@@ -1997,7 +1997,8 @@ export const PROCUREMENT_UNITS: UnitOfMeasure[] = [
     "category": "Electrical capacitance",
     "categoryCode": "UOM-18",
     "system": "Metric",
-    "baseUnit": "F",    "multiplier": 0.000001,
+    "baseUnit": "F",
+    "multiplier": 0.000001,
     "active": true,
     "selectable": true,
     "color": "#7C3AED"

@@ -1997,7 +1997,8 @@ async function releaseRequisitions(ctx: OrgContext, po: Obj, poId: string, why: 
 /** A requisition matches an order when vendor, currency, payment terms, buyer group and categories agree. */
 function matches(po: Obj, rq: Obj, keys: string[]): boolean {
     const pt = str(po.poType) || poTypeOf(objs(po.lines));
-    if (pt && str(rq.poType) && pt !== str(rq.poType)) return false;    if (str(po.vendorId) !== str(rq.vendorId) || str(po.currency) !== str(rq.currency) || str(po.paymentTermsCode) !== str(rq.paymentTermsCode) || str(po.groupKey) !== str(rq.groupKey)) return false;
+    if (pt && str(rq.poType) && pt !== str(rq.poType)) return false;
+    if (str(po.vendorId) !== str(rq.vendorId) || str(po.currency) !== str(rq.currency) || str(po.paymentTermsCode) !== str(rq.paymentTermsCode) || str(po.groupKey) !== str(rq.groupKey)) return false;
     const have = new Set(scopeKeysOf(objs(po.lines)));
     return !have.size || keys.every((k) => have.has(k));
 }
