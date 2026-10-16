@@ -1,4 +1,4 @@
-import { api } from '@appdeploy/client';
+import { api } from './httpClient';
 import { firebaseAuth } from '../firebase';
 
 // Client-side audit tracker: navigation, clicks, form submits and errors.

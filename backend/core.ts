@@ -1,18 +1,18 @@
-import { createHash, createSign, createVerify, randomBytes } from 'node:crypto';
-import { secrets } from '@appdeploy/sdk';
+import { createHash, createVerify, randomBytes } from 'node:crypto';
+import { secrets } from './platform/sdk';
+import { GoogleAuth } from 'google-auth-library';
 import { PUBLIC_EMAIL_DOMAINS } from './defaults';
 
 // ---------------------------------------------------------------------------
 // Configuration and utilities
 // ---------------------------------------------------------------------------
 
-export const PROJECT_ID = 'mems2026';
+export const PROJECT_ID = process.env.MEMS_FIREBASE_PROJECT_ID || 'UNCONFIGURED';
 export const STAFF_DOMAIN = 'manufusion.com';
 export const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 export const DOCUMENT_NAME_ROOT = `projects/${PROJECT_ID}/databases/(default)/documents`;
 export const IDENTITY_BASE = `https://identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}`;
 const CERTS_URL = 'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
-const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 export type Plain = string | number | boolean | null | Plain[] | { [key: string]: Plain };
 export type Fields = Record<string, Plain>;
@@ -230,74 +230,22 @@ export async function verifyIdToken(token: unknown): Promise<TokenClaims> {
 // Service account access token
 // ---------------------------------------------------------------------------
 
-interface ServiceAccount {
-    client_email: string;
-    private_key: string;
-}
-
-let serviceAccountCache: ServiceAccount | null = null;
-let accessTokenCache: { token: string; expiresAt: number } | null = null;
-
-async function getServiceAccount(): Promise<ServiceAccount> {
-    if (serviceAccountCache) return serviceAccountCache;
-    let raw: string;
-    try {
-        raw = await secrets.readSecret('FIREBASE_SERVICE_ACCOUNT');
-    } catch {
-        console.error('FIREBASE_SERVICE_ACCOUNT secret is missing');
-        throw new HttpError(503, 'The server is not configured yet.');
-    }
-    let parsed: Record<string, unknown>;
-    try {
-        parsed = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-        throw new HttpError(503, 'The server configuration is invalid.');
-    }
-    const clientEmail = str(parsed.client_email);
-    const privateKey = str(parsed.private_key).replace(/\\n/g, '\n');
-    const projectId = str(parsed.project_id);
-    if (!clientEmail || !privateKey || (projectId && projectId !== PROJECT_ID)) {
-        console.error('FIREBASE_SERVICE_ACCOUNT is incomplete or for a different project');
-        throw new HttpError(503, 'The server configuration is invalid.');
-    }
-    serviceAccountCache = { client_email: clientEmail, private_key: privateKey };
-    return serviceAccountCache;
-}
-
+const googleAuth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+/** Workload Identity / ADC. Uses the attached Cloud Run service account. */
 export async function getAccessToken(): Promise<string> {
-    if (accessTokenCache && accessTokenCache.expiresAt > Date.now() + 60_000) return accessTokenCache.token;
-    const account = await getServiceAccount();
-    const now = Math.floor(Date.now() / 1000);
-    const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
-    const unsigned = `${encode({ alg: 'RS256', typ: 'JWT' })}.${encode({
-        iss: account.client_email,
-        scope: 'https://www.googleapis.com/auth/cloud-platform',
-        aud: TOKEN_URL,
-        iat: now,
-        exp: now + 3600,
-    })}`;
-    const signer = createSign('RSA-SHA256');
-    signer.update(unsigned);
-    signer.end();
-    const signature = signer.sign(account.private_key).toString('base64url');
-    const res = await fetch(TOKEN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-            grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-            assertion: `${unsigned}.${signature}`,
-        }).toString(),
-    });
-    if (!res.ok) {
-        const detail = (await res.text()).slice(0, 300);
-        console.error('Firebase service account token exchange failed', res.status, detail);
-        if (res.status === 429) throw new HttpError(503, 'The database sign-in service is rate limited. Please try again in a minute.');
-        if (res.status === 400 || res.status === 401) throw new HttpError(503, `The server could not sign in to the database (service account rejected: ${res.status}). The Firebase service account key may have been revoked or expired.`);
-        throw new HttpError(503, `The server could not sign in to the database (token service ${res.status}). Please try again.`);
+    if (PROJECT_ID === 'UNCONFIGURED') {
+        throw new HttpError(503, 'MEMS_FIREBASE_PROJECT_ID is required.');
     }
-    const data = (await res.json()) as { access_token: string; expires_in: number };
-    accessTokenCache = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
-    return data.access_token;
+    try {
+        const client = await googleAuth.getClient();
+        const response = await client.getAccessToken();
+        const token = response.token;
+        if (!token) throw new Error('Credential service returned no access token.');
+        return token;
+    } catch (cause) {
+        console.error('Google Workload Identity token error', cause instanceof Error ? cause.message : 'unknown');
+        throw new HttpError(503, 'Database credentials are unavailable. Check the service account permissions.');
+    }
 }
 
 export async function googleRequest(url: string, method: string, body?: unknown): Promise<FetchResponse> {

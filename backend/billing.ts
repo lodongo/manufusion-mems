@@ -1,4 +1,4 @@
-import { secrets } from '@appdeploy/sdk';
+import { secrets } from './platform/sdk';
 import { timingSafeEqual } from 'node:crypto';
 import { HttpError, fieldEq, getDoc, isObj, listDocs, nowIso, randomId, rateLimit, runQuery, str, updateFields, writeDoc, type Doc, type Obj, type Plain } from './core';
 import { audit } from './audit';
@@ -9,7 +9,7 @@ import { orgRoute, publicRoute, staff } from './guards';
 // Payments go through a provider: 'mock' (simulated) today; IntaSend checkout is wired in and
 // switched on from MEMS admin > Billing once its secrets are added.
 
-const APP_ORIGIN = 'https://mems-a6ztx8.v2.appdeploy.ai';
+const APP_ORIGIN = (process.env.MEMS_PUBLIC_URL || '').replace(/\/$/, '');
 const PROVIDERS = ['mock', 'intasend_sandbox', 'intasend_live'];
 const INTASEND_BASE: Record<string, string> = {
     intasend_sandbox: 'https://sandbox.intasend.com/api/v1',

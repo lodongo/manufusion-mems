@@ -1,4 +1,4 @@
-import { storage } from '@appdeploy/sdk';
+import { storage } from './platform/sdk';
 import { HttpError, getDoc, listDocs, nowIso, randomId, rateLimit, str, writeDoc, updateFields, deleteDoc, isObj } from './core';
 import { orgRoute, type OrgContext } from './guards';
 import { people, displayName } from './chatCommon';

@@ -1,4 +1,4 @@
-import { storage } from '@appdeploy/sdk';
+import { storage } from './platform/sdk';
 import {
     DOCUMENT_NAME_ROOT,
     FIRESTORE_BASE,

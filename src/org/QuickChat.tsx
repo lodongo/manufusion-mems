@@ -346,7 +346,7 @@ export default function QuickChat({ uid, roomId = '' }: Props) {
                     </div>}
                     <p className='mt-2 flex items-center gap-2 text-[11px] text-muted'>
                         {live.connected ? <Wifi className='h-3.5 w-3.5 text-brand' /> : <WifiOff className='h-3.5 w-3.5' />}
-                        {live.connected ? 'Live messaging connected' : 'Connecting to live messaging'}
+                        {live.connected ? 'Live messaging connected' : 'Messages refresh every 12 seconds'}
                     </p>
                 </div>
                 {error && <p role='alert' className='shrink-0 bg-red-500/10 px-4 py-2 text-xs text-red-500'>{error}</p>}

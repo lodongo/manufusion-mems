@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { storage } from '@appdeploy/sdk';
+import { storage } from './platform/sdk';
 import {
     HttpError, encodeValue, getDoc, isObj, listDocs, nowIso, orderDesc,
     randomId, rateLimit, runQuery, str, updateFields, writeDoc,

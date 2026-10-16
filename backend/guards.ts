@@ -1,4 +1,4 @@
-import { json, error } from '@appdeploy/sdk';
+import { json, error } from './platform/sdk';
 import { assertHealthAccess } from './healthPolicy';
 import {
     HttpError,

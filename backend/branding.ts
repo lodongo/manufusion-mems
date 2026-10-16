@@ -1,4 +1,4 @@
-import { storage } from '@appdeploy/sdk';
+import { storage } from './platform/sdk';
 import { HttpError, isObj, listDocs, nowIso, randomId, rateLimit, str, text, updateFields, type Doc, type Fields, type Plain } from './core';
 import { audit } from './audit';
 import { orgRoute, staff } from './guards';

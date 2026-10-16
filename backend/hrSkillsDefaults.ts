@@ -1997,7 +1997,8 @@ export const HR_SKILL_DEFAULTS = [
     "label": "Portfolio management",
     "category": "Finance",
     "subcategory": "Banking & Investment",
-    "description": "Apply portfolio management methods, standards, tools and safe practices in banking & investment.",    "active": true
+    "description": "Apply portfolio management methods, standards, tools and safe practices in banking & investment.",
+    "active": true
   },
   {
     "code": "HR_SK_021_008",

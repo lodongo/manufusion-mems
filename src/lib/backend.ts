@@ -1,4 +1,4 @@
-import { api } from '@appdeploy/client';
+import { api } from './httpClient';
 import { firebaseAuth } from '../firebase';
 
 function readError(err: unknown): string {

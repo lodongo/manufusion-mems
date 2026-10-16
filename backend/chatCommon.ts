@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { ws } from '@appdeploy/sdk';
+import { ws } from './platform/sdk';
 import { HttpError, getDoc, listDocs, nowIso, randomId, str, updateFields, writeDoc, type Doc } from './core';
 import { orgUsers } from './org';
 import { signedUrl } from './structure';

@@ -1,4 +1,4 @@
-import { secrets } from '@appdeploy/sdk';
+import { secrets } from './platform/sdk';
 import { HttpError, fieldEq, getDoc, isObj, listDocs, nowIso, num, orderDesc, randomId, rateLimit, runQuery, str, updateFields, writeDoc, type Doc } from './core';
 import { audit } from './audit';
 import { orgRoute, publicRoute, type OrgContext } from './guards';
@@ -7,7 +7,7 @@ import { orgRoute, publicRoute, type OrgContext } from './guards';
 // Payments run in simulation until IntaSend keys are stored as secrets:
 //   INTASEND_PUBLISHABLE_KEY, INTASEND_SECRET_KEY, INTASEND_ENV (sandbox | live), INTASEND_WEBHOOK_CHALLENGE
 
-const APP_URL = 'https://mems-a6ztx8.v2.appdeploy.ai/';
+const APP_URL = (process.env.MEMS_PUBLIC_URL || '').replace(/\/?$/, '/');
 
 interface ModuleInfo {
     code: string;

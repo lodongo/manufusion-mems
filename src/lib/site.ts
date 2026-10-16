@@ -107,7 +107,7 @@ export const SITE_DEFAULTS: SiteConfig = {
     theme: THEME_PRESETS[0].theme,
 };
 
-export const EMPTY_LOCKED: SiteLocked = { staffEmailDomain: 'manufusion.com', firebaseProjectId: 'mems2026', setupCompletedAt: '' };
+export const EMPTY_LOCKED: SiteLocked = { staffEmailDomain: 'manufusion.com', firebaseProjectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '', setupCompletedAt: '' };
 
 function rgb(hex: string): string {
     const value = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#000000';

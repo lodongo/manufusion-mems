@@ -83,7 +83,7 @@ export default function AdminShell({
                 { key: 'modules', label: 'Modules', Icon: Puzzle },
                 { key: 'site', label: 'Site setup', Icon: Palette },
                 { key: 'billing', label: 'Billing and payments', Icon: CreditCard },
-                ...(isSuper ? [{ key: 'firestore', label: 'Database explorer', Icon: FolderTree },{ key: 'appdeploy', label: 'AppDeploy dashboard', Icon: Activity }] : []),
+                ...(isSuper ? [{ key: 'firestore', label: 'Database explorer', Icon: FolderTree },{ key: 'appdeploy', label: 'Hosting migration', Icon: Activity }] : []),
             ],
         },
         {

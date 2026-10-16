@@ -1,4 +1,4 @@
-import { router, json, storage } from '@appdeploy/sdk';
+import { router, json, storage } from './platform/sdk';
 import { AFRICAN_COUNTRIES, CURRENCIES, METADATA_LISTS, PUBLIC_EMAIL_DOMAINS } from './defaults';
 import { DEFAULT_MODULES, FEATURE_ICONS, MODULE_CATEGORIES, SITE_DEFAULTS } from './catalog';
 import {
