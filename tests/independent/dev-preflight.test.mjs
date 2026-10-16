@@ -30,7 +30,7 @@ test('accepts the actual Manufusion development Firebase project ID', () => {
     GCP_DEV_PROJECT_ID: actual,
     MEMS_FIREBASE_PROJECT_ID: actual,
     MEMS_STORAGE_BUCKET: actual + '-files',
-    GCP_DEV_DEPLOYER_SA: 'mems-dev-deployer@' + actual + '.iam.gserviceaccount.com',
+    GCP_DEV_DEPLOYER_SA: 'mems-development-deployer@' + actual + '.iam.gserviceaccount.com',
     GCP_DEV_RUNTIME_SA: 'mems-dev-runtime@' + actual + '.iam.gserviceaccount.com',
     VITE_FIREBASE_AUTH_DOMAIN: actual + '.firebaseapp.com',
     VITE_FIREBASE_PROJECT_ID: actual,

@@ -7,7 +7,7 @@ This procedure builds the verified `develop` source on GitHub Actions and deploy
 1. **Created (confirmed by Firebase Console screenshot):** Firebase project **Manufusion MEMS Development**, Project ID `manufusion-mems-development`. This is the dedicated development project. Do **not** reuse `mems2026`.
 2. Attach a billing account and set a budget alert before provisioning. Cloud services and builds may incur charges.
 3. Enable Firebase Authentication (email/password) and create a Firestore database in the new project. Pick the Firestore region deliberately; the location cannot simply be changed later. Register a **Web app** in Firebase; retain the public web configuration values.
-4. From the Google Cloud Console or authenticated Cloud Shell, enable Cloud Run, IAM Service Account Credentials, Security Token Service, Artifact Registry and other required APIs. Provision a dedicated private Cloud Storage bucket and two distinct service accounts: `mems-dev-runtime` and `mems-dev-deployer`. Use **Workload Identity Federation**, not downloaded JSON credentials.
+4. From the Google Cloud Console or authenticated Cloud Shell, enable Cloud Run, IAM Service Account Credentials, Security Token Service, Artifact Registry and other required APIs. Provision a dedicated private Cloud Storage bucket and two distinct service accounts: `mems-dev-runtime` and `mems-development-deployer`. Use **Workload Identity Federation**, not downloaded JSON credentials.
 5. Make an Artifact Registry Docker repository named `mems-dev` in the selected region. Choose the region deliberately based on residency, service availability and costs.
 
 ## Least-privilege starting permissions
@@ -18,6 +18,8 @@ This procedure builds the verified `develop` source on GitHub Actions and deploy
 
 See Google's Workload Identity Federation deployment-pipeline guidance and the official `google-github-actions/auth` README for exact IAM commands.
 
+> **Verified service account:** The existing deployer identity, confirmed in Google Cloud Console, is `mems-development-deployer@manufusion-mems-development.iam.gserviceaccount.com`. Use this exact address in Google Cloud IAM and the GitHub `GCP_DEV_DEPLOYER_SA` variable; `mems-dev-deployer@...` was an earlier suggested ID, not the created account.
+
 ## GitHub configuration
 
 In the private repository **Settings → Environments**, create environment `development`. Add protection/reviewer requirements if available. Add these **environment variables** (Firebase web settings are public identifiers, not private credentials):
@@ -27,7 +29,7 @@ In the private repository **Settings → Environments**, create environment `dev
 | `GCP_DEV_PROJECT_ID` | `manufusion-mems-development`; confirmed dedicated development project |
 | `GCP_DEV_REGION` | A supported Cloud Run/Artifact Registry region, e.g. `africa-south1` |
 | `GCP_DEV_WIF_PROVIDER` | `projects/123456789/locations/global/workloadIdentityPools/mems-gh/providers/mems-develop` |
-| `GCP_DEV_DEPLOYER_SA` | `mems-dev-deployer@manufusion-mems-development.iam.gserviceaccount.com` |
+| `GCP_DEV_DEPLOYER_SA` | `mems-development-deployer@manufusion-mems-development.iam.gserviceaccount.com` |
 | `GCP_DEV_RUNTIME_SA` | `mems-dev-runtime@manufusion-mems-development.iam.gserviceaccount.com` |
 | `MEMS_STORAGE_BUCKET` | Private dedicated bucket, e.g. `manufusion-mems-development-files` |
 | `VITE_FIREBASE_API_KEY` | Web API key from **new** Firebase Web app; public identifier |
