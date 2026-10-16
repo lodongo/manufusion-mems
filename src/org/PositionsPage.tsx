@@ -23,7 +23,6 @@ export interface Position {
     defaultNodeId?: string;
     securityRoles?: string[];
     coreSkills?: string[];
-    coreSkills?: string[];
 }
 
 export interface RoleOption {

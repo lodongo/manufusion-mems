@@ -315,7 +315,7 @@ export default function OrgHomePage({
     const activeModule = currentPath.startsWith('module/') ? menus.find((m) => m.module.code === currentPath.split('/')[1]) : activeMenu;
     const allShortcuts = menus.flatMap(m=>[...m.links,...m.capabilities].filter(x=>!x.path.startsWith('organization_admin')).map(x=>({...x,module:m.module.name})));
     const shortcutInfo=(path:string)=>allShortcuts.find(x=>x.path===path);
-    const shortcutList=(paths:string[])=>paths.filter(p=>Boolean(shortcutInfo(p))).map(p=>({path:p,...shortcutInfo(p)!}));
+    const shortcutList=(paths:string[])=>paths.filter(p=>Boolean(shortcutInfo(p))).map(p=>({...shortcutInfo(p)!,path:p}));
     const showProfile = section === 'profile';
     const showActivity = section === 'activity';
     const needsVerification = Boolean(firebaseAuth.currentUser && !firebaseAuth.currentUser.emailVerified);
@@ -327,7 +327,7 @@ export default function OrgHomePage({
     else if (section === 'my_setup') content = <UserSetup session={session} onUpdated={onSessionChange} />;
     else if (section === 'keep_alive') content = <UserHealth uid={session.user.uid} />;
     else if (section === 'my_tables') content = <MyTables selectedId={id} canAdmin={canAdmin} allowedPaths={menus.flatMap((m) => [...m.links, ...m.capabilities].filter((l) => !l.path.startsWith('organization_admin')).map((l) => l.path))} />;
-    else if (section === 'quick') content = <QuickWorkspace mode={id} id={sub} />;
+    else if (section === 'quick') content = <QuickWorkspace mode={id} id={sub} uid={session.user.uid} />;
     else if (section === 'mail') content = <OrgMail myEmail={session.user.email} initialId={id==='read'?sub:''} />;
     else if (showActivity) content = <MyActivity />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='0') content = <InventoryDashboard />;

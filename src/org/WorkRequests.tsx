@@ -264,7 +264,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
             const asset = handoff && p.assets.some((a) => a.tag === handoff.assetTag) ? handoff.assetTag : '';
             // A verified observation asset takes precedence; otherwise use the
             // equipment unit's authoritative mapped asset, never an arbitrary nearby asset.
-            setAssetTag(asset || p.defaultAssetTag || (p.assets.length===1?p.assets[0].tag:''));
+            setAssetTag(asset || p.linkedTag || (p.assets.length===1?p.assets[0].tag:''));
             if (handoff && asset) {
                 setTitle(handoff.title.slice(0, 120));
                 setDescription((handoff.description || handoff.title).slice(0, 5000));
@@ -272,7 +272,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                 setPendingLink(handoff);
                 const gembaGroup=lists.sources.find(g=>/^gemba(?:\s|$)/i.test(g.label));
                 const gembaSource=gembaGroup?.items.find(item=>item.code===handoff.gembaTypeCode)
-                    ||gembaGroup?.items.find(item=>item.label.toLowerCase()===handoff.gembaTypeName.toLowerCase());
+                    ||gembaGroup?.items.find(item=>item.label.toLowerCase()===(handoff.gembaTypeName || '').toLowerCase());
                 if(gembaSource)setSourceCode(gembaSource.code);
             }
             setStep(1);

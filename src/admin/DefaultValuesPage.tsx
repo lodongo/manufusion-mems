@@ -50,7 +50,7 @@ export default function DefaultValuesPage({ listKey, canWrite, isSuper }: { list
     return <ListPage key={listKey} listKey={listKey} canWrite={canWrite} />;
 }
 
-type Pending = { kind: 'restore' | 'clear' } | { kind: 'remove'; code: string; label: string } | null;
+type Pending = { kind: 'restore' } | { kind: 'clear' } | { kind: 'remove'; code: string; label: string } | null;
 
 function ListPage({ listKey, canWrite }: { listKey: string; canWrite: boolean }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<ListData>('/api/admin/reference/list/get', { key: listKey }), [listKey]);

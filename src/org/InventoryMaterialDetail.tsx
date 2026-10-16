@@ -909,7 +909,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
     const { data: metadata } = useLoad(() => callBackend<Metadata>('/api/org/inventory/material/metadata'));
     const { ask, sheet } = useConfirm();
 
-    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['Overview','Current Status','Inventory Information','Procurement Information','Movements','Criticality Analysis','Technical Data','Associated Assets'], 'Overview'));
+    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['Overview','Current Status','Inventory Information','Procurement Information','Movements','Criticality Analysis','Technical Data'], 'Overview'));
     const [editing, setEditing] = useState(false);
     const [values, setValues] = useState<Values>({});
     const [uomCategory, setUomCategory] = useState('');

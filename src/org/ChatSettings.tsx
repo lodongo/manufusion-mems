@@ -94,9 +94,9 @@ export function ChatOptions({uid,room,people,onChanged,onLeave,onClose,onTheme}:
                     if(window.confirm('Remove member from this group?'))void action('/api/org/quick/chat/group/update',{roomId:room.id,action:'remove',memberUid:id},'Member removed.');
                 }} className='flex h-9 w-8 items-center justify-center text-red-500'><X className='h-4 w-4'/></button>}
             </div>)}
-            {manager&&room.pendingInvites?.length>0&&<div className='space-y-2 rounded-xl border border-line bg-page p-2'>
+            {manager&&(room.pendingInvites?.length ?? 0)>0&&<div className='space-y-2 rounded-xl border border-line bg-page p-2'>
                 <h4 className='text-xs font-semibold text-ink'>Pending invitations</h4>
-                {room.pendingInvites.map(id=><div key={id} className='flex min-h-10 items-center gap-2 text-xs text-muted'>
+                {room.pendingInvites?.map(id=><div key={id} className='flex min-h-10 items-center gap-2 text-xs text-muted'>
                     <span className='min-w-0 flex-1 truncate'>{person(id)?.name||'Colleague'}</span>
                     <button type='button' disabled={busy} onClick={()=>{void action('/api/org/quick/chat/group/member',{roomId:room.id,action:'revoke',uid:id},'Invitation revoked.')}}
                         className='min-h-9 rounded-lg border border-line px-2 text-red-500'>Revoke</button>

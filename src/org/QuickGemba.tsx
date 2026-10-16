@@ -339,37 +339,6 @@ function GembaSession({ id, uid }: { id: string; uid: string }) {
                 {gemba.status === 'closed' && <p className='text-xs text-muted'>{completed} of {items.length} observations reviewed</p>}
             </Card>
             {gemba.status === 'open' && <Button onClick={()=>setCaptureMode(true)} className='w-full'><Plus className='h-4 w-4'/> Add observation · full screen</Button>}
-            {false && gemba.status === 'open' && (
-                <Card className='space-y-3'>
-                    <h3 className='font-semibold text-ink'>Add observation {items.length + 1}</h3>
-                    <p className='text-xs text-muted'>Save & exit pauses this Gemba and keeps your unfinished observation, including its uploaded photo, for your next session.</p>
-                    <label className='block text-xs font-semibold text-muted'>Asset
-                        <select value={assetTag} onChange={(e) => setAssetTag(e.target.value)} className={field + ' mt-1'}>
-                            {gemba.assetTags.map((tag, i) => <option key={tag} value={tag}>{gemba.assetNames[i] || tag} · {tag}</option>)}
-                        </select>
-                    </label>
-                    <label className='block text-xs font-semibold text-muted'>Description (optional if a photo is added)
-                        <textarea rows={3} maxLength={5000} value={description} onChange={(e) => setDescription(e.target.value)}
-                            placeholder='What did you observe?' className={field + ' mt-1 resize-y'} />
-                    </label>
-                    <label className='flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-line bg-page px-3 text-sm font-medium text-brand'>
-                        <Camera className='h-4 w-4' /> {uploading ? 'Uploading photo…' : photo ? 'Replace photo' : 'Capture / add photo'}
-                        <input type='file' accept='image/*' capture='environment' onChange={(e) => { void upload(e); }} className='sr-only' disabled={uploading} />
-                    </label>
-                    {photo && <div className='flex items-center gap-3'>
-                        <img src={photo.url} alt='New observation' className='h-20 w-20 rounded-xl object-cover' />
-                        <button type='button' className='text-xs text-red-500 underline' onClick={() => setPhoto(null)}>Remove photo</button>
-                    </div>}
-                    <p className='text-xs text-muted'>A description, a photo, or both. Tap Save & next to quickly capture another observation.</p>
-                    <Button className='w-full' disabled={busy || uploading || (!description.trim() && !photo)}
-                        busy={busy} onClick={() => { void add(); }}>
-                        <Plus className='h-4 w-4' /> Save & next observation
-                    </Button>
-                    <Button variant='secondary' className='w-full' disabled={!items.length || busy} onClick={() => { void close(); }}>
-                        <CheckCircle2 className='h-4 w-4' /> Close Gemba & review
-                    </Button>
-                </Card>
-            )}
             {error && <Alert tone='error'>{error}</Alert>}
             {info && <Alert tone='success'>{info}</Alert>}
             <section className='space-y-2'>

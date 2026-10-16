@@ -7,6 +7,7 @@ export interface OrgBranding {
     brandColor: string;
     theme: Theme;
     logoUrl: string;
+    logoNeedsReview?: boolean;
 }
 
 export interface Organization {

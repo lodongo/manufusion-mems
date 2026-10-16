@@ -373,7 +373,7 @@ export default function RichTable<T>({
     const allTemplates = [
         ...onlineTemplates,
         ...templates.filter((t) => !onlineTemplates.some((saved) => saved.name.toLowerCase() === t.name.toLowerCase()))
-            .map((t) => ({ ...t, online: false })),
+            .map((t) => ({ ...t, online: false, cloudId: undefined as string | undefined })),
     ];
     const olderTemplates = legacyTemplates.filter((t) =>
         !!t && typeof t.name === 'string' && !allTemplates.some((saved) => saved.name === t.name));
