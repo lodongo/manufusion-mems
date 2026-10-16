@@ -1,0 +1,879 @@
+[
+  {
+    "name": "Mobile movement filters collapse",
+    "description": "Compact filters make the movement table immediately visible on mobile.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "inventory movement filter layout"
+    ],
+    "steps": [
+      "Open Stock Movements on a phone",
+      "Confirm the table is visible below the compact filter control",
+      "Open Filters and search for a material"
+    ],
+    "expected": "Filters open on demand and movement rows update without leaving the page."
+  },
+  {
+    "name": "Movement journal visibility guidance",
+    "description": "Show an actionable distinction between empty accessible journals and active filters.",
+    "viewport": "mobile",
+    "covers": [
+      "inventory operations backend journal diagnostics"
+    ],
+    "steps": [
+      "Open Stock Movements with an account that has no accessible journal movements"
+    ],
+    "expected": "The page shows an explanatory empty-state message without claiming journal records were deleted."
+  },
+  {
+    "name": "MEMS AppDeploy administrator page",
+    "description": "Provide a super-administrator-only MEMS deployment launchpad.",
+    "viewport": "desktop",
+    "covers": [
+      "super admin navigation",
+      "AppDeploy dashboard"
+    ],
+    "steps": [
+      "Sign in as MEMS platform super administrator",
+      "Open Platform > AppDeploy dashboard"
+    ],
+    "expected": "A MEMS-only read-only AppDeploy launchpad appears with working external console and app links."
+  },
+  {
+    "name": "Inspect effective access without changing existing permissions",
+    "description": "Shows the current user assignments, effective permissions, duty conflict warnings, and audit review using the existing administration design.",
+    "viewport": "mobile",
+    "covers": [
+      "read-only security inspector",
+      "tenant-scoped user access",
+      "combined role conflict warnings",
+      "security audit review",
+      "mobile security review design"
+    ],
+    "steps": [
+      "Sign in as an organization user with security-role administration permission",
+      "Open Organization administration > Security roles > Review access",
+      "Select Inspect user access and security events",
+      "Select an organization user from the list and inspect their permission sources"
+    ],
+    "expected": "The inspector lists only the organization's users, shows their job and direct permissions and recent security history, and provides no action that changes permissions."
+  },
+  {
+    "name": "Temporary password change is required before protected operations",
+    "description": "Verifies a temporary credential must be changed through the existing flow before privileged pages or business operations are available.",
+    "viewport": "desktop",
+    "covers": [
+      "server-side temporary password protection",
+      "Firebase password change verification",
+      "protected organization APIs",
+      "existing password-change UI"
+    ],
+    "steps": [
+      "Sign in with a freshly issued temporary password for an organization user",
+      "Confirm the existing Set your own password screen is shown",
+      "Change the password to a new valid password",
+      "Confirm the normal organization landing page becomes available"
+    ],
+    "expected": "Normal business pages remain inaccessible before a verified password change; after the Firebase password update the existing landing page loads."
+  },
+  {
+    "name": "Organization logo belongs only to its own tenant",
+    "viewport": "mobile",
+    "description": "Check that an organization keeps its own registered or uploaded logo and cannot display a foreign tenant logo after changing accounts.",
+    "covers": [
+      "organization-specific logo URLs",
+      "legacy application logo ownership",
+      "organization branding upload",
+      "cross-account branding isolation",
+      "mobile branding page"
+    ],
+    "steps": [
+      "Sign in as an organization super administrator and open Organization administration > Branding",
+      "Upload a valid organization logo and confirm it is shown in the branding preview and organization header",
+      "Sign out and sign in as a user of a different organization",
+      "Open the second organization's header and branding page"
+    ],
+    "expected": "Each organization displays only its own approved or uploaded logo (or a neutral placeholder if its stored reference is invalid). The first organization's logo never appears for the second organization."
+  },
+  {
+    "name": "Organization administrator membership limited to three",
+    "description": "An existing super administrator can add or promote users up to three designated administrators and receives a clear error at the limit.",
+    "viewport": "desktop",
+    "covers": [
+      "admin role selection",
+      "admin user creation",
+      "administrator cap",
+      "server-side concurrent membership protection",
+      "organization administrator list"
+    ],
+    "steps": [
+      "Sign in as an organization super administrator and open Organization administration > Users",
+      "Review the administrator counter and select Add administrator while a slot is available",
+      "Create an administrator with a valid company email and strong temporary password",
+      "Open another existing user and attempt to assign administrator rights after three designated administrators exist"
+    ],
+    "expected": "The newly created administrator appears in the user list, the count does not exceed 3/3, and a fourth administrator assignment is rejected without changing user permissions."
+  },
+  {
+    "name": "Remove administrator rights without removing the account",
+    "description": "An administrator can safely demote another administrator while retaining the account, and cannot remove the last active administrator.",
+    "viewport": "mobile",
+    "covers": [
+      "admin demotion without deletion",
+      "last active administrator protection",
+      "role revocation",
+      "existing mobile user editor"
+    ],
+    "steps": [
+      "Sign in as an organization super administrator and open Organization administration > Users on a phone",
+      "Open another administrator and choose Remove administrator rights, then save the role change",
+      "Confirm the user remains listed with standard security role",
+      "Attempt to remove administrator rights when only one active administrator remains"
+    ],
+    "expected": "The demoted user remains an organization member, their elevated rights no longer apply, and the last active administrator cannot be removed or disabled."
+  },
+  {
+    "name": "Founder account remains permanent super administrator",
+    "viewport": "desktop",
+    "description": "Creator of an organization cannot be deleted, disabled or demoted while other super administrators remain editable.",
+    "covers": [
+      "founder account protected",
+      "original creator never demoted",
+      "cannot disable founder",
+      "organization administrator access management"
+    ],
+    "steps": [
+      "Sign in as a different organization super administrator and open Organization administration > Users",
+      "Open the original organization creator",
+      "Verify the creator is labeled Protected and their role and active status cannot be changed",
+      "Verify Delete is unavailable for the creator",
+      "Open a nonfounder administrator and confirm the ordinary removal-of-rights option remains available"
+    ],
+    "expected": "The original creator retains active super-admin status, even if other administrators exist, while other administrators can still be managed normally."
+  },
+  {
+    "name": "Personal setup persists and restores last page",
+    "viewport": "mobile",
+    "description": "Individual user can choose any corporate theme preset, including dark choices, and resume the last organization page.",
+    "covers": [
+      "personal appearance preferences",
+      "brand color remains unchanged",
+      "preferences persisted per user",
+      "personal landing page preference",
+      "last visited page tracking",
+      "personal preferences endpoint",
+      "organization theme preset parity",
+      "dark preset retained"
+    ],
+    "steps": [
+      "Sign in to an active organization account and open My setup from the menu",
+      "Select Royal blue or another organization preset, and Last visited page, then save",
+      "Confirm the selected neutral colors apply while the organization's main brand color remains unchanged",
+      "Navigate to a permitted organization page and log out",
+      "Sign back in and verify the previous page is restored",
+      "Open My setup and confirm the saved choices persist"
+    ],
+    "expected": "The selected neutral color scheme and startup page persist only for that user, and the restored page is accessible and within the organization."
+  },
+  {
+    "name": "MEMS imprint appears fixed on organization workspaces",
+    "viewport": "mobile",
+    "description": "Small footer uses platform MEMS identity and remains visible across scrolling on organization home and administration screens.",
+    "covers": [
+      "MEMS platform footer",
+      "fixed footer on organization pages",
+      "footer does not reuse tenant logo",
+      "mobile footer accessibility"
+    ],
+    "steps": [
+      "Sign in as an organization super administrator and open Organization home",
+      "Scroll a long page and verify the MEMS footer remains at the bottom",
+      "Open Organization administration > Users and scroll",
+      "Verify the platform footer still shows MEMS and Run by Manufusion Africa Limited"
+    ],
+    "expected": "The fixed footer remains visible on both organization workspaces with the small MEMS platform logo and publisher text, and does not cover page controls."
+  },
+  {
+    "name": "Personal screen-time tracker with enforced breaks",
+    "viewport": "mobile",
+    "description": "Enable individual MEMS wellbeing breaks, track active foreground usage, and enforce a timed server-backed lock.",
+    "covers": [
+      "health status endpoint",
+      "health settings endpoint",
+      "health heartbeat endpoint",
+      "server-enforced wellbeing break",
+      "automatic logout on break",
+      "timed sign-in reattempt"
+    ],
+    "steps": [
+      "Sign in as an organization user and open My setup > Keep Alive for the Health & screen time page.",
+      "Enable screen-time tracking and mandatory breaks, select 15 minutes work and a 1-minute break, and save",
+      "Actively use MEMS until the chosen duration is reached",
+      "Verify an automatic logout and a timed MEMS rest message appear",
+      "Attempt login before the break ends, then again after it expires"
+    ],
+    "expected": "Foreground active usage is counted, the configured break triggers a server-enforced lock with remaining time, and MEMS access resumes only after the timer expires."
+  },
+  {
+    "name": "Weekly Off reactivation requires explicit account confirmation",
+    "viewport": "mobile",
+    "description": "Weekly Off is available again without unexpectedly locking accounts whose old rest-day selections were retained during suspension.",
+    "covers": [
+      "weekly lockout enabled server-side",
+      "legacy rest day inactive until confirmed",
+      "organization super administrator login safety",
+      "weekly health settings save endpoint",
+      "health status active/inactive policy"
+    ],
+    "steps": [
+      "Sign in as an organization user or super administrator who selected a weekly rest day before it was suspended",
+      "Open My setup > Keep Alive and find Weekly Off, which is now available",
+      "Confirm the old day remains selected but Enable my Weekly Off lockout is off",
+      "Confirm the existing account can keep using MEMS without an unexpected lockout",
+      "Tick Enable my Weekly Off lockout, confirm its impact and save the setup",
+      "Confirm the selected weekday is now enforced on that user account only"
+    ],
+    "expected": "Existing archived weekly selections remain inert until explicitly reactivated, while users can re-enable the full-day rest lockout for their own accounts."
+  },
+  {
+    "name": "Another organization user can sign in during someone else's wellbeing lock",
+    "viewport": "mobile",
+    "description": "Health lockout applies to one user identity, not a device, login form, organization or platform-wide session. Clear another user's countdown and login warning when switching accounts.",
+    "covers": [
+      "account-specific health lockout",
+      "login screen shared-device access",
+      "account-scoped countdown",
+      "identity-scoped automatic signout",
+      "different user permitted to login"
+    ],
+    "steps": [
+      "Sign in as organization user A and enable a scheduled 1-minute mandatory break after 15 minutes of active MEMS use",
+      "After the break starts, confirm A is automatically signed out",
+      "On the login screen enter A's email and verify the timed countdown appears and its login button is disabled",
+      "Select Sign in with another account and enter organization user B's email and password",
+      "Confirm A's countdown and warning are not shown for B and user B can sign in normally",
+      "Check B's session remains open while A's break timer is still running"
+    ],
+    "expected": "The account-specific countdown prevents only A from signing in during A's break; user B is not blocked or automatically logged out by A's lock event."
+  },
+  {
+    "name": "Weekly Off timer and other-user sign-in remain account specific",
+    "viewport": "desktop",
+    "description": "A weekly rest day blocks only the account that knowingly enabled it, with a visible countdown and working account switch on a shared device.",
+    "covers": [
+      "account scoped weekly lockout",
+      "backend verified local midnight expiry",
+      "new weekly lock login countdown",
+      "old stale countdown ignored",
+      "other account can sign in",
+      "weekly server lockout via session and guards"
+    ],
+    "steps": [
+      "With user A, explicitly enable Weekly Off for the current weekday in Keep Alive, confirm the immediate lockout, and save",
+      "Confirm MEMS signs user A out and shows a per-user countdown to next midnight when A's email is entered",
+      "Choose Sign in with another account and authenticate user B during A's Weekly Off",
+      "Confirm B is able to enter MEMS and use authorized organization modules without A's countdown or logout",
+      "Confirm a legacy countdown stored before this reactivation does not block a different user or an inactive account"
+    ],
+    "expected": "Only an account that newly enabled Weekly Off is denied access on its chosen weekday, until local midnight; colleagues can log in normally."
+  },
+  {
+    "name": "My activity compact header and internal scrolling",
+    "description": "Simplifies the personal activity view on a mobile device without changing the audit records shown.",
+    "viewport": "mobile",
+    "covers": [
+      "my activity single title",
+      "activity refresh control removed",
+      "subtitle removed",
+      "activity history internal scrolling",
+      "fixed page header"
+    ],
+    "steps": [
+      "Sign in as an organization user and navigate to My activity",
+      "Confirm the content has only the My activity title, without the subtitle or refresh button",
+      "Scroll vertically within the activity-history region across multiple days of events",
+      "Confirm the app page header and title remain visible while the activity list scrolls"
+    ],
+    "expected": "No refresh button or subtitle is visible, and the audit entries scroll inside their own bounded container while surrounding navigation remains stable."
+  },
+  {
+    "name": "Organization Users shows existing circular profile photos",
+    "description": "Display a user's own uploaded or registration profile photo in a round avatar alongside their name, preserving user identity and privacy.",
+    "viewport": "mobile",
+    "covers": [
+      "organization user list profile photos",
+      "tenant-scoped photo signing",
+      "user avatar circular crop",
+      "missing or invalid photo fallback",
+      "existing user card layout"
+    ],
+    "steps": [
+      "Sign in as an authorized organization administrator and open Organization administration > Users",
+      "Find a user who has already uploaded a personal profile photo",
+      "Verify a circular cropped photo appears to the left of that user's name and email",
+      "Find a user with no profile photo and verify a neutral person icon appears instead",
+      "Open any user card and confirm the normal user details editor still works"
+    ],
+    "expected": "User cards show the correct person's existing profile photo in a circle, or a safe fallback, without exposing another tenant's private photo or changing user records."
+  },
+  {
+    "name": "Only Add user is shown on organization Users page",
+    "description": "Remove the duplicate Add administrator shortcut while preserving existing role assignment and three-administrator safety controls.",
+    "viewport": "mobile",
+    "covers": [
+      "remove add administrator shortcut",
+      "keep add user action",
+      "organization admin roster retained",
+      "role change via user editor"
+    ],
+    "steps": [
+      "Sign in as an organization super administrator and open Organization administration > Users",
+      "Confirm there is a single Add user button and no Add administrator button",
+      "Confirm the organization administrator count is still displayed",
+      "Open an existing organization user and confirm the security role selector is still available when permitted"
+    ],
+    "expected": "The Add administrator shortcut is absent; adding users and safe promotion to administrator through the existing user editor still function."
+  },
+  {
+    "name": "Organization administrator is distinguished by red circular outlines",
+    "description": "User avatars and the role badge clearly distinguish administrators while keeping ordinary users unchanged.",
+    "viewport": "mobile",
+    "covers": [
+      "organization super administrator circular red avatar border",
+      "administrator badge red outline",
+      "standard user neutral styling",
+      "preserved user listing and role permissions"
+    ],
+    "steps": [
+      "Sign in as an organization administrator and open Organization administration > Users",
+      "Locate the original organization super administrator",
+      "Confirm the administrator profile-photo circle and its role badge have a clear red outline",
+      "Compare a standard user's avatar and role badge, which should retain ordinary neutral styling",
+      "Open both entries and confirm the normal profile-management screens are unchanged"
+    ],
+    "expected": "Only organization administrators have red outlines on circular photo avatars and role badges; role assignments and administrator rules are unchanged."
+  },
+  {
+    "name": "Platform configured organization footer message with default fallback",
+    "description": "Platform staff can customize the small fixed footer's text independently from public website footer, while no custom message shows the Manufusion default.",
+    "viewport": "mobile",
+    "covers": [
+      "platform Site setup organization footer message",
+      "organization footer configuration persistence",
+      "public site footer isolation",
+      "footer fallback text",
+      "larger MEMS logo without MEMS label"
+    ],
+    "steps": [
+      "Sign in as a MEMS platform administrator and open Site setup > Branding",
+      "Confirm Organization footer message field is available and its blank state uses the existing Manufusion Africa Limited text",
+      "Enter a short custom footer message and save the site setup",
+      "Sign in as an organization user, open an organization page and confirm the fixed footer shows the slightly larger MEMS logo and custom message without a separate MEMS label",
+      "Confirm the public website footer text has not been changed",
+      "Clear Organization footer message, save, and confirm the default Run by Manufusion Africa Limited copyright message returns on organization pages"
+    ],
+    "expected": "The organization footer shows configured text with a small enlarged platform logo, uses the original Manufusion message if blank, and does not modify the public website footer text."
+  },
+  {
+    "name": "MEMS themed fixed footer independently of personal organization theme",
+    "viewport": "mobile",
+    "description": "Footer uses platform theme colors while tenant-specific appearance remains on organization content.",
+    "covers": [
+      "platform themed footer surface",
+      "footer theme isolation",
+      "saved organization message"
+    ],
+    "steps": [
+      "Sign in to an organization with a personal light or dark theme that differs from MEMS branding",
+      "Scroll an organization page to the footer",
+      "Confirm the footer background, border and text use MEMS platform theme colors",
+      "Confirm the user's main content still uses the organization theme"
+    ],
+    "expected": "Footer follows MEMS platform appearance regardless of tenant or personal theme, and its configured message remains visible."
+  },
+  {
+    "name": "Keep Alive is separate and screen time appears beneath account photo",
+    "viewport": "mobile",
+    "description": "Health moves out of personal setup and remains accessible as a nested menu while an active-time counter appears beneath the profile photo.",
+    "covers": [
+      "Keep Alive route",
+      "health accessible separately",
+      "user setup without embedded health panel",
+      "MEMS today screen-time counter",
+      "health pulse event updates"
+    ],
+    "steps": [
+      "Open My setup and confirm Appearance and startup preferences remain but the full health page is not embedded",
+      "Open Keep Alive from the personal menu and confirm existing health statistics and break controls",
+      "Return to Organization home and confirm today's MEMS screen-time count displays below the profile photo",
+      "Use MEMS actively and confirm the counter updates as usage accumulates"
+    ],
+    "expected": "Keep Alive provides the existing health settings separately, and a small live screen-time counter is placed below the profile photo."
+  },
+  {
+    "name": "Empty organization home cards are hidden",
+    "viewport": "mobile",
+    "description": "Avoid blank requests, work orders and favorites sections while preserving all populated workflow cards.",
+    "covers": [
+      "hide empty waiting-for-me home card",
+      "hide empty requests home card",
+      "hide empty work orders home card",
+      "hide empty favorites home card",
+      "preserve mapped nonempty workflow cards"
+    ],
+    "steps": [
+      "Sign in as an organization user who has no open work orders, open requests or favorites",
+      "Open Organization home and confirm the empty cards are absent",
+      "Sign in as a user with submitted work requests and approvals",
+      "Confirm only the populated relevant cards appear, with the correct items and actions"
+    ],
+    "expected": "Cards without records are omitted after loading; actionable data remains visible to its authorized owner."
+  },
+  {
+    "name": "Personal home card visibility ordering and sizes are saved",
+    "viewport": "mobile",
+    "description": "Customize only the account-mapped homepage widgets, with mobile move-up/down and size choices, then reopen the home screen to verify.",
+    "covers": [
+      "homepage layout get endpoint",
+      "homepage layout save endpoint",
+      "per-account card visibility",
+      "per-account card order",
+      "compact regular wide size settings",
+      "server-side fixed widget allowlist",
+      "personalized organization home card renderer"
+    ],
+    "steps": [
+      "Sign in as an organization user and open My setup",
+      "Locate My home layout and confirm the available cards reflect the user's assigned permissions",
+      "Hide My modules, move My requests above Waiting for me, and choose Compact for My requests",
+      "Save the layout and navigate to Organization home",
+      "Confirm nonempty mapped home cards are rendered in the chosen order and chosen size, while hidden and empty cards are absent",
+      "Sign in as a different organization user and confirm their layout is unchanged"
+    ],
+    "expected": "Changes persist only for the configured user and never expose unassigned modules or hidden data. Card controls work on phone without dragging."
+  },
+  {
+    "name": "My Tables list is user scoped and bookmarkable",
+    "viewport": "mobile",
+    "description": "Saved views appear in a shareable My Tables directory and open only pages for which the current user retains access.",
+    "covers": [
+      "My Tables menu and route",
+      "my tables account scoped list endpoint",
+      "saved table view deep link opening",
+      "table access checked on navigation",
+      "copy link to own My Tables"
+    ],
+    "steps": [
+      "Sign in to MEMS as an organization user and open My Tables from the menu",
+      "Confirm an empty account sees guidance rather than another user's views",
+      "After saving a customized view in a table, return to My Tables and see the view under its table name",
+      "Use Copy link and open it in a new browser session, then sign in",
+      "Confirm only the newly signed-in user's saved views are shown and inaccessible pages cannot be opened"
+    ],
+    "expected": "My Tables is directly linkable after login; saved personal views are not publicly shared and retain current organization permissions."
+  },
+  {
+    "name": "RichTable views save to personal account and restore from My Tables",
+    "viewport": "mobile",
+    "description": "Save a customized table layout to the account, restore it from a My Tables shortcut, and retain the existing browser-only templates without leaking them between users.",
+    "covers": [
+      "rich table saved view save endpoint",
+      "rich table cloud list endpoint",
+      "saved view delete endpoint",
+      "saved column orders",
+      "saved table filters and sorting",
+      "account isolated device templates",
+      "older browser template import"
+    ],
+    "steps": [
+      "Sign in to an organization account and open an authorized RichTable, such as Inventory On Hand",
+      "Hide one column, move another column, set a filter and sort order, then open Templates",
+      "Name the view and save; confirm the My Tables confirmation is displayed",
+      "Open My Tables from the organization menu and confirm the named view appears",
+      "Select the saved view and confirm the table page opens with its saved column order, hidden columns, sorting and filters",
+      "On another device sign in with the same account and open My Tables; verify the view is available",
+      "Verify a different user cannot see the first user's saved views"
+    ],
+    "expected": "Saved table-view configuration persists by authenticated user across devices, without exposing data across users or bypassing table permissions."
+  },
+  {
+    "name": "My Tables saves active list tab and restores exact tab before applying view",
+    "description": "A saved view from a tabbed Work requests or Goods issue list opens that tab directly, retaining its customized table filters and column positions.",
+    "viewport": "mobile",
+    "covers": [
+      "my tables saved tabKey validation and persistence",
+      "RichTable captures tabKey",
+      "Work requests tab restore",
+      "Goods issue history tab restore",
+      "saved table view applied in correct tab",
+      "Work Orders restored tabs",
+      "Finance period trial balance and reconciliation tabs",
+      "Inventory material Movements tab",
+      "Cost center Stock tab",
+      "Purchase order overview tab"
+    ],
+    "steps": [
+      "Open Organization home > Work requests and choose Mine rather than the initial tab",
+      "Customize table columns and filters, then save a named view using Templates",
+      "Open My Tables and select the saved Work requests view",
+      "Confirm Mine is already selected and the table reflects the saved view",
+      "Repeat from Goods issue > History tab and verify that it restores History",
+      "Save a view on Work Orders > Mine and Finance Calendar > Trial balance; confirm the correct tab opens directly."
+    ],
+    "expected": "Both table shortcuts navigate directly to the tab where the view was saved; table configuration is not lost or applied to another tab."
+  },
+  {
+    "name": "Quick workspace personal tasks and notes",
+    "viewport": "mobile",
+    "description": "Private to-dos save action deadline status; formatted markdown notepad saves topic and content.",
+    "covers": [
+      "quick todo create list update delete routes",
+      "quick note create list update delete routes",
+      "user-isolated quick data",
+      "quick todo normalized Open/Closed/Canceled lifecycle",
+      "required cancellation reason",
+      "append-only task progress note history",
+      "legacy task status preservation",
+      "MTD YTD All period completion calculations",
+      "open-closed accessible donut chart",
+      "quick full-screen save-and-exit"
+    ],
+    "steps": [
+      "Open Quick links To-do from an organization account and add a new Open action with a deadline",
+      "Add one progress note, save, reload, and verify the note stays in the record history",
+      "Close a task, observe its change in MTD, YTD and All Time completion percentages and the open-versus-closed pie",
+      "Attempt to cancel another task without a reason; confirm validation, then provide a reason and save",
+      "Confirm older tasks in To do, In progress and Blocked appear as Open, and Done appears as Closed",
+      "Leave the workspace with an unfinished draft, return and verify its state is recoverable",
+      "Switch to Notepad, apply formatting, use Save & exit, return and verify the note is retained"
+    ],
+    "expected": "Personal actions show only Open, Closed or Canceled; cancellation requires a reason, progress notes persist, completion charts use date-filtered eligible actions, and quick exit saves drafts."
+  },
+  {
+    "name": "Gemba observations are scoped to assigned assets and auditable after close",
+    "viewport": "mobile",
+    "description": "Employee can start an asset-scoped typed Gemba, capture repeated findings with description or photos, close then resolve each finding.",
+    "covers": [
+      "gemba options list start get routes",
+      "gemba photo upload route",
+      "gemba observation capture and close routes",
+      "gemba observation resolve with reason",
+      "gemba personal draft save endpoint",
+      "gemba server persisted observation capture draft",
+      "Gemba type options and start validation from work request sources Gemba subtypes",
+      "plus icon reveals Gemba setup",
+      "active Gemba list hides closed sessions by default",
+      "Show closed Gembas checkbox",
+      "full-screen Gemba observation capture with bottom Save and next"
+    ],
+    "steps": [
+      "Open Quick Links > Gemba: the creation form should be collapsed and only the accessible + icon should reveal it; tap + to open and tap X to close without losing the draft",
+      "Choose a Gemba subtype from the active MNT Work Request Sources > Gemba child values; confirm its code and label match the metadata, then enter name, select two scoped assets and begin",
+      "Confirm the new Gemba opens a full-screen observation capture interface with a large description field, asset selector, camera button and bottom Save & next",
+      "Add one descriptive observation, immediately add a photo-only observation on another asset",
+      "Finish capturing and verify a saved Gemba is active in the list; close the Gemba and return to the sessions list, where it must be hidden until Show closed Gembas is selected",
+      "Close the session and review observations",
+      "Resolve one observation with a mandatory reason and confirm it is marked closed",
+      "Begin typing a third observation and use Save & exit without closing the Gemba; reopen on another device and verify the observation draft and active session are retained."
+    ],
+    "expected": "Only user-scoped Gembas and assets are accessible; photos and findings are persisted and observations can only be reviewed once session is closed."
+  },
+  {
+    "name": "Gemba work-request conversion requires appropriate assembly and existing maintenance permissions",
+    "viewport": "mobile",
+    "description": "Review action selects assembly before opening standard work request form, preserving criticality rules while allowing optional photos and inheriting available Gemba photographs.",
+    "covers": [
+      "gemba scoped assembly options",
+      "gemba work request link endpoint",
+      "asset-to-assembly match",
+      "existing WR create authorization and workflow",
+      "WorkRequests wizard prefill from session handoff",
+      "work request equipment-unit default asset selection",
+      "exact Gemba subtype transferred into work request source",
+      "Gemba WR link recorded only following verified WR submission"
+    ],
+    "steps": [
+      "Close Gemba and select Create work request on an observation",
+      "Select an assembly mapped to the observation asset",
+      "Continue into work request wizard; confirm the observation asset is preselected and the exact Gemba subtype is set as finding source, then complete mandatory fields without attaching a duplicate photo",
+      "Submit and verify the WR code appears in the observation review",
+      "After submission, return to the closed Gemba and confirm the observation shows the WR reference and cannot be closed again.",
+      "Start a separate work request from a mapped assembly with no Gemba handoff; verify the explicitly linked equipment asset or unique direct asset is preselected and can be changed if appropriate"
+    ],
+    "expected": "An observation is marked converted only after an authorized matching work request is successfully created."
+  },
+  {
+    "name": "Thunderbolt opens account-specific quick workspace from org header",
+    "viewport": "mobile",
+    "description": "From any organization screen the thunderbolt opens a full-viewport Quick links workspace with fixed Save & exit controls, tool switching and restoration of the original page.",
+    "covers": [
+      "lightning icon next to user profile",
+      "Quick links route from organization administration and home",
+      "To-do Notepad Gemba quick tabs",
+      "mobile navigation within quick workspace",
+      "App-level full viewport quick route",
+      "fixed tool navigation and save-and-exit",
+      "original route restored after exit",
+      "health tracker remains active while quick workspace fullscreen",
+      "Chat fourth Quick link full-screen integration"
+    ],
+    "steps": [
+      "Sign in on a small mobile viewport and open an organization module",
+      "Tap the thunderbolt beside the user picture; the full-height Quick links workspace replaces the normal page chrome and footer",
+      "Open To-do, Notepad and Gemba using compact fixed tabs and confirm only the tool content scrolls",
+      "Create a draft action or note, tap Save & exit, verify a return to the original module page",
+      "Reopen Quick links and confirm the saved action or note is available",
+      "Verify the Gemba work area remains accessible and a started session stays open when exiting",
+      "Confirm the background screen-time tracker and user account protections remain active",
+      "Open Chat from the fourth quick navigation tab and verify it fills the available workspace, retaining fixed navigation and Save & exit."
+    ],
+    "expected": "The thunderbolt opens a mobile-first Quick links space with three tools, while the photo continues to open the user's profile."
+  },
+  {
+    "name": "Same-organization direct chat with secure realtime messages and user photos",
+    "viewport": "mobile",
+    "description": "Two users in one approved organization can exchange messages live with photos and typing indicators; a user in another organization has no access.",
+    "covers": [
+      "chat people directory membership",
+      "chat create one-to-one",
+      "chat member-scoped conversation list",
+      "chat message history",
+      "chat message send",
+      "chat realtime connection subscriptions",
+      "typing and presence live updates",
+      "read marks",
+      "user avatar and chat bubble alignment",
+      "per-user unread message indicator",
+      "presence refresh while conversation stays open"
+    ],
+    "steps": [
+      "Sign in as organization member A, open Quick links > Chat and choose another enabled member B from the same organization",
+      "Create a direct conversation and send a message containing a web link",
+      "In another signed-in browser, open Chat as member B and observe the new message appear without refreshing",
+      "Type a response as B and confirm A sees a typing indicator; send and observe messages and profile avatars aligned on opposite sides",
+      "Open the same conversation as someone in a different organization or a nonmember and verify access is denied",
+      "Check read acknowledgments when B opens the thread",
+      "Return to the inbox and confirm only unread conversations have the highlight until opened.",
+      "Keep both conversations open for more than 90 seconds; active status should remain while the users are engaging."
+    ],
+    "expected": "Only members of an authorized same-organization conversation see and receive its messages, links and live activity; another organization receives no chat data."
+  },
+  {
+    "name": "Private group chat management, photo and report attachments with previews",
+    "viewport": "mobile",
+    "description": "Group admins can add/remove organization participants; members can exchange photos, PDFs and office reports with previews within the conversation.",
+    "covers": [
+      "chat group creation and roster controls",
+      "chat group add/remove/rename endpoints",
+      "chat attachment upload validates file types",
+      "chat private image signed previews",
+      "chat attached PDF Excel Word CSV link",
+      "chat participant photos and color-coded group senders",
+      "chat reactions and reply quoting"
+    ],
+    "steps": [
+      "Create a named group and invite three same-organization colleagues; verify they must individually accept before seeing history",
+      "Each invited colleague accepts, then can see group messages and distinct sender name colors.",
+      "Verify members each see the group with color-distinct sender names and photos",
+      "Upload a JPEG photo and send it, then preview it inside the thread",
+      "Attach a PDF or Excel report and verify it opens from a signed private attachment link",
+      "Reply to an earlier message and react with an emoji; verify both appear live",
+      "As group administrator add a member, rename the group, remove a member and confirm the removed member cannot reopen the thread"
+    ],
+    "expected": "Attachments are private to authorized members, safe file formats preview correctly, replies and emoji reactions persist, and only group admins manage the roster."
+  },
+  {
+    "name": "Sender-only three-minute delete, private chat hide, and preserved history",
+    "viewport": "mobile",
+    "description": "Only the message author may delete a message for everyone within 180 seconds; hidden conversations disappear only from the requesting user's inbox.",
+    "covers": [
+      "chat delete for everyone within 3 minutes",
+      "sender authorization",
+      "three-minute expiry enforced by backend",
+      "chat tombstone in history",
+      "chat hide for self",
+      "private chat history pagination",
+      "chat WS subscription access validation",
+      "no skipped records at chat history page boundary"
+    ],
+    "steps": [
+      "Send a message in a one-to-one thread and delete it for everyone within three minutes",
+      "Confirm the receiver sees Message deleted with no body or photo attachment",
+      "Verify the recipient cannot delete a different sender's message",
+      "Confirm a message older than three minutes cannot be deleted for everyone",
+      "Hide the chat from one member's inbox; verify the other member's conversation and history remain intact",
+      "Send another message and verify the hidden conversation returns, with its history intact",
+      "Send more than 60 messages and open earlier history; verify all messages remain accessible without gaps."
+    ],
+    "expected": "No user can delete someone else's message; deleted content is unavailable to both participants; hiding a chat affects only the requester and does not destroy history."
+  },
+  {
+    "name": "Organization group invitation consent and permanent founder administration",
+    "viewport": "mobile",
+    "description": "Invite-only group participation; invited members accept or decline, creator always administers, member leaves, admins promote demote and mute.",
+    "covers": [
+      "group start queues invitations without granting conversation access",
+      "invitations list and respond",
+      "member leave and promote demote",
+      "group pending invites and revocation",
+      "chat member preferences mute global and room theme"
+    ],
+    "steps": [
+      "Create group inviting two colleagues; confirm neither is immediately an active member nor may retrieve group messages",
+      "Invitation recipient accepts, second declines; verify only accepter joins and group inbox updates",
+      "Invite another colleague, promote to administrator, demote back; creator remains permanently admin",
+      "Member uses Leave and loses access to chat history while the founder remains",
+      "Member mutes the group and changes theme without modifying organizational primary brand",
+      "Switch Mute all chats and verify the setting persists per account",
+      "Tap the information icon and verify only the work-account audit notice appears; tap the conversation name to access group settings."
+    ],
+    "expected": "Group access requires explicit acceptance, never includes another organization, founder cannot be demoted or leave, and chat preferences persist."
+  },
+  {
+    "name": "Chat assigned actions require each recipient acceptance and separate editable ownership",
+    "viewport": "mobile",
+    "description": "An action addressed to several colleagues creates separate acceptance/progress records, without changing personal To-do MTD YTD dashboard.",
+    "covers": [
+      "chat.action.create",
+      "chat.action.list",
+      "chat.action.respond",
+      "chat.action.revise",
+      "chat.action.progress",
+      "chat.action.comment",
+      "chat.action.cancel",
+      "action owner-only modification and requester commentary"
+    ],
+    "steps": [
+      "In an organization chat assign a dated work action to two colleagues",
+      "Confirm both get a pending acceptance in Chat assignments and personal To-do remains unchanged",
+      "First colleague Accepts, the second requests review with details",
+      "Requester revises the action and the second colleague accepts",
+      "The first assigned colleague closes only their assignment and adds a progress note",
+      "Requester comments on progress but cannot modify recipient statuses",
+      "Requester cancels a remaining request with reason; confirm action tracker updates",
+      "Verify personal To-do dashboards and MTD/YTD totals remain unchanged by chat actions."
+    ],
+    "expected": "Each assigned person controls only their status and notes after acceptance, the requester can comment and track, and chat actions never enter personal completion metrics."
+  },
+  {
+    "name": "Group poll anonymous vote consent and instant or deferred results",
+    "viewport": "mobile",
+    "description": "An active group member creates an optional anonymous one-time ballot with selectable instant results, polls retained for the group.",
+    "covers": [
+      "chat.poll.create",
+      "chat.poll.list",
+      "chat.poll.vote",
+      "chat.poll.close",
+      "anonymous results hide voters",
+      "no results before close unless instantResults"
+    ],
+    "steps": [
+      "Open a group after accepting invitation and create an anonymous poll with three options and instant results on",
+      "Vote once, confirm results show percentage counts and another vote is blocked",
+      "Create another poll with instant results off; vote and verify results hidden until poll creator closes it",
+      "Close the poll and see results, but for anonymous polls no user-identifiable ballot list",
+      "Confirm person not in the group cannot list or vote in the polls"
+    ],
+    "expected": "Group polls respect group membership, one vote per user, privacy and result timing, and retain completed results."
+  },
+  {
+    "name": "Minimal chat bubbles with outside seen timestamp and long press controls",
+    "viewport": "mobile",
+    "description": "Mobile content-fit chat balloons; time/read receipts appear beneath; long-press shows reply, react and time-limited delete; persistent emoji reactions stay attached to messages.",
+    "covers": [
+      "chat message UI slim content width",
+      "timestamp and seen underneath bubble",
+      "long press or context menu message actions",
+      "sender-only delete within three minutes",
+      "persistent emoji reactions inline",
+      "keyboard-accessible message menu"
+    ],
+    "steps": [
+      "Open Chat and send short and long messages; verify each bubble is only as wide as the content permits",
+      "Check time and seen markers below, not inside the bubble",
+      "Long press a message on mobile, or right-click it on desktop; verify contextual Reply, React and eligible Delete buttons",
+      "React using the pop-up emoji picker and verify the emoji badge remains attached without a new chat message",
+      "Try Delete on your own message after three minutes and confirm the action is absent; test on a receiver message and confirm sender-only",
+      "Review an older message and confirm its date and time appear below the bubble."
+    ],
+    "expected": "WhatsApp-like compact bubbles and contextual message controls without clutter under every bubble."
+  },
+  {
+    "name": "Inline Chat action and poll creation with two-person closure confirmation and team quick groups",
+    "viewport": "mobile",
+    "description": "Within a full-screen Chat message composer, create actions and polls in the conversation; monitored assignments surface in My To-do until requester acknowledges completion; managers can select direct reports or full team from assigned job roles.",
+    "covers": [
+      "chat action and poll plus menu inline",
+      "chat action/poll event cards in message history",
+      "chat action acknowledgement workflow",
+      "action photo uploaded on Chat assignment creation",
+      "group and individual acknowledged closure rates",
+      "QuickMonitoredActions in My To-do",
+      "chat reporting quick groups",
+      "chat policy acknowledgement gate",
+      "image reply thumbnail no photo filename",
+      "full-screen Chat hides quick link header and footer",
+      "full-width message box with lower integrated Send control"
+    ],
+    "steps": [
+      "Open full-screen Chat and acknowledge workplace policy, verifying it does not waive statutory rights",
+      "In an individual conversation tap + and assign a Monitored Action directly to the person being chatted with",
+      "Confirm recipient sees it under My To-do as a Monitored Action, accepts and submits closure; completion rate stays open until requester acknowledges",
+      "Requester acknowledges closure; check both people see confirmed completion and rates update",
+      "Create a group using Direct Reports or My Team verified from roles; invitees accept before seeing the group",
+      "Inside group Chat compose a poll and a multiple-recipient action with a JPEG photo using +, then see the photo and inline cards in the history",
+      "Verify group and individual closure rate, and check that personal action MTD/YTD calculations do not mix with Monitored Actions",
+      "Reply to an image and confirm its small thumbnail is visible without image filename",
+      "Check on mobile that the message box fills the available conversation width and Send is inside the box along the lower edge; send a message successfully"
+    ],
+    "expected": "Group and direct message work items originate in conversation, reach correct assignees, progress by owner, close only when acknowledged, and remain fully accessible in full-screen Chat."
+  },
+  {
+    "name": "Internal Outlook-style mail in organization workspace",
+    "viewport": "mobile",
+    "description": "Email replaces Arrange home on organization homepage while homepage arrangement stays in Settings. Test confidential tenant-only delivery, folders, messages and rich email editing.",
+    "covers": ["organization homepage Email shortcut", "Arrange home in Settings", "org mail people", "org mail draft/save", "org mail upload", "org mail send", "org mail list and read", "org mail change folders flags unread", "org mail custom folder create and management", "rich text formatting", "blocked external delivery", "email signature and automatic reply settings", "five configurable rich text toolbar tools", "resizable email editor", "quick status attention indicator", "action photo in email assignment draft and delivery"],
+    "steps": ["Open Organization home, confirm Email shortcut replaced Arrange home and open Email", "Open My setup > Arrange home and verify homepage editor remains available", "Compose to a second active employee in the same organization, add To and Cc via colleague lookup, format bold text, list, heading, hyperlink and table", "Attach a PDF and an action photo to a proposed monitored action, save Draft, return to Drafts, continue editing, send and confirm message in Sent Items, the recipient Inbox, and My To-do", "Open received mail and confirm readable theme-transparent formatted body and attachment, then reply and reply all; verify forwarded quote does not import old opaque or conflicting message colors", "Star, flag, mark unread, move to Archive and a new custom folder, then delete and restore", "Try sending to an address outside the organization and confirm the backend rejects it", "Save a formatted default signature under Email settings and confirm it appears in new messages and replies; enable internal automatic replies and check one automatic response per colleague per day", "Verify only five primary formatting icons are shown, More opens the additional tools, and toolbar settings allow selecting exactly five per user", "Resize the rich-text writing window with the resize icon and confirm body text remains editable without affecting send", "Verify thunderbolt is borderless and filled; send an unread chat or overdue action, and confirm a glowing notification count appears", "On mobile confirm inbox and reader switch cleanly without horizontal scrolling"],
+    "expected": "Only members of the same active organization can exchange durable private email; standard mail actions work, rich formatting and attachments are preserved, and external sending remains disabled."
+  },
+  {
+    "name": "Quick Calendar and source-linked To-do action synchronization",
+    "viewport": "mobile",
+    "description": "Preserve a single source-linked monitored action record while showing header, description, due date and status in My To-do, reflecting milestones on Quick Calendar and publishing progress to its originating channel.",
+    "covers": [
+      "quick calendar tool navigation",
+      "calendar action due and closure overlay",
+      "actions.calendar organization-scoped milestone endpoint",
+      "calendar activity endpoint",
+      "personal To-do header and body",
+      "single consolidated standard RichTable with shared MEMS filters search sorting column templates and Excel export",
+      "default visible performance charts across all personal assigned requested actions",
+      "closed records hidden until Show closed checkbox selected",
+      "authenticated action photo upload and signed photo view",
+      "action photo on Chat Email and Calendar creation and action progress",
+      "chat and email shared action header body source metadata",
+      "monitored action open closed status and progress comment",
+      "automatic Chat timeline source updates",
+      "automatic Email reply source updates",
+      "calendar event action activity synchronization",
+      "source action membership and assignment authorization",
+      "default-on Email Reply Reply All Delete permissions with backend enforcement",
+      "transparent theme-aware email compose, reply, forward and read bodies"
+    ],
+    "steps": [
+      "On a phone open Quick Links and confirm Calendar appears beside To-do, Gemba, Notepad and Chat; inspect month and agenda views and due/overdue summaries",
+      "Create personal To-do with a header, description, due date and photo; verify the consolidated RichTable shows one record with the photo indicator and hides it when closed until Show closed is checked",
+      "Verify MTD YTD and All-time performance charts appear above the table by default, combining personal assigned and requested actions without double-counting",
+      "Verify MEMS RichTable standard search, filters, column reorder, export to Excel and saved view templates on the combined action list",
+      "Create a Chat group monitored action with header, body and due date, then have the assignee accept; verify it appears exactly once in the assignee's monitored list and Quick Calendar",
+      "Open the monitored row in the mobile full-screen detail view, attach a second photo and submit Open progress with comment, then submit Closed; verify the photo is retained and a source-linked Chat update is created for each change and requester acknowledgement is still needed",
+      "Requester acknowledges closure; verify closure confirmation appears in Chat and Calendar, while accepted or created action deadlines remain represented",
+      "Send an internal email with a monitored action, recipients and required description; update progress from My To-do and verify a Re: update arrives on the original email thread",
+      "Compose a separate email with Reply, Reply All and Delete allowed by default; check that reading, composing and replying all have transparent body backgrounds and theme-contrasting text, including older HTML formatted in black and dark background, and disable Reply All on another email to ensure backend rejects recipient reply-all",
+      "Create a calendar meeting with an action and accept it; update the assigned action and verify a dated activity entry is recorded on that event",
+      "Confirm a user outside the relevant organization, assignment or Chat room cannot view its monitored action or its Calendar milestone"
+    ],
+    "expected": "My To-do shows each owned or assigned action with one source-linked status/history, and Quick Calendar displays due/closure markers without generating duplicate actions. Updates notify the originating source while privacy and mail permissions remain enforced."
+  }
+]

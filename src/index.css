@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Personal appearance is scoped to organization pages and never changes tenant primary colors. */
+html[data-mems-appearance='light'] .mems-organization-ui {
+    color-scheme: light;
+}
+html[data-mems-appearance='light'] .mems-organization-ui .bg-slate-950 {
+    background-color: rgb(var(--c-page));
+}
+html[data-mems-appearance='light'] .mems-organization-ui .bg-slate-900 {
+    background-color: rgb(var(--c-panel));
+}
+html[data-mems-appearance='light'] .mems-organization-ui .bg-slate-800 {
+    background-color: #edf2f7;
+}
+html[data-mems-appearance='light'] .mems-organization-ui .border-slate-800,
+html[data-mems-appearance='light'] .mems-organization-ui .border-slate-700 {
+    border-color: rgb(var(--c-line));
+}
+html[data-mems-appearance='light'] .mems-organization-ui .text-slate-200,
+html[data-mems-appearance='light'] .mems-organization-ui .text-slate-300,
+html[data-mems-appearance='light'] .mems-organization-ui .text-slate-400 {
+    color: rgb(var(--c-soft));
+}
+html[data-mems-appearance='light'] .mems-organization-ui .text-slate-500 {
+    color: rgb(var(--c-muted));
+}
+html[data-mems-appearance='light'] .mems-organization-ui .text-white:not(.text-onbrand) {
+    color: rgb(var(--c-ink));
+}
+html[data-mems-appearance='light'] .mems-organization-ui input.bg-slate-950,
+html[data-mems-appearance='light'] .mems-organization-ui select.bg-slate-950,
+html[data-mems-appearance='light'] .mems-organization-ui textarea.bg-slate-950 {
+    background-color: rgb(var(--c-panel));
+    color: rgb(var(--c-ink));
+    color-scheme: light;
+}
+html[data-mems-appearance='dark'] .mems-organization-ui {
+    color-scheme: dark;
+}
+
+/* Risk assessment inherits tenant brand colors, while retaining accessible light surfaces. */
+.mems-risk-light { color-scheme: light; background: #fff; color: #172033; }
+.mems-risk-light input:not([type=checkbox]),.mems-risk-light select,.mems-risk-light textarea { background: #fff; color: #172033; border-color: #cbd5e1; color-scheme: light; }
+.mems-risk-light input[type=checkbox] { accent-color: rgb(var(--c-brand)); }
+.mems-risk-light button:not(.text-red-600):not(.text-red-700) { accent-color: rgb(var(--c-brand)); }
+.mems-risk-light button.text-blue-600,.mems-risk-light button.text-blue-700,.mems-risk-light summary.text-blue-600 { color: rgb(var(--c-brand)); }
+.mems-risk-light button.bg-blue-600,.mems-risk-light .bg-blue-600 { background: rgb(var(--c-brand)); color: rgb(var(--c-onbrand)); }
+.mems-risk-light .border-blue-300 { border-color: rgb(var(--c-brand)); }
+/* Scoped readable surfaces in activity editing and assessment, independent of dark global defaults. */
+.mems-risk-light, .mems-risk-light fieldset, .mems-risk-light section, .mems-risk-light article, .mems-risk-light .rounded-xl, .mems-risk-light .rounded-lg { color-scheme: light; }
+.mems-risk-light fieldset, .mems-risk-light .rounded-xl, .mems-risk-light .rounded-lg { background-color: #fff; color: #172033; }
+.mems-risk-light label,.mems-risk-light legend,.mems-risk-light h2,.mems-risk-light h3,.mems-risk-light h4,.mems-risk-light strong { color: #172033; }
+.mems-risk-light button { background-color: #fff; color: rgb(var(--c-brand)); border-color: #cbd5e1; }
+.mems-risk-light button[class*="bg-[rgb(var(--c-brand))]"] { background-color: rgb(var(--c-brand)); color: rgb(var(--c-onbrand)); }
+.mems-risk-light button:focus-visible,.mems-risk-light select:focus-visible { outline: 2px solid rgb(var(--c-brand)); outline-offset: 2px; }
+.mems-risk-light input[type=checkbox] { accent-color: rgb(var(--c-brand)); }
+.mems-activity-light { color-scheme: light; background-color: #fff; color: #172033; }
+.mems-activity-light fieldset,.mems-activity-light form,.mems-activity-light input,.mems-activity-light textarea,.mems-activity-light select { background-color: #fff !important; color: #172033 !important; border-color: #cbd5e1 !important; color-scheme: light !important; }
+.mems-activity-light legend,.mems-activity-light label,.mems-activity-light h2,.mems-activity-light h3,.mems-activity-light p { color: #172033; }
+.mems-activity-light button:not(.text-red-600) { color: rgb(var(--c-brand)); }
+.mems-activity-light input[type=checkbox] { accent-color: rgb(var(--c-brand)); }
+ /* Shared modal surface: intentionally independent of tenant themes. */
+.mems-modal-backdrop { background: rgba(15,23,42,.58) !important; }
+.mems-modal-surface, .mems-modal-surface * { color-scheme: light; }
+.mems-modal-surface { background: #fff !important; color: #172033 !important; border: 1px solid #cbd5e1 !important; box-shadow: 0 24px 65px rgba(0,0,0,.25) !important; isolation: isolate; }
+.mems-modal-surface h1,.mems-modal-surface h2,.mems-modal-surface h3,.mems-modal-surface label,.mems-modal-surface p { color: #172033; }
+.mems-modal-surface input:not([type=checkbox]):not([type=file]),.mems-modal-surface select,.mems-modal-surface textarea { background: #fff !important; color: #172033 !important; border-color: #cbd5e1 !important; }
+.mems-modal-surface .mems-modal-panel { background: #f8fafc !important; color: #172033 !important; border-color: #cbd5e1 !important; }
+.mems-modal-surface button:not([class*=bg-]) { color: #172033; }
+
+
+:root {
+    --c-page: 2 6 23;
+    --c-panel: 15 23 42;
+    --c-line: 30 41 59;
+    --c-ink: 255 255 255;
+    --c-soft: 203 213 225;
+    --c-muted: 148 163 184;
+    --c-brand: 16 185 129;
+    --c-brandsoft: 110 231 183;
+    --c-onbrand: 2 6 23;
+}
+
+html,
+body,
+#root {
+    min-height: 100%;
+}
+
+body {
+    margin: 0;
+    background: rgb(var(--c-page));
+    color: rgb(var(--c-soft));
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+}
