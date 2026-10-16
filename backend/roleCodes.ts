@@ -1,4 +1,4 @@
-import { HttpError, deleteDoc, fieldEq, getDoc, isObj, listDocs, nowIso, runQuery, str, writeDoc, type Doc, type Plain } from './core';
+import { HttpError, deleteDoc, fieldEq, getDoc, isObj, listDocs, nowIso, runQuery, str, writeDoc, type Doc } from './core';
 import { clearAccessCache, orgRoute, type OrgContext } from './guards';
 import { record } from './org';
 import { col } from './structure';
@@ -63,14 +63,15 @@ async function plan(ctx: OrgContext) {
         { label: 'Workflow configuration', docs: await listDocs(`${root}/workflow_registry`), path: (d) => `${root}/workflow_registry/${d.id}` },
         { label: 'Material workflow', docs: await listDocs(`${root}/material_workflows`), path: (d) => `${root}/material_workflows/${d.id}` },
     ];
-    const touched: Array<{ label: string; path: string; data: Plain; count: number }> = [];
+    const touched: Array<{ label: string; path: string; data: Record<string, unknown>; count: number }> = [];
     const perArea = new Map<string, number>();
     for (const s of sources) {
         for (const d of s.docs) {
             const r = rewrite(d.data, map);
             const renamed = s.label === 'Job roles' && map.has(d.id);
             if (r.count || renamed) {
-                touched.push({ label: s.label, path: s.path(d), data: r.value as Plain, count: r.count });
+                if (!isObj(r.value)) throw new HttpError(500, 'Role code rewrite produced an invalid document.');
+                touched.push({ label: s.label, path: s.path(d), data: r.value, count: r.count });
                 perArea.set(s.label, (perArea.get(s.label) ?? 0) + 1);
             }
         }

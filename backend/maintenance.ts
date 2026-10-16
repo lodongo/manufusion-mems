@@ -347,7 +347,7 @@ function wrOut(doc: Doc) {
     };
 }
 
-async function readFinding(l: Lists, b: Obj) {
+async function readFinding(l: Lists, b: Record<string, unknown>) {
     const title = clean(b.title, 120);
     const description = str(b.description).trim().slice(0, 2000);
     if (title.length < 5) throw new HttpError(400, 'Give the request a short title (5 to 120 characters).');
