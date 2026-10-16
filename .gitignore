@@ -9,3 +9,4 @@ service-account*.json
 *.key
 logs/
 .DS_Store
+gha-creds-*.json

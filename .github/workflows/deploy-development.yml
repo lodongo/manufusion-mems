@@ -1,0 +1,98 @@
+name: Deploy MEMS to isolated development Cloud Run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mems-development-cloudrun
+  cancel-in-progress: false
+
+jobs:
+  deploy-development:
+    if: github.ref == 'refs/heads/develop' && github.repository == 'lodongo/manufusion-mems'
+    runs-on: ubuntu-latest
+    environment: development
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_DEV_PROJECT_ID: ${{ vars.GCP_DEV_PROJECT_ID }}
+      MEMS_FIREBASE_PROJECT_ID: ${{ vars.GCP_DEV_PROJECT_ID }}
+      GCP_DEV_REGION: ${{ vars.GCP_DEV_REGION }}
+      GCP_DEV_WIF_PROVIDER: ${{ vars.GCP_DEV_WIF_PROVIDER }}
+      GCP_DEV_DEPLOYER_SA: ${{ vars.GCP_DEV_DEPLOYER_SA }}
+      GCP_DEV_RUNTIME_SA: ${{ vars.GCP_DEV_RUNTIME_SA }}
+      MEMS_STORAGE_BUCKET: ${{ vars.MEMS_STORAGE_BUCKET }}
+      VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+      VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+      VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+      VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+      VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+      VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify development-only target
+        run: |
+          set -euo pipefail
+          node scripts/dev-preflight.mjs deploy
+          test "${GITHUB_REF}" = 'refs/heads/develop'
+
+      - name: Authenticate to Google Cloud without a service account key
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_DEV_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_DEV_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEV_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Build, push and deploy restricted MEMS development service
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${GCP_DEV_REGION}-docker.pkg.dev/${GCP_DEV_PROJECT_ID}/mems-dev/mems:${GITHUB_SHA}"
+          gcloud auth configure-docker "${GCP_DEV_REGION}-docker.pkg.dev" --quiet
+          docker build \
+            --build-arg "GCP_DEV_PROJECT_ID=${GCP_DEV_PROJECT_ID}" \
+            --build-arg "VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}" \
+            --build-arg "VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}" \
+            --build-arg "VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}" \
+            --build-arg "VITE_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}" \
+            --build-arg "VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}" \
+            --build-arg "VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}" \
+            -t "${IMAGE}" .
+          docker push "${IMAGE}"
+          gcloud run deploy mems-dev \
+            --project="${GCP_DEV_PROJECT_ID}" \
+            --region="${GCP_DEV_REGION}" \
+            --image="${IMAGE}" \
+            --platform=managed \
+            --service-account="${GCP_DEV_RUNTIME_SA}" \
+            --no-allow-unauthenticated \
+            --min-instances=0 \
+            --max-instances=2 \
+            --cpu=1 \
+            --memory=1Gi \
+            --concurrency=20 \
+            --timeout=120 \
+            --set-env-vars="MEMS_FIREBASE_PROJECT_ID=${MEMS_FIREBASE_PROJECT_ID},MEMS_STORAGE_BUCKET=${MEMS_STORAGE_BUCKET}" \
+            --quiet
+          URL="$(gcloud run services describe mems-dev --project="${GCP_DEV_PROJECT_ID}" --region="${GCP_DEV_REGION}" --format='value(status.url)')"
+          test -n "$URL"
+          gcloud run services update mems-dev \
+            --project="${GCP_DEV_PROJECT_ID}" \
+            --region="${GCP_DEV_REGION}" \
+            --update-env-vars="MEMS_PUBLIC_URL=$URL/" \
+            --quiet
+          {
+            echo '### MEMS isolated development Cloud Run'
+            echo "Project: ${GCP_DEV_PROJECT_ID}"
+            echo "Region: ${GCP_DEV_REGION}"
+            echo "Cloud Run URL: ${URL}"
+            echo 'Access: restricted (Cloud Run IAM); no public access enabled'
+            echo 'No live Firebase project has been used.'
+          } >> "$GITHUB_STEP_SUMMARY"
