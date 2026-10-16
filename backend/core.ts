@@ -297,16 +297,20 @@ export interface Doc {
     updateTime: string;
 }
 
-export function encodeValue(value: Plain): Record<string, unknown> {
+export function encodeValue(value: unknown): Record<string, unknown> {
     if (value === null || value === undefined) return { nullValue: null };
     if (typeof value === 'string') return { stringValue: value };
     if (typeof value === 'boolean') return { booleanValue: value };
-    if (typeof value === 'number') return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) throw new HttpError(400, 'A database number must be finite.');
+        return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+    }
     if (Array.isArray(value)) return { arrayValue: { values: value.map(encodeValue) } };
-    return { mapValue: { fields: encodeFields(value) } };
+    if (typeof value === 'object') return { mapValue: { fields: encodeFields(value as Record<string, unknown>) } };
+    throw new HttpError(400, 'Unsupported database value type.');
 }
 
-export function encodeFields(data: Fields): Record<string, unknown> {
+export function encodeFields(data: Record<string, unknown>): Record<string, unknown> {
     const fields: Record<string, unknown> = {};
     for (const key of Object.keys(data)) {
         if (data[key] !== undefined) fields[key] = encodeValue(data[key]);
@@ -361,7 +365,7 @@ export async function listDocs(collection: string): Promise<Doc[]> {
     return docs;
 }
 
-export async function createDoc(collection: string, data: Fields): Promise<Doc> {
+export async function createDoc(collection: string, data: Record<string, unknown>): Promise<Doc> {
     const res = await googleRequest(`${FIRESTORE_BASE}/${collection}`, 'POST', { fields: encodeFields(data) });
     if (!res.ok) await fail(res, 'Firestore create');
     return toDoc((await res.json()) as Record<string, any>);
@@ -375,7 +379,7 @@ function assertDocPath(path: string, operation: string) {
     }
 }
 
-export async function writeDoc(path: string, data: Fields, precondition?: { exists?: boolean; updateTime?: string }): Promise<boolean> {
+export async function writeDoc(path: string, data: Record<string, unknown>, precondition?: { exists?: boolean; updateTime?: string }): Promise<boolean> {
     assertDocPath(path, 'Firestore write');
     const query = new URLSearchParams();
     if (precondition?.exists !== undefined) query.set('currentDocument.exists', String(precondition.exists));
@@ -392,7 +396,7 @@ export async function writeDoc(path: string, data: Fields, precondition?: { exis
     return true;
 }
 
-export async function updateFields(path: string, data: Fields): Promise<void> {
+export async function updateFields(path: string, data: Record<string, unknown>): Promise<void> {
     assertDocPath(path, 'Firestore update');
     const query = new URLSearchParams();
     for (const key of Object.keys(data)) query.append('updateMask.fieldPaths', key);
@@ -406,7 +410,7 @@ export async function deleteDoc(path: string): Promise<void> {
 }
 
 /** Creates many documents in one atomic request (max 500). */
-export async function commitCreates(items: Array<{ collection: string; data: Fields }>): Promise<void> {
+export async function commitCreates(items: Array<{ collection: string; data: Record<string, unknown> }>): Promise<void> {
     for (let i = 0; i < items.length; i += 450) {
         const writes = items.slice(i, i + 450).map((item) => ({
             update: { name: `${DOCUMENT_NAME_ROOT}/${item.collection}/${randomId()}`, fields: encodeFields(item.data) },

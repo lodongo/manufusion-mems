@@ -15,6 +15,9 @@ interface MetaItem {
     code: string;
     label: string;
     active: boolean;
+    category?: string;
+    selectable?: boolean;
+    color?: string;
 }
 
 const item = (code: string, label: string): MetaItem => ({ code, label, active: true });
