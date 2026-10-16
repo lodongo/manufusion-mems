@@ -24,6 +24,21 @@ test('accepts a matching isolated development project', () => {
   assert.equal(verifyDevBuild(env()), 'mems-dev-example1');
   assert.equal(verifyDevDeploy(env()), 'mems-dev-example1');
 });
+test('accepts the actual Manufusion development Firebase project ID', () => {
+  const actual = 'manufusion-mems-development';
+  const setup = env({
+    GCP_DEV_PROJECT_ID: actual,
+    MEMS_FIREBASE_PROJECT_ID: actual,
+    MEMS_STORAGE_BUCKET: actual + '-files',
+    GCP_DEV_DEPLOYER_SA: 'mems-dev-deployer@' + actual + '.iam.gserviceaccount.com',
+    GCP_DEV_RUNTIME_SA: 'mems-dev-runtime@' + actual + '.iam.gserviceaccount.com',
+    VITE_FIREBASE_AUTH_DOMAIN: actual + '.firebaseapp.com',
+    VITE_FIREBASE_PROJECT_ID: actual,
+    VITE_FIREBASE_STORAGE_BUCKET: actual + '.firebasestorage.app',
+  });
+  assert.equal(verifyDevBuild(setup), actual);
+  assert.equal(verifyDevDeploy(setup), actual);
+});
 test('rejects live project even with an explicit override', () => {
   assert.throws(() => verifyDevBuild(env({GCP_DEV_PROJECT_ID: 'mems2026', VITE_FIREBASE_PROJECT_ID: 'mems2026'})), /non-production|production/);
   assert.throws(() => verifyDevDeploy(env({MEMS_ALLOW_LIVE_DATA:'I_ACKNOWLEDGE_THE_RISK'})), /override/);

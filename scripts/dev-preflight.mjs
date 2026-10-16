@@ -14,7 +14,7 @@ const denyLive = (value, name) => {
   if (/mems2026/i.test(value)) throw new Error(name + ' contains the production Firebase project ID.');
 };
 const safeProject = (value) => {
-  if (!/^[a-z][a-z0-9-]{5,29}$/.test(value) || !/(^|[-])(dev|test|staging|sandbox)([-]|$)/.test(value)) {
+  if (!/^[a-z][a-z0-9-]{5,29}$/.test(value) || !/(^|[-])(dev|development|test|testing|staging|sandbox)([-]|$)/.test(value)) {
     throw new Error('GCP_DEV_PROJECT_ID must be an explicit, clearly named non-production project (e.g. mems-dev-1234).');
   }
   denyLive(value, 'GCP_DEV_PROJECT_ID');
