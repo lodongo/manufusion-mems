@@ -1,0 +1,71 @@
+name: Import MEMS independent migration ZIP
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'imports/MEMS_Independent_Source_Migration_2026-10-16.zip'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          persist-credentials: true
+      - name: Verify archive and unpack safely
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path, PurePosixPath
+          import hashlib, stat, zipfile
+          package = Path('imports/MEMS_Independent_Source_Migration_2026-10-16.zip')
+          expected = '94ca4a83a62570fb68f6aadaac5ec6b6034aa711592e1f6246fe753274a36d5d'
+          if not package.exists():
+              raise SystemExit('Upload the approved migration ZIP to imports/ on develop first.')
+          if hashlib.sha256(package.read_bytes()).hexdigest() != expected:
+              raise SystemExit('Archive SHA-256 mismatch: do not import an unexpected ZIP.')
+          root = Path.cwd().resolve()
+          extracted = []
+          with zipfile.ZipFile(package) as archive:
+              for entry in archive.infolist():
+                  name = PurePosixPath(entry.filename)
+                  if not name.parts or name.parts[0] != 'mems-independent' or '..' in name.parts:
+                      raise SystemExit('Unsafe archive path: ' + entry.filename)
+                  if stat.S_ISLNK(entry.external_attr >> 16):
+                      raise SystemExit('Symlink not permitted in source archive: ' + entry.filename)
+                  if entry.is_dir():
+                      continue
+                  rel = Path(*name.parts[1:])
+                  if not rel.parts or rel.is_absolute():
+                      raise SystemExit('Invalid entry: ' + entry.filename)
+                  target = (root / rel).resolve()
+                  if not target.is_relative_to(root) or '.git' in rel.parts or 'imports' == rel.parts[0]:
+                      raise SystemExit('Refusing to overwrite protected path: ' + entry.filename)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(archive.read(entry))
+                  extracted.append(str(rel))
+          if len(extracted) != 297 or len(set(extracted)) != len(extracted):
+              raise SystemExit(f'Expected 297 unique files; received {len(extracted)}.')
+          required = ['package.json','backend/platform/server.ts','backend/platform/sdk.ts',
+                      'src/App.tsx','docs/README_FIRST.md','automation/src/server.mjs']
+          if not all(r in extracted for r in required):
+              raise SystemExit('Required independent source files missing.')
+          print(f'Imported {len(extracted)} source files without accessing Firebase.')
+          PY
+      - name: Commit reviewed migration source to develop
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f imports/MEMS_Independent_Source_Migration_2026-10-16.zip
+          rm -f docs/IMPORT_STATUS.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Apply independent MEMS migration candidate from verified recovery ZIP"
+            git push origin HEAD:develop
+          fi
