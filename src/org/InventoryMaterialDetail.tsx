@@ -1,0 +1,1233 @@
+import { useMemo, useState, type ReactNode } from 'react';
+import { Link2, Link2Off, PackagePlus, Pencil, Save, Send, X } from 'lucide-react';
+import { callBackend } from '../lib/backend';
+import { Alert, Field, SelectField } from '../components/ui';
+import { InfoTip, Screen, Segmented, messageOf, useConfirm } from '../components/screen';
+import RichTable, { type Column } from '../components/RichTable';
+import { restoredTableTab } from '../lib/tableTabs';
+import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
+import { fmtDate } from '../admin/format';
+
+// Material detail for one warehouse (INV), opened from Inventory on hand.
+//   Overview                 headline figures (location, available quantity, min/max, unit cost, annual usage)
+//   Current Status           stock position from the posted, reconciled material journal; first-time (opening) stock
+//                            is posted once and cannot be reversed; restricted stock is isolated through a request that
+//                            needs approval (no stock moves until it is approved)
+//   Inventory / Procurement  warehouse-specific settings, validated here as on the server (numbers ≥ 0, min ≤ max,
+//                            safety stock and reorder point ≤ max, lead time in whole days ≤ 3650, text ≤ 120, remarks ≤ 1000);
+//                            the physical location (bin) changes only by link / delink, never through the settings form
+//   Movements                the material journal for this warehouse
+//   Criticality / Technical  criticality placeholder and the original material master record
+// Every change is confirmed in-app and recorded by the server (journal, bin events, audit trail).
+
+type Info = Record<string, string | number>;
+
+interface Movement {
+    id: string;
+    type: string;
+    status: string;
+    reconciled: boolean;
+    postedAt: string;
+    postedBy: string;
+    reference: string;
+    balancesDelta: Record<string, number>;
+}
+
+interface IsolationRequest {
+    id: string;
+    reason: string;
+    quantity: number;
+    status: string;
+    moveToBin: boolean;
+    createdAt: string;
+}
+
+interface CurrentStatus {
+    isolationRequests?: IsolationRequest[];
+    canInitialize?: boolean;
+    reconciled: boolean;
+    entryCount: number;
+    balances: Record<string, number>;
+    reason: string;
+}
+
+interface BinDiagnostics {
+    configured: number;
+    matchingClassification: number;
+    occupied: number;
+    classification: string;
+    warehouseId: string;
+    linkedBin: string;
+    required: string[];
+}
+
+interface Detail {
+    material: Record<string, unknown>;
+    inventory: Info;
+    procurement: Info;
+    materialMovements?: Movement[];
+    currentStatus?: CurrentStatus;
+    warehouse: { id: string; name: string };
+    currency: { local: string; alternatives: Array<{ code: string; rate: number }> };
+    canEdit: boolean;
+    associatedAssets: Array<{ id: string; name: string }>;
+    identities: Record<string, string>;
+    catalogNames: Record<string, string>;
+    structureNames: Record<string, string>;
+    recommendedBins: Array<{ id: string; name: string; batch: string }>;
+    binDiagnostics?: BinDiagnostics;
+}
+
+interface MetaOption {
+    code: string;
+    description: string;
+    enabled: boolean;
+}
+
+interface Uom {
+    code: string;
+    name: string;
+    description: string;
+    categoryCode: string;
+    categoryName: string;
+    subcategoryCode: string;
+    subcategoryName: string;
+    enabled: boolean;
+}
+
+interface Metadata {
+    incoterms: MetaOption[];
+    stockingPolicies: MetaOption[];
+    paymentTerms: MetaOption[];
+    uoms: Uom[];
+}
+
+type Section = 'inventory' | 'procurement';
+type Values = Record<string, string>;
+type Errors = Record<string, string>;
+
+const TABS = ['Overview', 'Current Status', 'Inventory Information', 'Procurement Information', 'Movements', 'Criticality Analysis', 'Technical Data'] as const;
+type Tab = (typeof TABS)[number];
+
+const INVENTORY_FIELDS = ['stockingPolicy', 'minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'remarks'];
+const PROCUREMENT_FIELDS = ['incoterms', 'preferredVendor', 'vendorPartNumber', 'purchaseUom', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice', 'priceCurrency', 'paymentTerms'];
+const NUMBER_FIELDS = new Set(['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice']);
+const OPENING_KEYS = ['physicalStock', 'reservedStock', 'quarantinedStock', 'damagedStock', 'expiredStock', 'onOrder', 'onRequisition', 'inTransit', 'allocatedStock'];
+const DELTA_KEYS = ['physicalStock', 'reservedStock', 'quarantinedStock', 'damagedStock', 'expiredStock', 'other', 'onOrder', 'onRequisition', 'inTransit', 'allocatedStock'];
+const ISOLATION_REASONS = [
+    { value: 'quarantinedStock', label: 'Quarantined' },
+    { value: 'damagedStock', label: 'Damaged' },
+    { value: 'expiredStock', label: 'Expired' },
+    { value: 'other', label: 'Other' },
+];
+const IDENTITY_KEYS = ['createdBy', 'submittedBy', 'verifiedBy', 'numberAllocatedBy', 'pushedBy', 'disabledBy'];
+const MAX_QUANTITY = 1e12;
+const NUMBER_PATTERN = /^\d+(\.\d+)?$/;
+const OPENING_PHRASE = 'POST OPENING STOCK';
+
+const EXPLANATIONS: Record<string, string> = {
+    stockingPolicy: 'Defines how the warehouse replenishes this material, for example stock-held, non-stock, or order-on-demand.',
+    minimumLevel: 'Minimum desired available stock quantity; falling below this level signals insufficient stock.',
+    maximumLevel: 'Maximum planned stock quantity to limit excess inventory and working capital.',
+    safetyStock: 'Buffer stock held to protect against demand variation or replenishment delays.',
+    reorderPoint: 'Available stock threshold that triggers a replenishment recommendation.',
+    reorderQuantity: 'Normal quantity to replenish when the reorder point is reached.',
+    leadTimeDays: 'Expected calendar days between ordering and receipt of the material.',
+    remarks: 'Additional warehouse-specific handling, stocking, or replenishment instructions.',
+    incoterms: 'International delivery rule defining buyer and seller responsibilities for transport, risk and costs.',
+    preferredVendor: 'Preferred approved supplier for purchasing this material.',
+    vendorPartNumber: "Supplier's own part reference, which may differ from the internal material number.",
+    purchaseUom: 'Unit used when ordering from suppliers. Select its category, then the unit; no subcategory is required.',
+    minimumOrderQuantity: 'Smallest quantity the supplier accepts per purchase order.',
+    orderMultiple: 'Quantity increment in which orders must be placed, such as multiples of 10.',
+    unitPrice: 'Agreed price per purchase unit, in the recorded price currency.',
+    priceCurrency: 'Currency in which the supplier price is recorded.',
+    paymentTerms: 'Agreed payment conditions, for example net 30 days.',
+};
+
+const BALANCE_HELP: Record<string, string> = {
+    availableStock: 'Available Stock = Physical Stock − Reserved − Quarantined − Damaged − Expired − Other.',
+    physicalStock: 'Quantity physically held in the warehouse, including stock under restriction.',
+    reservedStock: 'Stock committed to approved allocations or reservations.',
+    onOrder: 'Quantity on open purchase orders that has not been received yet.',
+    onRequisition: 'Quantity on purchase requisitions that are not yet ordered.',
+    inTransit: 'Quantity shipped to this warehouse and not yet received.',
+    allocatedStock: 'Physical stock allocated to demand but not yet issued.',
+};
+
+const label = (x: string) => x.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+const words = (s: string) => (s || '').replace(/_/g, ' ');
+const blank = (v: unknown) => v === null || v === undefined || v === '';
+const qty = (v: unknown) => Number(v || 0).toLocaleString();
+const signed = (n: number) => `${n > 0 ? '+' : ''}${Number(n || 0).toLocaleString()}`;
+
+// ---------------------------------------------------------------------------
+// Validation (same rules as the server)
+// ---------------------------------------------------------------------------
+
+/** Number check for a settings or quantity field; '' is allowed (clears the value / counts as zero). */
+function numberProblem(raw: string, wholeDaysMax?: number): string {
+    const v = raw.trim();
+    if (!v) return '';
+    if (!NUMBER_PATTERN.test(v)) return 'Enter a number of 0 or more (digits and an optional decimal point).';
+    const n = Number(v);
+    if (n > MAX_QUANTITY) return 'This number is too large.';
+    if (wholeDaysMax !== undefined && (!Number.isInteger(n) || n > wholeDaysMax)) return `Enter whole days from 0 to ${wholeDaysMax}.`;
+    return '';
+}
+
+const numberOf = (raw: string | undefined) => (raw && raw.trim() && NUMBER_PATTERN.test(raw.trim()) ? Number(raw.trim()) : null);
+
+function validateSettings(section: Section, values: Values): Errors {
+    const errors: Errors = {};
+    for (const key of section === 'inventory' ? INVENTORY_FIELDS : PROCUREMENT_FIELDS) {
+        const raw = values[key] ?? '';
+        if (NUMBER_FIELDS.has(key)) {
+            const problem = numberProblem(raw, key === 'leadTimeDays' ? 3650 : undefined);
+            if (problem) errors[key] = problem;
+        } else {
+            const max = key === 'remarks' ? 1000 : 120;
+            if (raw.trim().length > max) errors[key] = `Use at most ${max} characters.`;
+        }
+    }
+    if (section === 'inventory') {
+        const max = errors.maximumLevel ? null : numberOf(values.maximumLevel);
+        if (max !== null) {
+            const min = numberOf(values.minimumLevel);
+            const safety = numberOf(values.safetyStock);
+            const reorder = numberOf(values.reorderPoint);
+            if (!errors.minimumLevel && min !== null && min > max) errors.minimumLevel = 'Minimum level cannot be above the maximum level.';
+            if (!errors.safetyStock && safety !== null && safety > max) errors.safetyStock = 'Safety stock cannot be above the maximum level.';
+            if (!errors.reorderPoint && reorder !== null && reorder > max) errors.reorderPoint = 'Reorder point cannot be above the maximum level.';
+        }
+    }
+    return errors;
+}
+
+/** Values sent to /material/update: numbers as numbers, empty fields as '' (cleared). Never includes binLocation. */
+function settingsPayload(section: Section, values: Values): Record<string, string | number> {
+    const out: Record<string, string | number> = {};
+    for (const key of section === 'inventory' ? INVENTORY_FIELDS : PROCUREMENT_FIELDS) {
+        const raw = (values[key] ?? '').trim();
+        out[key] = NUMBER_FIELDS.has(key) && raw ? Number(raw) : raw;
+    }
+    return out;
+}
+
+function validateOpening(values: Values, reason: string): Errors {
+    const errors: Errors = {};
+    for (const key of OPENING_KEYS) {
+        const problem = numberProblem(values[key] ?? '');
+        if (problem) errors[key] = problem;
+    }
+    const n = (key: string) => numberOf(values[key]) ?? 0;
+    if (!errors.physicalStock && n('reservedStock') + n('quarantinedStock') + n('damagedStock') + n('expiredStock') > n('physicalStock')) {
+        errors.physicalStock = 'Reserved, quarantined, damaged and expired together cannot exceed physical stock.';
+    }
+    if (!errors.allocatedStock && n('allocatedStock') > n('physicalStock')) errors.allocatedStock = 'Allocated stock cannot exceed physical stock.';
+    if (reason.trim().length < 8) errors.reason = 'Give the count reference or explanation (at least 8 characters).';
+    return errors;
+}
+
+const problemList = (errors: Errors) => Object.entries(errors).map(([key, message]) => `${key === 'reason' ? 'Reference' : label(key)}: ${message}`);
+
+// ---------------------------------------------------------------------------
+// Small building blocks
+// ---------------------------------------------------------------------------
+
+/** Short list of what blocks the primary action, shown next to it. */
+function Problems({ items }: { items: string[] }) {
+    if (!items.length) return null;
+    return (
+        <div role='status' className='rounded-lg bg-amber-500/10 p-3 text-sm text-amber-300'>
+            <p className='font-medium'>Fix before continuing:</p>
+            <ul className='mt-1 list-disc space-y-0.5 pl-5'>
+                {items.map((x) => (
+                    <li key={x}>{x}</li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
+/** Label with tap-to-open help; the help wraps onto its own line when opened. */
+function HelpLabel({ text, help, className = 'text-xs text-muted' }: { text: string; help?: string; className?: string }) {
+    return (
+        <div className='flex flex-wrap items-center gap-x-1'>
+            <span className={className}>{text}</span>
+            {help && <InfoTip label={text}>{help}</InfoTip>}
+        </div>
+    );
+}
+
+/** One figure in a stock or overview grid. */
+function Stat({ name, value, help, emphasis }: { name: string; value: string; help?: string; emphasis?: boolean }) {
+    return (
+        <div className='min-w-0 rounded-xl border border-line bg-page p-3'>
+            <HelpLabel text={name} help={help} />
+            <strong className={`mt-1 block break-words font-semibold tabular-nums text-ink ${emphasis ? 'text-2xl' : 'text-lg'}`}>{value}</strong>
+        </div>
+    );
+}
+
+/** Bottom sheet (phone) / dialog (desktop); its primary action sits in the header so it is always reachable. */
+function Sheet({ title, onClose, action, children }: { title: string; onClose: () => void; action?: ReactNode; children: ReactNode }) {
+    return (
+        <div className='fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4' role='presentation'>
+            <button type='button' aria-label='Close' className='absolute inset-0 bg-black/60' onClick={onClose} />
+            <div role='dialog' aria-modal='true' aria-label={title} className='relative flex max-h-[92dvh] w-full flex-col rounded-t-2xl border border-line bg-panel sm:max-w-lg sm:rounded-2xl'>
+                <div className='flex items-center gap-2 border-b border-line p-3'>
+                    <button type='button' aria-label='Close' onClick={onClose} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted active:bg-page'>
+                        <X className='h-5 w-5' />
+                    </button>
+                    <h2 className='min-w-0 flex-1 truncate text-base font-semibold text-ink'>{title}</h2>
+                    {action}
+                </div>
+                <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom))]'>{children}</div>
+            </div>
+        </div>
+    );
+}
+
+/** Readable rendering of a material master value (names for people, structure nodes, units and catalogue codes). */
+function humanValue(key: string, v: unknown, data: Detail, metadata: Metadata | null): ReactNode {
+    if (blank(v)) return '—';
+    if (Array.isArray(v)) {
+        return (
+            <div className='space-y-1'>
+                {v.map((x, i) => (
+                    <div key={i} className='rounded bg-page px-2 py-1'>
+                        {humanValue(key, x, data, metadata)}
+                    </div>
+                ))}
+            </div>
+        );
+    }
+    if (typeof v === 'object') {
+        return (
+            <div className='space-y-1'>
+                {Object.entries(v as Record<string, unknown>).map(([k, x]) => (
+                    <div key={k} className='flex flex-wrap gap-2'>
+                        <span className='text-muted'>{label(k)}:</span>
+                        <span>{humanValue(k, x, data, metadata)}</span>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+    const value = String(v);
+    if (IDENTITY_KEYS.includes(key)) return data.identities[value] || value;
+    if (/(?:asset|assembly|costCenter)Id$/i.test(key)) return data.structureNames[value] || value;
+    if (key === 'uom' || key === 'purchaseUom') return metadata?.uoms.find((x) => x.code === value)?.description || value;
+    return data.catalogNames[value] || data.identities[value] || value;
+}
+
+function annualUsage(movements: Movement[] = []): string {
+    const cutoff = Date.now() - 365 * 24 * 60 * 60 * 1000;
+    const used = movements.filter((m) => m.status === 'posted' && m.reconciled && new Date(m.postedAt).getTime() >= cutoff && /ISSUE|CONSUMPTION|USAGE/i.test(m.type));
+    if (!used.length) return 'Not available';
+    return used.reduce((sum, m) => sum + Math.abs(Number(m.balancesDelta.physicalStock || m.balancesDelta.quantity || 0)), 0).toLocaleString();
+}
+
+// ---------------------------------------------------------------------------
+// Sections
+// ---------------------------------------------------------------------------
+
+function Overview({ data, id, base }: { data: Detail; id: string; base: string }) {
+    const status = data.currentStatus;
+    const price = data.procurement.unitPrice;
+    const stats: Array<[string, string]> = [
+        ['Physical location', data.binDiagnostics?.linkedBin || 'Not allocated'],
+        ['Available quantity', status?.reconciled ? qty(status.balances.availableStock) : 'Not reconciled'],
+        ['Minimum stock', blank(data.inventory.minimumLevel) ? 'Not set' : String(data.inventory.minimumLevel)],
+        ['Maximum stock', blank(data.inventory.maximumLevel) ? 'Not set' : String(data.inventory.maximumLevel)],
+        ['Unit cost', blank(price) ? 'Not set' : `${String(data.procurement.priceCurrency || base)} ${Number(price).toLocaleString(undefined, { maximumFractionDigits: 2 })}`],
+        ['Annual usage', annualUsage(data.materialMovements)],
+    ];
+    return (
+        <Card className='space-y-4'>
+            <div className='border-b border-line pb-3'>
+                <p className='break-all font-mono text-lg font-semibold text-brandsoft'>{String(data.material.materialNumber || id)}</p>
+                <p className='mt-1 break-words text-sm text-ink'>{String(data.material.shortText || data.material.name || '—')}</p>
+                <p className='mt-1 text-xs text-muted'>{data.warehouse.name}</p>
+            </div>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+                {stats.map(([name, value]) => (
+                    <Stat key={name} name={name} value={value} />
+                ))}
+            </div>
+        </Card>
+    );
+}
+
+function StockPosition({ data, onIsolate }: { data: Detail; onIsolate: (reason: string) => void }) {
+    const status = data.currentStatus;
+    const known = !!status?.reconciled;
+    const balance = (key: string) => (known ? qty(status?.balances[key]) : '—');
+    const available = Number(status?.balances.availableStock || 0);
+    const { minimumLevel: min, maximumLevel: max } = data.inventory;
+    const target = !known
+        ? 'Not reconciled'
+        : !blank(min) && available < Number(min)
+          ? 'Below minimum'
+          : !blank(max) && available > Number(max)
+            ? 'Above maximum'
+            : !blank(min) || !blank(max)
+              ? 'Within target'
+              : 'No min/max set';
+    const targetTone = target === 'Below minimum' ? 'text-red-300' : target === 'Above maximum' ? 'text-amber-300' : 'text-soft';
+    const pending = (status?.isolationRequests || []).filter((x) => x.status === 'pending_approval');
+
+    return (
+        <Card className='space-y-4'>
+            <div className='flex flex-wrap items-center justify-between gap-2'>
+                <h2 className='text-sm font-semibold text-ink'>Stock position</h2>
+                <Badge tone={known ? 'brand' : 'warn'}>{known ? `Reconciled · ${status?.entryCount ?? 0} entries` : 'Opening pending'}</Badge>
+            </div>
+            {!known && <Alert tone='warn'>Reconciliation pending: {status?.reason || 'Material journal not available.'} No stock quantity is assumed to be zero.</Alert>}
+
+            <div className='rounded-xl border border-brand/40 bg-brand/10 p-4 text-center'>
+                <div className='flex justify-center'>
+                    <HelpLabel text='Available stock' help={BALANCE_HELP.availableStock} className='text-sm font-semibold text-brandsoft' />
+                </div>
+                <p className='text-3xl font-semibold tabular-nums text-ink'>{balance('availableStock')}</p>
+                <p className={`mt-1 text-xs ${targetTone}`}>{target}</p>
+            </div>
+
+            <div className='grid grid-cols-2 gap-2'>
+                <Stat name='Physical stock' value={balance('physicalStock')} help={BALANCE_HELP.physicalStock} />
+                <Stat name='Reserved stock' value={balance('reservedStock')} help={BALANCE_HELP.reservedStock} />
+            </div>
+
+            <div>
+                <HelpLabel
+                    text='Restricted stock · tap to request isolation'
+                    help='Isolating stock (quarantine, damaged, expired, other) needs approval. Until it is approved, actual stock does not change. Requires reconciled opening stock.'
+                    className='text-sm font-medium text-soft'
+                />
+                <div className='mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                    {ISOLATION_REASONS.map((r) => {
+                        const waiting = pending.filter((x) => x.reason === r.value).reduce((s, x) => s + x.quantity, 0);
+                        return (
+                            <button
+                                key={r.value}
+                                type='button'
+                                disabled={!known || !data.canEdit}
+                                onClick={() => onIsolate(r.value)}
+                                className='min-h-[44px] min-w-0 rounded-xl border border-line bg-page p-3 text-left active:bg-panel disabled:opacity-60'
+                            >
+                                <span className='block text-xs text-muted'>{r.label}</span>
+                                <strong className='block text-lg font-semibold tabular-nums text-ink'>{balance(r.value)}</strong>
+                                {waiting > 0 && <span className='block text-xs text-amber-300'>Pending: {waiting.toLocaleString()}</span>}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div>
+                <p className='text-sm font-medium text-soft'>Commitments</p>
+                <div className='mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                    {(['onOrder', 'onRequisition', 'inTransit', 'allocatedStock'] as const).map((k) => (
+                        <Stat key={k} name={label(k)} value={balance(k)} help={BALANCE_HELP[k]} />
+                    ))}
+                </div>
+            </div>
+        </Card>
+    );
+}
+
+function BinPanel({
+    data,
+    binChoice,
+    onChoose,
+    onLink,
+    onUnlink,
+}: {
+    data: Detail;
+    binChoice: string;
+    onChoose: (binId: string) => void;
+    onLink: () => void;
+    onUnlink: () => void;
+}) {
+    const diag = data.binDiagnostics;
+    const linked = diag?.linkedBin || '';
+    return (
+        <Card className='space-y-3'>
+            <HelpLabel
+                text='Physical location'
+                help='A bin must exist in this warehouse, permit the material classification and subcategory, be enabled and not be reserved by another material. Bins change only by linking and delinking here; both are recorded with a snapshot.'
+                className='text-sm font-semibold text-ink'
+            />
+            <p className='break-all font-mono text-lg font-semibold text-ink'>{linked || 'Not allocated'}</p>
+            {data.canEdit && linked && (
+                <Button variant='danger' onClick={onUnlink} className='w-full sm:w-auto'>
+                    <Link2Off className='h-4 w-4' />
+                    Delink from bin
+                </Button>
+            )}
+            {data.canEdit && !linked && data.recommendedBins.length > 0 && (
+                <div className='flex flex-col gap-2 sm:flex-row sm:items-end'>
+                    <div className='min-w-0 flex-1'>
+                        <SelectField id='material-bin' label='Available bin' value={binChoice} onChange={(e) => onChoose(e.target.value)}>
+                            <option value=''>Choose an available bin</option>
+                            {data.recommendedBins.map((b) => (
+                                <option key={b.id} value={b.id}>
+                                    {b.name}
+                                    {b.batch ? ` · Batch ${b.batch}` : ''}
+                                </option>
+                            ))}
+                        </SelectField>
+                    </div>
+                    <Button disabled={!binChoice} onClick={onLink}>
+                        <Link2 className='h-4 w-4' />
+                        Link bin
+                    </Button>
+                </div>
+            )}
+            {!linked && !data.recommendedBins.length && (
+                <div className='rounded-lg bg-amber-500/10 p-3 text-sm text-amber-300'>
+                    <p className='font-medium'>No eligible bin found.</p>
+                    <dl className='mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs'>
+                        <dt>Configured bins</dt>
+                        <dd>{diag?.configured ?? 0}</dd>
+                        <dt>Material classification</dt>
+                        <dd>{data.catalogNames[diag?.classification || ''] || diag?.classification || 'Missing'}</dd>
+                        <dt>Bins matching classification</dt>
+                        <dd>{diag?.matchingClassification ?? 0}</dd>
+                        <dt>Occupied bins</dt>
+                        <dd>{diag?.occupied ?? 0}</dd>
+                    </dl>
+                    <p className='mt-2 text-xs'>
+                        Configure a storage cluster in this warehouse with the material&apos;s classification and subcategory, then make sure an eligible physical position is free.
+                    </p>
+                </div>
+            )}
+        </Card>
+    );
+}
+
+/** Read-only value of one settings field. */
+function SettingValue({
+    section,
+    field,
+    data,
+    metadata,
+    base,
+    displayCurrency,
+}: {
+    section: Section;
+    field: string;
+    data: Detail;
+    metadata: Metadata | null;
+    base: string;
+    displayCurrency: string;
+}) {
+    const raw = (section === 'procurement' ? data.procurement : data.inventory)[field];
+    if (field === 'unitPrice') {
+        if (blank(raw) || !Number.isFinite(Number(raw))) return <>—</>;
+        const entered = String(data.procurement.priceCurrency || base);
+        const rate = (code: string) => data.currency.alternatives.find((x) => x.code === code)?.rate;
+        const convert = (amount: number, from: string, to: string) => {
+            if (from === to) return amount;
+            const source = rate(from);
+            const target = rate(to);
+            return source && target ? (amount / source) * target : null;
+        };
+        const shown = convert(Number(raw), entered, displayCurrency || base);
+        const local = convert(Number(raw), entered, base);
+        return (
+            <>
+                {shown === null ? 'Rate unavailable' : new Intl.NumberFormat(undefined, { style: 'currency', currency: displayCurrency || base || 'USD' }).format(shown)}
+                <span className='mt-1 block text-xs font-normal text-amber-300'>
+                    Entered: {entered} {Number(raw).toLocaleString()} · Local: {base} {local === null ? 'Rate unavailable' : local.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </span>
+            </>
+        );
+    }
+    if (blank(raw)) return <>—</>;
+    const value = String(raw);
+    if (field === 'stockingPolicy') return <>{metadata?.stockingPolicies.find((x) => x.code === value)?.description || value}</>;
+    if (field === 'paymentTerms') return <>{metadata?.paymentTerms.find((x) => x.code === value)?.description || value}</>;
+    if (field === 'incoterms') return <>{metadata?.incoterms.find((x) => x.code === value)?.description || value}</>;
+    if (field === 'purchaseUom') return <>{metadata?.uoms.find((x) => x.code === value)?.name || value}</>;
+    return <>{value}</>;
+}
+
+/** Edit control for one settings field, with its explanation as hint and the validation message as error. */
+function SettingInput({
+    field,
+    values,
+    errors,
+    metadata,
+    currencies,
+    uomCategory,
+    onUomCategory,
+    onChange,
+}: {
+    field: string;
+    values: Values;
+    errors: Errors;
+    metadata: Metadata | null;
+    currencies: string[];
+    uomCategory: string;
+    onUomCategory: (code: string) => void;
+    onChange: (field: string, value: string) => void;
+}) {
+    const id = `material-${field}`;
+    const value = values[field] ?? '';
+    const hint = EXPLANATIONS[field];
+    const error = errors[field];
+
+    if (field === 'purchaseUom') {
+        const uoms = (metadata?.uoms || []).filter((x) => x.enabled);
+        const categories = Array.from(new Map(uoms.map((x) => [x.categoryCode || x.categoryName, { code: x.categoryCode || x.categoryName, name: x.categoryName || x.categoryCode }])).values()).filter((x) => x.code);
+        return (
+            <div className='grid gap-2 sm:grid-cols-2'>
+                <SelectField id={`${id}-category`} label='Purchase UoM category' value={uomCategory} onChange={(e) => onUomCategory(e.target.value)}>
+                    <option value=''>Select category</option>
+                    {categories.map((c) => (
+                        <option key={c.code} value={c.code}>
+                            {c.name}
+                        </option>
+                    ))}
+                </SelectField>
+                <SelectField id={id} label='Purchase UoM' value={value} hint={hint} error={error} onChange={(e) => onChange(field, e.target.value)}>
+                    <option value=''>Select unit of measure</option>
+                    {uoms
+                        .filter((x) => (x.categoryCode || x.categoryName) === uomCategory)
+                        .map((x) => (
+                            <option key={x.code} value={x.code}>
+                                {x.name}
+                            </option>
+                        ))}
+                </SelectField>
+            </div>
+        );
+    }
+
+    if (field === 'incoterms' || field === 'stockingPolicy' || field === 'paymentTerms') {
+        const list = (field === 'incoterms' ? metadata?.incoterms : field === 'stockingPolicy' ? metadata?.stockingPolicies : metadata?.paymentTerms) || [];
+        const options = list.filter((x) => x.enabled !== false);
+        return (
+            <SelectField id={id} label={label(field)} value={value} hint={hint} error={error} onChange={(e) => onChange(field, e.target.value)}>
+                <option value=''>Select {label(field).toLowerCase()}</option>
+                {value && !options.some((x) => x.code === value) && <option value={value}>{value} (no longer listed)</option>}
+                {options.map((x) => (
+                    <option key={x.code} value={x.code}>
+                        {x.code} — {x.description}
+                    </option>
+                ))}
+            </SelectField>
+        );
+    }
+
+    if (field === 'priceCurrency') {
+        return (
+            <SelectField id={id} label='Price currency' value={value} hint={hint} error={error} onChange={(e) => onChange(field, e.target.value)}>
+                {value && !currencies.includes(value) && <option value={value}>{value}</option>}
+                {currencies.map((c) => (
+                    <option key={c} value={c}>
+                        {c}
+                        {c === currencies[0] ? ' (local)' : ''}
+                    </option>
+                ))}
+            </SelectField>
+        );
+    }
+
+    if (field === 'remarks') {
+        return (
+            <div>
+                <TextArea id={id} label='Remarks' value={value} maxLength={1000} rows={4} onChange={(e) => onChange(field, e.target.value)} />
+                <p className={`mt-1 text-xs ${error ? 'text-red-300' : 'text-muted'}`} role={error ? 'alert' : undefined}>
+                    {error || `${hint} ${value.trim().length}/1000`}
+                </p>
+            </div>
+        );
+    }
+
+    if (NUMBER_FIELDS.has(field)) {
+        return (
+            <Field
+                id={id}
+                label={field === 'leadTimeDays' ? 'Lead time (days)' : label(field)}
+                value={value}
+                inputMode={field === 'leadTimeDays' ? 'numeric' : 'decimal'}
+                autoComplete='off'
+                placeholder='Not set'
+                hint={hint}
+                error={error}
+                onChange={(e) => onChange(field, e.target.value)}
+            />
+        );
+    }
+
+    return <Field id={id} label={label(field)} value={value} maxLength={120} autoComplete='off' hint={hint} error={error} onChange={(e) => onChange(field, e.target.value)} />;
+}
+
+function movementColumns(identities: Record<string, string>): Array<Column<Movement>> {
+    return [
+        { key: 'postedAt', label: 'Posted', type: 'date', value: (m) => m.postedAt, render: (m) => fmtDate(m.postedAt) },
+        { key: 'type', label: 'Type', value: (m) => words(m.type) },
+        { key: 'reference', label: 'Reference', value: (m) => m.reference || '—' },
+        { key: 'status', label: 'Status', value: (m) => words(m.status) },
+        { key: 'reconciled', label: 'Reconciled', value: (m) => (m.reconciled ? 'Yes' : 'No'), render: (m) => <Badge tone={m.reconciled ? 'brand' : 'warn'}>{m.reconciled ? 'Reconciled' : 'Pending'}</Badge> },
+        { key: 'postedBy', label: 'Posted by', value: (m) => identities[m.postedBy] || m.postedBy || '—', hidden: true },
+        ...DELTA_KEYS.map(
+            (k): Column<Movement> => ({
+                key: k,
+                label: label(k),
+                type: 'number',
+                value: (m) => (Number.isFinite(Number(m.balancesDelta[k])) ? Number(m.balancesDelta[k]) : null),
+                render: (m) => (blank(m.balancesDelta[k]) ? '—' : signed(Number(m.balancesDelta[k]))),
+                hidden: k !== 'physicalStock' && k !== 'reservedStock',
+            }),
+        ),
+    ];
+}
+
+function TechnicalData({ data, metadata }: { data: Detail; metadata: Metadata | null }) {
+    const entries = Object.entries(data.material).filter(([k]) => !['approvalHistory', 'workflowTermination'].includes(k));
+    return (
+        <>
+            <h2 className='text-sm font-semibold text-ink'>Original material master information</h2>
+            <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>
+                {entries.map(([k, v]) => (
+                    <div key={k} className='min-w-0 rounded-xl border border-line bg-panel p-3'>
+                        <div className='text-xs text-muted'>{label(k)}</div>
+                        <div className={`mt-1 break-words text-ink ${v !== null && typeof v === 'object' ? 'text-xs' : 'text-sm'}`}>{humanValue(k, v, data, metadata)}</div>
+                    </div>
+                ))}
+            </div>
+            <Card className='space-y-2'>
+                <h3 className='text-sm font-semibold text-ink'>Associated assets</h3>
+                {data.associatedAssets.length ? (
+                    <div className='flex flex-wrap gap-2'>
+                        {data.associatedAssets.map((x) => (
+                            <span key={x.id} className='rounded-lg border border-line bg-page px-3 py-2 text-sm text-ink'>
+                                {x.name}
+                            </span>
+                        ))}
+                    </div>
+                ) : (
+                    <p className='text-sm text-muted'>No associated assets recorded.</p>
+                )}
+            </Card>
+        </>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Sheets: opening stock and isolation request
+// ---------------------------------------------------------------------------
+
+function OpeningStockSheet({ onClose, onPost }: { onClose: () => void; onPost: (values: Record<string, number>, reason: string) => void }) {
+    const [values, setValues] = useState<Values>({});
+    const [reason, setReason] = useState('');
+    const errors = validateOpening(values, reason);
+    const problems = problemList(errors);
+    const submit = () => {
+        if (problems.length) return;
+        const quantities: Record<string, number> = {};
+        for (const key of OPENING_KEYS) quantities[key] = numberOf(values[key]) ?? 0;
+        onPost(quantities, reason.trim());
+    };
+    return (
+        <Sheet
+            title='First-time stock loading'
+            onClose={onClose}
+            action={
+                <Button disabled={problems.length > 0} onClick={submit}>
+                    <Send className='h-4 w-4' />
+                    Post
+                </Button>
+            }
+        >
+            <Alert tone='warn'>One-time opening journal entry. Blank quantities count as zero. Verify the physical count and outstanding commitments before posting; it cannot be edited or posted again.</Alert>
+            <Problems items={problems} />
+            <div className='grid grid-cols-2 gap-3'>
+                {OPENING_KEYS.map((k) => (
+                    <Field
+                        key={k}
+                        id={`opening-${k}`}
+                        label={label(k)}
+                        value={values[k] ?? ''}
+                        inputMode='decimal'
+                        autoComplete='off'
+                        placeholder='0'
+                        error={errors[k]}
+                        onChange={(e) => setValues((p) => ({ ...p, [k]: e.target.value }))}
+                    />
+                ))}
+            </div>
+            <Field
+                id='opening-reason'
+                label='Count reference / reconciliation explanation *'
+                value={reason}
+                maxLength={500}
+                placeholder='Count sheet, date and responsible person'
+                error={reason ? errors.reason : undefined}
+                hint='At least 8 characters. Stored as the journal reference.'
+                onChange={(e) => setReason(e.target.value)}
+            />
+        </Sheet>
+    );
+}
+
+interface IsolationPayload {
+    reason: string;
+    quantity: number;
+    explanation: string;
+    moveToBin: boolean;
+    safetyAcknowledged: boolean;
+    qualityAcknowledged: boolean;
+}
+
+function IsolationSheet({
+    data,
+    initialReason,
+    onClose,
+    onSubmit,
+}: {
+    data: Detail;
+    initialReason: string;
+    onClose: () => void;
+    onSubmit: (payload: IsolationPayload) => Promise<void>;
+}) {
+    const [reason, setReason] = useState(initialReason);
+    const [quantity, setQuantity] = useState('');
+    const [explanation, setExplanation] = useState('');
+    const [moveToBin, setMoveToBin] = useState(false);
+    const [safety, setSafety] = useState(false);
+    const [quality, setQuality] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+
+    const balances = data.currentStatus?.balances || {};
+    const requests = data.currentStatus?.isolationRequests || [];
+    const available = Number(balances.availableStock || 0);
+    const pendingAll = requests.filter((x) => x.status === 'pending_approval').reduce((s, x) => s + x.quantity, 0);
+    const limit = Math.max(0, available - pendingAll);
+    const reasonLabel = ISOLATION_REASONS.find((r) => r.value === reason)?.label || label(reason);
+
+    const errors: Errors = {};
+    const q = numberOf(quantity);
+    if (!quantity.trim() || q === null || q <= 0) errors.quantity = 'Enter a quantity greater than 0.';
+    else if (q > limit) errors.quantity = `At most ${limit.toLocaleString()} (available after pending requests).`;
+    if (explanation.trim().length < 10) errors.explanation = 'Explain the isolation in at least 10 characters.';
+    if (moveToBin && (!safety || !quality)) errors.acknowledgements = 'Acknowledge both safety and quality controls for a bin transfer.';
+    const problems = Object.values(errors);
+    // Untouched required fields are marked * and keep Submit disabled; messages appear once the person starts typing.
+    const shownProblems = [quantity.trim() ? errors.quantity : '', explanation ? errors.explanation : '', errors.acknowledgements].filter((x): x is string => !!x);
+
+    const submit = async () => {
+        if (problems.length || busy) return;
+        setBusy(true);
+        setError('');
+        try {
+            await onSubmit({ reason, quantity: Number(quantity.trim()), explanation: explanation.trim(), moveToBin, safetyAcknowledged: moveToBin && safety, qualityAcknowledged: moveToBin && quality });
+        } catch (err) {
+            setError(messageOf(err));
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <Sheet
+            title={`Isolate stock · ${reasonLabel}`}
+            onClose={() => !busy && onClose()}
+            action={
+                <Button busy={busy} disabled={problems.length > 0} onClick={() => void submit()}>
+                    <Send className='h-4 w-4' />
+                    Submit
+                </Button>
+            }
+        >
+            <p className='text-sm text-soft'>
+                Actual {reasonLabel.toLowerCase()}: {qty(balances[reason])} · Available: {available.toLocaleString()} · Pending requests: {pendingAll.toLocaleString()}. A request waits for approval and does not change actual stock.
+            </p>
+            {requests
+                .filter((x) => x.reason === reason)
+                .map((x) => (
+                    <p key={x.id} className='text-xs text-amber-300'>
+                        {words(x.status)} · {x.quantity.toLocaleString()} · {fmtDate(x.createdAt)}
+                    </p>
+                ))}
+            {error && <Alert tone='error'>{error}</Alert>}
+            <Problems items={shownProblems} />
+            <SelectField id='isolation-reason' label='Reason *' value={reason} onChange={(e) => setReason(e.target.value)}>
+                {ISOLATION_REASONS.map((r) => (
+                    <option key={r.value} value={r.value}>
+                        {r.label}
+                    </option>
+                ))}
+            </SelectField>
+            <Field
+                id='isolation-quantity'
+                label='Quantity *'
+                value={quantity}
+                inputMode='decimal'
+                autoComplete='off'
+                error={quantity.trim() ? errors.quantity : undefined}
+                hint={`Up to ${limit.toLocaleString()}`}
+                onChange={(e) => setQuantity(e.target.value)}
+            />
+            <div>
+                <TextArea id='isolation-explanation' label='Explanation *' value={explanation} rows={3} maxLength={1000} onChange={(e) => setExplanation(e.target.value)} />
+                <p className={`mt-1 text-xs ${explanation && errors.explanation ? 'text-red-300' : 'text-muted'}`}>{explanation.trim().length}/10 characters minimum</p>
+            </div>
+            <label className='flex min-h-[44px] items-start gap-3 rounded-xl border border-line p-3 text-sm text-ink'>
+                <input type='checkbox' className='mt-0.5 h-5 w-5 shrink-0 accent-emerald-500' checked={moveToBin} onChange={(e) => setMoveToBin(e.target.checked)} />
+                Move to a designated temporary physical location
+            </label>
+            {moveToBin && (
+                <div className='space-y-2 rounded-xl bg-amber-500/10 p-3 text-sm text-amber-300'>
+                    <p>
+                        Safety first: isolate this material in a clearly designated safe area for {reasonLabel.toLowerCase()} stock. Use a compatible classification-specific temporary cluster of at least five physical
+                        locations. If no such cluster exists, warehouse configuration must be completed before any physical transfer. Approval alone must not bypass safety or quality checks.
+                    </p>
+                    <label className='flex min-h-[44px] items-start gap-3'>
+                        <input type='checkbox' className='mt-0.5 h-5 w-5 shrink-0 accent-emerald-500' checked={safety} onChange={(e) => setSafety(e.target.checked)} />I acknowledge the safety controls *
+                    </label>
+                    <label className='flex min-h-[44px] items-start gap-3'>
+                        <input type='checkbox' className='mt-0.5 h-5 w-5 shrink-0 accent-emerald-500' checked={quality} onChange={(e) => setQuality(e.target.checked)} />I acknowledge the quality controls *
+                    </label>
+                </div>
+            )}
+        </Sheet>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Screen
+// ---------------------------------------------------------------------------
+
+export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { id: string; warehouseId: string; onBack: () => void }) {
+    const { data, loading, error, reload } = useLoad(() => callBackend<Detail>('/api/org/inventory/material/detail', { id, warehouseId }));
+    const { data: metadata } = useLoad(() => callBackend<Metadata>('/api/org/inventory/material/metadata'));
+    const { ask, sheet } = useConfirm();
+
+    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['Overview','Current Status','Inventory Information','Procurement Information','Movements','Criticality Analysis','Technical Data','Associated Assets'], 'Overview'));
+    const [editing, setEditing] = useState(false);
+    const [values, setValues] = useState<Values>({});
+    const [uomCategory, setUomCategory] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+    const [currency, setCurrency] = useState('');
+    const [binChoice, setBinChoice] = useState('');
+    const [opening, setOpening] = useState(false);
+    const [isolation, setIsolation] = useState('');
+    const [movement, setMovement] = useState<Movement | null>(null);
+
+    const section: Section | null = tab === 'Inventory Information' ? 'inventory' : tab === 'Procurement Information' ? 'procurement' : null;
+    const fields = section === 'procurement' ? PROCUREMENT_FIELDS : INVENTORY_FIELDS;
+    const base = data?.currency.local || '';
+    const currencies = useMemo(
+        () => [base, ...(data?.currency.alternatives || []).filter((x) => x.code && x.rate > 0).map((x) => x.code)].filter((x, i, a) => x && a.indexOf(x) === i),
+        [data, base],
+    );
+    const displayCurrency = currency || base;
+    const journalColumns = useMemo(() => movementColumns(data?.identities || {}), [data]);
+    const materialNumber = String(data?.material.materialNumber || id);
+    const materialName = String(data?.material.shortText || data?.material.name || 'Material');
+
+    const errors = section && editing ? validateSettings(section, values) : {};
+    const problems = problemList(errors);
+    const record = section === 'procurement' ? data?.procurement : data?.inventory;
+    const payload = section && editing ? settingsPayload(section, values) : {};
+    const dirty = !!section && editing && fields.some((k) => String(record?.[k] ?? '') !== String(payload[k] ?? ''));
+
+    const flash = (tone: 'success' | 'error', text: string) => setNotice({ tone, text });
+
+    const changeTab = (next: Tab) => {
+        setTab(next);
+        setEditing(false);
+        setNotice(null);
+    };
+
+    const startEdit = () => {
+        if (!data || !section) return;
+        const source = section === 'inventory' ? data.inventory : data.procurement;
+        const next: Values = {};
+        for (const k of fields) next[k] = blank(source[k]) ? '' : String(source[k]);
+        if (section === 'procurement' && !next.priceCurrency) next.priceCurrency = base;
+        setValues(next);
+        const chosen = metadata?.uoms.find((x) => x.code === next.purchaseUom);
+        setUomCategory(chosen?.categoryCode || chosen?.categoryName || '');
+        setNotice(null);
+        setEditing(true);
+    };
+
+    const save = async () => {
+        if (!section || problems.length || !dirty) return;
+        setSaving(true);
+        setNotice(null);
+        try {
+            const res = await callBackend<{ ok: boolean; changed?: number }>('/api/org/inventory/material/update', { id, warehouseId, section, values: payload });
+            setEditing(false);
+            reload();
+            const changed = Number(res?.changed || 0);
+            flash('success', changed ? `Saved ${changed} change${changed === 1 ? '' : 's'}.` : 'Nothing changed.');
+        } catch (err) {
+            flash('error', messageOf(err));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const linkBin = () => {
+        const bin = data?.recommendedBins.find((b) => b.id === binChoice);
+        if (!bin) return;
+        ask(
+            {
+                title: 'Link bin to material',
+                message: (
+                    <>
+                        Link <strong className='text-ink'>{bin.name}</strong> to {materialNumber} in {data?.warehouse.name}? The bin is reserved for this material and the link is recorded in the bin history.
+                    </>
+                ),
+                confirmLabel: 'Link bin',
+            },
+            async () => {
+                await callBackend('/api/org/inventory/material/bin/link', { id, warehouseId, binId: bin.id });
+                setBinChoice('');
+                reload();
+                flash('success', 'Physical location linked and reserved for this material.');
+            },
+        );
+    };
+
+    const unlinkBin = () =>
+        ask(
+            {
+                title: 'Delink material from bin',
+                message: (
+                    <>
+                        Delink {materialNumber} from <strong className='text-ink'>{data?.binDiagnostics?.linkedBin}</strong>? The bin becomes free for other materials. The event and a snapshot of the material are recorded.
+                    </>
+                ),
+                confirmLabel: 'Delink',
+                tone: 'danger',
+                reason: { label: 'Reason for delinking', minLength: 5, placeholder: 'For example: bin re-assigned after re-layout' },
+            },
+            async (reason) => {
+                await callBackend('/api/org/inventory/material/bin/unlink', { id, warehouseId, reason });
+                reload();
+                flash('success', 'Physical location delinked; audit snapshot recorded.');
+            },
+        );
+
+    const postOpening = (quantities: Record<string, number>, reason: string) =>
+        ask(
+            {
+                title: 'Post opening stock',
+                message: (
+                    <div className='space-y-2'>
+                        <p>
+                            This posts a permanent, reconciled opening entry to the material journal of {materialNumber} in {data?.warehouse.name}. It can be posted only once and cannot be edited or reversed.
+                        </p>
+                        <ul className='space-y-0.5 text-xs'>
+                            {OPENING_KEYS.map((k) => (
+                                <li key={k} className='flex justify-between gap-3'>
+                                    <span>{label(k)}</span>
+                                    <span className='tabular-nums text-ink'>{quantities[k].toLocaleString()}</span>
+                                </li>
+                            ))}
+                        </ul>
+                        <p className='text-xs'>Reference: {reason}</p>
+                    </div>
+                ),
+                confirmLabel: 'Post opening stock',
+                tone: 'danger',
+                acknowledge: 'I have verified the physical count and outstanding commitments for this material and warehouse.',
+                phrase: OPENING_PHRASE,
+            },
+            async () => {
+                await callBackend('/api/org/inventory/material/opening-stock', { id, warehouseId, ...quantities, reason });
+                setOpening(false);
+                reload();
+                flash('success', 'Opening stock posted to the material journal.');
+            },
+        );
+
+    const requestIsolation = async (p: IsolationPayload) => {
+        await callBackend('/api/org/inventory/material/isolation/request', { id, warehouseId, ...p });
+        setIsolation('');
+        reload();
+        flash('success', 'Isolation request saved as pending approval; actual stock remains unchanged.');
+    };
+
+    const actions = (() => {
+        if (!data) return undefined;
+        if (section && data.canEdit) {
+            return editing ? (
+                <>
+                    <Button variant='secondary' disabled={saving} onClick={() => setEditing(false)}>
+                        Cancel
+                    </Button>
+                    <Button busy={saving} disabled={problems.length > 0 || !dirty} onClick={() => void save()}>
+                        <Save className='h-4 w-4' />
+                        Save
+                    </Button>
+                </>
+            ) : (
+                <Button variant='secondary' onClick={startEdit}>
+                    <Pencil className='h-4 w-4' />
+                    Edit
+                </Button>
+            );
+        }
+        if (tab === 'Current Status' && data.currentStatus?.canInitialize) {
+            return (
+                <Button onClick={() => setOpening(true)} aria-label='First-time stock loading'>
+                    <PackagePlus className='h-4 w-4' />
+                    <span className='hidden sm:inline'>Opening stock</span>
+                </Button>
+            );
+        }
+        return undefined;
+    })();
+
+    return (
+        <Screen
+            title={data ? materialName : 'Material'}
+            eyebrow={materialNumber}
+            subtitle={data?.warehouse.name || warehouseId}
+            onBack={onBack}
+            actions={actions}
+            toolbar={<Segmented<Tab> label='Material sections' value={tab} onChange={changeTab} options={TABS.map((t) => ({ value: t, label: t }))} />}
+        >
+            {loading && <Spinner />}
+            {!loading && error && <Alert tone='error'>{error}</Alert>}
+            {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}
+
+            {!loading && !error && data && (
+                <>
+                    {tab === 'Overview' && <Overview data={data} id={id} base={base} />}
+
+                    {tab === 'Current Status' && (
+                        <>
+                            {data.currentStatus?.canInitialize && (
+                                <Alert tone='info'>No journal entries yet. Use “Opening stock” at the top to post the first-time stock loading.</Alert>
+                            )}
+                            <StockPosition data={data} onIsolate={setIsolation} />
+                        </>
+                    )}
+
+                    {section && (
+                        <>
+                            {section === 'inventory' && <BinPanel data={data} binChoice={binChoice} onChoose={setBinChoice} onLink={linkBin} onUnlink={unlinkBin} />}
+                            {section === 'procurement' && !editing && currencies.length > 1 && (
+                                <SelectField id='material-display-currency' label='Display currency' value={displayCurrency} onChange={(e) => setCurrency(e.target.value)}>
+                                    {currencies.map((c) => (
+                                        <option key={c} value={c}>
+                                            {c}
+                                            {c === base ? ' (local)' : ''}
+                                        </option>
+                                    ))}
+                                </SelectField>
+                            )}
+                            {editing ? (
+                                <Card className='space-y-3'>
+                                    <h2 className='text-sm font-semibold text-ink'>Edit {tab.toLowerCase()}</h2>
+                                    <Problems items={problems} />
+                                    {!problems.length && !dirty && <p className='text-xs text-muted'>Change a value to enable Save.</p>}
+                                    <div className='grid gap-3 sm:grid-cols-2'>
+                                        {fields.map((k) => (
+                                            <div key={k} className={k === 'purchaseUom' || k === 'remarks' ? 'sm:col-span-2' : ''}>
+                                                <SettingInput
+                                                    field={k}
+                                                    values={values}
+                                                    errors={errors}
+                                                    metadata={metadata}
+                                                    currencies={currencies}
+                                                    uomCategory={uomCategory}
+                                                    onUomCategory={(code) => {
+                                                        setUomCategory(code);
+                                                        setValues((p) => ({ ...p, purchaseUom: '' }));
+                                                    }}
+                                                    onChange={(field, value) => setValues((p) => ({ ...p, [field]: value }))}
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </Card>
+                            ) : (
+                                <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>
+                                    {fields.map((k) => (
+                                        <div key={k} className='min-w-0 rounded-xl border border-line bg-panel p-3'>
+                                            <HelpLabel text={k === 'leadTimeDays' ? 'Lead time (days)' : label(k)} help={EXPLANATIONS[k]} />
+                                            <strong className='mt-1 block break-words text-sm font-semibold text-ink'>
+                                                <SettingValue section={section} field={k} data={data} metadata={metadata} base={base} displayCurrency={displayCurrency} />
+                                            </strong>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {section === 'procurement' && (
+                                <p className='text-xs text-muted'>
+                                    Prices are stored in their entered currency. Display conversion is available only where an explicit configured rate exists; changing the display currency does not rewrite stored prices.
+                                </p>
+                            )}
+                        </>
+                    )}
+
+                    {tab === 'Movements' && (
+                        <>
+                            <p className='text-xs text-muted'>Chronological transaction record for this material and warehouse. Posted, reconciled entries drive Current Status.</p>
+                            <RichTable<Movement>
+                                id='inv.material.movements'
+                                tabKey='Movements'
+                                title='Material journal'
+                                columns={journalColumns}
+                                rows={data.materialMovements || []}
+                                rowKey={(m) => m.id}
+                                onRowClick={setMovement}
+                                empty='No journal entries yet. Post the first-time stock loading on Current Status.'
+                                fileName={`material-journal-${materialNumber}`}
+                                height='h-[calc(100dvh-20rem)]'
+                            />
+                        </>
+                    )}
+
+                    {tab === 'Criticality Analysis' && (
+                        <Card className='space-y-2'>
+                            <h2 className='text-sm font-semibold text-ink'>Criticality analysis</h2>
+                            <p className='text-sm text-muted'>
+                                Criticality assessment is not yet configured for this material. A future assessment will record operational impact, safety, lead time, redundancy and stockout risk.
+                            </p>
+                        </Card>
+                    )}
+
+                    {tab === 'Technical Data' && <TechnicalData data={data} metadata={metadata} />}
+
+                    {opening && <OpeningStockSheet onClose={() => setOpening(false)} onPost={postOpening} />}
+                    {isolation && <IsolationSheet data={data} initialReason={isolation} onClose={() => setIsolation('')} onSubmit={requestIsolation} />}
+                    {movement && (
+                        <Sheet title={`${words(movement.type)} · ${fmtDate(movement.postedAt)}`} onClose={() => setMovement(null)}>
+                            <dl className='divide-y divide-line text-sm'>
+                                {(
+                                    [
+                                        ['Reference', movement.reference || '—'],
+                                        ['Status', words(movement.status)],
+                                        ['Reconciled', movement.reconciled ? 'Yes' : 'No'],
+                                        ['Posted by', data.identities[movement.postedBy] || movement.postedBy || '—'],
+                                        ...Object.entries(movement.balancesDelta).map(([k, v]) => [label(k), signed(Number(v))]),
+                                    ] as Array<[string, string]>
+                                ).map(([k, v]) => (
+                                    <div key={k} className='flex justify-between gap-3 py-2'>
+                                        <dt className='text-muted'>{k}</dt>
+                                        <dd className='min-w-0 break-words text-right text-ink'>{v}</dd>
+                                    </div>
+                                ))}
+                            </dl>
+                        </Sheet>
+                    )}
+                </>
+            )}
+            {sheet}
+        </Screen>
+    );
+}
