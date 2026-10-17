@@ -38,6 +38,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
     const options = useMemo(() => extractOptions(children), [children]);
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
+    const [searchVisible, setSearchVisible] = useState(false);
     const [internal, setInternal] = useState(defaultValue === undefined ? '' : String(defaultValue));
     const selectedValue = value === undefined ? internal : String(value);
     const current = options.find((o) => o.value === selectedValue);
@@ -60,6 +61,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
         onChange?.({ target: { value: v, name, id }, currentTarget: { value: v, name, id } } as unknown as ChangeEvent<HTMLSelectElement>);
         setOpen(false);
         setQuery('');
+        setSearchVisible(false);
     };
 
     return (
@@ -68,7 +70,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
             <input type='hidden' name={name} value={selectedValue} />
             <button type='button' id={id} disabled={disabled} aria-required={required} aria-invalid={!!error}
                 aria-haspopup='listbox' aria-expanded={open} aria-describedby={error || hint ? `${id}-note` : undefined}
-                onClick={() => { setQuery(''); setOpen(true); }}
+                onClick={() => { setQuery(''); setSearchVisible(false); setOpen(true); }}
                 className={`flex min-h-12 w-full items-center gap-2 rounded-xl border bg-panel px-3 text-left text-base text-ink focus:outline-none disabled:opacity-50 ${error ? 'border-red-500/70' : 'border-line focus:border-brand'}`}>
                 <span className={`min-w-0 flex-1 truncate ${!selectedValue ? 'text-muted' : ''}`}>{current?.label || options.find((o) => !o.value)?.label || 'Choose...'}</span>
                 <ChevronDown className='h-5 w-5 shrink-0 text-muted' />
@@ -86,13 +88,22 @@ export default function SearchableSelect({ label, id, hint, error, children, val
                                 onClick={() => setOpen(false)}><X className='h-5 w-5' /></button>
                         </div>
                         <div className='p-3'>
-                            <label className='flex min-h-12 items-center gap-2 rounded-xl border border-line bg-panel px-3'>
-                                <Search className='h-5 w-5 shrink-0 text-muted' />
-                                <input autoFocus type='search' value={query} onChange={(e) => setQuery(e.target.value)}
-                                    placeholder='Search names or codes...' aria-label={`Search ${label}`}
-                                    className='min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-muted outline-none' />
-                            </label>
-                            <p className='mt-2 px-1 text-xs text-muted'>{filtered.length} of {options.length} options</p>
+                            {searchVisible ? (
+                                <label className='flex min-h-12 items-center gap-2 rounded-xl border border-line bg-panel px-3'>
+                                    <Search className='h-5 w-5 shrink-0 text-muted' />
+                                    <input type='search' value={query} onChange={(e) => setQuery(e.target.value)}
+                                        placeholder='Search names or codes…' aria-label={`Search ${label}`}
+                                        className='min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-muted outline-none' />
+                                    <button type='button' aria-label='Hide search' className='rounded-lg p-2 text-muted'
+                                        onClick={() => { setSearchVisible(false); setQuery(''); }}><X className='h-4 w-4'/></button>
+                                </label>
+                            ) : (
+                                <button type='button' onClick={() => setSearchVisible(true)}
+                                    className='flex min-h-11 w-full items-center gap-2 rounded-xl border border-line bg-panel px-3 text-sm text-ink'>
+                                    <Search className='h-4 w-4 text-muted'/> Search (optional) · tap to type
+                                </button>
+                            )}
+                            <p className='mt-2 px-1 text-xs text-muted'>{filtered.length} of {options.length} options · scroll to choose</p>
                         </div>
                         <div role='listbox' aria-label={label} className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-8'>
                             {filtered.length === 0 && <p className='p-4 text-center text-sm text-muted'>No matching options</p>}
