@@ -4,11 +4,10 @@ import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
 import { Badge, Button, Card, PageTitle, Spinner, useLoad } from '../admin/kit';
-import { AssetDetail, AssetForm, STATUS, type AssetFull } from './AssetRegister';
+import { STATUS, type AssetFull } from './AssetRegister';
 
-// The asset record of an equipment unit (machine, line, utility system or facility). Its class comes from the
-// organization's asset catalog; its attributes are configured here, confirmed by the person configuring them and
-// approved by another user.
+// Organization Design owns only the equipment classification and its 1:1 asset link.
+// All technical asset attributes are created/edited exclusively in Asset Management (AST).
 
 interface WorkCenterAssetData {
     workCenter: { id: string; code: string; name: string; classCode?: string; className?: string };
@@ -21,8 +20,7 @@ interface WorkCenterAssetData {
 
 export default function WorkCenterAsset({ workCenterId, configure = false, onBack }: { workCenterId: string; configure?: boolean; onBack: () => void }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<WorkCenterAssetData>('/api/org/assets/work-center', { workCenterId }), [workCenterId]);
-    const [view, setView] = useState<'' | 'create' | 'detail' | 'link' | 'unlink'>(configure ? 'detail' : '');
-    const [firstOpen, setFirstOpen] = useState(configure);
+    const [view, setView] = useState<'' | 'link' | 'unlink'>('');
     const [tag, setTag] = useState('');
     const [typed, setTyped] = useState('');
     const [busy, setBusy] = useState(false);
@@ -33,12 +31,9 @@ export default function WorkCenterAsset({ workCenterId, configure = false, onBac
     const wc = data.workCenter;
     const back = () => {
         setView('');
-        setFirstOpen(false);
         reload();
     };
 
-    if (view === 'create') return <AssetForm workCenter={wc} onDone={() => back()} onCancel={() => setView('')} />;
-    if (view === 'detail' && data.asset) return <AssetDetail tag={data.asset.tag} onBack={back} startEditing={firstOpen && (data.asset.status === 'draft' || data.asset.status === 'rejected')} />;
 
     const link = async (target: string) => {
         setBusy(true);
@@ -61,7 +56,7 @@ export default function WorkCenterAsset({ workCenterId, configure = false, onBac
             <button type='button' onClick={onBack} className='text-sm text-slate-400'>
                 ← Equipment unit {wc.code}
             </button>
-            <PageTitle title={`${wc.name} · asset and attributes`} subtitle={`Equipment unit ${wc.code}. Its class and attributes come from your organization's asset catalog.`} />
+            <PageTitle title={`${wc.name} · asset mapping`} subtitle={`Equipment unit ${wc.code}. Select a compatible asset or create one in Asset Management; technical attributes are never edited here.`} />
 
             {!data.astEnabled ? (
                 <Card>
@@ -102,15 +97,9 @@ export default function WorkCenterAsset({ workCenterId, configure = false, onBac
                             </div>
                         </div>
                     </div>
-                    <p className='mt-3 text-xs text-slate-400'>
-                        {a.status === 'draft' || a.status === 'rejected'
-                            ? 'Next: configure every required attribute, then review and confirm to send it for approval.'
-                            : a.status === 'active'
-                              ? 'Approved and in use. Changes to its attributes are proposed and approved again.'
-                              : 'Waiting for another approver.'}
-                    </p>
+                    <p className='mt-3 text-xs text-soft'>One-to-one mapping confirmed. Category, subcategory and class are taken from the asset dictionary. Technical attributes, review and approvals belong exclusively to Asset Management.</p>
                     <div className='mt-3 flex flex-wrap gap-2'>
-                        <Button onClick={() => setView('detail')}>{a.status === 'draft' || a.status === 'rejected' ? 'Configure and confirm attributes' : 'Open asset'}</Button>
+                        <Button onClick={() => navigate(`organization_admin/assets/${a.tag}`)}>Open in Asset Management</Button>
                         {data.can.link && (
                             <Button variant='danger' onClick={() => setView('unlink')} aria-label='Unlink asset'>
                                 <Unlink className='h-4 w-4' />
@@ -134,13 +123,13 @@ export default function WorkCenterAsset({ workCenterId, configure = false, onBac
                 </Card>
             ) : (
                 <Card className='space-y-3'>
-                    <p className='text-sm text-slate-300'>This equipment unit has no linked asset. You can adopt one compatible, unassigned asset or create a new draft.</p>
+                    <p className='text-sm text-ink'>No linked asset. Match an existing unmapped asset of the same category, subcategory and class, or create an asset in Asset Management.</p>
                     {data.can.create && data.can.link && (
-                        <button type='button' onClick={() => setView('create')} className='flex w-full items-center gap-3 rounded-2xl border border-emerald-500/40 p-4 text-left active:bg-slate-800'>
+                        <button type='button' onClick={() => navigate('organization_admin/assets/new')} className='flex w-full items-center gap-3 rounded-2xl border border-emerald-500/40 p-4 text-left active:bg-panel'>
                             <Plus className='h-6 w-6 shrink-0 text-emerald-400' />
                             <span>
-                                <span className='block font-medium text-white'>Choose its equipment class and configure attributes</span>
-                                <span className='block text-xs text-slate-400'>Pick the class from the asset catalog, fill in its attributes, then confirm them for approval.</span>
+                                <span className='block font-medium text-ink'>Create an asset in Asset Management</span>
+                                <span className='block text-xs text-soft'>Asset Management alone records technical specifications and approval. Choose the same equipment class and select this unassigned equipment when creating it.</span>
                             </span>
                         </button>
                     )}
@@ -148,7 +137,7 @@ export default function WorkCenterAsset({ workCenterId, configure = false, onBac
                         <button type='button' onClick={() => setView('link')} disabled={!data.candidates.length} className='flex w-full items-center gap-3 rounded-2xl border border-slate-700 p-4 text-left active:bg-slate-800 disabled:opacity-50'>
                             <Link2 className='h-6 w-6 shrink-0 text-sky-400' />
                             <span>
-                                <span className='block font-medium text-white'>Link an existing asset</span>
+                                <span className='block font-medium text-ink'>Link an existing unmapped asset</span>
                                 <span className='block text-xs text-slate-400'>{data.candidates.length ? `${data.candidates.length} compatible draft or approved assets are available at this site.` : 'No compatible, unassigned assets at this site.'}</span>
                             </span>
                         </button>
