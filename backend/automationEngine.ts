@@ -7,7 +7,9 @@ import { refreshCurrencyCatalogue } from './fxRates';
 import { settingsOf, type FxSettings } from './fxSettings';
 
 const PROJECT = 'manufusion-mems-development';
-const REGION = 'africa-south1';
+// Cloud Scheduler is not available in africa-south1 (Cloud Run remains there).
+// The trigger contains only schedule metadata; it invokes MEMS in Johannesburg.
+const REGION = 'me-central1';
 const SCHEDULER = 'mems-automation-heartbeat';
 const SCHEDULER_SA = `mems-fx-scheduler@${PROJECT}.iam.gserviceaccount.com`;
 const SCHEDULER_PATH = `projects/${PROJECT}/locations/${REGION}/jobs/${SCHEDULER}`;
@@ -60,6 +62,7 @@ async function cloudSchedulerStatus() {
     const response = await googleRequest(SCHEDULER_API, 'GET');
     if (response.status === 404) return { provisioned: false, reason: 'One shared scheduler trigger has not been created yet.', job: SCHEDULER };
     if (response.status === 403) return { provisioned: false, reason: 'Cloud Scheduler API may be disabled, or the runtime account lacks Cloud Scheduler Viewer. Check the API and IAM permissions.', job: SCHEDULER };
+    if (response.status === 400) return { provisioned: false, reason: `Cloud Scheduler rejected location ${REGION} (HTTP 400). Check the supported Cloud Scheduler locations and API.`, job: SCHEDULER };
     if (!response.ok) return { provisioned: false, reason: `Cloud Scheduler HTTP ${response.status}`, job: SCHEDULER };
     const data = await response.json() as Record<string, unknown>;
     return { provisioned: true, job: SCHEDULER, state: str(data.state), schedule: str(data.schedule),
@@ -169,6 +172,13 @@ export const automationRoutes = {
                     'Cloud Scheduler provisioning is not authorized. A Google Cloud project administrator must enable the Cloud Scheduler API, grant Cloud Scheduler Admin to the MEMS development runtime account, and grant Service Account User on the dedicated scheduler identity. These are one-time permissions; retry Activate after they are approved.');
             }
             if (response.status === 404) throw new HttpError(503, 'The Cloud Scheduler API or target job is unavailable in development. Enable Cloud Scheduler API and retry.');
+            // HTTP 400 may contain an actionable field/location validation error; surface
+            // only a short Google-provided diagnostic to the platform super administrator.
+            if (response.status === 400) {
+                const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+                const detail = str(payload?.error?.message).slice(0, 300).replace(/[\r\n]+/g, ' ');
+                throw new HttpError(400, `Cloud Scheduler rejected the ${REGION} job: ${detail || 'invalid request'}.`);
+            }
             throw new HttpError(502, `Could not create the shared automation trigger (HTTP ${response.status}).`);
         }
         await audit([{ category: 'admin', action: 'automations.engine.activate', actor: ctx.actor, meta: ctx.meta, details: `Shared ${SCHEDULER} provisioned` }]);
