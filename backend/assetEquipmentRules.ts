@@ -3,8 +3,8 @@ import { str, type Fields } from './core';
 /** Exact classification is required in both directions; a common category on its own
  * never qualifies an asset for linking to an equipment unit. */
 export function identicalAssetEquipmentClass(
-    asset: Pick<Fields, 'categoryCode' | 'subcategoryCode' | 'classCode'>,
-    equipment: Pick<Fields, 'categoryCode' | 'subcategoryCode' | 'classCode'>,
+    asset: Partial<Pick<Fields, 'categoryCode' | 'subcategoryCode' | 'classCode'>>,
+    equipment: Partial<Pick<Fields, 'categoryCode' | 'subcategoryCode' | 'classCode'>>,
 ): boolean {
     return Boolean(str(asset.classCode) && str(asset.categoryCode) && str(asset.subcategoryCode) &&
         str(asset.classCode) === str(equipment.classCode) &&
