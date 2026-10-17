@@ -39,8 +39,8 @@ async function latest() {
             };
         }),
         scheduler: {
-            status: str(schedule?.data.lastReceivedAt) ? 'heartbeat_seen' : 'configuration_saved_only',
-            lastReceivedAt: str(schedule?.data.lastReceivedAt),
+            status: str(schedule?.data.lastVerifiedHeartbeatAt) ? 'heartbeat_seen' : 'configuration_saved_only',
+            lastReceivedAt: str(schedule?.data.lastVerifiedHeartbeatAt),
             lastCompletedAt: str(schedule?.data.lastCompletedAt),
             lastError: str(schedule?.data.lastError),
             notes: 'One reusable Cloud Scheduler heartbeat executes every enabled MEMS automation. Its connection can be managed in Automation Center.',
