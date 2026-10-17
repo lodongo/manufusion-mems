@@ -149,14 +149,23 @@ export const positionRoutes = {
                 const role = rolesMap.get(r);
                 if (!role || r === 'org_super_admin') throw new HttpError(400, 'Choose security roles from the list. The super admin role cannot be mapped.');
             }
-            const rawSkills=ctx.body.coreSkills;
-            if(rawSkills!==undefined&&!Array.isArray(rawSkills))throw new HttpError(400,'Core skills must be a list.');
-            const coreSkills=Array.from(new Set((Array.isArray(rawSkills)?rawSkills:[]).map(str).filter(Boolean)));
-            if(coreSkills.length<5||coreSkills.length>20)throw new HttpError(400,'Each job role requires at least 5 and at most 20 core skills.');
-            const skillDoc=await getDoc('module_workspaces/HRM/metadata/skillsMaster');
-            const available=new Set((Array.isArray(skillDoc?.data.items)?skillDoc.data.items:[]).filter(isObj).filter(x=>x.active!==false).map(x=>str(x.code)));
-            if(coreSkills.some(x=>!available.has(x)))throw new HttpError(400,'Choose enabled skills from HRM Skills Master.');
+            const rawSkills = ctx.body.coreSkills;
+            if (rawSkills !== undefined && !Array.isArray(rawSkills)) throw new HttpError(400, 'Core skills must be a list.');
+            // No business-imposed minimum or maximum. An empty list is valid. The underlying
+            // Firestore document size still applies, as it does to every persisted record.
+            const coreSkills = Array.from(new Set((Array.isArray(rawSkills) ? rawSkills : []).map(str).filter(Boolean)));
             const positions = await allPositions(ctx.orgId);
+            if (coreSkills.length) {
+                const skillDoc = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
+                const available = new Set((Array.isArray(skillDoc?.data.items) ? skillDoc.data.items : [])
+                    .filter(isObj).filter((x) => x.active !== false).map((x) => str(x.code)));
+                // Existing assignments remain editable even if a skill was subsequently
+                // disabled in HRM. It cannot be newly adopted by another role.
+                const savedSkills = new Set(positions.find((p) => p.code === code)?.coreSkills ?? []);
+                if (coreSkills.some((x) => !available.has(x) && !savedSkills.has(x))) {
+                    throw new HttpError(400, 'Newly added skills must be enabled in HRM Skills Master.');
+                }
+            }
             if (positions.some((p) => p.code !== code && p.title.toLowerCase() === title.toLowerCase())) throw new HttpError(409, 'Another role already has this title.');
             if (parentCode) {
                 if (parentCode === code) throw new HttpError(400, 'A role cannot report to itself.');
