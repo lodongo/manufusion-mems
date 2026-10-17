@@ -3,6 +3,7 @@ import { audit } from './audit';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { VENDOR_META_LISTS } from './vendorMetaDefaults';
 import { HR_SKILL_DEFAULTS } from './hrSkillsDefaults';
+import { HR_SKILL_EXPANDED, HR_SKILL_EXPANDED_COUNTS } from './hrSkillsExpanded';
 import { SAF_DEFAULT_LISTS } from './safDefaults';
 import { AST_UTILITY_ITEMS } from './astUtilityDefaults';
 import { orgRoute, staff } from './guards';
@@ -144,6 +145,55 @@ export async function seedModuleMetadata(code: string): Promise<string[]> {
 }
 
 export const moduleDefaultRoutes = {
+    /** Explicit, audited fresh start of the shared HRM role-skill catalogue.
+     * NEVER run via module initialisation, unattended migration, or ordinary defaults reset.
+     * The backup is persisted before replacing the live list. Existing role references
+     * retain their legacy codes and can be edited; no new code collides with them.
+     */
+    'POST /api/admin/modules/metadata/skills/fresh-start': [
+        staff('admin.modules.metadata.skills.fresh_start', 'super', async (ctx) => {
+            if (str(ctx.body.confirm) !== 'REPLACE SKILLS MASTER') {
+                throw new HttpError(400, 'Type REPLACE SKILLS MASTER to confirm the controlled catalogue replacement.');
+            }
+            const replacement = HR_SKILL_EXPANDED;
+            if (replacement.length < 2000 || HR_SKILL_EXPANDED_COUNTS.subcategories < 100) {
+                throw new HttpError(500, 'The new reference catalogue failed its coverage validation.');
+            }
+            const codes = new Set(replacement.map((item) => item.code));
+            if (codes.size !== replacement.length ||
+                replacement.some((x) => !x.category || !x.subcategory || !x.label || !x.description || !/^HR_NSK_\d{3}_\d{3}$/.test(x.code))) {
+                throw new HttpError(500, 'The new skills list contains duplicate or invalid identifiers.');
+            }
+            const path = 'module_workspaces/HRM/metadata/skillsMaster';
+            const current = await getDoc(path);
+            const oldItems = Array.isArray(current?.data.items) ? current.data.items : [];
+            const backupId = `skills_before_refresh_${nowIso().replace(/[^0-9]/g, '')}`;
+            const backupPath = `system_backups/${backupId}`;
+            // Fail closed if Firestore's 1 MiB per-document size is likely to be breached.
+            const target = {
+                title: 'Skills master', description: 'Exhaustive universal HR skills: technical, human, relational, digital and industry-specific competencies.',
+                items: replacement as unknown as Plain,
+                source: 'MEMS universal skills master', version: 2,
+                catalogueCount: replacement.length, categoryCount: HR_SKILL_EXPANDED_COUNTS.categories,
+                subcategoryCount: HR_SKILL_EXPANDED_COUNTS.subcategories,
+                createdAt: str(current?.data.createdAt) || nowIso(),
+                updatedAt: nowIso(), replacedBy: ctx.actor.email, backupId,
+            };
+            const estimatedBytes = Buffer.byteLength(JSON.stringify(target), 'utf8');
+            if (estimatedBytes > 720_000) throw new HttpError(413, 'Skills catalogue exceeds the safe size limit for a single Firestore document; use a partitioned catalogue instead.');
+            const savedBackup = await writeDoc(backupPath, {
+                sourcePath: path, oldMetadata: current?.data || {}, originalCount: oldItems.length,
+                newCount: replacement.length, createdAt: nowIso(), createdBy: ctx.actor.email,
+            }, { exists: false });
+            if (!savedBackup) throw new HttpError(409, 'Could not back up the old catalogue. No changes have been made.');
+            await writeDoc(path, target);
+            await audit([{ category: 'admin', action: 'hr.skills_master.fresh_start', actor: ctx.actor,
+                meta: ctx.meta, details: `Replaced ${oldItems.length} legacy skills with ${replacement.length} newly codified skills; backup ${backupPath}` }]);
+            return { success: true, total: replacement.length, categories: HR_SKILL_EXPANDED_COUNTS.categories,
+                subcategories: HR_SKILL_EXPANDED_COUNTS.subcategories, legacyCount: oldItems.length, backupId,
+                message: 'New database catalogue installed. Older role skills remain referenced by their original legacy codes and can be reassigned.' };
+        }),
+    ],
     'POST /api/admin/modules/metadata/defaults': [
         staff('admin.modules.metadata.defaults', 'write', async (ctx) => {
             const code = str(ctx.body.code);
