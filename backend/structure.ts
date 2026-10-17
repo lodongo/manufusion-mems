@@ -593,7 +593,10 @@ export const structureRoutes = {
                     if (level === 'work_center' && unitClass) {
                         const existingAssetTag = str(body.existingAssetTag);
                         try {
-                            if (existingAssetTag) {
+                            if (existingAssetTag === '__UNASSIGNED__') {
+                                // The equipment exists independently until an authorized user
+                                // creates or adopts its single asset.
+                            } else if (existingAssetTag) {
                                 if (!/^AST-\d{6}$/.test(existingAssetTag)) throw new HttpError(400, 'Choose an eligible unassigned asset from the list.');
                                 await linkWorkCenterAsset(ctx, { id, code, parentId }, '', existingAssetTag);
                             } else {
