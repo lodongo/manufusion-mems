@@ -1,8 +1,8 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
 import { callBackend } from '../lib/backend';
-import { formatRate } from '../lib/reference';
-import { Alert, Field } from '../components/ui';
+import { fetchReference, formatRate } from '../lib/reference';
+import { Alert, Field, SelectField } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import BanksPanel from './BanksPanel';
 import SequencesCard from './SequencesCard';
@@ -36,6 +36,8 @@ const DESCRIPTIONS: Record<string, string> = {
     publicEmailDomains: 'Public webmail domains that cannot register an organization or be used for organization accounts.',
     banks: 'Starter list of banks per African country, used when setting up legal entity bank details.',
     sequences: 'Number sequences used to code records such as organizations.',
+    'meta.industryCategories': 'Codified global economic activity categories. Load these before selecting industry subcategories for registration.',
+    'meta.industries': 'Codified MEMS industry subcategories linked to their parent category. Restoring the master replaces any existing flat legacy industry list.',
 };
 
 export default function DefaultValuesPage({ listKey, canWrite, isSuper }: { listKey: string; canWrite: boolean; isSuper: boolean }) {
@@ -85,6 +87,17 @@ function ListPage({ listKey, canWrite }: { listKey: string; canWrite: boolean })
                 { key: 'unitsPerUsd', label: 'Per 1 USD', type: 'number', value: (r) => n(r.unitsPerUsd), render: (r) => formatRate(n(r.unitsPerUsd)) },
                 { key: 'usdPerUnit', label: 'USD per unit', type: 'number', value: (r) => n(r.usdPerUnit), render: (r) => formatRate(n(r.usdPerUnit)), hidden: true },
             ];
+        if (listKey === 'meta.industryCategories') return [
+            { key: 'code', label: 'Category code', value: (r) => s(r.code), className: 'font-mono' },
+            { key: 'label', label: 'Industry category', value: (r) => s(r.label) },
+            { key: 'isicSection', label: 'ISIC section', value: (r) => s(r.isicSection) },
+        ];
+        if (listKey === 'meta.industries') return [
+            { key: 'code', label: 'Subcategory code', value: (r) => s(r.code), className: 'font-mono' },
+            { key: 'label', label: 'Industry subcategory', value: (r) => s(r.label) },
+            { key: 'categoryCode', label: 'Parent category', value: (r) => s(r.categoryCode), className: 'font-mono' },
+            { key: 'isicSection', label: 'ISIC section', value: (r) => s(r.isicSection), hidden: true },
+        ];
         if (listKey === 'publicEmailDomains') return [{ key: 'domain', label: 'Domain', value: (r) => s(r.domain), className: 'font-mono' }];
         return [
             { key: 'code', label: 'Code', value: (r) => s(r.code), className: 'font-mono' },
@@ -180,7 +193,13 @@ function ListPage({ listKey, canWrite }: { listKey: string; canWrite: boolean })
                         }
                     />
                 )}
-                {adding && <AddEntry domain={listKey === 'publicEmailDomains'} busy={!!busy} onCancel={() => setAdding(false)} onAdd={(code, label) => run('/api/admin/reference/list/entry', { op: 'add', code, label }, 'Entry added.')} />}
+                {adding && (listKey === 'meta.industries' ? (
+                    <AddIndustryEntry busy={!!busy} onCancel={() => setAdding(false)} onAdd={(categoryCode, label) =>
+                        run('/api/admin/reference/list/entry', { op: 'add', categoryCode, label }, 'Industry subcategory added.')} />
+                ) : (
+                    <AddEntry domain={listKey === 'publicEmailDomains'} category={listKey === 'meta.industryCategories'} busy={!!busy} onCancel={() => setAdding(false)} onAdd={(code, label) =>
+                        run('/api/admin/reference/list/entry', { op: 'add', code, label }, 'Entry added.')} />
+                ))}
                 {actionError && <div className='mt-3'><Alert tone='error'>{actionError}</Alert></div>}
                 {info && <div className='mt-3'><Alert tone='info'>{info}</Alert></div>}
             </Card>
@@ -224,7 +243,7 @@ function Confirm({ expected, title, busy, danger, onCancel, onConfirm }: { expec
     );
 }
 
-function AddEntry({ domain, busy, onAdd, onCancel }: { domain: boolean; busy: boolean; onAdd: (code: string, label: string) => void; onCancel: () => void }) {
+function AddEntry({ domain, category = false, busy, onAdd, onCancel }: { domain: boolean; category?: boolean; busy: boolean; onAdd: (code: string, label: string) => void; onCancel: () => void }) {
     const [code, setCode] = useState('');
     const [label, setLabel] = useState('');
     const [error, setError] = useState('');
@@ -237,7 +256,8 @@ function AddEntry({ domain, busy, onAdd, onCancel }: { domain: boolean; busy: bo
             return onAdd(d, '');
         }
         if (label.trim().length < 1 || label.trim().length > 80) return setError('Enter a label of 1 to 80 characters.');
-        if (code && !/^[A-Za-z0-9_ ]{1,60}$/.test(code)) return setError('The code can only use letters, numbers and underscores.');
+        if (category && !/^IND-[A-Z0-9]{1,4}$/.test(code.trim().toUpperCase())) return setError('Enter a unique category code such as IND-W.');
+        if (!category && code && !/^[A-Za-z0-9_ ]{1,60}$/.test(code)) return setError('The code can only use letters, numbers and underscores.');
         onAdd(code.trim(), label.trim());
     };
     return (
@@ -247,7 +267,7 @@ function AddEntry({ domain, busy, onAdd, onCancel }: { domain: boolean; busy: bo
             ) : (
                 <>
                     <Field id='entry-label' label='Label' maxLength={80} value={label} onChange={(e) => setLabel(e.target.value)} />
-                    <Field id='entry-code' label='Code (optional, made from the label if empty)' maxLength={60} value={code} onChange={(e) => setCode(e.target.value)} />
+                    <Field id='entry-code' label={category ? 'Permanent category code (e.g. IND-W)' : 'Code (optional, made from the label if empty)'} maxLength={60} value={code} onChange={(e) => setCode(e.target.value)} />
                 </>
             )}
             {error && <Alert tone='error'>{error}</Alert>}
@@ -258,6 +278,35 @@ function AddEntry({ domain, busy, onAdd, onCancel }: { domain: boolean; busy: bo
                 <Button type='button' variant='secondary' onClick={onCancel}>
                     Cancel
                 </Button>
+            </div>
+        </form>
+    );
+}
+
+function AddIndustryEntry({ busy, onAdd, onCancel }: { busy: boolean; onAdd: (categoryCode: string, label: string) => void; onCancel: () => void }) {
+    const { data, error } = useLoad(() => fetchReference());
+    const [categoryCode, setCategoryCode] = useState('');
+    const [label, setLabel] = useState('');
+    const [localError, setLocalError] = useState('');
+    const categories = data?.metadataLists.find((l) => l.key === 'industryCategories')?.items.filter((e) => e.active !== false) ?? [];
+    return (
+        <form className='mt-3 space-y-3 rounded-xl border border-line p-3' onSubmit={(e) => {
+            e.preventDefault();
+            if (!categories.some((c) => c.code === categoryCode)) return setLocalError('Select a loaded industry category.');
+            if (!label.trim() || label.trim().length > 80) return setLocalError('Enter a subcategory name of 1–80 characters.');
+            setLocalError('');
+            onAdd(categoryCode, label.trim());
+        }}>
+            <SelectField id='new-industry-category' label='Parent industry category' value={categoryCode} onChange={(e) => setCategoryCode(e.target.value)}>
+                <option value=''>Choose category...</option>
+                {categories.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
+            </SelectField>
+            <Field id='new-industry-name' label='Industry subcategory' maxLength={80} value={label} onChange={(e) => setLabel(e.target.value)} />
+            <p className='text-xs text-soft'>MEMS allocates the next permanent subcategory code under the selected category.</p>
+            {(error || localError) && <Alert tone='error'>{error || localError}</Alert>}
+            <div className='flex gap-2'>
+                <Button type='submit' className='flex-1' busy={busy}>Add subcategory</Button>
+                <Button type='button' variant='secondary' onClick={onCancel}>Cancel</Button>
             </div>
         </form>
     );
