@@ -11,7 +11,7 @@ import { AssetDetail, AssetForm, STATUS, type AssetFull } from './AssetRegister'
 // approved by another user.
 
 interface WorkCenterAssetData {
-    workCenter: { id: string; code: string; name: string };
+    workCenter: { id: string; code: string; name: string; classCode?: string; className?: string };
     astEnabled: boolean;
     dictionaryImported: boolean;
     can: { create: boolean; edit: boolean; approve: boolean; link: boolean };
