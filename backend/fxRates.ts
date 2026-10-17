@@ -91,7 +91,7 @@ export async function refreshCurrencyCatalogue(provider: FxProvider, actor = 'au
     }
     const rateDates = { ratesUpdatedAt: quote.publishedAt || quote.fetchedAt,
         ratesLastCheckedAt: quote.fetchedAt, ratesSource: provider,
-        ratesCoverage: { matched, total: values.length, unsupported: unavailable.length } };
+        ratesCoverage: { matched, total: values.length, unsupported: unavailable.length, unavailableCodes: unavailable.slice().sort() } };
     await writeDoc(PATH, { ...current.data, items: updated, ...rateDates });
     const kes = quote.rates.KES ?? null;
     const signature = Object.keys(quote.rates).sort().map((code) => code + ':' + quote.rates[code]).join('|');
