@@ -432,6 +432,20 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         if (status === 'suspended') throw new HttpError(403, 'Your organization has been suspended.');
         if (status === 'pending_approval') throw new HttpError(403, 'Your organization is pending approval by MEMS.');
         if (status === 'rejected') throw new HttpError(403, 'Your organization registration was not approved.');
+        // Tenant bootstrap rule: site structure and job roles must exist before protected
+        // functional configuration. Reads and personal routes remain available.
+        if (permission && permission !== 'ADM.structure' &&
+            !name.startsWith('org.structure.') && !name.startsWith('org.positions.') &&
+            !name.startsWith('org.setup.')) {
+            const [nodes, positions] = await Promise.all([
+                listDocs(`organizations/${orgId}/structure`),
+                listDocs(`organizations/${orgId}/positions`),
+            ]);
+            const has = (level: string) => nodes.some((d) => str(d.data.level) === level && str(d.data.status) !== 'inactive');
+            if (!has('legal_entity') || !has('site') || positions.length === 0) {
+                throw new HttpError(428, 'Complete the legal entity, site and at least one job role under Organization design before continuing with other configuration.');
+            }
+        }
         const domain = await ensureOrgDomain(org);
         if (domain && emailDomain(ctx.claims.email) !== domain) throw new HttpError(403, 'Your account does not belong to this organization.');
         if (name.startsWith('chat.') && name !== 'chat.policy.status' && name !== 'chat.policy.accept') {
