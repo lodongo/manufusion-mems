@@ -23,7 +23,7 @@ import {
 import { clearAccessCache, hasPerm, orgRoute, type OrgContext } from './guards';
 import { detectImage } from './branding';
 import { ID_RE, childrenOf, col, designOf, getNode, managerContext, nodeOut, record } from './structure';
-import { matchingRoleNodes, employmentCoverage, type RoleStaffingRow, type StaffingUnit } from '../src/org/roleStaffing';
+import { matchingRoleNodes, employmentCoverage, type RoleStaffingRow, type StaffingUnit } from './positionStaffing';
 
 // Organization roles (job positions such as CEO or Manufacturing Manager).
 // These are NOT system access roles: they describe the org chart, not what a user can do in MEMS.
