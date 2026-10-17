@@ -181,8 +181,16 @@ export const automationRoutes = {
             }
             throw new HttpError(502, `Could not create the shared automation trigger (HTTP ${response.status}).`);
         }
-        await audit([{ category: 'admin', action: 'automations.engine.activate', actor: ctx.actor, meta: ctx.meta, details: `Shared ${SCHEDULER} provisioned` }]);
-        return { ok: true, message: 'Shared automation heartbeat provisioned. Schedule and execution history are available from the Automation Center.' };
+        // Fire once through Cloud Scheduler itself so the OIDC callback can be verified
+        // immediately, without waiting for the next five-minute tick.
+        const probe = await googleRequest(SCHEDULER_API + ':run', 'POST', {});
+        const probeQueued = probe.ok;
+        if (!probeQueued) console.warn('Scheduler job created but initial trigger failed', probe.status);
+        await audit([{ category: 'admin', action: 'automations.engine.activate', actor: ctx.actor, meta: ctx.meta, details: `Shared ${SCHEDULER} provisioned in ${REGION}; initial callback ${probeQueued ? 'requested' : 'not started'}` }]);
+        return { ok: true, region: REGION, verifiedCallbackRequested: probeQueued,
+            message: probeQueued
+                ? 'Shared scheduler saved in me-central1 (Doha). A signed test callback was requested; tap Check connection to verify.'
+                : 'Shared scheduler saved in me-central1 (Doha). Initial test could not be started; wait for its next five-minute tick and check connection.' };
     })],
     'POST /api/internal/automations/heartbeat': [async (ctx: RouterContext) => {
         try { await verifyHeartbeat(ctx); } catch { return error('Unauthorized automation caller.', 401); }
