@@ -37,6 +37,7 @@ interface Node {
     managerRoleCode?: string;
     managerRoleTitle?: string;
     managerHolders?: string[];
+    childCount?: number;
 }
 
 interface BomLine {
@@ -70,7 +71,7 @@ interface NodeData {
     design: Design;
 }
 
-type Mode = null | { type: 'create'; level: string } | { type: 'edit' } | { type: 'bom'; bom?: Bom } | { type: 'levels' } | { type: 'roles' } | { type: 'details' } | { type: 'asset'; configure?: boolean } | { type: 'utilities' } | { type: 'stored-energy' } | { type: 'activity-risk' } | { type: 'activity-risk-review' } | { type: 'loto-program' } | { type: 'stored-energy-review' } | { type: 'storage' } | { type: 'activities' };
+type Mode = null | { type: 'create'; level: string } | { type: 'edit' } | { type: 'bom'; bom?: Bom } | { type: 'levels' } | { type: 'expand' } | { type: 'roles' } | { type: 'details' } | { type: 'asset'; configure?: boolean } | { type: 'utilities' } | { type: 'stored-energy' } | { type: 'activity-risk' } | { type: 'activity-risk-review' } | { type: 'loto-program' } | { type: 'stored-energy-review' } | { type: 'storage' } | { type: 'activities' };
 
 const open = (id: string) => navigate(id === 'root' ? 'organization_admin/structure' : `organization_admin/structure/${id}`);
 
@@ -124,6 +125,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
     };
 
     if (mode?.type === 'levels') return <LevelsForm design={design} onDone={done} onCancel={() => setMode(null)} />;
+    if (mode?.type === 'expand') return <AddUpperLevel onDone={done} onCancel={() => setMode(null)} />;
     if (mode?.type === 'roles' && node) return <SiteRolesForm site={node} onDone={done} onCancel={() => setMode(null)} />;
     if (mode?.type === 'create' || mode?.type === 'edit') {
         const level = mode.type === 'create' ? mode.level : node!.level;
@@ -249,7 +251,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
 
     return (
         <div className='space-y-3'>
-            <PageTitle title='Organization design' subtitle='Tap to go inside. Use the icons to view or edit.' />
+            <PageTitle title='Organization design' subtitle='Choose a unit to configure it or add lower levels. Changes can be made later.' />
             <nav aria-label='Path' className='flex flex-wrap items-center gap-1 text-sm'>
                 <button onClick={() => open('root')} className='flex items-center gap-1 rounded-lg px-2 py-1 text-emerald-300'>
                     <Home className='h-4 w-4' />
@@ -275,11 +277,11 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                             {node.status === 'inactive' ? ' · inactive' : ''}
                         </p>
                     </div>
-                    <IconButton label='View details' onClick={() => setMode({ type: 'details' })}>
-                        <Eye className='h-4 w-4' />
+                    <IconButton label='Configure' onClick={() => setMode({ type: 'edit' })}>
+                        <Cog className='h-4 w-4' />
                     </IconButton>
                     {canEdit && (
-                        <IconButton label='Edit' onClick={() => setMode({ type: 'edit' })}>
+                        <IconButton label='Configure' onClick={() => setMode({ type: 'edit' })}>
                             <Pencil className='h-4 w-4' />
                         </IconButton>
                     )}
@@ -298,9 +300,20 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                         <p className='truncate text-xs text-slate-500'>{design.mode === 'single' ? 'One legal entity' : names.length ? names.join(' › ') + ' › Legal entities' : 'Several legal entities'}</p>
                     </div>
                     {canEdit && design.mode === 'multi' && (
-                        <IconButton label='Edit levels' onClick={() => setMode({ type: 'levels' })}>
+                        <IconButton label='Rename upper levels' onClick={() => setMode({ type: 'levels' })}>
                             <Pencil className='h-4 w-4' />
                         </IconButton>
+                    )}
+                    {canEdit && names.length < MAX_UPPER_LEVELS && (
+                        <IconButton label='Adopt an additional upper level' onClick={() => setMode({ type: 'expand' })}>
+                            <Plus className='h-4 w-4' />
+                        </IconButton>
+                    )}
+                    {canEdit && design.mode === 'single' && (
+                        <button type='button' onClick={async () => {
+                            try { await callBackend('/api/org/structure/design/save', { mode: 'multi', names: [] }); reload(); }
+                            catch (e) { setActionError(e instanceof Error ? e.message : 'Could not allow additional legal entities.'); }
+                        }} className='rounded-xl border border-line px-3 py-2 text-xs text-brand'>Allow multiple legal entities</button>
                     )}
                 </div>
             )}
@@ -390,15 +403,16 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                         {node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'utilities'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-blue-400'/><div className='min-w-0 flex-1'><p className='text-sm text-white'>Utilities</p><p className='truncate text-xs text-slate-500'>Add electrical, water, steam, CIP and other supplies</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}
                         {node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'loto-program'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-blue-500'/><div className='min-w-0 flex-1'><p className='text-sm'>LOTO Program</p><p className='truncate text-xs text-slate-500'>To be configured</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}{node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'stored-energy'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-orange-400'/><div className='min-w-0 flex-1'><p className='text-sm'>Activities and Activity-Based Risk Assessment</p><p className='truncate text-xs text-slate-500'>Assembly activities, hazards, impacts, risk review and downloads</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}
                         {data.children.map((c) => (
-                            <li key={c.id}>
-                                <button onClick={() => open(c.id)} className='flex w-full items-center gap-3 px-4 py-3 text-left'>
+                            <li key={c.id} className='mx-2 my-2 rounded-xl border border-line bg-panel shadow-sm'>
+                                <button onClick={() => open(c.id)} className='flex w-full items-center gap-3 px-3 py-3 text-left'>
                                     <Layers className='h-5 w-5 shrink-0 text-emerald-400' />
                                     <div className='min-w-0 flex-1'>
-                                        <p className='truncate text-sm text-white'>{c.name}</p>
-                                        <p className='truncate text-xs text-slate-500'>
+                                        <p className='truncate text-sm font-medium text-ink'>{c.name}</p>
+                                        <p className='truncate text-xs text-muted'>
                                             <span className='font-mono'>{c.code}</span> · {labelOf(c, names)}
                                             {c.status === 'inactive' ? ' · inactive' : ''}
                                         </p>
+                                        <p className='mt-1 text-xs text-brand'>{c.childCount ?? 0} lower units configured · tap to configure</p>
                                     </div>
                                     <ChevronRight className='h-4 w-4 shrink-0 text-slate-500' />
                                 </button>
@@ -417,7 +431,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                                 </button>
                             </li>
                         ))}
-                        {nothingInside && <li className='px-4 py-3 text-sm text-slate-500'>Nothing here yet.</li>}
+                        {nothingInside && <li className='px-4 py-3 text-sm text-muted'>Nothing configured at this level yet.</li>}
                         {canEdit &&
                             allowed.map((a) => (
                                 <li key={a.level}>
@@ -862,6 +876,38 @@ function LevelsForm({ design, onDone, onCancel }: { design: Design; onDone: () =
             </div>
         </div>
     );
+}
+
+function AddUpperLevel({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+    const [name, setName] = useState('');
+    const [unitName, setUnitName] = useState('');
+    const [segment, setSegment] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const save = async () => {
+        if (!window.confirm('Add a new top hierarchy level above existing units? MEMS will preserve every existing unit and job role identifier.')) return;
+        setBusy(true); setError('');
+        try {
+            await callBackend('/api/org/structure/design/expand', { name: name.trim(), unitName: unitName.trim(), segment: segment.trim().toUpperCase() });
+            onDone();
+            open('root');
+        } catch (e) { setError(e instanceof Error ? e.message : 'Could not extend the hierarchy.'); }
+        finally { setBusy(false); }
+    };
+    return <div className='space-y-4'>
+        <PageTitle title='Adopt an upper hierarchy level' subtitle='Extend your organization as you grow without rebuilding existing sites or job roles.' />
+        <Card className='space-y-4'>
+            <Field id='upper-level-name' label='Level name (e.g. Country office or Regional office)' value={name} onChange={(e) => setName(e.target.value)} maxLength={40} />
+            <Field id='upper-unit-name' label='First unit name (e.g. East Africa)' value={unitName} onChange={(e) => setUnitName(e.target.value)} maxLength={120} />
+            <Field id='upper-unit-code' label='Unit code (2–6 capital letters)' value={segment} onChange={(e) => setSegment(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6))} maxLength={6} />
+            <p className='text-sm text-soft'>The new unit becomes the parent of the existing top-level units. Existing codes, sites and asset records are preserved. This is an audited, atomic change.</p>
+            {error && <Alert tone='error'>{error}</Alert>}
+            <div className='flex gap-2'>
+                <Button variant='secondary' onClick={onCancel}>Cancel</Button>
+                <Button className='flex-1' busy={busy} onClick={save}>Add upper level</Button>
+            </div>
+        </Card>
+    </div>;
 }
 
 function SiteRolesForm({ site, onDone, onCancel }: { site: Node; onDone: () => void; onCancel: () => void }) {
