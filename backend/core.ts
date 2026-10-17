@@ -387,7 +387,7 @@ export async function writeDoc(path: string, data: Record<string, unknown>, prec
     const qs = query.toString();
     const res = await googleRequest(`${FIRESTORE_BASE}/${path}${qs ? `?${qs}` : ''}`, 'PATCH', { fields: encodeFields(data) });
     if (!res.ok) {
-        if (precondition && (res.status === 400 || res.status === 404 || res.status === 409)) {
+        if (precondition && (res.status === 400 || res.status === 404 || res.status === 409 || res.status === 412)) {
             console.warn('Firestore write precondition not met', res.status);
             return false;
         }
