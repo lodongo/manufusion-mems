@@ -24,6 +24,7 @@ import AppDeployPage from './AppDeployPage';
 import SkillsMasterPage from './SkillsMasterPage';
 import OperationsCenter from './OperationsCenter';
 import FxMonitor from './FxMonitor';
+import AutomationCenter from './AutomationCenter';
 
 const DEFAULT_META_LISTS = [
     { key: 'meta.industryCategories', label: 'Industry categories' },
@@ -88,6 +89,7 @@ export default function AdminShell({
                 { key: 'billing', label: 'Billing and payments', Icon: CreditCard },
                 ...(isSuper ? [
                     { key: 'operations', label: 'GitHub & Cloud Run', Icon: Activity },
+                    { key: 'automation_center', label: 'Automation Center', Icon: Activity },
                     { key: 'fx_monitor', label: 'FX automation and rates', Icon: Coins },
                     { key: 'firestore', label: 'Database explorer', Icon: FolderTree },
                     { key: 'appdeploy', label: 'Hosting migration', Icon: Activity },
@@ -173,6 +175,9 @@ export default function AdminShell({
             break;
         case 'fx_monitor':
             content = isSuper ? <FxMonitor /> : <Dashboard />;
+            break;
+        case 'automation_center':
+            content = isSuper ? <AutomationCenter /> : <Dashboard />;
             break;
         case 'modules':
             content = <ModulesPage code={id} tab={sub} canWrite={canWrite} isSuper={isSuper} />;
