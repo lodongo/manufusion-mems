@@ -1,3 +1,4 @@
+import { INDUSTRY_CATEGORIES, INDUSTRY_SUBCATEGORIES } from './industryCatalog';
 // Default reference data for MEMS. Loaded into Firestore by the super admin.
 
 // [name, iso2, iso3, dialCode, capital, region, currencyCode, timezone, languages]
@@ -179,7 +180,7 @@ export interface MetaListDefault {
     key: string;
     title: string;
     appliesTo: string;
-    items: Array<{ code: string; label: string }>;
+    items: Array<{ code: string; label: string; categoryCode?: string; isicSection?: string; description?: string; active?: boolean }>;
 }
 
 function slug(label: string): string {
@@ -195,17 +196,14 @@ function metaList(key: string, title: string, appliesTo: string, labels: string[
 }
 
 export const METADATA_LISTS: MetaListDefault[] = [
-    metaList('industries', 'Industry / manufacturing sector', 'organization', [
-        'Food processing', 'Dairy', 'Bakery and confectionery', 'Meat and poultry processing', 'Grain milling',
-        'Edible oils', 'Beverages and bottled water', 'Brewing and distilling', 'Tea and coffee processing',
-        'Sugar', 'Agro-processing', 'Animal feed', 'Textiles and apparel', 'Leather and footwear',
-        'Furniture and wood products', 'Paper and packaging', 'Printing', 'Plastics and rubber', 'Chemicals',
-        'Paints and coatings', 'Pharmaceuticals', 'Cosmetics and personal care', 'Soap and detergents',
-        'Fertilizers and agrochemicals', 'Building materials and cement', 'Steel and metal fabrication',
-        'Machinery and equipment', 'Electrical and electronics', 'Automotive and assembly',
-        'Glass and ceramics', 'Mining and mineral processing', 'Energy and solar products',
-        'Jewelry and crafts', 'Other manufacturing',
-    ]),
+    {
+        key: 'industryCategories', title: 'Industry categories — ISIC Rev.5 section-aligned',
+        appliesTo: 'organization', items: INDUSTRY_CATEGORIES,
+    },
+    {
+        key: 'industries', title: 'Industry subcategories — MEMS global master',
+        appliesTo: 'organization', items: INDUSTRY_SUBCATEGORIES,
+    },
     metaList('companySizes', 'Company size', 'organization', [
         'Micro (1-9 employees)', 'Small (10-49 employees)', 'Medium (50-249 employees)',
         'Large (250-999 employees)', 'Enterprise (1000+ employees)',
