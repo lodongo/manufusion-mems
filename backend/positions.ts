@@ -138,6 +138,23 @@ function validateStaffingPlan(raw: unknown, operatingLevel: string, nodes: Staff
     });
 }
 
+/** Keep the existing site-role selection aligned with the staffing activation switches.
+ * Role requirements remain the source of truth; disabling a staffed unit is blocked first.
+ */
+async function syncRoleAtSites(orgId: string, roleCode: string, operatingLevel: string, rows: RoleStaffingRow[], nodes: ReturnType<typeof nodeOut>[], uid: string) {
+    if (!rows.length) return; // Legacy roles without a configured establishment remain unchanged.
+    const enabled = new Set(operatingLevel === 'site' ? rows.filter(r => r.enabled).map(r => r.nodeId) : []);
+    for (const site of nodes.filter(n => n.level === 'site')) {
+        const before = site.roleCodes;
+        const after = enabled.has(site.id)
+            ? [...new Set([...before, roleCode])]
+            : before.filter(code => code !== roleCode);
+        if (after.length !== before.length || after.some((v,i) => v !== before[i])) {
+            await updateFields(`${col(orgId)}/${site.id}`, { roleCodes: after, updatedAt: nowIso(), updatedBy: uid });
+        }
+    }
+}
+
 export const positionRoutes = {
     'POST /api/org/reference/core-skills': [orgRoute('org.reference.core_skills',null,async()=>{const doc=await getDoc('module_workspaces/HRM/metadata/skillsMaster');return {ready:!!doc,skills:(Array.isArray(doc?.data.items)?doc.data.items:[]).filter(isObj).map(x=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description),active:x.active!==false}))};})],
     'POST /api/org/positions/list': [
@@ -221,17 +238,21 @@ export const positionRoutes = {
             const nodeDocs = await listDocs(col(ctx.orgId));
             const nodes = nodeDocs.map(nodeOut).filter(n => SCOPE_LEVELS.includes(n.level));
             const staffingPlan = validateStaffingPlan(ctx.body.staffingPlan, operatingLevel, nodes);
+            const matchedNodes = matchingRoleNodes(operatingLevel, nodes);
+            if (staffingPlan.length && staffingPlan.length !== matchedNodes.length) {
+                throw new HttpError(400, 'Configure every organization unit at this role level, even if it is disabled.');
+            }
             if (code && staffingPlan.length) {
                 // Do not silently disable a location with employees already holding this job role.
                 const people = await runQuery({ from: [{ collectionId: 'users' }], where: {
                     fieldFilter: { field: { fieldPath: 'orgId' }, op: 'EQUAL', value: { stringValue: ctx.orgId } },
                 } });
-                const disabled = new Set(matchingRoleNodes(operatingLevel, nodes).filter(n =>
+                const disabled = new Set(matchedNodes.filter(n =>
                     !staffingPlan.some(p => p.nodeId === n.id && p.enabled)).map(n => n.id));
                 for (const person of people) {
                     if (['disabled','suspended','deleted','inactive'].includes(str(person.data.status))) continue;
                     const assigned = employmentCoverage(readAssignments(person.data.assignments), code, nowIso().slice(0,10));
-                    if (assigned.some(a => a.type === 'primary' && disabled.has(a.nodeId))) {
+                    if (assigned.some(a => a.type === 'primary' && (disabled.has(a.nodeId) || (staffingPlan.length && !matchedNodes.some(n => n.id === a.nodeId))))) {
                         throw new HttpError(409, 'This role already has an active employee in a disabled unit. Enable the unit or reassign the employee first.');
                     }
                 }
@@ -272,6 +293,7 @@ export const positionRoutes = {
                     if (mine && ctx.role !== 'org_super_admin') throw new HttpError(403, 'You cannot change the security roles of a job role you hold.');
                 }
                 await updateFields(`${posCol(ctx.orgId)}/${code}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, staffingPlan, updatedAt: now, updatedBy: ctx.uid });
+                await syncRoleAtSites(ctx.orgId, code, operatingLevel, staffingPlan, nodeDocs.map(nodeOut), ctx.uid);
                 await record(ctx, 'org.position.update', `${code} ${title}`, added.length || removed.length ? `Security roles added: ${added.join(', ') || 'none'}; removed: ${removed.join(', ') || 'none'}` : '');
                 if (added.length || removed.length) clearAccessCache(ctx.orgId);
                 return { code };
@@ -282,6 +304,7 @@ export const positionRoutes = {
                 if (n > 999999) throw new HttpError(400, 'Your organization has reached 999999 job roles.');
                 const newCode = `ROL_${String(n).padStart(6, '0')}`;
                 if (await writeDoc(`${posCol(ctx.orgId)}/${newCode}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, staffingPlan, createdAt: now, createdBy: ctx.uid, updatedAt: now }, { exists: false })) {
+                    await syncRoleAtSites(ctx.orgId, newCode, operatingLevel, staffingPlan, nodeDocs.map(nodeOut), ctx.uid);
                     if (securityRoles.length) clearAccessCache(ctx.orgId);
                     await record(ctx, 'org.position.create', `${newCode} ${title}`, parentCode ? `Reports to ${parentCode}` : 'Top role');
                     return { code: newCode };
@@ -438,6 +461,14 @@ export const positionRoutes = {
                     const upper = /^upper:(\d)$/.exec(level);
                     const fits = !level || (level === node.level) || (!!upper && node.level === 'group' && node.tier === Number(upper[1]));
                     if (!fits) throw new HttpError(400, `${position.title} operates at a different level.`);
+                    // A configured establishment decides where new employee assignments are allowed.
+                    // Existing assignments are grandfathered only until their location is reconciled.
+                    const plan = position.staffingPlan;
+                    if (plan.length && !plan.some((r) => r.nodeId === nodeId && r.enabled)) {
+                        const wasAssigned = readAssignments(user.data.assignments).some((old) =>
+                            old.positionCode === positionCode && old.nodeId === nodeId);
+                        if (!wasAssigned) throw new HttpError(409, `${position.title} is not enabled for this organizational unit. Enable it under Job roles first.`);
+                    }
                     
                     const type = rawAssignments.indexOf(a) === 0 ? 'primary' : str(a.type);
                     const startsOn = str(a.startsOn);
