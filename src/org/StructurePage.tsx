@@ -1005,6 +1005,10 @@ function NodeForm({
     const [banks, setBanks] = useState<Array<{ id: string; name: string; swiftCode: string }>>([]);
     const [costTypes, setCostTypes] = useState<Array<{ code: string; label: string }>>([]);
     const [assetOpts, setAssetOpts] = useState<{ enabled: boolean; assets: Array<{ tag: string; name: string; className: string }> }>({ enabled: true, assets: [] });
+    const [matchingAssets, setMatchingAssets] = useState<Array<{ tag: string; name: string; status: string; nodeCode: string }>>([]);
+    const [eligibleLoading, setEligibleLoading] = useState(false);
+    const [existingAssetTag, setExistingAssetTag] = useState('');
+
     const [managerRoleCode, setManagerRoleCode] = useState(existing?.managerRoleCode ?? '');
     const [managerRoles, setManagerRoles] = useState<Array<{ code: string; title: string; selectedAtSite: boolean }>>([]);
     const [siteLabel, setSiteLabel] = useState('');
@@ -1032,6 +1036,19 @@ function NodeForm({
             .catch(() => setCostTypes([]));
     }, [def.fields]);
 
+    useEffect(() => {
+        if (level !== 'work_center' || existing || !parent?.id || !attributes.equipmentClass) {
+            setMatchingAssets([]); setExistingAssetTag(''); return;
+        }
+        let active = true;
+        setEligibleLoading(true);
+        callBackend<{ candidates: Array<{ tag: string; name: string; status: string; nodeCode: string }> }>(
+            '/api/org/assets/eligible-for-equipment', { parentId: parent.id, classCode: attributes.equipmentClass }
+        ).then((r) => { if (active) setMatchingAssets(r.candidates); })
+            .catch(() => { if (active) setMatchingAssets([]); })
+            .finally(() => { if (active) setEligibleLoading(false); });
+        return () => { active = false; };
+    }, [level, existing?.id, parent?.id, attributes.equipmentClass]);
     const managerParent = existing ? existing.parentId : parent?.id ?? 'root';
     const managerNode = existing?.id ?? '';
     useEffect(() => {
@@ -1242,6 +1259,19 @@ function NodeForm({
                     </SelectField>
                 )}
             </Card>
+            {level === 'work_center' && !existing && attributes.equipmentClass && (
+                <Card className='space-y-3'>
+                    <h3 className='text-base font-semibold text-ink'>Equipment ↔ Asset (one-to-one)</h3>
+                    <p className='text-sm text-soft'>Matching uses the exact asset category, subcategory and class, the same site, and assets that are not already assigned to equipment.</p>
+                    <SelectField id='new-equipment-existing-asset' label='Match an existing, unassigned asset (optional)' value={existingAssetTag}
+                        onChange={(e)=>setExistingAssetTag(e.target.value)} disabled={eligibleLoading}>
+                        <option value=''>{eligibleLoading ? 'Checking eligible assets…' : 'Create a new draft asset for this equipment'}</option>
+                        {matchingAssets.map((a)=><option key={a.tag} value={a.tag}>{a.tag} · {a.name} ({a.status}; {a.nodeCode})</option>)}
+                    </SelectField>
+                    {existingAssetTag ? <p className='text-xs text-brand'>The existing asset will be linked; no duplicate asset will be created.</p>
+                        : <p className='text-xs text-soft'>{matchingAssets.length ? `${matchingAssets.length} compatible unassigned asset(s) available. Choose one to avoid duplicates.` : 'No matching available asset detected; a new draft asset will be created.'}</p>}
+                </Card>
+            )}
             {sections.map((section) => (
                 <Card key={section} className='space-y-4'>
                     <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>{section}</p>
