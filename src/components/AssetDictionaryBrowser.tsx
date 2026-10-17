@@ -133,6 +133,7 @@ export default function AssetDictionaryBrowser({
     body = {},
     onPick,
     pickLabel = 'Use this class',
+    showAttributes = true,
     labels: L = ASSET_LABELS,
 }: {
     treePath: string;
@@ -140,6 +141,7 @@ export default function AssetDictionaryBrowser({
     body?: Record<string, unknown>;
     onPick?: (cls: ClassDetail) => void;
     pickLabel?: string;
+    showAttributes?: boolean;
     labels?: BrowserLabels;
 }) {
     const bodyKey = JSON.stringify(body);
@@ -204,6 +206,7 @@ export default function AssetDictionaryBrowser({
                 onBack={() => setPath({ group: path.group, category: path.category, subcategory: path.subcategory })}
                 onPick={onPick}
                 pickLabel={pickLabel}
+                showAttributes={showAttributes}
                 names={names}
                 labels={L}
             />
@@ -291,6 +294,7 @@ function ClassView({
     onBack,
     onPick,
     pickLabel,
+    showAttributes,
     names,
     labels: L,
 }: {
@@ -300,6 +304,7 @@ function ClassView({
     onBack: () => void;
     onPick?: (cls: ClassDetail) => void;
     pickLabel: string;
+    showAttributes: boolean;
     names: Map<string, string>;
     labels: BrowserLabels;
 }) {
@@ -330,8 +335,8 @@ function ClassView({
                 <h2 className='text-lg font-semibold text-white'>{data.name}</h2>
                 <p className='mt-1 text-sm text-slate-300'>{data.description}</p>
                 <div className='mt-2 flex flex-wrap gap-1'>
-                    <Badge>{data.attributes.length} attributes</Badge>
-                    <Badge tone='danger'>{data.attributes.filter((a) => a.required).length} required</Badge>
+                    {showAttributes && <Badge>{data.attributes.length} attributes</Badge>}
+                    {showAttributes && <Badge tone='danger'>{data.attributes.filter((a) => a.required).length} required</Badge>}
                     {data.usefulLifeYears && <Badge tone='warn'>Useful life {lifeText(data.usefulLifeYears)}</Badge>}
                 </div>
                 <p className='mt-2 text-xs text-slate-500'>
@@ -359,7 +364,7 @@ function ClassView({
                     </Button>
                 )}
             </Card>
-            <RichTable id={`${L.tableId}.attributes`} title={`${data.code} attributes`} fileName={`MEMS_${data.code}_attributes`} columns={columns} rows={data.attributes} rowKey={(r) => r.code} height='h-[calc(100dvh-20rem)]' />
+            {showAttributes && <RichTable id={`${L.tableId}.attributes`} title={`${data.code} attributes`} fileName={`MEMS_${data.code}_attributes`} columns={columns} rows={data.attributes} rowKey={(r) => r.code} height='h-[calc(100dvh-20rem)]' />}
         </div>
     );
 }
