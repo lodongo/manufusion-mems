@@ -233,48 +233,54 @@ export default function WarehouseSetup({ costCenterId, onBack }: { costCenterId:
     const cluster = d.clusters.find((c) => c.code === openCluster);
 
     return (
-        <div className='flex h-[calc(100dvh-7rem)] flex-col'>
-            <div className='shrink-0 space-y-2 border-b border-slate-800 bg-slate-950 pb-3'>
+        <div className='flex min-h-0 flex-col gap-3'>
+            <div className='shrink-0 space-y-3 rounded-2xl border border-line bg-panel p-3'>
                 <div className='flex items-center gap-2'>
                     <Button variant='secondary' aria-label='Back' onClick={cluster ? () => setOpenCluster('') : onBack}>
                         <ArrowLeft className='h-4 w-4' />
                     </Button>
                     <div className='min-w-0 flex-1'>
-                        <p className='font-mono text-xs text-emerald-300'>{d.costCenter.code}</p>
-                        <p className='truncate font-semibold text-white'>Storage · {d.costCenter.name}</p>
+                        <p className='font-mono text-xs text-soft'>{d.costCenter.code}</p>
+                        <p className='truncate font-semibold text-ink'>Warehouse · {d.costCenter.name}</p>
                     </div>
-                    {tab === 'setup' && d.canEdit && d.configured && (
+                    {d.canEdit && d.configured && !cluster && (
                         <Button variant='secondary' onClick={() => setEditing(true)}>
                             <Pencil className='h-4 w-4' />
                             Edit
                         </Button>
                     )}
-                    {(tab === 'clusters' || tab === 'topology') && d.canEdit && d.configured && !cluster && (
+                    {d.canEdit && d.configured && !cluster && (
                         <Button onClick={() => setNewCluster(true)}>
                             <Plus className='h-4 w-4' />
                             Cluster
                         </Button>
                     )}
                 </div>
-                <div className='flex gap-1 overflow-x-auto rounded-xl border border-slate-800 p-1'>
+                <div className='grid grid-cols-2 gap-1 rounded-xl border border-line bg-page p-1 sm:grid-cols-4'>
                     {(
                         [
-                            ['setup', 'Layout & capacity'],
-                            ['topology', 'Physical storage'],
-                            ['clusters', `Clusters (${d.clusters.length})`],
-                            ['positions', 'Positions'],
+                            ['setup', 'Overview'],
+                            ['topology', 'Storage map'],
+                            ['clusters', `Clusters · ${d.clusters.length}`],
+                            ['positions', 'Bin positions'],
                         ] as Array<[Tab, string]>
                     ).map(([k, label]) => (
-                        <button key={k} type='button' onClick={() => (setTab(k), setOpenCluster(''))} className={`h-9 shrink-0 rounded-lg px-3 text-sm ${tab === k ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
+                        <button key={k} type='button' onClick={() => (setTab(k), setOpenCluster(''))} className={`min-h-11 rounded-lg px-2 py-2 text-center text-sm font-medium ${tab === k ? 'bg-brand text-onbrand' : 'text-ink active:bg-panel'}`}>
                             {label}
                         </button>
                     ))}
                 </div>
             </div>
 
-            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
+            <div className='min-h-0 flex-1 space-y-3 pb-4'>
                 {!d.configured && !d.canEdit && <Alert tone='info'>Storage has not been set up for this cost center yet.</Alert>}
-                {tab === 'setup' && d.setup && <SetupView data={d} setup={d.setup} onTopology={() => setTab('topology')} />}
+                {tab === 'setup' && d.setup && <>
+                    <div className='flex items-center justify-between gap-3 rounded-xl border border-line bg-panel px-3 py-2'>
+                        <p className='min-w-0 text-sm text-soft'>{d.summary.clusters} clusters · {d.summary.free.toLocaleString()} positions ready to allocate</p>
+                        {d.canEdit && <Button onClick={() => setNewCluster(true)}><Plus className='h-4 w-4'/> Add cluster</Button>}
+                    </div>
+                    <SetupView data={d} setup={d.setup} onTopology={() => setTab('topology')} />
+                </>}
                 {tab === 'topology' && d.setup && <PhysicalStorage data={d} setup={d.setup} reload={reload} />}
                 {tab === 'clusters' && !cluster && <ClusterList data={d} onOpen={setOpenCluster} />}
                 {tab === 'clusters' && cluster && <ClusterDetail data={d} cluster={cluster} onDeleted={done} onPositions={() => (setPositionsOf(cluster.code), setTab('positions'), setOpenCluster(''))} />}
@@ -290,18 +296,18 @@ export default function WarehouseSetup({ costCenterId, onBack }: { costCenterId:
 
 function Stat({ label, value }: { label: string; value: string }) {
     return (
-        <div className='rounded-xl border border-slate-800 bg-slate-950 p-3'>
-            <p className='text-[11px] uppercase tracking-wider text-slate-500'>{label}</p>
-            <p className='mt-0.5 text-lg font-semibold text-white'>{value}</p>
+        <div className='min-w-0 rounded-xl border border-line bg-panel p-3'>
+            <p className='text-[11px] uppercase tracking-wider text-soft'>{label}</p>
+            <p className='mt-1 break-words text-lg font-semibold text-ink'>{value}</p>
         </div>
     );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
     return (
-        <div className='grid grid-cols-[9.5rem_1fr] gap-2 text-sm'>
-            <span className='text-xs text-slate-500'>{label}</span>
-            <span className='text-slate-200'>{value}</span>
+        <div className='grid grid-cols-[minmax(0,43%)_minmax(0,1fr)] gap-2 text-sm'>
+            <span className='text-xs text-soft'>{label}</span>
+            <span className='break-words text-ink'>{value}</span>
         </div>
     );
 }
@@ -322,9 +328,9 @@ function SetupView({ data, setup, onTopology }: { data: Data; setup: Setup; onTo
         <>
             <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
                 <Stat label='Positions' value={s.totalPositions.toLocaleString()} />
-                <Stat label='In clusters' value={s.allocated.toLocaleString()} />
+                <Stat label='Allocated' value={s.allocated.toLocaleString()} />
                 <Stat label='Free' value={s.free.toLocaleString()} />
-                <Stat label='Used' value={s.totalPositions ? `${Math.round((s.allocated / s.totalPositions) * 100)}%` : '0%'} />
+                <Stat label='Allocation' value={s.totalPositions ? `${Math.round((s.allocated / s.totalPositions) * 100)}%` : '0%'} />
             </div>
             <Card className='space-y-2'>
                 <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Material categories ({setup.materialCategoryCodes.length})</p>
