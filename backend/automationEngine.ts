@@ -73,7 +73,9 @@ async function status() {
         cloudSchedulerStatus().catch(() => ({ provisioned: false, reason: 'Cloud Scheduler could not be reached.', job: SCHEDULER })),
     ]);
     const settings = settingsOf(cfg);
-    const lastSeen = str(state?.data.lastReceivedAt);
+    // Only an OIDC-authenticated shared heartbeat counts as scheduler connectivity.
+    // Older versions stored manual-refresh timestamps in lastReceivedAt too.
+    const lastSeen = str(state?.data.lastVerifiedHeartbeatAt);
     const connected = !!lastSeen && Date.now() - Date.parse(lastSeen) < 20 * 60 * 1000;
     return {
         engine: { name: 'MEMS shared automation engine', version: '1.0', registered: [JOB_ID],
@@ -160,8 +162,13 @@ export const automationRoutes = {
             response = await googleRequest(SCHEDULER_API + '?updateMask=schedule,timeZone,httpTarget,attemptDeadline,retryConfig', 'PATCH', body);
         }
         if (!response.ok) {
-            if ([401, 403].includes(response.status)) throw new HttpError(403, 'One-time Google Cloud permission required: Cloud Scheduler Admin on development project and Service Account User on the dedicated scheduler identity. Enable Cloud Scheduler API and retry.');
-            if (response.status === 404) throw new HttpError(503, 'Cloud Scheduler API is not enabled in the development project.');
+            if ([401, 403].includes(response.status)) {
+                // The application must not elevate IAM itself. Return specific instructions
+                // while keeping Google API details and credentials out of the browser.
+                throw new HttpError(403,
+                    'Cloud Scheduler provisioning is not authorized. A Google Cloud project administrator must enable the Cloud Scheduler API, grant Cloud Scheduler Admin to the MEMS development runtime account, and grant Service Account User on the dedicated scheduler identity. These are one-time permissions; retry Activate after they are approved.');
+            }
+            if (response.status === 404) throw new HttpError(503, 'The Cloud Scheduler API or target job is unavailable in development. Enable Cloud Scheduler API and retry.');
             throw new HttpError(502, `Could not create the shared automation trigger (HTTP ${response.status}).`);
         }
         await audit([{ category: 'admin', action: 'automations.engine.activate', actor: ctx.actor, meta: ctx.meta, details: `Shared ${SCHEDULER} provisioned` }]);
@@ -171,7 +178,7 @@ export const automationRoutes = {
         try { await verifyHeartbeat(ctx); } catch { return error('Unauthorized automation caller.', 401); }
         const at = new Date();
         const previous = await getDoc(STATE);
-        await writeDoc(STATE, { ...(previous?.data || {}), lastReceivedAt: at.toISOString() });
+        await writeDoc(STATE, { ...(previous?.data || {}), lastReceivedAt: at.toISOString(), lastVerifiedHeartbeatAt: at.toISOString() });
         const cfg = settingsOf(await getDoc('system/fx_config'));
         if (!automationDue(cfg, str(previous?.data.lastCompletedAt), at)) return json({ ok: true, skipped: 'No registered task is due.' });
         const bucket = at.toISOString().slice(0, 16).replace(/[^0-9]/g, '');
