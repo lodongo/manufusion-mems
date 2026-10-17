@@ -787,7 +787,7 @@ async function renameOnWorkCenter(ctx: OrgContext, wcId: string, tag: string, na
 }
 
 /** Equipment units are classified from the organization's asset catalog. Returns null when no class applies. */
-export async function readUnitClass(ctx: OrgContext, code: string, required: boolean): Promise<{ code: string; name: string } | null> {
+export async function readUnitClass(ctx: OrgContext, code: string, required: boolean): Promise<{ code: string; name: string; categoryCode: string; subcategoryCode: string } | null> {
     const modules = isObj(ctx.org.data.modules) ? ctx.org.data.modules : {};
     if (modules.AST !== true) {
         if (code) throw new HttpError(400, 'Enable Asset Management (AST) under Modules to classify equipment units.');
@@ -801,7 +801,7 @@ export async function readUnitClass(ctx: OrgContext, code: string, required: boo
     const dict = await orgDictionary(ctx);
     const c = dict.classes.get(code);
     if (!c) throw new HttpError(400, 'Choose an equipment class from the asset catalog.');
-    return { code, name: str(c.name) };
+    return { code, name: str(c.name), categoryCode: str(c.categoryCode), subcategoryCode: str(c.subcategoryCode) };
 }
 
 /** Creates the draft asset that represents a new equipment unit, so its attributes can be configured and confirmed. */
