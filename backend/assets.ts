@@ -828,12 +828,14 @@ export async function createUnitAsset(ctx: OrgContext, unit: { id: string; code:
         updatedAt: now,
         history: [{ at: now, by: ctx.uid, byName: displayName(ctx), action: 'created', note: `Created with equipment unit ${unit.code}` }],
     };
-    if (!(await writeDoc(`${assetCol(ctx.orgId)}/${tag}`, data, { exists: false }))) throw new HttpError(409, 'Please try again.');
     const unitDoc = await getDoc(structPath(ctx.orgId, unit.id));
-    const unitAttrs: Obj = unitDoc && isObj(unitDoc.data.attributes) ? { ...unitDoc.data.attributes } : {};
-    unitAttrs.assetTag = tag;
-    unitAttrs.assetTagName = unit.name;
-    await updateFields(structPath(ctx.orgId, unit.id), { attributes: unitAttrs, updatedAt: now });
+    if (!unitDoc) throw new HttpError(404, 'Equipment unit not found.');
+    const unitAttrs: Obj = isObj(unitDoc.data.attributes) ? { ...unitDoc.data.attributes } : {};
+    if (!unitIsAssignable(unitAttrs)) throw new HttpError(409, 'The equipment is already mapped to an asset.');
+    await commitAssetEquipmentWrites([
+        { path: `${assetCol(ctx.orgId)}/${tag}`, fields: data, create: true },
+        { path: structPath(ctx.orgId, unit.id), fields: { attributes: { ...unitAttrs, assetTag: tag, assetTagName: unit.name }, updatedAt: now }, updateTime: unitDoc.updateTime },
+    ]);
     await rec(ctx, 'data', 'org.assets.create', `${tag} ${unit.name}`, `${classCode} ${str(c.name)} for equipment unit ${unit.code}`, ctx.orgId);
     return tag;
 }
