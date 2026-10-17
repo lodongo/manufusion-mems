@@ -492,8 +492,17 @@ export const structureRoutes = {
                 },
                 currentDocument: { exists: false },
             });
-            for (const n of root) patch(`${col(ctx.orgId)}/${n.id}`, { parentId: id, updatedAt: now });
-            for (const n of groups) patch(`${col(ctx.orgId)}/${n.id}`, { tier: Number(n.data.tier) + 1, updatedAt: now });
+            const rootedIds = new Set(root.map((n) => n.id));
+            for (const n of nodes) {
+                const isRoot = rootedIds.has(n.id);
+                const isGroup = str(n.data.level) === 'group';
+                if (!isRoot && !isGroup) continue;
+                patch(`${col(ctx.orgId)}/${n.id}`, {
+                    ...(isRoot ? { parentId: id } : {}),
+                    ...(isGroup ? { tier: Number(n.data.tier) + 1 } : {}),
+                    updatedAt: now,
+                });
+            }
             for (const p of upperRoles) {
                 const currentTier = Number(str(p.data.operatingLevel).slice(6));
                 patch(`organizations/${ctx.orgId}/positions/${p.id}`, { operatingLevel: `upper:${currentTier + 1}`, updatedAt: now });
