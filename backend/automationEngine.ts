@@ -59,7 +59,7 @@ async function verifyHeartbeat(ctx: RouterContext) {
 async function cloudSchedulerStatus() {
     const response = await googleRequest(SCHEDULER_API, 'GET');
     if (response.status === 404) return { provisioned: false, reason: 'One shared scheduler trigger has not been created yet.', job: SCHEDULER };
-    if (response.status === 403) return { provisioned: false, reason: 'Runtime service account lacks Cloud Scheduler Viewer.', job: SCHEDULER };
+    if (response.status === 403) return { provisioned: false, reason: 'Cloud Scheduler API may be disabled, or the runtime account lacks Cloud Scheduler Viewer. Check the API and IAM permissions.', job: SCHEDULER };
     if (!response.ok) return { provisioned: false, reason: `Cloud Scheduler HTTP ${response.status}`, job: SCHEDULER };
     const data = await response.json() as Record<string, unknown>;
     return { provisioned: true, job: SCHEDULER, state: str(data.state), schedule: str(data.schedule),
