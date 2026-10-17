@@ -109,6 +109,7 @@ import { brandingOut, brandingRoutes, THEME_PRESETS as ORG_THEME_PRESETS } from 
 import { signedUrl, structureRoutes } from './structure';
 import { adminOperationsRoutes } from './adminOperations';
 import { fxManagementRoutes } from './fxManagement';
+import { fxSchedulerRoutes } from './fxScheduler';
 import { setupProgressRoutes } from './setupProgress';
 import { positionRoutes } from './positions';
 import { moduleDefaultRoutes, pendingDefaultKeys, seedModuleMetadata } from './moduleDefaults';
@@ -1541,6 +1542,7 @@ export const handler = router({
     ...setupProgressRoutes,
     ...adminOperationsRoutes,
     ...fxManagementRoutes,
+    ...fxSchedulerRoutes,
     ...positionRoutes,
     ...moduleDefaultRoutes,
     ...billingRoutes,
