@@ -29,6 +29,7 @@ import UserSetup from './UserSetup';
 import UserHealth from './UserHealth';
 import OrgOverview from './OrgOverview';
 import SetupGuide, { type SetupProgress } from './SetupGuide';
+import RestCountdown from '../components/RestCountdown';
 import OrgUsers from './OrgUsers';
 import OrgRoles from './OrgRoles';
 import OrgAudit from './OrgAudit';
@@ -348,7 +349,7 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
                     <UserChip session={session} compact onClick={() => go('profile')} />
                 </header>
                 <main className='mx-auto w-full max-w-4xl px-4 py-6 lg:px-8 lg:py-8'>
-                    {setup.data && (section === 'positions' || (section === 'structure' && parts[3] !== 'storage')) && <SetupGuide progress={setup.data} compact />}
+                    {(section === 'positions' || (section === 'structure' && parts[3] !== 'storage')) && <RestCountdown />}
                     {content}
                 </main>
             </div>
