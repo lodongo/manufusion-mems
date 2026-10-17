@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowDownUp, RefreshCw, Save } from 'lucide-react';
 import { callBackend } from '../lib/backend';
+import { navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
 import { Badge, Button, Card, PageTitle, Spinner, useLoad } from './kit';
 
-interface History { capturedAt: string; observedAt: string; provider: string; usdKes: number; kesUsd: number }
+interface History { capturedAt: string; observedAt: string; provider: string; usdKes: number | null; kesUsd: number | null; rates?: Record<string, number> }
 interface Provider { id: string; label: string; apiKeyRequired: boolean; cadence: string; notes: string }
 interface Config { provider: string; enabled: boolean; frequency: string; timeUtc: string; weekday: number }
 interface FxData {
     settings: Config; providers: Provider[];
     rates: { usdKes: number | null; kesUsd: number | null; providerObservedAt: string; source: string };
+    currencies: Array<{ code:string;name:string;unitsPerUsd:number|null;usdPerUnit:number|null;rateSource:string;rateObservedAt:string }>;
+    coverage: { matched?:number;total?:number;unsupported?:number } | null;
     history: History[]; scheduler: { status: string; notes: string; lastReceivedAt?: string; lastCompletedAt?: string; lastError?: string };
 }
 type Window = 'hour' | 'today' | '24h' | 'month' | '30d' | 'year' | 'lastYear';
@@ -26,22 +29,24 @@ function after(range: Window): number {
     return Date.UTC(date.getUTCFullYear(), 0, 1);
 }
 
-function MiniTrend({ points }: { points: History[] }) {
-    const series = points.filter((p) => Number.isFinite(p.usdKes)).slice(-200);
-    if (series.length < 2) return <div className='rounded-xl border border-line bg-panel p-5 text-center text-sm text-soft'>No meaningful trend yet. Refresh rates over time to build a historical series.</div>;
-    const values = series.map((p) => p.usdKes);
+function MiniTrend({ points, currency }: { points: History[]; currency: string }) {
+    const series = points.map((p) => ({ ...p,
+        usdKes: Number(p.rates?.[currency] ?? (currency === 'KES' ? p.usdKes : NaN)) }))
+        .filter((p) => Number.isFinite(p.usdKes) && (p.usdKes as number) > 0).slice(-200);
+    if (series.length < 2) return <div className='rounded-xl border border-line bg-panel p-5 text-center text-sm text-soft'>No meaningful published change yet for the selected currency. Historical market movements are never estimated.</div>;
+    const values = series.map((p) => p.usdKes as number);
     const low = Math.min(...values), high = Math.max(...values), span = high - low || 1;
     const path = values.map((v, i) => `${i ? 'L' : 'M'} ${20 + (i / (values.length - 1)) * 560} ${160 - ((v - low) / span) * 130}`).join(' ');
     const delta = values[values.length - 1] - values[0];
     return <div className='rounded-xl border border-line bg-panel p-3'>
-        <svg viewBox='0 0 600 195' className='w-full text-brand' role='img' aria-label='USD to KES history line graph'>
+        <svg viewBox='0 0 600 195' className='w-full text-brand' role='img' aria-label={`USD to ${currency} history line graph`}>
             <path d='M20 160 H580' fill='none' stroke='currentColor' strokeOpacity='.2' />
             <path d={path} stroke='currentColor' fill='none' strokeWidth='3' strokeLinecap='round' strokeLinejoin='round' />
             <circle cx='580' cy={160 - ((values[values.length - 1] - low) / span) * 130} r='5' fill='currentColor' />
-            <text x='22' y='20' fill='currentColor' fontSize='13'>{high.toFixed(3)} KES</text>
-            <text x='22' y='185' fill='currentColor' fontSize='13'>{low.toFixed(3)} KES</text>
+            <text x='22' y='20' fill='currentColor' fontSize='13'>{high.toFixed(4)} {currency}</text>
+            <text x='22' y='185' fill='currentColor' fontSize='13'>{low.toFixed(4)} {currency}</text>
         </svg>
-        <p className='text-center text-sm text-soft'>Change within available observations: {delta >= 0 ? '+' : ''}{delta.toFixed(4)} KES per USD · {series.length} snapshots</p>
+        <p className='text-center text-sm text-soft'>Change within available observations: {delta >= 0 ? '+' : ''}{delta.toFixed(4)} {currency} per USD · {series.length} snapshots</p>
     </div>;
 }
 
@@ -53,6 +58,7 @@ export default function FxMonitor() {
     const [weekday, setWeekday] = useState('1');
     const [enabled, setEnabled] = useState(false);
     const [windowKey, setWindowKey] = useState<Window>('30d');
+    const [currency, setCurrency] = useState('KES');
     const [busy, setBusy] = useState('');
     const [notice, setNotice] = useState('');
     const [fault, setFault] = useState('');
@@ -64,6 +70,7 @@ export default function FxMonitor() {
         setWeekday(String(data.settings.weekday));
         setEnabled(data.settings.enabled);
     }, [data?.settings]);
+    const selected = data?.currencies.find((c)=>c.code===currency);
     const filtered = useMemo(() =>
         (data?.history ?? []).filter((p) => Date.parse(p.capturedAt) >= after(windowKey)).sort((a,b) => a.capturedAt.localeCompare(b.capturedAt)),
         [data?.history, windowKey]
@@ -78,29 +85,37 @@ export default function FxMonitor() {
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load exchange-rate data.'}</Alert>;
     return <div className='space-y-4'>
-        <PageTitle title='FX monitoring & automation' subtitle='USD base, KES settlement rate · published observations and preserved history' />
-        <div className='grid grid-cols-2 gap-3'>
-            <Card className='space-y-1'>
-                <p className='text-xs text-soft'>1 USD equals</p>
-                <p className='text-xl font-bold text-ink'>{data.rates.usdKes?.toFixed(4) ?? 'Unavailable'} <span className='text-xs'>KES</span></p>
-            </Card>
-            <Card className='space-y-1'>
-                <p className='text-xs text-soft'>1 KES equals</p>
-                <p className='text-xl font-bold text-ink'>{data.rates.kesUsd?.toFixed(6) ?? 'Unavailable'} <span className='text-xs'>USD</span></p>
-            </Card>
-        </div>
-        <Card className='space-y-2 text-xs text-soft'>
-            <p>Source: <strong className='text-ink'>{data.rates.source || 'Not yet refreshed'}</strong></p>
-            <p>Provider's published rate: {data.rates.providerObservedAt ? new Date(data.rates.providerObservedAt).toLocaleString() : 'Unknown'}</p>
-            <p>Last fetched snapshots available: {data.history.length}. These are observations, not guaranteed live market ticks.</p>
+        <PageTitle title='World exchange rates & automation' subtitle='All uploaded currencies · USD base · source-verified history' />
+        <Card className='space-y-3'>
+            <h2 className='font-semibold text-ink'>Loaded currency catalogue</h2>
+            <div className='grid grid-cols-2 gap-2'>
+                <div className='rounded-xl border border-line p-3'><p className='text-xs text-soft'>Uploaded currencies</p><p className='text-xl font-bold text-ink'>{data.currencies.length}</p></div>
+                <div className='rounded-xl border border-line p-3'><p className='text-xs text-soft'>Provider coverage</p><p className='text-xl font-bold text-ink'>{data.coverage?.matched ?? '—'}</p></div>
+            </div>
+            <SelectField label='Explore a currency' id='fx-currency' value={currency} onChange={(e)=>setCurrency(e.target.value)}>
+                {data.currencies.map((c)=><option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
+            </SelectField>
+            <div className='grid grid-cols-2 gap-3'>
+                <div className='rounded-xl border border-line bg-panel p-3'>
+                    <p className='text-xs text-soft'>1 USD equals</p>
+                    <p className='mt-1 text-xl font-bold text-ink'>{selected?.unitsPerUsd?.toLocaleString(undefined,{maximumFractionDigits:6}) ?? '—'} <span className='text-xs'>{currency}</span></p>
+                </div>
+                <div className='rounded-xl border border-line bg-panel p-3'>
+                    <p className='text-xs text-soft'>1 {currency} equals</p>
+                    <p className='mt-1 text-xl font-bold text-ink'>{selected?.usdPerUnit?.toPrecision(7) ?? '—'} <span className='text-xs'>USD</span></p>
+                </div>
+            </div>
+            <p className='text-xs text-soft'>Source: {selected?.rateSource || data.rates.source || 'Not refreshed'} · Published: {selected?.rateObservedAt ? new Date(selected.rateObservedAt).toLocaleString() : 'Unconfirmed'}</p>
+            {(data.coverage?.unsupported ?? 0)>0 && <Alert tone='warn'>{data.coverage?.unsupported} uploaded currency codes are not supplied by this provider. Their previously recorded rates have been preserved rather than replaced by estimated data.</Alert>}
+            <p className='text-xs text-soft'>Reference rates inform conversions; they do not alter already-posted transactions or replace bank execution rates.</p>
         </Card>
         <Card className='space-y-3'>
-            <div className='flex items-center gap-2'><Activity className='h-5 w-5 text-brand'/><h2 className='font-semibold text-ink'>USD/KES exchange-rate trends</h2></div>
+            <div className='flex items-center gap-2'><Activity className='h-5 w-5 text-brand'/><h2 className='font-semibold text-ink'>USD/{currency} exchange-rate trends</h2></div>
             <div className='flex gap-2 overflow-x-auto pb-2'>
                 {WINDOWS.map(([key,title])=><button type='button' key={key} onClick={()=>setWindowKey(key)}
                     className={`shrink-0 rounded-lg border px-3 py-2 text-xs ${windowKey===key?'border-brand bg-brand text-onbrand':'border-line bg-panel text-ink'}`}>{title}</button>)}
             </div>
-            <MiniTrend points={filtered} />
+            <MiniTrend points={filtered} currency={currency} />
             <p className='text-xs text-soft'>Hourly and daily periods only show changes when the selected provider publishes new values. Empty periods are not estimated.</p>
         </Card>
         <Card className='space-y-4'>
@@ -120,7 +135,10 @@ export default function FxMonitor() {
                 <input type='checkbox' checked={enabled} onChange={(e)=>setEnabled(e.target.checked)} className='h-5 w-5 accent-brand' />
                 Enable scheduled-rate refresh configuration
             </label>
-            <Alert tone={data.scheduler.status === 'oidc_schedule_connected' ? 'success' : 'warn'}>
+            <button type='button' onClick={()=>navigate('admin/automation_center')} className='w-full rounded-xl border border-brand bg-brand/10 p-3 text-left text-sm font-semibold text-ink'>
+                Open shared Automation Center → Connect one trigger for all future MEMS automations
+            </button>
+            <Alert tone={data.scheduler.status === 'heartbeat_seen' ? 'success' : 'warn'}>
                 {data.scheduler.notes}
                 {data.scheduler.lastReceivedAt ? ` Last verified callback: ${new Date(data.scheduler.lastReceivedAt).toLocaleString()}.` : ''}
                 {data.scheduler.lastCompletedAt ? ` Last completed refresh: ${new Date(data.scheduler.lastCompletedAt).toLocaleString()}.` : ''}
@@ -130,7 +148,7 @@ export default function FxMonitor() {
                 <Button variant='secondary' busy={!!busy} onClick={()=>execute('/api/admin/fx/config',{provider,frequency,timeUtc,weekday:Number(weekday),enabled},'Provider and schedule preferences saved.')}>
                     <Save className='h-4 w-4' /> Save settings
                 </Button>
-                <Button busy={!!busy} onClick={()=>execute('/api/admin/fx/refresh',{},'Updated KES exchange rate and added a historical snapshot.')}>
+                <Button busy={!!busy} onClick={()=>execute('/api/admin/fx/refresh',{},'Updated every currency supported by the configured provider; new published values were archived.')}>
                     <RefreshCw className='h-4 w-4'/> Refresh now
                 </Button>
             </div>
@@ -138,11 +156,11 @@ export default function FxMonitor() {
             {fault && <Alert tone='error'>{fault}</Alert>}
         </Card>
         <Card className='space-y-2'>
-            <h2 className='font-semibold text-ink'>Rate observations</h2>
+            <h2 className='font-semibold text-ink'>Recorded {currency} observations</h2>
             <div className='max-h-72 space-y-2 overflow-y-auto'>
-                {filtered.slice(-40).reverse().map((h,i)=><div key={h.capturedAt+'-'+i} className='flex items-center justify-between gap-2 rounded-lg border border-line p-2 text-xs text-soft'>
+                {filtered.filter((h)=>Number.isFinite(h.rates?.[currency] ?? (currency==='KES' ? h.usdKes : NaN))).slice(-40).reverse().map((h,i)=><div key={h.capturedAt+'-'+i} className='flex items-center justify-between gap-2 rounded-lg border border-line p-2 text-xs text-soft'>
                     <div>{new Date(h.capturedAt).toLocaleString()}<span className='block text-muted'>{h.provider}</span></div>
-                    <strong className='text-ink'>1 USD = {h.usdKes.toFixed(4)} KES</strong>
+                    <strong className='text-ink'>1 USD = {Number(h.rates?.[currency] ?? (currency === 'KES' ? h.usdKes : NaN)).toLocaleString(undefined, { maximumFractionDigits: 6 })} {currency}</strong>
                 </div>)}
                 {!filtered.length && <p className='text-sm text-soft'>No snapshots in this period.</p>}
             </div>
