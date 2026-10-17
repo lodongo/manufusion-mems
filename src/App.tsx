@@ -180,7 +180,17 @@ function App() {
                     const last = res.lastRoute ?? '';
                     const validLast = /^(organization_home|organization_admin)(\/[A-Za-z0-9_-]{1,128}){0,8}$/.test(last)
                         && (res.landing === 'organization_admin' || !last.startsWith('organization_admin'));
-                    const destination = res.preferences?.startPage === 'last' && validLast ? last : 'organization_home';
+                    // Explicitly remember the last organization-design or job-role configuration
+                    // on this device; otherwise preserve the normal home/last-page preference.
+                    let lastConfiguration = '';
+                    if (res.landing === 'organization_admin' && res.organization?.id) {
+                        try {
+                            const key = 'mems.lastDesign.' + res.organization.id + '.' + res.user.uid;
+                            const saved = localStorage.getItem(key) || '';
+                            if (/^organization_admin\/(structure|positions)(\/[A-Za-z0-9_-]{1,128}){0,3}$/.test(saved)) lastConfiguration = saved;
+                        } catch { /* no persisted route on this device */ }
+                    }
+                    const destination = lastConfiguration || (res.preferences?.startPage === 'last' && validLast ? last : 'organization_home');
                     if (!current || current === 'login' || current === 'organization_home' || current === 'organization_admin') {
                         navigate(destination);
                     } else if (!current.startsWith('organization_home/')
