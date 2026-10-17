@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Save, Undo2 } from 'lucide-react';
+import { Save, Undo2, DatabaseZap } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
@@ -25,7 +25,7 @@ const subOf = (s: Skill) => s.subcategory || 'General';
 const plural = (n: number, word: string, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
 const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-export default function SkillsBrowser({ items, canWrite, onDone, onCancel }: { items: Skill[]; canWrite: boolean; onDone: () => void; onCancel: () => void }) {
+export default function SkillsBrowser({ items, canWrite, canReplace = false, onDone, onCancel }: { items: Skill[]; canWrite: boolean; canReplace?: boolean; onDone: () => void; onCancel: () => void }) {
     const [view, setView] = useState<View>('browse');
     const [category, setCategory] = useState('');
     const [subcategory, setSubcategory] = useState('');
@@ -33,6 +33,7 @@ export default function SkillsBrowser({ items, canWrite, onDone, onCancel }: { i
     const [changes, setChanges] = useState<Record<string, boolean>>({});
     const [openCode, setOpenCode] = useState('');
     const [error, setError] = useState('');
+    const [replacing, setReplacing] = useState(false);
     const confirm = useConfirm();
 
     const saved = (s: Skill) => s.active !== false;
@@ -123,6 +124,31 @@ export default function SkillsBrowser({ items, canWrite, onDone, onCancel }: { i
             },
         );
 
+    const freshStart = async () => {
+        if (Object.keys(changes).length) {
+            setError('Save or undo pending skill status changes before replacing the catalogue.');
+            return;
+        }
+        const acknowledgement = window.prompt(
+            `Replace all ${items.length} existing HRM skills with the new 2,600-skill universal master?\n\n` +
+            'MEMS will back up the old catalogue first. Existing role references keep their legacy codes but should be reviewed.\n\n' +
+            'Type REPLACE SKILLS MASTER to confirm:'
+        );
+        if (acknowledgement !== 'REPLACE SKILLS MASTER') return;
+        setError('');
+        setReplacing(true);
+        try {
+            const outcome = await callBackend<{success:boolean;total:number;categories:number;subcategories:number;backupId:string}>(
+                '/api/admin/modules/metadata/skills/fresh-start', { confirm: acknowledgement });
+            if (!outcome.success || outcome.total < 2000) throw new Error('Catalogue refresh could not be verified.');
+            onDone();
+        } catch (e) {
+            setError(messageOf(e,'Could not replace Skills Master. The original catalogue remains available unless the server confirms success.'));
+        } finally {
+            setReplacing(false);
+        }
+    };
+
     const columns: Array<Column<Skill>> = [
         { key: 'code', label: 'Code', value: (s) => s.code, className: 'font-mono text-xs' },
         { key: 'label', label: 'Skill', value: (s) => s.label, className: 'font-semibold text-ink' },
@@ -172,12 +198,15 @@ export default function SkillsBrowser({ items, canWrite, onDone, onCancel }: { i
             subtitle={`${items.length} skills · ${enabledCount} enabled`}
             onBack={back}
             actions={
-                canWrite && (
-                    <Button onClick={save} disabled={!changeList.length || tooMany}>
+                <div className='flex flex-wrap items-center gap-2'>
+                    {canReplace && <Button variant='secondary' busy={replacing} onClick={freshStart}>
+                        <DatabaseZap className='h-4 w-4' /> Replace catalogue
+                    </Button>}
+                    {canWrite && <Button onClick={save} disabled={!changeList.length || tooMany || replacing}>
                         <Save className='h-4 w-4' />
                         Save{changeList.length ? ` (${changeList.length})` : ''}
-                    </Button>
-                )
+                    </Button>}
+                </div>
             }
             toolbar={
                 <div className='space-y-1'>
