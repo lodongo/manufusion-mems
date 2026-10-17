@@ -1530,9 +1530,16 @@ export const assetRoutes = {
             let candidates: Array<{ tag: string; name: string; className: string; nodeCode: string }> = [];
             if (!asset) {
                 const { siteId } = await lineage(ctx.orgId, wc.id);
+                const wcAttrs = isObj(wc.data.attributes) ? wc.data.attributes : {};
+                const unitClass = await unitClassification(ctx, str(wcAttrs.equipmentClass));
                 candidates = (await listDocs(assetCol(ctx.orgId)))
-                    .filter((d) => str(d.data.status) === 'active' && !str(d.data.workCenterId) && (!siteId || !str(d.data.siteId) || str(d.data.siteId) === siteId) && inScope(scope, str(d.data.nodeId)))
-                    .map((d) => ({ tag: d.id, name: str(d.data.name), className: str(d.data.className), nodeCode: str(d.data.nodeCode) }))
+                    .filter((d) => ['active', 'draft'].includes(str(d.data.status))
+                        && assetIsAssignable(d.data)
+                        && identicalAssetEquipmentClass(d.data, unitClass)
+                        && (!siteId || !str(d.data.siteId) || str(d.data.siteId) === siteId)
+                        && inScope(scope, str(d.data.nodeId)))
+                    .map((d) => ({ tag: d.id, name: str(d.data.name), className: str(d.data.className),
+                        nodeCode: str(d.data.nodeCode), status: str(d.data.status) }))
                     .sort((a, b) => a.tag.localeCompare(b.tag));
             }
             return { ...out, asset: asset ? assetOut(asset, true) : null, candidates };
@@ -1568,6 +1575,60 @@ export const assetRoutes = {
         }),
     ],
 
+    /** Choose a compatible existing asset while creating an equipment unit. */
+    'POST /api/org/assets/eligible-for-equipment': [
+        orgRoute('org.assets.eligible_for_equipment', 'ADM.structure', async (ctx) => {
+            requireAst(ctx);
+            if (!hasPerm(ctx.permissions, 'AST.create')) throw new HttpError(403, 'Asset creation or mapping rights are required.');
+            const parentId = str(ctx.body.parentId);
+            const classCode = str(ctx.body.classCode);
+            if (!NODE_ID_RE.test(parentId)) throw new HttpError(400, 'Choose the equipment parent cost center.');
+            const parent = await getDoc(structPath(ctx.orgId, parentId));
+            if (!parent || str(parent.data.level) !== 'cost_center') throw new HttpError(400, 'Equipment must be created under a cost center.');
+            const scope = await scopeOf(ctx);
+            if (!inScope(scope, parentId)) throw new HttpError(403, 'The selected parent is outside your permitted scope.');
+            const equipment = await unitClassification(ctx, classCode);
+            const { siteId } = await lineage(ctx.orgId, parentId);
+            const candidates = (await listDocs(assetCol(ctx.orgId)))
+                .filter((a) => ['active', 'draft'].includes(str(a.data.status))
+                    && assetIsAssignable(a.data)
+                    && identicalAssetEquipmentClass(a.data, equipment)
+                    && (!siteId || !str(a.data.siteId) || siteId === str(a.data.siteId))
+                    && inScope(scope, str(a.data.nodeId)))
+                .map((a) => ({ tag: a.id, name: str(a.data.name), classCode: str(a.data.classCode),
+                    categoryCode: str(a.data.categoryCode), subcategoryCode: str(a.data.subcategoryCode),
+                    status: str(a.data.status), nodeCode: str(a.data.nodeCode) }))
+                .sort((a, b) => a.tag.localeCompare(b.tag));
+            return { candidates };
+        }),
+    ],
+    /** Choose compatible, unassigned equipment when creating an asset. */
+    'POST /api/org/assets/eligible-equipment': [
+        orgRoute('org.assets.eligible_equipment', 'AST.create', async (ctx) => {
+            requireAst(ctx);
+            if (!hasPerm(ctx.permissions, 'ADM.structure')) throw new HttpError(403, 'Organization design permission is required to assign equipment.');
+            const classCode = str(ctx.body.classCode);
+            const nodeId = str(ctx.body.nodeId);
+            if (!NODE_ID_RE.test(nodeId)) throw new HttpError(400, 'Choose a location before assigning equipment.');
+            const node = await getDoc(structPath(ctx.orgId, nodeId));
+            const scope = await scopeOf(ctx);
+            if (!node || !inScope(scope, nodeId)) throw new HttpError(403, 'Location outside your permitted scope.');
+            const equipment = await unitClassification(ctx, classCode);
+            const { siteId } = await lineage(ctx.orgId, nodeId);
+            const units = (await listDocs(`organizations/${ctx.orgId}/structure`))
+                .filter((n) => str(n.data.level) === 'work_center' && str(n.data.status) !== 'inactive'
+                    && inScope(scope, n.id) && unitIsAssignable(isObj(n.data.attributes) ? n.data.attributes : {})
+                    && str(isObj(n.data.attributes) ? n.data.attributes.equipmentClass : '') === equipment.classCode);
+            const candidates = (await Promise.all(units.map(async (wc) => {
+                const location = await lineage(ctx.orgId, wc.id);
+                return (!siteId || location.siteId === siteId) ? { id: wc.id, code: str(wc.data.code),
+                    name: str(wc.data.name), classCode, categoryCode: equipment.categoryCode,
+                    subcategoryCode: equipment.subcategoryCode } : null;
+            }))).filter((item): item is NonNullable<typeof item> => item !== null);
+            return { candidates };
+        }),
+    ],
+
     // Assets a work center can be linked to: active, at the same site, not linked elsewhere.
     'POST /api/org/assets/options': [
         orgRoute('org.assets.options', 'ADM.structure', async (ctx) => {
@@ -1575,11 +1636,16 @@ export const assetRoutes = {
             if (map.AST !== true) return { enabled: false, assets: [] };
             const parentId = str(ctx.body.parentId);
             const nodeId = str(ctx.body.nodeId);
+            const classCode = str(ctx.body.classCode);
             if (!NODE_ID_RE.test(parentId)) throw new HttpError(400, 'Invalid location.');
             const { siteId } = await lineage(ctx.orgId, parentId);
+            const cls = classCode ? await unitClassification(ctx, classCode) : null;
             const docs = await listDocs(assetCol(ctx.orgId));
             const assets = docs
-                .filter((d) => str(d.data.status) === 'active' && (!siteId || !str(d.data.siteId) || str(d.data.siteId) === siteId) && (!str(d.data.workCenterId) || str(d.data.workCenterId) === nodeId))
+                .filter((d) => ['active','draft'].includes(str(d.data.status)) &&
+                    (!siteId || !str(d.data.siteId) || str(d.data.siteId) === siteId) &&
+                    assetIsAssignable(d.data, nodeId) &&
+                    (!cls || identicalAssetEquipmentClass(d.data, cls)))
                 .map((d) => ({ tag: d.id, name: str(d.data.name), className: str(d.data.className), nodeCode: str(d.data.nodeCode) }))
                 .sort((a, b) => a.tag.localeCompare(b.tag));
             return { enabled: true, assets };
