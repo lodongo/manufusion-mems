@@ -584,8 +584,8 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
     const setC = (k: keyof typeof cap) => (v: string) => setCap((x) => ({ ...x, [k]: v }));
 
     return (
-        <div className='flex h-[calc(100dvh-7rem)] flex-col'>
-            <div className='shrink-0 space-y-1 border-b border-slate-800 bg-slate-950 pb-3'>
+        <div className='flex h-[calc(100dvh-8rem)] min-h-0 flex-col'>
+            <div className='shrink-0 space-y-2 border-b border-line bg-page pb-3'>
                 <div className='flex items-center gap-2'>
                     <Button variant='secondary' aria-label='Back' onClick={onCancel}>
                         <ArrowLeft className='h-4 w-4' />
@@ -605,7 +605,7 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                     {floors.length} floor{floors.length === 1 ? '' : 's'} · {positions.toLocaleString()} storage positions
                 </p>
             </div>
-            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
+            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3 pb-6'>
                 {data.categories.length === 0 && <Alert tone='error'>The material catalog has not been loaded by MEMS yet, so no material category can be chosen.</Alert>}
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-white'>1 · Material categories in this warehouse *</p>
@@ -769,8 +769,8 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                     </div>
                 </Card>
 
-                {problems.length > 0 && (
-                    <ul className='space-y-0.5 text-xs text-amber-300'>
+                {showSaveIssues && problems.length > 0 && (
+                    <ul className='space-y-1 rounded-xl border border-amber-400 bg-amber-100 p-3 text-sm text-amber-950'>
                         {problems.map((p) => (
                             <li key={p}>• {p}</li>
                         ))}
@@ -1034,6 +1034,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     if (subCodes.length > data.limits.clusterSubcategories) problems.push(`Up to ${data.limits.clusterSubcategories} subcategories per cluster.`);
     if (name.trim().length > 60) problems.push('The name can be up to 60 characters.');
     const preview = startOrd !== null && endOrd !== null && fits ? `${size.toLocaleString()} positions · ${codeAt(floorNo, floor, startOrd)} → ${codeAt(floorNo, floor, endOrd)}` : '';
+    const ready = problems.length === 0 && confirmed;
 
     const create = async () => {
         setBusy(true);
@@ -1074,19 +1075,21 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                         <ArrowLeft className='h-4 w-4' />
                     </Button>
                     <div className='min-w-0 flex-1'>
-                        <p className='font-mono text-xs text-emerald-300'>{data.costCenter.code}</p>
-                        <p className='truncate font-semibold text-white'>New storage cluster</p>
+                        <p className='font-mono text-xs text-soft'>{data.costCenter.code}</p>
+                        <p className='truncate font-semibold text-ink'>Add storage cluster</p>
                     </div>
-                    <Button busy={busy} disabled={problems.length > 0 || !confirmed} onClick={create}>
-                        <Check className='h-4 w-4' />
-                        Create
-                    </Button>
+                    <span className='rounded-lg bg-panel px-2.5 py-1.5 text-xs font-semibold text-ink'>5 steps</span>
                 </div>
-                <p className={`font-mono text-xs ${clash || (sizeOk && !preview) ? 'text-red-300' : 'text-slate-300'}`}>{preview || 'Enter the number of positions'}</p>
+                <div className='rounded-xl border border-line bg-panel px-3 py-2'>
+                    <p className={`break-words text-xs font-medium ${clash || (sizeOk && !preview) ? 'text-red-700' : 'text-ink'}`}>
+                        {preview || 'Select floor, positions, storage location and material subcategories'}
+                    </p>
+                    <p className='mt-1 text-xs text-soft'>{problems.length ? `${problems.length} item${problems.length===1?'':'s'} to complete` : confirmed ? 'Ready to create' : 'Review the allocation and confirm below'}</p>
+                </div>
             </div>
             <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-white'>1 · Floor</p><p className='text-xs text-slate-300'>5S · Set in order: select an accessible floor with safe material-handling routes. Keep emergency exits and aisles unobstructed; minimize picking travel.</p>
+                    <p className='text-sm font-semibold text-ink'>1 · Select floor</p><p className='text-xs text-soft'>Choose the floor where these positions will be allocated.</p>
                     <SelectField id='cl-floor' label='A cluster sits on one floor' value={String(floorNo)} onChange={(e) => (setFloorNo(Number(e.target.value)), setStart({ r: 1, k: 1, c: 1, p: 1 }), setConfirmed(false))}>
                         {floors.map((f, i) => (
                             <option key={i} value={i + 1}>
@@ -1102,7 +1105,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-white'>2 · Allocate positions *</p><p className='text-xs text-slate-300'>5S · Set in order: reserve a clearly identified continuous run for fast, repeatable retrieval and stock counts. Respect load ratings, handling clearance and safe access.</p>
+                    <p className='text-sm font-semibold text-ink'>2 · Allocate positions *</p><p className='text-xs text-soft'>Use the next free positions, or select a specific starting bin. Occupied bins cannot be reused.</p>
                     <div className='grid grid-cols-1 gap-2'>
                         {(
                             [
@@ -1145,7 +1148,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-white'>3 · Classification and storage location *</p><p className='text-xs text-slate-300'>Safety first: choose the material classification below, then a matching storage location. Classification and segregation take priority over subcategory. Hazardous items require SDS and chemical compatibility checks.</p>
+                    <p className='text-sm font-semibold text-ink'>3 · Choose storage location *</p><p className='text-xs text-soft'>Its existing material classification is automatically applied to the cluster. Hazardous materials still require segregation and compatibility checks.</p>
                     <p className='text-xs text-slate-400'>A storage location has one configured classification. Selecting that location applies its classification automatically.</p>
                     <SelectField id='cl-classification' label='Filter locations by material classification (optional)' value={clusterClass} onChange={(e)=>{setClusterClass(e.target.value);setLocation('');setConfirmed(false);}}>
                         <option value=''>Show all classifications</option>
@@ -1186,8 +1189,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-white'>4 · Material subcategories *</p>
-                    <p className='text-xs text-slate-300'>5S · Sort: limit this cluster to the intended subcategories for organized picking and easy counting. Never mix incompatible materials merely because they share a subcategory.</p>
+                    <p className='text-sm font-semibold text-ink'>4 · Select material subcategories *</p>
+                    <p className='text-xs text-soft'>Choose the material types allowed in this cluster. Keep incompatible materials segregated.</p>
                     {subCodes.length > 0 && (
                         <div className='flex max-h-32 flex-wrap gap-1 overflow-y-auto'>
                             {subCodes.map((c) => (
@@ -1233,7 +1236,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-white'>5 · Physical location type and identification</p><p className='text-xs text-slate-300'>5S · Shine, standardize and sustain: choose suitable storage and name the cluster for labeling, inspections, housekeeping and easy retrieval.</p><SelectField id='cl-type' label='Physical location type (bin, drawer, pallet position, etc.)' value={storageType} onChange={(e) => setStorageType(e.target.value)}>
+                    <p className='text-sm font-semibold text-ink'>5 · Name and identification</p><p className='text-xs text-soft'>Use a practical name for bin labels and picking. The name is optional.</p><SelectField id='cl-type' label='Physical location type (bin, drawer, pallet position, etc.)' value={storageType} onChange={(e) => setStorageType(e.target.value)}>
                         {data.storageTypes.map((t) => (
                             <option key={t.code} value={t.code}>
                                 {t.label}
@@ -1255,6 +1258,20 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                     I confirm: allocate these {sizeOk ? size.toLocaleString() : 0} positions{preview ? ` (${preview.split(' · ')[1]})` : ''} to {chosen ? `${chosen.code} ${chosen.name} (${chosen.classificationLabel})` : 'the chosen storage location'} for {subCodes.length} subcategor{subCodes.length === 1 ? 'y' : 'ies'}. The cluster is numbered automatically.
                 </label>
                 {error && <Alert tone='error'>{error}</Alert>}
+            </div>
+            <div className='shrink-0 border-t border-line bg-page px-2 py-3'>
+                <div className='flex items-center gap-2'>
+                    <button type='button' onClick={onCancel} className='min-h-12 rounded-xl border border-line px-4 font-semibold text-ink'>Cancel</button>
+                    <Button className='min-h-12 flex-1' busy={busy} disabled={busy} onClick={() => {
+                        if (problems.length) { setShowSaveIssues(true); return; }
+                        if (!confirmed) { setShowSaveIssues(true); return; }
+                        void create();
+                    }}>
+                        <Check className='h-4 w-4' />
+                        {ready ? 'Create cluster' : problems.length ? `Review ${problems.length} required item${problems.length===1?'':'s'}` : 'Confirm allocation to create'}
+                    </Button>
+                </div>
+                {showSaveIssues && !problems.length && !confirmed && <p className='mt-2 text-center text-sm font-medium text-amber-800'>Tick the allocation confirmation checkbox above before creating.</p>}
             </div>
         </div>
     );
