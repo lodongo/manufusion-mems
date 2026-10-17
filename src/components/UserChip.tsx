@@ -8,6 +8,7 @@ import type { Session } from '../types';
 export default function UserChip({ session, roleLabel, compact, onClick }: { session: Session; roleLabel?: string; compact?: boolean; onClick?: () => void }) {
     const name = `${session.user.firstName} ${session.user.lastName}`.trim() || session.user.email;
     const [seconds, setSeconds] = useState<number | null>(null);
+    const [restLimit, setRestLimit] = useState<number | null>(null);
     const [quickCount,setQuickCount]=useState<{total:number;unreadChats:number;newMonitored:number;overdue:number}|null>(null);
     useEffect(()=>{
         if(!session.organization){setQuickCount(null);return;}
@@ -24,19 +25,19 @@ export default function UserChip({ session, roleLabel, compact, onClick }: { ses
     useEffect(() => {
         let mounted = true;
         const refresh = () => {
-            void callBackend<{ todaySeconds: number }>('/api/profile/health/status')
-                .then((data) => { if (mounted) setSeconds(data.todaySeconds); })
+            void callBackend<{ todaySeconds: number; workSeconds:number; settings:{tracking:boolean;breaks:boolean;workMinutes:number} }>('/api/profile/health/status')
+                .then((data) => { if (mounted) { setSeconds(data.settings.tracking && data.settings.breaks ? Math.max(0, data.settings.workMinutes * 60 - data.workSeconds) : null); setRestLimit(data.settings.tracking && data.settings.breaks ? data.settings.workMinutes : null); } })
                 .catch(() => undefined);
         };
         const progress = (event: Event) => {
-            const item = (event as CustomEvent<{ uid: string; todaySeconds: number }>).detail;
-            if (mounted && item?.uid === session.user.uid) setSeconds(item.todaySeconds);
+            const item = (event as CustomEvent<{ uid: string; todaySeconds: number; workSeconds?:number; settings?:{tracking:boolean;breaks:boolean;workMinutes:number} }>).detail;
+            if (mounted && item?.uid === session.user.uid && item.settings) { setSeconds(item.settings.tracking && item.settings.breaks ? Math.max(0,item.settings.workMinutes*60-(item.workSeconds??0)) : null);setRestLimit(item.settings.tracking && item.settings.breaks ? item.settings.workMinutes : null); }
         };
         refresh();
         window.addEventListener('mems-health-progress', progress);
         return () => { mounted = false; window.removeEventListener('mems-health-progress', progress); };
     }, [session.user.uid]);
-    const minutes = Math.floor((seconds ?? 0) / 60);
+    const minutes = Math.ceil((seconds ?? 0) / 60);
     const duration = minutes >= 60 ? Math.floor(minutes / 60) + 'h ' + String(minutes % 60).padStart(2, '0') + 'm' : minutes + 'm';
     return (
         <div className='flex min-w-0 items-center gap-1'>
@@ -62,8 +63,8 @@ export default function UserChip({ session, roleLabel, compact, onClick }: { ses
                 <span className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-700 bg-slate-800 ${compact ? 'h-9 w-9' : 'h-10 w-10'}`}>
                     {session.photoUrl ? <img src={session.photoUrl} alt={name} className='h-full w-full object-cover' /> : <UserRound className='h-5 w-5 text-slate-400' />}
                 </span>
-                <span className='flex items-center gap-0.5 whitespace-nowrap text-[9px] leading-none text-muted' title={'MEMS screen time today: ' + duration}>
-                    <Clock3 className='h-2.5 w-2.5' />{seconds === null ? '–' : duration}
+                <span className='flex items-center gap-0.5 whitespace-nowrap text-[9px] leading-none text-muted' title={restLimit===null?'Rest countdown is not enabled':'Time until next rest: ' + duration}>
+                    <Clock3 className='h-2.5 w-2.5' />{seconds === null ? 'Rest off' : duration}
                 </span>
             </span>
             {!compact && (
