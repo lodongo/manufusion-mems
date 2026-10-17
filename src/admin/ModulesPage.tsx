@@ -223,7 +223,7 @@ function ModuleDetail({
             )}
             {active === 'overview' && module && <ModuleOverview module={module} kesPerUsd={kesPerUsd} />}
             {active === 'setup' && <ModuleForm module={module} all={all} categories={categories} kesPerUsd={kesPerUsd} canWrite={canWrite} onSaved={onSaved} />}
-            {(active === 'metadata' || active === 'files') && module && <Workspace module={module} view={active} canWrite={canWrite} />}
+            {(active === 'metadata' || active === 'files') && module && <Workspace module={module} view={active} canWrite={canWrite} isSuper={isSuper} />}
             {active === 'dictionary' && module?.code === 'PRC' && (module.initialized ? <AssetDictionaryAdmin canWrite={canWrite} isSuper={isSuper} /> : <Card tone='danger'><p className='text-sm text-slate-300'>Initialise PRC first.</p></Card>)}
         </div>
     );
@@ -293,7 +293,7 @@ interface WorkspaceData {
     defaultsAvailable?: string[];
 }
 
-function Workspace({ module, view, canWrite }: { module: Module; view: 'metadata' | 'files'; canWrite: boolean }) {
+function Workspace({ module, view, canWrite, isSuper }: { module: Module; view: 'metadata' | 'files'; canWrite: boolean; isSuper: boolean }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<WorkspaceData>('/api/admin/modules/workspace', { code: module.code }), [module.code, module.initialized]);
     const [editing, setEditing] = useState<MetaList | 'new' | null>(null);
 
@@ -336,7 +336,7 @@ function Workspace({ module, view, canWrite }: { module: Module; view: 'metadata
 
     if (editing && editing !== 'new' && module.code === 'SAF') return <SafMetadataBrowser title={editing.title} items={editing.items} onCancel={()=>setEditing(null)}/>;
 
-    if (editing && editing !== 'new' && module.code === 'HRM' && editing.key === 'skillsMaster') return <SkillsBrowser items={editing.items} canWrite={canWrite} onDone={()=>{setEditing(null);reload()}} onCancel={()=>setEditing(null)}/>;
+    if (editing && editing !== 'new' && module.code === 'HRM' && editing.key === 'skillsMaster') return <SkillsBrowser items={editing.items} canWrite={canWrite} canReplace={isSuper} onDone={()=>{setEditing(null);reload()}} onCancel={()=>setEditing(null)}/>;
 
     if (editing && editing !== 'new' && module.code === 'PRC' && editing.key === 'unitsOfMeasure') {
         return <ProcurementUnits items={editing.items as UomEntry[]} canWrite={canWrite} onDone={() => { setEditing(null); reload(); }} onCancel={() => setEditing(null)} />;
