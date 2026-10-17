@@ -991,7 +991,9 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const [countText, setCountText] = useState('');
     const [start, setStart] = useState({ r: 1, k: 1, c: 1, p: 1 });
     const [name, setName] = useState('');
-    const [location, setLocation] = useState('');const [clusterClass,setClusterClass]=useState('');
+    const [location, setLocation] = useState(options.length === 1 ? options[0].code : '');
+    // Classification belongs to the selected storage location and is not a second independent field.
+    const [clusterClass,setClusterClass]=useState(options.length === 1 ? options[0].classificationCode : '');
     const [q, setQ] = useState('');
     const [storageType, setStorageType] = useState(setup.storageTypeCode);
     const [confirmed, setConfirmed] = useState(false);
@@ -1020,7 +1022,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     else if (mode === 'next' && startOrd === null) problems.push(`Floor ${letter(floorNo)} has no free space of ${size.toLocaleString()} positions in sequence (largest free space: ${largestGap.toLocaleString()}).`);
     if (startOrd !== null && endOrd !== null && !fits) problems.push(`Only ${(total - startOrd).toLocaleString()} positions remain on this floor from ${codeAt(floorNo, floor, startOrd)}.`);
     if (clash) problems.push(`Overlaps cluster ${clash.code} (${clash.firstCode} to ${clash.lastCode}). Every position belongs to one cluster only.`);
-    if (!chosen) problems.push('Choose the storage location.');if(!clusterClass)problems.push('Choose material classification.');else if(chosen&&clusterClass!==chosen.classificationCode)problems.push('Classification must match storage location.');
+    if (!chosen) problems.push('Choose a storage location.');
+    if (chosen && !chosen.classificationCode) problems.push('The selected storage location needs a material classification. Edit the warehouse setup.');
     if (!subCodes.length) problems.push('Choose at least one material subcategory.');
     if (subCodes.length > data.limits.clusterSubcategories) problems.push(`Up to ${data.limits.clusterSubcategories} subcategories per cluster.`);
     if (name.trim().length > 60) problems.push('The name can be up to 60 characters.');
@@ -1042,7 +1045,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 startPos: start.p,
                 name: name.trim(),
                 locationCode: location,
-                classificationCode:clusterClass,
+                classificationCode: chosen?.classificationCode || clusterClass,
                 subcategoryCodes: subCodes,
                 storageTypeCode: storageType,
                 confirm: confirmed,
@@ -1137,7 +1140,11 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
 
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-white'>3 · Classification and storage location *</p><p className='text-xs text-slate-300'>Safety first: choose the material classification below, then a matching storage location. Classification and segregation take priority over subcategory. Hazardous items require SDS and chemical compatibility checks.</p>
-                    <p className='text-xs text-slate-400'>Classification and safety segregation take priority over subcategory.</p><SelectField id='cl-classification' label='Material classification *' value={clusterClass} onChange={(e)=>{setClusterClass(e.target.value);setLocation('');setConfirmed(false);}}><option value=''>Choose classification</option>{data.classifications.filter(x=>x.active||x.code===clusterClass).map(x=><option key={x.code} value={x.code}>{x.label} ({x.code})</option>)}</SelectField>
+                    <p className='text-xs text-slate-400'>A storage location has one configured classification. Selecting that location applies its classification automatically.</p>
+                    <SelectField id='cl-classification' label='Filter locations by material classification (optional)' value={clusterClass} onChange={(e)=>{setClusterClass(e.target.value);setLocation('');setConfirmed(false);}}>
+                        <option value=''>Show all classifications</option>
+                        {data.classifications.filter(x=>x.active||x.code===clusterClass).map(x=><option key={x.code} value={x.code}>{x.label} ({x.code})</option>)}
+                    </SelectField>
                     {options.length === 0 && <Alert tone='error'>This warehouse has no active storage locations. Edit the setup and add one first.</Alert>}
                     {options.length > 6 && (
                         <div className='relative'>
@@ -1150,7 +1157,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                             const on = location === l.code;
                             return (
                                 <li key={l.code}>
-                                    <button type='button' onClick={() => {setLocation(l.code);setConfirmed(false);}} className={`flex w-full items-start gap-3 rounded-xl border-2 p-3 text-left text-sm ${on ? 'text-white' : 'border-slate-800 text-slate-300'}`} style={on ? { borderColor: l.color, background: `${l.color}1f` } : undefined}>
+                                    <button type='button' onClick={() => {setLocation(l.code);setClusterClass(l.classificationCode);setConfirmed(false);}} className={`flex w-full items-start gap-3 rounded-xl border-2 p-3 text-left text-sm ${on ? 'text-white' : 'border-slate-800 text-slate-300'}`} style={on ? { borderColor: l.color, background: `${l.color}1f` } : undefined}>
                                         <LocDot color={l.color} size='mt-0.5 h-4 w-4' />
                                         <span className='min-w-0 flex-1'>
                                             {l.name}
@@ -1165,6 +1172,11 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                             );
                         })}
                     </ul>
+                    {chosen && <div className='rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-ink'>
+                        <p className='font-semibold'>Selected: {chosen.code} · {chosen.name}</p>
+                        <p className='mt-1 text-xs text-soft'>Classification applied automatically: {chosen.classificationLabel} ({chosen.classificationCode}).</p>
+                    </div>}
+                    {!shownOptions.length && <p className='rounded-xl border border-amber-500/40 bg-amber-100 p-3 text-sm text-amber-950'>No storage locations match this filter. Clear the classification filter or edit the warehouse setup.</p>}
                 </Card>
 
                 <Card className='space-y-3'>
