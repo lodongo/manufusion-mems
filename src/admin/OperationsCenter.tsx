@@ -9,7 +9,7 @@ type RecordType = Record<string, unknown>;
 interface Ops {
     project: string; serviceName: string; region: string; repository: string; branch: string;
     generatedAt: string; githubConfigured: boolean;
-    service: Result; revisions: Result; logs: Result; runs: Result; commits: Result;
+    service: Result; revisions: Result; logs: Result; runs: Result; commits: Result; firebase: Result;
 }
 const obj = (v: unknown): RecordType => v && typeof v === 'object' && !Array.isArray(v) ? v as RecordType : {};
 const entries = (section: Result, field: string): RecordType[] => {
@@ -25,7 +25,7 @@ const link = (url: string) => window.open(url, '_blank', 'noopener,noreferrer');
 
 export default function OperationsCenter() {
     const {data,error,loading,reload} = useLoad(() => callBackend<Ops>('/api/admin/ops/overview'));
-    const [tab,setTab] = useState<'github'|'cloud'|'faults'>('github');
+    const [tab,setTab] = useState<'github'|'cloud'|'firebase'|'faults'>('github');
     const [busy,setBusy] = useState('');
     const [notice,setNotice] = useState('');
     const [fault,setFault] = useState('');
@@ -71,8 +71,8 @@ export default function OperationsCenter() {
             <Button variant='secondary' onClick={()=>link('https://github.com/lodongo/manufusion-mems/actions/workflows/deploy-development.yml')}><ExternalLink className='h-4 w-4'/> GitHub Actions</Button>
             <Button variant='secondary' onClick={()=>link('https://console.cloud.google.com/run/detail/africa-south1/mems-dev/observability?project=manufusion-mems-development')}><ExternalLink className='h-4 w-4'/> Cloud Run</Button>
         </div>
-        <div className='grid grid-cols-3 gap-2'>
-            {([['github','GitHub'],['cloud','Cloud Run'],['faults','Faults & logs']] as const).map(([k,v])=>
+        <div className='grid grid-cols-4 gap-1.5'>
+            {([['github','GitHub'],['cloud','Cloud Run'],['firebase','Firebase'],['faults','Faults']] as const).map(([k,v])=>
                 <button key={k} type='button' onClick={()=>setTab(k)} className={`rounded-xl border p-3 text-xs font-semibold ${tab===k?'border-brand bg-brand text-onbrand':'border-line bg-panel text-ink'}`}>{v}</button>
             )}
         </div>
@@ -141,6 +141,37 @@ export default function OperationsCenter() {
                     <p className='mt-1 text-xs text-soft'>Image: {txt(obj(obj(obj(v.containers)).image)).slice(0,100)||'See revision details in Cloud Run'}</p>
                 </div>)}
                 {!revs.length&&<p className='text-sm text-soft'>No revisions are currently available to this account.</p>}
+            </Card>
+        </div>}
+        {tab==='firebase'&&<div className='space-y-3'>
+            <Card className='space-y-3'>
+                <div className='flex items-center justify-between gap-2'>
+                    <h2 className='font-semibold text-ink'>Firebase operations</h2>{good(data.firebase)}
+                </div>
+                {data.firebase.ok ? <>
+                    <p className='text-xs text-soft'>Development project: {txt(obj(data.firebase.data).project)}</p>
+                    <div className='grid grid-cols-2 gap-2'>
+                        {([['authUsers','Auth users'],['userDocuments','MEMS user records'],['organizations','Organizations'],['applications','Registrations']] as const)
+                            .map(([key,label])=><div key={key} className='rounded-xl border border-line bg-page p-3'>
+                                <p className='text-xs text-soft'>{label}</p>
+                                <p className='text-xl font-bold text-ink'>{txt(obj(data.firebase.data)[key])}</p>
+                            </div>)}
+                    </div>
+                    <p className='text-sm text-soft'>Setup status: {txt(obj(data.firebase.data).setupStatus)}</p>
+                </>:<Alert tone='warn'>{data.firebase.message}</Alert>}
+            </Card>
+            <Card className='space-y-2'>
+                <h2 className='font-semibold text-ink'>Administration and incident investigation</h2>
+                <Button variant='secondary' onClick={()=>link('https://console.firebase.google.com/project/manufusion-mems-development/authentication/users')}>
+                    <ExternalLink className='h-4 w-4'/> Authentication users
+                </Button>
+                <Button variant='secondary' onClick={()=>link('https://console.firebase.google.com/project/manufusion-mems-development/firestore/databases/-default-/data')}>
+                    <ExternalLink className='h-4 w-4'/> Firestore database
+                </Button>
+                <Button variant='secondary' onClick={()=>link('https://console.cloud.google.com/monitoring?project=manufusion-mems-development')}>
+                    <ExternalLink className='h-4 w-4'/> Google Cloud Monitoring
+                </Button>
+                <p className='text-xs text-soft'>Privileged Firebase user mutations remain in MEMS user administration or the authenticated Firebase Console; this page does not expose unrestricted identity or database writes.</p>
             </Card>
         </div>}
         {tab==='faults'&&<div className='space-y-3'>
