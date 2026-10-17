@@ -1550,11 +1550,15 @@ export const assetRoutes = {
             if (!asset) {
                 const { siteId } = await lineage(ctx.orgId, wc.id);
                 const wcAttrs = isObj(wc.data.attributes) ? wc.data.attributes : {};
-                const unitClass = await unitClassification(ctx, str(wcAttrs.equipmentClass));
+                const unitClass = str(wcAttrs.equipmentClass)
+                    ? await unitClassification(ctx, str(wcAttrs.equipmentClass)) : null;
+                const units = await listDocs(`organizations/${ctx.orgId}/structure`);
+                const previouslyClaimed = new Set(units.filter((u) => u.id !== wc.id && str(u.data.level) === 'work_center' && isObj(u.data.attributes))
+                    .map((u) => str((u.data.attributes as Obj).assetTag)).filter(Boolean));
                 candidates = (await listDocs(assetCol(ctx.orgId)))
                     .filter((d) => ['active', 'draft'].includes(str(d.data.status))
-                        && assetIsAssignable(d.data)
-                        && identicalAssetEquipmentClass(d.data, unitClass)
+                        && assetIsAssignable(d.data) && !previouslyClaimed.has(d.id)
+                        && unitClass !== null && identicalAssetEquipmentClass(d.data, unitClass)
                         && (!siteId || !str(d.data.siteId) || str(d.data.siteId) === siteId)
                         && inScope(scope, str(d.data.nodeId)))
                     .map((d) => ({ tag: d.id, name: str(d.data.name), className: str(d.data.className),
@@ -1601,9 +1605,12 @@ export const assetRoutes = {
             if (!inScope(scope, parentId)) throw new HttpError(403, 'The selected parent is outside your permitted scope.');
             const equipment = await unitClassification(ctx, classCode);
             const { siteId } = await lineage(ctx.orgId, parentId);
+            const occupied = new Set((await listDocs(`organizations/${ctx.orgId}/structure`))
+                .filter((u) => str(u.data.level) === 'work_center' && isObj(u.data.attributes))
+                .map((u) => str((u.data.attributes as Obj).assetTag)).filter(Boolean));
             const candidates = (await listDocs(assetCol(ctx.orgId)))
                 .filter((a) => ['active', 'draft'].includes(str(a.data.status))
-                    && assetIsAssignable(a.data)
+                    && assetIsAssignable(a.data) && !occupied.has(a.id)
                     && identicalAssetEquipmentClass(a.data, equipment)
                     && (!siteId || !str(a.data.siteId) || siteId === str(a.data.siteId))
                     && inScope(scope, str(a.data.nodeId)))
@@ -1627,8 +1634,11 @@ export const assetRoutes = {
             if (!node || !inScope(scope, nodeId)) throw new HttpError(403, 'Location outside your permitted scope.');
             const equipment = await unitClassification(ctx, classCode);
             const { siteId } = await lineage(ctx.orgId, nodeId);
+            const occupiedEquipment = new Set((await listDocs(assetCol(ctx.orgId)))
+                .filter((a) => !['disposed','deleted'].includes(str(a.data.status)))
+                .map((a) => str(a.data.workCenterId)).filter(Boolean));
             const units = (await listDocs(`organizations/${ctx.orgId}/structure`))
-                .filter((n) => str(n.data.level) === 'work_center' && str(n.data.status) !== 'inactive'
+                .filter((n) => str(n.data.level) === 'work_center' && !occupiedEquipment.has(n.id) && str(n.data.status) !== 'inactive'
                     && inScope(scope, n.id) && unitIsAssignable(isObj(n.data.attributes) ? n.data.attributes : {})
                     && str(isObj(n.data.attributes) ? n.data.attributes.equipmentClass : '') === equipment.classCode);
             const candidates = (await Promise.all(units.map(async (wc) => {
