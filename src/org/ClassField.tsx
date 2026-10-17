@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BookOpen, Lock, X } from 'lucide-react';
-import AssetDictionaryBrowser from '../components/AssetDictionaryBrowser';
+import AssetDictionaryBrowser, { type ClassDetail } from '../components/AssetDictionaryBrowser';
 
 // Picks an equipment class from the organization's asset catalog (stored in the database).
 // Opens the catalog full screen so it is easy to search and browse on a phone.
@@ -16,7 +16,7 @@ export default function ClassField({
     value: string;
     name: string;
     locked: boolean;
-    onChange: (code: string, name: string) => void;
+    onChange: (code: string, name: string, classification: Pick<ClassDetail, 'categoryCode' | 'subcategoryCode'>) => void;
 }) {
     const [open, setOpen] = useState(false);
     return (
@@ -45,7 +45,7 @@ export default function ClassField({
                 </button>
             )}
             <p className='mt-1 text-xs text-slate-500'>
-                {locked ? 'Fixed because the unit already has its asset record.' : 'After saving, you configure the attributes of this class for the unit.'}
+                {locked ? 'Fixed because the unit already has its asset record.' : 'Category, subcategory and class are chosen here. Technical attributes are configured only in Asset Management.'}
             </p>
             {open && (
                 <div className='fixed inset-0 z-50 flex flex-col bg-slate-950'>
@@ -61,7 +61,7 @@ export default function ClassField({
                             classPath='/api/org/assets/dictionary/class'
                             pickLabel='Use this equipment class'
                             onPick={(c) => {
-                                onChange(c.code, c.name);
+                                onChange(c.code, c.name, { categoryCode: c.categoryCode, subcategoryCode: c.subcategoryCode });
                                 setOpen(false);
                             }}
                         />
