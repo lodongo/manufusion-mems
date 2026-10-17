@@ -188,6 +188,7 @@ export const orgRoutes = {
                 ) && /^photo_[A-Za-z0-9_-]+\.(?:png|jpe?g)$/i.test(path.split('/').pop() || '');
                 return {
                     ...userOut(user),
+                    skillCodes: (Array.isArray(user.data.skillCodes) ? user.data.skillCodes : []).map(str),
                     isCreator: user.id === str(ctx.org.data.createdBy),
                     photoUrl: isOwnedPhoto ? await signedUrl(path) : '',
                 };
@@ -201,6 +202,7 @@ export const orgRoutes = {
         }),
     ],
 
+    // Employee skills are selections from the active HRM Skills Master, independent of access permissions.
     'POST /api/org/users/create': [
         orgRoute('org.users.create', 'ADM.users', async (ctx) => {
             const { body } = ctx;
@@ -213,13 +215,19 @@ export const orgRoutes = {
             const phone = phoneE164(body.phone);
             const role = str(body.role);
             await assignableRole(ctx, role);
+            const skillsDoc = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
+            const activeSkills = new Set((Array.isArray(skillsDoc?.data.items) ? skillsDoc.data.items : [])
+                .filter(isObj).filter(item => item.active !== false).map(item => str(item.code)));
+            const submittedSkills = Array.isArray(body.skillCodes) ? body.skillCodes.map(str) : [];
+            const skillCodes = [...new Set(submittedSkills)];
+            if (skillCodes.length > 250 || skillCodes.some(code => !activeSkills.has(code))) throw new HttpError(400, 'Choose employee skills from the active HRM Skills Master.');
             const password = str(body.password);
             checkPassword(password);
             const uid = await createAuthUser({ email, password, displayName: `${firstName} ${lastName}`, phoneNumber: phone });
             try {
                 const createdAt = nowIso();
                 const record = {
-                    uid, email, firstName, lastName, phone, role, status: 'active', orgId: ctx.orgId,
+                    uid, email, firstName, lastName, phone, role, skillCodes, status: 'active', orgId: ctx.orgId,
                     createdAt, createdBy: ctx.uid, lastLoginAt: '', mustChangePassword: true,
                     passwordChangeRequiredAt: createdAt,
                 };
@@ -246,6 +254,13 @@ export const orgRoutes = {
             const lastName = text(body, 'lastName', 1, 40, 'Enter the last name.');
             const phone = phoneE164(body.phone);
             const role = str(body.role);
+            const skillsDoc = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
+            const activeSkills = new Set((Array.isArray(skillsDoc?.data.items) ? skillsDoc.data.items : [])
+                .filter(isObj).filter(item => item.active !== false).map(item => str(item.code)));
+            const previousSkills = (Array.isArray(target.data.skillCodes) ? target.data.skillCodes : []).map(str);
+            const submittedSkills = Array.isArray(body.skillCodes) ? body.skillCodes.map(str) : previousSkills;
+            const skillCodes = [...new Set(submittedSkills)];
+            if (skillCodes.length > 250 || skillCodes.some(code => !activeSkills.has(code) && !previousSkills.includes(code))) throw new HttpError(400, 'Choose employee skills from the HRM Skills Master.');
             const status = str(body.status) === 'disabled' ? 'disabled' : 'active';
             const roleExpiresAt = str(body.roleExpiresAt);
             if (roleExpiresAt && (!/^\d{4}-\d{2}-\d{2}$/.test(roleExpiresAt) || Number.isNaN(Date.parse(`${roleExpiresAt}T00:00:00Z`)))) throw new HttpError(400, 'Enter a valid expiry date.');
@@ -272,6 +287,7 @@ export const orgRoutes = {
                 lastName,
                 phone,
                 role,
+                skillCodes,
                 status,
                 roleExpiresAt: role === 'org_super_admin' ? '' : roleExpiresAt,
                 updatedAt: now,
