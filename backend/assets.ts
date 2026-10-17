@@ -1,6 +1,9 @@
 import { createHash } from 'crypto';
 import {
     HttpError,
+    DOCUMENT_NAME_ROOT,
+    encodeFields,
+    googleRequest,
     deleteDoc,
     getDoc,
     isObj,
@@ -19,6 +22,7 @@ import {
 import { audit } from './audit';
 import { hasPerm, orgRoute, staff, type OrgContext, type SecureContext } from './guards';
 import { allowedNodeIds, nextOrgCounter } from './positions';
+import { identicalAssetEquipmentClass, assetIsAssignable, unitIsAssignable } from './assetEquipmentRules';
 
 // ---------------------------------------------------------------------------
 // Asset Management (AST)
@@ -655,40 +659,98 @@ function completeness(info: ClassInfo, attrs: Obj): number {
     return Math.round((req.filter((a) => attrs[a.code] !== undefined).length / req.length) * 100);
 }
 
+function unitClassification(ctx: OrgContext, classCode: string): Promise<{ classCode: string; categoryCode: string; subcategoryCode: string }> {
+    return orgDictionary(ctx).then((dict) => {
+        const cls = dict.classes.get(classCode);
+        if (!cls) throw new HttpError(400, 'The selected equipment class is missing from the active asset catalogue.');
+        return { classCode, categoryCode: str(cls.categoryCode), subcategoryCode: str(cls.subcategoryCode) };
+    });
+}
+
+async function matchingEquipmentClass(ctx: OrgContext, unit: Doc, asset: Doc): Promise<void> {
+    const attrs = isObj(unit.data.attributes) ? unit.data.attributes : {};
+    const code = str(attrs.equipmentClass);
+    if (!code) throw new HttpError(409, 'Choose an equipment class before linking an asset.');
+    const equipment = await unitClassification(ctx, code);
+    if (!identicalAssetEquipmentClass(asset.data, equipment)) {
+        throw new HttpError(409, 'The asset and equipment must match in category, subcategory and class. Select another compatible record.');
+    }
+}
+
+/** Use a conditional atomic commit to avoid one-to-many mappings when two users click Save together. */
+async function commitAssetEquipmentWrites(writes: Array<{ path: string; fields: Fields; updateTime?: string; create?: boolean }>): Promise<void> {
+    const request = writes.map((w) => ({
+        update: { name: `${DOCUMENT_NAME_ROOT}/${w.path}`, fields: encodeFields(w.fields) },
+        ...(w.create ? { currentDocument: { exists: false } } : {
+            updateMask: { fieldPaths: Object.keys(w.fields) },
+            currentDocument: { updateTime: w.updateTime },
+        }),
+    }));
+    const result = await googleRequest(`https://firestore.googleapis.com/v1/${DOCUMENT_NAME_ROOT}:commit`, 'POST', { writes: request });
+    if (!result.ok) {
+        if ([400, 409, 412].includes(result.status)) throw new HttpError(409, 'This asset or equipment changed while you were configuring it. Refresh to see the current mapping and try again.');
+        throw new HttpError(503, `Asset/equipment mapping was not saved (HTTP ${result.status}). Please retry.`);
+    }
+}
+
 /** Validates that an asset can be linked to a work center. Returns the asset name. */
 export async function checkWorkCenterAsset(ctx: OrgContext, parentId: string, workCenterId: string, tag: string): Promise<string> {
     if (!TAG_RE.test(tag)) throw new HttpError(400, 'Choose an asset from the list.');
     const asset = await getDoc(`${assetCol(ctx.orgId)}/${tag}`);
-    if (!asset) throw new HttpError(400, 'Choose an asset from the list.');
-    if (['disposed', 'disposal_pending', 'rejected'].includes(str(asset.data.status))) throw new HttpError(400, `${tag} is ${str(asset.data.status).replace(/_/g, ' ')} and cannot be linked.`);
-    const linked = str(asset.data.workCenterId);
-    if (linked && linked !== workCenterId) throw new HttpError(400, `${tag} is already linked to equipment unit ${str(asset.data.workCenterCode)}.`);
+    if (!asset) throw new HttpError(404, 'Asset not found. Refresh the list.');
+    if (!assetIsAssignable(asset.data, workCenterId)) throw new HttpError(409, `${tag} is already assigned to another equipment unit or not available.`);
+    const unit = await getDoc(structPath(ctx.orgId, workCenterId));
+    if (!unit || str(unit.data.level) !== 'work_center') throw new HttpError(404, 'The equipment unit no longer exists.');
+    const wcAttrs = isObj(unit.data.attributes) ? unit.data.attributes : {};
+    if (!unitIsAssignable(wcAttrs, tag)) throw new HttpError(409, 'The equipment unit is already mapped to another asset.');
+    await matchingEquipmentClass(ctx, unit, asset);
     const { siteId } = await lineage(ctx.orgId, parentId);
-    if (str(asset.data.siteId) && siteId && str(asset.data.siteId) !== siteId) throw new HttpError(400, `${tag} is located at another site.`);
+    if (str(asset.data.siteId) && siteId && str(asset.data.siteId) !== siteId) throw new HttpError(409, 'Asset and equipment must be located at the same site.');
     return str(asset.data.name);
 }
 
-/**
- * Links a work center to an asset (called when a work center is saved or deleted). The asset must be
- * active, at the same site and not linked to another work center. Returns the stored asset name.
+/** Updates both sides of a one-to-one mapping in the same optimistic Firestore commit.
+ * Existing approved assets are never silently replaced with new draft assets.
  */
 export async function linkWorkCenterAsset(ctx: OrgContext, workCenter: { id: string; code: string; parentId: string }, previousTag: string, tag: string): Promise<string> {
+    const unitPath = structPath(ctx.orgId, workCenter.id);
+    const unit = await getDoc(unitPath);
+    if (!unit) throw new HttpError(404, 'Equipment no longer exists.');
+    const attrs: Obj = isObj(unit.data.attributes) ? { ...unit.data.attributes } : {};
+    const currentTag = str(attrs.assetTag);
+    if (currentTag && currentTag !== previousTag) throw new HttpError(409, 'Equipment mapping changed. Refresh and try again.');
+    if (tag && previousTag && previousTag !== tag) throw new HttpError(409, 'Unlink the previous asset before selecting another.');
+    const now = nowIso();
+    const writes: Array<{ path: string; fields: Fields; updateTime?: string }> = [];
     let name = '';
     if (tag) {
         name = await checkWorkCenterAsset(ctx, workCenter.parentId, workCenter.id, tag);
-        const asset = (await getDoc(`${assetCol(ctx.orgId)}/${tag}`)) as Doc;
+        const asset = await getDoc(`${assetCol(ctx.orgId)}/${tag}`);
+        if (!asset) throw new HttpError(404, 'Asset no longer exists.');
+        attrs.assetTag = tag;
+        attrs.assetTagName = name;
         if (str(asset.data.workCenterId) !== workCenter.id || str(asset.data.workCenterCode) !== workCenter.code) {
-            await updateFields(`${assetCol(ctx.orgId)}/${tag}`, { workCenterId: workCenter.id, workCenterCode: workCenter.code, history: withHistory(asset, ctx, 'linked', `Linked to equipment unit ${workCenter.code}`) });
-            await rec(ctx, 'data', 'org.assets.linked', tag, `Equipment unit ${workCenter.code}`, ctx.orgId);
+            writes.push({ path: `${assetCol(ctx.orgId)}/${tag}`,
+                fields: { workCenterId: workCenter.id, workCenterCode: workCenter.code,
+                    history: withHistory(asset, ctx, 'linked', `Linked to equipment unit ${workCenter.code}`),
+                    updatedAt: now }, updateTime: asset.updateTime });
         }
-    }
-    if (previousTag && previousTag !== tag && TAG_RE.test(previousTag)) {
-        const old = await getDoc(`${assetCol(ctx.orgId)}/${previousTag}`);
-        if (old && str(old.data.workCenterId) === workCenter.id) {
-            await updateFields(`${assetCol(ctx.orgId)}/${previousTag}`, { workCenterId: '', workCenterCode: '', history: withHistory(old, ctx, 'unlinked', `Unlinked from equipment unit ${workCenter.code}`) });
-            await rec(ctx, 'data', 'org.assets.unlinked', previousTag, `Equipment unit ${workCenter.code}`, ctx.orgId);
+    } else {
+        if (!previousTag) throw new HttpError(400, 'Nothing to unlink.');
+        const asset = await getDoc(`${assetCol(ctx.orgId)}/${previousTag}`);
+        if (asset && str(asset.data.workCenterId) === workCenter.id) {
+            writes.push({ path: `${assetCol(ctx.orgId)}/${previousTag}`,
+                fields: { workCenterId: '', workCenterCode: '',
+                    history: withHistory(asset, ctx, 'unlinked', `Unlinked from equipment unit ${workCenter.code}`), updatedAt: now },
+                updateTime: asset.updateTime });
         }
+        delete attrs.assetTag;
+        delete attrs.assetTagName;
     }
+    writes.push({ path: unitPath, fields: { attributes: attrs, updatedAt: now }, updateTime: unit.updateTime });
+    await commitAssetEquipmentWrites(writes);
+    await rec(ctx, 'data', tag ? 'org.assets.linked' : 'org.assets.unlinked',
+        tag || previousTag, `Equipment ${workCenter.code}; one asset per unit`, ctx.orgId);
     return name;
 }
 
