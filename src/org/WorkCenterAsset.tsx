@@ -16,7 +16,7 @@ interface WorkCenterAssetData {
     dictionaryImported: boolean;
     can: { create: boolean; edit: boolean; approve: boolean; link: boolean };
     asset: AssetFull | null;
-    candidates: Array<{ tag: string; name: string; className: string; nodeCode: string }>;
+    candidates: Array<{ tag: string; name: string; className: string; nodeCode: string; status?: string }>;
 }
 
 export default function WorkCenterAsset({ workCenterId, configure = false, onBack }: { workCenterId: string; configure?: boolean; onBack: () => void }) {
@@ -134,7 +134,7 @@ export default function WorkCenterAsset({ workCenterId, configure = false, onBac
                 </Card>
             ) : (
                 <Card className='space-y-3'>
-                    <p className='text-sm text-slate-300'>This equipment unit has no asset record yet. Choose its equipment class to configure its attributes.</p>
+                    <p className='text-sm text-slate-300'>This equipment unit has no linked asset. You can adopt one compatible, unassigned asset or create a new draft.</p>
                     {data.can.create && data.can.link && (
                         <button type='button' onClick={() => setView('create')} className='flex w-full items-center gap-3 rounded-2xl border border-emerald-500/40 p-4 text-left active:bg-slate-800'>
                             <Plus className='h-6 w-6 shrink-0 text-emerald-400' />
@@ -149,7 +149,7 @@ export default function WorkCenterAsset({ workCenterId, configure = false, onBac
                             <Link2 className='h-6 w-6 shrink-0 text-sky-400' />
                             <span>
                                 <span className='block font-medium text-white'>Link an existing asset</span>
-                                <span className='block text-xs text-slate-400'>{data.candidates.length ? `${data.candidates.length} approved assets at this site are free to link.` : 'No approved, unlinked assets at this site.'}</span>
+                                <span className='block text-xs text-slate-400'>{data.candidates.length ? `${data.candidates.length} compatible draft or approved assets are available at this site.` : 'No compatible, unassigned assets at this site.'}</span>
                             </span>
                         </button>
                     )}
@@ -160,7 +160,7 @@ export default function WorkCenterAsset({ workCenterId, configure = false, onBac
                                 <option value=''>Select…</option>
                                 {data.candidates.map((c) => (
                                     <option key={c.tag} value={c.tag}>
-                                        {c.tag} · {c.name} ({c.className})
+                                        {c.tag} · {c.name} ({c.className}; {c.status || 'active'})
                                     </option>
                                 ))}
                             </SelectField>
