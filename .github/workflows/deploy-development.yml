@@ -50,7 +50,7 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v3
 
-      - name: Build, push and deploy restricted MEMS development service
+      - name: Build, push and deploy MEMS development service
         shell: bash
         run: |
           set -euo pipefail
@@ -72,7 +72,6 @@ jobs:
             --image="${IMAGE}" \
             --platform=managed \
             --service-account="${GCP_DEV_RUNTIME_SA}" \
-            --no-allow-unauthenticated \
             --min-instances=0 \
             --max-instances=2 \
             --cpu=1 \
@@ -93,6 +92,6 @@ jobs:
             echo "Project: ${GCP_DEV_PROJECT_ID}"
             echo "Region: ${GCP_DEV_REGION}"
             echo "Cloud Run URL: ${URL}"
-            echo 'Access: restricted (Cloud Run IAM); no public access enabled'
+            echo 'Access: governed by Cloud Run service security settings, managed separately in the Google Cloud Console'
             echo 'No live Firebase project has been used.'
           } >> "$GITHUB_STEP_SUMMARY"
