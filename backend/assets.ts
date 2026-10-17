@@ -1292,6 +1292,16 @@ export const assetRoutes = {
             const classCode = existing ? str(existing.data.classCode) : str(ctx.body.classCode);
             if (existing && str(ctx.body.classCode) && str(ctx.body.classCode) !== classCode) throw new HttpError(400, 'The asset class cannot be changed after creation. Create a new asset instead.');
             const info = classOut(dict, classCode);
+            if (forWorkCenter) {
+                const wcAttrs = isObj(node.data.attributes) ? node.data.attributes : {};
+                if (!unitIsAssignable(wcAttrs)) throw new HttpError(409, 'This equipment already has an asset. Refresh before creating another.');
+                const equipment = await unitClassification(ctx, str(wcAttrs.equipmentClass));
+                const cls = dict.classes.get(classCode);
+                if (!cls || !identicalAssetEquipmentClass(
+                    { classCode, categoryCode: str(cls.categoryCode), subcategoryCode: str(cls.subcategoryCode) }, equipment)) {
+                    throw new HttpError(409, 'Asset class must match the chosen equipment category, subcategory and class.');
+                }
+            }
             const attributes = await readAssetAttributes(info, ctx.body.attributes, false);
             attributes['ATT-IDN-001'] = name;
             const now = nowIso();
@@ -1358,14 +1368,17 @@ export const assetRoutes = {
                 updatedAt: now,
                 history: [{ at: now, by: ctx.uid, byName: displayName(ctx), action: 'created', note: '' }],
             };
-            if (!(await writeDoc(`${assetCol(ctx.orgId)}/${newTag}`, data, { exists: false }))) throw new HttpError(409, 'Please try again.');
             if (forWorkCenter) {
                 const wcAttrs: Obj = isObj(node.data.attributes) ? { ...node.data.attributes } : {};
-                wcAttrs.assetTag = newTag;
-                wcAttrs.assetTagName = name;
-                await updateFields(structPath(ctx.orgId, forWorkCenter), { attributes: wcAttrs, updatedAt: now });
+                if (!unitIsAssignable(wcAttrs)) throw new HttpError(409, 'This equipment is already mapped. Refresh before continuing.');
+                await commitAssetEquipmentWrites([
+                    { path: `${assetCol(ctx.orgId)}/${newTag}`, fields: data, create: true },
+                    { path: structPath(ctx.orgId, forWorkCenter),
+                        fields: { attributes: { ...wcAttrs, assetTag: newTag, assetTagName: name }, updatedAt: now },
+                        updateTime: node.updateTime },
+                ]);
                 await rec(ctx, 'data', 'org.structure.asset_linked', `Equipment unit ${str(node.data.code)}`, `${newTag} created for this equipment unit`, ctx.orgId);
-            }
+            } else if (!(await writeDoc(`${assetCol(ctx.orgId)}/${newTag}`, data, { exists: false }))) throw new HttpError(409, 'Please try again.');
             await rec(ctx, 'data', 'org.assets.create', `${newTag} ${name}`, `${classCode} at ${location.nodeCode}`, ctx.orgId);
             return { tag: newTag, status: 'draft' };
         }),
@@ -1548,7 +1561,8 @@ export const assetRoutes = {
                 delete attrs.assetTag;
                 delete attrs.assetTagName;
             }
-            await updateFields(structPath(ctx.orgId, wc.id), { attributes: attrs, updatedAt: nowIso() });
+            // linkWorkCenterAsset has already committed both sides with update-time
+            // preconditions. Never apply a second unconditional write here.
             await rec(ctx, 'data', tag ? 'org.structure.asset_linked' : 'org.structure.asset_unlinked', `Equipment unit ${code}`, tag || previous, ctx.orgId);
             return { ok: true };
         }),
