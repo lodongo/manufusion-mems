@@ -12,9 +12,9 @@ export const FX_PROVIDERS = [
     { id: 'exchange_rate_api', label: 'ExchangeRate-API paid', apiKeyRequired: true, cadence: 'Depends on plan', notes: 'Requires MEMS_FX_PROVIDER_API_KEY in Cloud Run Secret Manager.' },
 ] as const;
 
-type Provider = typeof FX_PROVIDERS[number]['id'];
+export type Provider = typeof FX_PROVIDERS[number]['id'];
 type Frequency = 'hourly' | 'three_hourly' | 'six_hourly' | 'daily' | 'weekly';
-interface FxSettings {
+export interface FxSettings {
     provider: Provider;
     enabled: boolean;
     frequency: Frequency;
@@ -26,7 +26,7 @@ const DEFAULT_CONFIG: FxSettings = {
     provider: 'open_er_api', enabled: false, frequency: 'daily', timeUtc: '06:00', weekday: 1,
 };
 
-function settingsOf(d: Doc | null): FxSettings {
+export function settingsOf(d: Doc | null): FxSettings {
     const x = d?.data || {};
     return {
         provider: FX_PROVIDERS.some((p) => p.id === x.provider) ? x.provider as Provider : DEFAULT_CONFIG.provider,
@@ -37,7 +37,7 @@ function settingsOf(d: Doc | null): FxSettings {
     };
 }
 
-async function getLive(provider: Provider): Promise<{ usdKes: number; at: string; nextUpdate: string }> {
+export async function getLive(provider: Provider): Promise<{ usdKes: number; at: string; nextUpdate: string }> {
     const key = str(process.env.MEMS_FX_PROVIDER_API_KEY);
     let url = '';
     if (provider === 'open_er_api') url = 'https://open.er-api.com/v6/latest/USD';
