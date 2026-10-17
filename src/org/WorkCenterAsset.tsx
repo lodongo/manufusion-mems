@@ -18,7 +18,7 @@ interface WorkCenterAssetData {
     candidates: Array<{ tag: string; name: string; className: string; nodeCode: string; status?: string }>;
 }
 
-export default function WorkCenterAsset({ workCenterId, configure = false, onBack }: { workCenterId: string; configure?: boolean; onBack: () => void }) {
+export default function WorkCenterAsset({ workCenterId, onBack }: { workCenterId: string; configure?: boolean; onBack: () => void }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<WorkCenterAssetData>('/api/org/assets/work-center', { workCenterId }), [workCenterId]);
     const [view, setView] = useState<'' | 'link' | 'unlink'>('');
     const [tag, setTag] = useState('');
@@ -50,6 +50,15 @@ export default function WorkCenterAsset({ workCenterId, configure = false, onBac
         }
     };
 
+    const createAssetInManagement = () => {
+        try {
+            sessionStorage.setItem('mems.assetCreationEquipment', JSON.stringify({
+                id: wc.id, code: wc.code, name: wc.name,
+                classCode: wc.classCode || '', className: wc.className || '',
+            }));
+        } catch { /* standard asset registration can still be used */ }
+        navigate('organization_admin/assets/new');
+    };
     const a = data.asset;
     return (
         <div className='space-y-3'>
@@ -125,7 +134,7 @@ export default function WorkCenterAsset({ workCenterId, configure = false, onBac
                 <Card className='space-y-3'>
                     <p className='text-sm text-ink'>No linked asset. Match an existing unmapped asset of the same category, subcategory and class, or create an asset in Asset Management.</p>
                     {data.can.create && data.can.link && (
-                        <button type='button' onClick={() => navigate('organization_admin/assets/new')} className='flex w-full items-center gap-3 rounded-2xl border border-emerald-500/40 p-4 text-left active:bg-panel'>
+                        <button type='button' onClick={createAssetInManagement} className='flex w-full items-center gap-3 rounded-2xl border border-emerald-500/40 p-4 text-left active:bg-panel'>
                             <Plus className='h-6 w-6 shrink-0 text-emerald-400' />
                             <span>
                                 <span className='block font-medium text-ink'>Create an asset in Asset Management</span>
