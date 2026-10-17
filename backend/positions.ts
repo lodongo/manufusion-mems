@@ -162,7 +162,7 @@ export const positionRoutes = {
             const [positions, roles, structure] = await Promise.all([allPositions(ctx.orgId), securityRoleMap(ctx.orgId), listDocs(col(ctx.orgId))]);
             return {
                 positions,
-                scopeNodes: structure.map(nodeOut).filter(n => SCOPE_LEVELS.includes(n.level)).map(n => ({ id: n.id, level: n.level, tier: n.tier, code: n.code, name: n.name })),
+                scopeNodes: structure.map(nodeOut).filter(n => SCOPE_LEVELS.includes(n.level)).map(n => ({ id: n.id, level: n.level, tier: n.tier, code: n.code, name: n.name, status: n.status, roleCodes: n.roleCodes })),
                 design: designOf(ctx.org),
                 roleOptions: Array.from(roles.entries())
                     .filter(([id]) => id !== 'org_super_admin')
