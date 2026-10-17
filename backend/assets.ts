@@ -693,6 +693,19 @@ async function commitAssetEquipmentWrites(writes: Array<{ path: string; fields: 
     }
 }
 
+/** Also inspect the reverse pointer, to catch legacy or interrupted mappings. */
+async function assertNoConflictingReverseLinks(ctx: OrgContext, unitId: string, tag: string) {
+    const [units, assets] = await Promise.all([
+        listDocs(`organizations/${ctx.orgId}/structure`), listDocs(assetCol(ctx.orgId)),
+    ]);
+    const otherUnit = units.find((u) => u.id !== unitId && str(u.data.level) === 'work_center'
+        && isObj(u.data.attributes) && str(u.data.attributes.assetTag) === tag);
+    if (otherUnit) throw new HttpError(409, `Asset ${tag} is already referenced by equipment ${str(otherUnit.data.code)}. Resolve that mapping first.`);
+    const anotherAsset = assets.find((a) => a.id !== tag && str(a.data.workCenterId) === unitId
+        && !['disposed', 'deleted'].includes(str(a.data.status)));
+    if (anotherAsset) throw new HttpError(409, `Equipment is already referenced by asset ${anotherAsset.id}. Resolve that mapping first.`);
+}
+
 /** Validates that an asset can be linked to a work center. Returns the asset name. */
 export async function checkWorkCenterAsset(ctx: OrgContext, parentId: string, workCenterId: string, tag: string): Promise<string> {
     if (!TAG_RE.test(tag)) throw new HttpError(400, 'Choose an asset from the list.');
@@ -704,6 +717,7 @@ export async function checkWorkCenterAsset(ctx: OrgContext, parentId: string, wo
     const wcAttrs = isObj(unit.data.attributes) ? unit.data.attributes : {};
     if (!unitIsAssignable(wcAttrs, tag)) throw new HttpError(409, 'The equipment unit is already mapped to another asset.');
     await matchingEquipmentClass(ctx, unit, asset);
+    await assertNoConflictingReverseLinks(ctx, workCenterId, tag);
     const { siteId } = await lineage(ctx.orgId, parentId);
     if (str(asset.data.siteId) && siteId && str(asset.data.siteId) !== siteId) throw new HttpError(409, 'Asset and equipment must be located at the same site.');
     return str(asset.data.name);
@@ -1297,6 +1311,9 @@ export const assetRoutes = {
             if (forWorkCenter) {
                 const wcAttrs = isObj(node.data.attributes) ? node.data.attributes : {};
                 if (!unitIsAssignable(wcAttrs)) throw new HttpError(409, 'This equipment already has an asset. Refresh before creating another.');
+                const claimed = (await listDocs(assetCol(ctx.orgId))).find((a) => str(a.data.workCenterId) === forWorkCenter
+                    && !['disposed', 'deleted'].includes(str(a.data.status)));
+                if (claimed) throw new HttpError(409, `Equipment is already referenced by asset ${claimed.id}.`);
                 const equipment = await unitClassification(ctx, str(wcAttrs.equipmentClass));
                 const cls = dict.classes.get(classCode);
                 if (!cls || !identicalAssetEquipmentClass(
@@ -1563,13 +1580,6 @@ export const assetRoutes = {
             if (tag) await getAsset(ctx, tag, scope);
             const code = str(wc.data.code);
             const name = await linkWorkCenterAsset(ctx, { id: wc.id, code, parentId: str(wc.data.parentId) }, previous, tag);
-            if (tag) {
-                attrs.assetTag = tag;
-                attrs.assetTagName = name;
-            } else {
-                delete attrs.assetTag;
-                delete attrs.assetTagName;
-            }
             // linkWorkCenterAsset has already committed both sides with update-time
             // preconditions. Never apply a second unconditional write here.
             await rec(ctx, 'data', tag ? 'org.structure.asset_linked' : 'org.structure.asset_unlinked', `Equipment unit ${code}`, tag || previous, ctx.orgId);
