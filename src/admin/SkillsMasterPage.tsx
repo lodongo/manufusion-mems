@@ -51,7 +51,7 @@ const COLUMNS: Array<Column<Skill>> = [
 
 const selectClass = 'h-11 min-w-0 flex-1 rounded-xl border border-line bg-panel px-3 text-base text-ink focus:border-brand focus:outline-none';
 
-export default function SkillsMasterPage() {
+export default function SkillsMasterPage({ isSuper = false }: { isSuper?: boolean }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<Catalog>('/api/admin/skills/list'));
     const [category, setCategory] = useState('');
     const [subcategory, setSubcategory] = useState('');
@@ -104,6 +104,32 @@ export default function SkillsMasterPage() {
         );
     };
 
+    const freshStart = () => {
+        confirm.ask(
+            {
+                title: 'Replace the HRM job-role skills master with 2,600 skills?',
+                message: (
+                    <div className='space-y-2'>
+                        <p>This is a deliberate fresh start for the database-backed HRM role-skill selector:
+                            2,600 codified skills across 23 categories and 130 subcategories, including extensive personal,
+                            relationship, leadership, digital, engineering and cross-industry skills.</p>
+                        <p>The current HRM list will be backed up first and then replaced. Existing job-role assignments
+                            keep their old codes, but you can adopt new skills from the replacement list.</p>
+                        <p>This does not replace the separate platform reference/skills_master collection managed in the table below.</p>
+                    </div>
+                ),
+                confirmLabel: 'Replace HRM skills master',
+                tone: 'danger',
+            },
+            async () => {
+                const result = await callBackend<{ total: number; categories: number; subcategories: number; backupId: string }>(
+                    '/api/admin/modules/metadata/skills/fresh-start', { confirm: 'REPLACE SKILLS MASTER' });
+                setMessage(`HRM database skill master replaced: ${result.total} skills, ${result.categories} categories and ${result.subcategories} subcategories. Backup: ${result.backupId}`);
+                reload();
+            },
+        );
+    };
+
     const toggle = (s: Skill) => {
         const disabling = s.enabled;
         confirm.ask(
@@ -139,6 +165,11 @@ export default function SkillsMasterPage() {
                     <Button variant='secondary' aria-label='Refresh' className='w-11 px-0' disabled={loading} onClick={reload}>
                         <RefreshCw className='h-4 w-4' />
                     </Button>
+                    {isSuper && (
+                        <Button type='button' variant='secondary' onClick={freshStart}>
+                            <RefreshCw className='h-4 w-4' /> Replace HRM role-skill list (2,600)
+                        </Button>
+                    )}
                     <Button disabled={!data || missing.length === 0} onClick={importDefaults}>
                         <Download className='h-4 w-4' />
                         {skills.length ? 'Import' : 'Initialise'}
