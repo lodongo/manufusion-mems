@@ -180,7 +180,7 @@ export const moduleDefaultRoutes = {
                 updatedAt: nowIso(), replacedBy: ctx.actor.email, backupId,
             };
             const estimatedBytes = Buffer.byteLength(JSON.stringify(target), 'utf8');
-            if (estimatedBytes > 720_000) throw new HttpError(413, 'Skills catalogue exceeds the safe size limit for a single Firestore document; use a partitioned catalogue instead.');
+            if (estimatedBytes > 900_000) throw new HttpError(413, 'Skills catalogue exceeds the safe size limit for a single Firestore document; use a partitioned catalogue instead.');
             const savedBackup = await writeDoc(backupPath, {
                 sourcePath: path, oldMetadata: current?.data || {}, originalCount: oldItems.length,
                 newCount: replacement.length, createdAt: nowIso(), createdBy: ctx.actor.email,
