@@ -153,7 +153,7 @@ export default function PositionsPage({ canEdit, code }: { canEdit: boolean; cod
 
     return (
         <div className='space-y-3'>
-            <PageTitle title='Job roles' subtitle='Tap a role to see who reports to it' />
+            <PageTitle title='Job roles' subtitle='Choose a job role to configure its hierarchy, skills and security mappings.' />
             <nav aria-label='Path' className='flex flex-wrap items-center gap-1 text-sm'>
                 <button onClick={() => open()} className='flex items-center gap-1 rounded-lg px-2 py-1 text-emerald-300'>
                     <Home className='h-4 w-4' />
@@ -176,11 +176,8 @@ export default function PositionsPage({ canEdit, code }: { canEdit: boolean; cod
                         <p className='truncate text-white'>{current.title}</p>
                         <p className='truncate text-xs text-slate-500'>{operatingLabel(current.operatingLevel, names)}</p>
                     </div>
-                    <IconButton label='View details' onClick={() => setMode('view')}>
-                        <Eye className='h-4 w-4' />
-                    </IconButton>
                     {canEdit && (
-                        <IconButton label='Edit' onClick={() => setMode('edit')}>
+                        <IconButton label='Configure role' onClick={() => setMode('edit')}>
                             <Pencil className='h-4 w-4' />
                         </IconButton>
                     )}
