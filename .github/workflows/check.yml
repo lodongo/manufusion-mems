@@ -27,3 +27,30 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: '123456789012'
           VITE_FIREBASE_APP_ID: 1:123456789012:web:ci-fixture
       - run: node --import tsx --test tests/independent/*.test.mjs automation/test/*.test.mjs
+
+  # Only a fully green, current develop commit may dispatch the isolated development
+  # workflow. GitHub's workflow_dispatch exception allows GITHUB_TOKEN to start it.
+  # This does NOT expand Google Cloud WIF credentials or give MEMS website visitors deploy keys.
+  deploy-on-green:
+    needs: code-check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && github.repository == 'lodongo/manufusion-mems'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    concurrency:
+      group: mems-dev-green-dispatch
+      cancel-in-progress: true
+    steps:
+      - name: Dispatch the verified current develop branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current="$(gh api repos/lodongo/manufusion-mems/branches/develop --jq '.commit.sha')"
+          if [ "$current" != "$GITHUB_SHA" ]; then
+            echo "Skipping stale CI commit; develop has advanced to $current"
+            exit 0
+          fi
+          gh api -X POST repos/lodongo/manufusion-mems/actions/workflows/deploy-development.yml/dispatches -f ref=develop
+          echo "Triggered manual-gated development deployment for $GITHUB_SHA"
