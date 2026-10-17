@@ -139,7 +139,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                 label={label}
                 existing={mode.type === 'edit' ? node! : undefined}
                 canRecode={mode.type === 'edit' && node!.level === 'legal_entity' && data.children.length === 0}
-                onDone={(newId) => (newId ? (mode.type === 'create' && level === 'work_center' ? navigate(`organization_admin/structure/${newId}/asset`) : open(newId)) : done())}
+                onDone={(newId) => (newId ? open(newId) : done())}
                 onCancel={() => setMode(null)}
             />
         );
@@ -1109,7 +1109,11 @@ function NodeForm({
                 await callBackend('/api/org/structure/update', { id, name, description, status, managerRoleCode: allowsManager ? managerRoleCode : '', attributes });
                 onDone(id !== existing.id ? id : undefined);
             } else {
-                const res = await callBackend<{ id: string }>('/api/org/structure/create', { parentId: parent?.id ?? 'root', level, segment, name, description, managerRoleCode: allowsManager ? managerRoleCode : '', attributes });
+                const res = await callBackend<{ id: string }>('/api/org/structure/create', {
+                    parentId: parent?.id ?? 'root', level, segment, name, description,
+                    managerRoleCode: allowsManager ? managerRoleCode : '', attributes,
+                    ...(level === 'work_center' ? { existingAssetTag } : {}),
+                });
                 onDone(res.id);
             }
         } catch (err) {
@@ -1135,7 +1139,13 @@ function NodeForm({
                     value={String(value)}
                     name={String(attributes[`${f.key}Name`] ?? '')}
                     locked={!!existing?.attributes.assetTag && !!existing?.attributes[f.key]}
-                    onChange={(code, className) => setAttributes({ ...attributes, [f.key]: code, [`${f.key}Name`]: className })}
+                    onChange={(code, className, classification) => {
+                        setExistingAssetTag('');
+                        setMatchingAssets([]);
+                        setAttributes({ ...attributes, [f.key]: code, [`${f.key}Name`]: className,
+                            equipmentCategory: classification.categoryCode,
+                            equipmentSubcategory: classification.subcategoryCode });
+                    }}
                 />
             );
         if (['select', 'country', 'currency', 'meta', 'bank', 'fin', 'asset'].includes(f.type)) {
@@ -1259,6 +1269,17 @@ function NodeForm({
                     </SelectField>
                 )}
             </Card>
+            {level === 'work_center' && !!attributes.equipmentClass && (
+                <Card className='space-y-2'>
+                    <h3 className='font-semibold text-ink'>Equipment classification</h3>
+                    <p className='text-xs text-soft'>Select Group → Category → Subcategory → Class through the asset dictionary below. Classification controls compatible one-to-one asset matches; technical specifications are maintained only in Asset Management.</p>
+                    <div className='grid grid-cols-2 gap-2'>
+                        <div className='rounded-lg border border-line p-2 text-xs text-soft'>Category <span className='block font-mono font-semibold text-ink'>{attributes.equipmentCategory || 'Derived from class'}</span></div>
+                        <div className='rounded-lg border border-line p-2 text-xs text-soft'>Subcategory <span className='block font-mono font-semibold text-ink'>{attributes.equipmentSubcategory || 'Derived from class'}</span></div>
+                    </div>
+                    <p className='text-xs text-soft'>Class: {attributes.equipmentClass} · {attributes.equipmentClassName || ''}</p>
+                </Card>
+            )}
             {level === 'work_center' && !existing && attributes.equipmentClass && (
                 <Card className='space-y-3'>
                     <h3 className='text-base font-semibold text-ink'>Equipment ↔ Asset (one-to-one)</h3>
