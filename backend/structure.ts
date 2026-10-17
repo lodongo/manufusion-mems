@@ -561,11 +561,15 @@ export const structureRoutes = {
             const description = text(body, 'description', 0, 300, 'Description can be up to 300 characters.');
             const manager = await readManagerRole(ctx, body.managerRoleCode, level, parentId, '', level === 'cost_center');
             const attributes = await readAttributes(level, body.attributes);
-            let unitClass: { code: string; name: string } | null = null;
+            let unitClass: { code: string; name: string; categoryCode: string; subcategoryCode: string } | null = null;
             if (level === 'work_center') {
                 delete attributes.assetTag;
                 unitClass = await readUnitClass(ctx, str(attributes.equipmentClass), true);
-                if (unitClass) attributes.equipmentClassName = unitClass.name;
+                if (unitClass) {
+                    attributes.equipmentClassName = unitClass.name;
+                    attributes.equipmentCategory = unitClass.categoryCode;
+                    attributes.equipmentSubcategory = unitClass.subcategoryCode;
+                }
             }
             const now = nowIso();
 
@@ -632,7 +636,6 @@ export const structureRoutes = {
             if (level === 'cost_center' && !['INV', 'WHS'].includes(str(attributes.costType)) && (await getDoc(`organizations/${ctx.orgId}/warehouses/${doc.id}`))) {
                 throw new HttpError(400, 'This cost center has a storage setup, so its type must stay Inventory (INV) or Warehousing (WHS).');
             }
-            let createClass = '';
             if (level === 'work_center') {
                 // The asset link is managed from the unit's asset page; keep it exactly as stored.
                 const before = isObj(doc.data.attributes) ? doc.data.attributes : {};
@@ -648,11 +651,13 @@ export const structureRoutes = {
                     throw new HttpError(400, 'The equipment class is fixed once the unit has its asset. Delete the draft asset (or dispose the approved one) to change it.');
                 }
                 const unitClass = await readUnitClass(ctx, newClass, !previousTag);
-                if (unitClass) attributes.equipmentClassName = unitClass.name;
-                if (unitClass && !previousTag) createClass = unitClass.code;
+                if (unitClass) {
+                    attributes.equipmentClassName = unitClass.name;
+                    attributes.equipmentCategory = unitClass.categoryCode;
+                    attributes.equipmentSubcategory = unitClass.subcategoryCode;
+                }
             }
             await updateFields(`${col(ctx.orgId)}/${doc.id}`, { name, description, status, ...manager, attributes, updatedAt: nowIso(), updatedBy: ctx.uid });
-            if (createClass) await createUnitAsset(ctx, { id: doc.id, code: str(doc.data.code), name }, createClass);
             await record(ctx, 'org.structure.update', `${LEVELS[level]?.label ?? level} ${str(doc.data.code)}`, name);
             return { ok: true };
         }),
