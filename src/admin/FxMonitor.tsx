@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowDownUp, RefreshCw, Save } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
+import { observedPairRate, formatFxRate } from './fxPair';
 import { Alert, Field, SelectField } from '../components/ui';
 import { Badge, Button, Card, PageTitle, Spinner, useLoad } from './kit';
 
@@ -29,24 +30,30 @@ function after(range: Window): number {
     return Date.UTC(date.getUTCFullYear(), 0, 1);
 }
 
-function MiniTrend({ points, currency }: { points: History[]; currency: string }) {
-    const series = points.map((p) => ({ ...p,
-        usdKes: Number(p.rates?.[currency] ?? (currency === 'KES' ? p.usdKes : NaN)) }))
-        .filter((p) => Number.isFinite(p.usdKes) && (p.usdKes as number) > 0).slice(-200);
-    if (series.length < 2) return <div className='rounded-xl border border-line bg-panel p-5 text-center text-sm text-soft'>No meaningful published change yet for the selected currency. Historical market movements are never estimated.</div>;
-    const values = series.map((p) => p.usdKes as number);
-    const low = Math.min(...values), high = Math.max(...values), span = high - low || 1;
+function MiniTrend({ points, base, quote }: { points: History[]; base: string; quote: string }) {
+    const series = points.map((point) => ({
+        time: point.observedAt || point.capturedAt,
+        rate: observedPairRate(point, base, quote),
+    })).filter((p): p is { time: string; rate: number } => p.rate !== null && Number.isFinite(p.rate));
+    // Plot real observations only. Identical source publication timestamps are not distinct
+    // intraday market observations even if repeated manual polls were recorded.
+    const unique = Array.from(new Map(series.map((p) => [p.time, p])).values()).slice(-200);
+    if (unique.length < 2) return <div className='rounded-xl border border-line bg-panel p-5 text-center text-sm text-soft'>
+        No change history available for {base}/{quote} in this period. We only plot real provider observations.
+    </div>;
+    const values = unique.map((p) => p.rate);
+    const low = Math.min(...values), high = Math.max(...values), span = high - low || Math.max(1e-12, high * 0.001);
     const path = values.map((v, i) => `${i ? 'L' : 'M'} ${20 + (i / (values.length - 1)) * 560} ${160 - ((v - low) / span) * 130}`).join(' ');
     const delta = values[values.length - 1] - values[0];
     return <div className='rounded-xl border border-line bg-panel p-3'>
-        <svg viewBox='0 0 600 195' className='w-full text-brand' role='img' aria-label={`USD to ${currency} history line graph`}>
+        <svg viewBox='0 0 600 195' className='w-full text-brand' role='img' aria-label={`${base} to ${quote} historical exchange rate chart`}>
             <path d='M20 160 H580' fill='none' stroke='currentColor' strokeOpacity='.2' />
             <path d={path} stroke='currentColor' fill='none' strokeWidth='3' strokeLinecap='round' strokeLinejoin='round' />
             <circle cx='580' cy={160 - ((values[values.length - 1] - low) / span) * 130} r='5' fill='currentColor' />
-            <text x='22' y='20' fill='currentColor' fontSize='13'>{high.toFixed(4)} {currency}</text>
-            <text x='22' y='185' fill='currentColor' fontSize='13'>{low.toFixed(4)} {currency}</text>
+            <text x='22' y='20' fill='currentColor' fontSize='13'>{formatFxRate(high)} {quote}</text>
+            <text x='22' y='185' fill='currentColor' fontSize='13'>{formatFxRate(low)} {quote}</text>
         </svg>
-        <p className='text-center text-sm text-soft'>Change within available observations: {delta >= 0 ? '+' : ''}{delta.toFixed(4)} {currency} per USD · {series.length} snapshots</p>
+        <p className='text-center text-sm text-soft'>Change: {delta >= 0 ? '+' : ''}{formatFxRate(delta)} {quote} per {base} · {unique.length} distinct source observations</p>
     </div>;
 }
 
@@ -58,7 +65,8 @@ export default function FxMonitor() {
     const [weekday, setWeekday] = useState('1');
     const [enabled, setEnabled] = useState(false);
     const [windowKey, setWindowKey] = useState<Window>('30d');
-    const [currency, setCurrency] = useState('KES');
+    const [base, setBase] = useState('USD');
+    const [quote, setQuote] = useState('KES');
     const [busy, setBusy] = useState('');
     const [notice, setNotice] = useState('');
     const [fault, setFault] = useState('');
@@ -70,7 +78,10 @@ export default function FxMonitor() {
         setWeekday(String(data.settings.weekday));
         setEnabled(data.settings.enabled);
     }, [data?.settings]);
-    const selected = data?.currencies.find((c)=>c.code===currency);
+    const first = data?.currencies.find((c)=>c.code===base);
+    const second = data?.currencies.find((c)=>c.code===quote);
+    const currentRate = first?.unitsPerUsd && second?.unitsPerUsd ? second.unitsPerUsd / first.unitsPerUsd : null;
+    const reverseRate = currentRate && currentRate > 0 ? 1/currentRate : null;
     const filtered = useMemo(() =>
         (data?.history ?? []).filter((p) => Date.parse(p.capturedAt) >= after(windowKey)).sort((a,b) => a.capturedAt.localeCompare(b.capturedAt)),
         [data?.history, windowKey]
@@ -92,30 +103,43 @@ export default function FxMonitor() {
                 <div className='rounded-xl border border-line p-3'><p className='text-xs text-soft'>Uploaded currencies</p><p className='text-xl font-bold text-ink'>{data.currencies.length}</p></div>
                 <div className='rounded-xl border border-line p-3'><p className='text-xs text-soft'>Provider coverage</p><p className='text-xl font-bold text-ink'>{data.coverage?.matched ?? '—'}</p></div>
             </div>
-            <SelectField label='Explore a currency' id='fx-currency' value={currency} onChange={(e)=>setCurrency(e.target.value)}>
-                {data.currencies.map((c)=><option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
-            </SelectField>
+            <div className='grid grid-cols-[1fr_auto_1fr] items-end gap-2'>
+                <SelectField label='From' id='fx-base' value={base} onChange={(e)=>setBase(e.target.value)}>
+                    {data.currencies.map((c)=><option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
+                </SelectField>
+                <button type='button' aria-label='Swap currency direction' title='Swap currencies' onClick={()=>{setBase(quote);setQuote(base);}}
+                    className='mb-0 flex h-12 w-12 items-center justify-center rounded-xl border border-brand bg-brand/10 text-brand active:bg-brand/20'>
+                    <ArrowDownUp className='h-5 w-5'/>
+                </button>
+                <SelectField label='To' id='fx-quote' value={quote} onChange={(e)=>setQuote(e.target.value)}>
+                    {data.currencies.map((c)=><option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
+                </SelectField>
+            </div>
             <div className='grid grid-cols-2 gap-3'>
                 <div className='rounded-xl border border-line bg-panel p-3'>
-                    <p className='text-xs text-soft'>1 USD equals</p>
-                    <p className='mt-1 text-xl font-bold text-ink'>{selected?.unitsPerUsd?.toLocaleString(undefined,{maximumFractionDigits:6}) ?? '—'} <span className='text-xs'>{currency}</span></p>
+                    <p className='text-xs text-soft'>1 {base} equals</p>
+                    <p className='mt-1 break-words text-xl font-bold text-ink'>{formatFxRate(currentRate)} <span className='text-xs'>{quote}</span></p>
                 </div>
                 <div className='rounded-xl border border-line bg-panel p-3'>
-                    <p className='text-xs text-soft'>1 {currency} equals</p>
-                    <p className='mt-1 text-xl font-bold text-ink'>{selected?.usdPerUnit?.toPrecision(7) ?? '—'} <span className='text-xs'>USD</span></p>
+                    <p className='text-xs text-soft'>1 {quote} equals</p>
+                    <p className='mt-1 break-words text-xl font-bold text-ink'>{formatFxRate(reverseRate)} <span className='text-xs'>{base}</span></p>
                 </div>
             </div>
-            <p className='text-xs text-soft'>Source: {selected?.rateSource || data.rates.source || 'Not refreshed'} · Published: {selected?.rateObservedAt ? new Date(selected.rateObservedAt).toLocaleString() : 'Unconfirmed'}</p>
+            <p className='text-xs text-soft'>Source: {first?.rateSource || second?.rateSource || data.rates.source || 'Not refreshed'} · Published:
+                {first?.rateObservedAt ? ' '+new Date(first.rateObservedAt).toLocaleString() : second?.rateObservedAt ? ' '+new Date(second.rateObservedAt).toLocaleString() : ' Unconfirmed'}
+            </p>
+            {first?.rateObservedAt && second?.rateObservedAt && first.rateObservedAt !== second.rateObservedAt &&
+                <Alert tone='warn'>These currencies have differing rate timestamps. The displayed cross-rate is indicative only; refresh a common provider snapshot before making financial decisions.</Alert>}
             {(data.coverage?.unsupported ?? 0)>0 && <Alert tone='warn'>{data.coverage?.unsupported} uploaded currency codes are not supplied by this provider. Their previously recorded rates have been preserved rather than replaced by estimated data.</Alert>}
             <p className='text-xs text-soft'>Reference rates inform conversions; they do not alter already-posted transactions or replace bank execution rates.</p>
         </Card>
         <Card className='space-y-3'>
-            <div className='flex items-center gap-2'><Activity className='h-5 w-5 text-brand'/><h2 className='font-semibold text-ink'>USD/{currency} exchange-rate trends</h2></div>
+            <div className='flex items-center gap-2'><Activity className='h-5 w-5 text-brand'/><h2 className='font-semibold text-ink'>{base}/{quote} exchange-rate trends</h2></div>
             <div className='flex gap-2 overflow-x-auto pb-2'>
                 {WINDOWS.map(([key,title])=><button type='button' key={key} onClick={()=>setWindowKey(key)}
                     className={`shrink-0 rounded-lg border px-3 py-2 text-xs ${windowKey===key?'border-brand bg-brand text-onbrand':'border-line bg-panel text-ink'}`}>{title}</button>)}
             </div>
-            <MiniTrend points={filtered} currency={currency} />
+            <MiniTrend points={filtered} base={base} quote={quote} />
             <p className='text-xs text-soft'>Hourly and daily periods only show changes when the selected provider publishes new values. Empty periods are not estimated.</p>
         </Card>
         <Card className='space-y-4'>
@@ -156,13 +180,13 @@ export default function FxMonitor() {
             {fault && <Alert tone='error'>{fault}</Alert>}
         </Card>
         <Card className='space-y-2'>
-            <h2 className='font-semibold text-ink'>Recorded {currency} observations</h2>
+            <h2 className='font-semibold text-ink'>Recorded {base}/{quote} observations</h2>
             <div className='max-h-72 space-y-2 overflow-y-auto'>
-                {filtered.filter((h)=>Number.isFinite(h.rates?.[currency] ?? (currency==='KES' ? h.usdKes : NaN))).slice(-40).reverse().map((h,i)=><div key={h.capturedAt+'-'+i} className='flex items-center justify-between gap-2 rounded-lg border border-line p-2 text-xs text-soft'>
+                {filtered.filter((h)=>observedPairRate(h,base,quote)!==null).slice(-40).reverse().map((h,i)=><div key={h.capturedAt+'-'+i} className='flex items-center justify-between gap-2 rounded-lg border border-line p-2 text-xs text-soft'>
                     <div>{new Date(h.capturedAt).toLocaleString()}<span className='block text-muted'>{h.provider}</span></div>
-                    <strong className='text-ink'>1 USD = {Number(h.rates?.[currency] ?? (currency === 'KES' ? h.usdKes : NaN)).toLocaleString(undefined, { maximumFractionDigits: 6 })} {currency}</strong>
+                    <strong className='text-ink'>1 {base} = {formatFxRate(observedPairRate(h,base,quote))} {quote}</strong>
                 </div>)}
-                {!filtered.length && <p className='text-sm text-soft'>No snapshots in this period.</p>}
+                {!filtered.some((h)=>observedPairRate(h,base,quote)!==null) && <p className='text-sm text-soft'>No provider observations for this pair in the selected period.</p>}
             </div>
         </Card>
     </div>;
