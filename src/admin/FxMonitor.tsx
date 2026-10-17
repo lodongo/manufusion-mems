@@ -131,7 +131,7 @@ export default function FxMonitor() {
             {first?.rateObservedAt && second?.rateObservedAt && first.rateObservedAt !== second.rateObservedAt &&
                 <Alert tone='warn'>These currencies have differing rate timestamps. The displayed cross-rate is indicative only; refresh a common provider snapshot before making financial decisions.</Alert>}
             {data.coverage && <p className='text-sm font-semibold text-ink'>Last refresh: {data.coverage?.matched ?? 0} of {data.coverage?.total ?? data.currencies.length} uploaded currencies matched the provider.</p>}
-            {(data.coverage?.unsupported ?? 0)>0 && <Alert tone='warn'>{data.coverage?.unsupported} uploaded currencies were not supplied by this provider. Existing recorded rates were preserved. {data.coverage.unavailableCodes?.length ? `Codes: ${data.coverage.unavailableCodes.join(', ')}` : ''}</Alert>}
+            {(data.coverage?.unsupported ?? 0)>0 && <Alert tone='warn'>{data.coverage?.unsupported} uploaded currencies were not supplied by this provider. Existing recorded rates were preserved. {data.coverage?.unavailableCodes?.length ? `Codes: ${data.coverage?.unavailableCodes.join(', ')}` : ''}</Alert>}
             <p className='text-xs text-soft'>Reference rates inform conversions; they do not alter already-posted transactions or replace bank execution rates.</p>
         </Card>
         <Card className='space-y-3'>
