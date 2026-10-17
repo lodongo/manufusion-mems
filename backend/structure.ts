@@ -399,8 +399,9 @@ export const structureRoutes = {
             const design = designOf(ctx.org);
             const id = str(ctx.body.id) || 'root';
             if (id === 'root') {
-                const children = await childrenOf(ctx.orgId, 'root');
-                return { node: null, ancestors: [], children, boms: [], design: { ...design, locked: children.length > 0 } };
+                const [children, all] = await Promise.all([childrenOf(ctx.orgId, 'root'), listDocs(col(ctx.orgId))]);
+                const withCounts = children.map((c) => ({ ...c, childCount: all.filter((n) => str(n.data.parentId) === c.id).length }));
+                return { node: null, ancestors: [], children: withCounts, boms: [], design: { ...design, locked: children.length > 0 } };
             }
             const doc = await getNode(ctx, id);
             const node = nodeOut(doc);
@@ -419,7 +420,9 @@ export const structureRoutes = {
                     .filter((u) => (Array.isArray(u.data.assignments) ? (u.data.assignments as Plain[]) : []).some((a) => isObj(a) && str(a.positionCode) === node.managerRoleCode && str(a.nodeId) === scopeId))
                     .map((u) => `${str(u.data.firstName)} ${str(u.data.lastName)}`.trim());
             }
-            return { node: { ...node, logoUrl, managerHolders }, ancestors, children, boms, design: { ...design, locked: true } };
+            const siblings = await listDocs(col(ctx.orgId));
+            const withCounts = children.map((c) => ({ ...c, childCount: siblings.filter((n) => str(n.data.parentId) === c.id).length }));
+            return { node: { ...node, logoUrl, managerHolders }, ancestors, children: withCounts, boms, design: { ...design, locked: true } };
         }),
     ],
 
