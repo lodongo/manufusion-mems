@@ -92,12 +92,12 @@ async function executeFx(mode: 'scheduled' | 'manual') {
     const startedAt = nowIso();
     const eventId = `${startedAt.replace(/[^0-9]/g, '')}_${randomId(4)}`;
     const snapshot = await getDoc(STATE);
-    await writeDoc(STATE, { ...(snapshot?.data || {}), lastStartedAt: startedAt, lastReceivedAt: startedAt });
+    await writeDoc(STATE, { ...(snapshot?.data || {}), lastStartedAt: startedAt });
     try {
         const result = await refreshCurrencyCatalogue(c.provider, mode);
         const completedAt = nowIso();
         await writeDoc(STATE, {
-            ...(snapshot?.data || {}), lastStartedAt: startedAt, lastCompletedAt: completedAt, lastReceivedAt: completedAt,
+            ...(snapshot?.data || {}), lastStartedAt: startedAt, lastCompletedAt: completedAt,
             lastResult: { matched: result.matched, changed: result.changed, total: result.total, unavailable: result.unavailable.length,
                 publishedAt: result.providerPublishedAt, historyRecorded: result.historyRecorded },
             lastProvider: c.provider, lastError: '', lastErrorAt: '',
@@ -113,7 +113,7 @@ async function executeFx(mode: 'scheduled' | 'manual') {
         const completedAt = nowIso();
         const message = e instanceof Error ? e.message : 'Unknown provider error';
         await writeDoc(STATE, {
-            ...(snapshot?.data || {}), lastStartedAt: startedAt, lastReceivedAt: completedAt, lastErrorAt: completedAt,
+            ...(snapshot?.data || {}), lastStartedAt: startedAt, lastErrorAt: completedAt,
             lastError: message.slice(0, 250), lastFailedAt: completedAt,
         });
         await writeDoc(`${RUNS_COL}/${eventId}`, {
