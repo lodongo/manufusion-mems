@@ -13,7 +13,7 @@ export function identicalAssetEquipmentClass(
 }
 
 export function assetIsAssignable(asset: Fields, equipmentId = ''): boolean {
-    return !['disposed', 'disposal_pending', 'rejected'].includes(str(asset.status)) &&
+    return ['active', 'draft'].includes(str(asset.status)) &&
         (!str(asset.workCenterId) || (equipmentId !== '' && str(asset.workCenterId) === equipmentId));
 }
 
