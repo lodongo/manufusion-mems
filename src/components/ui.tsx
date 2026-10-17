@@ -60,10 +60,10 @@ export { default as SelectField } from './SearchableSelect';
 export type AlertTone = 'error' | 'info' | 'success' | 'warn';
 
 const ALERT_STYLES: Record<AlertTone, string> = {
-    error: 'bg-red-500/10 text-red-300',
-    info: 'bg-emerald-500/10 text-emerald-300',
-    success: 'bg-emerald-500/10 text-emerald-300',
-    warn: 'bg-amber-500/10 text-amber-300',
+    error: 'border border-red-300 bg-red-100 text-red-950',
+    info: 'border border-sky-300 bg-sky-100 text-sky-950',
+    success: 'border border-emerald-300 bg-emerald-100 text-emerald-950',
+    warn: 'border border-amber-400 bg-amber-100 text-amber-950',
 };
 
 export function Alert({ tone, children }: { tone: AlertTone; children: ReactNode }) {
