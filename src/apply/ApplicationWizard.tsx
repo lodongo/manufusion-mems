@@ -253,9 +253,11 @@ function ApplicantStep({ app, refData, onSaved, onBack }: StepProps) {
 function OrganizationStep({ app, refData, onSaved, onBack }: StepProps) {
     const lists = useLists(refData);
     const v = app.organization;
-    const [f, setF] = useState({ name: v.name ?? '', legalEntityType: v.legalEntityType ?? '', industry: v.industry ?? '', companySize: v.companySize ?? '', currencyCode: v.currencyCode ?? '', website: v.website ?? '' });
+    const [f, setF] = useState({ name: v.name ?? '', legalEntityType: v.legalEntityType ?? '', industryCategory: v.industryCategory ?? '', industry: v.industry ?? '', companySize: v.companySize ?? '', currencyCode: v.currencyCode ?? '', website: v.website ?? '' });
+    const categories = lists.meta('industryCategories').filter((x) => x.active !== false);
+    const subcategories = lists.meta('industries').filter((x) => x.categoryCode === f.industryCategory && x.active !== false);
     const { busy, error, save } = useSection('organization', onSaved);
-    const sel = (key: 'legalEntityType' | 'industry' | 'companySize', label: string, list: string) => (
+    const sel = (key: 'legalEntityType' | 'companySize', label: string, list: string) => (
         <SelectField id={`org-${key}`} label={label} value={f[key]} onChange={(e) => setF({ ...f, [key]: e.target.value })}>
             <option value=''>Select...</option>
             {lists.meta(list).map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
@@ -269,7 +271,16 @@ function OrganizationStep({ app, refData, onSaved, onBack }: StepProps) {
                 {sel('legalEntityType', 'Legal entity type', 'legalEntityTypes')}
             </Group>
             <Group title='Business'>
-                {sel('industry', 'Industry', 'industries')}
+                <SelectField id='org-industry-category' label='Industry category' value={f.industryCategory} onChange={(e) => setF({ ...f, industryCategory: e.target.value, industry: '' })}>
+                    <option value=''>Select an industry category...</option>
+                    {categories.map((category) => <option key={category.code} value={category.code}>{category.code} — {category.label}</option>)}
+                </SelectField>
+                <SelectField id='org-industry-subcategory' label='Industry subcategory' value={f.industry} disabled={!f.industryCategory} onChange={(e) => setF({ ...f, industry: e.target.value })}>
+                    <option value=''>{f.industryCategory ? 'Select your primary activity...' : 'Choose a category first...'}</option>
+                    {subcategories.map((type) => <option key={type.code} value={type.code}>{type.code} — {type.label}</option>)}
+                </SelectField>
+                <p className='-mt-1 text-xs text-slate-500'>Your primary industry determines which specialist MEMS interfaces and defaults may be offered in future.</p>
+                {!categories.length && <Alert tone='error'>Industry categories are not loaded. Ask the MEMS administrator to load Industry categories and Industry subcategories under Default values.</Alert>}
                 {sel('companySize', 'Company size', 'companySizes')}
                 <SelectField id='org-currency' label='Base currency' value={f.currencyCode} onChange={(e) => setF({ ...f, currencyCode: e.target.value })}>
                     <option value=''>Select...</option>
@@ -578,7 +589,7 @@ function ReviewStep({ app, refData, onBack, onEdit, onChanged }: StepProps & { o
 
     const sections: Array<{ step: number; title: string; rows: Array<[string, string]> }> = [
         { step: 0, title: 'You', rows: [['Name', `${label('titles', app.applicant.title ?? '')} ${app.applicant.firstName ?? ''} ${app.applicant.lastName ?? ''}`.trim()], ['Email', app.email], ['Phone', app.applicant.phone ?? '']] },
-        { step: 1, title: 'Organization', rows: [['Name', app.organization.name ?? ''], ['Legal entity', label('legalEntityTypes', app.organization.legalEntityType ?? '')], ['Industry', label('industries', app.organization.industry ?? '')], ['Size', label('companySizes', app.organization.companySize ?? '')], ['Currency', app.organization.currencyCode ?? '']] },
+        { step: 1, title: 'Organization', rows: [['Name', app.organization.name ?? ''], ['Legal entity', label('legalEntityTypes', app.organization.legalEntityType ?? '')], ['Industry category', label('industryCategories', app.organization.industryCategory ?? '')], ['Industry subcategory', label('industries', app.organization.industry ?? '')], ['Size', label('companySizes', app.organization.companySize ?? '')], ['Currency', app.organization.currencyCode ?? '']] },
         { step: 2, title: 'Registration', rows: [['Country', country(app.registration.countryCode ?? '')], ['Number', app.registration.registrationNumber ?? ''], ['Date', app.registration.registrationDate ?? ''], ['Origin', app.registration.originCountryCode === 'OTHER' ? app.registration.originOther ?? '' : country(app.registration.originCountryCode ?? '')]] },
         { step: 3, title: 'Headquarters', rows: [['Location', `${app.headquarters.city ?? ''}, ${country(app.headquarters.countryCode ?? '')}`], ['Address', app.headquarters.address ?? '']] },
         {
