@@ -87,9 +87,32 @@ const fmt = (iso: string) => (iso ? new Date(iso).toLocaleString() : '');
 
 export default function AssetRegister({ view, id }: { view: 'register' | 'approvals' | 'dictionary'; id?: string }) {
     if (view === 'dictionary') return <OrgDictionary />;
-    if (id === 'new') return <AssetForm key='new' />;
+    if (id === 'new') return <NewAssetWithEquipmentContext key='new' />;
     if (id && /^AST-\d{6}$/.test(id)) return <AssetDetail key={id} tag={id} back={view === 'approvals' ? 'asset_approvals' : 'assets'} />;
     return <AssetList key={view} approvals={view === 'approvals'} />;
+}
+
+/** Consume only the explicit, one-time equipment assignment requested from Organization Design.
+ * This context is only a UI convenience: the AST backend re-verifies organization, scope,
+ * matching class/category/subcategory and the strict one-asset-per-equipment rule.
+ */
+function NewAssetWithEquipmentContext() {
+    const [equipment] = useState<{
+        id: string; code: string; name: string; classCode?: string; className?: string;
+    } | null>(() => {
+        try {
+            const stored = sessionStorage.getItem('mems.assetCreationEquipment');
+            sessionStorage.removeItem('mems.assetCreationEquipment');
+            if (!stored) return null;
+            const parsed: unknown = JSON.parse(stored);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+            const v = parsed as Record<string, unknown>;
+            if (![v.id, v.code, v.name, v.classCode].every((x) => typeof x === 'string' && x.length > 0 && x.length < 128)) return null;
+            return { id: v.id as string, code: v.code as string, name: v.name as string,
+                classCode: v.classCode as string, className: typeof v.className === 'string' ? v.className : '' };
+        } catch { return null; }
+    });
+    return <AssetForm workCenter={equipment ?? undefined} />;
 }
 
 // ----- Organization copy of the asset master data -----
