@@ -348,7 +348,7 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
                     <UserChip session={session} compact onClick={() => go('profile')} />
                 </header>
                 <main className='mx-auto w-full max-w-4xl px-4 py-6 lg:px-8 lg:py-8'>
-                    {setup.data && (section === 'structure' || section === 'positions') && <SetupGuide progress={setup.data} compact />}
+                    {setup.data && (section === 'positions' || (section === 'structure' && parts[3] !== 'storage')) && <SetupGuide progress={setup.data} compact />}
                     {content}
                 </main>
             </div>
