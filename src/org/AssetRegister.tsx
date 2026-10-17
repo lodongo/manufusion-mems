@@ -557,11 +557,19 @@ export function AssetForm({
     asset?: AssetFull;
     cls?: ClassDetail;
     /** When set, the new asset is created at and attributed to this work center. */
-    workCenter?: { id: string; code: string; name: string };
+    workCenter?: { id: string; code: string; name: string; classCode?: string; className?: string };
     onDone?: (tag: string) => void;
     onCancel?: () => void;
 }) {
     const [cls, setCls] = useState<ClassDetail | null>(initialCls ?? null);
+    useEffect(() => {
+        if (asset || !workCenter?.classCode || initialCls) return;
+        let active = true;
+        callBackend<ClassDetail>('/api/org/assets/dictionary/class', { code: workCenter.classCode })
+            .then((matched) => { if (active) setCls(matched); })
+            .catch(() => { /* catalogue picker below remains available; server still validates exact class */ });
+        return () => { active = false; };
+    }, [asset?.tag, workCenter?.id, workCenter?.classCode, initialCls?.code]);
     const locations = useLoad(() => (workCenter ? Promise.resolve({ locations: [] as Array<{ id: string; code: string; name: string; level: string }> }) : callBackend<{ locations: Array<{ id: string; code: string; name: string; level: string }> }>('/api/org/assets/locations')));
     const ref = useLoad(() => fetchReference());
     const [name, setName] = useState(asset?.name ?? (workCenter ? workCenter.name : ''));
@@ -606,10 +614,20 @@ export function AssetForm({
                     title={workCenter ? `Equipment unit ${workCenter.code} · choose the equipment class` : 'New asset · choose the asset class'}
                     subtitle="Find the class that best describes the machine, line or equipment. Its attributes come from your organization's asset master data."
                 />
+                {workCenter?.classCode && <p className='mb-3 rounded-xl border border-line bg-panel p-3 text-sm text-ink'>
+                    Equipment category, subcategory and class are already assigned. Loading {workCenter.classCode}
+                    {workCenter.className ? ` · ${workCenter.className}` : ''}.
+                </p>}
+                {error && <Alert tone='error'>{error}</Alert>}
                 <AssetDictionaryBrowser
                     treePath='/api/org/assets/dictionary/tree'
                     classPath='/api/org/assets/dictionary/class'
                     onPick={(c) => {
+                        if (workCenter?.classCode && c.code !== workCenter.classCode) {
+                            setError('This equipment is classified as ' + workCenter.classCode + '. Choose that exact asset class.');
+                            return;
+                        }
+                        setError('');
                         setCls(c);
                         setValues(Object.fromEntries(c.attributes.map((x) => [x.code, toInput(x, undefined)])));
                         const first = c.attributes.find((x) => x.required && x.code !== 'ATT-IDN-001');
@@ -758,7 +776,7 @@ export function AssetForm({
             </div>
             {error && <Alert tone='error'>{error}</Alert>}
             <Card className='space-y-3'>
-                {!asset && (
+                {!asset && !workCenter?.classCode && (
                     <button type='button' onClick={() => setCls(null)} className='text-xs text-emerald-300'>
                         Change asset class
                     </button>
