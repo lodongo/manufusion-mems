@@ -56,6 +56,7 @@ const DOC_SLOTS: Record<string, { label: string; required: boolean; imageOnly: b
 
 interface Refs {
     codes: (key: string) => Set<string>;
+    entry: (key: string, code: string) => Obj | undefined;
     blocked: Set<string>;
     country: (iso2: string) => Obj | undefined;
     currency: (code: string) => Obj | undefined;
@@ -80,7 +81,11 @@ async function loadRefs(): Promise<Refs> {
         currency: (code) => currencies.find((x) => str(x.code) === code),
         codes: (key) => {
             const list = lists.find((l) => str(l.key) === key);
-            return new Set((Array.isArray(list?.items) ? (list?.items as Plain[]) : []).map((i) => (isObj(i) ? str(i.code) : '')).filter(Boolean));
+            return new Set((Array.isArray(list?.items) ? (list.items as Plain[]) : []).filter(isObj).filter((i) => i.active !== false).map((i) => str(i.code)).filter(Boolean));
+        },
+        entry: (key, code) => {
+            const list = lists.find((l) => str(l.key) === key);
+            return (Array.isArray(list?.items) ? (list.items as Plain[]) : []).filter(isObj).find((i) => str(i.code) === code && i.active !== false);
         },
     };
 }
@@ -114,7 +119,7 @@ function completeness(d: Fields) {
     const slotsDone = (step: 'documents' | 'branding') => Object.entries(DOC_SLOTS).every(([slot, def]) => def.step !== step || !def.required || !!docs[slot]);
     return {
         applicant: !!(a.firstName && a.lastName && a.phone),
-        organization: !!(o.name && o.legalEntityType && o.industry && o.companySize && o.currencyCode),
+        organization: !!(o.name && o.legalEntityType && o.industryCategory && o.industry && o.companySize && o.currencyCode),
         registration: !!(r.countryCode && r.registrationNumber && r.registrationDate && r.originCountryCode),
         headquarters: !!(h.countryCode && h.city && h.address),
         identity: !!(i.idType && i.idNumber),
@@ -173,13 +178,17 @@ function readApplicant(b: Record<string, unknown>, refs: Refs): Fields {
 function readOrganization(b: Record<string, unknown>, refs: Refs): Fields {
     const name = text(b, 'name', 2, 100, 'Enter the organization name (2 to 100 characters).');
     const legalEntityType = pick(b, 'legalEntityType', refs.codes('legalEntityTypes'), 'Choose a legal entity type from the list.');
-    const industry = pick(b, 'industry', refs.codes('industries'), 'Choose an industry from the list.');
+    const industryCategory = pick(b, 'industryCategory', refs.codes('industryCategories'), 'Choose an industry category from the list.');
+    const industry = pick(b, 'industry', refs.codes('industries'), 'Choose an industry subcategory from the list.');
+    if (str(refs.entry('industries', industry)?.categoryCode) !== industryCategory) {
+        throw new HttpError(400, 'The industry subcategory must belong to the selected industry category.');
+    }
     const companySize = pick(b, 'companySize', refs.codes('companySizes'), 'Choose a company size from the list.');
     const currencyCode = str(b.currencyCode);
     if (!refs.currency(currencyCode)) throw new HttpError(400, 'Choose a base currency from the list.');
     const website = str(b.website).trim();
     if (website && (website.length > 200 || !/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}(\/[^\s]*)?$/i.test(website))) throw new HttpError(400, 'The website must start with https://');
-    return { name, legalEntityType, industry, companySize, currencyCode, website };
+    return { name, legalEntityType, industryCategory, industry, industrySubcategory: industry, companySize, currencyCode, website };
 }
 
 function readRegistration(b: Record<string, unknown>, refs: Refs): Fields {
@@ -555,7 +564,9 @@ export const applicationRoutes = {
                 code,
                 domain,
                 legalEntityType: org.legalEntityType,
+                industryCategory: org.industryCategory,
                 industry: org.industry,
+                industrySubcategory: org.industry,
                 companySize: org.companySize,
                 currencyCode: org.currencyCode,
                 website: org.website ?? '',
