@@ -1,28 +1,24 @@
-# Firebase connection for the recovered MEMS app (mobile-friendly)
+# Firebase development connection for Manufusion MEMS
 
-**You do not need the Firebase plugin, a desktop app, or a new production app registration.** The original AppDeploy source contains an existing Firebase **Web app** registration for project `mems2026`. The independent React frontend and Node backend already use Firebase Authentication and Google Cloud Firestore APIs. The new deployment is not yet linked to working Google Cloud credentials; GitHub build success alone is not proof of a live connection.
+Use only the existing project `manufusion-mems-development` and its registered Web app `Manufusion MES Dev`. Do not create a project or register another Web app. Do not inspect, read, write, or migrate production data in `mems2026`.
 
-## What stays the same
+## Existing integration
 
-- The existing AppDeploy-hosted MEMS and its Firebase project `mems2026` remain untouched while we build the independent host.
-- Existing Auth accounts, Firestore documents, and production attachments are not copied, deleted, or reinitialized.
-- The Firebase web app config is not a service-account key. Its `apiKey`, `authDomain`, `projectId`, `storageBucket`, `messagingSenderId`, and `appId` identify a Firebase Web app; do **not** share private service-account JSON or other secrets.
+The React frontend uses Firebase Authentication. Protected API requests attach a fresh Firebase ID token. The Node backend verifies signatures, expiry, issuer and audience against `MEMS_FIREBASE_PROJECT_ID`, then accesses Firestore through REST using Google Application Default Credentials. Storage uses the Google Cloud Storage SDK. Preserve these adapters and the existing business modules.
 
-## What still needs to happen, from a phone browser
+## Local setup
 
-1. Visit https://console.firebase.google.com/ and select `mems2026`; verify the existing application, Authentication and Firestore are still present. **Do not change** the existing project for this step.
-2. A *separate* Google Cloud/Firebase project with an ID containing `dev` or `staging` is recommended for isolated backend testing. This is **not** a replacement for `mems2026`; it is a temporary test database and authentication environment. Reusing the existing Web app within `mems2026` for experimental writes is unsafe.
-3. Register a Firebase Web app in that *test project*. You can do so from the browser on your phone. Firebase Project settings → Your apps → Web app config exposes the six public `VITE_FIREBASE_*` values.
-4. Those six values become GitHub `development` environment variables, along with the dedicated Google Cloud project ID, region, bucket and Workload Identity Federation identifiers described in [DEPLOY_DEVELOPMENT.md](DEPLOY_DEVELOPMENT.md). Nothing should be pasted into tracked source code.
-5. A Google Cloud owner must configure billing, Cloud Run, GCS, Artifact Registry, least-privilege service accounts and GitHub OIDC identity before the **manual** deployment can run. We do not have direct permission to create or configure those cloud resources from this GitHub-only connection.
-6. After the independent test environment passes login, tenant isolation, API, Firestore and storage testing, we can plan a *separately authorized* transition to the existing `mems2026` production data. That stage needs a backup, safe read/write verification, and storage object reconciliation. It will **not** require rebuilding the app or replacing existing users.
+1. Copy `.env.example` to `.env.local` (ignored by Git).
+2. Set `MEMS_FIREBASE_PROJECT_ID` and `VITE_FIREBASE_PROJECT_ID` to `manufusion-mems-development`. Set `VITE_FIREBASE_AUTH_DOMAIN` from the registered Web app configuration.
+3. Copy the real six public Firebase Web configuration fields from that existing app into the matching `VITE_FIREBASE_*` settings. Do not invent API keys, app IDs or bucket names. Confirm the actual development storage bucket for `MEMS_STORAGE_BUCKET` separately.
+4. Use keyless Application Default Credentials for local backend access, restricted to the development project. Never download or store a service-account private key. The deployed backend uses its attached runtime identity.
+5. Install dependencies, run `npm run check`, and build the frontend. Start `npm run dev:api` and `npm run dev` in separate terminals. The API development command reads `.env.local`; existing process environment values take precedence. Node 20.6 or later is required for environment-file loading.
+6. Open `http://localhost:5173`. Vite proxies `/api` to port 8080. Keep the backend port aligned with that proxy. Keep payment flows in simulation.
 
-## What our automatic checks do and do not prove
+## Validation and approvals
 
-- GitHub CI compiles the frontend and backend, builds a production bundle with fake isolated Web app settings, and starts the independent Node server. It checks static files, its health endpoint and guard behavior **without contacting Firebase or changing data**.
-- A real Firebase connection is verified only after Google Cloud credentials, IAM, the correct Web app registration and isolated Firestore have been configured and an authenticated integration test has succeeded.
-- The `/healthz` endpoint is a Node-process liveness check, **not** a Firebase/Firestore connectivity test.
+Offline CI verifies TypeScript, fixture-configured builds, module retention and isolated HTTP routing. `/healthz` establishes process liveness only. Live development authentication, token validation, tenant isolation, Firestore and storage checks require the real Web app settings, keyless credentials and development-only test accounts. Initial registration and application setup may write development data; use an agreed test plan.
 
-The development deployment is private by default. To test it from a mobile browser, we'll later need an approved mobile-compatible access path (for example an authenticated testing gateway) before enabling public HTTPS for the application. This is distinct from ordinary Firebase email/password sign-in.
+An authorized project owner must verify development Auth providers and authorized domains, the default Firestore database and its region, required APIs, billing, a private storage bucket, narrowly scoped runtime IAM, Artifact Registry, Cloud Run and GitHub Workload Identity Federation. See `DEPLOY_DEVELOPMENT.md`; older descriptions of resources as created are historical notes, not current verification.
 
-**No Firebase plugin needed for the deployed app to connect to Firebase.** The plugin only enables separate administrative operations from within some developer tools.
+Cloud deployment and resource changes require explicit user approval. The deployment workflow is manual, restricted to `develop`, and private by default. A mobile-compatible testing access path needs a separate decision. Do not trigger deployment while reviewing source changes.
