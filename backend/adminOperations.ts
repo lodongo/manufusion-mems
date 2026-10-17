@@ -1,5 +1,5 @@
 import { createSign } from 'node:crypto';
-import { PROJECT_ID, HttpError, googleRequest, nowIso, str } from './core';
+import { PROJECT_ID, HttpError, authUserCount, countQuery, getDoc, googleRequest, nowIso, str } from './core';
 import { staff } from './guards';
 import { audit } from './audit';
 
@@ -81,7 +81,7 @@ function view<T>(fn: () => Promise<T>) {
 export const adminOperationsRoutes = {
     'POST /api/admin/ops/overview': [staff('admin.ops.overview', 'super', async () => {
         enforceDevelopment();
-        const [service, revisions, logs, runs, commits] = await Promise.all([
+        const [service, revisions, logs, runs, commits, firebase] = await Promise.all([
             view(() => cloud<Record<string, unknown>>(servicePath)),
             view(() => cloud<{ revisions?: Array<Record<string, unknown>> }>(`${servicePath}/revisions?pageSize=30`)),
             view(() => cloud<{ entries?: Array<Record<string, unknown>> }>('https://logging.googleapis.com/v2/entries:list', 'POST', {
@@ -91,10 +91,17 @@ export const adminOperationsRoutes = {
             })),
             view(() => github<{ workflow_runs?: Array<Record<string, unknown>> }>(`/actions/workflows/${WORKFLOW}/runs?per_page=30`)),
             view(() => github<Array<Record<string, unknown>>>(`/commits?sha=develop&per_page=12`)),
+            view(async () => {
+                const [users, accounts, orgs, applications, setup] = await Promise.all([
+                    authUserCount(), countQuery('users'), countQuery('organizations'), countQuery('applications'), getDoc('system/setup'),
+                ]);
+                return { project: DEV_PROJECT, authUsers: users, userDocuments: accounts, organizations: orgs,
+                    applications, setupStatus: str(setup?.data.status), checkedAt: nowIso() };
+            }),
         ]);
         return {
             project: DEV_PROJECT, serviceName: SERVICE, region: REGION, repository: REPO, branch: 'develop',
-            generatedAt: nowIso(), service, revisions, logs, runs, commits,
+            generatedAt: nowIso(), service, revisions, logs, runs, commits, firebase,
             githubConfigured: !!(process.env.MEMS_GITHUB_APP_ID && process.env.MEMS_GITHUB_INSTALLATION_ID && process.env.MEMS_GITHUB_PRIVATE_KEY),
         };
     })],
