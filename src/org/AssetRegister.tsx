@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, DownloadCloud, Pencil, Plus, Trash2, Undo2, XCircle } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
@@ -567,6 +567,9 @@ export function AssetForm({
     const [name, setName] = useState(asset?.name ?? (workCenter ? workCenter.name : ''));
     const [description, setDescription] = useState(asset?.description ?? '');
     const [nodeId, setNodeId] = useState(asset?.nodeId ?? workCenter?.id ?? '');
+    const [eligibleEquipment, setEligibleEquipment] = useState<Array<{ id: string; code: string; name: string }>>([]);
+    const [selectedEquipmentId, setSelectedEquipmentId] = useState('');
+    const [equipmentLoading, setEquipmentLoading] = useState(false);
     const [note, setNote] = useState('');
     const [changeConfirmed, setChangeConfirmed] = useState(false);
     const [values, setValues] = useState<Record<string, Val>>(() => {
@@ -580,6 +583,20 @@ export function AssetForm({
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const isActive = asset?.status === 'active';
+    useEffect(() => {
+        if (asset || workCenter || !cls?.code || !nodeId) {
+            setEligibleEquipment([]); setSelectedEquipmentId(''); return;
+        }
+        let current = true;
+        setEquipmentLoading(true);
+        setSelectedEquipmentId('');
+        callBackend<{ candidates: Array<{ id: string; code: string; name: string }> }>(
+            '/api/org/assets/eligible-equipment', { classCode: cls.code, nodeId }
+        ).then((res) => { if (current) setEligibleEquipment(res.candidates); })
+            .catch(() => { if (current) setEligibleEquipment([]); })
+            .finally(() => { if (current) setEquipmentLoading(false); });
+        return () => { current = false; };
+    }, [asset?.tag, workCenter?.id, cls?.code, nodeId]);
     const cancel = () => (onCancel ? onCancel() : navigate('organization_admin/assets'));
 
     if (!cls) {
@@ -648,7 +665,7 @@ export function AssetForm({
                 name: name.trim(),
                 description: description.trim(),
                 nodeId,
-                workCenterId: !asset && workCenter ? workCenter.id : undefined,
+                workCenterId: !asset ? (workCenter?.id || selectedEquipmentId || undefined) : undefined,
                 attributes,
                 note: note.trim(),
                 confirmed: isActive ? changeConfirmed : undefined,
@@ -760,7 +777,7 @@ export function AssetForm({
                         <SelectField id='asset-location' label='Location *' value={nodeId} onChange={(e) => setNodeId(e.target.value)} disabled={!!asset?.workCenterId}>
                             <option value={asset ? asset.nodeId : ''}>{locations.loading ? 'Loading…' : asset ? `${asset.nodeCode} · ${asset.nodeName}` : 'Select…'}</option>
                             {(locations.data?.locations ?? [])
-                                .filter((l) => !asset || l.id !== asset.nodeId)
+                                .filter((l) => (asset || l.level !== 'work_center') && (!asset || l.id !== asset.nodeId))
                                 .map((l) => (
                                     <option key={l.id} value={l.id}>
                                         {l.code} · {l.name} ({LEVEL_LABELS[l.level] ?? l.level})
@@ -771,6 +788,19 @@ export function AssetForm({
                     </>
                 )}
                 {fieldErrors.nodeId && <p className='text-xs text-red-400'>{fieldErrors.nodeId}</p>}
+                {!asset && !workCenter && nodeId && (
+                    <div className='space-y-2 rounded-xl border border-line bg-panel p-3'>
+                        <h3 className='text-sm font-semibold text-ink'>Assign an existing equipment unit (optional)</h3>
+                        <p className='text-xs text-soft'>Only unassigned equipment at the same site with the exact category, subcategory and class can be selected. One asset ↔ one equipment.</p>
+                        <SelectField id='asset-match-equipment' label='Compatible equipment' value={selectedEquipmentId}
+                            disabled={equipmentLoading} onChange={(e)=>setSelectedEquipmentId(e.target.value)}>
+                            <option value=''>{equipmentLoading ? 'Checking compatible equipment…' : 'No equipment mapping — register asset only'}</option>
+                            {eligibleEquipment.map((u)=><option key={u.id} value={u.id}>{u.code} · {u.name}</option>)}
+                        </SelectField>
+                        <p className='text-xs text-soft'>{selectedEquipmentId ? 'This equipment and asset will be mapped together when saved.' :
+                            `${eligibleEquipment.length} compatible unassigned equipment unit(s) available at the selected site.`}</p>
+                    </div>
+                )}
                 <TextArea id='asset-description' label='Description (optional)' rows={2} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
                 {isActive && (
                     <>
