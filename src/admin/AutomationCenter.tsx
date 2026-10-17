@@ -59,10 +59,35 @@ export default function AutomationCenter() {
                 <div className='rounded-lg border border-line p-3'>Trigger interval <strong className='block text-ink'>{data.engine.tickMinutes} minutes</strong></div>
                 <div className='rounded-lg border border-line p-3'>State <strong className='block text-ink'>{trigger.state || 'Not configured'}</strong></div>
             </div>
-            <p className='text-xs text-soft'>Last verified heartbeat: {pretty(data.engine.lastHeartbeat)}</p>
+            <p className='text-xs text-soft'>Last OIDC-verified scheduler callback: {pretty(data.engine.lastHeartbeat)}</p>
             <Button className='w-full' onClick={activate} busy={busy}><Play className='h-4 w-4'/> {trigger.provisioned ? 'Verify or repair scheduler' : 'Activate shared scheduler'}</Button>
             <Button className='w-full' variant='secondary' onClick={reload}><RefreshCw className='h-4 w-4'/> Check connection</Button>
             {fault && <Alert tone='error'>{fault}</Alert>}
+            {!operational && <div className='space-y-2 rounded-xl border border-line bg-panel p-3'>
+                <p className='font-semibold text-ink'>One-time Google Cloud connection</p>
+                <p className='text-sm text-soft'>The application cannot grant itself Google Cloud permissions. An authorized project administrator must complete these development-only steps once.</p>
+                <ol className='list-inside list-decimal space-y-1 text-sm text-ink'>
+                    <li>Enable the Cloud Scheduler API.</li>
+                    <li>Ensure the dedicated caller identity <code className='break-all text-xs'>mems-fx-scheduler@manufusion-mems-development.iam.gserviceaccount.com</code> exists.</li>
+                    <li>Temporarily grant <code>roles/cloudscheduler.admin</code> to the development runtime service account.</li>
+                    <li>Grant <code>roles/iam.serviceAccountUser</code> on the dedicated caller identity to the runtime service account.</li>
+                    <li>Return here and activate the shared scheduler. Remove Cloud Scheduler Admin after provisioning.</li>
+                </ol>
+                <div className='grid grid-cols-2 gap-2'>
+                    <a href='https://console.cloud.google.com/apis/library/cloudscheduler.googleapis.com?project=manufusion-mems-development'
+                        target='_blank' rel='noopener noreferrer'
+                        className='flex min-h-12 items-center justify-center rounded-xl border border-brand px-2 py-2 text-center text-xs font-semibold text-ink'>Enable API</a>
+                    <a href='https://console.cloud.google.com/iam-admin/iam?project=manufusion-mems-development'
+                        target='_blank' rel='noopener noreferrer'
+                        className='flex min-h-12 items-center justify-center rounded-xl border border-brand px-2 py-2 text-center text-xs font-semibold text-ink'>Project IAM</a>
+                    <a href='https://console.cloud.google.com/iam-admin/serviceaccounts?project=manufusion-mems-development'
+                        target='_blank' rel='noopener noreferrer'
+                        className='flex min-h-12 items-center justify-center rounded-xl border border-line px-2 py-2 text-center text-xs font-semibold text-ink'>Service accounts</a>
+                    <a href='https://console.cloud.google.com/cloudscheduler?project=manufusion-mems-development'
+                        target='_blank' rel='noopener noreferrer'
+                        className='flex min-h-12 items-center justify-center rounded-xl border border-line px-2 py-2 text-center text-xs font-semibold text-ink'>Scheduler jobs</a>
+                </div>
+            </div>}
             {notice && <Alert tone='success'>{notice}</Alert>}
             <p className='text-xs text-soft'>One-time setup requires Cloud Scheduler API, Cloud Scheduler job permissions for the MEMS runtime identity, and Service Account User permission on the dedicated automation caller identity. Once connected, new MEMS automation types reuse this trigger.</p>
         </Card>
