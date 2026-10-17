@@ -107,6 +107,8 @@ import { explorerRoutes } from './explorer';
 import { settingsRoutes } from './settings';
 import { brandingOut, brandingRoutes, THEME_PRESETS as ORG_THEME_PRESETS } from './branding';
 import { signedUrl, structureRoutes } from './structure';
+import { adminOperationsRoutes } from './adminOperations';
+import { fxManagementRoutes } from './fxManagement';
 import { setupProgressRoutes } from './setupProgress';
 import { positionRoutes } from './positions';
 import { moduleDefaultRoutes, pendingDefaultKeys, seedModuleMetadata } from './moduleDefaults';
@@ -1537,6 +1539,8 @@ export const handler = router({
     ...brandingRoutes,
     ...structureRoutes,
     ...setupProgressRoutes,
+    ...adminOperationsRoutes,
+    ...fxManagementRoutes,
     ...positionRoutes,
     ...moduleDefaultRoutes,
     ...billingRoutes,
