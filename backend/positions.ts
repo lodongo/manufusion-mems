@@ -23,6 +23,7 @@ import {
 import { clearAccessCache, hasPerm, orgRoute, type OrgContext } from './guards';
 import { detectImage } from './branding';
 import { ID_RE, childrenOf, col, designOf, getNode, managerContext, nodeOut, record } from './structure';
+import { matchingRoleNodes, employmentCoverage, type RoleStaffingRow, type StaffingUnit } from '../src/org/roleStaffing';
 
 // Organization roles (job positions such as CEO or Manufacturing Manager).
 // These are NOT system access roles: they describe the org chart, not what a user can do in MEMS.
@@ -72,6 +73,9 @@ function positionOut(doc: Doc) {
         defaultNodeId: str(d.defaultNodeId),
         securityRoles: Array.isArray(d.securityRoles) ? (d.securityRoles as Plain[]).map(str).filter(Boolean) : [],
         coreSkills: Array.isArray(d.coreSkills) ? (d.coreSkills as Plain[]).map(str).filter(Boolean) : [],
+        staffingPlan: (Array.isArray(d.staffingPlan) ? d.staffingPlan : []).filter(isObj).map((item) => ({
+            nodeId: str(item.nodeId), enabled: item.enabled === true, required: Number(item.required) || 0,
+        })),
         createdAt: str(d.createdAt),
         updatedAt: str(d.updatedAt),
     };
@@ -115,6 +119,25 @@ async function allPositions(orgId: string) {
     return (await listDocs(posCol(orgId))).map(positionOut).sort((a, b) => a.code.localeCompare(b.code));
 }
 
+function validateStaffingPlan(raw: unknown, operatingLevel: string, nodes: StaffingUnit[]): RoleStaffingRow[] {
+    if (raw === undefined) return [];
+    if (!Array.isArray(raw)) throw new HttpError(400, 'Role staffing requirements must be a list.');
+    const matching = new Set(matchingRoleNodes(operatingLevel, nodes).map(n => n.id));
+    const seen = new Set<string>();
+    return raw.map((entry) => {
+        if (!isObj(entry)) throw new HttpError(400, 'Invalid role staffing row.');
+        const nodeId = str(entry.nodeId);
+        const enabled = entry.enabled === true;
+        const required = Number(entry.required);
+        if (!matching.has(nodeId)) throw new HttpError(400, 'Each staffing unit must match the selected operating level.');
+        if (seen.has(nodeId)) throw new HttpError(400, 'A unit can only be configured once for this role.');
+        seen.add(nodeId);
+        if (!Number.isSafeInteger(required) || required < 0 || required > 999999) throw new HttpError(400, 'Required positions must be a non-negative whole number.');
+        if (!enabled && required !== 0) throw new HttpError(400, 'Disabled organizational units must have zero required positions.');
+        return { nodeId, enabled, required };
+    });
+}
+
 export const positionRoutes = {
     'POST /api/org/reference/core-skills': [orgRoute('org.reference.core_skills',null,async()=>{const doc=await getDoc('module_workspaces/HRM/metadata/skillsMaster');return {ready:!!doc,skills:(Array.isArray(doc?.data.items)?doc.data.items:[]).filter(isObj).map(x=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description),active:x.active!==false}))};})],
     'POST /api/org/positions/list': [
@@ -132,6 +155,46 @@ export const positionRoutes = {
         }),
     ],
 
+    /** Live staffing occupancy for the selected job role, read from actual user assignments.
+     * Primary assignments fill permanent positions. Time-bound acting/secondment is shown separately.
+     * Employee names are restricted to organization structure administrators.
+     */
+    'POST /api/org/positions/staffing': [
+        orgRoute('org.positions.staffing', 'ADM.structure', async (ctx) => {
+            const code = str(ctx.body.code);
+            if (code && !/^ROL_\\d{3,6}$/.test(code)) throw new HttpError(400, 'Invalid job role code.');
+            if (!code) return { counts: [], asOf: nowIso(), occupiedTotal: 0 };
+            const position = await getDoc(`${posCol(ctx.orgId)}/${code}`);
+            if (!position) throw new HttpError(404, 'Job role not found.');
+            const people = await runQuery({ from: [{ collectionId: 'users' }], where: {
+                fieldFilter: { field: { fieldPath: 'orgId' }, op: 'EQUAL', value: { stringValue: ctx.orgId } },
+            } });
+            const counts = new Map<string, { nodeId: string; filled: number; temporary: number; employees: Array<{ name: string; type: string }> }>();
+            const today = nowIso().slice(0, 10);
+            for (const person of people) {
+                if (['disabled','suspended','deleted','inactive'].includes(str(person.data.status))) continue;
+                const raw = readAssignments(person.data.assignments);
+                const matched = employmentCoverage(raw, code, today);
+                const handled = new Set<string>();
+                for (const assignment of matched) {
+                    const key = `${assignment.nodeId}:${assignment.type === 'primary' ? 'primary' : 'temporary'}`;
+                    if (handled.has(key)) continue;
+                    handled.add(key);
+                    const item = counts.get(assignment.nodeId) || { nodeId: assignment.nodeId, filled: 0, temporary: 0, employees: [] };
+                    const primary = assignment.type === 'primary';
+                    if (primary) item.filled++;
+                    else item.temporary++;
+                    item.employees.push({
+                        name: [str(person.data.firstName), str(person.data.lastName)].filter(Boolean).join(' ') || 'Employee',
+                        type: primary ? 'primary' : assignment.type,
+                    });
+                    counts.set(assignment.nodeId, item);
+                }
+            }
+            return { counts: [...counts.values()].sort((a,b) => a.nodeId.localeCompare(b.nodeId)),
+                asOf: nowIso(), occupiedTotal: [...counts.values()].reduce((n,v) => n + v.filled, 0) };
+        }),
+    ],
     'POST /api/org/positions/save': [
         orgRoute('org.positions.save', 'ADM.structure', async (ctx) => {
             const title = text(ctx.body, 'title', 2, 80, 'Enter the role title (2 to 80 characters).');
@@ -155,6 +218,24 @@ export const positionRoutes = {
             // Firestore document size still applies, as it does to every persisted record.
             const coreSkills = Array.from(new Set((Array.isArray(rawSkills) ? rawSkills : []).map(str).filter(Boolean)));
             const positions = await allPositions(ctx.orgId);
+            const nodeDocs = await listDocs(col(ctx.orgId));
+            const nodes = nodeDocs.map(nodeOut).filter(n => SCOPE_LEVELS.includes(n.level));
+            const staffingPlan = validateStaffingPlan(ctx.body.staffingPlan, operatingLevel, nodes);
+            if (code && staffingPlan.length) {
+                // Do not silently disable a location with employees already holding this job role.
+                const people = await runQuery({ from: [{ collectionId: 'users' }], where: {
+                    fieldFilter: { field: { fieldPath: 'orgId' }, op: 'EQUAL', value: { stringValue: ctx.orgId } },
+                } });
+                const disabled = new Set(matchingRoleNodes(operatingLevel, nodes).filter(n =>
+                    !staffingPlan.some(p => p.nodeId === n.id && p.enabled)).map(n => n.id));
+                for (const person of people) {
+                    if (['disabled','suspended','deleted','inactive'].includes(str(person.data.status))) continue;
+                    const assigned = employmentCoverage(readAssignments(person.data.assignments), code, nowIso().slice(0,10));
+                    if (assigned.some(a => a.type === 'primary' && disabled.has(a.nodeId))) {
+                        throw new HttpError(409, 'This role already has an active employee in a disabled unit. Enable the unit or reassign the employee first.');
+                    }
+                }
+            }
             if (coreSkills.length) {
                 const skillDoc = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
                 const available = new Set((Array.isArray(skillDoc?.data.items) ? skillDoc.data.items : [])
@@ -190,7 +271,7 @@ export const positionRoutes = {
                     const mine = (Array.isArray(ctx.me.data.assignments) ? (ctx.me.data.assignments as Plain[]) : []).filter(isObj).some((a) => str(a.positionCode) === code);
                     if (mine && ctx.role !== 'org_super_admin') throw new HttpError(403, 'You cannot change the security roles of a job role you hold.');
                 }
-                await updateFields(`${posCol(ctx.orgId)}/${code}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, updatedAt: now, updatedBy: ctx.uid });
+                await updateFields(`${posCol(ctx.orgId)}/${code}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, staffingPlan, updatedAt: now, updatedBy: ctx.uid });
                 await record(ctx, 'org.position.update', `${code} ${title}`, added.length || removed.length ? `Security roles added: ${added.join(', ') || 'none'}; removed: ${removed.join(', ') || 'none'}` : '');
                 if (added.length || removed.length) clearAccessCache(ctx.orgId);
                 return { code };
@@ -200,7 +281,7 @@ export const positionRoutes = {
                 const n = await nextOrgCounter(ctx.orgId, 'positionSeq');
                 if (n > 999999) throw new HttpError(400, 'Your organization has reached 999999 job roles.');
                 const newCode = `ROL_${String(n).padStart(6, '0')}`;
-                if (await writeDoc(`${posCol(ctx.orgId)}/${newCode}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, createdAt: now, createdBy: ctx.uid, updatedAt: now }, { exists: false })) {
+                if (await writeDoc(`${posCol(ctx.orgId)}/${newCode}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, staffingPlan, createdAt: now, createdBy: ctx.uid, updatedAt: now }, { exists: false })) {
                     if (securityRoles.length) clearAccessCache(ctx.orgId);
                     await record(ctx, 'org.position.create', `${newCode} ${title}`, parentCode ? `Reports to ${parentCode}` : 'Top role');
                     return { code: newCode };
