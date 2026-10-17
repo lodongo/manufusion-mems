@@ -10,7 +10,7 @@ interface Config { provider: string; enabled: boolean; frequency: string; timeUt
 interface FxData {
     settings: Config; providers: Provider[];
     rates: { usdKes: number | null; kesUsd: number | null; providerObservedAt: string; source: string };
-    history: History[]; scheduler: { status: string; notes: string };
+    history: History[]; scheduler: { status: string; notes: string; lastReceivedAt?: string; lastCompletedAt?: string; lastError?: string };
 }
 type Window = 'hour' | 'today' | '24h' | 'month' | '30d' | 'year' | 'lastYear';
 const WINDOWS: Array<[Window, string]> = [['hour','This hour'],['today','Today'],['24h','Last 24 hours'],['month','This month'],['30d','Last 30 days'],['year','This year'],['lastYear','Last 1 year']];
@@ -120,7 +120,12 @@ export default function FxMonitor() {
                 <input type='checkbox' checked={enabled} onChange={(e)=>setEnabled(e.target.checked)} className='h-5 w-5 accent-brand' />
                 Enable scheduled-rate refresh configuration
             </label>
-            <Alert tone='warn'>Schedule settings can be saved, but unattended refresh is not active until the separate Cloud Scheduler job and identity are connected. Scheduling does not start merely by enabling this checkbox.</Alert>
+            <Alert tone={data.scheduler.status === 'oidc_schedule_connected' ? 'success' : 'warn'}>
+                {data.scheduler.notes}
+                {data.scheduler.lastReceivedAt ? ` Last verified callback: ${new Date(data.scheduler.lastReceivedAt).toLocaleString()}.` : ''}
+                {data.scheduler.lastCompletedAt ? ` Last completed refresh: ${new Date(data.scheduler.lastCompletedAt).toLocaleString()}.` : ''}
+            </Alert>
+            {data.scheduler.lastError && <Alert tone='error'>Last scheduler fault: {data.scheduler.lastError}</Alert>}
             <div className='grid grid-cols-2 gap-2'>
                 <Button variant='secondary' busy={!!busy} onClick={()=>execute('/api/admin/fx/config',{provider,frequency,timeUtc,weekday:Number(weekday),enabled},'Provider and schedule preferences saved.')}>
                     <Save className='h-4 w-4' /> Save settings
