@@ -212,7 +212,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                         </>
                     )}
                     {node.level === 'site' && <Row label='Job roles used here' value={node.roleCodes.length ? node.roleCodes.join(', ') : 'None yet'} />}
-                    {fields.map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
+                    {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset')).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
                     {node.level === 'work_center' && <Row label='Asset' value={node.attributes.assetTag ? `${String(node.attributes.assetTag)} · ${String(node.attributes.assetTagName ?? '')}` : 'Not attributed yet'} />}
                 </Card>
             </div>
@@ -634,7 +634,7 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
                             </>
                         )}
                         {node.level === 'cost_center' && <Row label='Currency (from legal entity)' value={String(data.ancestors.find((a) => a.level === 'legal_entity')?.attributes.currencyCode ?? '—')} />}
-                        {fields.map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
+                        {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset')).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
                     </div>
                     {canEdit && (
                         <div className='flex gap-2'>
