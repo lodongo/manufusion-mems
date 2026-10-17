@@ -15,7 +15,7 @@ export interface CatalogSkill {
 export const HR_SKILL_EXPANDED: CatalogSkill[] = GROUPS.flatMap(([category, subcategory, topics], groupIndex) => {
     const concepts = topics.split(';').map((x) => x.trim()).filter(Boolean);
     return concepts.flatMap((topic, topicIndex) => {
-        const prefix = `HR_SK_${String(groupIndex + 1).padStart(3,'0')}_`;
+        const prefix = `HR_NSK_${String(groupIndex + 1).padStart(3,'0')}_`;
         const serial = topicIndex * 2 + 1;
         return [
             { code: prefix + String(serial).padStart(3,'0'),
