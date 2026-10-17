@@ -1281,8 +1281,10 @@ export const assetRoutes = {
             if (!inScope(scope, nodeId)) throw new HttpError(403, 'You can only place assets inside your assigned scope.');
             const { node, siteId, legalEntityId } = await lineage(ctx.orgId, nodeId);
             if (!node || !LOCATION_LEVELS.includes(str(node.data.level))) throw new HttpError(400, 'Assets are located at a site, department, cost center or equipment unit.');
+            if (!forWorkCenter && str(node.data.level) === 'work_center' && isNew) throw new HttpError(400, 'An asset at an equipment unit must be linked through the one-to-one equipment selector.');
             if (forWorkCenter) {
                 if (str(node.data.level) !== 'work_center') throw new HttpError(400, 'Choose an equipment unit.');
+                if (str(node.data.status) === 'inactive') throw new HttpError(409, 'Inactive equipment cannot accept a new asset.');
                 if (!hasPerm(ctx.permissions, 'ADM.structure')) throw new HttpError(403, 'You need the organization design permission to attribute an asset to an equipment unit.');
                 if (isObj(node.data.attributes) && str(node.data.attributes.assetTag)) throw new HttpError(409, 'This equipment unit already has an asset. Unlink it first.');
             }
