@@ -390,7 +390,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                                 <button onClick={() => setMode({ type: 'asset' })} className='flex w-full items-center gap-3 px-4 py-3 text-left'>
                                     <Cog className='h-5 w-5 shrink-0 text-amber-400' />
                                     <div className='min-w-0 flex-1'>
-                                        <p className='text-sm text-white'>Asset and attributes</p>
+                                        <p className='text-sm text-white'>Asset link and classification</p>
                                         <p className='truncate text-xs text-slate-500'>
                                             {node.attributes.equipmentClass ? `${String(node.attributes.equipmentClass)} · ${String(node.attributes.equipmentClassName ?? '')}` : 'Not classified yet'}
                                             {node.attributes.assetTag ? ` · ${String(node.attributes.assetTag)}` : ' · tap to configure'}
@@ -1298,7 +1298,7 @@ function NodeForm({
             {sections.map((section) => (
                 <Card key={section} className='space-y-4'>
                     <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>{section}</p>
-                    {def.fields.filter((f) => (f.section ?? 'Details') === section).map(renderField)}
+                    {def.fields.filter((f) => (f.section ?? 'Details') === section && !(level === 'work_center' && f.type === 'asset')).map(renderField)}
                 </Card>
             ))}
             {level === 'legal_entity' && !existing && <p className='text-xs text-slate-500'>You can add the logo right after saving.</p>}
