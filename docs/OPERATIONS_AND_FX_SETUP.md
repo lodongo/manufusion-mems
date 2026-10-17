@@ -52,6 +52,9 @@ For a keyed provider, store the key as a separate development Secret Manager sec
 
 ## 4. One-time shared Automation Center trigger
 
+**Region compatibility:** Your MEMS Cloud Run app continues to run in `africa-south1` (Johannesburg). Google Cloud Scheduler **does not currently support** that region, so the shared scheduler trigger is provisioned in the supported region `me-central1` (Doha). Its target URL continues to invoke the existing Johannesburg MEMS service. Never try to create this scheduler job in `africa-south1`: Google returns HTTP 400 for the unsupported location.
+
+
 **Do this only once.** All future coded MEMS automation types reuse this single scheduler. Do not create a separate Google Cloud Scheduler job for every module or business process.
 
 1. In Google Cloud Console, confirm project `manufusion-mems-development`, then enable the **Cloud Scheduler API**.
@@ -62,7 +65,7 @@ For a keyed provider, store the key as a separate development Secret Manager sec
    `mems-dev-runtime@manufusion-mems-development.iam.gserviceaccount.com`
    Cloud Scheduler Admin (`roles/cloudscheduler.admin`) in the development project for initial provisioning, and Service Account User (`roles/iam.serviceAccountUser`) on the dedicated `mems-fx-scheduler` account. This is a privileged, one-time authorization that must be performed by the authorized Google Cloud project owner. Prefer a custom minimal scheduler role if supported.
 4. Log in to MEMS as the **platform** super administrator. Open **Automation Center** → **Activate shared scheduler**. Confirm `ACTIVATE AUTOMATIONS`.
-5. MEMS creates one Cloud Scheduler job named `mems-automation-heartbeat` in `africa-south1` with five-minute ticks, OIDC authentication, audience set to the canonical development Cloud Run URL and a fixed endpoint `/api/internal/automations/heartbeat`. The scheduler calls MEMS only; it cannot execute arbitrary scripts or access Firestore.
+5. MEMS creates one Cloud Scheduler job named `mems-automation-heartbeat` in `me-central1` (Doha; Cloud Scheduler is unavailable in Johannesburg) with five-minute ticks, OIDC authentication, audience set to the canonical development Cloud Run URL and a fixed endpoint `/api/internal/automations/heartbeat`. The scheduler calls MEMS only; it cannot execute arbitrary scripts or access Firestore.
 6. Select an exchange-rate provider and schedule in **FX automation and rates**, then Save. The application will execute the exchange-rate job when due, without further Google Cloud scheduler changes.
 7. Confirm the **Automation Center** shows an enabled shared trigger, a recent verified heartbeat, successful executions, updated currency coverage and historical logs. If a tick fails, inspect the fault details.
 8. Once the job is created, remove broad Cloud Scheduler Admin from the runtime service account; retain a scoped **Cloud Scheduler Viewer** permission only if the administration dashboard needs to read job status. With creation rights removed, the existing trigger continues to run and all future MEMS automations still share it.
