@@ -609,7 +609,10 @@ export const warehouseRoutes = {
                 const allowed = new Map(
                     catalog.filter((cat) => categoryCodesOf(wh.data).includes(cat.code)).flatMap((cat) => cat.subcategories.map((s) => [s.code, { code: s.code, name: s.name, categoryCode: cat.code }] as const))
                 );
-                const clusterClassification=str(b.classificationCode);if(!clusterClassification)throw new HttpError(400,'Choose a material classification.');if(clusterClassification!==location.classificationCode)throw new HttpError(409,'Cluster classification must match the storage location.');const subCodes = Array.from(new Set((Array.isArray(b.subcategoryCodes) ? b.subcategoryCodes : []).map(str).filter(Boolean)));
+                const clusterClassification = str(b.classificationCode);
+                // Classification is authoritative on the warehouse storage location. A duplicate
+                // input from the browser is optional; never require users to choose it twice.
+                if (clusterClassification && clusterClassification !== location.classificationCode) throw new HttpError(409, 'This storage location has a different classification. Review the chosen location.');const subCodes = Array.from(new Set((Array.isArray(b.subcategoryCodes) ? b.subcategoryCodes : []).map(str).filter(Boolean)));
                 if (!subCodes.length) throw new HttpError(400, 'Choose at least one material subcategory for the cluster.');
                 if (subCodes.length > MAX_CLUSTER_SUBCATEGORIES) throw new HttpError(400, `A cluster can hold up to ${MAX_CLUSTER_SUBCATEGORIES} subcategories.`);
                 const subcategories = subCodes.map((code) => {
