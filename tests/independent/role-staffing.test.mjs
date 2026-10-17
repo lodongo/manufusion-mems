@@ -41,6 +41,8 @@ test('job role configuration persists unit staffing and employee assignment guar
     assert.match(backend,/staffingPlan: rows|staffingPlan, updatedAt/);
     assert.match(backend,/org\.positions\.staffing/);
     assert.match(backend,/Enable it under Job roles first/);
+    assert.match(backend,/from '\.\/positionStaffing'/);
+    assert.ok(!backend.includes("from '../src/org/roleStaffing'"), 'backend cannot import frontend source omitted from Docker image');
     const frontend = fs.readFileSync(new URL('../../src/org/PositionsPage.tsx',import.meta.url),'utf8');
     assert.match(frontend,/staffingPlan: rows/);
     assert.match(frontend,/Vacant positions/);
