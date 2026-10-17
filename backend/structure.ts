@@ -26,7 +26,7 @@ import {
 import { audit, auditOut } from './audit';
 import { orgRoute, secure, type OrgContext } from './guards';
 import { detectImage } from './branding';
-import { createUnitAsset, readUnitClass, releaseUnitAsset } from './assets';
+import { createUnitAsset, linkWorkCenterAsset, readUnitClass, releaseUnitAsset } from './assets';
 
 // Organization design.
 // Single legal entity organizations start directly with the legal entity. Groups declare
@@ -590,7 +590,21 @@ export const structureRoutes = {
                     { exists: false }
                 );
                 if (created) {
-                    if (level === 'work_center' && unitClass) await createUnitAsset(ctx, { id, code, name }, unitClass.code);
+                    if (level === 'work_center' && unitClass) {
+                        const existingAssetTag = str(body.existingAssetTag);
+                        try {
+                            if (existingAssetTag) {
+                                if (!/^AST-\d{6}$/.test(existingAssetTag)) throw new HttpError(400, 'Choose an eligible unassigned asset from the list.');
+                                await linkWorkCenterAsset(ctx, { id, code, parentId }, '', existingAssetTag);
+                            } else {
+                                await createUnitAsset(ctx, { id, code, name }, unitClass.code);
+                            }
+                        } catch (e) {
+                            // Creation must not leave equipment without its intended 1:1 asset.
+                            await deleteDoc(`${col(ctx.orgId)}/${id}`);
+                            throw e;
+                        }
+                    }
                     const label = level === 'group' ? levelName(design.names, tier) : def.label;
                     await record(ctx, 'org.structure.create', `${label} ${code}`, name);
                     return { id };
