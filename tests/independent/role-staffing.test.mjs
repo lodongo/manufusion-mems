@@ -35,7 +35,7 @@ test('temporary assignments do not count as primary permanent job occupancy', ()
     assert.equal(employmentCoverage(a,'ROL_000001','2026-11-01').length,1);
 });
 
-test('job role configuration persists unit staffing and employee assignment guards', () => {
+test('job role configuration persists unit staffing and employee assignment guards', async () => {
     const fs = await import('node:fs');
     const backend = fs.readFileSync(new URL('../../backend/positions.ts',import.meta.url),'utf8');
     assert.match(backend,/staffingPlan: rows|staffingPlan, updatedAt/);
