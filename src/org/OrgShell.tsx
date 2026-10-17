@@ -28,6 +28,7 @@ import ProfilePage from '../admin/ProfilePage';
 import UserSetup from './UserSetup';
 import UserHealth from './UserHealth';
 import OrgOverview from './OrgOverview';
+import SetupGuide, { type SetupProgress } from './SetupGuide';
 import OrgUsers from './OrgUsers';
 import OrgRoles from './OrgRoles';
 import OrgAudit from './OrgAudit';
@@ -46,14 +47,12 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
         title: 'Organization design',
         items: [
             { key: 'structure', label: 'Design', Icon: Layers, perm: 'ADM.structure' },
-            { key: 'structure_view', label: 'View', Icon: Workflow, perm: 'ADM.structure' },
         ],
     },
     {
         title: 'Job roles (ROL_)',
         items: [
             { key: 'positions', label: 'Design', Icon: Briefcase, perm: 'ADM.structure' },
-            { key: 'positions_view', label: 'View', Icon: Eye, perm: 'ADM.structure' },
         ],
     },
     {
@@ -161,6 +160,7 @@ function RedirectMyTables() {
 
 export default function OrgShell({ session, route, onSignOut, onSessionChange }: { session: Session; route: string; onSignOut: () => void; onSessionChange: (s: Session) => void }) {
     const { data, error, loading } = useLoad(() => callBackend<OrgContextData>('/api/org/context'));
+    const setup = useLoad(() => callBackend<SetupProgress>('/api/org/setup/progress'), [session.organization?.id]);
     const [open, setOpen] = useState(false);
     const parts = route.split('/');
     const section = parts[0] === 'organization_admin' ? (parts[1] ?? '') : '';
@@ -170,12 +170,28 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
         setOpen(false);
         window.scrollTo(0, 0);
     }, [route]);
+    const lastKey = 'mems.lastDesign.' + (session.organization?.id || 'unknown') + '.' + session.user.uid;
+    useEffect(() => {
+        const selected = route.replace(/^organization_admin\\/?/, '');
+        if (selected.startsWith('structure') || selected.startsWith('positions')) {
+            try { localStorage.setItem(lastKey, route); } catch { /* navigation still works */ }
+        }
+    }, [route, lastKey]);
+    useEffect(() => {
+        if (section || setup.loading || !setup.data) return;
+        let last = '';
+        try { last = localStorage.getItem(lastKey) ?? ''; } catch { /* optional */ }
+        navigate(last.startsWith('organization_admin/structure') || last.startsWith('organization_admin/positions') ? last : setup.data.nextRoute);
+    }, [section, setup.loading, setup.data, lastKey]);
+
 
     if (loading && !data) return <Spinner />;
     if (error || !data) return <div className='p-6'><Alert tone='error'>{error || 'Could not load your organization.'}</Alert></div>;
 
     const enabledCodes = new Set(data.modules.map((m) => m.code));
-    const groups: NavGroup[] = MENU.map((g) => ({ title: g.title, items: g.items.filter((m) => (!m.perm || (m.perm.endsWith('.') ? data.permissions.some((p) => p === '*' || p.startsWith(m.perm as string)) : hasPerm(data.permissions, m.perm))) && (!m.module || enabledCodes.has(m.module))) }));
+    const basicsOnly = setup.data?.ready === false;
+    const allowedSetup = new Set(['structure', 'positions', 'profile', 'my_setup', 'keep_alive', 'activity']);
+    const groups: NavGroup[] = MENU.map((g) => ({ title: g.title, items: g.items.filter((m) => (!basicsOnly || allowedSetup.has(m.key)) && (!m.perm || (m.perm.endsWith('.') ? data.permissions.some((p) => p === '*' || p.startsWith(m.perm as string)) : hasPerm(data.permissions, m.perm))) && (!m.module || enabledCodes.has(m.module))) }));
     const items = groups.flatMap((g) => g.items);
     const active = items.some((m) => m.key === section) ? section : '';
     const canDesign = hasPerm(data.permissions, 'ADM.structure');
@@ -281,6 +297,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             content = <OrgOverview ctx={data} hasBranding={!!session.organization?.branding?.preset && !!session.organization?.branding?.displayName} />;
     }
 
+    if (basicsOnly && section && !allowedSetup.has(section)) {
+        content = <SetupGuide progress={setup.data!} />;
+    }
     const go = (key: string) => navigate(key ? `organization_admin/${key}` : 'organization_admin');
 
     const nav = (
@@ -328,7 +347,10 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
                     <span className='min-w-0 flex-1 truncate font-semibold text-white'>{headerTitle}</span>
                     <UserChip session={session} compact onClick={() => go('profile')} />
                 </header>
-                <main className='mx-auto w-full max-w-4xl px-4 py-6 lg:px-8 lg:py-8'>{content}</main>
+                <main className='mx-auto w-full max-w-4xl px-4 py-6 lg:px-8 lg:py-8'>
+                    {setup.data && (section === 'structure' || section === 'positions') && <SetupGuide progress={setup.data} compact />}
+                    {content}
+                </main>
             </div>
         </div>
     );
