@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 
 export function PrimaryButton({
@@ -55,30 +55,7 @@ export function Field({ label, id, hint, error, ...rest }: InputHTMLAttributes<H
     );
 }
 
-export function SelectField({
-    label,
-    id,
-    hint,
-    error,
-    children,
-    ...rest
-}: SelectHTMLAttributes<HTMLSelectElement> & { label: string; id: string; hint?: string; error?: string; children: ReactNode }) {
-    return (
-        <label htmlFor={id} className='block'>
-            <span className='mb-1 block text-sm text-soft'>{label}</span>
-            <select
-                id={id}
-                aria-invalid={error ? true : undefined}
-                aria-describedby={error || hint ? `${id}-note` : undefined}
-                {...rest}
-                className={`h-12 w-full rounded-xl border bg-panel px-3 text-base text-ink focus:outline-none disabled:opacity-60 ${error ? 'border-red-500/70 focus:border-red-400' : 'border-line focus:border-brand'}`}
-            >
-                {children}
-            </select>
-            <FieldNote id={id} error={error} hint={hint} />
-        </label>
-    );
-}
+export { default as SelectField } from './SearchableSelect';
 
 export type AlertTone = 'error' | 'info' | 'success' | 'warn';
 
