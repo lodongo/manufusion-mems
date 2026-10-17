@@ -179,7 +179,7 @@ export const positionRoutes = {
     'POST /api/org/positions/staffing': [
         orgRoute('org.positions.staffing', 'ADM.structure', async (ctx) => {
             const code = str(ctx.body.code);
-            if (code && !/^ROL_\\d{3,6}$/.test(code)) throw new HttpError(400, 'Invalid job role code.');
+            if (code && !/^ROL_\d{3,6}$/.test(code)) throw new HttpError(400, 'Invalid job role code.');
             if (!code) return { counts: [], asOf: nowIso(), occupiedTotal: 0 };
             const position = await getDoc(`${posCol(ctx.orgId)}/${code}`);
             if (!position) throw new HttpError(404, 'Job role not found.');
