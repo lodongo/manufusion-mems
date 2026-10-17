@@ -24,7 +24,7 @@ import {
     type Plain,
 } from './core';
 import { audit, auditOut } from './audit';
-import { orgRoute, secure, type OrgContext } from './guards';
+import { hasPerm, orgRoute, secure, type OrgContext } from './guards';
 import { detectImage } from './branding';
 import { createUnitAsset, linkWorkCenterAsset, readUnitClass, releaseUnitAsset } from './assets';
 
@@ -597,6 +597,7 @@ export const structureRoutes = {
                                 // The equipment exists independently until an authorized user
                                 // creates or adopts its single asset.
                             } else if (existingAssetTag) {
+                                if (!hasPerm(ctx.permissions, 'AST.create')) throw new HttpError(403, 'Asset Management create permission is required to assign an existing asset.');
                                 if (!/^AST-\d{6}$/.test(existingAssetTag)) throw new HttpError(400, 'Choose an eligible unassigned asset from the list.');
                                 await linkWorkCenterAsset(ctx, { id, code, parentId }, '', existingAssetTag);
                             } else {
