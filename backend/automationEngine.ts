@@ -4,7 +4,7 @@ import { json, error, type RouterContext } from './platform/sdk';
 import { audit } from './audit';
 import { staff } from './guards';
 import { refreshCurrencyCatalogue } from './fxRates';
-import { settingsOf, type FxSettings } from './fxManagement';
+import { settingsOf, type FxSettings } from './fxSettings';
 
 const PROJECT = 'manufusion-mems-development';
 const REGION = 'africa-south1';
