@@ -57,6 +57,7 @@ export default function ClassField({
                     </div>
                     <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain p-4'>
                         <AssetDictionaryBrowser
+                            showAttributes={false}
                             treePath='/api/org/assets/dictionary/tree'
                             classPath='/api/org/assets/dictionary/class'
                             pickLabel='Use this equipment class'
