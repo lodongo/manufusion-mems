@@ -8,6 +8,7 @@ import { Badge, Button, Card, Empty, PageTitle, Spinner, useLoad } from '../admi
 import { passwordProblem } from '../lib/password';
 import ResetPassword from '../admin/ResetPassword';
 import UserScope from './UserScope';
+import RoleCoreSkills from './RoleCoreSkills';
 import type { OrgRole } from './types';
 
 interface OrgUser {
@@ -20,6 +21,7 @@ interface OrgUser {
     status: string;
     roleExpiresAt?: string;
     jobRoles?: string[];
+    skillCodes?: string[];
     lastLoginAt: string;
     isCreator?: boolean;
     photoUrl?: string;
@@ -179,6 +181,9 @@ function UserForm({
     const [status, setStatus] = useState(user?.status ?? 'active');
     const roleExpiresAt = user?.roleExpiresAt ?? '';
     const [password, setPassword] = useState('');
+    const [skillCodes, setSkillCodes] = useState<string[]>(user?.skillCodes ?? []);
+    const positions = useLoad(() => callBackend<{ positions: Array<{ code:string; title:string; coreSkills?:string[] }> }>('/api/org/positions/list'));
+    const assignedRoles = (positions.data?.positions ?? []).filter(p => (user?.jobRoles ?? []).includes(p.code));
     const [busy, setBusy] = useState('');
     const [error, setError] = useState('');
 
@@ -209,9 +214,9 @@ function UserForm({
         setBusy('save');
         try {
             if (isNew) {
-                await callBackend('/api/org/users/create', { emailLocal: emailLocal.trim().toLowerCase(), firstName, lastName, phone, role, password });
+                await callBackend('/api/org/users/create', { emailLocal: emailLocal.trim().toLowerCase(), firstName, lastName, phone, role, password, skillCodes });
             } else {
-                await callBackend('/api/org/users/update', { uid: user.uid, firstName, lastName, phone, role, status, roleExpiresAt: role === 'org_super_admin' ? '' : roleExpiresAt });
+                await callBackend('/api/org/users/update', { uid: user.uid, firstName, lastName, phone, role, status, skillCodes, roleExpiresAt: role === 'org_super_admin' ? '' : roleExpiresAt });
             }
             onDone();
         } catch (err) {
