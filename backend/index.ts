@@ -110,6 +110,7 @@ import { signedUrl, structureRoutes } from './structure';
 import { adminOperationsRoutes } from './adminOperations';
 import { fxManagementRoutes } from './fxManagement';
 import { fxSchedulerRoutes } from './fxScheduler';
+import { automationRoutes } from './automationEngine';
 import { setupProgressRoutes } from './setupProgress';
 import { positionRoutes } from './positions';
 import { moduleDefaultRoutes, pendingDefaultKeys, seedModuleMetadata } from './moduleDefaults';
@@ -1543,6 +1544,7 @@ export const handler = router({
     ...adminOperationsRoutes,
     ...fxManagementRoutes,
     ...fxSchedulerRoutes,
+    ...automationRoutes,
     ...positionRoutes,
     ...moduleDefaultRoutes,
     ...billingRoutes,
