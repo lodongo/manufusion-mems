@@ -24,6 +24,7 @@ import QuickWorkspace from './org/QuickWorkspace';
 import OrganizationFooter from './components/OrganizationFooter';
 import HealthTracker from './components/HealthTracker';
 import { Alert } from './components/ui';
+import GlobalSelectEnhancer from './components/GlobalSelectEnhancer';
 
 type SetupState = 'checking' | 'needed' | 'done' | 'error';
 type SessionState = 'idle' | 'loading' | 'ready' | 'error';
@@ -283,6 +284,7 @@ function App() {
     const quickFullScreen = route === 'organization_home/quick' || route.startsWith('organization_home/quick/');
     return (
         <SiteContext.Provider value={siteState}>
+            <GlobalSelectEnhancer />
             <div className={organizationReady ? 'mems-organization-ui' + (quickFullScreen ? '' : ' pb-12') : ''}>{render()}</div>
             {organizationReady && session && <HealthTracker session={session} />}
             {organizationReady && !quickFullScreen && <OrganizationFooter />}
