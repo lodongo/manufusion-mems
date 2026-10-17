@@ -195,7 +195,7 @@ export default function AdminShell({
             content = <ProcurementCatalogAdmin key='gl_accounts' kind='gl_accounts' canWrite={canWrite} />;
             break;
         case 'hr_skills':
-            content = <SkillsMasterPage />;
+            content = <SkillsMasterPage isSuper={isSuper} />;
             break;
         case 'site':
             content = <SiteSetupPage canWrite={canWrite} />;
