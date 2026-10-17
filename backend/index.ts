@@ -1444,7 +1444,7 @@ export const handler = router({
                         .find((i) => str(i.code) === categoryCode && i.active !== false);
                     if (!parent) throw new HttpError(400, 'Select a valid, enabled industry category first.');
                     const largest = entries.filter((e) => str(e.categoryCode) === categoryCode)
-                        .map((e) => Number(/^IND-[A-Z0-9]+-(\\d{3})$/.exec(str(e.code))?.[1] ?? 0))
+                        .map((e) => Number(/^IND-[A-Z0-9]+-(\d{3})$/.exec(str(e.code))?.[1] ?? 0))
                         .reduce((max, n) => Math.max(max, n), 0);
                     if (largest >= 999) throw new HttpError(400, 'This industry category has no available subcategory codes.');
                     code = `${categoryCode}-${String(largest + 1).padStart(3, '0')}`;
