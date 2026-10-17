@@ -1542,7 +1542,10 @@ export const assetRoutes = {
                 approve: hasPerm(ctx.permissions, 'AST.approve'),
                 link: hasPerm(ctx.permissions, 'ADM.structure') && hasPerm(ctx.permissions, 'AST.create'),
             };
-            const out = { workCenter: { id: wc.id, code: str(wc.data.code), name: str(wc.data.name) }, astEnabled: modules.AST === true, dictionaryImported: !!str((await getDoc(POINTER))?.data.activeVid), can };
+            const unitMeta = isObj(wc.data.attributes) ? wc.data.attributes : {};
+            const out = { workCenter: { id: wc.id, code: str(wc.data.code), name: str(wc.data.name),
+                classCode: str(unitMeta.equipmentClass), className: str(unitMeta.equipmentClassName) },
+                astEnabled: modules.AST === true, dictionaryImported: !!str((await getDoc(POINTER))?.data.activeVid), can };
             if (modules.AST !== true) return { ...out, asset: null, candidates: [] };
             const tag = isObj(wc.data.attributes) ? str(wc.data.attributes.assetTag) : '';
             const asset = TAG_RE.test(tag) ? await getDoc(`${assetCol(ctx.orgId)}/${tag}`) : null;
