@@ -1,6 +1,9 @@
 import { storage } from './platform/sdk';
 import {
     HttpError,
+    DOCUMENT_NAME_ROOT,
+    encodeFields,
+    googleRequest,
     deleteDoc,
     fieldEq,
     getDoc,
@@ -434,12 +437,76 @@ export const structureRoutes = {
             if (new Set(names.map((n) => n.toLowerCase())).size !== names.length) throw new HttpError(400, 'Each level needs a different name.');
             const current = designOf(ctx.org);
             const changesShape = names.length !== current.names.length || mode !== (current.mode || mode);
-            if (changesShape && (await childrenOf(ctx.orgId, 'root')).length) {
-                throw new HttpError(400, 'The design type and number of levels can only change before any units or legal entities are added. You can still rename the levels.');
+            const rooted = await childrenOf(ctx.orgId, 'root');
+            // Converting from one legal entity to many is a safe policy-only change:
+            // existing legal entities and all their descendants retain their IDs and parent links.
+            const allowExpansion = current.mode === 'single' && mode === 'multi' && names.length === 0;
+            if (changesShape && rooted.length && !allowExpansion) {
+                throw new HttpError(400, 'Existing hierarchy links must be preserved. Use Add upper level to insert a new parent safely, or rename existing levels.');
             }
             await updateFields(`organizations/${ctx.orgId}`, { designLevels: { mode, names, updatedAt: nowIso(), updatedBy: ctx.actor.email } });
             await record(ctx, 'org.structure.design', mode === 'single' ? 'Single legal entity' : 'Several legal entities', names.length ? names.map((n, i) => `Level_${i}: ${n}`).join(', ') : 'No upper levels');
             return { mode, names };
+        }),
+    ],
+
+    /** Safely adopt an additional top hierarchy level, preserving all existing node identifiers.
+     * Firestore atomic commit ensures we never leave half-reparented structure data.
+     */
+    'POST /api/org/structure/design/expand': [
+        orgRoute('org.structure.design.expand', 'ADM.structure', async (ctx) => {
+            const current = designOf(ctx.org);
+            if (!current.mode) throw new HttpError(400, 'Configure your initial organization design first.');
+            if (current.names.length >= MAX_UPPER_LEVELS) throw new HttpError(400, 'Maximum number of upper levels reached.');
+            const name = text(ctx.body, 'name', 2, 40, 'Enter a name for the new top level.');
+            if (current.names.some((n) => n.toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'An upper hierarchy level already has this name.');
+            const segment = str(ctx.body.segment).trim().toUpperCase();
+            if (!/^[A-Z]{2,6}$/.test(segment)) throw new HttpError(400, 'Enter 2 to 6 capital letters for the new top-level code.');
+            const id = `G_${segment}`;
+            const [nodes, positions] = await Promise.all([
+                listDocs(col(ctx.orgId)),
+                listDocs(`organizations/${ctx.orgId}/positions`),
+            ]);
+            if (nodes.some((n) => n.id === id || str(n.data.code) === segment)) throw new HttpError(409, 'That upper level code already exists.');
+            // Write everything, including the new parent, in one atomic Firestore commit.
+            const now = nowIso();
+            const root = nodes.filter((n) => str(n.data.parentId) === 'root');
+            const groups = nodes.filter((n) => str(n.data.level) === 'group');
+            const upperRoles = positions.filter((p) => /^upper:\d+$/.test(str(p.data.operatingLevel)));
+            if (!root.length) throw new HttpError(400, 'Create your first legal entity or upper unit before expanding.');
+            if (groups.some((n) => Number(n.data.tier) + 1 >= MAX_UPPER_LEVELS)) throw new HttpError(400, 'Current upper levels exceed the supported depth.');
+            const writes: Array<Record<string, unknown>> = [];
+            const patch = (path: string, fields: Record<string, unknown>) => writes.push({
+                update: { name: `${DOCUMENT_NAME_ROOT}/${path}`, fields: encodeFields(fields) },
+                updateMask: { fieldPaths: Object.keys(fields) },
+            });
+            writes.push({
+                update: {
+                    name: `${DOCUMENT_NAME_ROOT}/${col(ctx.orgId)}/${id}`,
+                    fields: encodeFields({
+                        level: 'group', tier: 0, parentId: 'root', segment, code: segment,
+                        name: text(ctx.body, 'unitName', 2, 120, 'Enter a name for the new top-level unit.'),
+                        description: '', status: 'active', managerRoleCode: '', managerRoleTitle: '',
+                        roleCodes: [], attributes: {}, createdAt: now, createdBy: ctx.uid, updatedAt: now,
+                    }),
+                },
+                currentDocument: { exists: false },
+            });
+            for (const n of root) patch(`${col(ctx.orgId)}/${n.id}`, { parentId: id, updatedAt: now });
+            for (const n of groups) patch(`${col(ctx.orgId)}/${n.id}`, { tier: Number(n.data.tier) + 1, updatedAt: now });
+            for (const p of upperRoles) {
+                const currentTier = Number(str(p.data.operatingLevel).slice(6));
+                patch(`organizations/${ctx.orgId}/positions/${p.id}`, { operatingLevel: `upper:${currentTier + 1}`, updatedAt: now });
+            }
+            patch(`organizations/${ctx.orgId}`, { designLevels: { mode: 'multi', names: [name, ...current.names], updatedAt: now, updatedBy: ctx.actor.email } });
+            if (writes.length > 450) throw new HttpError(400, 'This organization has too many hierarchy records for a safe single-step expansion. Ask support for a controlled migration.');
+            const res = await googleRequest(`https://firestore.googleapis.com/v1/${DOCUMENT_NAME_ROOT}:commit`, 'POST', { writes });
+            if (!res.ok) {
+                console.error('Hierarchy migration transaction failed', res.status);
+                throw new HttpError(409, 'Could not add the upper level atomically; no changes were applied. Check the unit code and try again.');
+            }
+            await record(ctx, 'org.structure.design.expand', name, `Added ${id} above ${root.length} top units and remapped ${upperRoles.length} job roles`);
+            return { id, name, mode: 'multi', updatedNodes: root.length + groups.length };
         }),
     ],
 
