@@ -30,9 +30,9 @@ export default function HealthTracker({ session }: { session: Session }) {
             lastCheck = now;
             pending = true;
             try {
-                const result = await callBackend<{ lock?: HealthLock | null; todaySeconds: number }>('/api/profile/health/pulse', { seconds });
+                const result = await callBackend<{ lock?: HealthLock | null; todaySeconds: number; workSeconds:number; settings:{tracking:boolean;breaks:boolean;workMinutes:number} }>('/api/profile/health/pulse', { seconds });
                 if (active && typeof result.todaySeconds === 'number') {
-                    window.dispatchEvent(new CustomEvent('mems-health-progress', { detail: { uid: session.user.uid, todaySeconds: result.todaySeconds } }));
+                    window.dispatchEvent(new CustomEvent('mems-health-progress', { detail: { uid: session.user.uid, todaySeconds: result.todaySeconds, workSeconds: result.workSeconds, settings: result.settings } }));
                 }
                 if (active && result.lock && Date.parse(result.lock.until) > Date.now()) {
                     window.dispatchEvent(new CustomEvent('mems-health-lock', { detail: { ...result.lock, uid: session.user.uid } }));
