@@ -7,7 +7,7 @@ const PATH = 'reference/currencies';
 const HISTORY = 'fx_snapshots';
 const MAX_RATE = 1e12;
 
-function normalizeRates(values: unknown): Record<string, number> {
+export function normalizeRates(values: unknown): Record<string, number> {
     if (!values || typeof values !== 'object' || Array.isArray(values)) throw new HttpError(502, 'Provider returned no currency-rate catalogue.');
     const clean: Record<string, number> = { USD: 1 };
     for (const [key, raw] of Object.entries(values)) {
