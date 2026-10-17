@@ -172,7 +172,7 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
     }, [route]);
     const lastKey = 'mems.lastDesign.' + (session.organization?.id || 'unknown') + '.' + session.user.uid;
     useEffect(() => {
-        const selected = route.replace(/^organization_admin\\/?/, '');
+        const selected = route.startsWith('organization_admin/') ? route.slice('organization_admin/'.length) : '';
         if (selected.startsWith('structure') || selected.startsWith('positions')) {
             try { localStorage.setItem(lastKey, route); } catch { /* navigation still works */ }
         }
