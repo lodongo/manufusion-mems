@@ -8,8 +8,8 @@ This is a guide to complete the one-time cloud authorizations for the MEMS devel
 
 - `MEMS Admin → GitHub & Cloud Run`: super-admin-only workflow history, Cloud Run service versions, Cloud Logging, Firebase Authentication and Firestore operational counts.
 - On-demand development dispatch and failed-job retry can use short-lived **GitHub App installation tokens**, generated on the backend. They never appear in frontend JavaScript or Firestore.
-- `MEMS Admin → FX automation and rates`: USD/KES, KES/USD, selectable provider, refresh, historical snapshots, 1-hour / today / 24-hour / monthly / yearly views, and schedule preferences.
-- `/api/internal/fx/scheduled-refresh` verifies a signed Google OIDC token including audience, issuer and the dedicated scheduler identity. It does not accept arbitrary bearer strings or query-string secrets.
+- `MEMS Admin → FX automation and rates`: full uploaded world currency catalogue with USD base (including USD/KES and KES/USD), selectable provider, refresh, historical snapshots, 1-hour / today / 24-hour / monthly / yearly views, and schedule preferences.
+- `/api/internal/automations/heartbeat` verifies a signed Google OIDC token including audience, issuer and the dedicated scheduler identity. It does not accept arbitrary bearer strings or query-string secrets.
 - GitHub `develop` pushes run TypeScript checks, production build and automated tests. The final **green, current** commit dispatches the existing `workflow_dispatch` development deployment. The WIF provider remains restricted to that named workflow and environment. No production deployment.
 - Cloud Run deploy uses `--update-env-vars` to preserve externally configured Secret Manager bindings.
 
@@ -50,29 +50,37 @@ Optional provider types:
 
 For a keyed provider, store the key as a separate development Secret Manager secret, grant the runtime account accessor on that secret only, and bind it to `MEMS_FX_PROVIDER_API_KEY` on Cloud Run. Never enter it into MEMS frontend forms.
 
-## 4. Activate reliable timed exchange-rate updates
+## 4. One-time shared Automation Center trigger
 
-Simply saving `enabled=true` inside MEMS does **not** create a cloud scheduled job. For unattended execution configure **Google Cloud Scheduler** once:
+**Do this only once.** All future coded MEMS automation types reuse this single scheduler. Do not create a separate Google Cloud Scheduler job for every module or business process.
 
-1. Enable the Cloud Scheduler API in `manufusion-mems-development`.
-2. Create the service account `mems-fx-scheduler@manufusion-mems-development.iam.gserviceaccount.com`. It does not need Firestore, Firebase Auth or storage permissions.
-3. Create a **single** HTTP Cloud Scheduler job with:
-   - Name: `mems-fx-refresh`
-   - Region: `africa-south1`
-   - Schedule: `*/5 * * * *`
-   - Time zone: `Etc/UTC`
-   - Method: `POST`
-   - URL: `https://mems-dev-c2hjaqiaqq-bq.a.run.app/api/internal/fx/scheduled-refresh`
-   - Header: `Content-Type: application/json`
-   - Body: `{}`
-   - Auth: **OIDC token**
-   - OIDC service account: `mems-fx-scheduler@manufusion-mems-development.iam.gserviceaccount.com`
-   - OIDC audience: `https://mems-dev-c2hjaqiaqq-bq.a.run.app/` (including the trailing slash; must exactly match `MEMS_PUBLIC_URL`)
-4. The project Cloud Scheduler service agent must retain its standard Cloud Scheduler service-agent role. The principal creating/editing the job must be authorized to use the scheduler service account.
-5. In MEMS Admin → FX automation and rates, choose provider, frequency and UTC time, tick enabled, and **Save**.
-6. Run the Cloud Scheduler job once using the Console's `Run now`. Verify `oidc_schedule_connected` and the last-received/last-completed timestamps in the MEMS dashboard; consult error logs if the job fails.
+1. In Google Cloud Console, confirm project `manufusion-mems-development`, then enable the **Cloud Scheduler API**.
+2. Create one dedicated OIDC-only service account:
+   `mems-fx-scheduler@manufusion-mems-development.iam.gserviceaccount.com`.
+   This account does **not** require Firestore, Firebase or Storage permissions.
+3. Temporarily grant the development runtime account
+   `mems-dev-runtime@manufusion-mems-development.iam.gserviceaccount.com`
+   Cloud Scheduler Admin (`roles/cloudscheduler.admin`) in the development project for initial provisioning, and Service Account User (`roles/iam.serviceAccountUser`) on the dedicated `mems-fx-scheduler` account. This is a privileged, one-time authorization that must be performed by the authorized Google Cloud project owner. Prefer a custom minimal scheduler role if supported.
+4. Log in to MEMS as the **platform** super administrator. Open **Automation Center** → **Activate shared scheduler**. Confirm `ACTIVATE AUTOMATIONS`.
+5. MEMS creates one Cloud Scheduler job named `mems-automation-heartbeat` in `africa-south1` with five-minute ticks, OIDC authentication, audience set to the canonical development Cloud Run URL and a fixed endpoint `/api/internal/automations/heartbeat`. The scheduler calls MEMS only; it cannot execute arbitrary scripts or access Firestore.
+6. Select an exchange-rate provider and schedule in **FX automation and rates**, then Save. The application will execute the exchange-rate job when due, without further Google Cloud scheduler changes.
+7. Confirm the **Automation Center** shows an enabled shared trigger, a recent verified heartbeat, successful executions, updated currency coverage and historical logs. If a tick fails, inspect the fault details.
+8. Once the job is created, remove broad Cloud Scheduler Admin from the runtime service account; retain a scoped **Cloud Scheduler Viewer** permission only if the administration dashboard needs to read job status. With creation rights removed, the existing trigger continues to run and all future MEMS automations still share it.
 
-The 5-minute tick does not fetch FX data every 5 minutes. MEMS checks the saved frequency/UTC schedule, and only requests provider data when due. This offers an approximately 5-minute execution window. Cloud Scheduler and Cloud Run invocation costs can apply.
+If the required Cloud Scheduler IAM roles or API are unavailable, MEMS will clearly identify the missing one-time permission. Saving automation preferences alone **does not** mean a heartbeat is active.
+
+Manual **Refresh now** does work independently of Cloud Scheduler; it refreshes all currencies returned by the configured provider and records results. No scheduler connection is needed for this manual action.
+
+### Automation architecture
+
+- Registry: server-coded and allow-listed job IDs, beginning with `fx.world-rates`.
+- Scheduling: per-job enable toggle, hourly/3-hourly/6-hourly/daily/weekly, UTC clock and weekday.
+- Delivery: one centrally managed authenticated Cloud Scheduler heartbeat, independent of any device or Cloud Shell window.
+- Authorization: Google-issued OIDC identity token, validated issuer, audience and dedicated service account.
+- Reliability: per-tick Firestore create-only lock, retries on the next eligible tick after failure, append-only run history and audit events.
+- Observability: last verified heartbeat, last success, latest failure, provider coverage, job history and connection state in Automation Center.
+- Currency history: rate snapshots only when provider content changes; unsupported or obsolete codes are flagged and retain existing recorded values.
+- Provider limitations: the free ExchangeRate-API source publishes roughly daily; faster schedule checks do not generate intraday market quotes.
 
 ## Security and deployment rules
 
