@@ -1433,21 +1433,45 @@ export const handler = router({
             let detail: string;
             if (op === 'add') {
                 const label = text(ctx.body, 'label', 1, 80, 'Enter a label of 1 to 80 characters.');
-                const code = (str(ctx.body.code).trim() || label)
-                    .toLowerCase()
-                    .replace(/&/g, 'and')
-                    .replace(/[^a-z0-9]+/g, '_')
-                    .replace(/^_+|_+$/g, '')
-                    .slice(0, 60);
-                if (!code) throw new HttpError(400, 'Enter a code made of letters and numbers.');
-                if (entries.some((e) => str(e.code) === code)) throw new HttpError(409, `The code ${code} already exists in this list.`);
-                if (entries.some((e) => str(e.label).toLowerCase() === label.toLowerCase())) throw new HttpError(409, 'An entry with this label already exists.');
                 if (entries.length >= 500) throw new HttpError(400, 'A list can hold up to 500 entries.');
-                next = [...entries, { code, label }];
+                if (entries.some((e) => str(e.label).toLowerCase() === label.toLowerCase())) throw new HttpError(409, 'An entry with this label already exists.');
+                let code: string;
+                let entry: Obj;
+                if (target.listKey === 'industries') {
+                    const categoryCode = str(ctx.body.categoryCode).trim();
+                    const categories = lists.find((l) => str(l.key) === 'industryCategories');
+                    const parent = (Array.isArray(categories?.items) ? (categories.items as Plain[]) : []).filter(isObj)
+                        .find((i) => str(i.code) === categoryCode && i.active !== false);
+                    if (!parent) throw new HttpError(400, 'Select a valid, enabled industry category first.');
+                    const largest = entries.filter((e) => str(e.categoryCode) === categoryCode)
+                        .map((e) => Number(/^IND-[A-Z0-9]+-(\\d{3})$/.exec(str(e.code))?.[1] ?? 0))
+                        .reduce((max, n) => Math.max(max, n), 0);
+                    if (largest >= 999) throw new HttpError(400, 'This industry category has no available subcategory codes.');
+                    code = `${categoryCode}-${String(largest + 1).padStart(3, '0')}`;
+                    entry = { code, label, categoryCode, isicSection: str(parent.isicSection), active: true };
+                } else if (target.listKey === 'industryCategories') {
+                    code = str(ctx.body.code).trim().toUpperCase();
+                    if (!/^IND-[A-Z0-9]{1,4}$/.test(code)) throw new HttpError(400, 'Enter a category code such as IND-W.');
+                    entry = { code, label, isicSection: '', active: true };
+                } else {
+                    code = (str(ctx.body.code).trim() || label)
+                        .toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '_')
+                        .replace(/^_+|_+$/g, '').slice(0, 60);
+                    if (!code) throw new HttpError(400, 'Enter a code made of letters and numbers.');
+                    entry = { code, label };
+                }
+                if (entries.some((e) => str(e.code) === code)) throw new HttpError(409, `The code ${code} already exists in this list.`);
+                next = [...entries, entry];
                 detail = `${code} · ${label}`;
             } else {
                 const code = str(ctx.body.code);
                 if (!entries.some((e) => str(e.code) === code)) throw new HttpError(404, 'Entry not found.');
+                if (target.listKey === 'industryCategories') {
+                    const subs = lists.find((l) => str(l.key) === 'industries');
+                    const used = (Array.isArray(subs?.items) ? (subs.items as Plain[]) : []).filter(isObj)
+                        .some((i) => str(i.categoryCode) === code);
+                    if (used) throw new HttpError(409, 'This category still has industry subcategories; remove or reassign them before deleting the category.');
+                }
                 next = entries.filter((e) => str(e.code) !== code);
                 detail = code;
             }
