@@ -35,6 +35,8 @@ export default function AutomationCenter() {
     const operational = trigger.provisioned && trigger.state === 'ENABLED' && data.engine.connected;
     const ok = data.history.filter((r)=>r.status==='success').length;
     const errors = data.history.filter((r)=>r.status==='failed').length;
+    const scheduledExecutions = data.history.filter((r)=>r.mode==='scheduled').length;
+    const manualExecutions = data.history.filter((r)=>r.mode==='manual').length;
     return <div className='space-y-4'>
         <PageTitle title='MEMS Automation Center' subtitle='One secure execution engine for finance and future platform automations' />
         <div className='grid grid-cols-2 gap-3'>
@@ -44,7 +46,7 @@ export default function AutomationCenter() {
             </Card>
             <Card className='space-y-1'>
                 <p className='text-xs text-soft'>Recent executions</p><p className='text-2xl font-bold text-ink'>{ok} / {data.history.length}</p>
-                <p className='text-xs text-soft'>{errors} failed</p>
+                <p className='text-xs text-soft'>{scheduledExecutions} scheduled · {manualExecutions} manual · {errors} failed</p>
             </Card>
         </div>
         <Card className='space-y-3'>
@@ -59,6 +61,7 @@ export default function AutomationCenter() {
                 <div className='rounded-lg border border-line p-3'>Trigger interval <strong className='block text-ink'>{data.engine.tickMinutes} minutes</strong></div>
                 <div className='rounded-lg border border-line p-3'>State <strong className='block text-ink'>{trigger.state || 'Not configured'}</strong></div>
             </div>
+            <p className='text-xs text-soft'>Scheduler location: me-central1 (Doha). Cloud Run remains in africa-south1 (Johannesburg).</p>
             <p className='text-xs text-soft'>Last OIDC-verified scheduler callback: {pretty(data.engine.lastHeartbeat)}</p>
             <Button className='w-full' onClick={activate} busy={busy}><Play className='h-4 w-4'/> {trigger.provisioned ? 'Verify or repair scheduler' : 'Activate shared scheduler'}</Button>
             <Button className='w-full' variant='secondary' onClick={reload}><RefreshCw className='h-4 w-4'/> Check connection</Button>
