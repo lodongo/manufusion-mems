@@ -183,7 +183,8 @@ function UserForm({
     const [password, setPassword] = useState('');
     const [skillCodes, setSkillCodes] = useState<string[]>(user?.skillCodes ?? []);
     const positions = useLoad(() => callBackend<{ positions: Array<{ code:string; title:string; coreSkills?:string[] }> }>('/api/org/positions/list'));
-    const assignedRoles = (positions.data?.positions ?? []).filter(p => (user?.jobRoles ?? []).includes(p.code));
+    const [previewRole, setPreviewRole] = useState('');
+    const assignedRoles = (positions.data?.positions ?? []).filter(p => (user?.jobRoles ?? []).includes(p.code) || (previewRole && p.code === previewRole));
     const [busy, setBusy] = useState('');
     const [error, setError] = useState('');
 
