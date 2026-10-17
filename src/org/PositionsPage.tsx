@@ -7,6 +7,7 @@ import { Button, Card, PageTitle, Spinner, TextArea, useLoad } from '../admin/ki
 import { operatingLabel, upperName } from './structureDefs';
 import RoleCoreSkills from './RoleCoreSkills';
 import { parentSkillSources } from './skillAdoption';
+import { matchingRoleNodes, staffingSummary, type RoleStaffingRow, type RoleStaffingCount, type StaffingUnit } from './roleStaffing';
 
 export interface Position {
     code: string;
@@ -17,6 +18,7 @@ export interface Position {
     defaultNodeId?: string;
     securityRoles?: string[];
     coreSkills?: string[];
+    staffingPlan?: RoleStaffingRow[];
 }
 
 export interface RoleOption {
@@ -30,7 +32,7 @@ interface PositionsData {
     positions: Position[];
     design: { mode: string; names: string[] };
     roleOptions?: RoleOption[];
-    scopeNodes?: Array<{id:string;level:string;tier:number;code:string;name:string}>;
+    scopeNodes?: StaffingUnit[];
 }
 
 const open = (code?: string) => navigate(code ? `organization_admin/positions/${code}` : 'organization_admin/positions');
@@ -241,7 +243,7 @@ function PositionForm({
     positions: Position[];
     names: string[];
     roleOptions: RoleOption[];
-    scopeNodes: Array<{id:string;level:string;tier:number;code:string;name:string}>;
+    scopeNodes: StaffingUnit[];
     onDone: () => void;
     onCancel: () => void;
 }) {
@@ -250,6 +252,25 @@ function PositionForm({
     const [parent, setParent] = useState(parentCode);
     const [operatingLevel, setOperatingLevel] = useState(existing?.operatingLevel ?? '');
     const [defaultNodeId, setDefaultNodeId] = useState(existing?.defaultNodeId ?? '');
+    const [staffing, setStaffing] = useState<RoleStaffingRow[]>(existing?.staffingPlan ?? []);
+    const staffCounts = useLoad(() => callBackend<{ counts: RoleStaffingCount[]; asOf: string }>('/api/org/positions/staffing', { code: existing?.code ?? '' }), [existing?.code]);
+    const applicableNodes = matchingRoleNodes(operatingLevel, scopeNodes);
+    const rows = applicableNodes.map(n => staffing.find(r => r.nodeId === n.id) ?? {
+        nodeId: n.id,
+        enabled: Boolean(existing?.code && n.roleCodes?.includes(existing.code)),
+        required: 0,
+    });
+    const byCounts = new Map((staffCounts.data?.counts ?? []).map(c => [c.nodeId, c]));
+    const summary = staffingSummary(rows, staffCounts.data?.counts ?? []);
+    const updateStaffing = (nodeId: string, patch: Partial<RoleStaffingRow>) => {
+        setStaffing(current => {
+            const initial = current.find(r => r.nodeId === nodeId) ?? rows.find(r => r.nodeId === nodeId);
+            if (!initial) return current;
+            const next = { ...initial, ...patch };
+            if (!next.enabled) next.required = 0;
+            return [...current.filter(r => r.nodeId !== nodeId), next];
+        });
+    };
     const [securityRoles, setSecurityRoles] = useState<string[]>(existing?.securityRoles ?? []);
     const [coreSkills,setCoreSkills]=useState<string[]>(existing?.coreSkills??[]);
     const toggleRole = (id: string) => setSecurityRoles((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
@@ -261,9 +282,10 @@ function PositionForm({
         setError('');
         if (title.trim().length < 2) return setError('Enter the job role title (2 to 80 characters).');
         if (securityRoles.length > 10) return setError('Map up to 10 security roles.');
+        if (rows.some(r => !Number.isSafeInteger(r.required) || r.required < 0 || r.required > 999999)) return setError('Enter a valid non-negative whole-number requirement for every enabled unit.');
         setBusy(true);
         try {
-            await callBackend('/api/org/positions/save', { code: existing?.code, title: title.trim(), description, parentCode: parent, operatingLevel, securityRoles, coreSkills });
+            await callBackend('/api/org/positions/save', { code: existing?.code, title: title.trim(), description, parentCode: parent, operatingLevel, securityRoles, coreSkills, staffingPlan: rows });
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save.');
@@ -295,7 +317,7 @@ function PositionForm({
                             </option>
                         ))}
                 </SelectField>
-                <SelectField id='pos-level' label='Operates at' value={operatingLevel} onChange={(e) => { setOperatingLevel(e.target.value); setDefaultNodeId(''); }}>
+                <SelectField id='pos-level' label='Operates at' value={operatingLevel} onChange={(e) => { setOperatingLevel(e.target.value); setDefaultNodeId(''); setStaffing([]); }}>
                     <option value=''>Decide later</option>
                     {names.map((n, i) => (
                         <option key={i} value={`upper:${i}`}>
@@ -306,6 +328,73 @@ function PositionForm({
                     <option value='site'>Site level</option><option value='department'>Department level</option><option value='cost_center'>Cost center level</option>
                 </SelectField>
 
+                <Card className='space-y-3 border border-line bg-panel'>
+                    <div>
+                        <h3 className='text-base font-semibold text-ink'>Staffing by organizational unit</h3>
+                        <p className='mt-1 text-xs text-soft'>Choose an operating level above. Every configured unit at that level is listed below. Enable this role for each location separately, then set the number of positions needed there.</p>
+                    </div>
+                    {!operatingLevel ? (
+                        <Alert tone='info'>First select the organizational level where this job role operates.</Alert>
+                    ) : !applicableNodes.length ? (
+                        <Alert tone='warn'>No organizational units exist at the selected level. Create those units in Organization Design, then return to this role.</Alert>
+                    ) : (
+                        <>
+                            <div className='grid grid-cols-2 gap-2 text-sm'>
+                                <div className='rounded-xl border border-line p-3'>
+                                    <span className='text-xs text-soft'>Required / occupied</span>
+                                    <p className='mt-1 font-bold text-ink'>{summary.required} / {summary.filled}</p>
+                                </div>
+                                <div className='rounded-xl border border-line p-3'>
+                                    <span className='text-xs text-soft'>Vacant positions</span>
+                                    <p className='mt-1 text-xl font-bold text-ink'>{summary.vacant}</p>
+                                </div>
+                            </div>
+                            <p className='text-xs text-soft'>{summary.enabledUnits} of {applicableNodes.length} units enabled. Only active employees with a primary assignment to this exact role and unit fill permanent positions. Temporary cover is counted separately.</p>
+                            {staffCounts.error && <Alert tone='warn'>Employee occupancy is unavailable: {staffCounts.error}. Requirements can still be edited, but occupancy cannot be verified.</Alert>}
+                            <div className='space-y-3'>
+                                {applicableNodes.map(n => {
+                                    const row = rows.find(r => r.nodeId === n.id)!;
+                                    const count = byCounts.get(n.id);
+                                    const filled = count?.filled ?? 0;
+                                    const temp = count?.temporary ?? 0;
+                                    const vacant = row.enabled ? Math.max(0,row.required - filled) : 0;
+                                    const over = row.enabled ? Math.max(0,filled - row.required) : 0;
+                                    return <div key={n.id} className='space-y-3 rounded-xl border border-line bg-page p-3'>
+                                        <label className='flex min-h-12 items-start gap-3'>
+                                            <input type='checkbox' checked={row.enabled} onChange={(e) => updateStaffing(n.id,{enabled:e.target.checked})}
+                                                className='mt-1 h-5 w-5 shrink-0 accent-emerald-500' />
+                                            <span className='min-w-0 flex-1'>
+                                                <span className='block text-sm font-semibold text-ink'>{n.name}</span>
+                                                <span className='block break-words font-mono text-xs text-soft'>{n.code} {n.status === 'inactive' ? '· inactive unit' : ''}</span>
+                                                <span className='block text-xs text-soft'>{row.enabled ? 'Enabled at this unit' : 'Not enabled at this unit'}</span>
+                                            </span>
+                                        </label>
+                                        {row.enabled && <label className='block'>
+                                            <span className='mb-1 block text-sm font-medium text-ink'>Required positions</span>
+                                            <input aria-label={`Required ${title || 'role'} positions at ${n.name}`} type='number' min={0} max={999999}
+                                                inputMode='numeric' step={1} value={row.required} onChange={(e) => updateStaffing(n.id,{required:e.target.value === '' ? 0 : Number(e.target.value)})}
+                                                className='h-12 w-full rounded-xl border border-line bg-panel px-3 text-base text-ink' />
+                                        </label>}
+                                        <div className='grid grid-cols-3 gap-2 text-center text-xs'>
+                                            <div className='rounded-lg border border-line p-2'><strong className='block text-base text-ink'>{filled}</strong>Filled</div>
+                                            <div className='rounded-lg border border-line p-2'><strong className='block text-base text-ink'>{vacant}</strong>Vacant</div>
+                                            <div className='rounded-lg border border-line p-2'><strong className='block text-base text-ink'>{temp}</strong>Acting / temporary</div>
+                                        </div>
+                                        {over > 0 && <Alert tone='warn'>{over} employees exceed the current requirement at this unit.</Alert>}
+                                        {!row.enabled && filled > 0 && <Alert tone='warn'>{filled} active employees hold this role here. Enable the unit before saving or reassign them.</Alert>}
+                                        {!!count?.employees.length && <details className='text-sm text-ink'>
+                                            <summary className='cursor-pointer font-medium'>Assigned employees ({count.employees.length})</summary>
+                                            <div className='mt-2 space-y-1'>
+                                                {count.employees.map((person,i) =>
+                                                    <p key={i} className='rounded-lg border border-line px-3 py-2 text-xs text-soft'>{person.name} · {person.type === 'primary' ? 'Permanent assignment' : person.type}</p>)}
+                                            </div>
+                                        </details>}
+                                    </div>;
+                                })}
+                            </div>
+                        </>
+                    )}
+                </Card>
                 <TextArea id='pos-desc' label='Purpose and responsibilities (optional)' rows={3} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
                 <RoleCoreSkills value={coreSkills} onChange={setCoreSkills} sources={parentSkillSources(parent, positions, existing?.code)}/>
                 <fieldset className='space-y-2'>
