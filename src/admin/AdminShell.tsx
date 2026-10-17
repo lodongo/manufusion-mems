@@ -24,7 +24,8 @@ import AppDeployPage from './AppDeployPage';
 import SkillsMasterPage from './SkillsMasterPage';
 
 const DEFAULT_META_LISTS = [
-    { key: 'meta.industries', label: 'Industry / manufacturing sector' },
+    { key: 'meta.industryCategories', label: 'Industry categories' },
+    { key: 'meta.industries', label: 'Industry subcategories' },
     { key: 'meta.companySizes', label: 'Company size' },
     { key: 'meta.legalEntityTypes', label: 'Legal entity type' },
     { key: 'meta.annualTurnover', label: 'Annual turnover (USD)' },
