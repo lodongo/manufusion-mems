@@ -6,13 +6,7 @@ import { Alert, Field, SelectField } from '../components/ui';
 import { Button, Card, PageTitle, Spinner, TextArea, useLoad } from '../admin/kit';
 import { operatingLabel, upperName } from './structureDefs';
 import RoleCoreSkills from './RoleCoreSkills';
-
-function CoreSkillsSelector({value,onChange}:{value:string[];onChange:(v:string[])=>void}){
- const {data,error}=useLoad(()=>callBackend<{ready:boolean;skills:Array<{code:string;label:string;category:string;subcategory:string;description:string;active:boolean}>}>('/api/org/reference/core-skills'));
- const [category,setCategory]=useState('');const [subcategory,setSubcategory]=useState('');const [skill,setSkill]=useState('');const skills=data?.skills??[];
- const categories=[...new Set(skills.filter(x=>x.active).map(x=>x.category))].sort();const subs=[...new Set(skills.filter(x=>x.active&&x.category===category).map(x=>x.subcategory))].sort();const choices=skills.filter(x=>x.active&&x.category===category&&x.subcategory===subcategory&&!value.includes(x.code));
- return <fieldset className='space-y-3 rounded-xl border border-slate-700 p-3'><legend className='px-1 text-sm font-semibold text-white'>Core skills ({value.length}/20)</legend>{error&&<p className='text-red-400'>{error}</p>}{data&&!data.ready&&<p className='text-amber-300'>Load HRM Skills Master metadata first.</p>}<div className='grid gap-2 sm:grid-cols-3'><label className='text-xs text-slate-300'>Category<select className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white' value={category} onChange={e=>{setCategory(e.target.value);setSubcategory('');setSkill('')}}><option value=''>Choose category</option>{categories.map(x=><option key={x}>{x}</option>)}</select></label><label className='text-xs text-slate-300'>Subcategory<select className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white' value={subcategory} disabled={!category} onChange={e=>{setSubcategory(e.target.value);setSkill('')}}><option value=''>Choose subcategory</option>{subs.map(x=><option key={x}>{x}</option>)}</select></label><label className='text-xs text-slate-300'>Skill<select className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white' value={skill} disabled={!subcategory||value.length>=20} onChange={e=>setSkill(e.target.value)}><option value=''>Choose skill</option>{choices.map(x=><option key={x.code} value={x.code}>{x.label}</option>)}</select></label></div><button type='button' disabled={!skill||value.length>=20} onClick={()=>{onChange([...value,skill]);setSkill('')}} className='rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40'>Add skill</button><div className='space-y-2'>{value.map((code,i)=>{const x=skills.find(s=>s.code===code);return <div key={code} className='flex justify-between gap-2 rounded-lg border border-slate-700 bg-slate-900 p-3'><div><p className='text-sm font-semibold text-white'>{i+1}. {x?.label??code}</p><p className='text-xs text-slate-400'>{x?x.category+' › '+x.subcategory:code}</p><p className='mt-1 text-xs text-slate-300'>{x?.description}</p></div><button type='button' onClick={()=>onChange(value.filter(c=>c!==code))} className='text-xs text-red-300'>Remove</button></div>})}</div></fieldset>;
-}
+import { parentSkillSources } from './skillAdoption';
 
 export interface Position {
     code: string;
@@ -113,7 +107,7 @@ export default function PositionsPage({ canEdit, code }: { canEdit: boolean; cod
                     <Detail label='Direct reports' value={String(children.length)} />
                     {current.description && <Detail label='Purpose' value={current.description} />}
                 </Card>
-                <Card className='space-y-2 text-sm'><p className='font-medium text-white'>Core skills required ({(current.coreSkills??[]).length}/20)</p>{(current.coreSkills??[]).length?(current.coreSkills??[]).map(x=><p key={x} className='rounded-lg border border-slate-700 p-2 font-mono text-slate-200'>{x}</p>):<p className='text-slate-400'>No core skills assigned.</p>}</Card>
+                <Card className='space-y-2 text-sm'><p className='font-medium text-white'>Core skills (optional · {(current.coreSkills??[]).length} selected)</p>{(current.coreSkills??[]).length?(current.coreSkills??[]).map(x=><p key={x} className='rounded-lg border border-slate-700 p-2 font-mono text-slate-200'>{x}</p>):<p className='text-slate-400'>No core skills assigned.</p>}</Card>
                 <Card className='space-y-2 text-sm'>
                     <p className='flex items-center gap-2 font-medium text-white'>
                         <ShieldCheck className='h-4 w-4 text-emerald-400' />
@@ -267,7 +261,6 @@ function PositionForm({
         setError('');
         if (title.trim().length < 2) return setError('Enter the job role title (2 to 80 characters).');
         if (securityRoles.length > 10) return setError('Map up to 10 security roles.');
-        if (coreSkills.length < 5 || coreSkills.length > 20) return setError('Select at least 5 and at most 20 core skills for this job role.');
         setBusy(true);
         try {
             await callBackend('/api/org/positions/save', { code: existing?.code, title: title.trim(), description, parentCode: parent, operatingLevel, securityRoles, coreSkills });
@@ -314,7 +307,7 @@ function PositionForm({
                 </SelectField>
 
                 <TextArea id='pos-desc' label='Purpose and responsibilities (optional)' rows={3} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
-                <RoleCoreSkills value={coreSkills} onChange={setCoreSkills}/>
+                <RoleCoreSkills value={coreSkills} onChange={setCoreSkills} sources={parentSkillSources(parent, positions, existing?.code)}/>
                 <fieldset className='space-y-2'>
                     <legend className='text-sm font-medium text-slate-200'>Security roles (what this job role may do)</legend>
                     <p className='text-xs text-slate-500'>People holding this job role get these rights where they hold it and below. Administration rights are never passed on through job roles.</p>
