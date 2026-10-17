@@ -1266,9 +1266,11 @@ function NodeForm({
                     <SelectField id='new-equipment-existing-asset' label='Match an existing, unassigned asset (optional)' value={existingAssetTag}
                         onChange={(e)=>setExistingAssetTag(e.target.value)} disabled={eligibleLoading}>
                         <option value=''>{eligibleLoading ? 'Checking eligible assets…' : 'Create a new draft asset for this equipment'}</option>
+                        <option value='__UNASSIGNED__'>Create equipment only — link an asset later</option>
                         {matchingAssets.map((a)=><option key={a.tag} value={a.tag}>{a.tag} · {a.name} ({a.status}; {a.nodeCode})</option>)}
                     </SelectField>
-                    {existingAssetTag ? <p className='text-xs text-brand'>The existing asset will be linked; no duplicate asset will be created.</p>
+                    {existingAssetTag === '__UNASSIGNED__' ? <p className='text-xs text-soft'>Equipment will be saved without an asset. Add or adopt one later from Equipment configuration.</p>
+                        : existingAssetTag ? <p className='text-xs text-brand'>The existing compatible asset will be linked; no duplicate asset will be created.</p>
                         : <p className='text-xs text-soft'>{matchingAssets.length ? `${matchingAssets.length} compatible unassigned asset(s) available. Choose one to avoid duplicates.` : 'No matching available asset detected; a new draft asset will be created.'}</p>}
                 </Card>
             )}
