@@ -65,10 +65,11 @@ export async function getLive(provider: Provider): Promise<{ usdKes: number; at:
 }
 
 async function latest() {
-    const [config, currencies, history] = await Promise.all([
+    const [config, currencies, history, schedule] = await Promise.all([
         getDoc(CONFIG_PATH),
         getDoc(RATES_PATH),
         runQuery({ from: [{ collectionId: HISTORY }], orderBy: orderDesc('capturedAt'), limit: 550 }),
+        getDoc('system/fx_schedule_state'),
     ]);
     const settings = settingsOf(config);
     const rows = Array.isArray(currencies?.data.items) ? (currencies?.data.items as Plain[]) : [];
@@ -86,8 +87,11 @@ async function latest() {
             provider: str(r.data.provider),
         })).filter((r) => r.usdKes !== null),
         scheduler: {
-            status: 'configuration_saved_only',
-            notes: 'A Cloud Scheduler job with verified OIDC identity must be provisioned before unattended refresh is active.',
+            status: str(schedule?.data.lastReceivedAt) ? 'oidc_schedule_connected' : 'configuration_saved_only',
+            notes: str(schedule?.data.lastReceivedAt) ? 'Verified Cloud Scheduler requests have reached MEMS.' : 'Provision a Cloud Scheduler HTTP job with a verified OIDC service identity to activate unattended refresh.',
+            lastReceivedAt: str(schedule?.data.lastReceivedAt),
+            lastCompletedAt: str(schedule?.data.lastCompletedAt),
+            lastError: str(schedule?.data.lastError),
         },
     };
 }
