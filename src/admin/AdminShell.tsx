@@ -22,6 +22,8 @@ import HealthPage from './HealthPage';
 import LogsPage from './LogsPage';
 import AppDeployPage from './AppDeployPage';
 import SkillsMasterPage from './SkillsMasterPage';
+import OperationsCenter from './OperationsCenter';
+import FxMonitor from './FxMonitor';
 
 const DEFAULT_META_LISTS = [
     { key: 'meta.industryCategories', label: 'Industry categories' },
@@ -84,7 +86,12 @@ export default function AdminShell({
                 { key: 'modules', label: 'Modules', Icon: Puzzle },
                 { key: 'site', label: 'Site setup', Icon: Palette },
                 { key: 'billing', label: 'Billing and payments', Icon: CreditCard },
-                ...(isSuper ? [{ key: 'firestore', label: 'Database explorer', Icon: FolderTree },{ key: 'appdeploy', label: 'Hosting migration', Icon: Activity }] : []),
+                ...(isSuper ? [
+                    { key: 'operations', label: 'GitHub & Cloud Run', Icon: Activity },
+                    { key: 'fx_monitor', label: 'FX automation and rates', Icon: Coins },
+                    { key: 'firestore', label: 'Database explorer', Icon: FolderTree },
+                    { key: 'appdeploy', label: 'Hosting migration', Icon: Activity },
+                ] : []),
             ],
         },
         {
@@ -160,6 +167,12 @@ export default function AdminShell({
             break;
         case 'appdeploy':
             content = isSuper ? <AppDeployPage /> : <Dashboard />;
+            break;
+        case 'operations':
+            content = isSuper ? <OperationsCenter /> : <Dashboard />;
+            break;
+        case 'fx_monitor':
+            content = isSuper ? <FxMonitor /> : <Dashboard />;
             break;
         case 'modules':
             content = <ModulesPage code={id} tab={sub} canWrite={canWrite} isSuper={isSuper} />;
