@@ -185,6 +185,7 @@ export default function PositionsPage({ canEdit, code }: { canEdit: boolean; cod
                 </div>
             )}
             {actionError && <Alert tone='error'>{actionError}</Alert>}
+            {current && canEdit && <RoleVacancyOverview role={current} units={data.scopeNodes ?? []} />}
 
             <p className='px-1 text-xs font-semibold uppercase tracking-wider text-slate-500'>{current ? `Reporting to ${current.title}` : 'Top roles'}</p>
             <Card className='p-0'>
@@ -226,6 +227,53 @@ function Detail({ label, value }: { label: string; value: string }) {
             <span className='break-words text-right text-white'>{value}</span>
         </div>
     );
+}
+
+/** Live establishment summary on the role page, not only during editing. */
+function RoleVacancyOverview({ role, units }: { role: Position; units: StaffingUnit[] }) {
+    const staff = useLoad(() => callBackend<{ counts: RoleStaffingCount[]; asOf: string }>('/api/org/positions/staffing', { code: role.code }), [role.code]);
+    const matching = matchingRoleNodes(role.operatingLevel, units);
+    const rows = matching.map(n => role.staffingPlan?.find(r => r.nodeId === n.id) ??
+        ({ nodeId: n.id, enabled: Boolean(n.roleCodes?.includes(role.code)), required: 0 }));
+    const totals = staffingSummary(rows, staff.data?.counts ?? []);
+    const byNode = new Map((staff.data?.counts ?? []).map(c => [c.nodeId, c]));
+    return <Card className='space-y-3'>
+        <div className='flex items-center justify-between gap-2'>
+            <p className='font-semibold text-ink'>Staffing & vacant positions</p>
+            <span className='text-xs text-soft'>{totals.enabledUnits} units enabled</span>
+        </div>
+        <div className='grid grid-cols-3 gap-2 text-center text-xs'>
+            <div className='rounded-xl border border-line p-2'><strong className='block text-lg text-ink'>{totals.required}</strong>Required</div>
+            <div className='rounded-xl border border-line p-2'><strong className='block text-lg text-ink'>{totals.filled}</strong>Filled</div>
+            <div className='rounded-xl border border-line p-2'><strong className='block text-lg text-ink'>{totals.vacant}</strong>Vacant</div>
+        </div>
+        {staff.loading && <p className='text-xs text-soft'>Checking employee assignments…</p>}
+        {staff.error && <Alert tone='warn'>Employee assignment data could not be loaded: {staff.error}</Alert>}
+        {matching.length === 0 && <p className='text-sm text-soft'>Select an operating level and create its organizational units to configure staffing.</p>}
+        {matching.map(n => {
+            const row = rows.find(r => r.nodeId === n.id)!;
+            const count = byNode.get(n.id);
+            const filled = count?.filled ?? 0;
+            const vacant = row.enabled ? Math.max(0,row.required-filled) : 0;
+            return <div key={n.id} className='rounded-xl border border-line px-3 py-2'>
+                <div className='flex items-center justify-between gap-3'>
+                    <div className='min-w-0'>
+                        <p className='truncate text-sm font-semibold text-ink'>{n.name}</p>
+                        <p className='text-xs text-soft'>{n.code} · {row.enabled ? 'Enabled' : 'Disabled'}</p>
+                    </div>
+                    <div className='shrink-0 text-right text-xs text-soft'>
+                        <p>{filled}/{row.enabled ? row.required : 0} filled</p>
+                        <p className='font-semibold text-ink'>{vacant} vacant</p>
+                    </div>
+                </div>
+                {!!count?.employees.length && <details className='mt-2 text-xs text-soft'>
+                    <summary className='cursor-pointer'>Employees ({count.employees.length}) · {count.temporary} temporary</summary>
+                    {count.employees.map((person,i)=><p className='mt-1' key={i}>{person.name} — {person.type}</p>)}
+                </details>}
+            </div>;
+        })}
+        <p className='text-xs text-soft'>Permanent vacancies = max(0, positions required − active primary holders) per enabled unit. Acting assignments are shown separately.</p>
+    </Card>;
 }
 
 function PositionForm({
