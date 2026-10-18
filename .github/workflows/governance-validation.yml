@@ -8,6 +8,8 @@ on:
       - 'backend/governanceCore.test.ts'
       - 'backend/transactionRegistry.ts'
       - 'backend/permissionPolicy.ts'
+      - 'src/org/TransactionGovernance.tsx'
+      - 'src/org/OrgShell.tsx'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/governance-validation.yml'
