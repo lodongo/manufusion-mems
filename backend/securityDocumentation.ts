@@ -1,4 +1,5 @@
 import { storage } from './platform/sdk';
+import { audit } from './audit';
 import { HttpError, getDoc, listDocs, nowIso, randomId, str, updateFields, writeDoc } from './core';
 import { orgRoute, staff } from './guards';
 import { standardRoleTemplates } from './standardRoleTemplates';
@@ -48,6 +49,7 @@ export const documentationRoutes = {
         organizationId: null, createdAt: str(existing?.data.createdAt)||now,
         updatedAt: now, updatedBy: ctx.uid,
       });
+      await audit([{category:'documentation',action:'security-document.save',actor:ctx.actor,target:{type:'document',id},details:'Draft saved'}]);
       return { id, status: 'draft' };
     }),
   ],
@@ -63,6 +65,7 @@ export const documentationRoutes = {
         approvedBy: '', publishedBy: '', createdAt: nowIso(), updatedAt: nowIso(),
         updatedBy: ctx.uid,
       },{exists:false});
+      await audit([{category:'documentation',action:'security-document.revise',actor:ctx.actor,target:{type:'document',id:revisionId},details:`Revised from ${id}`}]);
       return { id: revisionId };
     }),
   ],
@@ -73,6 +76,7 @@ export const documentationRoutes = {
       if (!doc || str(doc.data.status) !== 'draft') throw new HttpError(409,'Document must be a draft.');
       if (str(doc.data.updatedBy) === ctx.uid) throw new HttpError(403,'Independent approval required.');
       await updateFields(pathFor(id), {status:'approved', approvedBy:ctx.uid,approvedAt:nowIso()});
+      await audit([{category:'documentation',action:'security-document.approve',actor:ctx.actor,target:{type:'document',id}}]);
       return {ok:true};
     }),
   ],
@@ -82,6 +86,7 @@ export const documentationRoutes = {
       const doc = safeId(id) ? await getDoc(pathFor(id)) : null;
       if (!doc || str(doc.data.status) !== 'approved' || !str(doc.data.approvedBy)) throw new HttpError(409,'Independent approval is required.');
       await updateFields(pathFor(id), {status:'published',publishedBy:ctx.uid,publishedAt:nowIso()});
+      await audit([{category:'documentation',action:'security-document.publish',actor:ctx.actor,target:{type:'document',id}}]);
       return {ok:true};
     }),
   ],
@@ -121,6 +126,7 @@ export const documentationRoutes = {
         path:storagePath,mime,filename:clean(ctx.body.filename,180),
         signedBy:ctx.uid,uploadedAt:nowIso(),status:'uploaded',
       },{exists:false});
+      await audit([{category:'documentation',action:'security-document.signoff-upload',actor:ctx.actor,orgId:ctx.orgId,target:{type:'signoff',id:fileId},details:`Signed revision ${id}`}]);
       return {id:fileId,documentId:id};
     }),
   ],
