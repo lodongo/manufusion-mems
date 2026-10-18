@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { HeartPulse, BookOpen, Boxes, Briefcase, Calculator, ClipboardList, CircleUser, ClipboardCheck, CreditCard, Eye, GitBranch, History, Home, Layers, LayoutDashboard, LogOut, Menu, Network, Package, PackageCheck, PackagePlus, Palette, Puzzle, ScrollText, Settings, ShieldCheck, Table2, Users, Workflow, Wrench, X } from 'lucide-react';
 import AssetRegister from './AssetRegister';
 import MaterialWorkflow from './MaterialWorkflow';
+import TransactionGovernance from './TransactionGovernance';
 import WorkflowInbox from './WorkflowInbox';
 import ProcurementCatalog from './ProcurementCatalog';
 import WorkRequests from './WorkRequests';
@@ -106,7 +107,8 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
         title: 'Governance',
         items: [
             { key: 'delegations', label: 'Delegation', Icon: Network, perm: 'ADM.delegations' },
-            { key: 'workflows', label: 'Workflow configuration', Icon: GitBranch, perm: 'ADM.workflows' },
+            { key: 'transaction_governance', label: 'Transaction governance', Icon: ShieldCheck, perm: 'ADM.workflows' },
+            { key: 'workflows', label: 'Legacy workflows', Icon: GitBranch, perm: 'ADM.workflows' },
             { key: 'authority', label: 'Chart of authority', Icon: Table2, perm: 'ADM.authority' },
             { key: 'audit', label: 'Audit trail', Icon: ScrollText, perm: 'ADM.audit' },
         ],
@@ -140,6 +142,7 @@ const TITLES: Record<string, string> = {
     positions: 'Job roles',
     positions_view: 'Job role structure',
     roles: 'Security roles',
+    transaction_governance: 'Transaction governance',
     modules: 'All modules',
     modules_available: 'Modules not adopted',
     modules_adopted: 'Adopted modules',
@@ -256,6 +259,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             content = <OrgRoles id={id} />;
             break;
 
+        case 'transaction_governance':
+            content = <TransactionGovernance canRoles={hasPerm(data.permissions, 'ADM.roles')} canWorkflow={hasPerm(data.permissions, 'ADM.workflows')} />;
+            break;
         case 'workflows':
             content = <MaterialWorkflow />;
             break;
