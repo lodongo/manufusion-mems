@@ -52,6 +52,7 @@ const panels: Record<Tab, { title: string; description: string; details: string[
 
 export default function TransactionGovernance({ canRoles, canWorkflow }: { canRoles: boolean; canWorkflow: boolean }) {
   const [active, setActive] = useState<Tab>('transactions');
+  const [reviewModule,setReviewModule] = useState('MNT');
   const [entity, setEntity] = useState('');
   const [docModule, setDocModule] = useState('PRC');
   const [docVersion, setDocVersion] = useState('1.0.0');
@@ -94,8 +95,8 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
         {active === 'permissions' && canRoles && <button type='button' onClick={() => go('roles')} className='inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-ink'>Open Security Roles <ArrowRight size={16}/></button>}
         {active === 'workflows' && canWorkflow && <button type='button' onClick={() => go('workflows')} className='inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-ink'>Open Workflow Configuration <ArrowRight size={16}/></button>}
       </section>
-      {active === 'permissions' && canWorkflow && <GovernancePolicyAdmin />}
-      {active === 'authority' && canWorkflow && <GovernanceCutoverAdmin />}
+      {active === 'permissions' && canWorkflow && <GovernancePolicyAdmin initialModule={reviewModule} />}
+      {active === 'authority' && canWorkflow && <GovernanceCutoverAdmin onReviewBinding={module=>{setReviewModule(module);setActive('permissions');}} />}
       {active === 'reports' && <GovernanceReports />}
       {active === 'documentation' && <section className='rounded-xl border border-[rgb(var(--c-border))] p-4 space-y-3'>
         <h2 className='font-semibold text-ink'>Create a controlled draft</h2>
