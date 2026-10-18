@@ -150,6 +150,17 @@ export default function PositionsPage({ canEdit, code }: { canEdit: boolean; cod
     return (
         <div className='space-y-3'>
             <PageTitle title='Job roles' subtitle='Choose a job role to configure its hierarchy, skills and security mappings.' />
+            {canEdit && <div className='flex flex-wrap items-center gap-2'>
+                <button type='button' disabled={busy} onClick={async()=>{
+                    setBusy(true);setActionError('');
+                    try { await callBackend('/api/org/positions/baseline/sync');reload(); }
+                    catch(e){setActionError(e instanceof Error?e.message:'Could not update standard role mappings.');}
+                    finally{setBusy(false);}
+                }} className='rounded-lg border border-emerald-500/30 px-3 py-2 text-sm text-emerald-300'>
+                    Ensure Standard User for all job roles
+                </button>
+                <p className='text-xs text-slate-400'>The basic self-service role is included automatically when a job role is created or edited.</p>
+            </div>
             <nav aria-label='Path' className='flex flex-wrap items-center gap-1 text-sm'>
                 <button onClick={() => open()} className='flex items-center gap-1 rounded-lg px-2 py-1 text-emerald-300'>
                     <Home className='h-4 w-4' />
