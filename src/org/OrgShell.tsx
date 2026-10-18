@@ -110,7 +110,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
             { key: 'delegations', label: 'Delegation', Icon: Network, perm: 'ADM.delegations' },
             { key: 'transaction_governance', label: 'Transaction governance', Icon: ShieldCheck, perm: 'ADM.workflows' },
             { key: 'transaction_catalogue', label: 'Transaction catalogue', Icon: Table2, perm: 'ADM.workflows' },
-            { key: 'workflows', label: 'Legacy workflows', Icon: GitBranch, perm: 'ADM.workflows' },
+            { key: 'workflows', label: 'Workflow configuration', Icon: GitBranch, perm: 'ADM.workflows' },
             { key: 'authority', label: 'Chart of authority', Icon: Table2, perm: 'ADM.authority' },
             { key: 'audit', label: 'Audit trail', Icon: ScrollText, perm: 'ADM.audit' },
         ],
