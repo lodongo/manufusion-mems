@@ -58,3 +58,19 @@ test('approval state machine enforces sequential levels and parallel specialist 
   assert.throws(()=>applyApprovalDecision({...e,votes:s3.votes},'user-a','approve','2026-10-18T09:04:00Z'));
   assert.throws(()=>applyApprovalDecision({...e,votes:s3.votes},'u1','approve','2026-10-18T09:04:00Z'));
 });
+
+test('independent streams prohibit a single person approving both financial and specialist obligations',()=>{
+  const a:ApprovalEvidence={
+    ...proof,status:'pending',votes:[],steps:[
+      {stream:'FINANCE',level:1,quorum:{mode:'any'},eligibleUserIds:['u1']},
+      {stream:'SAFETY',level:1,quorum:{mode:'any'},eligibleUserIds:['u1','u2']},
+    ],
+  };
+  const first=applyApprovalDecision(a,'u1','approve','2026-10-18T09:00:00Z');
+  assert.equal(nextEligibleApprovalStep({...a,votes:first.votes},'u1'),null);
+  const second=applyApprovalDecision({...a,votes:first.votes},'u2','approve','2026-10-18T09:01:00Z');
+  assert.equal(second.status,'approved');
+  assert.equal(validateApprovalEvidence({...a,status:'approved',votes:second.votes},context).length,0);
+  const forged={...a,status:'approved',votes:[...first.votes,{uid:'u1',stream:'SAFETY',level:1,decision:'approve' as const,decidedAt:'2026-10-18T09:01:00Z'}]};
+  assert.ok(validateApprovalEvidence(forged,context).some(m=>m.includes('distinct human')));
+});
