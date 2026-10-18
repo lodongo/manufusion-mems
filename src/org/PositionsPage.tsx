@@ -160,7 +160,7 @@ export default function PositionsPage({ canEdit, code }: { canEdit: boolean; cod
                     Ensure Standard User for all job roles
                 </button>
                 <p className='text-xs text-slate-400'>The basic self-service role is included automatically when a job role is created or edited.</p>
-            </div>
+            </div>}
             <nav aria-label='Path' className='flex flex-wrap items-center gap-1 text-sm'>
                 <button onClick={() => open()} className='flex items-center gap-1 rounded-lg px-2 py-1 text-emerald-300'>
                     <Home className='h-4 w-4' />
