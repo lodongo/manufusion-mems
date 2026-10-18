@@ -67,7 +67,7 @@ export function recordWiredRoutes<T extends Record<string, unknown>>(routes: T):
     }
     const guard=metadata?.kind==='organization'?'organization' as const:
       metadata?.kind==='staff'?'staff' as const:'other' as const;
-    const bindingStatus=guard==='organization'?'system_bound' as const:
+    const bindingStatus=(guard==='organization'||guard==='staff')?'system_bound' as const:
       (path.startsWith('/api/org/')?'unguarded_org' as const:'public_or_custom' as const);
     const enforcement=guard==='organization'
       ?(metadata?.permission?'role_permission' as const:'authenticated_handler' as const)
