@@ -1,0 +1,67 @@
+name: Production release
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type DEPLOY to confirm production release
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: manufusion-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/develop' && github.event.inputs.confirmation == 'DEPLOY'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROD_PROJECT_ID: ${{ vars.GCP_PROD_PROJECT_ID }}
+      GCP_PROD_REGION: ${{ vars.GCP_PROD_REGION }}
+      GCP_PROD_WIF_PROVIDER: ${{ vars.GCP_PROD_WIF_PROVIDER }}
+      GCP_PROD_DEPLOYER_SA: ${{ vars.GCP_PROD_DEPLOYER_SA }}
+      GCP_PROD_RUNTIME_SA: ${{ vars.GCP_PROD_RUNTIME_SA }}
+      MEMS_FIREBASE_PROJECT_ID: ${{ vars.GCP_PROD_PROJECT_ID }}
+      MEMS_STORAGE_BUCKET: ${{ vars.MEMS_STORAGE_BUCKET }}
+      VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+      VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+      VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+      VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+      VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+      VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify production target and tests
+        run: |
+          node scripts/prod-preflight.mjs
+          npm install --no-audit --no-fund
+          npm run check
+          npm run test:governance
+          npm run audit:routes
+          npm run build
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROD_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_PROD_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_PROD_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Deploy verified commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${GCP_PROD_REGION}-docker.pkg.dev/${GCP_PROD_PROJECT_ID}/mems-prod/mems:${GITHUB_SHA}"
+          gcloud auth configure-docker "${GCP_PROD_REGION}-docker.pkg.dev" --quiet
+          docker build -t "${IMAGE}" .
+          docker push "${IMAGE}"
+          gcloud run deploy mems-prod --project="${GCP_PROD_PROJECT_ID}" --region="${GCP_PROD_REGION}" --image="${IMAGE}" --service-account="${GCP_PROD_RUNTIME_SA}" --update-env-vars="MEMS_FIREBASE_PROJECT_ID=${MEMS_FIREBASE_PROJECT_ID},MEMS_STORAGE_BUCKET=${MEMS_STORAGE_BUCKET},MEMS_DEPLOY_SHA=${GITHUB_SHA}" --quiet
+          URL="$(gcloud run services describe mems-prod --project="${GCP_PROD_PROJECT_ID}" --region="${GCP_PROD_REGION}" --format='value(status.url)')"
+          test -n "${URL}"
+          gcloud run services update mems-prod --project="${GCP_PROD_PROJECT_ID}" --region="${GCP_PROD_REGION}" --update-env-vars="MEMS_PUBLIC_URL=${URL}/" --quiet
+          echo "Production Cloud Run URL: ${URL}" >> "${GITHUB_STEP_SUMMARY}"
