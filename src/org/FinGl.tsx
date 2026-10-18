@@ -396,6 +396,9 @@ function Mapping({ le }: { le: Entity }) {
             {msg && <Alert tone='success'>{msg}</Alert>}
             <Pending items={data.pending} />
             {!data.accounts.length && <Alert tone='warn'>Approve accounts in the chart first; only approved accounts can be mapped.</Alert>}
+            <FinGranularTransactionCatalog variants={data.variants??[]} accountRules={activeRules} onConfigure={v=>{setPrefill(v);document.getElementById('fin-rule-config')?.scrollIntoView({behavior:'smooth',block:'start'});}} />
+            <details className='rounded-xl border border-line p-3'>
+              <summary className='cursor-pointer text-sm font-semibold text-ink'>Advanced: default role mappings and category fallbacks · version {data.mapping.version}</summary>
             <Card title={`Account determination · version ${data.mapping.version}`}>
                 {data.roles.map((x) => (
                     <SelectField key={x.code} id={`fm-${x.code}`} label={`${x.label}${x.required ? ' *' : ''}`} hint={`${x.note} ${x.statement === 'BS' ? 'Balance sheet account.' : 'Profit and loss account.'}`} value={r[x.code] ?? ''} disabled={!can} onChange={(e) => setRoles({ ...r, [x.code]: e.target.value })}>
@@ -457,7 +460,8 @@ function Mapping({ le }: { le: Entity }) {
                     </div>
                 )}
             </Card>
-            <FinGranularTransactionCatalog variants={data.variants??[]} accountRules={activeRules} onConfigure={v=>{setPrefill(v);document.getElementById('fin-rule-config')?.scrollIntoView({behavior:'smooth',block:'start'});}} />
+
+            </details>
             <FinAccountRuleManager leId={le.id} rules={activeRules} setRules={setDeterminationRules} events={data.events??[]} roles={data.roles} accounts={data.accounts} categories={data.categories} canEdit={can} mapping={{roles:r,byCategory:bc}} prefill={prefill} />
             {can && (
                 <Button disabled={!changed} onClick={() => confirm.ask({ title: 'Propose the mapping', message: 'Every posting from approval on uses the new accounts. A person with FIN.mapping.approve must approve it.', confirmLabel: 'Propose', reason: { label: 'Reason', minLength: 10 } }, async (reason) => { await callBackend(`${FIN_API}/mapping/propose`, { leId: le.id, mapping: { roles: r, byCategory: bc,rules:activeRules }, reason }); setRoles(null); setCats(null); setDeterminationRules(null); setMsg('Proposed for approval.'); reload(); })}>
