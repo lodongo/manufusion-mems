@@ -163,7 +163,7 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
         }
         const rate = await fxRate(str(a.po.currency), info.currency);
         const map = await mappingOf(ctx.orgId, leId);
-        const grir = roleAccount(map, 'GRIR','',{event:'GR_STOCK'});
+        const grirFor=(event:'GR_STOCK'|'GR_DIRECT'|'GR_ASSET')=>roleAccount(map,'GRIR','',{event});
         const groups: Record<string, { lines: PostLine[]; stock: StockMove[]; extra: Write[] }> = {};
         const add = (t: string) => (groups[t] ??= { lines: [], stock: [], extra: [] });
         const stockAgg = new Map<string, StockMove>();
@@ -175,7 +175,7 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
                 const g = add('GR_STOCK');
                 const gl = roleAccount(map, 'INVENTORY', str(it.l.categoryCode) || str(it.material!.data.categoryCode),{event:'GR_STOCK',costCenterId:it.cc});
                 g.lines.push({ side: 'D', glCode: gl, ccId: it.cc, amount: value, docAmount: it.docValue, description: desc, materialId: it.material!.id, qty: it.qty });
-                g.lines.push({ side: 'C', glCode: grir, ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
+                g.lines.push({ side: 'C', glCode: grirFor('GR_STOCK'), ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
                 const k = `${it.cc}|${it.material!.id}`;
                 const cur = stockAgg.get(k);
                 if (cur) {
@@ -189,7 +189,7 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
                 g.extra.push({ path: mjPath(ctx.orgId, m.id), exists: false, fields: m.data });
             } else if (str(it.l.type) === 'asset') {
                 const g = add('GR_ASSET');
-                g.lines.push({ side: 'D', glCode: roleAccount(map, 'ASSET_CLEARING'), ccId: it.cc, amount: value, docAmount: it.docValue, description: desc, qty: it.qty });
+                g.lines.push({ side: 'D', glCode: roleAccount(map, 'ASSET_CLEARING','',{event:'GR_ASSET',costCenterId:it.cc}), ccId: it.cc, amount: value, docAmount: it.docValue, description: desc, qty: it.qty });
                 g.lines.push({ side: 'C', glCode: grir, ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
             } else {
                 const g = add('GR_DIRECT');
