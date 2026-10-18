@@ -1,13 +1,15 @@
 import { useState } from 'react';
+import { callBackend } from '../lib/backend';
 import { ArrowRight, GitBranch, ShieldCheck, Scale, Database, AlertTriangle, ClipboardCheck } from 'lucide-react';
 import { navigate } from '../lib/route';
 
-type Tab = 'transactions' | 'permissions' | 'authority' | 'workflows';
+type Tab = 'transactions' | 'permissions' | 'authority' | 'workflows' | 'documentation';
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'transactions', label: 'Transactions' },
   { key: 'permissions', label: 'Security' },
   { key: 'authority', label: 'Authority' },
   { key: 'workflows', label: 'Workflows' },
+  { key: 'documentation', label: 'Documents' },
 ];
 const EXAMPLES: Array<{ code: string; name: string; module: string; actions: string }> = [
   { code: 'MNT.WR', name: 'Work Request', module: 'Maintenance', actions: 'Create · Review · Return · Convert' },
@@ -32,6 +34,11 @@ const panels: Record<Tab, { title: string; description: string; details: string[
     description: 'The new engine will evaluate amount bands, organizational inheritance, mandatory specialist streams and governance rules.',
     details: ['CoA rules select required streams and levels, not named approvers.', 'Currency evidence and site-specific overrides will be recorded.', 'Rule changes will be simulated and independently approved before activation.'],
   },
+  documentation: {
+    title: 'Legal-entity module documentation',
+    description: 'Draft and version module governance documents separately for every legal entity. Drafts do not change permissions, authority limits or workflows.',
+    details: ['Documents use major.minor.patch versions.', 'Activation requires separate platform certification and legal-entity sign-off.', 'Export and controlled approval remain in development.'],
+  },
   workflows: {
     title: 'Workflow Configuration',
     description: 'Workflows resolve authorized approvers and execute the approval requirements produced by the Chart of Authority.',
@@ -42,6 +49,19 @@ const panels: Record<Tab, { title: string; description: string; details: string[
 export default function TransactionGovernance({ canRoles, canWorkflow }: { canRoles: boolean; canWorkflow: boolean }) {
   const [active, setActive] = useState<Tab>('transactions');
   const [search, setSearch] = useState('');
+  const [entity, setEntity] = useState('');
+  const [docModule, setDocModule] = useState('PRC');
+  const [docVersion, setDocVersion] = useState('1.0.0');
+  const [docStatus, setDocStatus] = useState('');
+  const [docBusy, setDocBusy] = useState(false);
+  const createDraft = async () => {
+    setDocBusy(true); setDocStatus('');
+    try {
+      const response = await callBackend<{ id: string }>('/api/org/governance/documents/draft', { legalEntityId: entity.trim(), moduleCode: docModule, documentVersion: docVersion.trim() });
+      setDocStatus('Draft created: ' + response.id + '. Approval and activation are not available yet.');
+    } catch (e) { setDocStatus(e instanceof Error ? e.message : 'Could not create draft.'); }
+    finally { setDocBusy(false); }
+  };
   const current = panels[active];
   const examples = EXAMPLES.filter(x => [x.code, x.name, x.module, x.actions].some(s => s.toLowerCase().includes(search.trim().toLowerCase())));
   const go = (page: string) => navigate('organization_admin/' + page);
@@ -75,7 +95,7 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
           </div>
         ))}
       </div>
-      <nav aria-label='Governance areas' className='grid grid-cols-2 sm:grid-cols-4 gap-2'>
+      <nav aria-label='Governance areas' className='grid grid-cols-2 sm:grid-cols-5 gap-2'>
         {TABS.map(t => <button key={t.key} type='button' aria-current={active === t.key ? 'page' : undefined} onClick={() => setActive(t.key)}
           className={`min-w-0 rounded-lg px-3 py-3 text-sm font-semibold border ${active === t.key ? 'border-[rgb(var(--c-brand))] bg-[rgb(var(--c-brand)/0.08)] text-[rgb(var(--c-brand))]' : 'border-[rgb(var(--c-border))] text-ink'}`}>{t.label}</button>)}
       </nav>
@@ -86,6 +106,15 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
         {active === 'permissions' && canRoles && <button type='button' onClick={() => go('roles')} className='inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-ink'>Open existing Security Roles <ArrowRight size={16}/></button>}
         {active === 'workflows' && canWorkflow && <button type='button' onClick={() => go('workflows')} className='inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-ink'>Open existing Workflows <ArrowRight size={16}/></button>}
       </section>
+      {active === 'documentation' && <section className='rounded-xl border border-[rgb(var(--c-border))] p-4 space-y-3'>
+        <h2 className='font-semibold text-ink'>Create a controlled draft</h2>
+        <p className='text-xs text-soft'>Use the legal entity ID from Organization Design. Only authorized governance administrators can create drafts.</p>
+        <label className='block text-sm text-ink'>Legal entity ID<input value={entity} onChange={e=>setEntity(e.target.value)} placeholder='Legal entity ID' className='mt-1 w-full rounded-lg border border-[rgb(var(--c-border))] bg-transparent p-3 text-base'/></label>
+        <label className='block text-sm text-ink'>Module<select value={docModule} onChange={e=>setDocModule(e.target.value)} className='mt-1 w-full rounded-lg border border-[rgb(var(--c-border))] bg-transparent p-3 text-base'>{['PRC','MNT','INV','AST','FIN','SAF','WHS'].map(m=><option key={m} value={m}>{m}</option>)}</select></label>
+        <label className='block text-sm text-ink'>Document version<input value={docVersion} onChange={e=>setDocVersion(e.target.value)} placeholder='1.0.0' className='mt-1 w-full rounded-lg border border-[rgb(var(--c-border))] bg-transparent p-3 text-base'/></label>
+        <button type='button' disabled={docBusy || !entity.trim() || !/^\\d+\\.\\d+\\.\\d+$/.test(docVersion)} onClick={createDraft} className='rounded-lg bg-[rgb(var(--c-brand))] text-white px-4 py-3 text-sm font-semibold disabled:opacity-50'>Create draft only</button>
+        {docStatus && <p role='status' className='text-sm text-ink break-words'>{docStatus}</p>}
+      </section>}
       {active === 'transactions' && <section className='space-y-3'>
         <div className='flex items-center gap-2'><ClipboardCheck size={18} className='text-soft'/><h2 className='font-semibold text-ink'>Example transaction groups</h2></div>
         <label className='block text-sm text-soft' htmlFor='transaction-governance-search'>Filter examples</label>
