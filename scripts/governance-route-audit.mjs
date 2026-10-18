@@ -40,7 +40,7 @@ const warnings = [
   ...records.filter(r=>r.permission === null).map(r=>'No direct route permission (possibly internal authorization): '+r.method+' '+r.path),
   ...records.filter(r=>r.assessment!=='requires_runtime_verification').map(r=>'Unwired or unresolved: '+r.method+' '+r.path),
 ];
-const duplicates = new Map<string,number>();
+const duplicates = new Map();
 for(const r of records){const k=r.method+' '+r.path;duplicates.set(k,(duplicates.get(k)||0)+1);}
 for(const [route,count] of duplicates){if(count>1)warnings.push('Duplicate route declaration: '+route);}
 const indexed = new Set(records.map(r => r.source + ':' + r.method + ' ' + r.path));
