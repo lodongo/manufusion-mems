@@ -612,10 +612,10 @@ export async function choosableAccounts(orgId: string, ccId: string): Promise<{ 
     const le = leOf(units, ccId);
     if (!le) throw new HttpError(409, 'The cost center is not under a legal entity.');
     await syncDefaultChart(orgId, le.id);
-    const [chart, map, fin] = await Promise.all([chartOf(orgId, le.id), mappingOf(orgId, le.id), ccFinOf(orgId, ccId)]);
+    const [chart, map, fin, entity] = await Promise.all([chartOf(orgId, le.id), mappingOf(orgId, le.id), ccFinOf(orgId, ccId), entityOf(orgId, le.id)]);
     const sys = systemAccounts(map);
     const allowed = new Set(fin.allowedGl);
-    const accounts = Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && !sys.has(a.code) && (!allowed.size || a.statement === 'BS' || allowed.has(a.code)));
+    const accounts = Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && !sys.has(a.code) && (entity.doc?.data.glScopeConfigured !== true || strs(entity.doc.data.allowedGl).includes(a.code)) && (!allowed.size || a.statement === 'BS' || allowed.has(a.code)));
     return { le, accounts: accounts.sort((a, b) => a.code.localeCompare(b.code)) };
 }
 /** Throws with a plain reason unless the GL account may be used on this cost center. */
@@ -756,6 +756,7 @@ async function postOnce(ctx: OrgContext, input: PostInput, keyId: string): Promi
         const acc = chart.get(l.glCode);
         if (!acc) throw new HttpError(409, `GL account ${l.glCode} is not in the approved chart of accounts of ${le.code}.`);
         if (acc.status !== 'active') throw new HttpError(409, `GL account ${acc.code} ${acc.name} is ${acc.status} in ${le.code}.`);
+        if (entity.doc?.data.glScopeConfigured === true && !strs(entity.doc.data.allowedGl).includes(acc.code)) throw new HttpError(409, `GL account ${acc.code} is not included in the approved account selection for ${le.code}.`);
         if (!acc.postable) throw new HttpError(409, `GL account ${acc.code} ${acc.name} is a heading and cannot take postings.`);
         let ccCode = '';
         let ccName = '';
