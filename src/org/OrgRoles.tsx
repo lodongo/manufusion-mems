@@ -122,7 +122,7 @@ function RolesHome({ id }: { id?: string }) {
                     </button>
                 </Alert>
             )}
-            {undocumented > 0 && <Alert tone='info'>{undocumented} role{undocumented === 1 ? ' has' : 's have'} no current rules. Open a role and choose Rules to write them.</Alert>}
+            {undocumented > 0 && <Alert tone='info'>{undocumented} role{undocumented === 1 ? ' has' : 's have'} missing or outdated documentation. Standard template rules can be initialized without overwriting existing documentation. <StandardRuleDocsButton onDone={reload} /></Alert>}
             <RichTable<RoleItem>
                 id='org.roles'
                 title='Security roles'
@@ -616,4 +616,21 @@ function RecommendedRoles() {
             {sheet}
         </Screen>
     );
+}
+
+function StandardRuleDocsButton({onDone}:{onDone:()=>void}) {
+    const [busy,setBusy]=useState(false);
+    const [result,setResult]=useState('');
+    return <span className='inline-flex flex-wrap items-center gap-2'>
+        <button type='button' disabled={busy} className='font-semibold underline' onClick={async()=>{
+            setBusy(true);
+            try {
+                const response=await callBackend<{created:number}>('/api/org/roles/docs/fill-standard');
+                setResult(`Created ${response.created} missing standard rule documents.`);
+                onDone();
+            } catch(e) {setResult(messageOf(e));}
+            finally {setBusy(false);}
+        }}>{busy?'Preparing rules…':'Prepare standard rules'}</button>
+        {result&&<span>{result}</span>}
+    </span>;
 }

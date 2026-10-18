@@ -71,7 +71,7 @@ function positionOut(doc: Doc) {
         parentCode: str(d.parentCode),
         operatingLevel: str(d.operatingLevel),
         defaultNodeId: str(d.defaultNodeId),
-        securityRoles: Array.isArray(d.securityRoles) ? (d.securityRoles as Plain[]).map(str).filter(Boolean) : [],
+        securityRoles: ['org_user', ...(Array.isArray(d.securityRoles) ? (d.securityRoles as Plain[]).map(str).filter(Boolean) : []).filter(id => id !== 'org_user')],
         coreSkills: Array.isArray(d.coreSkills) ? (d.coreSkills as Plain[]).map(str).filter(Boolean) : [],
         staffingPlan: (Array.isArray(d.staffingPlan) ? d.staffingPlan : []).filter(isObj).map((item) => ({
             nodeId: str(item.nodeId), enabled: item.enabled === true, required: Number(item.required) || 0,
@@ -212,6 +212,26 @@ export const positionRoutes = {
                 asOf: nowIso(), occupiedTotal: [...counts.values()].reduce((n,v) => n + v.filled, 0) };
         }),
     ],
+    'POST /api/org/positions/baseline/sync': [
+        orgRoute('org.positions.baseline.sync', 'ADM.structure', async (ctx) => {
+            const positions = await listDocs(posCol(ctx.orgId));
+            let updated = 0;
+            for (const position of positions) {
+                const current = Array.isArray(position.data.securityRoles) ? (position.data.securityRoles as Plain[]).map(str).filter(Boolean) : [];
+                if (current.includes('org_user')) continue;
+                await updateFields(`${posCol(ctx.orgId)}/${position.id}`, {
+                    securityRoles: ['org_user', ...current],
+                    updatedAt: nowIso(), updatedBy: ctx.uid,
+                });
+                updated++;
+            }
+            if (updated) {
+                clearAccessCache(ctx.orgId);
+                await record(ctx, 'org.positions.baseline.sync', 'MEMS Standard User', `Added baseline to ${updated} existing user roles`);
+            }
+            return { updated, total: positions.length };
+        }),
+    ],
     'POST /api/org/positions/save': [
         orgRoute('org.positions.save', 'ADM.structure', async (ctx) => {
             const title = text(ctx.body, 'title', 2, 80, 'Enter the role title (2 to 80 characters).');
@@ -224,7 +244,7 @@ export const positionRoutes = {
             const rolesMap = await securityRoleMap(ctx.orgId);
             const rawRoles = Array.isArray(ctx.body.securityRoles) ? ctx.body.securityRoles : [];
             if (rawRoles.length > 10) throw new HttpError(400, 'A job role can be mapped to up to 10 security roles.');
-            const securityRoles = Array.from(new Set(rawRoles.map(str).filter(Boolean)));
+            const securityRoles = Array.from(new Set(['org_user', ...rawRoles.map(str).filter(Boolean)]));
             for (const r of securityRoles) {
                 const role = rolesMap.get(r);
                 if (!role || r === 'org_super_admin') throw new HttpError(400, 'Choose security roles from the list. The super admin role cannot be mapped.');
