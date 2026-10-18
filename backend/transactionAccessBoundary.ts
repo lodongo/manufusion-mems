@@ -19,7 +19,7 @@ export type AccessDecisionInput = {
 export type AccessDecision = { allowed: boolean; reasons: string[] };
 export function evaluateTransactionAccess(input: AccessDecisionInput): AccessDecision {
   const reasons: string[] = [];
-  if (!/^[A-Z]{2,4}-[A-Z0-9]{3,4}-[A-Z0-9]{2,4}$/.test(input.code)) reasons.push('Invalid transaction code');
+  if (!/^[A-Z]{2,4}-[A-Z0-9]{3,4}-[A-Z0-9]{2,8}$/.test(input.code)) reasons.push('Invalid transaction code');
   if (!input.moduleEnabled) reasons.push('Module disabled');
   if (!input.submoduleEnabled) reasons.push('Submodule disabled');
   if (!input.implementedHandler) reasons.push('Transaction has no implemented backend handler');
