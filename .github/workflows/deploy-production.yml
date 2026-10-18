@@ -57,6 +57,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PREVIOUS="$(gcloud run services describe mems-prod --project="${GCP_PROD_PROJECT_ID}" --region="${GCP_PROD_REGION}" --format='value(status.traffic[0].revisionName)' 2>/dev/null || true)"
+          rollback() {
+            if [ -n "${PREVIOUS}" ]; then
+              echo "Production verification failed; restoring Cloud Run revision ${PREVIOUS}" >&2
+              gcloud run services update-traffic mems-prod --project="${GCP_PROD_PROJECT_ID}" --region="${GCP_PROD_REGION}" --to-revisions="${PREVIOUS}=100" --quiet || true
+            fi
+          }
+          trap rollback ERR
           IMAGE="${GCP_PROD_REGION}-docker.pkg.dev/${GCP_PROD_PROJECT_ID}/mems-prod/mems:${GITHUB_SHA}"
           gcloud auth configure-docker "${GCP_PROD_REGION}-docker.pkg.dev" --quiet
           docker build --build-arg "GCP_PROD_PROJECT_ID=${GCP_PROD_PROJECT_ID}" --build-arg "VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}" --build-arg "VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}" --build-arg "VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}" --build-arg "VITE_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}" --build-arg "VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}" --build-arg "VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}" -t "${IMAGE}" .
@@ -73,4 +81,5 @@ jobs:
             -o /tmp/prod_api_probe.json -w '%{http_code}' \
             "${URL}/api/org/governance/cutover/status")"
           test "${CODE}" = '401'
+          trap - ERR
           echo "Production Cloud Run URL: ${URL}" >> "${GITHUB_STEP_SUMMARY}"
