@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CheckCircle2, CheckSquare, Circle, Clock3, ExternalLink, X, XCircle } from 'lucide-react';
 import { callBackend } from '../lib/backend';
+import UnifiedApprovalInbox from './UnifiedApprovalInbox';
 import { navigate } from '../lib/route';
 import { Alert } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
@@ -277,6 +278,7 @@ export default function WorkflowInbox() {
                 }
                 toolbar={<Segmented label='Workflow views' value={filter} options={options} onChange={setFilter} />}
             >
+                <UnifiedApprovalInbox />
                 {error && <Alert tone='error'>{error}</Alert>}
                 {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}
                 {count('conflict') > 0 && <Alert tone='warn'>Nobody can approve their own request. Ask an administrator to map another authorized approver to the conflicting steps.</Alert>}
