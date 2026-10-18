@@ -29,7 +29,6 @@ import UserSetup from './UserSetup';
 import UserHealth from './UserHealth';
 import OrgOverview from './OrgOverview';
 import SetupGuide, { type SetupProgress } from './SetupGuide';
-import RestCountdown from '../components/RestCountdown';
 import OrgUsers from './OrgUsers';
 import OrgRoles from './OrgRoles';
 import OrgAudit from './OrgAudit';
