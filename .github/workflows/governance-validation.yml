@@ -4,6 +4,8 @@ on:
   push:
     branches: [develop]
     paths:
+      - 'scripts/future-route-check.mjs'
+      - 'tests/independent/future-route-check.test.mjs'
       - 'backend/guards.ts'
       - 'backend/transactionRuntime.ts'
       - 'backend/transactionRuntime.test.ts'
