@@ -26,6 +26,7 @@ import OperationsCenter from './OperationsCenter';
 import FxMonitor from './FxMonitor';
 import AutomationCenter from './AutomationCenter';
 import TransactionManager from './TransactionManager';
+import SecurityDocumentationAdmin from './SecurityDocumentationAdmin';
 
 const DEFAULT_META_LISTS = [
     { key: 'meta.industryCategories', label: 'Industry categories' },
@@ -87,6 +88,7 @@ export default function AdminShell({
             items: [
                 { key: 'modules', label: 'Modules', Icon: Puzzle },
                 { key: 'transactions', label: 'Transactions Manager', Icon: ListChecks },
+                { key: 'security_docs', label: 'Security documentation', Icon: ScrollText },
                 { key: 'site', label: 'Site setup', Icon: Palette },
                 { key: 'billing', label: 'Billing and payments', Icon: CreditCard },
                 ...(isSuper ? [
@@ -183,6 +185,9 @@ export default function AdminShell({
             break;
         case 'transactions':
             content = <TransactionManager />;
+            break;
+        case 'security_docs':
+            content = <SecurityDocumentationAdmin />;
             break;
         case 'modules':
             content = <ModulesPage code={id} tab={sub} canWrite={canWrite} isSuper={isSuper} />;
