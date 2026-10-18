@@ -4,7 +4,7 @@ type AuditReport = {
   title: string; status: string; publishable: boolean; generatedAt: string;
   period: {year:number;start:string;end:string};
   configuration: {registeredPermissionActions:number;verifiedPermissionActions:number;jobRoles:number;securityRoles:number;moduleDocuments:Array<{id:string;module:string;version:string;status:string}>};
-  historicalActivity:{sampledEvents:number;outcomes:Record<string,number>;categories:Record<string,number>};
+  historicalActivity:{sampledEvents:number;outcomes:Record<string,number>;categories:Record<string,number>;periodQueryComplete:boolean;cap:number};
   limitations:string[];
 };
 export default function GovernanceReports() {
@@ -47,11 +47,12 @@ export default function GovernanceReports() {
           ['Verified actions',report.configuration.verifiedPermissionActions],
           ['Job roles',report.configuration.jobRoles],
           ['Security roles',report.configuration.securityRoles],
-          ['Sampled events',report.historicalActivity.sampledEvents],
+          ['Retrieved events',report.historicalActivity.sampledEvents],
           ['Module documents',report.configuration.moduleDocuments.length],
         ].map(([label,val])=><div key={String(label)} className='rounded-lg border p-3'><div className='text-xl font-bold text-ink'>{val}</div><div className='text-xs text-soft'>{label}</div></div>)}
       </div>
-      <h3 className='font-semibold text-ink'>Outcomes in sampled events</h3>
+      <p role='status' className='text-sm text-soft'>{report.historicalActivity.periodQueryComplete ? 'Period query completed within its retrieval limit. Source reconciliation is still pending.' : 'Event retrieval limit reached — audit incomplete.'}</p>
+      <h3 className='font-semibold text-ink'>Outcomes in retrieved events</h3>
       <div className='space-y-1'>{Object.entries(report.historicalActivity.outcomes).map(([key,value])=><p key={key} className='text-sm text-ink'>{key}: {value}</p>)}</div>
       <div role='note' className='rounded-lg border border-amber-300 p-3'><p className='font-semibold text-sm'>Data coverage limitations</p><ul className='list-disc pl-4 text-xs space-y-1 mt-2'>{report.limitations.map(l=><li key={l}>{l}</li>)}</ul></div>
       <button type='button' onClick={exportPreview} className='border rounded-lg p-3 font-semibold text-sm'>Download JSON preview (not certified)</button>
