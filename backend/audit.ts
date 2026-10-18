@@ -114,3 +114,28 @@ export async function queryAudit(limit: number, orgId = '') {
     );
     return docs.map(auditOut);
 }
+
+/**
+ * Paginated historical tenant audit retrieval, bounded for synchronous reports.
+ * Firestore offset pagination is intentionally limited; no report may claim full
+ * coverage when the cap is reached. Longer reports need async export jobs.
+ */
+export async function queryAuditPeriod(orgId: string, start: string, endExclusive: string, cap = 10000) {
+    const batchSize = 500;
+    const events: ReturnType<typeof auditOut>[] = [];
+    let exhausted = false;
+    for (let offset = 0; offset < cap; offset += batchSize) {
+        const docs = await runQuery({
+            from: [{ collectionId: 'audit_events' }],
+            where: { compositeFilter: { op: 'AND', filters: [
+                { fieldFilter: { field: { fieldPath: 'at' }, op: 'GREATER_THAN_OR_EQUAL', value: { stringValue: start } } },
+                { fieldFilter: { field: { fieldPath: 'at' }, op: 'LESS_THAN', value: { stringValue: endExclusive } } },
+            ] } },
+            orderBy: [{ field: { fieldPath: 'at' }, direction: 'ASCENDING' }],
+            limit: batchSize, offset,
+        }, `organizations/${orgId}`);
+        events.push(...docs.map(auditOut));
+        if (docs.length < batchSize) { exhausted = true; break; }
+    }
+    return { events, completeWithinCap: exhausted, cap };
+}
