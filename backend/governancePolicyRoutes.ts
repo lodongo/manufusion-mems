@@ -4,7 +4,7 @@
  * administrator publishes either a binding or a monetary/workflow policy.
  */
 import { randomUUID } from 'node:crypto';
-import { HttpError, getDoc, isObj, listDocs, nowIso, str, writeDoc } from './core';
+import { HttpError, getDoc, isObj, listDocs, nowIso, str, updateFields, writeDoc } from './core';
 import { orgRoute } from './guards';
 import { wiredTransactionInventory } from './transactionRuntime';
 import { quorumCount, type GovernanceRule, type ApprovalQuorum } from './governanceCore';
@@ -116,6 +116,11 @@ export const governancePolicyRoutes={
           !nonempty(payload.handlerEvidenceId)||!nonempty(payload.scopeEvidenceId)||!nonempty(payload.sodEvidenceId))
           throw new HttpError(409,'Transaction evidence is incomplete.');
       }else throw new HttpError(409,'Invalid proposal kind.');
+      // Claim the proposal with Firestore's update-time precondition before
+      // publishing. Two reviewers cannot approve the same proposal concurrently.
+      const claimed=await writeDoc(path,{...doc.data,status:'reviewing',
+        reviewerUid:ctx.uid,reviewStartedAt:nowIso()},{updateTime:doc.updateTime});
+      if(!claimed)throw new HttpError(409,'Another reviewer is processing this proposal.');
       const target=kind==='authority'?authority(ctx.orgId,code):binding(ctx.orgId,code);
       const existing=await getDoc(target);
       const version=Number(existing?.data.version)||0;
@@ -127,9 +132,11 @@ export const governancePolicyRoutes={
         status:'active',version:version+1,updatedAt:nowIso(),
       };
       const ok=await writeDoc(target,next,existing?{updateTime:existing.updateTime}:{exists:false});
-      if(!ok)throw new HttpError(409,'Configuration changed during review. Refresh and retry.');
-      await writeDoc(path,{...doc.data,status:'approved',approvedBy:ctx.uid,approvedAt:nowIso()},
-        {updateTime:doc.updateTime});
+      if(!ok){
+        await updateFields(path,{status:'review_failed',reviewFailureAt:nowIso()});
+        throw new HttpError(409,'Configuration changed during review. Submit an updated proposal.');
+      }
+      await updateFields(path,{status:'approved',approvedBy:ctx.uid,approvedAt:nowIso()});
       await audit([{category:'governance',action:'governance.config.approved',actor:ctx.actor,meta:ctx.meta,
         target:{type:'governance_policy',id:code,label:kind},details:'Version '+(version+1)}]);
       return {code,kind,status:'active',version:version+1};
