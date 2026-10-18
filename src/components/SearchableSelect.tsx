@@ -42,7 +42,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
     const [pending, setPending] = useState<string | null>(null);
     const [internal, setInternal] = useState(defaultValue === undefined ? '' : String(defaultValue));
     const selectedValue = value === undefined ? internal : String(value);
-    const current = options.find((o) => o.value === pending);
+    const current = options.find((o) => o.value === selectedValue);
     const staged = options.find((o) => o.value === pending);
     const filtered = useMemo(() => options.filter((o) =>
         !query.trim() || (o.label + ' ' + o.value + ' ' + (o.group ?? '')).toLowerCase().includes(query.trim().toLowerCase())
