@@ -48,3 +48,12 @@ test('control-plane endpoints do not deadlock the cutover validation',()=>{
   assert.equal(evaluateCutoverCoverage([a,control],new Map([[a.code!,binding(a)]]),new Map()).canActivate,true);
   assert.equal(evaluateCutoverCoverage([control],new Map(),new Map()).canActivate,false);
 });
+
+test('unprotected organization API endpoints are included and block activation',()=>{
+  const exposed={...a,path:'/api/org/unprotected/write',code:null,guard:'other' as const,permission:null,name:''};
+  const report=evaluateCutoverCoverage([a,exposed],new Map([[a.code!,binding(a)]]),new Map());
+  assert.equal(report.inspected,2);
+  assert.equal(report.ready,1);
+  assert.equal(report.canActivate,false);
+  assert.ok(report.items.some(i=>i.issues.includes('Route has no organization guard')));
+});
