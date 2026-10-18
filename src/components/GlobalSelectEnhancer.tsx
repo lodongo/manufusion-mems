@@ -69,7 +69,12 @@ export default function GlobalSelectEnhancer() {
     if (!target || typeof document === 'undefined') return null;
     const choose = (value: string) => {
         // Dispatch native events so existing React onChange logic and form validation remain intact.
-        target.select.value = value;
+        // React tracks the value property on controlled selects. Assign with the native
+        // setter so React's change-event plugin observes the new value rather than
+        // discarding the event as an unchanged controlled component.
+        const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+        if (nativeSetter) nativeSetter.call(target.select, value);
+        else target.select.value = value;
         target.select.dispatchEvent(new Event('input', { bubbles: true }));
         target.select.dispatchEvent(new Event('change', { bubbles: true }));
         setTarget(null);
