@@ -1,4 +1,4 @@
-import { Children, isValidElement, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { Children, isValidElement, useEffect, useMemo, useState, type ChangeEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 
@@ -37,14 +37,12 @@ function extractOptions(children: ReactNode, group = ''): Option[] {
 export default function SearchableSelect({ label, id, hint, error, children, value, defaultValue, name, onChange, disabled, required, ...rest }: Props) {
     const options = useMemo(() => extractOptions(children), [children]);
     const [open, setOpen] = useState(false);
-    const openedAt = useRef(0);
-    const pressedOption = useRef<{ pointerId: number; value: string } | null>(null);
     const [query, setQuery] = useState('');
     const [searchVisible, setSearchVisible] = useState(false);
     const [pending, setPending] = useState<string | null>(null);
     const [internal, setInternal] = useState(defaultValue === undefined ? '' : String(defaultValue));
     const selectedValue = value === undefined ? internal : String(value);
-    const current = options.find((o) => o.value === selectedValue);
+    const current = options.find((o) => o.value === pending);
     const staged = options.find((o) => o.value === pending);
     const filtered = useMemo(() => options.filter((o) =>
         !query.trim() || (o.label + ' ' + o.value + ' ' + (o.group ?? '')).toLowerCase().includes(query.trim().toLowerCase())
@@ -113,18 +111,15 @@ export default function SearchableSelect({ label, id, hint, error, children, val
                         <div role='listbox' aria-label={label} className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-8'>
                             {filtered.length === 0 && <p className='p-4 text-center text-sm text-muted'>No matching options</p>}
                             {filtered.map((o, i) =>
-                                <button key={o.value + '-' + i} type='button' role='option' aria-selected={o.value === selectedValue}
+                                <button key={o.value + '-' + i} type='button' role='option' aria-selected={o.value === pending}
                                     disabled={o.disabled}
-                                    onPointerDown={e => { pressedOption.current = Date.now()-openedAt.current > 550 ? {pointerId:e.pointerId,value:o.value} : null; }}
-                                    onPointerCancel={() => { pressedOption.current=null; }}
-                                    onPointerUp={e => { const press=pressedOption.current; pressedOption.current=null; if(press?.pointerId===e.pointerId && press.value===o.value) choose(o.value); }}
-                                    onClick={e => { if(e.detail===0 && Date.now()-openedAt.current>550) choose(o.value); }}
-                                    className={`mb-1 flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm disabled:opacity-40 ${o.value === selectedValue ? 'border-brand bg-brand/10 text-ink' : 'border-transparent text-ink active:bg-panel'}`}>
+                                    onClick={() => setPending(o.value)}
+                                    className={`mb-1 flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm disabled:opacity-40 ${o.value === pending ? 'border-brand bg-brand/10 text-ink' : 'border-transparent text-ink active:bg-panel'}`}>
                                     <span className='min-w-0 flex-1 break-words'>
                                         {o.group && <span className='block text-xs text-muted'>{o.group}</span>}
                                         {o.label || 'None'}
                                     </span>
-                                    {o.value === selectedValue && <Check className='h-5 w-5 shrink-0 text-brand' />}
+                                    {o.value === pending && <Check className='h-5 w-5 shrink-0 text-brand' />}
                                 </button>
                             )}
                         </div>
