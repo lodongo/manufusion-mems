@@ -1,4 +1,5 @@
 import {DETERMINATION_EVENTS,resolveAccountRule,validateRuleDraft,type AccountRule} from './finAccountRules';
+import {buildGlTransactionVariants} from './finTransactionVariants';
 import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, updateFields, writeDoc, type Fields } from './core';
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, orgUsers, record } from './org';
@@ -971,6 +972,7 @@ export const finRoutes = {
             return {
                 roles: ROLES,
                 events: DETERMINATION_EVENTS,
+                variants: buildGlTransactionVariants(Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable).map(a=>({code:a.code,name:a.name,statement:a.statement,classCode:a.classCode,className:a.className,categoryCode:a.categoryCode,categoryName:a.categoryName,groupCode:a.groupCode,groupName:a.groupName,accountRole:a.accountRole,accountType:a.accountType}))),
                 mapping: map,
                 txns: TXNS.map((t) => ({ ...t, taxes: t.taxStage ? regimes.filter((r) => strs(r.appliesTo).includes(t.taxStage)).map((r) => `${str(r.code)} (${objs(r.rates).map((x) => `${str(x.code)} ${Number(x.rate)}%`).join(', ')})`) : [] })),
                 accounts: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable).map((a) => ({ code: a.code, name: a.name, statement: a.statement })),
