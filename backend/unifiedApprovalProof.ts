@@ -64,6 +64,7 @@ export function validateApprovalEvidence(e:ApprovalEvidence,context:{
     if(step.eligibleUserIds.includes(e.requestedBy))errors.push('Creator is included in approver group');
     if(!isStepApproved(step,e.votes))errors.push('Required approval quorum is unsatisfied');
   }
+  const streamByApprover=new Map<string,string>();
   for(const v of e.votes){
     const key=v.uid+':'+v.stream+':'+v.level;
     if(voted.has(key))errors.push('Duplicate decision by an approver');
