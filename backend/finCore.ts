@@ -283,7 +283,7 @@ export interface Settings {
     yearStartMonth: number;
     yearNaming: 'start' | 'end';
     weekEndDay: number;
-    yearEndRule: 'last' | 'nearest';
+    yearEndRule: 'last' | 'nearest' | 'on_or_after';
     specialPeriods: number;
     extraWeekPeriod: number;
     authority: Band[];
@@ -314,7 +314,7 @@ export function readSettings(raw: unknown): Settings {
     const wd = Number(s.weekEndDay);
     if (!Number.isInteger(wd) || wd < 0 || wd > 6) throw new HttpError(400, 'Choose the last day of the week.');
     const rule = str(s.yearEndRule);
-    if (!['last', 'nearest'].includes(rule)) throw new HttpError(400, 'Choose how the year end is fixed.');
+    if (!['last', 'nearest', 'on_or_after'].includes(rule)) throw new HttpError(400, 'Choose how the year end is fixed.');
     const sp = Number(s.specialPeriods);
     if (![0, 1].includes(sp)) throw new HttpError(400, 'Choose 0 or 1 year-end adjustment period.');
     const totalPeriods = ct === '13x4' ? 13 : ct === 'weekly' ? 53 : ct === 'quarterly' ? 4 : 12;
@@ -362,7 +362,7 @@ function weekYearEnd(fy: number, s: Settings): number {
     const last = utc(endYear, endMonth + 1, 0);
     const back = (new Date(last).getUTCDay() - s.weekEndDay + 7) % 7;
     let d = last - back * DAY;
-    if (s.yearEndRule === 'nearest' && back >= 4) d += 7 * DAY;
+    if ((s.yearEndRule === 'nearest' && back >= 4) || (s.yearEndRule === 'on_or_after' && back > 0)) d += 7 * DAY;
     return d;
 }
 
