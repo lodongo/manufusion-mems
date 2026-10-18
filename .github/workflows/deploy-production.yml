@@ -17,7 +17,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/develop' && ((github.event_name == 'workflow_dispatch' && github.event.inputs.confirmation == 'DEPLOY') || (github.event_name == 'push' && github.event.head_commit.message == 'release(production): user-approved one-time launch'))
+    if: >-
+      github.ref == 'refs/heads/develop' &&
+      ((github.event_name == 'workflow_dispatch' && github.event.inputs.confirmation == 'DEPLOY') ||
+       (github.event_name == 'push' && github.event.head_commit.message == 'release(production): user-approved one-time launch'))
     runs-on: ubuntu-latest
     environment: production
     permissions:
