@@ -80,10 +80,20 @@ export function evaluateCutoverCoverage(
       classification:String(r.code?bindings.get(r.code)?.classification??'unconfigured':'unconfigured'),issues};
   });
   const ready=items.filter(x=>x.issues.length===0).length;
-  const digest=createHash('sha256').update(JSON.stringify(items
-    .map(x=>[x.code,x.route,x.classification,
-      bindings.get(x.code??'')?.version,authorities.get(x.code??'')?.version,x.issues])
-    .sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))))).digest('hex');
+  // Bind cutover approval to the full effective policy contents. Matching
+  // version numbers alone cannot detect out-of-band policy modifications.
+  const canonical=(v:unknown):unknown=>Array.isArray(v)?v.map(canonical):
+    v!==null&&typeof v==='object'
+      ?Object.fromEntries(Object.entries(v as Record<string,unknown>)
+        .filter(([,value])=>value!==undefined).sort(([a],[b])=>a.localeCompare(b))
+        .map(([key,value])=>[key,canonical(value)]))
+      :v;
+  const digestInput=items.map(x=>({
+    code:x.code,route:x.route,classification:x.classification,issues:x.issues,
+    binding:bindings.get(x.code??'')??null,
+    authority:authorities.get(x.code??'')??null,
+  })).sort((a,b)=>a.route.localeCompare(b.route));
+  const digest=createHash('sha256').update(JSON.stringify(canonical(digestInput))).digest('hex');
   return {inspected:items.length,ready,blocked:items.length-ready,
     coveragePercent:items.length?Math.round(ready*10000/items.length)/100:0,
     digest,canActivate:items.length>0&&ready===items.length,items};
