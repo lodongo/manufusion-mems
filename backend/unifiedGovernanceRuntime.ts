@@ -6,7 +6,8 @@
  * Approval-required actions are blocked until a handler-specific, server-side
  * approval proof adapter exists. Request body flags never count as approvals.
  */
-import { HttpError, getDoc, str, type Doc } from './core';
+import { HttpError, getDoc, nowIso, str, updateFields, writeDoc, type Doc } from './core';
+import { validateApprovalEvidence, type ApprovalEvidence } from './unifiedApprovalProof';
 import { evaluateTransactionAccess, type AccessDecision } from './transactionAccessBoundary';
 import { wiredTransactionInventory } from './transactionRuntime';
 
@@ -61,7 +62,7 @@ export function evaluateGovernedHandler(input: {
     // scope/SoD checks. Those checks must remain in force inside the handler.
     scopeAuthorized:true,sodPermitted:true,
     governanceClass:b.classification==='permission_only'?'permission_only':b.classification==='approval_required'?'approval_required':'unconfigured',
-    approvedPolicy:b.classification==='permission_only',
+    approvedPolicy:b.classification==='permission_only' || input.approvalSatisfied===true,
     approvalSatisfied:b.classification==='permission_only' || input.approvalSatisfied===true,
   });
 }
@@ -73,9 +74,11 @@ export async function enforceOrgTransactionGovernance(input: {
   permission:string|null;
   effectivePermissionGranted:boolean;
   org:Doc;
-}):Promise<void> {
+  uid:string;
+  body:Record<string,unknown>;
+}):Promise<((success:boolean)=>Promise<void>) | null> {
   const config=await getDoc(RUNTIME(input.orgId));
-  if(str(config?.data.mode)!=='enforce')return;
+  if(str(config?.data.mode)!=='enforce')return null;
   // A tenant-wide cutover must be independently authorized.
   const owner=str(config?.data.configuredBy), approver=str(config?.data.approvedBy);
   if(!owner||!approver||owner===approver) throw new HttpError(403,'Unified governance activation is not independently approved.');
@@ -88,6 +91,23 @@ export async function enforceOrgTransactionGovernance(input: {
   const moduleMap=modules&&typeof modules==='object'&&!Array.isArray(modules)?modules as Record<string,unknown>:{};
   const submodules=input.org.data.submodules;
   const subMap=submodules&&typeof submodules==='object'&&!Array.isArray(submodules)?submodules as Record<string,unknown>:{};
+  let approved=false;
+  let approvalPath='';
+  let approvalDoc:Doc|null=null;
+  if(b?.classification==='approval_required') {
+    const approvalId=str(input.body.governanceApprovalId);
+    if(!/^[A-Za-z0-9_-]{8,128}$/.test(approvalId))
+      throw new HttpError(403,'Provide a valid independently approved governance request.');
+    approvalPath=`organizations/${input.orgId}/governance_approvals/${approvalId}`;
+    approvalDoc=await getDoc(approvalPath);
+    if(!approvalDoc)throw new HttpError(403,'Approval request not found.');
+    const issues=validateApprovalEvidence(approvalDoc.data as unknown as ApprovalEvidence,{
+      orgId:input.orgId,code:route.code,handlerName:input.name,
+      requesterUid:input.uid,payload:input.body,
+    });
+    if(issues.length)throw new HttpError(403,'Approval evidence invalid: '+issues.join('; '));
+    approved=true;
+  }
   const result=evaluateGovernedHandler({
     mode:'enforce',code:route.code,handlerName:input.name,routePermission:input.permission,
     module:route.module,area:route.area,
@@ -95,6 +115,19 @@ export async function enforceOrgTransactionGovernance(input: {
     submoduleEnabled:subMap[route.module+'.'+route.area]!==false,
     effectivePermissionGranted:input.effectivePermissionGranted,
     binding:b as Partial<RuntimeBinding>|null,
+    approvalSatisfied:approved,
   });
   if(!result.allowed)throw new HttpError(403,'Transaction governance denied: '+result.reasons.join('; '));
+  if(!approvalPath || !approvalDoc)return null;
+  // Claim the approval atomically BEFORE executing the handler. Concurrent
+  // requests cannot reuse the same proof. A failed business action needs
+  // a new approved request rather than an unsafe automatic replay.
+  const claimed=await writeDoc(approvalPath,{...approvalDoc.data,status:'executing',
+    executionStartedAt:nowIso(),executionBy:input.uid},{updateTime:approvalDoc.updateTime});
+  if(!claimed)throw new HttpError(409,'Approval was already used or updated.');
+  return async(success:boolean)=>{
+    await updateFields(approvalPath,{
+      status:success?'executed':'execution_failed',executionCompletedAt:nowIso(),
+    });
+  };
 }
