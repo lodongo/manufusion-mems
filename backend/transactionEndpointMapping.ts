@@ -37,7 +37,7 @@ export function validateEndpointMapping(mapping: TransactionEndpointMapping): st
   if (!mapping.sourceFile.startsWith('backend/')) errors.push('Backend source required');
   if (mapping.classification === 'unclassified') errors.push('Endpoint is unclassified');
   if (mapping.classification !== 'non_transaction') {
-    if (!mapping.canonicalCode || !/^[A-Z]{2,4}-[A-Z0-9]{3,4}-[A-Z0-9]{2,4}$/.test(mapping.canonicalCode)) errors.push('Canonical transaction code missing');
+    if (!mapping.canonicalCode || !/^[A-Z]{2,4}-[A-Z0-9]{3,4}-[A-Z0-9]{2,8}$/.test(mapping.canonicalCode)) errors.push('Canonical transaction code missing');
     if (!mapping.legacyPermission) errors.push('Permission binding missing');
   }
   if (mapping.verification !== 'enforcement_verified') errors.push('Enforcement verification missing');
