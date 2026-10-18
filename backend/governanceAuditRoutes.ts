@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { HttpError, getDoc, isObj, listDocs, nowIso, str } from './core';
 import { orgRoute } from './guards';
-import { queryAudit } from './audit';
+import { queryAuditPeriod } from './audit';
 import { discoverTransactionActions } from './transactionRegistry';
 
 /**
@@ -32,13 +32,14 @@ export const governanceAuditRoutes = {
         const entity = await getDoc(`organizations/${ctx.orgId}/structure/${legalEntityId}`);
         if (!entity || str(entity.data.level) !== 'legal_entity') throw new HttpError(404, 'Legal entity does not exist.');
       }
-      const [events, documents, positions, roles] = await Promise.all([
-        queryAudit(500, ctx.orgId),
+      const endExclusive = new Date(Date.parse(end + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
+      const [auditPeriod, documents, positions, roles] = await Promise.all([
+        queryAuditPeriod(ctx.orgId, start + 'T00:00:00.000Z', endExclusive + 'T00:00:00.000Z'),
         listDocs(`organizations/${ctx.orgId}/governance_documents`),
         listDocs(`organizations/${ctx.orgId}/positions`),
         listDocs(`organizations/${ctx.orgId}/roles`),
       ]);
-      const relevant = events.filter(e => e.at.slice(0, 10) >= start && e.at.slice(0, 10) <= end);
+      const relevant = auditPeriod.events;
       const byOutcome: Record<string, number> = {};
       const byCategory: Record<string, number> = {};
       for (const e of relevant) {
@@ -58,10 +59,10 @@ export const governanceAuditRoutes = {
           jobRoles: positions.length, securityRoles: roles.length,
           moduleDocuments: matchedDocuments.map(d => ({ id: d.id, module: str(d.data.moduleCode), version: str(d.data.documentVersion), status: isObj(d.data.identity) ? str(d.data.identity.status) : 'unknown' })),
         },
-        historicalActivity: { sampledEvents: relevant.length, outcomes: byOutcome, categories: byCategory },
+        historicalActivity: { sampledEvents: relevant.length, outcomes: byOutcome, categories: byCategory, periodQueryComplete: auditPeriod.completeWithinCap, cap: auditPeriod.cap },
         limitations: [
-          'Audit events are sampled from the newest 500 tenant audit entries, not a complete historical extract.',
-          'Older dates may be missing even when activities occurred. A blank period is NOT evidence that no activity happened.',
+          ...(auditPeriod.completeWithinCap ? [] : ['This time-range audit reached its event cap and is not complete; use an asynchronous comprehensive extract.']),
+          'Date-range tenant audit events do not yet reconcile against all source transaction collections; absence of events is NOT proof of no activity.',
           'Legacy audit entries do not necessarily identify legal entity; legal-entity filters apply to documentation only until event-level attribution is migrated.',
           'Registry actions are currently catalogued, not independently verified against every enforcing handler.',
           'Effectiveness findings, compliance scoring and publication need complete data and tested governance policies.',
