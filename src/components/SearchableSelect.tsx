@@ -37,6 +37,7 @@ function extractOptions(children: ReactNode, group = ''): Option[] {
 export default function SearchableSelect({ label, id, hint, error, children, value, defaultValue, name, onChange, disabled, required, ...rest }: Props) {
     const options = useMemo(() => extractOptions(children), [children]);
     const [open, setOpen] = useState(false);
+    const [selectionReady, setSelectionReady] = useState(false);
     const [query, setQuery] = useState('');
     const [searchVisible, setSearchVisible] = useState(false);
     const [internal, setInternal] = useState(defaultValue === undefined ? '' : String(defaultValue));
@@ -48,14 +49,18 @@ export default function SearchableSelect({ label, id, hint, error, children, val
 
     useEffect(() => {
         if (!open) return;
+        // Prevent the opening tap from reaching an option at the same screen coordinate.
+        setSelectionReady(false);
+        const readyTimer = window.setTimeout(() => setSelectionReady(true), 320);
         const old = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
         const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
         document.addEventListener('keydown', escape);
-        return () => { document.body.style.overflow = old; document.removeEventListener('keydown', escape); };
+        return () => { window.clearTimeout(readyTimer); document.body.style.overflow = old; document.removeEventListener('keydown', escape); };
     }, [open]);
 
     const choose = (v: string) => {
+        if (!selectionReady) return;
         if (value === undefined) setInternal(v);
         // All existing MEMS SelectField callers consume e.target.value. Keep that contract intact.
         onChange?.({ target: { value: v, name, id }, currentTarget: { value: v, name, id } } as unknown as ChangeEvent<HTMLSelectElement>);
@@ -77,11 +82,11 @@ export default function SearchableSelect({ label, id, hint, error, children, val
             </button>
             {(error || hint) && <span id={`${id}-note`} className={`mt-1 block text-xs ${error ? 'text-red-500' : 'text-muted'}`}>{error || hint}</span>}
             {open && typeof document !== 'undefined' && createPortal(
-                <div className='fixed inset-0 z-[1100] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-5'
+                <div className='fixed inset-0 z-[1100] flex items-start justify-center bg-black/60 px-2 pb-3 pt-[max(5dvh,16px)] sm:p-5 sm:items-start'
                     role='presentation' onClick={() => setOpen(false)}>
                     <div role='dialog' aria-label={label} aria-modal='true'
                         onClick={(e) => e.stopPropagation()}
-                        className='flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-line bg-page shadow-2xl sm:rounded-2xl'>
+                        className='flex max-h-[88dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-line bg-page shadow-2xl'>
                         <div className='flex items-center justify-between border-b border-line p-4'>
                             <h2 className='min-w-0 truncate text-lg font-semibold text-ink'>{label}</h2>
                             <button type='button' aria-label='Close' className='flex h-10 w-10 items-center justify-center rounded-xl border border-line text-ink'
@@ -109,7 +114,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
                             {filtered.length === 0 && <p className='p-4 text-center text-sm text-muted'>No matching options</p>}
                             {filtered.map((o, i) =>
                                 <button key={o.value + '-' + i} type='button' role='option' aria-selected={o.value === selectedValue}
-                                    disabled={o.disabled} onClick={() => choose(o.value)}
+                                    disabled={o.disabled || !selectionReady} onClick={() => choose(o.value)}
                                     className={`mb-1 flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm disabled:opacity-40 ${o.value === selectedValue ? 'border-brand bg-brand/10 text-ink' : 'border-transparent text-ink active:bg-panel'}`}>
                                     <span className='min-w-0 flex-1 break-words'>
                                         {o.group && <span className='block text-xs text-muted'>{o.group}</span>}
