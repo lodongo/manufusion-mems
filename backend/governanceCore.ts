@@ -41,11 +41,13 @@ export type Evaluation = {
 const validLevel = (n: number) => Number.isSafeInteger(n) && n >= 1 && n <= 100;
 export function quorumCount(quorum: ApprovalQuorum, eligibleCount: number): number {
   if (!Number.isSafeInteger(eligibleCount) || eligibleCount < 0) throw new Error('Invalid eligible approver count');
+  if (eligibleCount === 0) throw new Error('No eligible approvers');
   switch (quorum.mode) {
     case 'all': return eligibleCount;
     case 'any': return 1;
     case 'count':
       if (!Number.isSafeInteger(quorum.value) || (quorum.value ?? 0) < 1) throw new Error('Invalid fixed quorum');
+      if (quorum.value! > eligibleCount) throw new Error('Required quorum exceeds eligible approvers');
       return quorum.value!;
     case 'percent':
       if (!Number.isFinite(quorum.value) || (quorum.value ?? 0) <= 0 || quorum.value! > 100) throw new Error('Invalid percentage quorum');
