@@ -562,9 +562,9 @@ function RecommendedRoles() {
     const apply = () =>
         ask(
             {
-                title: `Create ${picked.length} recommended role${picked.length === 1 ? '' : 's'}?`,
-                message: 'The roles are created as normal custom roles that you can edit or delete. They include the default baseline permissions. Creation is recorded in the audit trail.',
-                confirmLabel: 'Create roles',
+                title: `Adopt ${picked.length} standard role${picked.length === 1 ? '' : 's'}?`,
+                message: 'The roles are created as normal custom roles that you can edit or delete. Every user already has standard self-service access independently. Creation is recorded in the audit trail.',
+                confirmLabel: 'Adopt roles',
             },
             async () => {
                 const res = await callBackend<{ created: string[]; skipped: Array<{ id: string; reason: string }> }>('/api/org/roles/templates/apply', { ids: picked });
@@ -576,8 +576,8 @@ function RecommendedRoles() {
 
     return (
         <Screen
-            title='Recommended roles'
-            subtitle='Ready-made roles that keep duties apart'
+            title='Adopt Standard Security Roles'
+            subtitle='One-click adoption of transaction-ready roles for your enabled modules. Existing roles are preserved.'
             onBack={() => navigate(BASE)}
             actions={
                 <Button onClick={apply} disabled={picked.length === 0}>
@@ -587,7 +587,7 @@ function RecommendedRoles() {
             toolbar={
                 <div className='flex gap-2'>
                     <Button variant='secondary' className='flex-1' onClick={() => setPicked(usable.map((t) => t.id))}>
-                        Select all available
+                        Adopt all available
                     </Button>
                     <Button variant='secondary' className='flex-1' onClick={() => setPicked([])}>
                         Clear
