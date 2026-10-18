@@ -6,7 +6,21 @@ type Status = {mode:string;proposals:Proposal[];report:{
   inspected:number;ready:number;blocked:number;coveragePercent:number;
   digest:string;canActivate:boolean;items:Blocked[];truncated:boolean;
 }};
-export default function GovernanceCutoverAdmin(){
+function routeOwner(item:Blocked):{owner:string;next:string;bindingReady:boolean}{
+  const all=item.issues.join('; ').toLowerCase();
+  if(all.includes('route has no organization guard')||all.includes('canonical transaction code missing')||
+     all.includes('explicit route action permission missing')||all.includes('handler name is not unique')){
+    return {owner:'Engineering',next:'Register this route with an exact transaction code and enforced server permission. Validate tenant/site scope and separation of duties before assigning an administrator.',bindingReady:false};
+  }
+  if(all.includes('handler, scope or separation-of-duties evidence missing')||all.includes('binding does not match')){
+    return {owner:'Engineering + governance administrator',next:'Resolve handler evidence or permission mapping in code; then submit a corrected binding for independent review.',bindingReady:true};
+  }
+  if(all.includes('chart of authority')||all.includes('authority rules')){
+    return {owner:'Governance administrators',next:'Configure the applicable Chart of Authority, approver streams and levels, then obtain approval from a different authorized administrator.',bindingReady:false};
+  }
+  return {owner:'Governance administrators',next:'Open the Security tab, select the installed transaction, attach genuine engineering verification evidence and submit a binding. A second authorized administrator must approve it.',bindingReady:true};
+}
+export default function GovernanceCutoverAdmin({onReviewBinding}:{onReviewBinding?:(module:string)=>void}){
   const [data,setData]=useState<Status|null>(null);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
@@ -48,8 +62,9 @@ export default function GovernanceCutoverAdmin(){
           </div>)}
       </div>
       <p className='text-sm text-soft'>{data.report.coveragePercent}% of guarded transaction handlers have reviewed, matching configuration.
-        {data.report.blocked>0?' Activation is blocked until every remaining handler is resolved.':''}</p>
+        {data.report.blocked>0?' Activation is blocked until every remaining handler is resolved. Existing business routes continue under their present controls.':''}</p>
       {data.report.blocked>0&&<div className='space-y-2'>
+        <p className='text-xs text-soft'>Resolution order: (1) Engineering assigns and enforces missing route permissions/codes; (2) an authorized governance administrator submits verified bindings and authority policies; (3) a different authorized administrator approves; (4) refresh this assessment. A missing code cannot be resolved by entering a justification.</p>
         <button type='button' aria-expanded={showIssues} onClick={()=>setShowIssues(x=>!x)}
           className='min-h-11 rounded-lg border border-[rgb(var(--c-border))] px-3 text-sm text-ink'>
           {showIssues?'Hide':'Show'} blocked handlers
@@ -59,6 +74,13 @@ export default function GovernanceCutoverAdmin(){
             <p className='break-all text-xs font-semibold text-ink'>{item.code??'Unassigned'} · {item.route}</p>
             <p className='text-xs text-soft'>{item.module} / {item.area} · {item.handler}</p>
             <p className='text-xs text-red-600'>{item.issues.join('; ')}</p>
+            <p className='mt-2 text-xs font-semibold text-ink'>Owner: {routeOwner(item).owner}</p>
+            <p className='text-xs text-soft'>{routeOwner(item).next}</p>
+            {routeOwner(item).bindingReady&&item.code&&onReviewBinding&&
+              <button type='button' onClick={()=>onReviewBinding(item.module)}
+                className='mt-2 min-h-10 rounded-lg border border-[rgb(var(--c-border))] px-3 text-xs font-semibold text-ink'>
+                Open binding review for {item.module}
+              </button>}
           </div>)}
           {data.report.truncated&&<p className='text-xs text-soft'>Showing the first 250 blocked handlers.</p>}
         </div>}
