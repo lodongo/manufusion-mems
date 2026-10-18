@@ -88,6 +88,7 @@ import { roleCodeRoutes } from './roleCodes';
 import { roleDocRoutes } from './roleDocs';
 import { workflowTraceRoutes } from './workflowTrace';
 import { governanceDocumentRoutes } from './governanceDocumentRoutes';
+import { governanceAuditRoutes } from './governanceAuditRoutes';
 import { procurementSetupRoutes } from './procurementSetup';
 import { purchaseRequirementRoutes } from './purchaseRequirements';
 import { procurementPolicyRoutes } from './procurementPolicy';
@@ -1521,6 +1522,7 @@ export const handler = router({
     ...roleDocRoutes,
     ...workflowTraceRoutes,
     ...governanceDocumentRoutes,
+    ...governanceAuditRoutes,
     ...procurementSetupRoutes,
     ...purchaseRequirementRoutes,
     ...procurementPolicyRoutes,
