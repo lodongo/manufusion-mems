@@ -3,6 +3,7 @@ import { ArrowLeft, Check, ChevronRight, FolderTree, Layers, ListChecks, Lock, S
 import { callBackend } from '../lib/backend';
 import FinEntityAccounts from './FinEntityAccounts';
 import FinAccountRuleManager from './FinAccountRuleManager';
+import FinGranularTransactionCatalog,{type GranularVariant} from './FinGranularTransactionCatalog';
 import { Alert, SelectField } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import { Button, Spinner, useLoad } from '../admin/kit';
@@ -363,6 +364,7 @@ interface MapData {
     roles: Array<{ code: string; label: string; statement: 'BS' | 'PL'; required: boolean; note: string }>;
     mapping: { roles: Record<string, string>; byCategory: Record<string, { INVENTORY?: string; CONSUMPTION?: string }>; rules: Array<{id:string;event:string;role:string;account:string;categoryCode:string;costCenterId:string;priority:number;enabled:boolean}>;version: number };
     events: Array<{code:string;label:string;roles:string[];implemented:boolean}>;
+    variants:GranularVariant[];
     txns: Array<{ code: string; label: string; debit: string; credit: string; live: boolean; source: string; taxes: string[] }>;
     accounts: Array<{ code: string; name: string; statement: string }>;
     categories: Array<{ code: string; name: string }>;
@@ -375,6 +377,7 @@ function Mapping({ le }: { le: Entity }) {
     const [cats, setCats] = useState<Record<string, { INVENTORY?: string; CONSUMPTION?: string }> | null>(null);
     const [newCat, setNewCat] = useState('');
     const [determinationRules,setDeterminationRules]=useState<MapData['mapping']['rules']|null>(null);
+    const [prefill,setPrefill]=useState<GranularVariant|null>(null);
     const [msg, setMsg] = useState('');
     const confirm = useConfirm();
     if (loading && !data) return <Spinner />;
@@ -454,13 +457,14 @@ function Mapping({ le }: { le: Entity }) {
                     </div>
                 )}
             </Card>
-            <FinAccountRuleManager leId={le.id} rules={activeRules} setRules={setDeterminationRules} events={data.events??[]} roles={data.roles} accounts={data.accounts} categories={data.categories} canEdit={can} mapping={{roles:r,byCategory:bc}} />
+            <FinGranularTransactionCatalog variants={data.variants??[]} accountRules={activeRules} onConfigure={v=>{setPrefill(v);document.getElementById('fin-rule-config')?.scrollIntoView({behavior:'smooth',block:'start'});}} />
+            <FinAccountRuleManager leId={le.id} rules={activeRules} setRules={setDeterminationRules} events={data.events??[]} roles={data.roles} accounts={data.accounts} categories={data.categories} canEdit={can} mapping={{roles:r,byCategory:bc}} prefill={prefill} />
             {can && (
                 <Button disabled={!changed} onClick={() => confirm.ask({ title: 'Propose the mapping', message: 'Every posting from approval on uses the new accounts. A person with FIN.mapping.approve must approve it.', confirmLabel: 'Propose', reason: { label: 'Reason', minLength: 10 } }, async (reason) => { await callBackend(`${FIN_API}/mapping/propose`, { leId: le.id, mapping: { roles: r, byCategory: bc,rules:activeRules }, reason }); setRoles(null); setCats(null); setDeterminationRules(null); setMsg('Proposed for approval.'); reload(); })}>
                     Propose mapping
                 </Button>
             )}
-            <Card title='Every financial transaction and where it posts'>
+            <Card title='Core transaction handlers and their default accounting roles'>
                 <ul className='space-y-2'>
                     {data.txns.map((t) => (
                         <li key={t.code} className='space-y-1 rounded-xl border border-line p-3'>
