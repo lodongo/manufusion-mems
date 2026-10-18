@@ -66,4 +66,11 @@ jobs:
           test -n "${URL}"
           gcloud run services update mems-prod --project="${GCP_PROD_PROJECT_ID}" --region="${GCP_PROD_REGION}" --update-env-vars="MEMS_PUBLIC_URL=${URL}/" --quiet
           curl --fail --silent --show-error --retry 6 --retry-delay 5 "${URL}/healthz"
+          # A public API call with no Firebase token MUST be denied by authentication.
+          # HTTP 503 indicates invalid production environment configuration.
+          CODE="$(curl --silent --show-error --max-time 30 -X POST \
+            -H 'Content-Type: application/json' -d '{}' \
+            -o /tmp/prod_api_probe.json -w '%{http_code}' \
+            "${URL}/api/org/governance/cutover/status")"
+          test "${CODE}" = '401'
           echo "Production Cloud Run URL: ${URL}" >> "${GITHUB_STEP_SUMMARY}"
