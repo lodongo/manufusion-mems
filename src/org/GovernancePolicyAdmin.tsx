@@ -13,6 +13,7 @@ const modules=['ADM','AST','FIN','INV','MNT','PRC','WHS','SAF','QLT','HRM','PAY'
 export default function GovernancePolicyAdmin(){
   const [module,setModule]=useState('MNT');
   const [endpoints,setEndpoints]=useState<Endpoint[]>([]);
+  const [loadingEndpoints,setLoadingEndpoints]=useState(false);
   const [code,setCode]=useState('');
   const [classification,setClassification]=useState('permission_only');
   const [evidence,setEvidence]=useState({handlerEvidenceId:'',scopeEvidenceId:'',sodEvidenceId:''});
@@ -28,10 +29,11 @@ export default function GovernancePolicyAdmin(){
   },[]);
   useEffect(()=>{void refresh();},[refresh]);
   useEffect(()=>{
-    let active=true;setCode('');
+    let active=true;setCode('');setEndpoints([]);setLoadingEndpoints(true);
     callBackend<{wiredEndpoints:Endpoint[]}>('/api/org/governance/blueprints/list',{module})
       .then(d=>{if(active)setEndpoints((d.wiredEndpoints??[]).filter(x=>x.code&&x.permission));})
-      .catch(e=>{if(active)setError(e instanceof Error?e.message:'Could not load installed transactions.');});
+      .catch(e=>{if(active)setError(e instanceof Error?e.message:'Could not load installed transactions.');})
+      .finally(()=>{if(active)setLoadingEndpoints(false);});
     return ()=>{active=false;};
   },[module]);
   async function propose(){
@@ -60,7 +62,8 @@ export default function GovernancePolicyAdmin(){
   return <section className='space-y-4 rounded-xl border border-[rgb(var(--c-border))] p-4'>
     <header className='space-y-1'>
       <h2 className='font-semibold text-ink'>Transaction binding review</h2>
-      <p className='text-sm text-soft'>Bind installed handlers to security controls. A separate authorized administrator must approve changes. Proposals do not activate transactions.</p>
+      <p className='text-sm text-soft'>A governance administrator with ADM.workflows proposes a verified handler binding; a different authorized administrator reviews it under Configuration proposals below. Neither step edits legacy permission codes or grants a role automatically.</p>
+      <p className='text-xs text-soft'>Engineering must first verify the handler, site/tenant scope and separation of duties, then supply real evidence references. Unassigned codes or missing route permissions must be corrected in backend code; these cannot be approved away in this form.</p>
     </header>
     {error&&<p role='alert' className='text-sm text-red-600'>{error}</p>}
     {notice&&<p role='status' className='text-sm text-ink'>{notice}</p>}
@@ -68,7 +71,7 @@ export default function GovernancePolicyAdmin(){
       <SelectField id='governance-binding-module' label='Module' value={module} onChange={e=>setModule(e.target.value)}>
         {modules.map(m=><option key={m} value={m}>{m}</option>)}
       </SelectField>
-      <SelectField id='governance-binding-endpoint' label='Installed transaction' value={code} onChange={e=>setCode(e.target.value)}>
+      <SelectField id='governance-binding-endpoint' label='Installed transaction' disabled={loadingEndpoints||endpoints.length===0} value={code} onChange={e=>setCode(e.target.value)}>
         <option value=''>Select a transaction</option>
         {endpoints.map(x=><option key={x.code} value={x.code!}>{x.code} · {x.name}</option>)}
       </SelectField>
@@ -77,6 +80,8 @@ export default function GovernancePolicyAdmin(){
         <option value='approval_required'>Authority and approval required</option>
       </SelectField>
     </div>
+    {loadingEndpoints&&<p role='status' className='text-xs text-soft'>Loading installed transactions for {module}…</p>}
+    {!loadingEndpoints&&!endpoints.length&&<p role='status' className='text-xs text-soft'>No registered, permission-guarded handlers found under {module}. This requires engineering mapping; no user approval is possible yet.</p>}
     <div className='grid grid-cols-1 sm:grid-cols-3 gap-3'>
       {([
         ['handlerEvidenceId','Handler verification evidence'],
@@ -95,7 +100,7 @@ export default function GovernancePolicyAdmin(){
       onClick={()=>void propose()} className='min-h-12 rounded-lg bg-[rgb(var(--c-brand))] px-4 font-semibold text-white disabled:opacity-40'>Submit for review</button>
     <div className='space-y-2 border-t border-[rgb(var(--c-border))] pt-4'>
       <div className='flex items-center justify-between gap-3'>
-        <h3 className='font-semibold text-ink'>Configuration proposals</h3>
+        <h3 className='font-semibold text-ink'>Configuration proposals — independent administrator review</h3>
         <button type='button' onClick={()=>void refresh()} className='rounded-lg border border-[rgb(var(--c-border))] px-3 py-2 text-sm text-ink'>Refresh</button>
       </div>
       {proposals.slice(0,60).map(p=><div key={p.id} className='flex flex-col gap-2 rounded-lg border border-[rgb(var(--c-border))] p-3 sm:flex-row sm:items-center'>
@@ -105,7 +110,7 @@ export default function GovernancePolicyAdmin(){
       </div>)}
       {!proposals.length&&<p className='text-sm text-soft'>No governance configuration proposals yet.</p>}
       {reviewId&&<div className='rounded-lg border border-[rgb(var(--c-border))] p-3 space-y-2'>
-        <p className='text-sm text-ink'>Approve independent review of {reviewId}?</p>
+        <p className='text-sm text-ink'>Approve independent review of {reviewId}? Verify the handler evidence and intended permission/scope; the person who submitted the proposal cannot approve it.</p>
         <div className='flex flex-wrap gap-2'>
           <button disabled={busy} type='button' onClick={()=>void approve()} className='min-h-11 rounded-lg bg-[rgb(var(--c-brand))] px-4 text-sm font-semibold text-white'>Approve configuration</button>
           <button type='button' onClick={()=>setReviewId('')} className='min-h-11 rounded-lg border border-[rgb(var(--c-border))] px-4 text-sm text-ink'>Cancel</button>
