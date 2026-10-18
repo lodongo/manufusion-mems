@@ -64,4 +64,5 @@ jobs:
           URL="$(gcloud run services describe mems-prod --project="${GCP_PROD_PROJECT_ID}" --region="${GCP_PROD_REGION}" --format='value(status.url)')"
           test -n "${URL}"
           gcloud run services update mems-prod --project="${GCP_PROD_PROJECT_ID}" --region="${GCP_PROD_REGION}" --update-env-vars="MEMS_PUBLIC_URL=${URL}/" --quiet
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 "${URL}/api/_healthcheck"
           echo "Production Cloud Run URL: ${URL}" >> "${GITHUB_STEP_SUMMARY}"
