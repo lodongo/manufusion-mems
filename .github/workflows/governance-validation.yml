@@ -16,6 +16,7 @@ on:
       - 'src/org/GovernanceReports.tsx'
       - 'src/org/TransactionGovernance.tsx'
       - 'src/org/OrgShell.tsx'
+      - 'scripts/governance-route-audit.mjs'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/governance-validation.yml'
@@ -35,5 +36,6 @@ jobs:
       # The repository currently has no npm lockfile. Do not enable setup-node npm cache or npm ci until a reviewed lockfile is committed.
       - run: npm install --no-audit --no-fund
       - run: npm run check
+      - run: npm run audit:routes
       - run: npm run test:governance
       - run: npm run build
