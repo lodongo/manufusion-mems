@@ -101,3 +101,47 @@ jobs:
             echo 'Access: governed by Cloud Run service security settings, managed separately in the Google Cloud Console'
             echo 'No live Firebase project has been used.'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish separate public MEMS live pilot using development Firebase
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This is an intentionally PUBLIC pilot deployment, not the production
+          # Firebase project. It reuses the green, pinned development image.
+          node scripts/dev-preflight.mjs deploy
+          IMAGE="${GCP_DEV_REGION}-docker.pkg.dev/${GCP_DEV_PROJECT_ID}/mems-dev/mems:${GITHUB_SHA}"
+          gcloud run deploy mems-live \
+            --project="${GCP_DEV_PROJECT_ID}" \
+            --region="${GCP_DEV_REGION}" \
+            --image="${IMAGE}" \
+            --platform=managed \
+            --service-account="${GCP_DEV_RUNTIME_SA}" \
+            --allow-unauthenticated \
+            --min-instances=0 \
+            --max-instances=2 \
+            --cpu=1 \
+            --memory=1Gi \
+            --concurrency=20 \
+            --timeout=120 \
+            --update-env-vars="MEMS_FIREBASE_PROJECT_ID=${MEMS_FIREBASE_PROJECT_ID},MEMS_STORAGE_BUCKET=${MEMS_STORAGE_BUCKET},MEMS_DEPLOY_SHA=${GITHUB_SHA},MEMS_DEPLOY_MODE=live-pilot" \
+            --quiet
+          LIVE_URL="$(gcloud run services describe mems-live --project="${GCP_DEV_PROJECT_ID}" --region="${GCP_DEV_REGION}" --format='value(status.url)')"
+          test -n "${LIVE_URL}"
+          gcloud run services update mems-live \
+            --project="${GCP_DEV_PROJECT_ID}" \
+            --region="${GCP_DEV_REGION}" \
+            --update-env-vars="MEMS_PUBLIC_URL=${LIVE_URL}/" \
+            --quiet
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 "${LIVE_URL}/healthz" > /tmp/mems-pilot-health.json
+          STATUS="$(curl --silent --show-error -X POST -H 'Content-Type: application/json' \
+            -d '{}' -o /tmp/mems-pilot-probe.json -w '%{http_code}' \
+            "${LIVE_URL}/api/org/governance/cutover/status")"
+          test "${STATUS}" = '401'
+          {
+            echo '### MEMS public live pilot'
+            echo "URL: ${LIVE_URL}"
+            echo "Pinned source: ${GITHUB_SHA}"
+            echo "Google Cloud project: ${GCP_DEV_PROJECT_ID}"
+            echo '**Data: development Firebase/Firestore, not isolated production.**'
+            echo 'Public landing page verified; unauthenticated business API rejected (401).'
+          } >> "$GITHUB_STEP_SUMMARY"
