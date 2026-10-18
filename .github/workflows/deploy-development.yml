@@ -50,6 +50,20 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v3
 
+      - name: Enable public access for existing MEMS pilot
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gcloud run services describe mems-live --project="${GCP_DEV_PROJECT_ID}" --region="${GCP_DEV_REGION}" >/dev/null 2>&1; then
+            gcloud run services update mems-live \
+              --project="${GCP_DEV_PROJECT_ID}" \
+              --region="${GCP_DEV_REGION}" \
+              --no-invoker-iam-check \
+              --quiet
+            URL="$(gcloud run services describe mems-live --project="${GCP_DEV_PROJECT_ID}" --region="${GCP_DEV_REGION}" --format='value(status.url)')"
+            curl --fail --silent --show-error --retry 4 --retry-delay 4 "${URL}/healthz"
+          fi
+
       - name: Validate application before deployment
         run: |
           npm install --no-audit --no-fund
@@ -116,7 +130,7 @@ jobs:
             --image="${IMAGE}" \
             --platform=managed \
             --service-account="${GCP_DEV_RUNTIME_SA}" \
-            --allow-unauthenticated \
+            --no-invoker-iam-check \
             --min-instances=0 \
             --max-instances=2 \
             --cpu=1 \
