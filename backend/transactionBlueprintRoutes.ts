@@ -1,6 +1,6 @@
 import { orgRoute } from './guards';
 import { plannedTransactionBlueprints } from './transactionBlueprints';
-import { existingPermissionCrosswalk } from './existingPermissionCrosswalk';
+import { existingPermissionCrosswalk, existingPermissionMappingSummary } from './existingPermissionCrosswalk';
 
 /** Read-only transaction design registry; never grants access. */
 export const transactionBlueprintRoutes = {
@@ -10,7 +10,7 @@ export const transactionBlueprintRoutes = {
       const kind = String(ctx.body.kind ?? '').trim();
       const items = plannedTransactionBlueprints().filter(x => (!module || x.module === module) && (!kind || x.kind === kind));
       const existingPermissions = existingPermissionCrosswalk().filter(x=>!module||x.module===module);
-      return { count: items.length, items, existingPermissions, notice: 'All blueprint records are non-executable. Permission and activation require independently verified implementation and approved governance.' };
+      return { count: items.length, items, existingPermissions, mappingSummary: existingPermissionMappingSummary(), notice: 'All blueprint records are non-executable. Permission and activation require independently verified implementation and approved governance.' };
     }),
   ],
 };
