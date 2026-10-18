@@ -69,6 +69,9 @@ export function validateApprovalEvidence(e:ApprovalEvidence,context:{
     if(voted.has(key))errors.push('Duplicate decision by an approver');
     voted.add(key);
     if(v.uid===e.requestedBy)errors.push('Creator cannot approve their own transaction');
+    if(streamByApprover.has(v.uid)&&streamByApprover.get(v.uid)!==v.stream)
+      errors.push('Independent approval streams require distinct human approvers');
+    streamByApprover.set(v.uid,v.stream);
     const step=e.steps.find(s=>s.stream===v.stream&&s.level===v.level);
     if(!step || !step.eligibleUserIds.includes(v.uid))errors.push('Decision by an ineligible approver');
     if(v.decision!=='approve')errors.push('Approval contains a return or rejection');
@@ -83,7 +86,9 @@ export function nextEligibleApprovalStep(e:ApprovalEvidence,uid:string):Approval
   for(const step of e.steps){
     if(isStepApproved(step,e.votes))continue;
     if(e.steps.some(other=>other.stream===step.stream&&other.level<step.level&&!isStepApproved(other,e.votes)))continue;
-    if(step.eligibleUserIds.includes(uid)&&!e.votes.some(v=>v.uid===uid&&v.stream===step.stream&&v.level===step.level))
+    if(step.eligibleUserIds.includes(uid)&&
+      !e.votes.some(v=>v.uid===uid&&v.stream!==step.stream)&&
+      !e.votes.some(v=>v.uid===uid&&v.stream===step.stream&&v.level===step.level))
       return step;
   }
   return null;
