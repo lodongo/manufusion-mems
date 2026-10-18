@@ -16,7 +16,7 @@ interface Blueprint {
 type WiredEndpoint = {method:string;path:string;name:string;permission:string|null;module:string;area:string;code:string|null;guard:string;handlerWired:true;activationCertified:false};
 const MODULES: Array<[string,string]> = [
  ['ADM','Administration & Security'],['FIN','Finance & Accounting'],['INV','Inventory'],['MFG','Manufacturing'],
- ['PLN','Production Planning'],['CST','Product Costing'],['QLT','Quality'],['MNT','Maintenance'],
+ ['PLN','Production Planning'],['CST','Product Costing'],['QLT','Quality'],['SAF','Safety'],['MNT','Maintenance'],
  ['AST','Asset Management'],['PRC','Procurement'],['WHS','Warehousing'],['LOG','Logistics'],
  ['DST','Distribution'],['SAL','Sales'],['CRM','Customer Management'],['POS','Point of Sale'],
  ['HRM','Human Resources'],['PAY','Payroll'],['DOC','Documentation'],['RPT','Reporting'],['PRJ','Projects'],
