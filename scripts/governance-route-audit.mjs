@@ -21,7 +21,7 @@ for (const m of router.matchAll(/import\s*\{([^}]+)\}\s*from\s*'\.\/([^']+)'/g))
 }
 for (const name of names) {
   const content = readFileSync(join(backend, name), 'utf8');
-  for (const hit of content.matchAll(/['\"]((?:GET|POST|PUT|PATCH|DELETE)\\s+\\/api\\/[^'\"]+)['\"]\\s*:\\s*\\[/g)) {
+  for (const hit of content.matchAll(/['\"]((?:GET|POST|PUT|PATCH|DELETE)\s+\/api\/[^'\"]+)['\"]\s*:\s*\[/g)) {
     routeDeclarations.push({ source: name, route: hit[1] });
   }
   for (const m of content.matchAll(/['"]((?:GET|POST|PUT|PATCH|DELETE)\s+\/api\/[^'"]+)['"]\s*:\s*\[\s*(\w+)\s*\(\s*['"]([^'"]+)['"]\s*,\s*(['"][^'"]*['"]|null)/g)) {
