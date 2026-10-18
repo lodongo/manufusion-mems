@@ -190,7 +190,7 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
             } else if (str(it.l.type) === 'asset') {
                 const g = add('GR_ASSET');
                 g.lines.push({ side: 'D', glCode: roleAccount(map, 'ASSET_CLEARING','',{event:'GR_ASSET',costCenterId:it.cc}), ccId: it.cc, amount: value, docAmount: it.docValue, description: desc, qty: it.qty });
-                g.lines.push({ side: 'C', glCode: grir, ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
+                g.lines.push({ side: 'C', glCode: grirFor('GR_ASSET'), ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
             } else {
                 const g = add('GR_DIRECT');
                 g.lines.push({ side: 'D', glCode: str(it.l.glCode), ccId: it.cc, amount: value, docAmount: it.docValue, description: desc, qty: it.qty });
