@@ -23,6 +23,7 @@ import {
     type TokenClaims,
 } from './core';
 import { audit, type Actor } from './audit';
+import type { GovernanceHandlerMetadata } from './transactionRuntime';
 
 export const STAFF_ROLES = ['super_admin', 'mems_admin', 'mems_support'];
 
@@ -117,7 +118,7 @@ export interface StaffContext extends SecureContext {
 }
 
 export function staff(name: string, level: 'read' | 'write' | 'super', fn: (ctx: StaffContext) => Promise<unknown>) {
-    return secure(name, async (ctx) => {
+    const guarded = secure(name, async (ctx) => {
         const me = await getDoc(`users/${ctx.uid}`);
         const role = str(me?.data.role);
         if (!me || !STAFF_ROLES.includes(role) || str(me.data.status) === 'disabled' || emailDomain(ctx.claims.email) !== STAFF_DOMAIN) {
@@ -462,4 +463,5 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         if (permission && role !== 'org_super_admin' && !hasPerm(gate, permission)) throw new HttpError(403, 'You do not have permission to do this.');
         return fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain });
     });
+    return Object.assign(guarded, { governanceMetadata: Object.freeze({ name, permission, kind: 'organization' as const } satisfies GovernanceHandlerMetadata) });
 }
