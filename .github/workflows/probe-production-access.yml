@@ -1,0 +1,39 @@
+name: Probe live project access (read only)
+on:
+  push:
+    branches: [develop]
+    paths:
+      - '.github/workflows/probe-production-access.yml'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: development
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate through existing development connection
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_DEV_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_DEV_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEV_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Check live-project visibility without changing data
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gcloud projects describe mems2026 --format='value(projectId)' >/dev/null 2>/tmp/project-error; then
+            echo 'Live project mems2026 is visible to the existing deployment identity.' >> "$GITHUB_STEP_SUMMARY"
+            if gcloud run services list --project=mems2026 --region=africa-south1 --format='table(metadata.name,status.url)' > /tmp/cloudrun.txt 2>/tmp/run-error; then
+              echo 'Cloud Run service list is readable in the live project.' >> "$GITHUB_STEP_SUMMARY"
+              cat /tmp/cloudrun.txt >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo 'Live Cloud Run configuration cannot be read using the existing identity.' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo 'The existing development deployment identity cannot access mems2026. A production Google Cloud identity must be configured.' >> "$GITHUB_STEP_SUMMARY"
+          fi
