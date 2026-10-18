@@ -52,3 +52,14 @@ test('system automatically binds authenticated self-service and staff handlers w
   recordWiredRoutes({...routes});
   assert.deepEqual(allSystemTransactions(),all);
 });
+
+test('legacy stock-take permissions map to Inventory codes without granting access',()=>{
+  const handler=Object.assign(async()=>null,{governanceMetadata:{name:'stocktake.config.read',permission:'INV_ST_001',kind:'organization' as const}});
+  recordWiredRoutes({'POST /api/org/stocktake/config/read':[handler]});
+  const result=wiredTransactionInventory()[0];
+  assert.equal(result.module,'INV');
+  assert.match(result.code??'',/^INV-/);
+  assert.equal(result.permission,'INV_ST_001');
+  assert.equal(result.enforcement,'role_permission');
+  assert.equal(result.bindingStatus,'system_bound');
+});
