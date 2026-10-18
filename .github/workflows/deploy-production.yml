@@ -1,9 +1,5 @@
 name: Production release
 on:
-  push:
-    branches: [develop]
-    paths:
-      - '.github/workflows/deploy-production.yml'
   workflow_dispatch:
     inputs:
       confirmation:
@@ -17,10 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    if: >-
-      github.ref == 'refs/heads/develop' &&
-      ((github.event_name == 'workflow_dispatch' && github.event.inputs.confirmation == 'DEPLOY') ||
-       (github.event_name == 'push' && github.event.head_commit.message == 'release(production): user-approved one-time launch'))
+    if: github.ref == 'refs/heads/develop' && github.event.inputs.confirmation == 'DEPLOY'
     runs-on: ubuntu-latest
     environment: production
     permissions:
