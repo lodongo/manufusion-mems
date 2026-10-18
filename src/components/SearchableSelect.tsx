@@ -1,4 +1,4 @@
-import { Children, isValidElement, useEffect, useMemo, useState, type ChangeEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { Children, isValidElement, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 
@@ -37,7 +37,8 @@ function extractOptions(children: ReactNode, group = ''): Option[] {
 export default function SearchableSelect({ label, id, hint, error, children, value, defaultValue, name, onChange, disabled, required, ...rest }: Props) {
     const options = useMemo(() => extractOptions(children), [children]);
     const [open, setOpen] = useState(false);
-    const [selectionReady, setSelectionReady] = useState(false);
+    const openedAt = useRef(0);
+    const pressedOption = useRef<{ pointerId: number; value: string } | null>(null);
     const [query, setQuery] = useState('');
     const [searchVisible, setSearchVisible] = useState(false);
     const [internal, setInternal] = useState(defaultValue === undefined ? '' : String(defaultValue));
@@ -49,18 +50,14 @@ export default function SearchableSelect({ label, id, hint, error, children, val
 
     useEffect(() => {
         if (!open) return;
-        // Prevent the opening tap from reaching an option at the same screen coordinate.
-        setSelectionReady(false);
-        const readyTimer = window.setTimeout(() => setSelectionReady(true), 320);
         const old = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
         const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
         document.addEventListener('keydown', escape);
-        return () => { window.clearTimeout(readyTimer); document.body.style.overflow = old; document.removeEventListener('keydown', escape); };
+        return () => { document.body.style.overflow = old; document.removeEventListener('keydown', escape); };
     }, [open]);
 
     const choose = (v: string) => {
-        if (!selectionReady) return;
         if (value === undefined) setInternal(v);
         // All existing MEMS SelectField callers consume e.target.value. Keep that contract intact.
         onChange?.({ target: { value: v, name, id }, currentTarget: { value: v, name, id } } as unknown as ChangeEvent<HTMLSelectElement>);
@@ -75,7 +72,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
             <input type='hidden' name={name} value={selectedValue} />
             <button type='button' id={id} disabled={disabled} aria-required={required} aria-invalid={!!error}
                 aria-haspopup='listbox' aria-expanded={open} aria-describedby={error || hint ? `${id}-note` : undefined}
-                onClick={() => { setQuery(''); setSearchVisible(false); setOpen(true); }}
+                onClick={() => { openedAt.current=Date.now(); pressedOption.current=null; setQuery(''); setSearchVisible(false); setOpen(true); }}
                 className={`flex min-h-12 w-full items-center gap-2 rounded-xl border bg-panel px-3 text-left text-base text-ink focus:outline-none disabled:opacity-50 ${error ? 'border-red-500/70' : 'border-line focus:border-brand'}`}>
                 <span className={`min-w-0 flex-1 truncate ${!selectedValue ? 'text-muted' : ''}`}>{current?.label || options.find((o) => !o.value)?.label || 'Choose...'}</span>
                 <ChevronDown className='h-5 w-5 shrink-0 text-muted' />
@@ -114,7 +111,11 @@ export default function SearchableSelect({ label, id, hint, error, children, val
                             {filtered.length === 0 && <p className='p-4 text-center text-sm text-muted'>No matching options</p>}
                             {filtered.map((o, i) =>
                                 <button key={o.value + '-' + i} type='button' role='option' aria-selected={o.value === selectedValue}
-                                    disabled={o.disabled || !selectionReady} onClick={() => choose(o.value)}
+                                    disabled={o.disabled}
+                                    onPointerDown={e => { pressedOption.current = Date.now()-openedAt.current > 550 ? {pointerId:e.pointerId,value:o.value} : null; }}
+                                    onPointerCancel={() => { pressedOption.current=null; }}
+                                    onPointerUp={e => { const press=pressedOption.current; pressedOption.current=null; if(press?.pointerId===e.pointerId && press.value===o.value) choose(o.value); }}
+                                    onClick={e => { if(e.detail===0 && Date.now()-openedAt.current>550) choose(o.value); }}
                                     className={`mb-1 flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm disabled:opacity-40 ${o.value === selectedValue ? 'border-brand bg-brand/10 text-ink' : 'border-transparent text-ink active:bg-panel'}`}>
                                     <span className='min-w-0 flex-1 break-words'>
                                         {o.group && <span className='block text-xs text-muted'>{o.group}</span>}
