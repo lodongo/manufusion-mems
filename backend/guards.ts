@@ -24,6 +24,7 @@ import {
 } from './core';
 import { audit, type Actor } from './audit';
 import type { GovernanceHandlerMetadata } from './transactionRuntime';
+import { moduleDisableReason } from './transactionModuleGate';
 
 export const STAFF_ROLES = ['super_admin', 'mems_admin', 'mems_support'];
 
@@ -447,6 +448,8 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
                 throw new HttpError(428, 'Complete the legal entity, site and at least one job role under Organization design before continuing with other configuration.');
             }
         }
+        const moduleDisabled = moduleDisableReason(name,permission,org.data.modules);
+        if(moduleDisabled && permission)throw new HttpError(403,moduleDisabled);
         const domain = await ensureOrgDomain(org);
         if (domain && emailDomain(ctx.claims.email) !== domain) throw new HttpError(403, 'Your account does not belong to this organization.');
         if (name.startsWith('chat.') && name !== 'chat.policy.status' && name !== 'chat.policy.accept') {
