@@ -88,7 +88,7 @@ export default function TransactionBlueprints() {
     </div>
     <div className='flex flex-wrap items-center justify-between gap-2 text-xs text-soft'>
       <span>{selected?.[1]} · {groups.length} submodules · {items.filter(x=>x.kind==='transaction').length} transaction blueprints</span>
-      <span>Existing permission matches are provisional until route verification</span>
+      <span>{wired.length} server-wired organization endpoints found; workflow certification separate</span>
     </div>
     {loading&&<p role='status' className='text-sm text-soft'><RefreshCw className='inline mr-2 animate-spin' size={16}/>Loading module catalogue…</p>}
     {error&&<p role='alert' className='text-sm text-red-600'>{error}</p>}
@@ -105,15 +105,20 @@ export default function TransactionBlueprints() {
           <button type='button' aria-expanded={open} onClick={()=>expand(g.area)} className='flex w-full items-center gap-3 px-3 py-4 text-left hover:bg-[rgb(var(--c-border)/0.08)]'>
             {open?<ChevronDown size={18}/>:<ChevronRight size={18}/>}
             <span className='min-w-0 flex-1'><strong className='block text-sm text-ink'>{g.title}</strong><code className='text-xs text-soft'>{g.code}</code></span>
-            <span className='shrink-0 text-xs text-soft'>{g.actions.length} actions</span>
+            <span className='shrink-0 text-xs text-soft'>{g.live.length} installed · {g.actions.length} planned</span>
           </button>
           {open&&<div className='border-t border-[rgb(var(--c-border))]'>
+            {g.live.map(e=><div key={e.method+' '+e.path} className='flex flex-col gap-1 border-b border-[rgb(var(--c-border))] px-4 py-3 sm:flex-row sm:items-center sm:gap-4'>
+              <code className='shrink-0 text-xs font-semibold text-ink'>{e.code??'Code unassigned'}</code>
+              <span className='flex-1 text-sm text-ink'>{e.name||e.method+' '+e.path}<span className='block text-xs text-soft'>{e.method} {e.path}</span></span>
+              <span className='text-xs text-soft'>Handler installed · {e.permission?'Permission bound':'In-handler controls'} · approval verification pending</span>
+            </div>)}
             {g.actions.map(a=><div key={a.code} className='flex flex-col gap-1 border-b border-[rgb(var(--c-border))] px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:gap-4'>
               <code className='min-w-0 shrink-0 text-xs font-semibold text-ink'>{a.code}</code>
               <span className='flex-1 text-sm text-ink'>{a.area==='LEG'?a.name:suffix[a.code.split('-').slice(-1)[0]??'']||a.name}</span>
               <span className='text-xs text-soft'>{proposedByCode.has(a.code)?'Existing permission match · verification pending':a.state==='reserved'?'Planned action · not verified':'Existing permission · verification pending'}</span>
             </div>)}
-            {!g.actions.length&&<p className='px-4 py-3 text-sm text-soft'>Submodule access reserved; no actions catalogued.</p>}
+            {!g.actions.length&&!g.live.length&&<p className='px-4 py-3 text-sm text-soft'>Submodule access reserved; no actions catalogued.</p>}
           </div>}
         </div>;
       })}
