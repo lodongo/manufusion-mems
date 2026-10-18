@@ -39,7 +39,7 @@ const AREA_ALIASES: Record<string,string> = {
   workflows:'GOA', settings:'ORG', positions:'JBR', structure:'ORG',
   actions:'ACT', calendar:'CAL', chat:'COM', mail:'COM', messages:'COM',
   jobs:'JBR', tasks:'TSK', alerts:'ALT', notifications:'NTF', photos:'PHT',
-  organization:'ORG', list:'LST', materials:'MAT', stocktake:'STK',
+  organization:'ORG', list:'LST', stocktake:'STK',
 };
 export function recordWiredRoutes<T extends Record<string, unknown>>(routes: T): T {
   const found: WiredTransaction[] = [];
