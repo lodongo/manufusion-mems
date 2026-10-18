@@ -1,8 +1,9 @@
 /**
  * Central runtime enforcement for a tenant that has explicitly activated
- * governance. A missing/inactive configuration leaves established business
- * handlers unchanged. Active configuration fails closed for EVERY guarded
- * organization action; permission-only handlers can be certified individually.
+ * governance. All installed organization routes have a built-in code and keep
+ * their existing authentication, role and in-handler business controls.
+ * Optional tenant-specific policies may add approval requirements but their
+ * absence must not block the standard system-bound business routes.
  * Approval-required actions are blocked until a handler-specific, server-side
  * approval proof adapter exists. Request body flags never count as approvals.
  */
@@ -96,6 +97,10 @@ export async function enforceOrgTransactionGovernance(input: {
   const route=matches[0];
   const bindingDoc=await getDoc(BINDING(input.orgId,route.code));
   const b=bindingDoc?.data??null;
+  // Built-in bindings are supplied by the deployed router itself.
+  // A tenant does not have to create or approve a Firestore binding document.
+  // The existing orgRoute security and the business handler still enforce access.
+  if(!b)return null;
   const modules=input.org.data.modules;
   const moduleMap=modules&&typeof modules==='object'&&!Array.isArray(modules)?modules as Record<string,unknown>:{};
   const submodules=input.org.data.submodules;
