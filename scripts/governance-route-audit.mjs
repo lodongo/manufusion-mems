@@ -47,10 +47,23 @@ const indexed = new Set(records.map(r => r.source + ':' + r.method + ' ' + r.pat
 const unclassified = routeDeclarations.filter(r => !indexed.has(r.source + ':' + r.route));
 for(const route of unclassified)warnings.push('Unclassified backend declaration: ' + route.source + ' ' + route.route);
 const summary={scannedFiles:names.length,declaredRoutes:routeDeclarations.length,discoveredStaticRoutes:records.length,unclassifiedRoutes:unclassified.length,routeGroupsWired:wired.size,permissionDeclared:records.filter(r=>r.permission!==null).length,permissionNotDeclared:records.filter(r=>r.permission===null).length,warnings:warnings.length};
-const output={generatedAt:new Date().toISOString(),disclaimer:'Static inventory only. Dynamic endpoint coverage, actual permissions, classification and protection are NOT verified.',summary,routes:records,unclassified,warnings};
+const coverage = routeDeclarations.length ? Number(((records.length / routeDeclarations.length) * 100).toFixed(2)) : 0;
+const releaseGate = {
+  staticDiscoveryComplete: routeDeclarations.length > 0 && unclassified.length === 0,
+  duplicateDeclarations: [...duplicates.values()].filter(n=>n>1).length,
+  mappedRouteDeclarations: records.length,
+  staticDiscoveryCoveragePercent: coverage,
+  runtimeAuthorizationVerified: false,
+  safeForProductionCutover: false,
+};
+const output={releaseGate,generatedAt:new Date().toISOString(),disclaimer:'Static inventory only. Dynamic endpoint coverage, actual permissions, classification and protection are NOT verified.',summary,routes:records,unclassified,warnings};
 if(process.argv.includes('--json')) process.stdout.write(JSON.stringify(output,null,2)+'\n');
 else {
   process.stdout.write(JSON.stringify(summary,null,2)+'\n');
   process.stdout.write('Run npm run audit:routes -- --json for complete inventory.\n');
 }
 if(records.length===0){process.stderr.write('No routes discovered; discovery cannot be trusted.\n');process.exitCode=1;}
+if(process.argv.includes('--strict') && (!releaseGate.staticDiscoveryComplete || releaseGate.duplicateDeclarations>0)) {
+  process.stderr.write('Transaction route inventory is incomplete or has duplicates. Release gate failed.\n');
+  process.exitCode=1;
+}
