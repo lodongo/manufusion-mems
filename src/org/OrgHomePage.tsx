@@ -271,6 +271,26 @@ export default function OrgHomePage({
 }) {
     const { data, error, loading } = useLoad(() => callBackend<OrgContextData>('/api/org/context'));
     const [menuOpen, setMenuOpen] = useState(false);
+    const menuPrefsKey='mems.menu.preferences.'+session.user.uid;
+    const personalItems = [
+        {key:'mail',label:'Email',Icon:Mail,path:'mail'},
+        {key:'my_access',label:'My access',Icon:ShieldCheck,path:'my_access'},
+        {key:'activity',label:'My activity',Icon:Activity,path:'activity'},
+        {key:'profile',label:'My details',Icon:CircleUser,path:'profile'},
+        {key:'my_tables',label:'My Tables',Icon:Table2,path:'my_tables'},
+        {key:'my_setup',label:'My setup',Icon:Settings,path:'my_setup'},
+        {key:'keep_alive',label:'Keep Alive',Icon:HeartPulse,path:'keep_alive'},
+        ...(canAdmin?[{key:'organization_admin',label:'Organization admin',Icon:Settings,path:'organization_admin'}]:[]),
+    ];
+    const [personalVisible,setPersonalVisible]=useState<string[]>(()=>{
+        try { const saved=JSON.parse(localStorage.getItem(menuPrefsKey)||'null'); return Array.isArray(saved?.visible)?saved.visible:['mail','my_tables','my_setup']; }
+        catch { return ['mail','my_tables','my_setup']; }
+    });
+    const [personalCollapsed,setPersonalCollapsed]=useState(()=>{try {return JSON.parse(localStorage.getItem(menuPrefsKey)||'null')?.collapsed!==false;}catch{return true;}});
+    const [personalHeight,setPersonalHeight]=useState(()=>{try{return Math.min(55,Math.max(15,Number(JSON.parse(localStorage.getItem(menuPrefsKey)||'null')?.height)||28));}catch{return 28;}});
+    const [personalEditing,setPersonalEditing]=useState(false);
+    useEffect(()=>{try{localStorage.setItem(menuPrefsKey,JSON.stringify({visible:personalVisible,collapsed:personalCollapsed,height:personalHeight}));}catch{/* local preferences optional */}},[menuPrefsKey,personalVisible,personalCollapsed,personalHeight]);
+
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
     const [search, setSearch] = useState('');
     const section = route.split('/')[1] ?? '';
@@ -430,16 +450,28 @@ export default function OrgHomePage({
                 ))}
                 {!menus.length && <p className='px-3 py-3 text-sm text-slate-400'>No modules assigned.</p>}
             </nav>
-            <div className='border-t border-slate-800 p-2'>
-                <button onClick={() => toHome('mail')} className='flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 hover:bg-slate-800'><Mail className='h-[18px] w-[18px]' /> Email</button>
-                <button onClick={() => toHome('my_access')} className='flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 hover:bg-slate-800'><ShieldCheck className='h-[18px] w-[18px]' /> My access</button>
-                <button onClick={() => toHome('activity')} className='flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 hover:bg-slate-800'><Activity className='h-[18px] w-[18px]' /> My activity</button>
-                <button onClick={() => toHome('profile')} className='flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 hover:bg-slate-800'><CircleUser className='h-[18px] w-[18px]' /> My details</button>
-                <button onClick={() => toHome('my_tables')} className='flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 hover:bg-slate-800'><Table2 className='h-[18px] w-[18px]' /> My Tables</button>
-                <button onClick={() => toHome('my_setup')} className='flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 hover:bg-slate-800'><Settings className='h-[18px] w-[18px]' /> My setup</button>
-                <button onClick={() => toHome('keep_alive')} className='ml-5 flex h-10 w-[calc(100%-1.25rem)] items-center gap-3 rounded-lg px-3 text-sm text-slate-300 hover:bg-slate-800'><HeartPulse className='h-[18px] w-[18px]' /> Keep Alive</button>
-                {canAdmin && <button onClick={() => navigate('organization_admin')} className='flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 hover:bg-slate-800'><Settings className='h-[18px] w-[18px]' /> Organization admin</button>}
-                <button onClick={onSignOut} className='flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 hover:bg-slate-800'><LogOut className='h-[18px] w-[18px]' /> Log out</button>
+            <div className='shrink-0 border-t border-slate-800 p-2'>
+                <div className='flex items-center gap-1'>
+                    <button type='button' aria-expanded={!personalCollapsed} onClick={()=>setPersonalCollapsed(x=>!x)} className='flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left text-xs font-semibold text-slate-300'>
+                        {personalCollapsed?<ChevronRight className='h-4 w-4'/>:<ChevronDown className='h-4 w-4'/>} Personal shortcuts
+                    </button>
+                    <button type='button' aria-label='Customize personal shortcuts' onClick={()=>{setPersonalEditing(x=>!x);setPersonalCollapsed(false);}} className='flex h-10 w-10 items-center justify-center rounded-lg text-slate-300'><Settings className='h-4 w-4'/></button>
+                </div>
+                {!personalCollapsed&&<div className='min-h-0 overflow-y-auto overscroll-contain' style={{maxHeight:personalHeight+'dvh'}}>
+                    {personalEditing&&<div className='space-y-2 rounded-lg border border-line p-2'>
+                        <label className='block text-xs text-muted'>Shortcut area height
+                            <input type='range' min='15' max='55' value={personalHeight} onChange={e=>setPersonalHeight(Number(e.target.value))} className='mt-1 block w-full'/>
+                        </label>
+                        {personalItems.map(item=><label key={item.key} className='flex min-h-9 items-center gap-2 text-xs text-ink'>
+                            <input type='checkbox' checked={personalVisible.includes(item.key)} onChange={e=>setPersonalVisible(previous=>e.target.checked?[...previous,item.key]:previous.filter(k=>k!==item.key))}/>{item.label}
+                        </label>)}
+                        <button type='button' onClick={()=>setPersonalEditing(false)} className='min-h-10 w-full rounded-lg border border-line text-sm text-ink'>Done</button>
+                    </div>}
+                    {personalItems.filter(item=>personalVisible.includes(item.key)).map(item=><button key={item.key} type='button' onClick={()=>{setMenuOpen(false);if(item.path==='organization_admin')navigate(item.path);else toHome(item.path);}} className='flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-300 hover:bg-slate-800'>
+                        <item.Icon className='h-[18px] w-[18px] shrink-0'/><span className='min-w-0 truncate'>{item.label}</span>
+                    </button>)}
+                </div>}
+                <button onClick={onSignOut} className='flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-300 hover:bg-slate-800'><LogOut className='h-[18px] w-[18px]'/> Log out</button>
             </div>
         </div>
     );
