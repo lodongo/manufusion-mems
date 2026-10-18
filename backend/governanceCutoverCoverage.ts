@@ -69,7 +69,10 @@ export function evaluateCutoverCoverage(
 ):CoverageReport {
   const byName=new Map<string,number>();
   for(const r of routes)byName.set(r.name,(byName.get(r.name)??0)+1);
-  const entries=routes.filter(r=>r.guard==='organization'&&!CONTROL_ROUTES.has(r.name));
+  // Also inspect organization-prefixed endpoints that have NO orgRoute guard;
+  // otherwise an unguarded business endpoint could be invisible at cutover.
+  const entries=routes.filter(r=>(r.guard==='organization'||r.path.startsWith('/api/org/')) &&
+    !(r.guard==='organization'&&CONTROL_ROUTES.has(r.name)));
   const items=entries.map(r=>{
     const issues=validateBinding(r,r.code?bindings.get(r.code):undefined,r.code?authorities.get(r.code):undefined);
     if(byName.get(r.name)!==1)issues.push('Handler name is not unique across registered routes');
