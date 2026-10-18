@@ -49,3 +49,9 @@ test('vacant approver groups and impossible quorums block approval', () => {
   assert.throws(() => quorumCount({ mode: 'any' }, 0));
   assert.throws(() => quorumCount({ mode: 'count', value: 3 }, 2));
 });
+
+test('duplicate authority identifiers block evaluation', () => {
+  const result = evaluateAuthority([band('DUP', 1, 100000), band('DUP', 2, 200000)], { amount: 50000, currency: 'KES' });
+  assert.equal(result.allowed, false);
+  assert.ok(result.problems.some(x => x.includes('Duplicate authority rule ID')));
+});
