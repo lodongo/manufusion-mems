@@ -27,6 +27,7 @@ import { clearAccessCache, ensureOrgCode, hasPerm, loadRole, orgRoute, type OrgC
 import { SOD_RULES, buildCatalogue, docStatus, reviewPermissions, sensitiveKeys, sodConflicts } from './permissionPolicy';
 import { adminTotals, guardedAdminChange, isOrgAdmin, MAX_ORG_ADMINS, MIN_ACTIVE_ORG_ADMINS } from './adminRoster';
 import { signedUrl } from './structure';
+import { standardRoleTemplates } from './standardRoleTemplates';
 
 // ---------------------------------------------------------------------------
 // Roles and permissions model
@@ -44,7 +45,7 @@ export const ORG_SYSTEM_ROLES: Record<string, { name: string; description: strin
     },
     org_user: {
         name: 'Standard user',
-        description: 'Default role for new users. Grant module permissions as needed.',
+        description: 'Permanent basic employee self-service access. Higher business permissions come from separately assigned roles.',
         permissions: [],
     },
 };
@@ -213,7 +214,7 @@ export const orgRoutes = {
             const firstName = text(body, 'firstName', 1, 40, 'Enter the first name.');
             const lastName = text(body, 'lastName', 1, 40, 'Enter the last name.');
             const phone = phoneE164(body.phone);
-            const role = str(body.role);
+            const role = str(body.role) || 'org_user';
             await assignableRole(ctx, role);
             const skillsDoc = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
             const activeSkills = new Set((Array.isArray(skillsDoc?.data.items) ? skillsDoc.data.items : [])
@@ -344,6 +345,66 @@ export const orgRoutes = {
         }),
     ],
 
+    // Organization admin adopts vetted transaction roles without manual permission binding.
+    'POST /api/org/roles/templates': [
+        orgRoute('org.roles.templates', 'ADM.roles', async (ctx) => {
+            const templates = standardRoleTemplates(await catalogue(ctx.org));
+            const existing = new Set((await listDocs(`organizations/${ctx.orgId}/roles`)).map(r => r.id));
+            return { templates: templates.map(t => ({
+                ...t, exists: existing.has(t.id), moduleAdopted: true, grantable: canGrant(ctx, t.permissions), conflicts: sodConflicts(t.permissions).length,
+            })) };
+        }),
+    ],
+
+    'POST /api/org/roles/templates/apply': [
+        orgRoute('org.roles.templates.apply', 'ADM.roles', async (ctx) => {
+            if (ctx.role !== 'org_super_admin') throw new HttpError(403, 'Only organization super admins can adopt standard roles.');
+            const ids = [...new Set((Array.isArray(ctx.body.ids) ? ctx.body.ids : []).map(str))];
+            if (!ids.length || ids.length > 100) throw new HttpError(400, 'Select between 1 and 100 standard roles.');
+            const available = new Map(standardRoleTemplates(await catalogue(ctx.org)).map(t => [t.id, t]));
+            const existing = await listDocs(`organizations/${ctx.orgId}/roles`);
+            const possibleNew = ids.filter(id => available.has(id) && !existing.some(r => r.id === id));
+            if (existing.length + possibleNew.length > 100) throw new HttpError(400, 'An organization can have at most 100 security roles.');
+            const created: string[] = [];
+            const skipped: Array<{ id: string; reason: string }> = [];
+            for (const id of ids) {
+                const template = available.get(id);
+                if (!template) { skipped.push({ id, reason: 'Not available for an enabled module.' }); continue; }
+                if (!canGrant(ctx, template.permissions)) { skipped.push({ id, reason: 'Missing grant authority.' }); continue; }
+                if (sodConflicts(template.permissions).length) { skipped.push({ id, reason: 'Incompatible duties.' }); continue; }
+                const now = nowIso();
+                const didCreate = await writeDoc(`organizations/${ctx.orgId}/roles/${id}`, {
+                    name: template.name, description: template.description, permissions: template.permissions,
+                    system: false, standardTemplateId: id, standardTemplateVersion: 1,
+                    createdAt: now, updatedAt: now, createdBy: ctx.uid,
+                }, { exists: false });
+                if (didCreate) created.push(id);
+                else skipped.push({ id, reason: 'Already adopted; preserved existing customizations.' });
+            }
+            // Recommend and assign only exact-name, non-sensitive job-role matches.
+            // Approval, posting, administration and existing mappings require deliberate assignment.
+            const mappedPositions: string[] = [];
+            if (created.length) {
+                const sensitive = new Set(sensitiveKeys());
+                const safeNew = [...available.values()].filter(t =>
+                    created.includes(t.id) && t.permissions.every(p => !sensitive.has(p)) &&
+                    !t.permissions.some(p => /\\.approve\\b|\\.admin\\b|\\.configure\\b/i.test(p)));
+                const byName = new Map(safeNew.map(t => [t.name.toLowerCase().trim(), t.id]));
+                for (const position of await listDocs(`organizations/${ctx.orgId}/positions`)) {
+                    const current = Array.isArray(position.data.securityRoles) ? (position.data.securityRoles as unknown[]).map(str).filter(Boolean) : [];
+                    if (current.length) continue;
+                    const roleId = byName.get(str(position.data.title).toLowerCase().trim());
+                    if (!roleId) continue;
+                    await updateFields(`organizations/${ctx.orgId}/positions/${position.id}`, { securityRoles: [roleId] });
+                    mappedPositions.push(position.id);
+                }
+                clearAccessCache(ctx.orgId);
+                await record(ctx, 'org.roles.templates.apply', 'Standard security roles', `Adopted: ${created.join(', ')}. Auto-mapped safe exact-title positions: ${mappedPositions.join(', ') || 'none'}`);
+            }
+            return { created, skipped, mappedPositions };
+        }),
+    ],
+
     'POST /api/org/roles/list': [
         orgRoute('org.roles.list', 'ADM.roles', async (ctx) => {
             const [roles, users, groups, positions, docList] = await Promise.all([listDocs(`organizations/${ctx.orgId}/roles`), orgUsers(ctx.orgId), catalogue(ctx.org), listDocs(`organizations/${ctx.orgId}/positions`), listDocs(`organizations/${ctx.orgId}/role_docs`)]);
@@ -356,10 +417,9 @@ export const orgRoutes = {
                 const r = str(u.data.role) === 'org_admin' ? 'org_super_admin' : str(u.data.role);
                 counts.set(r, (counts.get(r) ?? 0) + 1);
             }
-            const baseline = roles.find((r) => r.id === 'default_security');
-            const baselineRole = baseline ?? { id: 'default_security', data: { name: 'Default Security Role', description: 'Configurable baseline permissions copied into every newly created security role.', permissions: [], system: true, updatedAt: '' } };
+            // Retain the legacy default_security record for history only; it is no longer copied into roles.
             return {
-                roles: [...roles.filter((r) => r.id !== 'default_security'), baselineRole]
+                roles: roles.filter((r) => r.id !== 'default_security')
                     .map((r) => {
                         const permissions = Array.isArray(r.data.permissions) ? (r.data.permissions as unknown[]).map(str) : [];
                         return {
@@ -404,7 +464,7 @@ export const orgRoutes = {
                     clearAccessCache(ctx.orgId);
                     return { id };
                 }
-                if (id === 'org_super_admin') throw new HttpError(400, 'The super admin role always has full access and cannot be edited.');
+                if (id === 'org_super_admin' || id === 'org_user') throw new HttpError(400, 'System identity roles cannot be modified.');
                 if (id === ctx.role) throw new HttpError(403, 'You cannot edit the role you are assigned.');
                 if (!existing) throw new HttpError(404, 'Role not found.');
                 const system = existing.data.system === true;
@@ -426,10 +486,8 @@ export const orgRoutes = {
             const description = text(raw, 'description', 0, 300, 'Description can be up to 300 characters.');
             if (roles.some((r) => str(r.data.name).toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'Another role already has this name.');
             if (roles.length >= 100) throw new HttpError(400, 'An organization can have up to 100 roles.');
-            const baseline = roles.find((r) => r.id === 'default_security');
-            const inherited = Array.isArray(baseline?.data.permissions) ? (baseline.data.permissions as unknown[]).map(str).filter((p) => valid.has(p)) : [];
-            const combined = Array.from(new Set([...inherited, ...permissions]));
-            if (!canGrant(ctx, combined)) throw new HttpError(403, 'Default baseline includes permissions you cannot grant.');
+            // Baseline self-service belongs to every authenticated user, NOT each role.
+            const combined = permissions;
             const note = requireSodAcknowledgement(raw, combined);
             const newId = `role_${randomId(6)}`;
             await writeDoc(`organizations/${ctx.orgId}/roles/${newId}`, { name, description, permissions: combined, system: false, createdAt: now, updatedAt: now, createdBy: ctx.uid });

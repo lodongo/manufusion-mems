@@ -2,6 +2,8 @@ name: Deploy MEMS to isolated development Cloud Run
 
 on:
   workflow_dispatch:
+  push:
+    branches: [develop]
 
 permissions:
   contents: read
