@@ -1,0 +1,31 @@
+name: Governance validation (no deployment)
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'backend/governanceCore.ts'
+      - 'backend/governanceCore.test.ts'
+      - 'backend/transactionRegistry.ts'
+      - 'backend/permissionPolicy.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/governance-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm run test:governance
+      - run: npm run build
