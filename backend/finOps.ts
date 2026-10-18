@@ -163,7 +163,7 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
         }
         const rate = await fxRate(str(a.po.currency), info.currency);
         const map = await mappingOf(ctx.orgId, leId);
-        const grir = roleAccount(map, 'GRIR');
+        const grirFor=(event:'GR_STOCK'|'GR_DIRECT'|'GR_ASSET')=>roleAccount(map,'GRIR','',{event});
         const groups: Record<string, { lines: PostLine[]; stock: StockMove[]; extra: Write[] }> = {};
         const add = (t: string) => (groups[t] ??= { lines: [], stock: [], extra: [] });
         const stockAgg = new Map<string, StockMove>();
@@ -173,9 +173,9 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
             const desc = `${a.poId} line ${Number(it.l.no)}: ${str(it.l.itemName) || str(it.l.requirement)}`.slice(0, 200);
             if (it.wh) {
                 const g = add('GR_STOCK');
-                const gl = roleAccount(map, 'INVENTORY', str(it.l.categoryCode) || str(it.material!.data.categoryCode));
+                const gl = roleAccount(map, 'INVENTORY', str(it.l.categoryCode) || str(it.material!.data.categoryCode),{event:'GR_STOCK',costCenterId:it.cc});
                 g.lines.push({ side: 'D', glCode: gl, ccId: it.cc, amount: value, docAmount: it.docValue, description: desc, materialId: it.material!.id, qty: it.qty });
-                g.lines.push({ side: 'C', glCode: grir, ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
+                g.lines.push({ side: 'C', glCode: grirFor('GR_STOCK'), ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
                 const k = `${it.cc}|${it.material!.id}`;
                 const cur = stockAgg.get(k);
                 if (cur) {
@@ -189,12 +189,12 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
                 g.extra.push({ path: mjPath(ctx.orgId, m.id), exists: false, fields: m.data });
             } else if (str(it.l.type) === 'asset') {
                 const g = add('GR_ASSET');
-                g.lines.push({ side: 'D', glCode: roleAccount(map, 'ASSET_CLEARING'), ccId: it.cc, amount: value, docAmount: it.docValue, description: desc, qty: it.qty });
-                g.lines.push({ side: 'C', glCode: grir, ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
+                g.lines.push({ side: 'D', glCode: roleAccount(map, 'ASSET_CLEARING','',{event:'GR_ASSET',costCenterId:it.cc}), ccId: it.cc, amount: value, docAmount: it.docValue, description: desc, qty: it.qty });
+                g.lines.push({ side: 'C', glCode: grirFor('GR_ASSET'), ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
             } else {
                 const g = add('GR_DIRECT');
                 g.lines.push({ side: 'D', glCode: str(it.l.glCode), ccId: it.cc, amount: value, docAmount: it.docValue, description: desc, qty: it.qty });
-                g.lines.push({ side: 'C', glCode: grir, ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
+                g.lines.push({ side: 'C', glCode: grirFor('GR_DIRECT'), ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
             }
         }
         if (groups.GR_STOCK) groups.GR_STOCK.stock = Array.from(stockAgg.values());
@@ -240,7 +240,7 @@ export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string;
         }
         const rate = await fxRate(str(a.po.currency), info.currency);
         const map = await mappingOf(ctx.orgId, leId);
-        const grir = roleAccount(map, 'GRIR');
+        const grir = roleAccount(map, 'GRIR','',{event:'SVC_ACCEPT'});
         const lines: PostLine[] = [];
         for (const x of list) {
             const value = round2(x.amount * rate);
@@ -274,7 +274,7 @@ export async function postStockTake(ctx: OrgContext, warehouseId: string, sessio
     const info = await leInfo(ctx.orgId, units, warehouseId, new Map());
     if (info.state === 'not_live') return '';
     const map = await mappingOf(ctx.orgId, info.le.id);
-    const diff = roleAccount(map, 'STOCK_DIFF');
+    const diff = roleAccount(map, 'STOCK_DIFF','',{event:'ST_ADJ'});
     const lines: PostLine[] = [];
     const stock: StockMove[] = [];
     const agg = new Map<string, number>();
@@ -283,7 +283,7 @@ export async function postStockTake(ctx: OrgContext, warehouseId: string, sessio
         if (!delta) continue;
         const [v, m] = await Promise.all([stockValOf(ctx.orgId, warehouseId, materialId), getDoc(`organizations/${ctx.orgId}/materials/${materialId}`)]);
         const sdoc = await getDoc(P(ctx.orgId).stock(warehouseId, materialId));
-        const gl = str(sdoc?.data.glCode) || roleAccount(map, 'INVENTORY', str(m?.data.categoryCode));
+        const gl = str(sdoc?.data.glCode) || roleAccount(map, 'INVENTORY', str(m?.data.categoryCode),{event:'ST_ADJ',costCenterId:warehouseId});
         let value: number;
         if (delta < 0) value = issueValue(v, -delta);
         else {
@@ -335,14 +335,14 @@ registerHandler('stock.opening', {
         const wh = str(p.warehouseId);
         const now = await unvalued(ctx.orgId, wh);
         const map = await mappingOf(ctx.orgId, leId);
-        const ob = roleAccount(map, 'OPENING_BALANCE');
+        const ob = roleAccount(map, 'OPENING_BALANCE','',{event:'STK_OPEN'});
         const lines: PostLine[] = [];
         const stock: StockMove[] = [];
         for (const it of objs(p.items)) {
             const cur = now.find((x) => x.materialId === str(it.materialId));
             if (!cur || cur.gap !== Number(it.qty)) throw new HttpError(409, `The unvalued quantity of ${str(it.materialNumber)} changed. Reject and propose again.`);
             const value = round2(Number(it.qty) * Number(it.unitCost));
-            const gl = roleAccount(map, 'INVENTORY', cur.categoryCode);
+            const gl = roleAccount(map, 'INVENTORY', cur.categoryCode,{event:'STK_OPEN',costCenterId:wh});
             const v = await stockValOf(ctx.orgId, wh, cur.materialId);
             lines.push({ side: 'D', glCode: gl, ccId: wh, amount: value, description: `Opening stock ${cur.materialNumber}: ${cur.gap} at ${Number(it.unitCost)}`, materialId: cur.materialId, qty: cur.gap });
             lines.push({ side: 'C', glCode: ob, ccId: wh, amount: value, description: `Opening stock ${cur.materialNumber}` });
@@ -451,8 +451,8 @@ export const finOpsRoutes = {
                     const v = await stockValOf(ctx.orgId, wh, m.id);
                     value = issueValue(v, w.qty);
                     const sdoc = await getDoc(P(ctx.orgId).stock(wh, m.id));
-                    const inv = str(sdoc?.data.glCode) || roleAccount(map, 'INVENTORY', str(m.data.categoryCode));
-                    const exp = roleAccount(map, woId ? 'MAINT_CONSUMPTION' : 'CONSUMPTION', str(m.data.categoryCode));
+                    const inv = str(sdoc?.data.glCode) || roleAccount(map, 'INVENTORY', str(m.data.categoryCode),{event:woId?'GI_WO':'GI_CC',costCenterId:ccId});
+                    const exp = roleAccount(map, woId ? 'MAINT_CONSUMPTION' : 'CONSUMPTION', str(m.data.categoryCode),{event:woId?'GI_WO':'GI_CC',costCenterId:ccId});
                     const desc = `${str(m.data.materialNumber)} ${str(m.data.name)}: ${w.qty}`.slice(0, 200);
                     if (value > 0) {
                         lines.push({ side: 'D', glCode: exp, ccId, amount: value, description: desc, materialId: m.id, qty: w.qty });

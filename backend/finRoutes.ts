@@ -1,3 +1,4 @@
+import {DETERMINATION_EVENTS,resolveAccountRule,validateRuleDraft,type AccountRule} from './finAccountRules';
 import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, updateFields, writeDoc, type Fields } from './core';
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, orgUsers, record } from './org';
@@ -397,7 +398,7 @@ registerHandler('coa.change', {
     },
 });
 
-function readMapping(raw: Obj): { roles: Record<string, string>; byCategory: Record<string, Obj> } {
+function readMapping(raw: Obj): { roles: Record<string, string>; byCategory: Record<string, Obj>; rules: AccountRule[] } {
     const roles: Record<string, string> = {};
     for (const r of ROLES) {
         const v = str(o(raw.roles)[r.code]);
@@ -409,19 +410,34 @@ function readMapping(raw: Obj): { roles: Record<string, string>; byCategory: Rec
         const con = str(o(v).CONSUMPTION);
         if (inv || con) byCategory[k.slice(0, 60)] = { INVENTORY: inv, CONSUMPTION: con };
     }
-    return { roles, byCategory };
+    let rules:AccountRule[];
+    try {rules=validateRuleDraft(raw.rules??[]);}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid account rules');}
+    return { roles, byCategory, rules };
 }
 async function mappingProblems(orgId: string, leId: string, m: ReturnType<typeof readMapping>): Promise<string[]> {
     const chart = await chartOf(orgId, leId);
+    const [entity,units,categories]=await Promise.all([entityOf(orgId,leId),unitsOf(orgId),materialCategories()]);
+    const validCategories=new Set(categories.map(c=>c.code));
     const out: string[] = [];
+    for(const rule of m.rules){
+        if(rule.categoryCode&&!validCategories.has(rule.categoryCode))out.push(`Rule ${rule.id}: unknown material category ${rule.categoryCode}.`);
+        if(rule.costCenterId){const cc=units.get(rule.costCenterId);
+            if(!cc || cc.level!=='cost_center' || leOf(units,cc.id)?.id!==leId)out.push(`Rule ${rule.id}: cost center is not part of this legal entity.`);
+        }
+    }
     const check = (code: string, statement: 'BS' | 'PL', what: string) => {
         const a = chart.get(code);
         if (!a) out.push(`${what}: ${code} is not in the approved chart.`);
         else if (a.status !== 'active') out.push(`${what}: ${code} is ${a.status}.`);
         else if (!a.postable) out.push(`${what}: ${code} is a heading.`);
+        else if(entity.doc?.data.glScopeConfigured===true&&!strs(entity.doc.data.allowedGl).includes(code))out.push(`${what}: ${code} is not in the legal entity approved scope.`);
         else if (a.statement !== statement) out.push(`${what}: ${code} is a ${a.statement === 'BS' ? 'balance sheet' : 'profit and loss'} account; this role needs a ${statement === 'BS' ? 'balance sheet' : 'profit and loss'} account.`);
     };
     for (const r of ROLES) if (m.roles[r.code]) check(m.roles[r.code], r.statement, r.label);
+    for(const rule of m.rules){
+        const def=ROLES.find(r=>r.code===rule.role);
+        if(def)check(rule.account,def.statement,`Transaction ${rule.event}, ${rule.role}`);
+    }
     for (const [k, v] of Object.entries(m.byCategory)) {
         if (str(v.INVENTORY)) check(str(v.INVENTORY), 'BS', `Inventory for category ${k}`);
         if (str(v.CONSUMPTION)) check(str(v.CONSUMPTION), 'PL', `Consumption for category ${k}`);
@@ -437,7 +453,7 @@ registerHandler('mapping.save', {
         const problems = await mappingProblems(ctx.orgId, leId, m);
         if (problems.length) throw new HttpError(409, problems.join(' '));
         const cur = await mappingOf(ctx.orgId, leId);
-        await writeDoc(P(ctx.orgId).mapping(leId), { leId, roles: m.roles, byCategory: m.byCategory as unknown as Fields, version: cur.version + 1, approvedBy: ctx.uid, approvedAt: nowIso(), proposedBy: str(req.makerUid) } as unknown as Fields);
+        await writeDoc(P(ctx.orgId).mapping(leId), { leId, roles: m.roles, byCategory: m.byCategory as unknown as Fields, rules: m.rules as unknown as Fields[keyof Fields], version: cur.version + 1, approvedBy: ctx.uid, approvedAt: nowIso(), proposedBy: str(req.makerUid) } as unknown as Fields);
         return { version: cur.version + 1 };
     },
 });
@@ -954,6 +970,7 @@ export const finRoutes = {
             const regimes = objs(taxes?.data.regimes).filter((r) => r.active !== false);
             return {
                 roles: ROLES,
+                events: DETERMINATION_EVENTS,
                 mapping: map,
                 txns: TXNS.map((t) => ({ ...t, taxes: t.taxStage ? regimes.filter((r) => strs(r.appliesTo).includes(t.taxStage)).map((r) => `${str(r.code)} (${objs(r.rates).map((x) => `${str(x.code)} ${Number(x.rate)}%`).join(', ')})`) : [] })),
                 accounts: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable).map((a) => ({ code: a.code, name: a.name, statement: a.statement })),
@@ -961,6 +978,38 @@ export const finRoutes = {
                 pending,
                 can: flags(ctx, e),
             };
+        }),
+    ],
+    'POST /api/org/fin/mapping/simulate': [
+        fin('org.fin.mapping.simulate',async ctx=>{
+            const e=await env(ctx,ctx.body.leId);
+            needView(ctx,e);
+            const map=ctx.body.mapping?readMapping(o(ctx.body.mapping)):await mappingOf(ctx.orgId,e.le.id);
+            const event=str(ctx.body.event);
+            const def=DETERMINATION_EVENTS.find(x=>x.code===event);
+            if(!def)throw new HttpError(400,'Unknown transaction event.');
+            const categoryCode=str(ctx.body.categoryCode),costCenterId=str(ctx.body.costCenterId);
+            if(costCenterId){
+                const cc=e.units.get(costCenterId);
+                if(!cc || cc.level!=='cost_center'||leOf(e.units,cc.id)?.id!==e.le.id)
+                    throw new HttpError(400,'Cost center must belong to this legal entity.');
+            }
+            const chart=await chartOf(ctx.orgId,e.le.id);
+            const entity=await entityOf(ctx.orgId,e.le.id);
+            const lines=def.roles.map(role=>{
+                const matched=resolveAccountRule(map.rules,role,{event,categoryCode,costCenterId});
+                const override=categoryCode?map.byCategory[categoryCode]:undefined;
+                const fallback=role==='INVENTORY'?override?.INVENTORY
+                  :role==='CONSUMPTION'||role==='MAINT_CONSUMPTION'?override?.CONSUMPTION:undefined;
+                const code=matched?.account||str(fallback)||map.roles[role]||
+                    (role==='MAINT_CONSUMPTION'?map.roles.CONSUMPTION:'')||'';
+                const account=chart.get(code);
+                const scopeOK=entity.doc?.data.glScopeConfigured!==true||strs(entity.doc.data.allowedGl).includes(code);
+                return {role,code,accountName:account?.name||'',source:matched?'Transaction rule':fallback?'Material category override':'Standard role',
+                    matchedRuleId:matched?.id||'',status:!code?'missing':!account||account.status!=='active'||!account.postable||!scopeOK?'unavailable':'resolved'};
+            });
+            return {event,implemented:def.implemented,lines,covered:lines.every(x=>x.status==='resolved'),
+                note:def.implemented?'Configuration preview only; posting also validates amounts, account restrictions and periods.':'Planned event: this simulator does not activate a posting handler.'};
         }),
     ],
     'POST /api/org/fin/mapping/propose': [
@@ -973,8 +1022,8 @@ export const finRoutes = {
             if (problems.length) throw new HttpError(400, problems.join(' '));
             const cur = await mappingOf(ctx.orgId, e.le.id);
             const changed = ROLES.filter((r) => (cur.roles[r.code] ?? '') !== (m.roles[r.code] ?? '')).map((r) => `${r.code}: ${cur.roles[r.code] || '-'} to ${m.roles[r.code] || '-'}`);
-            if (!changed.length && JSON.stringify(cur.byCategory) === JSON.stringify(m.byCategory)) throw new HttpError(400, 'Nothing has changed.');
-            return createRequest(ctx, { leId: e.le.id, type: 'mapping.save', title: `${e.le.code}: account mapping`, summary: `${changed.join('; ')}${Object.keys(m.byCategory).length ? `; ${Object.keys(m.byCategory).length} category override(s)` : ''}`, payload: { mapping: m as unknown as Obj }, reason, scopeKey: `mapping_${e.le.id}` });
+            if (!changed.length && JSON.stringify(cur.byCategory) === JSON.stringify(m.byCategory) && JSON.stringify(cur.rules) === JSON.stringify(m.rules)) throw new HttpError(400, 'Nothing has changed.');
+            return createRequest(ctx, { leId: e.le.id, type: 'mapping.save', title: `${e.le.code}: account mapping`, summary: `${changed.join('; ')}${Object.keys(m.byCategory).length ? `; ${Object.keys(m.byCategory).length} category override(s)` : ''}${m.rules.length ? `; ${m.rules.length} transaction determination rule(s)` : ''}`, payload: { mapping: m as unknown as Obj }, reason, scopeKey: `mapping_${e.le.id}` });
         }),
     ],
 
