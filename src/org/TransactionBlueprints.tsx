@@ -32,6 +32,7 @@ export default function TransactionBlueprints() {
   const [existingPermissions,setExistingPermissions]=useState<Array<{existingPermission:string;label:string;suggestedCode:string|null;status:string}>>([]);
   const [mappingSummary,setMappingSummary]=useState<{total:number;proposed:number;collisions:number;manualReview:number;certified:number}|null>(null);
   const [search,setSearch]=useState('');
+  const [showFuture,setShowFuture]=useState(false);
   const [expanded,setExpanded]=useState<string[]>([]);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
@@ -53,7 +54,7 @@ export default function TransactionBlueprints() {
         lookup.set(item.area,{title:item.name.replace(/^Access /,''),code:item.code,actions:[],live:[]});
       }
     }
-    for(const item of items.filter(x=>x.kind==='transaction')) {
+    for(const item of items.filter(x=>x.kind==='transaction' && x.state==='reserved')) {
       if(!lookup.has(item.area))lookup.set(item.area,{title:item.area==='LEG'?'Existing transaction permissions':item.area,code:item.module+'-'+item.area+'-VW',actions:[],live:[]});
       lookup.get(item.area)!.actions.push(item);
     }
@@ -98,6 +99,7 @@ export default function TransactionBlueprints() {
       {mappingSummary&&<p className='text-xs text-soft'>All modules: {mappingSummary.proposed} proposed · {mappingSummary.collisions} collisions to resolve · {mappingSummary.manualReview} require manual mapping · {mappingSummary.certified} certified.</p>}
       <div className='max-h-52 overflow-y-auto space-y-1'>{existingPermissions.filter(x=>(x.existingPermission+' '+x.label+' '+(x.suggestedCode??'')).toLowerCase().includes(search.toLowerCase())).map(x=><div key={x.existingPermission} className='flex flex-wrap items-center justify-between gap-2 border-b border-[rgb(var(--c-border))] py-2 text-xs'><span className='text-ink'>{x.label} <code className='text-soft'>({x.existingPermission})</code></span><span className='text-soft'>{x.status==='collision_review_required'?'Conflicting mapping · review needed':x.suggestedCode??'Mapping review needed'}</span></div>)}</div>
     </div>
+    <label className='flex items-center gap-2 text-sm text-ink'><input type='checkbox' checked={showFuture} onChange={e=>setShowFuture(e.target.checked)}/> Include future reserved actions</label>
     <div className='space-y-2'>
       {groups.map(g=>{
         const open=search.trim()!==''||expanded.includes(g.area);
@@ -113,12 +115,12 @@ export default function TransactionBlueprints() {
               <span className='flex-1 text-sm text-ink'>{e.name||e.method+' '+e.path}<span className='block text-xs text-soft'>{e.method} {e.path}</span></span>
               <span className='text-xs text-soft'>Handler installed · {e.permission?'Permission bound':'In-handler controls'} · approval verification pending</span>
             </div>)}
-            {g.actions.map(a=><div key={a.code} className='flex flex-col gap-1 border-b border-[rgb(var(--c-border))] px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:gap-4'>
+            {showFuture&&g.actions.map(a=><div key={a.code} className='flex flex-col gap-1 border-b border-[rgb(var(--c-border))] px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:gap-4'>
               <code className='min-w-0 shrink-0 text-xs font-semibold text-ink'>{a.code}</code>
               <span className='flex-1 text-sm text-ink'>{a.area==='LEG'?a.name:suffix[a.code.split('-').slice(-1)[0]??'']||a.name}</span>
               <span className='text-xs text-soft'>{proposedByCode.has(a.code)?'Existing permission match · verification pending':a.state==='reserved'?'Planned action · not verified':'Existing permission · verification pending'}</span>
             </div>)}
-            {!g.actions.length&&!g.live.length&&<p className='px-4 py-3 text-sm text-soft'>Submodule access reserved; no actions catalogued.</p>}
+            {!g.live.length&&(!showFuture||!g.actions.length)&&<p className='px-4 py-3 text-sm text-soft'>No installed backend handlers currently listed for this submodule.</p>}
           </div>}
         </div>;
       })}
