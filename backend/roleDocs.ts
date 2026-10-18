@@ -3,6 +3,9 @@ import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, record } from './org';
 import { col as structureCol } from './structure';
 import { docStatus, groupLabels, permissionsDigest } from './permissionPolicy';
+import { standardRoleTemplates } from './standardRoleTemplates';
+import { enabledModules } from './org';
+import { buildCatalogue } from './permissionPolicy';
 
 // Role documentation: the rules that go with a security role. Guidance for people, never part of access control.
 //   organizations/{orgId}/role_docs/{roleId}                  current version
@@ -81,7 +84,50 @@ async function userNames(orgId: string, uids: string[]): Promise<Map<string, str
     return out;
 }
 
+export async function fillMissingStandardRoleDocs(orgId: string, actorId: string): Promise<number> {
+    const org = await getDoc(`organizations/${orgId}`);
+    if (!org) throw new HttpError(404, 'Organization not found.');
+    const modules = await enabledModules(org);
+    const templates = new Map(standardRoleTemplates(buildCatalogue(modules)).map(t => [t.id,t]));
+    const roles = await listDocs(`organizations/${orgId}/roles`);
+    let created = 0;
+    for (const role of roles) {
+        const template = templates.get(role.id);
+        if (!template) continue;
+        const permissions = asList(role.data.permissions);
+        const out = `${root(orgId)}/${role.id}`;
+        if (await getDoc(out)) continue;
+        const now = nowIso();
+        const data = {
+            version: 1,
+            purpose: template.description.slice(0,400).padEnd(10,'.'),
+            audience: 'Employees and managers assigned this role by organizational authority.',
+            allows: `May perform these configured transaction permissions: ${permissions.join(', ')}`.slice(0,1200),
+            never: 'Never exceed assigned organizational scope or combine conflicting duties.',
+            limits: 'Approval and financial limits remain governed by organizational authority and workflow rules.',
+            rules: `Transactions must be performed only through authorized MEMS handlers. Role template: ${template.name}. All activity remains subject to audit, segregation of duties and relevant workflow approvals.`,
+            nextReview: '',
+            reviewedDigest: permissionsDigest(permissions),
+            createdAt:now,updatedAt:now,createdBy:actorId,updatedBy:actorId,
+        };
+        if (await writeDoc(out,data,{exists:false})) {
+            await writeDoc(`${out}/versions/1`,{...data,reason:'Automatically generated standard template rules'}, {exists:false});
+            created++;
+        }
+    }
+    return created;
+}
+
 export const roleDocRoutes = {
+    'POST /api/org/roles/docs/fill-standard': [
+        orgRoute('org.roles.docs.fill-standard','ADM.roles',async (ctx) => {
+            if (ctx.role !== 'org_super_admin') throw new HttpError(403,'Only organization super admins may initialize standard role documentation.');
+            const count = await fillMissingStandardRoleDocs(ctx.orgId,ctx.uid);
+            if (count) await record(ctx,'org.roles.docs.fill-standard','Standard role documents',`Created ${count} missing standard rule documents`);
+            return {created:count};
+        }),
+    ],
+
     'POST /api/org/roles/docs/get': [
         orgRoute('org.roles.docs.get', null, async (ctx) => {
             const role = await loadRole(ctx, str(ctx.body.id));
