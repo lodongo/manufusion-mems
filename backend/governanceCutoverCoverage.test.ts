@@ -57,3 +57,13 @@ test('unprotected organization API endpoints are included and block activation',
   assert.equal(report.canActivate,false);
   assert.ok(report.items.some(i=>i.issues.includes('Route has no organization guard')));
 });
+
+test('cutover digest changes if live policy contents change without a version bump',()=>{
+  const first=evaluateCutoverCoverage([a],new Map([[a.code!,binding(a)]]),new Map());
+  const altered=evaluateCutoverCoverage([a],new Map([[a.code!,{
+    ...binding(a),handlerEvidenceId:'different-handler-test',
+  }]]),new Map());
+  assert.equal(first.canActivate,true);
+  assert.equal(altered.canActivate,true);
+  assert.notEqual(first.digest,altered.digest);
+});
