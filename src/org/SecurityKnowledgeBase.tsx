@@ -45,6 +45,39 @@ export default function SecurityKnowledgeBase({canInspect=false}:{canInspect?:bo
           </>:<p className='text-sm text-muted'>Select a published document to read its rules.</p>}
       </article>
     </div>}
+    {canInspect&&doc&&<section className='space-y-3 rounded-xl border border-line p-4'>
+      <h2 className='font-semibold'>Physical approval and signed copies</h2>
+      <p className='text-sm text-muted'>Print the immutable published revision above, collect authorized signatures, and attach the scanned copy to this exact document version. Supported: PDF, JPEG or PNG up to 8 MB.</p>
+      <input type='file' accept='.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png' disabled={working} onChange={async e=>{
+        const file=e.target.files?.[0];
+        if(!file)return;
+        if(file.size>8_000_000){setSignoffMessage('Files must be 8 MB or smaller.');return;}
+        setWorking(true);setSignoffMessage('');
+        try{
+          const base64=await new Promise<string>((resolve,reject)=>{
+            const reader=new FileReader();
+            reader.onload=()=>resolve(String(reader.result).split(',')[1]||'');
+            reader.onerror=()=>reject(new Error('Unable to read file.'));
+            reader.readAsDataURL(file);
+          });
+          await callBackend('/api/org/security-docs/signoff/upload',{id:doc.id,content:base64,mime:file.type,filename:file.name});
+          setSignoffMessage('Signed copy attached to the published revision.');
+        }catch(err){setSignoffMessage(err instanceof Error?err.message:'Upload failed.');}
+        finally{setWorking(false);}
+      }}/>
+      <Button variant='secondary' disabled={working} onClick={async()=>{
+        setWorking(true);try{
+          const r=await callBackend<{signoffs:typeof signedCopies}>('/api/org/security-docs/signoff/list');
+          setSignedCopies(r.signoffs.filter(x=>x.documentId===doc.id));
+        }catch(err){setSignoffMessage(err instanceof Error?err.message:'Could not load files.');}
+        finally{setWorking(false);}
+      }}>View signed copies</Button>
+      {signoffMessage&&<p className='text-sm'>{signoffMessage}</p>}
+      {signedCopies.map(x=><button key={x.id} type='button' className='block text-left text-sm underline' onClick={async()=>{
+        try{const r=await callBackend<{url:string}>('/api/org/security-docs/signoff/open',{id:x.id});window.open(r.url,'_blank','noopener,noreferrer');}
+        catch(err){setSignoffMessage(err instanceof Error?err.message:'Unable to open signed copy.');}
+      }}>{x.filename||'Signed document'} · v{x.version} · {x.uploadedAt.slice(0,10)}</button>)}
+    </section>}
     {canInspect&&<section className='rounded-xl border border-line p-4'>
       <h2 className='font-semibold'>Current organization security configuration</h2>
       <p className='mb-3 text-sm text-muted'>Live tenant-scoped role-to-permission information. This is a configuration preview, not a published document or approval.</p>
