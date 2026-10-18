@@ -4,6 +4,15 @@ on:
   push:
     branches: [develop]
     paths:
+      - 'backend/guards.ts'
+      - 'backend/transactionRuntime.ts'
+      - 'backend/transactionRuntime.test.ts'
+      - 'backend/transactionModuleGate.ts'
+      - 'backend/transactionModuleGate.test.ts'
+      - 'backend/existingPermissionCrosswalk.test.ts'
+      - 'Dockerfile'
+      - 'scripts/prod-preflight.mjs'
+      - '.github/workflows/deploy-production.yml'
       - 'backend/governanceCore.ts'
       - 'backend/governanceCore.test.ts'
       - 'backend/transactionRegistry.ts'
