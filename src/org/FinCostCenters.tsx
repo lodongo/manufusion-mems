@@ -56,7 +56,7 @@ interface CcData {
     statusLabel: string;
     statuses: Record<string, string>;
     allowedGl: Array<{ code: string; name: string; status: string }>;
-    choosable: Array<{ code: string; name: string }>;
+    choosable: Array<{ code: string; name: string; classCode: string; className: string; categoryCode: string; categoryName: string; groupCode: string; groupName: string }>;
     importFrom: Array<{ id: string; code: string; name: string; count: number }>;
     version: number;
     pending: Array<{ id: string; title: string; makerName: string; next: string }>;
@@ -126,29 +126,81 @@ function Settings({ le, d, onDone }: { le: Entity; d: CcData; onDone: (m: string
                     </>
                 )}
             </Card>
+            <Card title='Choose approved accounts by category and subcategory'>
+                <p className='text-xs text-muted'>Only active, posting-level profit-and-loss accounts already adopted by this legal entity appear. Selecting a category selects its eligible descendants; partial selections are preserved.</p>
+                <div className='mb-2 flex flex-wrap items-center gap-2'>
+                    <Button variant='secondary' disabled={!can} onClick={()=>setList(d.choosable.map(a=>a.code))}>Select all eligible</Button>
+                    <Button variant='secondary' disabled={!can} onClick={()=>setList([])}>Clear selection</Button>
+                    <span className='text-xs text-muted'>{list.length} selected / {d.choosable.length} eligible</span>
+                </div>
+                <div className='max-h-96 space-y-1 overflow-y-auto overscroll-contain'>
+                    {Array.from(new Map(d.choosable.map(a=>[a.classCode, a.className||a.classCode])).entries()).map(([cl,clName])=>{
+                        const accounts=d.choosable.filter(a=>a.classCode===cl);
+                        return <details key={cl} className='rounded-lg border border-line p-2'>
+                            <summary className='flex cursor-pointer items-center gap-2'>
+                                <input type='checkbox' disabled={!can} aria-label={`Select class ${clName}`}
+                                    checked={accounts.every(a=>list.includes(a.code))}
+                                    ref={el=>{if(el)el.indeterminate=accounts.some(a=>list.includes(a.code))&&!accounts.every(a=>list.includes(a.code));}}
+                                    onClick={e=>e.stopPropagation()} onChange={e=>setList(cur=>e.target.checked?Array.from(new Set([...cur,...accounts.map(a=>a.code)])):cur.filter(c=>!accounts.some(a=>a.code===c)))}/>
+                                <span className='text-sm font-semibold'>{cl} {clName} ({accounts.filter(a=>list.includes(a.code)).length}/{accounts.length})</span>
+                            </summary>
+                            {Array.from(new Map(accounts.map(a=>[a.categoryCode,a.categoryName||a.categoryCode])).entries()).map(([cat,catName])=>{
+                                const category=accounts.filter(a=>a.categoryCode===cat);
+                                return <details key={cat} className='ml-4 mt-2 rounded-lg border border-line p-2'>
+                                    <summary className='flex cursor-pointer items-center gap-2'>
+                                        <input type='checkbox' disabled={!can} aria-label={`Select category ${catName}`}
+                                            checked={category.every(a=>list.includes(a.code))}
+                                            ref={el=>{if(el)el.indeterminate=category.some(a=>list.includes(a.code))&&!category.every(a=>list.includes(a.code));}}
+                                            onClick={e=>e.stopPropagation()} onChange={e=>setList(cur=>e.target.checked?Array.from(new Set([...cur,...category.map(a=>a.code)])):cur.filter(c=>!category.some(a=>a.code===c)))}/>
+                                        <span className='text-sm'>{cat} {catName} ({category.filter(a=>list.includes(a.code)).length}/{category.length})</span>
+                                    </summary>
+                                    {Array.from(new Map(category.map(a=>[a.groupCode,a.groupName||a.groupCode])).entries()).map(([grp,grpName])=>{
+                                        const group=category.filter(a=>a.groupCode===grp);
+                                        return <details key={grp} className='ml-4 mt-2 rounded-lg border border-line p-2'>
+                                            <summary className='flex cursor-pointer items-center gap-2'>
+                                                <input type='checkbox' disabled={!can} aria-label={`Select group ${grpName}`}
+                                                    checked={group.every(a=>list.includes(a.code))}
+                                                    ref={el=>{if(el)el.indeterminate=group.some(a=>list.includes(a.code))&&!group.every(a=>list.includes(a.code));}}
+                                                    onClick={e=>e.stopPropagation()} onChange={e=>setList(cur=>e.target.checked?Array.from(new Set([...cur,...group.map(a=>a.code)])):cur.filter(c=>!group.some(a=>a.code===c)))}/>
+                                                <span className='text-sm'>{grp} {grpName} ({group.filter(a=>list.includes(a.code)).length}/{group.length})</span>
+                                            </summary>
+                                            {group.map(a=><label key={a.code} className='ml-4 mt-1 flex min-h-9 items-center gap-2 text-sm'>
+                                                <input type='checkbox' disabled={!can} checked={list.includes(a.code)}
+                                                    onChange={e=>setList(cur=>e.target.checked?[...cur.filter(c=>c!==a.code),a.code]:cur.filter(c=>c!==a.code))}/>
+                                                <span className='font-mono text-xs'>{a.code}</span><span>{a.name}</span>
+                                            </label>)}
+                                        </details>;
+                                    })}
+                                </details>;
+                            })}
+                        </details>;
+                    })}
+                </div>
+            </Card>
             {can && (
                 <Button disabled={!changed} onClick={() => confirm.ask({ title: `Propose changes to ${d.cc.code}`, message: 'A person with FIN.cc.approve must approve before they apply.', confirmLabel: 'Propose', reason: { label: 'Reason', minLength: 10 } }, async (reason) => { await callBackend(`${FIN_API}/cc/propose`, { leId: le.id, ccId: d.cc.id, status, allowedGl: list, reason }); onDone('Proposed for approval.'); })}>
                     Propose changes
                 </Button>
             )}
             {can && d.importFrom.length > 0 && (
-                <Card title='Import the account list of another cost center'>
-                    <SelectField id='fcc-imp' label='Import from' value={from} onChange={(e) => setFrom(e.target.value)}>
-                        <option value=''>Choose</option>
-                        {d.importFrom.map((x) => (
-                            <option key={x.id} value={x.id}>
-                                {x.code} {x.name} ({x.count} accounts)
-                            </option>
-                        ))}
+                <Card title='Copy from another cost center as a draft'>
+                    <SelectField id='fcc-imp' label='Source cost center' value={from} onChange={e=>setFrom(e.target.value)}>
+                        <option value=''>Choose a cost center</option>
+                        {d.importFrom.map(x=><option key={x.id} value={x.id}>{x.code} {x.name} ({x.count} accounts)</option>)}
                     </SelectField>
                     <div className='flex flex-wrap gap-2'>
-                        <Button variant='secondary' disabled={!from} onClick={() => confirm.ask({ title: 'Propose replacing the list', message: 'This cost center gets exactly the other cost center\'s account list.', confirmLabel: 'Propose', reason: { label: 'Reason', minLength: 10 } }, async (reason) => { await callBackend(`${FIN_API}/cc/propose`, { leId: le.id, ccId: d.cc.id, status, fromCcId: from, merge: false, reason }); setFrom(''); onDone('Import proposed for approval.'); })}>
-                            Replace with it
-                        </Button>
-                        <Button variant='secondary' disabled={!from} onClick={() => confirm.ask({ title: 'Propose adding its accounts', message: 'The other cost center\'s accounts are added to this list.', confirmLabel: 'Propose', reason: { label: 'Reason', minLength: 10 } }, async (reason) => { await callBackend(`${FIN_API}/cc/propose`, { leId: le.id, ccId: d.cc.id, status, fromCcId: from, merge: true, reason }); setFrom(''); onDone('Import proposed for approval.'); })}>
-                            Add to this list
-                        </Button>
+                        <Button variant='secondary' disabled={!from} onClick={async()=>{
+                            const src=await callBackend<CcData>(`${FIN_API}/cc/get`,{leId:le.id,ccId:from});
+                            setList(src.allowedGl.map(a=>a.code).filter(c=>d.choosable.some(a=>a.code===c)));
+                            setFrom('');
+                        }}>Copy / replace draft</Button>
+                        <Button variant='secondary' disabled={!from} onClick={async()=>{
+                            const src=await callBackend<CcData>(`${FIN_API}/cc/get`,{leId:le.id,ccId:from});
+                            setList(cur=>Array.from(new Set([...cur,...src.allowedGl.map(a=>a.code).filter(c=>d.choosable.some(a=>a.code===c))])));
+                            setFrom('');
+                        }}>Merge into draft</Button>
                     </div>
+                    <p className='text-xs text-muted'>Copied accounts are not approved automatically. Review the selection and use Propose changes to request approval.</p>
                 </Card>
             )}
             {confirm.sheet}
