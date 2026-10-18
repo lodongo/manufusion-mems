@@ -114,6 +114,14 @@ function RolesHome({ id }: { id?: string }) {
                 </>
             }
         >
+            {!data.roles.some(r => r.id.startsWith('std_')) && (
+                <Alert tone='info'>
+                    Get started quickly: adopt MEMS standard transaction security roles already mapped to the built-in permission catalogue. Existing users and job roles are not changed.{' '}
+                    <button type='button' className='font-semibold underline' onClick={() => navigate(`${BASE}/recommended`)}>
+                        Adopt standard security roles
+                    </button>
+                </Alert>
+            )}
             {attention > 0 && (
                 <Alert tone='warn'>
                     {attention} role{attention === 1 ? '' : 's'} hold permissions that do nothing or combine duties that must stay apart.{' '}
