@@ -46,23 +46,28 @@ export default function TransactionBlueprints() {
   },[module]);
   const groups=useMemo(()=>{
     const filter=search.trim().toLowerCase();
-    const lookup=new Map<string,{title:string;code:string;actions:Blueprint[]}>();
+    const lookup=new Map<string,{title:string;code:string;actions:Blueprint[];live:WiredEndpoint[]}>();
     for(const item of items) {
       if(item.kind==='module_access')continue;
       if(item.kind==='submodule_access') {
-        lookup.set(item.area,{title:item.name.replace(/^Access /,''),code:item.code,actions:[]});
+        lookup.set(item.area,{title:item.name.replace(/^Access /,''),code:item.code,actions:[],live:[]});
       }
     }
     for(const item of items.filter(x=>x.kind==='transaction')) {
-      if(!lookup.has(item.area))lookup.set(item.area,{title:item.area==='LEG'?'Existing transaction permissions':item.area,code:item.module+'-'+item.area+'-VW',actions:[]});
+      if(!lookup.has(item.area))lookup.set(item.area,{title:item.area==='LEG'?'Existing transaction permissions':item.area,code:item.module+'-'+item.area+'-VW',actions:[],live:[]});
       lookup.get(item.area)!.actions.push(item);
+    }
+    for(const endpoint of wired) {
+      if(!lookup.has(endpoint.area))lookup.set(endpoint.area,{title:endpoint.area+' — Installed endpoints',code:endpoint.module+'-'+endpoint.area+'-VW',actions:[],live:[]});
+      lookup.get(endpoint.area)!.live.push(endpoint);
     }
     return [...lookup.entries()].filter(([area,g])=>!filter||
       (area+' '+g.title+' '+g.code).toLowerCase().includes(filter)||
-      g.actions.some(a=>(a.code+' '+a.name+' '+a.legacyPermissionKeys.join(' ')).toLowerCase().includes(filter))
+      g.actions.some(a=>(a.code+' '+a.name+' '+a.legacyPermissionKeys.join(' ')).toLowerCase().includes(filter))||g.live.some(e=>(e.code+' '+e.path+' '+e.name+' '+e.permission).toLowerCase().includes(filter))
     ).map(([area,g])=>({...g,area,actions:filter&&!(area+' '+g.title+' '+g.code).toLowerCase().includes(filter)?
-      g.actions.filter(a=>(a.code+' '+a.name+' '+a.legacyPermissionKeys.join(' ')).toLowerCase().includes(filter)):g.actions}));
-  },[items,search]);
+      g.actions.filter(a=>(a.code+' '+a.name+' '+a.legacyPermissionKeys.join(' ')).toLowerCase().includes(filter)):g.actions,
+      live: filter&&!(area+' '+g.title+' '+g.code).toLowerCase().includes(filter)?g.live.filter(e=>(e.code+' '+e.path+' '+e.name+' '+e.permission).toLowerCase().includes(filter)):g.live}));
+  },[items,wired,search]);
   const selected=MODULES.find(x=>x[0]===module);
   const proposedByCode=useMemo(()=>new Map(existingPermissions.filter(x=>x.suggestedCode).map(x=>[x.suggestedCode!,x])),[existingPermissions]);
   const expand=(area:string)=>setExpanded(old=>old.includes(area)?old.filter(x=>x!==area):[...old,area]);
