@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { callBackend } from '../lib/backend';
 import GovernanceReports from './GovernanceReports';
+import TransactionBlueprints from './TransactionBlueprints';
 import { ArrowRight, GitBranch, ShieldCheck, Scale, Database, AlertTriangle, ClipboardCheck } from 'lucide-react';
 import { navigate } from '../lib/route';
 
@@ -123,6 +124,7 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
         <button type='button' disabled={docBusy || !entity.trim() || !/^\\d+\\.\\d+\\.\\d+$/.test(docVersion)} onClick={createDraft} className='rounded-lg bg-[rgb(var(--c-brand))] text-white px-4 py-3 text-sm font-semibold disabled:opacity-50'>Create draft only</button>
         {docStatus && <p role='status' className='text-sm text-ink break-words'>{docStatus}</p>}
       </section>}
+      {active === 'transactions' && <TransactionBlueprints />}
       {active === 'transactions' && <section className='space-y-3'>
         <div className='flex items-center gap-2'><ClipboardCheck size={18} className='text-soft'/><h2 className='font-semibold text-ink'>Example transaction groups</h2></div>
         <label className='block text-sm text-soft' htmlFor='transaction-governance-search'>Filter examples</label>
