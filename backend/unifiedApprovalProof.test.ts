@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  isStepApproved,transactionPayloadHash,validateApprovalEvidence,
+  isStepApproved,transactionPayloadHash,validateApprovalEvidence,applyApprovalDecision,nextEligibleApprovalStep,
   type ApprovalEvidence,
 } from './unifiedApprovalProof';
 const payload={materialId:'MAT-123',amount:12500,currency:'KES',idToken:'session-a'};
@@ -33,4 +33,28 @@ test('quorum requires distinct eligible humans; denies self, duplicates and reje
   assert.ok(validateApprovalEvidence({...proof,votes:[...proof.votes,{uid:'u3',stream:'FINANCE',level:1,decision:'reject',decidedAt:'2026-10-18T09:11:00Z'}]},context).length);
   assert.ok(validateApprovalEvidence({...proof,steps:[{...proof.steps[0],eligibleUserIds:['user-a','u1','u2']}]},context).length);
   assert.ok(validateApprovalEvidence({...proof,status:'executed'},context).length);
+});
+
+test('approval state machine enforces sequential levels and parallel specialist streams',()=>{
+  const e:ApprovalEvidence={
+    ...proof,status:'pending',votes:[],
+    steps:[
+      {stream:'FINANCE',level:1,quorum:{mode:'count',value:2},eligibleUserIds:['u1','u2']},
+      {stream:'FINANCE',level:2,quorum:{mode:'any'},eligibleUserIds:['u3']},
+      {stream:'SAFETY',level:1,quorum:{mode:'any'},eligibleUserIds:['u4']},
+    ],
+  };
+  assert.equal(nextEligibleApprovalStep(e,'u3'),null);
+  const s1=applyApprovalDecision(e,'u4','approve','2026-10-18T09:00:00Z');
+  assert.equal(s1.status,'pending');
+  const s2=applyApprovalDecision({...e,votes:s1.votes},'u1','approve','2026-10-18T09:01:00Z');
+  assert.equal(s2.status,'pending');
+  assert.equal(nextEligibleApprovalStep({...e,votes:s2.votes},'u3'),null);
+  const s3=applyApprovalDecision({...e,votes:s2.votes},'u2','approve','2026-10-18T09:02:00Z');
+  assert.equal(s3.status,'pending');
+  const s4=applyApprovalDecision({...e,votes:s3.votes},'u3','approve','2026-10-18T09:03:00Z');
+  assert.equal(s4.status,'approved');
+  assert.equal(validateApprovalEvidence({...e,status:'approved',votes:s4.votes},context).length,0);
+  assert.throws(()=>applyApprovalDecision({...e,votes:s3.votes},'user-a','approve','2026-10-18T09:04:00Z'));
+  assert.throws(()=>applyApprovalDecision({...e,votes:s3.votes},'u1','approve','2026-10-18T09:04:00Z'));
 });
