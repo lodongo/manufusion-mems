@@ -114,14 +114,6 @@ function RolesHome({ id }: { id?: string }) {
                 </>
             }
         >
-            {!data.roles.some(r => r.id.startsWith('std_')) && (
-                <Alert tone='info'>
-                    Get started quickly: adopt MEMS standard transaction security roles already mapped to the built-in permission catalogue. Existing users and job roles are not changed.{' '}
-                    <button type='button' className='font-semibold underline' onClick={() => navigate(`${BASE}/recommended`)}>
-                        Adopt standard security roles
-                    </button>
-                </Alert>
-            )}
             {attention > 0 && (
                 <Alert tone='warn'>
                     {attention} role{attention === 1 ? '' : 's'} hold permissions that do nothing or combine duties that must stay apart.{' '}
@@ -140,9 +132,9 @@ function RolesHome({ id }: { id?: string }) {
                 rowKey={(r) => r.id}
                 onRowClick={(r) => navigate(`${BASE}/${r.id}`)}
                 actions={
-                    <Button variant='secondary' onClick={() => navigate(`${BASE}/recommended`)} aria-label='Recommended roles'>
+                    <Button variant='secondary' onClick={() => navigate(`${BASE}/recommended`)} aria-label='Standard role templates'>
                         <Sparkles className='h-4 w-4' />
-                        <span className='hidden sm:inline'>Recommended</span>
+                        <span className='hidden sm:inline'>Standard templates</span>
                     </Button>
                 }
                 empty='No security roles yet.'
@@ -571,7 +563,7 @@ function RecommendedRoles() {
         ask(
             {
                 title: `Adopt ${picked.length} standard role${picked.length === 1 ? '' : 's'}?`,
-                message: 'The roles are created as normal custom roles that you can edit or delete. Every user already has standard self-service access independently. Creation is recorded in the audit trail.',
+                message: 'Adopt these suggested roles without changing existing role assignments. Templates can be customized afterwards. Existing templates are preserved.',
                 confirmLabel: 'Adopt roles',
             },
             async () => {
