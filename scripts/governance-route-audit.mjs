@@ -13,12 +13,17 @@ const names = readdirSync(backend).filter(x => x.endsWith('.ts') && !x.endsWith(
 const router = readFileSync(join(backend, 'index.ts'), 'utf8');
 const wired = new Set([...router.matchAll(/\.\.\.(\w+Routes)\b/g)].map(x => x[1]));
 const records = [];
+const routeDeclarations = [];
+
 const imported = new Map();
 for (const m of router.matchAll(/import\s*\{([^}]+)\}\s*from\s*'\.\/([^']+)'/g)) {
   for (const name of m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0])) imported.set(name, m[2]);
 }
 for (const name of names) {
   const content = readFileSync(join(backend, name), 'utf8');
+  for (const hit of content.matchAll(/['\"]((?:GET|POST|PUT|PATCH|DELETE)\\s+\\/api\\/[^'\"]+)['\"]\\s*:\\s*\\[/g)) {
+    routeDeclarations.push({ source: name, route: hit[1] });
+  }
   for (const m of content.matchAll(/['"]((?:GET|POST|PUT|PATCH|DELETE)\s+\/api\/[^'"]+)['"]\s*:\s*\[\s*(\w+)\s*\(\s*['"]([^'"]+)['"]\s*,\s*(['"][^'"]*['"]|null)/g)) {
     const [, path, guard, routeName, permissionRaw] = m;
     const method = path.split(' ')[0];
@@ -38,8 +43,11 @@ const warnings = [
 const duplicates = new Map<string,number>();
 for(const r of records){const k=r.method+' '+r.path;duplicates.set(k,(duplicates.get(k)||0)+1);}
 for(const [route,count] of duplicates){if(count>1)warnings.push('Duplicate route declaration: '+route);}
-const summary={scannedFiles:names.length,discoveredStaticRoutes:records.length,routeGroupsWired:wired.size,permissionDeclared:records.filter(r=>r.permission!==null).length,permissionNotDeclared:records.filter(r=>r.permission===null).length,warnings:warnings.length};
-const output={generatedAt:new Date().toISOString(),disclaimer:'Static inventory only. Dynamic endpoint coverage, actual permissions, classification and protection are NOT verified.',summary,routes:records,warnings};
+const indexed = new Set(records.map(r => r.source + ':' + r.method + ' ' + r.path));
+const unclassified = routeDeclarations.filter(r => !indexed.has(r.source + ':' + r.route));
+for(const route of unclassified)warnings.push('Unclassified backend declaration: ' + route.source + ' ' + route.route);
+const summary={scannedFiles:names.length,declaredRoutes:routeDeclarations.length,discoveredStaticRoutes:records.length,unclassifiedRoutes:unclassified.length,routeGroupsWired:wired.size,permissionDeclared:records.filter(r=>r.permission!==null).length,permissionNotDeclared:records.filter(r=>r.permission===null).length,warnings:warnings.length};
+const output={generatedAt:new Date().toISOString(),disclaimer:'Static inventory only. Dynamic endpoint coverage, actual permissions, classification and protection are NOT verified.',summary,routes:records,unclassified,warnings};
 if(process.argv.includes('--json')) process.stdout.write(JSON.stringify(output,null,2)+'\n');
 else {
   process.stdout.write(JSON.stringify(summary,null,2)+'\n');
