@@ -21,6 +21,7 @@ interface Settings {
     weekEndDay: number;
     yearEndRule: 'last' | 'nearest';
     specialPeriods: number;
+    extraWeekPeriod: number;
     authority: Array<{ from: number; to: number | null; levels: string[] }>;
 }
 interface SetupData {
@@ -168,12 +169,18 @@ function Body({ le, onEntityChange, section }: { le: Entity; onEntityChange: () 
                             </SelectField>
                         </>
                     )}
+                    {weekBased && s.calendarType !== 'weekly' && (
+                        <SelectField id='fs-extra-week' label='53rd week allocation' value={String(s.extraWeekPeriod ?? 0)} disabled={!canEdit} onChange={e=>set({extraWeekPeriod:Number(e.target.value)})} hint='Only used when the boundary rule generates a 53-week year. Automatic assigns the final period.'>
+                            <option value='0'>Automatic: last period</option>
+                            {Array.from({length:s.calendarType==='13x4'?13:s.calendarType==='quarterly'?4:12},(_,i)=><option key={i+1} value={i+1}>Period {i+1}</option>)}
+                        </SelectField>
+                    )}
                     <SelectField id='fs-sp' label='Year-end adjustment period' value={String(s.specialPeriods)} disabled={!canEdit} onChange={(e) => set({ specialPeriods: Number(e.target.value) })} hint='An extra period dated on the last day of the year, used for the year-end close and audit adjustments.'>
                         <option value='1'>Yes, one adjustment period</option>
                         <option value='0'>No</option>
                     </SelectField>
                 </div>
-                {weekBased && <p className='text-xs text-muted'>A week-based year has 52 weeks, or 53 when the year-end rule needs it; the extra week goes to the last period. The dates of every period are shown before a year is initialised and must be confirmed.</p>}
+                {weekBased && <p className='text-xs text-muted'>A week-based year has 52 weeks, or 53 when the year-end rule needs it; the extra week is allocated to the configured period. The dates of every period are shown before a year is initialised and must be confirmed.</p>}
                 {d.le.fiscalYearStart && <p className='text-xs text-muted'>The legal entity record says its financial year starts: {d.le.fiscalYearStart}.</p>}
             </Card>
             )}
