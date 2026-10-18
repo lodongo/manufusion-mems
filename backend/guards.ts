@@ -118,7 +118,7 @@ export interface StaffContext extends SecureContext {
 }
 
 export function staff(name: string, level: 'read' | 'write' | 'super', fn: (ctx: StaffContext) => Promise<unknown>) {
-    const guarded = secure(name, async (ctx) => {
+    return secure(name, async (ctx) => {
         const me = await getDoc(`users/${ctx.uid}`);
         const role = str(me?.data.role);
         if (!me || !STAFF_ROLES.includes(role) || str(me.data.status) === 'disabled' || emailDomain(ctx.claims.email) !== STAFF_DOMAIN) {
@@ -420,7 +420,7 @@ export interface OrgContext extends SecureContext {
  * record, never from the request, so a tenant can never reach another tenant's data.
  */
 export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgContext) => Promise<unknown>) {
-    return secure(name, async (ctx) => {
+    const guarded = secure(name, async (ctx) => {
         const me = await getDoc(`users/${ctx.uid}`);
         const orgId = str(me?.data.orgId);
         if (!me || !orgId) throw new HttpError(403, 'You are not a member of an organization.');
