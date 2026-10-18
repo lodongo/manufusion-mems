@@ -41,7 +41,9 @@ const planned=[{re:/payroll|salar|wages|employee benefit/i,scenario:'Payroll all
 export function buildGlTransactionVariants(accounts:ReadonlyArray<GlVariantAccount>):GlTransactionVariant[]{
  const result:GlTransactionVariant[]=[];
  for(const a of accounts){
-  const text=[a.name,a.className,a.categoryName,a.groupName,a.accountRole||'',a.accountType||''].join(' ');
+  // Account-specific semantics drive rules; broad class/group names alone must never
+  // classify an unrelated account (e.g. 'other equity' under a stock group).
+  const text=[a.name,a.accountRole||'',a.accountType||''].join(' ');
   const applicable=patterns.filter(p=>p.re.test(text) &&
     ((a.statement==='BS')===['INVENTORY','GRIR','ASSET_CLEARING','OPENING_BALANCE','RECON_DIFF','RETAINED_EARNINGS'].includes(p.role)));
   const entries=applicable.length?applicable:
