@@ -25,6 +25,7 @@ import {
 import { audit, type Actor } from './audit';
 import type { GovernanceHandlerMetadata } from './transactionRuntime';
 import { moduleDisableReason } from './transactionModuleGate';
+import { enforceOrgTransactionGovernance } from './unifiedGovernanceRuntime';
 
 export const STAFF_ROLES = ['super_admin', 'mems_admin', 'mems_support'];
 
@@ -463,7 +464,9 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         const access = await effectiveAccess(orgId, role, me);
         // Administration rights (ADM.*) only ever come from the directly assigned security role.
         const gate = permission && permission.startsWith('ADM.') ? access.directPermissions : access.permissions;
-        if (permission && role !== 'org_super_admin' && !hasPerm(gate, permission)) throw new HttpError(403, 'You do not have permission to do this.');
+        const granted = role === 'org_super_admin' || (permission !== null && hasPerm(gate, permission));
+        if (permission && !granted) throw new HttpError(403, 'You do not have permission to do this.');
+        await enforceOrgTransactionGovernance({ orgId, name, permission, effectivePermissionGranted: granted, org });
         return fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain });
     });
     return Object.assign(guarded, { governanceMetadata: Object.freeze({ name, permission, kind: 'organization' as const } satisfies GovernanceHandlerMetadata) });
