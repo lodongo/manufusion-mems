@@ -1,0 +1,24 @@
+name: Trigger isolated development deployment
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: mems-development-dispatch
+  cancel-in-progress: false
+
+jobs:
+  request-approved-deployment:
+    if: github.repository == 'lodongo/manufusion-mems'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch WIF-authorized development deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run deploy-development.yml --ref develop
