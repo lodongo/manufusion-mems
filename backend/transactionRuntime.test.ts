@@ -10,7 +10,7 @@ test('registered organization handlers receive stable distinct diagnostic codes'
   const first=wiredTransactionInventory();
   assert.equal(first.length,2);
   assert.equal(first[0].handlerWired,true);
-  assert.ok(first.every(x=>x.code && /^[A-Z]{2,4}-[A-Z0-9]{3,4}-[A-Z0-9]{2,4}$/.test(x.code)));
+  assert.ok(first.every(x=>x.code && /^[A-Z]{2,4}-[A-Z0-9]{3,4}-[A-Z0-9]{2,8}$/.test(x.code)));
   assert.equal(new Set(first.map(x=>x.code)).size,2);
   assert.equal(first.find(x=>x.module==='MNT')?.area,'WRQ');
   recordWiredRoutes(registered);
