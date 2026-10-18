@@ -115,6 +115,18 @@ export async function enforceOrgTransactionGovernance(input: {
       requesterUid:input.uid,payload:input.body,
     });
     if(issues.length)throw new HttpError(403,'Approval evidence invalid: '+issues.join('; '));
+    const policy=await getDoc(`organizations/${input.orgId}/governance_authority/${route.code}`);
+    if(str(policy?.data.status)!=='active' ||
+       !str(policy?.data.configuredBy) || !str(policy?.data.approvedBy) ||
+       str(policy?.data.configuredBy)===str(policy?.data.approvedBy) ||
+       str(policy?.data.version)!==str(approvalDoc.data.policyVersion) ||
+       str(bindingDoc?.data.version)!==str(approvalDoc.data.bindingVersion))
+      throw new HttpError(409,'Approval no longer matches the current, independently reviewed authority and transaction policy.');
+    for(const vote of (approvalDoc.data.votes as Array<{uid?:string}>??[])) {
+      const user=await getDoc('users/'+vote.uid);
+      if(!user||str(user.data.orgId)!==input.orgId || str(user.data.status)==='disabled')
+        throw new HttpError(403,'Approving employee is no longer eligible.');
+    }
     approved=true;
   }
   const result=evaluateGovernedHandler({
