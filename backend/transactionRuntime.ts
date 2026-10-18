@@ -51,7 +51,7 @@ export function recordWiredRoutes<T extends Record<string, unknown>>(routes: T):
     const handler = entries[0] as ((...args:unknown[])=>unknown) & { governanceMetadata?: GovernanceHandlerMetadata };
     const metadata = handler && handler.governanceMetadata;
     const segments = path.split('/').filter(Boolean);
-    const fromPermission = metadata?.permission?.split('.')[0].toUpperCase() || '';
+    const fromPermission = metadata?.kind==='organization' ? (metadata.permission?.split('.')[0].toUpperCase() || '') : '';
     const first = segments[1] === 'org' ? segments[2] : '';
     // Every declared /api/org handler belongs to the installed ORG namespace,
     // even if no product-specific module was inferred. Do not invent a role grant.
