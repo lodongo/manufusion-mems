@@ -91,6 +91,7 @@ import { workflowTraceRoutes } from './workflowTrace';
 import { governanceDocumentRoutes } from './governanceDocumentRoutes';
 import { governanceAuditRoutes } from './governanceAuditRoutes';
 import { transactionBlueprintRoutes } from './transactionBlueprintRoutes';
+import { platformTransactionRoutes } from './platformTransactionRoutes';
 import { unifiedApprovalRoutes } from './unifiedApprovalRoutes';
 import { governancePolicyRoutes } from './governancePolicyRoutes';
 import { governanceCutoverRoutes } from './governanceCutoverRoutes';
@@ -1529,6 +1530,7 @@ export const handler = router(recordWiredRoutes({
     ...governanceDocumentRoutes,
     ...governanceAuditRoutes,
     ...transactionBlueprintRoutes,
+    ...platformTransactionRoutes,
     ...unifiedApprovalRoutes,
     ...governancePolicyRoutes,
     ...governanceCutoverRoutes,
