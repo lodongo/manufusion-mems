@@ -953,7 +953,7 @@ export const finRoutes = {
                 statusLabel: CC_STATUS[f.status],
                 statuses: CC_STATUS,
                 allowedGl: f.allowedGl.map((c) => ({ code: c, name: chart.get(c)?.name ?? '', status: chart.get(c)?.status ?? 'missing' })),
-                choosable: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && a.statement === 'PL' && !sys.has(a.code)).map((a) => ({ code: a.code, name: a.name })),
+                choosable: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && a.statement === 'PL' && !sys.has(a.code)).map((a) => ({ code: a.code, name: a.name, classCode: a.classCode, className: a.className, categoryCode: a.categoryCode, categoryName: a.categoryName, groupCode: a.groupCode, groupName: a.groupName })),
                 importFrom: others.filter((x) => str(x.data.leId) === e.le.id && x.id !== ccId && strs(x.data.allowedGl).length).map((x) => ({ id: x.id, code: e.units.get(x.id)?.code ?? x.id, name: e.units.get(x.id)?.name ?? '', count: strs(x.data.allowedGl).length })),
                 version: f.version,
                 pending: await (async () => {
