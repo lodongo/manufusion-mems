@@ -3,6 +3,7 @@ import { callBackend } from '../lib/backend';
 import GovernanceReports from './GovernanceReports';
 import TransactionBlueprints from './TransactionBlueprints';
 import GovernancePolicyAdmin from './GovernancePolicyAdmin';
+import GovernanceCutoverAdmin from './GovernanceCutoverAdmin';
 import { ArrowRight, AlertTriangle } from 'lucide-react';
 import { navigate } from '../lib/route';
 
@@ -94,6 +95,7 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
         {active === 'workflows' && canWorkflow && <button type='button' onClick={() => go('workflows')} className='inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-ink'>Open Workflow Configuration <ArrowRight size={16}/></button>}
       </section>
       {active === 'permissions' && canWorkflow && <GovernancePolicyAdmin />}
+      {active === 'authority' && canWorkflow && <GovernanceCutoverAdmin />}
       {active === 'reports' && <GovernanceReports />}
       {active === 'documentation' && <section className='rounded-xl border border-[rgb(var(--c-border))] p-4 space-y-3'>
         <h2 className='font-semibold text-ink'>Create a controlled draft</h2>
