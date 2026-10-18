@@ -120,7 +120,7 @@ export interface StaffContext extends SecureContext {
 }
 
 export function staff(name: string, level: 'read' | 'write' | 'super', fn: (ctx: StaffContext) => Promise<unknown>) {
-    return secure(name, async (ctx) => {
+    const guarded = secure(name, async (ctx) => {
         const me = await getDoc(`users/${ctx.uid}`);
         const role = str(me?.data.role);
         if (!me || !STAFF_ROLES.includes(role) || str(me.data.status) === 'disabled' || emailDomain(ctx.claims.email) !== STAFF_DOMAIN) {
@@ -132,6 +132,7 @@ export function staff(name: string, level: 'read' | 'write' | 'super', fn: (ctx:
         if (level === 'super' && role !== 'super_admin') throw new HttpError(403, 'Only a super admin can do this.');
         return fn({ ...ctx, role, me });
     });
+    return Object.assign(guarded,{governanceMetadata:Object.freeze({name,permission:level,kind:'staff' as const} satisfies GovernanceHandlerMetadata)});
 }
 
 // ---------------------------------------------------------------------------
