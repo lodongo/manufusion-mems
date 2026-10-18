@@ -10,6 +10,7 @@ import {
   HttpError, getDoc, isObj, listDocs, nowIso, str, writeDoc,
 } from './core';
 import { orgRoute, hasPerm } from './guards';
+import { audit } from './audit';
 import { evaluateAuthority, quorumCount, type GovernanceRule, type ApprovalQuorum } from './governanceCore';
 import {
   transactionPayloadHash,isStepApproved,
@@ -128,6 +129,8 @@ export const unifiedApprovalRoutes = {
       };
       if(!await writeDoc(ROOT(ctx.orgId)+'/'+id,request,{exists:false}))
         throw new HttpError(409,'Approval could not be registered.');
+      await audit([{category:'workflow',action:'governance.request.submitted',actor:ctx.actor,meta:ctx.meta,
+        target:{type:'transaction_approval',id,label:code},details:'Requested approval for '+route.name}]);
       return {id,code,status:'pending',steps:steps.map(({stream,level,quorum})=>({stream,level,quorum}))};
     }),
   ],
@@ -156,6 +159,8 @@ export const unifiedApprovalRoutes = {
         ...(reason?{decisionReason:reason}:{})};
       if(!await writeDoc(path,updated,{updateTime:doc.updateTime}))
         throw new HttpError(409,'Approval changed during your decision. Refresh and try again.');
+      await audit([{category:'workflow',action:'governance.request.'+decision,actor:ctx.actor,meta:ctx.meta,
+        target:{type:'transaction_approval',id,label:request.code},details:'Status: '+status+'; stream: '+step.stream+'; level: '+step.level}]);
       return {id,status,stream:step.stream,level:step.level};
     }),
   ],
