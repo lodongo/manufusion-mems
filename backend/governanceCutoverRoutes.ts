@@ -40,8 +40,17 @@ function reasons(value:unknown):string{
 export const governanceCutoverRoutes={
   'POST /api/org/governance/cutover/status':[
     orgRoute('org.governance.cutover.status','ADM.workflows',async ctx=>{
-      const [report,config]=await Promise.all([loadCutoverCoverage(ctx.orgId),getDoc(CONFIG(ctx.orgId))]);
-      return {mode:str(config?.data.mode)||'inactive',report:{
+      const [report,config,docs]=await Promise.all([
+        loadCutoverCoverage(ctx.orgId),getDoc(CONFIG(ctx.orgId)),
+        listDocs(ROOT(ctx.orgId)+'/governance_cutovers'),
+      ]);
+      return {mode:str(config?.data.mode)||'inactive',
+        proposals:docs.slice(0,100).map(d=>({
+          id:d.id,status:str(d.data.status),reason:str(d.data.reason),
+          configuredBy:str(d.data.configuredBy),configuredAt:str(d.data.configuredAt),
+          canReview:str(d.data.status)==='proposed'&&str(d.data.configuredBy)!==ctx.uid,
+        })),
+        report:{
         inspected:report.inspected,ready:report.ready,blocked:report.blocked,
         coveragePercent:report.coveragePercent,digest:report.digest,canActivate:report.canActivate,
         items:report.items.filter(i=>i.issues.length>0).slice(0,250),
