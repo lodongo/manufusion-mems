@@ -58,7 +58,7 @@ jobs:
           set -euo pipefail
           IMAGE="${GCP_PROD_REGION}-docker.pkg.dev/${GCP_PROD_PROJECT_ID}/mems-prod/mems:${GITHUB_SHA}"
           gcloud auth configure-docker "${GCP_PROD_REGION}-docker.pkg.dev" --quiet
-          docker build -t "${IMAGE}" .
+          docker build --build-arg "GCP_DEV_PROJECT_ID=${GCP_PROD_PROJECT_ID}" --build-arg "VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}" --build-arg "VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}" --build-arg "VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}" --build-arg "VITE_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}" --build-arg "VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}" --build-arg "VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}" -t "${IMAGE}" .
           docker push "${IMAGE}"
           gcloud run deploy mems-prod --project="${GCP_PROD_PROJECT_ID}" --region="${GCP_PROD_REGION}" --image="${IMAGE}" --service-account="${GCP_PROD_RUNTIME_SA}" --update-env-vars="MEMS_FIREBASE_PROJECT_ID=${MEMS_FIREBASE_PROJECT_ID},MEMS_STORAGE_BUCKET=${MEMS_STORAGE_BUCKET},MEMS_DEPLOY_SHA=${GITHUB_SHA}" --quiet
           URL="$(gcloud run services describe mems-prod --project="${GCP_PROD_PROJECT_ID}" --region="${GCP_PROD_REGION}" --format='value(status.url)')"
