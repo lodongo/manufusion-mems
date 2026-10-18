@@ -416,12 +416,21 @@ function readMapping(raw: Obj): { roles: Record<string, string>; byCategory: Rec
 }
 async function mappingProblems(orgId: string, leId: string, m: ReturnType<typeof readMapping>): Promise<string[]> {
     const chart = await chartOf(orgId, leId);
+    const [entity,units,categories]=await Promise.all([entityOf(orgId,leId),unitsOf(orgId),materialCategories()]);
+    const validCategories=new Set(categories.map(c=>c.code));
     const out: string[] = [];
+    for(const rule of m.rules){
+        if(rule.categoryCode&&!validCategories.has(rule.categoryCode))out.push(`Rule ${rule.id}: unknown material category ${rule.categoryCode}.`);
+        if(rule.costCenterId){const cc=units.get(rule.costCenterId);
+            if(!cc || cc.level!=='cost_center' || leOf(units,cc.id)?.id!==leId)out.push(`Rule ${rule.id}: cost center is not part of this legal entity.`);
+        }
+    }
     const check = (code: string, statement: 'BS' | 'PL', what: string) => {
         const a = chart.get(code);
         if (!a) out.push(`${what}: ${code} is not in the approved chart.`);
         else if (a.status !== 'active') out.push(`${what}: ${code} is ${a.status}.`);
         else if (!a.postable) out.push(`${what}: ${code} is a heading.`);
+        else if(entity.doc?.data.glScopeConfigured===true&&!strs(entity.doc.data.allowedGl).includes(code))out.push(`${what}: ${code} is not in the legal entity approved scope.`);
         else if (a.statement !== statement) out.push(`${what}: ${code} is a ${a.statement === 'BS' ? 'balance sheet' : 'profit and loss'} account; this role needs a ${statement === 'BS' ? 'balance sheet' : 'profit and loss'} account.`);
     };
     for (const r of ROLES) if (m.roles[r.code]) check(m.roles[r.code], r.statement, r.label);
