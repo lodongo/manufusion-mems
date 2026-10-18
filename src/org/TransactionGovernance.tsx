@@ -2,9 +2,7 @@ import { useState } from 'react';
 import { callBackend } from '../lib/backend';
 import GovernanceReports from './GovernanceReports';
 import TransactionBlueprints from './TransactionBlueprints';
-import GovernancePolicyAdmin from './GovernancePolicyAdmin';
-import GovernanceCutoverAdmin from './GovernanceCutoverAdmin';
-import { ArrowRight, AlertTriangle } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { navigate } from '../lib/route';
 
 type Tab = 'transactions' | 'permissions' | 'authority' | 'workflows' | 'documentation' | 'reports';
@@ -20,18 +18,18 @@ const TABS: Array<{ key: Tab; label: string }> = [
 const panels: Record<Tab, { title: string; description: string; details: string[] }> = {
   transactions: {
     title: 'Transaction Registry',
-    description: 'Browse transaction definitions and installed permission mappings by module and submodule. Endpoint verification controls activation.',
-    details: ['Transaction activation requires verified backend enforcement.', 'Existing permission mappings are retained; endpoint verification remains required.', 'The catalogue distinguishes current permission references from reserved designs.'],
+    description: 'Browse the platform-managed codes of installed transactions, grouped by module. Bindings are automatic for all organizations.',
+    details: ['No organization-level transaction binding setup or second-person binding approval is required.', 'Existing role permissions, organizational access rules and business-specific approval workflows remain in force.', 'MEMS Admin manages the platform transaction code catalogue.'],
   },
   permissions: {
     title: 'Security Permissions',
     description: 'Security Roles determine the actions an employee can perform within an authorized organizational scope.',
-    details: ['Existing Security Roles continue to control operational access.', 'Transaction permissions are organized by module and action in the catalogue.', 'Additional governance controls will require independent approval before activation.'],
+    details: ['Existing Security Roles continue to control operational access.', 'Transaction permissions are organized by module and action in the catalogue.', 'Business authorization and approval settings remain separate from automatic transaction code registration.'],
   },
   authority: {
     title: 'Chart of Authority',
-    description: 'The planned unified authority engine will evaluate amount bands, organizational inheritance, mandatory specialist streams and governance rules.',
-    details: ['CoA rules select required streams and levels, not named approvers.', 'Currency evidence and site-specific overrides will be recorded.', 'Rule changes will be simulated and independently approved before activation.'],
+    description: 'Authority and business approval rules are configured through the appropriate role and workflow settings. Transaction code binding is already handled at platform level.',
+    details: ['No activation or manual transaction binding review is needed.', 'Maintain financial approval limits, approver roles and business workflow policies independently.', 'Existing business approval procedures remain operational.'],
   },
   reports: {
     title: 'Governance auditing and reporting',
@@ -52,7 +50,6 @@ const panels: Record<Tab, { title: string; description: string; details: string[
 
 export default function TransactionGovernance({ canRoles, canWorkflow }: { canRoles: boolean; canWorkflow: boolean }) {
   const [active, setActive] = useState<Tab>('transactions');
-  const [reviewModule,setReviewModule] = useState('MNT');
   const [entity, setEntity] = useState('');
   const [docModule, setDocModule] = useState('PRC');
   const [docVersion, setDocVersion] = useState('1.0.0');
@@ -75,15 +72,6 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
         <h1 className='text-xl sm:text-2xl font-bold text-ink'>Transaction Governance</h1>
         <p className='text-sm text-soft'>One place for transaction permissions, authority and approval workflows.</p>
       </header>
-      <section className='rounded-xl border border-amber-300/60 bg-amber-50 p-3 text-amber-950 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-100' role='status'>
-        <div className='flex items-start gap-2'>
-          <AlertTriangle className='h-5 w-5 shrink-0' aria-hidden='true'/>
-          <div className='min-w-0'>
-            <p className='text-sm font-semibold'>Unified governance activation pending verification</p>
-            <p className='text-xs leading-relaxed mt-1'>Existing transaction controls remain in effect. Complete backend integration, security tests and production certification before activating unified governance.</p>
-          </div>
-        </div>
-      </section>
       <nav aria-label='Governance areas' className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2'>
         {TABS.map(t => <button key={t.key} type='button' aria-current={active === t.key ? 'page' : undefined} onClick={() => setActive(t.key)}
           className={`min-w-0 rounded-lg px-3 py-3 text-sm font-semibold border ${active === t.key ? 'border-[rgb(var(--c-brand))] bg-[rgb(var(--c-brand)/0.08)] text-[rgb(var(--c-brand))]' : 'border-[rgb(var(--c-border))] text-ink'}`}>{t.label}</button>)}
@@ -95,8 +83,6 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
         {active === 'permissions' && canRoles && <button type='button' onClick={() => go('roles')} className='inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-ink'>Open Security Roles <ArrowRight size={16}/></button>}
         {active === 'workflows' && canWorkflow && <button type='button' onClick={() => go('workflows')} className='inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-ink'>Open Workflow Configuration <ArrowRight size={16}/></button>}
       </section>
-      {active === 'permissions' && canWorkflow && <GovernancePolicyAdmin initialModule={reviewModule} />}
-      {active === 'authority' && canWorkflow && <GovernanceCutoverAdmin onReviewBinding={module=>{setReviewModule(module);setActive('permissions');}} />}
       {active === 'reports' && <GovernanceReports />}
       {active === 'documentation' && <section className='rounded-xl border border-[rgb(var(--c-border))] p-4 space-y-3'>
         <h2 className='font-semibold text-ink'>Create a controlled draft</h2>
