@@ -12,3 +12,7 @@ This deployment is an intentionally **public live-test frontend and API** on a s
 ## Roll back pilot
 
 In Google Cloud Run for the development project and region, select the `mems-live` service and redirect traffic to the preceding revision. This does not reverse Firestore data already written to the shared development database.
+
+## Public Cloud Run access
+
+The pilot is created as `mems-live` in `africa-south1`. This project restricts the `allUsers` IAM binding, so the verified deployment uses Google's recommended `--no-invoker-iam-check` setting rather than relying on `--allow-unauthenticated`. That Cloud Run access setting still requires appropriately privileged Google Cloud deployment identity. The release job verifies HTTP `/healthz` and rejects an anonymous business transaction before reporting success.
