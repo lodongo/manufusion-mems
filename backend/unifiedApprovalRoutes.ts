@@ -25,7 +25,7 @@ const ID=/^[a-zA-Z0-9_-]{8,128}$/;
 const LIMIT=200;
 
 type StoredRequest=ApprovalEvidence&{
-  id:string;createdAt:string;updatedAt:string;reason:string;policyVersion:string;
+  id:string;createdAt:string;updatedAt:string;reason:string;policyVersion:string;bindingVersion:string;
 };
 
 function exactRoute(code:string) {
