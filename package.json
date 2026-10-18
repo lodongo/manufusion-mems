@@ -12,7 +12,7 @@
     "check:backend": "tsc --noEmit -p tsconfig.backend.json",
     "check": "npm run check:web && npm run check:backend",
     "preview": "vite preview",
-    "test:governance": "node --import tsx --test backend/governanceCore.test.ts backend/transactionAccessBoundary.test.ts backend/transactionEndpointMapping.test.ts backend/existingPermissionCrosswalk.test.ts backend/transactionRuntime.test.ts",
+    "test:governance": "node --import tsx --test backend/governanceCore.test.ts backend/transactionAccessBoundary.test.ts backend/transactionEndpointMapping.test.ts backend/existingPermissionCrosswalk.test.ts backend/transactionRuntime.test.ts backend/transactionModuleGate.test.ts",
     "audit:routes": "node scripts/governance-route-audit.mjs",
     "audit:routes:strict": "node scripts/governance-route-audit.mjs --strict"
   },
