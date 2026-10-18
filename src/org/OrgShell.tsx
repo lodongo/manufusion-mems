@@ -33,6 +33,7 @@ import OrgOverview from './OrgOverview';
 import SetupGuide, { type SetupProgress } from './SetupGuide';
 import OrgUsers from './OrgUsers';
 import OrgRoles from './OrgRoles';
+import SecurityKnowledgeBase from './SecurityKnowledgeBase';
 import OrgAudit from './OrgAudit';
 import PlannedPage from './PlannedPage';
 import type { OrgContextData } from './types';
@@ -93,6 +94,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
         items: [
             { key: 'users', label: 'Users', Icon: Users, perm: 'ADM.users' },
             { key: 'roles', label: 'Security roles', Icon: ShieldCheck, perm: 'ADM.roles' },
+            { key: 'security_docs', label: 'Documentation', Icon: BookOpen },
         ],
     },
     {
@@ -196,7 +198,7 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
 
     const enabledCodes = new Set(data.modules.map((m) => m.code));
     const basicsOnly = setup.data?.ready === false;
-    const allowedSetup = new Set(['structure', 'positions', 'profile', 'my_setup', 'keep_alive', 'activity']);
+    const allowedSetup = new Set(['structure', 'positions', 'profile', 'my_setup', 'keep_alive', 'activity', 'security_docs']);
     const groups: NavGroup[] = MENU.map((g) => ({ title: g.title, items: g.items.filter((m) => (!basicsOnly || allowedSetup.has(m.key)) && (!m.perm || (m.perm.endsWith('.') ? data.permissions.some((p) => p === '*' || p.startsWith(m.perm as string)) : hasPerm(data.permissions, m.perm))) && (!m.module || enabledCodes.has(m.module))) }));
     const items = groups.flatMap((g) => g.items);
     const active = items.some((m) => m.key === section) ? section : '';
@@ -260,6 +262,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             break;
         case 'roles':
             content = <OrgRoles id={id} />;
+            break;
+        case 'security_docs':
+            content = <SecurityKnowledgeBase canInspect={hasPerm(data.permissions, 'ADM.roles')} />;
             break;
 
         case 'transaction_catalogue':
