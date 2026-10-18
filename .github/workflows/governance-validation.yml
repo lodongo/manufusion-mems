@@ -6,6 +6,8 @@ on:
     paths:
       - 'scripts/future-route-check.mjs'
       - 'tests/independent/future-route-check.test.mjs'
+      - 'backend/unifiedGovernanceRuntime.ts'
+      - 'backend/unifiedGovernanceRuntime.test.ts'
       - 'backend/guards.ts'
       - 'backend/transactionRuntime.ts'
       - 'backend/transactionRuntime.test.ts'
