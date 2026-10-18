@@ -9,6 +9,8 @@ export function verifyProductionDeploy(env=process.env){
   if(!/^[a-z][a-z0-9-]{4,29}$/.test(project)||/(?:^|-)(dev|development|test|staging|sandbox)(?:-|$)/i.test(project))
     throw Error('Production project must be a valid, non-development Google Cloud project ID');
   if(project==='manufusion-mems-development')throw Error('Development Firebase project cannot be used in production');
+  if(project==='mems2026' && env.MEMS_ALLOW_LIVE_DATA!=='I_ACKNOWLEDGE_THE_RISK')
+    throw Error('MEMS_ALLOW_LIVE_DATA must explicitly authorize the existing live Firebase project');
   if(value(env,'VITE_FIREBASE_PROJECT_ID')!==project||value(env,'MEMS_FIREBASE_PROJECT_ID')!==project)
     throw Error('Browser and server Firebase projects must equal the production GCP project');
   const auth=value(env,'VITE_FIREBASE_AUTH_DOMAIN');
