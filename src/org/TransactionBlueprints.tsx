@@ -28,15 +28,16 @@ export default function TransactionBlueprints() {
   const [module,setModule]=useState('ADM');
   const [items,setItems]=useState<Blueprint[]>([]);
   const [existingPermissions,setExistingPermissions]=useState<Array<{existingPermission:string;label:string;suggestedCode:string|null;status:string}>>([]);
+  const [mappingSummary,setMappingSummary]=useState<{total:number;proposed:number;collisions:number;manualReview:number;certified:number}|null>(null);
   const [search,setSearch]=useState('');
   const [expanded,setExpanded]=useState<string[]>([]);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
   useEffect(()=>{
     let cancelled=false;
-    setLoading(true);setError('');setItems([]);setExistingPermissions([]);setExpanded([]);
-    callBackend<{items:Blueprint[];existingPermissions:Array<{existingPermission:string;label:string;suggestedCode:string|null;status:string}>}>('/api/org/governance/blueprints/list',{module})
-      .then(response=>{if(!cancelled){setItems(response.items);setExistingPermissions(response.existingPermissions??[]);}})
+    setLoading(true);setError('');setItems([]);setExistingPermissions([]);setMappingSummary(null);setExpanded([]);
+    callBackend<{items:Blueprint[];existingPermissions:Array<{existingPermission:string;label:string;suggestedCode:string|null;status:string}>;mappingSummary:{total:number;proposed:number;collisions:number;manualReview:number;certified:number}}>('/api/org/governance/blueprints/list',{module})
+      .then(response=>{if(!cancelled){setItems(response.items);setExistingPermissions(response.existingPermissions??[]);setMappingSummary(response.mappingSummary??null);}})
       .catch(e=>{if(!cancelled)setError(e instanceof Error?e.message:'Could not load the transaction catalogue.');})
       .finally(()=>{if(!cancelled)setLoading(false);});
     return ()=>{cancelled=true;};
@@ -87,7 +88,8 @@ export default function TransactionBlueprints() {
     <div className='rounded-lg border border-[rgb(var(--c-border))] p-3 space-y-2'>
       <h3 className='font-semibold text-ink'>Installed permission compatibility</h3>
       <p className='text-xs text-soft'>{existingPermissions.length} existing permission definitions retained. Suggested code matches are for review only; they do not change granted permissions or backend enforcement.</p>
-      <div className='max-h-52 overflow-y-auto space-y-1'>{existingPermissions.filter(x=>(x.existingPermission+' '+x.label+' '+(x.suggestedCode??'')).toLowerCase().includes(search.toLowerCase())).map(x=><div key={x.existingPermission} className='flex flex-wrap items-center justify-between gap-2 border-b border-[rgb(var(--c-border))] py-2 text-xs'><span className='text-ink'>{x.label} <code className='text-soft'>({x.existingPermission})</code></span><span className='text-soft'>{x.suggestedCode??'Mapping review needed'}</span></div>)}</div>
+      {mappingSummary&&<p className='text-xs text-soft'>All modules: {mappingSummary.proposed} proposed · {mappingSummary.collisions} collisions to resolve · {mappingSummary.manualReview} require manual mapping · {mappingSummary.certified} certified.</p>}
+      <div className='max-h-52 overflow-y-auto space-y-1'>{existingPermissions.filter(x=>(x.existingPermission+' '+x.label+' '+(x.suggestedCode??'')).toLowerCase().includes(search.toLowerCase())).map(x=><div key={x.existingPermission} className='flex flex-wrap items-center justify-between gap-2 border-b border-[rgb(var(--c-border))] py-2 text-xs'><span className='text-ink'>{x.label} <code className='text-soft'>({x.existingPermission})</code></span><span className='text-soft'>{x.status==='collision_review_required'?'Conflicting mapping · review needed':x.suggestedCode??'Mapping review needed'}</span></div>)}</div>
     </div>
     <div className='space-y-2'>
       {groups.map(g=>{
