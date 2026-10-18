@@ -25,6 +25,7 @@ import SkillsMasterPage from './SkillsMasterPage';
 import OperationsCenter from './OperationsCenter';
 import FxMonitor from './FxMonitor';
 import AutomationCenter from './AutomationCenter';
+import TransactionManager from './TransactionManager';
 
 const DEFAULT_META_LISTS = [
     { key: 'meta.industryCategories', label: 'Industry categories' },
@@ -85,6 +86,7 @@ export default function AdminShell({
             title: 'Platform',
             items: [
                 { key: 'modules', label: 'Modules', Icon: Puzzle },
+                { key: 'transactions', label: 'Transactions Manager', Icon: ListChecks },
                 { key: 'site', label: 'Site setup', Icon: Palette },
                 { key: 'billing', label: 'Billing and payments', Icon: CreditCard },
                 ...(isSuper ? [
@@ -178,6 +180,9 @@ export default function AdminShell({
             break;
         case 'automation_center':
             content = isSuper ? <AutomationCenter /> : <Dashboard />;
+            break;
+        case 'transactions':
+            content = <TransactionManager />;
             break;
         case 'modules':
             content = <ModulesPage code={id} tab={sub} canWrite={canWrite} isSuper={isSuper} />;
