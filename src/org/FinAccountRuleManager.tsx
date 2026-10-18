@@ -1,4 +1,5 @@
-import {useMemo,useState} from 'react';
+import {useEffect,useMemo,useState} from 'react';
+import type {GranularVariant} from './FinGranularTransactionCatalog';
 import {callBackend} from '../lib/backend';
 import {Button,useLoad} from '../admin/kit';
 import {Alert} from '../components/ui';
@@ -11,13 +12,15 @@ export default function FinAccountRuleManager(props:{
   leId:string;rules:Rule[];setRules:(next:Rule[])=>void;
   events:Event[];roles:Role[];accounts:Acc[];categories:Array<{code:string;name:string}>;
   canEdit:boolean; mapping:{roles:Record<string,string>;byCategory:Record<string,unknown>};
+  prefill:GranularVariant|null;
 }){
-  const {rules,setRules,events,roles,accounts,categories,canEdit,mapping,leId}=props;
+  const {rules,setRules,events,roles,accounts,categories,canEdit,mapping,leId,prefill}=props;
   const centers=useLoad(()=>callBackend<{costCenters:Array<{id:string;code:string;name:string}>}>('/api/org/fin/cc/list',{leId}),[leId]);
   const [event,setEvent]=useState('GR_STOCK'),[role,setRole]=useState('INVENTORY');
   const [account,setAccount]=useState(''),[category,setCategory]=useState('');
   const [costCenter,setCostCenter]=useState(''),[preview,setPreview]=useState<Simulation|null>(null);
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
+  useEffect(()=>{if(prefill){setEvent(prefill.event);setRole(prefill.role);setAccount(prefill.accountCode);setCategory('');setCostCenter('');setPreview(null);setMessage('GL transaction selected. Add the draft rule, then submit the mapping for approval.');}},[prefill]);
   const selectedEvent=events.find(e=>e.code===event);
   const effectiveRole=selectedEvent?.roles.includes(role)?role:(selectedEvent?.roles[0]||'');
   const statement=roles.find(r=>r.code===effectiveRole)?.statement;
@@ -41,35 +44,35 @@ export default function FinAccountRuleManager(props:{
     }catch(e){setMessage(e instanceof Error?e.message:'Simulation failed.');}
     finally{setBusy(false);}
   };
-  return <section className='space-y-3 rounded-xl border border-line p-4'>
+  return <section id='fin-rule-config' className='space-y-3 rounded-xl border border-line p-4'>
     <div><h3 className='font-semibold text-ink'>Transaction-specific account determination</h3>
       <p className='text-sm text-muted'>Optional rules refine the default GL mappings. Organizations may use different accounts for the same transaction type or material category without creating duplicate transaction handlers. These rules apply only after approval.</p>
     </div>
     <label className='block text-sm'>Transaction event
-      <select value={event} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>{const v=e.target.value;setEvent(v);setRole(events.find(t=>t.code===v)?.roles[0]||'');setAccount('');setPreview(null);}}>
+      <select data-native-select='true' value={event} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>{const v=e.target.value;setEvent(v);setRole(events.find(t=>t.code===v)?.roles[0]||'');setAccount('');setPreview(null);}}>
         {events.map(e=><option key={e.code} value={e.code}>{e.code} · {e.label} {e.implemented?'':'(planned)'}</option>)}
       </select>
     </label>
     <div className='grid gap-2 sm:grid-cols-2'>
       <label className='block text-sm'>Accounting role
-        <select value={effectiveRole} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>{setRole(e.target.value);setAccount('');}}>
+        <select data-native-select='true' value={effectiveRole} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>{setRole(e.target.value);setAccount('');}}>
           {selectedEvent?.roles.map(r=><option key={r} value={r}>{roles.find(x=>x.code===r)?.label||r}</option>)}
         </select>
       </label>
       <label className='block text-sm'>Material category (optional)
-        <select value={category} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>setCategory(e.target.value)}>
+        <select data-native-select='true' value={category} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>setCategory(e.target.value)}>
           <option value=''>Any material category</option>
           {categories.map(c=><option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
         </select>
       </label>
       <label className='block text-sm'>Approved GL account
-        <select value={account} disabled={!canEdit} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>setAccount(e.target.value)}>
+        <select data-native-select='true' value={account} disabled={!canEdit} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>setAccount(e.target.value)}>
           <option value=''>Select an approved account</option>
           {usable.map(a=><option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
         </select>
       </label>
       <label className='block text-sm'>Cost center (optional)
-        <select value={costCenter} disabled={!canEdit} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>setCostCenter(e.target.value)}>
+        <select data-native-select='true' value={costCenter} disabled={!canEdit} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>setCostCenter(e.target.value)}>
           <option value=''>All cost centers</option>
           {centers.data?.costCenters.map(c=><option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}
         </select>
