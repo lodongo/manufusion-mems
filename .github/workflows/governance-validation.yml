@@ -11,6 +11,8 @@ on:
       - 'backend/transactionEndpointMapping.test.ts'
       - 'backend/transactionAccessBoundary.ts'
       - 'backend/transactionAccessBoundary.test.ts'
+      - 'backend/existingPermissionCrosswalk.ts'
+      - 'src/components/SearchableSelect.tsx'
       - 'backend/transactionBlueprints.ts'
       - 'backend/transactionBlueprintRoutes.ts'
       - 'src/org/TransactionBlueprints.tsx'
