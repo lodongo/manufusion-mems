@@ -89,9 +89,6 @@ export async function enforceOrgTransactionGovernance(input: {
       'org.governance.cutover.approve','org.governance.cutover.disable'].includes(input.name))return null;
   const config=await getDoc(RUNTIME(input.orgId));
   if(str(config?.data.mode)!=='enforce')return null;
-  // A tenant-wide cutover must be independently authorized.
-  const owner=str(config?.data.configuredBy), approver=str(config?.data.approvedBy);
-  if(!owner||!approver||owner===approver) throw new HttpError(403,'Unified governance activation is not independently approved.');
   const matches=wiredTransactionInventory().filter(r=>r.name===input.name);
   if(matches.length!==1 || !matches[0].code)throw new HttpError(403,'Transaction endpoint has no unique registered handler.');
   const route=matches[0];
@@ -101,6 +98,12 @@ export async function enforceOrgTransactionGovernance(input: {
   // A tenant does not have to create or approve a Firestore binding document.
   // The existing orgRoute security and the business handler still enforce access.
   if(!b)return null;
+  // Legacy tenant-specific approval overrides still require a validated
+  // activation; the automatic platform route binding itself does not.
+  const owner=str(config?.data.configuredBy), approver=str(config?.data.approvedBy);
+  if(!owner||!approver||owner===approver)
+    throw new HttpError(403,'Existing custom workflow override has not been authorized.');
+
   const modules=input.org.data.modules;
   const moduleMap=modules&&typeof modules==='object'&&!Array.isArray(modules)?modules as Record<string,unknown>:{};
   const submodules=input.org.data.submodules;
