@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { ArrowLeft, Check, ChevronRight, FolderTree, Layers, ListChecks, Lock, Search } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import FinEntityAccounts from './FinEntityAccounts';
+import FinAccountRuleManager from './FinAccountRuleManager';
 import { Alert, SelectField } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import { Button, Spinner, useLoad } from '../admin/kit';
@@ -360,7 +361,8 @@ function AccountView({ le, code }: { le: Entity; code: string }) {
 
 interface MapData {
     roles: Array<{ code: string; label: string; statement: 'BS' | 'PL'; required: boolean; note: string }>;
-    mapping: { roles: Record<string, string>; byCategory: Record<string, { INVENTORY?: string; CONSUMPTION?: string }>; version: number };
+    mapping: { roles: Record<string, string>; byCategory: Record<string, { INVENTORY?: string; CONSUMPTION?: string }>; rules: Array<{id:string;event:string;role:string;account:string;categoryCode:string;costCenterId:string;priority:number;enabled:boolean}>;version: number };
+    events: Array<{code:string;label:string;roles:string[];implemented:boolean}>;
     txns: Array<{ code: string; label: string; debit: string; credit: string; live: boolean; source: string; taxes: string[] }>;
     accounts: Array<{ code: string; name: string; statement: string }>;
     categories: Array<{ code: string; name: string }>;
@@ -372,6 +374,7 @@ function Mapping({ le }: { le: Entity }) {
     const [roles, setRoles] = useState<Record<string, string> | null>(null);
     const [cats, setCats] = useState<Record<string, { INVENTORY?: string; CONSUMPTION?: string }> | null>(null);
     const [newCat, setNewCat] = useState('');
+    const [determinationRules,setDeterminationRules]=useState<MapData['mapping']['rules']|null>(null);
     const [msg, setMsg] = useState('');
     const confirm = useConfirm();
     if (loading && !data) return <Spinner />;
@@ -382,7 +385,8 @@ function Mapping({ le }: { le: Entity }) {
     const opts = (st: string) => data.accounts.filter((a) => a.statement === st);
     const name = (code?: string) => (code ? `${code} ${data.accounts.find((a) => a.code === code)?.name ?? ''}` : '');
     const resolve = (role: string) => (data.roles.some((x) => x.code === role) ? name(r[role]) || `${role} (not mapped)` : role);
-    const changed = JSON.stringify(r) !== JSON.stringify(data.mapping.roles) || JSON.stringify(bc) !== JSON.stringify(data.mapping.byCategory);
+    const activeRules=determinationRules??data.mapping.rules??[];
+    const changed = JSON.stringify(r) !== JSON.stringify(data.mapping.roles) || JSON.stringify(bc) !== JSON.stringify(data.mapping.byCategory) || JSON.stringify(activeRules)!==JSON.stringify(data.mapping.rules??[]);
     const missing = data.roles.filter((x) => x.required && !r[x.code]);
     return (
         <>
@@ -450,8 +454,9 @@ function Mapping({ le }: { le: Entity }) {
                     </div>
                 )}
             </Card>
+            <FinAccountRuleManager leId={le.id} rules={activeRules} setRules={setDeterminationRules} events={data.events??[]} roles={data.roles} accounts={data.accounts} categories={data.categories} canEdit={can} mapping={{roles:r,byCategory:bc}} />
             {can && (
-                <Button disabled={!changed} onClick={() => confirm.ask({ title: 'Propose the mapping', message: 'Every posting from approval on uses the new accounts. A person with FIN.mapping.approve must approve it.', confirmLabel: 'Propose', reason: { label: 'Reason', minLength: 10 } }, async (reason) => { await callBackend(`${FIN_API}/mapping/propose`, { leId: le.id, mapping: { roles: r, byCategory: bc }, reason }); setRoles(null); setCats(null); setMsg('Proposed for approval.'); reload(); })}>
+                <Button disabled={!changed} onClick={() => confirm.ask({ title: 'Propose the mapping', message: 'Every posting from approval on uses the new accounts. A person with FIN.mapping.approve must approve it.', confirmLabel: 'Propose', reason: { label: 'Reason', minLength: 10 } }, async (reason) => { await callBackend(`${FIN_API}/mapping/propose`, { leId: le.id, mapping: { roles: r, byCategory: bc,rules:activeRules }, reason }); setRoles(null); setCats(null); setDeterminationRules(null); setMsg('Proposed for approval.'); reload(); })}>
                     Propose mapping
                 </Button>
             )}
