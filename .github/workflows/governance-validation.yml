@@ -31,6 +31,8 @@ on:
       - 'src/components/SearchableSelect.tsx'
       - 'backend/transactionBlueprints.ts'
       - 'backend/transactionBlueprintRoutes.ts'
+      - 'src/org/UnifiedApprovalInbox.tsx'
+      - 'src/org/WorkflowInbox.tsx'
       - 'src/org/TransactionBlueprints.tsx'
       - 'backend/permissionPolicy.ts'
       - 'backend/audit.ts'
