@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { callBackend } from '../lib/backend';
+import GovernanceReports from './GovernanceReports';
 import { ArrowRight, GitBranch, ShieldCheck, Scale, Database, AlertTriangle, ClipboardCheck } from 'lucide-react';
 import { navigate } from '../lib/route';
 
-type Tab = 'transactions' | 'permissions' | 'authority' | 'workflows' | 'documentation';
+type Tab = 'transactions' | 'permissions' | 'authority' | 'workflows' | 'documentation' | 'reports';
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'transactions', label: 'Transactions' },
   { key: 'permissions', label: 'Security' },
   { key: 'authority', label: 'Authority' },
   { key: 'workflows', label: 'Workflows' },
   { key: 'documentation', label: 'Documents' },
+  { key: 'reports', label: 'Audit reports' },
 ];
 const EXAMPLES: Array<{ code: string; name: string; module: string; actions: string }> = [
   { code: 'MNT.WR', name: 'Work Request', module: 'Maintenance', actions: 'Create · Review · Return · Convert' },
@@ -33,6 +35,11 @@ const panels: Record<Tab, { title: string; description: string; details: string[
     title: 'Chart of Authority',
     description: 'The new engine will evaluate amount bands, organizational inheritance, mandatory specialist streams and governance rules.',
     details: ['CoA rules select required streams and levels, not named approvers.', 'Currency evidence and site-specific overrides will be recorded.', 'Rule changes will be simulated and independently approved before activation.'],
+  },
+  reports: {
+    title: 'Governance auditing and reporting',
+    description: 'Review the current configuration and inspect historical audit events by selected period.',
+    details: ['Preview data is limited to the newest 500 audit events.', 'Current previews are not certified, shareable public reports.', 'Publication requires complete evidence, approval and redaction.'],
   },
   documentation: {
     title: 'Legal-entity module documentation',
@@ -95,7 +102,7 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
           </div>
         ))}
       </div>
-      <nav aria-label='Governance areas' className='grid grid-cols-2 sm:grid-cols-5 gap-2'>
+      <nav aria-label='Governance areas' className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2'>
         {TABS.map(t => <button key={t.key} type='button' aria-current={active === t.key ? 'page' : undefined} onClick={() => setActive(t.key)}
           className={`min-w-0 rounded-lg px-3 py-3 text-sm font-semibold border ${active === t.key ? 'border-[rgb(var(--c-brand))] bg-[rgb(var(--c-brand)/0.08)] text-[rgb(var(--c-brand))]' : 'border-[rgb(var(--c-border))] text-ink'}`}>{t.label}</button>)}
       </nav>
@@ -106,6 +113,7 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
         {active === 'permissions' && canRoles && <button type='button' onClick={() => go('roles')} className='inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-ink'>Open existing Security Roles <ArrowRight size={16}/></button>}
         {active === 'workflows' && canWorkflow && <button type='button' onClick={() => go('workflows')} className='inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-ink'>Open existing Workflows <ArrowRight size={16}/></button>}
       </section>
+      {active === 'reports' && <GovernanceReports />}
       {active === 'documentation' && <section className='rounded-xl border border-[rgb(var(--c-border))] p-4 space-y-3'>
         <h2 className='font-semibold text-ink'>Create a controlled draft</h2>
         <p className='text-xs text-soft'>Use the legal entity ID from Organization Design. Only authorized governance administrators can create drafts.</p>
