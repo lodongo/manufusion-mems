@@ -27,8 +27,9 @@ test('permission-only action requires exact route binding, authorizer, module an
   assert.equal(evaluateGovernedHandler({...input,submoduleEnabled:false}).allowed,false);
   assert.equal(evaluateGovernedHandler({...input,binding:null}).allowed,false);
 });
-test('approval-required actions never trust requested approval flags without a server-side policy',()=>{
+test('approval-required actions need a matching policy plus approval proof verified by the server',()=>{
   const approval={...binding,classification:'approval_required' as const};
   assert.equal(evaluateGovernedHandler({...input,binding:approval}).allowed,false);
-  assert.equal(evaluateGovernedHandler({...input,binding:approval,approvalSatisfied:true}).allowed,false);
+  assert.equal(evaluateGovernedHandler({...input,binding:approval,approvalSatisfied:true}).allowed,true);
+  assert.equal(evaluateGovernedHandler({...input,binding:{...approval,approvedBy:approval.configuredBy},approvalSatisfied:true}).allowed,false);
 });
