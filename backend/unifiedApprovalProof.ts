@@ -76,3 +76,26 @@ export function validateApprovalEvidence(e:ApprovalEvidence,context:{
   }
   return errors;
 }
+
+/** Independent streams can run in parallel; levels in each stream are sequential. */
+export function nextEligibleApprovalStep(e:ApprovalEvidence,uid:string):ApprovalStep|null {
+  if(e.status!=='pending'||e.requestedBy===uid)return null;
+  for(const step of e.steps){
+    if(isStepApproved(step,e.votes))continue;
+    if(e.steps.some(other=>other.stream===step.stream&&other.level<step.level&&!isStepApproved(other,e.votes)))continue;
+    if(step.eligibleUserIds.includes(uid)&&!e.votes.some(v=>v.uid===uid&&v.stream===step.stream&&v.level===step.level))
+      return step;
+  }
+  return null;
+}
+export function applyApprovalDecision(e:ApprovalEvidence,uid:string,decision:ApprovalVote['decision'],decidedAt:string):
+  {status:'pending'|'approved'|'rejected'|'returned';votes:ApprovalVote[];step:ApprovalStep} {
+  const step=nextEligibleApprovalStep(e,uid);
+  if(!step)throw new Error('Approver is not eligible for an outstanding level');
+  if(!['approve','reject','return'].includes(decision)||!Number.isFinite(Date.parse(decidedAt)))
+    throw new Error('Invalid approver decision');
+  const votes=[...e.votes,{uid,stream:step.stream,level:step.level,decision,decidedAt}];
+  const status=decision==='reject'?'rejected':decision==='return'?'returned':
+    e.steps.every(s=>isStepApproved(s,votes))?'approved':'pending';
+  return {status,votes,step};
+}
