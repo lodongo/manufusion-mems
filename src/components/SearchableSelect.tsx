@@ -41,6 +41,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
     const pressedOption = useRef<{ pointerId: number; value: string } | null>(null);
     const [query, setQuery] = useState('');
     const [searchVisible, setSearchVisible] = useState(false);
+    const [pending, setPending] = useState<string | null>(null);
     const [internal, setInternal] = useState(defaultValue === undefined ? '' : String(defaultValue));
     const selectedValue = value === undefined ? internal : String(value);
     const current = options.find((o) => o.value === selectedValue);
