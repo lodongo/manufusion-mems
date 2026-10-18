@@ -3,6 +3,7 @@ import { HeartPulse, BookOpen, Boxes, Briefcase, Calculator, ClipboardList, Circ
 import AssetRegister from './AssetRegister';
 import MaterialWorkflow from './MaterialWorkflow';
 import TransactionGovernance from './TransactionGovernance';
+import TransactionBlueprints from './TransactionBlueprints';
 import WorkflowInbox from './WorkflowInbox';
 import ProcurementCatalog from './ProcurementCatalog';
 import WorkRequests from './WorkRequests';
@@ -108,6 +109,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
         items: [
             { key: 'delegations', label: 'Delegation', Icon: Network, perm: 'ADM.delegations' },
             { key: 'transaction_governance', label: 'Transaction governance', Icon: ShieldCheck, perm: 'ADM.workflows' },
+            { key: 'transaction_catalogue', label: 'Transaction catalogue', Icon: Table2, perm: 'ADM.workflows' },
             { key: 'workflows', label: 'Legacy workflows', Icon: GitBranch, perm: 'ADM.workflows' },
             { key: 'authority', label: 'Chart of authority', Icon: Table2, perm: 'ADM.authority' },
             { key: 'audit', label: 'Audit trail', Icon: ScrollText, perm: 'ADM.audit' },
@@ -143,6 +145,7 @@ const TITLES: Record<string, string> = {
     positions_view: 'Job role structure',
     roles: 'Security roles',
     transaction_governance: 'Transaction governance',
+    transaction_catalogue: 'Transaction catalogue',
     modules: 'All modules',
     modules_available: 'Modules not adopted',
     modules_adopted: 'Adopted modules',
@@ -259,6 +262,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             content = <OrgRoles id={id} />;
             break;
 
+        case 'transaction_catalogue':
+            content = <TransactionBlueprints />;
+            break;
         case 'transaction_governance':
             content = <TransactionGovernance canRoles={hasPerm(data.permissions, 'ADM.roles')} canWorkflow={hasPerm(data.permissions, 'ADM.workflows')} />;
             break;
