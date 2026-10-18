@@ -43,3 +43,9 @@ test('quorum fixed number and percentage', () => {
   assert.equal(quorumCount({ mode: 'all' }, 5), 5);
   assert.throws(() => quorumCount({ mode: 'count', value: 0 }, 5));
 });
+
+test('vacant approver groups and impossible quorums block approval', () => {
+  assert.throws(() => quorumCount({ mode: 'all' }, 0));
+  assert.throws(() => quorumCount({ mode: 'any' }, 0));
+  assert.throws(() => quorumCount({ mode: 'count', value: 3 }, 2));
+});
