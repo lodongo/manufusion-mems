@@ -519,7 +519,9 @@ registerHandler('cc.config', {
         if (!CC_STATUS[status]) throw new HttpError(400, 'Unknown cost center status.');
         const chart = await chartOf(ctx.orgId, leId);
         const allowed = strs(p.allowedGl);
+        const entity=await entityOf(ctx.orgId,leId);
         for (const g of allowed) {
+            if(entity.doc?.data.glScopeConfigured===true && !strs(entity.doc.data.allowedGl).includes(g)) throw new HttpError(409,`${g} is no longer approved for the legal entity.`);
             const a = chart.get(g);
             if (!a || a.status !== 'active' || !a.postable) throw new HttpError(409, `${g} is not an active account in the chart.`);
         }
@@ -1038,7 +1040,7 @@ export const finRoutes = {
             if (!cc || cc.level !== 'cost_center' || leOf(e.units, ccId)?.id !== e.le.id) throw new HttpError(404, 'Cost center not found in this legal entity.');
             const owned = ownedCostCenters(e.units, ctx.me).has(ccId);
             if (!owned && !ALL_FIN.some((p) => permAt(ctx, p, ccId, e.units, e.scope))) throw new HttpError(403, 'You have no finance access to this cost center.');
-            const [f, chart, map, wh, pending, others] = await Promise.all([ccFinOf(ctx.orgId, ccId), chartOf(ctx.orgId, e.le.id), mappingOf(ctx.orgId, e.le.id), getDoc(`organizations/${ctx.orgId}/warehouses/${ccId}`), runQuery({ from: [{ collectionId: 'fin_requests' }], where: fieldEq('scopeKey', `cc_${ccId}`) }, `organizations/${ctx.orgId}`), listDocs(P(ctx.orgId).ccs)]);
+            const [f, chart, map, entity, wh, pending, others] = await Promise.all([ccFinOf(ctx.orgId, ccId), chartOf(ctx.orgId, e.le.id), mappingOf(ctx.orgId, e.le.id), entityOf(ctx.orgId, e.le.id), getDoc(`organizations/${ctx.orgId}/warehouses/${ccId}`), runQuery({ from: [{ collectionId: 'fin_requests' }], where: fieldEq('scopeKey', `cc_${ccId}`) }, `organizations/${ctx.orgId}`), listDocs(P(ctx.orgId).ccs)]);
             const sys = systemAccounts(map);
             const ch = chainOf(e.units, ccId);
             return {
@@ -1047,7 +1049,7 @@ export const finRoutes = {
                 statusLabel: CC_STATUS[f.status],
                 statuses: CC_STATUS,
                 allowedGl: f.allowedGl.map((c) => ({ code: c, name: chart.get(c)?.name ?? '', status: chart.get(c)?.status ?? 'missing' })),
-                choosable: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && a.statement === 'PL' && !sys.has(a.code)).map((a) => ({ code: a.code, name: a.name, classCode: a.classCode, className: a.className, categoryCode: a.categoryCode, categoryName: a.categoryName, groupCode: a.groupCode, groupName: a.groupName })),
+                choosable: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && a.statement === 'PL' && !sys.has(a.code) && (entity.doc?.data.glScopeConfigured !== true || strs(entity.doc.data.allowedGl).includes(a.code))).map((a) => ({ code: a.code, name: a.name, classCode: a.classCode, className: a.className, categoryCode: a.categoryCode, categoryName: a.categoryName, groupCode: a.groupCode, groupName: a.groupName })),
                 importFrom: others.filter((x) => str(x.data.leId) === e.le.id && x.id !== ccId && strs(x.data.allowedGl).length).map((x) => ({ id: x.id, code: e.units.get(x.id)?.code ?? x.id, name: e.units.get(x.id)?.name ?? '', count: strs(x.data.allowedGl).length })),
                 version: f.version,
                 pending: await (async () => {
@@ -1076,7 +1078,9 @@ export const finRoutes = {
                 if (leOf(e.units, fromCc)?.id !== e.le.id) throw new HttpError(400, 'Import only from a cost center of the same legal entity.');
                 allowed = Array.from(new Set([...(ctx.body.merge === true ? cur.allowedGl : []), ...(await ccFinOf(ctx.orgId, fromCc)).allowedGl]));
             }
+            const entity = await entityOf(ctx.orgId,e.le.id);
             for (const g of allowed) {
+                if (entity.doc?.data.glScopeConfigured === true && !strs(entity.doc.data.allowedGl).includes(g)) throw new HttpError(400, `${g} is not enabled for this legal entity.`);
                 const a = chart.get(g);
                 if (!a || a.status !== 'active' || !a.postable) throw new HttpError(400, `${g} is not an active account in the chart.`);
                 if (a.statement !== 'PL') throw new HttpError(400, `${g} is a balance sheet account. A cost center list holds profit and loss accounts only.`);
