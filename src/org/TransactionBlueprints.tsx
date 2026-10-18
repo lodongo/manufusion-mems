@@ -49,7 +49,7 @@ export default function TransactionBlueprints() {
       }
     }
     for(const item of items.filter(x=>x.kind==='transaction')) {
-      if(!lookup.has(item.area))lookup.set(item.area,{title:item.area==='LEG'?'Legacy permissions requiring mapping':item.area,code:item.module+'-'+item.area+'-VW',actions:[]});
+      if(!lookup.has(item.area))lookup.set(item.area,{title:item.area==='LEG'?'Existing transaction permissions':item.area,code:item.module+'-'+item.area+'-VW',actions:[]});
       lookup.get(item.area)!.actions.push(item);
     }
     return [...lookup.entries()].filter(([area,g])=>!filter||
@@ -79,7 +79,7 @@ export default function TransactionBlueprints() {
     </div>
     <div className='flex flex-wrap items-center justify-between gap-2 text-xs text-soft'>
       <span>{selected?.[1]} · {groups.length} submodules · {items.filter(x=>x.kind==='transaction').length} transaction blueprints</span>
-      <span>All entries: Reserved / legacy mapping required</span>
+      <span>Reserved definitions and existing permissions</span>
     </div>
     {loading&&<p role='status' className='text-sm text-soft'><RefreshCw className='inline mr-2 animate-spin' size={16}/>Loading module catalogue…</p>}
     {error&&<p role='alert' className='text-sm text-red-600'>{error}</p>}
@@ -96,7 +96,7 @@ export default function TransactionBlueprints() {
             {g.actions.map(a=><div key={a.code} className='flex flex-col gap-1 border-b border-[rgb(var(--c-border))] px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:gap-4'>
               <code className='min-w-0 shrink-0 text-xs font-semibold text-ink'>{a.code}</code>
               <span className='flex-1 text-sm text-ink'>{a.area==='LEG'?a.name:suffix[a.code.split('-').slice(-1)[0]??'']||a.name}</span>
-              <span className='text-xs text-soft'>{a.state==='reserved'?'Not implemented / reserved':'Legacy mapping pending'}</span>
+              <span className='text-xs text-soft'>{a.state==='reserved'?'Not implemented / reserved':'Existing permission · verification pending'}</span>
             </div>)}
             {!g.actions.length&&<p className='px-4 py-3 text-sm text-soft'>Submodule access reserved; no actions catalogued.</p>}
           </div>}
