@@ -1,12 +1,13 @@
 import {useMemo,useState} from 'react';
 import {Button} from '../admin/kit';
+import {go} from './finKit';
 export type GranularVariant={
  id:string;code:string;name:string;classCode:string;className:string;
  categoryCode:string;categoryName:string;groupCode:string;groupName:string;
  scenario:string;event:string;role:string;accountCode:string;accountName:string;
  status:'configurable'|'template_only';reason:string;
 };
-export default function FinGranularTransactionCatalog({variants,onConfigure,accountRules}:{variants:GranularVariant[];onConfigure:(v:GranularVariant)=>void;accountRules:Array<{event:string;role:string;account:string;enabled:boolean}>}){
+export default function FinGranularTransactionCatalog({variants,onConfigure,accountRules,contracts=[]}:{variants:GranularVariant[];onConfigure:(v:GranularVariant)=>void;accountRules:Array<{event:string;role:string;account:string;enabled:boolean}>;contracts?:Array<{id:string;module:string;submodule:string;state:string;handlerId:string}>}){
  const [query,setQuery]=useState('');
  const [classCode,setClassCode]=useState('');
  const [categoryCode,setCategoryCode]=useState('');
@@ -59,10 +60,14 @@ export default function FinGranularTransactionCatalog({variants,onConfigure,acco
       <p className='mt-1 text-sm font-semibold text-ink'>{v.scenario}</p>
       <p className='text-sm text-soft'>{v.accountCode} · {v.accountName}</p>
       <p className='text-xs text-muted'>{v.className} / {v.categoryName} / {v.groupName}</p>
+      {(()=>{const c=contracts.find(x=>x.id===v.id);return c?<div className='mt-1 flex flex-wrap items-center gap-2 text-xs text-muted'>
+        <span>Handler: {c.module} / {c.submodule}</span>
+        <button type='button' className='text-brand underline' onClick={()=>go('fin_transactions/'+c.module)}>Open module handler</button>
+      </div>:null;})()}
       {v.status==='configurable'?<div className='mt-2 flex flex-wrap items-center justify-between gap-2'>
         <span className='text-xs text-muted'>{applied(v)?'Has a matching approved/draft rule':'Available to map'}</span>
         <Button variant='secondary' onClick={()=>onConfigure(v)}>Configure this transaction</Button>
-      </div>:<p className='mt-2 text-xs text-amber-300'>{v.reason}</p>}
+      </div>:<p className='mt-2 text-xs text-amber-300'>Placeholder handler registered in its owning module. Posting is blocked until the operational workflow is implemented.</p>}
     </div>)}
     {!shown.length&&<p className='p-3 text-sm text-muted'>No matching GL transaction scenarios. Change the filters to see more.</p>}
     {shown.length>visible&&<Button variant='secondary' onClick={()=>setVisible(n=>n+60)}>Show 60 more ({shown.length-visible} remaining)</Button>}
