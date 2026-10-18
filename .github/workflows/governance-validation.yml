@@ -6,6 +6,8 @@ on:
     paths:
       - 'scripts/future-route-check.mjs'
       - 'tests/independent/future-route-check.test.mjs'
+      - 'backend/governancePolicyRoutes.ts'
+      - 'src/org/GovernancePolicyAdmin.tsx'
       - 'backend/unifiedApprovalRoutes.ts'
       - 'backend/unifiedApprovalProof.ts'
       - 'backend/unifiedApprovalProof.test.ts'
