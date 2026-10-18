@@ -26,6 +26,7 @@ export default function RoleCoreSkills({
     const [search, setSearch] = useState('');
     const [sourceCode, setSourceCode] = useState('');
     const [parentSearch, setParentSearch] = useState('');
+    const [parentExpanded,setParentExpanded] = useState(false);
 
     const all = data?.skills ?? [];
     const availableCodes = new Set(all.map((x) => x.code));
@@ -48,7 +49,7 @@ export default function RoleCoreSkills({
         onChange(selectedCodes.has(code) ? value.filter((x) => x !== code) : adoptSkillCodes(value, [code], availableCodes));
 
     return (
-        <fieldset className='space-y-4 rounded-xl border border-line bg-panel p-3'>
+        <fieldset className='min-w-0 max-w-full space-y-3 overflow-hidden rounded-xl border border-line bg-panel p-3'>
             <legend className='px-1 text-sm font-semibold text-ink'>Core skills (optional · {value.length} selected)</legend>
             <p className='text-xs text-soft'>Skills are optional. Add as many as required, or leave the role without skills. Skill selection does not assign security permissions.</p>
             {error && <div className='space-y-2'><Alert tone='error'>{error}</Alert>
@@ -58,10 +59,12 @@ export default function RoleCoreSkills({
             {data && !data.ready && <Alert tone='warn'>Load the HRM Skills Master to select new skills. Roles can still be saved without skills.</Alert>}
 
             {sources.length > 0 && (
-                <div className='space-y-3 rounded-xl border border-line bg-page p-3'>
-                    <div className='flex items-start gap-2'>
+                <div className='min-w-0 max-w-full space-y-3 overflow-hidden rounded-xl border border-line bg-page p-3'>
+                    <button type='button' className='flex w-full min-w-0 items-center justify-between gap-2 text-left text-sm font-semibold text-ink' aria-expanded={parentExpanded} onClick={()=>setParentExpanded(x=>!x)}><span className='min-w-0 truncate'>Adopt from reporting role</span><span className='shrink-0 text-brand'>{parentExpanded?'Hide':'Show'}</span></button>
+                    {parentExpanded && <div className='min-w-0 space-y-3'>
+                    <div className='flex min-w-0 items-start gap-2'>
                         <GitBranch className='mt-0.5 h-5 w-5 shrink-0 text-brand' />
-                        <div>
+                        <div className='min-w-0'>
                             <p className='text-sm font-semibold text-ink'>Adopt skills from a parent role</p>
                             <p className='text-xs text-soft'>Select a reporting role and adopt all or individual skills. Copies are saved to this role and can be changed independently later.</p>
                         </div>
@@ -80,12 +83,12 @@ export default function RoleCoreSkills({
                     {adoptable.length > 0 && <>
                         <Field id='source-skill-search' label='Search parent role skills' type='search' value={parentSearch}
                             onChange={(e) => setParentSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()} />
-                        <ul aria-label='Skills available from the parent role' className='max-h-64 space-y-1 overflow-y-auto overscroll-contain'>
+                        <ul aria-label='Skills available from the parent role' className='min-w-0 max-w-full max-h-64 space-y-1 overflow-y-auto overscroll-contain'>
                             {parentChoices.map((code) => <li key={code}>
-                                <label className='flex min-h-12 items-start gap-3 rounded-lg border border-line p-3 text-sm text-ink active:bg-panel'>
+                                <label className='flex min-w-0 max-w-full min-h-12 items-start gap-3 rounded-lg border border-line p-3 text-sm text-ink active:bg-panel'>
                                     <input type='checkbox' className='mt-0.5 h-5 w-5 shrink-0 accent-brand' checked={selectedCodes.has(code)} onChange={() => toggle(code)} />
-                                    <span className='min-w-0 flex-1'>
-                                        <span className='block font-semibold'>{nameOf(code)}</span>
+                                    <span className='min-w-0 flex-1 break-words'>
+                                        <span className='block break-words font-semibold'>{nameOf(code)}</span>
                                         <span className='text-xs text-soft'>{byCode.get(code)?.category} · {byCode.get(code)?.subcategory}</span>
                                     </span>
                                 </label>
@@ -94,13 +97,14 @@ export default function RoleCoreSkills({
                         </ul>
                     </>}
                     {!inherited.length && <p className='text-xs text-soft'>This reporting role does not have any skills assigned yet. Select an ancestor or add skills manually below.</p>}
+                    </div>}
                 </div>
             )}
 
             {value.length > 0 ? (
                 <div className='space-y-2'>
-                    <p className='text-sm font-medium text-ink'>Skills currently assigned to this role ({value.length})</p>
-                    <ul aria-label='Selected core skills' className='max-h-72 space-y-1 overflow-y-auto overscroll-contain'>
+                    <p className='break-words text-sm font-medium text-ink'>Selected skills ({value.length})</p>
+                    <ul aria-label='Selected core skills' className='min-w-0 max-w-full max-h-72 space-y-1 overflow-y-auto overscroll-contain'>
                         {value.map((code) => <li key={code} className='flex min-h-12 items-center gap-2 rounded-lg border border-line bg-page pl-3 text-sm text-ink'>
                             <span className='min-w-0 flex-1 break-words'>{nameOf(code)}</span>
                             <button type='button' onClick={() => toggle(code)}
@@ -113,7 +117,7 @@ export default function RoleCoreSkills({
                 </div>
             ) : <p className='text-xs text-soft'>No skills selected. You may save this role now or add skills below.</p>}
 
-            {data && <div className='grid gap-3 sm:grid-cols-2'>
+            {data && <div className='grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2'>
                 <SelectField id='core-skill-cat' label='Add skills — category' value={cat}
                     onChange={(e) => { setCat(e.target.value); setSub(''); }}>
                     <option value=''>Select category</option>
@@ -131,11 +135,11 @@ export default function RoleCoreSkills({
                 {options.length === 0 ? <p className='text-sm text-soft'>No matching skills.</p> :
                     <ul aria-label='Available skills' className='max-h-72 space-y-1 overflow-y-auto overscroll-contain'>
                         {options.map((x) => <li key={x.code}>
-                            <label className='flex min-h-12 items-start gap-3 rounded-lg border border-line p-3 text-ink active:bg-page'>
+                            <label className='flex min-w-0 max-w-full min-h-12 items-start gap-3 rounded-lg border border-line p-3 text-ink active:bg-page'>
                                 <input type='checkbox' className='mt-0.5 h-5 w-5 shrink-0 accent-brand'
                                     checked={selectedCodes.has(x.code)} onChange={() => toggle(x.code)} />
-                                <span className='min-w-0'>
-                                    <span className='block text-sm font-semibold'>{x.label}</span>
+                                <span className='min-w-0 flex-1 break-words'>
+                                    <span className='block break-words text-sm font-semibold'>{x.label}</span>
                                     {x.description && <span className='block text-xs text-soft'>{x.description}</span>}
                                 </span>
                             </label>
