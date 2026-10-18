@@ -10,8 +10,8 @@ type Proposal={
 const modules=['ADM','AST','FIN','INV','MNT','PRC','WHS','SAF','QLT','HRM','PAY','MFG','LOG','DST','SAL','CRM','POS','PRJ','DOC','RPT','PLN','CST'];
 
 /** This UI never grants rights: proposal and independent approval are separate APIs. */
-export default function GovernancePolicyAdmin(){
-  const [module,setModule]=useState('MNT');
+export default function GovernancePolicyAdmin({initialModule='MNT'}:{initialModule?:string}){
+  const [module,setModule]=useState(initialModule);
   const [endpoints,setEndpoints]=useState<Endpoint[]>([]);
   const [loadingEndpoints,setLoadingEndpoints]=useState(false);
   const [code,setCode]=useState('');
