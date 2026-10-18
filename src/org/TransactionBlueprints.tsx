@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw, Search } from 'lucide-react';
 import { callBackend } from '../lib/backend';
+import SelectField from '../components/SearchableSelect';
 
 interface Blueprint {
   code: string;
@@ -60,6 +61,7 @@ export default function TransactionBlueprints() {
       g.actions.filter(a=>(a.code+' '+a.name+' '+a.legacyPermissionKeys.join(' ')).toLowerCase().includes(filter)):g.actions}));
   },[items,search]);
   const selected=MODULES.find(x=>x[0]===module);
+  const proposedByCode=useMemo(()=>new Map(existingPermissions.filter(x=>x.suggestedCode).map(x=>[x.suggestedCode!,x])),[existingPermissions]);
   const expand=(area:string)=>setExpanded(old=>old.includes(area)?old.filter(x=>x!==area):[...old,area]);
   return <section className='space-y-4'>
     <div>
@@ -67,11 +69,9 @@ export default function TransactionBlueprints() {
       <p className='text-sm text-soft'>Browse by module, submodule and SAP-inspired Manufusion transaction code. All blueprints are read-only and non-executable until independently implemented and verified.</p>
     </div>
     <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
-      <label className='text-sm font-medium text-ink'>Module
-        <select value={module} onChange={e=>setModule(e.target.value)} className='mt-1 w-full rounded-lg border border-[rgb(var(--c-border))] bg-transparent p-3 text-base'>
-          {MODULES.map(([code,name])=><option key={code} value={code}>{code} — {name}</option>)}
-        </select>
-      </label>
+      <SelectField id='transaction-catalogue-module' label='Module' value={module} onChange={e=>setModule(e.target.value)}>
+        {MODULES.map(([code,name])=><option key={code} value={code}>{code} — {name}</option>)}
+      </SelectField>
       <label className='text-sm font-medium text-ink'>Search this module
         <span className='relative mt-1 block'><Search size={16} className='absolute left-3 top-3.5 text-soft'/>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder='Code, submodule or transaction' className='w-full rounded-lg border border-[rgb(var(--c-border))] bg-transparent py-3 pl-10 pr-3 text-base'/>
@@ -80,7 +80,7 @@ export default function TransactionBlueprints() {
     </div>
     <div className='flex flex-wrap items-center justify-between gap-2 text-xs text-soft'>
       <span>{selected?.[1]} · {groups.length} submodules · {items.filter(x=>x.kind==='transaction').length} transaction blueprints</span>
-      <span>Reserved definitions and existing permissions</span>
+      <span>Existing permission matches are provisional until route verification</span>
     </div>
     {loading&&<p role='status' className='text-sm text-soft'><RefreshCw className='inline mr-2 animate-spin' size={16}/>Loading module catalogue…</p>}
     {error&&<p role='alert' className='text-sm text-red-600'>{error}</p>}
@@ -102,7 +102,7 @@ export default function TransactionBlueprints() {
             {g.actions.map(a=><div key={a.code} className='flex flex-col gap-1 border-b border-[rgb(var(--c-border))] px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:gap-4'>
               <code className='min-w-0 shrink-0 text-xs font-semibold text-ink'>{a.code}</code>
               <span className='flex-1 text-sm text-ink'>{a.area==='LEG'?a.name:suffix[a.code.split('-').slice(-1)[0]??'']||a.name}</span>
-              <span className='text-xs text-soft'>{a.state==='reserved'?'Not implemented / reserved':'Existing permission · verification pending'}</span>
+              <span className='text-xs text-soft'>{proposedByCode.has(a.code)?'Existing permission match · verification pending':a.state==='reserved'?'Planned action · not verified':'Existing permission · verification pending'}</span>
             </div>)}
             {!g.actions.length&&<p className='px-4 py-3 text-sm text-soft'>Submodule access reserved; no actions catalogued.</p>}
           </div>}
