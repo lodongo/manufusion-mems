@@ -267,6 +267,9 @@ export const CAL_TYPES = [
     { code: '454', label: '4-5-4 weeks (12 periods)', weeks: [4, 5, 4], note: 'Each quarter has periods of 4, 5 and 4 weeks (retail, NRF).' },
     { code: '544', label: '5-4-4 weeks (12 periods)', weeks: [5, 4, 4], note: 'Each quarter has periods of 5, 4 and 4 weeks.' },
     { code: '13x4', label: '13 periods of 4 weeks', weeks: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4], note: 'Thirteen equal periods of four weeks.' },
+    { code: 'weekly', label: 'Weekly (52 or 53 periods)', weeks: Array(52).fill(1) as number[], note: 'Each period is one complete financial week; a 53rd week forms its own period.' },
+    { code: 'quarterly', label: 'Quarterly (four 13-week periods)', weeks: [13, 13, 13, 13], note: 'Each period is a full 13-week quarter, with the possible 53rd week added as configured.' },
+    { code: 'custom', label: 'Custom week pattern', weeks: [52], note: 'Specify positive whole weeks per accounting period, totaling 52. A 53rd week follows the chosen allocation rule.' },
 ];
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -281,8 +284,10 @@ export interface Settings {
     yearStartMonth: number;
     yearNaming: 'start' | 'end';
     weekEndDay: number;
-    yearEndRule: 'last' | 'nearest';
+    yearEndRule: 'last' | 'nearest' | 'on_or_after';
     specialPeriods: number;
+    extraWeekPeriod: number;
+    customWeeks: number[];
     authority: Band[];
 }
 export const DEFAULT_SETTINGS: Settings = {
@@ -292,6 +297,8 @@ export const DEFAULT_SETTINGS: Settings = {
     weekEndDay: 6,
     yearEndRule: 'nearest',
     specialPeriods: 1,
+    extraWeekPeriod: 0,
+    customWeeks: [4,4,5,4,4,5,4,4,5,4,4,5],
     authority: [
         { from: 0, to: 100_000, levels: ['L1'] },
         { from: 100_000, to: 1_000_000, levels: ['L1', 'L2'] },
@@ -310,9 +317,15 @@ export function readSettings(raw: unknown): Settings {
     const wd = Number(s.weekEndDay);
     if (!Number.isInteger(wd) || wd < 0 || wd > 6) throw new HttpError(400, 'Choose the last day of the week.');
     const rule = str(s.yearEndRule);
-    if (!['last', 'nearest'].includes(rule)) throw new HttpError(400, 'Choose how the year end is fixed.');
+    if (!['last', 'nearest', 'on_or_after'].includes(rule)) throw new HttpError(400, 'Choose how the year end is fixed.');
     const sp = Number(s.specialPeriods);
     if (![0, 1].includes(sp)) throw new HttpError(400, 'Choose 0 or 1 year-end adjustment period.');
+    const customWeeks = s.customWeeks === undefined ? DEFAULT_SETTINGS.customWeeks : (Array.isArray(s.customWeeks) ? s.customWeeks.map(Number) : []);
+    if (!customWeeks.length || customWeeks.length > 52 || customWeeks.some(n=>!Number.isInteger(n)||n<1||n>52) || customWeeks.reduce((sum,n)=>sum+n,0)!==52)
+        throw new HttpError(400, 'Custom accounting periods must contain positive whole weeks totaling exactly 52.');
+    const totalPeriods = ct === '13x4' ? 13 : ct === 'weekly' ? 53 : ct === 'quarterly' ? 4 : ct === 'custom' ? customWeeks.length : 12;
+    const extraWeekPeriod = s.extraWeekPeriod === undefined ? 0 : Number(s.extraWeekPeriod);
+    if (!Number.isInteger(extraWeekPeriod) || extraWeekPeriod < 0 || extraWeekPeriod > totalPeriods) throw new HttpError(400, 'Choose which period receives a 53rd week, or leave automatic.');
     const bands = objs(s.authority).map((b, i): Band => {
         const from = Number(b.from);
         const to = b.to === null || b.to === undefined || b.to === '' ? null : Number(b.to);
@@ -329,7 +342,7 @@ export function readSettings(raw: unknown): Settings {
         if (i === bands.length - 1 && b.to !== null) throw new HttpError(400, 'The last approval band must have no upper limit.');
         if (i > 0 && b.levels.length < bands[i - 1].levels.length) throw new HttpError(400, `Approval band ${i + 1}: a higher amount cannot need fewer approvers.`);
     });
-    return { calendarType: ct, yearStartMonth: m, yearNaming: naming as Settings['yearNaming'], weekEndDay: wd, yearEndRule: rule as Settings['yearEndRule'], specialPeriods: sp, authority: bands };
+    return { calendarType: ct, yearStartMonth: m, yearNaming: naming as Settings['yearNaming'], weekEndDay: wd, yearEndRule: rule as Settings['yearEndRule'], specialPeriods: sp, extraWeekPeriod, customWeeks, authority: bands };
 }
 
 export interface Period {
@@ -355,7 +368,7 @@ function weekYearEnd(fy: number, s: Settings): number {
     const last = utc(endYear, endMonth + 1, 0);
     const back = (new Date(last).getUTCDay() - s.weekEndDay + 7) % 7;
     let d = last - back * DAY;
-    if (s.yearEndRule === 'nearest' && back >= 4) d += 7 * DAY;
+    if ((s.yearEndRule === 'nearest' && back >= 4) || (s.yearEndRule === 'on_or_after' && back > 0)) d += 7 * DAY;
     return d;
 }
 
@@ -384,8 +397,12 @@ export function buildYear(fy: number, s: Settings, prevEnd: string | null): { st
         const days = Math.round((end - start) / DAY) + 1;
         totalWeeks = days / 7;
         if (!Number.isInteger(totalWeeks) || totalWeeks < 52 || totalWeeks > 53) throw new HttpError(409, `Financial year ${fy} would run ${days} days from ${isoOf(start)} to ${isoOf(end)}. A week-based year must be 52 or 53 whole weeks; check the week-end day and year-end rule against the earlier years.`);
-        const pattern = type.weeks.length === 13 ? type.weeks.slice() : [0, 1, 2, 3].flatMap(() => type.weeks!);
-        if (totalWeeks === 53) pattern[pattern.length - 1] += 1;
+        const pattern = s.calendarType==='custom' ? s.customWeeks.slice() : type.weeks.length === 3 ? [0, 1, 2, 3].flatMap(() => type.weeks!) : type.weeks.slice();
+        if (totalWeeks === 53) {
+            const desired = s.extraWeekPeriod || pattern.length;
+            if (s.calendarType === 'weekly') pattern.push(1);
+            else pattern[desired - 1] += 1;
+        }
         let cur = start;
         let wk = 1;
         pattern.forEach((w, i) => {
@@ -601,10 +618,10 @@ export async function choosableAccounts(orgId: string, ccId: string): Promise<{ 
     const le = leOf(units, ccId);
     if (!le) throw new HttpError(409, 'The cost center is not under a legal entity.');
     await syncDefaultChart(orgId, le.id);
-    const [chart, map, fin] = await Promise.all([chartOf(orgId, le.id), mappingOf(orgId, le.id), ccFinOf(orgId, ccId)]);
+    const [chart, map, fin, entity] = await Promise.all([chartOf(orgId, le.id), mappingOf(orgId, le.id), ccFinOf(orgId, ccId), entityOf(orgId, le.id)]);
     const sys = systemAccounts(map);
     const allowed = new Set(fin.allowedGl);
-    const accounts = Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && !sys.has(a.code) && (!allowed.size || a.statement === 'BS' || allowed.has(a.code)));
+    const accounts = Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && !sys.has(a.code) && (entity.doc?.data.glScopeConfigured !== true || strs(entity.doc.data.allowedGl).includes(a.code)) && (!allowed.size || a.statement === 'BS' || allowed.has(a.code)));
     return { le, accounts: accounts.sort((a, b) => a.code.localeCompare(b.code)) };
 }
 /** Throws with a plain reason unless the GL account may be used on this cost center. */
@@ -745,6 +762,7 @@ async function postOnce(ctx: OrgContext, input: PostInput, keyId: string): Promi
         const acc = chart.get(l.glCode);
         if (!acc) throw new HttpError(409, `GL account ${l.glCode} is not in the approved chart of accounts of ${le.code}.`);
         if (acc.status !== 'active') throw new HttpError(409, `GL account ${acc.code} ${acc.name} is ${acc.status} in ${le.code}.`);
+        if (entity.doc?.data.glScopeConfigured === true && !strs(entity.doc.data.allowedGl).includes(acc.code)) throw new HttpError(409, `GL account ${acc.code} is not included in the approved account selection for ${le.code}.`);
         if (!acc.postable) throw new HttpError(409, `GL account ${acc.code} ${acc.name} is a heading and cannot take postings.`);
         let ccCode = '';
         let ccName = '';

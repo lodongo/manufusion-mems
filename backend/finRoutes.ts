@@ -1,4 +1,4 @@
-import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, writeDoc, type Fields } from './core';
+import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, updateFields, writeDoc, type Fields } from './core';
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, orgUsers, record } from './org';
 import { ROLE_TEMPLATES } from './permissionPolicy';
@@ -519,7 +519,9 @@ registerHandler('cc.config', {
         if (!CC_STATUS[status]) throw new HttpError(400, 'Unknown cost center status.');
         const chart = await chartOf(ctx.orgId, leId);
         const allowed = strs(p.allowedGl);
+        const entity=await entityOf(ctx.orgId,leId);
         for (const g of allowed) {
+            if(entity.doc?.data.glScopeConfigured===true && !strs(entity.doc.data.allowedGl).includes(g)) throw new HttpError(409,`${g} is no longer approved for the legal entity.`);
             const a = chart.get(g);
             if (!a || a.status !== 'active' || !a.postable) throw new HttpError(409, `${g} is not an active account in the chart.`);
         }
@@ -528,6 +530,43 @@ registerHandler('cc.config', {
         await writeDoc(P(ctx.orgId).cc(ccId), { leId, ccId, status, allowedGl: allowed, importedFrom: str(p.importedFrom), version, approvedBy: ctx.uid, approvedAt: nowIso(), proposedBy: str(req.makerUid) });
         return { version };
     },
+});
+
+registerHandler('coa.scope', {
+    label: 'Legal entity approved GL account scope',
+    approvePerm: 'FIN.gl.approve',
+    apply: async (ctx, req) => {
+        const leId = str(req.leId);
+        const codes = Array.from(new Set(strs(o(req.payload).codes)));
+        const [chart, map, old, ccs] = await Promise.all([
+            chartOf(ctx.orgId,leId), mappingOf(ctx.orgId,leId),
+            getDoc(P(ctx.orgId).entity(leId)),listDocs(P(ctx.orgId).ccs)
+        ]);
+        if (!codes.length) throw new HttpError(409,'At least one account must remain enabled.');
+        for (const code of codes) {
+            const a=chart.get(code);
+            if(!a || a.status!=='active' || !a.postable) throw new HttpError(409,`GL account ${code} is no longer eligible.`);
+        }
+        const chosen=new Set(codes);
+        const core=await coreAccounts(ctx.orgId,leId,chart,map);
+        for(const code of core.keys()) {
+            if(chart.get(code)?.status==='active' && chart.get(code)?.postable && !chosen.has(code))
+                throw new HttpError(409,`Core account ${code} is required by finance configuration and cannot be excluded.`);
+        }
+        for(const cc of ccs) {
+            if(str(cc.data.leId)!==leId) continue;
+            for(const code of strs(cc.data.allowedGl)) if(!chosen.has(code))
+                throw new HttpError(409,`GL account ${code} remains approved on cost center ${cc.id}. Change that cost center first.`);
+        }
+        const at=nowIso();
+        await updateFields(P(ctx.orgId).entity(leId),{
+            leId,allowedGl:codes,glScopeConfigured:true,
+            glScopeVersion:(Number(old?.data.glScopeVersion)||0)+1,
+            glScopeApprovedAt:at,glScopeApprovedBy:ctx.uid,
+            glScopeProposedBy:str(req.makerUid),updatedAt:at
+        });
+        return {enabled:codes.length};
+    }
 });
 
 // ===== Routes =====
@@ -722,6 +761,62 @@ export const finRoutes = {
 
     // ----- Chart of accounts -----
 
+    'POST /api/org/fin/chart/scope/get': [
+        fin('org.fin.chart.scope.get',async ctx=>{
+            const e=await env(ctx,ctx.body.leId);
+            needView(ctx,e);
+            const [entity,chart,pending]=await Promise.all([
+                getDoc(P(ctx.orgId).entity(e.le.id)),chartOf(ctx.orgId,e.le.id),
+                pendingFor(ctx,e.le.id,['coa.scope'])
+            ]);
+            const eligible=Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable);
+            const configured=entity?.data.glScopeConfigured===true;
+            const selected=configured?new Set(strs(entity?.data.allowedGl)):new Set(eligible.map(a=>a.code));
+            return {
+                configured,selected:[...selected],eligible:eligible.map(a=>({
+                    code:a.code,name:a.name,classCode:a.classCode,className:a.className,
+                    categoryCode:a.categoryCode,categoryName:a.categoryName,
+                    groupCode:a.groupCode,groupName:a.groupName
+                })),version:Number(entity?.data.glScopeVersion)||0,pending,can:flags(ctx,e)
+            };
+        }),
+    ],
+    'POST /api/org/fin/chart/scope/propose': [
+        fin('org.fin.chart.scope.propose',async ctx=>{
+            const e=await env(ctx,ctx.body.leId);
+            need(ctx,e,'FIN.gl.manage','Selecting legal entity GL accounts');
+            const chart=await chartOf(ctx.orgId,e.le.id);
+            let codes=Array.from(new Set(strs(ctx.body.codes)));
+            const fromLe=str(ctx.body.fromLeId);
+            if(fromLe){
+                needEntity(e.units,e.scope,fromLe);
+                if(fromLe===e.le.id) throw new HttpError(400,'Choose another legal entity to copy.');
+                const source=await getDoc(P(ctx.orgId).entity(fromLe));
+                const other=await chartOf(ctx.orgId,fromLe);
+                codes=source?.data.glScopeConfigured===true?strs(source.data.allowedGl):
+                    Array.from(other.values()).filter(a=>a.status==='active'&&a.postable).map(a=>a.code);
+            }
+            if(codes.length>5000) throw new HttpError(400,'Select no more than 5000 accounts.');
+            const valid=new Set(Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable).map(a=>a.code));
+            const invalid=codes.filter(code=>!valid.has(code));
+            if(invalid.length)throw new HttpError(400,`Not eligible in this entity: ${invalid.slice(0,10).join(', ')}`);
+            if(!codes.length)throw new HttpError(400,'Select at least one account.');
+            const core=await coreAccounts(ctx.orgId,e.le.id,chart,await mappingOf(ctx.orgId,e.le.id));
+            const chosen=new Set(codes);
+            for(const code of core.keys())if(valid.has(code)&&!chosen.has(code))
+                throw new HttpError(409,`Required finance mapping account ${code} cannot be excluded.`);
+            const ccs=await listDocs(P(ctx.orgId).ccs);
+            for(const cc of ccs)if(str(cc.data.leId)===e.le.id)for(const code of strs(cc.data.allowedGl))
+                if(!chosen.has(code))throw new HttpError(409,`Account ${code} is used by cost center ${cc.id}. Amend it first.`);
+            return createRequest(ctx,{
+                leId:e.le.id,type:'coa.scope',
+                title:`${e.le.code}: approve ${codes.length} GL accounts`,
+                summary:`Enable ${codes.length} posting-level accounts for this legal entity.`,
+                payload:{codes,fromLeId:fromLe},reason:reasonOf(ctx.body),
+                scopeKey:`coa_scope_${e.le.id}`
+            });
+        }),
+    ],
     'POST /api/org/fin/chart/list': [
         fin('org.fin.chart.list', async (ctx) => {
             const e = await env(ctx, ctx.body.leId);
@@ -944,7 +1039,7 @@ export const finRoutes = {
             if (!cc || cc.level !== 'cost_center' || leOf(e.units, ccId)?.id !== e.le.id) throw new HttpError(404, 'Cost center not found in this legal entity.');
             const owned = ownedCostCenters(e.units, ctx.me).has(ccId);
             if (!owned && !ALL_FIN.some((p) => permAt(ctx, p, ccId, e.units, e.scope))) throw new HttpError(403, 'You have no finance access to this cost center.');
-            const [f, chart, map, wh, pending, others] = await Promise.all([ccFinOf(ctx.orgId, ccId), chartOf(ctx.orgId, e.le.id), mappingOf(ctx.orgId, e.le.id), getDoc(`organizations/${ctx.orgId}/warehouses/${ccId}`), runQuery({ from: [{ collectionId: 'fin_requests' }], where: fieldEq('scopeKey', `cc_${ccId}`) }, `organizations/${ctx.orgId}`), listDocs(P(ctx.orgId).ccs)]);
+            const [f, chart, map, entity, wh, pending, others] = await Promise.all([ccFinOf(ctx.orgId, ccId), chartOf(ctx.orgId, e.le.id), mappingOf(ctx.orgId, e.le.id), entityOf(ctx.orgId, e.le.id), getDoc(`organizations/${ctx.orgId}/warehouses/${ccId}`), runQuery({ from: [{ collectionId: 'fin_requests' }], where: fieldEq('scopeKey', `cc_${ccId}`) }, `organizations/${ctx.orgId}`), listDocs(P(ctx.orgId).ccs)]);
             const sys = systemAccounts(map);
             const ch = chainOf(e.units, ccId);
             return {
@@ -953,7 +1048,7 @@ export const finRoutes = {
                 statusLabel: CC_STATUS[f.status],
                 statuses: CC_STATUS,
                 allowedGl: f.allowedGl.map((c) => ({ code: c, name: chart.get(c)?.name ?? '', status: chart.get(c)?.status ?? 'missing' })),
-                choosable: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && a.statement === 'PL' && !sys.has(a.code)).map((a) => ({ code: a.code, name: a.name })),
+                choosable: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && a.statement === 'PL' && !sys.has(a.code) && (entity.doc?.data.glScopeConfigured !== true || strs(entity.doc.data.allowedGl).includes(a.code))).map((a) => ({ code: a.code, name: a.name, classCode: a.classCode, className: a.className, categoryCode: a.categoryCode, categoryName: a.categoryName, groupCode: a.groupCode, groupName: a.groupName })),
                 importFrom: others.filter((x) => str(x.data.leId) === e.le.id && x.id !== ccId && strs(x.data.allowedGl).length).map((x) => ({ id: x.id, code: e.units.get(x.id)?.code ?? x.id, name: e.units.get(x.id)?.name ?? '', count: strs(x.data.allowedGl).length })),
                 version: f.version,
                 pending: await (async () => {
@@ -982,7 +1077,9 @@ export const finRoutes = {
                 if (leOf(e.units, fromCc)?.id !== e.le.id) throw new HttpError(400, 'Import only from a cost center of the same legal entity.');
                 allowed = Array.from(new Set([...(ctx.body.merge === true ? cur.allowedGl : []), ...(await ccFinOf(ctx.orgId, fromCc)).allowedGl]));
             }
+            const entity = await entityOf(ctx.orgId,e.le.id);
             for (const g of allowed) {
+                if (entity.doc?.data.glScopeConfigured === true && !strs(entity.doc.data.allowedGl).includes(g)) throw new HttpError(400, `${g} is not enabled for this legal entity.`);
                 const a = chart.get(g);
                 if (!a || a.status !== 'active' || !a.postable) throw new HttpError(400, `${g} is not an active account in the chart.`);
                 if (a.statement !== 'PL') throw new HttpError(400, `${g} is a balance sheet account. A cost center list holds profit and loss accounts only.`);

@@ -19,8 +19,10 @@ interface Settings {
     yearStartMonth: number;
     yearNaming: 'start' | 'end';
     weekEndDay: number;
-    yearEndRule: 'last' | 'nearest';
+    yearEndRule: 'last' | 'nearest' | 'on_or_after';
     specialPeriods: number;
+    extraWeekPeriod: number;
+    customWeeks: number[];
     authority: Array<{ from: number; to: number | null; levels: string[] }>;
 }
 interface SetupData {
@@ -47,10 +49,15 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 function Body({ le, onEntityChange, section }: { le: Entity; onEntityChange: () => void; section: Exclude<Section, 'roles'> }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<SetupData>(`${FIN_API}/setup/get`, { leId: le.id }), [le.id]);
     const [s, setS] = useState<Settings | null>(null);
+    const [customText,setCustomText] = useState('');
     const [msg, setMsg] = useState('');
     const confirm = useConfirm();
     useEffect(() => {
-        if (data) setS(JSON.parse(JSON.stringify(data.settings ?? data.defaults)) as Settings);
+        if (data) {
+            const saved=JSON.parse(JSON.stringify(data.settings ?? data.defaults)) as Settings;
+            setS(saved);
+            setCustomText((saved.customWeeks??[4,4,5,4,4,5,4,4,5,4,4,5]).join(', '));
+        }
     }, [data]);
     if (loading && !data) return <Spinner />;
     if (error || !data || !s) return <Alert tone='error'>{error || 'Could not load the setup.'}</Alert>;
@@ -62,6 +69,9 @@ function Body({ le, onEntityChange, section }: { le: Entity; onEntityChange: () 
     const bands = s.authority;
     const setBand = (i: number, p: Partial<Settings['authority'][number]>) => set({ authority: bands.map((b, k) => (k === i ? { ...b, ...p } : k === i + 1 && p.to !== undefined ? { ...b, from: p.to ?? b.from } : b)) });
     const problems: string[] = [];
+    const customParts=customText.split(',').map(x=>Number(x.trim()));
+    const customValid=customParts.length>0&&customParts.length<=52&&customParts.every(n=>Number.isInteger(n)&&n>0&&n<=52)&&customParts.reduce((sum,n)=>sum+n,0)===52;
+    if(s.calendarType==='custom'&&!customValid)problems.push('Custom period weeks must be positive whole numbers totaling 52.');
     bands.forEach((b, i) => {
         if (!b.levels.length) problems.push(`Band ${i + 1} needs at least one approval level.`);
         if (i < bands.length - 1 && (b.to === null || b.to <= b.from)) problems.push(`Band ${i + 1} must end above where it starts.`);
@@ -164,16 +174,36 @@ function Body({ le, onEntityChange, section }: { le: Entity; onEntityChange: () 
                             </SelectField>
                             <SelectField id='fs-rule' label='The year ends on' value={s.yearEndRule} disabled={!canEdit} onChange={(e) => set({ yearEndRule: e.target.value as Settings['yearEndRule'] })} hint='Nearest keeps the year end within 3 days of the month end (52/53-week year, as in ISO and the retail 4-5-4 calendar).'>
                                 <option value='nearest'>the {d.weekdays[s.weekEndDay]} nearest to the end of {MONTHS[(s.yearStartMonth + 10) % 12]}</option>
-                                <option value='last'>the last {d.weekdays[s.weekEndDay]} of {MONTHS[(s.yearStartMonth + 10) % 12]}</option>
+                                <option value='last'>the last {d.weekdays[s.weekEndDay]} on or before {MONTHS[(s.yearStartMonth + 10) % 12]} end</option>
+                                <option value='on_or_after'>the first {d.weekdays[s.weekEndDay]} on or after {MONTHS[(s.yearStartMonth + 10) % 12]} end</option>
                             </SelectField>
                         </>
+                    )}
+                    {s.calendarType === 'custom' && (
+                        <label className='block text-sm sm:col-span-2'>Custom weeks per period (comma-separated, total 52)
+                            <input value={customText} disabled={!canEdit} onChange={e=>{
+                                const value=e.target.value;
+                                setCustomText(value);
+                                const next=value.split(',').map(x=>Number(x.trim()));
+                                if(next.length>0&&next.length<=52&&next.every(n=>Number.isInteger(n)&&n>0&&n<=52)&&next.reduce((sum,n)=>sum+n,0)===52)
+                                    set({customWeeks:next,extraWeekPeriod:0});
+                            }} className='mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink'
+                                placeholder='4, 4, 5, 4, 4, 5, 4, 4, 5, 4, 4, 5'/>
+                            <span className='block text-xs text-muted'>Enter complete weeks for each accounting period. Leap days are handled by financial-year boundaries.</span>
+                        </label>
+                    )}
+                    {weekBased && s.calendarType !== 'weekly' && (
+                        <SelectField id='fs-extra-week' label='53rd week allocation' value={String(s.extraWeekPeriod ?? 0)} disabled={!canEdit} onChange={e=>set({extraWeekPeriod:Number(e.target.value)})} hint='Only used when the boundary rule generates a 53-week year. Automatic assigns the final period.'>
+                            <option value='0'>Automatic: last period</option>
+                            {Array.from({length:s.calendarType==='13x4'?13:s.calendarType==='quarterly'?4:s.calendarType==='custom'?(s.customWeeks?.length||1):12},(_,i)=><option key={i+1} value={i+1}>Period {i+1}</option>)}
+                        </SelectField>
                     )}
                     <SelectField id='fs-sp' label='Year-end adjustment period' value={String(s.specialPeriods)} disabled={!canEdit} onChange={(e) => set({ specialPeriods: Number(e.target.value) })} hint='An extra period dated on the last day of the year, used for the year-end close and audit adjustments.'>
                         <option value='1'>Yes, one adjustment period</option>
                         <option value='0'>No</option>
                     </SelectField>
                 </div>
-                {weekBased && <p className='text-xs text-muted'>A week-based year has 52 weeks, or 53 when the year-end rule needs it; the extra week goes to the last period. The dates of every period are shown before a year is initialised and must be confirmed.</p>}
+                {weekBased && <p className='text-xs text-muted'>A week-based year has 52 weeks, or 53 when the year-end rule needs it; the extra week is allocated to the configured period. The dates of every period are shown before a year is initialised and must be confirmed.</p>}
                 {d.le.fiscalYearStart && <p className='text-xs text-muted'>The legal entity record says its financial year starts: {d.le.fiscalYearStart}.</p>}
             </Card>
             )}
