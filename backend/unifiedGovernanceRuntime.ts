@@ -81,7 +81,9 @@ export async function enforceOrgTransactionGovernance(input: {
   // eligible approvers; applying business-execution approval proof to them
   // would prevent submission/decision of the proof itself.
   if(['org.governance.approvals.request','org.governance.approvals.decide',
-      'org.governance.approvals.my'].includes(input.name))return null;
+      'org.governance.approvals.my',
+      'org.governance.config.propose','org.governance.config.review',
+      'org.governance.config.list'].includes(input.name))return null;
   const config=await getDoc(RUNTIME(input.orgId));
   if(str(config?.data.mode)!=='enforce')return null;
   // A tenant-wide cutover must be independently authorized.
