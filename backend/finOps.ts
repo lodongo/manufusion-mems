@@ -194,7 +194,7 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
             } else {
                 const g = add('GR_DIRECT');
                 g.lines.push({ side: 'D', glCode: str(it.l.glCode), ccId: it.cc, amount: value, docAmount: it.docValue, description: desc, qty: it.qty });
-                g.lines.push({ side: 'C', glCode: grir, ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
+                g.lines.push({ side: 'C', glCode: grirFor('GR_DIRECT'), ccId: it.cc, amount: value, docAmount: it.docValue, description: `GR/IR ${a.poId} delivery ${a.ref}`.slice(0, 200) });
             }
         }
         if (groups.GR_STOCK) groups.GR_STOCK.stock = Array.from(stockAgg.values());
