@@ -58,8 +58,14 @@ export function quorumCount(quorum: ApprovalQuorum, eligibleCount: number): numb
 export function evaluateAuthority(rules: readonly GovernanceRule[], input: EvaluationInput): Evaluation {
   const problems: string[] = [];
   const matched: GovernanceRule[] = [];
+  const ruleIds = new Set<string>();
   for (const rule of rules) {
     if (!rule.enabled) continue;
+    if (ruleIds.has(rule.id)) {
+      problems.push('Duplicate authority rule ID: ' + rule.id);
+      continue;
+    }
+    ruleIds.add(rule.id);
     if (!rule.id || !rule.stream || !validLevel(rule.level)) {
       problems.push('Invalid authority rule configuration: ' + (rule.id || '(unnamed)'));
       continue;
@@ -101,5 +107,7 @@ export function evaluateAuthority(rules: readonly GovernanceRule[], input: Evalu
   }
   for (const rule of specialist.values()) requirements.push({ stream: rule.stream, level: rule.level, specialistKey: rule.specialistKey, quorum: { mode: 'any' } });
   if (!matched.length) problems.push('No effective authority rule matches this transaction');
+  // A specialist obligation cannot be replaced or weakened by a generic level.
+  // Exact workflow dependencies and quorum policy are validated by the workflow resolver.
   return { requirements, matchedRuleIds: matched.map(x => x.id), problems, allowed: problems.length === 0 };
 }
