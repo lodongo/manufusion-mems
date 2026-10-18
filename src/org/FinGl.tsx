@@ -365,6 +365,7 @@ interface MapData {
     mapping: { roles: Record<string, string>; byCategory: Record<string, { INVENTORY?: string; CONSUMPTION?: string }>; rules: Array<{id:string;event:string;role:string;account:string;categoryCode:string;costCenterId:string;priority:number;enabled:boolean}>;version: number };
     events: Array<{code:string;label:string;roles:string[];implemented:boolean}>;
     variants:GranularVariant[];
+    contracts:Array<{id:string;module:string;submodule:string;state:string;handlerId:string}>;
     txns: Array<{ code: string; label: string; debit: string; credit: string; live: boolean; source: string; taxes: string[] }>;
     accounts: Array<{ code: string; name: string; statement: string }>;
     categories: Array<{ code: string; name: string }>;
@@ -396,7 +397,7 @@ function Mapping({ le }: { le: Entity }) {
             {msg && <Alert tone='success'>{msg}</Alert>}
             <Pending items={data.pending} />
             {!data.accounts.length && <Alert tone='warn'>Approve accounts in the chart first; only approved accounts can be mapped.</Alert>}
-            <FinGranularTransactionCatalog variants={data.variants??[]} accountRules={activeRules} onConfigure={v=>{setPrefill(v);document.getElementById('fin-rule-config')?.scrollIntoView({behavior:'smooth',block:'start'});}} />
+            <FinGranularTransactionCatalog variants={data.variants??[]} contracts={data.contracts??[]} accountRules={activeRules} onConfigure={v=>{setPrefill(v);document.getElementById('fin-rule-config')?.scrollIntoView({behavior:'smooth',block:'start'});}} />
             <details className='rounded-xl border border-line p-3'>
               <summary className='cursor-pointer text-sm font-semibold text-ink'>Advanced: default role mappings and category fallbacks · version {data.mapping.version}</summary>
             <Card title={`Account determination · version ${data.mapping.version}`}>
