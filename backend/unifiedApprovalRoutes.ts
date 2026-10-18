@@ -13,7 +13,7 @@ import { orgRoute, hasPerm } from './guards';
 import { audit } from './audit';
 import { evaluateAuthority, quorumCount, type GovernanceRule, type ApprovalQuorum } from './governanceCore';
 import {
-  transactionPayloadHash,isStepApproved,
+  transactionPayloadHash,applyApprovalDecision,nextEligibleApprovalStep,
   type ApprovalEvidence,type ApprovalStep,type ApprovalVote,
 } from './unifiedApprovalProof';
 import { wiredTransactionInventory } from './transactionRuntime';
@@ -62,15 +62,6 @@ function readRequest(data:Record<string,unknown>):StoredRequest{
     createdAt:str(data.createdAt),updatedAt:str(data.updatedAt),
     reason:str(data.reason),policyVersion:str(data.policyVersion),
   };
-}
-function eligibleForDecision(request:StoredRequest,uid:string):ApprovalStep|null {
-  for(const step of request.steps) {
-    if(isStepApproved(step,request.votes))continue;
-    const earlier=request.steps.some(s=>s.stream===step.stream && s.level<step.level && !isStepApproved(s,request.votes));
-    if(earlier)continue;
-    if(step.eligibleUserIds.includes(uid))return step;
-  }
-  return null;
 }
 
 export const unifiedApprovalRoutes = {
@@ -145,16 +136,12 @@ export const unifiedApprovalRoutes = {
       if(request.orgId!==ctx.orgId||request.status!=='pending')
         throw new HttpError(409,'Approval request is no longer pending.');
       if(request.requestedBy===ctx.uid)throw new HttpError(403,'Creator cannot approve their own transaction.');
-      const step=eligibleForDecision(request,ctx.uid);
-      if(!step)throw new HttpError(403,'You are not the current eligible approver.');
-      if(request.votes.some(v=>v.uid===ctx.uid&&v.stream===step.stream&&v.level===step.level))
-        throw new HttpError(409,'You have already decided at this level.');
       const reason=str(ctx.body.reason).trim().slice(0,1000);
       if(decision!=='approve'&&!reason)throw new HttpError(400,'A reason is required to reject or return.');
-      const votes=[...request.votes,{uid:ctx.uid,stream:step.stream,level:step.level,
-        decision:decision as ApprovalVote['decision'],decidedAt:nowIso()}];
-      const status=decision==='reject'?'rejected':decision==='return'?'returned':
-        request.steps.every(s=>isStepApproved(s,votes))?'approved':'pending';
+      let next:ReturnType<typeof applyApprovalDecision>;
+      try{next=applyApprovalDecision(request,ctx.uid,decision as ApprovalVote['decision'],nowIso());}
+      catch{throw new HttpError(403,'You are not eligible to decide at this level.');}
+      const {votes,status,step}=next;
       const updated={...doc.data,votes,status,updatedAt:nowIso(),
         ...(reason?{decisionReason:reason}:{})};
       if(!await writeDoc(path,updated,{updateTime:doc.updateTime}))
@@ -172,7 +159,7 @@ export const unifiedApprovalRoutes = {
       return {items:records.map(r=>({
         id:r.id,code:r.code,handlerName:r.handlerName,status:r.status,
         createdAt:r.createdAt,requestedBy:r.requestedBy,
-        canDecide:r.status==='pending'&&r.requestedBy!==ctx.uid&&!!eligibleForDecision(r,ctx.uid),
+        canDecide:r.status==='pending'&&r.requestedBy!==ctx.uid&&!!nextEligibleApprovalStep(r,ctx.uid),
       })),truncated:records.length>=LIMIT};
     }),
   ],
