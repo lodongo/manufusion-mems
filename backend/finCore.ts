@@ -1,3 +1,4 @@
+import {resolveAccountRule,validateRuleDraft,type AccountRule,type DeterminationContext} from './finAccountRules';
 import { createHash } from 'crypto';
 import {
     DOCUMENT_NAME_ROOT,
@@ -565,6 +566,7 @@ export const TXN_LABEL: Record<string, string> = Object.fromEntries(TXNS.map((t)
 export interface Mapping {
     roles: Record<string, string>;
     byCategory: Record<string, { INVENTORY?: string; CONSUMPTION?: string }>;
+    rules: AccountRule[];
     version: number;
 }
 export async function mappingOf(orgId: string, leId: string): Promise<Mapping> {
@@ -573,18 +575,23 @@ export async function mappingOf(orgId: string, leId: string): Promise<Mapping> {
     for (const [k, v] of Object.entries(o(d?.data.roles))) if (str(v)) roles[k] = str(v);
     const byCategory: Mapping['byCategory'] = {};
     for (const [k, v] of Object.entries(o(d?.data.byCategory))) byCategory[k] = { INVENTORY: str(o(v).INVENTORY) || undefined, CONSUMPTION: str(o(v).CONSUMPTION) || undefined };
-    return { roles, byCategory, version: Number(d?.data.version) || 0 };
+    let rules:AccountRule[]=[];
+    try {rules=validateRuleDraft(d?.data.rules??[]);}catch {rules=[];}
+    return { roles, byCategory, rules, version: Number(d?.data.version) || 0 };
 }
 /** Accounts that only the system posts to: they can never be chosen by people on a requirement or line. */
 export function systemAccounts(m: Mapping): Set<string> {
     const s = new Set(Object.values(m.roles));
+    for (const rule of m.rules??[]) if (rule.enabled) s.add(rule.account);
     for (const v of Object.values(m.byCategory)) {
         if (v.INVENTORY) s.add(v.INVENTORY);
         if (v.CONSUMPTION) s.add(v.CONSUMPTION);
     }
     return s;
 }
-export function roleAccount(m: Mapping, role: string, categoryCode = ''): string {
+export function roleAccount(m: Mapping, role: string, categoryCode = '', context:DeterminationContext = {}): string {
+    const eventRule=resolveAccountRule(m.rules??[],role,{...context,categoryCode:context.categoryCode||categoryCode});
+    if(eventRule)return eventRule.account;
     const cat = categoryCode ? m.byCategory[categoryCode] : undefined;
     if (role === 'INVENTORY' && cat?.INVENTORY) return cat.INVENTORY;
     if ((role === 'CONSUMPTION' || role === 'MAINT_CONSUMPTION') && cat?.CONSUMPTION && !(role === 'MAINT_CONSUMPTION' && m.roles.MAINT_CONSUMPTION)) return cat.CONSUMPTION;
