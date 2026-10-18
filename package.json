@@ -11,7 +11,8 @@
     "check:web": "tsc --noEmit -p tsconfig.json",
     "check:backend": "tsc --noEmit -p tsconfig.backend.json",
     "check": "npm run check:web && npm run check:backend",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:governance": "node --import tsx --test backend/governanceCore.test.ts"
   },
   "dependencies": {
     "firebase": "^11.0.0",
