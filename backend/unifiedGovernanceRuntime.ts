@@ -76,7 +76,12 @@ export async function enforceOrgTransactionGovernance(input: {
   org:Doc;
   uid:string;
   body:Record<string,unknown>;
-}):Promise<((success:boolean)=>Promise<void>) | null> {
+ }):Promise<((success:boolean)=>Promise<void>) | null> {
+  // These three routes independently validate tenant, permission, policy and
+  // eligible approvers; applying business-execution approval proof to them
+  // would prevent submission/decision of the proof itself.
+  if(['org.governance.approvals.request','org.governance.approvals.decide',
+      'org.governance.approvals.my'].includes(input.name))return null;
   const config=await getDoc(RUNTIME(input.orgId));
   if(str(config?.data.mode)!=='enforce')return null;
   // A tenant-wide cutover must be independently authorized.
