@@ -381,11 +381,27 @@ export const orgRoutes = {
                 if (didCreate) created.push(id);
                 else skipped.push({ id, reason: 'Already adopted; preserved existing customizations.' });
             }
+            // Recommend and assign only exact-name, non-sensitive job-role matches.
+            // Approval, posting, administration and existing mappings require deliberate assignment.
+            const mappedPositions: string[] = [];
             if (created.length) {
+                const sensitive = new Set(sensitiveKeys());
+                const safeNew = [...available.values()].filter(t =>
+                    created.includes(t.id) && t.permissions.every(p => !sensitive.has(p)) &&
+                    !t.permissions.some(p => /\\.approve\\b|\\.admin\\b|\\.configure\\b/i.test(p)));
+                const byName = new Map(safeNew.map(t => [t.name.toLowerCase().trim(), t.id]));
+                for (const position of await listDocs(`organizations/${ctx.orgId}/positions`)) {
+                    const current = Array.isArray(position.data.securityRoles) ? (position.data.securityRoles as unknown[]).map(str).filter(Boolean) : [];
+                    if (current.length) continue;
+                    const roleId = byName.get(str(position.data.title).toLowerCase().trim());
+                    if (!roleId) continue;
+                    await updateFields(`organizations/${ctx.orgId}/positions/${position.id}`, { securityRoles: [roleId] });
+                    mappedPositions.push(position.id);
+                }
                 clearAccessCache(ctx.orgId);
-                await record(ctx, 'org.roles.templates.apply', 'Standard security roles', `Adopted: ${created.join(', ')}`);
+                await record(ctx, 'org.roles.templates.apply', 'Standard security roles', `Adopted: ${created.join(', ')}. Auto-mapped safe exact-title positions: ${mappedPositions.join(', ') || 'none'}`);
             }
-            return { created, skipped };
+            return { created, skipped, mappedPositions };
         }),
     ],
 
