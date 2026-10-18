@@ -5,7 +5,8 @@ import type {WiredTransaction} from './transactionRuntime';
 
 const route=(code:string,name:string,permission:string|null):WiredTransaction=>({
   method:'POST',path:'/api/org/'+name.replaceAll('.','/'),name,permission,
-  module:'MNT',area:'WOR',code,handlerWired:true,guard:'organization',activationCertified:false,
+  module:'MNT',area:'WOR',code,handlerWired:true,guard:'organization',
+  bindingStatus:'system_bound',enforcement:permission?'role_permission':'authenticated_handler',activationCertified:false,
 });
 const a=route('MNT-WOR-ABC12345','org.mnt.wo.close','MNT.WO.close');
 const binding=(r:WiredTransaction,classification:'permission_only'|'approval_required'='permission_only')=>({
