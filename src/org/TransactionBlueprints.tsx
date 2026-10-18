@@ -95,7 +95,7 @@ export default function TransactionBlueprints() {
           {open&&<div className='border-t border-[rgb(var(--c-border))]'>
             {g.actions.map(a=><div key={a.code} className='flex flex-col gap-1 border-b border-[rgb(var(--c-border))] px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:gap-4'>
               <code className='min-w-0 shrink-0 text-xs font-semibold text-ink'>{a.code}</code>
-              <span className='flex-1 text-sm text-ink'>{a.area==='LEG'?a.name:suffix[a.code.split('-').at(-1)??'']||a.name}</span>
+              <span className='flex-1 text-sm text-ink'>{a.area==='LEG'?a.name:suffix[a.code.split('-').slice(-1)[0]??'']||a.name}</span>
               <span className='text-xs text-soft'>{a.state==='reserved'?'Not implemented / reserved':'Legacy mapping pending'}</span>
             </div>)}
             {!g.actions.length&&<p className='px-4 py-3 text-sm text-soft'>Submodule access reserved; no actions catalogued.</p>}
