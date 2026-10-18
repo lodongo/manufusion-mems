@@ -50,6 +50,12 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v3
 
+      - name: Validate application before deployment
+        run: |
+          npm install --no-audit --no-fund
+          npm run check
+          npm run build
+
       - name: Build, push and deploy MEMS development service
         shell: bash
         run: |
