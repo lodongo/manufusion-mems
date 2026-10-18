@@ -28,6 +28,7 @@ import { SOD_RULES, buildCatalogue, docStatus, reviewPermissions, sensitiveKeys,
 import { adminTotals, guardedAdminChange, isOrgAdmin, MAX_ORG_ADMINS, MIN_ACTIVE_ORG_ADMINS } from './adminRoster';
 import { signedUrl } from './structure';
 import { standardRoleTemplates } from './standardRoleTemplates';
+import { fillMissingStandardRoleDocs } from './roleDocs';
 
 // ---------------------------------------------------------------------------
 // Roles and permissions model
@@ -44,7 +45,7 @@ export const ORG_SYSTEM_ROLES: Record<string, { name: string; description: strin
         permissions: ['*'],
     },
     org_user: {
-        name: 'Standard user',
+        name: 'MEMS Standard User',
         description: 'Permanent basic employee self-service access. Higher business permissions come from separately assigned roles.',
         permissions: [],
     },
@@ -401,7 +402,8 @@ export const orgRoutes = {
                 clearAccessCache(ctx.orgId);
                 await record(ctx, 'org.roles.templates.apply', 'Standard security roles', `Adopted: ${created.join(', ')}. Auto-mapped safe exact-title positions: ${mappedPositions.join(', ') || 'none'}`);
             }
-            return { created, skipped, mappedPositions };
+            const documented = await fillMissingStandardRoleDocs(ctx.orgId,ctx.uid);
+            return { created, skipped, mappedPositions, documented };
         }),
     ],
 
