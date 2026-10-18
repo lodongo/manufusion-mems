@@ -45,6 +45,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
     const [internal, setInternal] = useState(defaultValue === undefined ? '' : String(defaultValue));
     const selectedValue = value === undefined ? internal : String(value);
     const current = options.find((o) => o.value === selectedValue);
+    const staged = options.find((o) => o.value === pending);
     const filtered = useMemo(() => options.filter((o) =>
         !query.trim() || (o.label + ' ' + o.value + ' ' + (o.group ?? '')).toLowerCase().includes(query.trim().toLowerCase())
     ), [options, query]);
@@ -63,6 +64,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
         // All existing MEMS SelectField callers consume e.target.value. Keep that contract intact.
         onChange?.({ target: { value: v, name, id }, currentTarget: { value: v, name, id } } as unknown as ChangeEvent<HTMLSelectElement>);
         setOpen(false);
+        setPending(null);
         setQuery('');
         setSearchVisible(false);
     };
@@ -73,7 +75,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
             <input type='hidden' name={name} value={selectedValue} />
             <button type='button' id={id} disabled={disabled} aria-required={required} aria-invalid={!!error}
                 aria-haspopup='listbox' aria-expanded={open} aria-describedby={error || hint ? `${id}-note` : undefined}
-                onClick={() => { openedAt.current=Date.now(); pressedOption.current=null; setQuery(''); setSearchVisible(false); setOpen(true); }}
+                onClick={() => { setPending(null); setQuery(''); setSearchVisible(false); setOpen(true); }}
                 className={`flex min-h-12 w-full items-center gap-2 rounded-xl border bg-panel px-3 text-left text-base text-ink focus:outline-none disabled:opacity-50 ${error ? 'border-red-500/70' : 'border-line focus:border-brand'}`}>
                 <span className={`min-w-0 flex-1 truncate ${!selectedValue ? 'text-muted' : ''}`}>{current?.label || options.find((o) => !o.value)?.label || 'Choose...'}</span>
                 <ChevronDown className='h-5 w-5 shrink-0 text-muted' />
