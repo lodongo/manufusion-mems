@@ -269,6 +269,7 @@ export const CAL_TYPES = [
     { code: '13x4', label: '13 periods of 4 weeks', weeks: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4], note: 'Thirteen equal periods of four weeks.' },
     { code: 'weekly', label: 'Weekly (52 or 53 periods)', weeks: Array(52).fill(1) as number[], note: 'Each period is one complete financial week; a 53rd week forms its own period.' },
     { code: 'quarterly', label: 'Quarterly (four 13-week periods)', weeks: [13, 13, 13, 13], note: 'Each period is a full 13-week quarter, with the possible 53rd week added as configured.' },
+    { code: 'custom', label: 'Custom week pattern', weeks: [52], note: 'Specify positive whole weeks per accounting period, totaling 52. A 53rd week follows the chosen allocation rule.' },
 ];
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -286,6 +287,7 @@ export interface Settings {
     yearEndRule: 'last' | 'nearest' | 'on_or_after';
     specialPeriods: number;
     extraWeekPeriod: number;
+    customWeeks: number[];
     authority: Band[];
 }
 export const DEFAULT_SETTINGS: Settings = {
@@ -296,6 +298,7 @@ export const DEFAULT_SETTINGS: Settings = {
     yearEndRule: 'nearest',
     specialPeriods: 1,
     extraWeekPeriod: 0,
+    customWeeks: [4,4,5,4,4,5,4,4,5,4,4,5],
     authority: [
         { from: 0, to: 100_000, levels: ['L1'] },
         { from: 100_000, to: 1_000_000, levels: ['L1', 'L2'] },
@@ -317,7 +320,10 @@ export function readSettings(raw: unknown): Settings {
     if (!['last', 'nearest', 'on_or_after'].includes(rule)) throw new HttpError(400, 'Choose how the year end is fixed.');
     const sp = Number(s.specialPeriods);
     if (![0, 1].includes(sp)) throw new HttpError(400, 'Choose 0 or 1 year-end adjustment period.');
-    const totalPeriods = ct === '13x4' ? 13 : ct === 'weekly' ? 53 : ct === 'quarterly' ? 4 : 12;
+    const customWeeks = s.customWeeks === undefined ? DEFAULT_SETTINGS.customWeeks : (Array.isArray(s.customWeeks) ? s.customWeeks.map(Number) : []);
+    if (!customWeeks.length || customWeeks.length > 52 || customWeeks.some(n=>!Number.isInteger(n)||n<1||n>52) || customWeeks.reduce((sum,n)=>sum+n,0)!==52)
+        throw new HttpError(400, 'Custom accounting periods must contain positive whole weeks totaling exactly 52.');
+    const totalPeriods = ct === '13x4' ? 13 : ct === 'weekly' ? 53 : ct === 'quarterly' ? 4 : ct === 'custom' ? customWeeks.length : 12;
     const extraWeekPeriod = s.extraWeekPeriod === undefined ? 0 : Number(s.extraWeekPeriod);
     if (!Number.isInteger(extraWeekPeriod) || extraWeekPeriod < 0 || extraWeekPeriod > totalPeriods) throw new HttpError(400, 'Choose which period receives a 53rd week, or leave automatic.');
     const bands = objs(s.authority).map((b, i): Band => {
@@ -336,7 +342,7 @@ export function readSettings(raw: unknown): Settings {
         if (i === bands.length - 1 && b.to !== null) throw new HttpError(400, 'The last approval band must have no upper limit.');
         if (i > 0 && b.levels.length < bands[i - 1].levels.length) throw new HttpError(400, `Approval band ${i + 1}: a higher amount cannot need fewer approvers.`);
     });
-    return { calendarType: ct, yearStartMonth: m, yearNaming: naming as Settings['yearNaming'], weekEndDay: wd, yearEndRule: rule as Settings['yearEndRule'], specialPeriods: sp, extraWeekPeriod, authority: bands };
+    return { calendarType: ct, yearStartMonth: m, yearNaming: naming as Settings['yearNaming'], weekEndDay: wd, yearEndRule: rule as Settings['yearEndRule'], specialPeriods: sp, extraWeekPeriod, customWeeks, authority: bands };
 }
 
 export interface Period {
@@ -391,7 +397,7 @@ export function buildYear(fy: number, s: Settings, prevEnd: string | null): { st
         const days = Math.round((end - start) / DAY) + 1;
         totalWeeks = days / 7;
         if (!Number.isInteger(totalWeeks) || totalWeeks < 52 || totalWeeks > 53) throw new HttpError(409, `Financial year ${fy} would run ${days} days from ${isoOf(start)} to ${isoOf(end)}. A week-based year must be 52 or 53 whole weeks; check the week-end day and year-end rule against the earlier years.`);
-        const pattern = type.weeks.length === 3 ? [0, 1, 2, 3].flatMap(() => type.weeks!) : type.weeks.slice();
+        const pattern = s.calendarType==='custom' ? s.customWeeks.slice() : type.weeks.length === 3 ? [0, 1, 2, 3].flatMap(() => type.weeks!) : type.weeks.slice();
         if (totalWeeks === 53) {
             const desired = s.extraWeekPeriod || pattern.length;
             if (s.calendarType === 'weekly') pattern.push(1);
