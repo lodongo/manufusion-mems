@@ -40,7 +40,7 @@ export function recordWiredRoutes<T extends Record<string, unknown>>(routes: T):
     const first = segments[1] === 'org' ? segments[2] : '';
     const module = /^[A-Z]{2,4}$/.test(fromPermission) ? fromPermission : (MODULE_ALIASES[first?.toLowerCase()] ?? 'UNKNOWN');
     const area = AREA_ALIASES[(segments[3] || '').toLowerCase()] ?? AREA_ALIASES[(segments[2] || '').toLowerCase()] ?? 'GEN';
-    const shortHash = parseInt(createHash('sha256').update(route).digest('hex').slice(0,8),16).toString(36).toUpperCase().padStart(7,'0').slice(-4);
+    const shortHash = parseInt(createHash('sha256').update(route).digest('hex').slice(0,13),16).toString(36).toUpperCase().padStart(8,'0').slice(-8);
     const code = metadata?.kind === 'organization' && module !== 'UNKNOWN' ? module+'-'+area+'-'+shortHash : null;
     if(code) {
       const earlier = codes.get(code);
