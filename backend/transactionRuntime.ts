@@ -29,7 +29,7 @@ const MODULE_ALIASES: Record<string,string> = {
   reporting:'RPT', reports:'RPT', documents:'DOC', documentation:'DOC',
   projects:'PRJ', planning:'PLN', production:'MFG', automation:'AUT',
   workforce:'HRM', people:'HRM', attendance:'HRM', shifts:'HRM',
-  inventory:'INV', stocktake:'INV', finance:'FIN', maintenance:'MNT',
+  stocktake:'INV',
 };
 const AREA_ALIASES: Record<string,string> = {
   wr:'WRQ', wo:'WOR', po:'PUR', req:'REQ', prq:'PRQ', quotes:'RFQ', quotations:'RFQ',
