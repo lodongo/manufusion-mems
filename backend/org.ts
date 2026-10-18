@@ -45,7 +45,7 @@ export const ORG_SYSTEM_ROLES: Record<string, { name: string; description: strin
     },
     org_user: {
         name: 'Standard user',
-        description: 'Default role for new users. Grant module permissions as needed.',
+        description: 'Permanent basic employee self-service access. Higher business permissions come from separately assigned roles.',
         permissions: [],
     },
 };
@@ -214,7 +214,7 @@ export const orgRoutes = {
             const firstName = text(body, 'firstName', 1, 40, 'Enter the first name.');
             const lastName = text(body, 'lastName', 1, 40, 'Enter the last name.');
             const phone = phoneE164(body.phone);
-            const role = str(body.role);
+            const role = str(body.role) || 'org_user';
             await assignableRole(ctx, role);
             const skillsDoc = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
             const activeSkills = new Set((Array.isArray(skillsDoc?.data.items) ? skillsDoc.data.items : [])
@@ -351,7 +351,7 @@ export const orgRoutes = {
             const templates = standardRoleTemplates(await catalogue(ctx.org));
             const existing = new Set((await listDocs(`organizations/${ctx.orgId}/roles`)).map(r => r.id));
             return { templates: templates.map(t => ({
-                ...t, exists: existing.has(t.id), moduleAdopted: true, grantable: canGrant(ctx, t.permissions),
+                ...t, exists: existing.has(t.id), moduleAdopted: true, grantable: canGrant(ctx, t.permissions), conflicts: sodConflicts(t.permissions).length,
             })) };
         }),
     ],
@@ -363,7 +363,8 @@ export const orgRoutes = {
             if (!ids.length || ids.length > 100) throw new HttpError(400, 'Select between 1 and 100 standard roles.');
             const available = new Map(standardRoleTemplates(await catalogue(ctx.org)).map(t => [t.id, t]));
             const existing = await listDocs(`organizations/${ctx.orgId}/roles`);
-            if (existing.length + ids.length > 100) throw new HttpError(400, 'An organization can have at most 100 security roles.');
+            const possibleNew = ids.filter(id => available.has(id) && !existing.some(r => r.id === id));
+            if (existing.length + possibleNew.length > 100) throw new HttpError(400, 'An organization can have at most 100 security roles.');
             const created: string[] = [];
             const skipped: Array<{ id: string; reason: string }> = [];
             for (const id of ids) {
@@ -400,10 +401,9 @@ export const orgRoutes = {
                 const r = str(u.data.role) === 'org_admin' ? 'org_super_admin' : str(u.data.role);
                 counts.set(r, (counts.get(r) ?? 0) + 1);
             }
-            const baseline = roles.find((r) => r.id === 'default_security');
-            const baselineRole = baseline ?? { id: 'default_security', data: { name: 'Default Security Role', description: 'Configurable baseline permissions copied into every newly created security role.', permissions: [], system: true, updatedAt: '' } };
+            // Retain the legacy default_security record for history only; it is no longer copied into roles.
             return {
-                roles: [...roles.filter((r) => r.id !== 'default_security'), baselineRole]
+                roles: roles.filter((r) => r.id !== 'default_security')
                     .map((r) => {
                         const permissions = Array.isArray(r.data.permissions) ? (r.data.permissions as unknown[]).map(str) : [];
                         return {
@@ -448,7 +448,7 @@ export const orgRoutes = {
                     clearAccessCache(ctx.orgId);
                     return { id };
                 }
-                if (id === 'org_super_admin') throw new HttpError(400, 'The super admin role always has full access and cannot be edited.');
+                if (id === 'org_super_admin' || id === 'org_user') throw new HttpError(400, 'System identity roles cannot be modified.');
                 if (id === ctx.role) throw new HttpError(403, 'You cannot edit the role you are assigned.');
                 if (!existing) throw new HttpError(404, 'Role not found.');
                 const system = existing.data.system === true;
@@ -470,10 +470,8 @@ export const orgRoutes = {
             const description = text(raw, 'description', 0, 300, 'Description can be up to 300 characters.');
             if (roles.some((r) => str(r.data.name).toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'Another role already has this name.');
             if (roles.length >= 100) throw new HttpError(400, 'An organization can have up to 100 roles.');
-            const baseline = roles.find((r) => r.id === 'default_security');
-            const inherited = Array.isArray(baseline?.data.permissions) ? (baseline.data.permissions as unknown[]).map(str).filter((p) => valid.has(p)) : [];
-            const combined = Array.from(new Set([...inherited, ...permissions]));
-            if (!canGrant(ctx, combined)) throw new HttpError(403, 'Default baseline includes permissions you cannot grant.');
+            // Baseline self-service belongs to every authenticated user, NOT each role.
+            const combined = permissions;
             const note = requireSodAcknowledgement(raw, combined);
             const newId = `role_${randomId(6)}`;
             await writeDoc(`organizations/${ctx.orgId}/roles/${newId}`, { name, description, permissions: combined, system: false, createdAt: now, updatedAt: now, createdBy: ctx.uid });
