@@ -1,6 +1,6 @@
 import {useMemo,useState} from 'react';
 import {callBackend} from '../lib/backend';
-import {Button} from '../admin/kit';
+import {Button,useLoad} from '../admin/kit';
 import {Alert} from '../components/ui';
 type Rule={id:string;event:string;role:string;account:string;categoryCode:string;costCenterId:string;priority:number;enabled:boolean};
 type Event={code:string;label:string;roles:readonly string[];implemented:boolean};
@@ -13,6 +13,7 @@ export default function FinAccountRuleManager(props:{
   canEdit:boolean; mapping:{roles:Record<string,string>;byCategory:Record<string,unknown>};
 }){
   const {rules,setRules,events,roles,accounts,categories,canEdit,mapping,leId}=props;
+  const centers=useLoad(()=>callBackend<{costCenters:Array<{id:string;code:string;name:string}>}>('/api/org/fin/cc/list',{leId}),[leId]);
   const [event,setEvent]=useState('GR_STOCK'),[role,setRole]=useState('INVENTORY');
   const [account,setAccount]=useState(''),[category,setCategory]=useState('');
   const [costCenter,setCostCenter]=useState(''),[preview,setPreview]=useState<Simulation|null>(null);
@@ -67,8 +68,11 @@ export default function FinAccountRuleManager(props:{
           {usable.map(a=><option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
         </select>
       </label>
-      <label className='block text-sm'>Cost center ID (optional)
-        <input value={costCenter} disabled={!canEdit} placeholder='Blank = all cost centers' className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>setCostCenter(e.target.value)}/>
+      <label className='block text-sm'>Cost center (optional)
+        <select value={costCenter} disabled={!canEdit} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>setCostCenter(e.target.value)}>
+          <option value=''>All cost centers</option>
+          {centers.data?.costCenters.map(c=><option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}
+        </select>
       </label>
     </div>
     <div className='flex flex-wrap gap-2'>
