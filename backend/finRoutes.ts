@@ -1,5 +1,6 @@
 import {DETERMINATION_EVENTS,resolveAccountRule,validateRuleDraft,type AccountRule} from './finAccountRules';
 import {buildGlTransactionVariants} from './finTransactionVariants';
+import {registerGlContracts} from './finTransactionContracts';
 import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, updateFields, writeDoc, type Fields } from './core';
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, orgUsers, record } from './org';
@@ -973,6 +974,7 @@ export const finRoutes = {
                 roles: ROLES,
                 events: DETERMINATION_EVENTS,
                 variants: buildGlTransactionVariants(Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable).map(a=>({code:a.code,name:a.name,statement:a.statement,classCode:a.classCode,className:a.className,categoryCode:a.categoryCode,categoryName:a.categoryName,groupCode:a.groupCode,groupName:a.groupName,accountRole:a.accountRole,accountType:a.accountType}))),
+                contracts: registerGlContracts(buildGlTransactionVariants(Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable).map(a=>({code:a.code,name:a.name,statement:a.statement,classCode:a.classCode,className:a.className,categoryCode:a.categoryCode,categoryName:a.categoryName,groupCode:a.groupCode,groupName:a.groupName,accountRole:a.accountRole,accountType:a.accountType})))),
                 mapping: map,
                 txns: TXNS.map((t) => ({ ...t, taxes: t.taxStage ? regimes.filter((r) => strs(r.appliesTo).includes(t.taxStage)).map((r) => `${str(r.code)} (${objs(r.rates).map((x) => `${str(x.code)} ${Number(x.rate)}%`).join(', ')})`) : [] })),
                 accounts: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable).map((a) => ({ code: a.code, name: a.name, statement: a.statement })),
@@ -981,6 +983,26 @@ export const finRoutes = {
                 can: flags(ctx, e),
             };
         }),
+    ],
+    'POST /api/org/fin/transactions/contract': [
+        fin('org.fin.transactions.contract',async ctx=>{
+            const e=await env(ctx,ctx.body.leId);
+            needView(ctx,e);
+            const chart=await chartOf(ctx.orgId,e.le.id);
+            const variants=buildGlTransactionVariants(Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable).map(a=>({code:a.code,name:a.name,statement:a.statement,classCode:a.classCode,className:a.className,categoryCode:a.categoryCode,categoryName:a.categoryName,groupCode:a.groupCode,groupName:a.groupName,accountRole:a.accountRole,accountType:a.accountType})));
+            const contract=registerGlContracts(variants).find(c=>c.id===str(ctx.body.id));
+            if(!contract)throw new HttpError(404,'Transaction contract not found among approved legal entity accounts.');
+            return {contract,editable:false,note:'Registry contract only. This endpoint never creates journal entries or changes transactions.'};
+        })
+    ],
+    'POST /api/org/fin/transactions/placeholder/execute': [
+        fin('org.fin.transactions.placeholder.execute',async ctx=>{
+            const e=await env(ctx,ctx.body.leId);
+            needView(ctx,e);
+            // Explicit fail-closed endpoint for all future nonposting handlers.
+            // No amount, approval flag or arbitrary client value can bypass this gate.
+            throw new HttpError(409,'This transaction has a placeholder handler contract only. Execution is disabled until the owning module implements and verifies its operational posting handler.');
+        })
     ],
     'POST /api/org/fin/mapping/simulate': [
         fin('org.fin.mapping.simulate',async ctx=>{
