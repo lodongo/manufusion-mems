@@ -467,14 +467,24 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         const granted = role === 'org_super_admin' || (permission !== null && hasPerm(gate, permission));
         if (permission && !granted) throw new HttpError(403, 'You do not have permission to do this.');
         const finishApproval = await enforceOrgTransactionGovernance({ orgId, name, permission, effectivePermissionGranted: granted, org, uid: ctx.uid, body:ctx.body });
+        let result: unknown;
         try {
-            const result = await fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain });
-            await finishApproval?.(true);
-            return result;
+            result = await fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain });
         } catch (err) {
-            await finishApproval?.(false);
+            try { await finishApproval?.(false); }
+            catch (finalError) { console.error('Could not reconcile failed governance execution', finalError instanceof Error ? finalError.message : 'unknown'); }
             throw err;
         }
+        // Never mark an already-successful business transaction as failed just because
+        // the separate workflow completion journal could not be updated.
+        try { await finishApproval?.(true); }
+        catch (finalError) {
+            console.error('Approval execution completed but requires workflow reconciliation', finalError instanceof Error ? finalError.message : 'unknown');
+            await audit([{category:'governance',action:'governance.approval.reconciliation_required',actor:ctx.actor,meta:ctx.meta,
+                target:{type:'transaction',label:name},outcome:'blocked',
+                details:'Business handler succeeded but approval completion write failed'}]);
+        }
+        return result;
     });
     return Object.assign(guarded, { governanceMetadata: Object.freeze({ name, permission, kind: 'organization' as const } satisfies GovernanceHandlerMetadata) });
 }
