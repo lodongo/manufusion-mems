@@ -1001,7 +1001,7 @@ export const finRoutes = {
                 const override=categoryCode?map.byCategory[categoryCode]:undefined;
                 const fallback=role==='INVENTORY'?override?.INVENTORY
                   :role==='CONSUMPTION'||role==='MAINT_CONSUMPTION'?override?.CONSUMPTION:undefined;
-                const code=matched?.account||fallback||map.roles[role]||
+                const code=matched?.account||str(fallback)||map.roles[role]||
                     (role==='MAINT_CONSUMPTION'?map.roles.CONSUMPTION:'')||'';
                 const account=chart.get(code);
                 const scopeOK=entity.doc?.data.glScopeConfigured!==true||strs(entity.doc.data.allowedGl).includes(code);
