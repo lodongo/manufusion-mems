@@ -13,6 +13,8 @@ export default function SecurityKnowledgeBase({canInspect=false}:{canInspect?:bo
   const [snapshot,setSnapshot]=useState<Snapshot|null>(null);
   const [failure,setFailure]=useState('');
   const [working,setWorking]=useState(false);
+  const [signedCopies,setSignedCopies]=useState<Array<{id:string;documentId:string;version:number;filename:string;uploadedAt:string}>>([]);
+  const [signoffMessage,setSignoffMessage]=useState('');
   const docs=(data?.documents||[]).filter(d=>!search||[d.title,...(d.sections||[]).flatMap(s=>[s.heading,s.markdown])].join(' ').toLowerCase().includes(search.toLowerCase()));
   const doc=docs.find(d=>d.id===selected)||docs[0];
   const loadSnapshot=async()=>{
