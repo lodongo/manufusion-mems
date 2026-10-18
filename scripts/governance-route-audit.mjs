@@ -12,9 +12,8 @@ const backend = 'backend';
 const names = readdirSync(backend).filter(x => x.endsWith('.ts') && !x.endsWith('.test.ts'));
 const router = readFileSync(join(backend, 'index.ts'), 'utf8');
 const wired = new Set([...router.matchAll(/\.\.\.(\w+Routes)\b/g)].map(x => x[1]));
-type RouteRecord = { path: string; method: string; module: string; name: string; source: string; guard: string; permission: string | null; assessment: string };
-const records: RouteRecord[] = [];
-const imported = new Map<string, string>();
+const records = [];
+const imported = new Map();
 for (const m of router.matchAll(/import\s*\{([^}]+)\}\s*from\s*'\.\/([^']+)'/g)) {
   for (const name of m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0])) imported.set(name, m[2]);
 }
