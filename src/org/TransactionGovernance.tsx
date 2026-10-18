@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { callBackend } from '../lib/backend';
 import GovernanceReports from './GovernanceReports';
 import TransactionBlueprints from './TransactionBlueprints';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, AlertTriangle } from 'lucide-react';
 import { navigate } from '../lib/route';
 
 type Tab = 'transactions' | 'permissions' | 'authority' | 'workflows' | 'documentation' | 'reports';
@@ -72,6 +72,15 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
         <h1 className='text-xl sm:text-2xl font-bold text-ink'>Transaction Governance</h1>
         <p className='text-sm text-soft'>One place for transaction permissions, authority and approval workflows.</p>
       </header>
+      <section className='rounded-xl border border-amber-300/60 bg-amber-50 p-3 text-amber-950 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-100' role='status'>
+        <div className='flex items-start gap-2'>
+          <AlertTriangle className='h-5 w-5 shrink-0' aria-hidden='true'/>
+          <div className='min-w-0'>
+            <p className='text-sm font-semibold'>Unified governance activation pending verification</p>
+            <p className='text-xs leading-relaxed mt-1'>Existing transaction controls remain in effect. Complete backend integration, security tests and production certification before activating unified governance.</p>
+          </div>
+        </div>
+      </section>
       <nav aria-label='Governance areas' className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2'>
         {TABS.map(t => <button key={t.key} type='button' aria-current={active === t.key ? 'page' : undefined} onClick={() => setActive(t.key)}
           className={`min-w-0 rounded-lg px-3 py-3 text-sm font-semibold border ${active === t.key ? 'border-[rgb(var(--c-brand))] bg-[rgb(var(--c-brand)/0.08)] text-[rgb(var(--c-brand))]' : 'border-[rgb(var(--c-border))] text-ink'}`}>{t.label}</button>)}
