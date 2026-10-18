@@ -440,7 +440,7 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         // functional configuration. Reads and personal routes remain available.
         if (permission && permission !== 'ADM.structure' &&
             !name.startsWith('org.structure.') && !name.startsWith('org.positions.') &&
-            !name.startsWith('org.setup.')) {
+            !name.startsWith('org.setup.') && !name.startsWith('org.roles.')) {
             const [nodes, positions] = await Promise.all([
                 listDocs(`organizations/${orgId}/structure`),
                 listDocs(`organizations/${orgId}/positions`),
