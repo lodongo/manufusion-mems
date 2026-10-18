@@ -466,8 +466,15 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         const gate = permission && permission.startsWith('ADM.') ? access.directPermissions : access.permissions;
         const granted = role === 'org_super_admin' || (permission !== null && hasPerm(gate, permission));
         if (permission && !granted) throw new HttpError(403, 'You do not have permission to do this.');
-        await enforceOrgTransactionGovernance({ orgId, name, permission, effectivePermissionGranted: granted, org });
-        return fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain });
+        const finishApproval = await enforceOrgTransactionGovernance({ orgId, name, permission, effectivePermissionGranted: granted, org, uid: ctx.uid, body:ctx.body });
+        try {
+            const result = await fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain });
+            await finishApproval?.(true);
+            return result;
+        } catch (err) {
+            await finishApproval?.(false);
+            throw err;
+        }
     });
     return Object.assign(guarded, { governanceMetadata: Object.freeze({ name, permission, kind: 'organization' as const } satisfies GovernanceHandlerMetadata) });
 }
