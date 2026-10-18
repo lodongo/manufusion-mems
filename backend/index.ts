@@ -92,6 +92,7 @@ import { governanceDocumentRoutes } from './governanceDocumentRoutes';
 import { governanceAuditRoutes } from './governanceAuditRoutes';
 import { transactionBlueprintRoutes } from './transactionBlueprintRoutes';
 import { unifiedApprovalRoutes } from './unifiedApprovalRoutes';
+import { governancePolicyRoutes } from './governancePolicyRoutes';
 import { procurementSetupRoutes } from './procurementSetup';
 import { purchaseRequirementRoutes } from './purchaseRequirements';
 import { procurementPolicyRoutes } from './procurementPolicy';
@@ -1528,6 +1529,7 @@ export const handler = router(recordWiredRoutes({
     ...governanceAuditRoutes,
     ...transactionBlueprintRoutes,
     ...unifiedApprovalRoutes,
+    ...governancePolicyRoutes,
     ...procurementSetupRoutes,
     ...purchaseRequirementRoutes,
     ...procurementPolicyRoutes,
