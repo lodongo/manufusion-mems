@@ -1,4 +1,5 @@
 import { router, json, storage } from './platform/sdk';
+import { recordWiredRoutes } from './transactionRuntime';
 import { AFRICAN_COUNTRIES, CURRENCIES, METADATA_LISTS, PUBLIC_EMAIL_DOMAINS } from './defaults';
 import { DEFAULT_MODULES, FEATURE_ICONS, MODULE_CATEGORIES, SITE_DEFAULTS } from './catalog';
 import {
@@ -488,7 +489,7 @@ const NOISY = new Set(['api', 'navigation', 'interaction', 'form']);
 // Routes
 // ---------------------------------------------------------------------------
 
-export const handler = router({
+export const handler = router(recordWiredRoutes({
     'GET /api/_healthcheck': [async () => json({ message: 'Success' })],
 
     // ----- Setup -----
@@ -1569,4 +1570,4 @@ export const handler = router({
     ...activityRiskRoutes,
     ...activityLegacyRoutes,
     ...safRiskRoutes,
-});
+}));
