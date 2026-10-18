@@ -19,7 +19,7 @@ interface Settings {
     yearStartMonth: number;
     yearNaming: 'start' | 'end';
     weekEndDay: number;
-    yearEndRule: 'last' | 'nearest';
+    yearEndRule: 'last' | 'nearest' | 'on_or_after';
     specialPeriods: number;
     extraWeekPeriod: number;
     authority: Array<{ from: number; to: number | null; levels: string[] }>;
@@ -165,7 +165,8 @@ function Body({ le, onEntityChange, section }: { le: Entity; onEntityChange: () 
                             </SelectField>
                             <SelectField id='fs-rule' label='The year ends on' value={s.yearEndRule} disabled={!canEdit} onChange={(e) => set({ yearEndRule: e.target.value as Settings['yearEndRule'] })} hint='Nearest keeps the year end within 3 days of the month end (52/53-week year, as in ISO and the retail 4-5-4 calendar).'>
                                 <option value='nearest'>the {d.weekdays[s.weekEndDay]} nearest to the end of {MONTHS[(s.yearStartMonth + 10) % 12]}</option>
-                                <option value='last'>the last {d.weekdays[s.weekEndDay]} of {MONTHS[(s.yearStartMonth + 10) % 12]}</option>
+                                <option value='last'>the last {d.weekdays[s.weekEndDay]} on or before {MONTHS[(s.yearStartMonth + 10) % 12]} end</option>
+                                <option value='on_or_after'>the first {d.weekdays[s.weekEndDay]} on or after {MONTHS[(s.yearStartMonth + 10) % 12]} end</option>
                             </SelectField>
                         </>
                     )}
