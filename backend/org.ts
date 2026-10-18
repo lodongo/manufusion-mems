@@ -27,6 +27,7 @@ import { clearAccessCache, ensureOrgCode, hasPerm, loadRole, orgRoute, type OrgC
 import { SOD_RULES, buildCatalogue, docStatus, reviewPermissions, sensitiveKeys, sodConflicts } from './permissionPolicy';
 import { adminTotals, guardedAdminChange, isOrgAdmin, MAX_ORG_ADMINS, MIN_ACTIVE_ORG_ADMINS } from './adminRoster';
 import { signedUrl } from './structure';
+import { standardRoleTemplates } from './standardRoleTemplates';
 
 // ---------------------------------------------------------------------------
 // Roles and permissions model
@@ -341,6 +342,49 @@ export const orgRoutes = {
             }
             await record(ctx, 'org.user.delete', str(target.data.email));
             return { ok: true };
+        }),
+    ],
+
+    // Organization admin adopts vetted transaction roles without manual permission binding.
+    'POST /api/org/roles/templates': [
+        orgRoute('org.roles.templates', 'ADM.roles', async (ctx) => {
+            const templates = standardRoleTemplates(await catalogue(ctx.org));
+            const existing = new Set((await listDocs(`organizations/${ctx.orgId}/roles`)).map(r => r.id));
+            return { templates: templates.map(t => ({
+                ...t, exists: existing.has(t.id), moduleAdopted: true, grantable: canGrant(ctx, t.permissions),
+            })) };
+        }),
+    ],
+
+    'POST /api/org/roles/templates/apply': [
+        orgRoute('org.roles.templates.apply', 'ADM.roles', async (ctx) => {
+            if (ctx.role !== 'org_super_admin') throw new HttpError(403, 'Only organization super admins can adopt standard roles.');
+            const ids = [...new Set((Array.isArray(ctx.body.ids) ? ctx.body.ids : []).map(str))];
+            if (!ids.length || ids.length > 100) throw new HttpError(400, 'Select between 1 and 100 standard roles.');
+            const available = new Map(standardRoleTemplates(await catalogue(ctx.org)).map(t => [t.id, t]));
+            const existing = await listDocs(`organizations/${ctx.orgId}/roles`);
+            if (existing.length + ids.length > 100) throw new HttpError(400, 'An organization can have at most 100 security roles.');
+            const created: string[] = [];
+            const skipped: Array<{ id: string; reason: string }> = [];
+            for (const id of ids) {
+                const template = available.get(id);
+                if (!template) { skipped.push({ id, reason: 'Not available for an enabled module.' }); continue; }
+                if (!canGrant(ctx, template.permissions)) { skipped.push({ id, reason: 'Missing grant authority.' }); continue; }
+                if (sodConflicts(template.permissions).length) { skipped.push({ id, reason: 'Incompatible duties.' }); continue; }
+                const now = nowIso();
+                const didCreate = await writeDoc(`organizations/${ctx.orgId}/roles/${id}`, {
+                    name: template.name, description: template.description, permissions: template.permissions,
+                    system: false, standardTemplateId: id, standardTemplateVersion: 1,
+                    createdAt: now, updatedAt: now, createdBy: ctx.uid,
+                }, { exists: false });
+                if (didCreate) created.push(id);
+                else skipped.push({ id, reason: 'Already adopted; preserved existing customizations.' });
+            }
+            if (created.length) {
+                clearAccessCache(ctx.orgId);
+                await record(ctx, 'org.roles.templates.apply', 'Standard security roles', `Adopted: ${created.join(', ')}`);
+            }
+            return { created, skipped };
         }),
     ],
 
