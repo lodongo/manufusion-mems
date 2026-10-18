@@ -1,4 +1,4 @@
-import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, writeDoc, type Fields } from './core';
+import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, updateFields, writeDoc, type Fields } from './core';
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, orgUsers, record } from './org';
 import { ROLE_TEMPLATES } from './permissionPolicy';
@@ -559,13 +559,12 @@ registerHandler('coa.scope', {
                 throw new HttpError(409,`GL account ${code} remains approved on cost center ${cc.id}. Change that cost center first.`);
         }
         const at=nowIso();
-        await writeDoc(P(ctx.orgId).entity(leId),{
-            ...(old?.data??{}),leId,allowedGl:codes,
-            glScopeConfigured:true,
+        await updateFields(P(ctx.orgId).entity(leId),{
+            leId,allowedGl:codes,glScopeConfigured:true,
             glScopeVersion:(Number(old?.data.glScopeVersion)||0)+1,
             glScopeApprovedAt:at,glScopeApprovedBy:ctx.uid,
             glScopeProposedBy:str(req.makerUid),updatedAt:at
-        } as Fields);
+        });
         return {enabled:codes.length};
     }
 });
