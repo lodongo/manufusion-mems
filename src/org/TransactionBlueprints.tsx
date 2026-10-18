@@ -1,41 +1,108 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronRight, RefreshCw, Search } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 
 interface Blueprint {
-  code: string; module: string; area: string; name: string;
+  code: string;
+  module: string;
+  area: string;
+  name: string;
   kind: 'module_access' | 'submodule_access' | 'transaction';
-  state: 'reserved' | 'catalogued_legacy'; executable: false;
+  state: 'reserved' | 'catalogued_legacy';
+  executable: false;
   legacyPermissionKeys: string[];
 }
-const MODULES=['ADM','FIN','INV','MFG','PLN','CST','QLT','MNT','AST','PRC','WHS','LOG','DST','SAL','CRM','POS','HRM','PAY','DOC','RPT','PRJ'];
+const MODULES: Array<[string,string]> = [
+ ['ADM','Administration & Security'],['FIN','Finance & Accounting'],['INV','Inventory'],['MFG','Manufacturing'],
+ ['PLN','Production Planning'],['CST','Product Costing'],['QLT','Quality'],['MNT','Maintenance'],
+ ['AST','Asset Management'],['PRC','Procurement'],['WHS','Warehousing'],['LOG','Logistics'],
+ ['DST','Distribution'],['SAL','Sales'],['CRM','Customer Management'],['POS','Point of Sale'],
+ ['HRM','Human Resources'],['PAY','Payroll'],['DOC','Documentation'],['RPT','Reporting'],['PRJ','Projects'],
+];
+const suffix: Record<string,string> = {
+ VW:'View / access',CR:'Create',ED:'Edit',SB:'Submit',AP:'Approve',RT:'Return',
+ RJ:'Reject',CN:'Cancel',PS:'Post',CL:'Close',RV:'Reverse',RP:'Report',
+};
 export default function TransactionBlueprints() {
-  const [module,setModule]=useState('PRC');
-  const [kind,setKind]=useState('');
+  const [module,setModule]=useState('ADM');
   const [items,setItems]=useState<Blueprint[]>([]);
   const [search,setSearch]=useState('');
-  const [busy,setBusy]=useState(false);
+  const [expanded,setExpanded]=useState<string[]>([]);
+  const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
-  async function load(nextModule=module,nextKind=kind) {
-    setBusy(true);setError('');
-    try {const data=await callBackend<{items:Blueprint[]}>('/api/org/governance/blueprints/list',{module:nextModule,kind:nextKind});setItems(data.items);}
-    catch(e){setItems([]);setError(e instanceof Error?e.message:'Could not load transaction blueprints.');}
-    finally{setBusy(false);}
-  }
-  const shown=items.filter(x=>(x.code+' '+x.name+' '+x.legacyPermissionKeys.join(' ')).toLowerCase().includes(search.toLowerCase()));
-  return <section className='space-y-3 rounded-xl border border-[rgb(var(--c-border))] p-4'>
-    <h2 className='text-lg font-semibold text-ink'>Codified transaction catalogue</h2>
-    <p className='text-sm text-soft'>SAP-inspired Manufusion codes: MODULE–AREA–ACTION. Future transactions are reserved, not available for execution or assignment.</p>
-    <div className='grid grid-cols-1 sm:grid-cols-3 gap-2'>
-      <label className='text-sm text-ink'>Module<select className='w-full mt-1 border rounded-lg bg-transparent p-3' value={module} onChange={e=>setModule(e.target.value)}>{MODULES.map(x=><option key={x}>{x}</option>)}</select></label>
-      <label className='text-sm text-ink'>Type<select className='w-full mt-1 border rounded-lg bg-transparent p-3' value={kind} onChange={e=>setKind(e.target.value)}><option value=''>All</option><option value='module_access'>Module access</option><option value='submodule_access'>Submodule access</option><option value='transaction'>Transaction action</option></select></label>
-      <div className='flex items-end'><button type='button' disabled={busy} onClick={()=>load()} className='w-full rounded-lg bg-[rgb(var(--c-brand))] p-3 text-white disabled:opacity-50'>{busy?'Loading…':'Load catalogue'}</button></div>
+  useEffect(()=>{
+    let cancelled=false;
+    setLoading(true);setError('');setItems([]);setExpanded([]);
+    callBackend<{items:Blueprint[]}>('/api/org/governance/blueprints/list',{module})
+      .then(response=>{if(!cancelled)setItems(response.items);})
+      .catch(e=>{if(!cancelled)setError(e instanceof Error?e.message:'Could not load the transaction catalogue.');})
+      .finally(()=>{if(!cancelled)setLoading(false);});
+    return ()=>{cancelled=true;};
+  },[module]);
+  const groups=useMemo(()=>{
+    const filter=search.trim().toLowerCase();
+    const lookup=new Map<string,{title:string;code:string;actions:Blueprint[]}>();
+    for(const item of items) {
+      if(item.kind==='module_access')continue;
+      if(item.kind==='submodule_access') {
+        lookup.set(item.area,{title:item.name.replace(/^Access /,''),code:item.code,actions:[]});
+      }
+    }
+    for(const item of items.filter(x=>x.kind==='transaction')) {
+      if(!lookup.has(item.area))lookup.set(item.area,{title:item.area==='LEG'?'Legacy permissions requiring mapping':item.area,code:item.module+'-'+item.area+'-VW',actions:[]});
+      lookup.get(item.area)!.actions.push(item);
+    }
+    return [...lookup.entries()].filter(([area,g])=>!filter||
+      (area+' '+g.title+' '+g.code).toLowerCase().includes(filter)||
+      g.actions.some(a=>(a.code+' '+a.name+' '+a.legacyPermissionKeys.join(' ')).toLowerCase().includes(filter))
+    ).map(([area,g])=>({...g,area,actions:filter&&!(area+' '+g.title+' '+g.code).toLowerCase().includes(filter)?
+      g.actions.filter(a=>(a.code+' '+a.name+' '+a.legacyPermissionKeys.join(' ')).toLowerCase().includes(filter)):g.actions}));
+  },[items,search]);
+  const selected=MODULES.find(x=>x[0]===module);
+  const expand=(area:string)=>setExpanded(old=>old.includes(area)?old.filter(x=>x!==area):[...old,area]);
+  return <section className='space-y-4'>
+    <div>
+      <h2 className='text-xl font-semibold text-ink'>Enterprise transaction catalogue</h2>
+      <p className='text-sm text-soft'>Browse by module, submodule and SAP-inspired Manufusion transaction code. All blueprints are read-only and non-executable until independently implemented and verified.</p>
     </div>
+    <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
+      <label className='text-sm font-medium text-ink'>Module
+        <select value={module} onChange={e=>setModule(e.target.value)} className='mt-1 w-full rounded-lg border border-[rgb(var(--c-border))] bg-transparent p-3 text-base'>
+          {MODULES.map(([code,name])=><option key={code} value={code}>{code} — {name}</option>)}
+        </select>
+      </label>
+      <label className='text-sm font-medium text-ink'>Search this module
+        <span className='relative mt-1 block'><Search size={16} className='absolute left-3 top-3.5 text-soft'/>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder='Code, submodule or transaction' className='w-full rounded-lg border border-[rgb(var(--c-border))] bg-transparent py-3 pl-10 pr-3 text-base'/>
+        </span>
+      </label>
+    </div>
+    <div className='flex flex-wrap items-center justify-between gap-2 text-xs text-soft'>
+      <span>{selected?.[1]} · {groups.length} submodules · {items.filter(x=>x.kind==='transaction').length} transaction blueprints</span>
+      <span>All entries: Reserved / legacy mapping required</span>
+    </div>
+    {loading&&<p role='status' className='text-sm text-soft'><RefreshCw className='inline mr-2 animate-spin' size={16}/>Loading module catalogue…</p>}
     {error&&<p role='alert' className='text-sm text-red-600'>{error}</p>}
-    <input aria-label='Filter transaction codes' className='w-full border rounded-lg p-3 bg-transparent' placeholder='Filter codes or names' value={search} onChange={e=>setSearch(e.target.value)}/>
-    <p className='text-xs text-soft'>{shown.length} items shown. No listed blueprint authorizes a business operation.</p>
-    <div className='max-h-[440px] overflow-y-auto space-y-2'>{shown.map(x=><div key={x.code} className='rounded-lg border p-3'>
-      <div className='flex gap-2 justify-between items-center'><code className='text-xs font-semibold text-ink break-all'>{x.code}</code><span className='text-xs text-soft'>{x.state==='reserved'?'Reserved':'Legacy mapping needed'}</span></div>
-      <p className='text-sm text-ink mt-1'>{x.name}</p><p className='text-xs text-soft mt-1'>{x.kind.replaceAll('_',' ')}</p>
-    </div>)}</div>
+    <div className='space-y-2'>
+      {groups.map(g=>{
+        const open=search.trim()!==''||expanded.includes(g.area);
+        return <div key={g.area} className='overflow-hidden rounded-xl border border-[rgb(var(--c-border))]'>
+          <button type='button' aria-expanded={open} onClick={()=>expand(g.area)} className='flex w-full items-center gap-3 px-3 py-4 text-left hover:bg-[rgb(var(--c-border)/0.08)]'>
+            {open?<ChevronDown size={18}/>:<ChevronRight size={18}/>}
+            <span className='min-w-0 flex-1'><strong className='block text-sm text-ink'>{g.title}</strong><code className='text-xs text-soft'>{g.code}</code></span>
+            <span className='shrink-0 text-xs text-soft'>{g.actions.length} actions</span>
+          </button>
+          {open&&<div className='border-t border-[rgb(var(--c-border))]'>
+            {g.actions.map(a=><div key={a.code} className='flex flex-col gap-1 border-b border-[rgb(var(--c-border))] px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:gap-4'>
+              <code className='min-w-0 shrink-0 text-xs font-semibold text-ink'>{a.code}</code>
+              <span className='flex-1 text-sm text-ink'>{a.area==='LEG'?a.name:suffix[a.code.split('-').at(-1)??'']||a.name}</span>
+              <span className='text-xs text-soft'>{a.state==='reserved'?'Not implemented / reserved':'Legacy mapping pending'}</span>
+            </div>)}
+            {!g.actions.length&&<p className='px-4 py-3 text-sm text-soft'>Submodule access reserved; no actions catalogued.</p>}
+          </div>}
+        </div>;
+      })}
+      {!loading&&!error&&!groups.length&&<p className='rounded-lg border p-4 text-sm text-soft'>No matching submodules.</p>}
+    </div>
   </section>;
 }
