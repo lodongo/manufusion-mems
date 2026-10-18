@@ -123,6 +123,10 @@ export default function SearchableSelect({ label, id, hint, error, children, val
                                 </button>
                             )}
                         </div>
+                        <div className='flex shrink-0 items-center justify-between gap-2 border-t border-line bg-page p-3'>
+                            <span className='min-w-0 flex-1 truncate text-xs text-muted'>{staged ? staged.label : 'Choose an option, then confirm'}</span>
+                            <button type='button' disabled={pending === null || staged?.disabled} onClick={() => { if (pending !== null) choose(pending); }} className='min-h-12 shrink-0 rounded-xl bg-brand px-5 font-semibold text-onbrand disabled:opacity-40'>Confirm</button>
+                        </div>
                     </div>
                 </div>, document.body
             )}
