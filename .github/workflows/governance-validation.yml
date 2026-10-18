@@ -6,6 +6,9 @@ on:
     paths:
       - 'scripts/future-route-check.mjs'
       - 'tests/independent/future-route-check.test.mjs'
+      - 'backend/governanceCutoverCoverage.ts'
+      - 'backend/governanceCutoverCoverage.test.ts'
+      - 'backend/governanceCutoverRoutes.ts'
       - 'backend/governancePolicyRoutes.ts'
       - 'src/org/GovernancePolicyAdmin.tsx'
       - 'backend/unifiedApprovalRoutes.ts'
