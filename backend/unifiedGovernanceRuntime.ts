@@ -83,7 +83,9 @@ export async function enforceOrgTransactionGovernance(input: {
   if(['org.governance.approvals.request','org.governance.approvals.decide',
       'org.governance.approvals.my',
       'org.governance.config.propose','org.governance.config.review',
-      'org.governance.config.list'].includes(input.name))return null;
+      'org.governance.config.list',
+      'org.governance.cutover.status','org.governance.cutover.propose',
+      'org.governance.cutover.approve','org.governance.cutover.disable'].includes(input.name))return null;
   const config=await getDoc(RUNTIME(input.orgId));
   if(str(config?.data.mode)!=='enforce')return null;
   // A tenant-wide cutover must be independently authorized.
