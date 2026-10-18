@@ -11,7 +11,13 @@ ARG VITE_FIREBASE_STORAGE_BUCKET
 ARG VITE_FIREBASE_MESSAGING_SENDER_ID
 ARG VITE_FIREBASE_APP_ID
 ARG GCP_DEV_PROJECT_ID
-RUN node scripts/dev-preflight.mjs build
+ARG GCP_PROD_PROJECT_ID
+RUN if [ -n "$GCP_PROD_PROJECT_ID" ]; then \
+      test "$GCP_PROD_PROJECT_ID" = "$VITE_FIREBASE_PROJECT_ID" && \
+      test -z "$GCP_DEV_PROJECT_ID" && \
+      test -n "$VITE_FIREBASE_API_KEY" && \
+      test -n "$VITE_FIREBASE_APP_ID"; \
+    else node scripts/dev-preflight.mjs build; fi
 RUN npm run build
 RUN npm prune --omit=dev
 
