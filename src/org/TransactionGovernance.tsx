@@ -25,22 +25,22 @@ const panels: Record<Tab, { title: string; description: string; details: string[
   transactions: {
     title: 'Transaction Registry',
     description: 'The system-controlled catalogue will connect each implemented transaction action to the exact permission enforced by the backend.',
-    details: ['Tenant activation and verification require the replacement engine.', 'Legacy permission mapping and endpoint verification are underway.', 'Catalogue examples below are illustrative, not live activation controls.'],
+    details: ['Tenant activation and verification require the replacement engine.', 'Existing permission mappings are retained; endpoint verification remains required.', 'Catalogue examples below are illustrative, not live activation controls.'],
   },
   permissions: {
     title: 'Security Permissions',
     description: 'Security Roles determine the actions an employee can perform within an authorized organizational scope.',
-    details: ['Existing Security Roles remain operational under the legacy engine.', 'The new interface will group grants by module, transaction and action.', 'Role changes under the new architecture will require independent governance approval.'],
+    details: ['Existing Security Roles continue to control operational access.', 'Transaction permissions are organized by module and action in the catalogue.', 'Additional governance controls will require independent approval before activation.'],
   },
   authority: {
     title: 'Chart of Authority',
-    description: 'The new engine will evaluate amount bands, organizational inheritance, mandatory specialist streams and governance rules.',
+    description: 'The planned unified authority engine will evaluate amount bands, organizational inheritance, mandatory specialist streams and governance rules.',
     details: ['CoA rules select required streams and levels, not named approvers.', 'Currency evidence and site-specific overrides will be recorded.', 'Rule changes will be simulated and independently approved before activation.'],
   },
   reports: {
     title: 'Governance auditing and reporting',
     description: 'Review the current configuration and inspect historical audit events by selected period.',
-    details: ['Preview data is limited to the newest 500 audit events.', 'Current previews are not certified, shareable public reports.', 'Publication requires complete evidence, approval and redaction.'],
+    details: ['Historical events are retrieved by date in bounded batches; source reconciliation is pending.', 'Current previews are not certified, shareable public reports.', 'Publication requires complete evidence, approval and redaction.'],
   },
   documentation: {
     title: 'Legal-entity module documentation',
@@ -50,7 +50,7 @@ const panels: Record<Tab, { title: string; description: string; details: string[
   workflows: {
     title: 'Workflow Configuration',
     description: 'Workflows resolve authorized approvers and execute the approval requirements produced by the Chart of Authority.',
-    details: ['Flexible levels and mixed sequential/parallel routing are being built.', 'Job roles, managers, named employees and groups are supported in the target architecture.', 'The existing workflow editor is still a legacy configuration screen.'],
+    details: ['Flexible levels and mixed sequential/parallel routing are being built.', 'Job roles, managers, named employees and groups are supported in the target architecture.', 'The current workflow editor remains available while unified routing is validated.'],
   },
 };
 
@@ -85,16 +85,16 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
           <AlertTriangle className='h-5 w-5 shrink-0' aria-hidden='true'/>
           <div className='min-w-0'>
             <p className='text-sm font-semibold'>Implementation in progress — not yet active</p>
-            <p className='text-xs leading-relaxed mt-1'>This is the new governance workspace preview. Existing permissions, approvals and workflow screens still govern live transactions until tested migration and authorized cutover. No new configuration can be activated here yet.</p>
+            <p className='text-xs leading-relaxed mt-1'>Current permissions and workflow configurations remain operational. Additional governance controls are not active until verified migration and authorized cutover.</p>
           </div>
         </div>
       </section>
       <div className='grid grid-cols-2 sm:grid-cols-4 gap-2'>
         {[
           { Icon: Database, title: 'Registry', note: 'Catalogue foundation' },
-          { Icon: ShieldCheck, title: 'Security', note: 'Legacy enforced' },
-          { Icon: Scale, title: 'Authority', note: 'New engine pending' },
-          { Icon: GitBranch, title: 'Workflow', note: 'New engine pending' },
+          { Icon: ShieldCheck, title: 'Security', note: 'Current controls' },
+          { Icon: Scale, title: 'Authority', note: 'Integration pending' },
+          { Icon: GitBranch, title: 'Workflow', note: 'Integration pending' },
         ].map(({ Icon, title, note }) => (
           <div key={title} className='min-w-0 rounded-xl border border-[rgb(var(--c-border))] bg-[rgb(var(--c-surface))] p-3'>
             <Icon size={18} className='text-[rgb(var(--c-brand))]' aria-hidden='true'/>
@@ -126,15 +126,15 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
       </section>}
       {active === 'transactions' && <TransactionBlueprints />}
       {active === 'transactions' && <section className='space-y-3'>
-        <div className='flex items-center gap-2'><ClipboardCheck size={18} className='text-soft'/><h2 className='font-semibold text-ink'>Example transaction groups</h2></div>
-        <label className='block text-sm text-soft' htmlFor='transaction-governance-search'>Filter examples</label>
+        <div className='flex items-center gap-2'><ClipboardCheck size={18} className='text-soft'/><h2 className='font-semibold text-ink'>Transaction groups overview</h2></div>
+        <label className='block text-sm text-soft' htmlFor='transaction-governance-search'>Filter overview</label>
         <input id='transaction-governance-search' type='text' value={search} onChange={e=>setSearch(e.target.value)} placeholder='Filter by transaction or module' className='w-full rounded-lg border border-[rgb(var(--c-border))] bg-transparent px-3 py-3 text-base text-ink'/>
         <div className='space-y-2'>
           {examples.map(x => <div key={x.code} className='min-w-0 rounded-lg border border-[rgb(var(--c-border))] p-3'>
             <div className='flex flex-wrap gap-2 items-center justify-between'><strong className='text-sm text-ink'>{x.name}</strong><code className='text-xs text-soft'>{x.code}</code></div>
             <p className='text-xs text-soft mt-1'>{x.module}</p><p className='text-sm text-ink mt-2 break-words'>{x.actions}</p>
           </div>)}
-          {!examples.length && <p className='text-sm text-soft'>No matching examples.</p>}
+          {!examples.length && <p className='text-sm text-soft'>No matching groups.</p>}
         </div>
       </section>}
     </div>
