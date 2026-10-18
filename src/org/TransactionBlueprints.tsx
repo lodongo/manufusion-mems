@@ -13,6 +13,7 @@ interface Blueprint {
   executable: false;
   legacyPermissionKeys: string[];
 }
+type WiredEndpoint = {method:string;path:string;name:string;permission:string|null;module:string;area:string;code:string|null;guard:string;handlerWired:true;activationCertified:false};
 const MODULES: Array<[string,string]> = [
  ['ADM','Administration & Security'],['FIN','Finance & Accounting'],['INV','Inventory'],['MFG','Manufacturing'],
  ['PLN','Production Planning'],['CST','Product Costing'],['QLT','Quality'],['MNT','Maintenance'],
@@ -27,6 +28,7 @@ const suffix: Record<string,string> = {
 export default function TransactionBlueprints() {
   const [module,setModule]=useState('ADM');
   const [items,setItems]=useState<Blueprint[]>([]);
+  const [wired,setWired]=useState<WiredEndpoint[]>([]);
   const [existingPermissions,setExistingPermissions]=useState<Array<{existingPermission:string;label:string;suggestedCode:string|null;status:string}>>([]);
   const [mappingSummary,setMappingSummary]=useState<{total:number;proposed:number;collisions:number;manualReview:number;certified:number}|null>(null);
   const [search,setSearch]=useState('');
@@ -35,9 +37,9 @@ export default function TransactionBlueprints() {
   const [error,setError]=useState('');
   useEffect(()=>{
     let cancelled=false;
-    setLoading(true);setError('');setItems([]);setExistingPermissions([]);setMappingSummary(null);setExpanded([]);
-    callBackend<{items:Blueprint[];existingPermissions:Array<{existingPermission:string;label:string;suggestedCode:string|null;status:string}>;mappingSummary:{total:number;proposed:number;collisions:number;manualReview:number;certified:number}}>('/api/org/governance/blueprints/list',{module})
-      .then(response=>{if(!cancelled){setItems(response.items);setExistingPermissions(response.existingPermissions??[]);setMappingSummary(response.mappingSummary??null);}})
+    setLoading(true);setError('');setItems([]);setWired([]);setExistingPermissions([]);setMappingSummary(null);setExpanded([]);
+    callBackend<{items:Blueprint[];wiredEndpoints:WiredEndpoint[];existingPermissions:Array<{existingPermission:string;label:string;suggestedCode:string|null;status:string}>;mappingSummary:{total:number;proposed:number;collisions:number;manualReview:number;certified:number}}>('/api/org/governance/blueprints/list',{module})
+      .then(response=>{if(!cancelled){setItems(response.items);setWired(response.wiredEndpoints??[]);setExistingPermissions(response.existingPermissions??[]);setMappingSummary(response.mappingSummary??null);}})
       .catch(e=>{if(!cancelled)setError(e instanceof Error?e.message:'Could not load the transaction catalogue.');})
       .finally(()=>{if(!cancelled)setLoading(false);});
     return ()=>{cancelled=true;};
