@@ -13,7 +13,7 @@ test('Gregorian leap day occurs within generated calendar-month financial period
   assert.equal(y.periods[1].end,'2024-02-29');
   assert.equal(y.periods.filter(x=>!x.special).length,12);
 });
-for(const type of ['445','454','544','13x4','weekly','quarterly']){
+for(const type of ['445','454','544','13x4','weekly','quarterly','custom']){
  test(type+' builds 52/53-week periods with no gaps or overlap',()=>{
    const s=standard(type);
    const one=buildYear(2025,s,null);
@@ -50,4 +50,11 @@ test('week boundary on or after month end yields complete financial weeks',()=>{
 test('changed rules that create gaps are not accepted for a continuing fiscal year',()=>{
   const one=buildYear(2026,standard('month'),null);
   assert.throws(()=>buildYear(2027,{...standard('month'),yearStartMonth:2},one.end));
+});
+
+test('custom 52-week distribution generates the specified period count',()=>{
+  const s={...standard('custom'),customWeeks:[2,3,4,5,6,7,8,9,8]};
+  const year=buildYear(2025,s,null);
+  assert.equal(year.periods.filter(p=>!p.special).length,9);
+  assert.equal(year.periods.filter(p=>!p.special).reduce((n,p)=>n+p.weeks,0),year.weeks);
 });
