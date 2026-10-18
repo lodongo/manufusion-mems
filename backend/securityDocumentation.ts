@@ -1,3 +1,4 @@
+import { storage } from './platform/sdk';
 import { HttpError, getDoc, listDocs, nowIso, randomId, str, updateFields, writeDoc } from './core';
 import { orgRoute, staff } from './guards';
 import { standardRoleTemplates } from './standardRoleTemplates';
@@ -92,6 +93,57 @@ export const documentationRoutes = {
         audience:str(d.data.audience) as 'organization',
         organizationId:str(d.data.organizationId)||null,
       } as Parameters<typeof visibleToOrganization>[0],ctx.orgId)).map(d=>publicEntry(d.id,d.data))};
+    }),
+  ],
+  'POST /api/org/security-docs/signoff/upload': [
+    orgRoute('org.security-docs.signoff.upload','ADM.roles',async (ctx) => {
+      const id=clean(ctx.body.id,100);
+      const document=safeId(id)?await getDoc(pathFor(id)):null;
+      if(!document || str(document.data.status)!=='published' || str(document.data.audience)!=='organization')
+        throw new HttpError(404,'Published document not available.');
+      const orgId=str(document.data.organizationId);
+      if(orgId && orgId!==ctx.orgId) throw new HttpError(404,'Published document not available.');
+      const content=clean(ctx.body.content,11_000_000);
+      const bytes=Buffer.from(content,'base64');
+      const mime=clean(ctx.body.mime,100);
+      if(bytes.length<5 || bytes.length>8_000_000 ||
+          !((mime==='application/pdf' && bytes.subarray(0,4).toString('ascii')==='%PDF') ||
+            (mime==='image/jpeg' && bytes[0]===255 && bytes[1]===216) ||
+            (mime==='image/png' && bytes.subarray(0,4).equals(Buffer.from([137,80,78,71])))))
+        throw new HttpError(400,'Upload a PDF, JPEG or PNG signed copy (max 8 MB).');
+      const fileId=randomId();
+      const ext=mime==='application/pdf'?'pdf':mime==='image/png'?'png':'jpg';
+      const storagePath=`organizations/${ctx.orgId}/security_signoffs/${id}/${fileId}.${ext}`;
+      if(!(await storage.write([{path:storagePath,content,contentType:mime}]))[0])
+        throw new HttpError(503,'Signed document could not be stored.');
+      await writeDoc(`organizations/${ctx.orgId}/security_signoffs/${fileId}`,{
+        documentId:id,documentVersion:Number(document.data.version)||1,
+        path:storagePath,mime,filename:clean(ctx.body.filename,180),
+        signedBy:ctx.uid,uploadedAt:nowIso(),status:'uploaded',
+      },{exists:false});
+      return {id:fileId,documentId:id};
+    }),
+  ],
+  'POST /api/org/security-docs/signoff/list': [
+    orgRoute('org.security-docs.signoff.list','ADM.roles',async (ctx) => {
+      const docs=await listDocs(`organizations/${ctx.orgId}/security_signoffs`);
+      return {signoffs:docs.map(d=>({id:d.id,documentId:str(d.data.documentId),
+        version:Number(d.data.documentVersion)||1,filename:str(d.data.filename),
+        uploadedAt:str(d.data.uploadedAt),signedBy:str(d.data.signedBy)}))};
+    }),
+  ],
+  'POST /api/org/security-docs/signoff/open': [
+    orgRoute('org.security-docs.signoff.open','ADM.roles',async (ctx) => {
+      const id=clean(ctx.body.id,100);
+      if(!safeId(id)) throw new HttpError(404,'Signed copy not found.');
+      const entry=await getDoc(`organizations/${ctx.orgId}/security_signoffs/${id}`);
+      if(!entry) throw new HttpError(404,'Signed copy not found.');
+      const path=str(entry.data.path);
+      if(!path.startsWith(`organizations/${ctx.orgId}/security_signoffs/`))
+        throw new HttpError(403,'Invalid signed copy.');
+      const [link]=await storage.url([path]);
+      if(!link?.url) throw new HttpError(503,'Unable to open signed document.');
+      return {url:link.url};
     }),
   ],
   'POST /api/org/security-docs/configuration': [
