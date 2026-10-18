@@ -87,6 +87,7 @@ import { mailPreferenceRoutes } from './mailPreferences';
 import { healthOverview } from './healthPolicy';
 import { roleCodeRoutes } from './roleCodes';
 import { roleDocRoutes } from './roleDocs';
+import { documentationRoutes } from './securityDocumentation';
 import { workflowTraceRoutes } from './workflowTrace';
 import { governanceDocumentRoutes } from './governanceDocumentRoutes';
 import { governanceAuditRoutes } from './governanceAuditRoutes';
@@ -1524,6 +1525,7 @@ export const handler = router(recordWiredRoutes({
     ...mailPreferenceRoutes,
     ...roleCodeRoutes,
     ...roleDocRoutes,
+    ...documentationRoutes,
     ...workflowTraceRoutes,
     ...governanceDocumentRoutes,
     ...governanceAuditRoutes,
