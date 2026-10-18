@@ -39,6 +39,7 @@ import PurchaseOrders from './PurchaseOrders';
 import ProcurementDashboard from './ProcurementDashboard';
 import Journals from './Journals';
 import FinGl from './FinGl';
+import FinTransactionWorkspace from './FinTransactionWorkspace';
 import FinCostCenters from './FinCostCenters';
 import FinJournal from './FinJournal';
 import FinCalendar from './FinCalendar';
@@ -125,6 +126,11 @@ function moduleMenus(data: OrgContextData, canAdmin: boolean): ModuleMenu[] {
         .filter((module) => module.code !== 'ADM' && (hasAny(data.permissions, module.code) || module.code === 'PRC'))
         .map((module) => {
             const links = (MODULE_LINKS[module.code] ?? []).filter((link) => canOpen(data.permissions, link));
+            // GL-linked contracts are owned by their operational modules, while
+            // financial visibility remains subject to legal-entity permissions.
+            const contractOwners = new Set(['FIN','INV','MNT','AST','PRC','PAY','SAL','LOG','MFG','QLT','CST']);
+            if(contractOwners.has(module.code) && hasAny(data.permissions,'FIN'))
+                links.push({label:'GL-linked transaction handlers',path:`fin_transactions/${module.code}`,prefix:'FIN.'});
             const capabilities = (module.code === 'INV' ? ['Dashboard','On Hand List','Invoices','Stock Take','Stock Movements','Alerts'] : [] as string[]).map((label, index) => ({
                 label,
                 path: module.code === 'INV' && index === 1 ? 'inventory_on_hand' : `module/${module.code}/feature/${index}`,
@@ -377,6 +383,7 @@ export default function OrgHomePage({
     else if (activeMenu && section === 'procurement_dashboard') content = <ProcurementDashboard />;
     else if (activeMenu && section === 'finance_journals') content = <Journals id={id} />;
     else if (activeMenu && section === 'fin_gl') content = <FinGl tab={id} code={sub} />;
+    else if (activeMenu && section === 'fin_transactions') content = <FinTransactionWorkspace module={id||'ALL'} />;
     else if (activeMenu && section === 'fin_cc') content = <FinCostCenters id={id} />;
     else if (activeMenu && section === 'fin_journal') content = <FinJournal id={id} />;
     else if (activeMenu && section === 'fin_calendar') content = <FinCalendar fy={id} no={sub} />;
