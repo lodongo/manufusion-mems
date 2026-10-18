@@ -60,7 +60,7 @@ function readRequest(data:Record<string,unknown>):StoredRequest{
     payloadHash:str(data.payloadHash),status:str(data.status),
     steps:rawSteps(data.steps),votes:rawVotes(data.votes),
     createdAt:str(data.createdAt),updatedAt:str(data.updatedAt),
-    reason:str(data.reason),policyVersion:str(data.policyVersion),
+    reason:str(data.reason),policyVersion:str(data.policyVersion),bindingVersion:str(data.bindingVersion),
   };
 }
 
@@ -116,7 +116,7 @@ export const unifiedApprovalRoutes = {
         id,orgId:ctx.orgId,code,handlerName:route.name,requestedBy:ctx.uid,
         payloadHash:transactionPayloadHash(payload),status:'pending',steps,votes:[],
         reason:str(ctx.body.reason).trim().slice(0,1000),
-        policyVersion:str(policy?.data.version)||'1',createdAt:now,updatedAt:now,
+        policyVersion:str(policy?.data.version)||'1',bindingVersion:str(binding?.data.version)||'1',createdAt:now,updatedAt:now,
       };
       if(!await writeDoc(ROOT(ctx.orgId)+'/'+id,request,{exists:false}))
         throw new HttpError(409,'Approval could not be registered.');
@@ -136,6 +136,14 @@ export const unifiedApprovalRoutes = {
       if(request.orgId!==ctx.orgId||request.status!=='pending')
         throw new HttpError(409,'Approval request is no longer pending.');
       if(request.requestedBy===ctx.uid)throw new HttpError(403,'Creator cannot approve their own transaction.');
+      const [livePolicy,liveBinding]=await Promise.all([
+        getDoc(POLICY(ctx.orgId,request.code)),getDoc(BINDING(ctx.orgId,request.code)),
+      ]);
+      if(!reviewed(livePolicy?.data)||!reviewed(liveBinding?.data)||
+        str(livePolicy?.data.version)!==request.policyVersion||
+        str(liveBinding?.data.version)!==request.bindingVersion)
+        throw new HttpError(409,'Authority or transaction binding changed. Return the request for resubmission.');
+
       const reason=str(ctx.body.reason).trim().slice(0,1000);
       if(decision!=='approve'&&!reason)throw new HttpError(400,'A reason is required to reject or return.');
       let next:ReturnType<typeof applyApprovalDecision>;
