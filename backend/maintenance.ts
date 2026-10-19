@@ -15,7 +15,7 @@ import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
 import { searchCatalog,serviceCatalogHierarchy } from './procurement';
 import {MAINTENANCE_GATES,maintenanceGateReadiness} from './maintenanceWorkflowConfig';
-import {validateAssessmentTasks,summarizeAssessmentTasks,assessmentTaskSummaries} from './maintenanceTaskAssessment';
+import {validateAssessmentTasks,summarizeAssessmentTasks,assessmentTaskSummaries,type AssessedTask} from './maintenanceTaskAssessment';
 import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} from './maintenanceTaskRisk';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +49,7 @@ const WR_RE = /^WR\d{8}$/;
 const WO_RE = /^WO\d{8}$/;
 const PHOTO_RE = /^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/wr_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png)$/;
 const MAX_PHOTOS = 4;
+const ASSESSMENT_PHOTO_RE=/^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/assessment_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png)$/;
 const wrCol = (orgId: string) => `organizations/${orgId}/work_requests`;
 const woCol = (orgId: string) => `organizations/${orgId}/work_orders`;
 
@@ -645,6 +646,47 @@ async function orgUserMap(orgId: string) {
     return new Map(users.filter((u) => str(u.data.status) !== 'disabled').map((u) => [u.id, `${str(u.data.firstName)} ${str(u.data.lastName)}`.trim() || str(u.data.email)]));
 }
 
+async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:AssessedTask[]){
+    const [energyDoc,permitDoc]=await Promise.all([
+        getDoc('module_workspaces/SAF/metadata/hazardousEnergy'),
+        getDoc('module_workspaces/SAF/metadata/permitTypes')
+    ]);
+    const master=(doc:Doc|null,key:string)=>{
+        const defaults=SAF_DEFAULT_LISTS.find(x=>x.key===key);
+        return objs(Array.isArray(doc?.data.items)?doc?.data.items:defaults?.items)
+            .filter(x=>x.active!==false&&x.selectable!==false);
+    };
+    const energies=master(energyDoc,'hazardousEnergy'),permits=master(permitDoc,'permitTypes');
+    const energyIds=new Set(energies.map(e=>str(e.code))),permitIds=new Set(permits.map(e=>str(e.code)));
+    const oldPaths=new Set(objs(record.data.assessmentTasks).flatMap(t=>objs(t.spares).map(sp=>str(sp.photoPath)).filter(Boolean)));
+    for(const task of tasks){
+        if(task.energySourceCodes?.some(code=>!energyIds.has(code)))
+            throw new HttpError(400,'Choose hazardous energy sources from the active SAF list.');
+        if(task.permitCodes?.some(code=>!permitIds.has(code)))
+            throw new HttpError(400,'Choose permits from the active SAF permit list.');
+        if(task.lotoRequired){
+            if(!task.energySourceCodes?.every(code=>task.risk.some(r=>r.energyCode===code)))
+                throw new HttpError(400,'Complete risk assessment for every selected LOTO hazardous energy source.');
+            const lotoPermit=permits.find(x=>/loto|lock.?out|isolation/i.test(str(x.label)));
+            if(lotoPermit&&!task.permitCodes?.includes(str(lotoPermit.code)))
+                throw new HttpError(400,'Add the SAF LOTO isolation permit for this task.');
+        }
+        if(task.liveEquipment){
+            if(!task.risk.some(r=>r.energyCode==='LIVE_EQUIPMENT'))
+                throw new HttpError(400,'Assess live-equipment hazards and mitigation for this task.');
+            const livePermit=permits.find(x=>/live/i.test(str(x.label)));
+            if(livePermit&&!task.permitCodes?.includes(str(livePermit.code)))
+                throw new HttpError(400,'Add the SAF live work permit for this task.');
+        }
+        for(const spare of task.spares){
+            if(!spare.photoPath)continue;
+            if(!ASSESSMENT_PHOTO_RE.test(spare.photoPath)||
+                !spare.photoPath.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`)||
+                !(spare.photoPath.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/${ctx.uid}/`)||oldPaths.has(spare.photoPath)))
+                throw new HttpError(400,'Invalid or unauthorized assessment spare photo.');
+        }
+    }
+}
 async function ensureCurrentAssessmentApproval(ctx:OrgContext,data:Obj) {
     const settings=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
     const reviewerRole=str(isObj(settings?.data.approverRoles)?settings.data.approverRoles['MNT.ASSESS.REVIEW']:'');
@@ -849,6 +891,30 @@ export const maintenanceRoutes = {
             return {items:items.slice(0,40)};
         })
     ],
+    'POST /api/org/mnt/assessment/photo': [
+        orgRoute('org.mnt.assessment.photo',null,async(ctx)=>{
+            requireMnt(ctx);
+            const code=str(ctx.body.code);
+            const record=WR_RE.test(code)?await getWr(ctx,code):WO_RE.test(code)?await getWo(ctx,code):null;
+            if(!record)throw new HttpError(400,'Choose a valid work assessment.');
+            need(ctx,P.assessment_edit,pathOf(record),await scopeOf(ctx));
+            if((WR_RE.test(code)&&!['submitted','under_review'].includes(wrStatus(record)))||
+               (WO_RE.test(code)&&str(record.data.status)!=='planning'))
+                throw new HttpError(409,'This assessment is locked.');
+            await rateLimit('mnt-assessment-photo',ctx.uid,30,3600);
+            const data=str(ctx.body.data);
+            if(!data||data.length>2_000_000||!/^[A-Za-z0-9+/=]+$/.test(data))
+                throw new HttpError(400,'Upload a JPEG or PNG photo smaller than 1.5 MB.');
+            const buffer=Buffer.from(data,'base64');
+            if(!buffer.length||buffer.length>1_500_000)throw new HttpError(400,'Photo too large.');
+            const detected=detectImage(buffer);
+            if(!detected)throw new HttpError(400,'Only JPEG and PNG images are allowed.');
+            const path=`organizations/${ctx.orgId}/mnt/assessment_photos/${ctx.uid}/${randomId(6)}.${detected.ext}`;
+            const [ok]=await storage.write([{path,content:data,contentType:detected.contentType}]);
+            if(!ok)throw new HttpError(502,'Photo could not be stored.');
+            return {token:path,url:await signedUrl(path)};
+        })
+    ],
     'POST /api/org/mnt/assessment/options': [
         orgRoute('org.mnt.assessment.options',null,async(ctx)=>{
             requireMnt(ctx);
@@ -870,7 +936,13 @@ export const maintenanceRoutes = {
             const equipmentOptions=[];
             if(record){need(ctx,'MNT.view',pathOf(record),await scopeOf(ctx));const nodes=await listDocs(col(ctx.orgId));for(const n of nodes){if(n.id===str(record.data.unitId)||(str(n.data.level)==='assembly'&&(await nodePath(ctx.orgId,n.id)).includes(str(record.data.unitId))))equipmentOptions.push({id:n.id,name:str(n.data.name),code:str(n.data.code)});}}
             const skillMaster=await getDoc('module_workspaces/HRM/metadata/skillsMaster');const skills=objs(skillMaster?.data.items).filter(s=>s.active!==false).map(s=>({code:str(s.code),label:str(s.label)||str(s.name),category:str(s.category)}));
-            return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
+            const photos:Record<string,string>={};
+            if(record)for(const task of objs(record.data.assessmentTasks))for(const spare of objs(task.spares)){
+                const path=str(spare.photoPath);
+                if(path&&ASSESSMENT_PHOTO_RE.test(path)&&path.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`))
+                    photos[path]=await signedUrl(path);
+            }
+            return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),photos,serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
                 hazardousEnergy:safetyOptions(energyDoc,'hazardousEnergy'),
                 safetyPermits:safetyOptions(permitsDoc,'permitTypes'),
                 riskMatrix:riskDoc?.data?.configuration||defaultMaintenanceRiskMatrix};
@@ -1176,6 +1248,7 @@ export const maintenanceRoutes = {
                             if(!sub||!family)throw new HttpError(400,'Choose a valid service category, subcategory and family/class from the approved hierarchy.');
                         }
                     }
+                    await verifyAssessedTaskChoices(ctx,doc,tasks);
                     tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(x=>x.proposedVendorIds));
                     if(allProposed.length){
@@ -1459,6 +1532,7 @@ export const maintenanceRoutes = {
                         tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(b.tasks),
                             (m?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix);
                     }catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid task work assessment.');}
+                    await verifyAssessedTaskChoices(ctx,doc,tasks);
                     tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(v=>v.proposedVendorIds));
                     if(allProposed.length){
