@@ -25,7 +25,7 @@ export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
   if(rawSpares.length>60)throw Error('Maximum 60 spares per task.');
   const spares=rawSpares.map((s,j)=>{
    const a=(s&&typeof s==='object'&&!Array.isArray(s)?s:{}) as Record<string,unknown>;
-   const source=a.source==='warehouse'||a.source==='catalog'?a.source:'description';
+   const source:AssessedSpare['source']=a.source==='warehouse'?'warehouse':a.source==='catalog'?'catalog':'description';
    const description=text(a.description,200),materialId=text(a.materialId,100),catalogCode=text(a.catalogCode,80);
    if(description.length<2||source==='warehouse'&&!materialId||source==='catalog'&&!catalogCode)throw Error('Task '+(i+1)+', spare '+(j+1)+': select a source and item.');
    return {id:text(a.id,50)||'spare_'+(j+1),source,description,materialId,catalogCode,qty:number(a.qty,0.001,1000000),uom:text(a.uom,12)||'EA',unitCost:source==='warehouse'&&a.unitCost!==null&&a.unitCost!==undefined?number(a.unitCost,0,1e9):null};
