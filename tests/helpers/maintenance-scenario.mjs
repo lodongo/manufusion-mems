@@ -295,6 +295,13 @@ const finding = {
     criticalityCode: l.criticality.at(-1).code,
     impactCodes: [first(l.impacts)],
 };
+const linkedPlace=await route(maintenanceRoutes,'/api/org/mnt/assembly','requester',{assemblyId:'BEARINGS',purpose:'wr'});
+assert.equal(linkedPlace.defaultAssetTag,'AST000001');
+assert.deepEqual(linkedPlace.assets.map(a=>a.tag),['AST000001'],'Do not offer other nearby assets');
+await assert.rejects(
+    ()=>route(maintenanceRoutes,'/api/org/mnt/wr/create','requester',{...finding,assetTag:'AST000002'}),
+    /differs from the equipment link/,
+);
 const wr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', finding);
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'start_review' });
 const header = {
