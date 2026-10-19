@@ -26,7 +26,7 @@ const server = createServer(async (req, res) => {
     try {
         const url = new URL(req.url || '/', 'http://localhost');
         const path = url.pathname;
-        if (path === '/healthz') return sendJson(res, 200, { service: 'mems-independent', ok: true });
+        if (path === '/healthz') return sendJson(res, 200, { service: 'mems-independent', ok: true, revision: process.env.MEMS_DEPLOY_SHA || 'local' });
         if (path.startsWith('/api/')) {
             if (!process.env.MEMS_FIREBASE_PROJECT_ID || !process.env.MEMS_STORAGE_BUCKET) {
                 return sendJson(res, 503, { error: 'Independent environment is not configured.' });
@@ -89,3 +89,4 @@ const server = createServer(async (req, res) => {
 });
 server.requestTimeout = 90000;
 server.listen(port, '0.0.0.0', () => console.log('Independent MEMS HTTP service listening on :' + port));
+

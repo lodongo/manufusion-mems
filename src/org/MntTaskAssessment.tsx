@@ -2,16 +2,16 @@ import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert} from '../components/ui';
 import {Button,Card,useLoad} from '../admin/kit';
-type Spare={id:string;source:'warehouse'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null};
-type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[]};
-type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>};
+type Spare={id:string;source:'warehouse'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;specifications?:string;attributes?:Record<string,string>};
+type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string};
+type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;exposedPersonnel?:string;responsiblePerson?:string;precautions?:string};
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
 type ServiceHierarchy={categories:Array<{code:string;name:string}>;subcategories:Array<{code:string;name:string;categoryCode:string}>;families:Array<{code:string;name:string;subcategoryCode:string}>};
-export type TaskAssessment={id:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing'};
+export type TaskAssessment={id:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string};
 const seed=():TaskAssessment=>({id:'task_'+Math.random().toString(36).slice(2,10),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[{hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}}],templateStatus:'pending_validation'});
 const input='mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 p-3 text-base text-white';
 const label='block text-sm text-slate-300';
-function WarehouseSparePicker({onSelect}:{onSelect:(item:{materialId:string;warehouseId:string;materialNumber:string;name:string;uom:string;available:number|null;stockVerified:boolean;warehouseName:string})=>void}){
+export function WarehouseSparePicker({onSelect}:{onSelect:(item:{materialId:string;warehouseId:string;materialNumber:string;name:string;uom:string;available:number|null;stockVerified:boolean;warehouseName:string})=>void}){
  const [query,setQuery]=useState(''),[items,setItems]=useState<Array<{materialId:string;warehouseId:string;materialNumber:string;name:string;uom:string;available:number|null;stockVerified:boolean;warehouseName:string}>>([]);
  const [busy,setBusy]=useState(false);
  useEffect(()=>{if(query.trim().length<2){setItems([]);return;}
@@ -35,7 +35,7 @@ function WarehouseSparePicker({onSelect}:{onSelect:(item:{materialId:string;ware
   </button>)}</div>
  </div>;
 }
-function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSelect:(item:{code:string;name:string;family:string})=>void}){
+export function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSelect:(item:{code:string;name:string;family:string})=>void}){
  const [q,setQ]=useState(''),[rows,setRows]=useState<Array<{code:string;name:string;family:string}>>([]);
  const [loading,setLoading]=useState(false);
  useEffect(()=>{if(q.trim().length<2){setRows([]);return;}
@@ -60,12 +60,13 @@ function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSelect:(it
 }
 export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial.length?initial:[seed()]);
- const vendorOptions=useLoad(()=>callBackend<{vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;serviceHierarchy:ServiceHierarchy}>('/api/org/mnt/assessment/options'));
+ const vendorOptions=useLoad(()=>callBackend<{vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;serviceHierarchy:ServiceHierarchy;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>}>('/api/org/mnt/assessment/options',{code}));
  const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
  const [current,setCurrent]=useState(0);
  const [section,setSection]=useState(0);
+ const [attributeText,setAttributeText]=useState<Record<string,string>>({});
  const [gestureStart,setGestureStart]=useState<number|null>(null);
- const sections=['Task','Spares','Services','Safety','Review'];
+ const sections=['Task details','Spares','Services','Risk assessment','Review & dependencies'];
  const [saving,setSaving]=useState(false),[message,setMessage]=useState('');
  const task=tasks[current];
  const patch=(next:Partial<TaskAssessment>)=>setTasks(old=>old.map((t,i)=>i===current?{...t,...next}:t));
@@ -103,11 +104,16 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
       {item.task.description} · approved v{item.version}
    </button>)}</div>
   </div>:null}
+  <label className={label}>Task title<input className={input} value={task.title||''} onChange={e=>patch({title:e.target.value})}/></label>
+  <label className={label}>Equipment or assembly<select data-native-select='true' className={input} value={task.assemblyId||''} onChange={e=>patch({assemblyId:e.target.value,equipmentId:vendorOptions.data?.equipmentId})}><option value=''>Use work request assembly</option>{vendorOptions.data?.equipmentOptions.map(n=><option key={n.id} value={n.id}>{n.code} · {n.name}</option>)}</select></label>
   <label className={label}>What needs to be done?<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='Describe the task clearly'/></label>
   <div className='grid grid-cols-2 gap-3'>
    <label className={label}>Number of people<input type='number' min={1} className={input} value={task.persons} onChange={e=>patch({persons:Number(e.target.value)})}/></label>
    <label className={label}>Estimated hours<input type='number' min={0.25} step={0.25} className={input} value={task.hours} onChange={e=>patch({hours:Number(e.target.value)})}/></label>
   </div>
+  <label className={label}>Required HRM competencies<select data-native-select='true' multiple className={input+' h-44'} value={task.skillCodes||[]} onChange={e=>{const codes=Array.from(e.target.selectedOptions,o=>o.value);patch({skillCodes:codes,skills:codes.map(code=>vendorOptions.data?.skills.find(s=>s.code===code)?.label||code).join('; ')});}}>{vendorOptions.data?.skills.map(s=><option key={s.code} value={s.code}>{s.category} · {s.label}</option>)}</select></label>
+  {(['instructions','skills','completionCriteria','documentation','safetyEquipment','isolation'] as const).map(key=><label key={key} className={label}>{({instructions:'Work instructions',skills:'Required skills and competencies',completionCriteria:'Completion criteria',documentation:'Technical documentation',safetyEquipment:'Safety equipment',isolation:'Task isolation requirements'})[key]}<textarea className={input} rows={2} value={task[key]||''} onChange={e=>patch({[key]:e.target.value})}/></label>)}
+  <label className={label}>Task priority<select data-native-select='true' className={input} value={task.priority||'normal'} onChange={e=>patch({priority:e.target.value})}>{['low','normal','high','urgent'].map(p=><option key={p} value={p}>{p}</option>)}</select></label>
   <label className={label}>Tools required<textarea rows={2} className={input} value={task.tools} onChange={e=>patch({tools:e.target.value})} placeholder='Tools and equipment required'/></label>
   </>}
   {section===1&&<section className='space-y-3 rounded-xl border border-slate-700 p-3'>
@@ -118,6 +124,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     </select></label>
     <label className={label}>Description<input className={input} value={s.description} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,description:e.target.value}:x)})}/></label>
     {s.source!=='description'&&<label className={label}>{s.source==='warehouse'?'Warehouse material / warehouse IDs':'Technical catalogue code'}<input className={input} readOnly={s.source==='warehouse'} value={s.source==='warehouse'?s.materialId+' / '+s.warehouseId:s.catalogCode} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,catalogCode:e.target.value}:x)})}/></label>}
+    <label className={label}>Technical specifications<textarea rows={2} className={input} value={s.specifications||''} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,specifications:e.target.value}:x)})}/></label>
     <div className='grid grid-cols-2 gap-2'><label className={label}>Quantity<input type='number' step='any' min={0.001} className={input} value={s.qty} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,qty:Number(e.target.value)}:x)})}/></label>
     <label className={label}>Unit<input className={input} value={s.uom} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,uom:e.target.value}:x)})}/></label></div>
     <button type='button' className='text-xs text-red-300 underline' onClick={()=>patch({spares:task.spares.filter((_,j)=>j!==i)})}>Remove spare</button>
@@ -132,6 +139,9 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
   {section===2&&<section className='space-y-3 rounded-xl border border-slate-700 p-3'><h4 className='font-semibold text-white'>Services for this task</h4>
    {task.services.map((s,i)=><div key={s.id} className='space-y-2 rounded-xl border border-slate-700 p-3'>
     <label className={label}>Service required<input className={input} value={s.description} onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,description:e.target.value}:x)})}/></label>
+    {(['scope','deliverables','qualifications','acceptanceCriteria'] as const).map(key=><label key={key} className={label}>{({scope:'Technical service scope',deliverables:'Required deliverables',qualifications:'Required qualifications',acceptanceCriteria:'Service acceptance criteria'})[key]}<textarea className={input} rows={2} value={s[key]||''} onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,[key]:e.target.value}:x)})}/></label>)}
+    <label className={label}>Estimated quantity / duration<input type='number' min='0.001' step='any' className={input} value={s.quantity??1} onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,quantity:Number(e.target.value)}:x)})}/></label>
+    <label className={label}>Expected cost (optional)<input type='number' min='0' className={input} value={s.expectedCost??''} onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,expectedCost:e.target.value===''?null:Number(e.target.value)}:x)})}/></label>
     <label className={label}>Service category
       <select data-native-select='true' className={input} value={s.categoryCode}
         onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,categoryCode:e.target.value,subcategoryCode:'',classCode:''}:x)})}>
@@ -155,8 +165,8 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     </label>
     <label className={label}>Catalogue service code (if selected)<input readOnly className={input} value={s.catalogCode||''}/></label>
     <label className={label}>Technical service attributes (key: value, one per line)
-      <textarea rows={3} className={input} value={Object.entries(s.attributes).map(([k,v])=>k+': '+v).join('\n')}
-        onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,attributes:Object.fromEntries(e.target.value.split('\n').filter(x=>x.includes(':')).map(x=>{const at=x.indexOf(':');return [x.slice(0,at).trim(),x.slice(at+1).trim()]}).filter(x=>x[0]))}:x)})}/>
+      <textarea rows={3} className={input} value={attributeText[s.id]??Object.entries(s.attributes).map(([k,v])=>k+': '+v).join('\n')}
+        onChange={e=>{setAttributeText(old=>({...old,[s.id]:e.target.value}));patch({services:task.services.map((x,j)=>j===i?{...x,attributes:Object.fromEntries(e.target.value.split('\n').filter(x=>x.includes(':')).map(x=>{const at=x.indexOf(':');return [x.slice(0,at).trim(),x.slice(at+1).trim()]}).filter(x=>x[0]))}:x)});}}/>
     </label>
     {!vendorOptions.data?.serviceHierarchy.categories.length&&<p className='text-xs text-amber-300'>Service hierarchy not loaded in the MEMS catalogue. An administrator must adopt it before classification can be completed.</p>}
 
@@ -179,6 +189,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    {task.risk.map((r,i)=><div key={i} className='space-y-2 rounded-xl border border-slate-700 p-3'>
     {(['hazard','impact','controls','permit'] as const).map(k=><label key={k} className={label}>{({hazard:'Hazard / unsafe condition',impact:'Potential impact',controls:'Mitigation and preventive controls',permit:'Required permit / LOTO (if applicable)'})[k]}
      <input className={input} value={r[k]} onChange={e=>patch({risk:task.risk.map((x,j)=>j===i?{...x,[k]:e.target.value}:x)})}/></label>)}
+    {(['exposedPersonnel','responsiblePerson','precautions'] as const).map(key=><label key={key} className={label}>{({exposedPersonnel:'Exposed personnel',responsiblePerson:'Person responsible for controls',precautions:'Additional safety precautions'})[key]}<input className={input} value={r[key]||''} onChange={e=>patch({risk:task.risk.map((x,j)=>j===i?{...x,[key]:e.target.value}:x)})}/></label>)}
     {(['beforeRatings','afterRatings'] as const).map(key=><div key={key} className='space-y-2 rounded-lg border border-slate-600 p-3'>
       <h5 className='text-sm font-semibold text-white'>{key==='beforeRatings'?'Initial risk rating':'Residual risk after controls'}</h5>
       <div className='grid grid-cols-2 gap-2'>
@@ -198,7 +209,8 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    <Button variant='secondary' onClick={()=>patch({risk:[...task.risk,{hazard:'',impact:'',before:'',controls:'',after:'',permit:'',beforeRatings:{},afterRatings:{}}]})}>+ Add hazard</Button>
   </section>}
   {section===4&&<div className='space-y-2 rounded-xl border border-emerald-700 p-3 text-sm'>
-    <p className='font-semibold text-white'>{task.description||'Unnamed task'}</p>
+    <p className='font-semibold text-white'>{task.title||task.description||'Unnamed task'}</p>
+    <fieldset><legend>Dependencies — tasks that must finish first</legend>{tasks.filter(t=>t.id!==task.id).map(t=><label key={t.id} className='my-2 flex gap-2'><input type='checkbox' checked={(task.dependencies||[]).includes(t.id)} onChange={e=>patch({dependencies:e.target.checked?[...(task.dependencies||[]),t.id]:(task.dependencies||[]).filter(id=>id!==t.id)})}/>{t.title||t.description||t.id}</label>)}</fieldset>
     <p>{task.spares.length} spares · {task.services.length} services · {task.risk.length} hazard assessments</p>
     <p className='text-slate-400'>People: {task.persons} · Duration: {task.hours} hours</p>
     <p className='text-xs text-amber-300'>New task templates await validation before reuse. Risk assessment is mandatory but does not require a separate approval.</p>
@@ -211,9 +223,12 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
   <div className='flex flex-wrap gap-2'>
    <Button variant='secondary' disabled={current===0} onClick={()=>{setCurrent(i=>Math.max(i-1,0));setSection(0);}}>← Previous task</Button>
    <Button variant='secondary' onClick={()=>current===tasks.length-1?add():(setCurrent(i=>i+1),setSection(0))}>{current===tasks.length-1?'+ Add next task':'Next task →'}</Button>
-   {tasks.length>1&&<Button variant='secondary' onClick={()=>{setTasks(tasks.filter((_,i)=>i!==current));setCurrent(Math.max(0,current-1));}}>Remove current task</Button>}
+   <Button variant='secondary' onClick={()=>{const copy=JSON.parse(JSON.stringify(task)) as TaskAssessment;copy.id='task_'+Math.random().toString(36).slice(2,10);copy.templateStatus='pending_validation';copy.title=(copy.title||copy.description)+' (copy)';copy.dependencies=[];setTasks(old=>[...old,copy]);setCurrent(tasks.length);setSection(0);}}>Duplicate task</Button>
+   <Button variant='secondary' disabled={current===0} onClick={()=>{const next=[...tasks];[next[current-1],next[current]]=[next[current],next[current-1]];setTasks(next);setCurrent(current-1);}}>Move task earlier</Button>
+   {tasks.length>1&&<Button variant='secondary' onClick={()=>{setTasks(tasks.filter((_,i)=>i!==current).map(t=>({...t,dependencies:(t.dependencies||[]).filter(id=>id!==task.id)})));setCurrent(Math.max(0,current-1));}}>Remove current task</Button>}
   </div>
   <Button busy={saving} disabled={saving} onClick={save}>Save complete task assessments</Button>
   {message&&<p className='text-sm text-amber-200'>{message}</p>}
  </Card>;
 }
+

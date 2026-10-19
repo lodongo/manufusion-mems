@@ -93,6 +93,15 @@ jobs:
             --region="${GCP_DEV_REGION}" \
             --update-env-vars="MEMS_PUBLIC_URL=$URL/" \
             --quiet
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 "$URL/healthz" > "$RUNNER_TEMP/mems-development-health.json"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const health = JSON.parse(readFileSync(process.env.RUNNER_TEMP + "/mems-development-health.json", "utf8"));
+            if (health.ok !== true || health.revision !== process.env.GITHUB_SHA) {
+              throw new Error("Development health or deployed revision does not match the verified commit");
+            }
+            console.log("Verified healthy development revision " + health.revision);
+          '
           {
             echo '### MEMS isolated development Cloud Run'
             echo "Project: ${GCP_DEV_PROJECT_ID}"
@@ -101,3 +110,4 @@ jobs:
             echo 'Access: governed by Cloud Run service security settings, managed separately in the Google Cloud Console'
             echo 'No live Firebase project has been used.'
           } >> "$GITHUB_STEP_SUMMARY"
+

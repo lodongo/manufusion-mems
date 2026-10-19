@@ -63,6 +63,7 @@ interface Row {
     attachments: number;
 }
 interface Item {
+    maintenanceSource?:{woCode:string;taskId:string;assessedRequirement?:Record<string,any>;proposedVendors?:Array<{id:string;name:string}>};
     no: number;
     type: Kind;
     categoryCode: string;
@@ -1106,6 +1107,7 @@ function ItemCard({ l, currency, files, onDownload, onEdit, onRemove }: { l: Ite
                 </dl>
             )}
             {l.technical && <p className='whitespace-pre-wrap text-soft'>{l.technical}</p>}
+            {l.maintenanceSource&&<details className='rounded-xl border border-line p-3'><summary className='cursor-pointer font-semibold'>Assessed maintenance task scope · {l.maintenanceSource.woCode}</summary><button className='mt-2 text-sm underline' onClick={()=>navigate('organization_admin/work_orders/'+l.maintenanceSource!.woCode)}>Open originating work order</button>{Object.entries(l.maintenanceSource.assessedRequirement||{}).filter(([key,value])=>['scope','deliverables','quantity','qualifications','acceptanceCriteria','specifications'].includes(key)&&value).map(([key,value])=><p key={key} className='mt-2 whitespace-pre-wrap text-sm'><strong>{key.replace(/([A-Z])/g,' $1')}: </strong>{String(value)}</p>)}{l.maintenanceSource.proposedVendors?.length?<p className='mt-2 text-sm'>Proposed suppliers: {l.maintenanceSource.proposedVendors.map(v=>v.name).join(', ')}. Procurement makes the final selection.</p>:null}</details>}
             {l.complete !== undefined && (l.complete ? <Badge tone='brand'>Complete</Badge> : <Badge tone='warn'>Needs: {(l.missing ?? []).join(', ')}</Badge>)}
             {files.map((a) => (
                 <button key={a.id} type='button' onClick={() => onDownload(a.id)} className='flex min-h-11 items-center gap-2 text-xs text-brand'>
@@ -1471,3 +1473,4 @@ export default function PurchaseRequirements({ id, sub, no }: { id?: string; sub
     }
     return <List />;
 }
+

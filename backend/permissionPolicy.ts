@@ -1,4 +1,4 @@
-import { MNT_ACTIVITIES } from './maintenance';
+import { MNT_ACTIVITIES } from './maintenanceActivities';
 import { expandPermissions, hasPerm } from './guards';
 
 // ---------------------------------------------------------------------------
@@ -396,3 +396,4 @@ export function groupLabels(perms: string[]): Array<{ module: string; items: str
     }
     return [...groups.entries()].map(([module, items]) => ({ module, items }));
 }
+

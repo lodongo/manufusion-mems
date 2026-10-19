@@ -9,6 +9,7 @@ import ProcurementCatalog from './ProcurementCatalog';
 import WorkRequests from './WorkRequests';
 import WorkOrders from './WorkOrders';
 import MntHome from './MntHome';
+import MntWindows from './MntWindows';
 import SafConfiguration from './SafConfiguration';
 import OrgModules from './OrgModules';
 import OrgSubscription from './OrgSubscription';
@@ -76,6 +77,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
             { key: 'mnt', label: 'Maintenance workspace', Icon: Wrench, perm: 'MNT.', module: 'MNT' },
             { key: 'work_requests', label: 'Work requests', Icon: Wrench, perm: 'MNT.', module: 'MNT' },
             { key: 'work_orders', label: 'Work orders', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
+            { key: 'maintenance_windows', label: 'Maintenance windows', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
         ],
     },
     {
@@ -245,6 +247,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
         case 'saf_configuration':
             content = <SafConfiguration />;
             break;
+        case 'maintenance_windows':
+            content = <MntWindows />;
+            break;
         case 'mnt':
             content = <MntHome />;
             break;
@@ -372,3 +377,4 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
         </div>
     );
 }
+

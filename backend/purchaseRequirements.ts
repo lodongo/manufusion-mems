@@ -559,6 +559,31 @@ async function mutate(ctx: OrgContext, body: Obj, action: string, statuses: stri
     });
 }
 
+/** Maintenance sourcing uses the same item checks, manager routing and approval lifecycle. */
+export async function createMaintenanceRequirement(ctx: OrgContext, input: Obj, source: Obj) {
+    requireProcurement(ctx);
+    const existing = (await listDocs(requirementsPath(ctx.orgId))).find(d => d.data.maintenanceSourceKey === source.key && !['cancelled','rejected'].includes(str(d.data.status)));
+    if (existing) return existing.id;
+    const line = await prepareItem(ctx, input, 10);
+    const missing = missingOf(line);
+    if (missing.length) throw new HttpError(400, 'Complete procurement specifications: ' + missing.join(', '));
+    const approver = await approverFor(ctx, ctx.me);
+    if (approver.problem) throw new HttpError(409, approver.problem);
+    const id = `REQ${String(await nextOrgCounter(ctx.orgId, 'requirementSeq')).padStart(9, '0')}`;
+    const at = nowIso();
+    if (!await writeDoc(`${requirementsPath(ctx.orgId)}/${id}`, {
+        number:id,title:requiredMaintenanceTitle(source),status:'pending_approval',
+        requesterUid:ctx.uid,requesterName:nameOfUser(ctx.me),requesterEmail:str(ctx.me.data.email),
+        requesterPosition:approver.position,approverPosition:approver.managerPosition,approverTitle:approver.managerTitle,
+        lines:[{...line,maintenanceSource:source}],attachments:[],attachmentSeq:0,
+        maintenanceSourceKey:source.key,maintenanceSource:source,submittedAt:at,createdAt:at,updatedAt:at,version:1,
+        history:[{at,by:ctx.uid,byName:nameOfUser(ctx.me),action:'submitted',note:'Maintenance sourcing; standard manager approval required',from:'',to:'pending_approval'}],
+    }, {exists:false})) throw new HttpError(409, 'Purchase requirement number already exists.');
+    await record(ctx,'org.procurement.req.submit',id,`Maintenance ${str(source.woCode)} / ${str(source.taskId)}`);
+    return id;
+}
+const requiredMaintenanceTitle = (s: Obj) => `${str(s.woCode)} · ${str(s.description)}`.slice(0,120);
+
 export const purchaseRequirementRoutes = {
     // Everything the screens need: adopted categories, units, cost centers in the person's scope, who will approve.
     'POST /api/org/procurement/req/options': [
@@ -766,6 +791,8 @@ export const purchaseRequirementRoutes = {
                     no = Math.floor(top / ITEM_STEP) * ITEM_STEP + ITEM_STEP;
                 }
                 const line = await prepareItem(ctx, ctx.body, no);
+                const previous=lines.find(l=>Number(l.no)===given);
+                if(isObj(previous?.maintenanceSource)){const keys=['type','source','requirement','technical','categoryCode','subcategoryCode','familyCode','materialId','warehouseId','quantity','uomCode','attributes'];for(const key of keys)if(JSON.stringify(previous[key]??null)!==JSON.stringify(line[key]??null))throw new HttpError(409,'Maintenance technical scope must be changed by controlled reassessment of the originating task.');line.maintenanceSource=previous.maintenanceSource;}
                 const next = [...lines.filter((l) => Number(l.no) !== no), line].sort((a, b) => Number(a.no) - Number(b.no));
                 return { patch: { lines: next }, label: `${given ? 'Item changed' : 'Item added'}: ${no}`, note: str(line.requirement).slice(0, 100), result: { no, missing: missingOf(line) } };
             })
@@ -990,3 +1017,4 @@ export const purchaseRequirementRoutes = {
         }),
     ],
 };
+
