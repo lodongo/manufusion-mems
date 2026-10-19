@@ -3,6 +3,7 @@ import { commit, withLock } from './finCore';
 import { enforceMaintenanceTransition, executeMaintenanceAction } from './maintenanceOperations';
 import { requireMaintenanceRole } from './maintenanceAccess';
 import { prepareMaintenanceAssessment } from './maintenanceAssessmentIntegration';
+import { resolveMaintenanceEquipmentAsset } from './maintenanceAssetLink';
 import { assessmentReviewCurrent, approvedAssessmentSnapshot, reviewAssessmentPrerequisites } from './maintenanceAssessmentReview';
 import { HttpError, getDoc, isObj, listDocs, nowIso, randomId, rateLimit, runQuery, fieldEq, str, updateFields, writeDoc, type Doc, type Obj, type Plain } from './core';
 import { audit } from './audit';
@@ -230,34 +231,40 @@ async function assemblyContext(ctx: OrgContext, assemblyId: string, perm: string
     const site = docs.find((d) => str(d.data.level) === 'site') ?? null;
     const unitAttrs: Obj = unit && isObj(unit.data.attributes) ? unit.data.attributes : {};
     const linkedTag = str(unitAttrs.assetTag);
-    const assetDocs = (await listDocs(`organizations/${ctx.orgId}/assets`)).filter((d) => ['active', 'change_pending', 'pending_approval'].includes(str(d.data.status)));
-    // Explicit equipment-unit asset takes priority. Where that reference was not
-    // configured, only infer a default if exactly one asset is directly mapped
-    // to the unit; never guess between multiple valid mappings.
-    const directAssets=unit?assetDocs.filter(d=>str(d.data.workCenterId)===unit.id||str(d.data.nodeId)===unit.id):[];
-    const defaultAssetTag=assetDocs.some(d=>d.id===linkedTag)?linkedTag:directAssets.length===1?directAssets[0].id:'';
-    const near = assetDocs.filter((d) => d.id === linkedTag || (unit && (str(d.data.workCenterId) === unit.id || str(d.data.nodeId) === unit.id)) || (costCenter && str(d.data.nodeId) === costCenter.id));
-    const others = assetDocs.filter((d) => !near.includes(d) && (scope === 'all' || scope.has(str(d.data.nodeId))) && (!site || !str(d.data.siteId) || str(d.data.siteId) === site.id));
-    const asset = (d: Doc, linked: boolean) => ({ tag: d.id, name: str(d.data.name), className: str(d.data.className), classCode: str(d.data.classCode), status: str(d.data.status), linked });
+    // Equipment/Asset Management owns this one-to-one relationship.
+    // Never offer other site/cost-centre assets on a maintenance request.
+    const assetDocs=await listDocs(`organizations/${ctx.orgId}/assets`);
+    let resolvedTag='';
+    try {
+        resolvedTag=resolveMaintenanceEquipmentAsset(unit?.id??'',linkedTag,
+            assetDocs.map(d=>({id:d.id,status:str(d.data.status),workCenterId:str(d.data.workCenterId)})));
+    } catch (e) { throw new HttpError(409,e instanceof Error?e.message:'The equipment asset mapping is invalid.'); }
+    const linkedAsset=assetDocs.find(d=>d.id===resolvedTag);
+    if(!linkedAsset)throw new HttpError(409,'The mapped asset is missing. Verify the asset in Asset Management.');
+    const mappedSiteId=str(linkedAsset.data.siteId);
+    if(mappedSiteId&&site&&mappedSiteId!==site.id)
+        throw new HttpError(409,'The linked asset belongs to a different site. Repair the equipment-to-asset link.');
+    const asset=(d:Doc)=>({tag:d.id,name:str(d.data.name),className:str(d.data.className),
+        classCode:str(d.data.classCode),status:str(d.data.status),linked:true});
     return {
         assembly: { id: assembly.id, code: str(assembly.data.code), name: str(assembly.data.name) },
         unit: unit ? { id: unit.id, code: str(unit.data.code), name: str(unit.data.name), equipmentClass: str(unitAttrs.equipmentClass), equipmentClassName: str(unitAttrs.equipmentClassName) } : null,
         costCenter: costCenter ? { id: costCenter.id, code: str(costCenter.data.code), name: str(costCenter.data.name) } : null,
         site: site ? { id: site.id, code: str(site.data.code), name: str(site.data.name) } : null,
         path: docs.map((d) => ({ id: d.id, level: str(d.data.level), code: str(d.data.code), name: str(d.data.name) })),
-        assets: [
-            ...near.sort((a, b) => (a.id === defaultAssetTag ? -1 : b.id === defaultAssetTag ? 1 : a.id.localeCompare(b.id))).map((d) => asset(d, d.id === defaultAssetTag)), 
-            ...others.sort((a, b) => a.id.localeCompare(b.id)).slice(0, 200).map((d) => asset(d, false)),
-        ],
-        linkedTag,
-        defaultAssetTag,
+        assets: [asset(linkedAsset)],
+        linkedTag: resolvedTag,
+        defaultAssetTag: resolvedTag,
     };
 }
 type Place = Awaited<ReturnType<typeof assemblyContext>>;
 
 function placeFields(place: Place, assetTag: string) {
-    const asset = place.assets.find((a) => a.tag === assetTag);
-    if (!asset) throw new HttpError(400, 'Choose the asset.');
+    const mappedTag=place.defaultAssetTag;
+    if(assetTag&&assetTag!==mappedTag)
+        throw new HttpError(409,'The selected asset differs from the equipment link. Refresh the request or fix the mapping in Asset Management.');
+    const asset=place.assets.find(a=>a.tag===mappedTag&&a.linked);
+    if(!asset)throw new HttpError(409,'The equipment has no valid linked asset. Fix the mapping in Asset Management.');
     return {
         assemblyId: place.assembly.id,
         assemblyCode: place.assembly.code,
