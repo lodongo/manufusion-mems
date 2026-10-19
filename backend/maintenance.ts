@@ -394,7 +394,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         resubmit: mine && status === 'returned' && at(P.WR_edit),
         cancel: mine && ['submitted', 'returned'].includes(status) && at(P.WR_cancel),
         startReview: !mine && status === 'submitted' && at(P.WR_review),
-        assess: ['submitted','under_review'].includes(status) && (mine || at(P.view)),
+        assess: ['submitted','under_review'].includes(status) && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
         return: !mine && status === 'under_review' && at(P.WR_return),
         decline: !mine && status === 'under_review' && at(P.WR_decline),
         reviewAssessment: !mine && status === 'under_review' && at(P.assessment_review) && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid),
@@ -1256,6 +1256,7 @@ export const maintenanceRoutes = {
 
     'POST /api/org/mnt/wo/create': [
         orgRoute('org.mnt.wo.create', null, async (ctx) => {
+            throw new HttpError(409, 'Direct work order creation is disabled. Start with a Work Request and approved Work Assessment.');
             requireMnt(ctx);
             const b = ctx.body;
             if (b.confirm !== true) throw new HttpError(400, 'Confirm the details first.');
@@ -1432,7 +1433,7 @@ export const maintenanceRoutes = {
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
                 case 'save_task_assessment': {
-                    if(!can.view||str(d.status)!=='planning')
+                    if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning')
                         throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
                     if(isObj(d.taskPlanning)&&Object.keys(d.taskPlanning).length)throw new HttpError(409,'Open controlled reassessment before editing a task whose resources have already been planned.');
                     let tasks;
