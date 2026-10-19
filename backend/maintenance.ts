@@ -460,8 +460,12 @@ function estimate(d: Obj) {
     const services = objs(d.services);
     const labourHours = tasks.reduce((s, t) => s + (Number(t.persons) || 0) * (Number(t.hours) || 0), 0);
     const labour = tasks.reduce((s, t) => s + (Number(t.persons) || 0) * (Number(t.hours) || 0) * (Number(t.rate) || 0), 0);
-    const sparesCost = spares.reduce((s, x) => s + (Number(x.qty) || 0) * (Number(x.unitCost) || 0), 0);
-    const servicesCost = services.reduce((s, x) => s + (Number(x.cost) || 0), 0);
+    // New work assessments own resources within each task. Old work orders still
+    // use flat spares/services, so preserve both representations without double counting.
+    const taskSpares = tasks.flatMap(t => objs(t.spares));
+    const taskServices = tasks.flatMap(t => objs(t.services));
+    const sparesCost = (taskSpares.length ? taskSpares : spares).reduce((n, x) => n + (Number(x.qty) || 0) * (Number(x.unitCost) || 0), 0);
+    const servicesCost = (taskServices.length ? taskServices : services).reduce((n, x) => n + (Number(x.cost) || 0), 0);
     const r = (n: number) => Math.round(n * 100) / 100;
     return { labourHours: r(labourHours), labour: r(labour), spares: r(sparesCost), services: r(servicesCost), total: r(labour + sparesCost + servicesCost) };
 }
@@ -1193,9 +1197,12 @@ export const maintenanceRoutes = {
             switch (action) {
                 case 'save_plan': {
                     deny(can.plan, 'You cannot plan this work order.');
-                    const tasks = readTasks(b.tasks, l);
-                    const spares = readSpares(b.spares);
-                    const services = readServices(b.services);
+                    const assessedTasks=objs(d.assessmentTasks);
+                    // A converted request already has assessed task scope/resources/risk;
+                    // planning cannot silently replace them through the legacy flat form.
+                    const tasks = assessedTasks.length ? assessedTasks : readTasks(b.tasks, l);
+                    const spares = assessedTasks.length ? [] : readSpares(b.spares);
+                    const services = assessedTasks.length ? [] : readServices(b.services);
                     const exec = pick(l.executionLocations, str(b.executionLocationCode), 'execution location', false);
                     const fields: Record<string, Plain> = {
                         tasks: tasks as unknown as Plain,
