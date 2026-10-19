@@ -39,12 +39,12 @@ async function runServer(overrides, fn) {
     while (Date.now() < deadline) {
       if (child.exitCode !== null) throw new Error('Server exited early: ' + errorOutput);
       try {
-        const response = await fetch(base + '/healthz', { signal: AbortSignal.timeout(500) });
+        const response = await fetch(base + '/health', { signal: AbortSignal.timeout(500) });
         if (response.ok) break;
       } catch { /* Server still booting. */ }
       await new Promise(resolve => setTimeout(resolve, 150));
     }
-    const check = await fetch(base + '/healthz', { signal: AbortSignal.timeout(1500) });
+    const check = await fetch(base + '/health', { signal: AbortSignal.timeout(1500) });
     assert.equal(check.status, 200, errorOutput);
     await fn(base);
   } finally {
@@ -57,7 +57,12 @@ async function runServer(overrides, fn) {
 }
 test('MEMS independent server serves the built frontend without exposing code', { timeout: 30000 }, async () => {
   assert.ok(existsSync('dist/index.html'), 'Run npm run build before the runtime smoke test.');
-  await runServer({}, async base => {
+  await runServer({ MEMS_DEPLOY_SHA: 'smoke-test-revision' }, async base => {
+    const health = await fetch(base + '/health');
+    assert.deepEqual(await health.json(), { service: 'mems-independent', ok: true, revision: 'smoke-test-revision' });
+    const compatibility = await fetch(base + '/healthz');
+    assert.equal(compatibility.status, 200);
+    assert.equal((await compatibility.json()).revision, 'smoke-test-revision');
     const home = await fetch(base + '/');
     assert.equal(home.status, 200);
     assert.match(home.headers.get('content-type'), /text\/html/);
@@ -83,3 +88,4 @@ test('MEMS independent API routes isolated dev requests without touching Firesto
     assert.match((await absentRoute.json()).error, /not found/i);
   });
 });
+
