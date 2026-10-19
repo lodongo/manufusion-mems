@@ -750,7 +750,7 @@ export const maintenanceRoutes = {
                 if(canAt(ctx,'MNT.activities.edit',await nodePath(ctx.orgId,str(d.data.assemblyId)),scope))
                     pending.push({id:d.id,wrCode:str(d.data.wrCode),taskId:str(d.data.taskId),
                         description:str(d.data.description),assemblyId:str(d.data.assemblyId),
-                        assetTag:str(d.data.assetTag),createdBy:str(d.data.createdBy)});
+                        assetTag:str(d.data.assetTag),createdBy:str(d.data.createdBy),task:d.data.task});
             }
             return {items:pending,configurationNeeded:false};
         })
