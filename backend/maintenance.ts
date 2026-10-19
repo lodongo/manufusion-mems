@@ -110,6 +110,19 @@ function rec(ctx: OrgContext, action: string, target: string, details = '') {
     return audit([{ category: 'maintenance', action, actor: ctx.actor, meta: ctx.meta, target: { label: target }, details, orgId: ctx.orgId }]);
 }
 
+async function requireConfiguredMaintenanceRole(ctx:OrgContext,gate:string,recordPath:string[]){
+ const settings=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+ const mapped=isObj(settings?.data.approverRoles)?settings.data.approverRoles:{};
+ const role=str(mapped[gate]);
+ if(!role)throw new HttpError(409,'Configure '+gate+' as an organizational job role in Maintenance Workflows before this transition.');
+ const today=new Date().toISOString().slice(0,10);
+ const assigned=objs(ctx.me.data.assignments).some(a=>str(a.positionCode)===role
+    &&recordPath.includes(str(a.nodeId))
+    &&(!str(a.startsOn)||str(a.startsOn)<=today)
+    &&(!str(a.endsOn)||str(a.endsOn)>=today));
+ if(!assigned)throw new HttpError(403,'This transition requires the configured '+gate+' job role at this location.');
+}
+
 function displayName(ctx: OrgContext) {
     return `${str(ctx.me.data.firstName)} ${str(ctx.me.data.lastName)}`.trim() || ctx.actor.email;
 }
@@ -1186,6 +1199,7 @@ export const maintenanceRoutes = {
                     const d = doc.data;
                     if (!str(d.maintenanceTypeCode) || !str(d.workTypeCode) || !str(d.priorityCode) || !str(d.disciplineCode)) throw new HttpError(400, 'Complete the assessment (maintenance type, work type, priority and discipline) before converting.');
                     if(!objs(d.assessmentTasks).length) throw new HttpError(409,'Complete the task-by-task work assessment, including spares, services and each task risk assessment, before conversion.');
+                    await requireConfiguredMaintenanceRole(ctx,'MNT.WR.CONVERT',pathOf(doc));
                     confirmCode(ctx, doc);
                     const keys = ['assemblyId', 'assemblyCode', 'assemblyName', 'unitId', 'unitCode', 'unitName', 'costCenterId', 'costCenterCode', 'costCenterName', 'siteId', 'siteCode', 'siteName', 'assetTag', 'assetName', 'assetClass', 'title', 'description', 'criticalityCode', 'criticalityLabel', 'criticalityColor', 'maintenanceTypeCode', 'maintenanceTypeLabel', 'workTypeCode', 'workTypeLabel', 'priorityCode', 'priorityLabel', 'disciplineCode', 'disciplineLabel', 'failureModeCode', 'failureModeLabel'];
                     const base: Record<string, Plain> = Object.fromEntries(keys.map((k) => [k, str(d[k])]));
