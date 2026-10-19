@@ -707,6 +707,14 @@ export const maintenanceRoutes = {
         })
     ],
 
+    'POST /api/org/mnt/assessment/options': [
+        orgRoute('org.mnt.assessment.options',null,async(ctx)=>{
+            requireMnt(ctx);
+            const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
+            const serviceVendors=vendors.filter(d=>str(d.data.status)==='approved'&&objs(d.data.scopes).some(x=>str(x.kind)==='service'));
+            return {vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name))};
+        })
+    ],
     'POST /api/org/mnt/setup': [
         orgRoute('org.mnt.setup', null, async (ctx) => {
             const map = isObj(ctx.org.data.modules) ? ctx.org.data.modules : {};
@@ -981,6 +989,12 @@ export const maintenanceRoutes = {
                     try {tasks=validateAssessmentTasks(ctx.body.tasks);} catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid assessment tasks.');}
                     // Every task owns its parts/services/tools/risk. Legacy header-level
                     // spares/services are deliberately not written by this action.
+                    const allProposed=tasks.flatMap(t=>t.services.flatMap(x=>x.proposedVendorIds));
+                    if(allProposed.length){
+                        const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
+                        const approved=new Set(vendors.filter(v=>str(v.data.status)==='approved'&&objs(v.data.scopes).some(x=>str(x.kind)==='service')).map(v=>v.id));
+                        if(allProposed.some(id=>!approved.has(id)))throw new HttpError(400,'Choose proposed service vendors from the approved service vendor list.');
+                    }
                     const summary=summarizeAssessmentTasks(tasks);
                     await done({assessmentTasks:tasks as unknown as Plain,assessmentTasksBy:ctx.uid,
                         assessmentTasksAt:now,assessmentTasksVersion:(Number(doc.data.assessmentTasksVersion)||0)+1},
