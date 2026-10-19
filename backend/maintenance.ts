@@ -1233,6 +1233,9 @@ export const maintenanceRoutes = {
                     base.assessmentTasksVersion = Number(d.assessmentTasksVersion)||1;
                     base.assessmentTasksAt = str(d.assessmentTasksAt);
                     base.assessedAt = str(d.assessedAt);
+                    base.requestedBy = str(d.requestedBy);
+                    base.assessedBy = str(d.assessedBy);
+                    base.assessmentTasksBy = str(d.assessmentTasksBy);
                     base.assessmentReview = d.assessmentReview as Plain;
                     const woCode = await createWo(ctx, base, doc.id);
                     await done({ status: 'converted', woCode, convertedBy: ctx.uid, convertedByName: displayName(ctx), convertedAt: now, closedAt: now }, `Converted to ${woCode}`, 'mnt.wr.converted', woCode);
