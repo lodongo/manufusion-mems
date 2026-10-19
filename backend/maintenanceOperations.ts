@@ -1464,6 +1464,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
                     ...wo.data,
                     status: 'planning',
                     taskPlanning: {},
+                    assessmentReview: null,
                     safety: null,
                     safetySignoff: null,
                     handover: null,
