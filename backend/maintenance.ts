@@ -1180,6 +1180,26 @@ export const maintenanceRoutes = {
                         'Task assessments saved','mnt.wr.task_assessments',JSON.stringify(summary));
                     return {ok:true,summary};
                 }
+                case 'review_assessment':
+                case 'return_assessment': {
+                    if(str(doc.data.status)!=='under_review')throw new HttpError(409,'Start the work request review before assessment approval.');
+                    need(ctx,P.assessment_review,pathOf(doc),scope);
+                    const role=await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
+                    const issue=reviewAssessmentPrerequisites(doc.data,ctx.uid);
+                    if(issue)throw new HttpError(409,issue);
+                    if(!str(doc.data.maintenanceTypeCode)||!str(doc.data.workTypeCode)||!str(doc.data.priorityCode)||!str(doc.data.disciplineCode))
+                        throw new HttpError(409,'Complete maintenance type, work type, priority and discipline before approval.');
+                    if(note.length<10)throw new HttpError(400,'Provide technical review notes (at least 10 characters).');
+                    if(action==='return_assessment'){
+                        await done({assessmentReview:{status:'changes_requested',version:Number(doc.data.assessmentTasksVersion)||0,
+                            by:ctx.uid,name:displayName(ctx),at:now,note,jobRole:role.role}},
+                            'Assessment returned for correction','mnt.assessment.returned',note);
+                        return {ok:true};
+                    }
+                    const snapshot=approvedAssessmentSnapshot(doc.data,ctx.uid,displayName(ctx),role.role,now,note);
+                    await done({assessmentReview:snapshot},'Work assessment approved','mnt.assessment.approved',note);
+                    return {ok:true};
+                }
                 case 'return':
                     deny(can.return, 'You cannot return this request.');
                     if (note.length < 5) throw new HttpError(400, 'Say what information is needed (at least 5 characters).');
@@ -1196,6 +1216,7 @@ export const maintenanceRoutes = {
                     const d = doc.data;
                     if (!str(d.maintenanceTypeCode) || !str(d.workTypeCode) || !str(d.priorityCode) || !str(d.disciplineCode)) throw new HttpError(400, 'Complete the assessment (maintenance type, work type, priority and discipline) before converting.');
                     if(!objs(d.assessmentTasks).length) throw new HttpError(409,'Complete the task-by-task work assessment, including spares, services and each task risk assessment, before conversion.');
+                    await ensureCurrentAssessmentApproval(ctx,d);
                     await requireConfiguredMaintenanceRole(ctx,'MNT.WR.CONVERT',pathOf(doc));
                     confirmCode(ctx, doc);
                     const keys = ['assemblyId', 'assemblyCode', 'assemblyName', 'unitId', 'unitCode', 'unitName', 'costCenterId', 'costCenterCode', 'costCenterName', 'siteId', 'siteCode', 'siteName', 'assetTag', 'assetName', 'assetClass', 'title', 'description', 'criticalityCode', 'criticalityLabel', 'criticalityColor', 'maintenanceTypeCode', 'maintenanceTypeLabel', 'workTypeCode', 'workTypeLabel', 'priorityCode', 'priorityLabel', 'disciplineCode', 'disciplineLabel', 'failureModeCode', 'failureModeLabel'];
@@ -1442,7 +1463,23 @@ export const maintenanceRoutes = {
                         JSON.stringify(summarizeAssessmentTasks(tasks)));
                     return {ok:true};
                 }
+                case 'review_assessment':
+                case 'return_assessment': {
+                    if(str(d.status)!=='planning')throw new HttpError(409,'Assessment review must occur before planning submission.');
+                    need(ctx,P.assessment_review,pathOf(doc),scope);
+                    const role=await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
+                    const issue=reviewAssessmentPrerequisites(d,ctx.uid);
+                    if(issue)throw new HttpError(409,issue);
+                    if(note.length<10)throw new HttpError(400,'Write technical review notes (at least 10 characters).');
+                    const approval=action==='return_assessment'
+                        ?{status:'changes_requested',version:Number(d.assessmentTasksVersion)||0,by:ctx.uid,name:displayName(ctx),at:now,note,jobRole:role.role}
+                        :approvedAssessmentSnapshot(d,ctx.uid,displayName(ctx),role.role,now,note);
+                    await done({assessmentReview:approval},action==='return_assessment'?'Assessment returned for correction':'Work assessment approved',
+                        action==='return_assessment'?'mnt.assessment.returned':'mnt.assessment.approved',note);
+                    return {ok:true};
+                }
                 case 'save_plan': {
+                    await ensureCurrentAssessmentApproval(ctx,d);
                     deny(can.plan, 'You cannot plan this work order.');
                     const assessedTasks=objs(d.assessmentTasks);
                     // A converted request already has assessed task scope/resources/risk;
@@ -1496,6 +1533,7 @@ export const maintenanceRoutes = {
                     return { ok: true };
                 }
                 case 'submit_plan':
+                    await ensureCurrentAssessmentApproval(ctx,d);
                     deny(can.submitPlan, 'You cannot submit this plan.');
                     if (!objs(d.assessmentTasks).length) throw new HttpError(409, 'Complete the task-by-task assessment first.');
                     await requireMaintenanceRole(ctx,'MNT.WO.PLAN',pathOf(doc));
