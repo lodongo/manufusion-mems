@@ -1344,50 +1344,11 @@ export const maintenanceRoutes = {
 
     // ----- Work orders -----
 
+    // Legacy endpoint fails closed: work orders originate from approved Work Requests only.
     'POST /api/org/mnt/wo/create': [
-        orgRoute('org.mnt.wo.create', null, async (ctx) => {
-            throw new HttpError(409, 'Direct work order creation is disabled. Start with a Work Request and approved Work Assessment.');
-            requireMnt(ctx);
-            const b = ctx.body;
-            if (b.confirm !== true) throw new HttpError(400, 'Confirm the details first.');
-            const place = await assemblyContext(ctx, str(b.assemblyId), P.WO_create);
-            const loc = placeFields(place, str(b.assetTag));
-            const l = await lists();
-            const title = clean(b.title, 120);
-            const description = str(b.description).trim().slice(0, 2000);
-            if (title.length < 5) throw new HttpError(400, 'Give the work order a short title (5 to 120 characters).');
-            if (description.length < 10) throw new HttpError(400, 'Describe the work (10 to 2000 characters).');
-            const mtype = pick(l.maintenanceTypes, str(b.maintenanceTypeCode), 'maintenance type')!;
-            const wtype = pick(l.workTypes, str(b.workTypeCode), 'work type')!;
-            const prio = pick(l.priorities, str(b.priorityCode), 'priority')!;
-            const disc = pick(l.disciplines, str(b.disciplineCode), 'discipline')!;
-            const crit = pick(l.criticality, str(b.criticalityCode), 'criticality')!;
-            const failure = pickGrouped(l.failureModes, str(b.failureModeCode), 'failure mode', false);
-            const code = await createWo(
-                ctx,
-                {
-                    ...loc,
-                    title,
-                    description,
-                    maintenanceTypeCode: mtype.code,
-                    maintenanceTypeLabel: mtype.label,
-                    workTypeCode: wtype.code,
-                    workTypeLabel: wtype.label,
-                    priorityCode: prio.code,
-                    priorityLabel: prio.label,
-                    disciplineCode: disc.code,
-                    disciplineLabel: disc.label,
-                    criticalityCode: crit.code,
-                    criticalityLabel: crit.label,
-                    criticalityColor: crit.color,
-                    failureModeCode: failure?.code ?? '',
-                    failureModeLabel: failure ? `${failure.group} · ${failure.label}` : '',
-                },
-                ''
-            );
-            await rec(ctx, 'mnt.wo.created', code, `Direct · ${title} · ${loc.assemblyCode} · ${loc.assetTag}`);
-            return { code };
-        }),
+        orgRoute('org.mnt.wo.create',null,async()=>{
+            throw new HttpError(409,'Direct work order creation is disabled. Complete and approve a Work Request assessment first.');
+        })
     ],
 
     'POST /api/org/mnt/wo/list': [
