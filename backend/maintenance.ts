@@ -1013,6 +1013,10 @@ export const maintenanceRoutes = {
             const scope = await scopeOf(ctx);
             const doc = await getWr(ctx, str(ctx.body.code));
             const can = wrCan(ctx, doc, scope);
+            const workflowConfig=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const assignedReviewerRole=str(isObj(workflowConfig?.data.approverRoles)?workflowConfig.data.approverRoles['MNT.ASSESS.REVIEW']:'');
+            const currentReview=!!assignedReviewerRole&&assessmentReviewCurrent(doc.data,assignedReviewerRole);
+            can.convert = can.convert && currentReview;
             // Show review controls only after both security permission and scoped
             // organizational job-role assignment are in effect.
             if (can.reviewAssessment) {
@@ -1048,7 +1052,7 @@ export const maintenanceRoutes = {
                 },
                 assessmentTasks: objs(d.assessmentTasks),
                 assessmentReview: isObj(d.assessmentReview)?d.assessmentReview:{status:'pending'},
-                assessmentReviewCurrent: assessmentReviewCurrent(d),
+                assessmentReviewCurrent: currentReview,
                 returnNote: str(d.returnNote),
                 declineReason: str(d.declineReason),
                 history: objs(d.history).map((h) => ({ at: str(h.at), name: str(h.name), action: str(h.action), note: str(h.note) })),
