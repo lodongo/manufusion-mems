@@ -237,13 +237,14 @@ function ResourceForm({
             {kind === 'candidate' && (
                 <>
                     <p className="text-sm text-soft">
-                        Create a material draft using the technical catalogue. Complete and submit the draft through Materials Master; its
-                        existing approval workflow applies.
+                        Submit this assessed spare as a material-creation candidate. Procurement / Materials Master will complete the technical specification and create a draft through the existing approval workflow. You do not need permission to create materials.
                     </p>
                     <CatalogPicker kind="materials" onSelect={pickSpec} />
                     <Button variant="secondary" onClick={() => pickSpec({ code: data.catalogCode })} disabled={!data.catalogCode}>
                         Load required specification attributes
                     </Button>
+                    <MntField label='Planner review and missing technical details' value={data.note} onChange={(v)=>patch('note',v)} multiline />
+                    {!data.catalogCode&&<p className='text-xs text-amber-500'>Description-only spare: submit now for specification by the Materials Master maintainer, or select a catalogue item above.</p>}
                     {spec && (
                         <>
                             <h3 className="font-semibold">{spec.name}</h3>
@@ -287,7 +288,7 @@ function ResourceForm({
             {error && <Alert tone="error">{error}</Alert>}
             <Button busy={busy} onClick={submit}>
                 {kind === 'candidate'
-                    ? 'Create material draft'
+                    ? 'Submit material creation candidate'
                     : kind === 'procure'
                       ? 'Submit purchase requirement'
                       : 'Save task resource plan'}
@@ -699,6 +700,9 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                                 >
                                                     Purchase requirement {p.requirementId}
                                                 </button>
+                                            )}
+                                            {p.candidateId && !p.materialDraftId && (
+                                                <p className='text-xs text-amber-500'>Material candidate {p.candidateId.slice(0,12)} queued for Materials Master review ({String(p.status||'pending').replaceAll('_',' ')}).</p>
                                             )}
                                             {p.materialDraftId && (
                                                 <button

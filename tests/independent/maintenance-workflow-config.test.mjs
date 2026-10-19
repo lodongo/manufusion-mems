@@ -13,6 +13,11 @@ test('implemented maintenance gates become ready only with their required organi
  assert.ok(configured.every(g=>g.ready));
  for(const gate of maintenanceGateReadiness({}).filter(g=>g.roleRequired))assert.equal(gate.ready,false,gate.code);
 });
+test('task work assessment does not require a separately configured reviewer role',()=>{
+ const assess=maintenanceGateReadiness({}).find(g=>g.code==='MNT.WR.ASSESS');
+ assert.equal(assess?.roleRequired,false);
+ assert.equal(assess?.ready,true);
+});
 test('closure requires explicit Technical Manager configuration',()=>{
  const gate=maintenanceGateReadiness({}).find(g=>g.code==='MNT.WO.TECHNICAL_CLOSE');
  assert.ok(gate);
