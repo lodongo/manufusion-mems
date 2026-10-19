@@ -711,11 +711,13 @@ export const maintenanceRoutes = {
     'POST /api/org/mnt/tasks/library': [
         orgRoute('org.mnt.tasks.library',null,async(ctx)=>{
             requireMnt(ctx);
-            const wr=await getWr(ctx,str(ctx.body.code));
+            const code=str(ctx.body.code),isOrder=WO_RE.test(code);
+            const doc=isOrder?await getWo(ctx,code):await getWr(ctx,code);
             const scope=await scopeOf(ctx);
-            if(!wrCan(ctx,wr,scope).view)throw new HttpError(403,'Work request access is required.');
+            const visible=isOrder?woCan(ctx,doc,scope,await lists()).view:wrCan(ctx,doc,scope).view;
+            if(!visible)throw new HttpError(403,'Work request/order access is required.');
             const docs=await listDocs(`organizations/${ctx.orgId}/asset_task_templates`);
-            const assemblyId=str(wr.data.assemblyId);
+            const assemblyId=str(doc.data.assemblyId);
             return {items:docs.filter(d=>str(d.data.assemblyId)===assemblyId&&str(d.data.status)==='approved')
                 .map(d=>({id:str(d.data.taskId),version:Number(d.data.version)||1,task:d.data.task,validatedBy:str(d.data.approvedByName)}))};
         })
