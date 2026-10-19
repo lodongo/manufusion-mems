@@ -68,6 +68,7 @@ export interface Place {
     path: Array<{ id: string; level: string; code: string; name: string }>;
     assets: Array<{ tag: string; name: string; className: string; classCode: string; status: string; linked: boolean }>;
     linkedTag: string;
+    defaultAssetTag: string;
 }
 
 export const LEVEL_LABEL: Record<string, string> = { group: 'Group', legal_entity: 'Legal entity', site: 'Site', department: 'Department', cost_center: 'Cost center', work_center: 'Equipment unit', equipment: 'Equipment', assembly: 'Assembly' };

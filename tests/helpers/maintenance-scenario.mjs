@@ -45,6 +45,14 @@ seed(r + '/assets/AST000001', {
     nodeId: 'CONVEYOR',
     siteId: 'SITE',
 });
+seed(r + '/assets/AST000002', {
+    name: 'Other Line Equipment',
+    status: 'active',
+    workCenterId: 'OTHER_LINE',
+    nodeId: 'OTHER_LINE',
+    siteId: 'SITE',
+});
+
 seed(r + '/equipment_stored_energy/CONVEYOR', {
     initialized: true,
     items: [
@@ -287,6 +295,13 @@ const finding = {
     criticalityCode: l.criticality.at(-1).code,
     impactCodes: [first(l.impacts)],
 };
+const linkedPlace=await route(maintenanceRoutes,'/api/org/mnt/assembly','requester',{assemblyId:'BEARINGS',purpose:'wr'});
+assert.equal(linkedPlace.defaultAssetTag,'AST000001');
+assert.deepEqual(linkedPlace.assets.map(a=>a.tag),['AST000001'],'Do not offer other nearby assets');
+await assert.rejects(
+    ()=>route(maintenanceRoutes,'/api/org/mnt/wr/create','requester',{...finding,assetTag:'AST000002'}),
+    /differs from the equipment link/,
+);
 const wr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', finding);
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'start_review' });
 const header = {
@@ -664,7 +679,7 @@ await assert.rejects(
 );
 async function createAssessedWorkOrder(title,description,assemblyId,assessedTasks){
     const wrNew=await route(maintenanceRoutes,'/api/org/mnt/wr/create','requester',{
-        ...finding,title,description,assemblyId,assetTag:'AST000001'
+        ...finding,title,description,assemblyId,assetTag:assemblyId==='OTHER_ASSEMBLY'?'AST000002':'AST000001'
     });
     await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'start_review'});
     await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'assess',...header});

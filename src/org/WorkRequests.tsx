@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type TouchEvent } from 'react';
-import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, ClipboardList, Cog, ImagePlus, MapPin, Pencil, Send, Trash2, Undo2, Wrench, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, ClipboardList, ImagePlus, MapPin, Pencil, Send, Trash2, Undo2, Wrench, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
@@ -215,7 +215,7 @@ function RequestList({ setup }: { setup: MntSetup }) {
 // New request wizard
 // ---------------------------------------------------------------------------
 
-const STEPS = ['Where', 'Asset', 'Finding', 'Criticality', 'Photos', 'Review'] as const;
+const STEPS = ['Where', 'Finding', 'Criticality', 'Photos', 'Review'] as const;
 interface GembaWrHandoff { id: string; observationId: string; assemblyId: string; assetTag: string; title: string; description: string; gembaTypeCode?: string; gembaTypeName?: string; photoPath?: string; photoUrl?: string }
 function pendingGembaWr(assemblyId: string): GembaWrHandoff | null {
     try {
@@ -265,13 +265,14 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         setPlaceError('');
         try {
             const p = await callBackend<Place>('/api/org/mnt/assembly', { assemblyId: id, purpose: 'wr' });
-            setPlace(p);
             const handoff = pendingGembaWr(id);
-            const asset = handoff && p.assets.some((a) => a.tag === handoff.assetTag) ? handoff.assetTag : '';
-            // A verified observation asset takes precedence; otherwise use the
-            // equipment unit's authoritative mapped asset, never an arbitrary nearby asset.
-            setAssetTag(asset || p.linkedTag || (p.assets.length===1?p.assets[0].tag:''));
-            if (handoff && asset) {
+            // Asset selection was already completed during the one-to-one
+            // equipment/asset setup. It is never repeated here.
+            if (handoff && handoff.assetTag!==p.defaultAssetTag)
+                throw new Error('This Gemba observation references a different asset from the equipment link. Review the asset mapping before proceeding.');
+            setPlace(p);
+            setAssetTag(p.defaultAssetTag);
+            if (handoff) {
                 setTitle(handoff.title.slice(0, 120));
                 setDescription((handoff.description || handoff.title).slice(0, 5000));
                 setPhotos(handoff.photoPath ? [{token:handoff.photoPath,url:handoff.photoUrl||''}] : []);
@@ -310,11 +311,10 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     const source = findIn(lists.sources, sourceCode);
     const failure = findIn(lists.failureModes, failureCode);
     const crit = lists.criticality.find((c) => c.code === critCode);
-    const asset = place?.assets.find((a) => a.tag === assetTag);
+    const asset = place?.assets.find((a) => a.tag === place.defaultAssetTag && a.linked);
 
     const problems: string[][] = [
-        place ? [] : ['Choose the assembly.'],
-        asset ? [] : ['Choose the asset.'],
+        place && asset && assetTag===place.defaultAssetTag ? [] : ['Choose an assembly with a valid linked equipment asset.'],
         [...(title.trim().length < 5 ? ['Give a short title (at least 5 characters).'] : []), ...(description.trim().length < 10 ? ['Describe what you found (at least 10 characters).'] : []), ...(source ? [] : ['Choose the source of the finding.'])],
         [...(crit ? [] : ['Choose the criticality.']), ...(impactCodes.length ? [] : ['Choose at least one impact.'])],
         [...(uploading ? ['Wait for the photos to finish uploading.'] : [])],
@@ -475,47 +475,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                     </>
                 )}
 
-                {step === 1 && place && (
-                    <>
-                        <p className='text-sm text-slate-400'>The asset mapped to this equipment unit is selected automatically. Change it only when the finding belongs to a different asset.</p>
-                        {place.assets.length === 0 ? (
-                            <Card>
-                                <p className='flex items-center gap-2 text-sm text-amber-300'>
-                                    <AlertTriangle className='h-4 w-4 shrink-0' />
-                                    No asset is registered for {place.unit ? `equipment unit ${place.unit.code}` : 'this location'} yet.
-                                </p>
-                                {place.unit && (
-                                    <Button variant='secondary' className='mt-3' onClick={() => navigate(`organization_admin/structure/${place.unit!.id}/asset`)}>
-                                        Configure the unit's asset
-                                    </Button>
-                                )}
-                            </Card>
-                        ) : (
-                            <ul className='space-y-2'>
-                                {place.assets.map((a) => (
-                                    <li key={a.tag}>
-                                        <button type='button' onClick={() => setAssetTag(a.tag)} className={`flex w-full items-start gap-3 rounded-2xl border p-3 text-left ${assetTag === a.tag ? 'border-emerald-400 bg-emerald-500/10' : 'border-slate-800 bg-slate-900 active:bg-slate-800'}`}>
-                                            <Cog className={`mt-0.5 h-6 w-6 shrink-0 ${assetTag === a.tag ? 'text-emerald-300' : 'text-amber-400'}`} />
-                                            <span className='min-w-0 flex-1'>
-                                                <span className='block font-mono text-xs text-emerald-300'>{a.tag}</span>
-                                                <span className='block font-medium text-white'>{a.name}</span>
-                                                <span className='block text-xs text-slate-400'>{a.className}</span>
-                                                {a.linked && (
-                                                    <span className='mt-1 inline-block'>
-                                                        <Badge tone='brand'>Asset of this equipment unit</Badge>
-                                                    </span>
-                                                )}
-                                            </span>
-                                            {assetTag === a.tag && <CheckCircle2 className='h-6 w-6 shrink-0 text-emerald-400' />}
-                                        </button>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
-                    </>
-                )}
-
-                {step === 2 && (
+                {step === 1 && (
                     <>
                         <Field id='wr-title' label='Short title *' maxLength={120} placeholder='e.g. Oil leak at gearbox output seal' value={title} onChange={(e) => setTitle(e.target.value)} />
                         <TextArea id='wr-desc' label='What did you find? *' rows={4} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
@@ -526,7 +486,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                     </>
                 )}
 
-                {step === 3 && (
+                {step === 2 && (
                     <>
                         <p className='text-sm font-medium text-slate-200'>Criticality *</p>
                         <div className='grid grid-cols-2 gap-2 sm:grid-cols-5'>
@@ -551,7 +511,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                     </>
                 )}
 
-                {step === 4 && (
+                {step === 3 && (
                     <>
                         <p className='text-sm text-slate-400'>Photos are optional. Add up to 4 if available; Gemba photos transfer without needing another upload.</p>
                         <div className='grid grid-cols-2 gap-2'>
@@ -585,7 +545,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                     </>
                 )}
 
-                {step === 5 && place && (
+                {step === 4 && place && (
                     <>
                         <ReviewBlock label='Where' onEdit={() => setStep(0)}>
                             <p className='text-white'>
@@ -593,13 +553,13 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                             </p>
                             <p className='text-xs text-slate-400'>{place.path.map((p) => `${LEVEL_LABEL[p.level] ?? p.level} ${p.code}`).join(' › ')}</p>
                         </ReviewBlock>
-                        <ReviewBlock label='Asset' onEdit={() => setStep(1)}>
+                        <ReviewBlock label='Equipment-linked asset'>
                             <p className='text-white'>
                                 {asset?.tag} · {asset?.name}
                             </p>
                             <p className='text-xs text-slate-400'>{asset?.className}</p>
                         </ReviewBlock>
-                        <ReviewBlock label='Finding' onEdit={() => setStep(2)}>
+                        <ReviewBlock label='Finding' onEdit={() => setStep(1)}>
                             <p className='font-medium text-white'>{title}</p>
                             <p className='whitespace-pre-wrap text-sm text-slate-300'>{description}</p>
                             <p className='mt-1 text-xs text-slate-400'>
@@ -607,7 +567,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                                 {failure ? ` · Failure mode: ${failure.group} · ${failure.label}` : ''}
                             </p>
                         </ReviewBlock>
-                        <ReviewBlock label='Criticality and impact' onEdit={() => setStep(3)}>
+                        <ReviewBlock label='Criticality and impact' onEdit={() => setStep(2)}>
                             <span className='inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold text-white' style={{ background: critColor(critCode, crit?.color ?? '', lists.criticality) }}>
                                 {crit?.label}
                             </span>
@@ -618,7 +578,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                                 })}
                             </div>
                         </ReviewBlock>
-                        <ReviewBlock label={`Photos (${photos.length})`} onEdit={() => setStep(4)}>
+                        <ReviewBlock label={`Photos (${photos.length})`} onEdit={() => setStep(3)}>
                             <div className='flex gap-2 overflow-x-auto'>
                                 {photos.map((p, i) => (
                                     <img key={p.token} src={p.url} alt={`Photo ${i + 1}`} className='h-20 w-20 shrink-0 rounded-xl object-cover' />
@@ -645,14 +605,14 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     );
 }
 
-function ReviewBlock({ label, onEdit, children }: { label: string; onEdit: () => void; children: ReactNode }) {
+function ReviewBlock({ label, onEdit, children }: { label: string; onEdit?: () => void; children: ReactNode }) {
     return (
         <Card>
             <div className='mb-1 flex items-center justify-between'>
                 <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>{label}</p>
-                <button type='button' onClick={onEdit} className='text-xs text-emerald-300'>
+                {onEdit && <button type='button' onClick={onEdit} className='text-xs text-emerald-300'>
                     Change
-                </button>
+                </button>}
             </div>
             {children}
         </Card>
