@@ -96,7 +96,7 @@ for (const role of new Set(Object.values(roles)))
     seed(r + '/positions/' + role, { code: role, title: role, parentCode: role === 'PLAN' ? 'TM' : '', operatingLevel: 'site' });
 const people = {
     requester: ['REQUESTER_01', []],
-    assessor: ['ASSESSOR_01', ['ASSESS', 'CONVERT']],
+    assessor: ['ASSESSOR_01', ['ASSESS', 'CONVERT', 'ASSESS_REVIEW']],
     validator: ['VALIDATOR_01', ['VALIDATE']],
     reviewer: ['REVIEWER_01', ['ASSESS_REVIEW']],
     planner: ['PLANNER_01', ['PLAN']],
