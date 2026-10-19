@@ -1106,6 +1106,7 @@ export const maintenanceRoutes = {
                 priorityCode: str(d.priorityCode),
                 disciplineCode: str(d.disciplineCode),
                 tasks: objs(d.tasks),
+                assessmentTasks: objs(d.assessmentTasks),
                 spares: objs(d.spares),
                 services: objs(d.services),
                 tools: str(d.tools),
