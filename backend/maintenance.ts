@@ -1181,7 +1181,8 @@ export const maintenanceRoutes = {
     'POST /api/org/mnt/catalog-search': [
         orgRoute('org.mnt.catalog_search', null, async (ctx) => {
             requireMnt(ctx);
-            if (!canAnywhere(ctx, P.WO_plan)) throw new HttpError(403, 'You do not have permission to do this.');
+            // Technical catalogue lookups are needed during open work assessment,
+            // before the maintenance planner is involved. Read-only and tenant-authenticated.
             const kind = str(ctx.body.kind) === 'services' ? 'services' : 'materials';
             const q = clean(ctx.body.q, 60);
             if (q.length < 2) return { items: [] };
