@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type TouchEvent } from 'react';
-import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, ClipboardList, Cog, ImagePlus, MapPin, Pencil, Send, Trash2, Undo2, Wrench, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, ClipboardList, ImagePlus, MapPin, Pencil, Send, Trash2, Undo2, Wrench, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
