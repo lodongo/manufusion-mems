@@ -22,6 +22,7 @@ import WorkRequests from './WorkRequests';
 import WorkOrders from './WorkOrders';
 import MntHome from './MntHome';
 import MntWindows from './MntWindows';
+import MntMaterialCandidates from './MntMaterialCandidates';
 import MntWorkflowSettings from './MntWorkflowSettings';
 import MntTaskValidation from './MntTaskValidation';
 import SafConfiguration from './SafConfiguration';
@@ -82,6 +83,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
     PRC: [
         { label: 'Purchase requirements', path: 'purchase_requirements', everyone: true },
         { label: 'Materials Master', path: 'material_catalog', permission: 'PRC.view' },
+        { label: 'Maintenance material candidates', path: 'mnt_material_candidates', permission: 'PRC.materials.manage' },
         { label: 'Service catalog', path: 'service_catalog', permission: 'PRC.view' },
         { label: 'Asset catalog', path: 'asset_dictionary', permission: 'AST.catalog.view' },
         { label: 'Vendors', path: 'procurement_vendors', permission: 'PRC.vendors.view' },
@@ -372,6 +374,7 @@ export default function OrgHomePage({
         content = <ModuleWorkspace menu={activeModule} selectedFeature={featureIndex !== undefined && Number.isInteger(featureIndex) && featureIndex >= 0 && featureIndex < activeModule.capabilities.length ? featureIndex : undefined} />;
     } else if (activeMenu && section === 'saf_configuration') content = <SafConfiguration />;
     else if (activeMenu && section === 'maintenance_windows') content = <MntWindows />;
+    else if (activeMenu && section === 'mnt_material_candidates') content = <MntMaterialCandidates />;
     else if (activeMenu && section === 'mnt') content = <MntHome />;
     else if (activeMenu && section === 'mnt_workflows') content = <MntWorkflowSettings />;
     else if (activeMenu && section === 'mnt_task_validation') content = <MntTaskValidation />;
