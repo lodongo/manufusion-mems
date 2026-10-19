@@ -4,7 +4,7 @@ export const MNT_ACTIVITIES: Array<{ key: string; label: string }> = [
     { key: 'MNT.WR.create', label: 'Work request: raise' },
     { key: 'MNT.WR.edit', label: 'Work request: edit own (before review) and resubmit' },
     { key: 'MNT.WR.cancel', label: 'Work request: cancel own (before review)' },
-    { key: 'MNT.WR.review', label: 'Work request: review and assess' },
+    { key: 'MNT.WR.review', label: 'Work request: triage and start initial review' },
     { key: 'MNT.WR.return', label: 'Work request: return to requester for information' },
     { key: 'MNT.WR.decline', label: 'Work request: decline' },
     { key: 'MNT.assessment.review', label: 'Work assessment: approve or return independently' },
