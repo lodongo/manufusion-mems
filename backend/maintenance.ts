@@ -767,7 +767,8 @@ export const maintenanceRoutes = {
             const proposal=await getDoc(path);
             if(!proposal||str(proposal.data.status)!=='pending_validation')throw new HttpError(409,'Task proposal not awaiting validation.');
             if(str(proposal.data.createdBy)===ctx.uid)throw new HttpError(403,'A task creator cannot validate their own task.');
-            const request=await getWr(ctx,str(proposal.data.wrCode));
+            const srcWo=str(proposal.data.woCode);
+            const request=srcWo?await getWo(ctx,srcWo):await getWr(ctx,str(proposal.data.wrCode));
             if(Number(request.data.assessmentTasksVersion)!==Number(proposal.data.assessmentVersion))
                 throw new HttpError(409,'This task belongs to an outdated assessment revision. Validate the latest proposal.');
             const matching=objs(request.data.assessmentTasks).find(t=>str(t.id)===str(proposal.data.taskId));
