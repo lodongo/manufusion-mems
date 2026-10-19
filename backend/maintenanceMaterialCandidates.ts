@@ -95,7 +95,7 @@ export const maintenanceMaterialCandidateRoutes={
                     {
                         path,
                         fields:{
-                            ...candidate.data,catalogCode:code,catalogueSpecification:spec,
+                            ...candidate.data,catalogCode:code,catalogueSpecification:spec as unknown as Obj,
                             attributes:attrs,materialDraftId:result.id,
                             status:'awaiting_material_approval',processedAt:nowIso(),processedBy:ctx.uid,
                         },
