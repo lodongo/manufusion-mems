@@ -692,6 +692,7 @@ const candidateTask = task('coupling', 'Replace coupling', 'GEARBOX', [
     },
     { id: 'bracket_part', source: 'description', description: 'Drive bearing to approved equipment specification', qty: 1, uom: unit.code },
 ]);
+candidateTask.externalResource = {type:'OEM',persons:2,notes:'OEM coupling inspection and alignment specialists'};
 const hiddenTask = task('hidden_task', 'Unselected historical-style task', 'BEARINGS');
 hiddenTask.risk = [{ ...risk[0], hazard: 'EXCLUDED_TASK_HAZARD' }];
 const direct = await createAssessedWorkOrder(
@@ -805,14 +806,25 @@ seed(r + '/material_journal/SPECIAL_RECEIPT', {
 });
 await op('planner', 'reserve', { code: direct, taskId: 'coupling', resourceId: 'coupling_part' });
 await op('planner', 'reserve', { code: direct, taskId: 'coupling', resourceId: 'bracket_part' });
+await assert.rejects(
+    () => op('planner', 'allocate', {
+        code:direct,taskId:'coupling',personnel:[people.tech[0]],toolsReady:true,competenciesConfirmed:true,
+        note:'Attempt to release unconfirmed OEM resource.'
+    }),
+    /external provider/,
+);
 await op('planner', 'allocate', {
     code: direct,
     taskId: 'coupling',
     personnel: [people.tech[0]],
     toolsReady: true,
     competenciesConfirmed: true,
-    note: 'All qualified people and task tools checked.',
+    externalProvider:'Approved OEM regional service',
+    externalEngagementRef:'PO00000001-V1',
+    externalConfirmed:true,
+    note: 'Qualified employees and OEM engagement confirmed against approved purchase order.',
 });
+assert.equal(snapshot(r+'/work_orders/'+direct).data.taskPlanning.coupling.allocation.externalConfirmed,true);
 await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'planner', { code: direct, action: 'submit_plan' });
 const subset = await op('planner', 'save_window', {
     title: 'Selected coupling task only',
