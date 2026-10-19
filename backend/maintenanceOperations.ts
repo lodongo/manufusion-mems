@@ -376,7 +376,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
             assessmentVersion: wo.data.assessmentTasksVersion,
             source: str(spare.source), description: str(spare.description),
             qty: Number(spare.qty), uom: str(spare.uom),
-            catalogCode: code, catalogueSpecification: spec || null,
+            catalogCode: code, catalogueSpecification: spec ? (spec as unknown as Obj) : null,
             attributes: attrs, plannerNotes: reason, status,
             createdBy: str(existing?.data.createdBy) || ctx.uid,
             createdAt: str(existing?.data.createdAt) || nowIso(),
