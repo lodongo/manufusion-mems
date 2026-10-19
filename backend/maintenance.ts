@@ -396,7 +396,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         resubmit: mine && status === 'returned' && at(P.WR_edit),
         cancel: mine && ['submitted', 'returned'].includes(status) && at(P.WR_cancel),
         startReview: !mine && status === 'submitted' && at(P.WR_review),
-        assess: ['submitted','under_review'].includes(status) && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
+        assess: ['submitted','under_review'].includes(status) && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data) && (!at(P.assessment_review) || !doc.data.assessmentTasksBy || str(doc.data.assessmentTasksBy)===ctx.uid),
         return: !mine && status === 'under_review' && at(P.WR_return),
         decline: !mine && status === 'under_review' && at(P.WR_decline),
         reviewAssessment: !mine && status === 'under_review' && at(P.assessment_review) && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid),
@@ -1170,6 +1170,9 @@ export const maintenanceRoutes = {
                 if (!allowed) throw new HttpError(403, why);
             };
             const l = await lists();
+            if(['assess','save_task_assessment'].includes(action)&&can.reviewAssessment&&
+               str(doc.data.assessmentTasksBy)&&str(doc.data.assessmentTasksBy)!==ctx.uid)
+                throw new HttpError(403,'Assessment review is read-only. Return the assessment to its author for corrections.');
             switch (action) {
                 case 'edit': {
                     deny(can.edit, 'Only the requester can edit, and only before review starts.');
