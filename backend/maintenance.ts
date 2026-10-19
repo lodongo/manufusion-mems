@@ -6,7 +6,7 @@ import { nextOrgCounter } from './positions';
 import { detectImage } from './branding';
 import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
 import { ID_RE, col, signedUrl } from './structure';
-import { canAnywhere, canAt, scopeOf, type Scope } from './access';
+import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
 import { searchCatalog } from './procurement';
 import {MAINTENANCE_GATES,maintenanceGateReadiness} from './maintenanceWorkflowConfig';
 import {validateAssessmentTasks,summarizeAssessmentTasks} from './maintenanceTaskAssessment';
@@ -707,6 +707,64 @@ export const maintenanceRoutes = {
         })
     ],
 
+    'POST /api/org/mnt/tasks/library': [
+        orgRoute('org.mnt.tasks.library',null,async(ctx)=>{
+            requireMnt(ctx);
+            const wr=await getWr(ctx,str(ctx.body.code));
+            const scope=await scopeOf(ctx);
+            if(!wrCan(ctx,wr,scope).view)throw new HttpError(403,'Work request access is required.');
+            const docs=await listDocs(`organizations/${ctx.orgId}/asset_task_templates`);
+            const assemblyId=str(wr.data.assemblyId);
+            return {items:docs.filter(d=>str(d.data.assemblyId)===assemblyId&&str(d.data.status)==='approved')
+                .map(d=>({id:str(d.data.taskId),version:Number(d.data.version)||1,task:d.data.task,validatedBy:str(d.data.approvedByName)}))};
+        })
+    ],
+    'POST /api/org/mnt/tasks/proposals': [
+        orgRoute('org.mnt.tasks.proposals',null,async(ctx)=>{
+            requireMnt(ctx);
+            const scope=await scopeOf(ctx);
+            const wr=await getWr(ctx,str(ctx.body.code));
+            if(!wrCan(ctx,wr,scope).view)throw new HttpError(403,'Work request access is required.');
+            const proposals=await listDocs(`organizations/${ctx.orgId}/asset_task_proposals`);
+            return {items:proposals.filter(p=>str(p.data.wrCode)===wr.id).map(p=>({
+                id:p.id,taskId:str(p.data.taskId),name:str(p.data.description),status:str(p.data.status),
+                revision:Number(p.data.assessmentVersion)||1,approvedBy:str(p.data.approvedByName)
+            }))};
+        })
+    ],
+    'POST /api/org/mnt/tasks/validate': [
+        orgRoute('org.mnt.tasks.validate',null,async(ctx)=>{
+            requireMnt(ctx);
+            const id=str(ctx.body.id);
+            if(!/^[A-Za-z0-9_-]{6,120}$/.test(id))throw new HttpError(400,'Choose a valid task proposal.');
+            const path=`organizations/${ctx.orgId}/asset_task_proposals/${id}`;
+            const proposal=await getDoc(path);
+            if(!proposal||str(proposal.data.status)!=='pending_validation')throw new HttpError(409,'Task proposal not awaiting validation.');
+            if(str(proposal.data.createdBy)===ctx.uid)throw new HttpError(403,'A task creator cannot validate their own task.');
+            const conf=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const roles=isObj(conf?.data.approverRoles)?conf.data.approverRoles:{};
+            const requiredRole=str(roles['MNT.TASK.VALIDATE']);
+            if(!requiredRole)throw new HttpError(409,'Configure an asset task validator in Maintenance Workflows first.');
+            const assignments=objs(ctx.me.data.assignments);
+            const today=new Date().toISOString().slice(0,10);
+            if(!assignments.some(a=>str(a.positionCode)===requiredRole&&(!str(a.startsOn)||str(a.startsOn)<=today)&&(!str(a.endsOn)||str(a.endsOn)>=today)))
+                throw new HttpError(403,'Only the configured asset-task validator may approve.');
+            const scope=await scopeOf(ctx);
+            const assemblyId=str(proposal.data.assemblyId);
+            const pathIds=await nodePath(ctx.orgId,assemblyId);
+            if(!canAt(ctx,'MNT.activities.edit',pathIds,scope))
+                throw new HttpError(403,'Asset activity maintenance permission is also required.');
+            const taskId=str(proposal.data.taskId);
+            const dest=`organizations/${ctx.orgId}/asset_task_templates/${assemblyId}_${taskId}`;
+            const existing=await getDoc(dest);
+            const version=(Number(existing?.data.version)||0)+1;
+            await writeDoc(dest,{assemblyId,taskId,task:proposal.data.task,status:'approved',version,
+                validatedFrom:proposal.id,approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso()});
+            await updateFields(path,{status:'approved',approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso(),templateVersion:version});
+            await rec(ctx,'mnt.task.validated',taskId,`Asset ${assemblyId}, revision ${version}`);
+            return {ok:true,version};
+        })
+    ],
     'POST /api/org/mnt/assessment/options': [
         orgRoute('org.mnt.assessment.options',null,async(ctx)=>{
             requireMnt(ctx);
@@ -995,9 +1053,27 @@ export const maintenanceRoutes = {
                         const approved=new Set(vendors.filter(v=>str(v.data.status)==='approved'&&objs(v.data.scopes).some(x=>str(x.kind)==='service')).map(v=>v.id));
                         if(allProposed.some(id=>!approved.has(id)))throw new HttpError(400,'Choose proposed service vendors from the approved service vendor list.');
                     }
+                    const version=(Number(doc.data.assessmentTasksVersion)||0)+1;
+                    const assemblyId=str(doc.data.assemblyId);
+                    for(const task of tasks){
+                        const dest=`organizations/${ctx.orgId}/asset_task_templates/${assemblyId}_${task.id}`;
+                        const adopted=await getDoc(dest);
+                        if(task.templateStatus==='existing'&&(!adopted||str(adopted.data.status)!=='approved'))
+                            throw new HttpError(400,'Selected reusable task has not been validated for this assembly.');
+                    }
+                    // Snapshot each newly created task as a separate validation candidate.
+                    // These entries are not active equipment/assembly templates yet.
+                    for(const task of tasks.filter(t=>t.templateStatus!=='existing')){
+                        const id=`${doc.id}_${task.id}_v${version}`;
+                        await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
+                            wrCode:doc.id,assemblyId,assetTag:str(doc.data.assetTag),taskId:task.id,
+                            description:task.description,task:task as unknown as Plain,assessmentVersion:version,
+                            status:'pending_validation',createdBy:ctx.uid,createdAt:now
+                        },{exists:false});
+                    }
                     const summary=summarizeAssessmentTasks(tasks);
                     await done({assessmentTasks:tasks as unknown as Plain,assessmentTasksBy:ctx.uid,
-                        assessmentTasksAt:now,assessmentTasksVersion:(Number(doc.data.assessmentTasksVersion)||0)+1},
+                        assessmentTasksAt:now,assessmentTasksVersion:version},
                         'Task assessments saved','mnt.wr.task_assessments',JSON.stringify(summary));
                     return {ok:true,summary};
                 }
