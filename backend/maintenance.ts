@@ -9,6 +9,7 @@ import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf, type Scope } from './access';
 import { searchCatalog } from './procurement';
 import {MAINTENANCE_GATES,maintenanceGateReadiness} from './maintenanceWorkflowConfig';
+import {validateAssessmentTasks,summarizeAssessmentTasks} from './maintenanceTaskAssessment';
 
 // ---------------------------------------------------------------------------
 // Maintenance Management (MNT)
@@ -404,7 +405,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         resubmit: mine && status === 'returned' && at(P.WR_edit),
         cancel: mine && ['submitted', 'returned'].includes(status) && at(P.WR_cancel),
         startReview: !mine && status === 'submitted' && at(P.WR_review),
-        assess: !mine && status === 'under_review' && at(P.WR_review),
+        assess: ['submitted','under_review'].includes(status) && (mine || at(P.view)),
         return: !mine && status === 'under_review' && at(P.WR_return),
         decline: !mine && status === 'under_review' && at(P.WR_decline),
         convert: !mine && status === 'under_review' && at(P.WR_convert),
@@ -970,6 +971,18 @@ export const maintenanceRoutes = {
                     );
                     return { ok: true };
                 }
+                case 'save_task_assessment': {
+                    deny(can.assess, 'You cannot assess this request.');
+                    let tasks;
+                    try {tasks=validateAssessmentTasks(ctx.body.tasks);} catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid assessment tasks.');}
+                    // Every task owns its parts/services/tools/risk. Legacy header-level
+                    // spares/services are deliberately not written by this action.
+                    const summary=summarizeAssessmentTasks(tasks);
+                    await done({assessmentTasks:tasks as unknown as Plain,assessmentTasksBy:ctx.uid,
+                        assessmentTasksAt:now,assessmentTasksVersion:(Number(doc.data.assessmentTasksVersion)||0)+1},
+                        'Task assessments saved','mnt.wr.task_assessments',JSON.stringify(summary));
+                    return {ok:true,summary};
+                }
                 case 'return':
                     deny(can.return, 'You cannot return this request.');
                     if (note.length < 5) throw new HttpError(400, 'Say what information is needed (at least 5 characters).');
@@ -985,10 +998,12 @@ export const maintenanceRoutes = {
                     deny(can.convert, can.ownRequest ? 'You cannot convert your own request.' : 'You cannot convert this request.');
                     const d = doc.data;
                     if (!str(d.maintenanceTypeCode) || !str(d.workTypeCode) || !str(d.priorityCode) || !str(d.disciplineCode)) throw new HttpError(400, 'Complete the assessment (maintenance type, work type, priority and discipline) before converting.');
+                    if(!objs(d.assessmentTasks).length) throw new HttpError(409,'Complete the task-by-task work assessment, including spares, services and each task risk assessment, before conversion.');
                     confirmCode(ctx, doc);
                     const keys = ['assemblyId', 'assemblyCode', 'assemblyName', 'unitId', 'unitCode', 'unitName', 'costCenterId', 'costCenterCode', 'costCenterName', 'siteId', 'siteCode', 'siteName', 'assetTag', 'assetName', 'assetClass', 'title', 'description', 'criticalityCode', 'criticalityLabel', 'criticalityColor', 'maintenanceTypeCode', 'maintenanceTypeLabel', 'workTypeCode', 'workTypeLabel', 'priorityCode', 'priorityLabel', 'disciplineCode', 'disciplineLabel', 'failureModeCode', 'failureModeLabel'];
                     const base: Record<string, Plain> = Object.fromEntries(keys.map((k) => [k, str(d[k])]));
                     base.path = strs(d.path);
+                    base.assessmentTasks = objs(d.assessmentTasks) as unknown as Plain;
                     const woCode = await createWo(ctx, base, doc.id);
                     await done({ status: 'converted', woCode, convertedBy: ctx.uid, convertedByName: displayName(ctx), convertedAt: now, closedAt: now }, `Converted to ${woCode}`, 'mnt.wr.converted', woCode);
                     await rec(ctx, 'mnt.wo.created', woCode, `From ${doc.id}`);
