@@ -6,7 +6,7 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canAt, canAnywhere, nodePath, scopeOf } from './access';
 import { audit } from './audit';
 import { commit, materialIn, physicalOf, stockValOf, withLock, type Write } from './finCore';
-import { catalogItemSpec, createMaterialDraft } from './procurement';
+import { catalogItemSpec } from './procurement';
 import { createMaintenanceRequirement } from './purchaseRequirements';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { postMaintenanceReturn } from './finOps';
@@ -241,7 +241,9 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
                 status =
                     shortage === 0
                         ? 'reserved'
-                        : p.materialDraftId
+                        : p.status === 'needs_specification' || p.status === 'ready_for_material_creation'
+                          ? p.status
+                          : p.materialDraftId
                           ? 'awaiting_material_approval'
                           : p.requirementId
                             ? 'awaiting_procurement'
@@ -348,46 +350,44 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
         };
     } else if (action === 'candidate') {
         if (!spare) throw new HttpError(400, 'Select a spare requirement.');
-        const code = str(spare.catalogCode) || requiredText(b.catalogCode, 'Catalogue specification', 1, 80),
-            spec = await catalogItemSpec('materials', code);
-        if (!spec) throw new HttpError(400, 'Choose an existing technical catalogue specification.');
+        if (previous.materialId || previous.reservationId)
+            throw new HttpError(409, 'This spare is already matched or reserved. Use the existing approved material.');
+        const candidateId = maintenanceKey(wo.id, str(task.id), str(spare.id));
+        const path = `${root(ctx)}/material_creation_candidates/${candidateId}`;
+        const existing = await getDoc(path);
+        if (existing?.data.materialDraftId)
+            throw new HttpError(409, 'The material draft has already been created. Complete its normal Materials Master approval.');
+        if (existing && existing.data.assessmentVersion !== wo.data.assessmentTasksVersion)
+            throw new HttpError(409, 'Reassess this work order before updating an outdated material candidate.');
+        const code = str(b.catalogCode) || str(spare.catalogCode);
+        const spec = code ? await catalogItemSpec('materials', code) : null;
+        if (code && !spec)
+            throw new HttpError(400, 'Choose a valid approved technical catalogue specification.');
         const attrs = { ...object(spare.attributes), ...object(b.attributes) };
-        const duplicate = (await listDocs(`${root(ctx)}/materials`)).find(
-            (m) =>
-                m.data.materialCode === code &&
-                hash(object(m.data.attributes)) === hash(attrs) &&
-                !['cancelled', 'rejected'].includes(str(m.data.status)),
-        );
-        if (duplicate)
-            throw new HttpError(
-                409,
-                `Material ${duplicate.id} already matches this specification. Match or complete that material instead.`,
-            );
-        const created = await createMaterialDraft({
-            ...ctx,
-            body: {
-                materialCode: code,
-                categoryCode: spec.categoryCode,
-                subcategoryCode: spec.subcategoryCode,
-                familyCode: spec.familyCode,
-                name: str(spare.description),
-                attributes: attrs,
-            },
-        });
-        await writeDoc(`${root(ctx)}/material_creation_candidates/${maintenanceKey(wo.id, str(task.id), str(spare.id))}`, {
-            woCode: wo.id,
-            taskId: task.id,
-            spareId: spare.id,
-            catalogCode: code,
-            catalogueSpecification: spec,
-            attributes: attrs,
-            materialDraftId: created.id,
-            status: 'awaiting_material_completion',
-            createdBy: ctx.uid,
-            createdAt: nowIso(),
-        });
-        state = { ...state, materialDraftId: created.id, status: 'awaiting_material_approval' };
-        result = { materialDraftId: created.id };
+        const reason = requiredText(b.note, 'Planner specification review', 5, 500);
+        const status = spec ? 'ready_for_material_creation' : 'needs_specification';
+        // Assessment owns the required quantity and technical description.
+        // Planner queues a proposal; an authorized Materials Master maintainer
+        // validates specifications and creates the material using PRC governance.
+        const candidate: Obj = {
+            woCode: wo.id, taskId: task.id, spareId: spare.id,
+            assemblyId: str(task.assemblyId) || str(wo.data.assemblyId),
+            equipmentId: str(task.equipmentId) || str(wo.data.unitId),
+            assessmentVersion: wo.data.assessmentTasksVersion,
+            source: str(spare.source), description: str(spare.description),
+            qty: Number(spare.qty), uom: str(spare.uom),
+            catalogCode: code, catalogueSpecification: spec || null,
+            attributes: attrs, plannerNotes: reason, status,
+            createdBy: str(existing?.data.createdBy) || ctx.uid,
+            createdAt: str(existing?.data.createdAt) || nowIso(),
+            updatedBy: ctx.uid, updatedAt: nowIso(),
+        };
+        await commit([{
+            path, fields: candidate,
+            ...(existing ? { updateTime: existing.updateTime } : { exists: false }),
+        }]);
+        state = { ...state, candidateId, status, materialDraftId: '' };
+        result = { candidateId, status };
     } else if (action === 'reserve') {
         if (!spare) throw new HttpError(400, 'Select a spare requirement.');
         await reserveTaskSpare(ctx, wo, task, spare, previous);
