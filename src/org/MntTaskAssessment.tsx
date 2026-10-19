@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert} from '../components/ui';
 import {Button,Card,useLoad} from '../admin/kit';
@@ -9,6 +9,29 @@ export type TaskAssessment={id:string;description:string;disciplineCode:string;r
 const seed=():TaskAssessment=>({id:'task_'+Math.random().toString(36).slice(2,10),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[{hazard:'',impact:'',controls:'',before:'',after:'',permit:''}],templateStatus:'pending_validation'});
 const input='mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 p-3 text-base text-white';
 const label='block text-sm text-slate-300';
+function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSelect:(item:{code:string;name:string;family:string})=>void}){
+ const [q,setQ]=useState(''),[rows,setRows]=useState<Array<{code:string;name:string;family:string}>>([]);
+ const [loading,setLoading]=useState(false);
+ useEffect(()=>{if(q.trim().length<2){setRows([]);return;}
+   let alive=true;const handle=setTimeout(async()=>{setLoading(true);
+    try{const result=await callBackend<{items:Array<{code:string;name:string;family:string}>}>('/api/org/mnt/catalog-search',{kind,q:q.trim()});
+      if(alive)setRows(result.items||[]);
+    }catch{if(alive)setRows([]);}finally{if(alive)setLoading(false);}
+   },320);
+   return()=>{alive=false;clearTimeout(handle);};
+ },[q,kind]);
+ return <div className='space-y-2 rounded-xl border border-emerald-700 p-3'>
+  <label className={label}>Find an approved catalogue specification
+   <input type='search' className={input} placeholder='Search by material or service name / code' value={q} onChange={e=>setQ(e.target.value)}/>
+  </label>
+  {loading&&<p className='text-xs text-slate-400'>Searching catalogue…</p>}
+  <div className='max-h-52 space-y-1 overflow-auto'>{rows.map(r=><button key={r.code} type='button' onClick={()=>{onSelect(r);setQ('');setRows([]);}}
+    className='w-full rounded-lg border border-slate-700 p-2 text-left text-sm text-white'>
+    <span className='font-mono text-xs text-emerald-300'>{r.code}</span> · {r.name}
+    {r.family&&<span className='block text-xs text-slate-400'>{r.family}</span>}
+  </button>)}</div>
+ </div>;
+}
 export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial.length?initial:[seed()]);
  const vendorOptions=useLoad(()=>callBackend<{vendors:Array<{id:string;name:string}>}>('/api/org/mnt/assessment/options'));
@@ -62,6 +85,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:
     <label className={label}>Unit<input className={input} value={s.uom} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,uom:e.target.value}:x)})}/></label></div>
     <button type='button' className='text-xs text-red-300 underline' onClick={()=>patch({spares:task.spares.filter((_,j)=>j!==i)})}>Remove spare</button>
    </div>)}
+   <CatalogPicker kind='materials' onSelect={item=>patch({spares:[...task.spares,{id:'sp_'+Math.random().toString(36).slice(2,10),source:'catalog',materialId:'',catalogCode:item.code,description:item.name,qty:1,uom:'EA',unitCost:null}]})}/>
    <Button variant='secondary' onClick={()=>patch({spares:[...task.spares,{id:'sp_'+Math.random().toString(36).slice(2,10),source:'description',materialId:'',catalogCode:'',description:'',qty:1,uom:'EA',unitCost:null}]})}>+ Add spare</Button>
   </section>}
   {section===2&&<section className='space-y-3 rounded-xl border border-slate-700 p-3'><h4 className='font-semibold text-white'>Services for this task</h4>
@@ -80,6 +104,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:
     </fieldset>
     <button type='button' className='text-xs text-red-300 underline' onClick={()=>patch({services:task.services.filter((_,j)=>j!==i)})}>Remove service</button>
    </div>)}
+   <CatalogPicker kind='services' onSelect={item=>patch({services:[...task.services,{id:'svc_'+Math.random().toString(36).slice(2,10),description:item.name,categoryCode:'',subcategoryCode:'',classCode:'',catalogCode:item.code,attributes:{},proposedVendorIds:[]}]})}/>
    <Button variant='secondary' onClick={()=>patch({services:[...task.services,{id:'svc_'+Math.random().toString(36).slice(2,10),description:'',categoryCode:'',subcategoryCode:'',classCode:'',catalogCode:'',attributes:{},proposedVendorIds:[]}]})}>+ Add service</Button>
   </section>}
   {section===3&&<section className='space-y-3 rounded-xl border border-slate-700 p-3'><h4 className='font-semibold text-white'>Risk assessment — this task</h4>
