@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Ban, CalendarClock, Check, CheckCircle2, Clipboa
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
+import MntTaskAssessment from './MntTaskAssessment';
 import RichTable, { type Column } from '../components/RichTable';
 import { restoredTableTab } from '../lib/tableTabs';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
@@ -449,6 +450,9 @@ function OrderDetail({ code, setup }: { code: string; setup: MntSetup }) {
     if (can.cancel) buttons.push({ key: 'cancel', label: 'Cancel', icon: <Ban className='h-4 w-4' />, variant: 'danger' });
     const press = (k: string) => (k === 'submit' ? void run('submit_plan') : k === 'start' ? void run('start') : setPanel(k as Panel));
 
+    if(panel==='plan'&&!w.assessmentTasks?.length&&!w.tasks.length)
+        return <MntTaskAssessment code={w.code} recordType='wo' initial={[]} editable={can.view}
+            onSaved={()=>{setPanel('');reload();}} onCancel={close}/>;
     if (panel === 'plan') return <PlanEditor wo={w} lists={lists} onSaved={() => (setPanel(''), reload())} onCancel={close} />;
 
     const stageIndex = STAGES.findIndex(([, s]) => s.includes(w.status));
