@@ -1493,12 +1493,12 @@ export const maintenanceRoutes = {
                     return {ok:true};
                 }
                 case 'save_plan': {
-                    await ensureCurrentAssessmentApproval(ctx,d);
                     deny(can.plan, 'You cannot plan this work order.');
                     const assessedTasks=objs(d.assessmentTasks);
                     // A converted request already has assessed task scope/resources/risk;
                     // planning cannot silently replace them through the legacy flat form.
                     if (!assessedTasks.length) throw new HttpError(409, 'Complete the task-by-task work assessment first.');
+                    await ensureCurrentAssessmentApproval(ctx,d);
                     if(objs(b.tasks).length||objs(b.spares).length||objs(b.services).length||str(b.tools))throw new HttpError(409,'Technical requirements can only change through controlled task reassessment.');
                     await requireMaintenanceRole(ctx,'MNT.WO.PLAN',pathOf(doc));
                     const tasks = assessedTasks;
@@ -1547,9 +1547,9 @@ export const maintenanceRoutes = {
                     return { ok: true };
                 }
                 case 'submit_plan':
-                    await ensureCurrentAssessmentApproval(ctx,d);
                     deny(can.submitPlan, 'You cannot submit this plan.');
                     if (!objs(d.assessmentTasks).length) throw new HttpError(409, 'Complete the task-by-task assessment first.');
+                    await ensureCurrentAssessmentApproval(ctx,d);
                     await requireMaintenanceRole(ctx,'MNT.WO.PLAN',pathOf(doc));
                     await done({ status: 'plan_ready' }, 'Plan ready for release', 'mnt.wo.plan_ready', `Estimate ${estimate(d).total}`);
                     return { ok: true };
