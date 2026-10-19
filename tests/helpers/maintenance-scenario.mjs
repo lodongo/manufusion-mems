@@ -672,7 +672,7 @@ await assert.rejects(
 );
 async function createAssessedWorkOrder(title,description,assemblyId,assessedTasks){
     const wrNew=await route(maintenanceRoutes,'/api/org/mnt/wr/create','requester',{
-        ...finding,title,description,assemblyId,assetTag:'AST000001'
+        ...finding,title,description,assemblyId,assetTag:assemblyId==='OTHER_ASSEMBLY'?'AST000002':'AST000001'
     });
     await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'start_review'});
     await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'assess',...header});
