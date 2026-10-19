@@ -1040,6 +1040,7 @@ export const maintenanceRoutes = {
                     duplicateOf: str(d.duplicateOf),
                     note: str(d.assessmentNote),
                 },
+                assessmentTasks: objs(d.assessmentTasks),
                 assessmentReview: isObj(d.assessmentReview)?d.assessmentReview:{status:'pending'},
                 assessmentReviewCurrent: assessmentReviewCurrent(d),
                 returnNote: str(d.returnNote),
