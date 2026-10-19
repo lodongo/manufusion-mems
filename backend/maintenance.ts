@@ -1081,7 +1081,6 @@ export const maintenanceRoutes = {
                     await done({ status: 'under_review', reviewer: ctx.uid, reviewerName: displayName(ctx), reviewStartedAt: now }, 'Review started', 'mnt.wr.review_started', '');
                     return { ok: true };
                 case 'assess': {
-                    await requireMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
                     deny(can.assess, 'You cannot assess this request.');
                     const b = ctx.body;
                     const mtype = pick(l.maintenanceTypes, str(b.maintenanceTypeCode), 'maintenance type')!;
@@ -1119,7 +1118,6 @@ export const maintenanceRoutes = {
                     return { ok: true };
                 }
                 case 'save_task_assessment': {
-                    await requireMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
                     deny(can.assess, 'You cannot assess this request.');
                     let tasks;
                     try{
@@ -1386,7 +1384,6 @@ export const maintenanceRoutes = {
                 case 'save_task_assessment': {
                     if(!can.view||str(d.status)!=='planning')
                         throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
-                    await requireMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
                     if(isObj(d.taskPlanning)&&Object.keys(d.taskPlanning).length)throw new HttpError(409,'Open controlled reassessment before editing a task whose resources have already been planned.');
                     let tasks;
                     try{
