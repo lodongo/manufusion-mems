@@ -78,7 +78,8 @@ for (const [key, code, label] of [
     seed('module_workspaces/SAF/metadata/' + key, { items: [{ code, label, active: true }] });
 seed(r + '/activity_risk_assessments/UNSELECTED_HISTORY', { hazards: [{ code: 'HISTORICAL_UNSELECTED_HAZARD' }] });
 const roles = {
-    'MNT.WR.ASSESS': 'ASSESS',
+    // Work assessment is open to users with access at the equipment;
+    // no configured assessment-only role is required.
     'MNT.WR.CONVERT': 'CONVERT',
     'MNT.TASK.VALIDATE': 'VALIDATE',
     'MNT.WO.PLAN': 'PLAN',
@@ -683,7 +684,16 @@ const proposal = (await listDocs(r + '/asset_task_proposals')).find((p) => p.dat
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/tasks/validate', 'assessor', { id: proposal.id }), /own task/);
 await route(maintenanceRoutes, '/api/org/mnt/tasks/validate', 'validator', { id: proposal.id });
 assert.equal((await listDocs(r + '/asset_task_template_revisions')).length, 1);
-const queued = await op('planner', 'candidate', {
+// The planner can send a candidate without Materials Master permissions.
+const plannerWithoutMaterials = context('planner', {
+    action:'candidate',code:direct,taskId:'coupling',resourceId:'coupling_part',attributes:{},
+    note:'Planner submitted the assessed spare for Materials Master creation.',
+});
+plannerWithoutMaterials.permissions=['MNT.*'];
+plannerWithoutMaterials.directPermissions=['MNT.*'];
+const queued = await maintenanceOperations(plannerWithoutMaterials);
+// duplicate candidate requests update the same controlled proposal rather than creating materials.
+await op('planner', 'candidate', {
     code: direct, taskId: 'coupling', resourceId: 'coupling_part', attributes: {},
     note: 'Planner reviewed assessed coupling and submitted its technical catalogue specification.',
 });
