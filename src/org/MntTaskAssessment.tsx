@@ -54,7 +54,7 @@ export function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSel
   {x.name}<span className='block text-xs text-slate-400'>{x.code} · {x.family}</span></button>)}</div></div>;
 }
 const categories=(opts:SafetyOption[])=>[...new Set(opts.map(x=>x.category||'Other'))];
-function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Options}){
+function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Options|null}){
  return <Card className='space-y-3'><h3 className='font-semibold text-white'>Work assessment — read-only review</h3>
   <p className='text-sm text-slate-400'>Review the submitted details. Approval or return does not alter the assessment.</p>
   {!tasks.length&&<p className='text-sm text-amber-300'>No tasks assessed.</p>}
