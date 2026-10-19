@@ -118,7 +118,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    setMessage('Assessment saved. Independent review is required before conversion.');onSaved();
   }catch(e){setMessage(e instanceof Error?e.message:'Assessment could not be saved.');}finally{setSaving(false);}
  };
- if(!editable)return <ReviewAssessment tasks={initial} options={options.data}/>;
+ if(!editable)return <ReviewAssessment tasks={initial} options={options.data??undefined}/>;
  return <Card className='space-y-4'>
    {onCancel&&<button type='button' className='text-sm text-emerald-300 underline' onClick={onCancel}>← Back</button>}
    <div><h3 className='text-lg font-semibold text-white'>Work assessment</h3>
