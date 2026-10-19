@@ -608,7 +608,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
             </div>
             {tasks.length>0&&<Card className="space-y-3">
                 <p className="font-semibold">Independent work assessment review</p>
-                <p className="text-sm">{wo.assessmentReview?.status==='approved'?'Approved by '+(wo.assessmentReview.name||'reviewer'):'Awaiting approval of current task assessment'}</p>
+                <p className="text-sm">{wo.assessmentReviewCurrent?'Approved by '+(wo.assessmentReview.name||'reviewer'):'Awaiting approval of current task assessment'}</p>
                 {wo.assessmentReview?.note&&<p className="text-sm text-soft">Review notes: {wo.assessmentReview.note}</p>}
                 {wo.status==='planning'&&can.reviewAssessment&&<div className="space-y-2">
                     <label className="block text-sm">Technical verification / correction notes (minimum 10 characters)
