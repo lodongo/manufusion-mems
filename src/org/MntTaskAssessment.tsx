@@ -2,7 +2,7 @@ import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert} from '../components/ui';
 import {Button,Card,useLoad} from '../admin/kit';
-type Spare={id:string;source:'warehouse'|'catalog'|'description';materialId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null};
+type Spare={id:string;source:'warehouse'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null};
 type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[]};
 type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>};
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
@@ -11,6 +11,30 @@ export type TaskAssessment={id:string;description:string;disciplineCode:string;r
 const seed=():TaskAssessment=>({id:'task_'+Math.random().toString(36).slice(2,10),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[{hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}}],templateStatus:'pending_validation'});
 const input='mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 p-3 text-base text-white';
 const label='block text-sm text-slate-300';
+function WarehouseSparePicker({onSelect}:{onSelect:(item:{materialId:string;warehouseId:string;materialNumber:string;name:string;uom:string;available:number|null;stockVerified:boolean;warehouseName:string})=>void}){
+ const [query,setQuery]=useState(''),[items,setItems]=useState<Array<{materialId:string;warehouseId:string;materialNumber:string;name:string;uom:string;available:number|null;stockVerified:boolean;warehouseName:string}>>([]);
+ const [busy,setBusy]=useState(false);
+ useEffect(()=>{if(query.trim().length<2){setItems([]);return;}
+  let live=true;const timer=setTimeout(async()=>{setBusy(true);
+   try{const response=await callBackend<{items:typeof items}>('/api/org/mnt/warehouse-spares/search',{q:query.trim()});
+    if(live)setItems(response.items);
+   }catch{if(live)setItems([]);}finally{if(live)setBusy(false);}
+  },350);
+  return()=>{live=false;clearTimeout(timer);};
+ },[query]);
+ return <div className='space-y-2 rounded-xl border border-emerald-700 p-3'>
+  <label className={label}>Choose a spare from your warehouse
+    <input type='search' className={input} value={query} onChange={e=>setQuery(e.target.value)} placeholder='Material number or name'/>
+  </label>
+  {busy&&<p className='text-xs text-slate-400'>Checking approved warehouse materials…</p>}
+  <div className='max-h-60 space-y-2 overflow-auto'>{items.map(item=><button type='button' key={item.materialId+':'+item.warehouseId}
+    className='w-full rounded-lg border border-slate-700 p-3 text-left text-sm text-white'
+    onClick={()=>{onSelect(item);setQuery('');setItems([]);}}>
+    <span className='font-mono text-xs text-emerald-300'>{item.materialNumber}</span> · {item.name}
+    <span className='block text-xs text-slate-400'>{item.warehouseName} · {item.stockVerified?'Available: '+item.available+' '+item.uom:'Stock ledger not verified — availability pending'}</span>
+  </button>)}</div>
+ </div>;
+}
 function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSelect:(item:{code:string;name:string;family:string})=>void}){
  const [q,setQ]=useState(''),[rows,setRows]=useState<Array<{code:string;name:string;family:string}>>([]);
  const [loading,setLoading]=useState(false);
@@ -93,13 +117,17 @@ export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:
      <option value='warehouse'>Warehouse / stock</option><option value='catalog'>Technical catalogue</option><option value='description'>Description only</option>
     </select></label>
     <label className={label}>Description<input className={input} value={s.description} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,description:e.target.value}:x)})}/></label>
-    {s.source!=='description'&&<label className={label}>{s.source==='warehouse'?'Warehouse material ID':'Catalogue item code'}<input className={input} value={s.source==='warehouse'?s.materialId:s.catalogCode} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,[s.source==='warehouse'?'materialId':'catalogCode']:e.target.value}:x)})}/></label>}
+    {s.source!=='description'&&<label className={label}>{s.source==='warehouse'?'Warehouse material / warehouse IDs':'Technical catalogue code'}<input className={input} readOnly={s.source==='warehouse'} value={s.source==='warehouse'?s.materialId+' / '+s.warehouseId:s.catalogCode} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,catalogCode:e.target.value}:x)})}/></label>}
     <div className='grid grid-cols-2 gap-2'><label className={label}>Quantity<input type='number' step='any' min={0.001} className={input} value={s.qty} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,qty:Number(e.target.value)}:x)})}/></label>
     <label className={label}>Unit<input className={input} value={s.uom} onChange={e=>patch({spares:task.spares.map((x,j)=>j===i?{...x,uom:e.target.value}:x)})}/></label></div>
     <button type='button' className='text-xs text-red-300 underline' onClick={()=>patch({spares:task.spares.filter((_,j)=>j!==i)})}>Remove spare</button>
    </div>)}
-   <CatalogPicker kind='materials' onSelect={item=>patch({spares:[...task.spares,{id:'sp_'+Math.random().toString(36).slice(2,10),source:'catalog',materialId:'',catalogCode:item.code,description:item.name,qty:1,uom:'EA',unitCost:null}]})}/>
-   <Button variant='secondary' onClick={()=>patch({spares:[...task.spares,{id:'sp_'+Math.random().toString(36).slice(2,10),source:'description',materialId:'',catalogCode:'',description:'',qty:1,uom:'EA',unitCost:null}]})}>+ Add spare</Button>
+   <WarehouseSparePicker onSelect={item=>patch({spares:[...task.spares,{
+      id:'sp_'+Math.random().toString(36).slice(2,10),source:'warehouse',materialId:item.materialId,
+      warehouseId:item.warehouseId,catalogCode:'',description:item.name,qty:1,uom:item.uom,unitCost:null
+   }]})}/>
+   <CatalogPicker kind='materials' onSelect={item=>patch({spares:[...task.spares,{id:'sp_'+Math.random().toString(36).slice(2,10),source:'catalog',materialId:'',warehouseId:'',catalogCode:item.code,description:item.name,qty:1,uom:'EA',unitCost:null}]})}/>
+   <Button variant='secondary' onClick={()=>patch({spares:[...task.spares,{id:'sp_'+Math.random().toString(36).slice(2,10),source:'description',materialId:'',warehouseId:'',catalogCode:'',description:'',qty:1,uom:'EA',unitCost:null}]})}>+ Add spare</Button>
   </section>}
   {section===2&&<section className='space-y-3 rounded-xl border border-slate-700 p-3'><h4 className='font-semibold text-white'>Services for this task</h4>
    {task.services.map((s,i)=><div key={s.id} className='space-y-2 rounded-xl border border-slate-700 p-3'>
