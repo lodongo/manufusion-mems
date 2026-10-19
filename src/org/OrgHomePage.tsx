@@ -22,6 +22,7 @@ import WorkRequests from './WorkRequests';
 import WorkOrders from './WorkOrders';
 import MntHome from './MntHome';
 import MntWorkflowSettings from './MntWorkflowSettings';
+import MntTaskValidation from './MntTaskValidation';
 import SafConfiguration from './SafConfiguration';
 import AssetRegister from './AssetRegister';
 import ProcurementCatalog from './ProcurementCatalog';
@@ -69,6 +70,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Work requests', path: 'work_requests', prefix: 'MNT.WR.' },
         { label: 'Work orders', path: 'work_orders', prefix: 'MNT.WO.' },
         { label: 'Workflows and approval roles', path: 'mnt_workflows', permission: 'ADM.workflows' },
+        { label: 'Validate new asset tasks', path: 'mnt_task_validation', permission: 'MNT.activities.edit' },
     ],
     AST: [
         { label: 'Asset register', path: 'assets', permission: 'AST.view' },
@@ -369,6 +371,7 @@ export default function OrgHomePage({
     } else if (activeMenu && section === 'saf_configuration') content = <SafConfiguration />;
     else if (activeMenu && section === 'mnt') content = <MntHome />;
     else if (activeMenu && section === 'mnt_workflows') content = <MntWorkflowSettings />;
+    else if (activeMenu && section === 'mnt_task_validation') content = <MntTaskValidation />;
     else if (activeMenu && section === 'work_requests') content = <WorkRequests id={id} sub={sub} />;
     else if (activeMenu && section === 'work_orders') content = <WorkOrders id={id} sub={sub} />;
     else if (activeMenu && section === 'assets') content = <AssetRegister view='register' id={id} />;
