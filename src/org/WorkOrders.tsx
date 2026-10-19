@@ -146,7 +146,7 @@ export default function WorkOrders({ id, sub }: { id?: string; sub?: string }) {
     if (setup.error || !setup.data) return <Alert tone='error'>{setup.error || 'Could not load maintenance.'}</Alert>;
     const s = setup.data;
     if (!s.enabled) return <NotEnabled />;
-    if (id === 'new') return s.can.WO_create ? <NewWorkOrder key={sub ?? 'new'} setup={s} assemblyId={sub} /> : <Alert tone='error'>Your job role or security role does not include creating work orders directly.</Alert>;
+    if (id === 'new') return <Alert tone='info'>Work orders are created only from approved work request assessments. Open Work Requests to begin.</Alert>;
     if (id && /^WO\d{8}$/.test(id)) return <OrderDetail key={id} code={id} setup={s} />;
     return <OrderList setup={s} />;
 }
@@ -226,14 +226,7 @@ function OrderList({ setup }: { setup: MntSetup }) {
                     onRowClick={(r) => navigate(`organization_admin/work_orders/${r.code}`)}
                     empty='No work orders here.'
                     height='h-[calc(100dvh-12rem)]'
-                    actions={
-                        setup.can.WO_create ? (
-                            <Button onClick={() => navigate('organization_admin/work_orders/new')}>
-                                <Plus className='h-4 w-4' />
-                                New
-                            </Button>
-                        ) : undefined
-                    }
+
                 />
             )}
         </div>
