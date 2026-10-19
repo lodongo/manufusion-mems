@@ -701,6 +701,18 @@ export async function catalogItemSpec(kind: 'materials' | 'services', code: stri
 }
 
 /** Catalog lookup used by maintenance planning (spares and services). Returns [] when the catalog is not loaded. */
+/** Read-only hierarchy used by maintenance assessors; no procurement rights implied. */
+export async function serviceCatalogHierarchy(){
+ try {
+  const loaded=await load('services');
+  return {
+   categories:loaded.categories.map(c=>({code:str(c.code),name:str(c.name)})),
+   subcategories:loaded.subcategories.map(c=>({code:str(c.code),name:str(c.name),categoryCode:str(c.categoryCode)})),
+   families:loaded.families.map(c=>({code:str(c.code),name:str(c.name),subcategoryCode:str(c.subcategoryCode)}))
+  };
+ }catch{return {categories:[],subcategories:[],families:[]};}
+}
+
 export async function searchCatalog(kind: 'materials' | 'services', q: string, limit = 25): Promise<Array<{ code: string; name: string; family: string }>> {
     let d: Loaded;
     try {
