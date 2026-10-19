@@ -3,6 +3,7 @@ import { commit, withLock } from './finCore';
 import { enforceMaintenanceTransition, executeMaintenanceAction } from './maintenanceOperations';
 import { requireMaintenanceRole } from './maintenanceAccess';
 import { prepareMaintenanceAssessment } from './maintenanceAssessmentIntegration';
+import { assessmentReviewCurrent, approvedAssessmentSnapshot, reviewAssessmentPrerequisites } from './maintenanceAssessmentReview';
 import { HttpError, getDoc, isObj, listDocs, nowIso, randomId, rateLimit, runQuery, fieldEq, str, updateFields, writeDoc, type Doc, type Obj, type Plain } from './core';
 import { audit } from './audit';
 import { orgRoute, type OrgContext } from './guards';
@@ -20,7 +21,7 @@ import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} 
 // Maintenance Management (MNT)
 //
 // Work request  organizations/{orgId}/work_requests/{WR00000001}   (counter organizations/{orgId}.wrSeq)
-//   submitted -> under_review -> converted (locked, linked to the work order)
+//   submitted -> under_review -> assessment approved -> converted (locked, linked to the work order)
 //                             -> returned (requester adds information, resubmits) -> submitted
 //                             -> declined (with reason)
 //   submitted | returned -> cancelled (requester, with reason)
@@ -331,6 +332,7 @@ function wrOut(doc: Doc) {
         requestedByName: str(d.requestedByName),
         requestedAt: str(d.requestedAt),
         reviewerName: str(d.reviewerName),
+        assessmentReviewStatus: str((isObj(d.assessmentReview)?d.assessmentReview:{}).status) || 'pending',
         woCode: str(d.woCode),
         updatedAt: str(d.updatedAt),
     };
@@ -395,7 +397,8 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         assess: ['submitted','under_review'].includes(status) && (mine || at(P.view)),
         return: !mine && status === 'under_review' && at(P.WR_return),
         decline: !mine && status === 'under_review' && at(P.WR_decline),
-        convert: !mine && status === 'under_review' && at(P.WR_convert),
+        reviewAssessment: !mine && status === 'under_review' && at(P.assessment_review) && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid),
+        convert: !mine && status === 'under_review' && at(P.WR_convert) && assessmentReviewCurrent(doc.data),
         ownRequest: mine,
     };
 }
@@ -564,7 +567,7 @@ async function createWo(ctx: OrgContext, base: Obj, wrCode: string): Promise<str
                 updatedAt: now,
                 history: history(null, ctx, wrCode ? `Created from ${wrCode}` : 'Created directly'),
         };
-        if(wrCode){const request=await getWr(ctx,wrCode);if(str(request.data.status)!=='under_review')throw new HttpError(409,'The request has already progressed.');await commit([{path:`${woCol(ctx.orgId)}/${code}`,fields:data,exists:false},{path:`${wrCol(ctx.orgId)}/${wrCode}`,fields:{...request.data,status:'converted',woCode:code,convertedBy:ctx.uid,convertedByName:displayName(ctx),convertedAt:now,closedAt:now,updatedAt:now,history:history(request,ctx,`Converted to ${code}`,code)},updateTime:request.updateTime}]);return code;}
+        if(wrCode){const request=await getWr(ctx,wrCode);if(!assessmentReviewCurrent(request.data))throw new HttpError(409,'Approved assessment required before conversion.');if(str(request.data.status)!=='under_review')throw new HttpError(409,'The request has already progressed.');await commit([{path:`${woCol(ctx.orgId)}/${code}`,fields:data,exists:false},{path:`${wrCol(ctx.orgId)}/${wrCode}`,fields:{...request.data,status:'converted',woCode:code,convertedBy:ctx.uid,convertedByName:displayName(ctx),convertedAt:now,closedAt:now,updatedAt:now,history:history(request,ctx,`Converted to ${code}`,code)},updateTime:request.updateTime}]);return code;}
         const created=await writeDoc(`${woCol(ctx.orgId)}/${code}`,data,{exists:false});
         if (created) return code;
     }
@@ -639,6 +642,13 @@ function readDate(v: unknown, label: string, required = true): string {
 async function orgUserMap(orgId: string) {
     const users = await runQuery({ from: [{ collectionId: 'users' }], where: fieldEq('orgId', orgId) });
     return new Map(users.filter((u) => str(u.data.status) !== 'disabled').map((u) => [u.id, `${str(u.data.firstName)} ${str(u.data.lastName)}`.trim() || str(u.data.email)]));
+}
+
+async function ensureCurrentAssessmentApproval(ctx:OrgContext,data:Obj) {
+    const settings=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+    const reviewerRole=str(isObj(settings?.data.approverRoles)?settings.data.approverRoles['MNT.ASSESS.REVIEW']:'');
+    if(!reviewerRole||!assessmentReviewCurrent(data,reviewerRole))
+        throw new HttpError(409,'Assessment approval is missing or outdated. Assign a reviewer and approve the latest assessment before planning.');
 }
 
 // ----- Routes -----
@@ -987,7 +997,7 @@ export const maintenanceRoutes = {
                     const s = wrStatus(d);
                     const mine = str(d.data.requestedBy) === ctx.uid;
                     if (view === 'mine') return mine;
-                    if (view === 'review') return !mine && ['submitted', 'under_review'].includes(s) && canAt(ctx, P.WR_review, pathOf(d), scope);
+                    if (view === 'review') return !mine && (['submitted', 'under_review'].includes(s) && canAt(ctx, P.WR_review, pathOf(d), scope) || s==='under_review' && !assessmentReviewCurrent(d.data) && canAt(ctx, P.assessment_review, pathOf(d), scope));
                     if (view === 'open') return ['submitted', 'under_review', 'returned'].includes(s);
                     return true;
                 })
@@ -1030,6 +1040,8 @@ export const maintenanceRoutes = {
                     duplicateOf: str(d.duplicateOf),
                     note: str(d.assessmentNote),
                 },
+                assessmentReview: isObj(d.assessmentReview)?d.assessmentReview:{status:'pending'},
+                assessmentReviewCurrent: assessmentReviewCurrent(d),
                 returnNote: str(d.returnNote),
                 declineReason: str(d.declineReason),
                 history: objs(d.history).map((h) => ({ at: str(h.at), name: str(h.name), action: str(h.action), note: str(h.note) })),
@@ -1068,7 +1080,7 @@ export const maintenanceRoutes = {
                 }
                 case 'resubmit':
                     deny(can.resubmit, 'Only the requester can resubmit a returned request.');
-                    await done({ status: 'submitted', returnNote: '' }, 'Resubmitted', 'mnt.wr.resubmitted');
+                    await done({ status: 'submitted', returnNote: '', assessmentReview: null }, 'Resubmitted', 'mnt.wr.resubmitted');
                     return { ok: true };
                 case 'cancel':
                     deny(can.cancel, 'Only the requester can cancel, and only before review starts.');
@@ -1110,6 +1122,7 @@ export const maintenanceRoutes = {
                             assessedBy: ctx.uid,
                             assessedByName: displayName(ctx),
                             assessedAt: now,
+                            assessmentReview: null,
                         },
                         'Assessed',
                         'mnt.wr.assessed',
@@ -1163,7 +1176,7 @@ export const maintenanceRoutes = {
                     }
                     const summary=summarizeAssessmentTasks(tasks);
                     await done({assessmentTasks:tasks as unknown as Plain,assessmentTasksBy:ctx.uid,
-                        assessmentTasksAt:now,assessmentTasksVersion:version},
+                        assessmentTasksAt:now,assessmentTasksVersion:version,assessmentReview:null},
                         'Task assessments saved','mnt.wr.task_assessments',JSON.stringify(summary));
                     return {ok:true,summary};
                 }
@@ -1191,6 +1204,8 @@ export const maintenanceRoutes = {
                     base.assessmentTasks = objs(d.assessmentTasks) as unknown as Plain;
                     base.assessmentTasksVersion = Number(d.assessmentTasksVersion)||1;
                     base.assessmentTasksAt = str(d.assessmentTasksAt);
+                    base.assessedAt = str(d.assessedAt);
+                    base.assessmentReview = d.assessmentReview as Plain;
                     const woCode = await createWo(ctx, base, doc.id);
                     await done({ status: 'converted', woCode, convertedBy: ctx.uid, convertedByName: displayName(ctx), convertedAt: now, closedAt: now }, `Converted to ${woCode}`, 'mnt.wr.converted', woCode);
                     await rec(ctx, 'mnt.wo.created', woCode, `From ${doc.id}`);
@@ -1422,7 +1437,7 @@ export const maintenanceRoutes = {
                     }
                     await done({assessmentTasks:tasks as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
                         spares:[],services:[],tools:'',assessmentTasksBy:ctx.uid,assessmentTasksAt:now,
-                        assessmentTasksVersion:version,safety:null},
+                        assessmentTasksVersion:version,assessmentReview:null,safety:null},
                         'Task assessments completed','mnt.wo.task_assessments',
                         JSON.stringify(summarizeAssessmentTasks(tasks)));
                     return {ok:true};
