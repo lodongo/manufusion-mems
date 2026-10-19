@@ -765,6 +765,13 @@ export const maintenanceRoutes = {
             const proposal=await getDoc(path);
             if(!proposal||str(proposal.data.status)!=='pending_validation')throw new HttpError(409,'Task proposal not awaiting validation.');
             if(str(proposal.data.createdBy)===ctx.uid)throw new HttpError(403,'A task creator cannot validate their own task.');
+            const request=await getWr(ctx,str(proposal.data.wrCode));
+            if(Number(request.data.assessmentTasksVersion)!==Number(proposal.data.assessmentVersion))
+                throw new HttpError(409,'This task belongs to an outdated assessment revision. Validate the latest proposal.');
+            const matching=objs(request.data.assessmentTasks).find(t=>str(t.id)===str(proposal.data.taskId));
+            if(!matching||JSON.stringify(matching)!==JSON.stringify(proposal.data.task))
+                throw new HttpError(409,'The assessed task has been revised. Reload the latest proposal.');
+
             const conf=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
             const roles=isObj(conf?.data.approverRoles)?conf.data.approverRoles:{};
             const requiredRole=str(roles['MNT.TASK.VALIDATE']);
