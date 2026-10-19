@@ -6,6 +6,7 @@ type Spare={id:string;source:'warehouse'|'catalog'|'description';materialId:stri
 type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[]};
 type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>};
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
+type ServiceHierarchy={categories:Array<{code:string;name:string}>;subcategories:Array<{code:string;name:string;categoryCode:string}>;families:Array<{code:string;name:string;subcategoryCode:string}>};
 export type TaskAssessment={id:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing'};
 const seed=():TaskAssessment=>({id:'task_'+Math.random().toString(36).slice(2,10),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[{hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}}],templateStatus:'pending_validation'});
 const input='mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 p-3 text-base text-white';
@@ -35,7 +36,7 @@ function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSelect:(it
 }
 export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial.length?initial:[seed()]);
- const vendorOptions=useLoad(()=>callBackend<{vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix}>('/api/org/mnt/assessment/options'));
+ const vendorOptions=useLoad(()=>callBackend<{vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;serviceHierarchy:ServiceHierarchy}>('/api/org/mnt/assessment/options'));
  const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
  const [current,setCurrent]=useState(0);
  const [section,setSection]=useState(0);
@@ -102,8 +103,35 @@ export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:
   </section>}
   {section===2&&<section className='space-y-3 rounded-xl border border-slate-700 p-3'><h4 className='font-semibold text-white'>Services for this task</h4>
    {task.services.map((s,i)=><div key={s.id} className='space-y-2 rounded-xl border border-slate-700 p-3'>
-    {(['description','categoryCode','subcategoryCode','classCode','catalogCode'] as const).map(k=><label key={k} className={label}>{({description:'Service required',categoryCode:'Service category',subcategoryCode:'Subcategory',classCode:'Service class',catalogCode:'Catalogue code (optional)'})[k]}
-     <input className={input} value={s[k]} onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,[k]:e.target.value}:x)})}/></label>)}
+    <label className={label}>Service required<input className={input} value={s.description} onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,description:e.target.value}:x)})}/></label>
+    <label className={label}>Service category
+      <select data-native-select='true' className={input} value={s.categoryCode}
+        onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,categoryCode:e.target.value,subcategoryCode:'',classCode:''}:x)})}>
+        <option value=''>Choose category</option>
+        {(vendorOptions.data?.serviceHierarchy.categories||[]).map(c=><option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
+      </select>
+    </label>
+    <label className={label}>Service subcategory
+      <select data-native-select='true' className={input} value={s.subcategoryCode}
+        onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,subcategoryCode:e.target.value,classCode:''}:x)})}>
+        <option value=''>Choose subcategory</option>
+        {(vendorOptions.data?.serviceHierarchy.subcategories||[]).filter(c=>c.categoryCode===s.categoryCode).map(c=><option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
+      </select>
+    </label>
+    <label className={label}>Service family / class
+      <select data-native-select='true' className={input} value={s.classCode}
+        onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,classCode:e.target.value}:x)})}>
+        <option value=''>Choose service class</option>
+        {(vendorOptions.data?.serviceHierarchy.families||[]).filter(c=>c.subcategoryCode===s.subcategoryCode).map(c=><option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
+      </select>
+    </label>
+    <label className={label}>Catalogue service code (if selected)<input readOnly className={input} value={s.catalogCode||''}/></label>
+    <label className={label}>Technical service attributes (key: value, one per line)
+      <textarea rows={3} className={input} value={Object.entries(s.attributes).map(([k,v])=>k+': '+v).join('\n')}
+        onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,attributes:Object.fromEntries(e.target.value.split('\n').filter(x=>x.includes(':')).map(x=>{const at=x.indexOf(':');return [x.slice(0,at).trim(),x.slice(at+1).trim()]}).filter(x=>x[0]))}:x)})}/>
+    </label>
+    {!vendorOptions.data?.serviceHierarchy.categories.length&&<p className='text-xs text-amber-300'>Service hierarchy not loaded in the MEMS catalogue. An administrator must adopt it before classification can be completed.</p>}
+
     <fieldset className='space-y-2'><legend className={label}>Proposed service vendors (up to 3; Procurement makes final selection)</legend>
       {vendorOptions.error&&<p className='text-xs text-amber-300'>Approved vendor list unavailable: {vendorOptions.error}</p>}
       {vendorOptions.data?.vendors.map(v=><label key={v.id} className='flex items-center gap-2 rounded-lg border border-slate-700 p-2 text-sm text-white'>
