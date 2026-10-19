@@ -265,12 +265,12 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         setPlaceError('');
         try {
             const p = await callBackend<Place>('/api/org/mnt/assembly', { assemblyId: id, purpose: 'wr' });
-            setPlace(p);
             const handoff = pendingGembaWr(id);
             // Asset selection was already completed during the one-to-one
             // equipment/asset setup. It is never repeated here.
             if (handoff && handoff.assetTag!==p.defaultAssetTag)
                 throw new Error('This Gemba observation references a different asset from the equipment link. Review the asset mapping before proceeding.');
+            setPlace(p);
             setAssetTag(p.defaultAssetTag);
             if (handoff) {
                 setTitle(handoff.title.slice(0, 120));
@@ -553,7 +553,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                             </p>
                             <p className='text-xs text-slate-400'>{place.path.map((p) => `${LEVEL_LABEL[p.level] ?? p.level} ${p.code}`).join(' › ')}</p>
                         </ReviewBlock>
-                        <ReviewBlock label='Equipment-linked asset' onEdit={() => setStep(0)}>
+                        <ReviewBlock label='Equipment-linked asset'>
                             <p className='text-white'>
                                 {asset?.tag} · {asset?.name}
                             </p>
@@ -605,14 +605,14 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     );
 }
 
-function ReviewBlock({ label, onEdit, children }: { label: string; onEdit: () => void; children: ReactNode }) {
+function ReviewBlock({ label, onEdit, children }: { label: string; onEdit?: () => void; children: ReactNode }) {
     return (
         <Card>
             <div className='mb-1 flex items-center justify-between'>
                 <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>{label}</p>
-                <button type='button' onClick={onEdit} className='text-xs text-emerald-300'>
+                {onEdit && <button type='button' onClick={onEdit} className='text-xs text-emerald-300'>
                     Change
-                </button>
+                </button>}
             </div>
             {children}
         </Card>
