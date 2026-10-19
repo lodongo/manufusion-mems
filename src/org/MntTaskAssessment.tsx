@@ -1,7 +1,7 @@
 import {useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert} from '../components/ui';
-import {Button,Card} from '../admin/kit';
+import {Button,Card,useLoad} from '../admin/kit';
 type Spare={id:string;source:'warehouse'|'catalog'|'description';materialId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null};
 type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[]};
 type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string};
@@ -11,6 +11,7 @@ const input='mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 p-3 tex
 const label='block text-sm text-slate-300';
 export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial.length?initial:[seed()]);
+ const vendorOptions=useLoad(()=>callBackend<{vendors:Array<{id:string;name:string}>}>('/api/org/mnt/assessment/options'));
  const [current,setCurrent]=useState(0);
  const [section,setSection]=useState(0);
  const [gestureStart,setGestureStart]=useState<number|null>(null);
@@ -67,7 +68,16 @@ export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:
    {task.services.map((s,i)=><div key={s.id} className='space-y-2 rounded-xl border border-slate-700 p-3'>
     {(['description','categoryCode','subcategoryCode','classCode','catalogCode'] as const).map(k=><label key={k} className={label}>{({description:'Service required',categoryCode:'Service category',subcategoryCode:'Subcategory',classCode:'Service class',catalogCode:'Catalogue code (optional)'})[k]}
      <input className={input} value={s[k]} onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,[k]:e.target.value}:x)})}/></label>)}
-    <label className={label}>Proposed vendor IDs (up to 3, comma-separated)<input className={input} value={s.proposedVendorIds.join(', ')} onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,proposedVendorIds:e.target.value.split(',').map(z=>z.trim()).filter(Boolean)}:x)})}/></label>
+    <fieldset className='space-y-2'><legend className={label}>Proposed service vendors (up to 3; Procurement makes final selection)</legend>
+      {vendorOptions.error&&<p className='text-xs text-amber-300'>Approved vendor list unavailable: {vendorOptions.error}</p>}
+      {vendorOptions.data?.vendors.map(v=><label key={v.id} className='flex items-center gap-2 rounded-lg border border-slate-700 p-2 text-sm text-white'>
+        <input type='checkbox' checked={s.proposedVendorIds.includes(v.id)}
+          disabled={!s.proposedVendorIds.includes(v.id)&&s.proposedVendorIds.length>=3}
+          onChange={e=>patch({services:task.services.map((x,j)=>j===i?{...x,proposedVendorIds:e.target.checked?[...x.proposedVendorIds,v.id]:x.proposedVendorIds.filter(id=>id!==v.id)}:x)})}/>
+        {v.name}
+      </label>)}
+      {vendorOptions.data?.vendors.length===0&&<p className='text-xs text-slate-400'>No approved service vendors available.</p>}
+    </fieldset>
     <button type='button' className='text-xs text-red-300 underline' onClick={()=>patch({services:task.services.filter((_,j)=>j!==i)})}>Remove service</button>
    </div>)}
    <Button variant='secondary' onClick={()=>patch({services:[...task.services,{id:'svc_'+Math.random().toString(36).slice(2,10),description:'',categoryCode:'',subcategoryCode:'',classCode:'',catalogCode:'',attributes:{},proposedVendorIds:[]}]})}>+ Add service</Button>
