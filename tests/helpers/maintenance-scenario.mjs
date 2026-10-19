@@ -3,6 +3,7 @@ import { seed, snapshot, listDocs, dump } from './maintenance-fixture.ts';
 import { writeFileSync } from 'node:fs';
 import { maintenanceOperations } from '../../backend/maintenanceOperations.ts';
 import { maintenanceRoutes } from '../../backend/maintenance.ts';
+import {maintenanceMaterialCandidateRoutes} from '../../backend/maintenanceMaterialCandidates.ts';
 import { procurementRoutes } from '../../backend/procurement.ts';
 import { finOpsRoutes } from '../../backend/finOps.ts';
 import { physicalOf } from '../../backend/finCore.ts';
@@ -682,12 +683,28 @@ const proposal = (await listDocs(r + '/asset_task_proposals')).find((p) => p.dat
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/tasks/validate', 'assessor', { id: proposal.id }), /own task/);
 await route(maintenanceRoutes, '/api/org/mnt/tasks/validate', 'validator', { id: proposal.id });
 assert.equal((await listDocs(r + '/asset_task_template_revisions')).length, 1);
-const candidate = await op('planner', 'candidate', { code: direct, taskId: 'coupling', resourceId: 'coupling_part', attributes: {} });
+const queued = await op('planner', 'candidate', {
+    code: direct, taskId: 'coupling', resourceId: 'coupling_part', attributes: {},
+    note: 'Planner reviewed assessed coupling and submitted its technical catalogue specification.',
+});
+assert.equal(snapshot(r + '/material_creation_candidates/' + queued.candidateId).data.status, 'ready_for_material_creation');
+const candidate = await route(maintenanceMaterialCandidateRoutes, '/api/org/mnt/material-candidates/adopt', 'planner', {
+    candidateId: queued.candidateId, catalogCode: 'SPECIAL-CAT', attributes: {},
+});
 assert.equal(snapshot(r + '/materials/' + candidate.materialDraftId).data.status, 'draft');
+assert.equal(snapshot(r + '/material_creation_candidates/' + queued.candidateId).data.status, 'awaiting_material_approval');
 await assert.rejects(
-    () => op('planner', 'candidate', { code: direct, taskId: 'coupling', resourceId: 'coupling_part', attributes: {} }),
-    /already matches/,
+    () => op('planner', 'candidate', {
+        code: direct, taskId: 'coupling', resourceId: 'coupling_part',
+        note: 'Do not create duplicate drafts.',
+    }),
+    /material draft has already been created/,
 );
+const descriptionQueue = await op('planner', 'candidate', {
+    code: direct, taskId: 'coupling', resourceId: 'bracket_part',
+    note: 'Specification is incomplete. Send to Materials Master for classification review.',
+});
+assert.equal(snapshot(r + '/material_creation_candidates/' + descriptionQueue.candidateId).data.status, 'needs_specification');
 await assert.rejects(
     () => op('planner', 'procure', { code: direct, taskId: 'coupling', resourceId: 'coupling_part', dateRequired: date, glCode: '610000' }),
     /approval/,
