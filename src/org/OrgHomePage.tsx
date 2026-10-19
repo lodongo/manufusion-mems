@@ -513,6 +513,7 @@ export default function OrgHomePage({
                     <div className='min-w-0 flex-1'><p className='truncate text-sm font-semibold text-white'>{title}</p><p className='truncate text-[11px] text-muted'>{data.organization.name}</p></div>
                     {currentShortcut&&<button aria-label={shortcuts.favorites.includes(currentPath)?'Remove favorite':'Add favorite'} title='Favorite this submodule' onClick={()=>toggleFavorite(currentPath)} className='rounded-xl p-2 text-amber-400'><Star className='h-5 w-5' fill={shortcuts.favorites.includes(currentPath)?'currentColor':'none'}/></button>}
                     <UserChip session={session} compact onClick={() => toHome('profile')} />
+                    <button type='button' onClick={onSignOut} aria-label='Log out' title='Log out' className='hidden lg:flex min-h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-700 px-3 text-sm font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400'><LogOut className='h-4 w-4' aria-hidden='true'/> Log out</button>
                 </header>
                 <main className='mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8'>{content}</main>
             </div>
