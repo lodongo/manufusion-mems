@@ -58,7 +58,7 @@ function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSelect:(it
   </button>)}</div>
  </div>;
 }
-export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean}){
+export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial.length?initial:[seed()]);
  const vendorOptions=useLoad(()=>callBackend<{vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;serviceHierarchy:ServiceHierarchy}>('/api/org/mnt/assessment/options'));
  const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
@@ -71,7 +71,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:
  const patch=(next:Partial<TaskAssessment>)=>setTasks(old=>old.map((t,i)=>i===current?{...t,...next}:t));
  const add=()=>{setTasks(old=>[...old,seed()]);setCurrent(tasks.length);setSection(0);};
  const save=async()=>{setSaving(true);setMessage('');
-  try{await callBackend('/api/org/mnt/wr/action',{code,action:'save_task_assessment',tasks});setMessage('Task assessments saved to the work request.');onSaved();}
+  try{await callBackend(recordType==='wo'?'/api/org/mnt/wo/action':'/api/org/mnt/wr/action',{code,action:'save_task_assessment',tasks});setMessage('Task assessments saved to the work request.');onSaved();}
   catch(e){setMessage(e instanceof Error?e.message:'Unable to save task assessments.');}finally{setSaving(false);}
  };
  if(!editable)return <Card><h3 className='font-semibold text-white'>Task work assessment</h3>
@@ -79,7 +79,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:
     <p className='font-medium text-white'>{i+1}. {t.description}</p><p className='text-slate-400'>{t.spares?.length||0} spares · {t.services?.length||0} services · {t.risk?.length||0} risks</p>
    </div>)}{!initial.length&&<p className='text-sm text-amber-300'>No task assessments recorded.</p>}</Card>;
  return <Card className='space-y-4'>
-  <div><h3 className='font-semibold text-white'>Task-by-task work assessment</h3>
+  <div>{onCancel&&<button type='button' onClick={onCancel} className='mb-2 text-sm text-emerald-300 underline'>← Back to work order</button>}<h3 className='font-semibold text-white'>Task-by-task work assessment</h3>
    <p className='mt-1 text-sm text-slate-400'>For each task, define spares, services, tools and its risk assessment here. Planning will secure these resources later.</p>
    <p className='mt-2 text-xs text-emerald-300'>Task {current+1} of {tasks.length}</p>
   </div>
