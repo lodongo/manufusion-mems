@@ -1,5 +1,5 @@
 /** Work assessments own every task and its resources, not work order header. */
-export interface AssessedSpare {id:string;source:'warehouse'|'catalog'|'description';materialId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;}
+export interface AssessedSpare {id:string;source:'warehouse'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;}
 export interface AssessedService {id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];}
 export interface AssessedRisk {hazard:string;impact:string;controls:string;before:string;after:string;permit:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;}
 export interface AssessedTask {id:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:AssessedSpare[];services:AssessedService[];risk:AssessedRisk[];templateStatus:'pending_validation'|'existing';}
@@ -29,9 +29,9 @@ export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
   const spares=rawSpares.map((s,j)=>{
    const a=(s&&typeof s==='object'&&!Array.isArray(s)?s:{}) as Record<string,unknown>;
    const source:AssessedSpare['source']=a.source==='warehouse'?'warehouse':a.source==='catalog'?'catalog':'description';
-   const description=text(a.description,200),materialId=text(a.materialId,100),catalogCode=text(a.catalogCode,80);
-   if(description.length<2||source==='warehouse'&&!materialId||source==='catalog'&&!catalogCode)throw Error('Task '+(i+1)+', spare '+(j+1)+': select a source and item.');
-   return {id:text(a.id,50)||'spare_'+(j+1),source,description,materialId,catalogCode,qty:number(a.qty,0.001,1000000),uom:text(a.uom,12)||'EA',unitCost:source==='warehouse'&&a.unitCost!==null&&a.unitCost!==undefined?number(a.unitCost,0,1e9):null};
+   const description=text(a.description,200),materialId=text(a.materialId,100),warehouseId=text(a.warehouseId,100),catalogCode=text(a.catalogCode,80);
+   if(description.length<2||source==='warehouse'&&(!materialId||!warehouseId)||source==='catalog'&&!catalogCode)throw Error('Task '+(i+1)+', spare '+(j+1)+': select a source and item.');
+   return {id:text(a.id,50)||'spare_'+(j+1),source,description,materialId,warehouseId,catalogCode,qty:number(a.qty,0.001,1000000),uom:text(a.uom,12)||'EA',unitCost:source==='warehouse'&&a.unitCost!==null&&a.unitCost!==undefined?number(a.unitCost,0,1e9):null};
   });
   const rawServices=Array.isArray(t.services)?t.services:[];
   if(rawServices.length>20)throw Error('Maximum 20 services per task.');
