@@ -45,6 +45,14 @@ seed(r + '/assets/AST000001', {
     nodeId: 'CONVEYOR',
     siteId: 'SITE',
 });
+seed(r + '/assets/AST000002', {
+    name: 'Other Line Equipment',
+    status: 'active',
+    workCenterId: 'OTHER_LINE',
+    nodeId: 'OTHER_LINE',
+    siteId: 'SITE',
+});
+
 seed(r + '/equipment_stored_energy/CONVEYOR', {
     initialized: true,
     items: [
