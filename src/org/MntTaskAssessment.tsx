@@ -35,6 +35,7 @@ function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSelect:(it
 export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial.length?initial:[seed()]);
  const vendorOptions=useLoad(()=>callBackend<{vendors:Array<{id:string;name:string}>}>('/api/org/mnt/assessment/options'));
+ const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
  const [current,setCurrent]=useState(0);
  const [section,setSection]=useState(0);
  const [gestureStart,setGestureStart]=useState<number|null>(null);
@@ -66,6 +67,16 @@ export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:
     onTouchEnd={e=>{const end=e.changedTouches[0]?.clientX??null;if(gestureStart!==null&&end!==null&&Math.abs(end-gestureStart)>90)setSection(n=>Math.max(0,Math.min(4,n+(end<gestureStart?1:-1))));setGestureStart(null);}}
     className='space-y-3'>
   {section===0&&<>
+  {library.data?.items.length? <div className='rounded-xl border border-slate-700 p-3'>
+   <p className='text-sm font-semibold text-white'>Reuse an approved task for this assembly</p>
+   <div className='mt-2 max-h-40 space-y-2 overflow-y-auto'>{library.data.items.map(item=><button key={item.id}
+      className='w-full rounded-lg border border-slate-700 p-3 text-left text-sm text-slate-200' type='button'
+      onClick={()=>{if(tasks.some(t=>t.id===item.id)){setMessage('This task is already selected.');return;}
+        setTasks(old=>[...old,{...item.task,id:item.id,templateStatus:'existing'}]);
+        setCurrent(tasks.length);setSection(0);}}>
+      {item.task.description} · approved v{item.version}
+   </button>)}</div>
+  </div>:null}
   <label className={label}>What needs to be done?<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='Describe the task clearly'/></label>
   <div className='grid grid-cols-2 gap-3'>
    <label className={label}>Number of people<input type='number' min={1} className={input} value={task.persons} onChange={e=>patch({persons:Number(e.target.value)})}/></label>
