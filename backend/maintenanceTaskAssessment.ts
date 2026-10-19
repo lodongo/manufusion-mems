@@ -46,13 +46,14 @@ export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
    if(a.attributes&&typeof a.attributes==='object'&&!Array.isArray(a.attributes))for(const [key,value] of Object.entries(a.attributes as Record<string,unknown>).slice(0,40))attributes[text(key,80)]=text(value,200);
    return {id:text(a.id,50)||'service_'+(j+1),description,categoryCode,subcategoryCode,classCode,catalogCode:text(a.catalogCode,80),attributes,proposedVendorIds,scope:text(a.scope,2000),deliverables:text(a.deliverables,1000),quantity:number(a.quantity??1,0.001,1000000),qualifications:text(a.qualifications,1000),expectedCost:a.expectedCost==null?null:number(a.expectedCost,0,1e9),acceptanceCriteria:text(a.acceptanceCriteria,1000)};
   });
-  const internalRoles=Array.isArray(t.internalRoles)?[...new Set(t.internalRoles.map(v=>text(v,30)).filter(Boolean))]:[];
+  const internalRoles=Array.isArray(t.internalRoles)?[...new Set(t.internalRoles.map(v=>text(v,30)).filter(Boolean))]:['technician'];
   if(internalRoles.some(v=>!['operator','technician','specialist','engineer'].includes(v)))throw Error('Choose a valid internal resource type.');
   const externalRaw=(t.externalResource&&typeof t.externalResource==='object'&&!Array.isArray(t.externalResource)?t.externalResource:{}) as Record<string,unknown>;
   const externalType=text(externalRaw.type,40);
   if(externalType&&!['OEM','OCM','verified_supplier','other'].includes(externalType))throw Error('Choose a valid external resource type.');
   const externalResource=externalType?{type:externalType,persons:number(externalRaw.persons??1,1,50),notes:text(externalRaw.notes,1200)}:undefined;
   if(externalType==='other'&&!externalResource?.notes)throw Error('Describe the other external resource.');
+  if(!internalRoles.length&&!externalResource)throw Error('Choose an internal role or an external resource for this task.');
   const lotoRequired=t.lotoRequired===true,liveEquipment=t.liveEquipment===true;
   const energySourceCodes=Array.isArray(t.energySourceCodes)?[...new Set(t.energySourceCodes.map(v=>text(v,80)).filter(Boolean))]:[];
   const permitCodes=Array.isArray(t.permitCodes)?[...new Set(t.permitCodes.map(v=>text(v,80)).filter(Boolean))]:[];
@@ -60,7 +61,7 @@ export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
   if(!lotoRequired&&energySourceCodes.length)throw Error('Hazardous energy selections require the LOTO flag.');
   if(energySourceCodes.length>120||permitCodes.length>80)throw Error('Too many safety source or permit selections.');
   return {id,internalRoles,externalResource,lotoRequired,liveEquipment,energySourceCodes,permitCodes,skillCodes:Array.isArray(t.skillCodes)?[...new Set(t.skillCodes.map(v=>text(v,80)).filter(Boolean))].slice(0,40):[],title:text(t.title,120)||desc,equipmentId:text(t.equipmentId,120),assemblyId:text(t.assemblyId,120),instructions:text(t.instructions,3000),skills:text(t.skills,1000),priority:text(t.priority,40)||'normal',dependencies:Array.isArray(t.dependencies)?[...new Set(t.dependencies.map(v=>text(v,50)).filter(Boolean))]:[],isolation:text(t.isolation,2000),completionCriteria:text(t.completionCriteria,2000),documentation:text(t.documentation,2000),safetyEquipment:text(t.safetyEquipment,1000),description:desc,disciplineCode:text(t.disciplineCode,80),resourceTypeCode:text(t.resourceTypeCode,80),
-   persons:number(t.persons??1,1,50),hours:number(t.hours??1,0.25,2000),rate:number(t.rate??0,0,1000000),
+   persons:internalRoles.length?number(t.persons??1,1,50):0,hours:number(t.hours??1,0.25,2000),rate:number(t.rate??0,0,1000000),
    tools:text(t.tools,1000),spares,services,risk:normalizedRisk,templateStatus:t.templateStatus==='existing'?'existing':'pending_validation'};
  });
  const visit=(id:string,stack=new Set<string>(),done=new Set<string>())=>{if(stack.has(id))throw Error('Task dependency cycle detected.');if(done.has(id))return;stack.add(id);for(const dep of tasks.find(t=>t.id===id)?.dependencies||[]){if(!ids.has(dep))throw Error('Task dependency must refer to another assessment task.');visit(dep,stack,done);}stack.delete(id);done.add(id);};
