@@ -892,7 +892,7 @@ export const maintenanceRoutes = {
         })
     ],
     'POST /api/org/mnt/assessment/photo': [
-        orgRoute('org.mnt.assessment.photo',null,async(ctx)=>{
+        orgRoute('org.mnt.assessment.photo','MNT.assessment.edit',async(ctx)=>{
             requireMnt(ctx);
             const code=str(ctx.body.code);
             const record=WR_RE.test(code)?await getWr(ctx,code):WO_RE.test(code)?await getWo(ctx,code):null;
