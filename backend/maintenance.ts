@@ -1013,6 +1013,12 @@ export const maintenanceRoutes = {
             const scope = await scopeOf(ctx);
             const doc = await getWr(ctx, str(ctx.body.code));
             const can = wrCan(ctx, doc, scope);
+            // Show review controls only after both security permission and scoped
+            // organizational job-role assignment are in effect.
+            if (can.reviewAssessment) {
+                try { await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc)); }
+                catch { can.reviewAssessment = false; }
+            }
             if (!can.view) throw new HttpError(403, 'This work request is outside your access.');
             const d = doc.data;
             const photoPaths = objs(d.photos).map((p) => str(p.path));
