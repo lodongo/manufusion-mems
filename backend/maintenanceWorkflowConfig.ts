@@ -12,7 +12,7 @@ export interface MntGate {
 export const MAINTENANCE_GATES:readonly MntGate[] = [
  {code:'MNT.WO.PLAN',stage:'planning',label:'Secure assessed task resources and schedule work',mode:'permission',permission:'MNT.WO.plan',status:'existing',requires:['work_assessment_completed'],owner:'Configured maintenance planner',separation:'Technical scope changes require controlled reassessment'},
  {code:'MNT.WR.CREATE',stage:'request',label:'Create a work request',mode:'permission',permission:'MNT.WR.create',status:'existing',requires:[],owner:'Any permitted employee',separation:'No maker/checker'},
- {code:'MNT.WR.ASSESS',stage:'assessment',label:'Complete open work assessment',mode:'permission',permission:null,status:'existing',requires:['request_present','tasks_and_resources_captured','task_risk_assessment_completed'],owner:'Any authenticated organization employee',separation:'No second person needed for task risk assessment'},
+ {code:'MNT.WR.ASSESS',stage:'assessment',label:'Complete open work assessment',mode:'permission',permission:null,status:'existing',requires:['request_present','tasks_and_resources_captured','task_risk_assessment_completed'],owner:'Any authenticated organization employee with work-request access at the equipment',separation:'No separate assessor authorization or second-person approval'},
  {code:'MNT.TASK.VALIDATE',stage:'assessment',label:'Validate new reusable asset task',mode:'approval',permission:null,status:'existing',requires:['task_risk_assessment_completed'],owner:'Configured asset-task validator',separation:'Cannot validate an unassessed task'},
  {code:'MNT.WR.CONVERT',stage:'conversion',label:'Convert assessed work request to work order',mode:'permission',permission:'MNT.WR.convert',status:'existing',requires:['work_assessment_completed'],owner:'Configured conversion role',separation:'Creator cannot convert own request under legacy policy'},
  {code:'MNT.MAT.CREATE',stage:'planning',label:'Approve newly specified material',mode:'approval',permission:'PRC.materials.manage',status:'existing',requires:['material_creation_workflow_completed'],owner:'Configured material master approver',separation:'Creator does not approve own material'},
@@ -30,7 +30,7 @@ export const MAINTENANCE_GATES:readonly MntGate[] = [
 ] as const;
 
 export function maintenanceGateReadiness(configuredRoles:Readonly<Record<string,string>>,gates:readonly MntGate[]=MAINTENANCE_GATES){
- const ownerRoles=['MNT.SPARES.RECONCILE','MNT.WR.ASSESS','MNT.WO.PLAN','MNT.TASK.FEEDBACK','MNT.WR.CONVERT','MNT.TASK.VALIDATE','MNT.WINDOW.ENGINEERING','MNT.WINDOW.SAFETY','MNT.SAFETY.SIGNOFF','MNT.HANDOVER','MNT.WO.TECHNICAL_CLOSE'];
+ const ownerRoles=['MNT.SPARES.RECONCILE','MNT.WO.PLAN','MNT.TASK.FEEDBACK','MNT.WR.CONVERT','MNT.TASK.VALIDATE','MNT.WINDOW.ENGINEERING','MNT.WINDOW.SAFETY','MNT.SAFETY.SIGNOFF','MNT.HANDOVER','MNT.WO.TECHNICAL_CLOSE'];
  return gates.map(g=>({
   ...g,
   configuredRole:configuredRoles[g.code]||'',
