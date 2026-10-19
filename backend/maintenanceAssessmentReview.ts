@@ -26,7 +26,7 @@ export function assessmentReviewCurrent(record:AssessmentRecord,assignedJobRole?
   && !!value(review.by) && !!value(review.jobRole)
   && (!assignedJobRole||value(review.jobRole)===assignedJobRole);
 }
-export function approvedAssessmentSnapshot(record:AssessmentRecord,by:string,name:string,jobRole:string,at:string,note:string):Fields {
+export function approvedAssessmentSnapshot(record:AssessmentRecord,by:string,name:string,jobRole:string,at:string,note:string):Record<string,string|number> {
  const problem=reviewAssessmentPrerequisites(record,by);
  if(problem)throw new Error(problem);
  if(!jobRole)throw new Error('Configure the assessment reviewer organizational job role.');
