@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Ban, CalendarClock, Check, CheckCircle2, Clipboa
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
+import MntTaskAssessment from './MntTaskAssessment';
 import RichTable, { type Column } from '../components/RichTable';
 import { restoredTableTab } from '../lib/tableTabs';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
@@ -100,6 +101,7 @@ interface Detail extends Row {
     description: string;
     failureModeLabel: string;
     tasks: Task[];
+    assessmentTasks?: Array<Task & {tools?:string;spares?:Spare[];services?:Service[];risk?:Array<{hazard:string;impact:string;controls:string;before:string;after:string}>}>;
     spares: Spare[];
     services: Service[];
     tools: string;
@@ -448,6 +450,9 @@ function OrderDetail({ code, setup }: { code: string; setup: MntSetup }) {
     if (can.cancel) buttons.push({ key: 'cancel', label: 'Cancel', icon: <Ban className='h-4 w-4' />, variant: 'danger' });
     const press = (k: string) => (k === 'submit' ? void run('submit_plan') : k === 'start' ? void run('start') : setPanel(k as Panel));
 
+    if(panel==='plan'&&!w.assessmentTasks?.length&&!w.tasks.length)
+        return <MntTaskAssessment code={w.code} recordType='wo' initial={[]} editable={can.view}
+            onSaved={()=>{setPanel('');reload();}} onCancel={close}/>;
     if (panel === 'plan') return <PlanEditor wo={w} lists={lists} onSaved={() => (setPanel(''), reload())} onCancel={close} />;
 
     const stageIndex = STAGES.findIndex(([, s]) => s.includes(w.status));
@@ -730,7 +735,8 @@ function PlanEditor({ wo, lists, onSaved, onCancel }: { wo: Detail; lists: MntLi
         const sv = services.reduce((s, x) => s + (Number(x.cost) || 0), 0);
         return { labourHours, labour, spares: sp, services: sv, total: labour + sp + sv };
     }, [tasks, spares, services]);
-    const ok = tasks.length > 0 && tasks.every((t) => t.description.trim().length >= 3 && t.disciplineCode && t.resourceTypeCode && t.persons >= 1 && t.hours > 0) && spares.every((s) => s.description.trim().length >= 2 && s.qty > 0) && services.every((s) => s.description.trim().length >= 3);
+    const hasAssessedTasks=!!wo.assessmentTasks?.length;
+    const ok = hasAssessedTasks || (tasks.length > 0 && tasks.every((t) => t.description.trim().length >= 3 && t.disciplineCode && t.resourceTypeCode && t.persons >= 1 && t.hours > 0) && spares.every((s) => s.description.trim().length >= 2 && s.qty > 0) && services.every((s) => s.description.trim().length >= 3));
     const upd = <T,>(list: T[], set: (v: T[]) => void, i: number, patch: Partial<T>) => set(list.map((x, j) => (j === i ? { ...x, ...patch } : x)));
     const save = async () => {
         setBusy(true);
@@ -768,6 +774,17 @@ function PlanEditor({ wo, lists, onSaved, onCancel }: { wo: Detail; lists: MntLi
             </div>
             <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
                 {error && <Alert tone='error'>{error}</Alert>}
+                {hasAssessedTasks ? <Card className='space-y-3'>
+                  <p className='font-semibold text-white'>Assessed task scope</p>
+                  <p className='text-sm text-emerald-300'>Tasks, spares, services and risk belong to each work-assessment task. Planning secures the required resources and cannot silently change the assessed work.</p>
+                  {wo.assessmentTasks!.map((t,i)=><div key={t.id||i} className='rounded-xl border border-slate-700 p-3 text-sm'>
+                    <p className='font-medium text-white'>{i+1}. {t.description}</p>
+                    <p className='text-xs text-slate-400'>{t.persons} people × {t.hours} hours · Tools: {t.tools||'None listed'}</p>
+                    {!!t.spares?.length&&<p className='mt-1 text-xs text-slate-300'>Spares: {t.spares.map(v=>v.description+' × '+v.qty).join('; ')}</p>}
+                    {!!t.services?.length&&<p className='mt-1 text-xs text-slate-300'>Services: {t.services.map(v=>v.description).join('; ')}</p>}
+                    {!!t.risk?.length&&<p className='mt-1 text-xs text-amber-300'>{t.risk.length} task-specific risk assessments</p>}
+                  </div>)}
+                </Card> : <>
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-white'>Tasks, people and duration</p>
                     {tasks.map((t, i) => (
@@ -875,6 +892,7 @@ function PlanEditor({ wo, lists, onSaved, onCancel }: { wo: Detail; lists: MntLi
                     )}
                 </Card>
 
+                </>}
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-white'>Logistics</p>
                     <SelectField id='p-loc' label='Where the work is done' value={execLoc} onChange={(e) => setExecLoc(e.target.value)}>

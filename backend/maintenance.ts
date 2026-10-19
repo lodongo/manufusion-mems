@@ -6,9 +6,11 @@ import { nextOrgCounter } from './positions';
 import { detectImage } from './branding';
 import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
 import { ID_RE, col, signedUrl } from './structure';
-import { canAnywhere, canAt, scopeOf, type Scope } from './access';
-import { searchCatalog } from './procurement';
+import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
+import { searchCatalog,serviceCatalogHierarchy } from './procurement';
 import {MAINTENANCE_GATES,maintenanceGateReadiness} from './maintenanceWorkflowConfig';
+import {validateAssessmentTasks,summarizeAssessmentTasks} from './maintenanceTaskAssessment';
+import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} from './maintenanceTaskRisk';
 
 // ---------------------------------------------------------------------------
 // Maintenance Management (MNT)
@@ -106,6 +108,19 @@ function need(ctx: OrgContext, perm: string, path: string[], scope: Scope) {
 
 function rec(ctx: OrgContext, action: string, target: string, details = '') {
     return audit([{ category: 'maintenance', action, actor: ctx.actor, meta: ctx.meta, target: { label: target }, details, orgId: ctx.orgId }]);
+}
+
+async function requireConfiguredMaintenanceRole(ctx:OrgContext,gate:string,recordPath:string[]){
+ const settings=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+ const mapped=isObj(settings?.data.approverRoles)?settings.data.approverRoles:{};
+ const role=str(mapped[gate]);
+ if(!role)throw new HttpError(409,'Configure '+gate+' as an organizational job role in Maintenance Workflows before this transition.');
+ const today=new Date().toISOString().slice(0,10);
+ const assigned=objs(ctx.me.data.assignments).some(a=>str(a.positionCode)===role
+    &&recordPath.includes(str(a.nodeId))
+    &&(!str(a.startsOn)||str(a.startsOn)<=today)
+    &&(!str(a.endsOn)||str(a.endsOn)>=today));
+ if(!assigned)throw new HttpError(403,'This transition requires the configured '+gate+' job role at this location.');
 }
 
 function displayName(ctx: OrgContext) {
@@ -404,7 +419,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         resubmit: mine && status === 'returned' && at(P.WR_edit),
         cancel: mine && ['submitted', 'returned'].includes(status) && at(P.WR_cancel),
         startReview: !mine && status === 'submitted' && at(P.WR_review),
-        assess: !mine && status === 'under_review' && at(P.WR_review),
+        assess: ['submitted','under_review'].includes(status) && (mine || at(P.view)),
         return: !mine && status === 'under_review' && at(P.WR_return),
         decline: !mine && status === 'under_review' && at(P.WR_decline),
         convert: !mine && status === 'under_review' && at(P.WR_convert),
@@ -459,8 +474,12 @@ function estimate(d: Obj) {
     const services = objs(d.services);
     const labourHours = tasks.reduce((s, t) => s + (Number(t.persons) || 0) * (Number(t.hours) || 0), 0);
     const labour = tasks.reduce((s, t) => s + (Number(t.persons) || 0) * (Number(t.hours) || 0) * (Number(t.rate) || 0), 0);
-    const sparesCost = spares.reduce((s, x) => s + (Number(x.qty) || 0) * (Number(x.unitCost) || 0), 0);
-    const servicesCost = services.reduce((s, x) => s + (Number(x.cost) || 0), 0);
+    // New work assessments own resources within each task. Old work orders still
+    // use flat spares/services, so preserve both representations without double counting.
+    const taskSpares = tasks.flatMap(t => objs(t.spares));
+    const taskServices = tasks.flatMap(t => objs(t.services));
+    const sparesCost = (taskSpares.length ? taskSpares : spares).reduce((n, x) => n + (Number(x.qty) || 0) * (Number(x.unitCost) || 0), 0);
+    const servicesCost = (taskServices.length ? taskServices : services).reduce((n, x) => n + (Number(x.cost) || 0), 0);
     const r = (n: number) => Math.round(n * 100) / 100;
     return { labourHours: r(labourHours), labour: r(labour), spares: r(sparesCost), services: r(servicesCost), total: r(labour + sparesCost + servicesCost) };
 }
@@ -702,6 +721,152 @@ export const maintenanceRoutes = {
         })
     ],
 
+    'POST /api/org/mnt/tasks/library': [
+        orgRoute('org.mnt.tasks.library',null,async(ctx)=>{
+            requireMnt(ctx);
+            const code=str(ctx.body.code),isOrder=WO_RE.test(code);
+            const doc=isOrder?await getWo(ctx,code):await getWr(ctx,code);
+            const scope=await scopeOf(ctx);
+            const visible=isOrder?woCan(ctx,doc,scope,await lists()).view:wrCan(ctx,doc,scope).view;
+            if(!visible)throw new HttpError(403,'Work request/order access is required.');
+            const docs=await listDocs(`organizations/${ctx.orgId}/asset_task_templates`);
+            const assemblyId=str(doc.data.assemblyId);
+            return {items:docs.filter(d=>str(d.data.assemblyId)===assemblyId&&str(d.data.status)==='approved')
+                .map(d=>({id:str(d.data.taskId),version:Number(d.data.version)||1,task:d.data.task,validatedBy:str(d.data.approvedByName)}))};
+        })
+    ],
+    'POST /api/org/mnt/tasks/proposals': [
+        orgRoute('org.mnt.tasks.proposals',null,async(ctx)=>{
+            requireMnt(ctx);
+            const scope=await scopeOf(ctx);
+            const wr=await getWr(ctx,str(ctx.body.code));
+            if(!wrCan(ctx,wr,scope).view)throw new HttpError(403,'Work request access is required.');
+            const proposals=await listDocs(`organizations/${ctx.orgId}/asset_task_proposals`);
+            return {items:proposals.filter(p=>str(p.data.wrCode)===wr.id).map(p=>({
+                id:p.id,taskId:str(p.data.taskId),name:str(p.data.description),status:str(p.data.status),
+                revision:Number(p.data.assessmentVersion)||1,approvedBy:str(p.data.approvedByName)
+            }))};
+        })
+    ],
+    'POST /api/org/mnt/tasks/pending': [
+        orgRoute('org.mnt.tasks.pending',null,async(ctx)=>{
+            requireMnt(ctx);
+            const conf=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const roles=isObj(conf?.data.approverRoles)?conf.data.approverRoles:{};
+            const positionCode=str(roles['MNT.TASK.VALIDATE']);
+            if(!positionCode)return {items:[],configurationNeeded:true};
+            const today=new Date().toISOString().slice(0,10);
+            const authorized=objs(ctx.me.data.assignments).some(a=>
+                str(a.positionCode)===positionCode&&(!str(a.startsOn)||str(a.startsOn)<=today)&&(!str(a.endsOn)||str(a.endsOn)>=today));
+            if(!authorized)throw new HttpError(403,'Only the assigned asset-task validation role can view the pending task queue.');
+            const scope=await scopeOf(ctx);
+            const docs=await listDocs(`organizations/${ctx.orgId}/asset_task_proposals`);
+            const pending=[];
+            for(const d of docs.filter(x=>str(x.data.status)==='pending_validation')){
+                if(canAt(ctx,'MNT.activities.edit',await nodePath(ctx.orgId,str(d.data.assemblyId)),scope))
+                    pending.push({id:d.id,wrCode:str(d.data.wrCode),taskId:str(d.data.taskId),
+                        description:str(d.data.description),assemblyId:str(d.data.assemblyId),
+                        assetTag:str(d.data.assetTag),createdBy:str(d.data.createdBy),task:d.data.task});
+            }
+            return {items:pending,configurationNeeded:false};
+        })
+    ],
+    'POST /api/org/mnt/tasks/validate': [
+        orgRoute('org.mnt.tasks.validate',null,async(ctx)=>{
+            requireMnt(ctx);
+            const id=str(ctx.body.id);
+            if(!/^[A-Za-z0-9_-]{6,120}$/.test(id))throw new HttpError(400,'Choose a valid task proposal.');
+            const path=`organizations/${ctx.orgId}/asset_task_proposals/${id}`;
+            const proposal=await getDoc(path);
+            if(!proposal||str(proposal.data.status)!=='pending_validation')throw new HttpError(409,'Task proposal not awaiting validation.');
+            if(str(proposal.data.createdBy)===ctx.uid)throw new HttpError(403,'A task creator cannot validate their own task.');
+            const srcWo=str(proposal.data.woCode);
+            const request=srcWo?await getWo(ctx,srcWo):await getWr(ctx,str(proposal.data.wrCode));
+            if(Number(request.data.assessmentTasksVersion)!==Number(proposal.data.assessmentVersion))
+                throw new HttpError(409,'This task belongs to an outdated assessment revision. Validate the latest proposal.');
+            const matching=objs(request.data.assessmentTasks).find(t=>str(t.id)===str(proposal.data.taskId));
+            if(!matching||JSON.stringify(matching)!==JSON.stringify(proposal.data.task))
+                throw new HttpError(409,'The assessed task has been revised. Reload the latest proposal.');
+
+            const conf=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const roles=isObj(conf?.data.approverRoles)?conf.data.approverRoles:{};
+            const requiredRole=str(roles['MNT.TASK.VALIDATE']);
+            if(!requiredRole)throw new HttpError(409,'Configure an asset task validator in Maintenance Workflows first.');
+            const assignments=objs(ctx.me.data.assignments);
+            const today=new Date().toISOString().slice(0,10);
+            if(!assignments.some(a=>str(a.positionCode)===requiredRole&&(!str(a.startsOn)||str(a.startsOn)<=today)&&(!str(a.endsOn)||str(a.endsOn)>=today)))
+                throw new HttpError(403,'Only the configured asset-task validator may approve.');
+            const scope=await scopeOf(ctx);
+            const assemblyId=str(proposal.data.assemblyId);
+            const pathIds=await nodePath(ctx.orgId,assemblyId);
+            if(!canAt(ctx,'MNT.activities.edit',pathIds,scope))
+                throw new HttpError(403,'Asset activity maintenance permission is also required.');
+            const taskId=str(proposal.data.taskId);
+            const dest=`organizations/${ctx.orgId}/asset_task_templates/${assemblyId}_${taskId}`;
+            const existing=await getDoc(dest);
+            const version=(Number(existing?.data.version)||0)+1;
+            await writeDoc(dest,{assemblyId,taskId,task:proposal.data.task,status:'approved',version,
+                validatedFrom:proposal.id,approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso()});
+            await updateFields(path,{status:'approved',approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso(),templateVersion:version});
+            await rec(ctx,'mnt.task.validated',taskId,`Asset ${assemblyId}, revision ${version}`);
+            return {ok:true,version};
+        })
+    ],
+    'POST /api/org/mnt/warehouse-spares/search': [
+        orgRoute('org.mnt.warehouse_spares.search',null,async(ctx)=>{
+            requireMnt(ctx);
+            const q=clean(ctx.body.q,80).toLowerCase();
+            if(q.length<2)return {items:[]};
+            const root=`organizations/${ctx.orgId}`;
+            const [warehouses,materials,extensions,journal]=await Promise.all([
+                listDocs(root+'/warehouses'),listDocs(root+'/materials'),listDocs(root+'/material_extensions'),
+                listDocs(root+'/material_journal')
+            ]);
+            const scope=await scopeOf(ctx);
+            const activeWarehouse=new Map(warehouses.filter(w=>scope==='all'||scope.has(w.id)).map(w=>[w.id,w]));
+            const balances=new Map<string,{physical:number;reserved:number;valid:boolean}>();
+            for(const entry of journal){
+                const d=entry.data,k=str(d.materialId)+'|'+str(d.warehouseId);
+                if(!activeWarehouse.has(str(d.warehouseId)))continue;
+                const b=balances.get(k)||{physical:0,reserved:0,valid:true};
+                if(str(d.status)!=='posted'||d.reconciled!==true)b.valid=false;
+                else {
+                    const deltas=isObj(d.balancesDelta)?d.balancesDelta:{};
+                    b.physical+=Number(deltas.physicalStock)||0;
+                    b.reserved+=Number(deltas.reservedStock)||0;
+                }
+                balances.set(k,b);
+            }
+            const items=[];
+            for(const m of materials){
+                if(!['approved','active'].includes(str(m.data.status)))continue;
+                const number=str(m.data.materialNumber),name=str(m.data.shortText)||str(m.data.name);
+                if(!(number+' '+name).toLowerCase().includes(q))continue;
+                const linked=new Set(strs(m.data.warehouseIds));
+                if(str(m.data.warehouseId)&&str(m.data.pushedAt))linked.add(str(m.data.warehouseId));
+                for(const x of extensions)if(str(x.data.sourceId)===m.id&&str(x.data.status)==='approved')linked.add(str(x.data.warehouseId));
+                for(const warehouseId of linked){
+                    const warehouse=activeWarehouse.get(warehouseId);if(!warehouse)continue;
+                    const balance=balances.get(m.id+'|'+warehouseId);
+                    items.push({materialId:m.id,materialNumber:number,name,warehouseId,
+                        warehouseName:str(warehouse.data.name)||warehouseId,uom:str(m.data.uom)||'EA',
+                        available:balance?.valid?Math.max(0,(balance.physical-balance.reserved)):null,
+                        stockVerified:!!balance?.valid&&!!balance,unitCost:null});
+                }
+            }
+            return {items:items.slice(0,40)};
+        })
+    ],
+    'POST /api/org/mnt/assessment/options': [
+        orgRoute('org.mnt.assessment.options',null,async(ctx)=>{
+            requireMnt(ctx);
+            const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
+            const serviceVendors=vendors.filter(d=>str(d.data.status)==='approved'&&objs(d.data.scopes).some(x=>str(x.kind)==='service'));
+            const [riskDoc,serviceHierarchy]=await Promise.all([getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`),serviceCatalogHierarchy()]);
+            return {serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
+                riskMatrix:riskDoc?.data?.configuration||defaultMaintenanceRiskMatrix};
+        })
+    ],
     'POST /api/org/mnt/setup': [
         orgRoute('org.mnt.setup', null, async (ctx) => {
             const map = isObj(ctx.org.data.modules) ? ctx.org.data.modules : {};
@@ -970,6 +1135,54 @@ export const maintenanceRoutes = {
                     );
                     return { ok: true };
                 }
+                case 'save_task_assessment': {
+                    deny(can.assess, 'You cannot assess this request.');
+                    let tasks;
+                    try{
+                        const matrixDoc=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
+                        const matrix=(matrixDoc?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix;
+                        tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(ctx.body.tasks),matrix);
+                    } catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid assessment tasks.');}
+                    // Every task owns its parts/services/tools/risk. Legacy header-level
+                    // spares/services are deliberately not written by this action.
+                    const hierarchy=await serviceCatalogHierarchy();
+                    if(hierarchy.categories.length){
+                        for(const task of tasks)for(const service of task.services){
+                            const sub=hierarchy.subcategories.find(c=>c.code===service.subcategoryCode&&c.categoryCode===service.categoryCode);
+                            const family=hierarchy.families.find(c=>c.code===service.classCode&&c.subcategoryCode===service.subcategoryCode);
+                            if(!sub||!family)throw new HttpError(400,'Choose a valid service category, subcategory and family/class from the approved hierarchy.');
+                        }
+                    }
+                    const allProposed=tasks.flatMap(t=>t.services.flatMap(x=>x.proposedVendorIds));
+                    if(allProposed.length){
+                        const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
+                        const approved=new Set(vendors.filter(v=>str(v.data.status)==='approved'&&objs(v.data.scopes).some(x=>str(x.kind)==='service')).map(v=>v.id));
+                        if(allProposed.some(id=>!approved.has(id)))throw new HttpError(400,'Choose proposed service vendors from the approved service vendor list.');
+                    }
+                    const version=(Number(doc.data.assessmentTasksVersion)||0)+1;
+                    const assemblyId=str(doc.data.assemblyId);
+                    for(const task of tasks){
+                        const dest=`organizations/${ctx.orgId}/asset_task_templates/${assemblyId}_${task.id}`;
+                        const adopted=await getDoc(dest);
+                        if(task.templateStatus==='existing'&&(!adopted||str(adopted.data.status)!=='approved'))
+                            throw new HttpError(400,'Selected reusable task has not been validated for this assembly.');
+                    }
+                    // Snapshot each newly created task as a separate validation candidate.
+                    // These entries are not active equipment/assembly templates yet.
+                    for(const task of tasks.filter(t=>t.templateStatus!=='existing')){
+                        const id=`${doc.id}_${task.id}_v${version}`;
+                        await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
+                            wrCode:doc.id,assemblyId,assetTag:str(doc.data.assetTag),taskId:task.id,
+                            description:task.description,task:task as unknown as Plain,assessmentVersion:version,
+                            status:'pending_validation',createdBy:ctx.uid,createdAt:now
+                        },{exists:false});
+                    }
+                    const summary=summarizeAssessmentTasks(tasks);
+                    await done({assessmentTasks:tasks as unknown as Plain,assessmentTasksBy:ctx.uid,
+                        assessmentTasksAt:now,assessmentTasksVersion:version},
+                        'Task assessments saved','mnt.wr.task_assessments',JSON.stringify(summary));
+                    return {ok:true,summary};
+                }
                 case 'return':
                     deny(can.return, 'You cannot return this request.');
                     if (note.length < 5) throw new HttpError(400, 'Say what information is needed (at least 5 characters).');
@@ -985,10 +1198,13 @@ export const maintenanceRoutes = {
                     deny(can.convert, can.ownRequest ? 'You cannot convert your own request.' : 'You cannot convert this request.');
                     const d = doc.data;
                     if (!str(d.maintenanceTypeCode) || !str(d.workTypeCode) || !str(d.priorityCode) || !str(d.disciplineCode)) throw new HttpError(400, 'Complete the assessment (maintenance type, work type, priority and discipline) before converting.');
+                    if(!objs(d.assessmentTasks).length) throw new HttpError(409,'Complete the task-by-task work assessment, including spares, services and each task risk assessment, before conversion.');
+                    await requireConfiguredMaintenanceRole(ctx,'MNT.WR.CONVERT',pathOf(doc));
                     confirmCode(ctx, doc);
                     const keys = ['assemblyId', 'assemblyCode', 'assemblyName', 'unitId', 'unitCode', 'unitName', 'costCenterId', 'costCenterCode', 'costCenterName', 'siteId', 'siteCode', 'siteName', 'assetTag', 'assetName', 'assetClass', 'title', 'description', 'criticalityCode', 'criticalityLabel', 'criticalityColor', 'maintenanceTypeCode', 'maintenanceTypeLabel', 'workTypeCode', 'workTypeLabel', 'priorityCode', 'priorityLabel', 'disciplineCode', 'disciplineLabel', 'failureModeCode', 'failureModeLabel'];
                     const base: Record<string, Plain> = Object.fromEntries(keys.map((k) => [k, str(d[k])]));
                     base.path = strs(d.path);
+                    base.assessmentTasks = objs(d.assessmentTasks) as unknown as Plain;
                     const woCode = await createWo(ctx, base, doc.id);
                     await done({ status: 'converted', woCode, convertedBy: ctx.uid, convertedByName: displayName(ctx), convertedAt: now, closedAt: now }, `Converted to ${woCode}`, 'mnt.wr.converted', woCode);
                     await rec(ctx, 'mnt.wo.created', woCode, `From ${doc.id}`);
@@ -1087,6 +1303,7 @@ export const maintenanceRoutes = {
                 priorityCode: str(d.priorityCode),
                 disciplineCode: str(d.disciplineCode),
                 tasks: objs(d.tasks),
+                assessmentTasks: objs(d.assessmentTasks),
                 spares: objs(d.spares),
                 services: objs(d.services),
                 tools: str(d.tools),
@@ -1147,7 +1364,8 @@ export const maintenanceRoutes = {
     'POST /api/org/mnt/catalog-search': [
         orgRoute('org.mnt.catalog_search', null, async (ctx) => {
             requireMnt(ctx);
-            if (!canAnywhere(ctx, P.WO_plan)) throw new HttpError(403, 'You do not have permission to do this.');
+            // Technical catalogue lookups are needed during open work assessment,
+            // before the maintenance planner is involved. Read-only and tenant-authenticated.
             const kind = str(ctx.body.kind) === 'services' ? 'services' : 'materials';
             const q = clean(ctx.body.q, 60);
             if (q.length < 2) return { items: [] };
@@ -1176,11 +1394,57 @@ export const maintenanceRoutes = {
                 if (!allowed) throw new HttpError(403, why);
             };
             switch (action) {
+                case 'save_task_assessment': {
+                    if(!can.view||str(d.status)!=='planning')
+                        throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
+                    let tasks;
+                    try{
+                        const m=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
+                        tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(b.tasks),
+                            (m?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix);
+                    }catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid task work assessment.');}
+                    const allProposed=tasks.flatMap(t=>t.services.flatMap(v=>v.proposedVendorIds));
+                    if(allProposed.length){
+                        const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
+                        const valid=new Set(vendors.filter(v=>str(v.data.status)==='approved'&&objs(v.data.scopes).some(x=>str(x.kind)==='service')).map(v=>v.id));
+                        if(allProposed.some(id=>!valid.has(id)))throw new HttpError(400,'Choose approved service vendors only.');
+                    }
+                    const assemblyId=str(d.assemblyId);
+                    const hierarchy=await serviceCatalogHierarchy();
+                    if(hierarchy.categories.length)for(const t of tasks)for(const svc of t.services){
+                        if(!hierarchy.subcategories.some(x=>x.code===svc.subcategoryCode&&x.categoryCode===svc.categoryCode)
+                            ||!hierarchy.families.some(x=>x.code===svc.classCode&&x.subcategoryCode===svc.subcategoryCode))
+                            throw new HttpError(400,'Select a valid service category, subcategory and class.');
+                    }
+                    const version=(Number(d.assessmentTasksVersion)||0)+1;
+                    for(const t of tasks){
+                        const approved=await getDoc(`organizations/${ctx.orgId}/asset_task_templates/${assemblyId}_${t.id}`);
+                        if(t.templateStatus==='existing'&&(!approved||str(approved.data.status)!=='approved'))
+                            throw new HttpError(400,'Selected task template must be validated for the assembly.');
+                    }
+                    for(const t of tasks.filter(x=>x.templateStatus!=='existing')){
+                        const id=`${doc.id}_${t.id}_v${version}`;
+                        await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
+                            woCode:doc.id,assemblyId,assetTag:str(d.assetTag),taskId:t.id,description:t.description,
+                            task:t as unknown as Plain,assessmentVersion:version,status:'pending_validation',
+                            createdBy:ctx.uid,createdAt:now
+                        },{exists:false});
+                    }
+                    await done({assessmentTasks:tasks as unknown as Plain,tasks:tasks as unknown as Plain,
+                        spares:[],services:[],tools:'',assessmentTasksBy:ctx.uid,assessmentTasksAt:now,
+                        assessmentTasksVersion:version,safety:null},
+                        'Task assessments completed','mnt.wo.task_assessments',
+                        JSON.stringify(summarizeAssessmentTasks(tasks)));
+                    return {ok:true};
+                }
                 case 'save_plan': {
                     deny(can.plan, 'You cannot plan this work order.');
-                    const tasks = readTasks(b.tasks, l);
-                    const spares = readSpares(b.spares);
-                    const services = readServices(b.services);
+                    const assessedTasks=objs(d.assessmentTasks);
+                    // A converted request already has assessed task scope/resources/risk;
+                    // planning cannot silently replace them through the legacy flat form.
+                    const tasks = assessedTasks.length ? assessedTasks : readTasks(b.tasks, l);
+                    const spares = assessedTasks.length ? [] : readSpares(b.spares);
+                    const services = assessedTasks.length ? [] : readServices(b.services);
                     const exec = pick(l.executionLocations, str(b.executionLocationCode), 'execution location', false);
                     const fields: Record<string, Plain> = {
                         tasks: tasks as unknown as Plain,

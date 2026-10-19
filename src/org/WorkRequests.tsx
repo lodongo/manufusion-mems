@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, Clip
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
+import MntTaskAssessment,{type TaskAssessment} from './MntTaskAssessment';
 import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
@@ -64,6 +65,7 @@ interface Detail extends Row {
     failureModeLabel: string;
     impacts: Array<{ code: string; label: string; group: string }>;
     photos: Array<{ token: string; url: string }>;
+    assessmentTasks: TaskAssessment[];
     assessment: {
         maintenanceTypeCode: string;
         maintenanceTypeLabel: string;
@@ -804,7 +806,9 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                     </div>
                 )}
 
-                {(r.assessment.maintenanceTypeLabel || r.assessment.note) && (
+                <MntTaskAssessment code={r.code} initial={r.assessmentTasks||[]} editable={can.assess} onSaved={reload}/>
+
+                 {(r.assessment.maintenanceTypeLabel || r.assessment.note) && (
                     <Card className='space-y-2 text-sm'>
                         <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Assessment</p>
                         {r.assessment.maintenanceTypeLabel && <Info label='Maintenance type' value={r.assessment.maintenanceTypeLabel} />}
