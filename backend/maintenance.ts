@@ -1379,6 +1379,49 @@ export const maintenanceRoutes = {
                 if (!allowed) throw new HttpError(403, why);
             };
             switch (action) {
+                case 'save_task_assessment': {
+                    if(!can.view||str(d.status)!=='planning')
+                        throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
+                    let tasks;
+                    try{
+                        const m=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
+                        tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(b.tasks),
+                            (m?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix);
+                    }catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid task work assessment.');}
+                    const allProposed=tasks.flatMap(t=>t.services.flatMap(v=>v.proposedVendorIds));
+                    if(allProposed.length){
+                        const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
+                        const valid=new Set(vendors.filter(v=>str(v.data.status)==='approved'&&objs(v.data.scopes).some(x=>str(x.kind)==='service')).map(v=>v.id));
+                        if(allProposed.some(id=>!valid.has(id)))throw new HttpError(400,'Choose approved service vendors only.');
+                    }
+                    const assemblyId=str(d.assemblyId);
+                    const hierarchy=await serviceCatalogHierarchy();
+                    if(hierarchy.categories.length)for(const t of tasks)for(const svc of t.services){
+                        if(!hierarchy.subcategories.some(x=>x.code===svc.subcategoryCode&&x.categoryCode===svc.categoryCode)
+                            ||!hierarchy.families.some(x=>x.code===svc.classCode&&x.subcategoryCode===svc.subcategoryCode))
+                            throw new HttpError(400,'Select a valid service category, subcategory and class.');
+                    }
+                    const version=(Number(d.assessmentTasksVersion)||0)+1;
+                    for(const t of tasks){
+                        const approved=await getDoc(`organizations/${ctx.orgId}/asset_task_templates/${assemblyId}_${t.id}`);
+                        if(t.templateStatus==='existing'&&(!approved||str(approved.data.status)!=='approved'))
+                            throw new HttpError(400,'Selected task template must be validated for the assembly.');
+                    }
+                    for(const t of tasks.filter(x=>x.templateStatus!=='existing')){
+                        const id=`${doc.id}_${t.id}_v${version}`;
+                        await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
+                            woCode:doc.id,assemblyId,assetTag:str(d.assetTag),taskId:t.id,description:t.description,
+                            task:t as unknown as Plain,assessmentVersion:version,status:'pending_validation',
+                            createdBy:ctx.uid,createdAt:now
+                        },{exists:false});
+                    }
+                    await done({assessmentTasks:tasks as unknown as Plain,tasks:tasks as unknown as Plain,
+                        spares:[],services:[],tools:'',assessmentTasksBy:ctx.uid,assessmentTasksAt:now,
+                        assessmentTasksVersion:version,safety:null},
+                        'Task assessments completed','mnt.wo.task_assessments',
+                        JSON.stringify(summarizeAssessmentTasks(tasks)));
+                    return {ok:true};
+                }
                 case 'save_plan': {
                     deny(can.plan, 'You cannot plan this work order.');
                     const assessedTasks=objs(d.assessmentTasks);
