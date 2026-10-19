@@ -8,6 +8,7 @@ import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
 import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf, type Scope } from './access';
 import { searchCatalog } from './procurement';
+import {MAINTENANCE_GATES,maintenanceGateReadiness} from './maintenanceWorkflowConfig';
 
 // ---------------------------------------------------------------------------
 // Maintenance Management (MNT)
@@ -649,6 +650,58 @@ async function orgUserMap(orgId: string) {
 // ----- Routes -----
 
 export const maintenanceRoutes = {
+    'POST /api/org/mnt/workflow/configuration': [
+        orgRoute('org.mnt.workflow.configuration', null, async (ctx) => {
+            requireMnt(ctx);
+            if (!canAnywhere(ctx, 'MNT.view') && !canAnywhere(ctx, 'ADM.workflows'))
+                throw new HttpError(403, 'Maintenance or workflow administration access is required.');
+            const [saved,positions]=await Promise.all([
+                getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`),
+                listDocs(`organizations/${ctx.orgId}/positions`)
+            ]);
+            const selected=isObj(saved?.data.approverRoles)?saved.data.approverRoles:{};
+            const roles=Object.fromEntries(Object.entries(selected).map(([k,v])=>[k,str(v)]));
+            return {
+                gates:maintenanceGateReadiness(roles),
+                jobRoles:positions.map(p=>({id:p.id,label:str(p.data.title)||str(p.data.name)||p.id})),
+                revision:Number(saved?.data.version)||0,
+                configuredAt:str(saved?.data.updatedAt),
+                note:'Pending-implementation gates are configuration only and do not enable missing transitions.'
+            };
+        })
+    ],
+    'POST /api/org/mnt/workflow/configuration/save': [
+        orgRoute('org.mnt.workflow.configuration.save','ADM.workflows',async(ctx)=>{
+            requireMnt(ctx);
+            const raw=ctx.body.approverRoles;
+            if(!isObj(raw))throw new HttpError(400,'Approver role mappings are required.');
+            const eligible=new Set(MAINTENANCE_GATES.map(g=>g.code));
+            if(Object.keys(raw).some(k=>!eligible.has(k)))throw new HttpError(400,'Unknown maintenance workflow gate.');
+            const positions=await listDocs(`organizations/${ctx.orgId}/positions`);
+            const ids=new Set(positions.map(p=>p.id));
+            const roles:Record<string,string>={};
+            for(const [key,val] of Object.entries(raw)){
+                const id=str(val);
+                if(id&&!ids.has(id))throw new HttpError(400,`Unknown organizational job role for ${key}.`);
+                if(id)roles[key]=id;
+            }
+            const path=`organizations/${ctx.orgId}/maintenance_workflow_settings/default`;
+            const prior=await getDoc(path);
+            const expected=Number(ctx.body.expectedVersion);
+            const version=Number(prior?.data.version)||0;
+            if(!Number.isInteger(expected)||expected!==version)
+                throw new HttpError(409,'Workflow configuration changed. Reload before saving.');
+            const reason=clean(ctx.body.reason,500);
+            if(reason.length<10)throw new HttpError(400,'Explain the configuration change (10 characters minimum).');
+            await writeDoc(path,{
+                version:version+1,approverRoles:roles,
+                updatedAt:nowIso(),updatedBy:ctx.uid,reason,
+            });
+            await rec(ctx,'mnt.workflow.configuration.updated','Maintenance approval configuration',reason);
+            return {ok:true,version:version+1,configured:roles};
+        })
+    ],
+
     'POST /api/org/mnt/setup': [
         orgRoute('org.mnt.setup', null, async (ctx) => {
             const map = isObj(ctx.org.data.modules) ? ctx.org.data.modules : {};
