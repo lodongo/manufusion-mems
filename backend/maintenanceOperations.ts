@@ -1585,8 +1585,10 @@ export async function maintenanceOperations(ctx: OrgContext) {
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
             canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));
         const users = await runQuery({ from: [{ collectionId: 'users' }], where: fieldEq('orgId', ctx.orgId) });
+        const workflow=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
+        const reviewRole=str(object(workflow?.data.approverRoles)['MNT.ASSESS.REVIEW']);
         return {
-            wo: { code: wo.id, ...wo.data },
+            wo: { code: wo.id, ...wo.data, assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             readiness: readinessData,
             permissions,
             currentUserId: ctx.uid,
