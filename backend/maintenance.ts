@@ -732,6 +732,29 @@ export const maintenanceRoutes = {
             }))};
         })
     ],
+    'POST /api/org/mnt/tasks/pending': [
+        orgRoute('org.mnt.tasks.pending',null,async(ctx)=>{
+            requireMnt(ctx);
+            const conf=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const roles=isObj(conf?.data.approverRoles)?conf.data.approverRoles:{};
+            const positionCode=str(roles['MNT.TASK.VALIDATE']);
+            if(!positionCode)return {items:[],configurationNeeded:true};
+            const today=new Date().toISOString().slice(0,10);
+            const authorized=objs(ctx.me.data.assignments).some(a=>
+                str(a.positionCode)===positionCode&&(!str(a.startsOn)||str(a.startsOn)<=today)&&(!str(a.endsOn)||str(a.endsOn)>=today));
+            if(!authorized)throw new HttpError(403,'Only the assigned asset-task validation role can view the pending task queue.');
+            const scope=await scopeOf(ctx);
+            const docs=await listDocs(`organizations/${ctx.orgId}/asset_task_proposals`);
+            const pending=[];
+            for(const d of docs.filter(x=>str(x.data.status)==='pending_validation')){
+                if(canAt(ctx,'MNT.activities.edit',await nodePath(ctx.orgId,str(d.data.assemblyId)),scope))
+                    pending.push({id:d.id,wrCode:str(d.data.wrCode),taskId:str(d.data.taskId),
+                        description:str(d.data.description),assemblyId:str(d.data.assemblyId),
+                        assetTag:str(d.data.assetTag),createdBy:str(d.data.createdBy)});
+            }
+            return {items:pending,configurationNeeded:false};
+        })
+    ],
     'POST /api/org/mnt/tasks/validate': [
         orgRoute('org.mnt.tasks.validate',null,async(ctx)=>{
             requireMnt(ctx);
