@@ -698,7 +698,8 @@ const direct = await createAssessedWorkOrder(
     'Follow-up conveyor work','Assess coupling and mounting bracket for the conveyor.','BEARINGS',
     [candidateTask,hiddenTask]
 );
-const proposal = (await listDocs(r + '/asset_task_proposals')).find((p) => p.data.woCode === direct && p.data.taskId === 'coupling');
+const proposal = (await listDocs(r + '/asset_task_proposals')).find((p) => p.data.taskId === 'coupling' && (p.data.woCode === direct || p.data.wrCode));
+assert.ok(proposal, 'Task registry proposal should be retained across WR assessment and conversion');
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/tasks/validate', 'assessor', { id: proposal.id }), /own task/);
 await route(maintenanceRoutes, '/api/org/mnt/tasks/validate', 'validator', { id: proposal.id });
 assert.equal((await listDocs(r + '/asset_task_template_revisions')).length, 1);
