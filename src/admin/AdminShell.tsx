@@ -248,12 +248,13 @@ export default function AdminShell({
             )}
 
             <div className='lg:pl-64'>
-                <header className='sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-slate-800 bg-slate-950/95 px-4 backdrop-blur lg:hidden'>
-                    <button aria-label='Open menu' onClick={() => setOpen(true)} className='flex h-10 w-10 items-center justify-center rounded-lg text-slate-200'>
+                <header className='sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-slate-800 bg-slate-950/95 px-4 backdrop-blur lg:justify-end'>
+                    <button aria-label='Open menu' onClick={() => setOpen(true)} className='flex h-10 w-10 items-center justify-center rounded-lg text-slate-200 lg:hidden'>
                         <Menu className='h-6 w-6' />
                     </button>
-                    <span className='min-w-0 flex-1 truncate font-semibold text-white'>{current.label}</span>
-                    <UserChip session={session} compact onClick={() => go('profile')} />
+                    <span className='min-w-0 flex-1 truncate font-semibold text-white lg:hidden'>{current.label}</span>
+                    <div className='lg:hidden'><UserChip session={session} compact onClick={() => go('profile')} /></div>
+                    <button type='button' onClick={onSignOut} aria-label='Log out' title='Log out' className='hidden lg:flex min-h-10 items-center gap-2 rounded-xl border border-slate-700 px-3 text-sm font-medium text-slate-200 hover:bg-slate-800'><LogOut className='h-4 w-4' aria-hidden='true'/> Log out</button>
                 </header>
                 <main className='mx-auto w-full max-w-4xl px-4 py-6 lg:px-8 lg:py-8'>{content}</main>
             </div>
