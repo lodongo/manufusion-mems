@@ -653,27 +653,33 @@ await op('manager', 'technical_close', { code: wo, note: 'All tasks, material re
 assert.equal(snapshot(r + '/work_orders/' + wo).data.status, 'closed');
 assert.equal(snapshot(r + '/work_orders/' + wo).data.technicalClosure.by, people.manager[0]);
 assert.ok(snapshot(r + '/work_orders/' + wo).data.history.length > 15);
-// Direct work orders require the same technical assessment and material governance.
-const direct = (
-    await route(maintenanceRoutes, '/api/org/mnt/wo/create', 'planner', {
-        confirm: true,
-        assemblyId: 'BEARINGS',
-        assetTag: 'AST000001',
-        title: 'Follow-up conveyor work',
-        description: 'Assess a coupling and mounting bracket for the conveyor.',
-        ...header,
-        criticalityCode: l.criticality.at(-1).code,
-    })
-).code;
+// Direct creation is forbidden; every additional work order must be converted
+// from a reviewed Work Request. Exercise that API boundary explicitly.
 await assert.rejects(
-    () =>
-        route(maintenanceRoutes, '/api/org/mnt/wo/action', 'planner', {
-            code: direct,
-            action: 'save_plan',
-            tasks: [{ description: 'Unassessed shortcut' }],
-        }),
-    /task-by-task/,
+    () => route(maintenanceRoutes,'/api/org/mnt/wo/create','planner',{
+        confirm:true,assemblyId:'BEARINGS',assetTag:'AST000001',
+        title:'Unsupported direct work order',description:'Direct creation must be rejected.'
+    }),
+    /Direct work order creation is disabled/,
 );
+async function createAssessedWorkOrder(title,description,assemblyId,assessedTasks){
+    const wrNew=await route(maintenanceRoutes,'/api/org/mnt/wr/create','requester',{
+        ...finding,title,description,assemblyId,assetTag:'AST000001'
+    });
+    await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'start_review'});
+    await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'assess',...header});
+    await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'save_task_assessment',tasks:assessedTasks});
+    await assert.rejects(
+        () => route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'convert',confirm:wrNew.code}),
+        /approval|convert/,
+    );
+    await route(maintenanceRoutes,'/api/org/mnt/wr/action','reviewer',{
+        code:wrNew.code,action:'review_assessment',note:'Independent technical review verified scope, controls and resources.'
+    });
+    const result=await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'convert',confirm:wrNew.code});
+    assert.ok(result.woCode);
+    return result.woCode;
+}
 const candidateTask = task('coupling', 'Replace coupling', 'GEARBOX', [
     {
         id: 'coupling_part',
@@ -688,21 +694,10 @@ const candidateTask = task('coupling', 'Replace coupling', 'GEARBOX', [
 ]);
 const hiddenTask = task('hidden_task', 'Unselected historical-style task', 'BEARINGS');
 hiddenTask.risk = [{ ...risk[0], hazard: 'EXCLUDED_TASK_HAZARD' }];
-await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'assessor', {
-    code: direct,
-    action: 'save_task_assessment',
-    tasks: [candidateTask, hiddenTask],
-});
-await assert.rejects(
-    () => op('planner', 'candidate', {
-        code: direct, taskId: 'coupling', resourceId: 'coupling_part', attributes: {},
-        note: 'A candidate should not progress until an independent assessment review is complete.',
-    }),
-    /Approve the latest work assessment/,
+const direct = await createAssessedWorkOrder(
+    'Follow-up conveyor work','Assess coupling and mounting bracket for the conveyor.','BEARINGS',
+    [candidateTask,hiddenTask]
 );
-await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'reviewer', {
-    code: direct, action: 'review_assessment', note: 'Independent review of direct work order technical scope and safety risks.',
-});
 const proposal = (await listDocs(r + '/asset_task_proposals')).find((p) => p.data.woCode === direct && p.data.taskId === 'coupling');
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/tasks/validate', 'assessor', { id: proposal.id }), /own task/);
 await route(maintenanceRoutes, '/api/org/mnt/tasks/validate', 'validator', { id: proposal.id });
@@ -828,22 +823,10 @@ const subset = await op('planner', 'save_window', {
 const subsetReport = await op('planner', 'window_report', { windowId: subset.windowId });
 assert.equal(subsetReport.workOrders[0].tasks.length, 1);
 assert.ok(!JSON.stringify(subsetReport).includes('EXCLUDED_TASK_HAZARD'));
-const other = (
-    await route(maintenanceRoutes, '/api/org/mnt/wo/create', 'planner', {
-        confirm: true,
-        assemblyId: 'OTHER_ASSEMBLY',
-        assetTag: 'AST000001',
-        title: 'Other production line work',
-        description: 'Assess work on another production line equipment.',
-        ...header,
-        criticalityCode: l.criticality.at(-1).code,
-    })
-).code;
 const otherTask = { ...task('other', 'Other line task', 'OTHER_ASSEMBLY'), equipmentId: 'OTHER_LINE' };
-await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'assessor', { code: other, action: 'save_task_assessment', tasks: [otherTask] });
-await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'reviewer', {
-    code: other, action: 'review_assessment', note: 'Independent review of other line technical task scope and control measures.',
-});
+const other = await createAssessedWorkOrder(
+    'Other production line work','Assess work on another production line equipment.','OTHER_ASSEMBLY',[otherTask]
+);
 await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'planner', { code: other, action: 'submit_plan' });
 await assert.rejects(
     () =>
