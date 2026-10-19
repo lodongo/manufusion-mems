@@ -10,6 +10,7 @@ import { orgRoute, type OrgContext } from './guards';
 import { nextOrgCounter } from './positions';
 import { detectImage } from './branding';
 import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
+import { SAF_DEFAULT_LISTS } from './safDefaults';
 import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
 import { searchCatalog,serviceCatalogHierarchy } from './procurement';
@@ -803,14 +804,17 @@ export const maintenanceRoutes = {
         orgRoute('org.mnt.warehouse_spares.search',null,async(ctx)=>{
             requireMnt(ctx);
             const q=clean(ctx.body.q,80).toLowerCase();
-            if(q.length<2)return {items:[]};
             const root=`organizations/${ctx.orgId}`;
             const [warehouses,materials,extensions,journal]=await Promise.all([
                 listDocs(root+'/warehouses'),listDocs(root+'/materials'),listDocs(root+'/material_extensions'),
                 listDocs(root+'/material_journal')
             ]);
             const scope=await scopeOf(ctx);
-            const activeWarehouse=new Map(warehouses.filter(w=>scope==='all'||scope.has(w.id)).map(w=>[w.id,w]));
+            const activeWarehouse=new Map(warehouses.filter(w=>(scope==='all'||scope.has(w.id))&&str(w.data.status)!=='inactive').map(w=>[w.id,w]));
+            if(str(ctx.body.mode)==='warehouses')return {warehouses:[...activeWarehouse.values()].map(w=>({id:w.id,name:str(w.data.name)||w.id})).sort((a,b)=>a.name.localeCompare(b.name)),items:[]};
+            const selectedWarehouse=str(ctx.body.warehouseId);
+            if(!selectedWarehouse||!activeWarehouse.has(selectedWarehouse))return {items:[]};
+            if(q.length<2)return {items:[]};
             const balances=new Map<string,{physical:number;reserved:number;valid:boolean}>();
             for(const entry of journal){
                 const d=entry.data,k=str(d.materialId)+'|'+str(d.warehouseId);
@@ -833,6 +837,7 @@ export const maintenanceRoutes = {
                 if(str(m.data.warehouseId)&&str(m.data.pushedAt))linked.add(str(m.data.warehouseId));
                 for(const x of extensions)if(str(x.data.sourceId)===m.id&&str(x.data.status)==='approved')linked.add(str(x.data.warehouseId));
                 for(const warehouseId of linked){
+                    if(warehouseId!==selectedWarehouse)continue;
                     const warehouse=activeWarehouse.get(warehouseId);if(!warehouse)continue;
                     const balance=balances.get(m.id+'|'+warehouseId);
                     items.push({materialId:m.id,materialNumber:number,name,warehouseId,
@@ -849,13 +854,25 @@ export const maintenanceRoutes = {
             requireMnt(ctx);
             const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
             const serviceVendors=vendors.filter(d=>str(d.data.status)==='approved'&&objs(d.data.scopes).some(x=>str(x.kind)==='service'));
-            const [riskDoc,serviceHierarchy]=await Promise.all([getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`),serviceCatalogHierarchy()]);
+            const [riskDoc,serviceHierarchy,energyDoc,permitsDoc]=await Promise.all([
+                getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`),serviceCatalogHierarchy(),
+                getDoc('module_workspaces/SAF/metadata/hazardousEnergy'),
+                getDoc('module_workspaces/SAF/metadata/permitTypes')]);
+            const safetyOptions=(doc:Doc|null,key:string)=> {
+                const defaults=SAF_DEFAULT_LISTS.find(l=>l.key===key);
+                const records=Array.isArray(doc?.data.items)?objs(doc?.data.items):objs(defaults?.items);
+                return records.filter(v=>v.active!==false&&v.selectable!==false)
+                    .map(v=>({code:str(v.code),label:str(v.label),category:str(v.category),subcategory:str(v.subcategory)}))
+                    .filter(v=>v.code&&v.label);
+            };
             const code=str(ctx.body.code);
             const record=WO_RE.test(code)?await getWo(ctx,code):WR_RE.test(code)?await getWr(ctx,code):null;
             const equipmentOptions=[];
             if(record){need(ctx,'MNT.view',pathOf(record),await scopeOf(ctx));const nodes=await listDocs(col(ctx.orgId));for(const n of nodes){if(n.id===str(record.data.unitId)||(str(n.data.level)==='assembly'&&(await nodePath(ctx.orgId,n.id)).includes(str(record.data.unitId))))equipmentOptions.push({id:n.id,name:str(n.data.name),code:str(n.data.code)});}}
             const skillMaster=await getDoc('module_workspaces/HRM/metadata/skillsMaster');const skills=objs(skillMaster?.data.items).filter(s=>s.active!==false).map(s=>({code:str(s.code),label:str(s.label)||str(s.name),category:str(s.category)}));
             return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
+                hazardousEnergy:safetyOptions(energyDoc,'hazardousEnergy'),
+                safetyPermits:safetyOptions(permitsDoc,'permitTypes'),
                 riskMatrix:riskDoc?.data?.configuration||defaultMaintenanceRiskMatrix};
         })
     ],
