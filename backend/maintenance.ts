@@ -7,7 +7,7 @@ import { detectImage } from './branding';
 import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
 import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
-import { searchCatalog } from './procurement';
+import { searchCatalog,serviceCatalogHierarchy } from './procurement';
 import {MAINTENANCE_GATES,maintenanceGateReadiness} from './maintenanceWorkflowConfig';
 import {validateAssessmentTasks,summarizeAssessmentTasks} from './maintenanceTaskAssessment';
 import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} from './maintenanceTaskRisk';
@@ -794,8 +794,8 @@ export const maintenanceRoutes = {
             requireMnt(ctx);
             const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
             const serviceVendors=vendors.filter(d=>str(d.data.status)==='approved'&&objs(d.data.scopes).some(x=>str(x.kind)==='service'));
-            const riskDoc=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
-            return {vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
+            const [riskDoc,serviceHierarchy]=await Promise.all([getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`),serviceCatalogHierarchy()]);
+            return {serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
                 riskMatrix:riskDoc?.data?.configuration||defaultMaintenanceRiskMatrix};
         })
     ],
@@ -1077,6 +1077,14 @@ export const maintenanceRoutes = {
                     } catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid assessment tasks.');}
                     // Every task owns its parts/services/tools/risk. Legacy header-level
                     // spares/services are deliberately not written by this action.
+                    const hierarchy=await serviceCatalogHierarchy();
+                    if(hierarchy.categories.length){
+                        for(const task of tasks)for(const service of task.services){
+                            const sub=hierarchy.subcategories.find(c=>c.code===service.subcategoryCode&&c.categoryCode===service.categoryCode);
+                            const family=hierarchy.families.find(c=>c.code===service.classCode&&c.subcategoryCode===service.subcategoryCode);
+                            if(!sub||!family)throw new HttpError(400,'Choose a valid service category, subcategory and family/class from the approved hierarchy.');
+                        }
+                    }
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(x=>x.proposedVendorIds));
                     if(allProposed.length){
                         const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
