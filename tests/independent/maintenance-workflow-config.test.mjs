@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {MAINTENANCE_GATES,maintenanceGateReadiness} from '../../backend/maintenanceWorkflowConfig.ts';
+test('maintenance workflow manifest has unique codes and complete stage coverage',()=>{
+ assert.equal(new Set(MAINTENANCE_GATES.map(g=>g.code)).size,MAINTENANCE_GATES.length);
+ for(const stage of ['request','assessment','conversion','planning','scheduling','execution','closure'])
+  assert.ok(MAINTENANCE_GATES.some(g=>g.stage===stage),stage);
+});
+test('pending handlers remain disabled even when job roles are configured',()=>{
+ const roles=Object.fromEntries(MAINTENANCE_GATES.map(g=>[g.code,'ROL_000001']));
+ const configured=maintenanceGateReadiness(roles);
+ for(const gate of configured.filter(g=>g.status==='pending_implementation'))
+  assert.equal(gate.ready,false,gate.code);
+});
+test('closure requires explicit technical manager configuration while implementation is pending',()=>{
+ const gate=maintenanceGateReadiness({}).find(g=>g.code==='MNT.WO.TECHNICAL_CLOSE');
+ assert.ok(gate);
+ assert.equal(gate.roleRequired,true);
+ assert.equal(gate.ready,false);
+ assert.ok(gate.requires.includes('safety_signed_off'));
+ assert.ok(gate.requires.includes('equipment_handed_over'));
+});
+test('safety near-miss gate requires explicit declaration and incident record where applicable',()=>{
+ const gate=MAINTENANCE_GATES.find(g=>g.code==='MNT.SAFETY.SIGNOFF');
+ assert.ok(gate);
+ assert.ok(gate.requires.includes('incident_declaration_explicit'));
+ assert.ok(gate.requires.includes('incident_record_if_reported'));
+});
+test('maintenance window approval requires both independent engineering and safety roles',()=>{
+ const keys=MAINTENANCE_GATES.filter(g=>g.stage==='scheduling').map(g=>g.code);
+ assert.ok(keys.includes('MNT.WINDOW.ENGINEERING'));
+ assert.ok(keys.includes('MNT.WINDOW.SAFETY'));
+ const lock=MAINTENANCE_GATES.find(g=>g.code==='MNT.WINDOW.LOCK');
+ assert.deepEqual(lock?.requires,['engineering_approved','safety_approved']);
+});
