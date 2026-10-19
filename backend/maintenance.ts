@@ -10,6 +10,7 @@ import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
 import { searchCatalog } from './procurement';
 import {MAINTENANCE_GATES,maintenanceGateReadiness} from './maintenanceWorkflowConfig';
 import {validateAssessmentTasks,summarizeAssessmentTasks} from './maintenanceTaskAssessment';
+import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} from './maintenanceTaskRisk';
 
 // ---------------------------------------------------------------------------
 // Maintenance Management (MNT)
@@ -793,7 +794,9 @@ export const maintenanceRoutes = {
             requireMnt(ctx);
             const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
             const serviceVendors=vendors.filter(d=>str(d.data.status)==='approved'&&objs(d.data.scopes).some(x=>str(x.kind)==='service'));
-            return {vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name))};
+            const riskDoc=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
+            return {vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
+                riskMatrix:riskDoc?.data?.configuration||defaultMaintenanceRiskMatrix};
         })
     ],
     'POST /api/org/mnt/setup': [
@@ -1067,7 +1070,11 @@ export const maintenanceRoutes = {
                 case 'save_task_assessment': {
                     deny(can.assess, 'You cannot assess this request.');
                     let tasks;
-                    try {tasks=validateAssessmentTasks(ctx.body.tasks);} catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid assessment tasks.');}
+                    try{
+                        const matrixDoc=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
+                        const matrix=(matrixDoc?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix;
+                        tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(ctx.body.tasks),matrix);
+                    } catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid assessment tasks.');}
                     // Every task owns its parts/services/tools/risk. Legacy header-level
                     // spares/services are deliberately not written by this action.
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(x=>x.proposedVendorIds));
