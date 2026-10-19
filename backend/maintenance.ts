@@ -789,6 +789,51 @@ export const maintenanceRoutes = {
             return {ok:true,version};
         })
     ],
+    'POST /api/org/mnt/warehouse-spares/search': [
+        orgRoute('org.mnt.warehouse_spares.search',null,async(ctx)=>{
+            requireMnt(ctx);
+            const q=clean(ctx.body.q,80).toLowerCase();
+            if(q.length<2)return {items:[]};
+            const root=`organizations/${ctx.orgId}`;
+            const [warehouses,materials,extensions,journal]=await Promise.all([
+                listDocs(root+'/warehouses'),listDocs(root+'/materials'),listDocs(root+'/material_extensions'),
+                listDocs(root+'/material_journal')
+            ]);
+            const scope=await scopeOf(ctx);
+            const activeWarehouse=new Map(warehouses.filter(w=>scope==='all'||scope.has(w.id)).map(w=>[w.id,w]));
+            const balances=new Map<string,{physical:number;reserved:number;valid:boolean}>();
+            for(const entry of journal){
+                const d=entry.data,k=str(d.materialId)+'|'+str(d.warehouseId);
+                if(!activeWarehouse.has(str(d.warehouseId)))continue;
+                const b=balances.get(k)||{physical:0,reserved:0,valid:true};
+                if(str(d.status)!=='posted'||d.reconciled!==true)b.valid=false;
+                else {
+                    const deltas=isObj(d.balancesDelta)?d.balancesDelta:{};
+                    b.physical+=Number(deltas.physicalStock)||0;
+                    b.reserved+=Number(deltas.reservedStock)||0;
+                }
+                balances.set(k,b);
+            }
+            const items=[];
+            for(const m of materials){
+                if(!['approved','active'].includes(str(m.data.status)))continue;
+                const number=str(m.data.materialNumber),name=str(m.data.shortText)||str(m.data.name);
+                if(!(number+' '+name).toLowerCase().includes(q))continue;
+                const linked=new Set(strs(m.data.warehouseIds));
+                if(str(m.data.warehouseId)&&str(m.data.pushedAt))linked.add(str(m.data.warehouseId));
+                for(const x of extensions)if(str(x.data.sourceId)===m.id&&str(x.data.status)==='approved')linked.add(str(x.data.warehouseId));
+                for(const warehouseId of linked){
+                    const warehouse=activeWarehouse.get(warehouseId);if(!warehouse)continue;
+                    const balance=balances.get(m.id+'|'+warehouseId);
+                    items.push({materialId:m.id,materialNumber:number,name,warehouseId,
+                        warehouseName:str(warehouse.data.name)||warehouseId,uom:str(m.data.uom)||'EA',
+                        available:balance?.valid?Math.max(0,(balance.physical-balance.reserved)):null,
+                        stockVerified:!!balance?.valid&&!!balance,unitCost:null});
+                }
+            }
+            return {items:items.slice(0,40)};
+        })
+    ],
     'POST /api/org/mnt/assessment/options': [
         orgRoute('org.mnt.assessment.options',null,async(ctx)=>{
             requireMnt(ctx);
