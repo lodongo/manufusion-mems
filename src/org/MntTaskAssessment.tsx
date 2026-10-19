@@ -4,9 +4,10 @@ import {Alert} from '../components/ui';
 import {Button,Card,useLoad} from '../admin/kit';
 type Spare={id:string;source:'warehouse'|'catalog'|'description';materialId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null};
 type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[]};
-type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string};
+type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>};
+type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
 export type TaskAssessment={id:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing'};
-const seed=():TaskAssessment=>({id:'task_'+Math.random().toString(36).slice(2,10),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[{hazard:'',impact:'',controls:'',before:'',after:'',permit:''}],templateStatus:'pending_validation'});
+const seed=():TaskAssessment=>({id:'task_'+Math.random().toString(36).slice(2,10),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[{hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}}],templateStatus:'pending_validation'});
 const input='mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 p-3 text-base text-white';
 const label='block text-sm text-slate-300';
 function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSelect:(item:{code:string;name:string;family:string})=>void}){
@@ -34,7 +35,7 @@ function CatalogPicker({kind,onSelect}:{kind:'materials'|'services';onSelect:(it
 }
 export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial.length?initial:[seed()]);
- const vendorOptions=useLoad(()=>callBackend<{vendors:Array<{id:string;name:string}>}>('/api/org/mnt/assessment/options'));
+ const vendorOptions=useLoad(()=>callBackend<{vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix}>('/api/org/mnt/assessment/options'));
  const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
  const [current,setCurrent]=useState(0);
  const [section,setSection]=useState(0);
@@ -120,11 +121,25 @@ export default function MntTaskAssessment({code,initial,onSaved,editable}:{code:
   </section>}
   {section===3&&<section className='space-y-3 rounded-xl border border-slate-700 p-3'><h4 className='font-semibold text-white'>Risk assessment — this task</h4>
    {task.risk.map((r,i)=><div key={i} className='space-y-2 rounded-xl border border-slate-700 p-3'>
-    {(['hazard','impact','before','controls','after','permit'] as const).map(k=><label key={k} className={label}>{({hazard:'Hazard',impact:'Impact',before:'Initial risk rating',controls:'Mitigation and safety controls',after:'Residual risk rating',permit:'Permit / isolation (if required)'})[k]}
+    {(['hazard','impact','controls','permit'] as const).map(k=><label key={k} className={label}>{({hazard:'Hazard / unsafe condition',impact:'Potential impact',controls:'Mitigation and preventive controls',permit:'Required permit / LOTO (if applicable)'})[k]}
      <input className={input} value={r[k]} onChange={e=>patch({risk:task.risk.map((x,j)=>j===i?{...x,[k]:e.target.value}:x)})}/></label>)}
+    {(['beforeRatings','afterRatings'] as const).map(key=><div key={key} className='space-y-2 rounded-lg border border-slate-600 p-3'>
+      <h5 className='text-sm font-semibold text-white'>{key==='beforeRatings'?'Initial risk rating':'Residual risk after controls'}</h5>
+      <div className='grid grid-cols-2 gap-2'>
+       {(vendorOptions.data?.riskMatrix.factors||[]).filter(f=>f.enabled).map(f=><label key={f.code} className={label}>{f.label}
+         <select data-native-select='true' className={input} value={r[key]?.[f.code]||''}
+           onChange={e=>patch({risk:task.risk.map((x,j)=>j===i?{...x,[key]:{...(x[key]||{}),[f.code]:Number(e.target.value)||0}}:x)})}>
+           <option value=''>Select rating</option>
+           {Array.from({length:f.max},(_,n)=><option key={n+1} value={n+1}>{n+1}</option>)}
+         </select>
+       </label>)}
+      </div>
+      <p className='text-xs text-slate-400'>Scored automatically using organization SAF matrix v{vendorOptions.data?.riskMatrix.version||'—'}.</p>
+    </div>)}
+
     {task.risk.length>1&&<button type='button' className='text-xs text-red-300 underline' onClick={()=>patch({risk:task.risk.filter((_,j)=>j!==i)})}>Remove hazard</button>}
    </div>)}
-   <Button variant='secondary' onClick={()=>patch({risk:[...task.risk,{hazard:'',impact:'',before:'',controls:'',after:'',permit:''}]})}>+ Add hazard</Button>
+   <Button variant='secondary' onClick={()=>patch({risk:[...task.risk,{hazard:'',impact:'',before:'',controls:'',after:'',permit:'',beforeRatings:{},afterRatings:{}}]})}>+ Add hazard</Button>
   </section>}
   {section===4&&<div className='space-y-2 rounded-xl border border-emerald-700 p-3 text-sm'>
     <p className='font-semibold text-white'>{task.description||'Unnamed task'}</p>
