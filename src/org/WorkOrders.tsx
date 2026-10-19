@@ -433,7 +433,7 @@ function OrderDetail({ code, setup }: { code: string; setup: MntSetup }) {
     };
 
     const buttons: Array<{ key: Panel | 'submit' | 'start'; label: string; icon: ReactNode; variant?: 'primary' | 'secondary' | 'danger' }> = [];
-    if (can.plan) buttons.push({ key: 'plan', label: w.tasks.length ? 'Edit plan' : 'Plan', icon: <Wrench className='h-4 w-4' />, variant: w.tasks.length ? 'secondary' : 'primary' });
+    if (can.plan) buttons.push({ key: 'plan', label: w.assessmentTasks?.length ? 'Secure assessed resources' : 'Assess tasks and resources', icon: <Wrench className='h-4 w-4' />, variant: w.tasks.length ? 'secondary' : 'primary' });
     if (can.safety) buttons.push({ key: 'safety', label: w.safety.assessedAt ? 'Update safety' : 'Safety assessment', icon: <ShieldCheck className='h-4 w-4' />, variant: w.safety.assessedAt ? 'secondary' : 'primary' });
     if (can.submitPlan) buttons.push({ key: 'submit', label: 'Plan ready', icon: <Send className='h-4 w-4' /> });
     if (can.release) buttons.push({ key: 'release', label: 'Release', icon: <Check className='h-4 w-4' /> });
@@ -450,7 +450,7 @@ function OrderDetail({ code, setup }: { code: string; setup: MntSetup }) {
     if (can.cancel) buttons.push({ key: 'cancel', label: 'Cancel', icon: <Ban className='h-4 w-4' />, variant: 'danger' });
     const press = (k: string) => (k === 'submit' ? void run('submit_plan') : k === 'start' ? void run('start') : setPanel(k as Panel));
 
-    if(panel==='plan'&&!w.assessmentTasks?.length&&!w.tasks.length)
+    if(panel==='plan'&&!w.assessmentTasks?.length)
         return <MntTaskAssessment code={w.code} recordType='wo' initial={[]} editable={can.view}
             onSaved={()=>{setPanel('');reload();}} onCancel={close}/>;
     if (panel === 'plan') return <PlanEditor wo={w} lists={lists} onSaved={() => (setPanel(''), reload())} onCancel={close} />;
@@ -718,8 +718,8 @@ function ConfirmPanel({ code, title, noteLabel, noteRequired, danger, busy, erro
 
 function PlanEditor({ wo, lists, onSaved, onCancel }: { wo: Detail; lists: MntLists; onSaved: () => void; onCancel: () => void }) {
     const [tasks, setTasks] = useState<Task[]>(wo.tasks.length ? wo.tasks : [{ description: '', disciplineCode: '', resourceTypeCode: '', persons: 1, hours: 1, rate: 0 }]);
-    const [spares, setSpares] = useState<Spare[]>(wo.spares);
-    const [services, setServices] = useState<Service[]>(wo.services);
+    const [spares, setSpares] = useState<Spare[]>([]);
+    const [services, setServices] = useState<Service[]>([]);
     const [tools, setTools] = useState(wo.tools);
     const [execLoc, setExecLoc] = useState(wo.executionLocationCode);
     const [downtime, setDowntime] = useState(String(wo.downtimeHours || ''));
@@ -736,13 +736,13 @@ function PlanEditor({ wo, lists, onSaved, onCancel }: { wo: Detail; lists: MntLi
         return { labourHours, labour, spares: sp, services: sv, total: labour + sp + sv };
     }, [tasks, spares, services]);
     const hasAssessedTasks=!!wo.assessmentTasks?.length;
-    const ok = hasAssessedTasks || (tasks.length > 0 && tasks.every((t) => t.description.trim().length >= 3 && t.disciplineCode && t.resourceTypeCode && t.persons >= 1 && t.hours > 0) && spares.every((s) => s.description.trim().length >= 2 && s.qty > 0) && services.every((s) => s.description.trim().length >= 3));
+    const ok = hasAssessedTasks;
     const upd = <T,>(list: T[], set: (v: T[]) => void, i: number, patch: Partial<T>) => set(list.map((x, j) => (j === i ? { ...x, ...patch } : x)));
     const save = async () => {
         setBusy(true);
         setError('');
         try {
-            await callBackend('/api/org/mnt/wo/action', { code: wo.code, action: 'save_plan', tasks, spares, services, tools, executionLocationCode: execLoc, downtimeHours: Number(downtime) || 0, targetDate });
+            await callBackend('/api/org/mnt/wo/action', { code: wo.code, action: 'save_plan', executionLocationCode: execLoc, downtimeHours: Number(downtime) || 0, targetDate });
             onSaved();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save the plan.');
@@ -761,7 +761,7 @@ function PlanEditor({ wo, lists, onSaved, onCancel }: { wo: Detail; lists: MntLi
                     </Button>
                     <div className='min-w-0 flex-1'>
                         <p className='font-mono text-xs text-emerald-300'>{wo.code}</p>
-                        <p className='truncate font-semibold text-white'>Plan the work</p>
+                        <p className='truncate font-semibold text-white'>Secure assessed work</p>
                     </div>
                     <Button busy={busy} disabled={!ok} onClick={save}>
                         <Check className='h-4 w-4' />
@@ -905,7 +905,7 @@ function PlanEditor({ wo, lists, onSaved, onCancel }: { wo: Detail; lists: MntLi
                     </SelectField>
                     <Field id='p-down' label='Equipment downtime needed (hours)' type='number' inputMode='decimal' min={0} value={downtime} onChange={(e) => setDowntime(e.target.value)} />
                     <Field id='p-date' label='Target completion date' type='date' value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
-                    <TextArea id='p-tools' label='Special tools and equipment' rows={2} maxLength={1000} value={tools} onChange={(e) => setTools(e.target.value)} />
+                    <p className='text-sm text-emerald-300'>Special tools, spares and services are specified inside each assessed task. They cannot be added at work-order header level.</p>
                 </Card>
             </div>
         </div>

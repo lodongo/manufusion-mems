@@ -1442,15 +1442,16 @@ export const maintenanceRoutes = {
                     const assessedTasks=objs(d.assessmentTasks);
                     // A converted request already has assessed task scope/resources/risk;
                     // planning cannot silently replace them through the legacy flat form.
-                    const tasks = assessedTasks.length ? assessedTasks : readTasks(b.tasks, l);
-                    const spares = assessedTasks.length ? [] : readSpares(b.spares);
-                    const services = assessedTasks.length ? [] : readServices(b.services);
+                    if (!assessedTasks.length) throw new HttpError(409, 'Complete the task-by-task work assessment first. Spares, services, tools and safety requirements belong to tasks, not the plan header.');
+                    const tasks = assessedTasks;
+                    const spares: Obj[] = [];
+                    const services: Obj[] = [];
                     const exec = pick(l.executionLocations, str(b.executionLocationCode), 'execution location', false);
                     const fields: Record<string, Plain> = {
                         tasks: tasks as unknown as Plain,
                         spares: spares as unknown as Plain,
                         services: services as unknown as Plain,
-                        tools: str(b.tools).trim().slice(0, 1000),
+                        tools: '', // All technical tools are defined per assessed task.
                         executionLocationCode: exec?.code ?? '',
                         executionLocationLabel: exec?.label ?? '',
                         downtimeHours: numIn(b.downtimeHours ?? 0, 0, 10000, 'Downtime hours'),
@@ -1489,7 +1490,7 @@ export const maintenanceRoutes = {
                 }
                 case 'submit_plan':
                     deny(can.submitPlan, 'You cannot submit this plan.');
-                    if (!objs(d.tasks).length) throw new HttpError(400, 'Add at least one task to the plan.');
+                    if (!objs(d.assessmentTasks).length) throw new HttpError(409, 'Complete a task-by-task work assessment before submitting the plan.');
                     if (!isObj(d.safety)) throw new HttpError(400, 'The safety assessment must be done before the plan is ready.');
                     await done({ status: 'plan_ready' }, 'Plan ready for release', 'mnt.wo.plan_ready', `Estimate ${estimate(d).total}`);
                     return { ok: true };
