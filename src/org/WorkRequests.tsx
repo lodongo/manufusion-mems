@@ -42,6 +42,7 @@ interface Row {
     requestedByName: string;
     requestedAt: string;
     reviewerName: string;
+    assessmentReviewStatus: string;
     woCode: string;
     updatedAt: string;
 }
@@ -52,6 +53,7 @@ interface WrCan {
     cancel: boolean;
     startReview: boolean;
     assess: boolean;
+    reviewAssessment: boolean;
     return: boolean;
     decline: boolean;
     convert: boolean;
@@ -78,6 +80,8 @@ interface Detail extends Row {
         duplicateOf: string;
         note: string;
     };
+    assessmentReview: {status:string;version?:number;name?:string;at?:string;note?:string};
+    assessmentReviewCurrent: boolean;
     returnNote: string;
     declineReason: string;
     history: Array<{ at: string; name: string; action: string; note: string }>;
@@ -163,12 +167,12 @@ function RequestList({ setup }: { setup: MntSetup }) {
             requested = sessionStorage.getItem('mems.table.tab.' + route) || '';
             sessionStorage.removeItem('mems.table.tab.' + route);
         } catch { /* Restoring a table is optional. */ }
-        return (['all', 'open', 'mine', 'review'].includes(requested) && (requested !== 'review' || can.WR_review)
-            ? requested : (can.WR_review ? 'review' : 'all')) as Tab;
+        return (['all', 'open', 'mine', 'review'].includes(requested) && (requested !== 'review' || can.WR_review || can.assessment_review)
+            ? requested : (can.WR_review || can.assessment_review ? 'review' : 'all')) as Tab;
     });
     const { data, error, loading } = useLoad(() => callBackend<{ rows: Row[] }>('/api/org/mnt/wr/list', { view: tab }), [tab]);
     const columns = useColumns();
-    const tabs: Array<[Tab, string]> = [...(can.WR_review ? ([['review', 'To review']] as Array<[Tab, string]>) : []), ['open', 'Open'], ['mine', 'Mine'], ['all', 'All']];
+    const tabs: Array<[Tab, string]> = [...((can.WR_review || can.assessment_review) ? ([['review', 'To review']] as Array<[Tab, string]>) : []), ['open', 'Open'], ['mine', 'Mine'], ['all', 'All']];
     return (
         <div className='space-y-3'>
             <div className='flex gap-1 overflow-x-auto rounded-xl border border-slate-800 p-1'>
@@ -659,7 +663,7 @@ function ReviewBlock({ label, onEdit, children }: { label: string; onEdit: () =>
 // Detail: review, assess, return, decline, convert; requester edit, resubmit, cancel
 // ---------------------------------------------------------------------------
 
-type Mode = '' | 'edit' | 'assess' | 'return' | 'decline' | 'convert' | 'cancel';
+type Mode = '' | 'edit' | 'assess' | 'review_assessment' | 'return_assessment' | 'return' | 'decline' | 'convert' | 'cancel';
 
 function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const lists = setup.lists!;
@@ -699,6 +703,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const buttons: Array<{ key: string; label: string; icon: ReactNode; variant?: 'primary' | 'secondary' | 'danger'; onClick: () => void }> = [];
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
     if (can.assess) buttons.push({ key: 'assess', label: assessed ? 'Update assessment' : 'Assess', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => setMode('assess') });
+    if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Review work assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => setMode('review_assessment') });
     if (can.convert) buttons.push({ key: 'convert', label: 'Convert to work order', icon: <Wrench className='h-4 w-4' />, variant: assessed ? 'primary' : 'secondary', onClick: () => setMode('convert') });
     if (can.return) buttons.push({ key: 'return', label: 'Return for information', icon: <Undo2 className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('return') });
     if (can.decline) buttons.push({ key: 'decline', label: 'Decline', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('decline') });
@@ -707,7 +712,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     if (can.cancel) buttons.push({ key: 'cancel', label: 'Cancel request', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('cancel') });
 
     const typedNeeded = mode === 'decline' || mode === 'convert' || mode === 'cancel';
-    const noteNeeded = mode === 'return' || mode === 'decline' || mode === 'cancel';
+    const noteNeeded = mode === 'return' || mode === 'decline' || mode === 'cancel' || mode === 'review_assessment' || mode === 'return_assessment';
 
     return (
         <div className='flex h-[calc(100dvh-7rem)] flex-col'>
@@ -745,22 +750,22 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
 
                 {mode === 'assess' && <AssessPanel detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />}
 
-                {(mode === 'return' || mode === 'decline' || mode === 'convert' || mode === 'cancel') && (
+                {(mode === 'return' || mode === 'decline' || mode === 'convert' || mode === 'cancel' || mode === 'review_assessment' || mode === 'return_assessment') && (
                     <Card className='space-y-3'>
                         <p className='font-medium text-white'>
-                            {mode === 'return' ? 'Return to the requester for more information' : mode === 'decline' ? 'Decline this request' : mode === 'convert' ? 'Convert to a work order' : 'Cancel this request'}
+                            {mode === 'review_assessment' ? 'Approve the independently reviewed work assessment' : mode === 'return_assessment' ? 'Return assessment to the assessor for correction' : mode === 'return' ? 'Return to the requester for more information' : mode === 'decline' ? 'Decline this request' : mode === 'convert' ? 'Convert to a work order' : 'Cancel this request'}
                         </p>
                         {mode === 'convert' && (
                             <p className='text-sm text-slate-300'>
-                                {assessed
+                                {r.assessmentReviewCurrent
                                     ? `A work order is created with the location, asset and your assessment (${r.assessment.maintenanceTypeLabel}, ${r.assessment.priorityLabel}). The request is then locked.`
-                                    : 'Complete the assessment first: maintenance type, work type, priority and discipline.'}
+                                    : 'An independent authorized reviewer must approve the current task assessment before conversion.'}
                             </p>
                         )}
                         {(noteNeeded || mode === 'convert') && (
                             <TextArea
                                 id='wr-note'
-                                label={mode === 'return' ? 'What information is needed? *' : mode === 'convert' ? 'Note (optional)' : 'Reason *'}
+                                label={mode === 'review_assessment' ? 'Technical verification and approval notes *' : mode === 'return_assessment' ? 'Required corrections *' : mode === 'return' ? 'What information is needed? *' : mode === 'convert' ? 'Note (optional)' : 'Reason *'}
                                 rows={3}
                                 maxLength={500}
                                 value={note}
@@ -774,7 +779,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                                 className='flex-1'
                                 variant={mode === 'decline' || mode === 'cancel' ? 'danger' : 'primary'}
                                 busy={busy}
-                                disabled={(typedNeeded && typed.trim() !== r.code) || (noteNeeded && note.trim().length < 5) || (mode === 'convert' && !assessed)}
+                                disabled={(typedNeeded && typed.trim() !== r.code) || (noteNeeded && note.trim().length < (mode === 'review_assessment'||mode === 'return_assessment'?10:5)) || (mode === 'convert' && !r.assessmentReviewCurrent)}
                                 onClick={() => run(mode)}
                             >
                                 Confirm
@@ -826,6 +831,13 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                     </div>
                 )}
 
+                <Card className='space-y-2 text-sm'>
+                    <p className='font-semibold text-white'>Independent work assessment review</p>
+                    <Badge tone={r.assessmentReviewCurrent?'brand':r.assessmentReview.status==='changes_requested'?'danger':'warn'}>{r.assessmentReviewCurrent?'Approved':r.assessmentReview.status==='changes_requested'?'Corrections requested':'Awaiting approval'}</Badge>
+                    {r.assessmentReview.name&&<Info label='Reviewed by' value={r.assessmentReview.name}/>}
+                    {r.assessmentReview.note&&<Info label='Review note' value={r.assessmentReview.note}/>}
+                    {can.reviewAssessment&&assessed&&r.assessmentTasks.length>0&&<Button variant='secondary' onClick={()=>setMode('return_assessment')}>Return assessment for correction</Button>}
+                </Card>
                 <MntTaskAssessment code={r.code} initial={r.assessmentTasks||[]} editable={can.assess} onSaved={reload}/>
 
                  {(r.assessment.maintenanceTypeLabel || r.assessment.note) && (

@@ -3,7 +3,7 @@ import {callBackend} from '../lib/backend';
 import {Alert} from '../components/ui';
 import {Button,Card,PageTitle,Spinner,useLoad} from '../admin/kit';
 import {workspaceNavigate as navigate} from '../lib/route';
-type Gate={code:string;stage:string;label:string;owner:string;status:'existing'|'pending_implementation';requires:string[];configuredRole:string;roleRequired:boolean;ready:boolean};
+type Gate={code:string;stage:string;label:string;owner:string;permission?:string|null;status:'existing'|'pending_implementation';requires:string[];configuredRole:string;roleRequired:boolean;ready:boolean};
 type Response={gates:Gate[];jobRoles:{id:string;label:string}[];revision:number;configuredAt:string;note:string};
 const stages=['request','assessment','conversion','planning','scheduling','execution','closure'];
 export default function MntWorkflowSettings(){
@@ -39,7 +39,7 @@ export default function MntWorkflowSettings(){
       <h2 className='mb-3 text-base font-semibold capitalize text-white'>{stage}</h2>
       <div className='space-y-3'>{gates.map(g=><div key={g.code} className='rounded-xl border border-slate-700 p-3'>
         <div className='flex flex-wrap items-start justify-between gap-2'>
-          <div><p className='text-sm font-semibold text-white'>{g.label}</p><p className='text-xs text-slate-400'>{g.code} · {g.owner}</p></div>
+          <div><p className='text-sm font-semibold text-white'>{g.label}</p><p className='text-xs text-slate-400'>{g.code} · {g.owner}{g.permission?` · Security activity: ${g.permission}`:''}</p></div>
           <span className={g.status==='existing'?'text-xs text-emerald-400':'text-xs text-amber-400'}>{g.status==='existing'?'Operational handler':'Pending implementation'}</span>
         </div>
         {g.roleRequired&&<label className='mt-2 block text-sm text-slate-300'>Assigned organizational job role

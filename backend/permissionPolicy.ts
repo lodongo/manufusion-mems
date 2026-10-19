@@ -74,7 +74,7 @@ const warehouse = (code: string): PermDef[] => [
     p(`${code}.bin.unlink`, 'Warehouse: delink a material from a bin'),
 ];
 
-const SENSITIVE_MNT = new Set(['MNT.WO.safety', 'MNT.WO.release', 'MNT.WO.verify', 'MNT.WO.close', 'MNT.WO.cancel', 'MNT.WO.reopen', 'MNT.WR.decline', 'MNT.WR.convert']);
+const SENSITIVE_MNT = new Set(['MNT.WO.safety', 'MNT.WO.release', 'MNT.WO.verify', 'MNT.WO.close', 'MNT.WO.cancel', 'MNT.WO.reopen', 'MNT.WR.decline', 'MNT.WR.convert', 'MNT.assessment.review']);
 
 /** Permissions of every module that has working screens or actions. Nothing else is ever offered. */
 export const BUILT_PERMISSIONS: Record<string, PermDef[]> = {
@@ -308,7 +308,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     T('inv_viewer', 'INV', 'Inventory Viewer', 'Read-only view of inventory.', ['INV.view', 'INV.warehouse.view', 'INV.bin.view']),
     T('wh_manager', 'INV', 'Warehouse Manager', 'Sets up warehouses, clusters and bins and links materials to bins.', ['INV.view', 'INV.edit', 'INV.warehouse.view', 'INV.warehouse.configure', 'INV.cluster.create', 'INV.cluster.delete', 'INV.bin.view', 'INV.bin.history', 'INV.bin.link', 'INV.bin.unlink']),
     T('mnt_requester', 'MNT', 'Maintenance Requester', 'Raises and follows own work requests.', ['MNT.view', 'MNT.WR.create', 'MNT.WR.edit', 'MNT.WR.cancel']),
-    T('mnt_planner', 'MNT', 'Maintenance Planner', 'Reviews requests and plans, schedules and releases work orders.', ['MNT.view', 'MNT.WR.review', 'MNT.WR.return', 'MNT.WR.decline', 'MNT.WR.convert', 'MNT.WO.create', 'MNT.WO.plan', 'MNT.WO.schedule', 'MNT.WO.release', 'MNT.activities.view', 'MNT.activities.edit']),
+    T('mnt_assessor', 'MNT', 'Maintenance Assessor', 'Create task-based technical work assessments; cannot independently approve own assessments.', ['MNT.view','MNT.assessment.edit']),
+    T('mnt_assessment_reviewer', 'MNT', 'Maintenance Assessment Reviewer', 'Independently approves or returns completed technical work assessments; also assign an organizational reviewer job role in Maintenance Workflows.', ['MNT.view', 'MNT.assessment.review']),
+    T('mnt_planner', 'MNT', 'Maintenance Planner', 'Reviews requests and plans, schedules and releases work orders.', ['MNT.view', 'MNT.WR.review', 'MNT.WR.return', 'MNT.WR.decline', 'MNT.WR.convert', 'MNT.WO.plan', 'MNT.WO.schedule', 'MNT.WO.release', 'MNT.activities.view', 'MNT.activities.edit']),
     T('mnt_technician', 'MNT', 'Maintenance Technician', 'Executes assigned work orders.', ['MNT.view', 'MNT.WO.execute', 'MNT.activities.view']),
     T('mnt_safety', 'MNT', 'Maintenance Safety Officer', 'Performs the safety assessment of work orders.', ['MNT.view', 'MNT.WO.safety']),
     T('mnt_verifier', 'MNT', 'Maintenance Verifier', 'Verifies completed work and closes work orders.', ['MNT.view', 'MNT.WO.verify', 'MNT.WO.close']),

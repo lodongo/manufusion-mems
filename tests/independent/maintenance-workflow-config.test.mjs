@@ -13,10 +13,18 @@ test('implemented maintenance gates become ready only with their required organi
  assert.ok(configured.every(g=>g.ready));
  for(const gate of maintenanceGateReadiness({}).filter(g=>g.roleRequired))assert.equal(gate.ready,false,gate.code);
 });
-test('task work assessment does not require a separately configured reviewer role',()=>{
+test('assessment author is open but independent reviewer must be configured',()=>{
  const assess=maintenanceGateReadiness({}).find(g=>g.code==='MNT.WR.ASSESS');
  assert.equal(assess?.roleRequired,false);
  assert.equal(assess?.ready,true);
+});
+test('independent assessment review gate is assignable and permission-linked',()=>{
+ const gate=maintenanceGateReadiness({}).find(g=>g.code==='MNT.ASSESS.REVIEW');
+ assert.equal(gate?.permission,'MNT.assessment.review');
+ assert.equal(gate?.mode,'approval');
+ assert.equal(gate?.roleRequired,true);
+ assert.equal(gate?.ready,false);
+ assert.ok(gate?.requires.includes('current_assessment_version'));
 });
 test('closure requires explicit Technical Manager configuration',()=>{
  const gate=maintenanceGateReadiness({}).find(g=>g.code==='MNT.WO.TECHNICAL_CLOSE');

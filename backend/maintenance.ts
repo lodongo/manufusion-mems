@@ -3,24 +3,26 @@ import { commit, withLock } from './finCore';
 import { enforceMaintenanceTransition, executeMaintenanceAction } from './maintenanceOperations';
 import { requireMaintenanceRole } from './maintenanceAccess';
 import { prepareMaintenanceAssessment } from './maintenanceAssessmentIntegration';
+import { assessmentReviewCurrent, approvedAssessmentSnapshot, reviewAssessmentPrerequisites } from './maintenanceAssessmentReview';
 import { HttpError, getDoc, isObj, listDocs, nowIso, randomId, rateLimit, runQuery, fieldEq, str, updateFields, writeDoc, type Doc, type Obj, type Plain } from './core';
 import { audit } from './audit';
 import { orgRoute, type OrgContext } from './guards';
 import { nextOrgCounter } from './positions';
 import { detectImage } from './branding';
 import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
+import { SAF_DEFAULT_LISTS } from './safDefaults';
 import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
 import { searchCatalog,serviceCatalogHierarchy } from './procurement';
 import {MAINTENANCE_GATES,maintenanceGateReadiness} from './maintenanceWorkflowConfig';
-import {validateAssessmentTasks,summarizeAssessmentTasks,assessmentTaskSummaries} from './maintenanceTaskAssessment';
+import {validateAssessmentTasks,summarizeAssessmentTasks,assessmentTaskSummaries,type AssessedTask} from './maintenanceTaskAssessment';
 import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} from './maintenanceTaskRisk';
 
 // ---------------------------------------------------------------------------
 // Maintenance Management (MNT)
 //
 // Work request  organizations/{orgId}/work_requests/{WR00000001}   (counter organizations/{orgId}.wrSeq)
-//   submitted -> under_review -> converted (locked, linked to the work order)
+//   submitted -> under_review -> assessment approved -> converted (locked, linked to the work order)
 //                             -> returned (requester adds information, resubmits) -> submitted
 //                             -> declined (with reason)
 //   submitted | returned -> cancelled (requester, with reason)
@@ -47,6 +49,7 @@ const WR_RE = /^WR\d{8}$/;
 const WO_RE = /^WO\d{8}$/;
 const PHOTO_RE = /^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/wr_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png)$/;
 const MAX_PHOTOS = 4;
+const ASSESSMENT_PHOTO_RE=/^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/assessment_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png)$/;
 const wrCol = (orgId: string) => `organizations/${orgId}/work_requests`;
 const woCol = (orgId: string) => `organizations/${orgId}/work_orders`;
 
@@ -331,6 +334,7 @@ function wrOut(doc: Doc) {
         requestedByName: str(d.requestedByName),
         requestedAt: str(d.requestedAt),
         reviewerName: str(d.reviewerName),
+        assessmentReviewStatus: str((isObj(d.assessmentReview)?d.assessmentReview:{}).status) || 'pending',
         woCode: str(d.woCode),
         updatedAt: str(d.updatedAt),
     };
@@ -392,10 +396,11 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         resubmit: mine && status === 'returned' && at(P.WR_edit),
         cancel: mine && ['submitted', 'returned'].includes(status) && at(P.WR_cancel),
         startReview: !mine && status === 'submitted' && at(P.WR_review),
-        assess: ['submitted','under_review'].includes(status) && (mine || at(P.view)),
+        assess: ['submitted','under_review'].includes(status) && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
         return: !mine && status === 'under_review' && at(P.WR_return),
         decline: !mine && status === 'under_review' && at(P.WR_decline),
-        convert: !mine && status === 'under_review' && at(P.WR_convert),
+        reviewAssessment: !mine && status === 'under_review' && at(P.assessment_review) && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid),
+        convert: !mine && status === 'under_review' && at(P.WR_convert) && assessmentReviewCurrent(doc.data),
         ownRequest: mine,
     };
 }
@@ -564,7 +569,7 @@ async function createWo(ctx: OrgContext, base: Obj, wrCode: string): Promise<str
                 updatedAt: now,
                 history: history(null, ctx, wrCode ? `Created from ${wrCode}` : 'Created directly'),
         };
-        if(wrCode){const request=await getWr(ctx,wrCode);if(str(request.data.status)!=='under_review')throw new HttpError(409,'The request has already progressed.');await commit([{path:`${woCol(ctx.orgId)}/${code}`,fields:data,exists:false},{path:`${wrCol(ctx.orgId)}/${wrCode}`,fields:{...request.data,status:'converted',woCode:code,convertedBy:ctx.uid,convertedByName:displayName(ctx),convertedAt:now,closedAt:now,updatedAt:now,history:history(request,ctx,`Converted to ${code}`,code)},updateTime:request.updateTime}]);return code;}
+        if(wrCode){const request=await getWr(ctx,wrCode);if(!assessmentReviewCurrent(request.data))throw new HttpError(409,'Approved assessment required before conversion.');if(str(request.data.status)!=='under_review')throw new HttpError(409,'The request has already progressed.');await commit([{path:`${woCol(ctx.orgId)}/${code}`,fields:data,exists:false},{path:`${wrCol(ctx.orgId)}/${wrCode}`,fields:{...request.data,status:'converted',woCode:code,convertedBy:ctx.uid,convertedByName:displayName(ctx),convertedAt:now,closedAt:now,updatedAt:now,history:history(request,ctx,`Converted to ${code}`,code)},updateTime:request.updateTime}]);return code;}
         const created=await writeDoc(`${woCol(ctx.orgId)}/${code}`,data,{exists:false});
         if (created) return code;
     }
@@ -639,6 +644,54 @@ function readDate(v: unknown, label: string, required = true): string {
 async function orgUserMap(orgId: string) {
     const users = await runQuery({ from: [{ collectionId: 'users' }], where: fieldEq('orgId', orgId) });
     return new Map(users.filter((u) => str(u.data.status) !== 'disabled').map((u) => [u.id, `${str(u.data.firstName)} ${str(u.data.lastName)}`.trim() || str(u.data.email)]));
+}
+
+async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:AssessedTask[]){
+    const [energyDoc,permitDoc]=await Promise.all([
+        getDoc('module_workspaces/SAF/metadata/hazardousEnergy'),
+        getDoc('module_workspaces/SAF/metadata/permitTypes')
+    ]);
+    const master=(doc:Doc|null,key:string)=>{
+        const defaults=SAF_DEFAULT_LISTS.find(x=>x.key===key);
+        return objs(Array.isArray(doc?.data.items)?doc?.data.items:defaults?.items)
+            .filter(x=>x.active!==false&&x.selectable!==false);
+    };
+    const energies=master(energyDoc,'hazardousEnergy'),permits=master(permitDoc,'permitTypes');
+    const energyIds=new Set(energies.map(e=>str(e.code))),permitIds=new Set(permits.map(e=>str(e.code)));
+    const oldPaths=new Set(objs(record.data.assessmentTasks).flatMap(t=>objs(t.spares).map(sp=>str(sp.photoPath)).filter(Boolean)));
+    for(const task of tasks){
+        if(task.energySourceCodes?.some(code=>!energyIds.has(code)))
+            throw new HttpError(400,'Choose hazardous energy sources from the active SAF list.');
+        if(task.permitCodes?.some(code=>!permitIds.has(code)))
+            throw new HttpError(400,'Choose permits from the active SAF permit list.');
+        if(task.lotoRequired){
+            if(!task.energySourceCodes?.every(code=>task.risk.some(r=>r.energyCode===code)))
+                throw new HttpError(400,'Complete risk assessment for every selected LOTO hazardous energy source.');
+            const lotoPermit=permits.find(x=>/loto|lock.?out|isolation/i.test(str(x.label)));
+            if(lotoPermit&&!task.permitCodes?.includes(str(lotoPermit.code)))
+                throw new HttpError(400,'Add the SAF LOTO isolation permit for this task.');
+        }
+        if(task.liveEquipment){
+            if(!task.risk.some(r=>r.energyCode==='LIVE_EQUIPMENT'))
+                throw new HttpError(400,'Assess live-equipment hazards and mitigation for this task.');
+            const livePermit=permits.find(x=>/live/i.test(str(x.label)));
+            if(livePermit&&!task.permitCodes?.includes(str(livePermit.code)))
+                throw new HttpError(400,'Add the SAF live work permit for this task.');
+        }
+        for(const spare of task.spares){
+            if(!spare.photoPath)continue;
+            if(!ASSESSMENT_PHOTO_RE.test(spare.photoPath)||
+                !spare.photoPath.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`)||
+                !(spare.photoPath.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/${ctx.uid}/`)||oldPaths.has(spare.photoPath)))
+                throw new HttpError(400,'Invalid or unauthorized assessment spare photo.');
+        }
+    }
+}
+async function ensureCurrentAssessmentApproval(ctx:OrgContext,data:Obj) {
+    const settings=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+    const reviewerRole=str(isObj(settings?.data.approverRoles)?settings.data.approverRoles['MNT.ASSESS.REVIEW']:'');
+    if(!reviewerRole||!assessmentReviewCurrent(data,reviewerRole))
+        throw new HttpError(409,'Assessment approval is missing or outdated. Assign a reviewer and approve the latest assessment before planning.');
 }
 
 // ----- Routes -----
@@ -793,14 +846,17 @@ export const maintenanceRoutes = {
         orgRoute('org.mnt.warehouse_spares.search',null,async(ctx)=>{
             requireMnt(ctx);
             const q=clean(ctx.body.q,80).toLowerCase();
-            if(q.length<2)return {items:[]};
             const root=`organizations/${ctx.orgId}`;
             const [warehouses,materials,extensions,journal]=await Promise.all([
                 listDocs(root+'/warehouses'),listDocs(root+'/materials'),listDocs(root+'/material_extensions'),
                 listDocs(root+'/material_journal')
             ]);
             const scope=await scopeOf(ctx);
-            const activeWarehouse=new Map(warehouses.filter(w=>scope==='all'||scope.has(w.id)).map(w=>[w.id,w]));
+            const activeWarehouse=new Map(warehouses.filter(w=>(scope==='all'||scope.has(w.id))&&str(w.data.status)!=='inactive').map(w=>[w.id,w]));
+            if(str(ctx.body.mode)==='warehouses')return {warehouses:[...activeWarehouse.values()].map(w=>({id:w.id,name:str(w.data.name)||w.id})).sort((a,b)=>a.name.localeCompare(b.name)),items:[]};
+            const selectedWarehouse=str(ctx.body.warehouseId);
+            if(!selectedWarehouse||!activeWarehouse.has(selectedWarehouse))return {items:[]};
+            if(q.length<2)return {items:[]};
             const balances=new Map<string,{physical:number;reserved:number;valid:boolean}>();
             for(const entry of journal){
                 const d=entry.data,k=str(d.materialId)+'|'+str(d.warehouseId);
@@ -823,6 +879,7 @@ export const maintenanceRoutes = {
                 if(str(m.data.warehouseId)&&str(m.data.pushedAt))linked.add(str(m.data.warehouseId));
                 for(const x of extensions)if(str(x.data.sourceId)===m.id&&str(x.data.status)==='approved')linked.add(str(x.data.warehouseId));
                 for(const warehouseId of linked){
+                    if(warehouseId!==selectedWarehouse)continue;
                     const warehouse=activeWarehouse.get(warehouseId);if(!warehouse)continue;
                     const balance=balances.get(m.id+'|'+warehouseId);
                     items.push({materialId:m.id,materialNumber:number,name,warehouseId,
@@ -834,18 +891,60 @@ export const maintenanceRoutes = {
             return {items:items.slice(0,40)};
         })
     ],
+    'POST /api/org/mnt/assessment/photo': [
+        orgRoute('org.mnt.assessment.photo',null,async(ctx)=>{
+            requireMnt(ctx);
+            const code=str(ctx.body.code);
+            const record=WR_RE.test(code)?await getWr(ctx,code):WO_RE.test(code)?await getWo(ctx,code):null;
+            if(!record)throw new HttpError(400,'Choose a valid work assessment.');
+            need(ctx,P.assessment_edit,pathOf(record),await scopeOf(ctx));
+            if((WR_RE.test(code)&&!['submitted','under_review'].includes(wrStatus(record)))||
+               (WO_RE.test(code)&&str(record.data.status)!=='planning'))
+                throw new HttpError(409,'This assessment is locked.');
+            await rateLimit('mnt-assessment-photo',ctx.uid,30,3600);
+            const data=str(ctx.body.data);
+            if(!data||data.length>2_000_000||!/^[A-Za-z0-9+/=]+$/.test(data))
+                throw new HttpError(400,'Upload a JPEG or PNG photo smaller than 1.5 MB.');
+            const buffer=Buffer.from(data,'base64');
+            if(!buffer.length||buffer.length>1_500_000)throw new HttpError(400,'Photo too large.');
+            const detected=detectImage(buffer);
+            if(!detected)throw new HttpError(400,'Only JPEG and PNG images are allowed.');
+            const path=`organizations/${ctx.orgId}/mnt/assessment_photos/${ctx.uid}/${randomId(6)}.${detected.ext}`;
+            const [ok]=await storage.write([{path,content:data,contentType:detected.contentType}]);
+            if(!ok)throw new HttpError(502,'Photo could not be stored.');
+            return {token:path,url:await signedUrl(path)};
+        })
+    ],
     'POST /api/org/mnt/assessment/options': [
         orgRoute('org.mnt.assessment.options',null,async(ctx)=>{
             requireMnt(ctx);
             const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
             const serviceVendors=vendors.filter(d=>str(d.data.status)==='approved'&&objs(d.data.scopes).some(x=>str(x.kind)==='service'));
-            const [riskDoc,serviceHierarchy]=await Promise.all([getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`),serviceCatalogHierarchy()]);
+            const [riskDoc,serviceHierarchy,energyDoc,permitsDoc]=await Promise.all([
+                getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`),serviceCatalogHierarchy(),
+                getDoc('module_workspaces/SAF/metadata/hazardousEnergy'),
+                getDoc('module_workspaces/SAF/metadata/permitTypes')]);
+            const safetyOptions=(doc:Doc|null,key:string)=> {
+                const defaults=SAF_DEFAULT_LISTS.find(l=>l.key===key);
+                const records=Array.isArray(doc?.data.items)?objs(doc?.data.items):objs(defaults?.items);
+                return records.filter(v=>v.active!==false&&v.selectable!==false)
+                    .map(v=>({code:str(v.code),label:str(v.label),category:str(v.category),subcategory:str(v.subcategory)}))
+                    .filter(v=>v.code&&v.label);
+            };
             const code=str(ctx.body.code);
             const record=WO_RE.test(code)?await getWo(ctx,code):WR_RE.test(code)?await getWr(ctx,code):null;
             const equipmentOptions=[];
             if(record){need(ctx,'MNT.view',pathOf(record),await scopeOf(ctx));const nodes=await listDocs(col(ctx.orgId));for(const n of nodes){if(n.id===str(record.data.unitId)||(str(n.data.level)==='assembly'&&(await nodePath(ctx.orgId,n.id)).includes(str(record.data.unitId))))equipmentOptions.push({id:n.id,name:str(n.data.name),code:str(n.data.code)});}}
             const skillMaster=await getDoc('module_workspaces/HRM/metadata/skillsMaster');const skills=objs(skillMaster?.data.items).filter(s=>s.active!==false).map(s=>({code:str(s.code),label:str(s.label)||str(s.name),category:str(s.category)}));
-            return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
+            const photos:Record<string,string>={};
+            if(record)for(const task of objs(record.data.assessmentTasks))for(const spare of objs(task.spares)){
+                const path=str(spare.photoPath);
+                if(path&&ASSESSMENT_PHOTO_RE.test(path)&&path.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`))
+                    photos[path]=await signedUrl(path);
+            }
+            return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),photos,serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
+                hazardousEnergy:safetyOptions(energyDoc,'hazardousEnergy'),
+                safetyPermits:safetyOptions(permitsDoc,'permitTypes'),
                 riskMatrix:riskDoc?.data?.configuration||defaultMaintenanceRiskMatrix};
         })
     ],
@@ -987,7 +1086,7 @@ export const maintenanceRoutes = {
                     const s = wrStatus(d);
                     const mine = str(d.data.requestedBy) === ctx.uid;
                     if (view === 'mine') return mine;
-                    if (view === 'review') return !mine && ['submitted', 'under_review'].includes(s) && canAt(ctx, P.WR_review, pathOf(d), scope);
+                    if (view === 'review') return !mine && (['submitted', 'under_review'].includes(s) && canAt(ctx, P.WR_review, pathOf(d), scope) || s==='under_review' && !assessmentReviewCurrent(d.data) && canAt(ctx, P.assessment_review, pathOf(d), scope));
                     if (view === 'open') return ['submitted', 'under_review', 'returned'].includes(s);
                     return true;
                 })
@@ -1003,6 +1102,16 @@ export const maintenanceRoutes = {
             const scope = await scopeOf(ctx);
             const doc = await getWr(ctx, str(ctx.body.code));
             const can = wrCan(ctx, doc, scope);
+            const workflowConfig=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const assignedReviewerRole=str(isObj(workflowConfig?.data.approverRoles)?workflowConfig.data.approverRoles['MNT.ASSESS.REVIEW']:'');
+            const currentReview=!!assignedReviewerRole&&assessmentReviewCurrent(doc.data,assignedReviewerRole);
+            can.convert = can.convert && currentReview;
+            // Show review controls only after both security permission and scoped
+            // organizational job-role assignment are in effect.
+            if (can.reviewAssessment) {
+                try { await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc)); }
+                catch { can.reviewAssessment = false; }
+            }
             if (!can.view) throw new HttpError(403, 'This work request is outside your access.');
             const d = doc.data;
             const photoPaths = objs(d.photos).map((p) => str(p.path));
@@ -1030,6 +1139,9 @@ export const maintenanceRoutes = {
                     duplicateOf: str(d.duplicateOf),
                     note: str(d.assessmentNote),
                 },
+                assessmentTasks: objs(d.assessmentTasks),
+                assessmentReview: isObj(d.assessmentReview)?d.assessmentReview:{status:'pending'},
+                assessmentReviewCurrent: currentReview,
                 returnNote: str(d.returnNote),
                 declineReason: str(d.declineReason),
                 history: objs(d.history).map((h) => ({ at: str(h.at), name: str(h.name), action: str(h.action), note: str(h.note) })),
@@ -1068,7 +1180,7 @@ export const maintenanceRoutes = {
                 }
                 case 'resubmit':
                     deny(can.resubmit, 'Only the requester can resubmit a returned request.');
-                    await done({ status: 'submitted', returnNote: '' }, 'Resubmitted', 'mnt.wr.resubmitted');
+                    await done({ status: 'submitted', returnNote: '', assessmentReview: null }, 'Resubmitted', 'mnt.wr.resubmitted');
                     return { ok: true };
                 case 'cancel':
                     deny(can.cancel, 'Only the requester can cancel, and only before review starts.');
@@ -1110,6 +1222,7 @@ export const maintenanceRoutes = {
                             assessedBy: ctx.uid,
                             assessedByName: displayName(ctx),
                             assessedAt: now,
+                            assessmentReview: null,
                         },
                         'Assessed',
                         'mnt.wr.assessed',
@@ -1135,6 +1248,7 @@ export const maintenanceRoutes = {
                             if(!sub||!family)throw new HttpError(400,'Choose a valid service category, subcategory and family/class from the approved hierarchy.');
                         }
                     }
+                    await verifyAssessedTaskChoices(ctx,doc,tasks);
                     tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(x=>x.proposedVendorIds));
                     if(allProposed.length){
@@ -1163,9 +1277,29 @@ export const maintenanceRoutes = {
                     }
                     const summary=summarizeAssessmentTasks(tasks);
                     await done({assessmentTasks:tasks as unknown as Plain,assessmentTasksBy:ctx.uid,
-                        assessmentTasksAt:now,assessmentTasksVersion:version},
+                        assessmentTasksAt:now,assessmentTasksVersion:version,assessmentReview:null},
                         'Task assessments saved','mnt.wr.task_assessments',JSON.stringify(summary));
                     return {ok:true,summary};
+                }
+                case 'review_assessment':
+                case 'return_assessment': {
+                    if(str(doc.data.status)!=='under_review')throw new HttpError(409,'Start the work request review before assessment approval.');
+                    need(ctx,P.assessment_review,pathOf(doc),scope);
+                    const role=await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
+                    const issue=reviewAssessmentPrerequisites(doc.data,ctx.uid);
+                    if(issue)throw new HttpError(409,issue);
+                    if(!str(doc.data.maintenanceTypeCode)||!str(doc.data.workTypeCode)||!str(doc.data.priorityCode)||!str(doc.data.disciplineCode))
+                        throw new HttpError(409,'Complete maintenance type, work type, priority and discipline before approval.');
+                    if(note.length<10)throw new HttpError(400,'Provide technical review notes (at least 10 characters).');
+                    if(action==='return_assessment'){
+                        await done({assessmentReview:{status:'changes_requested',version:Number(doc.data.assessmentTasksVersion)||0,
+                            by:ctx.uid,name:displayName(ctx),at:now,note,jobRole:role.role}},
+                            'Assessment returned for correction','mnt.assessment.returned',note);
+                        return {ok:true};
+                    }
+                    const snapshot=approvedAssessmentSnapshot(doc.data,ctx.uid,displayName(ctx),role.role,now,note);
+                    await done({assessmentReview:snapshot},'Work assessment approved','mnt.assessment.approved',note);
+                    return {ok:true};
                 }
                 case 'return':
                     deny(can.return, 'You cannot return this request.');
@@ -1183,6 +1317,7 @@ export const maintenanceRoutes = {
                     const d = doc.data;
                     if (!str(d.maintenanceTypeCode) || !str(d.workTypeCode) || !str(d.priorityCode) || !str(d.disciplineCode)) throw new HttpError(400, 'Complete the assessment (maintenance type, work type, priority and discipline) before converting.');
                     if(!objs(d.assessmentTasks).length) throw new HttpError(409,'Complete the task-by-task work assessment, including spares, services and each task risk assessment, before conversion.');
+                    await ensureCurrentAssessmentApproval(ctx,d);
                     await requireConfiguredMaintenanceRole(ctx,'MNT.WR.CONVERT',pathOf(doc));
                     confirmCode(ctx, doc);
                     const keys = ['assemblyId', 'assemblyCode', 'assemblyName', 'unitId', 'unitCode', 'unitName', 'costCenterId', 'costCenterCode', 'costCenterName', 'siteId', 'siteCode', 'siteName', 'assetTag', 'assetName', 'assetClass', 'title', 'description', 'criticalityCode', 'criticalityLabel', 'criticalityColor', 'maintenanceTypeCode', 'maintenanceTypeLabel', 'workTypeCode', 'workTypeLabel', 'priorityCode', 'priorityLabel', 'disciplineCode', 'disciplineLabel', 'failureModeCode', 'failureModeLabel'];
@@ -1191,6 +1326,11 @@ export const maintenanceRoutes = {
                     base.assessmentTasks = objs(d.assessmentTasks) as unknown as Plain;
                     base.assessmentTasksVersion = Number(d.assessmentTasksVersion)||1;
                     base.assessmentTasksAt = str(d.assessmentTasksAt);
+                    base.assessedAt = str(d.assessedAt);
+                    base.requestedBy = str(d.requestedBy);
+                    base.assessedBy = str(d.assessedBy);
+                    base.assessmentTasksBy = str(d.assessmentTasksBy);
+                    base.assessmentReview = d.assessmentReview as Plain;
                     const woCode = await createWo(ctx, base, doc.id);
                     await done({ status: 'converted', woCode, convertedBy: ctx.uid, convertedByName: displayName(ctx), convertedAt: now, closedAt: now }, `Converted to ${woCode}`, 'mnt.wr.converted', woCode);
                     await rec(ctx, 'mnt.wo.created', woCode, `From ${doc.id}`);
@@ -1204,49 +1344,11 @@ export const maintenanceRoutes = {
 
     // ----- Work orders -----
 
+    // Legacy endpoint fails closed: work orders originate from approved Work Requests only.
     'POST /api/org/mnt/wo/create': [
-        orgRoute('org.mnt.wo.create', null, async (ctx) => {
-            requireMnt(ctx);
-            const b = ctx.body;
-            if (b.confirm !== true) throw new HttpError(400, 'Confirm the details first.');
-            const place = await assemblyContext(ctx, str(b.assemblyId), P.WO_create);
-            const loc = placeFields(place, str(b.assetTag));
-            const l = await lists();
-            const title = clean(b.title, 120);
-            const description = str(b.description).trim().slice(0, 2000);
-            if (title.length < 5) throw new HttpError(400, 'Give the work order a short title (5 to 120 characters).');
-            if (description.length < 10) throw new HttpError(400, 'Describe the work (10 to 2000 characters).');
-            const mtype = pick(l.maintenanceTypes, str(b.maintenanceTypeCode), 'maintenance type')!;
-            const wtype = pick(l.workTypes, str(b.workTypeCode), 'work type')!;
-            const prio = pick(l.priorities, str(b.priorityCode), 'priority')!;
-            const disc = pick(l.disciplines, str(b.disciplineCode), 'discipline')!;
-            const crit = pick(l.criticality, str(b.criticalityCode), 'criticality')!;
-            const failure = pickGrouped(l.failureModes, str(b.failureModeCode), 'failure mode', false);
-            const code = await createWo(
-                ctx,
-                {
-                    ...loc,
-                    title,
-                    description,
-                    maintenanceTypeCode: mtype.code,
-                    maintenanceTypeLabel: mtype.label,
-                    workTypeCode: wtype.code,
-                    workTypeLabel: wtype.label,
-                    priorityCode: prio.code,
-                    priorityLabel: prio.label,
-                    disciplineCode: disc.code,
-                    disciplineLabel: disc.label,
-                    criticalityCode: crit.code,
-                    criticalityLabel: crit.label,
-                    criticalityColor: crit.color,
-                    failureModeCode: failure?.code ?? '',
-                    failureModeLabel: failure ? `${failure.group} · ${failure.label}` : '',
-                },
-                ''
-            );
-            await rec(ctx, 'mnt.wo.created', code, `Direct · ${title} · ${loc.assemblyCode} · ${loc.assetTag}`);
-            return { code };
-        }),
+        orgRoute('org.mnt.wo.create',null,async()=>{
+            throw new HttpError(409,'Direct work order creation is disabled. Complete and approve a Work Request assessment first.');
+        })
     ],
 
     'POST /api/org/mnt/wo/list': [
@@ -1382,7 +1484,7 @@ export const maintenanceRoutes = {
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
                 case 'save_task_assessment': {
-                    if(!can.view||str(d.status)!=='planning')
+                    if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning')
                         throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
                     if(isObj(d.taskPlanning)&&Object.keys(d.taskPlanning).length)throw new HttpError(409,'Open controlled reassessment before editing a task whose resources have already been planned.');
                     let tasks;
@@ -1391,6 +1493,7 @@ export const maintenanceRoutes = {
                         tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(b.tasks),
                             (m?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix);
                     }catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid task work assessment.');}
+                    await verifyAssessedTaskChoices(ctx,doc,tasks);
                     tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(v=>v.proposedVendorIds));
                     if(allProposed.length){
@@ -1422,9 +1525,24 @@ export const maintenanceRoutes = {
                     }
                     await done({assessmentTasks:tasks as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
                         spares:[],services:[],tools:'',assessmentTasksBy:ctx.uid,assessmentTasksAt:now,
-                        assessmentTasksVersion:version,safety:null},
+                        assessmentTasksVersion:version,assessmentReview:null,safety:null},
                         'Task assessments completed','mnt.wo.task_assessments',
                         JSON.stringify(summarizeAssessmentTasks(tasks)));
+                    return {ok:true};
+                }
+                case 'review_assessment':
+                case 'return_assessment': {
+                    if(str(d.status)!=='planning')throw new HttpError(409,'Assessment review must occur before planning submission.');
+                    need(ctx,P.assessment_review,pathOf(doc),scope);
+                    const role=await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
+                    const issue=reviewAssessmentPrerequisites(d,ctx.uid);
+                    if(issue)throw new HttpError(409,issue);
+                    if(note.length<10)throw new HttpError(400,'Write technical review notes (at least 10 characters).');
+                    const approval=action==='return_assessment'
+                        ?{status:'changes_requested',version:Number(d.assessmentTasksVersion)||0,by:ctx.uid,name:displayName(ctx),at:now,note,jobRole:role.role}
+                        :approvedAssessmentSnapshot(d,ctx.uid,displayName(ctx),role.role,now,note);
+                    await done({assessmentReview:approval},action==='return_assessment'?'Assessment returned for correction':'Work assessment approved',
+                        action==='return_assessment'?'mnt.assessment.returned':'mnt.assessment.approved',note);
                     return {ok:true};
                 }
                 case 'save_plan': {
@@ -1433,6 +1551,7 @@ export const maintenanceRoutes = {
                     // A converted request already has assessed task scope/resources/risk;
                     // planning cannot silently replace them through the legacy flat form.
                     if (!assessedTasks.length) throw new HttpError(409, 'Complete the task-by-task work assessment first.');
+                    await ensureCurrentAssessmentApproval(ctx,d);
                     if(objs(b.tasks).length||objs(b.spares).length||objs(b.services).length||str(b.tools))throw new HttpError(409,'Technical requirements can only change through controlled task reassessment.');
                     await requireMaintenanceRole(ctx,'MNT.WO.PLAN',pathOf(doc));
                     const tasks = assessedTasks;
@@ -1483,6 +1602,7 @@ export const maintenanceRoutes = {
                 case 'submit_plan':
                     deny(can.submitPlan, 'You cannot submit this plan.');
                     if (!objs(d.assessmentTasks).length) throw new HttpError(409, 'Complete the task-by-task assessment first.');
+                    await ensureCurrentAssessmentApproval(ctx,d);
                     await requireMaintenanceRole(ctx,'MNT.WO.PLAN',pathOf(doc));
                     await done({ status: 'plan_ready' }, 'Plan ready for release', 'mnt.wo.plan_ready', `Estimate ${estimate(d).total}`);
                     return { ok: true };

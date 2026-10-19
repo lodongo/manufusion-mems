@@ -11,6 +11,7 @@ import { createMaintenanceRequirement } from './purchaseRequirements';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { postMaintenanceReturn } from './finOps';
 import { maintenancePermission, requireMaintenanceRole } from './maintenanceAccess';
+import { assessmentReviewCurrent } from './maintenanceAssessmentReview';
 import { maintenanceKey, reserveTaskSpare, releaseMaintenanceReservations, verifyMaintenanceStockLedger } from './maintenanceInventory';
 import {
     closurePrerequisites,
@@ -273,6 +274,10 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
     return { items, problems, ready: problems.length === 0 };
 }
 async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
+     const settings=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
+     const jobRole=str(object(settings?.data.approverRoles)['MNT.ASSESS.REVIEW']);
+     if(!jobRole||!assessmentReviewCurrent(wo.data,jobRole))
+         throw new HttpError(409,'Approve the latest work assessment through the configured reviewer before allocating or sourcing resources.');
     await authority(ctx, wo, 'MNT.WO.plan', 'MNT.WO.PLAN');
     if (!['planning', 'plan_ready', 'released', 'scheduled', 'in_progress'].includes(str(wo.data.status)))
         throw new HttpError(409, 'Resource planning is locked after execution starts.');
@@ -1459,6 +1464,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
                     ...wo.data,
                     status: 'planning',
                     taskPlanning: {},
+                    assessmentReview: null,
                     safety: null,
                     safetySignoff: null,
                     handover: null,
@@ -1552,6 +1558,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         for (const [key, perm, gate] of [
             ['reconcile', 'MNT.view', 'MNT.SPARES.RECONCILE'],
             ['assess', 'MNT.view', 'MNT.WR.ASSESS'],
+            ['reviewAssessment', 'MNT.assessment.review', 'MNT.ASSESS.REVIEW'],
             ['plan', 'MNT.WO.plan', 'MNT.WO.PLAN'],
             ['execute', 'MNT.WO.execute', 'MNT.TASK.FEEDBACK'],
             ['safety', 'MNT.WO.safety', 'MNT.SAFETY.SIGNOFF'],
@@ -1562,7 +1569,12 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 // Assessment is intentionally open to employees who can view the
                 // work order at their organizational scope. Conversion, planning,
                 // execution, approvals and closure remain role-gated.
-                if (key === 'assess') await maintenancePermission(ctx, 'MNT.view', recordPath(wo));
+                if (key === 'assess') await maintenancePermission(ctx, 'MNT.assessment.edit', recordPath(wo));
+                else if (key === 'reviewAssessment') {
+                    if(str(wo.data.status)!=='planning'||[str(wo.data.createdBy),str(wo.data.assessmentTasksBy)].includes(ctx.uid))throw new Error('Not independently reviewable');
+                    await maintenancePermission(ctx, 'MNT.assessment.review', recordPath(wo));
+                    await requireMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo));
+                }
                 else await authority(ctx, wo, perm, gate);
                 permissions[key] = true;
             } catch {
@@ -1573,8 +1585,10 @@ export async function maintenanceOperations(ctx: OrgContext) {
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
             canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));
         const users = await runQuery({ from: [{ collectionId: 'users' }], where: fieldEq('orgId', ctx.orgId) });
+        const workflow=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
+        const reviewRole=str(object(workflow?.data.approverRoles)['MNT.ASSESS.REVIEW']);
         return {
-            wo: { code: wo.id, ...wo.data },
+            wo: { code: wo.id, ...wo.data, assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             readiness: readinessData,
             permissions,
             currentUserId: ctx.uid,

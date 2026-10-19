@@ -480,6 +480,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
     const [selected, setSelected] = useState(''),
         [tab, setTab] = useState('Details'),
         [assessing, setAssessing] = useState(false),
+        [assessmentReviewNote,setAssessmentReviewNote]=useState(''),
         [dialog, setDialog] = useState<MntData | null>(null),
         [message, setMessage] = useState(''),
         [failure, setFailure] = useState(''),
@@ -605,6 +606,20 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         </Button>
                     )}
             </div>
+            {tasks.length>0&&<Card className="space-y-3">
+                <p className="font-semibold">Independent work assessment review</p>
+                <p className="text-sm">{wo.assessmentReviewCurrent?'Approved by '+(wo.assessmentReview.name||'reviewer'):'Awaiting approval of current task assessment'}</p>
+                {wo.assessmentReview?.note&&<p className="text-sm text-soft">Review notes: {wo.assessmentReview.note}</p>}
+                {wo.status==='planning'&&can.reviewAssessment&&<div className="space-y-2">
+                    <label className="block text-sm">Technical verification / correction notes (minimum 10 characters)
+                        <textarea rows={3} value={assessmentReviewNote} onChange={e=>setAssessmentReviewNote(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-600 bg-transparent p-3 text-base" />
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                        <Button busy={busy} disabled={assessmentReviewNote.trim().length<10} onClick={async()=>{if(await legacy('review_assessment',{note:assessmentReviewNote}))setAssessmentReviewNote('');}}>Approve assessment</Button>
+                        <Button variant="secondary" busy={busy} disabled={assessmentReviewNote.trim().length<10} onClick={async()=>{if(await legacy('return_assessment',{note:assessmentReviewNote}))setAssessmentReviewNote('');}}>Return for correction</Button>
+                    </div>
+                </div>}
+            </Card>}
             {!tasks.length ? (
                 <Card>
                     <p>Technical task assessment is required before planning and execution.</p>
