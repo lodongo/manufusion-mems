@@ -1559,7 +1559,11 @@ export async function maintenanceOperations(ctx: OrgContext) {
             ['close', 'MNT.WO.close', 'MNT.WO.TECHNICAL_CLOSE'],
         ]) {
             try {
-                await authority(ctx, wo, perm, gate);
+                // Assessment is intentionally open to employees who can view the
+                // work order at their organizational scope. Conversion, planning,
+                // execution, approvals and closure remain role-gated.
+                if (key === 'assess') await maintenancePermission(ctx, 'MNT.view', recordPath(wo));
+                else await authority(ctx, wo, perm, gate);
                 permissions[key] = true;
             } catch {
                 permissions[key] = false;
