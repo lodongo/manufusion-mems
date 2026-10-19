@@ -396,7 +396,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         resubmit: mine && status === 'returned' && at(P.WR_edit),
         cancel: mine && ['submitted', 'returned'].includes(status) && at(P.WR_cancel),
         startReview: !mine && status === 'submitted' && at(P.WR_review),
-        assess: ['submitted','under_review'].includes(status) && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
+        assess: ['submitted','under_review'].includes(status) && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data) && (!at(P.assessment_review) || !doc.data.assessmentTasksBy || str(doc.data.assessmentTasksBy)===ctx.uid),
         return: !mine && status === 'under_review' && at(P.WR_return),
         decline: !mine && status === 'under_review' && at(P.WR_decline),
         reviewAssessment: !mine && status === 'under_review' && at(P.assessment_review) && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid),
@@ -960,7 +960,8 @@ export const maintenanceRoutes = {
     'POST /api/org/mnt/locations': [
         orgRoute('org.mnt.locations', null, async (ctx) => {
             requireMnt(ctx);
-            const perm = str(ctx.body.purpose) === 'wo' ? P.WO_create : P.WR_create;
+            if(str(ctx.body.purpose)==='wo')throw new HttpError(409,'Create a Work Request first. Direct Work Orders are unavailable.');
+            const perm = P.WR_create;
             const scope = await scopeOf(ctx);
             const docs = (await listDocs(col(ctx.orgId))).filter((d) => LOCATION_LEVELS.includes(str(d.data.level)) && str(d.data.status) !== 'inactive');
             const byId = new Map(docs.map((d) => [d.id, d]));
@@ -992,7 +993,8 @@ export const maintenanceRoutes = {
     'POST /api/org/mnt/assembly': [
         orgRoute('org.mnt.assembly', null, async (ctx) => {
             requireMnt(ctx);
-            return assemblyContext(ctx, str(ctx.body.assemblyId), str(ctx.body.purpose) === 'wo' ? P.WO_create : P.WR_create);
+            if(str(ctx.body.purpose)==='wo')throw new HttpError(409,'Create a Work Request first. Direct Work Orders are unavailable.');
+            return assemblyContext(ctx, str(ctx.body.assemblyId), P.WR_create);
         }),
     ],
 
@@ -1168,6 +1170,9 @@ export const maintenanceRoutes = {
                 if (!allowed) throw new HttpError(403, why);
             };
             const l = await lists();
+            if(['assess','save_task_assessment'].includes(action)&&can.reviewAssessment&&
+               str(doc.data.assessmentTasksBy)&&str(doc.data.assessmentTasksBy)!==ctx.uid)
+                throw new HttpError(403,'Assessment review is read-only. Return the assessment to its author for corrections.');
             switch (action) {
                 case 'edit': {
                     deny(can.edit, 'Only the requester can edit, and only before review starts.');
