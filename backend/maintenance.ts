@@ -960,7 +960,8 @@ export const maintenanceRoutes = {
     'POST /api/org/mnt/locations': [
         orgRoute('org.mnt.locations', null, async (ctx) => {
             requireMnt(ctx);
-            const perm = str(ctx.body.purpose) === 'wo' ? P.WO_create : P.WR_create;
+            if (str(ctx.body.purpose)==='wo')throw new HttpError(409,'Create a Work Request first. Direct Work Orders are unavailable.');
+            const perm = P.WR_create;
             const scope = await scopeOf(ctx);
             const docs = (await listDocs(col(ctx.orgId))).filter((d) => LOCATION_LEVELS.includes(str(d.data.level)) && str(d.data.status) !== 'inactive');
             const byId = new Map(docs.map((d) => [d.id, d]));
@@ -992,7 +993,8 @@ export const maintenanceRoutes = {
     'POST /api/org/mnt/assembly': [
         orgRoute('org.mnt.assembly', null, async (ctx) => {
             requireMnt(ctx);
-            return assemblyContext(ctx, str(ctx.body.assemblyId), str(ctx.body.purpose) === 'wo' ? P.WO_create : P.WR_create);
+            if (str(ctx.body.purpose)==='wo')throw new HttpError(409,'Create a Work Request first. Direct Work Orders are unavailable.');
+            return assemblyContext(ctx, str(ctx.body.assemblyId), P.WR_create);
         }),
     ],
 
