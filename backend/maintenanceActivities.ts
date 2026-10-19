@@ -7,6 +7,7 @@ export const MNT_ACTIVITIES: Array<{ key: string; label: string }> = [
     { key: 'MNT.WR.review', label: 'Work request: review and assess' },
     { key: 'MNT.WR.return', label: 'Work request: return to requester for information' },
     { key: 'MNT.WR.decline', label: 'Work request: decline' },
+    { key: 'MNT.assessment.review', label: 'Work assessment: approve or return independently' },
     { key: 'MNT.WR.convert', label: 'Work request: convert to work order' },
     { key: 'MNT.WO.create', label: 'Work order: create directly (breakdown, preventive)' },
     { key: 'MNT.WO.plan', label: 'Work order: plan tasks, people, spares and services' },
