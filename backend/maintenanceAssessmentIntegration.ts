@@ -16,8 +16,15 @@ export async function prepareMaintenanceAssessment(ctx: OrgContext, record: Doc,
     for (const t of tasks) {
         if ((t.skillCodes || []).some((code) => !activeSkills.has(code)))
             throw new HttpError(400, 'Choose task competencies from the active HRM Skills Master.');
-        if (!t.instructions || !t.skills || !t.completionCriteria)
-            throw new HttpError(400, 'Every task requires work instructions, skills and completion criteria.');
+        // The four-step assessor UI captures task scope and the people needed.
+        // Preserve the richer legacy fields without making them additional
+        // mandatory form steps: derive transparent planning placeholders.
+        t.instructions = t.instructions || t.description;
+        t.skills = t.skills || (t.internalRoles?.length
+            ? t.internalRoles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ')
+            : t.externalResource?.type || 'Competence to be verified by Maintenance Planning');
+        t.completionCriteria = t.completionCriteria ||
+            'Record completed task feedback, verify performance and confirm safe equipment handover.';
         t.equipmentId = t.equipmentId || str(record.data.unitId);
         t.assemblyId = t.assemblyId || str(record.data.assemblyId);
         const node = await getDoc(`organizations/${ctx.orgId}/structure/${t.assemblyId || t.equipmentId}`);
