@@ -78,8 +78,8 @@ for (const [key, code, label] of [
     seed('module_workspaces/SAF/metadata/' + key, { items: [{ code, label, active: true }] });
 seed(r + '/activity_risk_assessments/UNSELECTED_HISTORY', { hazards: [{ code: 'HISTORICAL_UNSELECTED_HAZARD' }] });
 const roles = {
-    // Work assessment is open to users with access at the equipment;
-    // no configured assessment-only role is required.
+    // Assessment entry stays open; independent approval is controlled by a configured role.
+    'MNT.ASSESS.REVIEW': 'ASSESS_REVIEW',
     'MNT.WR.CONVERT': 'CONVERT',
     'MNT.TASK.VALIDATE': 'VALIDATE',
     'MNT.WO.PLAN': 'PLAN',
@@ -98,6 +98,7 @@ const people = {
     requester: ['REQUESTER_01', []],
     assessor: ['ASSESSOR_01', ['ASSESS', 'CONVERT']],
     validator: ['VALIDATOR_01', ['VALIDATE']],
+    reviewer: ['REVIEWER_01', ['ASSESS_REVIEW']],
     planner: ['PLANNER_01', ['PLAN']],
     engineer: ['ENGINEER_01', ['ENG']],
     safety: ['SAFETY_01', ['SAFETY']],
@@ -366,6 +367,18 @@ tasks[1].dependencies = ['bearings'];
 tasks[2].dependencies = ['sensors'];
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'save_task_assessment', tasks });
 assert.equal((await listDocs(r + '/asset_task_templates')).length, 0, 'New tasks must not auto-approve');
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:wr.code,action:'convert',confirm:wr.code}),
+    /convert|approval/,
+);
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:wr.code,action:'review_assessment',note:'Attempt to self approve completed task assessment'}),
+    /cannot approve/,
+);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', {
+    code: wr.code, action: 'review_assessment', note: 'Independent check confirms all tasks, scope, risks and required resources.',
+});
+assert.equal(snapshot(r + '/work_requests/' + wr.code).data.assessmentReview.status, 'approved');
 const wo = (await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'convert', confirm: wr.code }))
     .woCode;
 assert.ok(wo);
@@ -680,6 +693,16 @@ await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'assessor', {
     action: 'save_task_assessment',
     tasks: [candidateTask, hiddenTask],
 });
+await assert.rejects(
+    () => op('planner', 'candidate', {
+        code: direct, taskId: 'coupling', resourceId: 'coupling_part', attributes: {},
+        note: 'A candidate should not progress until an independent assessment review is complete.',
+    }),
+    /Approve the latest work assessment/,
+);
+await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'reviewer', {
+    code: direct, action: 'review_assessment', note: 'Independent review of direct work order technical scope and safety risks.',
+});
 const proposal = (await listDocs(r + '/asset_task_proposals')).find((p) => p.data.woCode === direct && p.data.taskId === 'coupling');
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/tasks/validate', 'assessor', { id: proposal.id }), /own task/);
 await route(maintenanceRoutes, '/api/org/mnt/tasks/validate', 'validator', { id: proposal.id });
@@ -818,6 +841,9 @@ const other = (
 ).code;
 const otherTask = { ...task('other', 'Other line task', 'OTHER_ASSEMBLY'), equipmentId: 'OTHER_LINE' };
 await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'assessor', { code: other, action: 'save_task_assessment', tasks: [otherTask] });
+await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'reviewer', {
+    code: other, action: 'review_assessment', note: 'Independent review of other line technical task scope and control measures.',
+});
 await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'planner', { code: other, action: 'submit_plan' });
 await assert.rejects(
     () =>
