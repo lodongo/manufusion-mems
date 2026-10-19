@@ -1,7 +1,7 @@
 /** Work assessments own every task and its resources, not work order header. */
 export interface AssessedSpare {id:string;source:'warehouse'|'catalog'|'description';materialId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;}
 export interface AssessedService {id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];}
-export interface AssessedRisk {hazard:string;impact:string;controls:string;before:string;after:string;permit:string;}
+export interface AssessedRisk {hazard:string;impact:string;controls:string;before:string;after:string;permit:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;}
 export interface AssessedTask {id:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:AssessedSpare[];services:AssessedService[];risk:AssessedRisk[];templateStatus:'pending_validation'|'existing';}
 export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
  if(!Array.isArray(raw)||raw.length<1||raw.length>40)throw Error('Add between 1 and 40 assessed tasks.');
@@ -18,8 +18,11 @@ export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
   const normalizedRisk=risk.map((r,j)=>{
    const a=(r&&typeof r==='object'&&!Array.isArray(r)?r:{}) as Record<string,unknown>;
    const hazard=text(a.hazard),impact=text(a.impact),controls=text(a.controls,1200),before=text(a.before,60),after=text(a.after,60),permit=text(a.permit,120);
-   if(!hazard||!impact||controls.length<10||!before||!after)throw Error('Task '+(i+1)+', risk '+(j+1)+': hazard, impact, initial/residual risk and controls are required.');
-   return {hazard,impact,controls,before,after,permit};
+   const beforeRatings=a.beforeRatings&&typeof a.beforeRatings==='object'&&!Array.isArray(a.beforeRatings)?a.beforeRatings as Record<string,number>:undefined;
+   const afterRatings=a.afterRatings&&typeof a.afterRatings==='object'&&!Array.isArray(a.afterRatings)?a.afterRatings as Record<string,number>:undefined;
+   if(!hazard||!impact||controls.length<10||(!before&&!beforeRatings)||(!after&&!afterRatings))
+     throw Error('Task '+(i+1)+', risk '+(j+1)+': hazard, impact, initial/residual risk and controls are required.');
+   return {hazard,impact,controls,before,after,permit,beforeRatings,afterRatings};
   });
   const rawSpares=Array.isArray(t.spares)?t.spares:[];
   if(rawSpares.length>60)throw Error('Maximum 60 spares per task.');
