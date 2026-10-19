@@ -23,15 +23,15 @@ export default function MntWorkflowSettings(){
    const result=await callBackend<{version:number}>('/api/org/mnt/workflow/configuration/save',{
      approverRoles:current,expectedVersion:data.revision,reason
    });
-   setMessage('Saved role assignments as configuration revision '+result.version+'. Unfinished workflow gates remain inactive until their handlers are built.');
+   setMessage('Saved role assignments as configuration revision '+result.version+'. Operational transitions enforce these organizational role assignments.');
    setReason('');setRoles(null);reload();
   }catch(e){setMessage(e instanceof Error?e.message:'Unable to save workflow.');}
   finally{setBusy(false);}
  };
  return <div className='space-y-4'>
    <button type='button' onClick={()=>navigate('organization_admin/mnt_home')} className='text-sm text-emerald-400 underline'>← Maintenance</button>
-   <PageTitle title='Maintenance workflows & approvals' subtitle='Set accountable job roles before activating operational workflows'/>
-   <Alert tone='info'>This is a configuration register. Gates marked “Pending implementation” are not active approval actions yet and cannot bypass existing work-order controls.</Alert>
+   <PageTitle title='Maintenance workflows & approvals' subtitle='Assign accountable job roles to the operational maintenance workflow'/>
+   <Alert tone='info'>Each stage is enforced by its business handler. Required roles must be configured and assigned at the maintenance location. Changes invalidate earlier window approvals.</Alert>
    {stages.map(stage=>{
     const gates=data.gates.filter(g=>g.stage===stage);
     if(!gates.length)return null;
@@ -40,7 +40,7 @@ export default function MntWorkflowSettings(){
       <div className='space-y-3'>{gates.map(g=><div key={g.code} className='rounded-xl border border-slate-700 p-3'>
         <div className='flex flex-wrap items-start justify-between gap-2'>
           <div><p className='text-sm font-semibold text-white'>{g.label}</p><p className='text-xs text-slate-400'>{g.code} · {g.owner}</p></div>
-          <span className={g.status==='existing'?'text-xs text-emerald-400':'text-xs text-amber-400'}>{g.status==='existing'?'Existing action':'Pending implementation'}</span>
+          <span className={g.status==='existing'?'text-xs text-emerald-400':'text-xs text-amber-400'}>{g.status==='existing'?'Operational handler':'Pending implementation'}</span>
         </div>
         {g.roleRequired&&<label className='mt-2 block text-sm text-slate-300'>Assigned organizational job role
           <select data-native-select='true' value={current[g.code]||''} onChange={e=>setRoles({...current,[g.code]:e.target.value})}
@@ -65,3 +65,4 @@ export default function MntWorkflowSettings(){
    </Card>
  </div>;
 }
+

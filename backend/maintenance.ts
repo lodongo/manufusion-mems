@@ -1,4 +1,8 @@
 import { storage } from './platform/sdk';
+import { commit, withLock } from './finCore';
+import { enforceMaintenanceTransition, executeMaintenanceAction } from './maintenanceOperations';
+import { requireMaintenanceRole } from './maintenanceAccess';
+import { prepareMaintenanceAssessment } from './maintenanceAssessmentIntegration';
 import { HttpError, getDoc, isObj, listDocs, nowIso, randomId, rateLimit, runQuery, fieldEq, str, updateFields, writeDoc, type Doc, type Obj, type Plain } from './core';
 import { audit } from './audit';
 import { orgRoute, type OrgContext } from './guards';
@@ -9,7 +13,7 @@ import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
 import { searchCatalog,serviceCatalogHierarchy } from './procurement';
 import {MAINTENANCE_GATES,maintenanceGateReadiness} from './maintenanceWorkflowConfig';
-import {validateAssessmentTasks,summarizeAssessmentTasks} from './maintenanceTaskAssessment';
+import {validateAssessmentTasks,summarizeAssessmentTasks,assessmentTaskSummaries} from './maintenanceTaskAssessment';
 import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} from './maintenanceTaskRisk';
 
 // ---------------------------------------------------------------------------
@@ -34,29 +38,9 @@ import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} 
 // Every step is audited and appended to the record's history.
 // ---------------------------------------------------------------------------
 
-export const MNT_ACTIVITIES: Array<{ key: string; label: string }> = [
-    { key: 'MNT.view', label: 'View work requests and work orders' },
-    { key: 'MNT.WR.create', label: 'Work request: raise' },
-    { key: 'MNT.WR.edit', label: 'Work request: edit own (before review) and resubmit' },
-    { key: 'MNT.WR.cancel', label: 'Work request: cancel own (before review)' },
-    { key: 'MNT.WR.review', label: 'Work request: review and assess' },
-    { key: 'MNT.WR.return', label: 'Work request: return to requester for information' },
-    { key: 'MNT.WR.decline', label: 'Work request: decline' },
-    { key: 'MNT.WR.convert', label: 'Work request: convert to work order' },
-    { key: 'MNT.WO.create', label: 'Work order: create directly (breakdown, preventive)' },
-    { key: 'MNT.WO.plan', label: 'Work order: plan tasks, people, spares and services' },
-    { key: 'MNT.WO.safety', label: 'Work order: safety assessment' },
-    { key: 'MNT.WO.release', label: 'Work order: release for execution' },
-    { key: 'MNT.WO.schedule', label: 'Work order: schedule and assign' },
-    { key: 'MNT.WO.execute', label: 'Work order: execute (start, book time and spares, complete)' },
-    { key: 'MNT.WO.verify', label: 'Work order: verify completed work' },
-    { key: 'MNT.WO.close', label: 'Work order: close' },
-    { key: 'MNT.WO.cancel', label: 'Work order: cancel' },
-    { key: 'MNT.WO.reopen', label: 'Work order: reopen' },
-    { key: 'MNT.activities.view', label: 'Assembly activities: view PM/AM activities' },
-    { key: 'MNT.activities.edit', label: 'Assembly activities: define PM/AM activities' },
-    { key: 'MNT.admin', label: 'Administer maintenance settings' },
-];
+import {MNT_ACTIVITIES} from './maintenanceActivities';
+export {MNT_ACTIVITIES} from './maintenanceActivities';
+
 const P = Object.fromEntries(MNT_ACTIVITIES.map((a) => [a.key.replace(/^MNT\./, '').replace('.', '_'), a.key])) as Record<string, string>;
 
 const WR_RE = /^WR\d{8}$/;
@@ -110,18 +94,7 @@ function rec(ctx: OrgContext, action: string, target: string, details = '') {
     return audit([{ category: 'maintenance', action, actor: ctx.actor, meta: ctx.meta, target: { label: target }, details, orgId: ctx.orgId }]);
 }
 
-async function requireConfiguredMaintenanceRole(ctx:OrgContext,gate:string,recordPath:string[]){
- const settings=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
- const mapped=isObj(settings?.data.approverRoles)?settings.data.approverRoles:{};
- const role=str(mapped[gate]);
- if(!role)throw new HttpError(409,'Configure '+gate+' as an organizational job role in Maintenance Workflows before this transition.');
- const today=new Date().toISOString().slice(0,10);
- const assigned=objs(ctx.me.data.assignments).some(a=>str(a.positionCode)===role
-    &&recordPath.includes(str(a.nodeId))
-    &&(!str(a.startsOn)||str(a.startsOn)<=today)
-    &&(!str(a.endsOn)||str(a.endsOn)>=today));
- if(!assigned)throw new HttpError(403,'This transition requires the configured '+gate+' job role at this location.');
-}
+const requireConfiguredMaintenanceRole = requireMaintenanceRole;
 
 function displayName(ctx: OrgContext) {
     return `${str(ctx.me.data.firstName)} ${str(ctx.me.data.lastName)}`.trim() || ctx.actor.email;
@@ -138,7 +111,7 @@ const clean = (v: unknown, max: number) => str(v).trim().replace(/\s+/g, ' ').sl
 
 function history(doc: Doc | null, ctx: OrgContext, action: string, note = ''): Plain[] {
     const prev = doc && Array.isArray(doc.data.history) ? (doc.data.history as Plain[]) : [];
-    return [...prev, { at: nowIso(), uid: ctx.uid, name: displayName(ctx), action, note: note.slice(0, 500) }].slice(-150);
+    return [...prev, { at: nowIso(), uid: ctx.uid, name: displayName(ctx), action, note: note.slice(0, 500) }];
 }
 
 function confirmCode(ctx: OrgContext, doc: Doc) {
@@ -469,7 +442,7 @@ interface Service {
 }
 
 function estimate(d: Obj) {
-    const tasks = objs(d.tasks);
+    const tasks = objs(d.assessmentTasks).length?objs(d.assessmentTasks):objs(d.tasks);
     const spares = objs(d.spares);
     const services = objs(d.services);
     const labourHours = tasks.reduce((s, t) => s + (Number(t.persons) || 0) * (Number(t.hours) || 0), 0);
@@ -479,12 +452,13 @@ function estimate(d: Obj) {
     const taskSpares = tasks.flatMap(t => objs(t.spares));
     const taskServices = tasks.flatMap(t => objs(t.services));
     const sparesCost = (taskSpares.length ? taskSpares : spares).reduce((n, x) => n + (Number(x.qty) || 0) * (Number(x.unitCost) || 0), 0);
-    const servicesCost = (taskServices.length ? taskServices : services).reduce((n, x) => n + (Number(x.cost) || 0), 0);
+    const servicesCost = (taskServices.length ? taskServices : services).reduce((n, x) => n + (Number(x.expectedCost??x.cost) || 0), 0);
     const r = (n: number) => Math.round(n * 100) / 100;
     return { labourHours: r(labourHours), labour: r(labour), spares: r(sparesCost), services: r(servicesCost), total: r(labour + sparesCost + servicesCost) };
 }
 
 function actuals(d: Obj) {
+    if(objs(d.assessmentTasks).length){const tasks=objs(d.assessmentTasks),execution=isObj(d.taskExecution)?d.taskExecution:{},planning=isObj(d.taskPlanning)?d.taskPlanning:{};let labourHours=0,labour=0,spares=0,services=0;for(const t of tasks){const e=isObj(execution[str(t.id)])?execution[str(t.id)] as Obj:{},feedback=isObj(e.feedback)?e.feedback:{};const h=Number(feedback.actualHours)||0;labourHours+=h;labour+=h*(Number(t.rate)||0);spares+=objs(e.consumption).reduce((n,c)=>n+(Number(c.consumed)||0)*(Number(c.unitCost)||0),0);const p=isObj(planning[str(t.id)])?planning[str(t.id)] as Obj:{};services+=objs(t.services).reduce((n,s)=>n+(Number(isObj(p[str(s.id)])?(p[str(s.id)] as Obj).cost:0)||0),0);}return {labourHours,labour,spares,services,total:labour+spares+services};}
     const logs = objs(d.timeLogs);
     const used = objs(d.sparesUsed);
     const est = estimate(d);
@@ -570,14 +544,15 @@ async function createWo(ctx: OrgContext, base: Obj, wrCode: string): Promise<str
         const n = await nextOrgCounter(ctx.orgId, 'woSeq');
         if (n > 99_999_999) throw new HttpError(400, 'Work order numbering is exhausted.');
         const code = `WO${String(n).padStart(8, '0')}`;
-        const created = await writeDoc(
-            `${woCol(ctx.orgId)}/${code}`,
-            {
+        const data:Obj = {
                 ...(base as Record<string, Plain>),
                 code,
                 wrCode,
                 status: 'planning',
-                tasks: [],
+                tasks: assessmentTaskSummaries(objs(base.assessmentTasks) as any),
+                schemaVersion: 2,
+                taskPlanning: {},
+                taskExecution: {},
                 spares: [],
                 services: [],
                 tools: '',
@@ -588,9 +563,9 @@ async function createWo(ctx: OrgContext, base: Obj, wrCode: string): Promise<str
                 createdAt: now,
                 updatedAt: now,
                 history: history(null, ctx, wrCode ? `Created from ${wrCode}` : 'Created directly'),
-            },
-            { exists: false }
-        );
+        };
+        if(wrCode){const request=await getWr(ctx,wrCode);if(str(request.data.status)!=='under_review')throw new HttpError(409,'The request has already progressed.');await commit([{path:`${woCol(ctx.orgId)}/${code}`,fields:data,exists:false},{path:`${wrCol(ctx.orgId)}/${wrCode}`,fields:{...request.data,status:'converted',woCode:code,convertedBy:ctx.uid,convertedByName:displayName(ctx),convertedAt:now,closedAt:now,updatedAt:now,history:history(request,ctx,`Converted to ${code}`,code)},updateTime:request.updateTime}]);return code;}
+        const created=await writeDoc(`${woCol(ctx.orgId)}/${code}`,data,{exists:false});
         if (created) return code;
     }
     throw new HttpError(409, 'Could not number the work order. Please try again.');
@@ -685,7 +660,7 @@ export const maintenanceRoutes = {
                 jobRoles:positions.map(p=>({id:p.id,label:str(p.data.title)||str(p.data.name)||p.id})),
                 revision:Number(saved?.data.version)||0,
                 configuredAt:str(saved?.data.updatedAt),
-                note:'Pending-implementation gates are configuration only and do not enable missing transitions.'
+                note:'Operational handlers enforce these role mappings and their prerequisites; changed approval responsibilities require window revalidation.'
             };
         })
     ],
@@ -799,15 +774,17 @@ export const maintenanceRoutes = {
             const scope=await scopeOf(ctx);
             const assemblyId=str(proposal.data.assemblyId);
             const pathIds=await nodePath(ctx.orgId,assemblyId);
+            await requireMaintenanceRole(ctx,'MNT.TASK.VALIDATE',pathIds);
             if(!canAt(ctx,'MNT.activities.edit',pathIds,scope))
                 throw new HttpError(403,'Asset activity maintenance permission is also required.');
             const taskId=str(proposal.data.taskId);
             const dest=`organizations/${ctx.orgId}/asset_task_templates/${assemblyId}_${taskId}`;
             const existing=await getDoc(dest);
             const version=(Number(existing?.data.version)||0)+1;
-            await writeDoc(dest,{assemblyId,taskId,task:proposal.data.task,status:'approved',version,
-                validatedFrom:proposal.id,approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso()});
-            await updateFields(path,{status:'approved',approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso(),templateVersion:version});
+            const writes:any[]=[{path:dest,fields:{assemblyId,taskId,task:proposal.data.task,status:'approved',version,validatedFrom:proposal.id,approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso()},...(existing?{updateTime:existing.updateTime}:{exists:false})},
+                {path,fields:{...proposal.data,status:'approved',approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso(),templateVersion:version},updateTime:proposal.updateTime},
+                {path:`organizations/${ctx.orgId}/asset_task_template_revisions/${assemblyId}_${taskId}_v${version}`,fields:{task:proposal.data.task,version,validatedFrom:proposal.id,approvedBy:ctx.uid,approvedAt:nowIso()},exists:false}];
+            await commit(writes);
             await rec(ctx,'mnt.task.validated',taskId,`Asset ${assemblyId}, revision ${version}`);
             return {ok:true,version};
         })
@@ -863,7 +840,12 @@ export const maintenanceRoutes = {
             const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
             const serviceVendors=vendors.filter(d=>str(d.data.status)==='approved'&&objs(d.data.scopes).some(x=>str(x.kind)==='service'));
             const [riskDoc,serviceHierarchy]=await Promise.all([getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`),serviceCatalogHierarchy()]);
-            return {serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
+            const code=str(ctx.body.code);
+            const record=WO_RE.test(code)?await getWo(ctx,code):WR_RE.test(code)?await getWr(ctx,code):null;
+            const equipmentOptions=[];
+            if(record){need(ctx,'MNT.view',pathOf(record),await scopeOf(ctx));const nodes=await listDocs(col(ctx.orgId));for(const n of nodes){if(n.id===str(record.data.unitId)||(str(n.data.level)==='assembly'&&(await nodePath(ctx.orgId,n.id)).includes(str(record.data.unitId))))equipmentOptions.push({id:n.id,name:str(n.data.name),code:str(n.data.code)});}}
+            const skillMaster=await getDoc('module_workspaces/HRM/metadata/skillsMaster');const skills=objs(skillMaster?.data.items).filter(s=>s.active!==false).map(s=>({code:str(s.code),label:str(s.label)||str(s.name),category:str(s.category)}));
+            return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
                 riskMatrix:riskDoc?.data?.configuration||defaultMaintenanceRiskMatrix};
         })
     ],
@@ -1057,7 +1039,7 @@ export const maintenanceRoutes = {
     ],
 
     'POST /api/org/mnt/wr/action': [
-        orgRoute('org.mnt.wr.action', null, async (ctx) => {
+        orgRoute('org.mnt.wr.action', null, async (ctx) => withLock(ctx.orgId,'maintenance_operations',async()=>{
             requireMnt(ctx);
             const action = str(ctx.body.action);
             const note = str(ctx.body.note).trim().slice(0, 500);
@@ -1099,6 +1081,7 @@ export const maintenanceRoutes = {
                     await done({ status: 'under_review', reviewer: ctx.uid, reviewerName: displayName(ctx), reviewStartedAt: now }, 'Review started', 'mnt.wr.review_started', '');
                     return { ok: true };
                 case 'assess': {
+                    await requireMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
                     deny(can.assess, 'You cannot assess this request.');
                     const b = ctx.body;
                     const mtype = pick(l.maintenanceTypes, str(b.maintenanceTypeCode), 'maintenance type')!;
@@ -1136,6 +1119,7 @@ export const maintenanceRoutes = {
                     return { ok: true };
                 }
                 case 'save_task_assessment': {
+                    await requireMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
                     deny(can.assess, 'You cannot assess this request.');
                     let tasks;
                     try{
@@ -1153,6 +1137,7 @@ export const maintenanceRoutes = {
                             if(!sub||!family)throw new HttpError(400,'Choose a valid service category, subcategory and family/class from the approved hierarchy.');
                         }
                     }
+                    tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(x=>x.proposedVendorIds));
                     if(allProposed.length){
                         const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
@@ -1162,17 +1147,18 @@ export const maintenanceRoutes = {
                     const version=(Number(doc.data.assessmentTasksVersion)||0)+1;
                     const assemblyId=str(doc.data.assemblyId);
                     for(const task of tasks){
-                        const dest=`organizations/${ctx.orgId}/asset_task_templates/${assemblyId}_${task.id}`;
+                        const dest=`organizations/${ctx.orgId}/asset_task_templates/${task.assemblyId||assemblyId}_${task.id}`;
                         const adopted=await getDoc(dest);
                         if(task.templateStatus==='existing'&&(!adopted||str(adopted.data.status)!=='approved'))
                             throw new HttpError(400,'Selected reusable task has not been validated for this assembly.');
+                        if(task.templateStatus==='existing'&&JSON.stringify({...adopted.data.task as Obj,templateStatus:'existing'})!==JSON.stringify(task))task.templateStatus='pending_validation';
                     }
                     // Snapshot each newly created task as a separate validation candidate.
                     // These entries are not active equipment/assembly templates yet.
                     for(const task of tasks.filter(t=>t.templateStatus!=='existing')){
                         const id=`${doc.id}_${task.id}_v${version}`;
                         await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
-                            wrCode:doc.id,assemblyId,assetTag:str(doc.data.assetTag),taskId:task.id,
+                            wrCode:doc.id,assemblyId:task.assemblyId||assemblyId,assetTag:str(doc.data.assetTag),taskId:task.id,
                             description:task.description,task:task as unknown as Plain,assessmentVersion:version,
                             status:'pending_validation',createdBy:ctx.uid,createdAt:now
                         },{exists:false});
@@ -1205,6 +1191,8 @@ export const maintenanceRoutes = {
                     const base: Record<string, Plain> = Object.fromEntries(keys.map((k) => [k, str(d[k])]));
                     base.path = strs(d.path);
                     base.assessmentTasks = objs(d.assessmentTasks) as unknown as Plain;
+                    base.assessmentTasksVersion = Number(d.assessmentTasksVersion)||1;
+                    base.assessmentTasksAt = str(d.assessmentTasksAt);
                     const woCode = await createWo(ctx, base, doc.id);
                     await done({ status: 'converted', woCode, convertedBy: ctx.uid, convertedByName: displayName(ctx), convertedAt: now, closedAt: now }, `Converted to ${woCode}`, 'mnt.wr.converted', woCode);
                     await rec(ctx, 'mnt.wo.created', woCode, `From ${doc.id}`);
@@ -1213,7 +1201,7 @@ export const maintenanceRoutes = {
                 default:
                     throw new HttpError(400, 'Unknown action.');
             }
-        }),
+        })),
     ],
 
     // ----- Work orders -----
@@ -1374,7 +1362,7 @@ export const maintenanceRoutes = {
     ],
 
     'POST /api/org/mnt/wo/action': [
-        orgRoute('org.mnt.wo.action', null, async (ctx) => {
+        orgRoute('org.mnt.wo.action', null, async (ctx) => withLock(ctx.orgId,'maintenance_operations',async()=>{
             requireMnt(ctx);
             const action = str(ctx.body.action);
             const note = str(ctx.body.note).trim().slice(0, 1000);
@@ -1393,16 +1381,20 @@ export const maintenanceRoutes = {
             const deny = (allowed: boolean, why: string) => {
                 if (!allowed) throw new HttpError(403, why);
             };
+            await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
                 case 'save_task_assessment': {
                     if(!can.view||str(d.status)!=='planning')
                         throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
+                    await requireMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
+                    if(isObj(d.taskPlanning)&&Object.keys(d.taskPlanning).length)throw new HttpError(409,'Open controlled reassessment before editing a task whose resources have already been planned.');
                     let tasks;
                     try{
                         const m=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
                         tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(b.tasks),
                             (m?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix);
                     }catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid task work assessment.');}
+                    tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(v=>v.proposedVendorIds));
                     if(allProposed.length){
                         const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
@@ -1418,19 +1410,20 @@ export const maintenanceRoutes = {
                     }
                     const version=(Number(d.assessmentTasksVersion)||0)+1;
                     for(const t of tasks){
-                        const approved=await getDoc(`organizations/${ctx.orgId}/asset_task_templates/${assemblyId}_${t.id}`);
+                        const approved=await getDoc(`organizations/${ctx.orgId}/asset_task_templates/${t.assemblyId||assemblyId}_${t.id}`);
                         if(t.templateStatus==='existing'&&(!approved||str(approved.data.status)!=='approved'))
                             throw new HttpError(400,'Selected task template must be validated for the assembly.');
+                        if(t.templateStatus==='existing'&&JSON.stringify({...approved.data.task as Obj,templateStatus:'existing'})!==JSON.stringify(t))t.templateStatus='pending_validation';
                     }
                     for(const t of tasks.filter(x=>x.templateStatus!=='existing')){
                         const id=`${doc.id}_${t.id}_v${version}`;
                         await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
-                            woCode:doc.id,assemblyId,assetTag:str(d.assetTag),taskId:t.id,description:t.description,
+                            woCode:doc.id,assemblyId:t.assemblyId||assemblyId,assetTag:str(d.assetTag),taskId:t.id,description:t.description,
                             task:t as unknown as Plain,assessmentVersion:version,status:'pending_validation',
                             createdBy:ctx.uid,createdAt:now
                         },{exists:false});
                     }
-                    await done({assessmentTasks:tasks as unknown as Plain,tasks:tasks as unknown as Plain,
+                    await done({assessmentTasks:tasks as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
                         spares:[],services:[],tools:'',assessmentTasksBy:ctx.uid,assessmentTasksAt:now,
                         assessmentTasksVersion:version,safety:null},
                         'Task assessments completed','mnt.wo.task_assessments',
@@ -1442,15 +1435,18 @@ export const maintenanceRoutes = {
                     const assessedTasks=objs(d.assessmentTasks);
                     // A converted request already has assessed task scope/resources/risk;
                     // planning cannot silently replace them through the legacy flat form.
-                    const tasks = assessedTasks.length ? assessedTasks : readTasks(b.tasks, l);
-                    const spares = assessedTasks.length ? [] : readSpares(b.spares);
-                    const services = assessedTasks.length ? [] : readServices(b.services);
+                    if (!assessedTasks.length) throw new HttpError(409, 'Complete the task-by-task work assessment first.');
+                    if(objs(b.tasks).length||objs(b.spares).length||objs(b.services).length||str(b.tools))throw new HttpError(409,'Technical requirements can only change through controlled task reassessment.');
+                    await requireMaintenanceRole(ctx,'MNT.WO.PLAN',pathOf(doc));
+                    const tasks = assessedTasks;
+                    const spares: Obj[] = [];
+                    const services: Obj[] = [];
                     const exec = pick(l.executionLocations, str(b.executionLocationCode), 'execution location', false);
                     const fields: Record<string, Plain> = {
-                        tasks: tasks as unknown as Plain,
+                        tasks: assessmentTaskSummaries(tasks as any) as unknown as Plain,
                         spares: spares as unknown as Plain,
                         services: services as unknown as Plain,
-                        tools: str(b.tools).trim().slice(0, 1000),
+                        tools: '',
                         executionLocationCode: exec?.code ?? '',
                         executionLocationLabel: exec?.label ?? '',
                         downtimeHours: numIn(b.downtimeHours ?? 0, 0, 10000, 'Downtime hours'),
@@ -1464,7 +1460,7 @@ export const maintenanceRoutes = {
                         fields.status = 'planning';
                         fields.safety = null;
                     }
-                    const est = estimate(fields as Obj);
+                    const est = estimate({...d,...fields} as Obj);
                     await done(fields, 'Plan saved', 'mnt.wo.planned', `${tasks.length} tasks, ${spares.length} spares, ${services.length} services · estimate ${est.total}`);
                     return { ok: true };
                 }
@@ -1489,8 +1485,8 @@ export const maintenanceRoutes = {
                 }
                 case 'submit_plan':
                     deny(can.submitPlan, 'You cannot submit this plan.');
-                    if (!objs(d.tasks).length) throw new HttpError(400, 'Add at least one task to the plan.');
-                    if (!isObj(d.safety)) throw new HttpError(400, 'The safety assessment must be done before the plan is ready.');
+                    if (!objs(d.assessmentTasks).length) throw new HttpError(409, 'Complete the task-by-task assessment first.');
+                    await requireMaintenanceRole(ctx,'MNT.WO.PLAN',pathOf(doc));
                     await done({ status: 'plan_ready' }, 'Plan ready for release', 'mnt.wo.plan_ready', `Estimate ${estimate(d).total}`);
                     return { ok: true };
                 case 'release':
@@ -1581,9 +1577,7 @@ export const maintenanceRoutes = {
                 case 'close': {
                     deny(can.close, 'You cannot close this work order.');
                     confirmCode(ctx, doc);
-                    const act = actuals(d);
-                    await done({ status: 'closed', closeNote: note, closedBy: ctx.uid, closedByName: displayName(ctx), closedAt: now, finalCost: act as unknown as Plain }, 'Closed', 'mnt.wo.closed', `Actual ${act.total} to cost center ${str(d.costCenterCode)}`);
-                    return { ok: true };
+                    return executeMaintenanceAction(ctx,doc,'technical_close');
                 }
                 case 'cancel':
                     deny(can.cancel, 'You cannot cancel this work order.');
@@ -1600,6 +1594,7 @@ export const maintenanceRoutes = {
                 default:
                     throw new HttpError(400, 'Unknown action.');
             }
-        }),
+        })),
     ],
 };
+

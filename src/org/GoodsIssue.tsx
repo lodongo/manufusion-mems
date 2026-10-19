@@ -17,9 +17,9 @@ interface Options {
     warehouses: Array<{ id: string; code: string; name: string }>;
     finance?: string;
     leCode?: string;
-    materials?: Array<{ materialId: string; materialNumber: string; name: string; available: number; avg: number; valuedQty: number }>;
+    materials?: Array<{ materialId: string; materialNumber: string; name: string; available: number; avg: number; valuedQty: number;reservations?:Array<{workOrderId:string;taskId:string;qty:number}> }>;
     costCenters?: Array<{ id: string; code: string; name: string }>;
-    workOrders?: Array<{ id: string; title: string; costCenterId: string; status: string }>;
+    workOrders?: Array<{ id: string; title: string; costCenterId: string; status: string;tasks?:Array<{id:string;description:string}> }>;
     people?: Array<{ uid: string; name: string }>;
 }
 interface Issue {
@@ -55,12 +55,14 @@ function NewIssue({ onDone }: { onDone: (m: string) => void }) {
     const [mode, setMode] = useState<'cc' | 'wo'>('cc');
     const [cc, setCc] = useState('');
     const [wo, setWo] = useState('');
+    const [taskId,setTaskId]=useState('');
     const [to, setTo] = useState('');
     const [ref, setRef] = useState('');
     const [note, setNote] = useState('');
     const [lines, setLines] = useState<Array<{ materialId: string; qty: string }>>([{ materialId: '', qty: '' }]);
     const confirm = useConfirm();
-    const mats = data?.materials ?? [];
+    const mats = (data?.materials ?? []).map(m=>({...m,available:m.available+(mode==='wo'?(m.reservations||[]).filter(r=>r.workOrderId===wo&&r.taskId===taskId).reduce((n,r)=>n+r.qty,0):0)}));
+    const tasks=data?.workOrders?.find(w=>w.id===wo)?.tasks||[];
     const est = useMemo(() => lines.reduce((s, l) => s + (Number(l.qty) || 0) * (mats.find((m) => m.materialId === l.materialId)?.avg ?? 0), 0), [lines, mats]);
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load.'}</Alert>;
@@ -69,6 +71,7 @@ function NewIssue({ onDone }: { onDone: (m: string) => void }) {
     if (!wh) problems.push('the warehouse');
     if (mode === 'cc' && !cc) problems.push('the receiving cost center');
     if (mode === 'wo' && !wo) problems.push('the work order');
+    if(mode==='wo'&&tasks.length&&!taskId)problems.push('the maintenance task');
     if (!to) problems.push('the person receiving the stock');
     if (ref.trim().length < 3) problems.push('the issue slip or reference');
     lines.forEach((l, i) => {
@@ -105,7 +108,7 @@ function NewIssue({ onDone }: { onDone: (m: string) => void }) {
                             ))}
                         </SelectField>
                     ) : (
-                        <SelectField id='gi-wo' label='Work order (released, scheduled or in progress)' value={wo} onChange={(e) => setWo(e.target.value)}>
+                        <SelectField id='gi-wo' label='Work order (released, scheduled or in progress)' value={wo} onChange={(e) => {setWo(e.target.value);setTaskId('');}}>
                             <option value=''>Choose</option>
                             {(data.workOrders ?? []).map((w) => (
                                 <option key={w.id} value={w.id}>
@@ -114,6 +117,7 @@ function NewIssue({ onDone }: { onDone: (m: string) => void }) {
                             ))}
                         </SelectField>
                     )}
+                    {mode==='wo'&&tasks.length>0&&<SelectField id='gi-task' label='Maintenance task receiving these materials' value={taskId} onChange={e=>setTaskId(e.target.value)}><option value=''>Choose task</option>{tasks.map(t=><option key={t.id} value={t.id}>{t.description}</option>)}</SelectField>}
                     {lines.map((l, i) => {
                         const m = mats.find((x) => x.materialId === l.materialId);
                         return (
@@ -156,7 +160,7 @@ function NewIssue({ onDone }: { onDone: (m: string) => void }) {
                     <Field id='gi-note' label='Note, optional' value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />
                     {data.finance === 'live' && est > 0 && <p className='text-sm text-soft'>Estimated value at moving average: {fmt(est)}</p>}
                     {problems.length > 0 && <p className='text-xs text-amber-300'>Still needed: {problems.join(', ')}.</p>}
-                    <Button disabled={problems.length > 0} onClick={() => confirm.ask({ title: 'Issue the stock', message: `${lines.length} material(s) leave the warehouse${data.finance === 'live' ? ' and the issue is posted to the journal' : ''}. This cannot be undone; a return is a new receipt.`, confirmLabel: 'Issue', acknowledge: 'The quantities were counted and physically handed to the receiver, who signed the issue slip.' }, async () => { const r = await callBackend<{ id: string; journalId: string }>('/api/org/inv/issue/post', { warehouseId: wh, ccId: mode === 'cc' ? cc : '', workOrderId: mode === 'wo' ? wo : '', receivedBy: to, ref, note, lines: lines.map((l) => ({ materialId: l.materialId, qty: Number(l.qty) })), acknowledge: true }); setLines([{ materialId: '', qty: '' }]); setRef(''); setNote(''); onDone(`Issued as ${r.id}${r.journalId ? `, journal ${r.journalId}` : ' (not posted: finance not live)'}.`); })}>
+                    <Button disabled={problems.length > 0} onClick={() => confirm.ask({ title: 'Issue the stock', message: `${lines.length} material(s) leave the warehouse${data.finance === 'live' ? ' and the issue is posted to the journal' : ''}. This cannot be undone; a return is a new receipt.`, confirmLabel: 'Issue', acknowledge: 'The quantities were counted and physically handed to the receiver, who signed the issue slip.' }, async () => { const r = await callBackend<{ id: string; journalId: string }>('/api/org/inv/issue/post', { warehouseId: wh, ccId: mode === 'cc' ? cc : '', workOrderId: mode === 'wo' ? wo : '', taskId:mode==='wo'?taskId:'', receivedBy: to, ref, note, lines: lines.map((l) => ({ materialId: l.materialId, qty: Number(l.qty) })), acknowledge: true }); setLines([{ materialId: '', qty: '' }]); setRef(''); setNote(''); onDone(`Issued as ${r.id}${r.journalId ? `, journal ${r.journalId}` : ' (not posted: finance not live)'}.`); })}>
                         Issue stock
                     </Button>
                 </>
@@ -192,3 +196,4 @@ export default function GoodsIssue() {
         </Frame>
     );
 }
+

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type TouchEvent } from 'react';
 import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, ClipboardList, Cog, ImagePlus, MapPin, Pencil, Send, Trash2, Undo2, Wrench, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
@@ -317,6 +317,25 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         confirmed ? [] : ['Confirm that the details are correct.'],
     ];
     const canNext = problems[step].length === 0;
+    const swipeStart = useRef<{ x: number; y: number; at: number } | null>(null);
+    const startSwipe = (event: TouchEvent<HTMLDivElement>) => {
+        swipeStart.current = null;
+        const target = event.target;
+        if (busy || uploading || event.touches.length !== 1 ||
+            (target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"], [role="slider"]'))) return;
+        const touch = event.touches[0];
+        swipeStart.current = { x: touch.clientX, y: touch.clientY, at: Date.now() };
+    };
+    const finishSwipe = (event: TouchEvent<HTMLDivElement>) => {
+        const start = swipeStart.current;
+        swipeStart.current = null;
+        if (!start || busy || uploading || event.touches.length || event.changedTouches.length !== 1) return;
+        const touch = event.changedTouches[0];
+        const dx = touch.clientX - start.x, dy = touch.clientY - start.y;
+        if (Date.now() - start.at > 800 || Math.abs(dx) < 70 || Math.abs(dy) > 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        if (dx < 0 && canNext && step < STEPS.length - 1) setStep(step + 1);
+        if (dx > 0 && step > 0) setStep(step - 1);
+    };
 
     const addPhotos = async (e: ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files ?? []);
@@ -434,6 +453,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                         />
                     ))}
                 </div>
+                <p className='text-xs text-slate-500 sm:hidden'>Swipe left for next, right for back. Submit on the final step.</p>
                 {place && step > 0 && (
                     <p className='flex items-center gap-1 truncate text-xs text-slate-400'>
                         <MapPin className='h-3 w-3 shrink-0' />
@@ -443,7 +463,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
             </div>
 
             {/* Step content scrolls; the page does not */}
-            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
+            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3' style={{ touchAction: 'pan-y' }} onTouchStart={startSwipe} onTouchEnd={finishSwipe} onTouchCancel={() => { swipeStart.current = null; }}>
                 {step === 0 && (
                     <>
                         {placeError && <Alert tone='error'>{placeError}</Alert>}
@@ -1039,3 +1059,4 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
         </div>
     );
 }
+

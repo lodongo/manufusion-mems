@@ -21,6 +21,7 @@ import MyActivity from './MyActivity';
 import WorkRequests from './WorkRequests';
 import WorkOrders from './WorkOrders';
 import MntHome from './MntHome';
+import MntWindows from './MntWindows';
 import MntWorkflowSettings from './MntWorkflowSettings';
 import MntTaskValidation from './MntTaskValidation';
 import SafConfiguration from './SafConfiguration';
@@ -69,6 +70,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Maintenance workspace', path: 'mnt', prefix: 'MNT.' },
         { label: 'Work requests', path: 'work_requests', prefix: 'MNT.WR.' },
         { label: 'Work orders', path: 'work_orders', prefix: 'MNT.WO.' },
+        { label: 'Maintenance windows', path: 'maintenance_windows', prefix: 'MNT.' },
         { label: 'Workflows and approval roles', path: 'mnt_workflows', permission: 'ADM.workflows' },
         { label: 'Validate new asset tasks', path: 'mnt_task_validation', permission: 'MNT.activities.edit' },
     ],
@@ -369,6 +371,7 @@ export default function OrgHomePage({
         const featureIndex = sub === 'feature' ? Number(route.split('/')[4]) : undefined;
         content = <ModuleWorkspace menu={activeModule} selectedFeature={featureIndex !== undefined && Number.isInteger(featureIndex) && featureIndex >= 0 && featureIndex < activeModule.capabilities.length ? featureIndex : undefined} />;
     } else if (activeMenu && section === 'saf_configuration') content = <SafConfiguration />;
+    else if (activeMenu && section === 'maintenance_windows') content = <MntWindows />;
     else if (activeMenu && section === 'mnt') content = <MntHome />;
     else if (activeMenu && section === 'mnt_workflows') content = <MntWorkflowSettings />;
     else if (activeMenu && section === 'mnt_task_validation') content = <MntTaskValidation />;
@@ -513,3 +516,4 @@ export default function OrgHomePage({
         </div>
     );
 }
+

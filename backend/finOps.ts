@@ -1,4 +1,4 @@
-import { HttpError, fieldEq, getDoc, listDocs, nowIso, runQuery, str, writeDoc, type Doc, type Fields } from './core';
+import { HttpError, fieldEq, getDoc, listDocs, nowIso, runQuery, str, writeDoc, updateFields, type Doc, type Fields } from './core';
 import { orgRoute, type OrgContext } from './guards';
 import { record, orgUsers } from './org';
 import {
@@ -41,6 +41,8 @@ import {
     type Write,
 } from './finCore';
 import { fin } from './finRoutes';
+import {commit, withLock} from './finCore';
+import {reservationForIssue,verifyMaintenanceStockLedger} from './maintenanceInventory';
 
 // ---------------------------------------------------------------------------
 // Operational events that post to the journal of a legal entity:
@@ -378,21 +380,22 @@ export const finOpsRoutes = {
             if (!le) throw new HttpError(409, 'The warehouse is not under a legal entity.');
             const [stock, wos, users, state] = await Promise.all([unvalued(ctx.orgId, wh), listDocs(`organizations/${ctx.orgId}/work_orders`), orgUsers(ctx.orgId), financeState(ctx.orgId, le.id)]);
             const avail = new Map<string, number>();
+            const taskReservations=(await listDocs(`organizations/${ctx.orgId}/inventory_reservations`)).filter(r=>r.data.warehouseId===wh&&Number(r.data.qty)>0);
             for (const s of stock) if (s.physical > 0) avail.set(s.materialId, (await physicalOf(ctx.orgId, wh, s.materialId)).available);
             const ccs = Array.from(units.values()).filter((u) => u.level === 'cost_center' && u.status !== 'inactive' && leOf(units, u.id)?.id === le.id);
             return {
                 warehouses,
                 finance: state,
                 leCode: le.code,
-                materials: stock.filter((s) => (avail.get(s.materialId) ?? 0) > 0).map((s) => ({ ...s, available: avail.get(s.materialId) ?? 0 })),
+                materials: stock.filter((s) => (avail.get(s.materialId) ?? 0)>0||taskReservations.some(r=>r.data.materialId===s.materialId)).map((s) => ({ ...s, available: avail.get(s.materialId) ?? 0,reservations:taskReservations.filter(r=>r.data.materialId===s.materialId).map(r=>({workOrderId:r.data.workOrderId,taskId:r.data.taskId,qty:r.data.qty})) })),
                 costCenters: ccs.map((u) => ({ id: u.id, code: u.code, name: u.name })),
-                workOrders: wos.filter((w) => ISSUE_STATUSES.includes(str(w.data.status)) && ccs.some((c) => c.id === str(w.data.costCenterId))).map((w) => ({ id: w.id, title: str(w.data.title), costCenterId: str(w.data.costCenterId), status: str(w.data.status) })),
+                workOrders: wos.filter((w) => ISSUE_STATUSES.includes(str(w.data.status)) && ccs.some((c) => c.id === str(w.data.costCenterId))).map((w) => ({ id: w.id, title: str(w.data.title), costCenterId: str(w.data.costCenterId), status: str(w.data.status),tasks:objs(w.data.assessmentTasks).map(t=>({id:str(t.id),description:str(t.description)})) })),
                 people: users.filter((u) => u.id !== ctx.uid && str(u.data.status) !== 'disabled').map((u) => ({ uid: u.id, name: nameOf(u) })).sort((a, b) => a.name.localeCompare(b.name)),
             };
         }),
     ],
     'POST /api/org/inv/issue/post': [
-        inv('org.inv.issue.post', async (ctx) => {
+        inv('org.inv.issue.post', async (ctx) => withLock(ctx.orgId,'maintenance_operations',()=>withLock(ctx.orgId,'inventory_movements', async () => {
             const units = await unitsOf(ctx.orgId);
             const wh = str(ctx.body.warehouseId);
             const warehouses = await issueWarehouses(ctx, units);
@@ -407,6 +410,9 @@ export const finOpsRoutes = {
                 if (!wo || !ISSUE_STATUSES.includes(str(wo.data.status))) throw new HttpError(409, 'The work order is not released, scheduled or in progress.');
                 ccId = str(wo.data.costCenterId);
             }
+            const taskId = str(ctx.body.taskId);
+            if (wo && objs(wo.data.assessmentTasks).length && !objs(wo.data.assessmentTasks).some(t=>t.id===taskId)) throw new HttpError(400,'Select the assessed task receiving these materials.');
+            if (wo && (isClosedTask(wo,taskId))) throw new HttpError(409,'This task is already completed.');
             const cc = units.get(ccId);
             const whLe = leOf(units, wh);
             if (!cc || cc.level !== 'cost_center' || cc.status === 'inactive') throw new HttpError(400, 'Choose the cost center the stock is issued to.');
@@ -419,6 +425,7 @@ export const finOpsRoutes = {
             const ref = oneLine(ctx.body.ref, 60);
             const note = oneLine(ctx.body.note, 300);
             if (ref.length < 3) throw new HttpError(400, 'Enter the issue slip or reference (at least 3 characters).');
+            if(wo&&taskId){const old=(await listDocs(`organizations/${ctx.orgId}/goods_issues`)).find(d=>d.data.workOrderId===woId&&d.data.taskId===taskId&&d.data.ref===ref);if(old)return {ok:true,id:old.id,journalId:str(old.data.journalId),reused:true};}
             const want = objs(ctx.body.lines).slice(0, 31).map((l) => ({ materialId: str(l.materialId), qty: Number(l.qty) }));
             if (!want.length || want.length > 30) throw new HttpError(400, 'Issue 1 to 30 materials at a time.');
             if (new Set(want.map((w) => w.materialId)).size !== want.length) throw new HttpError(400, 'A material is listed twice.');
@@ -430,8 +437,10 @@ export const finOpsRoutes = {
                 if (!(w.qty > 0) || w.qty > 1e9) throw new HttpError(400, `Line ${i + 1}: enter a quantity above zero.`);
                 const m = await materialIn(ctx.orgId, w.materialId, wh);
                 if (!m) throw new HttpError(400, `Line ${i + 1}: the material is not held in this warehouse.`);
+                if(wo&&taskId){if(!['active','approved'].includes(str(m.data.status)))throw new HttpError(409,'Maintenance stock issues require approved, active materials.');await verifyMaintenanceStockLedger(ctx.orgId,wh,w.materialId);}
                 const { available } = await physicalOf(ctx.orgId, wh, w.materialId);
-                if (w.qty > available + 1e-9) throw new HttpError(409, `${str(m.data.materialNumber)}: only ${available} is available to issue.`);
+                const reservation=woId&&taskId?await reservationForIssue(ctx.orgId,woId,taskId,w.materialId,wh,w.qty,''): {reserved:0,writes:[]};
+                if (w.qty > available + reservation.reserved + 1e-9) throw new HttpError(409, `${str(m.data.materialNumber)}: only ${available} is available to issue.`);
                 if (map) issueValue(await stockValOf(ctx.orgId, wh, m.id), w.qty);
                 checked.push({ m, qty: w.qty });
             }
@@ -444,7 +453,8 @@ export const finOpsRoutes = {
             for (const [i, c] of checked.entries()) {
                 const m = c.m;
                 const w = { materialId: m.id, qty: c.qty };
-                const entry = mjEntry(m.id, wh, str(m.data.materialNumber), 'GOODS_ISSUE', -w.qty, gid, ctx.uid, { issueId: gid, costCenterId: ccId, workOrderId: woId, receivedBy, source: 'goods_issue' });
+                if(woId&&taskId) extra.push(...(await reservationForIssue(ctx.orgId,woId,taskId,m.id,wh,w.qty,gid)).writes);
+                const entry = mjEntry(m.id, wh, str(m.data.materialNumber), 'GOODS_ISSUE', -w.qty, gid, ctx.uid, { issueId: gid, costCenterId: ccId, workOrderId: woId, taskId, receivedBy, source: 'goods_issue' });
                 const mjId = safeId(`GI_${gid}_${i + 1}`);
                 let value = 0;
                 if (map) {
@@ -460,17 +470,23 @@ export const finOpsRoutes = {
                     }
                     stock.push({ warehouseId: wh, materialId: m.id, materialNumber: str(m.data.materialNumber), qty: -w.qty, value: -value, expectedUpdateTime: v.updateTime, glCode: inv } as StockMove);
                     extra.push({ path: mjPath(ctx.orgId, mjId), exists: false, fields: entry });
-                } else await writeDoc(mjPath(ctx.orgId, mjId), { ...entry, financeNote: 'Finance not live: not posted' } as unknown as Fields, { exists: false });
+                } else extra.push({path:mjPath(ctx.orgId,mjId),fields:{...entry,financeNote:'Finance not live: not posted'},exists:false});
                 out.push({ no: i + 1, materialId: m.id, materialNumber: str(m.data.materialNumber), name: str(m.data.name), qty: w.qty, uom: str(m.data.baseUom) || str(m.data.uom), value, unitCost: w.qty ? round4(value / w.qty) : 0 });
             }
             let journalId = '';
+            const at = nowIso();
+            const issueRecord: Obj = { id: gid, leId: info.le.id, warehouseId: wh, costCenterId: ccId, workOrderId: woId, taskId, ref, note, lines: out as unknown as Fields[keyof Fields], total: round2(out.reduce((s, x) => s + (Number(x.value) || 0), 0)), journalId:'', finance: info.state, issuedBy: ctx.uid, issuedByName: nameOf(ctx.me), receivedBy, receivedByName: nameOf(receiver), at };
+            extra.push({path:`organizations/${ctx.orgId}/goods_issues/${gid}`,fields:issueRecord,exists:false});
             if (map && lines.length) {
                 const p = await post(ctx, { leId: info.le.id, type: woId ? 'GI_WO' : 'GI_CC', docCurrency: info.currency, fxRate: 1, lines, narrative: `Goods issue ${gid} from ${units.get(wh)?.code} to ${cc.code}${woId ? ` for ${woId}` : ''}`, source: { kind: 'goods_issue', id: gid, ref: ref, route: woId ? `organization_home/work_orders/${woId}` : '' }, trace: { issueId: gid, warehouseId: wh, costCenterId: ccId, workOrderId: woId, receivedBy: nameOf(receiver) }, sourceKey: `GI_${gid}`, stock, extra });
                 journalId = p.id;
-            } else if (map) for (const x of extra) await writeDoc(x.path, x.fields as unknown as Fields, { exists: false });
-            const at = nowIso();
-            await writeDoc(`organizations/${ctx.orgId}/goods_issues/${gid}`, { id: gid, leId: info.le.id, warehouseId: wh, costCenterId: ccId, workOrderId: woId, ref, note, lines: out as unknown as Fields[keyof Fields], total: round2(out.reduce((s, x) => s + (Number(x.value) || 0), 0)), journalId, finance: info.state, issuedBy: ctx.uid, issuedByName: nameOf(ctx.me), receivedBy, receivedByName: nameOf(receiver), at } as unknown as Fields);
-            if (wo) {
+            } else {
+                const zeroStock:Write[]=[];
+                if(map)for(const move of stock){const path=P(ctx.orgId).stock(move.warehouseId,move.materialId),doc=await getDoc(path);zeroStock.push({path,fields:{...(doc?.data||{}),warehouseId:move.warehouseId,materialId:move.materialId,materialNumber:move.materialNumber,qtyM:(Number(doc?.data.qtyM)||0)+Math.round(move.qty*10000),valueC:Number(doc?.data.valueC)||0,glCode:move.glCode||'',updatedAt:at},...(doc?{updateTime:doc.updateTime}:{exists:false})});}
+                await commit([...extra,...zeroStock]);
+            }
+            if(journalId) await updateFields(`organizations/${ctx.orgId}/goods_issues/${gid}`,{journalId});
+            if (wo && !objs(wo.data.assessmentTasks).length) {
                 const fresh = await getDoc(`organizations/${ctx.orgId}/work_orders/${woId}`);
                 if (fresh) {
                     const used = [...objs(fresh.data.sparesUsed), ...out.map((x) => ({ id: `${gid}_${x.no}`, description: `${str(x.materialNumber)} ${str(x.name)}`.trim(), qty: Number(x.qty), uom: str(x.uom) || 'EA', unitCost: Number(x.unitCost) || 0, uid: ctx.uid, name: nameOf(ctx.me), at, source: 'goods_issue', issueId: gid, journalId }))];
@@ -479,7 +495,7 @@ export const finOpsRoutes = {
             }
             await record(ctx, 'org.inv.issue.post', gid, `${out.length} material(s) from ${units.get(wh)?.code} to ${cc.code}${woId ? ` (${woId})` : ''}, received by ${nameOf(receiver)}${journalId ? `, journal ${journalId}` : ', not posted (finance not live)'}`.slice(0, 400));
             return { ok: true, id: gid, journalId, finance: info.state };
-        }),
+        }))),
     ],
     'POST /api/org/inv/issue/list': [
         inv('org.inv.issue.list', async (ctx) => {
@@ -538,3 +554,28 @@ export const finOpsRoutes = {
 };
 
 export { activePositions, cents };
+
+
+function isClosedTask(wo:Doc,taskId:string){return objs(wo.data.taskExecution&&typeof wo.data.taskExecution==='object'?Object.values(wo.data.taskExecution):[]).some(t=>t.taskId===taskId&&t.status==='completed');}
+
+/** Return against the original task issue. Uses the existing finance posting and material journal. */
+export async function postMaintenanceReturn(ctx:OrgContext,issue:Doc,line:Obj,qty:number,key:string){
+ return withLock(ctx.orgId,'inventory_movements',async()=>{
+  const wh=str(issue.data.warehouseId), units=await unitsOf(ctx.orgId);
+  if(!(await issueWarehouses(ctx,units)).some(w=>w.id===wh))throw new HttpError(403,'Stores issue permission is required to confirm returned stock.');
+  const path=mjPath(ctx.orgId,'MRET_'+key);if(await getDoc(path))return;
+  const info=await leInfo(ctx.orgId,units,wh,new Map());
+  const materialId=str(line.materialId),value=round2((Number(line.unitCost)||0)*qty);
+  const entry=mjEntry(materialId,wh,str(line.materialNumber),'MAINTENANCE_RETURN',qty,issue.id,ctx.uid,{issueId:issue.id,taskId:str(issue.data.taskId),workOrderId:str(issue.data.workOrderId),returnKey:key});
+  const extra:Write[]=[{path,fields:entry,exists:false}];
+  if(info.state==='live'){
+   const mapping=await mappingOf(ctx.orgId,info.le.id),material=await materialIn(ctx.orgId,materialId,wh);
+   if(!material)throw new HttpError(409,'Returned material is not linked to the warehouse.');
+   const inv=roleAccount(mapping,'INVENTORY',str(material.data.categoryCode),{event:'GI_WO',costCenterId:str(issue.data.costCenterId)});
+   const exp=roleAccount(mapping,'MAINT_CONSUMPTION',str(material.data.categoryCode),{event:'GI_WO',costCenterId:str(issue.data.costCenterId)});
+   const v=await stockValOf(ctx.orgId,wh,materialId);
+   if(value>0)await post(ctx,{leId:info.le.id,type:'GI_WO',docCurrency:info.currency,fxRate:1,lines:[{side:'D',glCode:inv,ccId:wh,amount:value,description:'Unused maintenance material return',materialId,qty},{side:'C',glCode:exp,ccId:str(issue.data.costCenterId),amount:value,description:'Unused maintenance material return',materialId,qty:-qty}],narrative:'Return from '+str(issue.data.workOrderId),source:{kind:'goods_return',id:key,ref:issue.id,route:''},trace:{issueId:issue.id,taskId:str(issue.data.taskId)},sourceKey:'MRET_'+key,stock:[{warehouseId:wh,materialId,materialNumber:str(line.materialNumber),qty,value,expectedUpdateTime:v.updateTime,glCode:inv}],extra});
+   else {const path=P(ctx.orgId).stock(wh,materialId),doc=await getDoc(path);await commit([...extra,{path,fields:{...(doc?.data||{}),warehouseId:wh,materialId,qtyM:(Number(doc?.data.qtyM)||0)+Math.round(qty*10000),valueC:Number(doc?.data.valueC)||0,glCode:inv,updatedAt:nowIso()},...(doc?{updateTime:doc.updateTime}:{exists:false})}]);}
+  }else await commit(extra);
+ });
+}

@@ -740,6 +740,36 @@ export async function searchCatalog(kind: 'materials' | 'services', q: string, l
         .map(({ code, name, family }) => ({ code, name, family }));
 }
 
+export async function createMaterialDraft(ctx: OrgContext) {
+        requireModule(ctx, 'materials');
+        if (!['org_super_admin'].includes(ctx.role) && !['PRC.create', 'PRC.materials.manage', 'PRC.admin'].some(p => hasPerm(ctx.permissions, p))) throw new HttpError(403, 'Material creation permission is required.');
+        const d = await load('materials');
+        const materialCode = str(ctx.body.materialCode);
+        const cls = d.items.get(materialCode);
+        if (!cls) throw new HttpError(400, 'Select a valid material from the reference catalogue.');
+        const categoryCode = str(ctx.body.categoryCode), subcategoryCode = str(ctx.body.subcategoryCode), familyCode = str(ctx.body.familyCode);
+        if (categoryCode !== str(cls.categoryCode) || subcategoryCode !== str(cls.subcategoryCode) || familyCode !== str(cls.familyCode)) throw new HttpError(400, 'Material classification does not match the selected catalogue entry.');
+        const name = str(ctx.body.name).trim();
+        if (name.length < 2 || name.length > 160) throw new HttpError(400, 'Enter a material name between 2 and 160 characters.');
+        const raw = isObj(ctx.body.attributes) ? ctx.body.attributes : {};
+        const allowed = new Set(strs(cls.attributes));
+        const values: Record<string, string> = {};
+        for (const [key, value] of Object.entries(raw)) {
+            if (!allowed.has(key)) throw new HttpError(400, 'Unknown material attribute: ' + key);
+            const val = str(value).trim();
+            if (val.length > 500) throw new HttpError(400, 'Attribute value is too long: ' + key);
+            values[key] = val;
+        }
+        for (const key of strs(cls.requiredAttributes)) if (!values[key]) throw new HttpError(400, 'A required material attribute is missing: ' + key);
+        const specifics = strs(cls.specificAttributes).map(k => values[k]).filter(Boolean);
+        const shortText = [name, ...specifics].join(' · ').slice(0, 120);
+        const id = 'MAT-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+        const path = 'organizations/' + ctx.orgId + '/materials/' + id;
+        await writeDoc(path, { name, shortText, materialCode, categoryCode, subcategoryCode, familyCode, attributes: values, status: 'draft', approvalLevel: 0, createdAt: nowIso(), createdBy: ctx.uid }, { exists: false });
+        await audit([{ category: 'data', action: 'org.material.create', actor: ctx.actor, meta: ctx.meta, target: { label: id }, details: name, orgId: ctx.orgId }]);
+        return { ok: true, id, shortText };
+    }
+
 export const procurementRoutes = {
     'POST /api/org/inventory/material/metadata': [orgRoute('org.inventory.material.metadata', null, async ctx => {
         const root='organizations/'+ctx.orgId;
@@ -970,33 +1000,7 @@ export const procurementRoutes = {
         const flow=await getDoc('organizations/'+ctx.orgId+'/material_workflows/default');const currentUser=await getDoc('users/'+ctx.uid);const assignments=Array.isArray(currentUser?.data.assignments)?currentUser.data.assignments:[];const positions=await listDocs('organizations/'+ctx.orgId+'/positions');const parents=new Map(positions.map(x=>[x.id,str(x.data.parentCode)]));const delegated=Array.isArray(flow?.data.delegations)?flow.data.delegations:[];const now=nowIso();const eligible=async(d:Record<string,unknown>)=>{if(str(d.status)!=='pending_approval'||str(d.submittedBy)===ctx.uid)return false;const level=Number(d.approvalLevel)||1;const roles=Array.isArray(flow?.data.roles)?flow.data.roles:[];const modes=Array.isArray(flow?.data.modes)?flow.data.modes:[];let role=str(roles[level-1]);if(str(modes[level-1])==='above_creator'){const creator=await getDoc('users/'+str(d.submittedBy));const a=Array.isArray(creator?.data.assignments)?creator.data.assignments:[];let current=str(isObj(a[0])?a[0].positionCode:'');for(let i=0;i<level;i++)current=parents.get(current)||'';role=current;}return !!role&&(ctx.role===role||assignments.some(x=>isObj(x)&&str(x.positionCode)===role)||delegated.some(x=>isObj(x)&&str(x.role)===role&&str(x.uid)===ctx.uid&&(!str(x.start)||str(x.start)<=now)&&(!str(x.end)||str(x.end)>=now.slice(0,10))));};const items=await Promise.all(docs.map(async d=>({id:d.id,...d.data,canApprove:await eligible(d.data)})));return {items:items.sort((a,b)=>str((b as Record<string,unknown>).createdAt).localeCompare(str((a as Record<string,unknown>).createdAt))),isApprover:(Array.isArray(flow?.data.roles)?flow.data.roles:[]).some(role=>ctx.role===str(role)||assignments.some(x=>isObj(x)&&str(x.positionCode)===str(role))||delegated.some(x=>isObj(x)&&str(x.role)===str(role)&&str(x.uid)===ctx.uid&&(!str(x.start)||str(x.start)<=now)&&(!str(x.end)||str(x.end)>=now.slice(0,10))))||items.some(x=>x.canApprove),currentUserId:ctx.uid};
     })],
     'POST /api/org/procurement/materials/create': [orgRoute('org.procurement.materials.create', null, async ctx => {
-        requireModule(ctx, 'materials');
-        if (!['org_super_admin'].includes(ctx.role) && !['PRC.create', 'PRC.materials.manage', 'PRC.admin'].some(p => hasPerm(ctx.permissions, p))) throw new HttpError(403, 'Material creation permission is required.');
-        const d = await load('materials');
-        const materialCode = str(ctx.body.materialCode);
-        const cls = d.items.get(materialCode);
-        if (!cls) throw new HttpError(400, 'Select a valid material from the reference catalogue.');
-        const categoryCode = str(ctx.body.categoryCode), subcategoryCode = str(ctx.body.subcategoryCode), familyCode = str(ctx.body.familyCode);
-        if (categoryCode !== str(cls.categoryCode) || subcategoryCode !== str(cls.subcategoryCode) || familyCode !== str(cls.familyCode)) throw new HttpError(400, 'Material classification does not match the selected catalogue entry.');
-        const name = str(ctx.body.name).trim();
-        if (name.length < 2 || name.length > 160) throw new HttpError(400, 'Enter a material name between 2 and 160 characters.');
-        const raw = isObj(ctx.body.attributes) ? ctx.body.attributes : {};
-        const allowed = new Set(strs(cls.attributes));
-        const values: Record<string, string> = {};
-        for (const [key, value] of Object.entries(raw)) {
-            if (!allowed.has(key)) throw new HttpError(400, 'Unknown material attribute: ' + key);
-            const val = str(value).trim();
-            if (val.length > 500) throw new HttpError(400, 'Attribute value is too long: ' + key);
-            values[key] = val;
-        }
-        for (const key of strs(cls.requiredAttributes)) if (!values[key]) throw new HttpError(400, 'A required material attribute is missing: ' + key);
-        const specifics = strs(cls.specificAttributes).map(k => values[k]).filter(Boolean);
-        const shortText = [name, ...specifics].join(' · ').slice(0, 120);
-        const id = 'MAT-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
-        const path = 'organizations/' + ctx.orgId + '/materials/' + id;
-        await writeDoc(path, { name, shortText, materialCode, categoryCode, subcategoryCode, familyCode, attributes: values, status: 'draft', approvalLevel: 0, createdAt: nowIso(), createdBy: ctx.uid }, { exists: false });
-        await audit([{ category: 'data', action: 'org.material.create', actor: ctx.actor, meta: ctx.meta, target: { label: id }, details: name, orgId: ctx.orgId }]);
-        return { ok: true, id, shortText };
+        return createMaterialDraft(ctx);
     })],
     'POST /api/org/procurement/materials/update': [orgRoute('org.procurement.materials.update', null, async ctx => { requireModule(ctx, 'materials'); const id=str(ctx.body.id); const path='organizations/'+ctx.orgId+'/materials/'+id; const doc=await getDoc(path); if(!doc) throw new HttpError(404,'Material not found.'); if(!['draft','rejected'].includes(str(doc.data.status))) throw new HttpError(409,'Only drafts and rejected materials may be edited.'); if(ctx.role!=='org_super_admin' && str(doc.data.createdBy)!==ctx.uid) throw new HttpError(403,'Only the creator may edit this draft.'); const data=isObj(ctx.body.data)?ctx.body.data:{}; const allowed=['name','attributes','shortText','supplyType','vendorId','partyEntryMode','partyName','oemPartNumber','ocmPartNumber','generalPartNumber','model','versionNumber','materialClassification','warehouseId','costCenterId','assetId','assemblyId','uom','assemblyIds']; const patch:Record<string,unknown>={}; for(const k of allowed) if(k in data) patch[k]=data[k]; if('shortText' in patch){if(typeof patch.shortText!=='string'||patch.shortText.length>120)throw new HttpError(400,'Short text must be at most 120 characters.');}await writeDoc(path,{...doc.data,...patch,updatedAt:nowIso(),updatedBy:ctx.uid}); await audited(ctx,'procurement.material.draft_update','Material draft '+id,{fields:Object.keys(patch)}); return {ok:true}; })],
     'POST /api/org/procurement/materials/lifecycle': [orgRoute('org.procurement.materials.lifecycle', null, async ctx => {
@@ -1049,3 +1053,4 @@ export const procurementRoutes = {
     ...catalogRoutes('procurement', ['materials', 'services']),
     ...catalogRoutes('finance', ['gl_accounts']),
 };
+

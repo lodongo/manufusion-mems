@@ -45,6 +45,7 @@ interface BomLine {
     description: string;
     quantity: number;
     unit: string;
+    materialId?:string;installations?:Array<{woCode:string;taskId:string;issueId:string;quantity:number;installedAt:string}>;
 }
 
 interface Bom {
@@ -144,7 +145,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
             />
         );
     }
-    if (mode?.type === 'bom' && node) return <BomForm assembly={node} bom={mode.bom} onDone={done} onCancel={() => setMode(null)} />;
+    if (mode?.type === 'bom' && node) return <BomForm canEdit={canEdit} assembly={node} bom={mode.bom} onDone={done} onCancel={() => setMode(null)} />;
     if (mode?.type === 'asset' && node)
         return (
             <WorkCenterAsset
@@ -420,7 +421,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                         ))}
                         {data.boms.map((b) => (
                             <li key={b.id}>
-                                <button onClick={() => canEdit && setMode({ type: 'bom', bom: b })} className='flex w-full items-center gap-3 px-4 py-3 text-left'>
+                                <button onClick={() => setMode({ type: 'bom', bom: b })} className='flex w-full items-center gap-3 px-4 py-3 text-left'>
                                     <FileText className='h-5 w-5 shrink-0 text-lime-400' />
                                     <div className='min-w-0 flex-1'>
                                         <p className='truncate text-sm text-white'>{b.name}</p>
@@ -441,7 +442,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                                     </button>
                                 </li>
                             ))}
-                        {canEdit && node?.level === 'assembly' && (
+                        {canEdit && node && ['assembly','work_center','equipment'].includes(node.level) && (
                             <li>
                                 <button onClick={() => setMode({ type: 'bom' })} className='flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-emerald-300'>
                                     <Plus className='h-4 w-4 shrink-0' />
@@ -493,7 +494,7 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
             />
         );
     }
-    if (mode?.type === 'bom' && node) return <BomForm assembly={node} bom={mode.bom} onDone={done} onCancel={() => setMode(null)} />;
+    if (mode?.type === 'bom' && node) return <BomForm canEdit={canEdit} assembly={node} bom={mode.bom} onDone={done} onCancel={() => setMode(null)} />;
     if (mode?.type === 'asset' && node)
         return (
             <WorkCenterAsset
@@ -717,7 +718,7 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
                 </section>
             ) : null}
 
-            {node?.level === 'assembly' && (
+            {node && ['assembly','work_center','equipment'].includes(node.level) && (
                 <section>
                     <h2 className='mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500'>Bills of materials</h2>
                     {data.boms.length === 0 ? (
@@ -727,7 +728,7 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
                             <ul className='divide-y divide-slate-800'>
                                 {data.boms.map((b) => (
                                     <li key={b.id}>
-                                        <button onClick={() => canEdit && setMode({ type: 'bom', bom: b })} className='flex w-full items-center justify-between gap-3 px-4 py-3 text-left'>
+                                        <button onClick={() => setMode({ type: 'bom', bom: b })} className='flex w-full items-center justify-between gap-3 px-4 py-3 text-left'>
                                             <div className='min-w-0'>
                                                 <p className='truncate font-mono text-xs text-emerald-300'>{b.code}</p>
                                                 <p className='truncate text-sm text-white'>{b.name}</p>
@@ -1315,7 +1316,7 @@ function NodeForm({
     );
 }
 
-function BomForm({ assembly, bom, onDone, onCancel }: { assembly: Node; bom?: Bom; onDone: () => void; onCancel: () => void }) {
+function BomForm({ assembly, bom, onDone, onCancel,canEdit=true }: {canEdit?:boolean; assembly: Node; bom?: Bom; onDone: () => void; onCancel: () => void }) {
     const [name, setName] = useState(bom?.name ?? assembly.name);
     const [status, setStatus] = useState(bom?.status ?? 'draft');
     const [lines, setLines] = useState<Array<{ component: string; description: string; quantity: string; unit: string }>>(
@@ -1352,11 +1353,12 @@ function BomForm({ assembly, bom, onDone, onCancel }: { assembly: Node; bom?: Bo
     return (
         <div className='space-y-4'>
             <div className='flex items-center justify-between'>
-                <PageTitle title={bom ? `${bom.name} · v${bom.version}` : 'New bill of materials'} subtitle={`For assembly ${assembly.code}`} />
+                <PageTitle title={bom ? `${bom.name} · v${bom.version}` : 'New bill of materials'} subtitle={`For ${assembly.name} · ${assembly.code}`} />
                 <button onClick={onCancel} aria-label='Cancel' className='flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
                     <X className='h-4 w-4' />
                 </button>
             </div>
+            {!canEdit&&bom?<Card><h2 className='font-semibold'>{bom.name}</h2>{bom.lines.map((l,i)=><div key={i} className='border-b border-line py-3'><p className='font-semibold'>{l.component} · {l.description}</p><p>{l.quantity} {l.unit}</p>{l.installations?.map((x,j)=><p key={j} className='mt-2 text-xs'>Installed from <button className='underline' onClick={()=>navigate('organization_admin/work_orders/'+x.woCode)}>{x.woCode}</button> · task {x.taskId} · issue {x.issueId} · {x.quantity} · {x.installedAt}</p>)}</div>)}</Card>:<>
             <Card className='space-y-4'>
                 {!bom && <p className='text-xs text-slate-500'>Bills of materials are not codified. Each is identified by its assembly and version; components will be picked from inventory.</p>}
                 <Field id='bom-name' label='Name' maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
@@ -1378,6 +1380,7 @@ function BomForm({ assembly, bom, onDone, onCancel }: { assembly: Node; bom?: Bo
                                 </button>
                             )}
                         </div>
+                        {bom?.lines.find(row=>row.component===l.component)?.installations?.map((x,j)=><p key={j} className='text-xs'>Installed from <button className='underline' type='button' onClick={()=>navigate('organization_admin/work_orders/'+x.woCode)}>{x.woCode}</button> · task {x.taskId} · issue {x.issueId} · {x.quantity} · {x.installedAt}</p>)}
                         <Field id={`bl-c-${i}`} label='Component code' maxLength={40} value={l.component} onChange={(e) => update(i, { component: e.target.value })} />
                         <Field id={`bl-d-${i}`} label='Description' maxLength={120} value={l.description} onChange={(e) => update(i, { description: e.target.value })} />
                         <div className='grid grid-cols-2 gap-3'>
@@ -1401,7 +1404,8 @@ function BomForm({ assembly, bom, onDone, onCancel }: { assembly: Node; bom?: Bo
                 <Button className='flex-1' busy={busy === 'save'} disabled={!!busy} onClick={save}>
                     Save bill of materials
                 </Button>
-            </div>
+            </div></>}
         </div>
     );
 }
+

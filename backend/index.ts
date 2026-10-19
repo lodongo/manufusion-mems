@@ -129,6 +129,7 @@ import { procurementRoutes } from './procurement';
 import { stockTakeRoutes } from './stockTake';
 import { shortcutRoutes } from './shortcuts';
 import { maintenanceRoutes } from './maintenance';
+import { maintenanceOperationRoutes } from './maintenanceOperations';
 import { warehouseRoutes } from './warehouse';
 import { maintenanceReferenceRoutes } from './maintenanceReferences';
 import { utilityRoutes } from './astUtilities';
@@ -1568,6 +1569,7 @@ export const handler = router(recordWiredRoutes({
     ...stockTakeRoutes,
     ...shortcutRoutes,
     ...maintenanceRoutes,
+    ...maintenanceOperationRoutes,
     ...warehouseRoutes,
     ...maintenanceReferenceRoutes,
     ...utilityRoutes,
@@ -1577,3 +1579,4 @@ export const handler = router(recordWiredRoutes({
     ...activityLegacyRoutes,
     ...safRiskRoutes,
 }));
+

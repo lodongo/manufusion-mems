@@ -191,6 +191,7 @@ function bomOut(doc: Doc) {
     return {
         id: doc.id,
         assemblyId: str(d.assemblyId),
+        equipmentId: str(d.equipmentId),
         code: str(d.code),
         version: typeof d.version === 'number' ? d.version : 1,
         name: str(d.name),
@@ -199,7 +200,7 @@ function bomOut(doc: Doc) {
             component: str(l.component),
             description: str(l.description),
             quantity: typeof l.quantity === 'number' ? l.quantity : 0,
-            unit: str(l.unit),
+            unit: str(l.unit),materialId:str(l.materialId),installations:Array.isArray(l.installations)?l.installations.filter(isObj):[],
         })),
         updatedAt: str(d.updatedAt),
     };
@@ -211,7 +212,8 @@ export async function childrenOf(orgId: string, parentId: string) {
 }
 
 async function bomsOf(orgId: string, assemblyId: string) {
-    const docs = await runQuery({ from: [{ collectionId: 'boms' }], where: fieldEq('assemblyId', assemblyId) }, `organizations/${orgId}`);
+    const [assemblies,equipment]=await Promise.all([runQuery({from:[{collectionId:'boms'}],where:fieldEq('assemblyId',assemblyId)},`organizations/${orgId}`),runQuery({from:[{collectionId:'boms'}],where:fieldEq('equipmentId',assemblyId)},`organizations/${orgId}`)]);
+    const docs=[...assemblies,...equipment.filter(d=>!str(d.data.assemblyId))];
     return docs.map(bomOut).sort((a, b) => a.code.localeCompare(b.code));
 }
 
@@ -409,7 +411,7 @@ export const structureRoutes = {
             const [ancestors, children, boms, logoUrl] = await Promise.all([
                 ancestorsOf(ctx.orgId, node.parentId),
                 childrenOf(ctx.orgId, id),
-                node.level === 'assembly' ? bomsOf(ctx.orgId, id) : Promise.resolve([] as ReturnType<typeof bomOut>[]),
+                ['assembly','work_center','equipment'].includes(node.level) ? bomsOf(ctx.orgId, id) : Promise.resolve([] as ReturnType<typeof bomOut>[]),
                 signedUrl(node.level === 'legal_entity' && node.logoPath.startsWith('organizations/' + ctx.orgId + '/entities/' + node.id + '/logo_') ? node.logoPath : ''),
             ]);
             // People currently holding the cost center manager role at this site.
@@ -670,7 +672,7 @@ export const structureRoutes = {
             if (str(doc.data.level) === 'cost_center' && (await getDoc(`organizations/${ctx.orgId}/warehouses/${doc.id}`))) {
                 throw new HttpError(400, 'This cost center has a storage setup and cannot be deleted. Make it inactive instead.');
             }
-            if (str(doc.data.level) === 'assembly' && (await bomsOf(ctx.orgId, doc.id)).length) throw new HttpError(400, 'Delete its bills of materials first.');
+            if (['assembly','work_center','equipment'].includes(str(doc.data.level)) && (await bomsOf(ctx.orgId, doc.id)).length) throw new HttpError(400, 'Delete its bills of materials first.');
             if (str(doc.data.level) === 'work_center') await releaseUnitAsset(ctx, doc);
             await deleteDoc(`${col(ctx.orgId)}/${doc.id}`);
             await record(ctx, 'org.structure.delete', `${LEVELS[str(doc.data.level)]?.label ?? ''} ${str(doc.data.code)}`, str(doc.data.name));
@@ -681,7 +683,7 @@ export const structureRoutes = {
     'POST /api/org/bom/save': [
         orgRoute('org.bom.save', 'ADM.structure', async (ctx) => {
             const assembly = await getNode(ctx, str(ctx.body.assemblyId));
-            if (str(assembly.data.level) !== 'assembly') throw new HttpError(400, 'Bills of materials belong to an assembly.');
+            if (!['assembly','work_center','equipment'].includes(str(assembly.data.level))) throw new HttpError(400, 'Bills of materials belong to equipment or an assembly.');
             const name = text(ctx.body, 'name', 2, 80, 'Enter a name (2 to 80 characters).');
             const statusRaw = str(ctx.body.status);
             const status = ['draft', 'active', 'obsolete'].includes(statusRaw) ? statusRaw : 'draft';
@@ -702,8 +704,11 @@ export const structureRoutes = {
             const bomId = str(ctx.body.bomId);
             if (bomId) {
                 const existing = ID_RE.test(bomId) ? await getDoc(`${bomCol(ctx.orgId)}/${bomId}`) : null;
-                if (!existing || str(existing.data.assemblyId) !== assembly.id) throw new HttpError(404, 'Bill of materials not found.');
-                await updateFields(`${bomCol(ctx.orgId)}/${bomId}`, { name, status, lines, updatedAt: now, updatedBy: ctx.uid });
+                if (!existing || (str(existing.data.assemblyId)||str(existing.data.equipmentId)) !== assembly.id) throw new HttpError(404, 'Bill of materials not found.');
+                const prior=Array.isArray(existing.data.lines)?existing.data.lines.filter(isObj):[];
+                const tracedLines=lines.map(line=>({...prior.find(old=>str(old.component)===line.component),...line}));
+                await writeDoc(`organizations/${ctx.orgId}/bom_revisions/${bomId}_v${Number(existing.data.version)||1}_${now.replace(/[^0-9]/g,'')}`,{...existing.data,archivedAt:now,archivedBy:ctx.uid},{exists:false});
+                await updateFields(`${bomCol(ctx.orgId)}/${bomId}`, { name, status, lines:tracedLines, updatedAt: now, updatedBy: ctx.uid });
                 await record(ctx, 'org.bom.save', `${name} (BOM v${num(existing.data.version) ?? 1} of ${str(assembly.data.code)})`, `${lines.length} lines, ${status}`);
                 return { id: bomId };
             }
@@ -713,7 +718,7 @@ export const structureRoutes = {
             // Bills of materials are not codified: they are identified by assembly and version, and their
             // component lines will come from inventory items.
             const id = `BOM_${randomId(8)}`;
-            if (!(await writeDoc(`${bomCol(ctx.orgId)}/${id}`, { assemblyId: assembly.id, code: '', version, name, status, lines, createdAt: now, createdBy: ctx.uid, updatedAt: now }, { exists: false }))) {
+            if (!(await writeDoc(`${bomCol(ctx.orgId)}/${id}`, { assemblyId: str(assembly.data.level)==='assembly'?assembly.id:'',equipmentId:str(assembly.data.level)==='assembly'?'':assembly.id, code: '', version, name, status, lines, createdAt: now, createdBy: ctx.uid, updatedAt: now }, { exists: false }))) {
                 throw new HttpError(409, 'Please try again.');
             }
             await record(ctx, 'org.bom.save', `${name} (BOM v${version} of ${str(assembly.data.code)})`, `${lines.length} lines, ${status}`);
@@ -726,6 +731,7 @@ export const structureRoutes = {
             const id = str(ctx.body.id);
             const doc = ID_RE.test(id) ? await getDoc(`${bomCol(ctx.orgId)}/${id}`) : null;
             if (!doc) throw new HttpError(404, 'Bill of materials not found.');
+            if((Array.isArray(doc.data.lines)?doc.data.lines:[]).some(l=>isObj(l)&&Array.isArray(l.installations)&&l.installations.length))throw new HttpError(409,'Maintenance-linked BOMs must be marked obsolete to preserve installation history.');
             await deleteDoc(`${bomCol(ctx.orgId)}/${id}`);
             await record(ctx, 'org.bom.delete', `${str(doc.data.name)} (BOM v${num(doc.data.version) ?? 1})`, str(doc.data.code));
             return { ok: true };
@@ -789,3 +795,4 @@ export const structureRoutes = {
         }),
     ],
 };
+
