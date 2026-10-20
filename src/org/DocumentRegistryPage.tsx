@@ -61,7 +61,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview }: { canC
     } catch (err) { setSettingsError(err instanceof Error ? err.message : 'Unable to save settings.'); }
     finally { setConfigBusy(false); }
   };
-  const reviewDecision=async(documentId:string,decision:'return'|'reject')=>{
+  const reviewDecision=async(documentId:string,decision:'return'|'reject'|'verify')=>{
     setReviewing(documentId);setCreateError('');setNotice('');
     try{
       await callBackend('/api/org/drkms/documents/review-decision',{documentId,decision,reason:reviewReason.trim()});
@@ -195,6 +195,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview }: { canC
                     className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-white' placeholder='Reason for return or rejection'/>
                 </label>
                 <div className='flex flex-wrap gap-2'>
+                  <button type='button' disabled={!!reviewing||reviewReason.trim().length<10} onClick={()=>void reviewDecision(d.documentId,'verify')} className='min-h-10 rounded-lg border border-blue-500 px-3 text-xs text-blue-200 disabled:opacity-50'>Technically verify</button>
                   <button type='button' disabled={!!reviewing||reviewReason.trim().length<10} onClick={()=>void reviewDecision(d.documentId,'return')} className='min-h-10 rounded-lg border border-slate-600 px-3 text-xs text-white disabled:opacity-50'>Return for changes</button>
                   <button type='button' disabled={!!reviewing||reviewReason.trim().length<10} onClick={()=>void reviewDecision(d.documentId,'reject')} className='min-h-10 rounded-lg border border-red-700 px-3 text-xs text-red-200 disabled:opacity-50'>Reject</button>
                 </div>
