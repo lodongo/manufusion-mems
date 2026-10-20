@@ -634,6 +634,12 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const [busy, setBusy] = useState(false);
     const [actionError, setActionError] = useState('');
     const [zoom, setZoom] = useState('');
+    const [section,setSection]=useState<'request'|'tasks'|'summary'>('request');
+    const [tasksDirty,setTasksDirty]=useState(false);
+    const goSection=(next:'request'|'tasks'|'summary')=>{
+        if(next!==section&&tasksDirty&&!window.confirm('You have unsaved task changes. Leave without saving them?'))return;
+        setMode('');setActionError('');setSection(next);
+    };
 
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load the work request.'}</Alert>;
@@ -663,7 +669,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const buttons: Array<{ key: string; label: string; icon: ReactNode; variant?: 'primary' | 'secondary' | 'danger'; onClick: () => void }> = [];
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
     if (can.assess) buttons.push({ key: 'assess', label: assessed ? 'Update assessment' : 'Assess', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => setMode('assess') });
-    if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Review work assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => setMode('review_assessment') });
+    if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Review work assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => {setSection('summary');setMode('review_assessment');} });
     if (can.convert) buttons.push({ key: 'convert', label: 'Convert to work order', icon: <Wrench className='h-4 w-4' />, variant: assessed ? 'primary' : 'secondary', onClick: () => setMode('convert') });
     if (can.return) buttons.push({ key: 'return', label: 'Return for information', icon: <Undo2 className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('return') });
     if (can.decline) buttons.push({ key: 'decline', label: 'Decline', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('decline') });
@@ -692,20 +698,23 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                         </Button>
                     )}
                 </div>
-                {buttons.length > 0 && !mode && (
-                    <div className='flex gap-2 overflow-x-auto pb-1'>
-                        {buttons.map((b) => (
-                            <Button key={b.key} variant={b.variant ?? 'primary'} busy={busy && b.key !== 'edit'} className='shrink-0' onClick={b.onClick}>
-                                {b.icon}
-                                {b.label}
-                            </Button>
-                        ))}
-                    </div>
-                )}
-                {can.ownRequest && ['submitted', 'under_review'].includes(r.status) && <p className='text-xs text-slate-500'>You raised this request, so another person reviews it.</p>}
+
             </div>
 
-            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
+            <div className='grid min-h-0 min-w-0 flex-1 grid-cols-[64px_minmax(0,1fr)] overflow-hidden'>
+              <nav aria-label='Assessment sections' className='flex min-h-0 flex-col gap-2 overflow-y-auto border-r border-slate-700 bg-slate-900/70 px-1 py-3'>
+                {([
+                   ['request','Request',<ClipboardList className='h-5 w-5'/>],
+                   ['tasks','Tasks',<Wrench className='h-5 w-5'/>],
+                   ['summary','Summary',<CheckCircle2 className='h-5 w-5'/>],
+                ] as const).map(([key,title,icon])=><button type='button' key={key} aria-current={section===key?'page':undefined}
+                  aria-label={title==='Request'?'Review work request':title==='Tasks'?'Tasks and task assessments':'Assessment summary'}
+                  onClick={()=>goSection(key)}
+                  className={'flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center text-[10px] font-semibold leading-tight '+(section===key?'bg-emerald-900/50 text-emerald-200 ring-1 ring-emerald-700':'text-slate-400')}>
+                  {icon}<span>{title}</span></button>)}
+                <span className='mt-auto break-words text-center text-[9px] text-slate-500'>{r.code.slice(-4)}</span>
+              </nav>
+              <div className='min-w-0 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-3 sm:px-4'>
                 {actionError && !mode && <Alert tone='error'>{actionError}</Alert>}
 
                 {mode === 'assess' && <AssessPanel detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />}
@@ -751,6 +760,17 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                     </Card>
                 )}
 
+                {section==='request' && !mode && <>
+                  <div className='space-y-1'>
+                    <p className='text-xs font-semibold uppercase tracking-wider text-emerald-300'>Work request</p>
+                    <h2 className='text-lg font-semibold text-white'>Request details</h2>
+                  </div>
+                  {buttons.length>0&&<div className='grid grid-cols-2 gap-2'>
+                    {buttons.map(b=><Button key={b.key} variant={b.variant??'primary'} busy={busy&&b.key!=='edit'} className='min-w-0 justify-center text-xs' onClick={b.onClick}>
+                      {b.icon}<span className='min-w-0 break-words text-center'>{b.label}</span>
+                    </Button>)}
+                  </div>}
+                  {can.ownRequest&&['submitted','under_review'].includes(r.status)&&<p className='text-xs text-slate-400'>You raised this request. Independent review is handled by another authorized person.</p>}
                 {r.status === 'returned' && r.returnNote && (
                     <Card>
                         <p className='text-xs font-semibold uppercase tracking-wider text-red-300'>Information requested</p>
@@ -791,14 +811,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                     </div>
                 )}
 
-                <Card className='space-y-2 text-sm'>
-                    <p className='font-semibold text-white'>Independent work assessment review</p>
-                    <Badge tone={r.assessmentReviewCurrent?'brand':r.assessmentReview.status==='changes_requested'?'danger':'warn'}>{r.assessmentReviewCurrent?'Approved':r.assessmentReview.status==='changes_requested'?'Corrections requested':'Awaiting approval'}</Badge>
-                    {r.assessmentReview.name&&<Info label='Reviewed by' value={r.assessmentReview.name}/>}
-                    {r.assessmentReview.note&&<Info label='Review note' value={r.assessmentReview.note}/>}
-                    {can.reviewAssessment&&assessed&&r.assessmentTasks.length>0&&<Button variant='secondary' onClick={()=>setMode('return_assessment')}>Return assessment for correction</Button>}
-                </Card>
-                <MntTaskAssessment code={r.code} initial={r.assessmentTasks||[]} editable={can.assess} onSaved={reload}/>
+
 
                  {(r.assessment.maintenanceTypeLabel || r.assessment.note) && (
                     <Card className='space-y-2 text-sm'>
@@ -834,6 +847,16 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                 </Card>
 
                 <HistoryCard history={r.history} />
+                </>}
+                {section==='tasks' && <MntTaskAssessment key={r.code} code={r.code} initial={r.assessmentTasks||[]} editable={can.assess} onSaved={reload} onDirtyChange={setTasksDirty}/>}
+                {section==='summary' && <AssessmentSummary
+                    detail={r}
+                    canReview={!!can.reviewAssessment&&assessed&&r.assessmentTasks.length>0}
+                    busy={busy}
+                    onApprove={()=>{setMode('review_assessment');setNote('');}}
+                    onReturn={()=>{setMode('return_assessment');setNote('');}}
+                    />}
+              </div>
             </div>
 
             {zoom && (
