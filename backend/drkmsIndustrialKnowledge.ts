@@ -30,6 +30,6 @@ export function validIndustrialKnowledge(x:IndustrialKnowledgeRecord):boolean{
  (x.kind!=='plc_program'||(!!x.technology && !!x.plcSource &&
    (x.plcSource==='controller_read_only'||x.plcSource==='controlled_backup') &&
    !!x.runningVersionMatch && ['verified_match','verified_mismatch','not_verified'].includes(x.runningVersionMatch) &&
-   (x.plcSource!=='controller_read_only'||!!x.controllerReadAt)))&&
+   (x.plcSource!=='controller_read_only'||(typeof x.controllerReadAt==='string' && Number.isFinite(Date.parse(x.controllerReadAt))))))&&
  (x.kind!=='utility_feed'||!!x.utilityKind);
 }
