@@ -122,6 +122,8 @@ export const drkmsRoutes = {
                 throw new HttpError(409, 'Document has no approved organizational location.');
             const validated = await resolveScope(ctx.orgId, str((scope as Record<string, unknown>).nodeId));
             if (!validated.scope) throw new HttpError(409, 'Document location is no longer valid.');
+            if (!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,validated.scope.nodeId),await scopeOf(ctx)))
+                throw new HttpError(403,'Your document authority at this location has expired.');
             const submitted = await writeDoc(path, { ...document.data, status: 'in_review', submittedBy: ctx.uid, submittedAt: nowIso() }, { updateTime: document.updateTime });
             if (!submitted) throw new HttpError(409, 'Document changed while submitting. Refresh and try again.');
             await record(ctx, 'drkms.document.submit_review', id, 'Submitted for review; no approval implied');
@@ -169,6 +171,8 @@ export const drkmsRoutes = {
             const requestedScopeId = str(ctx.body.scopeNodeId);
             const [settings, location] = await Promise.all([getDoc(configPath(ctx.orgId)), resolveScope(ctx.orgId, requestedScopeId)]);
             if (!location.scope) throw new HttpError(400, 'Select a legal entity, site, department or cost center.');
+            if (!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,location.scope.nodeId),await scopeOf(ctx)))
+                throw new HttpError(403,'You are not authorized to register documents at this location.');
             const enabled = settings?.data.enabledClassCodes;
             if (Array.isArray(enabled) && !enabled.includes(classCode)) throw new HttpError(400, 'Document class disabled by organization.');
             const id = randomId(10);
