@@ -47,6 +47,10 @@ export const drkmsDigitalRoutes={
    const proposal=ctx.body.analysis as RcaAiAnalysis;
    if(!proposal||proposal.documentId!==documentId||!validateRcaAnalysis(proposal)||JSON.stringify(proposal).length>50000)
      throw new HttpError(400,'AI analysis requires traceable evidence, candidate-only hypotheses and human validation.');
+   const allowedEvidence=await listDocs(`${docs(ctx.orgId,documentId)}/evidence`);
+   const evidenceIds=new Set(allowedEvidence.map(e=>e.id));
+   if(!proposal.sourceIds.every(sourceId=>evidenceIds.has(sourceId)))
+     throw new HttpError(400,'The RCA analysis refers to evidence that is not registered for this investigation.');
    const id=randomId(10);
    const candidate={...proposal,id,createdBy:ctx.uid,createdAt:nowIso(),status:'candidate',humanValidated:false,publishable:false};
    if(!(await writeDoc(`${docs(ctx.orgId,documentId)}/rca_ai_analysis/${id}`,candidate,{exists:false})))
@@ -65,6 +69,9 @@ export const drkmsDigitalRoutes={
    const input=ctx.body.proposal as AiProposal;
    if(!input||!validateAiProposal(input)||JSON.stringify(input).length>25000)
      throw new HttpError(400,'Invalid human-review-required AI proposal.');
+   const sources=await Promise.all(input.sourceDocumentIds.map(id=>getDoc(docs(ctx.orgId,id))));
+   if(sources.some(source=>!source || str(source.data.status)!=='effective'))
+     throw new HttpError(400,'AI extraction requires verified, published source document revisions.');
    const id=randomId(10);
    const recordData={...input,id,documentId,createdBy:ctx.uid,createdAt:nowIso(),
      status:'candidate',humanReviewStatus:'pending',automatedExecution:false};
