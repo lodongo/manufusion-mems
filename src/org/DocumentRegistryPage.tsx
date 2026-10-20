@@ -34,6 +34,7 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
   const [busy, setBusy] = useState(false);
   const [configBusy, setConfigBusy] = useState(false);
   const [reviewMonths, setReviewMonths] = useState(24);
+  useEffect(() => { if (setup.data?.config.defaultReviewMonths) setReviewMonths(setup.data.config.defaultReviewMonths); }, [setup.data?.config.defaultReviewMonths]);
   const [settingsNotice, setSettingsNotice] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [notice, setNotice] = useState('');
