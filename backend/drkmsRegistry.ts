@@ -43,7 +43,13 @@ export const drkmsRoutes = {
     'POST /api/org/drkms/setup': [
         orgRoute('drkms.setup', 'ADM.document_registry', async ctx => {
             const [settings, locations] = await Promise.all([getDoc(configPath(ctx.orgId)), resolveScope(ctx.orgId, '')]);
-            return { config: settings?.data ?? defaults, locations: locations.nodes };
+            const permissionScope=await scopeOf(ctx);
+            const allowedLocations=[];
+            for(const node of locations.nodes){
+                if(canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,node.id),permissionScope))
+                    allowedLocations.push(node);
+            }
+            return { config: settings?.data ?? defaults, locations: allowedLocations };
         }),
     ],
     'POST /api/org/drkms/configure': [
