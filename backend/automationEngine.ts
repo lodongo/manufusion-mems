@@ -1,6 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { PROJECT_ID, HttpError, getDoc, googleRequest, listDocs, nowIso, orderDesc, randomId, runQuery, str, writeDoc } from './core';
-import { sweepOrganization } from './mrp';
+import { sweepOrganization } from './replenishment';
 import { json, error, type RouterContext } from './platform/sdk';
 import { audit } from './audit';
 import { staff } from './guards';
@@ -82,7 +82,7 @@ async function status() {
     const lastSeen = str(state?.data.lastVerifiedHeartbeatAt);
     const connected = !!lastSeen && Date.now() - Date.parse(lastSeen) < 20 * 60 * 1000;
     const mrp = await mrpSweepConfig();
-    const mrpState = await getDoc(MRP_STATE);
+    const mrpState = await sweepState();
     return {
         engine: { name: 'MEMS shared automation engine', version: '2.0', registered: JOBS.map((j) => j.id),
             tickMinutes: 5, lastHeartbeat: lastSeen, connected, sharedTrigger: scheduler },
@@ -94,9 +94,9 @@ async function status() {
                 lastStartedAt: str(state?.data.lastStartedAt), lastCompletedAt: str(state?.data.lastCompletedAt),
                 lastError: str(state?.data.lastError), lastErrorAt: str(state?.data.lastErrorAt),
                 lastResult: state?.data.lastResult || null },
-            { id: MRP_JOB_ID, label: 'MRP replenishment safety sweep (Min/max and Reorder point)', category: 'Inventory',
+            { id: MRP_JOB_ID, label: 'Replenishment safety sweep (every automated strategy, RP01-RP17)', category: 'Inventory',
                 enabled: mrp.enabled, schedule: mrp,
-                scheduleText: mrp.enabled ? `Every ${mrp.intervalHours} hour${mrp.intervalHours === 1 ? '' : 's'}${str(mrpState?.data.cursor) ? ' · resuming an unfinished sweep' : ''}` : 'Disabled (MRP still runs on every material change)',
+                scheduleText: mrp.enabled ? `Every ${mrp.intervalHours} hour${mrp.intervalHours === 1 ? '' : 's'}${str(mrpState?.data.cursor) ? ' · resuming an unfinished sweep' : ''}` : 'Disabled (replenishment still runs on every material change)',
                 configurable: 'inline',
                 lastStartedAt: str(mrpState?.data.lastStartedAt), lastCompletedAt: str(mrpState?.data.lastCompletedAt),
                 lastError: str(mrpState?.data.lastError), lastErrorAt: str(mrpState?.data.lastErrorAt),
@@ -149,18 +149,25 @@ export async function runFxNow() {
     return executeFx('manual');
 }
 
-// ===== MRP replenishment safety sweep =====
-// MRP runs on every material change (see mrp.ts). The sweep is the safety net: it re-plans every Min/max and Reorder
-// point material of every active organization, catching changes that did not pass through an organization request
-// (for example stock posted by another automation). Long sweeps resume on the next tick from where they stopped.
+// ===== Replenishment safety sweep =====
+// Replenishment runs on every material change (see replenishment.ts). The sweep is the safety net: it re-plans every
+// material with an automated strategy (Min-Max, Reorder Point, EOQ, JIT, demand-driven, MRP, kanban, two-bin, periodic
+// review, …) in every active organization, catching changes that did not pass through an organization request (for
+// example stock posted by another automation), periodic reviews falling due, and usage-based levels drifting with
+// consumption. Long sweeps resume on the next tick from where they stopped.
 
-const MRP_JOB_ID = 'inv.mrp-sweep';
-const MRP_CONFIG = 'system/mrp_sweep_config';
-const MRP_STATE = 'system/mrp_sweep_state';
+const MRP_JOB_ID = 'inv.replenishment-sweep';
+const MRP_CONFIG = 'system/replenishment_sweep_config';
+const MRP_STATE = 'system/replenishment_sweep_state';
+const LEGACY_CONFIG = 'system/mrp_sweep_config';
 const MRP_INTERVALS = [1, 3, 6, 12, 24];
 
+async function sweepState() {
+    return getDoc(MRP_STATE);
+}
+
 async function mrpSweepConfig(): Promise<{ enabled: boolean; intervalHours: number }> {
-    const d = await getDoc(MRP_CONFIG);
+    const d = (await getDoc(MRP_CONFIG)) ?? (await getDoc(LEGACY_CONFIG));
     const hours = Number(d?.data.intervalHours);
     return { enabled: d ? d.data.enabled !== false : true, intervalHours: MRP_INTERVALS.includes(hours) ? hours : 6 };
 }
@@ -182,28 +189,28 @@ async function executeMrpSweep(mode: 'scheduled' | 'manual', deadline: number) {
         const orgs = (await listDocs('organizations')).filter((o) => !['suspended', 'pending_approval', 'rejected'].includes(str(o.data.status))).map((o) => o.id).sort();
         const cursor = str(prior.cursor);
         const todo = cursor ? orgs.filter((id) => id >= cursor) : orgs;
-        const total = { organizations: 0, planned: 0, created: 0, replanned: 0, cancelled: 0, failed: 0 };
+        const total = { organizations: 0, planned: 0, created: 0, replanned: 0, signalled: 0, cancelled: 0, failed: 0 };
         let next = '';
         for (const orgId of todo) {
             if (Date.now() > deadline) { next = orgId; break; }
             const r = await sweepOrganization(orgId, deadline);
             total.organizations++;
-            total.planned += r.planned; total.created += r.created; total.replanned += r.replanned; total.cancelled += r.cancelled; total.failed += r.failed;
+            total.planned += r.planned; total.created += r.created; total.replanned += r.replanned; total.signalled += r.signalled; total.cancelled += r.cancelled; total.failed += r.failed;
             if (!r.complete) { next = orgId; break; }
         }
         const completedAt = nowIso();
         const result = { ...total, complete: !next, resumeFrom: next };
         await writeDoc(MRP_STATE, { ...prior, lastStartedAt: startedAt, cursor: next, ...(next ? {} : { lastCompletedAt: completedAt }), lastResult: result, lastError: '', lastErrorAt: '' });
         await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: MRP_JOB_ID, mode, status: 'success', startedAt, completedAt, durationMs: Date.now() - t0, ...result,
-            summary: `${total.planned} material(s) planned in ${total.organizations} organization(s): ${total.created} created, ${total.replanned} re-planned, ${total.cancelled} cancelled, ${total.failed} failed${next ? '; continues next tick' : ''}` }, { exists: false });
-        await audit([{ category: 'automation', action: 'inv.mrp_sweep.success', details: `${mode}: ${total.planned} planned, ${total.created} created, ${total.replanned} re-planned, ${total.cancelled} cancelled, ${total.failed} failed${next ? ' (partial)' : ''}` }]);
+            summary: `${total.planned} material(s) planned in ${total.organizations} organization(s): ${total.created} purchase request(s), ${total.signalled} signal(s), ${total.replanned} re-planned, ${total.cancelled} closed, ${total.failed} failed${next ? '; continues next tick' : ''}` }, { exists: false });
+        await audit([{ category: 'automation', action: 'inv.replenishment_sweep.success', details: `${mode}: ${total.planned} planned, ${total.created} requests, ${total.signalled} signals, ${total.replanned} re-planned, ${total.cancelled} closed, ${total.failed} failed${next ? ' (partial)' : ''}` }]);
         return result;
     } catch (e) {
-        const message = e instanceof Error ? e.message : 'MRP sweep failed';
+        const message = e instanceof Error ? e.message : 'Replenishment sweep failed';
         const completedAt = nowIso();
         await writeDoc(MRP_STATE, { ...prior, lastStartedAt: startedAt, lastError: message.slice(0, 250), lastErrorAt: completedAt });
         await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: MRP_JOB_ID, mode, status: 'failed', startedAt, completedAt, durationMs: Date.now() - t0, error: message.slice(0, 250) }, { exists: false });
-        await audit([{ category: 'automation', action: 'inv.mrp_sweep.failure', outcome: 'failure', details: message.slice(0, 400) }]);
+        await audit([{ category: 'automation', action: 'inv.replenishment_sweep.failure', outcome: 'failure', details: message.slice(0, 400) }]);
         throw e;
     }
 }
@@ -226,7 +233,7 @@ const JOBS: Job[] = [
     {
         id: MRP_JOB_ID,
         due: async (at) => {
-            const s = (await getDoc(MRP_STATE))?.data ?? {};
+            const s = (await sweepState())?.data ?? {};
             return mrpSweepDue(await mrpSweepConfig(), { lastCompletedAt: str(s.lastCompletedAt), cursor: str(s.cursor) }, at);
         },
         run: (mode, deadline) => executeMrpSweep(mode, deadline),
@@ -293,7 +300,7 @@ export const automationRoutes = {
     })],
     'POST /api/admin/automations/job/config': [staff('automations.job.config', 'super', async (ctx) => {
         developmentOnly();
-        if (str(ctx.body.jobId) !== MRP_JOB_ID) throw new HttpError(400, 'Only the MRP sweep is configured here; exchange rates are configured under FX automation.');
+        if (str(ctx.body.jobId) !== MRP_JOB_ID) throw new HttpError(400, 'Only the replenishment sweep is configured here; exchange rates are configured under FX automation.');
         const reason = str(ctx.body.reason).trim();
         if (reason.length < 10 || reason.length > 300) throw new HttpError(400, 'Give the reason for the change (10 to 300 characters).');
         const hours = Number(ctx.body.intervalHours);

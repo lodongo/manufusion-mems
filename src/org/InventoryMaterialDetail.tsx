@@ -7,6 +7,7 @@ import RichTable, { type Column } from '../components/RichTable';
 import { restoredTableTab } from '../lib/tableTabs';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
+import { METHODS, PARAMS, factorsOf, methodOf, routeFor } from '../../backend/replenishmentPlan';
 
 // Material detail for one warehouse (INV), opened from Inventory on hand.
 //   Overview                 headline figures (location, available quantity, min/max, unit cost, annual usage)
@@ -107,7 +108,7 @@ type Section = 'inventory' | 'procurement';
 type Values = Record<string, string>;
 type Errors = Record<string, string>;
 
-const TABS = ['Overview', 'Current Status', 'Inventory Information', 'Stock Control', 'Procurement Information', 'Movements', 'Criticality Analysis', 'Technical Data'] as const;
+const TABS = ['Overview', 'Current Status', 'Inventory Information', 'Stock Control', 'Replenishment', 'Procurement Information', 'Movements', 'Criticality Analysis', 'Technical Data'] as const;
 type Tab = (typeof TABS)[number];
 
 const STOCK_FIELDS=[
@@ -129,8 +130,20 @@ const STOCK_FIELDS=[
 ] as const;
 const STOCK_FIELD_LOOKUP=new Map<string,string>(STOCK_FIELDS);
 const INVENTORY_FIELDS = ['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'remarks'];
+// Strategy parameters (Replenishment tab). Which of them are shown depends on the replenishment strategy.
+const REPLENISHMENT_FIELDS = ['annualDemand', 'orderCost', 'holdingCostRate', 'demandLookbackDays', 'coverageDays', 'emergencyLevel', 'strategicLevel', 'seasonalFactors', 'rotablesInRepair', 'binQuantity', 'kanbanCardQuantity', 'kanbanCards', 'reviewPeriodDays', 'forecastMonthlyDemand'];
+const REPLENISHMENT_LIMITS: Record<string, { min: number; max: number; integer?: boolean }> = {
+    holdingCostRate: { min: 0, max: 1000 }, demandLookbackDays: { min: 7, max: 730, integer: true }, coverageDays: { min: 0, max: 3650, integer: true },
+    kanbanCards: { min: 1, max: 1000, integer: true }, reviewPeriodDays: { min: 1, max: 365, integer: true },
+};
+const CLASSIC_LEVELS = ['minimumLevel', 'maximumLevel', 'reorderPoint', 'reorderQuantity', 'safetyStock'];
+/** Parameters of the material's strategy that live on the Replenishment tab. */
+function replenishmentFieldsOf(inventory: Record<string, unknown> | undefined): string[] {
+    const m = METHODS[methodOf(inventory?.replenishmentStrategy, inventory?.stockingPolicy)];
+    return m ? [...m.required, ...m.optional].filter((k) => REPLENISHMENT_FIELDS.includes(k)) : [];
+}
 const PROCUREMENT_FIELDS = ['incoterms', 'preferredVendor', 'vendorPartNumber', 'purchaseUom', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice', 'priceCurrency', 'paymentTerms'];
-const NUMBER_FIELDS = new Set(['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice']);
+const NUMBER_FIELDS = new Set(['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice', ...REPLENISHMENT_FIELDS.filter((k) => k !== 'seasonalFactors')]);
 const OPENING_KEYS = ['physicalStock', 'reservedStock', 'quarantinedStock', 'damagedStock', 'expiredStock', 'onOrder', 'onRequisition', 'inTransit', 'allocatedStock'];
 const DELTA_KEYS = ['physicalStock', 'reservedStock', 'quarantinedStock', 'damagedStock', 'expiredStock', 'other', 'onOrder', 'onRequisition', 'inTransit', 'allocatedStock'];
 const ISOLATION_REASONS = [
@@ -145,12 +158,12 @@ const NUMBER_PATTERN = /^\d+(\.\d+)?$/;
 const OPENING_PHRASE = 'POST OPENING STOCK';
 
 const EXPLANATIONS: Record<string, string> = {
-    stockingPolicy: 'Legacy MRP engine policy for this material and warehouse. Use Stock Control to select a codified strategy; Min-Max and Reorder Point automatically synchronize with this field.',
+    stockingPolicy: 'Earlier stocking policy for this material and warehouse. Use Stock Control to select a codified replenishment strategy; it synchronizes this field.',
     stockOwnership: 'Default intended owner of this material at this warehouse. Actual owner must also be tracked on each balance/lot; this setting does not transfer title.',
     supplyArrangement: 'Approved supply and commercial arrangement. Consignment and VMI need a supplier agreement and separate ownership-aware transactions.',
     stockCustody: 'Expected physical custodian, independent of who owns or values the stock.',
     stockCondition: 'Default eligibility or disposition policy. Actual lot/block status must be recorded by controlled warehouse movements.',
-    replenishmentStrategy: 'Codified planning method; Min-Max and Reorder Point use the existing automated MRP engine. Other strategies await their specialized input and approval workflows.',
+    replenishmentStrategy: 'How replenishment plans this material: Min-Max, Reorder Point, EOQ, JIT, demand-driven, MRP-controlled, kanban, two-bin, periodic review and others. Every strategy except Direct purchase and Non-stock is planned automatically; set its parameters on the Replenishment tab.',
     stockPurpose: 'Business purpose for reporting and consumption mapping; cannot replace individual GL posting rules.',
     stockAllocation: 'Default demand allocation reference for reservations, without increasing physical stock quantity.',
     financialProfile: 'Financial treatment subject to legal-entity accounting policy and actual recognition event.',
@@ -168,6 +181,7 @@ const EXPLANATIONS: Record<string, string> = {
     reorderQuantity: 'Normal quantity to replenish when the reorder point is reached.',
     leadTimeDays: 'Expected calendar days between ordering and receipt of the material.',
     remarks: 'Additional warehouse-specific handling, stocking, or replenishment instructions.',
+    ...Object.fromEntries(REPLENISHMENT_FIELDS.map((k) => [k, PARAMS[k as keyof typeof PARAMS].hint])),
     incoterms: 'International delivery rule defining buyer and seller responsibilities for transport, risk and costs.',
     preferredVendor: 'Preferred approved supplier for purchasing this material.',
     vendorPartNumber: "Supplier's own part reference, which may differ from the internal material number.",
@@ -189,7 +203,7 @@ const BALANCE_HELP: Record<string, string> = {
     allocatedStock: 'Physical stock allocated to demand but not yet issued.',
 };
 
-const label = (x: string) => x.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+const label = (x: string) => (REPLENISHMENT_FIELDS.includes(x) ? PARAMS[x as keyof typeof PARAMS].label : x.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()));
 const words = (s: string) => (s || '').replace(/_/g, ' ');
 const blank = (v: unknown) => v === null || v === undefined || v === '';
 const qty = (v: unknown) => Number(v || 0).toLocaleString();
@@ -212,19 +226,25 @@ function numberProblem(raw: string, wholeDaysMax?: number): string {
 
 const numberOf = (raw: string | undefined) => (raw && raw.trim() && NUMBER_PATTERN.test(raw.trim()) ? Number(raw.trim()) : null);
 
-function validateSettings(section: Section, values: Values): Errors {
+/** Validates only the fields of the tab being edited (each tab saves its own fields). */
+function validateSettings(section: Section, values: Values, fields: string[]): Errors {
     const errors: Errors = {};
-    for (const key of section === 'inventory' ? INVENTORY_FIELDS : PROCUREMENT_FIELDS) {
+    for (const key of fields) {
         const raw = values[key] ?? '';
-        if (NUMBER_FIELDS.has(key)) {
+        if (key === 'seasonalFactors') {
+            if (raw.trim() && !factorsOf(raw)) errors[key] = 'Enter 12 comma-separated factors from 0 to 10 (January to December).';
+        } else if (NUMBER_FIELDS.has(key)) {
             const problem = numberProblem(raw, key === 'leadTimeDays' ? 3650 : undefined);
+            const limit = REPLENISHMENT_LIMITS[key];
+            const n = Number(raw.trim());
             if (problem) errors[key] = problem;
+            else if (limit && raw.trim() && (n < limit.min || n > limit.max || (limit.integer && !Number.isInteger(n)))) errors[key] = `Enter ${limit.integer ? 'a whole number' : 'a number'} from ${limit.min} to ${limit.max}.`;
         } else {
             const max = key === 'remarks' ? 1000 : 120;
             if (raw.trim().length > max) errors[key] = `Use at most ${max} characters.`;
         }
     }
-    if (section === 'inventory') {
+    if (section === 'inventory' && fields.includes('maximumLevel')) {
         const max = errors.maximumLevel ? null : numberOf(values.maximumLevel);
         if (max !== null) {
             const min = numberOf(values.minimumLevel);
@@ -239,9 +259,10 @@ function validateSettings(section: Section, values: Values): Errors {
 }
 
 /** Values sent to /material/update: numbers as numbers, empty fields as '' (cleared). Never includes binLocation. */
-function settingsPayload(section: Section, values: Values): Record<string, string | number> {
+/** Only the fields of the tab being edited are sent, so saving one tab never clears another tab's values. */
+function settingsPayload(values: Values, fields: string[]): Record<string, string | number> {
     const out: Record<string, string | number> = {};
-    for (const key of section === 'inventory' ? INVENTORY_FIELDS : PROCUREMENT_FIELDS) {
+    for (const key of fields) {
         const raw = (values[key] ?? '').trim();
         out[key] = NUMBER_FIELDS.has(key) && raw ? Number(raw) : raw;
     }
@@ -537,6 +558,55 @@ function BinPanel({
                     </p>
                 </div>
             )}
+        </Card>
+    );
+}
+
+/** How replenishment treats this material in this warehouse: strategy, who acts, and what is still missing. */
+function ReplenishmentSummary({ data }: { data: Detail }) {
+    const inv = data.inventory as Record<string, unknown>;
+    const proc = data.procurement as Record<string, unknown>;
+    const code = methodOf(inv.replenishmentStrategy, inv.stockingPolicy);
+    const m = METHODS[code];
+    if (!m) return <Alert tone='info'>No replenishment strategy is set. Choose one in Stock Control (with the stock ownership and supply arrangement) to plan this material automatically.</Alert>;
+    const route = routeFor(String(inv.stockOwnership || ''), String(inv.supplyArrangement || ''), code);
+    const has = (k: string) => {
+        const v = k === 'seasonalFactors' ? inv[k] : inv[k] ?? proc[k];
+        return k === 'seasonalFactors' ? !!factorsOf(v) : v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v));
+    };
+    const missing = m.required.filter((k) => !has(k));
+    const levels = [...m.required, ...m.optional].filter((k) => CLASSIC_LEVELS.includes(k));
+    return (
+        <Card className='space-y-3'>
+            <div className='flex flex-wrap items-center gap-2'>
+                <Badge tone={m.automated ? 'brand' : 'muted'}>{m.automated ? 'Planned automatically' : 'Not planned automatically'}</Badge>
+                <span className='font-mono text-xs text-muted'>{m.code}</span>
+                <span className='font-semibold text-ink'>{m.name}</span>
+            </div>
+            <p className='text-sm text-soft'>{m.explain}</p>
+            {m.automated && (
+                <p className='rounded-xl bg-page p-3 text-sm text-ink'>
+                    {route.kind === 'purchase' && <>Raises an <strong>unverified purchase requirement</strong> for a planner to verify; the planner's manager then approves under the chart of authority.{route.note ? ` ${route.note}` : ''}</>}
+                    {route.kind === 'signal' && <>Raises a <strong>{route.label.toLowerCase()}</strong> signal, not a purchase: {route.action}</>}
+                    {route.kind === 'blocked' && <span className='text-amber-300'>{route.reason}</span>}
+                    {!inv.stockOwnership || !inv.supplyArrangement ? <span className='mt-1 block text-xs text-amber-300'>Set the stock ownership and supply arrangement in Stock Control: they decide who acts.</span> : null}
+                </p>
+            )}
+            {levels.length > 0 && (
+                <div className='space-y-1'>
+                    <p className='text-xs text-muted'>Levels used (edit them in Inventory Information)</p>
+                    <ul className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+                        {levels.map((k) => (
+                            <li key={k} className={`rounded-lg border px-3 py-2 text-xs ${m.required.includes(k) && !has(k) ? 'border-amber-500/60 text-amber-200' : 'border-line text-soft'}`}>
+                                {PARAMS[k as keyof typeof PARAMS].label}
+                                <strong className='block text-sm text-ink'>{has(k) ? String(inv[k]) : m.required.includes(k) ? 'Required' : '—'}</strong>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+            {missing.length > 0 && m.automated && <Alert tone='warn'>Not planned until set: {missing.map((k) => PARAMS[k as keyof typeof PARAMS].label).join(', ')}.</Alert>}
+            {m.code === 'RP03' && <p className='text-xs text-muted'>Economic order quantity also uses the unit price from Procurement Information.</p>}
         </Card>
     );
 }
@@ -974,8 +1044,8 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
     const [isolation, setIsolation] = useState('');
     const [movement, setMovement] = useState<Movement | null>(null);
 
-    const section: Section | null = (tab === 'Inventory Information'||tab==='Stock Control') ? 'inventory' : tab === 'Procurement Information' ? 'procurement' : null;
-    const fields = tab==='Stock Control'?STOCK_FIELDS.map(([field])=>field):section === 'procurement' ? PROCUREMENT_FIELDS : INVENTORY_FIELDS;
+    const section: Section | null = (tab === 'Inventory Information' || tab === 'Stock Control' || tab === 'Replenishment') ? 'inventory' : tab === 'Procurement Information' ? 'procurement' : null;
+    const fields = tab === 'Stock Control' ? STOCK_FIELDS.map(([field]) => field) : tab === 'Replenishment' ? replenishmentFieldsOf(data?.inventory) : section === 'procurement' ? PROCUREMENT_FIELDS : INVENTORY_FIELDS;
     const base = data?.currency.local || '';
     const currencies = useMemo(
         () => [base, ...(data?.currency.alternatives || []).filter((x) => x.code && x.rate > 0).map((x) => x.code)].filter((x, i, a) => x && a.indexOf(x) === i),
@@ -986,10 +1056,10 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
     const materialNumber = String(data?.material.materialNumber || id);
     const materialName = String(data?.material.shortText || data?.material.name || 'Material');
 
-    const errors = section && editing ? validateSettings(section, values) : {};
+    const errors = section && editing ? validateSettings(section, values, fields) : {};
     const problems = problemList(errors);
     const record = section === 'procurement' ? data?.procurement : data?.inventory;
-    const payload = section && editing ? settingsPayload(section, values) : {};
+    const payload = section && editing ? settingsPayload(values, fields) : {};
     const dirty = !!section && editing && fields.some((k) => String(record?.[k] ?? '') !== String(payload[k] ?? ''));
 
     const flash = (tone: 'success' | 'error', text: string) => setNotice({ tone, text });
@@ -1119,7 +1189,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
 
     const actions = (() => {
         if (!data) return undefined;
-        if (section && data.canEdit) {
+        if (section && data.canEdit && fields.length) {
             return editing ? (
                 <>
                     <Button variant='secondary' disabled={saving} onClick={() => setEditing(false)}>
@@ -1187,7 +1257,8 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                                     ))}
                                 </SelectField>
                             )}
-                            {tab==='Stock Control'&&<Alert tone='info'>These settings describe the material and warehouse policy. They do not modify existing posted stock ownership or GL balances. Min-Max (RP01) and Reorder Point (RP02) connect to the existing automatic MRP request engine; consignment and supplier-managed arrangements are guarded until their settlement workflow is configured.</Alert>}
+                            {tab==='Stock Control'&&<Alert tone='info'>These settings describe the material and warehouse policy. They do not modify existing posted stock ownership or GL balances. The replenishment strategy, stock ownership and supply arrangement drive automatic replenishment (see the Replenishment tab).</Alert>}
+                            {tab === 'Replenishment' && <ReplenishmentSummary data={data} />}
                             {editing ? (
                                 <Card className='space-y-3'>
                                     <h2 className='text-sm font-semibold text-ink'>Edit {tab.toLowerCase()}</h2>

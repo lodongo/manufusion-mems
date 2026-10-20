@@ -96,8 +96,8 @@ import { transactionBlueprintRoutes } from './transactionBlueprintRoutes';
 import { platformTransactionRoutes } from './platformTransactionRoutes';
 import { unifiedApprovalRoutes } from './unifiedApprovalRoutes';
 import { procurementSetupRoutes } from './procurementSetup';
-import { mrpVerificationRoutes, purchaseRequirementRoutes } from './purchaseRequirements';
-import { mrpRoutes } from './mrp';
+import { replenishmentVerificationRoutes, purchaseRequirementRoutes } from './purchaseRequirements';
+import { replenishmentRoutes } from './replenishment';
 import { procurementPolicyRoutes } from './procurementPolicy';
 import { buyerGroupRoutes } from './buyerGroups';
 import { quotationRoutes } from './quotations';
@@ -1551,8 +1551,8 @@ export const handler = router(recordWiredRoutes({
     ...unifiedApprovalRoutes,
     ...procurementSetupRoutes,
     ...purchaseRequirementRoutes,
-    ...mrpVerificationRoutes,
-    ...mrpRoutes,
+    ...replenishmentVerificationRoutes,
+    ...replenishmentRoutes,
     ...procurementPolicyRoutes,
     ...buyerGroupRoutes,
     ...quotationRoutes,

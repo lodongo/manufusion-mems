@@ -31,7 +31,8 @@ test('supplier consignment and VMI cannot silently create standard MRP purchases
   assert.equal(isStandardMrpSafe(value).safe,false);
  }
  assert.equal(isStandardMrpSafe({stockOwnership:'OW01',supplyArrangement:'SA01'}).safe,true);
- assert.match(read('backend/mrp.ts'),/isStandardMrpSafe/);
+ // The replenishment engine routes these to signals for the supplier or owner, never to a standard purchase.
+ assert.match(read('backend/replenishment.ts'),/routeFor\(str\(i\.stockOwnership\), str\(i\.supplyArrangement\), method\)/);
 });
 test('Procurement and Inventory add tabs without replicating master definitions',()=>{
  const inv=read('src/org/InventoryMaterialDetail.tsx');

@@ -25,8 +25,8 @@ import { KIND_LABEL, LINE_KINDS, OPEN_STATUSES, adopted, can, isSuper, kindOf, m
 // requirement stays a private draft until the requester submits it.
 //
 // Status flow
-//   unverified (raised by MRP) --material planner verifies--> pending_approval (the planner becomes the requester)
-//   unverified --material planner dismisses, or MRP finds it no longer needed--> cancelled
+//   unverified (raised by Replenishment) --planner verifies--> pending_approval (the planner becomes the requester)
+//   unverified --planner dismisses, or Replenishment finds it no longer needed--> cancelled
 //   draft --requester submits--> pending_approval --manager approves--> approved --procurement acknowledges--> acknowledged
 //   pending_approval --manager returns--> returned_user (requester edits and submits again)
 //   pending_approval --manager rejects--> rejected
@@ -60,7 +60,7 @@ function uomGroups() {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-    unverified: 'Unverified (MRP), awaiting a material planner',
+    unverified: 'Unverified (Replenishment), awaiting a planner',
     draft: 'Draft',
     pending_approval: 'Pending manager approval',
     approved: 'Approved, awaiting procurement',
@@ -123,8 +123,8 @@ const approvedByMe = (ctx: OrgContext, d: Obj) => history(d).some((h) => str(h.b
 
 function visible(ctx: OrgContext, d: Obj): boolean {
     const status = str(d.status);
-    // MRP requests are reviewed by material planners before they become anybody's requirement.
-    if (status === 'unverified') return can(ctx, 'PRC.req.viewall') || can(ctx, 'INV.mrp.view');
+    // Replenishment requests are reviewed by planners before they become anybody's requirement.
+    if (status === 'unverified') return can(ctx, 'PRC.req.viewall') || can(ctx, 'INV.replenishment.view');
     if (str(d.requesterUid) === ctx.uid) return true;
     if (status === 'draft') return false; // a draft belongs to its requester alone
     if (can(ctx, 'PRC.req.viewall')) return true;
@@ -156,7 +156,7 @@ function flags(ctx: OrgContext, d: Obj) {
 function waitingOn(d: Obj): string {
     switch (str(d.status)) {
         case 'unverified':
-            return 'Material planner (verify the MRP request)';
+            return 'Planner (verify the replenishment request)';
         case 'draft':
             return 'Requester (not yet submitted)';
         case 'pending_approval':
@@ -592,30 +592,32 @@ export async function createMaintenanceRequirement(ctx: OrgContext, input: Obj, 
 }
 const requiredMaintenanceTitle = (s: Obj) => `${str(s.woCode)} · ${str(s.description)}`.slice(0,120);
 
-// ----- MRP requests: verification by a material planner -----
+// ----- Replenishment requests: verification by a planner -----
 
-const MRP_KEY = (orgId: string, key: string) => `organizations/${orgId}/mrp_keys/${key}`;
-async function mrpRequest(ctx: OrgContext, id: string): Promise<Doc> {
-    if (!ID.test(id)) throw new HttpError(404, 'MRP request not found.');
+const RPL_KEYS = (orgId: string, key: string) => [`organizations/${orgId}/replenishment_keys/${key}`, `organizations/${orgId}/mrp_keys/${key}`];
+const REPLENISHMENT_SOURCES = ['replenishment', 'mrp'];
+const rplKeyOf = (d: Obj) => str(d.replenishmentKey) || str(d.mrpKey);
+async function replenishmentRequest(ctx: OrgContext, id: string): Promise<Doc> {
+    if (!ID.test(id)) throw new HttpError(404, 'Replenishment request not found.');
     const doc = await getDoc(`${requirementsPath(ctx.orgId)}/${id}`);
-    if (!doc || str(doc.data.source) !== 'mrp') throw new HttpError(404, 'MRP request not found.');
-    if (str(doc.data.status) !== 'unverified') throw new HttpError(409, 'This MRP request has already been verified, dismissed or cancelled.');
+    if (!doc || !REPLENISHMENT_SOURCES.includes(str(doc.data.source))) throw new HttpError(404, 'Replenishment request not found.');
+    if (str(doc.data.status) !== 'unverified') throw new HttpError(409, 'This replenishment request has already been verified, dismissed or cancelled.');
     const w = str(objs(doc.data.lines)[0]?.warehouseId);
-    await requireAt(ctx, ['INV.mrp.verify'], w, 'write', 'You can verify or dismiss MRP requests only for warehouses where you hold INV.mrp.verify.');
+    await requireAt(ctx, ['INV.replenishment.verify'], w, 'write', 'You can verify or dismiss replenishment requests only for warehouses where you hold INV.replenishment.verify.');
     return doc;
 }
 
-export const mrpVerificationRoutes = {
+export const replenishmentVerificationRoutes = {
     // The planner checks quantity, date, urgency, unit and GL account; the request then follows the normal manager
     // approval (and chart of authority) as the planner's own requirement.
-    'POST /api/org/inventory/mrp/verify': [
-        orgRoute('org.inventory.mrp.verify', 'INV.mrp.verify', async (ctx) => {
+    'POST /api/org/inventory/replenishment/verify': [
+        orgRoute('org.inventory.replenishment.verify', 'INV.replenishment.verify', async (ctx) => {
             requireProcurement(ctx);
             const id = str(ctx.body.id);
-            await mrpRequest(ctx, id);
+            await replenishmentRequest(ctx, id);
             return lock(ctx, id, async () => {
                 const path = `${requirementsPath(ctx.orgId)}/${id}`;
-                const doc = await mrpRequest(ctx, id);
+                const doc = await replenishmentRequest(ctx, id);
                 const d = doc.data;
                 const cur = objs(d.lines)[0] ?? {};
                 const quantity = ctx.body.quantity === undefined || ctx.body.quantity === '' ? Number(cur.quantity) : Number(String(ctx.body.quantity).replace(/,/g, ''));
@@ -623,7 +625,7 @@ export const mrpVerificationRoutes = {
                 const reason = cleanText(ctx.body.reason);
                 if (changedQty && (reason.length < 10 || reason.length > 300)) throw new HttpError(400, 'Give the reason for changing the planned quantity (10 to 300 characters).');
                 const line = await prepareItem(ctx, { ...cur, source: 'warehouse', quantity, dateRequired: str(ctx.body.dateRequired) || str(cur.dateRequired), urgency: str(ctx.body.urgency) || str(cur.urgency), glCode: str(ctx.body.glCode), uomCode: str(ctx.body.uomCode) || str(cur.uomCode), costCenterId: str(cur.warehouseId) }, 10);
-                if (str(line.materialId) !== str(cur.materialId) || str(line.warehouseId) !== str(cur.warehouseId)) throw new HttpError(409, 'The material or warehouse of an MRP request cannot be changed.');
+                if (str(line.materialId) !== str(cur.materialId) || str(line.warehouseId) !== str(cur.warehouseId)) throw new HttpError(409, 'The material or warehouse of a replenishment request cannot be changed.');
                 const missing = missingOf(line);
                 if (missing.length) throw new HttpError(400, `Complete before verifying: ${missing.join(', ')}.`);
                 const approver = await approverFor(ctx, ctx.me);
@@ -639,7 +641,8 @@ export const mrpVerificationRoutes = {
                     requesterPosition: approver.position,
                     approverPosition: approver.managerPosition,
                     approverTitle: approver.managerTitle,
-                    lines: [{ ...line, mrpSource: { key: str(d.mrpKey), plannedQuantity: Number(cur.quantity) } }],
+                    source: 'replenishment',
+                    lines: [{ ...line, replenishmentSource: { key: rplKeyOf(d), plannedQuantity: Number(cur.quantity) } }],
                     submittedAt: at,
                     verifiedBy: ctx.uid,
                     verifiedByName: nameOfUser(ctx.me),
@@ -648,30 +651,34 @@ export const mrpVerificationRoutes = {
                     version: (Number(d.version) || 1) + 1,
                     history: [...history(d), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: 'verified', note, from: 'unverified', to: 'pending_approval' }],
                 }, { updateTime: doc.updateTime });
-                if (!ok) throw new HttpError(409, 'MRP re-planned this request while you were verifying it. Refresh and check the quantity again.');
-                const key = await getDoc(MRP_KEY(ctx.orgId, str(d.mrpKey)));
-                if (key && str(key.data.prId) === id) await deleteDoc(MRP_KEY(ctx.orgId, str(d.mrpKey)));
-                await record(ctx, 'org.inventory.mrp.verify', id, `MRP request verified: ${str(line.materialNumber)} ${quantity} ${str(line.unit)} for ${str(line.warehouseCode)}; sent to ${approver.managerTitle} for approval. ${note}`.slice(0, 400));
+                if (!ok) throw new HttpError(409, 'Replenishment re-planned this request while you were verifying it. Refresh and check the quantity again.');
+                for (const kp of RPL_KEYS(ctx.orgId, rplKeyOf(d))) {
+                    const key = await getDoc(kp);
+                    if (key && str(key.data.prId) === id) await deleteDoc(kp);
+                }
+                await record(ctx, 'org.inventory.replenishment.verify', id, `Replenishment request verified: ${str(line.materialNumber)} ${quantity} ${str(line.unit)} for ${str(line.warehouseCode)}; sent to ${approver.managerTitle} for approval. ${note}`.slice(0, 400));
                 return { ok: true, id, status: 'pending_approval', approver: approver.managerTitle };
             });
         }),
     ],
-    'POST /api/org/inventory/mrp/dismiss': [
-        orgRoute('org.inventory.mrp.dismiss', 'INV.mrp.verify', async (ctx) => {
+    'POST /api/org/inventory/replenishment/dismiss': [
+        orgRoute('org.inventory.replenishment.dismiss', 'INV.replenishment.verify', async (ctx) => {
             const id = str(ctx.body.id);
             const reason = reasonOf(ctx.body);
-            await mrpRequest(ctx, id);
+            await replenishmentRequest(ctx, id);
             return lock(ctx, id, async () => {
                 const path = `${requirementsPath(ctx.orgId)}/${id}`;
-                const doc = await mrpRequest(ctx, id);
+                const doc = await replenishmentRequest(ctx, id);
                 const d = doc.data;
                 const cur = objs(d.lines)[0] ?? {};
                 const at = nowIso();
                 const ok = await writeDoc(path, { ...d, status: 'cancelled', cancelReason: `Dismissed by ${nameOfUser(ctx.me)}: ${reason}`, dismissedBy: ctx.uid, dismissedAt: at, updatedAt: at, version: (Number(d.version) || 1) + 1, history: [...history(d), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: 'dismissed', note: reason, from: 'unverified', to: 'cancelled' }] }, { updateTime: doc.updateTime });
-                if (!ok) throw new HttpError(409, 'MRP re-planned this request at the same moment. Refresh and try again.');
+                if (!ok) throw new HttpError(409, 'Replenishment re-planned this request at the same moment. Refresh and try again.');
                 const until = new Date(Date.now() + 7 * 86_400_000).toISOString();
-                await writeDoc(MRP_KEY(ctx.orgId, str(d.mrpKey)), { materialId: str(cur.materialId), warehouseId: str(cur.warehouseId), prId: '', dismissedUntil: until, dismissedBy: ctx.uid, dismissedAt: at, reason });
-                await record(ctx, 'org.inventory.mrp.dismiss', id, `MRP request dismissed: ${str(cur.materialNumber)} for ${str(cur.warehouseCode)}. ${reason}`.slice(0, 400));
+                const [keyPath, legacyPath] = RPL_KEYS(ctx.orgId, rplKeyOf(d));
+                await deleteDoc(legacyPath).catch(() => undefined);
+                await writeDoc(keyPath, { materialId: str(cur.materialId), warehouseId: str(cur.warehouseId), prId: '', dismissedUntil: until, dismissedBy: ctx.uid, dismissedAt: at, reason });
+                await record(ctx, 'org.inventory.replenishment.dismiss', id, `Replenishment request dismissed: ${str(cur.materialNumber)} for ${str(cur.warehouseCode)}. ${reason}`.slice(0, 400));
                 return { ok: true, id, status: 'cancelled' };
             });
         }),
