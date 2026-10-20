@@ -128,7 +128,7 @@ const STOCK_FIELDS=[
  ['ownershipSettlementTrigger','ownershipSettlementTriggers'],
 ] as const;
 const STOCK_FIELD_LOOKUP=new Map<string,string>(STOCK_FIELDS);
-const INVENTORY_FIELDS = ['stockingPolicy', 'minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'remarks'];
+const INVENTORY_FIELDS = ['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'remarks'];
 const PROCUREMENT_FIELDS = ['incoterms', 'preferredVendor', 'vendorPartNumber', 'purchaseUom', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice', 'priceCurrency', 'paymentTerms'];
 const NUMBER_FIELDS = new Set(['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice']);
 const OPENING_KEYS = ['physicalStock', 'reservedStock', 'quarantinedStock', 'damagedStock', 'expiredStock', 'onOrder', 'onRequisition', 'inTransit', 'allocatedStock'];
@@ -579,6 +579,11 @@ function SettingValue({
             </>
         );
     }
+    if (field==='replenishmentStrategy'&&blank(raw)){
+        const old=String(data.inventory.stockingPolicy||'').toUpperCase();
+        if(old==='MINMAX')return <>RP01 — Min-Max (existing configuration)</>;
+        if(old==='REORDER')return <>RP02 — Reorder Point (existing configuration)</>;
+    }
     if (blank(raw)) return <>—</>;
     const value = String(raw);
     if (STOCK_FIELD_LOOKUP.has(field)){
@@ -1000,6 +1005,11 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
         const source = section === 'inventory' ? data.inventory : data.procurement;
         const next: Values = {};
         for (const k of fields) next[k] = blank(source[k]) ? '' : String(source[k]);
+        if(tab==='Stock Control'&&!next.replenishmentStrategy){
+            const legacy=String(data.inventory.stockingPolicy||'').toUpperCase();
+            if(legacy==='MINMAX')next.replenishmentStrategy='RP01';
+            else if(legacy==='REORDER')next.replenishmentStrategy='RP02';
+        }
         if (section === 'procurement' && !next.priceCurrency) next.priceCurrency = base;
         setValues(next);
         const chosen = metadata?.uoms.find((x) => x.code === next.purchaseUom);
