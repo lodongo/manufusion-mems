@@ -105,7 +105,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
             { key: 'modules', label: 'All modules', Icon: Puzzle, perm: 'ADM.modules' },
             { key: 'modules_available', label: 'Not adopted', Icon: PackagePlus, perm: 'ADM.modules' },
             { key: 'modules_adopted', label: 'Adopted', Icon: PackageCheck, perm: 'ADM.modules' },
-            { key: 'subscription', label: 'Subscription', Icon: CreditCard, perm: 'ADM.modules' },
+            { key: 'subscription', label: 'Subscription', Icon: CreditCard, perm: 'ADM.billing' },
         ],
     },
     {

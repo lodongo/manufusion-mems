@@ -9,6 +9,7 @@ import RoleCoreSkills from './RoleCoreSkills';
 import { parentSkillSources } from './skillAdoption';
 import { matchingRoleNodes, staffingSummary, type RoleStaffingRow, type RoleStaffingCount, type StaffingUnit } from './roleStaffing';
 import { appConfirm } from '../components/dialogs';
+import { withSodAcknowledgement } from '../lib/sod';
 
 export interface Position {
     code: string;
@@ -345,7 +346,7 @@ function PositionForm({
         if (rows.some(r => !Number.isSafeInteger(r.required) || r.required < 0 || r.required > 999999)) return setError('Enter a valid non-negative whole-number requirement for every enabled unit.');
         setBusy(true);
         try {
-            await callBackend('/api/org/positions/save', { code: existing?.code, title: title.trim(), description, parentCode: parent, operatingLevel, securityRoles, coreSkills, staffingPlan: rows });
+            await withSodAcknowledgement((extra) => callBackend('/api/org/positions/save', { code: existing?.code, title: title.trim(), description, parentCode: parent, operatingLevel, securityRoles, coreSkills, staffingPlan: rows, ...extra }));
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save.');

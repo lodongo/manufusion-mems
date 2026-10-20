@@ -5,6 +5,7 @@ import { Alert, SelectField } from '../components/ui';
 import { Button, Card, Spinner, useLoad } from '../admin/kit';
 import { LEVELS, upperName } from './structureDefs';
 import type { Position } from './PositionsPage';
+import { withSodAcknowledgement } from '../lib/sod';
 
 interface ScopeNode {
     id: string;
@@ -81,7 +82,7 @@ function ScopeForm({ uid, data }: { uid: string; data: ScopeData }) {
                 if (nextAssignments.length && (!startsOn || !endsOn || endsOn < startsOn)) throw new Error('Choose valid dates for the temporary assignment.');
                 if (!nextAssignments.some(a => a.positionCode === role)) nextAssignments.push({positionCode:role,nodeId:location,type:nextAssignments.length?temporaryType:'primary',startsOn:nextAssignments.length?startsOn:'',endsOn:nextAssignments.length?endsOn:''});
             }
-            const result = await callBackend<{assignments:ScopeData['assignments'];extraScopes:string[]}>('/api/org/users/scope/save', { uid, assignments: nextAssignments, extraScopes: extras });
+            const result = await withSodAcknowledgement((extra) => callBackend<{assignments:ScopeData['assignments'];extraScopes:string[]}>('/api/org/users/scope/save', { uid, assignments: nextAssignments, extraScopes: extras, ...extra }));
             setAssignments(result.assignments);
             setExtras(result.extraScopes);
             setRole('');

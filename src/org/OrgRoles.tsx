@@ -178,7 +178,7 @@ function RoleForm({ role, data, onDone }: { role?: RoleItem; data: ListResponse;
 
     const save = async () => {
         await callBackend('/api/org/roles/save', {
-            role: { id: role?.id, name: name.trim(), description: description.trim(), permissions: perms, acknowledgeSod: ackSod.filter((x) => conflicts.some((c) => c.id === x)), sodReason: conflicts.length ? sodReason.trim() : '' },
+            role: { id: role?.id, name: name.trim(), description: description.trim(), permissions: perms, acknowledgeSod: ackSod.filter((x) => conflicts.some((c) => c.id === x)), sodReason: conflicts.length ? sodReason.trim() : '', acknowledgeSensitive: newSensitive },
         });
         onDone();
     };

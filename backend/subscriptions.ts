@@ -262,10 +262,10 @@ export const subscriptionRoutes = {
         }),
     ],
 
-    'POST /api/org/subscription': [orgRoute('org.subscription.get', 'ADM.modules', async (ctx) => subscriptionFor(ctx))],
+    'POST /api/org/subscription': [orgRoute('org.subscription.get', 'ADM.billing', async (ctx) => subscriptionFor(ctx))],
 
     'POST /api/org/subscription/pay': [
-        orgRoute('org.subscription.pay', 'ADM.modules', async (ctx) => {
+        orgRoute('org.subscription.pay', 'ADM.billing', async (ctx) => {
             await rateLimit('org-pay', ctx.orgId, 10, 3600);
             const method = str(ctx.body.method) === 'card' ? 'card' : 'mpesa';
             const phone = str(ctx.body.phone).replace(/[\s-]/g, '');
