@@ -22,7 +22,7 @@ const CLASSES = [
  ['TMP','Template'], ['REG','Register'], ['REC','Record'], ['RPT','Report'],
 ] as const;
 
-export default function DocumentRegistryPage({ canConfigure, canReview }: { canConfigure: boolean; canReview: boolean }) {
+export default function DocumentRegistryPage({ canConfigure, canReview, mode = 'register' }: { canConfigure: boolean; canReview: boolean; mode?: 'register'|'engineering'|'sds'|'rca'|'review'|'knowledge'|'forms' }) {
   const { data, error, loading, reload } = useLoad(
     () => callBackend<{ documents: DocumentRow[] }>('/api/org/drkms/documents/list', {}), []
   );
@@ -92,8 +92,8 @@ export default function DocumentRegistryPage({ canConfigure, canReview }: { canC
     finally { setBusy(false); }
   };
   return <div className='space-y-4'>
-    <PageTitle title='Document Registry' subtitle='Controlled registration, verification and approved revisions' />
-    {canConfigure && <Card>
+    <PageTitle title={({register:'Document register',engineering:'Engineering & equipment library',sds:'SHEQ SDS / MSDS',rca:'Digital RCA & investigations',review:'Review & approvals',knowledge:'Knowledge & troubleshooting',forms:'Digital forms & records'} as Record<string,string>)[mode]} subtitle='Documentation & Records (DOC) · Controlled enterprise knowledge' />
+    {mode==='register' && canConfigure && <Card>
       <h2 className='mb-2 text-base font-semibold text-white'>Organization document settings</h2>
       <p className='mb-3 text-xs text-slate-400'>Global document classifications are inherited; locations come from the existing organization hierarchy.</p>
       <label className='block text-sm text-slate-200'>Default review cycle (months)
@@ -118,7 +118,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview }: { canC
       {settingsNotice && <p role='status' className='mt-2 text-sm text-green-300'>{settingsNotice}</p>}
       {settingsError && <p role='alert' className='mt-2 text-sm text-red-300'>{settingsError}</p>}
     </Card>}
-    <Card>
+    {mode==='register' && <Card>
       <h2 className='mb-3 text-base font-semibold text-white'>Register a document draft</h2>
       <div className='grid min-w-0 gap-3'>
         <label className='block text-sm text-slate-200'>Document title
@@ -158,13 +158,13 @@ export default function DocumentRegistryPage({ canConfigure, canReview }: { canC
       {notice && <p role='status' className='mt-3 text-sm text-green-300'>{notice}</p>}
       {createError && <p role='alert' className='mt-3 text-sm text-red-300'>{createError}</p>}
     </Card>
-    <DocumentSourceStaging documents={data?.documents ?? []} />
-    <EngineeringDocumentLinks documents={data?.documents ?? []} />
-    <SheqSdsRegistry canConfigure={canConfigure} />
-    <DigitalRcaDraft locations={setup.data?.locations ?? []} onCreated={reload} />
-    <Card>
+    {(mode==='register'||mode==='engineering') && <DocumentSourceStaging documents={data?.documents ?? []} />}
+    {mode==='engineering' && <EngineeringDocumentLinks documents={data?.documents ?? []} />}
+    {mode==='sds' && <SheqSdsRegistry canConfigure={canConfigure} />}
+    {mode==='rca' && <DigitalRcaDraft locations={setup.data?.locations ?? []} onCreated={reload} />}
+    {(mode==='register'||mode==='review') && <Card>
       <div className='mb-3 flex items-center justify-between gap-2'>
-        <h2 className='font-semibold text-white'>Registered documents</h2>
+        <h2 className='font-semibold text-white'>{mode==='review'?'Document review queue':'Registered documents'}</h2>
         <button type='button' aria-label='Refresh documents' onClick={reload}
           className='rounded-lg border border-slate-600 p-2 text-slate-200'><RefreshCw size={18}/></button>
       </div>
@@ -208,6 +208,8 @@ export default function DocumentRegistryPage({ canConfigure, canReview }: { canC
         </div>)}
       </div>
     </Card>
+    {mode==='knowledge' && <Card><p className='text-sm text-slate-200'>Open Asset Management and select an equipment item to access its scoped technical dossier, maintenance evidence and troubleshooting search. Full manual indexing and AI diagnosis are not yet enabled.</p></Card>}
+    {mode==='forms' && <Card><p className='text-sm text-slate-200'>Controlled digital form schemas and OCR contracts are in development. Executable forms and OCR processing are not yet released.</p></Card>}
     <p className='text-xs text-slate-400'>Restricted to dedicated document permissions for the foundation stage. Files are available only after controlled verification and approved publication.</p>
   </div>;
 }
