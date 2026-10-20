@@ -82,7 +82,7 @@ export default function HomeLayoutEditor() {
                                 <div key={key} className='rounded-xl border border-line bg-page p-3'>
                                     <div className='flex items-center gap-2'>
                                         <button type='button' aria-label={(enabled ? 'Hide ' : 'Show ') + card.label}
-                                            onClick={() => toggle(key)} className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line text-brand'>
+                                            onClick={() => toggle(key)} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line text-brand'>
                                             {enabled ? <Eye className='h-4 w-4' /> : <EyeOff className='h-4 w-4' />}
                                         </button>
                                         <div className='min-w-0 flex-1'>
@@ -92,12 +92,12 @@ export default function HomeLayoutEditor() {
                                         <div className='flex shrink-0 gap-1'>
                                             <button type='button' aria-label={'Move ' + card.label + ' up'} disabled={index === 0}
                                                 onClick={() => changeOrder(key, -1)}
-                                                className='flex h-10 w-9 items-center justify-center rounded-lg border border-line text-muted disabled:opacity-30'>
+                                                className='flex h-11 w-9 items-center justify-center rounded-lg border border-line text-muted disabled:opacity-30'>
                                                 <ArrowUp className='h-4 w-4' />
                                             </button>
                                             <button type='button' aria-label={'Move ' + card.label + ' down'} disabled={index === mapped.length - 1}
                                                 onClick={() => changeOrder(key, 1)}
-                                                className='flex h-10 w-9 items-center justify-center rounded-lg border border-line text-muted disabled:opacity-30'>
+                                                className='flex h-11 w-9 items-center justify-center rounded-lg border border-line text-muted disabled:opacity-30'>
                                                 <ArrowDown className='h-4 w-4' />
                                             </button>
                                         </div>
@@ -105,7 +105,7 @@ export default function HomeLayoutEditor() {
                                     <label className='mt-2 flex items-center gap-2 pl-1 text-xs text-muted'>
                                         Card size
                                         <select value={layout.sizes[key]} onChange={(e) => changeSize(key, e.target.value as HomeCardSize)}
-                                            className='min-h-10 min-w-0 flex-1 rounded-lg border border-line bg-panel px-2 text-sm text-ink'>
+                                            className='min-h-11 min-w-0 flex-1 rounded-lg border border-line bg-panel px-2 text-sm text-ink'>
                                             <option value='compact'>Compact · fewer rows</option>
                                             <option value='regular'>Regular</option>
                                             <option value='wide'>Wide · more rows on larger screens</option>

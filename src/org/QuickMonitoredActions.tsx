@@ -36,7 +36,7 @@ export default function QuickMonitoredActions({uid}:{uid:string}){
         {policy==='required'&&<div className='space-y-2 p-4 text-xs text-ink'>
             <p>Acknowledge the Chat workplace notice to access monitored assignments.</p>
             <button type='button' onClick={()=>leaveQuick('organization_home/quick/chat')}
-                className='flex min-h-10 items-center gap-2 rounded-xl bg-brand px-3 text-onbrand'><MessageCircle className='h-4 w-4'/>Open Chat</button>
+                className='flex min-h-11 items-center gap-2 rounded-xl bg-brand px-3 text-onbrand'><MessageCircle className='h-4 w-4'/>Open Chat</button>
         </div>}
         {policy==='accepted'&&<div className='h-[min(52dvh,540px)] min-h-[220px] overflow-hidden'>
             <ChatActionsBoard uid={uid} people={people}/>

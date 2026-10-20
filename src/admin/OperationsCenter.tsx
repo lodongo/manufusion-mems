@@ -3,6 +3,7 @@ import { Activity, AlertTriangle, Cloud, ExternalLink, GitBranch, GitCommit, Pla
 import { callBackend } from '../lib/backend';
 import { Alert } from '../components/ui';
 import { Badge, Button, Card, PageTitle, Spinner, useLoad } from './kit';
+import { appPrompt } from '../components/dialogs';
 
 type Result = { ok: boolean; data?: unknown; message?: string };
 type RecordType = Record<string, unknown>;
@@ -87,8 +88,8 @@ export default function OperationsCenter() {
                 <div className='flex gap-1 overflow-x-auto rounded-lg border border-line bg-page p-2' role='img' aria-label='Recent workflow success and failure history'>
                     {trend.length?trend.map(x=><span key={x.id} title={`Run #${x.id} — ${x.ok?'Success':x.status}`} className={`h-12 min-w-2 flex-1 rounded-sm ${x.ok?'bg-emerald-500':'bg-red-500'}`}/>):<p className='px-2 text-sm text-soft'>Connect GitHub App to show deployment trend.</p>}
                 </div>
-                <Button disabled={!data.githubConfigured||!!busy} busy={busy==='/api/admin/ops/github/dispatch'} onClick={()=>{
-                    if(window.prompt('Type DEPLOY DEVELOPMENT to start the audited workflow:')!=='DEPLOY DEVELOPMENT')return;
+                <Button disabled={!data.githubConfigured||!!busy} busy={busy==='/api/admin/ops/github/dispatch'} onClick={async ()=>{
+                    if((await appPrompt('Type DEPLOY DEVELOPMENT to start the audited workflow:'))!=='DEPLOY DEVELOPMENT')return;
                     void runAction('/api/admin/ops/github/dispatch',{confirm:'DEPLOY DEVELOPMENT'},'Development deployment requested; refresh for results.');
                 }}><Play className='h-4 w-4'/> Deploy develop</Button>
             </Card>
@@ -104,8 +105,8 @@ export default function OperationsCenter() {
                     </div>
                     <div className='mt-2 flex flex-wrap gap-2'>
                         <Button variant='secondary' onClick={()=>link(txt(r.html_url))}><ExternalLink className='h-4 w-4'/> Details</Button>
-                        {r.conclusion==='failure'&&<Button variant='secondary' disabled={!data.githubConfigured||!!busy} onClick={()=>{
-                            const id=Number(r.id);if(window.prompt(`Type RETRY ${id} to rerun failed jobs:`)!==`RETRY ${id}`)return;
+                        {r.conclusion==='failure'&&<Button variant='secondary' disabled={!data.githubConfigured||!!busy} onClick={async ()=>{
+                            const id=Number(r.id);if((await appPrompt(`Type RETRY ${id} to rerun failed jobs:`))!==`RETRY ${id}`)return;
                             void runAction('/api/admin/ops/github/retry',{runId:id,confirm:`RETRY ${id}`},'Rerun requested.');
                         }}><RotateCcw className='h-4 w-4'/> Retry failed</Button>}
                     </div>

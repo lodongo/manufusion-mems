@@ -279,7 +279,7 @@ export default function OrgUserHome({
                                 <div className='flex flex-wrap gap-1 border-t border-line p-2'>
                                     {m.links.slice(0, layout.sizes.modules === 'wide' ? 6 : 3).map((l) => (
                                         <button key={l.path} type='button' onClick={() => open(l.path)}
-                                            className='min-h-9 rounded-lg bg-panel px-2 text-xs text-soft'>{l.label}</button>
+                                            className='min-h-11 rounded-lg bg-panel px-2 text-xs text-soft'>{l.label}</button>
                                     ))}
                                 </div>
                             )}
@@ -318,7 +318,7 @@ export default function OrgUserHome({
                     <p className='text-sm text-muted'>{roleName}</p>
                 </div>
                 <div className='flex items-center gap-1.5'>
-                    {!!unreadMail && <span className={'flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold ' + (mailPreview.length ? 'bg-red-600 text-white' : 'bg-brand/10 text-brand')} title={mailPreview.length ? mailPreview.length+' critical unread email' : unreadMail+' unread email'}>{mailPreview.length || unreadMail > 99 ? (mailPreview.length > 99 || (!mailPreview.length && unreadMail > 99) ? '99+' : (mailPreview.length || unreadMail)) : unreadMail}</span>}
+                    {!!unreadMail && <span className={'flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-bold ' + (mailPreview.length ? 'bg-red-600 text-white' : 'bg-brand/10 text-brand')} title={mailPreview.length ? mailPreview.length+' critical unread email' : unreadMail+' unread email'}>{mailPreview.length || unreadMail > 99 ? (mailPreview.length > 99 || (!mailPreview.length && unreadMail > 99) ? '99+' : (mailPreview.length || unreadMail)) : unreadMail}</span>}
                     <button type='button' aria-label='Open internal Email' className='flex min-h-11 items-center gap-2 rounded-xl border border-line bg-panel px-3 text-xs font-semibold text-brand'
                         onClick={() => onNavigate('organization_home/mail')}>
                         <Mail className='h-5 w-5' /> Email

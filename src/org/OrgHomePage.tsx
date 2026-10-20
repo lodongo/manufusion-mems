@@ -257,14 +257,14 @@ function MenuSection({ menu, open, activePath, search, onToggle, onSelect, favor
             </button>
             {expanded && (
                 <div className='ml-5 border-l border-slate-700 py-1 pl-3'>
-                    <button onClick={() => onSelect(`module/${menu.module.code}`)} className={`mb-0.5 flex min-h-9 w-full items-center rounded-lg px-3 text-left text-xs ${activePath === `module/${menu.module.code}` ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-400 hover:bg-slate-800'}`}>
+                    <button onClick={() => onSelect(`module/${menu.module.code}`)} className={`mb-0.5 flex min-h-11 w-full items-center rounded-lg px-3 text-left text-xs ${activePath === `module/${menu.module.code}` ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-400 hover:bg-slate-800'}`}>
                         Module overview
                     </button>
                     {menu.module.code === 'FIN' && <FinEntityMenu onPick={() => onSelect(activePath.startsWith('fin_') ? activePath.split('/')[0] : 'fin_gl')} />}
                     {links.map(link => (
                         <div key={link.path} className='flex min-h-10 items-center gap-1 rounded-lg'>
                             <button onClick={() => onSelect(link.path)} className={`min-w-0 flex-1 rounded-lg px-3 py-2 text-left text-sm ${activePath === link.path || activePath.startsWith(`${link.path}/`) ? 'bg-emerald-500/10 font-medium text-emerald-300' : 'text-slate-300 hover:bg-slate-800'}`}>{link.label}</button>
-                            <button type='button' aria-label={favorites.includes(link.path)?'Remove favorite':'Add favorite'} onClick={()=>onFavorite(link.path)} className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-amber-400 hover:bg-slate-800'><Star className='h-5 w-5' fill={favorites.includes(link.path)?'currentColor':'none'}/></button>
+                            <button type='button' aria-label={favorites.includes(link.path)?'Remove favorite':'Add favorite'} onClick={()=>onFavorite(link.path)} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-amber-400 hover:bg-slate-800'><Star className='h-5 w-5' fill={favorites.includes(link.path)?'currentColor':'none'}/></button>
                         </div>
                     ))}
                     {term && !links.length && <p className='px-3 py-2 text-xs text-muted'>No matching submodules</p>}
@@ -446,12 +446,12 @@ export default function OrgHomePage({
                 <div className='mt-3'><UserChip session={session} compact onClick={() => toHome('profile')} /></div>
             </div>
             <nav aria-label='Organization modules and submodules' className='min-h-0 flex-1 overflow-y-auto overscroll-contain p-3'>
-                <button onClick={() => toHome()} className={`mb-3 flex h-10 w-full items-center gap-3 rounded-xl px-3 text-sm ${!currentPath ? 'bg-emerald-500/10 font-medium text-emerald-300' : 'text-slate-300 hover:bg-slate-800'}`}>
+                <button onClick={() => toHome()} className={`mb-3 flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm ${!currentPath ? 'bg-emerald-500/10 font-medium text-emerald-300' : 'text-slate-300 hover:bg-slate-800'}`}>
                     <Home className='h-[18px] w-[18px]' /> Organization home
                 </button>
                 <label className='mb-3 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3'>
                     <Search className='h-4 w-4 text-muted' />
-                    <input aria-label='Search modules and submodules' value={search} onChange={(e) => setSearch(e.target.value)} placeholder='Find a module or area' className='h-10 min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-muted' />
+                    <input aria-label='Search modules and submodules' value={search} onChange={(e) => setSearch(e.target.value)} placeholder='Find a module or area' className='h-11 min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-muted' />
                 </label>
                 <p className='mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted'>Modules & submodules</p>
                 {menus.map((m) => (
@@ -471,10 +471,10 @@ export default function OrgHomePage({
             </nav>
             <div className='shrink-0 border-t border-slate-800 p-2'>
                 <div className='flex items-center gap-1'>
-                    <button type='button' aria-expanded={!personalCollapsed} onClick={()=>setPersonalCollapsed(x=>!x)} className='flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left text-xs font-semibold text-slate-300'>
+                    <button type='button' aria-expanded={!personalCollapsed} onClick={()=>setPersonalCollapsed(x=>!x)} className='flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left text-xs font-semibold text-slate-300'>
                         {personalCollapsed?<ChevronRight className='h-4 w-4'/>:<ChevronDown className='h-4 w-4'/>} Personal shortcuts
                     </button>
-                    <button type='button' aria-label='Customize personal shortcuts' onClick={()=>{setPersonalEditing(x=>!x);setPersonalCollapsed(false);}} className='flex h-10 w-10 items-center justify-center rounded-lg text-slate-300'><Settings className='h-4 w-4'/></button>
+                    <button type='button' aria-label='Customize personal shortcuts' onClick={()=>{setPersonalEditing(x=>!x);setPersonalCollapsed(false);}} className='flex h-11 w-11 items-center justify-center rounded-lg text-slate-300'><Settings className='h-4 w-4'/></button>
                 </div>
                 {!personalCollapsed&&<div className='min-h-0 overflow-y-auto overscroll-contain' style={{maxHeight:personalHeight+'dvh'}}>
                     {personalEditing&&<div className='space-y-2 rounded-lg border border-line p-2'>
@@ -484,36 +484,36 @@ export default function OrgHomePage({
                         {personalItems.map(item=><label key={item.key} className='flex min-h-9 items-center gap-2 text-xs text-ink'>
                             <input type='checkbox' checked={personalVisible.includes(item.key)} onChange={e=>setPersonalVisible(previous=>e.target.checked?[...previous,item.key]:previous.filter(k=>k!==item.key))}/>{item.label}
                         </label>)}
-                        <button type='button' onClick={()=>setPersonalEditing(false)} className='min-h-10 w-full rounded-lg border border-line text-sm text-ink'>Done</button>
+                        <button type='button' onClick={()=>setPersonalEditing(false)} className='min-h-11 w-full rounded-lg border border-line text-sm text-ink'>Done</button>
                     </div>}
-                    {personalItems.filter(item=>personalVisible.includes(item.key)).map(item=><button key={item.key} type='button' onClick={()=>{setMenuOpen(false);if(item.path==='organization_admin')navigate(item.path);else toHome(item.path);}} className='flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-300 hover:bg-slate-800'>
+                    {personalItems.filter(item=>personalVisible.includes(item.key)).map(item=><button key={item.key} type='button' onClick={()=>{setMenuOpen(false);if(item.path==='organization_admin')navigate(item.path);else toHome(item.path);}} className='flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-300 hover:bg-slate-800'>
                         <item.Icon className='h-[18px] w-[18px] shrink-0'/><span className='min-w-0 truncate'>{item.label}</span>
                     </button>)}
                 </div>}
-                <button onClick={onSignOut} className='flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-300 hover:bg-slate-800'><LogOut className='h-[18px] w-[18px]'/> Log out</button>
+                <button onClick={onSignOut} className='flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-300 hover:bg-slate-800'><LogOut className='h-[18px] w-[18px]'/> Log out</button>
             </div>
         </div>
     );
 
     return (
-        <div className='min-h-screen bg-slate-950'>
+        <div className='mems-shell-home min-h-dvh bg-slate-950'>
             <aside className='fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-slate-800 bg-slate-900 lg:block'>{nav}</aside>
             {menuOpen && (
                 <div className='fixed inset-0 z-50 lg:hidden'>
                     <button aria-label='Close menu' className='absolute inset-0 bg-black/70' onClick={() => setMenuOpen(false)} />
                     <aside role='dialog' aria-modal='true' aria-label='Modules menu' className='absolute inset-y-0 left-0 w-80 max-w-[88%] border-r border-slate-800 bg-slate-900 shadow-2xl'>
-                        <button aria-label='Close menu' onClick={() => setMenuOpen(false)} className='absolute right-2 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800'><X className='h-5 w-5' /></button>
+                        <button aria-label='Close menu' onClick={() => setMenuOpen(false)} className='absolute right-2 top-3 z-10 flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800'><X className='h-5 w-5' /></button>
                         {nav}
                     </aside>
                 </div>
             )}
             <div className='lg:pl-72'>
                 <header className='sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-slate-800 bg-slate-950/95 px-4 backdrop-blur lg:px-8'>
-                    <button onClick={() => setMenuOpen(true)} aria-label='Open modules menu' className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-800 text-slate-200 hover:bg-slate-900 lg:hidden'><Menu className='h-5 w-5' /></button>
+                    <button onClick={() => setMenuOpen(true)} aria-label='Open modules menu' className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-800 text-slate-200 hover:bg-slate-900 lg:hidden'><Menu className='h-5 w-5' /></button>
                     <div className='min-w-0 flex-1'><p className='truncate text-sm font-semibold text-white'>{title}</p><p className='truncate text-[11px] text-muted'>{data.organization.name}</p></div>
                     {currentShortcut&&<button aria-label={shortcuts.favorites.includes(currentPath)?'Remove favorite':'Add favorite'} title='Favorite this submodule' onClick={()=>toggleFavorite(currentPath)} className='rounded-xl p-2 text-amber-400'><Star className='h-5 w-5' fill={shortcuts.favorites.includes(currentPath)?'currentColor':'none'}/></button>}
                     <UserChip session={session} compact onClick={() => toHome('profile')} />
-                    <button type='button' onClick={onSignOut} aria-label='Log out' title='Log out' className='hidden lg:flex min-h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-700 px-3 text-sm font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400'><LogOut className='h-4 w-4' aria-hidden='true'/> Log out</button>
+                    <button type='button' onClick={onSignOut} aria-label='Log out' title='Log out' className='hidden lg:flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-slate-700 px-3 text-sm font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400'><LogOut className='h-4 w-4' aria-hidden='true'/> Log out</button>
                 </header>
                 <main className='mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8'>{content}</main>
             </div>

@@ -148,11 +148,11 @@ export function FinEntityMenu({ onPick }: { onPick: () => void }) {
     if (!entities?.length) return null;
     return (
         <div className='mb-1 rounded-lg border border-slate-800 p-1'>
-            <p className='px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-muted'>Legal entity</p>
+            <p className='px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted'>Legal entity</p>
             {entities.map((e) => {
                 const on = le?.id === e.id;
                 return (
-                    <button key={e.id} type='button' aria-current={on ? 'true' : undefined} onClick={() => { chooseEntity(e.id); onPick(); }} className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2 text-left ${on ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-300 hover:bg-slate-800'}`}>
+                    <button key={e.id} type='button' aria-current={on ? 'true' : undefined} onClick={() => { chooseEntity(e.id); onPick(); }} className={`flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left ${on ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-300 hover:bg-slate-800'}`}>
                         <StatusDot status={e.status} label={e.statusLabel} />
                         <span className='font-mono text-xs'>{e.code}</span>
                         <span className='min-w-0 flex-1 truncate text-xs'>{e.name}</span>
@@ -197,7 +197,7 @@ export function Amount({ side, value, cur }: { side: 'D' | 'C'; value: number; c
     const s = SIDE[side];
     return (
         <span className={`inline-flex items-center gap-1 font-mono text-sm tabular-nums ${s.text}`}>
-            <span className={`rounded px-1 text-[10px] font-semibold ring-1 ${s.chip}`}>{s.label}</span>
+            <span className={`rounded px-1 text-[11px] font-semibold ring-1 ${s.chip}`}>{s.label}</span>
             {cur ? `${cur} ` : ''}
             {fmt(value)}
         </span>
@@ -253,7 +253,7 @@ export function SideBar<T extends string>({ items, value, onChange }: { items: A
                         {on && <span aria-hidden='true' className='absolute inset-y-2 left-0 w-1 rounded-full bg-emerald-400' />}
                         {Icon && <Icon className='h-5 w-5 shrink-0' />}
                         <span className='min-w-0 flex-1 truncate'>{it.label}</span>
-                        {it.count !== undefined && <span className={`rounded-full px-1.5 text-[10px] ${on ? 'bg-emerald-500/20' : 'bg-line'}`}>{it.count}</span>}
+                        {it.count !== undefined && <span className={`rounded-full px-1.5 text-[11px] ${on ? 'bg-emerald-500/20' : 'bg-line'}`}>{it.count}</span>}
                     </button>
                 );
             })}
@@ -436,7 +436,7 @@ export function Chips<T extends string>({ value, options, onChange }: { value: T
     return (
         <div role='radiogroup' className='inline-flex gap-1 rounded-xl border border-line p-1'>
             {options.map((o) => (
-                <button key={o.value} type='button' role='radio' aria-checked={value === o.value} onClick={() => onChange(o.value)} className={`h-10 shrink-0 rounded-lg px-3 text-sm font-medium ${value === o.value ? 'bg-emerald-500/15 text-emerald-300' : 'text-soft active:bg-panel'}`}>
+                <button key={o.value} type='button' role='radio' aria-checked={value === o.value} onClick={() => onChange(o.value)} className={`h-11 shrink-0 rounded-lg px-3 text-sm font-medium ${value === o.value ? 'bg-emerald-500/15 text-emerald-300' : 'text-soft active:bg-panel'}`}>
                     {o.label}
                 </button>
             ))}

@@ -8,6 +8,7 @@ import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { AssemblyPicker, GroupPicker, Info, LEVEL_LABEL, compressPhoto, critColor, findIn, type ListGroup, type MntLists, type MntSetup, type Place } from './mntShared';
+import { appConfirm } from '../components/dialogs';
 
 // Maintenance (MNT): work requests. A finding raised against an assembly, numbered WR + 8 digits by the server.
 // Requests are not approved: they are reviewed and assessed, then returned for information, declined, or
@@ -177,7 +178,7 @@ function RequestList({ setup }: { setup: MntSetup }) {
         <div className='space-y-3'>
             <div className='flex gap-1 overflow-x-auto rounded-xl border border-slate-800 p-1'>
                 {tabs.map(([k, label]) => (
-                    <button key={k} type='button' onClick={() => setTab(k)} className={`h-9 shrink-0 rounded-lg px-3 text-sm ${tab === k ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
+                    <button key={k} type='button' onClick={() => setTab(k)} className={`h-11 shrink-0 rounded-lg px-3 text-sm ${tab === k ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
                         {label}
                     </button>
                 ))}
@@ -531,7 +532,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                             {photos.map((p, i) => (
                                 <div key={p.token} className='relative overflow-hidden rounded-2xl border border-slate-800'>
                                     <img src={p.url} alt={`Photo ${i + 1}`} className='aspect-square w-full object-cover' />
-                                    <button type='button' aria-label='Remove photo' onClick={() => setPhotos((cur) => cur.filter((x) => x.token !== p.token))} className='absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full bg-slate-950/80 text-red-300'>
+                                    <button type='button' aria-label='Remove photo' onClick={() => setPhotos((cur) => cur.filter((x) => x.token !== p.token))} className='absolute right-2 top-2 flex h-11 w-11 items-center justify-center rounded-full bg-slate-950/80 text-red-300'>
                                         <Trash2 className='h-4 w-4' />
                                     </button>
                                 </div>
@@ -636,8 +637,8 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const [zoom, setZoom] = useState('');
     const [section,setSection]=useState<'request'|'tasks'|'summary'>('request');
     const [tasksDirty,setTasksDirty]=useState(false);
-    const goSection=(next:'request'|'tasks'|'summary')=>{
-        if(next!==section&&tasksDirty&&!window.confirm('You have unsaved task changes. Leave without saving them?'))return;
+    const goSection=async (next:'request'|'tasks'|'summary')=>{
+        if(next!==section&&tasksDirty&&!(await appConfirm('You have unsaved task changes. Leave without saving them?')))return;
         setMode('');setActionError('');setSection(next);
     };
 
@@ -685,7 +686,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
             {/* Action bar on top */}
             <div className='shrink-0 space-y-2 border-b border-slate-800 bg-slate-950 pb-3'>
                 <div className='flex items-center gap-2'>
-                    <Button variant='secondary' aria-label='Back' onClick={() => { if(tasksDirty&&!window.confirm('You have unsaved task changes. Leave without saving?'))return; navigate('organization_admin/work_requests'); }}>
+                    <Button variant='secondary' aria-label='Back' onClick={async () => { if(tasksDirty&&!(await appConfirm('You have unsaved task changes. Leave without saving?')))return; navigate('organization_admin/work_requests'); }}>
                         <ArrowLeft className='h-4 w-4' />
                     </Button>
                     <div className='min-w-0 flex-1'>
@@ -710,9 +711,9 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                 ] as const).map(([key,title,icon])=><button type='button' key={key} aria-current={section===key?'page':undefined}
                   aria-label={title==='Request'?'Review work request':title==='Tasks'?'Tasks and task assessments':'Assessment summary'}
                   onClick={()=>goSection(key)}
-                  className={'flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center text-[10px] font-semibold leading-tight '+(section===key?'bg-emerald-900/50 text-emerald-200 ring-1 ring-emerald-700':'text-slate-400')}>
+                  className={'flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center text-[11px] font-semibold leading-tight '+(section===key?'bg-emerald-900/50 text-emerald-200 ring-1 ring-emerald-700':'text-slate-400')}>
                   {icon}<span>{title}</span></button>)}
-                <span className='mt-auto break-words text-center text-[9px] text-slate-500'>{r.code.slice(-4)}</span>
+                <span className='mt-auto break-words text-center text-[11px] text-slate-500'>{r.code.slice(-4)}</span>
               </nav>
               <div className='min-w-0 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-3 sm:px-4'>
                 {actionError && !mode && <Alert tone='error'>{actionError}</Alert>}
@@ -1109,7 +1110,7 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
                     {photos.map((p) => (
                         <div key={p.token} className='relative overflow-hidden rounded-xl border border-slate-800'>
                             <img src={p.url} alt='Photo' className='aspect-square w-full object-cover' />
-                            <button type='button' aria-label='Remove photo' onClick={() => setPhotos((cur) => cur.filter((x) => x.token !== p.token))} className='absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-full bg-slate-950/80 text-red-300'>
+                            <button type='button' aria-label='Remove photo' onClick={() => setPhotos((cur) => cur.filter((x) => x.token !== p.token))} className='absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-full bg-slate-950/80 text-red-300'>
                                 <Trash2 className='h-4 w-4' />
                             </button>
                         </div>

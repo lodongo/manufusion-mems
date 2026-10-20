@@ -3,6 +3,7 @@ import { CreditCard, Smartphone } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert, Field } from '../components/ui';
 import { Badge, Button, Card, Empty, PageTitle, Spinner, useLoad } from '../admin/kit';
+import { appConfirm } from '../components/dialogs';
 
 interface Subscription {
     period: string;
@@ -41,7 +42,7 @@ export default function OrgSubscription() {
 
     const pay = async () => {
         setPayError('');
-        if (simulated && !window.confirm(`Simulate a ${method === 'mpesa' ? 'M-Pesa' : 'card'} payment of ${kes(data.balance)}? No money will move.`)) return;
+        if (simulated && !(await appConfirm(`Simulate a ${method === 'mpesa' ? 'M-Pesa' : 'card'} payment of ${kes(data.balance)}? No money will move.`))) return;
         setBusy(true);
         try {
             const res = await callBackend<{ subscription?: Subscription; checkoutUrl?: string }>('/api/org/subscription/pay', { method, phone });

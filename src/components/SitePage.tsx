@@ -7,7 +7,7 @@ export default function SitePage() {
     const { config } = useSite();
 
     return (
-        <div className='min-h-screen bg-slate-950 px-6 py-10'>
+        <div className='min-h-dvh bg-slate-950 px-6 py-10'>
             <main className='mx-auto w-full max-w-md'>
                 <p className='text-sm font-medium tracking-widest text-emerald-400'>{config.brandName}</p>
                 <p className='text-xs text-slate-500'>{config.platformName}</p>

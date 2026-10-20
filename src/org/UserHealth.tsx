@@ -3,6 +3,7 @@ import { Activity, AlertTriangle, CalendarOff, CheckCircle2, Clock3, HeartPulse,
 import { callBackend } from '../lib/backend';
 import { Alert } from '../components/ui';
 import { Badge, Button, Card, Spinner } from '../admin/kit';
+import { appConfirm } from '../components/dialogs';
 
 type HealthLock = { locked: true; kind: 'break' | 'weekly'; until: string; message: string };
 type HealthSettings = {
@@ -81,7 +82,7 @@ export default function UserHealth({ uid }: { uid: string }) {
             const message = today
                 ? 'Today is the chosen weekly rest day. Saving will immediately sign you out of MEMS until local midnight. Continue?'
                 : 'MEMS will prevent access for the entire selected weekday, including organization administrators. Confirm your operational coverage before continuing.';
-            if (!window.confirm(message)) return;
+            if (!(await appConfirm(message))) return;
         }
         setSaving(true);
         setInfo('');
@@ -146,7 +147,7 @@ export default function UserHealth({ uid }: { uid: string }) {
                         <div className='flex h-28 items-end justify-between gap-2' aria-label='Active MEMS usage by day'>
                             {data.days.map((entry) => (
                                 <div key={entry.date} className='flex min-w-0 flex-1 flex-col items-center gap-1'>
-                                    <span className='text-[10px] text-muted'>{Math.floor(entry.seconds / 60)}m</span>
+                                    <span className='text-[11px] text-muted'>{Math.floor(entry.seconds / 60)}m</span>
                                     <div className='flex h-20 w-full items-end rounded bg-page'>
                                         <div
                                             className='w-full rounded-t bg-brand/80'
@@ -154,7 +155,7 @@ export default function UserHealth({ uid }: { uid: string }) {
                                             title={entry.date + ': ' + formatTime(entry.seconds)}
                                         />
                                     </div>
-                                    <span className='truncate text-[10px] text-muted'>{entry.date.slice(5)}</span>
+                                    <span className='truncate text-[11px] text-muted'>{entry.date.slice(5)}</span>
                                 </div>
                             ))}
                         </div>

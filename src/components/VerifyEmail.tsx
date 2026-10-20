@@ -47,7 +47,7 @@ export default function VerifyEmail({ email, message, onVerified, onSignOut }: {
     };
 
     return (
-        <div className='flex min-h-screen items-center justify-center bg-slate-950 px-6'>
+        <div className='flex min-h-dvh items-center justify-center bg-slate-950 px-6'>
             <main className='w-full max-w-sm space-y-4 text-center'>
                 <MailCheck className='mx-auto h-12 w-12 text-emerald-400' />
                 <h1 className='text-2xl font-semibold text-white'>Verify your email</h1>

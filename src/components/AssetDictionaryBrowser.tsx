@@ -220,11 +220,11 @@ export default function AssetDictionaryBrowser({
                     {data.name} · version <span className='font-mono text-emerald-300'>{data.version}</span> · {data.groups.length} {L.groups} · {data.classes.length} {L.classes}
                 </p>
                 <div className='flex shrink-0 gap-1 rounded-xl border border-slate-700 p-1'>
-                    <button type='button' aria-label='Browse' onClick={() => setMode('browse')} className={`flex h-8 items-center gap-1 rounded-lg px-2 text-xs ${mode === 'browse' ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
+                    <button type='button' aria-label='Browse' onClick={() => setMode('browse')} className={`flex h-11 items-center gap-1 rounded-lg px-2 text-xs ${mode === 'browse' ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
                         <FolderTree className='h-4 w-4' />
                         Browse
                     </button>
-                    <button type='button' aria-label='Table' onClick={() => setMode('table')} className={`flex h-8 items-center gap-1 rounded-lg px-2 text-xs ${mode === 'table' ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
+                    <button type='button' aria-label='Table' onClick={() => setMode('table')} className={`flex h-11 items-center gap-1 rounded-lg px-2 text-xs ${mode === 'table' ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
                         <Table2 className='h-4 w-4' />
                         All {L.classes}
                     </button>

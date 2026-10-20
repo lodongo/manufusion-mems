@@ -822,37 +822,27 @@ function Tile({ label, value }: { label: string; value: string }) {
 }
 
 function PeriodTable({ title, rows, cur }: { title: string; rows: Array<{ key: string } & Totals>; cur: string }) {
+    const columns = useMemo<Array<Column<{ key: string } & Totals>>>(
+        () => [
+            { key: 'period', label: 'Period', value: (r) => r.key },
+            { key: 'count', label: 'POs', type: 'number', value: (r) => r.count },
+            { key: 'value', label: `Value (${cur})`, type: 'number', value: (r) => r.value, render: (r) => amount(r.value) },
+            { key: 'paid', label: 'Paid', type: 'number', value: (r) => r.paid, render: (r) => amount(r.paid) },
+            { key: 'pending', label: 'Pending', type: 'number', value: (r) => r.pending, render: (r) => amount(r.pending) },
+        ],
+        [cur],
+    );
     return (
-        <section className='space-y-1 rounded-2xl border border-line bg-panel p-3'>
-            <h2 className='text-sm font-semibold text-ink'>{title}</h2>
-            {!rows.length && <p className='text-xs text-muted'>Nothing to show yet.</p>}
-            {rows.length > 0 && (
-                <div className='max-h-72 overflow-auto'>
-                    <table className='w-full text-left text-xs'>
-                        <thead className='sticky top-0 bg-panel text-muted'>
-                            <tr>
-                                <th className='py-1 pr-2'>Period</th>
-                                <th className='py-1 pr-2 text-right'>POs</th>
-                                <th className='py-1 pr-2 text-right'>Value ({cur})</th>
-                                <th className='py-1 pr-2 text-right'>Paid</th>
-                                <th className='py-1 text-right'>Pending</th>
-                            </tr>
-                        </thead>
-                        <tbody className='text-ink'>
-                            {rows.map((r) => (
-                                <tr key={r.key} className='border-t border-line'>
-                                    <td className='py-1.5 pr-2'>{r.key}</td>
-                                    <td className='py-1.5 pr-2 text-right'>{r.count}</td>
-                                    <td className='py-1.5 pr-2 text-right'>{amount(r.value)}</td>
-                                    <td className='py-1.5 pr-2 text-right'>{amount(r.paid)}</td>
-                                    <td className='py-1.5 text-right'>{amount(r.pending)}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-        </section>
+        <RichTable
+            id={`vendor-po-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+            title={title}
+            fileName={`supplier_orders_${title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`}
+            height='h-[24rem]'
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.key}
+            empty='Nothing to show yet.'
+        />
     );
 }
 

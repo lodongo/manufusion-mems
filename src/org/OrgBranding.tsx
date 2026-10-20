@@ -96,7 +96,7 @@ function BrandingForm({ name, initial, onSaved }: { name: string; initial: Brand
                 <p className='pt-2 text-xs font-semibold uppercase tracking-wider text-slate-500'>Brand colour</p>
                 <div className='flex flex-wrap gap-2'>
                     {BRAND_SWATCHES.map((c) => (
-                        <button key={c} type='button' aria-label={`Colour ${c}`} onClick={() => setF({ ...f, brandColor: c })} className={`h-9 w-9 rounded-full border-2 ${f.brandColor.toLowerCase() === c ? 'border-white' : 'border-transparent'}`} style={{ background: c }} />
+                        <button key={c} type='button' aria-label={`Colour ${c}`} onClick={() => setF({ ...f, brandColor: c })} className={`h-11 w-11 rounded-full border-2 ${f.brandColor.toLowerCase() === c ? 'border-white' : 'border-transparent'}`} style={{ background: c }} />
                     ))}
                     <label className='flex h-9 items-center gap-2 rounded-full border border-slate-700 pl-1 pr-3 text-xs text-slate-300'>
                         <input type='color' value={f.brandColor} onChange={(e) => setF({ ...f, brandColor: e.target.value })} className='h-7 w-7 cursor-pointer rounded-full border-0 bg-transparent' aria-label='Custom colour' />

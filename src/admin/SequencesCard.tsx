@@ -3,6 +3,7 @@ import { Hash } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert, Field } from '../components/ui';
 import { Button, Card, Spinner, useLoad } from './kit';
+import { appConfirm } from '../components/dialogs';
 
 interface SequenceData {
     orgSeq: number;
@@ -16,7 +17,7 @@ export default function SequencesCard({ isSuper }: { isSuper: boolean }) {
     const [actionError, setActionError] = useState('');
 
     const save = async () => {
-        if (!window.confirm(`Set the next organization code number to ${next}? Codes are never reused.`)) return;
+        if (!(await appConfirm(`Set the next organization code number to ${next}? Codes are never reused.`))) return;
         setBusy(true);
         setActionError('');
         try {

@@ -5,6 +5,7 @@ import { Alert } from '../components/ui';
 import { Button, Spinner } from '../admin/kit';
 import MailRichEditor from './MailRichEditor';
 import { useQuickLeave } from './quickNavigation';
+import { appConfirm } from '../components/dialogs';
 
 type Attachment={id:string;path:string;name:string;mime:string;size:number;url:string};
 type Note={id:string;topic:string;body:string;format?:string;attachments?:Attachment[];archivedAt?:string;updatedAt:string};
@@ -82,7 +83,7 @@ export function QuickNotepad({uid}:{uid:string}){
         }catch(e){setError(errorText(e))}finally{setBusy(false)}
     };
     const remove=async(n:Note)=>{
-        if(!window.confirm('Permanently delete this note? This cannot be undone.'))return;
+        if(!(await appConfirm('Permanently delete this note? This cannot be undone.')))return;
         setBusy(true);
         try{
             await callBackend('/api/org/quick/note/delete',{id:n.id});
@@ -147,8 +148,8 @@ export function QuickNotepad({uid}:{uid:string}){
             <header className='flex min-h-16 shrink-0 items-center gap-3 border-b border-line bg-panel px-4 pt-[env(safe-area-inset-top)]'>
                 <div className='min-w-0 flex-1'><h3 className='truncate text-base font-bold'>{draft.id?'Edit note':'New note'}</h3>
                     <p className='text-xs text-muted'>Rich text · photos · attachments</p></div>
-                <button type='button' aria-label='Close note editor' onClick={()=>{
-                    if(draft.dirty&&!window.confirm('Close without saving? Your unfinished draft will be cleared.'))return;
+                <button type='button' aria-label='Close note editor' onClick={async ()=>{
+                    if(draft.dirty&&!(await appConfirm('Close without saving? Your unfinished draft will be cleared.')))return;
                     close();
                 }} className='flex h-11 w-11 items-center justify-center rounded-xl border border-line text-brand'><X className='h-5 w-5'/></button>
             </header>
@@ -174,7 +175,7 @@ export function QuickNotepad({uid}:{uid:string}){
                         {file.mime.startsWith('image/')&&file.url?<img src={file.url} alt={file.name} className='h-14 w-14 rounded-lg object-cover'/>:<FileText className='h-6 w-6 shrink-0 text-brand'/>}
                         <a className='min-w-0 flex-1 truncate text-xs font-semibold text-brand underline' href={file.url} target='_blank' rel='noopener noreferrer'>{file.name}</a>
                         <button type='button' aria-label={'Remove '+file.name} onClick={()=>setDraft(d=>({...d,attachments:d.attachments.filter(a=>a.path!==file.path),dirty:true}))}
-                            className='flex h-10 w-10 items-center justify-center text-red-500'><Trash2 className='h-4 w-4'/></button>
+                            className='flex h-11 w-11 items-center justify-center text-red-500'><Trash2 className='h-4 w-4'/></button>
                     </div>)}
                     <p className='text-[11px] text-muted'>Up to 12 files. Images up to 5 MB, documents up to 8 MB each. Only your account can read your note files.</p>
                 </section>

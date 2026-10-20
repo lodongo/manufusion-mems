@@ -4,6 +4,7 @@ import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import { Alert } from '../components/ui';
 import { Button, Card, PageTitle, Spinner } from '../admin/kit';
+import { appConfirm } from '../components/dialogs';
 
 interface SavedTable {
     id: string;
@@ -74,7 +75,7 @@ export default function MyTables({ allowedPaths, canAdmin, selectedId }: {
         navigate(item.route);
     };
     const remove = async (item: SavedTable) => {
-        if (!window.confirm('Remove the saved view ' + item.name + ' from My Tables?')) return;
+        if (!(await appConfirm('Remove the saved view ' + item.name + ' from My Tables?'))) return;
         setBusy(item.id);
         setError('');
         try {
@@ -121,15 +122,15 @@ export default function MyTables({ allowedPaths, canAdmin, selectedId }: {
                                         </button>
                                         <button type='button' title='Copy a link to My Tables' aria-label={'Copy link to ' + v.name}
                                             onClick={() => { void copy(v.id); }}
-                                            className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line text-soft'>
+                                            className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line text-soft'>
                                             <Copy className='h-4 w-4' />
                                         </button>
                                         {eligible(v) && <button type='button' aria-label={'Open ' + v.name} onClick={() => open(v)}
-                                            className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-brand'>
+                                            className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-brand'>
                                             <ExternalLink className='h-4 w-4' />
                                         </button>}
                                         <button type='button' disabled={busy === v.id} aria-label={'Remove ' + v.name}
-                                            onClick={() => { void remove(v); }} className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-red-500 disabled:opacity-40'>
+                                            onClick={() => { void remove(v); }} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-500 disabled:opacity-40'>
                                             <Trash2 className='h-4 w-4' />
                                         </button>
                                     </div>

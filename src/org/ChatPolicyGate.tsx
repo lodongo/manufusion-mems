@@ -23,7 +23,7 @@ export default function ChatPolicyGate({children}:{children:ReactNode}){
  if(policy?.accepted)return <>{children}</>;
  return <div className='flex h-full w-full min-h-0 items-center justify-center overflow-y-auto p-4 sm:p-8'>
     <section className='w-full max-w-xl space-y-4 rounded-2xl border border-line bg-panel p-5 shadow-sm'>
-        <button type='button' onClick={()=>leaveQuick('organization_home/quick')} className='min-h-10 text-xs font-semibold text-brand'>← Quick links</button>
+        <button type='button' onClick={()=>leaveQuick('organization_home/quick')} className='min-h-11 text-xs font-semibold text-brand'>← Quick links</button>
         <header className='flex items-start gap-3'>
           <span className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand'><ShieldCheck className='h-6 w-6'/></span>
           <div><h1 className='text-lg font-bold text-ink'>Chat workplace acknowledgement</h1>

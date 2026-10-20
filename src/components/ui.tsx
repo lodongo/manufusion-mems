@@ -92,7 +92,7 @@ export function Tabs<T extends string>({
                     role='tab'
                     aria-selected={value === option.value}
                     onClick={() => onChange(option.value)}
-                    className={`flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium ${
+                    className={`flex h-11 items-center justify-center gap-2 rounded-lg text-sm font-medium ${
                         value === option.value ? 'bg-brand text-onbrand' : 'text-muted'
                     }`}
                 >

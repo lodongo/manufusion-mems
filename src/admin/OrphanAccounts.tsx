@@ -5,6 +5,7 @@ import { ROLE_LABELS, STAFF_ROLES } from '../types';
 import { Alert } from '../components/ui';
 import { fmtDate } from './format';
 import { Button, Card, useLoad } from './kit';
+import { appConfirm } from '../components/dialogs';
 
 interface Orphan {
     uid: string;
@@ -27,7 +28,7 @@ export default function OrphanAccounts({ onRepaired }: { onRepaired: () => void 
 
     const repair = async (o: Orphan) => {
         const role = roles[o.uid] ?? 'mems_admin';
-        if (!window.confirm(`Create a MEMS profile for ${o.email} with the role ${ROLE_LABELS[role]}?`)) return;
+        if (!(await appConfirm(`Create a MEMS profile for ${o.email} with the role ${ROLE_LABELS[role]}?`))) return;
         setBusy(o.uid);
         setActionError('');
         try {

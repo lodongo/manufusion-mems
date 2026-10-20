@@ -25,13 +25,14 @@ import OrganizationFooter from './components/OrganizationFooter';
 import HealthTracker from './components/HealthTracker';
 import { Alert } from './components/ui';
 import GlobalSelectEnhancer from './components/GlobalSelectEnhancer';
+import { DialogHost } from './components/dialogs';
 
 type SetupState = 'checking' | 'needed' | 'done' | 'error';
 type SessionState = 'idle' | 'loading' | 'ready' | 'error';
 
 function Loading() {
     return (
-        <div className='flex min-h-screen items-center justify-center bg-page'>
+        <div className='flex min-h-dvh items-center justify-center bg-page'>
             <Loader2 className='h-8 w-8 animate-spin text-brand' aria-label='Loading' />
         </div>
     );
@@ -39,7 +40,7 @@ function Loading() {
 
 function ErrorScreen({ message, onRetry, onSignOut }: { message: string; onRetry: () => void; onSignOut?: () => void }) {
     return (
-        <div className='flex min-h-screen items-center justify-center bg-page px-6'>
+        <div className='flex min-h-dvh items-center justify-center bg-page px-6'>
             <div className='w-full max-w-sm space-y-4'>
                 <Alert tone='error'>{message}</Alert>
                 <button onClick={onRetry} className='h-12 w-full rounded-xl bg-brand font-semibold text-onbrand'>
@@ -295,6 +296,7 @@ function App() {
     return (
         <SiteContext.Provider value={siteState}>
             <GlobalSelectEnhancer />
+            <DialogHost />
             <div className={organizationReady ? 'mems-organization-ui' + (quickFullScreen ? '' : ' pb-12') : ''}>{render()}</div>
             {organizationReady && session && <HealthTracker session={session} />}
             {organizationReady && !quickFullScreen && <OrganizationFooter />}

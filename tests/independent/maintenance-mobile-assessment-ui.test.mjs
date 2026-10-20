@@ -26,7 +26,7 @@ test('reviewer is read-only and task changes are not lost silently on navigation
  const ui=src('WorkRequests.tsx');
  assert.match(tasks,/if\(!editable\)return <div/);
  assert.match(tasks,/<ReviewAssessment tasks=\{\[task\]\}/);
- assert.match(ui,/tasksDirty&&!window\.confirm/);
+ assert.match(ui,/tasksDirty&&!\(await appConfirm/);
  assert.match(ui,/function AssessmentSummary/);
  assert.match(ui,/canReview/);
  assert.match(ui,/editable=\{can.assess&&!can.reviewAssessment\}/);

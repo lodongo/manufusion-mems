@@ -11,6 +11,7 @@ import SafMetadataBrowser from './SafMetadataBrowser';
 import UtilityBrowser, { type Utility } from './UtilityBrowser';
 import AssetDictionaryAdmin from './AssetDictionaryAdmin';
 import ProcurementUnits, { type UomEntry } from './ProcurementUnits';
+import { appConfirm } from '../components/dialogs';
 
 export interface Module {
     code: string;
@@ -69,7 +70,7 @@ export default function ModulesPage({ code, tab, canWrite, isSuper = false }: { 
     }
 
     const seed = async () => {
-        if (!window.confirm('Upload the default ERP modules? This can only be done once.')) return;
+        if (!(await appConfirm('Upload the default ERP modules? This can only be done once.'))) return;
         setBusy(true);
         setActionError('');
         setInfo('');
@@ -173,7 +174,7 @@ function ModuleDetail({
     const [error, setError] = useState('');
 
     const initialise = async () => {
-        if (!module || !window.confirm(`Initialise ${module.code}? This creates the folder modules/${module.code} with ${module.code}_admin and ${module.code}_user.`)) return;
+        if (!module || !(await appConfirm(`Initialise ${module.code}? This creates the folder modules/${module.code} with ${module.code}_admin and ${module.code}_user.`))) return;
         setBusy(true);
         setError('');
         try {
@@ -431,7 +432,7 @@ function MetaListForm({ code, list, canWrite, onDone, onCancel }: { code: string
     };
 
     const remove = async () => {
-        if (!list || !window.confirm(`Delete the metadata list ${title}?`)) return;
+        if (!list || !(await appConfirm(`Delete the metadata list ${title}?`))) return;
         setBusy('delete');
         try {
             await callBackend('/api/admin/modules/metadata/delete', { code, key: list.key });
@@ -455,7 +456,7 @@ function MetaListForm({ code, list, canWrite, onDone, onCancel }: { code: string
                 )}
                 <Field id='meta-title' label='Title' maxLength={60} value={title} disabled={ro} onChange={(e) => setTitle(e.target.value)} />
                 <Field id='meta-description' label='Description (optional)' maxLength={300} value={description} disabled={ro} onChange={(e) => setDescription(e.target.value)} />
-                {isMnt && <div className='max-h-[60vh] space-y-2 overflow-y-auto rounded-xl border border-slate-700 p-2'>{mntItems.map((entry, idx) => <div key={entry.code} className='flex items-center gap-2 rounded-lg bg-slate-900 p-2'><input aria-label={'Color for ' + entry.label} type='color' value={entry.color || '#64748B'} disabled={ro} onChange={e => setMntItems(prev => prev.map((x,i)=>i===idx?{...x,color:e.target.value}:x))} className='h-8 w-9 shrink-0 cursor-pointer rounded' /><div className='min-w-0 flex-1'><div className='text-sm text-white'>{entry.label}</div><div className='font-mono text-[11px] text-slate-500'>{entry.code}{entry.selectable === false ? ' · Category' : ''}</div></div><label className='flex shrink-0 items-center gap-2 text-xs text-slate-300'><input type='checkbox' checked={entry.active !== false} disabled={ro} onChange={e=>setMntItems(prev=>prev.map((x,i)=>i===idx?{...x,active:e.target.checked}:x))} />Enabled</label></div>)}</div>}
+                {isMnt && <div className='max-h-[60dvh] space-y-2 overflow-y-auto rounded-xl border border-slate-700 p-2'>{mntItems.map((entry, idx) => <div key={entry.code} className='flex items-center gap-2 rounded-lg bg-slate-900 p-2'><input aria-label={'Color for ' + entry.label} type='color' value={entry.color || '#64748B'} disabled={ro} onChange={e => setMntItems(prev => prev.map((x,i)=>i===idx?{...x,color:e.target.value}:x))} className='h-8 w-9 shrink-0 cursor-pointer rounded' /><div className='min-w-0 flex-1'><div className='text-sm text-white'>{entry.label}</div><div className='font-mono text-[11px] text-slate-500'>{entry.code}{entry.selectable === false ? ' · Category' : ''}</div></div><label className='flex shrink-0 items-center gap-2 text-xs text-slate-300'><input type='checkbox' checked={entry.active !== false} disabled={ro} onChange={e=>setMntItems(prev=>prev.map((x,i)=>i===idx?{...x,active:e.target.checked}:x))} />Enabled</label></div>)}</div>}
                 {isMnt && canAddColor && <AddColorEntry items={mntItems} onAdd={(entry) => setMntItems((prev) => [...prev, entry])} />}
                 {!isMnt && <TextArea
                     id='meta-entries'
@@ -589,7 +590,7 @@ function ModuleForm({
     };
 
     const remove = async () => {
-        if (!module || !window.confirm(`Delete module ${module.code} · ${module.name}? This cannot be undone.`)) return;
+        if (!module || !(await appConfirm(`Delete module ${module.code} · ${module.name}? This cannot be undone.`))) return;
         setBusy('delete');
         setError('');
         try {
@@ -682,7 +683,7 @@ function ModuleForm({
                                     key={m.code}
                                     disabled={ro}
                                     onClick={() => setDeps(on ? deps.filter((d) => d !== m.code) : [...deps, m.code])}
-                                    className={`h-9 rounded-full px-3 font-mono text-xs ${on ? 'bg-emerald-500 text-onbrand' : 'border border-slate-700 text-slate-300'}`}
+                                    className={`h-11 rounded-full px-3 font-mono text-xs ${on ? 'bg-emerald-500 text-onbrand' : 'border border-slate-700 text-slate-300'}`}
                                 >
                                     {m.code}
                                 </button>

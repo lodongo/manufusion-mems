@@ -1,9 +1,39 @@
 import { useEffect, useRef, useState } from 'react';
 import { CalendarClock, Printer, ShieldCheck, Plus, ArrowLeft, RefreshCw } from 'lucide-react';
 import { Alert } from '../components/ui';
+import RichTable, { type Column } from '../components/RichTable';
 import { Button, Card, Spinner, useLoad } from '../admin/kit';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { MntCheck, MntDialog, MntField, MntRiskTable, mntApi, mntInput, type MntData } from './MntWorkOrder';
+
+const windowColumns: Array<Column<MntData>> = [
+    {
+        key: 'title',
+        label: 'Window',
+        value: (w) => `${w.title} ${w.id}`,
+        render: (w) => (
+            <span className="block min-w-[10rem]">
+                <span className="block font-semibold text-ink">{w.title}</span>
+                <span className="block font-mono text-xs text-muted">{w.id}</span>
+            </span>
+        ),
+    },
+    { key: 'line', label: 'Production line', value: (w) => w.lineName },
+    { key: 'start', label: 'Planned start', type: 'date', value: (w) => w.start, render: (w) => new Date(w.start).toLocaleString() },
+    { key: 'status', label: 'Status', value: (w) => String(w.status || '').replaceAll('_', ' ') },
+    {
+        key: 'approvals',
+        label: 'Approvals',
+        value: (w) => `${w.engineering ? 'Engineering approved' : 'Engineering pending'} · ${w.safety ? 'Safety approved' : 'Safety pending'}`,
+        render: (w) => (
+            <span className="block whitespace-nowrap">
+                {w.engineering ? 'Engineering ✓' : 'Engineering pending'}
+                <br />
+                {w.safety ? 'Safety ✓' : 'Safety pending'}
+            </span>
+        ),
+    },
+];
 
 function RiskReport({ report, onClose }: { report: MntData; onClose: () => void }) {
     const w = report.window,
@@ -181,7 +211,7 @@ function Gantt({ schedule, start, onMove }: { schedule: MntData; start: string; 
                                             draggable
                                             onDragStart={(e) => e.dataTransfer.setData('text/plain', t.id)}
                                             title={`${t.description}: ${t.critical ? 'Critical path' : 'Parallel / float available'}. Drag to reschedule.`}
-                                            className={`absolute top-0 h-9 min-w-5 cursor-grab truncate rounded px-2 text-left text-xs text-white text-onbrand ${t.critical ? 'bg-red-600' : 'bg-emerald-600'}`}
+                                            className={`absolute top-0 h-11 min-w-5 cursor-grab truncate rounded px-2 text-left text-xs text-white text-onbrand ${t.critical ? 'bg-red-600' : 'bg-emerald-600'}`}
                                             style={{
                                                 left: (100 * t.start) / scale + '%',
                                                 width: Math.max(2, (100 * t.hours) / scale) + '%',
@@ -750,44 +780,16 @@ export default function MntWindows() {
                     </Card>
                 </div>
             ) : (
-                <div className="overflow-auto rounded-2xl border border-line bg-panel">
-                    <table className="w-full text-left text-sm">
-                        <thead>
-                            <tr>
-                                {['Window', 'Production line', 'Planned start', 'Status', 'Approvals'].map((h) => (
-                                    <th className="border-b border-line p-4" key={h}>
-                                        {h}
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {windows.map((w) => (
-                                <tr
-                                    key={w.id}
-                                    className="cursor-pointer border-b border-line hover:bg-brand/5"
-                                    onClick={() => setSelected(w)}
-                                >
-                                    <td className="p-4">
-                                        <button className="font-semibold text-left">{w.title}</button>
-                                        <p className="font-mono text-xs text-muted">{w.id}</p>
-                                    </td>
-                                    <td className="p-4">{w.lineName}</td>
-                                    <td className="p-4">{new Date(w.start).toLocaleString()}</td>
-                                    <td className="p-4">{w.status.replaceAll('_', ' ')}</td>
-                                    <td className="p-4">
-                                        {w.engineering ? 'Engineering ✓' : 'Engineering pending'}
-                                        <br />
-                                        {w.safety ? 'Safety ✓' : 'Safety pending'}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    {!windows.length && (
-                        <p className="p-6 text-sm text-soft">No maintenance windows yet. Start with an assessed work-order plan.</p>
-                    )}
-                </div>
+                <RichTable
+                    id="mnt-windows"
+                    title="Maintenance windows"
+                    fileName="maintenance_windows"
+                    columns={windowColumns}
+                    rows={windows}
+                    rowKey={(w) => w.id}
+                    onRowClick={(w) => setSelected(w)}
+                    empty="No maintenance windows yet. Start with an assessed work-order plan."
+                />
             )}
             {dialog === 'line_mapping' && (
                 <MntDialog title="Production line mapping" onClose={() => setDialog('')}>

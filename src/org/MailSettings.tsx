@@ -33,8 +33,8 @@ export default function MailSettings({value,onSaved,onClose}:{value:MailPreferen
             <header className='flex min-h-14 shrink-0 items-center gap-3 border-b border-line bg-page px-4'>
                 <button type='button' aria-label='Close email settings' onClick={onClose}><ArrowLeft className='h-5 w-5 text-brand'/></button>
                 <div className='min-w-0 flex-1'><h2 className='text-base font-bold text-ink'>Email settings</h2><p className='text-[11px] text-muted'>Personal mailbox preferences</p></div>
-                <button type='button' onClick={()=>{void save()}} disabled={saving} className='flex min-h-10 items-center gap-2 rounded-xl bg-brand px-4 text-xs font-semibold text-onbrand disabled:opacity-50'><Save className='h-4 w-4'/>{saving?'Saving…':'Save'}</button>
-                <button type='button' aria-label='Close' onClick={onClose} className='flex h-10 w-10 items-center justify-center'><X className='h-5 w-5'/></button>
+                <button type='button' onClick={()=>{void save()}} disabled={saving} className='flex min-h-11 items-center gap-2 rounded-xl bg-brand px-4 text-xs font-semibold text-onbrand disabled:opacity-50'><Save className='h-4 w-4'/>{saving?'Saving…':'Save'}</button>
+                <button type='button' aria-label='Close' onClick={onClose} className='flex h-11 w-11 items-center justify-center'><X className='h-5 w-5'/></button>
             </header>
             <div className='min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6'>
                 <section className='space-y-3'>

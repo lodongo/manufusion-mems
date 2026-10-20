@@ -51,7 +51,7 @@ export default function ClassField({
                 <div className='fixed inset-0 z-50 flex flex-col bg-slate-950'>
                     <div className='flex shrink-0 items-center justify-between border-b border-slate-800 px-4 py-3'>
                         <p className='font-semibold text-white'>Choose the equipment class</p>
-                        <button type='button' aria-label='Close' onClick={() => setOpen(false)} className='flex h-10 w-10 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
+                        <button type='button' aria-label='Close' onClick={() => setOpen(false)} className='flex h-11 w-11 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
                             <X className='h-4 w-4' />
                         </button>
                     </div>

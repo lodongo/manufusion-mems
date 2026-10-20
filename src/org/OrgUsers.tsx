@@ -10,6 +10,7 @@ import ResetPassword from '../admin/ResetPassword';
 import UserScope from './UserScope';
 import RoleCoreSkills from './RoleCoreSkills';
 import type { OrgRole } from './types';
+import { appConfirm } from '../components/dialogs';
 
 interface OrgUser {
     uid: string;
@@ -209,7 +210,7 @@ function UserForm({
             return setError('The original organization creator must remain an active super administrator.');
         }
         if (!isNew && user && (role !== user.role || status !== user.status)) {
-            const proceeding = window.confirm('Change access for ' + user.email + '? The user may need to sign in again. This change is recorded in the audit trail.');
+            const proceeding = (await appConfirm('Change access for ' + user.email + '? The user may need to sign in again. This change is recorded in the audit trail.'));
             if (!proceeding) return;
         }
         setBusy('save');
@@ -227,7 +228,7 @@ function UserForm({
     };
 
     const remove = async () => {
-        if (!user || !window.confirm(`Delete ${user.email}? This cannot be undone.`)) return;
+        if (!user || !(await appConfirm(`Delete ${user.email}? This cannot be undone.`))) return;
         setBusy('delete');
         try {
             await callBackend('/api/org/users/delete', { uid: user.uid });

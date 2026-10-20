@@ -4,6 +4,7 @@ import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import { Alert } from '../components/ui';
 import { Badge, Button, Card, Empty, PageTitle, Spinner, useLoad } from '../admin/kit';
+import { appConfirm } from '../components/dialogs';
 
 interface Mod {
     code: string;
@@ -46,7 +47,7 @@ export default function OrgModules({ view }: { view: ModulesView }) {
     if (error || !data) return <Alert tone='error'>{error || 'Could not load modules.'}</Alert>;
 
     const act = async (m: Mod, action: 'adopt' | 'enable' | 'disable' | 'remove') => {
-        if (action === 'remove' && !window.confirm(`Remove ${m.name} from your adopted modules?`)) return;
+        if (action === 'remove' && !(await appConfirm(`Remove ${m.name} from your adopted modules?`))) return;
         setBusy(`${m.code}:${action}`);
         setActionError('');
         setInfo('');
@@ -92,7 +93,7 @@ export default function OrgModules({ view }: { view: ModulesView }) {
             <div className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'>
                     <PageTitle title={current.name} subtitle={`${current.code} · ${current.category}`} />
-                    <button onClick={() => setViewing(null)} aria-label='Close' className='flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
+                    <button onClick={() => setViewing(null)} aria-label='Close' className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
                         <X className='h-4 w-4' />
                     </button>
                 </div>

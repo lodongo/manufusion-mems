@@ -6,14 +6,18 @@ export function Card({ children, className = '', tone }: { children: ReactNode; 
     return <section className={`rounded-2xl ${border} bg-slate-900 p-4 ${className}`}>{children}</section>;
 }
 
+/**
+ * Page heading with its actions. It pins under the shell's top bar (see .mems-shell-* in index.css) so the
+ * title and primary actions stay reachable while the page content scrolls beneath it.
+ */
 export function PageTitle({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
     return (
-        <div className='mb-5 flex flex-wrap items-start justify-between gap-3'>
-            <div className='min-w-0'>
-                <h1 className='text-xl font-semibold text-white'>{title}</h1>
-                {subtitle && <p className='mt-1 text-sm text-slate-400'>{subtitle}</p>}
+        <div className='sticky top-[var(--mems-top,0px)] z-10 mx-[calc(var(--mems-gutter,0px)*-1)] mb-4 flex flex-wrap items-start justify-between gap-x-3 gap-y-2 border-b border-slate-800 bg-slate-950/95 px-[var(--mems-gutter,0px)] py-3 backdrop-blur'>
+            <div className='min-w-0 flex-1'>
+                <h1 className='text-lg font-semibold text-white sm:text-xl'>{title}</h1>
+                {subtitle && <p className='mt-1 line-clamp-2 text-sm text-slate-400 sm:line-clamp-none'>{subtitle}</p>}
             </div>
-            {action}
+            {action && <div className='flex max-w-full shrink-0 flex-wrap items-center gap-2'>{action}</div>}
         </div>
     );
 }
@@ -68,7 +72,7 @@ export function Toggle({ checked, onChange, disabled, label }: { checked: boolea
             aria-label={label}
             disabled={disabled}
             onClick={() => onChange(!checked)}
-            className={`relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50 ${checked ? 'bg-emerald-500' : 'bg-slate-700'}`}
+            className={`relative h-6 w-11 shrink-0 rounded-full transition before:absolute before:-inset-2.5 before:content-[''] disabled:opacity-50 ${checked ? 'bg-emerald-500' : 'bg-slate-700'}`}
         >
             <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-slate-200 shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`} />
         </button>
@@ -116,7 +120,7 @@ export function SubTabs<T extends string>({ value, tabs, onChange }: { value: T;
                     <aside className='absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r border-slate-800 bg-slate-900'>
                         <div className='flex items-center justify-between border-b border-slate-800 px-4 py-4'>
                             <p className='font-semibold text-white'>Sections</p>
-                            <button onClick={() => setOpen(false)} aria-label='Close sections' className='flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
+                            <button onClick={() => setOpen(false)} aria-label='Close sections' className='flex h-11 w-11 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
                                 <X className='h-4 w-4' />
                             </button>
                         </div>
@@ -152,7 +156,7 @@ export function LegacyTabs<T extends string>({ value, tabs, onChange }: { value:
                     role='tab'
                     aria-selected={value === tab.key}
                     onClick={() => onChange(tab.key)}
-                    className={`h-9 shrink-0 rounded-full px-4 text-sm font-medium ${
+                    className={`h-11 shrink-0 rounded-full px-4 text-sm font-medium ${
                         value === tab.key ? 'bg-emerald-500 text-onbrand' : 'border border-slate-700 text-slate-300'
                     }`}
                 >

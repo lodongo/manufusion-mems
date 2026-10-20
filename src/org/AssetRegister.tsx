@@ -250,7 +250,7 @@ function AssetList({ approvals }: { approvals: boolean }) {
                 height='h-[calc(100dvh-10rem)]'
                 actions={
                     !approvals && data.can.create ? (
-                        <button type='button' onClick={() => navigate('organization_admin/assets/new')} className='flex h-8 items-center gap-1 rounded-lg bg-emerald-500 px-3 text-xs font-semibold text-onbrand'>
+                        <button type='button' onClick={() => navigate('organization_admin/assets/new')} className='flex h-11 items-center gap-1 rounded-lg bg-emerald-500 px-3 text-xs font-semibold text-onbrand'>
                             <Plus className='h-4 w-4' />
                             New asset
                         </button>
@@ -481,7 +481,7 @@ export function AssetDetail({ tag, back, onBack, startEditing = false }: { tag: 
                 {cls.loading && !cls.data ? (
                     <Spinner />
                 ) : (
-                    <div className='max-h-[60vh] space-y-3 overflow-y-auto overscroll-contain pr-1'>
+                    <div className='max-h-[60dvh] space-y-3 overflow-y-auto overscroll-contain pr-1'>
                         {Array.from(byDomain.entries()).map(([domain, items]) => (
                             <div key={domain}>
                                 <p className='mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500'>{domain}</p>
@@ -887,7 +887,7 @@ export function AssetForm({
                                         <label htmlFor={`att-${x.code}`} className='mb-1 block text-sm text-slate-300'>
                                             {x.name}
                                             {x.required && <span className='text-red-400'> *</span>}
-                                            <span className='ml-1 text-[10px] text-slate-600'>{typeLabel(x.dataType)}</span>
+                                            <span className='ml-1 text-[11px] text-slate-600'>{typeLabel(x.dataType)}</span>
                                         </label>
                                         {renderInput(x)}
                                         {fieldErrors[x.code] ? <p className='mt-1 text-xs text-red-400'>{fieldErrors[x.code]}</p> : x.description ? <p className='mt-1 text-xs text-slate-500'>{x.description}</p> : null}

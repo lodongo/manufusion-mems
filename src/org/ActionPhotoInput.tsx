@@ -31,7 +31,7 @@ export default function ActionPhotoInput({
         {value&&<div className='flex items-center gap-3'>
             {url?<img src={url} alt='Action attachment' className='h-20 w-20 rounded-lg object-cover'/>:
                 <span className='text-xs font-semibold text-brand'>Photo attached</span>}
-            <button type='button' className='min-h-10 text-xs text-red-500'
+            <button type='button' className='min-h-11 text-xs text-red-500'
                 onClick={()=>{onChange('');setUrl('')}} aria-label='Remove action photo'><X className='mr-1 inline h-4 w-4'/>Remove</button>
         </div>}
         {error&&<p role='alert' className='text-xs text-red-500'>{error}</p>}

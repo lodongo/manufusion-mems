@@ -45,7 +45,7 @@ export default function ChangePassword({ email, onDone, onSignOut }: { email: st
     };
 
     return (
-        <div className='flex min-h-screen items-center justify-center bg-slate-950 px-6 py-10'>
+        <div className='flex min-h-dvh items-center justify-center bg-slate-950 px-6 py-10'>
             <main className='w-full max-w-sm'>
                 <KeyRound className='mx-auto h-12 w-12 text-emerald-400' />
                 <h1 className='mt-4 text-center text-2xl font-semibold text-white'>Set your own password</h1>

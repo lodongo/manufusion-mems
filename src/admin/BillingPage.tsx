@@ -3,6 +3,7 @@ import { CircleCheck, CircleX, Copy } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert } from '../components/ui';
 import { Button, Card, PageTitle, Spinner, useLoad } from './kit';
+import { appConfirm } from '../components/dialogs';
 
 interface BillingData {
     provider: string;
@@ -26,7 +27,7 @@ export default function BillingPage({ isSuper }: { isSuper: boolean }) {
 
     const choose = async (provider: string) => {
         if (provider === data.provider) return;
-        if (provider === 'intasend_live' && !window.confirm('Switch to live IntaSend payments? Organizations will pay with real money.')) return;
+        if (provider === 'intasend_live' && !(await appConfirm('Switch to live IntaSend payments? Organizations will pay with real money.'))) return;
         setBusy(provider);
         setSaveError('');
         try {

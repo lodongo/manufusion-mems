@@ -74,7 +74,7 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
                     role='tab'
                     aria-selected={value === o.value}
                     onClick={() => onChange(o.value)}
-                    className={`flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-medium ${value === o.value ? 'bg-brand text-onbrand' : 'text-soft active:bg-panel'}`}
+                    className={`flex h-11 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-medium ${value === o.value ? 'bg-brand text-onbrand' : 'text-soft active:bg-panel'}`}
                 >
                     {o.label}
                     {o.count !== undefined && <span className={`rounded-full px-1.5 text-xs ${value === o.value ? 'bg-black/15' : 'bg-line text-soft'}`}>{o.count}</span>}

@@ -227,7 +227,7 @@ function Body({ le, onEntityChange, section }: { le: Entity; onEntityChange: () 
                                 {d.levels.map((l) => {
                                     const on = b.levels.includes(l.code);
                                     return (
-                                        <button key={l.code} type='button' disabled={!canEdit} onClick={() => setBand(i, { levels: (on ? b.levels.filter((x) => x !== l.code) : [...b.levels, l.code]).sort() })} className={`min-h-10 rounded-full px-3 text-xs ${on ? 'bg-brand text-onbrand' : 'border border-line text-soft'}`}>
+                                        <button key={l.code} type='button' disabled={!canEdit} onClick={() => setBand(i, { levels: (on ? b.levels.filter((x) => x !== l.code) : [...b.levels, l.code]).sort() })} className={`min-h-11 rounded-full px-3 text-xs ${on ? 'bg-brand text-onbrand' : 'border border-line text-soft'}`}>
                                             {l.code} {l.title}
                                             {!l.mapped && l.code !== 'L1' ? ' (not mapped)' : ''}
                                         </button>

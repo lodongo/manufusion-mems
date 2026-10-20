@@ -6,6 +6,7 @@ import { Alert } from '../components/ui';
 import AssetDictionaryBrowser, { GL_LABELS, MATERIAL_LABELS, SERVICE_LABELS } from '../components/AssetDictionaryBrowser';
 import { fmtDate } from './format';
 import { Button, Card, PageTitle, Spinner, useLoad } from './kit';
+import { appConfirm } from '../components/dialogs';
 
 // MEMS admin: module lists - the material and service catalogs (Procurement, PRC) and the GL account master
 // (Finance, FIN). One file per list lives in the database. Uploading a file checks it (structure, codes, references,
@@ -109,7 +110,7 @@ export default function ProcurementCatalogAdmin({ kind, canWrite }: { kind: Kind
                 throw new Error(`This is a ${other} file. Open the ${other} to upload it.`);
             }
             if (!Array.isArray(parsed.attributes) || !(Array.isArray(parsed[t.items === 'accounts' ? 'accounts' : kind]) || Array.isArray(parsed.items))) throw new Error(`The file has no ${t.items} or attributes.`);
-            if (data?.loaded && !window.confirm(`This replaces the ${t.title.toLowerCase()} in the database. Continue?`)) {
+            if (data?.loaded && !(await appConfirm(`This replaces the ${t.title.toLowerCase()} in the database. Continue?`))) {
                 setProgress('');
                 return;
             }
@@ -176,7 +177,7 @@ export default function ProcurementCatalogAdmin({ kind, canWrite }: { kind: Kind
                         </p>
                         <p className='mt-1 text-xs text-slate-400'>{statsLine(data.stats, t)}</p>
                         {data.sha256 && (
-                            <p className='mt-1 flex items-center gap-1 break-all font-mono text-[10px] text-slate-600'>
+                            <p className='mt-1 flex items-center gap-1 break-all font-mono text-[11px] text-slate-600'>
                                 <ShieldCheck className='h-3 w-3 shrink-0' />
                                 SHA-256 {data.sha256}
                             </p>

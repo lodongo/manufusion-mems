@@ -33,8 +33,8 @@ export default function MailWorkGroups({people,groups,myUid,onApply,onReload,onC
         <div className='flex h-[100dvh] w-full max-w-2xl flex-col overflow-hidden bg-panel shadow-xl sm:h-[min(88dvh,780px)] sm:rounded-2xl sm:border sm:border-line'>
             <header className='flex min-h-14 items-center gap-3 border-b border-line px-4'>
                 <Users className='h-5 w-5 text-brand'/><span className='min-w-0 flex-1 font-semibold text-ink'>Work groups</span>
-                <button type='button' onClick={()=>change()} className='flex min-h-10 items-center gap-1 rounded-lg bg-brand/10 px-3 text-xs font-semibold text-brand'><Plus className='h-4 w-4'/>New group</button>
-                <button type='button' onClick={onClose} aria-label='Close work groups' className='flex h-10 w-10 items-center justify-center'><X className='h-5 w-5'/></button>
+                <button type='button' onClick={()=>change()} className='flex min-h-11 items-center gap-1 rounded-lg bg-brand/10 px-3 text-xs font-semibold text-brand'><Plus className='h-4 w-4'/>New group</button>
+                <button type='button' onClick={onClose} aria-label='Close work groups' className='flex h-11 w-11 items-center justify-center'><X className='h-5 w-5'/></button>
             </header>
             <div className='grid min-h-0 flex-1 grid-cols-1 overflow-y-auto sm:grid-cols-2 sm:overflow-hidden'>
                 <section className='space-y-2 border-b border-line p-3 sm:overflow-y-auto sm:border-b-0 sm:border-r'>
@@ -44,8 +44,8 @@ export default function MailWorkGroups({people,groups,myUid,onApply,onReload,onC
                         <p className='truncate text-sm font-semibold text-ink'>{g.name}</p>
                         <p className='text-[11px] text-muted'>{g.memberUids.length} colleagues · {g.chatRoomId?'Linked to Chat':'Email group'}</p>
                         <div className='flex gap-2'>
-                            <button type='button' onClick={()=>onApply(g)} className='min-h-10 flex-1 rounded-lg bg-brand px-3 text-xs font-semibold text-onbrand'>Use recipients</button>
-                            {g.ownerUid===myUid&&<button type='button' onClick={()=>change(g)} className='flex min-h-10 items-center gap-1 rounded-lg border border-line px-2 text-xs text-brand'><Edit3 className='h-4 w-4'/>Edit</button>}
+                            <button type='button' onClick={()=>onApply(g)} className='min-h-11 flex-1 rounded-lg bg-brand px-3 text-xs font-semibold text-onbrand'>Use recipients</button>
+                            {g.ownerUid===myUid&&<button type='button' onClick={()=>change(g)} className='flex min-h-11 items-center gap-1 rounded-lg border border-line px-2 text-xs text-brand'><Edit3 className='h-4 w-4'/>Edit</button>}
                         </div>
                     </div>)}
                 </section>

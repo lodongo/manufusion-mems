@@ -3,6 +3,7 @@ import { ShieldAlert } from 'lucide-react';
 import { callBackend, publicGet } from '../lib/backend';
 import { Alert } from '../components/ui';
 import { Card, Toggle, useLoad } from './kit';
+import { appConfirm } from '../components/dialogs';
 
 export default function RegistrationSettings({ isSuper }: { isSuper: boolean }) {
     const { data, setData, error } = useLoad(() => publicGet<{ requireEmailVerification: boolean }>('/api/registration/settings'));
@@ -10,7 +11,7 @@ export default function RegistrationSettings({ isSuper }: { isSuper: boolean }) 
     const [actionError, setActionError] = useState('');
 
     const change = async (value: boolean) => {
-        if (!value && !window.confirm('Allow registration without email verification? Use this only for testing with dummy emails, and turn it back on before going live.')) return;
+        if (!value && !(await appConfirm('Allow registration without email verification? Use this only for testing with dummy emails, and turn it back on before going live.'))) return;
         setBusy(true);
         setActionError('');
         try {

@@ -3,6 +3,7 @@ import { Check,CheckCircle2,ClipboardList,MessageSquarePlus,Plus,RefreshCw,Send,
 import { callBackend } from '../lib/backend';
 import type { ChatPerson } from './chatTypes';
 import ActionPhotoInput from './ActionPhotoInput';
+import { appConfirm, appPrompt } from '../components/dialogs';
 
 type Assigned={uid:string;decision:string;status:string;acknowledgedAt?:string;acknowledgementNote?:string;reviewNote?:string;progressNotes?:Array<{note:string;at:string;by:string}>;updatedAt:string};
 type Comment={id:string;by:string;text:string;createdAt:string};
@@ -56,7 +57,7 @@ export function ChatActionsBoard({uid,roomId,people,revision=0,initialCreate=fal
       <div className='flex items-center justify-between gap-2'>
         <div><h3 className='flex items-center gap-2 text-sm font-semibold text-ink'><ClipboardList className='h-4 w-4 text-brand'/> {roomId?'Action tracker':'My chat assignments'}</h3>
         <p className='text-[11px] text-muted'>Monitored Action · recipient completion requires requester acknowledgement</p></div>
-        {roomId&&<button type='button' onClick={()=>setShowForm(s=>!s)} className='flex min-h-10 items-center gap-1 rounded-xl bg-brand px-3 text-xs font-semibold text-onbrand'><Plus className='h-4 w-4'/>Assign</button>}
+        {roomId&&<button type='button' onClick={()=>setShowForm(s=>!s)} className='flex min-h-11 items-center gap-1 rounded-xl bg-brand px-3 text-xs font-semibold text-onbrand'><Plus className='h-4 w-4'/>Assign</button>}
       </div>
     </header>
     <div className='min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3 sm:px-5'>
@@ -117,36 +118,36 @@ export function ChatActionsBoard({uid,roomId,people,revision=0,initialCreate=fal
              <div className='flex flex-wrap gap-2 rounded-lg border border-brand/40 bg-brand/5 p-2'>
                  <p className='w-full text-xs text-ink'>Completion submitted. Review the work before confirming closure.</p>
                  <button type='button' disabled={busy} onClick={()=>{void apply('acknowledge',{actionId:a.id,uid:v.uid,decision:'acknowledge'},'Closure acknowledged.')}} 
-                     className='min-h-10 rounded-lg bg-brand px-3 text-xs font-semibold text-onbrand'>Acknowledge closure</button>
-                 <button type='button' disabled={busy} onClick={()=>{
-                     const reason=window.prompt('What must be corrected or completed before you can acknowledge?');
+                     className='min-h-11 rounded-lg bg-brand px-3 text-xs font-semibold text-onbrand'>Acknowledge closure</button>
+                 <button type='button' disabled={busy} onClick={async ()=>{
+                     const reason=(await appPrompt('What must be corrected or completed before you can acknowledge?'));
                      if(reason&&reason.trim().length>=5)void apply('acknowledge',{actionId:a.id,uid:v.uid,decision:'return',note:reason},'Returned for additional work.');
                      else if(reason!==null)setError('Provide a reason of at least five characters.');
-                 }} className='min-h-10 rounded-lg border border-line px-3 text-xs text-ink'>Request more work</button>
+                 }} className='min-h-11 rounded-lg border border-line px-3 text-xs text-ink'>Request more work</button>
              </div>}
             {v.progressNotes?.slice(-3).map((p,i)=><p key={i} className='text-xs text-soft'>• {p.note} <span className='text-muted'>{stamp(p.at)}</span></p>)}
             {!a.canceled&&v.uid===uid&&v.decision==='pending'&&<>
                 <div className='grid grid-cols-3 gap-1'>
-                    <button type='button' disabled={busy} onClick={()=>{void apply('respond',{actionId:a.id,decision:'accept'},'Action accepted and added to your Chat assignments.')}} className='min-h-10 rounded-lg bg-brand px-1 text-[11px] font-semibold text-onbrand'>Accept</button>
-                    <button type='button' onClick={()=>setDecisions(m=>({...m,[a.id]:'review'}))} className='min-h-10 rounded-lg border border-line px-1 text-[11px] text-ink'>Review</button>
-                    <button type='button' onClick={()=>setDecisions(m=>({...m,[a.id]:'decline'}))} className='min-h-10 rounded-lg border border-line px-1 text-[11px] text-red-500'>Decline</button>
+                    <button type='button' disabled={busy} onClick={()=>{void apply('respond',{actionId:a.id,decision:'accept'},'Action accepted and added to your Chat assignments.')}} className='min-h-11 rounded-lg bg-brand px-1 text-[11px] font-semibold text-onbrand'>Accept</button>
+                    <button type='button' onClick={()=>setDecisions(m=>({...m,[a.id]:'review'}))} className='min-h-11 rounded-lg border border-line px-1 text-[11px] text-ink'>Review</button>
+                    <button type='button' onClick={()=>setDecisions(m=>({...m,[a.id]:'decline'}))} className='min-h-11 rounded-lg border border-line px-1 text-[11px] text-red-500'>Decline</button>
                 </div>
                 {decisions[a.id]&&<div className='space-y-2'>
                     <textarea className={field} rows={2} placeholder={decisions[a.id]==='review'?'What needs clarification or more information?':'Why do you decline?'}
                         value={note[a.id]||''} onChange={e=>setNote(v=>({...v,[a.id]:e.target.value}))}/>
                     <button type='button' disabled={busy||(note[a.id]||'').trim().length<5}
                         onClick={()=>{void apply('respond',{actionId:a.id,decision:decisions[a.id],note:note[a.id]},'Your response has been shared.')}}
-                        className='min-h-10 rounded-lg bg-brand px-3 text-xs font-semibold text-onbrand'>Submit response</button>
+                        className='min-h-11 rounded-lg bg-brand px-3 text-xs font-semibold text-onbrand'>Submit response</button>
                 </div>}
             </>}
             {!a.canceled&&requester&&v.decision==='review'&&<>
                 <p className='text-[11px] text-muted'>The assignee requested clarification. Revise and resend or cancel the request.</p>
                 <button type='button' onClick={()=>{setRevise(s=>({...s,[v.uid+a.id]:!s[v.uid+a.id]}));setRevisedText(t=>({...t,[v.uid+a.id]:a.description}))}}
-                    className='min-h-10 rounded-lg border border-line px-3 text-xs text-brand'>Revise instructions</button>
+                    className='min-h-11 rounded-lg border border-line px-3 text-xs text-brand'>Revise instructions</button>
                 {revise[v.uid+a.id]&&<div className='space-y-2'>
                     <textarea className={field} rows={3} value={revisedText[v.uid+a.id]||''} onChange={e=>setRevisedText(m=>({...m,[v.uid+a.id]:e.target.value}))}/>
                     <button type='button' disabled={busy} onClick={()=>{void apply('revise',{actionId:a.id,uid:v.uid,title:a.title,description:revisedText[v.uid+a.id],deadline:a.deadline},'Revised request sent.')}}
-                        className='min-h-10 rounded-lg bg-brand px-3 text-xs text-onbrand'>Resend for acceptance</button>
+                        className='min-h-11 rounded-lg bg-brand px-3 text-xs text-onbrand'>Resend for acceptance</button>
                 </div>}
             </>}
             {!a.canceled&&v.uid===uid&&v.decision==='accepted'&&!v.acknowledgedAt&&<div className='space-y-2'>
@@ -156,7 +157,7 @@ export function ChatActionsBoard({uid,roomId,people,revision=0,initialCreate=fal
                 <textarea className={field} value={note[a.id]||''} onChange={e=>setNote(s=>({...s,[a.id]:e.target.value}))}
                     rows={2} placeholder='Your progress update (required if canceling)'/>
                 <button type='button' disabled={busy} onClick={()=>{void apply('progress',{actionId:a.id,status:status[a.id]||v.status,note:note[a.id]||''},'Your progress is now visible to participants.')}}
-                    className='min-h-10 rounded-lg bg-brand px-3 text-xs text-onbrand'>Update my progress</button>
+                    className='min-h-11 rounded-lg bg-brand px-3 text-xs text-onbrand'>Update my progress</button>
             </div>}
           </div>)}
          <div className='space-y-2 border-t border-line pt-2'>
@@ -168,11 +169,11 @@ export function ChatActionsBoard({uid,roomId,people,revision=0,initialCreate=fal
                 className='flex h-11 w-11 items-center justify-center rounded-xl bg-brand text-onbrand'><Send className='h-4 w-4'/></button>
              </div>
          </div>
-         {requester&&!a.canceled&&<button type='button' disabled={busy} onClick={()=>{
-            const reason=window.prompt('Why cancel this action request for all participants?');
+         {requester&&!a.canceled&&<button type='button' disabled={busy} onClick={async ()=>{
+            const reason=(await appPrompt('Why cancel this action request for all participants?'));
             if(reason&&reason.trim().length>=5)void apply('cancel',{actionId:a.id,reason},'Request canceled.');
             else if(reason!==null)setError('A reason of five or more characters is required.');
-         }} className='min-h-10 rounded-lg border border-line px-3 text-xs text-red-500'>Cancel request</button>}
+         }} className='min-h-11 rounded-lg border border-line px-3 text-xs text-red-500'>Cancel request</button>}
        </article>;
       })}
     </div>
@@ -195,7 +196,7 @@ export function ChatPollsBoard({uid,roomId,people,revision=0,initialCreate=false
  return <section className='flex min-h-0 flex-1 flex-col bg-page'>
     <header className='flex shrink-0 items-center justify-between gap-2 border-b border-line bg-panel px-3 py-3'>
       <div><h3 className='text-sm font-semibold text-ink'>Group polls</h3><p className='text-[11px] text-muted'>Vote once · results depend on poll settings</p></div>
-      <button type='button' onClick={()=>setShow(x=>!x)} className='min-h-10 rounded-xl bg-brand px-3 text-xs font-semibold text-onbrand'><Plus className='inline h-4 w-4'/> Poll</button>
+      <button type='button' onClick={()=>setShow(x=>!x)} className='min-h-11 rounded-xl bg-brand px-3 text-xs font-semibold text-onbrand'><Plus className='inline h-4 w-4'/> Poll</button>
     </header>
     <div className='min-h-0 flex-1 space-y-3 overflow-y-auto p-3'>
       {show&&<div className='space-y-3 rounded-2xl border border-brand/40 bg-panel p-3'>
@@ -205,7 +206,7 @@ export function ChatPollsBoard({uid,roomId,people,revision=0,initialCreate=false
             <input className={field+' flex-1'} value={option} maxLength={130} onChange={e=>setOptions(o=>o.map((x,j)=>j===i?e.target.value:x))} placeholder={'Option '+(i+1)}/>
             {options.length>2&&<button type='button' aria-label='Remove option' onClick={()=>setOptions(o=>o.filter((_,j)=>i!==j))} className='px-2 text-red-500'><X className='h-4 w-4'/></button>}
         </div>)}
-        {options.length<10&&<button type='button' className='min-h-9 text-xs font-semibold text-brand' onClick={()=>setOptions(o=>[...o,''])}>+ Add option</button>}
+        {options.length<10&&<button type='button' className='min-h-11 text-xs font-semibold text-brand' onClick={()=>setOptions(o=>[...o,''])}>+ Add option</button>}
         <label className='flex items-center gap-2 text-xs text-ink'><input type='checkbox' checked={anonymous} onChange={e=>setAnonymous(e.target.checked)}/> Anonymous voting</label>
         <label className='flex items-center gap-2 text-xs text-ink'><input type='checkbox' checked={instant} onChange={e=>setInstant(e.target.checked)}/> Show results immediately</label>
         <label className='flex items-center gap-2 text-xs text-ink'><input type='checkbox' checked={multiple} onChange={e=>setMultiple(e.target.checked)}/> Allow multiple options</label>
@@ -233,8 +234,8 @@ export function ChatPollsBoard({uid,roomId,people,revision=0,initialCreate=false
               className='min-h-11 w-full rounded-xl bg-brand px-3 text-xs font-semibold text-onbrand disabled:opacity-40'>Cast vote</button>}
           {p.counts?<p className='text-[11px] text-muted'>{p.totalVoters} voters · {p.closed?'Final results':'Live results'}</p>:
               <p className='text-[11px] text-muted'>Results will be visible after the poll closes.</p>}
-          {p.createdBy===uid&&!p.closed&&<button type='button' disabled={busy} onClick={()=>{if(window.confirm('Close this poll and publish final results?'))void apply('close',{pollId:p.id},'Poll closed.')}}
-              className='min-h-10 rounded-xl border border-line px-3 text-xs text-brand'>Close poll</button>}
+          {p.createdBy===uid&&!p.closed&&<button type='button' disabled={busy} onClick={async ()=>{if((await appConfirm('Close this poll and publish final results?')))void apply('close',{pollId:p.id},'Poll closed.')}}
+              className='min-h-11 rounded-xl border border-line px-3 text-xs text-brand'>Close poll</button>}
        </article>)}
     </div>
  </section>;

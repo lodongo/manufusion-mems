@@ -9,6 +9,7 @@ import MailWorkGroups, {type WorkGroup} from './MailWorkGroups';
 import MailCalendar from './MailCalendar';
 import UnifiedActions from './UnifiedActions';
 import { CalendarDays, Users, ListChecks } from 'lucide-react';
+import { appAlert, appConfirm, appPrompt } from '../components/dialogs';
 
 /** Keep message text visible while discarding active/untrusted HTML before rendering it in the page. */
 function safeReadHtml(source:string):string {
@@ -90,7 +91,7 @@ function RecipientInput({label,value,people,exclude,onChange}:{label:string;valu
     const attempt=()=>{
         const p=people.find(p=>p.email===search.trim().toLowerCase());
         if(p&&!exclude.includes(p.email))add(p.email);
-        else if(search.trim())window.alert('Choose an active colleague from this organization. External addresses are disabled.');
+        else if(search.trim())void appAlert('Choose an active colleague from this organization. External addresses are disabled.');
     };
     return <div className='relative flex min-h-12 flex-wrap items-center gap-1.5 border-b border-line px-3 py-1'>
         <span className='w-8 shrink-0 text-xs font-semibold text-muted'>{label}</span>
@@ -99,7 +100,7 @@ function RecipientInput({label,value,people,exclude,onChange}:{label:string;valu
         <input value={search} onFocus={()=>setOpen(true)} onBlur={()=>setTimeout(()=>setOpen(false),150)}
             onChange={e=>{setSearch(e.target.value);setOpen(true)}} aria-label={label+' recipients'}
             onKeyDown={e=>{if(e.key==='Enter'||e.key===','||e.key===';'){e.preventDefault();attempt();}if(e.key==='Backspace'&&!search&&value.length)onChange(value.slice(0,-1));}}
-            placeholder={value.length?'Add colleague…':'Type a name or internal email'} className='h-10 min-w-[110px] flex-1 bg-transparent text-xs text-ink outline-none'/>
+            placeholder={value.length?'Add colleague…':'Type a name or internal email'} className='h-11 min-w-[110px] flex-1 bg-transparent text-xs text-ink outline-none'/>
         {open&&eligible.length>0&&<div className='absolute left-8 right-2 top-[100%] z-30 max-h-60 overflow-y-auto rounded-xl border border-line bg-panel p-1 shadow-xl'>
             {eligible.map(p=><button key={p.uid} type='button' onMouseDown={e=>e.preventDefault()} onClick={()=>add(p.email)} className='flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-brand/10'>
                 <span className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand/15 text-brand'><UserRound className='h-4 w-4'/></span>
@@ -196,20 +197,20 @@ function Compose({people,groups,me,seed,prefs,onDone,onCancel,onManageGroups}:{p
             <header className='flex min-h-14 shrink-0 items-center gap-3 border-b border-line bg-page px-3 sm:px-5'>
                 <Mail className='h-5 w-5 shrink-0 text-brand'/>
                 <span className='min-w-0 flex-1 truncate text-sm font-bold'>{seed.mode==='reply'?'Reply':seed.mode==='replyall'?'Reply all':seed.mode==='forward'?'Forward':seed.mode==='draft'?'Edit draft':'New message'}</span>
-                <span className='hidden rounded-lg bg-brand/10 px-2 py-1 text-[10px] font-semibold text-brand sm:block'>Internal only</span>
-                <button type='button' aria-label='Save draft' onClick={()=>{void save()}} className='flex h-10 w-10 items-center justify-center rounded-lg hover:bg-brand/10'><Save className='h-4 w-4'/></button>
-                <button type='button' aria-label='Close composer' onClick={()=>{void close()}} className='flex h-10 w-10 items-center justify-center rounded-lg hover:bg-brand/10'><X className='h-5 w-5'/></button>
+                <span className='hidden rounded-lg bg-brand/10 px-2 py-1 text-[11px] font-semibold text-brand sm:block'>Internal only</span>
+                <button type='button' aria-label='Save draft' onClick={()=>{void save()}} className='flex h-11 w-11 items-center justify-center rounded-lg hover:bg-brand/10'><Save className='h-4 w-4'/></button>
+                <button type='button' aria-label='Close composer' onClick={()=>{void close()}} className='flex h-11 w-11 items-center justify-center rounded-lg hover:bg-brand/10'><X className='h-5 w-5'/></button>
             </header>
             <div className='min-h-0 flex-1 overflow-y-auto px-2 py-2 sm:px-5'>
                 <div className='flex items-center gap-2 border-b border-line py-1 text-[11px] text-muted'>
                     <span className='w-9 shrink-0 font-semibold'>From</span><span className='min-w-0 flex-1 truncate'>{me}</span>
-                    {!showCc&&<button className='min-h-8 px-2 text-brand' onClick={()=>setShowCc(true)}>Cc</button>}
-                    {!showBcc&&<button className='min-h-8 px-2 text-brand' onClick={()=>setShowBcc(true)}>Bcc</button>}
+                    {!showCc&&<button className='min-h-11 px-2 text-brand' onClick={()=>setShowCc(true)}>Cc</button>}
+                    {!showBcc&&<button className='min-h-11 px-2 text-brand' onClick={()=>setShowBcc(true)}>Bcc</button>}
                 </div>
                 <div className='flex flex-wrap items-center gap-2 border-b border-line px-3 py-2'>
                     <Users className='h-4 w-4 shrink-0 text-brand'/>
-                    <select aria-label='Quick add work group' className='min-h-9 min-w-0 max-w-[220px] flex-1 rounded-lg border border-line bg-page px-2 text-xs text-ink' defaultValue='' onChange={e=>{applyGroup(e.target.value);e.target.value=''}}><option value=''>Add work group recipients</option>{groups.map(g=><option key={g.id} value={g.id}>{g.name} · {g.memberUids.length}</option>)}</select>
-                    <button type='button' onClick={onManageGroups} className='min-h-9 rounded-lg border border-line px-3 text-xs font-semibold text-brand'>Manage work groups</button>
+                    <select aria-label='Quick add work group' className='min-h-11 min-w-0 max-w-[220px] flex-1 rounded-lg border border-line bg-page px-2 text-xs text-ink' defaultValue='' onChange={e=>{applyGroup(e.target.value);e.target.value=''}}><option value=''>Add work group recipients</option>{groups.map(g=><option key={g.id} value={g.id}>{g.name} · {g.memberUids.length}</option>)}</select>
+                    <button type='button' onClick={onManageGroups} className='min-h-11 rounded-lg border border-line px-3 text-xs font-semibold text-brand'>Manage work groups</button>
                 </div>
                 <RecipientInput label='To' value={data.to} people={people} exclude={[...data.cc,...data.bcc]} onChange={to=>patch({to})}/>
                 {showCc&&<RecipientInput label='Cc' value={data.cc} people={people} exclude={[...data.to,...data.bcc]} onChange={cc=>patch({cc})}/>}
@@ -218,7 +219,7 @@ function Compose({people,groups,me,seed,prefs,onDone,onCancel,onManageGroups}:{p
                     <input value={data.subject} onChange={e=>patch({subject:e.target.value})} placeholder='Add a subject' maxLength={250}
                         className='h-11 min-w-0 flex-1 bg-transparent text-sm text-ink outline-none'/></label>
                 <div className='mt-3 rounded-xl border border-line bg-page px-3 py-2'>
-                    <button type='button' onClick={()=>setActionExpanded(v=>!v)} className='flex min-h-10 w-full items-center gap-2 text-left text-xs font-semibold text-brand'><ListChecks className='h-4 w-4'/> Propose Monitored Action {action.enabled?'· enabled':''}<span className='ml-auto'>{actionExpanded?'▴':'▾'}</span></button>
+                    <button type='button' onClick={()=>setActionExpanded(v=>!v)} className='flex min-h-11 w-full items-center gap-2 text-left text-xs font-semibold text-brand'><ListChecks className='h-4 w-4'/> Propose Monitored Action {action.enabled?'· enabled':''}<span className='ml-auto'>{actionExpanded?'▴':'▾'}</span></button>
                     {actionExpanded&&<div className='space-y-3 border-t border-line pt-2'>
                         <label className='flex items-center gap-2 text-xs font-semibold text-ink'><input type='checkbox' checked={action.enabled} onChange={e=>{setAction(v=>({...v,enabled:e.target.checked}));setDirty(true)}} className='h-4 w-4 accent-[rgb(var(--c-brand))]'/>Include monitored action with this email</label>
                         {action.enabled&&<>
@@ -248,7 +249,7 @@ function Compose({people,groups,me,seed,prefs,onDone,onCancel,onManageGroups}:{p
                     <span>Recipients must be active employees in this organization.</span>
                 </div>
                 <div className='mt-2 rounded-xl border border-line bg-page p-2'>
-                    <button type='button' aria-expanded={showMessageOptions} onClick={()=>setShowMessageOptions(v=>!v)} className='flex min-h-10 w-full items-center justify-between text-left text-xs font-semibold text-brand'>Email permissions after Send <span>{showMessageOptions?'▴':'▾'}</span></button>
+                    <button type='button' aria-expanded={showMessageOptions} onClick={()=>setShowMessageOptions(v=>!v)} className='flex min-h-11 w-full items-center justify-between text-left text-xs font-semibold text-brand'>Email permissions after Send <span>{showMessageOptions?'▴':'▾'}</span></button>
                     {showMessageOptions&&<div className='grid gap-2 border-t border-line pt-3 sm:grid-cols-3'>
                         {([{key:'allowReply' as const,label:'Allow Reply'},{key:'allowReplyAll' as const,label:'Allow Reply to all'},{key:'allowDelete' as const,label:'Allow recipient deletion'}]).map(option=><label key={option.key} className='flex min-h-11 items-center gap-2 rounded-lg bg-panel px-3 text-xs text-ink'><input type='checkbox' checked={messageOptions[option.key]} onChange={e=>{setMessageOptions(x=>({...x,[option.key]:e.target.checked}));setDirty(true)}} className='h-4 w-4 accent-[rgb(var(--c-brand))]'/>{option.label}</label>)}
                         <p className='col-span-full text-[11px] text-muted'>All three options are enabled by default. These settings apply to this email and its recipients.</p>
@@ -348,26 +349,26 @@ export default function OrgMail({myEmail,initialId=''}:{myEmail:string;initialId
     const foldersDisplay=[...STANDARD,...folders.map(f=>({id:f.id,label:f.name,Icon:FolderClosed}))];
     const gotoFolder=(id:string)=>{setFolder(id);setMenu(false);setSelected('');setDetail(null);setChecked([]);setFilter('all');};
     const newFolder=async()=>{
-        const name=window.prompt('New folder name');
+        const name=(await appPrompt('New folder name'));
         if(!name)return;
         try{const r=await callBackend<{id:string}>('/api/org/mail/folder',{action:'create',name});await refresh(true);gotoFolder(r.id);}
         catch(e){setError(e instanceof Error?e.message:'Could not create folder');}
     };
     const renameFolder=async()=>{
         if(!folder.startsWith('f_'))return;
-        const name=window.prompt('Rename folder',folders.find(f=>f.id===folder)?.name||'');
+        const name=(await appPrompt('Rename folder', folders.find(f=>f.id===folder)?.name||''));
         if(!name)return;
         try{await callBackend('/api/org/mail/folder',{action:'rename',id:folder,name});await refresh(true);}
         catch(e){setError(e instanceof Error?e.message:'Could not rename folder');}
     };
     const deleteFolder=async()=>{
-        if(!folder.startsWith('f_')||!window.confirm('Delete folder? Its messages will move to Inbox.'))return;
+        if(!folder.startsWith('f_')||!(await appConfirm('Delete folder? Its messages will move to Inbox.')))return;
         try{await callBackend('/api/org/mail/folder',{action:'delete',id:folder});gotoFolder('inbox');await refresh(true);}
         catch(e){setError(e instanceof Error?e.message:'Could not delete folder');}
     };
     const composeMail=(mode:ComposeSeed['mode'],original?:MailItem)=>setCompose({mode,original});
     const bulk=checked.length?checked:selected?[selected]:[];
-    const iconButton=(label:string,Icon:typeof Mail,click:()=>void,disabled=false)=><button type='button' aria-label={label} title={label} onClick={click} disabled={disabled} className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-ink hover:bg-brand/10 disabled:opacity-30'><Icon className='h-4 w-4'/></button>;
+    const iconButton=(label:string,Icon:typeof Mail,click:()=>void,disabled=false)=><button type='button' aria-label={label} title={label} onClick={click} disabled={disabled} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-ink hover:bg-brand/10 disabled:opacity-30'><Icon className='h-4 w-4'/></button>;
     return <div className='fixed inset-0 z-[60] flex h-[100dvh] w-full flex-col overflow-hidden bg-page text-ink' aria-label='Organization internal Email'>
         <header className='flex min-h-[62px] shrink-0 items-center gap-2 border-b border-line bg-panel px-2 sm:px-4'>
             <button type='button' aria-label='Back to organization home' className='flex h-11 w-10 shrink-0 items-center justify-center rounded-xl border border-line text-brand' onClick={()=>navigate('organization_home')}><ArrowLeft className='h-5 w-5'/></button>
@@ -380,7 +381,7 @@ export default function OrgMail({myEmail,initialId=''}:{myEmail:string;initialId
             <button type='button' onClick={()=>composeMail('new')} className='flex h-11 items-center gap-2 rounded-xl bg-brand px-3 text-sm font-semibold text-onbrand'><Plus className='h-4 w-4'/> <span className='hidden min-[370px]:inline'>New mail</span></button>
         </header>
         <nav aria-label='Email and calendar' className='flex shrink-0 items-center gap-1 border-b border-line bg-panel px-2 py-1 sm:px-4'>
-            {([{key:'mail' as const,label:'Mail',Icon:Mail},{key:'calendar' as const,label:'Calendar',Icon:CalendarDays},{key:'actions' as const,label:'Monitored Actions',Icon:ListChecks}]).map(x=><button key={x.key} type='button' onClick={()=>setArea(x.key)} className={'flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold '+(area===x.key?'bg-brand/10 text-brand':'text-muted hover:bg-page')}><x.Icon className='h-4 w-4'/><span>{x.label}</span></button>)}
+            {([{key:'mail' as const,label:'Mail',Icon:Mail},{key:'calendar' as const,label:'Calendar',Icon:CalendarDays},{key:'actions' as const,label:'Monitored Actions',Icon:ListChecks}]).map(x=><button key={x.key} type='button' onClick={()=>setArea(x.key)} className={'flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold '+(area===x.key?'bg-brand/10 text-brand':'text-muted hover:bg-page')}><x.Icon className='h-4 w-4'/><span>{x.label}</span></button>)}
         </nav>
         {area==='calendar'?<MailCalendar uid={myUid} people={people} groups={groups} onClose={()=>setArea('mail')}/>:
             area==='actions'?<div className='min-h-0 flex-1 overflow-y-auto p-3 sm:p-6'><UnifiedActions uid={myUid} mode='sent' sourceFilter='email'/></div>:
@@ -407,7 +408,7 @@ export default function OrgMail({myEmail,initialId=''}:{myEmail:string;initialId
                         {loading||refreshing?<RefreshCw className='h-4 w-4 animate-spin text-muted'/>:<span className='text-xs text-muted'>{grouped.length}</span>}
                     </div>
                     <label className='flex h-11 items-center gap-2 rounded-xl border border-line bg-page px-3'><Search className='h-4 w-4 text-muted'/><input value={search} onChange={e=>setSearch(e.target.value)} aria-label='Search your emails' placeholder='Search mail · from: · subject:' className='min-w-0 flex-1 bg-transparent text-xs text-ink outline-none'/>{search&&<button type='button' onClick={()=>setSearch('')} aria-label='Clear search'><X className='h-4 w-4'/></button>}</label>
-                    {folder==='inbox'&&<div className='mt-2 grid grid-cols-2 gap-1 rounded-lg bg-page p-1'>{(['focused','other'] as const).map(k=><button type='button' key={k} onClick={()=>setFocus(k)} className={'min-h-9 rounded-md text-xs font-semibold '+(focus===k?'bg-panel text-brand shadow':'text-muted')}>{k==='focused'?'Focused':'Other'}</button>)}</div>}
+                    {folder==='inbox'&&<div className='mt-2 grid grid-cols-2 gap-1 rounded-lg bg-page p-1'>{(['focused','other'] as const).map(k=><button type='button' key={k} onClick={()=>setFocus(k)} className={'min-h-11 rounded-md text-xs font-semibold '+(focus===k?'bg-panel text-brand shadow':'text-muted')}>{k==='focused'?'Focused':'Other'}</button>)}</div>}
                     <div className='mt-2 flex items-center gap-2'>
                         <label className='min-w-0 flex-1 text-xs text-muted'>Filter <select aria-label='Filter mail list' value={filter} onChange={e=>setFilter(e.target.value)} className='ml-1 max-w-[135px] rounded-md bg-page px-2 py-1.5 text-xs text-ink'>
                             <option value='all'>All mail</option><option value='unread'>Unread</option><option value='starred'>Starred</option><option value='flagged'>Flagged</option><option value='attachments'>With attachments</option>
@@ -423,7 +424,7 @@ export default function OrgMail({myEmail,initialId=''}:{myEmail:string;initialId
                     {grouped.map(m=><div key={m.id} className={'flex items-start gap-1 border-b border-line/60 px-2 py-2 '+(selected===m.id?'bg-brand/10':m.read?'bg-page/40':'bg-panel')}>
                         <input type='checkbox' aria-label={'Select '+m.subject} checked={checked.includes(m.id)} onChange={e=>setChecked(old=>e.target.checked?[...old,m.id]:old.filter(id=>id!==m.id))} className='mt-3 h-4 w-4 shrink-0 accent-[rgb(var(--c-brand))]'/>
                         <button type='button' onClick={()=>{void open(m.id)}} className='min-h-16 min-w-0 flex-1 text-left'>
-                            <span className='flex items-baseline gap-1'><span className={'min-w-0 flex-1 truncate text-sm '+(m.read?'font-medium':'font-bold')}>{folder==='sent'?addr(m.to,people)||'Recipient':m.fromName||m.fromEmail}</span><time className='shrink-0 text-[10px] text-muted'>{fmt(m.sentAt||m.updatedAt)}</time></span>
+                            <span className='flex items-baseline gap-1'><span className={'min-w-0 flex-1 truncate text-sm '+(m.read?'font-medium':'font-bold')}>{folder==='sent'?addr(m.to,people)||'Recipient':m.fromName||m.fromEmail}</span><time className='shrink-0 text-[11px] text-muted'>{fmt(m.sentAt||m.updatedAt)}</time></span>
                             <span className={'mt-0.5 block truncate text-xs '+(m.read?'text-ink':'font-bold text-ink')}>{m.priority==='high'?'❗ ':''}{m.subject}</span>
                             <span className='mt-1 block truncate text-[11px] text-muted'>{m.excerpt||'(No preview)'}</span>
                             <span className='mt-1 flex gap-2 text-brand'>{m.attachments.length>0&&<Paperclip className='h-3 w-3'/>}{m.flagged&&<Flag className='h-3 w-3'/>}{m.starred&&<Star className='h-3 w-3' fill='currentColor'/>}</span>
@@ -436,7 +437,7 @@ export default function OrgMail({myEmail,initialId=''}:{myEmail:string;initialId
                 {selected&&!detail?<div className='flex flex-1 items-center justify-center text-sm text-muted'>Opening mail…</div>:
                 detail?<div className='flex min-h-0 flex-1 flex-col'>
                     <div className='flex shrink-0 flex-wrap items-center gap-1 border-b border-line bg-panel px-2 py-2 sm:px-4'>
-                        <button type='button' className='flex h-10 items-center gap-1 rounded-lg px-2 text-xs text-brand lg:hidden' onClick={()=>{setSelected('');setDetail(null)}}><ChevronLeft className='h-4 w-4'/> Inbox</button>
+                        <button type='button' className='flex h-11 items-center gap-1 rounded-lg px-2 text-xs text-brand lg:hidden' onClick={()=>{setSelected('');setDetail(null)}}><ChevronLeft className='h-4 w-4'/> Inbox</button>
                         {iconButton('Reply',Reply,()=>composeMail('reply',detail),detail.folder==='drafts'||detail.allowReply===false)}
                         {iconButton('Reply all',ReplyAll,()=>composeMail('replyall',detail),detail.folder==='drafts'||detail.allowReply===false||detail.allowReplyAll===false)}
                         {iconButton('Forward',Forward,()=>composeMail('forward',detail),detail.folder==='drafts')}
@@ -445,7 +446,7 @@ export default function OrgMail({myEmail,initialId=''}:{myEmail:string;initialId
                         {iconButton('Delete',Trash2,()=>{void change(detail.folder==='deleted'?'destroy':'delete',[detail.id])},detail.allowDelete===false)}
                         {iconButton('Flag',Flag,()=>{void change(detail.flagged?'unflag':'flag',[detail.id])})}
                         {iconButton('Mark unread',Mail,()=>{void change('unread',[detail.id])})}
-                        <button type='button' title='Print message' aria-label='Print message' onClick={()=>window.print()} className='flex h-10 w-10 items-center justify-center rounded-lg hover:bg-brand/10'><Printer className='h-4 w-4'/></button>
+                        <button type='button' title='Print message' aria-label='Print message' onClick={()=>window.print()} className='flex h-11 w-11 items-center justify-center rounded-lg hover:bg-brand/10'><Printer className='h-4 w-4'/></button>
                     </div>
                     <div className='min-h-0 flex-1 overflow-y-auto p-4 sm:p-6'>
                         <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
@@ -464,7 +465,7 @@ export default function OrgMail({myEmail,initialId=''}:{myEmail:string;initialId
                         </div>
                         {detail.folder==='drafts'?<button type='button' onClick={()=>composeMail('draft',detail)} className='mb-3 flex h-11 items-center gap-2 rounded-xl bg-brand px-4 text-xs font-semibold text-onbrand'><Edit3 className='h-4 w-4'/> Continue draft</button>:null}
                         {!!detail.attachments.length&&<div className='mb-4 flex flex-wrap gap-2'>{detail.attachments.map(a=><a key={a.id} href={a.url||undefined} target='_blank' rel='noopener noreferrer' download={a.name} className='flex max-w-[250px] items-center gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-xs text-brand'>
-                            <Paperclip className='h-4 w-4 shrink-0'/><span className='min-w-0 flex-1 truncate'>{a.name}</span><span className='text-[10px] text-muted'>{Math.ceil(a.size/1024)} KB</span>
+                            <Paperclip className='h-4 w-4 shrink-0'/><span className='min-w-0 flex-1 truncate'>{a.name}</span><span className='text-[11px] text-muted'>{Math.ceil(a.size/1024)} KB</span>
                         </a>)}</div>}
                         <div role='document' aria-label='Email message body'
                             className='min-h-[160px] w-full overflow-x-auto break-words rounded-xl border border-line bg-transparent p-4 text-sm leading-relaxed text-ink [&_blockquote]:border-l-4 [&_blockquote]:border-brand/50 [&_blockquote]:pl-3 [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_h1]:font-bold [&_h2]:font-bold [&_li]:ml-6 [&_ul]:list-disc [&_ol]:list-decimal [&_td]:border [&_td]:border-line [&_td]:p-2 [&_th]:border [&_th]:border-line [&_th]:p-2 [&_a]:text-brand'
@@ -486,7 +487,7 @@ export default function OrgMail({myEmail,initialId=''}:{myEmail:string;initialId
                             <span className='text-muted'>Category</span><select aria-label='Set mail category' value={detail.category} onChange={e=>{void change('category',[detail.id],{category:e.target.value});setDetail(d=>d?{...d,category:e.target.value}:d)}} className={cls}>
                                 <option value=''>None</option><option>Action</option><option>Follow up</option><option>Information</option><option>Urgent</option><option>Project</option><option>Finance</option><option>Maintenance</option>
                             </select>
-                            <button type='button' onClick={()=>{void change(detail.focus?'other':'focused',[detail.id])}} className='min-h-10 rounded-xl border border-line px-3 text-xs text-brand'>{detail.focus?'Move to Other':'Move to Focused'}</button>
+                            <button type='button' onClick={()=>{void change(detail.focus?'other':'focused',[detail.id])}} className='min-h-11 rounded-xl border border-line px-3 text-xs text-brand'>{detail.focus?'Move to Other':'Move to Focused'}</button>
                         </div>
                     </div>
                 </div>:<div className='flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-10 text-center text-muted'>

@@ -9,6 +9,7 @@ import { formatSize } from '../apply/files';
 import { fmtDate } from './format';
 import { Badge, Button, Card, Empty, PageTitle, Spinner, SubTabs, TextArea, useLoad } from './kit';
 import RegistrationSettings from './RegistrationSettings';
+import { appConfirm } from '../components/dialogs';
 
 interface Summary {
     uid: string;
@@ -111,7 +112,7 @@ function ApplicationDetail({ uid, isSuper }: { uid: string; isSuper: boolean }) 
             return: 'Return this application to the applicant for changes?',
             reject: 'Reject this application? The email extension will be released.',
         };
-        if (!window.confirm(prompts[decision])) return;
+        if (!(await appConfirm(prompts[decision]))) return;
         setBusy(decision);
         try {
             const res = await callBackend<{ status: string; code?: string }>('/api/admin/applications/decide', { uid, decision, note: note.trim() });
@@ -222,7 +223,7 @@ function ApplicationDetail({ uid, isSuper }: { uid: string; isSuper: boolean }) 
                                 )}
                                 <div className='p-2'>
                                     <p className='truncate text-xs font-medium text-white'>{d.label}</p>
-                                    <p className='text-[10px] text-slate-500'>{formatSize(d.size)}</p>
+                                    <p className='text-[11px] text-slate-500'>{formatSize(d.size)}</p>
                                 </div>
                             </a>
                         ))}

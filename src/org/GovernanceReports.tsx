@@ -33,7 +33,7 @@ export default function GovernanceReports() {
   return <section className='rounded-xl border border-[rgb(var(--c-border))] p-4 space-y-4'>
     <div><h2 className='font-semibold text-ink'>Audit and reports</h2><p className='text-sm text-soft'>Read-only current configuration and historical audit preview. Not yet certified or publishable.</p></div>
     <div className='grid grid-cols-1 sm:grid-cols-3 gap-3'>
-      <label className='text-sm text-ink'>Year<input type='number' min='2000' max={new Date().getFullYear()} value={year} onChange={e=>setYear(e.target.value)} className='mt-1 w-full border rounded-lg bg-transparent p-3 text-base'/></label>
+      <label className='text-sm text-ink'>Year<input type='number' inputMode='decimal' min='2000' max={new Date().getFullYear()} value={year} onChange={e=>setYear(e.target.value)} className='mt-1 w-full border rounded-lg bg-transparent p-3 text-base'/></label>
       <label className='text-sm text-ink'>From (optional)<input type='date' value={start} onChange={e=>setStart(e.target.value)} className='mt-1 w-full border rounded-lg bg-transparent p-3 text-base'/></label>
       <label className='text-sm text-ink'>To (optional)<input type='date' value={end} onChange={e=>setEnd(e.target.value)} className='mt-1 w-full border rounded-lg bg-transparent p-3 text-base'/></label>
     </div>

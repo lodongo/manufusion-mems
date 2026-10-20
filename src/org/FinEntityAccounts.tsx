@@ -60,7 +60,7 @@ export default function FinEntityAccounts({le,entities}:{le:Entity;entities:Enti
       <Button variant='secondary' disabled={!data.can.gl_manage} onClick={()=>setCodes([])}>Clear draft</Button>
       <Button variant='secondary' disabled={!changed} onClick={()=>setCodes(data.selected)}>Discard edits</Button>
     </div>
-    <div className='max-h-[65vh] space-y-2 overflow-y-auto overscroll-contain'>
+    <div className='max-h-[65dvh] space-y-2 overflow-y-auto overscroll-contain'>
       {classes.map(([classCode,className])=>{
         const all=choices.filter(a=>a.classCode===classCode);
         if(!all.length)return null;

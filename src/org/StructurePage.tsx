@@ -18,6 +18,7 @@ import { Alert, Field, SelectField } from '../components/ui';
 import { Badge, Button, Card, Empty, PageTitle, Spinner, TextArea, useLoad } from '../admin/kit';
 import { CHAIN, LEVELS, LEVEL_EXAMPLES, MAX_UPPER_LEVELS, suggestCode, upperName, type FieldDef } from './structureDefs';
 import type { Position } from './PositionsPage';
+import { appConfirm } from '../components/dialogs';
 
 interface Node {
     id: string;
@@ -100,7 +101,7 @@ export default function StructurePage({ nodeId, sub, canEdit }: { nodeId?: strin
 
 function IconButton({ label, onClick, danger, children }: { label: string; onClick: () => void; danger?: boolean; children: React.ReactNode }) {
     return (
-        <button type='button' aria-label={label} title={label} onClick={onClick} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${danger ? 'border-red-500/40 text-red-400' : 'border-slate-700 text-slate-200'}`}>
+        <button type='button' aria-label={label} title={label} onClick={onClick} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${danger ? 'border-red-500/40 text-red-400' : 'border-slate-700 text-slate-200'}`}>
             {children}
         </button>
     );
@@ -235,7 +236,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
     };
 
     const remove = async () => {
-        if (!node || busy || !window.confirm(`Delete ${labelOf(node, names)} ${node.code}?`)) return;
+        if (!node || busy || !(await appConfirm(`Delete ${labelOf(node, names)} ${node.code}?`))) return;
         setBusy(true);
         setActionError('');
         try {
@@ -522,7 +523,7 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
     };
 
     const remove = async () => {
-        if (!node || !window.confirm(`Delete ${labelOf(node, names)} ${node.code}?`)) return;
+        if (!node || !(await appConfirm(`Delete ${labelOf(node, names)} ${node.code}?`))) return;
         setBusy(true);
         setActionError('');
         try {
@@ -775,7 +776,7 @@ function Hierarchy({ names }: { names: string[] }) {
                     <div className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs ${r.upper ? 'bg-sky-500/10' : 'bg-slate-950'}`}>
                         <span className='min-w-0'>
                             <span className='font-medium text-white'>{r.label}</span>
-                            {r.ref && <span className='ml-2 font-mono text-[10px] text-sky-300'>{r.ref}</span>}
+                            {r.ref && <span className='ml-2 font-mono text-[11px] text-sky-300'>{r.ref}</span>}
                         </span>
                         <span className='truncate font-mono text-emerald-300'>{r.code}</span>
                     </div>
@@ -809,7 +810,7 @@ function LevelsForm({ design, onDone, onCancel }: { design: Design; onDone: () =
         <div className='space-y-4'>
             <div className='flex items-center justify-between'>
                 <PageTitle title='Levels above your legal entities' subtitle='Organizations with several legal entities' />
-                <button onClick={onCancel} aria-label='Cancel' className='flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
+                <button onClick={onCancel} aria-label='Cancel' className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
                     <X className='h-4 w-4' />
                 </button>
             </div>
@@ -886,7 +887,7 @@ function AddUpperLevel({ onDone, onCancel }: { onDone: () => void; onCancel: () 
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const save = async () => {
-        if (!window.confirm('Add a new top hierarchy level above existing units? MEMS will preserve every existing unit and job role identifier.')) return;
+        if (!(await appConfirm('Add a new top hierarchy level above existing units? MEMS will preserve every existing unit and job role identifier.'))) return;
         setBusy(true); setError('');
         try {
             await callBackend('/api/org/structure/design/expand', { name: name.trim(), unitName: unitName.trim(), segment: segment.trim().toUpperCase() });
@@ -934,7 +935,7 @@ function SiteRolesForm({ site, onDone, onCancel }: { site: Node; onDone: () => v
         <div className='space-y-4'>
             <div className='flex items-center justify-between'>
                 <PageTitle title='Job roles used at this site' subtitle={`${site.code} · ${site.name}`} />
-                <button onClick={onCancel} aria-label='Cancel' className='flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
+                <button onClick={onCancel} aria-label='Cancel' className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
                     <X className='h-4 w-4' />
                 </button>
             </div>
@@ -1196,7 +1197,7 @@ function NodeForm({
         <div className='space-y-4'>
             <div className='flex items-center justify-between'>
                 <PageTitle title={existing ? `Edit ${label.toLowerCase()}` : `Set up ${label.toLowerCase()}`} subtitle={parent ? `Under ${parent.code} · ${parent.name}` : existing ? existing.code : 'At the top of your organization'} />
-                <button onClick={onCancel} aria-label='Cancel' className='flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
+                <button onClick={onCancel} aria-label='Cancel' className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
                     <X className='h-4 w-4' />
                 </button>
             </div>
@@ -1206,7 +1207,7 @@ function NodeForm({
                     <label className='flex cursor-pointer items-center gap-4'>
                         <span className='relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-slate-600 bg-slate-950'>
                             {logoUrl ? <img src={logoUrl} alt='Logo' className='h-full w-full object-contain p-1' /> : <Building className='h-6 w-6 text-slate-500' />}
-                            {logoBusy && <span className='absolute inset-0 flex items-center justify-center bg-black/60 text-[10px] text-white'>Uploading</span>}
+                            {logoBusy && <span className='absolute inset-0 flex items-center justify-center bg-black/60 text-[11px] text-white'>Uploading</span>}
                         </span>
                         <span className='text-sm text-slate-300'>
                             Legal entity logo
@@ -1339,7 +1340,7 @@ function BomForm({ assembly, bom, onDone, onCancel,canEdit=true }: {canEdit?:boo
     };
 
     const remove = async () => {
-        if (!bom || !window.confirm(`Delete the bill of materials ${bom.name}?`)) return;
+        if (!bom || !(await appConfirm(`Delete the bill of materials ${bom.name}?`))) return;
         setBusy('delete');
         try {
             await callBackend('/api/org/bom/delete', { id: bom.id });
@@ -1354,7 +1355,7 @@ function BomForm({ assembly, bom, onDone, onCancel,canEdit=true }: {canEdit?:boo
         <div className='space-y-4'>
             <div className='flex items-center justify-between'>
                 <PageTitle title={bom ? `${bom.name} · v${bom.version}` : 'New bill of materials'} subtitle={`For ${assembly.name} · ${assembly.code}`} />
-                <button onClick={onCancel} aria-label='Cancel' className='flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
+                <button onClick={onCancel} aria-label='Cancel' className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
                     <X className='h-4 w-4' />
                 </button>
             </div>
