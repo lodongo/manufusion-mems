@@ -396,7 +396,7 @@ export default function RichTable<T>({
                             value={search}
                             maxLength={100}
                             onChange={(e) => setSearch(e.target.value)}
-                            className='h-10 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm'
+                            className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm'
                         />
                     </label>
                     <button type='button' aria-label='Filters' title='Filter by criteria' onClick={() => setPanel(panel === 'filters' ? '' : 'filters')} className={iconBtn(panel === 'filters' || view.criteria.length > 0)}>
@@ -433,7 +433,7 @@ export default function RichTable<T>({
                     <div className='max-h-64 overflow-y-auto overscroll-contain rounded-xl border border-slate-800 bg-slate-950 p-2'>
                         <div className='mb-1 flex items-center justify-between px-1'>
                             <p className='text-xs text-slate-400'>Tap the eye to add or remove a column. Arrows move it.</p>
-                            <button type='button' onClick={() => setView({ ...defaults })} className='flex items-center gap-1 text-xs text-emerald-300'>
+                            <button type='button' onClick={() => setView({ ...defaults })} className='flex min-h-11 items-center gap-1 text-xs text-emerald-300'>
                                 <RotateCcw className='h-3 w-3' />
                                 Reset
                             </button>
@@ -530,8 +530,8 @@ export default function RichTable<T>({
                                 {olderTemplates.map((t) => (
                                     <button key={t.name} type='button' disabled={!!syncBusy}
                                         onClick={() => { void saveCloud(t); }}
-                                        className='mb-1 flex min-h-10 w-full items-center justify-between rounded-lg border border-slate-700 px-3 text-left text-xs text-emerald-300 disabled:opacity-40'>
-                                        Import & save ${t.name} to My Tables
+                                        className='mb-1 flex min-h-11 w-full items-center justify-between rounded-lg border border-slate-700 px-3 text-left text-xs text-emerald-300 disabled:opacity-40'>
+                                        Import & save {t.name} to My Tables
                                         <BookmarkPlus className='h-4 w-4' />
                                     </button>
                                 ))}
@@ -551,7 +551,7 @@ export default function RichTable<T>({
                             <tr>
                                 {visible.map((c) => (
                                     <th key={c.key} scope='col' className='sticky top-0 z-10 border-b border-slate-800 bg-slate-900 px-3 py-2 text-left font-medium text-slate-400'>
-                                        <button type='button' onClick={() => toggleSort(c.key)} className='flex items-center gap-1 whitespace-nowrap text-xs uppercase tracking-wide'>
+                                        <button type='button' onClick={() => toggleSort(c.key)} className='flex min-h-11 items-center gap-1 whitespace-nowrap text-xs uppercase tracking-wide'>
                                             {c.label}
                                             {view.sort?.col === c.key ? view.sort.dir === 'asc' ? <ArrowUp className='h-3 w-3 text-emerald-400' /> : <ArrowDown className='h-3 w-3 text-emerald-400' /> : <ArrowUpDown className='h-3 w-3 opacity-40' />}
                                         </button>
@@ -585,7 +585,7 @@ function FiltersPanel<T>({ columns, criteria, onChange }: { columns: Array<Colum
     const [value2, setValue2] = useState('');
     const [error, setError] = useState('');
     const needs = OPS.find((o) => o.op === op)?.needs ?? 1;
-    const select = 'h-10 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-2 text-base text-white sm:text-sm';
+    const select = 'h-11 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-2 text-base text-white sm:text-sm';
 
     const add = () => {
         setError('');
@@ -607,13 +607,13 @@ function FiltersPanel<T>({ columns, criteria, onChange }: { columns: Array<Colum
                         <li key={i} className='flex items-center gap-1 rounded-full bg-emerald-500/10 py-1 pl-3 pr-1 text-xs text-emerald-200 ring-1 ring-emerald-500/30'>
                             {label(c.col)} {OPS.find((o) => o.op === c.op)?.label.toLowerCase()} {c.value}
                             {c.value2 ? ` and ${c.value2}` : ''}
-                            <button type='button' aria-label='Remove filter' onClick={() => onChange(criteria.filter((_, j) => j !== i))} className='flex h-5 w-5 items-center justify-center rounded-full'>
+                            <button type='button' aria-label='Remove filter' onClick={() => onChange(criteria.filter((_, j) => j !== i))} className='-my-2 -mr-1 flex h-11 w-11 items-center justify-center rounded-full'>
                                 <X className='h-3 w-3' />
                             </button>
                         </li>
                     ))}
                     <li>
-                        <button type='button' onClick={() => onChange([])} className='px-2 py-1 text-xs text-slate-400 underline'>
+                        <button type='button' onClick={() => onChange([])} className='flex min-h-11 items-center px-2 text-xs text-slate-400 underline'>
                             Clear all
                         </button>
                     </li>
@@ -638,7 +638,7 @@ function FiltersPanel<T>({ columns, criteria, onChange }: { columns: Array<Colum
                 {needs === 2 && <input aria-label='Second value' value={value2} maxLength={200} placeholder='and' onChange={(e) => setValue2(e.target.value)} className={select} />}
             </div>
             {error && <p className='text-xs text-red-400'>{error}</p>}
-            <button type='button' onClick={add} className='flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/50 text-sm font-medium text-emerald-300'>
+            <button type='button' onClick={add} className='flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/50 text-sm font-medium text-emerald-300'>
                 <Plus className='h-4 w-4' />
                 Add filter
             </button>
