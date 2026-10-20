@@ -2,9 +2,56 @@
 import {HttpError,getDoc,isObj,listDocs,str} from './core';
 import {orgRoute} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
+import {rankEvidence,type EvidenceHit} from './drkmsEvidenceSearch';
 
 const MAX=75;
 export const drkmsTroubleshootingRoutes={
+ 'POST /api/org/drkms/troubleshoot/search':[
+  orgRoute('drkms.troubleshoot.search','MNT.view',async ctx=>{
+   const assetTag=str(ctx.body.assetTag),query=str(ctx.body.query).trim();
+   if(!/^AST-[0-9]{6}$/.test(assetTag)||query.length<2||query.length>200)
+    throw new HttpError(400,'Choose an asset and a search of 2–200 characters.');
+   const asset=await getDoc(`organizations/${ctx.orgId}/assets/${assetTag}`);
+   if(!asset||str(asset.data.status)==='disposed')throw new HttpError(404,'Equipment asset not found.');
+   const location=str(asset.data.nodeId),scope=await scopeOf(ctx);
+   if(!location||!canAt(ctx,'MNT.view',await nodePath(ctx.orgId,location),scope))
+    throw new HttpError(403,'Maintenance access to this equipment is required.');
+   const [orders,requests,docs]=await Promise.all([
+    listDocs(`organizations/${ctx.orgId}/work_orders`),
+    listDocs(`organizations/${ctx.orgId}/work_requests`),
+    listDocs(`organizations/${ctx.orgId}/drkms_documents`),
+   ]);
+   const matching=(d:{data:Record<string,unknown>})=>str(d.data.assetTag)===assetTag||
+     (!!str(asset.data.workCenterId)&&str(d.data.unitId)===str(asset.data.workCenterId));
+   const entries:Omit<EvidenceHit,'score'>[]=[];
+   for(const [collection,kind] of [[orders,'work_order'],[requests,'work_request']] as const){
+    for(const d of collection.filter(matching).slice(0,250)){
+     entries.push({sourceType:kind,sourceId:d.id,title:str(d.data.title),
+       excerpt:[str(d.data.description),str(d.data.failureModeLabel),str(d.data.status)].join(' ').slice(0,900),
+       reference:kind+':'+d.id});
+    }
+   }
+   const assetAncestry=await nodePath(ctx.orgId,location);
+   for(const d of docs){
+    if(str(d.data.status)!=='effective'||!str(d.data.effectiveRevisionId))continue;
+    const applied=isObj(d.data.scope)?str(d.data.scope.nodeId):'';
+    if(!applied||!assetAncestry.includes(applied)||
+       !canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,applied),scope))continue;
+    const rev=await getDoc(`organizations/${ctx.orgId}/drkms_documents/${d.id}/revisions/${str(d.data.effectiveRevisionId)}`);
+    if(!rev||rev.data.immutable!==true||str(rev.data.status)!=='effective')continue;
+    const links=await listDocs(`organizations/${ctx.orgId}/drkms_documents/${d.id}/technical_links`);
+    if(!links.some(l=>str(l.data.targetType)==='asset'&&str(l.data.targetId)===assetTag||
+      str(l.data.targetType)==='work_center'&&str(l.data.targetId)===str(asset.data.workCenterId)))continue;
+    entries.push({sourceType:'controlled_document',sourceId:d.id,title:str(d.data.title),
+      excerpt:[str(d.data.classCode),str(d.data.subtypeCode)].join(' '),
+      revisionId:rev.id,reference:'document:'+d.id+':'+rev.id});
+   }
+   return {assetTag,query,hits:rankEvidence(query,entries),
+     searchMode:'verified_metadata_and_history',semanticSearchEnabled:false,ocrEnabled:false,
+     limitations:['Manual page content is not yet extracted or indexed.','Search results are source references, not AI diagnoses.']};
+  }),
+ ],
+
  'POST /api/org/drkms/troubleshoot/context':[
   orgRoute('drkms.troubleshoot.context','MNT.view',async ctx=>{
    const assetTag=str(ctx.body.assetTag);
