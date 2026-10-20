@@ -7,6 +7,7 @@ export default function TroubleshootingContext({assetTag}:{assetTag:string}){
  const [expanded,setExpanded]=useState(false);
  const [query,setQuery]=useState(''),[searchTerm,setSearchTerm]=useState('');
  const {data,loading,error,reload}=useLoad(()=>expanded?callBackend<Context>('/api/org/drkms/troubleshoot/context',{assetTag}):Promise.resolve(null),[assetTag,expanded]);
+ const industrial=useLoad(()=>expanded?callBackend<{records:Array<{id:string;kind:string;title:string;technology:string;utilityKind:string;sourceDocumentId:string;sourceRevisionId:string}>;aiControlEnabled:false;liveTelemetryConnected:false}>('/api/org/drkms/industrial/list',{assetTag}):Promise.resolve(null),[assetTag,expanded]);
  const found=useLoad(()=>expanded&&searchTerm?callBackend<{hits:Array<{reference:string;title:string;excerpt:string;revisionId?:string}>;limitations:string[]}>('/api/org/drkms/troubleshoot/search',{assetTag,query:searchTerm}):Promise.resolve(null),[assetTag,expanded,searchTerm]);
  return <Card><div className='space-y-3'>
   <button type='button' className='flex min-h-11 w-full items-center justify-between gap-2 text-left font-semibold text-white' onClick={()=>setExpanded(!expanded)}>
@@ -31,6 +32,15 @@ export default function TroubleshootingContext({assetTag}:{assetTag:string}){
      <p className='text-xs text-slate-300'>{x.excerpt}</p>
     </div>)}
     <p className='text-xs text-amber-200'>Search covers metadata and recorded maintenance text only; full manual extraction and AI diagnosis are not active.</p>
+   </div>}
+   {industrial.data&&<div className='space-y-2'>
+    <p className='font-semibold text-white'>PLC, IoT and utilities knowledge ({industrial.data.records.length})</p>
+    {industrial.data.records.map(x=><div key={x.id} className='rounded-lg border border-slate-700 p-2'>
+      <p className='break-words text-xs font-medium text-slate-200'>{x.title}</p>
+      <p className='text-xs text-slate-400'>{x.kind.replaceAll('_',' ')} · {x.technology||x.utilityKind||'Controlled reference'}</p>
+      <p className='break-all text-xs text-slate-500'>Revision: {x.sourceRevisionId.slice(0,12)} · Read-only reference</p>
+    </div>)}
+    <p className='text-xs text-slate-400'>PLC write access and live telemetry are not connected.</p>
    </div>}
    {data&&<>
     <button type='button' className='min-h-10 rounded-lg border border-slate-600 px-3 text-xs text-white' onClick={reload}>Refresh evidence</button>
