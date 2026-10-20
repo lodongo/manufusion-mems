@@ -39,5 +39,5 @@ test('Procurement and Inventory add tabs without replicating master definitions'
  assert.match(inv,/'Stock Control'/);assert.match(inv,/STOCK_FIELDS/);
  assert.match(prc,/label:'Stock policies'/);
  assert.match(prc,/StockConfigurationCatalogue/);
- assert.match(prc,/callBackend<\{stockDimensions:Dim\[]>\>/);
+ assert.match(prc,/callBackend<.*stockDimensions:Dim\[\]/);
 });
