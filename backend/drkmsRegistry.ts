@@ -2,6 +2,7 @@
 import { HttpError, getDoc, listDocs, nowIso, randomId, str, writeDoc } from './core';
 import { orgRoute } from './guards';
 import { record } from './org';
+import { validateDocumentLocation } from './drkmsHierarchy';
 
 const base = (orgId: string) => `organizations/${orgId}/drkms_documents`;
 const validId = (v: string) => /^[a-f0-9]{20}$/.test(v);
@@ -15,6 +16,7 @@ async function resolveScope(orgId: string, requestedId: string) {
     const byId = new Map(nodes.map(n => [n.id, n]));
     const selected = byId.get(requestedId);
     if (!selected || !organizationLevels.has(str(selected.data.level)) || str(selected.data.status) === 'inactive') throw new HttpError(400, 'Choose a valid active organizational location.');
+    const verifiedAncestors = validateDocumentLocation(requestedId, nodes.map(n => ({ id:n.id, level:str(n.data.level), parentId:str(n.data.parentId), status:str(n.data.status) })));
     const ancestors: string[] = [];
     const visited = new Set<string>();
     let node = selected;
@@ -30,7 +32,7 @@ async function resolveScope(orgId: string, requestedId: string) {
         node = parent;
     }
     return { nodes: allowed.map(n => ({ id:n.id, name:str(n.data.name), level:str(n.data.level), parentId:str(n.data.parentId) })),
-        scope: { nodeId: selected.id, level: str(selected.data.level), name: str(selected.data.name), ancestorIds: ancestors } };
+        scope: { nodeId: selected.id, level: str(selected.data.level), name: str(selected.data.name), ancestorIds: verifiedAncestors } };
 }
 const configPath = (orgId: string) => `organizations/${orgId}/drkms_config/default`;
 const defaults = { enabledClassCodes: Array.from(classes), defaultReviewMonths: 24, updatedAt: '' };
