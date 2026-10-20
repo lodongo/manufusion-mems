@@ -1,0 +1,449 @@
+{
+  "schemaVersion": "1.0.0",
+  "namespace": "DRKMS",
+  "designStatus": "proposed_not_enabled",
+  "hierarchy": [
+    {
+      "level": 0,
+      "label": "External authority"
+    },
+    {
+      "level": 1,
+      "label": "Strategic direction"
+    },
+    {
+      "level": 2,
+      "label": "Management systems"
+    },
+    {
+      "level": 3,
+      "label": "Process controls"
+    },
+    {
+      "level": 4,
+      "label": "Execution controls"
+    },
+    {
+      "level": 5,
+      "label": "Evidence and records"
+    }
+  ],
+  "documentClasses": [
+    {
+      "code": "EXT",
+      "level": 0,
+      "label": "External authority",
+      "description": "Law, regulation, external standard and contractual requirements",
+      "enabledByDefault": true
+    },
+    {
+      "code": "GOV",
+      "level": 1,
+      "label": "Governance instrument",
+      "description": "Charters, delegation and governance frameworks",
+      "enabledByDefault": true
+    },
+    {
+      "code": "POL",
+      "level": 1,
+      "label": "Policy",
+      "description": "Binding organizational principles and commitments",
+      "enabledByDefault": true
+    },
+    {
+      "code": "STR",
+      "level": 1,
+      "label": "Strategy",
+      "description": "Long-term priorities and direction",
+      "enabledByDefault": true
+    },
+    {
+      "code": "OBJ",
+      "level": 1,
+      "label": "Objective and target",
+      "description": "Measurable outcomes and commitments",
+      "enabledByDefault": true
+    },
+    {
+      "code": "FRW",
+      "level": 2,
+      "label": "Management framework",
+      "description": "Operating system and governance structure",
+      "enabledByDefault": true
+    },
+    {
+      "code": "MAN",
+      "level": 2,
+      "label": "Management manual",
+      "description": "Consolidated management system description",
+      "enabledByDefault": true
+    },
+    {
+      "code": "PRG",
+      "level": 2,
+      "label": "Management program",
+      "description": "Integrated sustained management arrangements",
+      "enabledByDefault": true
+    },
+    {
+      "code": "PLN",
+      "level": 2,
+      "label": "Management plan",
+      "description": "Time-bound resources, tasks and milestones",
+      "enabledByDefault": true
+    },
+    {
+      "code": "PRO",
+      "level": 3,
+      "label": "Process",
+      "description": "Inputs, outputs, interfaces and responsibilities",
+      "enabledByDefault": true
+    },
+    {
+      "code": "PRC",
+      "level": 3,
+      "label": "Procedure",
+      "description": "Mandatory flow, controls and decision responsibilities",
+      "enabledByDefault": true
+    },
+    {
+      "code": "STD",
+      "level": 3,
+      "label": "Internal standard",
+      "description": "Mandatory technical or operational requirements",
+      "enabledByDefault": true
+    },
+    {
+      "code": "SOP",
+      "level": 4,
+      "label": "Standard operating procedure",
+      "description": "Repeatable method for an operational activity",
+      "enabledByDefault": true
+    },
+    {
+      "code": "WIN",
+      "level": 4,
+      "label": "Work instruction",
+      "description": "Detailed step-by-step task execution",
+      "enabledByDefault": true
+    },
+    {
+      "code": "SPC",
+      "level": 4,
+      "label": "Specification",
+      "description": "Quantitative acceptance and design requirements",
+      "enabledByDefault": true
+    },
+    {
+      "code": "GDL",
+      "level": 4,
+      "label": "Guideline",
+      "description": "Recommended non-mandatory practices",
+      "enabledByDefault": true
+    },
+    {
+      "code": "CHK",
+      "level": 4,
+      "label": "Checklist",
+      "description": "Structured verification steps",
+      "enabledByDefault": true
+    },
+    {
+      "code": "FRM",
+      "level": 5,
+      "label": "Form",
+      "description": "Approved blank data-capture instrument",
+      "enabledByDefault": true
+    },
+    {
+      "code": "TMP",
+      "level": 5,
+      "label": "Template",
+      "description": "Controlled document creation structure",
+      "enabledByDefault": true
+    },
+    {
+      "code": "REG",
+      "level": 5,
+      "label": "Register",
+      "description": "Maintained list of structured entries",
+      "enabledByDefault": true
+    },
+    {
+      "code": "REC",
+      "level": 5,
+      "label": "Record",
+      "description": "Retained evidence of activity or result",
+      "enabledByDefault": true
+    },
+    {
+      "code": "RPT",
+      "level": 5,
+      "label": "Report",
+      "description": "Structured reporting of evidence, analysis or outcomes",
+      "enabledByDefault": true
+    }
+  ],
+  "technicalSubtypes": [
+    {
+      "code": "OPM",
+      "label": "Operator manual",
+      "parentClass": "MAN",
+      "enabledByDefault": true
+    },
+    {
+      "code": "TCM",
+      "label": "Technical manual",
+      "parentClass": "MAN",
+      "enabledByDefault": true
+    },
+    {
+      "code": "SVM",
+      "label": "Service manual",
+      "parentClass": "MAN",
+      "enabledByDefault": true
+    },
+    {
+      "code": "ELM",
+      "label": "Electrical manual",
+      "parentClass": "MAN",
+      "enabledByDefault": true
+    },
+    {
+      "code": "ELD",
+      "label": "Electrical drawing",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "SLD",
+      "label": "Single-line diagram",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "MCD",
+      "label": "Mechanical drawing",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "PID",
+      "label": "Piping and instrumentation drawing",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "PND",
+      "label": "Pneumatic diagram",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "HYD",
+      "label": "Hydraulic diagram",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "SPT",
+      "label": "Spare parts catalogue",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "BOM",
+      "label": "Bill of materials",
+      "parentClass": "REG",
+      "enabledByDefault": true
+    },
+    {
+      "code": "DSH",
+      "label": "Technical datasheet",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "LUB",
+      "label": "Lubrication chart",
+      "parentClass": "WIN",
+      "enabledByDefault": true
+    },
+    {
+      "code": "PLC",
+      "label": "PLC/automation documentation",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "NET",
+      "label": "Industrial network diagram",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "CAL",
+      "label": "Calibration document",
+      "parentClass": "REC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "DRW",
+      "label": "General engineering drawing",
+      "parentClass": "SPC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "MOD",
+      "label": "Modification and as-built record",
+      "parentClass": "REC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "OEM",
+      "label": "OEM technical bulletin",
+      "parentClass": "EXT",
+      "enabledByDefault": true
+    },
+    {
+      "code": "RAS",
+      "label": "Risk assessment",
+      "parentClass": "REC",
+      "enabledByDefault": true
+    },
+    {
+      "code": "TNG",
+      "label": "Training materials",
+      "parentClass": "TMP",
+      "enabledByDefault": true
+    }
+  ],
+  "relationshipTypes": [
+    {
+      "code": "REL-001",
+      "key": "applies_to_asset"
+    },
+    {
+      "code": "REL-002",
+      "key": "applies_to_equipment_model"
+    },
+    {
+      "code": "REL-003",
+      "key": "applies_to_assembly"
+    },
+    {
+      "code": "REL-004",
+      "key": "applies_to_subassembly"
+    },
+    {
+      "code": "REL-005",
+      "key": "applies_to_component"
+    },
+    {
+      "code": "REL-006",
+      "key": "defines_task"
+    },
+    {
+      "code": "REL-007",
+      "key": "specifies_material"
+    },
+    {
+      "code": "REL-008",
+      "key": "references_drawing"
+    },
+    {
+      "code": "REL-009",
+      "key": "supersedes"
+    },
+    {
+      "code": "REL-010",
+      "key": "supports_risk_assessment"
+    },
+    {
+      "code": "REL-011",
+      "key": "supports_work_order_task"
+    },
+    {
+      "code": "REL-012",
+      "key": "defines_acceptance_criteria"
+    },
+    {
+      "code": "REL-013",
+      "key": "supports_competency"
+    },
+    {
+      "code": "REL-014",
+      "key": "implements_obligation"
+    },
+    {
+      "code": "REL-015",
+      "key": "modified_by_engineering_change"
+    },
+    {
+      "code": "REL-016",
+      "key": "produces_record"
+    }
+  ],
+  "digitalMaturity": [
+    {
+      "code": "D0",
+      "label": "Preserved original"
+    },
+    {
+      "code": "D1",
+      "label": "Searchable extracted"
+    },
+    {
+      "code": "D2",
+      "label": "Verified structured digital"
+    },
+    {
+      "code": "D3",
+      "label": "Approved executable"
+    }
+  ],
+  "verificationStates": [
+    "not_required",
+    "pending",
+    "in_review",
+    "accepted",
+    "rejected"
+  ],
+  "lifecycleStates": [
+    "draft",
+    "in_review",
+    "approved",
+    "scheduled",
+    "effective",
+    "superseded",
+    "archived",
+    "disposed"
+  ],
+  "representationTypes": [
+    "uploaded",
+    "native",
+    "physical",
+    "ai_candidate",
+    "executable"
+  ],
+  "requiredFields": [
+    "tenantId",
+    "documentId",
+    "documentClass",
+    "title",
+    "ownerScope",
+    "securityClass",
+    "lifecycleState",
+    "currentRevision",
+    "origin"
+  ],
+  "safetyInvariants": [
+    "Immutable originals and published revision blobs",
+    "Never publish AI candidates without required human verification",
+    "Tenant isolation enforced server-side at document and file level",
+    "No storage of actual tenant documents in global metadata",
+    "Asset links reference existing AST registry and respect configuration compatibility",
+    "Approval actions use existing governance and SoD",
+    "Record disposal blocked by active legal hold"
+  ]
+}
