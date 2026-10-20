@@ -41,6 +41,8 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
   const [settingsNotice, setSettingsNotice] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [reviewing, setReviewing] = useState('');
+  const [documentSearch, setDocumentSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [notice, setNotice] = useState('');
   const [createError, setCreateError] = useState('');
   const updateSettings = async () => {
@@ -152,8 +154,20 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
       {loading && <p className='text-sm text-slate-300'>Loading documents…</p>}
       {error && <p role='alert' className='text-sm text-red-300'>{error}</p>}
       {!loading && !error && !data?.documents.length && <p className='text-sm text-slate-400'>No registered documents yet.</p>}
+      <div className='mb-3 grid min-w-0 gap-2'>
+        <input value={documentSearch} onChange={e=>setDocumentSearch(e.target.value)} placeholder='Search title, code or ID'
+          aria-label='Search registered documents'
+          className='min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'/>
+        <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}
+          aria-label='Filter document status'
+          className='min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
+          <option value='all'>All statuses</option><option value='draft'>Drafts</option>
+          <option value='in_review'>Submitted for review</option>
+        </select>
+      </div>
       <div className='space-y-2'>
-        {(data?.documents ?? []).map(d => <div key={d.documentId} className='min-w-0 rounded-lg border border-slate-700 p-3'>
+        {(data?.documents ?? []).filter(d=>(statusFilter==='all'||d.status===statusFilter) &&
+           [d.title,d.classCode,d.documentId].some(v=>String(v??'').toLowerCase().includes(documentSearch.trim().toLowerCase()))).map(d => <div key={d.documentId} className='min-w-0 rounded-lg border border-slate-700 p-3'>
           <div className='flex items-start gap-2'><FileText className='mt-0.5 shrink-0 text-blue-300' size={18}/>
             <div className='min-w-0 flex-1'>
               <p className='break-words font-medium text-white'>{d.title}</p>
