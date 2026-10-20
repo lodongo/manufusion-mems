@@ -7,7 +7,55 @@ const base = (orgId: string) => `organizations/${orgId}/drkms_documents`;
 const validId = (v: string) => /^[a-f0-9]{20}$/.test(v);
 const classes = new Set(['EXT','GOV','POL','STR','OBJ','FRW','MAN','PRG','PLN','PRO','PRC','STD','SOP','WIN','SPC','GDL','CHK','FRM','TMP','REG','REC','RPT']);
 
+const organizationLevels = new Set(['legal_entity', 'site', 'department', 'cost_center']);
+async function resolveScope(orgId: string, requestedId: string) {
+    const nodes = await listDocs(`organizations/${orgId}/structure`);
+    const allowed = nodes.filter(n => organizationLevels.has(str(n.data.level)) && str(n.data.status) !== 'inactive');
+    if (!requestedId) return { nodes: allowed.map(n => ({ id:n.id, name:str(n.data.name), level:str(n.data.level), parentId:str(n.data.parentId) })), scope: null };
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    const selected = byId.get(requestedId);
+    if (!selected || !organizationLevels.has(str(selected.data.level)) || str(selected.data.status) === 'inactive') throw new HttpError(400, 'Choose a valid active organizational location.');
+    const ancestors: string[] = [];
+    const visited = new Set<string>();
+    let node = selected;
+    while (node) {
+        if (visited.has(node.id)) throw new HttpError(400, 'Invalid cyclic organization hierarchy.');
+        visited.add(node.id);
+        if (str(node.data.status) === 'inactive') throw new HttpError(400, 'Inactive parent location.');
+        ancestors.unshift(node.id);
+        const parentId: string = str(node.data.parentId);
+        if (!parentId || parentId === 'root') break;
+        const parent = byId.get(parentId);
+        if (!parent) throw new HttpError(400, 'Incomplete organization hierarchy.');
+        node = parent;
+    }
+    return { nodes: allowed.map(n => ({ id:n.id, name:str(n.data.name), level:str(n.data.level), parentId:str(n.data.parentId) })),
+        scope: { nodeId: selected.id, level: str(selected.data.level), name: str(selected.data.name), ancestorIds: ancestors } };
+}
+const configPath = (orgId: string) => `organizations/${orgId}/drkms_config/default`;
+const defaults = { enabledClassCodes: Array.from(classes), defaultReviewMonths: 24, updatedAt: '' };
+
 export const drkmsRoutes = {
+    'POST /api/org/drkms/setup': [
+        orgRoute('drkms.setup', 'ADM.roles', async ctx => {
+            const [settings, locations] = await Promise.all([getDoc(configPath(ctx.orgId)), resolveScope(ctx.orgId, '')]);
+            return { config: settings?.data ?? defaults, locations: locations.nodes };
+        }),
+    ],
+    'POST /api/org/drkms/configure': [
+        orgRoute('drkms.configure', 'ADM.roles', async ctx => {
+            const incoming = ctx.body.enabledClassCodes;
+            if (!Array.isArray(incoming) || !incoming.length || incoming.length > classes.size ||
+                incoming.some(x => typeof x !== 'string' || !classes.has(x)) ||
+                new Set(incoming).size !== incoming.length) throw new HttpError(400, 'Invalid enabled document classes.');
+            const months = Number(ctx.body.defaultReviewMonths);
+            if (!Number.isInteger(months) || months < 1 || months > 120) throw new HttpError(400, 'Review interval must be 1–120 months.');
+            const config = { enabledClassCodes: incoming, defaultReviewMonths: months, updatedAt: nowIso(), updatedBy: ctx.uid };
+            await writeDoc(configPath(ctx.orgId), config);
+            await record(ctx, 'drkms.configure', 'Document controls');
+            return { config };
+        }),
+    ],
     'POST /api/org/drkms/documents/list': [
         orgRoute('drkms.documents.list', 'ADM.roles', async ctx => {
             const items = await listDocs(base(ctx.orgId));
@@ -29,10 +77,15 @@ export const drkmsRoutes = {
             const classCode = str(ctx.body.classCode).toUpperCase();
             if (title.length < 3 || title.length > 200) throw new HttpError(400, 'Title must contain 3–200 characters.');
             if (!classes.has(classCode)) throw new HttpError(400, 'Choose a valid document classification.');
+            const requestedScopeId = str(ctx.body.scopeNodeId);
+            const [settings, location] = await Promise.all([getDoc(configPath(ctx.orgId)), resolveScope(ctx.orgId, requestedScopeId)]);
+            if (!location.scope) throw new HttpError(400, 'Select a legal entity, site, department or cost center.');
+            const enabled = settings?.data.enabledClassCodes;
+            if (Array.isArray(enabled) && !enabled.includes(classCode)) throw new HttpError(400, 'Document class disabled by organization.');
             const id = randomId(10);
             const now = nowIso();
             const document = {
-                tenantId: ctx.orgId, documentId: id, classCode, title,
+                tenantId: ctx.orgId, documentId: id, classCode, title, scope: location.scope,
                 status: 'draft', representation: 'native', digitalMaturity: 'D0',
                 revision: '00', ownerUid: ctx.uid, createdBy: ctx.uid,
                 createdAt: now, updatedAt: now, securityClass: 'internal',
