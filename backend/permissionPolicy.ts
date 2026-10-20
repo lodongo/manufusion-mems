@@ -40,6 +40,7 @@ export const ADM_PERMISSIONS: PermDef[] = [
     p('ADM.document_registry', 'Register and view controlled document drafts', true),
     p('ADM.document_config', 'Configure organization document controls', true),
     p('ADM.document_review', 'Independently review or return document drafts', true),
+    p('ADM.document_publish', 'Publish independently approved, verified document revisions', true),
     p('ADM.scope.site', 'Grant view access beyond assigned site', true),
     p('ADM.scope.country', 'Grant country-wide view access', true),
     p('ADM.scope.business', 'Grant whole-organization view access', true),
