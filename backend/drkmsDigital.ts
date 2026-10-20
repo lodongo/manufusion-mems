@@ -1,7 +1,9 @@
 /** Structured RCA and AI-assisted draft capture. Review and CoA publication are external gates. */
-import {HttpError,getDoc,nowIso,randomId,str,writeDoc} from './core';
+import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc} from './core';
 import {orgRoute} from './guards';
 import {record} from './org';
+import {validateDocumentLocation} from './drkmsHierarchy';
+import {canAt,scopeOf,nodePath} from './access';
 import {validateAiProposal,type AiProposal} from './drkmsKnowledgeContracts';
 const docs=(org:string,id:string)=>`organizations/${org}/drkms_documents/${id}`;
 const idOk=(s:string)=>/^[a-f0-9]{20}$/.test(s);
@@ -15,11 +17,17 @@ export const drkmsDigitalRoutes={
    const node=await getDoc(`organizations/${ctx.orgId}/structure/${scopeNodeId}`);
    if(!node||!['legal_entity','site','department','cost_center'].includes(str(node.data.level))||
      str(node.data.status)==='inactive')throw new HttpError(400,'Choose an active organization location.');
+   const nodes=await listDocs(`organizations/${ctx.orgId}/structure`);
+   let ancestry:string[];
+   try{ancestry=validateDocumentLocation(scopeNodeId,nodes.map(n=>({id:n.id,level:str(n.data.level),parentId:str(n.data.parentId),status:str(n.data.status)})));}
+   catch{throw new HttpError(400,'RCA location has an invalid organizational hierarchy.');}
+   if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,scopeNodeId),await scopeOf(ctx)))
+     throw new HttpError(403,'You do not have document access at this organizational location.');
    const id=randomId(10);
    const entry={tenantId:ctx.orgId,documentId:id,title,classCode:'RPT',subtypeCode:'RCA',
      representation:'digital_structured',status:'draft',rcaStage:'investigation',
      incidentReference,problemStatement:problem,rootCauses:[],correctiveActions:[],
-     effectivenessChecks:[],scope:{nodeId:scopeNodeId,level:str(node.data.level),name:str(node.data.name)},
+     effectivenessChecks:[],scope:{nodeId:scopeNodeId,level:str(node.data.level),name:str(node.data.name),ancestorIds:ancestry},
      revision:'00',effectiveRevisionId:'',verified:false,
      securityClass:'internal',createdBy:ctx.uid,ownerUid:ctx.uid,createdAt:nowIso(),updatedAt:nowIso()};
    if(!(await writeDoc(docs(ctx.orgId,id),entry,{exists:false})))throw new HttpError(409,'Try again.');
