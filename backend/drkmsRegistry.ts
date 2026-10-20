@@ -114,6 +114,38 @@ export const drkmsRoutes = {
             return { documentId: id, status: 'in_review', approvalStatus: 'awaiting_governance_configuration' };
         }),
     ],
+    'POST /api/org/drkms/documents/review-decision': [
+        orgRoute('drkms.documents.review_decision', 'ADM.document_review', async ctx => {
+            const id = str(ctx.body.documentId), decision = str(ctx.body.decision);
+            const reason = str(ctx.body.reason).trim();
+            if (!validId(id) || !['return','reject'].includes(decision))
+                throw new HttpError(400, 'Only return or rejection decisions are currently enabled.');
+            if (reason.length < 10 || reason.length > 2000)
+                throw new HttpError(400, 'Provide a meaningful review reason (10–2000 characters).');
+            const path = `${base(ctx.orgId)}/${id}`;
+            const doc = await getDoc(path);
+            if (!doc) throw new HttpError(404, 'Document not found.');
+            if (str(doc.data.status) !== 'in_review') throw new HttpError(409, 'Document is not awaiting review.');
+            if (str(doc.data.createdBy) === ctx.uid || str(doc.data.submittedBy) === ctx.uid)
+                throw new HttpError(403, 'The document author cannot review their own submission.');
+            const scope = doc.data.scope;
+            if (!scope || typeof scope !== 'object' || Array.isArray(scope))
+                throw new HttpError(409, 'Document applicability is missing.');
+            const nodeId = str((scope as Record<string,unknown>).nodeId);
+            const {canAt,scopeOf,nodePath} = await import('./access');
+            if (!canAt(ctx, 'ADM.document_review', await nodePath(ctx.orgId,nodeId), await scopeOf(ctx)))
+                throw new HttpError(403, 'Reviewer has no authority at this location.');
+            const revision = {
+                ...doc.data, status: decision === 'return' ? 'draft' : 'rejected',
+                reviewedBy: ctx.uid, reviewedAt: nowIso(), reviewDecision: decision,
+                reviewReason: reason, updatedAt: nowIso(),
+            };
+            const updated = await writeDoc(path, revision, { updateTime: doc.updateTime });
+            if (!updated) throw new HttpError(409, 'Document changed while reviewing. Refresh first.');
+            await record(ctx, 'drkms.document.review_'+decision,id,reason);
+            return { documentId:id, status:revision.status, publicationEnabled:false };
+        }),
+    ],
     'POST /api/org/drkms/documents/create-draft': [
         orgRoute('drkms.documents.create_draft', 'ADM.document_registry', async ctx => {
             const title = str(ctx.body.title).trim();
