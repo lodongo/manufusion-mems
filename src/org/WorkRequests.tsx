@@ -871,6 +871,79 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     );
 }
 
+/** The summary is an independent, read-only snapshot of the saved assessment. */
+function AssessmentSummary({detail,canReview,busy,onApprove,onReturn}:{detail:Detail;canReview:boolean;busy:boolean;onApprove:()=>void;onReturn:()=>void}){
+    const tasks=detail.assessmentTasks||[];
+    const spares=tasks.reduce((sum,t)=>sum+(t.spares?.length||0),0);
+    const duration=tasks.reduce((sum,t)=>sum+(Number(t.hours)||0),0);
+    const people=tasks.reduce((sum,t)=>sum+(Number(t.persons)||0)+(Number(t.externalResource?.persons)||0),0);
+    const hazards=tasks.reduce((sum,t)=>sum+(t.risk?.filter(x=>x.hazard)?.length||0),0);
+    const status=detail.assessmentReviewCurrent?'Approved':detail.assessmentReview.status==='changes_requested'?'Returned for correction':'Awaiting review';
+    return <div className='min-w-0 space-y-3'>
+      <div><p className='text-xs font-semibold uppercase tracking-wide text-emerald-300'>Assessment summary</p>
+        <h2 className='mt-1 text-lg font-semibold text-white'>Scope and requirements</h2>
+        <p className='mt-1 text-xs text-slate-400'>Saved assessment only. Reviewers can inspect details, approve or return; they cannot modify tasks.</p>
+      </div>
+      <div className='grid min-w-0 grid-cols-2 gap-2'>
+        {([['Tasks',tasks.length],['Work hours',duration],['Spare items',spares],['People',people]] as const).map(([name,value])=>
+        <div key={name} className='min-w-0 rounded-xl border border-slate-700 bg-slate-900 p-3'>
+          <strong className='block text-xl text-white'>{value}</strong>
+          <span className='text-xs text-slate-400'>{name}</span>
+        </div>)}
+      </div>
+      <Card className='space-y-2 text-sm'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <p className='font-semibold text-white'>Independent review</p>
+          <Badge tone={detail.assessmentReviewCurrent?'brand':detail.assessmentReview.status==='changes_requested'?'danger':'warn'}>{status}</Badge>
+        </div>
+        {detail.assessmentReview.name&&<Info label='Reviewed by' value={detail.assessmentReview.name}/>}
+        {detail.assessmentReview.note&&<Info label='Review notes' value={detail.assessmentReview.note}/>}
+        {canReview&&<div className='grid grid-cols-1 gap-2 pt-2'>
+          <Button busy={busy} onClick={onApprove}>Approve assessment</Button>
+          <Button variant='secondary' busy={busy} onClick={onReturn}>Return for correction</Button>
+        </div>}
+      </Card>
+      <Card className='space-y-2 text-sm'>
+        <p className='font-semibold text-white'>Work classification</p>
+        <Info label='Maintenance type' value={detail.assessment.maintenanceTypeLabel||'Not yet classified'}/>
+        <Info label='Work type' value={detail.assessment.workTypeLabel||'Not yet classified'}/>
+        <Info label='Priority' value={detail.assessment.priorityLabel||'Not yet classified'}/>
+        <Info label='Discipline' value={detail.assessment.disciplineLabel||'Not yet classified'}/>
+        <Info label='Linked asset' value={detail.assetTag+' · '+detail.assetName}/>
+        <Info label='Equipment' value={detail.unitCode+' · '+detail.unitName}/>
+      </Card>
+      <Card className='space-y-2 text-sm'>
+        <p className='font-semibold text-white'>Safety overview</p>
+        <Info label='Tasks requiring LOTO' value={String(tasks.filter(t=>t.lotoRequired).length)}/>
+        <Info label='Tasks requiring live work' value={String(tasks.filter(t=>t.liveEquipment).length)}/>
+        <Info label='Identified hazards' value={String(hazards)}/>
+        <Info label='Permit selections' value={String(tasks.reduce((sum,t)=>sum+(t.permitCodes?.length||0),0))}/>
+      </Card>
+      <div className='space-y-2'>
+        <p className='text-sm font-semibold text-white'>Saved task details</p>
+        {!tasks.length&&<p className='rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400'>No tasks saved. The assessor must add and save tasks first.</p>}
+        {tasks.map((task,i)=><details key={task.id} className='min-w-0 rounded-xl border border-slate-700 bg-slate-900 p-3'>
+          <summary className='cursor-pointer text-sm font-semibold text-white'>{i+1}. {task.title||task.description}</summary>
+          <div className='mt-3 space-y-2 break-words text-xs text-slate-300'>
+            <p>{task.description}</p>
+            <p><strong>Duration:</strong> {task.hours} hours · <strong>Internal people:</strong> {task.persons}</p>
+            <p><strong>Internal roles:</strong> {task.internalRoles?.join(', ')||'None'}</p>
+            <p><strong>External:</strong> {task.externalResource?.type?task.externalResource.type+' ('+task.externalResource.persons+' people)':'None'}</p>
+            <p><strong>Special tools:</strong> {task.tools||'None'}</p>
+            <p><strong>Spares:</strong> {task.spares?.map(sp=>sp.qty+' × '+sp.description).join('; ')||'None'}</p>
+            <p><strong>LOTO:</strong> {task.lotoRequired?'Yes':'No'} · <strong>Live equipment:</strong> {task.liveEquipment?'Yes':'No'}</p>
+            <p><strong>Hazardous energy:</strong> {task.energySourceCodes?.join(', ')||'None selected'}</p>
+            <p><strong>Permits:</strong> {task.permitCodes?.join(', ')||'None selected'}</p>
+            {task.risk?.filter(x=>x.hazard).map((risk,j)=><div key={j} className='rounded-lg border border-slate-700 p-2'>
+              <p className='font-semibold text-white'>{risk.hazard}</p><p>Impact: {risk.impact}</p><p>Controls: {risk.controls}</p>
+              <p>Before: {risk.before||'—'} · After: {risk.after||'—'}</p>
+            </div>)}
+          </div>
+        </details>)}
+      </div>
+    </div>;
+}
+
 export function HistoryCard({ history }: { history: Array<{ at: string; name: string; action: string; note: string }> }) {
     return (
         <Card>
