@@ -77,7 +77,7 @@ export const drkmsTroubleshootingRoutes={
    for(const d of documents){
     if(str(d.data.status)!=='effective'||!str(d.data.effectiveRevisionId))continue;
     const applied=isObj(d.data.scope)?str(d.data.scope.nodeId):'';
-    if(!applied||!assetPath.includes(applied))continue;
+    if(!applied||!assetPath.includes(applied)||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,applied),await scopeOf(ctx)))continue;
     const links=await listDocs(`organizations/${ctx.orgId}/drkms_documents/${d.id}/technical_links`);
     if(!links.some(l=>str(l.data.targetType)==='asset'&&str(l.data.targetId)===assetTag||
       str(l.data.targetType)==='work_center'&&str(l.data.targetId)===str(asset.data.workCenterId)))continue;
