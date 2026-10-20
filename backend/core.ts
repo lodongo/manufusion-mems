@@ -413,6 +413,33 @@ export async function deleteDoc(path: string): Promise<void> {
     if (!res.ok && res.status !== 404) await fail(res, 'Firestore delete');
 }
 
+/** Firestore atomic multi-document write with optimistic concurrency. Never partially publishes a revision. */
+export async function commitChecked(writes: Array<{
+    path: string; data: Record<string,unknown>;
+    precondition: { exists?: boolean; updateTime?: string };
+}>): Promise<boolean> {
+    if(!writes.length||writes.length>50)throw new HttpError(400,'Invalid atomic write batch.');
+    const seen=new Set<string>();
+    const operations=writes.map(w=>{
+        assertDocPath(w.path,'Firestore atomic commit');
+        if(seen.has(w.path))throw new HttpError(400,'Duplicate atomic write target.');
+        seen.add(w.path);
+        if(w.precondition.exists===undefined&&!w.precondition.updateTime)
+            throw new HttpError(500,'Atomic writes require server-verified preconditions.');
+        return {
+            update:{name:`${DOCUMENT_NAME_ROOT}/${w.path}`,fields:encodeFields(w.data)},
+            currentDocument:{
+                ...(w.precondition.exists!==undefined?{exists:w.precondition.exists}:{}),
+                ...(w.precondition.updateTime?{updateTime:w.precondition.updateTime}:{}),
+            },
+        };
+    });
+    const res=await googleRequest(`${FIRESTORE_BASE}:commit`,'POST',{writes:operations});
+    if([400,404,409,412].includes(res.status))return false;
+    if(!res.ok)await fail(res,'Firestore atomic commit');
+    return true;
+}
+
 /** Creates many documents in one atomic request (max 500). */
 export async function commitCreates(items: Array<{ collection: string; data: Record<string, unknown> }>): Promise<void> {
     for (let i = 0; i < items.length; i += 450) {
