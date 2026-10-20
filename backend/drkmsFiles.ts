@@ -4,6 +4,7 @@ import { storage } from './platform/sdk';
 import { HttpError, getDoc, nowIso, randomId, rateLimit, str, writeDoc } from './core';
 import { orgRoute } from './guards';
 import { record } from './org';
+import {canAt,nodePath,scopeOf} from './access';
 
 const ALLOWED: Record<string,{ext:string,max:number}> = {
   'application/pdf':{ext:'pdf',max:8_000_000},
@@ -31,6 +32,10 @@ export const drkmsFileRoutes={
       const doc=await getDoc(`organizations/${ctx.orgId}/drkms_documents/${docId}`);
       if(!doc||str(doc.data.status)!=='draft')throw new HttpError(409,'Only existing draft documents can receive staging uploads.');
       if(str(doc.data.createdBy)!==ctx.uid&&ctx.role!=='org_super_admin')throw new HttpError(403,'Only the document owner may stage source files.');
+      const stageLocation=doc.data.scope&&typeof doc.data.scope==='object'&&!Array.isArray(doc.data.scope)
+        ?str((doc.data.scope as Record<string,unknown>).nodeId):'';
+      if(!stageLocation||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,stageLocation),await scopeOf(ctx)))
+        throw new HttpError(403,'Source staging is outside your current organizational permissions.');
       const raw=str(ctx.body.data);
       if(!raw||raw.length>11_000_000||!/^[A-Za-z0-9+/=]+$/.test(raw))throw new HttpError(413,'File exceeds the upload limit.');
       const bytes=Buffer.from(raw,'base64');
@@ -56,6 +61,10 @@ export const drkmsFileRoutes={
       const doc=await getDoc(`organizations/${ctx.orgId}/drkms_documents/${docId}`);
       if(!doc)throw new HttpError(404,'Document not found.');
       if(str(doc.data.createdBy)!==ctx.uid&&ctx.role!=='org_super_admin')throw new HttpError(403,'Only the document owner may inspect staged files.');
+      const fileLocation=doc.data.scope&&typeof doc.data.scope==='object'&&!Array.isArray(doc.data.scope)
+        ?str((doc.data.scope as Record<string,unknown>).nodeId):'';
+      if(!fileLocation||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,fileLocation),await scopeOf(ctx)))
+        throw new HttpError(403,'Source file metadata is outside your current organizational permissions.');
       const {listDocs}=await import('./core');
       const entries=await listDocs(`organizations/${ctx.orgId}/drkms_documents/${docId}/files`);
       return {files:entries.map(f=>({id:f.id,name:f.data.name,mime:f.data.mime,bytes:f.data.bytes,scanStatus:f.data.scanStatus,uploadedAt:f.data.uploadedAt}))};
