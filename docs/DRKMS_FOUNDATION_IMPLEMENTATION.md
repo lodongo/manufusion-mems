@@ -63,5 +63,5 @@ Date: 2026-10-20 | Source branch: `develop` | Scope: A01–A06, without producti
 - No deployment to production until build/check, governance and isolation tests, and environment gates pass.
 
 ## Current status
-Completed: verified repository and key integration entry points; created design taxonomy metadata and this implementation contract in a feature branch.
-Not completed: runtime metadata registration, persistence, UI, governance handlers, regression tests, Firebase staging or deployment.
+Completed: verified repository and key integration entry points; created taxonomy metadata and this contract; wired five document master lists into the existing reference-defaults pipeline via backend/drkmsDefaults.ts and backend/defaults.ts; added static metadata tests (not yet executed).
+Not completed: loading/restoring these defaults into Firestore, organization registry persistence and screens, document governance handlers, execution of regression tests, Firebase staging or deployment. Note: the existing global 'restore all defaults' operation may replace reference metadata: do not trigger it in production without backup and impact review.
