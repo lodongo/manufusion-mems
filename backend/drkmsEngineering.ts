@@ -66,7 +66,7 @@ export const drkmsEngineeringRoutes={
     if(!canAt(ctx,'ADM.document_registry',path,scope))throw new HttpError(403,'No document access at the technical target location.');
     const documentScope=isObj(doc.data.scope)?doc.data.scope:{};
     const ancestors=Array.isArray(documentScope.ancestorIds)?documentScope.ancestorIds.map(str):[];
-    if(!ancestors.some(x=>path.includes(x)))throw new HttpError(403,'Equipment is outside this document’s applicable organizational hierarchy.');
+    if(!path.includes(str(documentScope.nodeId)))throw new HttpError(403,'Equipment is outside this document’s applicable organizational hierarchy.');
     const key=`${type}_${targetId}`;
     const link={documentId:id,subtypeCode:subtype,targetType:type,targetId,orgId:ctx.orgId,
        targetName:str(target.data.name),linkedBy:ctx.uid,linkedAt:nowIso(),status:'draft'};
