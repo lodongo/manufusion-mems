@@ -1,10 +1,10 @@
 /** Metadata-only DRKMS registry. No publishing, file upload or AI output execution. */
-import { createHash } from 'node:crypto';
 import { HttpError, getDoc, listDocs, nowIso, randomId, str, writeDoc } from './core';
 import { orgRoute } from './guards';
 import { record } from './org';
 import { validateDocumentLocation } from './drkmsHierarchy';
 import { assessPublicationGate } from './drkmsPublicationGate';
+import {releaseManifest} from './drkmsPublish';
 import {canAt,scopeOf,nodePath} from './access';
 
 const base = (orgId: string) => `organizations/${orgId}/drkms_documents`;
@@ -200,10 +200,19 @@ export const drkmsRoutes = {
                 verifiedAt:str(doc.data.verifiedAt),updatedAt:str(doc.data.updatedAt)};
             if(!payload.technicalVerifierUid || payload.technicalVerifierUid===str(doc.data.createdBy))
                 throw new HttpError(409,'An independent technical verifier is required.');
-            const fingerprint=createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-            // Diagnostic packet only: a verified transaction approval and immutable release handler are still required.
-            return {documentId:id,documentFingerprint:fingerprint,payload,
-                publicationEnabled:false,approvalStatus:'requires_coa_transaction_binding'};
+            const attachments=await listDocs(`${base(ctx.orgId)}/${id}/files`);
+            const ready=attachments.length>0 && attachments.length<=50 &&
+                attachments.every(f=>str(f.data.scanStatus)==='clean' &&
+                    str(f.data.availability)==='verified' && /^[a-f0-9]{64}$/.test(str(f.data.sha256)) &&
+                    Number.isSafeInteger(Number(f.data.bytes)) && Number(f.data.bytes)>0);
+            if(!ready)throw new HttpError(409,'All source files must be independently scanned and verified before preparing the CoA publication request.');
+            const contentFingerprint=releaseManifest(id,str(doc.data.revision),attachments.map(f=>({
+                fileId:f.id,sha256:str(f.data.sha256),mime:str(f.data.mime),bytes:Number(f.data.bytes),
+            })));
+            const transactionPayload={documentId:id,revision:str(doc.data.revision),contentFingerprint};
+            return {documentId:id,documentFingerprint:contentFingerprint,payload:transactionPayload,
+                technicalVerification:payload,publicationEnabled:false,
+                approvalStatus:'submit_via_existing_coa_transaction'};
         }),
     ],
     'POST /api/org/drkms/documents/create-draft': [
