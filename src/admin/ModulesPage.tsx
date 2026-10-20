@@ -379,7 +379,7 @@ function Workspace({ module, view, canWrite, isSuper }: { module: Module; view: 
             {data.metadata.length === 0 ? (
                 <Empty>No metadata lists yet.</Empty>
             ) : (
-                data.metadata.map((list) => (
+                data.metadata.filter(list => module.code !== 'PRC' || list.key !== 'stockingPolicies').map((list) => (
                     <button key={list.key} onClick={() => setEditing(list)} className='block w-full text-left'>
                         <Card>
                             <div className='flex items-start justify-between gap-3'>
