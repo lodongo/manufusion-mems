@@ -11,6 +11,25 @@ import {
     ROOM_PATH, MESSAGE_ROOT, TYPING_ROOT, FILE_ROOT, checkedRoom, membersOf, isCurrentMember,
     notifyRoom, notify, chatFileUrl, ID_RE, displayName, photoUrl,
 } from './chatCommon';
+import { roomLiveState } from './chatLive';
+
+/** Media, files and links shared in a room (contact / group info page), newest first. */
+async function roomMedia(ctx: OrgContext, roomId: string) {
+    const docs = await runQuery({ from: [{ collectionId: 'messages' }], orderBy: orderDesc('createdAt'), limit: 400 }, ROOM_PATH(ctx.orgId, roomId));
+    const media: Array<Record<string, unknown>> = [];
+    const links: Array<Record<string, unknown>> = [];
+    for (const doc of docs) {
+        const d = doc.data;
+        if (d.deletedForAll === true) continue;
+        const raw = isObj(d.attachment) ? d.attachment : {};
+        if (str(raw.path) && media.length < 120) {
+            media.push({ messageId: doc.id, kind: str(raw.kind), name: str(raw.name), mime: str(raw.mime), size: Number(raw.size) || 0,
+                url: await chatFileUrl(ctx, roomId, str(raw.path)), createdAt: str(d.createdAt), senderUid: str(d.senderUid) });
+        }
+        for (const url of str(d.text).match(/https?:\/\/[^\s<>]+/g) ?? []) if (links.length < 80) links.push({ messageId: doc.id, url, createdAt: str(d.createdAt), senderUid: str(d.senderUid) });
+    }
+    return { media, links };
+}
 
 const DELETE_WINDOW_MS = 3 * 60_000;
 const EMOJIS = new Set(['👍','❤️','😂','🎉','🙏','👏','✅','👀','🔥','😮','😢','💯']);
@@ -92,28 +111,22 @@ export const chatMessageRoutes = {
     'POST /api/org/quick/chat/room': [orgRoute('chat.room.read', null, async (ctx) => {
         const roomId = str(ctx.body.roomId);
         const room = await checkedRoom(ctx, roomId);
+        if (ctx.body.media === true) return roomMedia(ctx, roomId);
         const before = str(ctx.body.before);
         if (before && (!Number.isFinite(Date.parse(before)) || before.length > 40)) throw new HttpError(400, 'Invalid history page.');
-        const [messages, profiles, typing, presence, readMarks] = await Promise.all([
+        const [messages, profiles, live] = await Promise.all([
             roomHistory(ctx, roomId, before),
             Promise.all(membersOf(room).map(async (uid) => {
                 const doc = await getDoc('users/' + uid);
                 if (!doc || str(doc.data.orgId) !== ctx.orgId) return { uid, name: 'Former member', photoUrl: '' };
                 return { uid, name: displayName(doc), photoUrl: await photoUrl(doc) };
             })),
-            listDocs(TYPING_ROOT(ctx.orgId, roomId)),
-            listDocs(ROOM_PATH(ctx.orgId, roomId) + '/presence'),
-            listDocs(ROOM_PATH(ctx.orgId, roomId) + '/read_marks'),
+            roomLiveState(ctx, roomId, membersOf(room), str(room.data.kind) !== 'group'),
         ]);
-        const now = Date.now();
         return {
-            room: { id: room.id, ...room.data },
+            room: { id: room.id, ...room.data, sendPolicy: str(room.data.sendPolicy) === 'admins' ? 'admins' : 'all', infoPolicy: str(room.data.infoPolicy) === 'all' ? 'all' : 'admins' },
             people: profiles, ...messages,
-            typing: typing.filter((d) => Date.parse(str(d.data.until)) > now && d.id !== ctx.uid)
-                .map((d) => ({ uid: d.id, until: str(d.data.until) })),
-            presence: presence.filter((d) => Date.parse(str(d.data.until)) > now)
-                .map((d) => ({ uid: d.id, until: str(d.data.until) })),
-            readMarks: readMarks.map((d) => ({ uid: d.id, readAt: str(d.data.readAt) })),
+            ...live,
             serverTime: nowIso(),
         };
     })],
@@ -121,6 +134,10 @@ export const chatMessageRoutes = {
         const roomId = str(ctx.body.roomId);
         const room = await checkedRoom(ctx, roomId);
         await rateLimit('chat-message', ctx.uid, 120, 60);
+        if (str(room.data.kind) === 'group' && str(room.data.sendPolicy) === 'admins'
+            && !(Array.isArray(room.data.admins) && room.data.admins.map(str).includes(ctx.uid))) {
+            throw new HttpError(403, 'Only group administrators can send messages in this group.');
+        }
         const text = str(ctx.body.text).trim();
         if (text.length > 4000) throw new HttpError(400, 'Messages can contain up to 4000 characters.');
         const attachmentId = str(ctx.body.attachmentId);
@@ -157,7 +174,8 @@ export const chatMessageRoutes = {
                 await updateFields(FILE_ROOT(ctx.orgId, roomId) + '/' + attachmentId, { usedBy: id });
             }
             await updateFields(ROOM_PATH(ctx.orgId, roomId), {
-                lastMessage: text.slice(0, 180) || (attachment ? '📎 ' + attachment.name : ''),
+                lastMessage: text.slice(0, 180) || (attachment ? (attachment.kind === 'image' ? '📷 Photo' : '📄 ' + attachment.name) : ''),
+                lastMessageKind: attachment ? attachment.kind : 'text',
                 lastSenderUid: ctx.uid, lastMessageId: id, lastMessageAt: now, updatedAt: now,
             });
             await auditChat(ctx, 'chat.message.send', roomId, id);

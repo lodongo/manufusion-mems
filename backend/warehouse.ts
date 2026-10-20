@@ -2,16 +2,21 @@ import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, str, updateField
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { getNode, record } from './structure';
 import { materialCategories } from './procurement';
-import { classifications, locationTypes } from './inventoryMeta';
+import { locationTypes } from './inventoryMeta';
+import { warehouseRestrictionMaster } from './stockMasters';
+import { MCL_TO_RESTRICTION, SEGREGATED_RESTRICTIONS } from './restrictionRules';
 
 // ---------------------------------------------------------------------------
 // Warehouse and storage setup for cost centers of type Inventory (INV) or Warehousing (WHS).
 //
 // Hierarchy:  warehouse (the cost center)  >  storage location  >  physical location (bins, in clusters)
 //   Warehouse         one or more material categories, layout per floor, capacity
-//   Storage location  SL-01 … inside the warehouse: a name, a storage location type and a material
-//                     classification (both codified lists maintained by MEMS in INV metadata; the
-//                     classification gives the colour). Storage locations hold no subcategories.
+//   Storage location  SL-01 … inside the warehouse: a name, a storage location type (INV metadata) and a
+//                     warehouse restriction (RS01 …) from the same master the materials use (Procurement
+//                     metadata → warehouseRestrictions); the restriction gives the colour. Clusters and bins
+//                     inherit it, and a material is binned only where its restriction is the same.
+//                     Locations saved before carry an old material classification (MCL-…) and stay blocked
+//                     for binning until a person confirms their restriction.
 //   Cluster           CL-0001 …: a run of N physical locations taken in sequence on one floor, in one storage
 //                     location, for one or more material subcategories chosen from the warehouse's categories.
 //                     The run starts at the next free space (after the last allocated position, or the first
@@ -260,7 +265,9 @@ function clusterOut(doc: Doc, layout: Layout) {
         lastCode: last,
         locationCode: str(d.locationCode),
         locationName: str(d.locationName),
-        classificationLabel: str(d.classificationLabel),
+        classificationLabel: str(d.restrictionLabel) || str(d.classificationLabel),
+        restrictionCode: str(d.restrictionCode),
+        restrictionLabel: str(d.restrictionLabel),
         color: /^#[0-9a-fA-F]{6}$/.test(str(d.color)) ? str(d.color) : '#64748B',
         subcategories: (Array.isArray(d.subcategories) ? (d.subcategories as Plain[]) : []).filter(isObj).map((s) => ({ code: str(s.code), name: str(s.name), categoryCode: str(s.categoryCode) })),
         storageTypeCode: str(d.storageTypeCode),
@@ -282,6 +289,9 @@ interface StoredLocation {
     code: string;
     name: string;
     typeCode: string;
+    /** Warehouse restriction (RS…) from the shared master: decides what may be binned here. */
+    restrictionCode: string;
+    /** Material classification (MCL-…) saved before restrictions; kept only to suggest a restriction. */
     classificationCode: string;
     active: boolean;
     createdAt: string;
@@ -292,6 +302,7 @@ function locationsOf(d: Record<string, unknown>): StoredLocation[] {
         code: str(l.code),
         name: str(l.name),
         typeCode: str(l.typeCode),
+        restrictionCode: str(l.restrictionCode),
         classificationCode: str(l.classificationCode),
         active: l.active !== false,
         createdAt: str(l.createdAt),
@@ -304,20 +315,29 @@ function categoryCodesOf(d: Record<string, unknown>): string[] {
     return str(d.materialCategoryCode) ? [str(d.materialCategoryCode)] : [];
 }
 
-/** Storage locations with the current labels and colour of their type and classification. */
+/** Storage locations with the current labels and colour of their type and warehouse restriction. */
 async function describeLocations(stored: StoredLocation[]) {
-    const [classes, types] = await Promise.all([classifications(), locationTypes()]);
-    const cls = new Map(classes.map((c) => [c.code, c]));
+    const [restrictions, types] = await Promise.all([warehouseRestrictionMaster(), locationTypes()]);
+    const rs = new Map(restrictions.map((c) => [c.code, c]));
     const typ = new Map(types.map((t) => [t.code, t]));
     return {
-        classes,
+        restrictions,
         types,
-        locations: stored.map((l) => ({
-            ...l,
-            typeLabel: typ.get(l.typeCode)?.label ?? l.typeCode,
-            classificationLabel: cls.get(l.classificationCode)?.label ?? l.classificationCode,
-            color: cls.get(l.classificationCode)?.color ?? '#64748B',
-        })),
+        locations: stored.map((l) => {
+            const r = rs.get(l.restrictionCode);
+            const label = r ? r.label : l.restrictionCode ? l.restrictionCode : 'Restriction not set';
+            return {
+                ...l,
+                typeLabel: typ.get(l.typeCode)?.label ?? l.typeCode,
+                restrictionLabel: label,
+                // Kept for screens and exports that still read the older field name.
+                classificationLabel: label,
+                color: r?.color ?? '#94A3B8',
+                // Aligned: the location carries an enabled restriction from the shared master, so binning is open.
+                aligned: !!r && r.active,
+                suggestedRestrictionCode: l.restrictionCode ? '' : MCL_TO_RESTRICTION[l.classificationCode] ?? '',
+            };
+        }),
     };
 }
 
@@ -353,17 +373,17 @@ export const warehouseRoutes = {
             const [doc, categories] = await Promise.all([getDoc(whPath(ctx.orgId, node.id)), materialCategories()]);
             const d = doc?.data ?? {};
             const layout = layoutOf(d);
-            const [rawClusters, { classes, types, locations }] = await Promise.all([clustersOf(ctx.orgId, node.id, layout), describeLocations(locationsOf(d))]);
+            const [rawClusters, { restrictions, types, locations }] = await Promise.all([clustersOf(ctx.orgId, node.id, layout), describeLocations(locationsOf(d))]);
             const reservations=await listDocs(`organizations/${ctx.orgId}/warehouse_bin_occupancy`);const linkedBins=reservations.filter(x=>str(x.data.warehouseId)===node.id).map(x=>({binId:str(x.data.binId),materialId:str(x.data.materialId),materialNumber:str(x.data.materialNumber)}));const byCode = new Map(locations.map((l) => [l.code, l]));
-            // Colours always follow the current classification of the storage location.
+            // Colours and restrictions always follow the current restriction of the storage location.
             const clusters = rawClusters.map((c) => {
                 const l = byCode.get(c.locationCode);
-                return l ? { ...c, locationName: l.name, classificationLabel: l.classificationLabel, color: l.color } : c;
+                return l ? { ...c, locationName: l.name, classificationLabel: l.restrictionLabel, restrictionCode: l.restrictionCode, restrictionLabel: l.restrictionLabel, aligned: l.aligned, color: l.color } : { ...c, aligned: false };
             });
             const capacity = isObj(d.capacity) ? d.capacity : {};
             const total = layoutPositions(layout);
             const allocated = clusters.reduce((s, c) => s + c.positions, 0);
-            const usedClasses = new Set(locations.map((l) => l.classificationCode));
+            const usedRestrictions = new Set(locations.map((l) => l.restrictionCode));
             const usedTypes = new Set(locations.map((l) => l.typeCode));
             return {
                 costCenter: { id: node.id, code: str(node.data.code), name: str(node.data.name), costType: isObj(node.data.attributes) ? str(node.data.attributes.costType) : '' },
@@ -393,7 +413,11 @@ export const warehouseRoutes = {
                 summary: { totalPositions: total, allocated, free: total - allocated, clusters: clusters.length },linkedBins,
                 clusters,
                 categories,
-                classifications: classes.filter((c) => c.active || usedClasses.has(c.code)),
+                restrictions: restrictions.filter((c) => c.active || usedRestrictions.has(c.code)),
+                alignment: {
+                    pending: locations.filter((l) => !l.aligned).map((l) => ({ code: l.code, name: l.name, suggestedRestrictionCode: l.suggestedRestrictionCode })),
+                    binningOpen: locations.length > 0 && locations.every((l) => l.aligned || !l.active),
+                },
                 locationTypes: types.filter((t) => t.active || usedTypes.has(t.code)),
                 storageTypes: STORAGE_TYPES.map(([code, label]) => ({ code, label })),
                 conditions: CONDITIONS.map(([code, label]) => ({ code, label })),
@@ -432,8 +456,8 @@ export const warehouseRoutes = {
             const condition = CONDITIONS.find(([c]) => c === str(b.conditionCode));
             if (!condition) throw new HttpError(400, 'Choose the storage condition.');
 
-            // Storage locations: name, storage location type, material classification.
-            const [classes, types] = await Promise.all([classifications(), locationTypes()]);
+            // Storage locations: name, storage location type, warehouse restriction (shared master).
+            const [restrictions, types] = await Promise.all([warehouseRestrictionMaster(), locationTypes()]);
             const rawLocations = (Array.isArray(b.storageLocations) ? (b.storageLocations as Plain[]) : []).filter(isObj);
             if (!rawLocations.length) throw new HttpError(400, 'Add at least one storage location.');
             if (rawLocations.length > MAX_LOCATIONS) throw new HttpError(400, `A warehouse can have up to ${MAX_LOCATIONS} storage locations.`);
@@ -498,14 +522,29 @@ export const warehouseRoutes = {
                     names.add(name.toLowerCase());
                     const type = types.find((t) => t.code === str(raw.typeCode));
                     if (!type || (!type.active && before?.typeCode !== type.code)) throw new HttpError(400, `${tag}: choose the storage location type.`);
-                    const cls = classes.find((x) => x.code === str(raw.classificationCode));
-                    if (!cls || (!cls.active && before?.classificationCode !== cls.code)) throw new HttpError(400, `${tag}: choose the material classification.`);
+                    const rs = restrictions.find((x) => x.code === str(raw.restrictionCode));
+                    if (!rs) throw new HttpError(400, `${tag}: choose the warehouse restriction from the restriction master.`);
+                    if (!rs.active && before?.restrictionCode !== rs.code) throw new HttpError(400, `${tag}: ${rs.label} (${rs.code}) is disabled in the restriction master. Choose an enabled restriction.`);
                     if (!before) {
                         seq += 1;
                         if (seq > 999) throw new HttpError(400, 'Storage location numbering is exhausted for this warehouse.');
                     }
-                    return { code: before ? before.code : `SL-${String(seq).padStart(2, '0')}`, name, typeCode: type.code, classificationCode: cls.code, active: raw.active !== false, createdAt: before?.createdAt || now };
+                    return { code: before ? before.code : `SL-${String(seq).padStart(2, '0')}`, name, typeCode: type.code, restrictionCode: rs.code, classificationCode: before?.classificationCode ?? '', active: raw.active !== false, createdAt: before?.createdAt || now };
                 });
+                // A storage location whose restriction changes must hold no binned material: the stock placed
+                // there was matched to the old restriction. Delink first, then change, then bin again.
+                const retagged = storageLocations.filter((s) => {
+                    const before = previous.find((p) => p.code === s.code);
+                    return before && before.restrictionCode && before.restrictionCode !== s.restrictionCode;
+                });
+                if (retagged.length) {
+                    const occupancy = await listDocs(`organizations/${ctx.orgId}/warehouse_bin_occupancy`);
+                    for (const loc of retagged) {
+                        const own = new Set(clusters.filter((x) => x.locationCode === loc.code).map((x) => x.code));
+                        const held = occupancy.filter((o) => str(o.data.warehouseId) === node.id && own.has(str(o.data.binId).split('__')[0]));
+                        if (held.length) throw new HttpError(409, `${loc.code} ${loc.name} holds ${held.length} binned material${held.length === 1 ? '' : 's'} matched to its current restriction. Delink them before changing the restriction.`);
+                    }
+                }
                 const kept = new Set(storageLocations.map((s) => s.code));
                 const removed = previous.filter((p) => !kept.has(p.code));
                 const removedInUse = removed.filter((p) => clusters.some((x) => x.locationCode === p.code));
@@ -556,14 +595,17 @@ export const warehouseRoutes = {
                 const affectedClusters=clusters.filter(x=>removedInUse.some(l=>l.code===x.locationCode)||x.subcategories.some(s=>droppedCats.includes(s.categoryCode)));if(affectedClusters.length){if(ctx.body.forceRemoveInUse!==true||str(ctx.body.forceConfirmation)!=='REMOVE IN USE')throw new HttpError(400,'Type REMOVE IN USE to confirm deleting affected clusters.');for(const cluster of affectedClusters)await deleteDoc(clusterCol(ctx.orgId,node.id)+'/'+cluster.code);}await writeDoc(whPath(ctx.orgId, node.id), data);
                 const total = layoutPositions(layout);
                 const typeLabel = (code: string) => types.find((t) => t.code === code)?.label ?? code;
-                const clsLabel = (code: string) => classes.find((t) => t.code === code)?.label ?? code;
+                const newlyAligned = storageLocations.filter((s) => previous.some((p) => p.code === s.code && !p.restrictionCode));
+                const rsLabel = (code: string) => { const r = restrictions.find((t) => t.code === code); return r ? `${r.code} ${r.label}` : code; };
                 await record(
                     ctx,
                     existing ? 'org.warehouse.update' : 'org.warehouse.create',
                     `Storage of cost center ${str(node.data.code)}`,
                     [
                         `Categories ${categories.map((x) => x.code).join(', ')}`,
-                        `storage locations ${storageLocations.map((s) => `${s.code} ${s.name} (${typeLabel(s.typeCode)}, ${clsLabel(s.classificationCode)}${s.active ? '' : ', inactive'})`).join('; ')}`,
+                        `storage locations ${storageLocations.map((s) => `${s.code} ${s.name} (${typeLabel(s.typeCode)}, ${rsLabel(s.restrictionCode)}${s.active ? '' : ', inactive'})`).join('; ')}`,
+                        retagged.length ? `restriction changed ${retagged.map((s) => `${s.code} ${rsLabel(previous.find((p) => p.code === s.code)?.restrictionCode ?? '')} → ${rsLabel(s.restrictionCode)}`).join('; ')}` : '',
+                        newlyAligned.length ? `aligned to the warehouse restriction master: ${newlyAligned.map((s) => `${s.code} ${s.classificationCode || 'unclassified'} → ${rsLabel(s.restrictionCode)}`).join('; ')}` : '',
                         removed.length ? `removed ${removed.map((p) => p.code).join(', ')}` : '',
                         affectedClusters.length ? `FORCE REMOVED ${affectedClusters.length} clusters: ${affectedClusters.map(x=>x.code).join(', ')} by ${ctx.uid}` : '',
                         storageType[1],
@@ -603,16 +645,18 @@ export const warehouseRoutes = {
                 const location = locations.find((x) => x.code === str(b.locationCode));
                 if (!location) throw new HttpError(400, 'Choose one of the storage locations of this warehouse.');
                 if (!location.active) throw new HttpError(400, `${location.code} ${location.name} is inactive. Choose another storage location.`);
+                if (!location.aligned) throw new HttpError(409, `${location.code} ${location.name} is not aligned to the warehouse restriction master. Edit the warehouse and confirm its restriction before creating clusters.`);
 
                 // Material subcategories, only from the warehouse's categories.
                 const catalog = await materialCategories();
                 const allowed = new Map(
                     catalog.filter((cat) => categoryCodesOf(wh.data).includes(cat.code)).flatMap((cat) => cat.subcategories.map((s) => [s.code, { code: s.code, name: s.name, categoryCode: cat.code }] as const))
                 );
-                const clusterClassification = str(b.classificationCode);
-                // Classification is authoritative on the warehouse storage location. A duplicate
+                const clusterRestriction = str(b.restrictionCode);
+                // The restriction is authoritative on the warehouse storage location. A duplicate
                 // input from the browser is optional; never require users to choose it twice.
-                if (clusterClassification && clusterClassification !== location.classificationCode) throw new HttpError(409, 'This storage location has a different classification. Review the chosen location.');const subCodes = Array.from(new Set((Array.isArray(b.subcategoryCodes) ? b.subcategoryCodes : []).map(str).filter(Boolean)));
+                if (clusterRestriction && clusterRestriction !== location.restrictionCode) throw new HttpError(409, 'This storage location has a different warehouse restriction. Review the chosen location.');
+                const subCodes = Array.from(new Set((Array.isArray(b.subcategoryCodes) ? b.subcategoryCodes : []).map(str).filter(Boolean)));
                 if (!subCodes.length) throw new HttpError(400, 'Choose at least one material subcategory for the cluster.');
                 if (subCodes.length > MAX_CLUSTER_SUBCATEGORIES) throw new HttpError(400, `A cluster can hold up to ${MAX_CLUSTER_SUBCATEGORIES} subcategories.`);
                 const subcategories = subCodes.map((code) => {
@@ -621,7 +665,8 @@ export const warehouseRoutes = {
                     return s;
                 });
 
-                if(/hazard|flammab|corrosiv|toxic|oxidiz|explosiv|reactiv/i.test(location.classificationLabel)&&subCodes.length>1)throw new HttpError(409,'Hazardous materials require segregated clusters; do not combine subcategories without a compatibility assessment.');const storageType = STORAGE_TYPES.find(([c]) => c === (str(b.storageTypeCode) || str(wh.data.storageTypeCode)));
+                if (SEGREGATED_RESTRICTIONS.has(location.restrictionCode) && subCodes.length > 1) throw new HttpError(409, `${location.restrictionLabel} storage requires segregated clusters: choose one subcategory per cluster.`);
+                const storageType = STORAGE_TYPES.find(([c]) => c === (str(b.storageTypeCode) || str(wh.data.storageTypeCode)));
                 if (!storageType) throw new HttpError(400, 'Choose the type of storage.');
 
                 const clusters = await clustersOf(ctx.orgId, node.id, layout);
@@ -680,8 +725,8 @@ export const warehouseRoutes = {
                         locationCode: location.code,
                         locationName: location.name,
                         locationTypeCode: location.typeCode,
-                        classificationCode: location.classificationCode,
-                        classificationLabel: location.classificationLabel,
+                        restrictionCode: location.restrictionCode,
+                        restrictionLabel: location.restrictionLabel,
                         color: location.color,
                         subcategories: subcategories as unknown as Plain,
                         storageTypeCode: storageType[0],
@@ -699,7 +744,7 @@ export const warehouseRoutes = {
                     ctx,
                     'org.warehouse.cluster.create',
                     `Cluster ${code} of ${str(node.data.code)}`,
-                    `${mode === 'next' ? 'Next free space' : 'From chosen bin'} · ${first} to ${last} · ${size} positions · ${location.code} ${location.name} (${location.classificationLabel}) · ${subcategories.map((s) => s.code).join(', ')} · ${storageType[1]}`
+                    `${mode === 'next' ? 'Next free space' : 'From chosen bin'} · ${first} to ${last} · ${size} positions · ${location.code} ${location.name} (${location.restrictionCode} ${location.restrictionLabel}) · ${subcategories.map((s) => s.code).join(', ')} · ${storageType[1]}`
                 );
                 return { code, positions: size, firstCode: first, lastCode: last };
             });
@@ -762,7 +807,7 @@ export const warehouseRoutes = {
                             locationCode: c.locationCode,
                             locationName: loc?.name ?? c.locationName,
                             locationType: loc?.typeLabel ?? '',
-                            classification: loc?.classificationLabel ?? c.classificationLabel,
+                            restriction: loc ? `${loc.restrictionCode} ${loc.restrictionLabel}`.trim() : c.restrictionLabel,
                             categories: cats,
                             subcategories: subs,
                             storageType: c.storageTypeLabel,

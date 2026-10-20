@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AlignCenter, AlignLeft, AlignRight, AlignJustify, Bold, ChevronDown, Highlighter, Indent, Italic, Link2, List, ListOrdered, Minus, Outdent, Quote, Redo2, RemoveFormatting, Settings2, Strikethrough, Table2, Underline, Undo2, Maximize2, Minimize2 } from 'lucide-react';
 import { firebaseAuth } from '../firebase';
 import { appAlert, appPrompt } from '../components/dialogs';
 
-type EditorProps = {html:string;onChange:(html:string)=>void;placeholder?:string;ariaLabel?:string};
+/** Lets a host insert content (photos, drawings) where the cursor was, even after a dialog took focus. */
+export interface RichEditorApi { saveSelection:()=>void; insertHtml:(html:string)=>void; element:()=>HTMLDivElement|null; sync:()=>void }
+type EditorProps = {html:string;onChange:(html:string)=>void;placeholder?:string;ariaLabel?:string;apiRef?:{current:RichEditorApi|null};extraTools?:ReactNode;onEditorClick?:(target:HTMLElement)=>void};
 type ToolKey='bold'|'italic'|'underline'|'bullets'|'link'|'numbered'|'strikethrough'|'alignleft'|'aligncenter'|'alignright'|'justify'|'indent'|'outdent'|'table'|'quote'|'rule'|'remove'|'undo'|'redo'|'font'|'size'|'color'|'highlight'|'heading';
 type Tool={id:ToolKey;label:string;Icon?:typeof Bold;cmd?:string};
 const TOOLS:Tool[]=[
@@ -44,7 +46,7 @@ function savedTools():ToolKey[]{
     }catch{/* Default when browser preferences are unavailable. */}
     return DEFAULT;
 }
-export default function MailRichEditor({html,onChange,placeholder='Write your message…',ariaLabel='Email body'}:EditorProps){
+export default function MailRichEditor({html,onChange,placeholder='Write your message…',ariaLabel='Email body',apiRef,extraTools,onEditorClick}:EditorProps){
     const editor=useRef<HTMLDivElement>(null);
     const [primary,setPrimary]=useState<ToolKey[]>(savedTools);
     const [customize,setCustomize]=useState(false);
@@ -66,6 +68,27 @@ export default function MailRichEditor({html,onChange,placeholder='Write your me
         editor.current.innerHTML=fragment.innerHTML;
     },[]);
     const sync=()=>onChange(editor.current?.innerHTML||'');
+    const saved=useRef<Range|null>(null);
+    const keepSelection=()=>{
+        const sel=window.getSelection();
+        if(sel&&sel.rangeCount&&editor.current?.contains(sel.anchorNode))saved.current=sel.getRangeAt(0).cloneRange();
+    };
+    if(apiRef)apiRef.current={
+        saveSelection:keepSelection,
+        element:()=>editor.current,
+        sync,
+        insertHtml:(fragment:string)=>{
+            const el=editor.current;
+            if(!el)return;
+            el.focus();
+            const sel=window.getSelection();
+            if(saved.current&&sel){sel.removeAllRanges();sel.addRange(saved.current);}
+            else if(sel){const r=document.createRange();r.selectNodeContents(el);r.collapse(false);sel.removeAllRanges();sel.addRange(r);}
+            document.execCommand('insertHTML',false,fragment);
+            saved.current=null;
+            sync();
+        },
+    };
     const command=(name:string,value?:string)=>{
         editor.current?.focus();
         document.execCommand(name,false,value);
@@ -118,6 +141,7 @@ export default function MailRichEditor({html,onChange,placeholder='Write your me
     return <div className='flex w-full min-w-0 flex-col rounded-xl border border-line bg-transparent'>
         <div className='flex min-h-12 shrink-0 flex-wrap items-center gap-1 border-b border-line bg-page/80 px-2 py-1.5' role='toolbar' aria-label='Email formatting'>
             <div className='flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto'>
+                {extraTools}
                 {main.map(control)}
             </div>
             <button type='button' aria-expanded={showMore} aria-label='More formatting options' title='More formatting' onClick={()=>{setShowMore(v=>!v);setCustomize(false)}} className={buttonStyle+' shrink-0 border-l border-line'}>
@@ -149,12 +173,13 @@ export default function MailRichEditor({html,onChange,placeholder='Write your me
         </div>}
         <div ref={editor} role='textbox' aria-label={ariaLabel} aria-multiline='true' contentEditable
             suppressContentEditableWarning spellCheck data-placeholder={placeholder}
-            onInput={sync} onBlur={sync}
+            onInput={sync} onBlur={()=>{keepSelection();sync();}} onKeyUp={keepSelection} onMouseUp={keepSelection} onTouchEnd={keepSelection}
+            onClick={e=>onEditorClick?.(e.target as HTMLElement)}
             style={{height:height,minHeight:140,maxHeight:'65dvh',resize:'vertical'}}
             className='mail-rich-editor w-full overflow-y-auto bg-transparent px-4 py-4 text-sm leading-relaxed text-ink outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand'/>
         <div className='flex min-h-8 items-center justify-between border-t border-line px-3 text-[11px] text-muted'>
             <span>Five favorite tools · More for all formatting</span><span>{heightLabel} · drag bottom-right corner or resize <Maximize2 className='inline h-3 w-3'/></span>
         </div>
-        <style>{'.mail-rich-editor:empty:before{content:attr(data-placeholder);color:rgb(var(--c-muted));pointer-events:none}.mail-rich-editor table{border-collapse:collapse}.mail-rich-editor td,.mail-rich-editor th{border:1px solid #a1a1aa;padding:6px}.mail-rich-editor ul{list-style:disc;padding-left:1.5rem}.mail-rich-editor ol{list-style:decimal;padding-left:1.5rem}.mail-rich-editor blockquote{border-left:3px solid #999;padding-left:1rem;margin:1rem}.mail-rich-editor h1{font-size:1.75rem;font-weight:700}.mail-rich-editor h2{font-size:1.4rem;font-weight:700}.mail-rich-editor h3{font-size:1.15rem;font-weight:700}'}</style>
+        <style>{'.mail-rich-editor:empty:before{content:attr(data-placeholder);color:rgb(var(--c-muted));pointer-events:none}.mail-rich-editor table{border-collapse:collapse}.mail-rich-editor td,.mail-rich-editor th{border:1px solid #a1a1aa;padding:6px}.mail-rich-editor ul{list-style:disc;padding-left:1.5rem}.mail-rich-editor ol{list-style:decimal;padding-left:1.5rem}.mail-rich-editor blockquote{border-left:3px solid #999;padding-left:1rem;margin:1rem}.mail-rich-editor h1{font-size:1.75rem;font-weight:700}.mail-rich-editor h2{font-size:1.4rem;font-weight:700}.mail-rich-editor h3{font-size:1.15rem;font-weight:700}.mail-rich-editor img{display:block;max-width:100%;height:auto;border-radius:8px;margin:8px 0;cursor:pointer}.mail-rich-editor img[data-width="25"]{width:25%}.mail-rich-editor img[data-width="50"]{width:50%}.mail-rich-editor img[data-width="75"]{width:75%}.mail-rich-editor img[data-width="100"]{width:100%}.mail-rich-editor img.note-img-active{outline:3px solid rgb(var(--c-brand));outline-offset:2px}'}</style>
     </div>;
 }
