@@ -85,7 +85,11 @@ export const drkmsEngineeringRoutes={
     // A tenant-scoped scan of document metadata; limits avoid unbounded materialization.
     const docs=await listDocs(`organizations/${ctx.orgId}/drkms_documents`);
     const visible=[] as Array<{documentId:string;title:string;classCode:string;subtypeCode:string;status:string}>;
+    const targetAncestry=await nodePath(ctx.orgId,nodeId);
     for(const doc of docs){
+      const applied=isObj(doc.data.scope)?str(doc.data.scope.nodeId):'';
+      if(!applied||!targetAncestry.includes(applied))continue;
+      if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,applied),await scopeOf(ctx)))continue;
       const links=await listDocs(`${docPath(ctx.orgId,doc.id)}/technical_links`);
       for(const link of links){
         if(str(link.data.targetType)===type&&str(link.data.targetId)===targetId){
