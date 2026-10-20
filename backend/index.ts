@@ -1136,7 +1136,7 @@ export const handler = router(recordWiredRoutes({
             if (!/^[A-Z]{3}$/.test(code)) throw new HttpError(400, 'Invalid module code.');
             const workspace = await getDoc(`module_workspaces/${code}`);
             if (!workspace) return { workspace: null, files: [], metadata: [] };
-            if (code === 'AST') await seedModuleMetadata('AST');
+            if (code === 'AST' || code === 'DOC') await seedModuleMetadata(code);
             const [files, metadata] = await Promise.all([listDocs(`module_workspaces/${code}/files`), listDocs(`module_workspaces/${code}/metadata`)]);
             return {
                 workspace: { ...workspace.data, code },
