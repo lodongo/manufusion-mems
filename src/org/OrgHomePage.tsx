@@ -57,6 +57,7 @@ import Vendors from './Vendors';
 import Quotations from './Quotations';
 import BuyerGroups from './BuyerGroups';
 import WarehouseOverview from './WarehouseOverview';
+import DocumentRegistryPage from './DocumentRegistryPage';
 import type { OrgContextData } from './types';
 
 type Module = OrgContextData['modules'][number];
@@ -67,6 +68,15 @@ const ROUTE = 'organization_home';
 const toHome = (path = '') => navigate(path ? `${ROUTE}/${path}` : ROUTE);
 
 const MODULE_LINKS: Record<string, LinkItem[]> = {
+    DOC: [
+        {label:'Document register',path:'doc_register',permission:'ADM.document_registry'},
+        {label:'Engineering & equipment library',path:'doc_engineering',permission:'ADM.document_registry'},
+        {label:'SHEQ SDS / MSDS',path:'doc_sds',permission:'ADM.document_registry'},
+        {label:'Digital RCA & investigations',path:'doc_rca',permission:'ADM.document_registry'},
+        {label:'Document review & approvals',path:'doc_review',permission:'ADM.document_review'},
+        {label:'Knowledge & troubleshooting',path:'doc_knowledge',permission:'ADM.document_registry'},
+        {label:'Digital forms & records',path:'doc_forms',permission:'ADM.document_registry'},
+    ],
     SAF: [{ label: 'Configuration', path: 'saf_configuration', prefix: 'SAF.' }],
     MNT: [
         { label: 'Maintenance workspace', path: 'mnt', prefix: 'MNT.' },
@@ -132,7 +142,7 @@ function canOpen(permissions: string[], link: LinkItem): boolean {
 
 function moduleMenus(data: OrgContextData, canAdmin: boolean): ModuleMenu[] {
     return data.modules
-        .filter((module) => module.code !== 'ADM' && (hasAny(data.permissions, module.code) || module.code === 'PRC'))
+        .filter((module) => module.code !== 'ADM' && (hasAny(data.permissions, module.code) || module.code === 'PRC' || (module.code === 'DOC' && hasAny(data.permissions,'ADM')))
         .map((module) => {
             const links = (MODULE_LINKS[module.code] ?? []).filter((link) => canOpen(data.permissions, link));
             // GL-linked contracts are owned by their operational modules, while
