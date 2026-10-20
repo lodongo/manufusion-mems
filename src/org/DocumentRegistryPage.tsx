@@ -6,6 +6,7 @@ import DocumentSourceStaging from './DocumentSourceStaging';
 import EngineeringDocumentLinks from './EngineeringDocumentLinks';
 import SheqSdsRegistry from './SheqSdsRegistry';
 import DigitalRcaDraft from './DigitalRcaDraft';
+import EffectiveDocumentFiles from './EffectiveDocumentFiles';
 
 type ScopeNode = { id: string; name: string; level: string; parentId: string };
 type DocumentSetup = { config: { enabledClassCodes: string[]; defaultReviewMonths: number }; locations: ScopeNode[] };
@@ -85,13 +86,13 @@ export default function DocumentRegistryPage({ canConfigure, canReview }: { canC
     try {
       await callBackend('/api/org/drkms/documents/create-draft', { title: title.trim(), classCode, scopeNodeId });
       setTitle('');
-      setNotice('Draft document registered. Content editing, file uploads and publication are not yet available.');
+      setNotice('Draft document registered. Stage controlled sources before review; publication requires an approved CoA transaction.');
       reload();
     } catch (err) { setCreateError(err instanceof Error ? err.message : 'Could not create document.'); }
     finally { setBusy(false); }
   };
   return <div className='space-y-4'>
-    <PageTitle title='Document Registry' subtitle='Controlled document identities · Foundation release (drafts only)' />
+    <PageTitle title='Document Registry' subtitle='Controlled registration, verification and approved revisions' />
     {canConfigure && <Card>
       <h2 className='mb-2 text-base font-semibold text-white'>Organization document settings</h2>
       <p className='mb-3 text-xs text-slate-400'>Global document classifications are inherited; locations come from the existing organization hierarchy.</p>
@@ -200,12 +201,13 @@ export default function DocumentRegistryPage({ canConfigure, canReview }: { canC
                   <button type='button' disabled={!!reviewing||reviewReason.trim().length<10} onClick={()=>void reviewDecision(d.documentId,'reject')} className='min-h-10 rounded-lg border border-red-700 px-3 text-xs text-red-200 disabled:opacity-50'>Reject</button>
                 </div>
               </div>}
+              {d.status==='effective' && <EffectiveDocumentFiles documentId={d.documentId} />}
               {d.status==='draft' && <button type='button' disabled={!!reviewing} onClick={()=>void submitReview(d.documentId)} className='mt-2 min-h-10 rounded-lg border border-blue-500 px-3 text-xs font-semibold text-blue-200 disabled:opacity-40'>{reviewing===d.documentId?'Submitting…':'Submit for review'}</button>}
             </div>
           </div>
         </div>)}
       </div>
     </Card>
-    <p className='text-xs text-slate-400'>Restricted to dedicated document permissions for the foundation stage. No files or published revisions are created here.</p>
+    <p className='text-xs text-slate-400'>Restricted to dedicated document permissions for the foundation stage. Files are available only after controlled verification and approved publication.</p>
   </div>;
 }
