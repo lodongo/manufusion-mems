@@ -29,4 +29,6 @@ test('reviewer is read-only and task changes are not lost silently on navigation
  assert.match(ui,/tasksDirty&&!window\.confirm/);
  assert.match(ui,/function AssessmentSummary/);
  assert.match(ui,/canReview/);
+ assert.match(ui,/editable=\{can.assess&&!can.reviewAssessment\}/);
+ assert.match(ui,/if \(can.assess && !can.reviewAssessment\)/);
 });
