@@ -44,7 +44,7 @@ export const drkmsFileRoutes={
       const fileId=randomId(10);
       const path=`organizations/${ctx.orgId}/drkms_quarantine/${docId}/${fileId}.${spec.ext}`;
       const sha256=createHash('sha256').update(bytes).digest('hex');
-      const [written]=await storage.write([{path,content:raw,contentType:mime}]);
+      const [written]=await storage.writeImmutable([{path,content:raw,contentType:mime}]);
       if(!written)throw new HttpError(502,'Could not preserve the source file.');
       const metadata={fileId,documentId:docId,tenantId:ctx.orgId,storagePath:path,
         name:name.replace(/[<>\\\u0000-\u001f]/g,'').trim(),mime,bytes:bytes.length,sha256,
