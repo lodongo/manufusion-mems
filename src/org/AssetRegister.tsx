@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, DownloadCloud, Pencil, Plus, Trash2, Undo2, XCircle } from 'lucide-react';
 import { callBackend } from '../lib/backend';
+import AssetTechnicalDossier from './AssetTechnicalDossier';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { fetchReference } from '../lib/reference';
 import { Alert, Field, SelectField } from '../components/ui';
@@ -338,6 +339,7 @@ export function AssetDetail({ tag, back, onBack, startEditing = false }: { tag: 
             <button type='button' onClick={goBack} className='text-sm text-slate-400'>
                 ← {onBack ? 'Back' : back === 'asset_approvals' ? 'Awaiting approval' : 'Asset register'}
             </button>
+            <AssetTechnicalDossier assetTag={a.tag} equipmentId={a.workCenterId} />
             <Card>
                 <div className='flex items-start justify-between gap-3'>
                     <div className='min-w-0'>
