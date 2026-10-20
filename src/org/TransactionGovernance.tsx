@@ -18,7 +18,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
 const panels: Record<Tab, { title: string; description: string; details: string[] }> = {
   transactions: {
     title: 'Transaction Registry',
-    description: 'Browse the platform-managed codes of installed transactions, grouped by module. Bindings are automatic for all organizations.',
+    description: 'Every transaction of your modules with its state and security access. Live transactions follow their permission; reserved ones can have security roles pre-assigned.',
     details: ['No organization-level transaction binding setup or second-person binding approval is required.', 'Existing role permissions, organizational access rules and business-specific approval workflows remain in force.', 'MEMS Admin manages the platform transaction code catalogue.'],
   },
   permissions: {
@@ -93,7 +93,7 @@ export default function TransactionGovernance({ canRoles, canWorkflow }: { canRo
         <button type='button' disabled={docBusy || !entity.trim() || !/^\\d+\\.\\d+\\.\\d+$/.test(docVersion)} onClick={createDraft} className='rounded-lg bg-[rgb(var(--c-brand))] text-white px-4 py-3 text-sm font-semibold disabled:opacity-50'>Create draft only</button>
         {docStatus && <p role='status' className='text-sm text-ink break-words'>{docStatus}</p>}
       </section>}
-      {active === 'transactions' && <TransactionBlueprints />}
+      {active === 'transactions' && (canRoles ? <TransactionBlueprints /> : <p className='rounded-xl border border-line p-4 text-sm text-soft'>Transaction access is configured by people with the right to manage security roles (ADM.roles).</p>)}
 
     </div>
   );

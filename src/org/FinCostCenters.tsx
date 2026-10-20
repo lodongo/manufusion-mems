@@ -58,6 +58,8 @@ interface CcData {
     allowedGl: Array<{ code: string; name: string; status: string }>;
     choosable: Array<{ code: string; name: string; classCode: string; className: string; categoryCode: string; categoryName: string; groupCode: string; groupName: string }>;
     importFrom: Array<{ id: string; code: string; name: string; count: number }>;
+    txnOff: string[];
+    txnChoices: Array<{ code: string; name: string; module: string; state: string; accounts: number }>;
     version: number;
     pending: Array<{ id: string; title: string; makerName: string; next: string }>;
     owned: boolean;
@@ -69,13 +71,18 @@ function Settings({ le, d, onDone }: { le: Entity; d: CcData; onDone: (m: string
     const [list, setList] = useState<string[]>(d.allowedGl.map((g) => g.code));
     const [q, setQ] = useState('');
     const [from, setFrom] = useState('');
+    const [off, setOff] = useState<string[]>(d.txnOff ?? []);
+    const [tq, setTq] = useState('');
     const confirm = useConfirm();
     useEffect(() => {
         setStatus(d.status);
         setList(d.allowedGl.map((g) => g.code));
+        setOff(d.txnOff ?? []);
     }, [d]);
     const can = d.can.cc_manage;
-    const changed = status !== d.status || JSON.stringify([...list].sort()) !== JSON.stringify(d.allowedGl.map((g) => g.code).sort());
+    const offChanged = JSON.stringify([...off].sort()) !== JSON.stringify([...(d.txnOff ?? [])].sort());
+    const changed = offChanged || status !== d.status || JSON.stringify([...list].sort()) !== JSON.stringify(d.allowedGl.map((g) => g.code).sort());
+    const txnShown = (d.txnChoices ?? []).filter((t) => !tq.trim() || `${t.code} ${t.name}`.toLowerCase().includes(tq.toLowerCase()));
     const options = d.choosable.filter((a) => !list.includes(a.code) && `${a.code} ${a.name}`.toLowerCase().includes(q.toLowerCase())).slice(0, 40);
     const nameOf = (c: string) => d.choosable.find((a) => a.code === c)?.name ?? d.allowedGl.find((a) => a.code === c)?.name ?? '';
     return (
@@ -177,8 +184,31 @@ function Settings({ le, d, onDone }: { le: Entity; d: CcData; onDone: (m: string
                     })}
                 </div>
             </Card>
+            <Card title={`Transactions (${off.length ? `${off.length} switched off` : 'all inherited from the legal entity'})`}>
+                <p className='text-xs text-soft'>This cost center inherits the transactions approved for the GL accounts of {le.code}. Switch a transaction off to refuse every posting of it on this cost center. Approved with FIN.cc.approve; enforced when posting.</p>
+                <label className='flex h-12 items-center gap-2 rounded-xl border border-line bg-page px-3'>
+                    <Search className='h-4 w-4 text-muted' />
+                    <input aria-label='Find a transaction' value={tq} onChange={(e) => setTq(e.target.value)} placeholder='Find a transaction by code or name' className='h-full min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-muted' />
+                </label>
+                <ul className='max-h-80 divide-y divide-line overflow-y-auto overscroll-contain rounded-xl border border-line'>
+                    {txnShown.map((t) => {
+                        const isOff = off.includes(t.code);
+                        return (
+                            <li key={t.code}>
+                                <label className='flex min-h-12 items-center gap-3 px-3 text-sm'>
+                                    <input type='checkbox' className='h-5 w-5' disabled={!can} checked={!isOff} aria-label={`${t.code} ${isOff ? 'switched off' : 'on'}`} onChange={(e) => setOff((cur) => (e.target.checked ? cur.filter((c) => c !== t.code) : [...cur, t.code]))} />
+                                    <span className='font-mono text-xs text-muted'>{t.code}</span>
+                                    <span className={`min-w-0 flex-1 truncate ${isOff ? 'text-muted line-through' : 'text-ink'}`}>{t.name}</span>
+                                    <span className='shrink-0 text-xs text-muted'>{t.state === 'live' ? 'Live' : 'Reserved'} · {t.accounts} acc.</span>
+                                </label>
+                            </li>
+                        );
+                    })}
+                    {!txnShown.length && <li className='p-3 text-xs text-muted'>No transaction matches.</li>}
+                </ul>
+            </Card>
             {can && (
-                <Button disabled={!changed} onClick={() => confirm.ask({ title: `Propose changes to ${d.cc.code}`, message: 'A person with FIN.cc.approve must approve before they apply.', confirmLabel: 'Propose', reason: { label: 'Reason', minLength: 10 } }, async (reason) => { await callBackend(`${FIN_API}/cc/propose`, { leId: le.id, ccId: d.cc.id, status, allowedGl: list, reason }); onDone('Proposed for approval.'); })}>
+                <Button disabled={!changed} onClick={() => confirm.ask({ title: `Propose changes to ${d.cc.code}`, message: 'A person with FIN.cc.approve must approve before they apply.', confirmLabel: 'Propose', reason: { label: 'Reason', minLength: 10 } }, async (reason) => { await callBackend(`${FIN_API}/cc/propose`, { leId: le.id, ccId: d.cc.id, status, allowedGl: list, txnOff: off, reason }); onDone('Proposed for approval.'); })}>
                     Propose changes
                 </Button>
             )}

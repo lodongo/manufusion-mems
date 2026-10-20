@@ -113,7 +113,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
         items: [
             { key: 'delegations', label: 'Delegation', Icon: Network, perm: 'ADM.delegations' },
             { key: 'transaction_governance', label: 'Transaction governance', Icon: ShieldCheck, perm: 'ADM.workflows' },
-            { key: 'transaction_catalogue', label: 'Transaction catalogue', Icon: Table2, perm: 'ADM.workflows' },
+            { key: 'transaction_catalogue', label: 'Transaction access', Icon: Table2, perm: 'ADM.roles' },
             { key: 'workflows', label: 'Workflow configuration', Icon: GitBranch, perm: 'ADM.workflows' },
             { key: 'authority', label: 'Chart of authority', Icon: Table2, perm: 'ADM.authority' },
             { key: 'audit', label: 'Audit trail', Icon: ScrollText, perm: 'ADM.audit' },
@@ -149,7 +149,7 @@ const TITLES: Record<string, string> = {
     positions_view: 'Job role structure',
     roles: 'Security roles',
     transaction_governance: 'Transaction governance',
-    transaction_catalogue: 'Transaction catalogue',
+    transaction_catalogue: 'Transaction access',
     modules: 'All modules',
     modules_available: 'Modules not adopted',
     modules_adopted: 'Adopted modules',
