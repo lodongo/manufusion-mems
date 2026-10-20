@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronDown, ChevronUp, Columns3, Download, Eye, EyeOff, Filter, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronDown, ChevronRight, ChevronUp, Columns3, Download, Eye, EyeOff, Filter, Layers, Plus, RotateCcw, Search, Sigma, Trash2, X } from 'lucide-react';
+import { FUNCTIONS, FormulaError, QUICK, evaluate, parseFormula, toNumber } from '../lib/tableFormula';
+import { MAX_GROUP_LEVELS, aggregate, allPaths, buildGroups, detectValueColumns, flatten, fmtNumber, type Agg, type FlatItem } from '../lib/tableGroups';
 import { buildXlsx, downloadBlob, type Cell } from '../lib/xlsx';
 import { firebaseAuth } from '../firebase';
 import { callBackend } from '../lib/backend';
 
 // Rich data table used everywhere MEMS shows records:
-// global search, criteria filters, sortable columns, show/hide/reorder columns,
-// Excel download, saved templates (per browser), lazy rendering and an always-visible action bar.
+// global search, criteria filters, sortable columns, show/hide/reorder columns, group by up to four levels with sum,
+// average and count of value columns (detected automatically), formula columns, Excel download, saved templates,
+// lazy rendering and an always-visible action bar.
 // The table body scrolls inside its own frame so the page itself never scrolls.
 
 export interface Column<T> {
@@ -31,12 +34,24 @@ interface Criterion {
     value2?: string;
 }
 
+interface Formula {
+    key: string;
+    label: string;
+    expr: string;
+}
+
 interface View {
     order: string[];
     hidden: string[];
     sort: { col: string; dir: 'asc' | 'desc' } | null;
     criteria: Criterion[];
+    /** Group-by columns, outermost first (up to four). */
+    groupBy?: string[];
+    /** Columns to sum and average; null means detected automatically. */
+    valueCols?: string[] | null;
+    formulas?: Formula[];
 }
+const MAX_FORMULAS = 6;
 
 interface Template extends View {
     name: string;
@@ -193,7 +208,7 @@ export default function RichTable<T>({
     const legacyKey = `mems.table.${id}`;
     const route = window.location.hash.replace(/^#\/?/, '');
     const canSync = !!firebaseAuth.currentUser && /^organization_(home|admin)\/[A-Za-z0-9_/-]{1,145}$/.test(route);
-    const defaults = useMemo<View>(() => ({ order: columns.map((c) => c.key), hidden: columns.filter((c) => c.hidden).map((c) => c.key), sort: null, criteria: [] }), [columns]);
+    const defaults = useMemo<View>(() => ({ order: columns.map((c) => c.key), hidden: columns.filter((c) => c.hidden).map((c) => c.key), sort: null, criteria: [], groupBy: [], valueCols: null, formulas: [] }), [columns]);
     const [view, setView] = useState<View>(() => {
         const saved = store.get<View | null>(`${storeKey}.current`, null);
         return saved ? { ...defaults, ...saved } : defaults;
@@ -206,16 +221,48 @@ export default function RichTable<T>({
     const [templateName, setTemplateName] = useState('');
     const [templateError, setTemplateError] = useState('');
     const [search, setSearch] = useState('');
-    const [panel, setPanel] = useState<'' | 'filters' | 'columns' | 'templates'>('');
+    const [panel, setPanel] = useState<'' | 'filters' | 'columns' | 'templates' | 'group' | 'formulas'>('');
+    const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
     const [limit, setLimit] = useState(PAGE);
     const scroller = useRef<HTMLDivElement>(null);
 
+    // Formula columns: parsed once, evaluated per row against the base columns (never against other formulas).
+    const baseByKey = useMemo(() => new Map(columns.map((c) => [c.key, c])), [columns]);
+    const formulaState = useMemo(() => {
+        const resolve = (name: string) => {
+            const n = name.trim().toLowerCase();
+            return columns.find((c) => c.label.trim().toLowerCase() === n)?.key ?? (baseByKey.has(name.trim()) ? name.trim() : undefined);
+        };
+        return (view.formulas ?? []).slice(0, MAX_FORMULAS).map((f) => {
+            try {
+                return { f, parsed: parseFormula(f.expr, resolve), error: '' };
+            } catch (e) {
+                return { f, parsed: null, error: e instanceof FormulaError ? e.message : 'The formula is not valid.' };
+            }
+        });
+    }, [view.formulas, columns, baseByKey]);
+    const formulaColumns = useMemo<Array<Column<T>>>(
+        () =>
+            formulaState.map(({ f, parsed }) => ({
+                key: f.key,
+                label: f.label,
+                type: 'number' as const,
+                value: (r: T) => (parsed ? evaluate(parsed.node, (k) => toNumber(baseByKey.get(k)?.value(r))) : null),
+                render: (r: T) => {
+                    const v = parsed ? evaluate(parsed.node, (k) => toNumber(baseByKey.get(k)?.value(r))) : null;
+                    return <span className='tabular-nums'>{fmtNumber(v)}</span>;
+                },
+            })),
+        [formulaState, baseByKey],
+    );
+    const allColumns = useMemo(() => [...columns, ...formulaColumns], [columns, formulaColumns]);
+
     // Keep the view consistent with the current column set (new columns appear, removed ones drop out).
-    const byKey = useMemo(() => new Map(columns.map((c) => [c.key, c])), [columns]);
+    const byKey = useMemo(() => new Map(allColumns.map((c) => [c.key, c])), [allColumns]);
     const order = useMemo(() => {
         const known = view.order.filter((k) => byKey.has(k));
-        return [...known, ...columns.map((c) => c.key).filter((k) => !known.includes(k))];
-    }, [view.order, byKey, columns]);
+        return [...known, ...allColumns.map((c) => c.key).filter((k) => !known.includes(k))];
+    }, [view.order, byKey, allColumns]);
     const visible = useMemo(() => order.filter((k) => !view.hidden.includes(k)).map((k) => byKey.get(k) as Column<T>), [order, view.hidden, byKey]);
 
     useEffect(() => store.set(`${storeKey}.current`, view), [storeKey, view]);
@@ -245,7 +292,8 @@ export default function RichTable<T>({
     useEffect(() => {
         setLimit(PAGE);
         scroller.current?.scrollTo({ top: 0 });
-    }, [search, view.criteria, view.sort, rows]);
+    }, [search, view.criteria, view.sort, view.groupBy, rows]);
+    useEffect(() => setExpanded(new Set()), [view.groupBy]);
 
     const filtered = useMemo(() => {
         const q = search.trim().toLowerCase();
@@ -272,10 +320,27 @@ export default function RichTable<T>({
         return out;
     }, [rows, search, view.criteria, view.sort, byKey, visible]);
 
+    // Value columns (summed and averaged) and groups.
+    const getValue = (key: string, r: T) => byKey.get(key)?.value(r);
+    const detected = useMemo(() => detectValueColumns(allColumns, rows as unknown[], (k, r) => byKey.get(k)?.value(r as T)), [allColumns, rows, byKey]);
+    const valueKeys = useMemo(() => (view.valueCols ?? detected).filter((k) => byKey.has(k)), [view.valueCols, detected, byKey]);
+    const groupBy = useMemo(() => (view.groupBy ?? []).filter((k) => byKey.has(k)).slice(0, MAX_GROUP_LEVELS), [view.groupBy, byKey]);
+    const groups = useMemo(() => (groupBy.length ? buildGroups(filtered, groupBy, valueKeys, getValue) : []), [filtered, groupBy, valueKeys, byKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    const items = useMemo<FlatItem<T>[]>(() => (groupBy.length ? flatten(groups, expanded) : filtered.map((row) => ({ kind: 'row' as const, row, level: 0 }))), [groupBy, groups, expanded, filtered]);
+    const totals = useMemo(() => aggregate(filtered, valueKeys, getValue), [filtered, valueKeys, byKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    const visibleValues = visible.filter((c) => valueKeys.includes(c.key));
+
     const onScroll = () => {
         const el = scroller.current;
-        if (el && el.scrollTop + el.clientHeight > el.scrollHeight - 300 && limit < filtered.length) setLimit((l) => l + PAGE);
+        if (el && el.scrollTop + el.clientHeight > el.scrollHeight - 300 && limit < items.length) setLimit((l) => l + PAGE);
     };
+    const toggleGroup = (path: string) =>
+        setExpanded((cur) => {
+            const next = new Set(cur);
+            if (next.has(path)) next.delete(path);
+            else next.add(path);
+            return next;
+        });
 
     const toggleSort = (key: string) =>
         setView((v) => ({
@@ -302,7 +367,16 @@ export default function RichTable<T>({
 
     const exportExcel = () => {
         const header = visible.map((c) => c.label);
-        const data: Cell[][] = filtered.map((r) => visible.map((c) => c.value(r) ?? ''));
+        const cellOf = (c: Column<T>, r: T): Cell => c.value(r) ?? '';
+        const aggRow = (label: string, values: Record<string, Agg>): Cell[] => visible.map((c, i) => (valueKeys.includes(c.key) ? values[c.key]?.sum ?? '' : i === 0 ? label : ''));
+        const data: Cell[][] = groupBy.length
+            ? flatten(groups, new Set(), true).map((it) =>
+                  it.kind === 'group'
+                      ? aggRow(`${'  '.repeat(it.node.level)}${byKey.get(it.node.col)?.label ?? it.node.col}: ${it.node.value} (${it.node.totals.rows})`, it.node.totals.values)
+                      : visible.map((c) => cellOf(c, it.row)),
+              )
+            : filtered.map((r) => visible.map((c) => cellOf(c, r)));
+        if (visibleValues.length) data.push(aggRow(`Total (${totals.rows} rows)`, totals.values));
         const stamp = new Date().toISOString().slice(0, 10);
         downloadBlob(buildXlsx(title || 'Data', header, data), `${(fileName || title || id).replace(/[^A-Za-z0-9_-]+/g, '_')}_${stamp}.xlsx`);
     };
@@ -323,6 +397,9 @@ export default function RichTable<T>({
                     hidden: template.hidden,
                     sort: template.sort,
                     criteria: template.criteria,
+                    groupBy: template.groupBy ?? [],
+                    valueCols: template.valueCols ?? null,
+                    formulas: template.formulas ?? [],
                 },
             });
             setCloudTemplates((previous) => [
@@ -386,8 +463,8 @@ export default function RichTable<T>({
         <div className={`flex ${height} min-h-[22rem] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900`}>
             {/* Action bar: always visible */}
             <div className='shrink-0 space-y-2 border-b border-slate-800 p-2'>
-                <div className='flex items-center gap-2'>
-                    <label className='relative min-w-0 flex-1'>
+                <div className='flex flex-wrap items-center gap-2'>
+                    <label className='relative min-w-0 basis-full sm:basis-auto sm:flex-1'>
                         <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
                         <input
                             type='search'
@@ -403,6 +480,14 @@ export default function RichTable<T>({
                         <Filter className='h-4 w-4' />
                         {view.criteria.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{view.criteria.length}</span>}
                     </button>
+                    <button type='button' aria-label='Group by' title='Group by up to four columns' onClick={() => setPanel(panel === 'group' ? '' : 'group')} className={iconBtn(panel === 'group' || groupBy.length > 0)}>
+                        <Layers className='h-4 w-4' />
+                        {groupBy.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{groupBy.length}</span>}
+                    </button>
+                    <button type='button' aria-label='Formula columns' title='Formula columns' onClick={() => setPanel(panel === 'formulas' ? '' : 'formulas')} className={iconBtn(panel === 'formulas' || formulaColumns.length > 0)}>
+                        <Sigma className='h-4 w-4' />
+                        {formulaColumns.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{formulaColumns.length}</span>}
+                    </button>
                     <button type='button' aria-label='Columns' title='Show, hide and move columns' onClick={() => setPanel(panel === 'columns' ? '' : 'columns')} className={iconBtn(panel === 'columns')}>
                         <Columns3 className='h-4 w-4' />
                     </button>
@@ -417,6 +502,7 @@ export default function RichTable<T>({
                     <p className='truncate text-xs text-slate-500'>
                         {title ? <span className='font-medium text-slate-300'>{title} · </span> : null}
                         {filtered.length === rows.length ? `${rows.length} rows` : `${filtered.length} of ${rows.length} rows`}
+                        {groupBy.length ? ` · ${groups.length} groups` : ''}
                         {view.sort ? ` · sorted by ${byKey.get(view.sort.col)?.label ?? ''} ${view.sort.dir === 'asc' ? '↑' : '↓'}` : ''}
                     </p>
                     {actions && <div className='flex shrink-0 items-center gap-2'>{actions}</div>}
@@ -429,11 +515,42 @@ export default function RichTable<T>({
                         onChange={(criteria) => setView((v) => ({ ...v, criteria }))}
                     />
                 )}
+                {panel === 'group' && (
+                    <GroupPanel
+                        columns={order.map((k) => byKey.get(k) as Column<T>)}
+                        groupBy={groupBy}
+                        valueKeys={valueKeys}
+                        auto={!view.valueCols}
+                        onGroupBy={(g) => setView((v) => ({ ...v, groupBy: g.slice(0, MAX_GROUP_LEVELS) }))}
+                        onValues={(vals) => setView((v) => ({ ...v, valueCols: vals }))}
+                        onExpandAll={() => setExpanded(new Set(allPaths(groups)))}
+                        onCollapseAll={() => setExpanded(new Set())}
+                    />
+                )}
+                {panel === 'formulas' && (
+                    <FormulaPanel
+                        columns={columns}
+                        formulas={formulaState}
+                        onChange={(formulas) =>
+                            setView((v) => {
+                                const removed = (v.formulas ?? []).filter((f) => !formulas.some((x) => x.key === f.key)).map((f) => f.key);
+                                return {
+                                    ...v,
+                                    formulas,
+                                    hidden: v.hidden.filter((k) => !removed.includes(k)),
+                                    groupBy: (v.groupBy ?? []).filter((k) => !removed.includes(k)),
+                                    criteria: v.criteria.filter((c) => !removed.includes(c.col)),
+                                    sort: v.sort && removed.includes(v.sort.col) ? null : v.sort,
+                                };
+                            })
+                        }
+                    />
+                )}
                 {panel === 'columns' && (
                     <div className='max-h-64 overflow-y-auto overscroll-contain rounded-xl border border-slate-800 bg-slate-950 p-2'>
                         <div className='mb-1 flex items-center justify-between px-1'>
                             <p className='text-xs text-slate-400'>Tap the eye to add or remove a column. Arrows move it.</p>
-                            <button type='button' onClick={() => setView({ ...defaults })} className='flex min-h-11 items-center gap-1 text-xs text-emerald-300'>
+                            <button type='button' onClick={() => setView((v) => ({ ...defaults, formulas: v.formulas, groupBy: v.groupBy, valueCols: v.valueCols }))} className='flex min-h-11 items-center gap-1 text-xs text-emerald-300'>
                                 <RotateCcw className='h-3 w-3' />
                                 Reset
                             </button>
@@ -482,7 +599,7 @@ export default function RichTable<T>({
                                 Save
                             </button>
                         </div>
-                        <p className='mb-2 text-xs text-slate-400'>{canSync ? 'Save your columns, filters and sorting to My Tables and this device.' : 'This table template is saved on this device.'}</p>
+                        <p className='mb-2 text-xs text-slate-400'>{canSync ? 'Save your columns, filters, sorting, groups and formulas to My Tables and this device.' : 'This table template is saved on this device.'}</p>
                         {templateInfo && <p role='status' className='mb-2 text-xs text-emerald-300'>{templateInfo}</p>}
                         {templateError && (
                             <p role='alert' className='mb-2 text-xs text-red-300'>
@@ -498,14 +615,14 @@ export default function RichTable<T>({
                                         <button
                                             type='button'
                                             onClick={() => {
-                                                setView({ order: t.order, hidden: t.hidden, sort: t.sort, criteria: t.criteria });
+                                                setView({ order: t.order, hidden: t.hidden, sort: t.sort, criteria: t.criteria, groupBy: t.groupBy ?? [], valueCols: t.valueCols ?? null, formulas: t.formulas ?? [] });
                                                 setPanel('');
                                             }}
                                             className='min-w-0 flex-1 truncate rounded-lg px-2 py-1.5 text-left text-sm text-white active:bg-slate-800'
                                         >
                                             {t.name}{t.online && <span className='ml-1 text-[11px] text-emerald-300'>· My Tables</span>}
                                             <span className='ml-2 text-xs text-slate-500'>
-                                                {t.order.length - t.hidden.length} columns{t.criteria.length ? ` · ${t.criteria.length} filters` : ''}
+                                                {t.order.length - t.hidden.length} columns{t.criteria.length ? ` · ${t.criteria.length} filters` : ''}{t.groupBy?.length ? ` · grouped ${t.groupBy.length}` : ''}{t.formulas?.length ? ` · ${t.formulas.length} formulas` : ''}
                                             </span>
                                         </button>
                                         {!t.online && canSync && (
@@ -543,7 +660,7 @@ export default function RichTable<T>({
 
             {/* Scrollable content: only this area scrolls */}
             <div ref={scroller} onScroll={onScroll} className='min-h-0 flex-1 overflow-auto overscroll-contain'>
-                {filtered.length === 0 ? (
+                {items.length === 0 ? (
                     <p className='py-10 text-center text-sm text-slate-500'>{rows.length ? 'No rows match your search or filters.' : empty}</p>
                 ) : (
                     <table className='w-full min-w-max border-separate border-spacing-0 text-sm'>
@@ -560,19 +677,55 @@ export default function RichTable<T>({
                             </tr>
                         </thead>
                         <tbody>
-                            {filtered.slice(0, limit).map((r) => (
-                                <tr key={rowKey(r)} onClick={onRowClick ? () => onRowClick(r) : undefined} className={`${onRowClick ? 'cursor-pointer active:bg-slate-800 hover:bg-slate-800/50' : ''} ${rowClassName?.(r) ?? ''}`}>
-                                    {visible.map((c) => (
-                                        <td key={c.key} className={`max-w-[22rem] border-b border-slate-800/70 px-3 py-2 align-top text-slate-200 ${c.type === 'number' ? 'text-right tabular-nums' : ''} ${c.className ?? ''}`}>
-                                            {c.render ? c.render(r) : <span className='line-clamp-2'>{String(c.value(r) ?? '')}</span>}
+                            {items.slice(0, limit).map((it) => {
+                                if (it.kind === 'group') {
+                                    const g = it.node;
+                                    const open = expanded.has(g.path);
+                                    return (
+                                        <tr key={`g${g.path}`} onClick={() => toggleGroup(g.path)} className='cursor-pointer bg-slate-800/40 active:bg-slate-800'>
+                                            {visible.map((c, i) => (
+                                                <td key={c.key} className={`border-b border-slate-800 px-3 py-2 align-top ${valueKeys.includes(c.key) ? 'text-right' : ''}`}>
+                                                    {i === 0 && (
+                                                        <button type='button' aria-expanded={open} aria-label={`${open ? 'Collapse' : 'Expand'} ${g.value}`} onClick={(e) => { e.stopPropagation(); toggleGroup(g.path); }} className='flex min-h-11 items-center gap-1 whitespace-nowrap text-left font-semibold text-white' style={{ paddingLeft: `${g.level * 1}rem` }}>
+                                                            {open ? <ChevronDown className='h-4 w-4 shrink-0 text-emerald-400' /> : <ChevronRight className='h-4 w-4 shrink-0 text-emerald-400' />}
+                                                            <span className='text-xs font-normal text-slate-400'>{byKey.get(g.col)?.label}:</span>
+                                                            <span className='max-w-[14rem] truncate'>{g.value}</span>
+                                                            <span className='rounded-full bg-slate-700 px-2 text-[11px] font-normal text-slate-200'>{g.totals.rows}</span>
+                                                        </button>
+                                                    )}
+                                                    {valueKeys.includes(c.key) && <AggCell agg={g.totals.values[c.key]} />}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    );
+                                }
+                                const r = it.row;
+                                return (
+                                    <tr key={rowKey(r)} onClick={onRowClick ? () => onRowClick(r) : undefined} className={`${onRowClick ? 'cursor-pointer active:bg-slate-800 hover:bg-slate-800/50' : ''} ${rowClassName?.(r) ?? ''}`}>
+                                        {visible.map((c, i) => (
+                                            <td key={c.key} style={i === 0 && it.level ? { paddingLeft: `${0.75 + it.level * 1}rem` } : undefined} className={`max-w-[22rem] border-b border-slate-800/70 px-3 py-2 align-top text-slate-200 ${c.type === 'number' || valueKeys.includes(c.key) ? 'text-right tabular-nums' : ''} ${c.className ?? ''}`}>
+                                                {c.render ? c.render(r) : <span className='line-clamp-2'>{String(c.value(r) ?? '')}</span>}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                        {visibleValues.length > 0 && (
+                            <tfoot>
+                                <tr>
+                                    {visible.map((c, i) => (
+                                        <td key={c.key} className={`sticky bottom-0 z-10 border-t border-slate-700 bg-slate-900 px-3 py-2 align-top ${valueKeys.includes(c.key) ? 'text-right' : ''}`}>
+                                            {i === 0 && <span className='block whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-300'>Total · {totals.rows} rows</span>}
+                                            {valueKeys.includes(c.key) && <AggCell agg={totals.values[c.key]} strong />}
                                         </td>
                                     ))}
                                 </tr>
-                            ))}
-                        </tbody>
+                            </tfoot>
+                        )}
                     </table>
                 )}
-                {limit < filtered.length && <p className='py-3 text-center text-xs text-slate-500'>Scroll for more…</p>}
+                {limit < items.length && <p className='py-3 text-center text-xs text-slate-500'>Scroll for more…</p>}
             </div>
         </div>
     );
@@ -642,6 +795,199 @@ function FiltersPanel<T>({ columns, criteria, onChange }: { columns: Array<Colum
                 <Plus className='h-4 w-4' />
                 Add filter
             </button>
+        </div>
+    );
+}
+
+/** Sum, simple average and count of a value column. */
+function AggCell({ agg, strong }: { agg: Agg | undefined; strong?: boolean }) {
+    if (!agg || !agg.n) return <span className='text-xs text-slate-600'>—</span>;
+    return (
+        <span className='block whitespace-nowrap text-right tabular-nums'>
+            <span className={`block ${strong ? 'font-semibold text-white' : 'font-medium text-slate-100'}`} title='Sum'>
+                Σ {fmtNumber(agg.sum)}
+            </span>
+            <span className='block text-[11px] text-slate-400'>
+                <span title='Simple average'>x̄ {fmtNumber(agg.avg)}</span> · <span title='Number of values'>n {agg.n}</span>
+            </span>
+        </span>
+    );
+}
+
+function GroupPanel<T>({ columns, groupBy, valueKeys, auto, onGroupBy, onValues, onExpandAll, onCollapseAll }: { columns: Array<Column<T>>; groupBy: string[]; valueKeys: string[]; auto: boolean; onGroupBy: (g: string[]) => void; onValues: (v: string[] | null) => void; onExpandAll: () => void; onCollapseAll: () => void }) {
+    const select = 'h-11 min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-2 text-base text-white sm:text-sm';
+    const choices = (level: number) => columns.filter((c) => !groupBy.some((g, i) => g === c.key && i !== level));
+    return (
+        <div className='max-h-[60dvh] space-y-3 overflow-y-auto overscroll-contain rounded-xl border border-slate-800 bg-slate-950 p-2'>
+            <div className='space-y-2'>
+                <p className='text-xs text-slate-400'>Group rows by up to {MAX_GROUP_LEVELS} columns. Each group shows its sum (Σ), simple average (x̄) and number of values (n).</p>
+                {groupBy.map((key, level) => (
+                    <div key={level} className='flex items-center gap-2'>
+                        <span className='w-14 shrink-0 text-xs text-slate-400'>Level {level + 1}</span>
+                        <select aria-label={`Group level ${level + 1}`} value={key} onChange={(e) => onGroupBy(groupBy.map((g, i) => (i === level ? e.target.value : g)))} className={select}>
+                            {choices(level).map((c) => (
+                                <option key={c.key} value={c.key}>
+                                    {c.label}
+                                </option>
+                            ))}
+                        </select>
+                        <button type='button' aria-label={`Remove group level ${level + 1}`} onClick={() => onGroupBy(groupBy.filter((_, i) => i !== level))} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-400'>
+                            <X className='h-4 w-4' />
+                        </button>
+                    </div>
+                ))}
+                {groupBy.length < MAX_GROUP_LEVELS && choices(groupBy.length).length > 0 && (
+                    <select aria-label='Add a group level' value='' onChange={(e) => e.target.value && onGroupBy([...groupBy, e.target.value])} className={`${select} w-full`}>
+                        <option value=''>{groupBy.length ? `Add level ${groupBy.length + 1}…` : 'Group by…'}</option>
+                        {choices(groupBy.length).map((c) => (
+                            <option key={c.key} value={c.key}>
+                                {c.label}
+                            </option>
+                        ))}
+                    </select>
+                )}
+                {groupBy.length > 0 && (
+                    <div className='flex flex-wrap gap-2'>
+                        <button type='button' onClick={onExpandAll} className='flex min-h-11 items-center rounded-xl border border-slate-700 px-3 text-xs text-slate-200'>Expand all</button>
+                        <button type='button' onClick={onCollapseAll} className='flex min-h-11 items-center rounded-xl border border-slate-700 px-3 text-xs text-slate-200'>Collapse all</button>
+                        <button type='button' onClick={() => onGroupBy([])} className='flex min-h-11 items-center rounded-xl px-3 text-xs text-slate-400 underline'>Remove grouping</button>
+                    </div>
+                )}
+            </div>
+            <div className='space-y-2 border-t border-slate-800 pt-2'>
+                <div className='flex items-center justify-between gap-2'>
+                    <p className='text-xs text-slate-400'>Value columns {auto ? '(detected automatically)' : '(chosen)'}</p>
+                    {!auto && (
+                        <button type='button' onClick={() => onValues(null)} className='flex min-h-11 items-center gap-1 text-xs text-emerald-300'>
+                            <RotateCcw className='h-3 w-3' /> Detect again
+                        </button>
+                    )}
+                </div>
+                <ul className='flex flex-wrap gap-1'>
+                    {columns.map((c) => {
+                        const on = valueKeys.includes(c.key);
+                        return (
+                            <li key={c.key}>
+                                <button type='button' aria-pressed={on} onClick={() => onValues(on ? valueKeys.filter((k) => k !== c.key) : [...valueKeys, c.key])} className={`flex min-h-11 items-center rounded-full px-3 text-xs ring-1 ${on ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-500/40' : 'text-slate-400 ring-slate-700'}`}>
+                                    {on ? 'Σ ' : ''}
+                                    {c.label}
+                                </button>
+                            </li>
+                        );
+                    })}
+                </ul>
+            </div>
+        </div>
+    );
+}
+
+function FormulaPanel<T>({ columns, formulas, onChange }: { columns: Array<Column<T>>; formulas: Array<{ f: Formula; error: string }>; onChange: (f: Formula[]) => void }) {
+    const [name, setName] = useState('');
+    const [mode, setMode] = useState<'quick' | 'custom'>('quick');
+    const [quick, setQuick] = useState(QUICK[0].id);
+    const [picked, setPicked] = useState<string[]>([]);
+    const [expr, setExpr] = useState('');
+    const [error, setError] = useState('');
+    const q = QUICK.find((x) => x.id === quick) ?? QUICK[0];
+    const select = 'h-11 min-w-0 w-full rounded-xl border border-slate-700 bg-slate-950 px-2 text-base text-white sm:text-sm';
+    const ref = (key: string) => `[${columns.find((c) => c.key === key)?.label ?? key}]`;
+    const built = mode === 'quick' ? (picked.length >= q.min ? q.build(picked.slice(0, q.max).map(ref)) : '') : expr;
+    const add = () => {
+        setError('');
+        const label = name.trim();
+        if (!label) return setError('Name the column.');
+        if (label.length > 40) return setError('Use up to 40 characters for the name.');
+        if (/[\u0000-\u001f<>`\\]/.test(label)) return setError('The name has characters that are not allowed.');
+        if (columns.some((c) => c.label.toLowerCase() === label.toLowerCase()) || formulas.some((x) => x.f.label.toLowerCase() === label.toLowerCase())) return setError('A column with this name already exists.');
+        if (formulas.length >= MAX_FORMULAS) return setError(`You can add up to ${MAX_FORMULAS} formula columns.`);
+        if (mode === 'quick' && picked.length < q.min) return setError(`Choose at least ${q.min} columns.`);
+        if (mode === 'quick' && picked.length > q.max) return setError(`Choose at most ${q.max} columns.`);
+        try {
+            parseFormula(built, (n) => columns.find((c) => c.label.trim().toLowerCase() === n.trim().toLowerCase())?.key ?? columns.find((c) => c.key === n.trim())?.key);
+        } catch (e) {
+            return setError(e instanceof FormulaError ? e.message : 'The formula is not valid.');
+        }
+        const key = `fx_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        onChange([...formulas.map((x) => x.f), { key, label, expr: built.trim() }]);
+        setName('');
+        setPicked([]);
+        setExpr('');
+    };
+    return (
+        <div className='max-h-[60dvh] space-y-3 overflow-y-auto overscroll-contain rounded-xl border border-slate-800 bg-slate-950 p-2'>
+            {formulas.length > 0 && (
+                <ul className='space-y-1'>
+                    {formulas.map(({ f, error: err }) => (
+                        <li key={f.key} className='flex items-start gap-2 rounded-lg border border-slate-800 px-3 py-2'>
+                            <div className='min-w-0 flex-1'>
+                                <p className='truncate text-sm font-medium text-white'>{f.label}</p>
+                                <p className='break-words font-mono text-[11px] text-slate-400'>{f.expr}</p>
+                                {err && <p className='text-xs text-red-400'>{err}</p>}
+                            </div>
+                            <button type='button' aria-label={`Remove formula ${f.label}`} onClick={() => onChange(formulas.filter((x) => x.f.key !== f.key).map((x) => x.f))} className='-my-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-400'>
+                                <Trash2 className='h-4 w-4' />
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            <div className='space-y-2'>
+                <p className='text-xs text-slate-400'>Add a column calculated from each row. Formula columns can be grouped, filtered, sorted and totalled like any other.</p>
+                <input aria-label='Formula column name' value={name} maxLength={40} placeholder='Column name, e.g. Line total' onChange={(e) => setName(e.target.value)} className={select} />
+                <div className='grid grid-cols-2 gap-2'>
+                    {(['quick', 'custom'] as const).map((m) => (
+                        <button key={m} type='button' aria-pressed={mode === m} onClick={() => setMode(m)} className={`flex min-h-11 items-center justify-center rounded-xl border text-xs ${mode === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-200' : 'border-slate-700 text-slate-300'}`}>
+                            {m === 'quick' ? 'Simple' : 'Formula'}
+                        </button>
+                    ))}
+                </div>
+                {mode === 'quick' ? (
+                    <>
+                        <select aria-label='Calculation' value={quick} onChange={(e) => setQuick(e.target.value)} className={select}>
+                            {QUICK.map((x) => (
+                                <option key={x.id} value={x.id}>
+                                    {x.label}
+                                </option>
+                            ))}
+                        </select>
+                        <p className='text-xs text-slate-400'>Choose {q.min === q.max ? q.min : `${q.min} to ${q.max}`} columns{q.min === 2 && q.max === 2 ? ' in order' : ''}:</p>
+                        <ul className='flex flex-wrap gap-1'>
+                            {columns.map((c) => {
+                                const i = picked.indexOf(c.key);
+                                return (
+                                    <li key={c.key}>
+                                        <button type='button' aria-pressed={i >= 0} onClick={() => setPicked((cur) => (i >= 0 ? cur.filter((k) => k !== c.key) : [...cur, c.key]))} className={`flex min-h-11 items-center rounded-full px-3 text-xs ring-1 ${i >= 0 ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-500/40' : 'text-slate-400 ring-slate-700'}`}>
+                                            {i >= 0 ? `${i + 1}. ` : ''}
+                                            {c.label}
+                                        </button>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </>
+                ) : (
+                    <>
+                        <textarea aria-label='Formula' rows={2} maxLength={300} value={expr} placeholder='e.g. [Quantity] * [Unit price]' onChange={(e) => setExpr(e.target.value)} className='w-full rounded-xl border border-slate-700 bg-slate-950 p-2 font-mono text-base text-white sm:text-sm' />
+                        <select aria-label='Insert a column' value='' onChange={(e) => e.target.value && setExpr((x) => `${x}${x && !/[\s(,+\-*/]$/.test(x) ? ' ' : ''}${ref(e.target.value)}`)} className={select}>
+                            <option value=''>Insert a column…</option>
+                            {columns.map((c) => (
+                                <option key={c.key} value={c.key}>
+                                    {c.label}
+                                </option>
+                            ))}
+                        </select>
+                        <p className='text-[11px] leading-snug text-slate-500'>
+                            Use + − × (*) ÷ (/) and brackets. Functions: {Object.entries(FUNCTIONS).filter(([k]) => k !== 'AVERAGE').map(([k, v]) => `${k} – ${v.help}`).join('; ')}. Empty cells count as 0 in arithmetic.
+                        </p>
+                    </>
+                )}
+                {built && <p className='break-words rounded-lg bg-slate-900 px-2 py-1 font-mono text-[11px] text-slate-300'>= {built}</p>}
+                {error && <p role='alert' className='text-xs text-red-400'>{error}</p>}
+                <button type='button' onClick={add} disabled={formulas.length >= MAX_FORMULAS} className='flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/50 text-sm font-medium text-emerald-300 disabled:opacity-40'>
+                    <Plus className='h-4 w-4' />
+                    Add formula column
+                </button>
+            </div>
         </div>
     );
 }
