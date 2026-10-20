@@ -157,7 +157,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
       </div>
       {notice && <p role='status' className='mt-3 text-sm text-green-300'>{notice}</p>}
       {createError && <p role='alert' className='mt-3 text-sm text-red-300'>{createError}</p>}
-    </Card>
+    </Card>}
     {(mode==='register'||mode==='engineering') && <DocumentSourceStaging documents={data?.documents ?? []} />}
     {mode==='engineering' && <EngineeringDocumentLinks documents={data?.documents ?? []} />}
     {mode==='sds' && <SheqSdsRegistry canConfigure={canConfigure} />}
@@ -207,7 +207,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
           </div>
         </div>)}
       </div>
-    </Card>
+    </Card>}
     {mode==='knowledge' && <Card><p className='text-sm text-slate-200'>Open Asset Management and select an equipment item to access its scoped technical dossier, maintenance evidence and troubleshooting search. Full manual indexing and AI diagnosis are not yet enabled.</p></Card>}
     {mode==='forms' && <Card><p className='text-sm text-slate-200'>Controlled digital form schemas and OCR contracts are in development. Executable forms and OCR processing are not yet released.</p></Card>}
     <p className='text-xs text-slate-400'>Restricted to dedicated document permissions for the foundation stage. Files are available only after controlled verification and approved publication.</p>
