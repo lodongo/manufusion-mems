@@ -11,6 +11,8 @@ export type IndustrialKnowledgeRecord={
  assetTag:string;kind:'plc_program'|'hmi_scada'|'industrial_network'|'io_list'|'control_narrative'|'utility_feed'|'instrumentation'|'historian_mapping';
  technology?:typeof CONTROL_TECHNOLOGIES[number];programLanguages?:typeof PLC_LANGUAGES[number][];
  utilityKind?:typeof UTILITY_KINDS[number];equipmentNodeId?:string;
+ plcSource?:'controller_read_only'|'controlled_backup';controllerReadAt?:string;
+ runningVersionMatch?:'verified_match'|'verified_mismatch'|'not_verified';
  title:string;sourceDocumentId:string;sourceRevisionId:string;
  manufacturer?:string;controllerModel?:string;firmwareVersion?:string;softwareVersion?:string;
  checksum?:string;tagNamespace?:string;effectiveFrom?:string;validatedBy?:string;
@@ -25,6 +27,9 @@ export function validIndustrialKnowledge(x:IndustrialKnowledgeRecord):boolean{
  (x.technology===undefined||CONTROL_TECHNOLOGIES.includes(x.technology))&&
  (x.utilityKind===undefined||UTILITY_KINDS.includes(x.utilityKind))&&
  (x.programLanguages===undefined||(Array.isArray(x.programLanguages)&&x.programLanguages.every(l=>PLC_LANGUAGES.includes(l))))&&
- (x.kind!=='plc_program'||!!x.technology)&&
+ (x.kind!=='plc_program'||(!!x.technology && !!x.plcSource &&
+   (x.plcSource==='controller_read_only'||x.plcSource==='controlled_backup') &&
+   !!x.runningVersionMatch && ['verified_match','verified_mismatch','not_verified'].includes(x.runningVersionMatch) &&
+   (x.plcSource!=='controller_read_only'||!!x.controllerReadAt)))&&
  (x.kind!=='utility_feed'||!!x.utilityKind);
 }
