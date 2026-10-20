@@ -21,7 +21,7 @@ const CLASSES = [
  ['TMP','Template'], ['REG','Register'], ['REC','Record'], ['RPT','Report'],
 ] as const;
 
-export default function DocumentRegistryPage({ canConfigure }: { canConfigure: boolean }) {
+export default function DocumentRegistryPage({ canConfigure, canReview }: { canConfigure: boolean; canReview: boolean }) {
   const { data, error, loading, reload } = useLoad(
     () => callBackend<{ documents: DocumentRow[] }>('/api/org/drkms/documents/list', {}), []
   );
@@ -44,6 +44,7 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
   const [settingsNotice, setSettingsNotice] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [reviewing, setReviewing] = useState('');
+  const [reviewReason,setReviewReason]=useState('');
   const [documentSearch, setDocumentSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [notice, setNotice] = useState('');
@@ -59,6 +60,15 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
       setup.reload();
     } catch (err) { setSettingsError(err instanceof Error ? err.message : 'Unable to save settings.'); }
     finally { setConfigBusy(false); }
+  };
+  const reviewDecision=async(documentId:string,decision:'return'|'reject')=>{
+    setReviewing(documentId);setCreateError('');setNotice('');
+    try{
+      await callBackend('/api/org/drkms/documents/review-decision',{documentId,decision,reason:reviewReason.trim()});
+      setNotice('Review decision recorded. Publication remains subject to independent CoA authorization.');
+      setReviewReason('');reload();
+    }catch(err){setCreateError(err instanceof Error?err.message:'Could not record review decision.');}
+    finally{setReviewing('');}
   };
   const submitReview = async (documentId:string) => {
     setReviewing(documentId);setCreateError('');setNotice('');
@@ -179,6 +189,16 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
               <p className='break-words font-medium text-white'>{d.title}</p>
               <p className='mt-1 break-all text-xs text-slate-400'>{d.classCode} · {d.documentId}</p>
               <p className='mt-1 text-xs text-slate-400'>Revision {d.revision} · {d.status}</p>
+              {d.status==='in_review' && canReview && <div className='mt-2 space-y-2'>
+                <label className='block text-xs text-slate-200'>Review reason
+                  <textarea rows={2} value={reviewReason} onChange={e=>setReviewReason(e.target.value)}
+                    className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-white' placeholder='Reason for return or rejection'/>
+                </label>
+                <div className='flex flex-wrap gap-2'>
+                  <button type='button' disabled={!!reviewing||reviewReason.trim().length<10} onClick={()=>void reviewDecision(d.documentId,'return')} className='min-h-10 rounded-lg border border-slate-600 px-3 text-xs text-white disabled:opacity-50'>Return for changes</button>
+                  <button type='button' disabled={!!reviewing||reviewReason.trim().length<10} onClick={()=>void reviewDecision(d.documentId,'reject')} className='min-h-10 rounded-lg border border-red-700 px-3 text-xs text-red-200 disabled:opacity-50'>Reject</button>
+                </div>
+              </div>}
               {d.status==='draft' && <button type='button' disabled={!!reviewing} onClick={()=>void submitReview(d.documentId)} className='mt-2 min-h-10 rounded-lg border border-blue-500 px-3 text-xs font-semibold text-blue-200 disabled:opacity-40'>{reviewing===d.documentId?'Submitting…':'Submit for review'}</button>}
             </div>
           </div>
