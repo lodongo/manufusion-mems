@@ -94,7 +94,7 @@ async function status() {
                 lastStartedAt: str(state?.data.lastStartedAt), lastCompletedAt: str(state?.data.lastCompletedAt),
                 lastError: str(state?.data.lastError), lastErrorAt: str(state?.data.lastErrorAt),
                 lastResult: state?.data.lastResult || null },
-            { id: MRP_JOB_ID, label: 'Replenishment safety sweep (every automated strategy, RP01-RP17)', category: 'Inventory',
+            { id: MRP_JOB_ID, label: 'Replenishment safety sweep (automated strategies RP01-RP04 and RP06)', category: 'Inventory',
                 enabled: mrp.enabled, schedule: mrp,
                 scheduleText: mrp.enabled ? `Every ${mrp.intervalHours} hour${mrp.intervalHours === 1 ? '' : 's'}${str(mrpState?.data.cursor) ? ' · resuming an unfinished sweep' : ''}` : 'Disabled (replenishment still runs on every material change)',
                 configurable: 'inline',
@@ -151,10 +151,10 @@ export async function runFxNow() {
 
 // ===== Replenishment safety sweep =====
 // Replenishment runs on every material change (see replenishment.ts). The sweep is the safety net: it re-plans every
-// material with an automated strategy (Min-Max, Reorder Point, EOQ, JIT, demand-driven, MRP, kanban, two-bin, periodic
-// review, …) in every active organization, catching changes that did not pass through an organization request (for
-// example stock posted by another automation), periodic reviews falling due, and usage-based levels drifting with
-// consumption. Long sweeps resume on the next tick from where they stopped.
+// material whose Stock Control strategy is automated (RP01 Min-Max, RP02 Reorder Point, RP03 EOQ, RP04 JIT, RP06 MRP)
+// in every active organization and closes requests left open under any other strategy. It catches changes that did not
+// pass through an organization request (for example stock posted by another automation) and usage-based levels drifting
+// with consumption. Long sweeps resume on the next tick from where they stopped.
 
 const MRP_JOB_ID = 'inv.replenishment-sweep';
 const MRP_CONFIG = 'system/replenishment_sweep_config';

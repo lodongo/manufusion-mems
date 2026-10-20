@@ -92,6 +92,7 @@ import { mailRoutes } from './mail';
 import { workGroupRoutes } from './workGroups';
 import { actionHubRoutes } from './actionHub';
 import { actionPhotoRoutes } from './actionPhotos';
+import { materialMediaRoutes } from './materialMedia';
 import { calendarRoutes } from './mailCalendar';
 import { mailPreferenceRoutes } from './mailPreferences';
 import { healthOverview } from './healthPolicy';
@@ -1556,6 +1557,7 @@ export const handler = router(recordWiredRoutes({
     ...workGroupRoutes,
     ...actionHubRoutes,
     ...actionPhotoRoutes,
+    ...materialMediaRoutes,
     ...calendarRoutes,
     ...mailPreferenceRoutes,
     ...roleCodeRoutes,

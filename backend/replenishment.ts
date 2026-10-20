@@ -3,8 +3,9 @@
  *
  * When anything about a material changes — its master record, its warehouse settings (strategy, ownership, supply
  * arrangement, levels, parameters), an extension to a warehouse, or a stock movement — the replenishment engine plans
- * that material in every warehouse where its replenishment strategy is automated (RP01-RP17, see replenishmentPlan.ts;
- * MRP is RP06). What happens with the quantity depends on who owns and supplies the stock:
+ * that material in every warehouse where the replenishment strategy chosen in Stock Control is automated: RP01 Min-Max,
+ * RP02 Reorder Point, RP03 EOQ, RP04 Just-in-Time and RP06 MRP (see replenishmentPlan.ts). Every other strategy is
+ * recorded for planning only, and an older stocking policy without a Stock Control strategy never starts replenishment. What happens with the quantity depends on who owns and supplies the stock:
  *
  *   company-owned, standard / framework / emergency / project / direct buying
  *       → a purchase requirement with status UNVERIFIED (requester "Replenishment"), verified by a planner
@@ -36,7 +37,7 @@ import { requirementsPath } from './procurementSetup';
 import { record } from './org';
 import {
     AUTOMATED_METHODS, CONSUMPTION_TYPES, METHODS, PO_OPEN, PRQ_OPEN, REQ_OPEN, RETURN_TYPES,
-    factorsOf, methodOf, numberOrNull, openQuantity, plan, routeFor, type Channel, type Params, type PlanResult,
+    factorsOf, legacyMethodOf, methodOf, numberOrNull, openQuantity, plan, routeFor, type Channel, type Params, type PlanResult,
 } from './replenishmentPlan';
 
 type Obj = Record<string, unknown>;
@@ -49,7 +50,6 @@ const DEFAULT_LOOKBACK = 90;
 const objs = (v: unknown): Obj[] => (Array.isArray(v) ? (v.filter(isObj) as Obj[]) : []);
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 export const SOURCES = ['replenishment', 'mrp'];
-const LEGACY_POLICIES = ['MINMAX', 'REORDER', 'JIT'];
 
 export const P = (orgId: string) => ({
     key: (k: string) => `${root(orgId)}/replenishment_keys/${k}`,
@@ -382,13 +382,8 @@ const automated = (d: Doc) => METHODS[methodOf(d.data.replenishmentStrategy, d.d
 
 async function plannedInfos(orgId: string, field: 'materialId' | 'warehouseId' | '', value = ''): Promise<Doc[]> {
     if (field) return (await runQuery({ from: [{ collectionId: 'inventory_material_info' }], where: fieldEq(field, value) }, root(orgId))).filter(automated);
-    const [a, b] = await Promise.all([
-        runQuery({ from: [{ collectionId: 'inventory_material_info' }], where: fieldIn('replenishmentStrategy', AUTOMATED_METHODS) }, root(orgId)),
-        runQuery({ from: [{ collectionId: 'inventory_material_info' }], where: fieldIn('stockingPolicy', [...LEGACY_POLICIES, ...AUTOMATED_METHODS]) }, root(orgId)),
-    ]);
-    const seen = new Map<string, Doc>();
-    for (const d of [...a, ...b]) if (automated(d)) seen.set(d.id, d);
-    return [...seen.values()];
+    // Only the Stock Control strategy counts (RP01-RP04, RP06); open requests of anything else are closed by the sweep.
+    return (await runQuery({ from: [{ collectionId: 'inventory_material_info' }], where: fieldIn('replenishmentStrategy', AUTOMATED_METHODS) }, root(orgId))).filter(automated);
 }
 
 /** Warehouses where a material is planned, or has an open request or signal (so it can be closed). */
@@ -461,7 +456,7 @@ const scopeOf = async (ctx: OrgContext): Promise<'all' | Set<string>> => (ctx.ro
 function requestOut(d: Doc) {
     const line = objs(d.data.lines)[0] ?? {};
     const c = isObj(d.data.replenishment) ? (d.data.replenishment as Obj) : isObj(d.data.mrp) ? (d.data.mrp as Obj) : {};
-    const method = str(c.method) || methodOf('', c.policy);
+    const method = str(c.method) || legacyMethodOf(c.policy);
     return {
         id: d.id, status: str(d.data.status), title: str(d.data.title),
         materialId: str(line.materialId), materialNumber: str(line.materialNumber), materialName: str(line.itemName),
