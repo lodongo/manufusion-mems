@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { FilePlus2, RefreshCw, FileText } from 'lucide-react';
 import { callBackend } from '../lib/backend';
-import { PageTitle, Card, Button, Spinner, useLoad } from '../admin/kit';
-import { Alert } from '../components/ui';
+import { PageTitle, Card, useLoad } from '../admin/kit';
 
 type DocumentRow = {
   documentId: string; title: string; classCode: string; status: string;
