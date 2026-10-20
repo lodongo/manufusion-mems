@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {CONTROL_TECHNOLOGIES,PLC_LANGUAGES,UTILITY_KINDS,validIndustrialKnowledge} from './drkmsIndustrialKnowledge';
 const base={assetTag:'AST-000001',kind:'plc_program' as const,technology:'siemens_step7_tia' as const,
- programLanguages:['ladder' as const,'structured_text' as const],title:'Filler S7 logic',
+ programLanguages:['ladder' as const,'structured_text' as const],plcSource:'controlled_backup' as const,runningVersionMatch:'not_verified' as const,title:'Filler S7 logic',
  sourceDocumentId:'a'.repeat(20),sourceRevisionId:'b'.repeat(64),accessMode:'read_only' as const,aiControlEnabled:false as const};
 test('multi-vendor PLC catalogue includes IEC languages and established environments',()=>{
  assert.ok(CONTROL_TECHNOLOGIES.includes('beckhoff_twincat'));
@@ -18,4 +18,12 @@ test('versioned PLC reference requires read-only AI boundary',()=>{
 test('PLC and utility binding require technology and utility classification',()=>{
  assert.equal(validIndustrialKnowledge({...base,technology:undefined}),false);
  assert.equal(validIndustrialKnowledge({...base,kind:'utility_feed',utilityKind:undefined} as never),false);
+});
+
+test('direct controller read requires capture timestamp and remains read only',()=>{
+ assert.equal(validIndustrialKnowledge({...base,plcSource:'controller_read_only'}),false);
+ assert.equal(validIndustrialKnowledge({...base,plcSource:'controller_read_only',controllerReadAt:'2026-10-20T09:00:00Z'}),true);
+});
+test('cannot classify an unverified backup as identical without evidence',()=>{
+ assert.equal(validIndustrialKnowledge({...base,runningVersionMatch:undefined}),false);
 });
