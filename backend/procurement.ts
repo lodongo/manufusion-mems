@@ -1,5 +1,23 @@
 import { createHash } from 'crypto';
 import {MATERIAL_STOCK_DIMENSIONS,UNIVERSAL_STOCK_METADATA,STOCK_META_BY_KEY,stockedPolicyToMrp} from './stockPolicyConfig';
+import {METHODS as REPLENISHMENT_METHODS,factorsOf,methodOf,routeFor} from './replenishmentPlan';
+// Numeric replenishment strategy parameters and their allowed ranges (material and warehouse, Inventory section).
+const REPLENISHMENT_LIMITS:Record<string,{min:number;max:number;integer?:boolean;message:string}>={
+    annualDemand:{min:0,max:1e12,message:'Annual demand must be 0 or more.'},
+    orderCost:{min:0,max:1e9,message:'Cost per order must be 0 or more.'},
+    holdingCostRate:{min:0,max:1000,message:'Holding cost must be 0 to 1000 percent per year.'},
+    demandLookbackDays:{min:7,max:730,integer:true,message:'Usage look-back must be a whole number of 7 to 730 days.'},
+    coverageDays:{min:0,max:3650,integer:true,message:'Coverage must be a whole number of 0 to 3650 days.'},
+    emergencyLevel:{min:0,max:1e12,message:'Emergency level must be 0 or more.'},
+    strategicLevel:{min:0,max:1e12,message:'Strategic buffer level must be 0 or more.'},
+    rotablesInRepair:{min:0,max:1e9,message:'Units out for repair must be 0 or more.'},
+    binQuantity:{min:0,max:1e12,message:'Bin quantity must be 0 or more.'},
+    kanbanCardQuantity:{min:0,max:1e12,message:'Quantity per kanban card must be 0 or more.'},
+    kanbanCards:{min:1,max:1000,integer:true,message:'Kanban cards must be a whole number of 1 to 1000.'},
+    reviewPeriodDays:{min:1,max:365,integer:true,message:'Review period must be a whole number of 1 to 365 days.'},
+    forecastMonthlyDemand:{min:0,max:1e12,message:'Forecast monthly demand must be 0 or more.'},
+};
+const REPLENISHMENT_NUMBER_FIELDS=Object.keys(REPLENISHMENT_LIMITS);
 import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, num, str, writeDoc, type Obj, type Plain } from './core';
 import { audit } from './audit';
 import { allowedNodeIds } from './positions';
@@ -926,13 +944,15 @@ export const procurementRoutes = {
         if(extensions.some(x=>str(x.data.sourceId)===id&&str(x.data.warehouseId)===warehouseId&&str(x.data.status)==='approved'))links.push(warehouseId);
         if(!links.includes(warehouseId))throw new HttpError(403,'Material not mapped to warehouse.');
         // Bins are linked and delinked only through the controlled bin link flow, never edited here.
-        const numberFields=section==='inventory'?['reorderPoint','minimumLevel','maximumLevel','safetyStock','reorderQuantity','leadTimeDays']:['minimumOrderQuantity','orderMultiple','leadTimeDays','unitPrice'];
-        const textFields=section==='inventory'?['stockingPolicy','remarks',...MATERIAL_STOCK_DIMENSIONS.map(([field])=>field)]:['preferredVendor','vendorPartNumber','purchaseUom','priceCurrency','paymentTerms','incoterms','remarks'];
+        const numberFields=section==='inventory'?['reorderPoint','minimumLevel','maximumLevel','safetyStock','reorderQuantity','leadTimeDays',...REPLENISHMENT_NUMBER_FIELDS]:['minimumOrderQuantity','orderMultiple','leadTimeDays','unitPrice'];
+        const textFields=section==='inventory'?['stockingPolicy','remarks','seasonalFactors',...MATERIAL_STOCK_DIMENSIONS.map(([field])=>field)]:['preferredVendor','vendorPartNumber','purchaseUom','priceCurrency','paymentTerms','incoterms','remarks'];
         const updates=isObj(ctx.body.values)?ctx.body.values:{};
         const has=(key:string)=>Object.prototype.hasOwnProperty.call(updates,key);
         const clean:Obj={};
-        for(const key of numberFields)if(has(key)){const raw=updates[key];if(raw===''||raw===null){clean[key]='';continue;}const n=Number(raw);if(!Number.isFinite(n)||n<0||n>1e12)throw new HttpError(400,key+' must be a number of 0 or more.');if(key==='leadTimeDays'&&(!Number.isInteger(n)||n>3650))throw new HttpError(400,'Lead time must be a whole number of days up to 3650.');clean[key]=n;}
+        for(const key of numberFields)if(has(key)){const raw=updates[key];if(raw===''||raw===null){clean[key]='';continue;}const n=Number(raw);if(!Number.isFinite(n)||n<0||n>1e12)throw new HttpError(400,key+' must be a number of 0 or more.');if(key==='leadTimeDays'&&(!Number.isInteger(n)||n>3650))throw new HttpError(400,'Lead time must be a whole number of days up to 3650.');const limit=REPLENISHMENT_LIMITS[key];if(limit&&(n<limit.min||n>limit.max||(limit.integer&&!Number.isInteger(n))))throw new HttpError(400,limit.message);clean[key]=n;}
         for(const key of textFields)if(has(key)){const v=updates[key];if(v!==null&&typeof v!=='string'&&typeof v!=='number')throw new HttpError(400,'Invalid '+key+'.');const s=str(v).trim();if(s.length>(key==='remarks'?1000:120))throw new HttpError(400,key+' is too long.');clean[key]=s;}
+        if(section==='inventory'&&has('seasonalFactors')&&str(clean.seasonalFactors)&&!factorsOf(clean.seasonalFactors))throw new HttpError(400,'Seasonal factors must be 12 comma-separated numbers from 0 to 10 (January to December).');
+        if(section==='inventory'&&has('seasonalFactors')&&str(clean.seasonalFactors))clean.seasonalFactors=factorsOf(clean.seasonalFactors)!.join(',');
         if(section==='inventory'){
             for(const [field,key] of MATERIAL_STOCK_DIMENSIONS){
                 if(!has(field)||!str(clean[field]))continue;
@@ -961,14 +981,18 @@ export const procurementRoutes = {
         const path=root+'/'+(section==='inventory'?'inventory_material_info':'procurement_material_info')+'/'+id+'_'+warehouseId;
         const old=await getDoc(path);
         const merged:Record<string,unknown>={...(old?.data||{}),...clean};
-        if(section==='inventory'&&has('replenishmentStrategy')&&stockedPolicyToMrp(str(merged.stockingPolicy))){
-            const owner=str(merged.stockOwnership);
-            const arrangement=str(merged.supplyArrangement);
-            // New automated replenishment requires a deliberate company-owned
-            // purchasing profile. Legacy MINMAX/REORDER records remain valid
-            // until their strategy is explicitly reconfigured.
-            if(owner!=='OW01'||!['SA01','SA14'].includes(arrangement))
-                throw new HttpError(409,'Automatic company replenishment requires Company-owned (OW01) and a permitted purchase arrangement. Choose both in Stock Control first; consignment and VMI need an owner-aware replenishment agreement.');
+        if(section==='inventory'&&(has('replenishmentStrategy')||has('stockOwnership')||has('supplyArrangement'))){
+            const method=methodOf(merged.replenishmentStrategy,merged.stockingPolicy);
+            if(REPLENISHMENT_METHODS[method]?.automated){
+                const owner=str(merged.stockOwnership);
+                const arrangement=str(merged.supplyArrangement);
+                // Automated replenishment needs a deliberate ownership and supply profile: it decides whether the
+                // engine raises a purchase requirement (company-owned standard buying) or a signal to the supplier or owner.
+                if(!owner||!arrangement)
+                    throw new HttpError(409,'Automatic replenishment needs the stock ownership and the supply arrangement. Choose both in Stock Control: they decide whether replenishment raises a purchase requirement or a signal to the supplier or owner.');
+                const route=routeFor(owner,arrangement,method);
+                if(route.kind==='blocked')throw new HttpError(409,route.reason);
+            }
         }
         const numOf=(k:string)=>merged[k]===''||merged[k]===null||merged[k]===undefined?null:Number(merged[k]);
         if(section==='inventory'){const min=numOf('minimumLevel'),max=numOf('maximumLevel'),safety=numOf('safetyStock'),reorder=numOf('reorderPoint');if(min!==null&&max!==null&&min>max)throw new HttpError(400,'Minimum level cannot be above maximum level.');if(safety!==null&&max!==null&&safety>max)throw new HttpError(400,'Safety stock cannot be above maximum level.');if(reorder!==null&&max!==null&&reorder>max)throw new HttpError(400,'Reorder point cannot be above maximum level.');}

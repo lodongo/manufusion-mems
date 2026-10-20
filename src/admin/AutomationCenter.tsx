@@ -10,7 +10,7 @@ type Run = { id: string; jobId: string; mode: string; status: string; startedAt:
 type Job = { id: string; label: string; category: string; enabled: boolean; schedule: { frequency?: string; timeUtc?: string; provider?: string; enabled?: boolean; intervalHours?: number };
     scheduleText?: string; configurable?: 'fx_monitor' | 'inline';
     lastStartedAt: string; lastCompletedAt: string; lastError: string; lastErrorAt: string; lastResult: unknown };
-const JOB_LABEL: Record<string, string> = { 'fx.world-rates': 'Exchange rates', 'inv.mrp-sweep': 'MRP sweep' };
+const JOB_LABEL: Record<string, string> = { 'fx.world-rates': 'Exchange rates', 'inv.replenishment-sweep': 'Replenishment sweep', 'inv.mrp-sweep': 'Replenishment sweep (earlier MRP runs)' };
 const runText = (r: Run) => r.summary || (r.matched !== undefined ? `${r.matched} currencies matched, ${r.changed} changed, ${r.missing} unmatched` : '');
 type Engine = {
     engine: { name: string; version: string; registered: string[]; tickMinutes: number;
@@ -108,7 +108,7 @@ export default function AutomationCenter() {
                 <p className='text-xs text-soft'>{j.category} · {j.scheduleText || `Frequency: ${j.schedule.frequency} · Provider: ${j.schedule.provider} · UTC: ${j.schedule.timeUtc}`}</p>
                 <p className='text-xs text-soft'>Last completed run: {pretty(j.lastCompletedAt)}</p>
                 {j.lastError && <Alert tone='error'>{j.lastError} ({pretty(j.lastErrorAt)})</Alert>}
-                {j.configurable === 'inline' ? <MrpSweepControls job={j} onDone={reload}/> : <Button variant='secondary' onClick={()=>navigate('admin/fx_monitor')}>Configure exchange rates</Button>}
+                {j.configurable === 'inline' ? <ReplenishmentSweepControls job={j} onDone={reload}/> : <Button variant='secondary' onClick={()=>navigate('admin/fx_monitor')}>Configure exchange rates</Button>}
             </div>)}
         </Card>
         <Card className='space-y-3'>
@@ -125,14 +125,14 @@ export default function AutomationCenter() {
     </div>;
 }
 
-function MrpSweepControls({ job, onDone }: { job: Job; onDone: () => void }) {
+function ReplenishmentSweepControls({ job, onDone }: { job: Job; onDone: () => void }) {
     const [enabled, setEnabled] = useState(job.schedule.enabled !== false);
     const [hours, setHours] = useState(String(job.schedule.intervalHours ?? 6));
     const [busy, setBusy] = useState('');
     const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
     const dirty = enabled !== (job.schedule.enabled !== false) || hours !== String(job.schedule.intervalHours ?? 6);
     const save = async () => {
-        const reason = await appPrompt('Reason for changing the MRP sweep (10 to 300 characters)');
+        const reason = await appPrompt('Reason for changing the replenishment sweep (10 to 300 characters)');
         if (!reason) return;
         if (reason.trim().length < 10) return setMessage({ tone: 'error', text: 'Give a reason of at least 10 characters.' });
         setBusy('save'); setMessage(null);
@@ -147,7 +147,7 @@ function MrpSweepControls({ job, onDone }: { job: Job; onDone: () => void }) {
         finally { setBusy(''); }
     };
     return <div className='space-y-2'>
-        <p className='text-xs text-soft'>MRP already runs whenever a material, its warehouse settings or its stock change. This sweep is the safety net for changes made outside a user request.</p>
+        <p className='text-xs text-soft'>Replenishment already runs whenever a material, its warehouse settings or its stock change, for every automated strategy (MRP is one of them). This sweep is the safety net for changes made outside a user request, periodic reviews falling due and usage-based levels moving with consumption.</p>
         <div className='grid grid-cols-2 gap-2'>
             <label className='flex min-h-11 items-center gap-2 rounded-xl border border-line px-3 text-sm text-ink'>
                 <input type='checkbox' className='h-5 w-5' checked={enabled} onChange={(e)=>setEnabled(e.target.checked)}/> Enabled

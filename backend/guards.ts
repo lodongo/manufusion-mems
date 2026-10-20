@@ -157,6 +157,10 @@ const LEGACY_EXPANSION: Record<string, string[]> = {
     'MNT.delete': ['MNT.WR.cancel', 'MNT.WO.cancel'],
     'MNT.approve': ['MNT.WR.review', 'MNT.WR.return', 'MNT.WR.decline', 'MNT.WR.convert', 'MNT.WO.safety', 'MNT.WO.release', 'MNT.WO.verify', 'MNT.WO.close'],
     'MNT.admin': ['MNT.WO.reopen'],
+    // MRP was renamed Replenishment (MRP is now one of its strategies).
+    'INV.mrp.view': ['INV.replenishment.view'],
+    'INV.mrp.run': ['INV.replenishment.run'],
+    'INV.mrp.verify': ['INV.replenishment.verify'],
 };
 
 export function expandPermissions(perms: string[]): string[] {

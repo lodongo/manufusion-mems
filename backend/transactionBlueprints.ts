@@ -105,7 +105,7 @@ const AREAS: Record<string, string> = {
     'TRF:Transfers between warehouses:VW,CR,SB,AP,DI,GR,CN',
     'CNT:Stock counts:VW,CR,ED,CT,VF,RQ,SB,AP,PS,CL,CN',
     'VAL:Valuation:VW,RN,AP,PS,RP',
-    'RPL:MRP replenishment requests:VW,CR,RN,VF,AP,RJ,CN',
+    'RPL:Replenishment requests and signals:VW,CR,RN,VF,AK,AP,RJ,CN',
     'BAT:Batches and serials:VW,CR,ED,BL,RL',
     'RSV:Reservations:VW,RS,RL,CN',
     'GRC:Goods receipt to stock:VW,CR,PS,RV',
