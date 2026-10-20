@@ -7,13 +7,26 @@ import { execFileSync } from 'node:child_process';
 export function validateAddedOrgRoutes(diff) {
   const lines=diff.split('\n');
   const problems=[];
+  // A route declared on a removed line already existed: a changed line (common in long single-line files) is an
+  // edit, not a new route. Only genuinely new declarations are gated, as this incremental check intends.
+  const existing=new Set();
+  for(const line of lines){
+    if(!line.startsWith('-'))continue;
+    for(const m of line.matchAll(/['"`]((?:GET|POST|PUT|PATCH|DELETE) \/api\/org\/[^'"`]+)['"`]\s*:\s*\[/g))existing.add(m[1]);
+  }
+  const ROUTE=/['"`]((?:GET|POST|PUT|PATCH|DELETE) \/api\/org\/[^'"`]+)['"`]\s*:\s*\[/g;
+  const GUARD=/\borgRoute\s*\(\s*['"`][^'"`]+['"`]\s*,\s*['"`][^'"`]+['"`]/;
   for(let i=0;i<lines.length;i++){
     const line=lines[i];
-    const route=/^\+\s*['"`]((?:GET|POST|PUT|PATCH|DELETE) \/api\/org\/[^'"`]+)['"`]\s*:\s*\[/.exec(line);
-    if(!route)continue;
-    const next=lines.slice(i+1,i+14).filter(s=>!s.startsWith('-')).join(' ');
-    const guard=/\borgRoute\s*\(\s*['"`][^'"`]+['"`]\s*,\s*['"`][^'"`]+['"`]/.test(next);
-    if(!guard)problems.push('New organization endpoint needs explicit orgRoute permission: '+route[1]);
+    if(!line.startsWith('+'))continue;
+    const matches=[...line.matchAll(ROUTE)];
+    matches.forEach((m,k)=>{
+      if(existing.has(m[1]))return;
+      // The guard belongs to this declaration: text up to the next declaration on the line, else the next lines.
+      const after=line.slice(m.index+m[0].length, k+1<matches.length?matches[k+1].index:undefined);
+      const following=k+1<matches.length?'':lines.slice(i+1,i+14).filter(s=>!s.startsWith('-')).join(' ');
+      if(!GUARD.test(after+' '+following))problems.push('New organization endpoint needs explicit orgRoute permission: '+m[1]);
+    });
   }
   return problems;
 }
