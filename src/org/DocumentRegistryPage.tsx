@@ -4,6 +4,7 @@ import { callBackend } from '../lib/backend';
 import { PageTitle, Card, useLoad } from '../admin/kit';
 import DocumentSourceStaging from './DocumentSourceStaging';
 import EngineeringDocumentLinks from './EngineeringDocumentLinks';
+import SheqSdsRegistry from './SheqSdsRegistry';
 
 type ScopeNode = { id: string; name: string; level: string; parentId: string };
 type DocumentSetup = { config: { enabledClassCodes: string[]; defaultReviewMonths: number }; locations: ScopeNode[] };
@@ -147,6 +148,7 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
     </Card>
     <DocumentSourceStaging documents={data?.documents ?? []} />
     <EngineeringDocumentLinks documents={data?.documents ?? []} />
+    <SheqSdsRegistry canConfigure={canConfigure} />
     <Card>
       <div className='mb-3 flex items-center justify-between gap-2'>
         <h2 className='font-semibold text-white'>Registered documents</h2>
