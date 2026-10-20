@@ -70,7 +70,7 @@ export const drkmsRoutes = {
                 const nodeId = str(location.nodeId);
                 if (!nodeId) continue;
                 if (!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),scope)) continue;
-                if (str(item.data.status)!=='effective' && str(item.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin') continue;
+                if (str(item.data.status)!=='effective' && str(item.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin' && !(str(item.data.status)==='in_review' && canAt(ctx,'ADM.document_review',await nodePath(ctx.orgId,nodeId),scope))) continue;
                 visible.push({ id: item.id, ...item.data });
             }
             return { documents: visible };
@@ -84,7 +84,7 @@ export const drkmsRoutes = {
             if (!doc) throw new HttpError(404, 'Document not found.');
             const location = doc.data.scope && typeof doc.data.scope === 'object' && !Array.isArray(doc.data.scope) ? doc.data.scope as Record<string,unknown> : {};
             if (!str(location.nodeId) || !canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,str(location.nodeId)),await scopeOf(ctx))) throw new HttpError(403,'Document is outside authorized scope.');
-            if (str(doc.data.status)!=='effective' && str(doc.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin') throw new HttpError(403,'Unpublished document is restricted to its author.');
+            if (str(doc.data.status)!=='effective' && str(doc.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin' && !(str(doc.data.status)==='in_review' && canAt(ctx,'ADM.document_review',await nodePath(ctx.orgId,str(location.nodeId)),await scopeOf(ctx)))) throw new HttpError(403,'Unpublished document is restricted to its author or assigned reviewer.');
             return { document: { id: doc.id, ...doc.data } };
         }),
     ],
