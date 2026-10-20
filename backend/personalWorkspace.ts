@@ -71,7 +71,15 @@ function validateSavedView(body: Record<string, unknown>) {
             value2: str(c.value2).slice(0, 200),
         }))
         .filter((c) => IDENT.test(c.col) && OPS.has(c.op));
-    return { tableId, name, title: title || tableId, route, tabKey, view: { order, hidden, sort, criteria } };
+    // Group-by (up to four levels), value columns (null = detected) and formula columns. Formulas are stored as text and
+    // only ever parsed by the table's own expression parser in the browser; they are never executed as code.
+    const groupBy = [...new Set(stringList(raw.groupBy).filter((v) => IDENT.test(v)))].slice(0, 4);
+    const valueCols = Array.isArray(raw.valueCols) ? [...new Set(stringList(raw.valueCols).filter((v) => IDENT.test(v)))].slice(0, 100) : null;
+    const formulas = (Array.isArray(raw.formulas) ? raw.formulas : []).filter(isObj).slice(0, 6)
+        .map((f) => ({ key: str(f.key), label: str(f.label).trim(), expr: str(f.expr).trim() }))
+        .filter((f) => /^fx_[A-Za-z0-9]{4,30}$/.test(f.key) && f.label.length > 0 && f.label.length <= 40 && f.expr.length > 0 && f.expr.length <= 300
+            && !/[\u0000-\u001f\u007f<>`\\]/.test(f.label + f.expr));
+    return { tableId, name, title: title || tableId, route, tabKey, view: { order, hidden, sort, criteria, groupBy, valueCols, formulas } };
 }
 function tableOut(doc: { id: string; data: Record<string, unknown> }) {
     return {
