@@ -95,6 +95,12 @@ export const drkmsRoutes = {
             const doc = await getDoc(`${base(ctx.orgId)}/${id}`);
             if (!doc) throw new HttpError(404, 'Document not found.');
             // This is a non-mutating diagnostic, NOT governance approval evidence.
+            const location = doc.data.scope && typeof doc.data.scope==='object' && !Array.isArray(doc.data.scope) ? doc.data.scope as Record<string,unknown> : {};
+            const nodeId = str(location.nodeId);
+            if (!nodeId || !canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))
+                throw new HttpError(403,'Document readiness is outside your authorized scope.');
+            if (str(doc.data.status)!=='effective' && str(doc.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin' && !(str(doc.data.status)==='in_review' && canAt(ctx,'ADM.document_review',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx))))
+                throw new HttpError(403,'Document readiness is restricted.');
             const d = doc.data;
             const outcome = assessPublicationGate({
                 state: str(d.status), creatorUid: str(d.createdBy),
