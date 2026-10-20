@@ -668,7 +668,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const assessed = !!(r.assessment.maintenanceTypeCode && r.assessment.workTypeCode && r.assessment.priorityCode && r.assessment.disciplineCode);
     const buttons: Array<{ key: string; label: string; icon: ReactNode; variant?: 'primary' | 'secondary' | 'danger'; onClick: () => void }> = [];
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
-    if (can.assess) buttons.push({ key: 'assess', label: assessed ? 'Update assessment' : 'Assess', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => setMode('assess') });
+    if (can.assess && !can.reviewAssessment) buttons.push({ key: 'assess', label: assessed ? 'Update assessment' : 'Assess', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => setMode('assess') });
     if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Review work assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => {setSection('summary');setMode('review_assessment');} });
     if (can.convert) buttons.push({ key: 'convert', label: 'Convert to work order', icon: <Wrench className='h-4 w-4' />, variant: assessed ? 'primary' : 'secondary', onClick: () => setMode('convert') });
     if (can.return) buttons.push({ key: 'return', label: 'Return for information', icon: <Undo2 className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('return') });
@@ -685,7 +685,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
             {/* Action bar on top */}
             <div className='shrink-0 space-y-2 border-b border-slate-800 bg-slate-950 pb-3'>
                 <div className='flex items-center gap-2'>
-                    <Button variant='secondary' aria-label='Back' onClick={() => navigate('organization_admin/work_requests')}>
+                    <Button variant='secondary' aria-label='Back' onClick={() => { if(tasksDirty&&!window.confirm('You have unsaved task changes. Leave without saving?'))return; navigate('organization_admin/work_requests'); }}>
                         <ArrowLeft className='h-4 w-4' />
                     </Button>
                     <div className='min-w-0 flex-1'>
@@ -848,7 +848,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
 
                 <HistoryCard history={r.history} />
                 </>}
-                {section==='tasks' && <MntTaskAssessment key={r.code} code={r.code} initial={r.assessmentTasks||[]} editable={can.assess} onSaved={reload} onDirtyChange={setTasksDirty}/>}
+                {section==='tasks' && <MntTaskAssessment key={r.code} code={r.code} initial={r.assessmentTasks||[]} editable={can.assess&&!can.reviewAssessment} onSaved={reload} onDirtyChange={setTasksDirty}/>}
                 {section==='summary' && <AssessmentSummary
                     detail={r}
                     canReview={!!can.reviewAssessment&&assessed&&r.assessmentTasks.length>0}
