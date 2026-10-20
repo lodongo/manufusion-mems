@@ -72,6 +72,7 @@ import { drkmsSdsRoutes } from './drkmsSds';
 import { drkmsDigitalRoutes } from './drkmsDigital';
 import { drkmsTroubleshootingRoutes } from './drkmsTroubleshooting';
 import { drkmsPublishRoutes } from './drkmsPublish';
+import { drkmsReadRoutes } from './drkmsRead';
 import { accessReviewRoutes } from './accessReview';
 import { securityReviewRoutes } from './securityReview';
 import { healthRoutes } from './healthRoutes';
@@ -1533,6 +1534,7 @@ export const handler = router(recordWiredRoutes({
     ...drkmsDigitalRoutes,
     ...drkmsTroubleshootingRoutes,
     ...drkmsPublishRoutes,
+    ...drkmsReadRoutes,
     ...accessReviewRoutes,
     ...securityReviewRoutes,
     ...healthRoutes,
