@@ -384,6 +384,15 @@ export default function OrgHomePage({
     else if (section === 'module' && activeModule) {
         const featureIndex = sub === 'feature' ? Number(route.split('/')[4]) : undefined;
         content = <ModuleWorkspace menu={activeModule} selectedFeature={featureIndex !== undefined && Number.isInteger(featureIndex) && featureIndex >= 0 && featureIndex < activeModule.capabilities.length ? featureIndex : undefined} />;
+    } else if (activeMenu?.module.code === 'DOC' && section.startsWith('doc_')) {
+        const mode = section.slice(4);
+        const supported = ['register','engineering','sds','rca','review','knowledge','forms'];
+        if (supported.includes(mode)) {
+            content = <DocumentRegistryPage
+                mode={mode as 'register'|'engineering'|'sds'|'rca'|'review'|'knowledge'|'forms'}
+                canConfigure={hasPerm(data.permissions,'ADM.document_config')}
+                canReview={hasPerm(data.permissions,'ADM.document_review')} />;
+        } else content = <Alert tone='error'>Unknown documentation workspace.</Alert>;
     } else if (activeMenu && section === 'saf_configuration') content = <SafConfiguration />;
     else if (activeMenu && section === 'maintenance_windows') content = <MntWindows />;
     else if (activeMenu && section === 'mnt_material_candidates') content = <MntMaterialCandidates />;
