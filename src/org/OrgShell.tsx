@@ -217,7 +217,7 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             content = <OrgOverview ctx={data} hasBranding={!!session.organization?.branding?.preset && !!session.organization?.branding?.displayName} />;
             break;
         case 'document_registry':
-            content = <DocumentRegistryPage canConfigure={data.role === 'org_super_admin' || hasPerm(data.permissions, 'ADM.document_config')} />;
+            content = <DocumentRegistryPage canConfigure={data.role === 'org_super_admin' || hasPerm(data.permissions, 'ADM.document_config')} canReview={data.role === 'org_super_admin' || hasPerm(data.permissions, 'ADM.document_review')} />;
             break;
         case 'users':
             content = <OrgUsers id={id} myUid={session.user.uid} myRole={data.role} canRoles={hasPerm(data.permissions, 'ADM.roles')} />;
