@@ -3,6 +3,7 @@ import { FilePlus2, RefreshCw, FileText } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { PageTitle, Card, useLoad } from '../admin/kit';
 import DocumentSourceStaging from './DocumentSourceStaging';
+import EngineeringDocumentLinks from './EngineeringDocumentLinks';
 
 type ScopeNode = { id: string; name: string; level: string; parentId: string };
 type DocumentSetup = { config: { enabledClassCodes: string[]; defaultReviewMonths: number }; locations: ScopeNode[] };
@@ -145,6 +146,7 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
       {createError && <p role='alert' className='mt-3 text-sm text-red-300'>{createError}</p>}
     </Card>
     <DocumentSourceStaging documents={data?.documents ?? []} />
+    <EngineeringDocumentLinks documents={data?.documents ?? []} />
     <Card>
       <div className='mb-3 flex items-center justify-between gap-2'>
         <h2 className='font-semibold text-white'>Registered documents</h2>
