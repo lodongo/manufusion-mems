@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FilePlus2, RefreshCw, FileText } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { PageTitle, Card, useLoad } from '../admin/kit';
@@ -23,6 +23,12 @@ export default function DocumentRegistryPage() {
   );
   const setup = useLoad(() => callBackend<DocumentSetup>('/api/org/drkms/setup', {}), []);
   const [scopeNodeId, setScopeNodeId] = useState('');
+  const [searchLocation, setSearchLocation] = useState('');
+  const [locationLevel, setLocationLevel] = useState('legal_entity');
+  const nodes = setup.data?.locations ?? [];
+  const scopedNodes = nodes.filter(n => n.level === locationLevel && n.name.toLowerCase().includes(searchLocation.toLowerCase()));
+  const chosen = nodes.find(n => n.id === scopeNodeId);
+  useEffect(() => { if (chosen && chosen.level !== locationLevel) setScopeNodeId(''); }, [locationLevel, chosen]);
   const [title, setTitle] = useState('');
   const [classCode, setClassCode] = useState('PRC');
   const [busy, setBusy] = useState(false);
@@ -87,13 +93,21 @@ export default function DocumentRegistryPage() {
             {CLASSES.map(([code,label]) => <option key={code} value={code}>{code} — {label}</option>)}
           </select>
         </label>
+        <label className='block text-sm text-slate-200'>Applicability level
+          <select value={locationLevel} onChange={e => { setLocationLevel(e.target.value); setScopeNodeId(''); }} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
+            <option value='legal_entity'>Legal entity</option><option value='site'>Site</option><option value='department'>Department</option><option value='cost_center'>Cost center</option>
+          </select>
+        </label>
+        <label className='block text-sm text-slate-200'>Search locations
+          <input value={searchLocation} onChange={e => setSearchLocation(e.target.value)} placeholder='Filter locations (optional)' className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'/>
+        </label>
         <label className='block text-sm text-slate-200'>Applicable organizational location
           <select value={scopeNodeId} onChange={e => setScopeNodeId(e.target.value)}
             className='mt-1 min-h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
             <option value=''>Select location</option>
-            {(setup.data?.locations ?? []).map(n => <option key={n.id} value={n.id}>{n.level.replaceAll('_',' ')} — {n.name}</option>)}
+            {scopedNodes.map(n => <option key={n.id} value={n.id}>{n.level.replaceAll('_',' ')} — {n.name}</option>)}
           </select>
-          <span className='mt-1 block text-xs text-slate-400'>Only active legal entities, sites, departments or cost centers may be selected. Hierarchy is validated by MEMS.</span>
+          <span className='mt-1 block text-xs text-slate-400'>Only locations at the chosen level appear. Hierarchy is validated by MEMS.</span>
         </label>
         {setup.error && <p role='alert' className='text-sm text-red-300'>{setup.error}</p>}
         <button type='button' disabled={busy || title.trim().length < 3 || !scopeNodeId || setup.loading}
