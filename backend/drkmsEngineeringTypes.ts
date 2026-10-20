@@ -1,6 +1,18 @@
 /** Globally codified engineering knowledge subtypes. Each is a governed document class, not a new asset record. */
 export type EngineeringDocType = {code:string;label:string;parentClass:string;source:'local'|'oem'|'either';reviewRequired:true};
 export const ENGINEERING_DOC_TYPES: EngineeringDocType[] = [
+  {code:'OT-PLC-SRC',label:'Controlled PLC program source backup',parentClass:'REC',source:'either',reviewRequired:true},
+  {code:'OT-PLC-CFG',label:'PLC controller, firmware and module configuration',parentClass:'SPC',source:'either',reviewRequired:true},
+  {code:'OT-PLC-LGC',label:'PLC logic and sequence functional description',parentClass:'SPC',source:'either',reviewRequired:true},
+  {code:'OT-HMI',label:'HMI and SCADA configuration backup',parentClass:'REC',source:'either',reviewRequired:true},
+  {code:'OT-IO',label:'I/O allocation and instrumentation map',parentClass:'SPC',source:'either',reviewRequired:true},
+  {code:'OT-NET',label:'Industrial Ethernet and fieldbus topology',parentClass:'SPC',source:'either',reviewRequired:true},
+  {code:'OT-TAG',label:'Historian and PLC tag dictionary',parentClass:'SPC',source:'either',reviewRequired:true},
+  {code:'OT-CHG',label:'PLC program change and validation record',parentClass:'REC',source:'local',reviewRequired:true},
+  {code:'UTIL-FEED',label:'Equipment utilities supply and connection schedule',parentClass:'SPC',source:'either',reviewRequired:true},
+  {code:'UTIL-PID',label:'Utilities distribution P&ID and metering map',parentClass:'SPC',source:'either',reviewRequired:true},
+  {code:'IOT-ARCH',label:'IIoT device and gateway architecture',parentClass:'SPC',source:'either',reviewRequired:true},
+  {code:'IOT-TAGS',label:'IoT telemetry, units and tag mappings',parentClass:'SPC',source:'either',reviewRequired:true},
   {code:'SDS',label:'Safety Data Sheet / MSDS',parentClass:'EXT',source:'either',reviewRequired:true},
   {code:'DYN-FRM',label:'Controlled dynamic digital form',parentClass:'FRM',source:'local',reviewRequired:true},
   {code:'OCR-SRC',label:'OCR transcription source record',parentClass:'REC',source:'either',reviewRequired:true},
