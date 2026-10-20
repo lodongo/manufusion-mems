@@ -87,7 +87,7 @@ export default function GlobalSelectEnhancer() {
                 className='flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-line bg-page text-ink shadow-2xl sm:rounded-2xl'>
                 <div className='flex items-center justify-between border-b border-line p-4'>
                     <h2 className='min-w-0 truncate text-lg font-semibold'>{target.title}</h2>
-                    <button type='button' className='rounded-lg border border-line p-2' aria-label='Close selector' onClick={() => setTarget(null)}><X className='h-5 w-5'/></button>
+                    <button type='button' className='flex h-11 w-11 items-center justify-center rounded-lg border border-line' aria-label='Close selector' onClick={() => setTarget(null)}><X className='h-5 w-5'/></button>
                 </div>
                 <div className='p-3'>
                     {searchVisible ? <label className='flex items-center gap-2 rounded-xl border border-line bg-panel px-3'>
@@ -95,7 +95,7 @@ export default function GlobalSelectEnhancer() {
                         <input type='search' value={query} onChange={(e)=>setQuery(e.target.value)} placeholder='Search options…'
                             aria-label='Search options' className='h-12 min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-muted outline-none'/>
                         <button type='button' aria-label='Hide search' onClick={()=>{setSearchVisible(false);setQuery('');}}
-                            className='rounded-lg p-2 text-muted'><X className='h-4 w-4'/></button>
+                            className='flex h-11 w-11 items-center justify-center rounded-lg text-muted'><X className='h-4 w-4'/></button>
                     </label> : <button type='button' onClick={()=>setSearchVisible(true)}
                         className='flex min-h-11 w-full items-center gap-2 rounded-xl border border-line bg-panel px-3 text-left text-sm text-ink'>
                         <Search className='h-4 w-4 text-muted'/> Search (optional) · tap to type
