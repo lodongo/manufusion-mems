@@ -1,4 +1,5 @@
 /** Metadata-only DRKMS registry. No publishing, file upload or AI output execution. */
+import { createHash } from 'node:crypto';
 import { HttpError, getDoc, listDocs, nowIso, randomId, str, writeDoc } from './core';
 import { orgRoute } from './guards';
 import { record } from './org';
@@ -176,6 +177,33 @@ export const drkmsRoutes = {
             if (!updated) throw new HttpError(409, 'Document changed while reviewing. Refresh first.');
             await record(ctx, 'drkms.document.review_'+decision,id,reason);
             return { documentId:id, status:revision.status, publicationEnabled:false };
+        }),
+    ],
+    'POST /api/org/drkms/documents/approval-packet': [
+        orgRoute('drkms.documents.approval_packet','ADM.document_registry',async ctx=>{
+            const id=str(ctx.body.documentId);
+            if(!validId(id))throw new HttpError(400,'Invalid document identifier.');
+            const doc=await getDoc(`${base(ctx.orgId)}/${id}`);
+            if(!doc)throw new HttpError(404,'Document not found.');
+            const scope=doc.data.scope && typeof doc.data.scope==='object' && !Array.isArray(doc.data.scope)
+                ? doc.data.scope as Record<string,unknown> : {};
+            const nodeId=str(scope.nodeId);
+            if(!nodeId || !canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))
+                throw new HttpError(403,'Document is outside your scope.');
+            if(str(doc.data.status)!=='technical_verified')
+                throw new HttpError(409,'Independent technical verification is required before the CoA approval packet.');
+            if(str(doc.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin')
+                throw new HttpError(403,'Only the document author may prepare its approval packet.');
+            const payload={documentId:id,revision:str(doc.data.revision),classCode:str(doc.data.classCode),
+                subtypeCode:str(doc.data.subtypeCode),title:str(doc.data.title),
+                scopeNodeId:nodeId,technicalVerifierUid:str(doc.data.verifiedBy),
+                verifiedAt:str(doc.data.verifiedAt),updatedAt:str(doc.data.updatedAt)};
+            if(!payload.technicalVerifierUid || payload.technicalVerifierUid===str(doc.data.createdBy))
+                throw new HttpError(409,'An independent technical verifier is required.');
+            const fingerprint=createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+            // Diagnostic packet only: a verified transaction approval and immutable release handler are still required.
+            return {documentId:id,documentFingerprint:fingerprint,payload,
+                publicationEnabled:false,approvalStatus:'requires_coa_transaction_binding'};
         }),
     ],
     'POST /api/org/drkms/documents/create-draft': [
