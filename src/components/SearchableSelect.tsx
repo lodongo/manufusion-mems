@@ -87,7 +87,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
                         className='flex max-h-[88dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-line bg-page shadow-2xl'>
                         <div className='flex items-center justify-between border-b border-line p-4'>
                             <h2 className='min-w-0 truncate text-lg font-semibold text-ink'>{label}</h2>
-                            <button type='button' aria-label='Close' className='flex h-10 w-10 items-center justify-center rounded-xl border border-line text-ink'
+                            <button type='button' aria-label='Close' className='flex h-11 w-11 items-center justify-center rounded-xl border border-line text-ink'
                                 onClick={() => setOpen(false)}><X className='h-5 w-5' /></button>
                         </div>
                         <div className='p-3'>
@@ -97,7 +97,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
                                     <input type='search' value={query} onChange={(e) => setQuery(e.target.value)}
                                         placeholder='Search names or codes…' aria-label={`Search ${label}`}
                                         className='min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-muted outline-none' />
-                                    <button type='button' aria-label='Hide search' className='rounded-lg p-2 text-muted'
+                                    <button type='button' aria-label='Hide search' className='flex h-11 w-11 items-center justify-center rounded-lg text-muted'
                                         onClick={() => { setSearchVisible(false); setQuery(''); }}><X className='h-4 w-4'/></button>
                                 </label>
                             ) : (
