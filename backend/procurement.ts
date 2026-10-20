@@ -940,7 +940,7 @@ export const procurementRoutes = {
                 const db=await getDoc('module_workspaces/PRC/metadata/'+key);
                 const options=Array.isArray(db?.data.items)?db.data.items.filter(isObj):master?.items||[];
                 const selected=options.find(v=>str(v.code)===str(clean[field]));
-                if(!selected||selected.active===false||selected.enabled===false||selected.selectable===false)
+                if(!selected||selected.active===false||('enabled' in selected&&selected.enabled===false)||selected.selectable===false)
                     throw new HttpError(400,field+' must use an enabled code from MEMS Admin → Procurement metadata.');
             }
             if(has('replenishmentStrategy')){
