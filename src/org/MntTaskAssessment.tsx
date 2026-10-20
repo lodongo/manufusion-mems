@@ -80,15 +80,17 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
   </section>)}
  </Card>;
 }
-export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void}){
- const [tasks,setTasks]=useState<TaskAssessment[]>(initial.length?initial:[seed()]);
+export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
+ const [tasks,setTasks]=useState<TaskAssessment[]>(initial);
+ const [dirty,setDirty]=useState(false);
  const options=useLoad(()=>callBackend<Options>('/api/org/mnt/assessment/options',{code}),[code]);
  const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
- const [current,setCurrent]=useState(0),[step,setStep]=useState(0),[saving,setSaving]=useState(false),[uploading,setUploading]=useState(''),[message,setMessage]=useState(''),[photoUrls,setPhotoUrls]=useState<Record<string,string>>({});
+ const [current,setCurrent]=useState<number|null>(null),[step,setStep]=useState(0),[saving,setSaving]=useState(false),[uploading,setUploading]=useState(''),[message,setMessage]=useState(''),[photoUrls,setPhotoUrls]=useState<Record<string,string>>({});
  const [showStock,setShowStock]=useState(false),[showCatalog,setShowCatalog]=useState(false),[energySearch,setEnergySearch]=useState(''),[permitSearch,setPermitSearch]=useState('');
- const task=tasks[current]||seed();
+ useEffect(()=>{onDirtyChange?.(dirty);return()=>onDirtyChange?.(false);},[dirty,onDirtyChange]);
+ const task=tasks[current??0]||seed();
  const sections=['Task','Spares','People & tools','Safety'];
- const patch=(next:Partial<TaskAssessment>)=>setTasks(old=>old.map((t,i)=>i===current?{...t,...next}:t));
+ const patch=(next:Partial<TaskAssessment>)=>{setDirty(true);setTasks(old=>old.map((t,i)=>i===current?{...t,...next}:t));};
  const patchSpare=(i:number,next:Partial<Spare>)=>patch({spares:task.spares.map((sp,j)=>i===j?{...sp,...next}:sp)});
  const addSpare=(sp:Spare)=>patch({spares:[...task.spares,sp]});
  const permitFor=(pattern:RegExp)=>options.data?.safetyPermits.find(x=>pattern.test(x.label))?.code;
@@ -115,20 +117,63 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const save=async()=>{
   setSaving(true);setMessage('');try{
    await callBackend(recordType==='wo'?'/api/org/mnt/wo/action':'/api/org/mnt/wr/action',{code,action:'save_task_assessment',tasks});
-   setMessage('Assessment saved. Independent review is required before conversion.');onSaved();
+   setDirty(false);setCurrent(null);setMessage('Assessment saved. Independent review is required before conversion.');onSaved();
   }catch(e){setMessage(e instanceof Error?e.message:'Assessment could not be saved.');}finally{setSaving(false);}
  };
- if(!editable)return <ReviewAssessment tasks={initial} options={options.data??undefined}/>;
- return <Card className='space-y-4'>
-   {onCancel&&<button type='button' className='text-sm text-emerald-300 underline' onClick={onCancel}>← Back</button>}
-   <div><h3 className='text-lg font-semibold text-white'>Work assessment</h3>
-    <p className='text-sm text-slate-400'>Add tasks and specify what each task needs. The reviewer sees a read-only copy after you save.</p>
-    <p className='mt-2 text-xs text-emerald-300'>Task {current+1} of {tasks.length}</p></div>
-   <div className='flex gap-2 overflow-x-auto pb-1'>{tasks.map((t,i)=><button type='button' key={t.id} onClick={()=>{setCurrent(i);setStep(0);}} className={'shrink-0 rounded-full px-3 py-2 text-sm '+(current===i?'bg-emerald-800 text-white':'border border-slate-700 text-slate-300')}>{i+1}. {t.title||'Task'}</button>)}</div>
+ const openTask=(i:number)=>{setCurrent(i);setStep(0);setMessage('');};
+ const addTask=()=>{
+   if(!editable)return;
+   setTasks(old=>[...old,seed()]);
+   setDirty(true);openTask(tasks.length);
+ };
+ if(current===null)return <div className='min-w-0 space-y-3'>
+  <div className='flex min-w-0 flex-wrap items-start justify-between gap-2'>
+   <div className='min-w-0'>
+    <h3 className='text-lg font-semibold text-white'>Tasks <span className='text-sm font-normal text-slate-400'>({tasks.length})</span></h3>
+    <p className='mt-1 text-xs text-slate-400'>{editable?'Open any task to configure its spares, people, time, tools and safety.':'Open any task to inspect the saved assessment (read-only).'}</p>
+   </div>
+   {editable&&<Button onClick={addTask} className='shrink-0'>+ Add Task</Button>}
+  </div>
+  {!tasks.length&&<div className='rounded-xl border border-dashed border-slate-600 bg-slate-900/40 px-4 py-8 text-center'>
+   <p className='font-semibold text-white'>No tasks added yet</p>
+   <p className='mt-1 text-sm text-slate-400'>{editable?'Use + Add Task to start the work assessment.':'The assessor has not saved any tasks yet.'}</p>
+  </div>}
+  <div className='space-y-2'>{tasks.map((t,i)=><button key={t.id} type='button' onClick={()=>openTask(i)}
+   className='flex w-full min-w-0 items-start gap-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-left active:bg-slate-800'>
+    <span className='flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-xs font-bold text-white'>{i+1}</span>
+    <span className='min-w-0 flex-1'>
+     <strong className='block break-words text-sm text-white'>{t.title||t.description||'Untitled task'}</strong>
+     {t.title&&t.description&&<span className='mt-1 block line-clamp-2 text-xs text-slate-400'>{t.description}</span>}
+     <span className='mt-2 flex flex-wrap gap-1 text-[11px] text-slate-300'>
+      <span className='rounded-lg bg-slate-800 px-2 py-1'>{t.hours||0}h</span>
+      <span className='rounded-lg bg-slate-800 px-2 py-1'>{t.spares?.length||0} spares</span>
+      <span className='rounded-lg bg-slate-800 px-2 py-1'>{t.persons||0} people</span>
+      {t.lotoRequired&&<span className='rounded-lg bg-amber-900/40 px-2 py-1 text-amber-300'>LOTO</span>}
+     </span>
+    </span>
+    <span className='shrink-0 text-lg text-slate-400' aria-hidden='true'>›</span>
+   </button>)}</div>
+  {editable&&tasks.length>0&&<div className='space-y-2 rounded-xl border border-slate-700 bg-slate-900/50 p-3'>
+    <p className='text-xs text-slate-400'>Save all task changes to the work request before an independent reviewer can approve them.</p>
+    <Button busy={saving} disabled={saving||!!uploading} onClick={save}>Save assessment for review</Button>
+  </div>}
+  {dirty&&<p className='text-xs text-amber-300'>Unsaved task changes. Save before leaving this section.</p>}
+  {message&&<Alert tone='info'>{message}</Alert>}
+ </div>;
+ if(!editable)return <div className='min-w-0 space-y-3'>
+   <button type='button' className='text-sm text-emerald-300 underline' onClick={()=>setCurrent(null)}>← All tasks</button>
+   <ReviewAssessment tasks={[task]} options={options.data??undefined}/>
+ </div>;
+ return <Card className='min-w-0 space-y-4'>
+   <button type='button' className='text-sm text-emerald-300 underline' onClick={()=>setCurrent(null)}>← All tasks</button>
+   <div><p className='text-xs font-semibold uppercase text-emerald-300'>Task ${current+1} of ${tasks.length}</p>
+    <h3 className='mt-1 break-words text-lg font-semibold text-white'>{task.title||'Configure task'}</h3>
+    <p className='text-xs text-slate-400'>Complete the four sections, then return to the task list and save the assessment.</p>
+   </div>
    <div className='grid grid-cols-4 gap-1'>{sections.map((name,i)=><button type='button' key={name} onClick={()=>setStep(i)} className={'rounded-lg p-2 text-xs '+(step===i?'bg-emerald-800 text-white':'bg-slate-800 text-slate-300')}>{name}</button>)}</div>
    {step===0&&<div className='space-y-3'>
      {library.data?.items.length?<details className='rounded-xl border border-slate-700 p-3'><summary className='text-sm text-slate-200'>Reuse an approved assembly task</summary>
-      {library.data.items.map(x=><button type='button' key={x.id} className='mt-2 block w-full rounded-lg border border-slate-700 p-2 text-left text-sm' onClick={()=>{if(tasks.some(t=>t.id===x.id)){setMessage('Task already selected.');return;}setTasks(old=>[...old,{...x.task,id:x.id,templateStatus:'existing'}]);setCurrent(tasks.length);}}>{x.task.description}</button>)}
+      {library.data.items.map(x=><button type='button' key={x.id} className='mt-2 block w-full rounded-lg border border-slate-700 p-2 text-left text-sm' onClick={()=>{if(tasks.some(t=>t.id===x.id)){setMessage('Task already selected.');return;}setTasks(old=>[...old,{...x.task,id:x.id,templateStatus:'existing'}]);setDirty(true);openTask(tasks.length);}}>{x.task.description}</button>)}
      </details>:null}
      <label className={label}>Task name<input className={input} value={task.title||''} onChange={e=>patch({title:e.target.value})}/></label>
      <label className={label}>Describe the work<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='What is required?'/></label>
@@ -215,12 +260,13 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
      <Button variant='secondary' disabled={step===0} onClick={()=>setStep(i=>Math.max(0,i-1))}>← Previous section</Button>
      <Button variant='secondary' disabled={step===3} onClick={()=>setStep(i=>Math.min(3,i+1))}>Next section →</Button>
    </div>
-   <div className='flex flex-wrap gap-2'>
-    <Button variant='secondary' disabled={current===0} onClick={()=>{setCurrent(i=>Math.max(0,i-1));setStep(0);}}>← Previous task</Button>
-    <Button variant='secondary' onClick={()=>{if(current<tasks.length-1){setCurrent(i=>i+1);}else{setTasks(old=>[...old,seed()]);setCurrent(tasks.length);}setStep(0);}}>{current===tasks.length-1?'+ Add task':'Next task →'}</Button>
-    {tasks.length>1&&<Button variant='secondary' onClick={()=>{setTasks(old=>old.filter((_,i)=>i!==current));setCurrent(Math.max(0,current-1));setStep(0);}}>Remove task</Button>}
+   <div className='flex flex-col gap-2 sm:flex-row'>
+    <Button className='flex-1' onClick={()=>{
+      if(!(task.title||task.description).trim()||task.description.trim().length<3){setStep(0);setMessage('Enter the task name and a work description before returning.');return;}
+      setMessage('');setCurrent(null);
+    }}>Done — back to tasks</Button>
+    <Button variant='secondary' onClick={()=>{setDirty(true);setTasks(old=>old.filter((_,i)=>i!==current));setCurrent(null);}}>Remove task</Button>
    </div>
-   <Button busy={saving} disabled={saving||!!uploading} onClick={save}>Save assessment for independent review</Button>
    {message&&<Alert tone='info'>{message}</Alert>}
   </Card>;
 }

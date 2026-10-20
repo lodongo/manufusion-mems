@@ -634,6 +634,12 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const [busy, setBusy] = useState(false);
     const [actionError, setActionError] = useState('');
     const [zoom, setZoom] = useState('');
+    const [section,setSection]=useState<'request'|'tasks'|'summary'>('request');
+    const [tasksDirty,setTasksDirty]=useState(false);
+    const goSection=(next:'request'|'tasks'|'summary')=>{
+        if(next!==section&&tasksDirty&&!window.confirm('You have unsaved task changes. Leave without saving them?'))return;
+        setMode('');setActionError('');setSection(next);
+    };
 
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load the work request.'}</Alert>;
@@ -662,8 +668,8 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const assessed = !!(r.assessment.maintenanceTypeCode && r.assessment.workTypeCode && r.assessment.priorityCode && r.assessment.disciplineCode);
     const buttons: Array<{ key: string; label: string; icon: ReactNode; variant?: 'primary' | 'secondary' | 'danger'; onClick: () => void }> = [];
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
-    if (can.assess) buttons.push({ key: 'assess', label: assessed ? 'Update assessment' : 'Assess', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => setMode('assess') });
-    if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Review work assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => setMode('review_assessment') });
+    if (can.assess && !can.reviewAssessment) buttons.push({ key: 'assess', label: assessed ? 'Update assessment' : 'Assess', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => setMode('assess') });
+    if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Review work assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => {setSection('summary');setMode('review_assessment');} });
     if (can.convert) buttons.push({ key: 'convert', label: 'Convert to work order', icon: <Wrench className='h-4 w-4' />, variant: assessed ? 'primary' : 'secondary', onClick: () => setMode('convert') });
     if (can.return) buttons.push({ key: 'return', label: 'Return for information', icon: <Undo2 className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('return') });
     if (can.decline) buttons.push({ key: 'decline', label: 'Decline', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('decline') });
@@ -679,7 +685,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
             {/* Action bar on top */}
             <div className='shrink-0 space-y-2 border-b border-slate-800 bg-slate-950 pb-3'>
                 <div className='flex items-center gap-2'>
-                    <Button variant='secondary' aria-label='Back' onClick={() => navigate('organization_admin/work_requests')}>
+                    <Button variant='secondary' aria-label='Back' onClick={() => { if(tasksDirty&&!window.confirm('You have unsaved task changes. Leave without saving?'))return; navigate('organization_admin/work_requests'); }}>
                         <ArrowLeft className='h-4 w-4' />
                     </Button>
                     <div className='min-w-0 flex-1'>
@@ -692,20 +698,23 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                         </Button>
                     )}
                 </div>
-                {buttons.length > 0 && !mode && (
-                    <div className='flex gap-2 overflow-x-auto pb-1'>
-                        {buttons.map((b) => (
-                            <Button key={b.key} variant={b.variant ?? 'primary'} busy={busy && b.key !== 'edit'} className='shrink-0' onClick={b.onClick}>
-                                {b.icon}
-                                {b.label}
-                            </Button>
-                        ))}
-                    </div>
-                )}
-                {can.ownRequest && ['submitted', 'under_review'].includes(r.status) && <p className='text-xs text-slate-500'>You raised this request, so another person reviews it.</p>}
+
             </div>
 
-            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
+            <div className='grid min-h-0 min-w-0 flex-1 grid-cols-[64px_minmax(0,1fr)] overflow-hidden'>
+              <nav aria-label='Assessment sections' className='flex min-h-0 flex-col gap-2 overflow-y-auto border-r border-slate-700 bg-slate-900/70 px-1 py-3'>
+                {([
+                   ['request','Request',<ClipboardList className='h-5 w-5'/>],
+                   ['tasks','Tasks',<Wrench className='h-5 w-5'/>],
+                   ['summary','Summary',<CheckCircle2 className='h-5 w-5'/>],
+                ] as const).map(([key,title,icon])=><button type='button' key={key} aria-current={section===key?'page':undefined}
+                  aria-label={title==='Request'?'Review work request':title==='Tasks'?'Tasks and task assessments':'Assessment summary'}
+                  onClick={()=>goSection(key)}
+                  className={'flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center text-[10px] font-semibold leading-tight '+(section===key?'bg-emerald-900/50 text-emerald-200 ring-1 ring-emerald-700':'text-slate-400')}>
+                  {icon}<span>{title}</span></button>)}
+                <span className='mt-auto break-words text-center text-[9px] text-slate-500'>{r.code.slice(-4)}</span>
+              </nav>
+              <div className='min-w-0 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-3 sm:px-4'>
                 {actionError && !mode && <Alert tone='error'>{actionError}</Alert>}
 
                 {mode === 'assess' && <AssessPanel detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />}
@@ -751,6 +760,17 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                     </Card>
                 )}
 
+                {section==='request' && !mode && <>
+                  <div className='space-y-1'>
+                    <p className='text-xs font-semibold uppercase tracking-wider text-emerald-300'>Work request</p>
+                    <h2 className='text-lg font-semibold text-white'>Request details</h2>
+                  </div>
+                  {buttons.length>0&&<div className='grid grid-cols-2 gap-2'>
+                    {buttons.map(b=><Button key={b.key} variant={b.variant??'primary'} busy={busy&&b.key!=='edit'} className='min-w-0 justify-center text-xs' onClick={b.onClick}>
+                      {b.icon}<span className='min-w-0 break-words text-center'>{b.label}</span>
+                    </Button>)}
+                  </div>}
+                  {can.ownRequest&&['submitted','under_review'].includes(r.status)&&<p className='text-xs text-slate-400'>You raised this request. Independent review is handled by another authorized person.</p>}
                 {r.status === 'returned' && r.returnNote && (
                     <Card>
                         <p className='text-xs font-semibold uppercase tracking-wider text-red-300'>Information requested</p>
@@ -791,14 +811,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                     </div>
                 )}
 
-                <Card className='space-y-2 text-sm'>
-                    <p className='font-semibold text-white'>Independent work assessment review</p>
-                    <Badge tone={r.assessmentReviewCurrent?'brand':r.assessmentReview.status==='changes_requested'?'danger':'warn'}>{r.assessmentReviewCurrent?'Approved':r.assessmentReview.status==='changes_requested'?'Corrections requested':'Awaiting approval'}</Badge>
-                    {r.assessmentReview.name&&<Info label='Reviewed by' value={r.assessmentReview.name}/>}
-                    {r.assessmentReview.note&&<Info label='Review note' value={r.assessmentReview.note}/>}
-                    {can.reviewAssessment&&assessed&&r.assessmentTasks.length>0&&<Button variant='secondary' onClick={()=>setMode('return_assessment')}>Return assessment for correction</Button>}
-                </Card>
-                <MntTaskAssessment code={r.code} initial={r.assessmentTasks||[]} editable={can.assess} onSaved={reload}/>
+
 
                  {(r.assessment.maintenanceTypeLabel || r.assessment.note) && (
                     <Card className='space-y-2 text-sm'>
@@ -834,6 +847,16 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                 </Card>
 
                 <HistoryCard history={r.history} />
+                </>}
+                {section==='tasks' && <MntTaskAssessment key={r.code} code={r.code} initial={r.assessmentTasks||[]} editable={can.assess&&!can.reviewAssessment} onSaved={reload} onDirtyChange={setTasksDirty}/>}
+                {section==='summary' && <AssessmentSummary
+                    detail={r}
+                    canReview={!!can.reviewAssessment&&assessed&&r.assessmentTasks.length>0}
+                    busy={busy}
+                    onApprove={()=>{setMode('review_assessment');setNote('');}}
+                    onReturn={()=>{setMode('return_assessment');setNote('');}}
+                    />}
+              </div>
             </div>
 
             {zoom && (
@@ -846,6 +869,79 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
             )}
         </div>
     );
+}
+
+/** The summary is an independent, read-only snapshot of the saved assessment. */
+function AssessmentSummary({detail,canReview,busy,onApprove,onReturn}:{detail:Detail;canReview:boolean;busy:boolean;onApprove:()=>void;onReturn:()=>void}){
+    const tasks=detail.assessmentTasks||[];
+    const spares=tasks.reduce((sum,t)=>sum+(t.spares?.length||0),0);
+    const duration=tasks.reduce((sum,t)=>sum+(Number(t.hours)||0),0);
+    const people=tasks.reduce((sum,t)=>sum+(Number(t.persons)||0)+(Number(t.externalResource?.persons)||0),0);
+    const hazards=tasks.reduce((sum,t)=>sum+(t.risk?.filter(x=>x.hazard)?.length||0),0);
+    const status=detail.assessmentReviewCurrent?'Approved':detail.assessmentReview.status==='changes_requested'?'Returned for correction':'Awaiting review';
+    return <div className='min-w-0 space-y-3'>
+      <div><p className='text-xs font-semibold uppercase tracking-wide text-emerald-300'>Assessment summary</p>
+        <h2 className='mt-1 text-lg font-semibold text-white'>Scope and requirements</h2>
+        <p className='mt-1 text-xs text-slate-400'>Saved assessment only. Reviewers can inspect details, approve or return; they cannot modify tasks.</p>
+      </div>
+      <div className='grid min-w-0 grid-cols-2 gap-2'>
+        {([['Tasks',tasks.length],['Work hours',duration],['Spare items',spares],['People',people]] as const).map(([name,value])=>
+        <div key={name} className='min-w-0 rounded-xl border border-slate-700 bg-slate-900 p-3'>
+          <strong className='block text-xl text-white'>{value}</strong>
+          <span className='text-xs text-slate-400'>{name}</span>
+        </div>)}
+      </div>
+      <Card className='space-y-2 text-sm'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <p className='font-semibold text-white'>Independent review</p>
+          <Badge tone={detail.assessmentReviewCurrent?'brand':detail.assessmentReview.status==='changes_requested'?'danger':'warn'}>{status}</Badge>
+        </div>
+        {detail.assessmentReview.name&&<Info label='Reviewed by' value={detail.assessmentReview.name}/>}
+        {detail.assessmentReview.note&&<Info label='Review notes' value={detail.assessmentReview.note}/>}
+        {canReview&&<div className='grid grid-cols-1 gap-2 pt-2'>
+          <Button busy={busy} onClick={onApprove}>Approve assessment</Button>
+          <Button variant='secondary' busy={busy} onClick={onReturn}>Return for correction</Button>
+        </div>}
+      </Card>
+      <Card className='space-y-2 text-sm'>
+        <p className='font-semibold text-white'>Work classification</p>
+        <Info label='Maintenance type' value={detail.assessment.maintenanceTypeLabel||'Not yet classified'}/>
+        <Info label='Work type' value={detail.assessment.workTypeLabel||'Not yet classified'}/>
+        <Info label='Priority' value={detail.assessment.priorityLabel||'Not yet classified'}/>
+        <Info label='Discipline' value={detail.assessment.disciplineLabel||'Not yet classified'}/>
+        <Info label='Linked asset' value={detail.assetTag+' · '+detail.assetName}/>
+        <Info label='Equipment' value={detail.unitCode+' · '+detail.unitName}/>
+      </Card>
+      <Card className='space-y-2 text-sm'>
+        <p className='font-semibold text-white'>Safety overview</p>
+        <Info label='Tasks requiring LOTO' value={String(tasks.filter(t=>t.lotoRequired).length)}/>
+        <Info label='Tasks requiring live work' value={String(tasks.filter(t=>t.liveEquipment).length)}/>
+        <Info label='Identified hazards' value={String(hazards)}/>
+        <Info label='Permit selections' value={String(tasks.reduce((sum,t)=>sum+(t.permitCodes?.length||0),0))}/>
+      </Card>
+      <div className='space-y-2'>
+        <p className='text-sm font-semibold text-white'>Saved task details</p>
+        {!tasks.length&&<p className='rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400'>No tasks saved. The assessor must add and save tasks first.</p>}
+        {tasks.map((task,i)=><details key={task.id} className='min-w-0 rounded-xl border border-slate-700 bg-slate-900 p-3'>
+          <summary className='cursor-pointer text-sm font-semibold text-white'>{i+1}. {task.title||task.description}</summary>
+          <div className='mt-3 space-y-2 break-words text-xs text-slate-300'>
+            <p>{task.description}</p>
+            <p><strong>Duration:</strong> {task.hours} hours · <strong>Internal people:</strong> {task.persons}</p>
+            <p><strong>Internal roles:</strong> {task.internalRoles?.join(', ')||'None'}</p>
+            <p><strong>External:</strong> {task.externalResource?.type?task.externalResource.type+' ('+task.externalResource.persons+' people)':'None'}</p>
+            <p><strong>Special tools:</strong> {task.tools||'None'}</p>
+            <p><strong>Spares:</strong> {task.spares?.map(sp=>sp.qty+' × '+sp.description).join('; ')||'None'}</p>
+            <p><strong>LOTO:</strong> {task.lotoRequired?'Yes':'No'} · <strong>Live equipment:</strong> {task.liveEquipment?'Yes':'No'}</p>
+            <p><strong>Hazardous energy:</strong> {task.energySourceCodes?.join(', ')||'None selected'}</p>
+            <p><strong>Permits:</strong> {task.permitCodes?.join(', ')||'None selected'}</p>
+            {task.risk?.filter(x=>x.hazard).map((risk,j)=><div key={j} className='rounded-lg border border-slate-700 p-2'>
+              <p className='font-semibold text-white'>{risk.hazard}</p><p>Impact: {risk.impact}</p><p>Controls: {risk.controls}</p>
+              <p>Before: {risk.before||'—'} · After: {risk.after||'—'}</p>
+            </div>)}
+          </div>
+        </details>)}
+      </div>
+    </div>;
 }
 
 export function HistoryCard({ history }: { history: Array<{ at: string; name: string; action: string; note: string }> }) {
