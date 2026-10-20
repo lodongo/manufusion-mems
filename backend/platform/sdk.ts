@@ -96,6 +96,23 @@ export const storage = {
             }
         }));
     },
+    /** DRKMS originals: cloud object create-only; an existing generation cannot be overwritten. */
+    async writeImmutable(items: Array<{path:string;content:string;contentType:string}>): Promise<boolean[]> {
+        return Promise.all(items.map(async item => {
+            try {
+                const file=bucket().file(safeObjectPath(item.path));
+                await file.save(Buffer.from(item.content,'base64'), {
+                    resumable:false,
+                    preconditionOpts:{ifGenerationMatch:0},
+                    metadata:{contentType:item.contentType,cacheControl:'private,no-store'},
+                });
+                return true;
+            } catch(err) {
+                console.error('MEMS immutable storage write failed',err instanceof Error?err.message:'unknown');
+                return false;
+            }
+        }));
+    },
     async url(paths: string[]): Promise<Array<{ path: string; url: string }>> {
         return Promise.all(paths.map(async path => {
             try {
