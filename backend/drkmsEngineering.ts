@@ -4,6 +4,7 @@ import { orgRoute } from './guards';
 import { scopeOf, canAt, nodePath } from './access';
 import { record } from './org';
 import { ENGINEERING_DOC_TYPES, ENGINEERING_DOC_TYPE_CODES } from './drkmsEngineeringTypes';
+import { matchingModel } from './drkmsApplicability';
 
 const docPath=(orgId:string,id:string)=>`organizations/${orgId}/drkms_documents/${id}`;
 const DOC=/^[a-f0-9]{20}$/;
@@ -76,6 +77,32 @@ export const drkmsEngineeringRoutes={
     return {link};
   }),
  ],
+ 'POST /api/org/drkms/engineering/model-link':[
+  orgRoute('drkms.engineering.model_link','ADM.document_registry',async ctx=>{
+    const id=str(ctx.body.documentId),assetId=str(ctx.body.assetTag),subtype=str(ctx.body.subtypeCode);
+    if(!DOC.test(id)||!ASSET.test(assetId)||!ENGINEERING_DOC_TYPE_CODES.has(subtype))throw new HttpError(400,'Invalid document, type or asset.');
+    const doc=await getDoc(docPath(ctx.orgId,id));
+    if(!doc||str(doc.data.status)!=='draft')throw new HttpError(409,'Only draft documents can be classified for model-wide reuse.');
+    if(str(doc.data.createdBy)!==ctx.uid&&ctx.role!=='org_super_admin')throw new HttpError(403,'Only the document author can define applicability.');
+    const typeDef=ENGINEERING_DOC_TYPES.find(x=>x.code===subtype)!;
+    if(typeDef.parentClass!==str(doc.data.classCode))throw new HttpError(409,'Subtype and parent document class do not match.');
+    const {target,nodeId}=await resolveTechnicalTarget(ctx.orgId,'asset',assetId);
+    const path=await nodePath(ctx.orgId,nodeId),scope=await scopeOf(ctx);
+    if(!canAt(ctx,'ADM.document_registry',path,scope))throw new HttpError(403,'No access to this asset location.');
+    const applied=isObj(doc.data.scope)?str(doc.data.scope.nodeId):'';
+    if(!applied||!path.includes(applied))throw new HttpError(403,'The model is outside the document applicability area.');
+    const modelKey={categoryCode:str(target.data.categoryCode),subcategoryCode:str(target.data.subcategoryCode),
+       classCode:str(target.data.classCode)};
+    if(!modelKey.categoryCode||!modelKey.subcategoryCode||!modelKey.classCode)throw new HttpError(409,'The asset needs its category, subcategory and class.');
+    const link={documentId:id,subtypeCode:subtype,targetType:'equipment_model',modelKey,sourceAssetTag:assetId,
+      orgId:ctx.orgId,linkedBy:ctx.uid,linkedAt:nowIso(),status:'draft'};
+    const key='model_'+[modelKey.categoryCode,modelKey.subcategoryCode,modelKey.classCode].join('_').replace(/[^a-zA-Z0-9_-]/g,'_');
+    if(!(await writeDoc(`${docPath(ctx.orgId,id)}/technical_links/${key}`,link,{exists:false})))
+      throw new HttpError(409,'This model applicability already exists.');
+    await record(ctx,'drkms.engineering.model_link',id,'Model applicability '+modelKey.classCode);
+    return {link};
+  }),
+ ],
  'POST /api/org/drkms/engineering/dossier':[
   orgRoute('drkms.engineering.dossier','ADM.document_registry',async ctx=>{
     const type=str(ctx.body.targetType),targetId=str(ctx.body.targetId);
@@ -86,6 +113,8 @@ export const drkmsEngineeringRoutes={
     const docs=await listDocs(`organizations/${ctx.orgId}/drkms_documents`);
     const visible=[] as Array<{documentId:string;title:string;classCode:string;subtypeCode:string;status:string}>;
     const targetAncestry=await nodePath(ctx.orgId,nodeId);
+    const requestedTarget=await getDoc(targetPath(ctx.orgId,type,targetId));
+    const assetForModel=type==='asset'?requestedTarget:(type==='work_center'&&isObj(requestedTarget?.data.attributes)?await getDoc(targetPath(ctx.orgId,'asset',str(requestedTarget.data.attributes.assetTag))):null);
     for(const doc of docs){
       if(str(doc.data.status)!=='effective' && str(doc.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin')continue;
       const applied=isObj(doc.data.scope)?str(doc.data.scope.nodeId):'';
@@ -93,7 +122,10 @@ export const drkmsEngineeringRoutes={
       if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,applied),await scopeOf(ctx)))continue;
       const links=await listDocs(`${docPath(ctx.orgId,doc.id)}/technical_links`);
       for(const link of links){
-        if(str(link.data.targetType)===type&&str(link.data.targetId)===targetId){
+        const isExact=str(link.data.targetType)===type&&str(link.data.targetId)===targetId;
+        const model=isObj(link.data.modelKey)?link.data.modelKey:null;
+        const modelMatch=str(link.data.targetType)==='equipment_model'&&!!model&&!!assetForModel&&matchingModel({categoryCode:str(model.categoryCode),subcategoryCode:str(model.subcategoryCode),classCode:str(model.classCode)}, {categoryCode:str(assetForModel.data.categoryCode),subcategoryCode:str(assetForModel.data.subcategoryCode),classCode:str(assetForModel.data.classCode)});
+        if(isExact||modelMatch){
           visible.push({documentId:doc.id,title:str(doc.data.title),classCode:str(doc.data.classCode),
             subtypeCode:str(link.data.subtypeCode),status:str(doc.data.status)});
         }
