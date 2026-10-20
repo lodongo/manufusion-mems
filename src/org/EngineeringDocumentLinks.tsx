@@ -10,13 +10,14 @@ export default function EngineeringDocumentLinks({documents}:{documents:Doc[]}){
  const assets=useLoad(()=>callBackend<{targets:Target[]}>('/api/org/drkms/engineering/targets',{}),[]);
  const [id,setId]=useState(''),[type,setType]=useState(''),[target,setTarget]=useState('');
  const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
+ const [modelWide,setModelWide]=useState(false);
  const selected=documents.find(d=>d.documentId===id);
  const choices=(types.data?.types??[]).filter(t=>t.parentClass===selected?.classCode);
  const apply=async()=>{
   if(!id||!type||!target)return;
   setBusy(true);setMessage('');
   const [targetType,targetId]=target.split(':',2);
-  try{await callBackend('/api/org/drkms/engineering/link',{documentId:id,subtypeCode:type,targetType,targetId});setMessage('Technical document linked.');}
+  try{await callBackend(modelWide?'/api/org/drkms/engineering/model-link':'/api/org/drkms/engineering/link',modelWide?{documentId:id,subtypeCode:type,assetTag:targetId}:{documentId:id,subtypeCode:type,targetType,targetId});setMessage('Technical document linked.');}
   catch(e){setMessage(e instanceof Error?e.message:'Link failed.');}finally{setBusy(false);}
  };
  return <Card><div className='space-y-3'>
@@ -37,7 +38,8 @@ export default function EngineeringDocumentLinks({documents}:{documents:Doc[]}){
     <option value=''>Choose registered target</option>{(assets.data?.targets??[]).map(t=><option key={t.type+':'+t.id} value={t.type+':'+t.id}>{t.type}: {t.code} {t.name}</option>)}
    </select>
   </label>
-  <button type='button' disabled={busy||!id||!type||!target} onClick={()=>void apply()} className='min-h-11 w-full rounded-lg bg-blue-600 p-2 font-semibold text-white disabled:opacity-50'>{busy?'Linking…':'Link document'}</button>
+  <label className='flex items-center gap-2 text-sm text-slate-200'><input type='checkbox' checked={modelWide} onChange={e=>setModelWide(e.target.checked)} />Reuse for matching asset category, subcategory and class (select an asset above)</label>
+  <button type='button' disabled={busy||!id||!type||!target||(modelWide&&!target.startsWith('asset:'))} onClick={()=>void apply()} className='min-h-11 w-full rounded-lg bg-blue-600 p-2 font-semibold text-white disabled:opacity-50'>{busy?'Linking…':'Link document'}</button>
   {message&&<p role='status' className='text-sm text-slate-200'>{message}</p>}
  </div></Card>;
 }
