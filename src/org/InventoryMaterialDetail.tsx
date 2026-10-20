@@ -98,6 +98,7 @@ interface Uom {
 interface Metadata {
     incoterms: MetaOption[];
     stockingPolicies: MetaOption[];
+    stockDimensions: Array<{key:string;title:string;description:string;items:Array<{code:string;label:string;description:string;enabled:boolean;category:string}>}>;
     paymentTerms: MetaOption[];
     uoms: Uom[];
 }
@@ -106,10 +107,28 @@ type Section = 'inventory' | 'procurement';
 type Values = Record<string, string>;
 type Errors = Record<string, string>;
 
-const TABS = ['Overview', 'Current Status', 'Inventory Information', 'Procurement Information', 'Movements', 'Criticality Analysis', 'Technical Data'] as const;
+const TABS = ['Overview', 'Current Status', 'Inventory Information', 'Stock Control', 'Procurement Information', 'Movements', 'Criticality Analysis', 'Technical Data'] as const;
 type Tab = (typeof TABS)[number];
 
-const INVENTORY_FIELDS = ['stockingPolicy', 'minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'remarks'];
+const STOCK_FIELDS=[
+ ['stockOwnership','stockOwnership'],
+ ['supplyArrangement','supplyArrangements'],
+ ['stockCustody','stockCustody'],
+ ['stockCondition','stockConditions'],
+ ['replenishmentStrategy','replenishmentStrategies'],
+ ['stockPurpose','stockPurposes'],
+ ['stockAllocation','stockAllocations'],
+ ['financialProfile','financialProfiles'],
+ ['valuationMethod','valuationMethods'],
+ ['traceabilityControl','traceabilityControls'],
+ ['titleTransferTrigger','titleTransferTriggers'],
+ ['specialStockProgram','specialStockPrograms'],
+ ['warehouseRestriction','warehouseRestrictions'],
+ ['stockPlanningControl','stockPlanningControls'],
+ ['ownershipSettlementTrigger','ownershipSettlementTriggers'],
+] as const;
+const STOCK_FIELD_LOOKUP=new Map<string,string>(STOCK_FIELDS);
+const INVENTORY_FIELDS = ['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'remarks'];
 const PROCUREMENT_FIELDS = ['incoterms', 'preferredVendor', 'vendorPartNumber', 'purchaseUom', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice', 'priceCurrency', 'paymentTerms'];
 const NUMBER_FIELDS = new Set(['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice']);
 const OPENING_KEYS = ['physicalStock', 'reservedStock', 'quarantinedStock', 'damagedStock', 'expiredStock', 'onOrder', 'onRequisition', 'inTransit', 'allocatedStock'];
@@ -126,7 +145,22 @@ const NUMBER_PATTERN = /^\d+(\.\d+)?$/;
 const OPENING_PHRASE = 'POST OPENING STOCK';
 
 const EXPLANATIONS: Record<string, string> = {
-    stockingPolicy: 'Defines how the warehouse replenishes this material, for example stock-held, non-stock, or order-on-demand.',
+    stockingPolicy: 'Legacy MRP engine policy for this material and warehouse. Use Stock Control to select a codified strategy; Min-Max and Reorder Point automatically synchronize with this field.',
+    stockOwnership: 'Default intended owner of this material at this warehouse. Actual owner must also be tracked on each balance/lot; this setting does not transfer title.',
+    supplyArrangement: 'Approved supply and commercial arrangement. Consignment and VMI need a supplier agreement and separate ownership-aware transactions.',
+    stockCustody: 'Expected physical custodian, independent of who owns or values the stock.',
+    stockCondition: 'Default eligibility or disposition policy. Actual lot/block status must be recorded by controlled warehouse movements.',
+    replenishmentStrategy: 'Codified planning method; Min-Max and Reorder Point use the existing automated MRP engine. Other strategies await their specialized input and approval workflows.',
+    stockPurpose: 'Business purpose for reporting and consumption mapping; cannot replace individual GL posting rules.',
+    stockAllocation: 'Default demand allocation reference for reservations, without increasing physical stock quantity.',
+    financialProfile: 'Financial treatment subject to legal-entity accounting policy and actual recognition event.',
+    valuationMethod: 'Approved legal-entity valuation basis. Changing this classification alone does not revalue inventory.',
+    traceabilityControl: 'Default lot, serial, expiry or compliance evidence requirement; transactions enforce detailed traceability separately.',
+    titleTransferTrigger: 'Contract event transferring legal title. Must agree with supplier agreement; does not itself post a financial entry.',
+    specialStockProgram: 'Overlay such as rotables, bonded, emergency or consignment without changing basic ownership.',
+    warehouseRestriction: 'Handling and placement constraint to be enforced by compatible warehouse/bin configuration.',
+    stockPlanningControl: 'Planning and classification dimension supporting criticality, variability and demand.',
+    ownershipSettlementTrigger: 'Contractual event for supplier settlement, which is distinct from stock movement and financial recognition.',
     minimumLevel: 'Minimum desired available stock quantity; falling below this level signals insufficient stock.',
     maximumLevel: 'Maximum planned stock quantity to limit excess inventory and working capital.',
     safetyStock: 'Buffer stock held to protect against demand variation or replenishment delays.',
@@ -545,8 +579,18 @@ function SettingValue({
             </>
         );
     }
+    if (field==='replenishmentStrategy'&&blank(raw)){
+        const old=String(data.inventory.stockingPolicy||'').toUpperCase();
+        if(old==='MINMAX')return <>RP01 — Min-Max (existing configuration)</>;
+        if(old==='REORDER')return <>RP02 — Reorder Point (existing configuration)</>;
+    }
     if (blank(raw)) return <>—</>;
     const value = String(raw);
+    if (STOCK_FIELD_LOOKUP.has(field)){
+        const dim=metadata?.stockDimensions?.find(d=>d.key===STOCK_FIELD_LOOKUP.get(field));
+        const selected=dim?.items.find(x=>x.code===value);
+        return <>{selected?selected.label+' ('+value+')':value}</>;
+    }
     if (field === 'stockingPolicy') return <>{metadata?.stockingPolicies.find((x) => x.code === value)?.description || value}</>;
     if (field === 'paymentTerms') return <>{metadata?.paymentTerms.find((x) => x.code === value)?.description || value}</>;
     if (field === 'incoterms') return <>{metadata?.incoterms.find((x) => x.code === value)?.description || value}</>;
@@ -579,6 +623,15 @@ function SettingInput({
     const hint = EXPLANATIONS[field];
     const error = errors[field];
 
+    if(STOCK_FIELD_LOOKUP.has(field)){
+        const list=metadata?.stockDimensions?.find(x=>x.key===STOCK_FIELD_LOOKUP.get(field));
+        const active=list?.items.filter(x=>x.enabled)||[];
+        return <SelectField id={id} label={label(field)} value={value} hint={hint} error={error} onChange={e=>onChange(field,e.target.value)}>
+            <option value=''>Not specified (inherit default)</option>
+            {value&&!active.some(x=>x.code===value)&&<option value={value}>{value} (not currently enabled)</option>}
+            {active.map(item=><option key={item.code} value={item.code}>{item.code} — {item.label}</option>)}
+        </SelectField>;
+    }
     if (field === 'purchaseUom') {
         const uoms = (metadata?.uoms || []).filter((x) => x.enabled);
         const categories = Array.from(new Map(uoms.map((x) => [x.categoryCode || x.categoryName, { code: x.categoryCode || x.categoryName, name: x.categoryName || x.categoryCode }])).values()).filter((x) => x.code);
@@ -909,7 +962,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
     const { data: metadata } = useLoad(() => callBackend<Metadata>('/api/org/inventory/material/metadata'));
     const { ask, sheet } = useConfirm();
 
-    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['Overview','Current Status','Inventory Information','Procurement Information','Movements','Criticality Analysis','Technical Data'], 'Overview'));
+    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>([...TABS], 'Overview'));
     const [editing, setEditing] = useState(false);
     const [values, setValues] = useState<Values>({});
     const [uomCategory, setUomCategory] = useState('');
@@ -921,8 +974,8 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
     const [isolation, setIsolation] = useState('');
     const [movement, setMovement] = useState<Movement | null>(null);
 
-    const section: Section | null = tab === 'Inventory Information' ? 'inventory' : tab === 'Procurement Information' ? 'procurement' : null;
-    const fields = section === 'procurement' ? PROCUREMENT_FIELDS : INVENTORY_FIELDS;
+    const section: Section | null = (tab === 'Inventory Information'||tab==='Stock Control') ? 'inventory' : tab === 'Procurement Information' ? 'procurement' : null;
+    const fields = tab==='Stock Control'?STOCK_FIELDS.map(([field])=>field):section === 'procurement' ? PROCUREMENT_FIELDS : INVENTORY_FIELDS;
     const base = data?.currency.local || '';
     const currencies = useMemo(
         () => [base, ...(data?.currency.alternatives || []).filter((x) => x.code && x.rate > 0).map((x) => x.code)].filter((x, i, a) => x && a.indexOf(x) === i),
@@ -952,6 +1005,11 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
         const source = section === 'inventory' ? data.inventory : data.procurement;
         const next: Values = {};
         for (const k of fields) next[k] = blank(source[k]) ? '' : String(source[k]);
+        if(tab==='Stock Control'&&!next.replenishmentStrategy){
+            const legacy=String(data.inventory.stockingPolicy||'').toUpperCase();
+            if(legacy==='MINMAX')next.replenishmentStrategy='RP01';
+            else if(legacy==='REORDER')next.replenishmentStrategy='RP02';
+        }
         if (section === 'procurement' && !next.priceCurrency) next.priceCurrency = base;
         setValues(next);
         const chosen = metadata?.uoms.find((x) => x.code === next.purchaseUom);
@@ -1118,7 +1176,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
 
                     {section && (
                         <>
-                            {section === 'inventory' && <BinPanel data={data} binChoice={binChoice} onChoose={setBinChoice} onLink={linkBin} onUnlink={unlinkBin} />}
+                            {tab === 'Inventory Information' && <BinPanel data={data} binChoice={binChoice} onChoose={setBinChoice} onLink={linkBin} onUnlink={unlinkBin} />}
                             {section === 'procurement' && !editing && currencies.length > 1 && (
                                 <SelectField id='material-display-currency' label='Display currency' value={displayCurrency} onChange={(e) => setCurrency(e.target.value)}>
                                     {currencies.map((c) => (
@@ -1129,6 +1187,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                                     ))}
                                 </SelectField>
                             )}
+                            {tab==='Stock Control'&&<Alert tone='info'>These settings describe the material and warehouse policy. They do not modify existing posted stock ownership or GL balances. Min-Max (RP01) and Reorder Point (RP02) connect to the existing automatic MRP request engine; consignment and supplier-managed arrangements are guarded until their settlement workflow is configured.</Alert>}
                             {editing ? (
                                 <Card className='space-y-3'>
                                     <h2 className='text-sm font-semibold text-ink'>Edit {tab.toLowerCase()}</h2>

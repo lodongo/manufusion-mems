@@ -26,6 +26,7 @@ import { PROCUREMENT_UNITS } from './procurementUnits';
 import { requirementsPath } from './procurementSetup';
 import { record } from './org';
 import { MRP_POLICIES, PO_OPEN, PRQ_OPEN, REQ_OPEN, numberOrNull, openQuantity, plan, type PlanResult } from './mrpPlan';
+import {isStandardMrpSafe} from './stockPolicyConfig';
 
 type Obj = Record<string, unknown>;
 const ID = /^[A-Za-z0-9_-]{1,120}$/;
@@ -190,6 +191,11 @@ export async function planMaterial(orgId: string, materialId: string, warehouseI
         if (!MRP_POLICIES.includes(policy as (typeof MRP_POLICIES)[number])) {
             if (await closeOpen('MRP: the stocking policy is no longer Min/max or Reorder point.')) return finish('cancelled', 'Stocking policy changed; the open MRP request was cancelled.', {}, openId);
             return { outcome: 'not_planned', reason: 'Not planned by MRP (stocking policy).' };
+        }
+        const arrangement=isStandardMrpSafe(inv?.data||{});
+        if(!arrangement.safe){
+            if(await closeOpen('MRP: '+arrangement.reason))return finish('cancelled',arrangement.reason,{},openId);
+            return finish('skipped',arrangement.reason);
         }
         if (!modulesOn(org)) return finish('skipped', 'Inventory and Procurement must both be adopted for MRP requests.');
         if (!material || !['approved', 'active'].includes(str(material.data.status).toLowerCase())) {

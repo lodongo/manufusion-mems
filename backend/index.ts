@@ -2,6 +2,7 @@ import { router, json, storage } from './platform/sdk';
 import { recordWiredRoutes } from './transactionRuntime';
 import { AFRICAN_COUNTRIES, CURRENCIES, METADATA_LISTS, PUBLIC_EMAIL_DOMAINS } from './defaults';
 import { DEFAULT_MODULES, FEATURE_ICONS, MODULE_CATEGORIES, SITE_DEFAULTS } from './catalog';
+import { STOCK_META_BY_KEY } from './stockPolicyConfig';
 import {
     EMAIL_LOCAL_RE,
     HttpError,
@@ -1189,6 +1190,18 @@ export const handler = router(recordWiredRoutes({
                 const missing = (Array.isArray(prev?.data.items) ? (prev?.data.items as unknown[]) : []).filter(isObj).map((i) => str(i.code)).filter((c) => c && !seen.has(c));
                 if (missing.length) throw new HttpError(400, `${missing.slice(0, 10).join(', ')} may be used by warehouse storage locations. Disable entries instead of removing them.`);
             }
+            if (code === 'PRC' && STOCK_META_BY_KEY.has(key)) {
+                const def = STOCK_META_BY_KEY.get(key)!;
+                if (ctx.body.isNew === true) throw new HttpError(409, 'Load the MEMS stock metadata defaults before editing.');
+                const prior = await getDoc(`module_workspaces/PRC/metadata/${key}`);
+                if (!prior) throw new HttpError(404, 'Load the stock reference defaults first.');
+                const previous = (Array.isArray(prior.data.items) ? prior.data.items : []).filter(isObj);
+                const prefix = def.items[0]?.code.replace(/\d+$/, '') || '';
+                const absent = previous.map(x => str(x.code)).filter(v => !seen.has(v));
+                if (absent.length) throw new HttpError(409, 'Disable existing stock codes instead of removing or renumbering them: ' + absent.slice(0, 8).join(', '));
+                if (items.some(x => !new RegExp('^' + prefix + '[0-9]{2}' + '$').test(x.code) || x.description.trim().length < 20))
+                    throw new HttpError(400, 'Stock variable codes must retain their master prefix and detailed description (at least 20 characters).');
+            }
             const path = `module_workspaces/${code}/metadata/${key}`;
             if (ctx.body.isNew === true) {
                 if (!(await writeDoc(path, { title, description, items, createdAt: nowIso(), updatedAt: nowIso() }, { exists: false }))) {
@@ -1209,7 +1222,7 @@ export const handler = router(recordWiredRoutes({
             const code = str(ctx.body.code);
             const key = str(ctx.body.key);
             if (!/^[A-Z]{3}$/.test(code) || !/^[a-z][a-zA-Z0-9_]{1,39}$/.test(key)) throw new HttpError(400, 'Invalid metadata list.');
-            if ((code === 'INV' && (key === 'materialClassifications' || key === 'storageLocationTypes')) || (code === 'PRC' && key === 'unitsOfMeasure') || (code === 'HRM' && key === 'skillsMaster')) throw new HttpError(400, 'This controlled reference list cannot be deleted. Disable individual entries instead.');
+            if ((code === 'INV' && (key === 'materialClassifications' || key === 'storageLocationTypes')) ||  (code === 'PRC' && (key === 'unitsOfMeasure' || STOCK_META_BY_KEY.has(key))) || (code === 'HRM' && key === 'skillsMaster')) throw new HttpError(400, 'This controlled reference list cannot be deleted. Disable individual entries instead.');
             await deleteDoc(`module_workspaces/${code}/metadata/${key}`);
             await record(ctx, 'admin', 'module.metadata.delete', `${code}.${key}`);
             return { ok: true };
