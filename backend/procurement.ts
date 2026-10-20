@@ -967,7 +967,7 @@ export const procurementRoutes = {
             // New automated replenishment requires a deliberate company-owned
             // purchasing profile. Legacy MINMAX/REORDER records remain valid
             // until their strategy is explicitly reconfigured.
-            if(owner!=='OW01'||!['SA01','SA05','SA06','SA11','SA14','SA15'].includes(arrangement))
+            if(owner!=='OW01'||!['SA01','SA14'].includes(arrangement))
                 throw new HttpError(409,'Automatic company replenishment requires Company-owned (OW01) and a permitted purchase arrangement. Choose both in Stock Control first; consignment and VMI need an owner-aware replenishment agreement.');
         }
         const numOf=(k:string)=>merged[k]===''||merged[k]===null||merged[k]===undefined?null:Number(merged[k]);
