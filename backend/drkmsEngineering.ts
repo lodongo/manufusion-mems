@@ -87,6 +87,7 @@ export const drkmsEngineeringRoutes={
     const visible=[] as Array<{documentId:string;title:string;classCode:string;subtypeCode:string;status:string}>;
     const targetAncestry=await nodePath(ctx.orgId,nodeId);
     for(const doc of docs){
+      if(str(doc.data.status)!=='effective' && str(doc.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin')continue;
       const applied=isObj(doc.data.scope)?str(doc.data.scope.nodeId):'';
       if(!applied||!targetAncestry.includes(applied))continue;
       if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,applied),await scopeOf(ctx)))continue;
