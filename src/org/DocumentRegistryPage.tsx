@@ -38,6 +38,7 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
   useEffect(() => { if (setup.data?.config.defaultReviewMonths) setReviewMonths(setup.data.config.defaultReviewMonths); }, [setup.data?.config.defaultReviewMonths]);
   const [settingsNotice, setSettingsNotice] = useState('');
   const [settingsError, setSettingsError] = useState('');
+  const [reviewing, setReviewing] = useState('');
   const [notice, setNotice] = useState('');
   const [createError, setCreateError] = useState('');
   const updateSettings = async () => {
@@ -51,6 +52,15 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
       setup.reload();
     } catch (err) { setSettingsError(err instanceof Error ? err.message : 'Unable to save settings.'); }
     finally { setConfigBusy(false); }
+  };
+  const submitReview = async (documentId:string) => {
+    setReviewing(documentId);setCreateError('');setNotice('');
+    try{
+      await callBackend('/api/org/drkms/documents/submit-review',{documentId});
+      setNotice('Draft submitted for review. Approval and publication remain disabled until workflow configuration is completed.');
+      reload();
+    }catch(error){setCreateError(error instanceof Error?error.message:'Could not submit for review.');}
+    finally{setReviewing('');}
   };
   const create = async () => {
     if (busy || title.trim().length < 3 || !scopeNodeId) return;
@@ -138,6 +148,7 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
               <p className='break-words font-medium text-white'>{d.title}</p>
               <p className='mt-1 break-all text-xs text-slate-400'>{d.classCode} · {d.documentId}</p>
               <p className='mt-1 text-xs text-slate-400'>Revision {d.revision} · {d.status}</p>
+              {d.status==='draft' && <button type='button' disabled={!!reviewing} onClick={()=>void submitReview(d.documentId)} className='mt-2 min-h-10 rounded-lg border border-blue-500 px-3 text-xs font-semibold text-blue-200 disabled:opacity-40'>{reviewing===d.documentId?'Submitting…':'Submit for review'}</button>}
             </div>
           </div>
         </div>)}
