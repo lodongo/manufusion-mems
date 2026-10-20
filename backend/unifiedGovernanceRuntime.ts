@@ -81,7 +81,7 @@ export async function enforceOrgTransactionGovernance(input: {
   // These three routes independently validate tenant, permission, policy and
   // eligible approvers; applying business-execution approval proof to them
   // would prevent submission/decision of the proof itself.
-  if(['org.governance.approvals.request','org.governance.approvals.decide',
+  if(['drkms.documents.publish', 'org.governance.approvals.request','org.governance.approvals.decide',
       'org.governance.approvals.my',
       'org.governance.config.propose','org.governance.config.review',
       'org.governance.config.list',

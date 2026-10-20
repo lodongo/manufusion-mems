@@ -65,6 +65,15 @@ import {
     type SecureContext,
 } from './guards';
 import { orgRoutes } from './org';
+import { drkmsRoutes } from './drkmsRegistry';
+import { drkmsFileRoutes } from './drkmsFiles';
+import { drkmsEngineeringRoutes } from './drkmsEngineering';
+import { drkmsSdsRoutes } from './drkmsSds';
+import { drkmsDigitalRoutes } from './drkmsDigital';
+import { drkmsTroubleshootingRoutes } from './drkmsTroubleshooting';
+import { drkmsPublishRoutes } from './drkmsPublish';
+import { drkmsReadRoutes } from './drkmsRead';
+import { drkmsIndustrialRoutes } from './drkmsIndustrialRoutes';
 import { accessReviewRoutes } from './accessReview';
 import { securityReviewRoutes } from './securityReview';
 import { healthRoutes } from './healthRoutes';
@@ -1519,6 +1528,15 @@ export const handler = router(recordWiredRoutes({
     ],
 
     ...orgRoutes,
+    ...drkmsRoutes,
+    ...drkmsFileRoutes,
+    ...drkmsEngineeringRoutes,
+    ...drkmsSdsRoutes,
+    ...drkmsDigitalRoutes,
+    ...drkmsTroubleshootingRoutes,
+    ...drkmsPublishRoutes,
+    ...drkmsReadRoutes,
+    ...drkmsIndustrialRoutes,
     ...accessReviewRoutes,
     ...securityReviewRoutes,
     ...healthRoutes,

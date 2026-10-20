@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {matchingModel} from './drkmsApplicability';
+const a={categoryCode:'CAT',subcategoryCode:'SUB',classCode:'CLS'};
+test('matching equipment classes inherit the model document',()=>assert.equal(matchingModel(a,{...a}),true));
+test('different category cannot inherit',()=>assert.equal(matchingModel(a,{...a,categoryCode:'OTHER'}),false));
+test('different subcategory cannot inherit',()=>assert.equal(matchingModel(a,{...a,subcategoryCode:'OTHER'}),false));
+test('different asset class cannot inherit',()=>assert.equal(matchingModel(a,{...a,classCode:'OTHER'}),false));
+test('no generic match when class missing',()=>assert.equal(matchingModel({categoryCode:'CAT',subcategoryCode:'SUB',classCode:''},a),false));
+test('OEM maker and model constrain matching when specified',()=>assert.equal(matchingModel({...a,manufacturer:'Krones',model:'X'}, {...a,manufacturer:'KHS',model:'X'}),false));

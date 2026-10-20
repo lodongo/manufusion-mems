@@ -1,4 +1,5 @@
 import { INDUSTRY_CATEGORIES, INDUSTRY_SUBCATEGORIES } from './industryCatalog';
+import { DOCUMENT_METADATA_LISTS } from './drkmsDefaults';
 // Default reference data for MEMS. Loaded into Firestore by the super admin.
 
 // [name, iso2, iso3, dialCode, capital, region, currencyCode, timezone, languages]
@@ -196,6 +197,7 @@ function metaList(key: string, title: string, appliesTo: string, labels: string[
 }
 
 export const METADATA_LISTS: MetaListDefault[] = [
+    ...DOCUMENT_METADATA_LISTS,
     {
         key: 'industryCategories', title: 'Industry categories — ISIC Rev.5 section-aligned',
         appliesTo: 'organization', items: INDUSTRY_CATEGORIES,
