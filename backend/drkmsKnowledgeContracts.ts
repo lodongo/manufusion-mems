@@ -10,9 +10,10 @@ export const FORM_FIELD_TYPES = ['text','number','date','datetime','boolean','se
 export type ProposedFormField = {code:string;label:string;type:typeof FORM_FIELD_TYPES[number];required:boolean;options?:string[]};
 export type AiProposal = {kind:'form'|'ocr'|'work_instruction'|'rca_analysis';sourceDocumentIds:string[];fields?:ProposedFormField[];extractedText?:string;confidence?:number;humanReviewStatus:'pending';automatedExecution:false};
 export function validateAiProposal(value:AiProposal):boolean{
- return value.humanReviewStatus==='pending'&&value.automatedExecution===false&&
- Array.isArray(value.sourceDocumentIds)&&value.sourceDocumentIds.length>0&&
+ return !!value && ['form','ocr','work_instruction','rca_analysis'].includes(value.kind)&&value.humanReviewStatus==='pending'&&value.automatedExecution===false&&
+ Array.isArray(value.sourceDocumentIds)&&value.sourceDocumentIds.length>0&&value.sourceDocumentIds.length<=25&&
  value.sourceDocumentIds.every(id=>/^[a-f0-9]{20}$/.test(id))&&
+ (value.fields===undefined || (Array.isArray(value.fields)&&value.fields.length<=150))&&
  (value.fields??[]).every(f=>/^[A-Z][A-Z0-9_]{1,30}$/.test(f.code)&&f.label.length>0&&FORM_FIELD_TYPES.some(t=>t===f.type));
 }
 export function safeSdsUrl(input:string):boolean{
