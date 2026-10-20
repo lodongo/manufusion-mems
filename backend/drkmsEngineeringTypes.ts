@@ -1,6 +1,9 @@
 /** Globally codified engineering knowledge subtypes. Each is a governed document class, not a new asset record. */
 export type EngineeringDocType = {code:string;label:string;parentClass:string;source:'local'|'oem'|'either';reviewRequired:true};
 export const ENGINEERING_DOC_TYPES: EngineeringDocType[] = [
+  {code:'SDS',label:'Safety Data Sheet / MSDS',parentClass:'EXT',source:'either',reviewRequired:true},
+  {code:'DYN-FRM',label:'Controlled dynamic digital form',parentClass:'FRM',source:'local',reviewRequired:true},
+  {code:'OCR-SRC',label:'OCR transcription source record',parentClass:'REC',source:'either',reviewRequired:true},
   {
     "code": "WI-OPS",
     "label": "Operating work instruction",
