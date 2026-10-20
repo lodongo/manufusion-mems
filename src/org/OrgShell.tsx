@@ -94,7 +94,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
     },
     {
         title: 'Documents & Knowledge',
-        items: [{ key: 'document_registry', label: 'Document registry', Icon: BookOpen, perm: 'ADM.roles' }],
+        items: [{ key: 'document_registry', label: 'Document registry', Icon: BookOpen, perm: 'ADM.document_registry' }],
     },
     {
         title: 'People and access',
@@ -217,7 +217,7 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             content = <OrgOverview ctx={data} hasBranding={!!session.organization?.branding?.preset && !!session.organization?.branding?.displayName} />;
             break;
         case 'document_registry':
-            content = <DocumentRegistryPage />;
+            content = <DocumentRegistryPage canConfigure={data.role === 'org_super_admin' || hasPerm(data.permissions, 'ADM.document_config')} />;
             break;
         case 'users':
             content = <OrgUsers id={id} myUid={session.user.uid} myRole={data.role} canRoles={hasPerm(data.permissions, 'ADM.roles')} />;
