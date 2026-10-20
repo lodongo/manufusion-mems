@@ -36,6 +36,26 @@ export const drkmsDigitalRoutes={
    return {document:entry,stagingEnabled:false};
   }),
  ],
+ 'POST /api/org/drkms/rca/evidence':[
+  orgRoute('drkms.rca.evidence','ADM.document_registry',async ctx=>{
+   const documentId=str(ctx.body.documentId);
+   if(!idOk(documentId))throw new HttpError(400,'Invalid RCA document.');
+   const doc=await getDoc(docs(ctx.orgId,documentId));
+   if(!doc||str(doc.data.subtypeCode)!=='RCA'||str(doc.data.status)!=='draft')
+     throw new HttpError(409,'Evidence can only be appended to a draft RCA.');
+   if(str(doc.data.createdBy)!==ctx.uid)throw new HttpError(403,'Only the responsible investigator can register evidence.');
+   const type=str(ctx.body.type),description=str(ctx.body.description).trim(),reference=str(ctx.body.reference).trim();
+   if(!['observation','inspection','measurement','interview','maintenance_record','alarm','photo_reference','manual_reference'].includes(type)
+      ||description.length<10||description.length>4000||reference.length>200)
+     throw new HttpError(400,'Provide a valid evidence type, description and reference.');
+   const id=randomId(10);
+   const evidence={id,documentId,tenantId:ctx.orgId,type,description,reference,createdBy:ctx.uid,createdAt:nowIso(),verificationStatus:'unverified'};
+   if(!(await writeDoc(`${docs(ctx.orgId,documentId)}/evidence/${id}`,evidence,{exists:false})))
+      throw new HttpError(409,'Evidence identifier conflict.');
+   await record(ctx,'drkms.rca.evidence',documentId,id);
+   return {evidenceId:id,verificationStatus:'unverified'};
+  }),
+ ],
  'POST /api/org/drkms/rca/ai-analysis':[
   orgRoute('drkms.rca.ai_analysis','ADM.document_registry',async ctx=>{
    const documentId=str(ctx.body.documentId);
