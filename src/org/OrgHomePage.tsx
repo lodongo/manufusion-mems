@@ -268,8 +268,8 @@ function MenuSection({ menu, open, activePath, search, onToggle, onSelect, favor
             </button>
             {expanded && (
                 <div className='ml-5 border-l border-slate-700 py-1 pl-3'>
-                    <button onClick={() => onSelect(`module/${menu.module.code}`)} className={`mb-0.5 flex min-h-11 w-full items-center rounded-lg px-3 text-left text-xs ${activePath === `module/${menu.module.code}` ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-400 hover:bg-slate-800'}`}>
-                        Module overview
+                    <button onClick={() => onSelect(menu.module.code==='DOC'?'doc_register':`module/${menu.module.code}`)} className={`mb-0.5 flex min-h-11 w-full items-center rounded-lg px-3 text-left text-xs ${activePath === `module/${menu.module.code}` ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-400 hover:bg-slate-800'}`}>
+                        {menu.module.code==='DOC'?'Document register':'Module overview'}
                     </button>
                     {menu.module.code === 'FIN' && <FinEntityMenu onPick={() => onSelect(activePath.startsWith('fin_') ? activePath.split('/')[0] : 'fin_gl')} />}
                     {links.map(link => (
