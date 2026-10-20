@@ -16,6 +16,12 @@ export function releaseManifest(documentId:string,revision:string,files:Array<{f
   .sort((a,b)=>a.fileId.localeCompare(b.fileId));
  return createHash('sha256').update(JSON.stringify({documentId,revision,files:normalized})).digest('hex');
 }
+export function publicationFingerprint(documentId:string,revision:string,
+ files:Array<{fileId:string;sha256:string;mime:string;bytes:number}>,
+ metadata:{title:string;classCode:string;subtypeCode:string;scopeNodeId:string;verifiedBy:string;verifiedAt:string;updatedAt:string}):string{
+ const sources=releaseManifest(documentId,revision,files);
+ return createHash('sha256').update(JSON.stringify({documentId,revision,sources,metadata})).digest('hex');
+}
 export const drkmsPublishRoutes={
  'POST /api/org/drkms/documents/publish':[
   orgRoute('drkms.documents.publish','ADM.document_publish',async ctx=>{
@@ -46,7 +52,12 @@ export const drkmsPublishRoutes={
    if(sources.some(f=>f.scanStatus!=='clean'||f.availability!=='verified'||!/^[a-f0-9]{64}$/.test(f.sha256)
      ||!Number.isSafeInteger(f.bytes)||f.bytes<=0))
     throw new HttpError(409,'All source files must first pass independent malware scanning and verification.');
-   const fingerprint=releaseManifest(documentId,revision,sources);
+   const metadata={
+    title:str(doc.data.title),classCode:str(doc.data.classCode),subtypeCode:str(doc.data.subtypeCode),
+    scopeNodeId:nodeId,verifiedBy:str(doc.data.verifiedBy),verifiedAt:str(doc.data.verifiedAt),
+    updatedAt:str(doc.data.updatedAt),
+   };
+   const fingerprint=publicationFingerprint(documentId,revision,sources,metadata);
    if(fingerprint!==contentFingerprint)throw new HttpError(409,'Document source changed after approval was requested.');
    const installed=wiredTransactionInventory().filter(r=>r.name==='drkms.documents.publish');
    if(installed.length!==1||!installed[0].code)throw new HttpError(409,'Publication transaction not installed.');
