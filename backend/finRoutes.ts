@@ -2,6 +2,7 @@ import {DETERMINATION_EVENTS,resolveAccountRule,validateRuleDraft,type AccountRu
 import {buildGlTransactionVariants} from './finTransactionVariants';
 import {registerGlContracts} from './finTransactionContracts';
 import { postingRoles, suggestRoleAccounts } from './finPostingCatalogue';
+import { ccTransactionChoices } from './glTransactionService';
 import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, updateFields, writeDoc, type Fields } from './core';
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, orgUsers, record } from './org';
@@ -72,7 +73,7 @@ import {
 // with the approving right approves it; every proposal, decision and change is audited.
 // ---------------------------------------------------------------------------
 
-const ALL_FIN = ['FIN.view', 'FIN.gl.view', 'FIN.gl.manage', 'FIN.gl.approve', 'FIN.setup.manage', 'FIN.setup.approve', 'FIN.calendar.manage', 'FIN.calendar.approve', 'FIN.mapping.manage', 'FIN.mapping.approve', 'FIN.tax.manage', 'FIN.tax.approve', 'FIN.cc.manage', 'FIN.cc.approve', 'FIN.journal.view', 'FIN.close.run', 'FIN.close.approve', 'FIN.post.approve'];
+export const ALL_FIN = ['FIN.view', 'FIN.gl.view', 'FIN.gl.manage', 'FIN.gl.approve', 'FIN.setup.manage', 'FIN.setup.approve', 'FIN.calendar.manage', 'FIN.calendar.approve', 'FIN.mapping.manage', 'FIN.mapping.approve', 'FIN.tax.manage', 'FIN.tax.approve', 'FIN.cc.manage', 'FIN.cc.approve', 'FIN.gltxn.manage', 'FIN.gltxn.approve', 'FIN.journal.view', 'FIN.close.run', 'FIN.close.approve', 'FIN.post.approve'];
 
 interface Env {
     units: Map<string, Unit>;
@@ -524,6 +525,7 @@ registerHandler('tax.save', {
     },
 });
 
+const TXN_CODE_RE = /^[A-Z]{2,4}-[A-Z0-9]{3,4}-[A-Z0-9]{2,4}$/;
 registerHandler('cc.config', {
     label: 'Cost center finance settings',
     approvePerm: 'FIN.cc.approve',
@@ -545,8 +547,10 @@ registerHandler('cc.config', {
             if (!a || a.status !== 'active' || !a.postable) throw new HttpError(409, `${g} is not an active account in the chart.`);
         }
         const cur = await getDoc(P(ctx.orgId).cc(ccId));
+        // Older requests carry no switched-off transactions: they keep what is approved.
+        const txnOff = Array.isArray(p.txnOff) ? strs(p.txnOff).filter((c) => TXN_CODE_RE.test(c)) : strs(cur?.data.txnOff);
         const version = (Number(cur?.data.version) || 0) + 1;
-        await writeDoc(P(ctx.orgId).cc(ccId), { leId, ccId, status, allowedGl: allowed, importedFrom: str(p.importedFrom), version, approvedBy: ctx.uid, approvedAt: nowIso(), proposedBy: str(req.makerUid) });
+        await writeDoc(P(ctx.orgId).cc(ccId), { leId, ccId, status, allowedGl: allowed, txnOff, importedFrom: str(p.importedFrom), version, approvedBy: ctx.uid, approvedAt: nowIso(), proposedBy: str(req.makerUid) });
         return { version };
     },
 });
@@ -1129,6 +1133,8 @@ export const finRoutes = {
                 statusLabel: CC_STATUS[f.status],
                 statuses: CC_STATUS,
                 allowedGl: f.allowedGl.map((c) => ({ code: c, name: chart.get(c)?.name ?? '', status: chart.get(c)?.status ?? 'missing' })),
+                txnOff: f.txnOff,
+                txnChoices: await ccTransactionChoices(ctx.orgId, e.le.id),
                 choosable: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && a.statement === 'PL' && !sys.has(a.code) && (entity.doc?.data.glScopeConfigured !== true || strs(entity.doc.data.allowedGl).includes(a.code))).map((a) => ({ code: a.code, name: a.name, classCode: a.classCode, className: a.className, categoryCode: a.categoryCode, categoryName: a.categoryName, groupCode: a.groupCode, groupName: a.groupName })),
                 importFrom: others.filter((x) => str(x.data.leId) === e.le.id && x.id !== ccId && strs(x.data.allowedGl).length).map((x) => ({ id: x.id, code: e.units.get(x.id)?.code ?? x.id, name: e.units.get(x.id)?.name ?? '', count: strs(x.data.allowedGl).length })),
                 version: f.version,
@@ -1167,15 +1173,25 @@ export const finRoutes = {
             }
             const status = str(ctx.body.status) || cur.status;
             if (!CC_STATUS[status]) throw new HttpError(400, 'Choose the cost center status.');
-            if (status === cur.status && JSON.stringify([...allowed].sort()) === JSON.stringify([...cur.allowedGl].sort())) throw new HttpError(400, 'Nothing has changed.');
+            // Transactions switched off for this cost center: only codes the legal entity's GL accounts can take.
+            let txnOff = cur.txnOff;
+            if (Array.isArray(ctx.body.txnOff)) {
+                const known = new Set((await ccTransactionChoices(ctx.orgId, e.le.id)).map((x) => x.code));
+                txnOff = Array.from(new Set(strs(ctx.body.txnOff))).slice(0, 300);
+                for (const c of txnOff) if (!TXN_CODE_RE.test(c) || !known.has(c)) throw new HttpError(400, `${c} is not a transaction used by the GL accounts of ${e.le.code}.`);
+            }
+            const sameTxn = JSON.stringify([...txnOff].sort()) === JSON.stringify([...cur.txnOff].sort());
+            if (status === cur.status && sameTxn && JSON.stringify([...allowed].sort()) === JSON.stringify([...cur.allowedGl].sort())) throw new HttpError(400, 'Nothing has changed.');
+            const offAdded = txnOff.filter((c) => !cur.txnOff.includes(c));
+            const offRemoved = cur.txnOff.filter((c) => !txnOff.includes(c));
             const added = allowed.filter((g) => !cur.allowedGl.includes(g));
             const removed = cur.allowedGl.filter((g) => !allowed.includes(g));
             return createRequest(ctx, {
                 leId: e.le.id,
                 type: 'cc.config',
                 title: `${cc.code} ${cc.name}: ${status !== cur.status ? CC_STATUS[status] : 'account list'}${fromCc ? ` (imported from ${e.units.get(fromCc)?.code ?? fromCc})` : ''}`,
-                summary: `${status !== cur.status ? `Status ${CC_STATUS[cur.status]} to ${CC_STATUS[status]}. ` : ''}${added.length ? `Add ${added.join(', ')}. ` : ''}${removed.length ? `Remove ${removed.join(', ')}. ` : ''}${allowed.length ? `${allowed.length} account(s) allowed.` : 'Every open account allowed.'}`,
-                payload: { ccId, status, allowedGl: allowed, importedFrom: fromCc },
+                summary: `${status !== cur.status ? `Status ${CC_STATUS[cur.status]} to ${CC_STATUS[status]}. ` : ''}${added.length ? `Add ${added.join(', ')}. ` : ''}${removed.length ? `Remove ${removed.join(', ')}. ` : ''}${allowed.length ? `${allowed.length} account(s) allowed.` : 'Every open account allowed.'}${offAdded.length ? ` Switch off ${offAdded.join(', ')}.` : ''}${offRemoved.length ? ` Switch on ${offRemoved.join(', ')}.` : ''}`,
+                payload: { ccId, status, allowedGl: allowed, txnOff, importedFrom: fromCc },
                 reason,
                 scopeKey: `cc_${ccId}`,
             });

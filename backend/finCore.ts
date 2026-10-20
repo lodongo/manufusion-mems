@@ -1,5 +1,7 @@
 import {resolveAccountRule,validateRuleDraft,type AccountRule,type DeterminationContext} from './finAccountRules';
 import { createHash } from 'crypto';
+import { POSTING_EVENTS } from './finPostingCatalogue';
+import { removedCodes, type Overrides, type Side } from './glTransactionMap';
 import {
     DOCUMENT_NAME_ROOT,
     FIRESTORE_BASE,
@@ -75,6 +77,7 @@ export const P = (orgId: string) => {
         mapping: (le: string) => `${r}/fin_mapping/${le}`,
         taxes: (le: string) => `${r}/fin_taxes/${le}`,
         cc: (cc: string) => `${r}/fin_cc/${cc}`,
+        gltxn: (le: string) => `${r}/fin_gltxn/${le}`,
         ccs: `${r}/fin_cc`,
         journal: (id: string) => `${r}/fin_journal/${id}`,
         journals: `${r}/fin_journal`,
@@ -605,11 +608,13 @@ export function roleAccount(m: Mapping, role: string, categoryCode = '', context
 export interface CcFin {
     status: string;
     allowedGl: string[];
+    /** Transaction codes switched off for this cost center (approved with FIN.cc.approve; enforced at posting). */
+    txnOff: string[];
     version: number;
 }
 export async function ccFinOf(orgId: string, ccId: string): Promise<CcFin> {
     const d = await getDoc(P(orgId).cc(ccId));
-    return { status: str(d?.data.status) || 'open', allowedGl: strs(d?.data.allowedGl), version: Number(d?.data.version) || 0 };
+    return { status: str(d?.data.status) || 'open', allowedGl: strs(d?.data.allowedGl), txnOff: strs(d?.data.txnOff), version: Number(d?.data.version) || 0 };
 }
 export const CC_STATUS: Record<string, string> = { open: 'Open for posting', blocked: 'Blocked for posting', closed: 'Closed' };
 
@@ -710,6 +715,35 @@ export async function financeState(orgId: string, leId: string): Promise<FinStat
 
 const PERIOD_END_TYPES = ['INV_RECON', 'REALLOC', 'YE_CLOSE'];
 
+/** MEMS-wide GL account transaction settings (MEMS administration; super admin only). */
+export const MEMS_GLTXN_DOC = 'platform_config/gl_transaction_map';
+
+/** Approved override items ({account, add, remove}) of a document, as a lookup by account. */
+export function overridesOf(raw: unknown): Overrides {
+    const out: Overrides = {};
+    for (const it of Array.isArray(raw) ? raw : []) {
+        const x = o(it);
+        const account = str(x.account);
+        if (!account) continue;
+        out[account] = {
+            add: objs(x.add).map((h) => ({ code: str(h.code), side: (['Dr', 'Cr', 'Dr/Cr'].includes(str(h.side)) ? str(h.side) : 'Dr/Cr') as Side })).filter((h) => h.code),
+            remove: strs(x.remove),
+        };
+    }
+    return out;
+}
+export function overridesToItems(ov: Overrides): Obj[] {
+    return Object.entries(ov).sort(([a], [b]) => a.localeCompare(b)).map(([account, v]) => ({ account, add: v.add as unknown as Obj[], remove: v.remove } as unknown as Obj));
+}
+
+/** Explicit transaction removals per account: MEMS default changes, then the legal entity's approved changes. */
+async function glTxnRemovals(orgId: string, leId: string): Promise<(account: string) => Set<string>> {
+    const [mems, le] = await Promise.all([getDoc(MEMS_GLTXN_DOC), getDoc(P(orgId).gltxn(leId))]);
+    const a = overridesOf(mems?.data.items);
+    const b = overridesOf(le?.data.items);
+    return (account: string) => removedCodes(account, a, b);
+}
+
 /** Validates and posts one journal entry with its balances (and stock valuation) in a single atomic commit. */
 export async function post(ctx: OrgContext, input: PostInput): Promise<Posted> {
     const keyId = hashKey(`${input.sourceKey}`);
@@ -757,9 +791,12 @@ async function postOnce(ctx: OrgContext, input: PostInput, keyId: string): Promi
 
     // Lines
     if (!input.lines.length || input.lines.length > 300) throw new HttpError(400, 'A journal entry needs 1 to 300 lines.');
-    const map = await mappingOf(orgId, input.leId);
+    const [map, glTxn] = await Promise.all([mappingOf(orgId, input.leId), glTxnRemovals(orgId, input.leId)]);
     const sys = systemAccounts(map);
     const ccCache = new Map<string, CcFin>();
+    // Transactions that may post this entry (from the posting catalogue). An account or cost center that has had all of
+    // them explicitly removed or switched off (approved changes) refuses the line. Unknown types are not restricted.
+    const txnCodes = POSTING_EVENTS.find((x) => x.event === input.type)?.codes ?? [];
     const lines: Obj[] = [];
     let dr = 0;
     let cr = 0;
@@ -771,6 +808,10 @@ async function postOnce(ctx: OrgContext, input: PostInput, keyId: string): Promi
         if (acc.status !== 'active') throw new HttpError(409, `GL account ${acc.code} ${acc.name} is ${acc.status} in ${le.code}.`);
         if (entity.doc?.data.glScopeConfigured === true && !strs(entity.doc.data.allowedGl).includes(acc.code)) throw new HttpError(409, `GL account ${acc.code} is not included in the approved account selection for ${le.code}.`);
         if (!acc.postable) throw new HttpError(409, `GL account ${acc.code} ${acc.name} is a heading and cannot take postings.`);
+        if (txnCodes.length) {
+            const removed = glTxn(acc.code);
+            if (txnCodes.every((c) => removed.has(c))) throw new HttpError(409, `GL account ${acc.code} ${acc.name} is not open to ${txnCodes.join(' / ')} in ${le.code} (approved GL account transaction settings).`);
+        }
         let ccCode = '';
         let ccName = '';
         if (l.ccId) {
@@ -782,6 +823,7 @@ async function postOnce(ctx: OrgContext, input: PostInput, keyId: string): Promi
             ccCache.set(cc.id, f);
             if (f.status !== 'open') throw new HttpError(409, `Cost center ${cc.code} ${cc.name} is ${CC_STATUS[f.status] ?? f.status}.`);
             if (f.allowedGl.length && acc.statement === 'PL' && !sys.has(acc.code) && !f.allowedGl.includes(acc.code)) throw new HttpError(409, `GL account ${acc.code} is not allowed on cost center ${cc.code}.`);
+            if (txnCodes.length && txnCodes.every((c) => f.txnOff.includes(c))) throw new HttpError(409, `${txnCodes.join(' / ')} is switched off for cost center ${cc.code} ${cc.name}.`);
             ccCode = cc.code;
             ccName = cc.name;
         } else if (acc.statement === 'PL') throw new HttpError(409, `Profit and loss account ${acc.code} needs a cost center.`);

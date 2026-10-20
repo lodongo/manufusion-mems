@@ -91,6 +91,12 @@ const AREAS: Record<string, string> = {
     'ENT:Legal entity finance:VW,ED',
     'GLT:GL transaction catalogue:VW,SM',
     'RPT:Financial statements:VW,RP,XP',
+    'ACR:Accruals, prepayments and provisions:VW,CR,SB,AP,PS,RV',
+    'TRS:Treasury, borrowings and investments:VW,CR,SB,AP,PS,RV',
+    'LSE:Leases:VW,CR,SB,AP,PS,RV',
+    'EQT:Equity and capital:VW,CR,SB,AP,PS',
+    'MEM:Memorandum and statistical entries:VW,CR,PS,RV',
+    'GTX:GL account transactions:VW,SB,AP',
   ].join('|'),
   INV: [
     'MAT:Material master:VW,CR,ED,SB,AP,RJ,EX,BL,DA',

@@ -87,6 +87,8 @@ const PATH_RULES: Rule[] = [
     [/^org\/fin\/stock\//, 'FIN', 'OPN'],
     [/^org\/fin\/(entities|le\/)/, 'FIN', 'ENT'],
     [/^org\/fin\/transactions\//, 'FIN', 'GLT'],
+    [/^org\/fin\/gltxn\//, 'FIN', 'GTX'],
+    [/^org\/transactions\/access\//, 'ADM', 'SEC'],
     // ----- Inventory and warehousing -----
     [/^org\/inventory\/stocktake\//, 'INV', 'CNT'],
     [/^org\/inventory\/material\/bin\//, 'WHS', 'BIN'],
@@ -167,6 +169,7 @@ const PATH_RULES: Rule[] = [
     [/^admin\/logs$/, 'PLT', 'AUD', 'VW'],
     [/^admin\/(health|dashboard)$/, 'PLT', 'HLT', 'VW'],
     [/^admin\/transactions\//, 'PLT', 'TRX'],
+    [/^admin\/fin\/gltxn\//, 'PLT', 'FNM'],
     [/^admin\/billing\//, 'PLT', 'BIL'],
     [/^admin\/(settings|site)\//, 'PLT', 'SET'],
     [/^admin\/skills\//, 'PLT', 'SKL'],

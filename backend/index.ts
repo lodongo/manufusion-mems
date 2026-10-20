@@ -104,6 +104,7 @@ import { purchaseOrderRoutes } from './purchaseOrders';
 import { poFinanceRoutes } from './poFinance';
 import { procurementDashboardRoutes } from './procurementDashboard';
 import { finRoutes } from './finRoutes';
+import { glTransactionRoutes } from './glTransactionRoutes';
 import { finLedgerRoutes } from './finLedger';
 import { finOpsRoutes } from './finOps';
 import { vendorRoutes } from './vendors';
@@ -1544,6 +1545,7 @@ export const handler = router(recordWiredRoutes({
     ...poFinanceRoutes,
     ...procurementDashboardRoutes,
     ...finRoutes,
+    ...glTransactionRoutes,
     ...finLedgerRoutes,
     ...finOpsRoutes,
     ...vendorRoutes,

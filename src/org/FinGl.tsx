@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { ArrowLeft, Check, ChevronRight, FolderTree, Layers, ListChecks, Lock, Search } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import FinEntityAccounts from './FinEntityAccounts';
+import FinGlTransactions from './FinGlTransactions';
 import FinAccountRuleManager from './FinAccountRuleManager';
 import FinGranularTransactionCatalog,{type GranularVariant} from './FinGranularTransactionCatalog';
 import { Alert, SelectField } from '../components/ui';
@@ -511,20 +512,20 @@ function Mapping({ le }: { le: Entity }) {
 
 export default function FinGl({ tab, code }: { tab?: string; code?: string }) {
     const ent = useEntity();
-    const t = tab === 'browse' || tab === 'mapping' || tab === 'account' || tab === 'scope' ? tab : 'chart';
+    const t = tab === 'browse' || tab === 'mapping' || tab === 'account' || tab === 'scope' || tab === 'transactions' ? tab : 'chart';
     const account = t === 'account' && code ? decodeURIComponent(code) : '';
-    type Tab = 'chart' | 'browse' | 'mapping' | 'scope';
+    type Tab = 'chart' | 'browse' | 'mapping' | 'scope' | 'transactions';
     return (
         <FinScreen
             title={account ? `GL account ${account}` : 'GL Accounts'}
             subtitle={account ? 'All parameters, status and movements' : 'Chart of accounts, MEMS GL master and mapping'}
             onBack={() => (account ? window.history.back() : go('module/FIN'))}
             entityState={ent}
-            nav={account ? undefined : [{ value: 'chart', label: 'Chart of accounts', icon: ListChecks }, { value: 'scope', label: 'Legal entity selection', icon: ListChecks }, { value: 'browse', label: 'Browse MEMS master', icon: FolderTree }, { value: 'mapping', label: 'GL account mapping', icon: Layers }]}
+            nav={account ? undefined : [{ value: 'chart', label: 'Chart of accounts', icon: ListChecks }, { value: 'scope', label: 'Legal entity selection', icon: ListChecks }, { value: 'browse', label: 'Browse MEMS master', icon: FolderTree }, { value: 'mapping', label: 'GL account mapping', icon: Layers }, { value: 'transactions', label: 'Account transactions', icon: Layers }]}
             navValue={(account ? undefined : t) as Tab | undefined}
             onNav={(v: Tab) => go(v === 'chart' ? 'fin_gl' : `fin_gl/${v}`)}
         >
-            {(le) => (account ? <AccountView le={le} code={account} /> : t === 'browse' ? <Browse le={le} /> : t === 'scope' ? <FinEntityAccounts le={le} entities={ent.entities ?? []} /> : t === 'mapping' ? <Mapping le={le} /> : <Chart le={le} entities={ent.entities ?? []} />)}
+            {(le) => (account ? <AccountView le={le} code={account} /> : t === 'browse' ? <Browse le={le} /> : t === 'scope' ? <FinEntityAccounts le={le} entities={ent.entities ?? []} /> : t === 'mapping' ? <Mapping le={le} /> : t === 'transactions' ? <FinGlTransactions le={le} /> : <Chart le={le} entities={ent.entities ?? []} />)}
         </FinScreen>
     );
 }
