@@ -146,8 +146,8 @@ export const drkmsRoutes = {
         orgRoute('drkms.documents.review_decision', 'ADM.document_review', async ctx => {
             const id = str(ctx.body.documentId), decision = str(ctx.body.decision);
             const reason = str(ctx.body.reason).trim();
-            if (!validId(id) || !['return','reject'].includes(decision))
-                throw new HttpError(400, 'Only return or rejection decisions are currently enabled.');
+            if (!validId(id) || !['return','reject','verify'].includes(decision))
+                throw new HttpError(400, 'Choose technical verification, return or rejection.');
             if (reason.length < 10 || reason.length > 2000)
                 throw new HttpError(400, 'Provide a meaningful review reason (10–2000 characters).');
             const path = `${base(ctx.orgId)}/${id}`;
@@ -163,8 +163,12 @@ export const drkmsRoutes = {
             const {canAt,scopeOf,nodePath} = await import('./access');
             if (!canAt(ctx, 'ADM.document_review', await nodePath(ctx.orgId,nodeId), await scopeOf(ctx)))
                 throw new HttpError(403, 'Reviewer has no authority at this location.');
+            if (decision === 'verify' && str(doc.data.representation) === 'digital_structured' &&
+                str(doc.data.subtypeCode) === 'RCA')
+                throw new HttpError(409, 'Digital RCAs require evidence and causal verification before technical approval can be enabled.');
             const revision = {
-                ...doc.data, status: decision === 'return' ? 'draft' : 'rejected',
+                ...doc.data, status: decision === 'return' ? 'draft' : decision === 'verify' ? 'technical_verified' : 'rejected',
+                ...(decision === 'verify' ? { verifiedBy:ctx.uid, verifiedAt:nowIso(), verified:true } : { verified:false, verifiedBy:'' }),
                 reviewedBy: ctx.uid, reviewedAt: nowIso(), reviewDecision: decision,
                 reviewReason: reason, updatedAt: nowIso(),
             };
