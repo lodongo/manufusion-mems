@@ -147,7 +147,7 @@ export default function AdminShell({
                 <p className='mb-3 text-lg font-semibold tracking-wide text-white'>{config.brandName} Admin</p>
                 <UserChip session={session} roleLabel={ROLE_LABELS[role] ?? role} onClick={() => go('profile')} />
             </div>
-            <SideNav groups={groups} active={activeKey} onSelect={go} />
+            <SideNav groups={groups} active={activeKey} onSelect={go} collapsible />
             <div className='border-t border-slate-800 p-2'>
                 <button onClick={onSignOut} className='flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 active:bg-slate-800'>
                     <LogOut className='h-[18px] w-[18px]' />

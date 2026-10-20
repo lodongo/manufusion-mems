@@ -79,7 +79,7 @@ const SENSITIVE_MNT = new Set(['MNT.WO.safety', 'MNT.WO.release', 'MNT.WO.verify
 
 /** Permissions of every module that has working screens or actions. Nothing else is ever offered. */
 export const BUILT_PERMISSIONS: Record<string, PermDef[]> = {
-    INV: [p('INV.view', 'Inventory: view'), p('INV.edit', 'Inventory: maintain materials and settings'), p('INV.issue', 'Inventory: issue stock to a cost center or work order (posts to the ledger when finance is live)', true), ...warehouse('INV'), ...STOCK_TAKE],
+    INV: [p('INV.view', 'Inventory: view'), p('INV.edit', 'Inventory: maintain materials and settings'), p('INV.issue', 'Inventory: issue stock to a cost center or work order (posts to the ledger when finance is live)', true), p('INV.mrp.view', 'MRP replenishment requests: view requests and the MRP run log'), p('INV.mrp.run', 'MRP replenishment requests: run MRP on demand for a warehouse or material'), p('INV.mrp.verify', 'MRP replenishment requests: verify (becomes the requester, sent for manager approval) or dismiss', true), ...warehouse('INV'), ...STOCK_TAKE],
     WHS: [p('WHS.view', 'Warehousing: view'), ...warehouse('WHS')],
     MNT: MNT_ACTIVITIES.map((a) => p(a.key, a.label, SENSITIVE_MNT.has(a.key))),
     AST: [
@@ -273,6 +273,8 @@ export const SOD_RULES: SodRule[] = [
     { id: 'fin-close-run-approve', a: 'FIN.close.run', b: 'FIN.close.approve', why: 'The person who runs period-end must not approve closing or locking.' },
     { id: 'fin-close-run-post', a: 'FIN.close.run', b: 'FIN.post.approve', why: 'The person who proposes reconciliation adjustments, reallocations and valuations must not approve them.' },
     { id: 'fin-mapping-post', a: 'FIN.mapping.manage', b: 'FIN.post.approve', why: 'The person who decides which accounts postings go to must not approve postings.' },
+    { id: 'mrp-verify-acknowledge', a: 'INV.mrp.verify', b: 'PRC.req.acknowledge', why: 'The planner who confirms an automatic replenishment request must not also accept it for procurement.' },
+    { id: 'mrp-verify-po-approve', a: 'INV.mrp.verify', b: 'PRC.po.approve', why: 'The planner who confirms what to buy must not also approve the purchase order for it.' },
     { id: 'inv-issue-post', a: 'INV.issue', b: 'FIN.post.approve', why: 'The person who issues stock must not approve stock valuations and adjustments.' },
     { id: 'inv-issue-verify', a: 'INV.issue', b: 'INV_ST_020', why: 'The person who issues stock must not verify stock counts.' },
 ];
@@ -371,6 +373,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     T('fin_mapping_approver', 'FIN', 'GL Mapping Approver', 'Approves the account mapping, GL account transactions and cost center finance settings.', ['FIN.view', 'FIN.gl.view', 'FIN.mapping.approve', 'FIN.cc.approve', 'FIN.gltxn.approve']),
     T('fin_accountant', 'FIN', 'Accountant (Period-end)', 'Runs period-end: trial balance, reconciliation, reallocation and opening stock valuation; proposes close and lock. Cannot approve them.', ['FIN.view', 'FIN.gl.view', 'FIN.journal.view', 'FIN.close.run']),
     T('fin_controller', 'FIN', 'Financial Controller', 'Approves reconciliation adjustments, reallocations, opening stock valuation, period close and lock and the year-end close. Cannot run them.', ['FIN.view', 'FIN.gl.view', 'FIN.journal.view', 'FIN.close.approve', 'FIN.post.approve']),
+    T('inv_mrp_planner', 'INV', 'Material Planner (MRP)', 'Reviews MRP replenishment requests for warehouse materials with a Min/max or Reorder point policy, verifies them (they then go to the manager for approval) or dismisses them, and runs MRP on demand. Cannot acknowledge requirements or approve orders.', ['INV.view', 'INV.mrp.view', 'INV.mrp.run', 'INV.mrp.verify', 'PRC.view']),
+    T('inv_mrp_viewer', 'INV', 'MRP Viewer', 'Read-only view of MRP replenishment requests and the MRP run log.', ['INV.view', 'INV.mrp.view']),
     T('inv_issuer', 'INV', 'Stores Issuer', 'Issues stock from warehouses to cost centers and work orders. Cannot approve postings or verify counts.', ['INV.view', 'INV.issue', 'INV.warehouse.view', 'INV.bin.view']),
 ];
 

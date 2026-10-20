@@ -51,6 +51,7 @@ import FinTaxes from './FinTaxes';
 import FinSetup from './FinSetup';
 import FinApprovals from './FinApprovals';
 import GoodsIssue from './GoodsIssue';
+import MrpRequests from './MrpRequests';
 import { FinEntityMenu, NotBuilt, OPEN_MENU_EVENT } from './finKit';
 import Vendors from './Vendors';
 import Quotations from './Quotations';
@@ -96,7 +97,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Warehouses', path: 'warehouse_overview', everyone: true },
         { label: 'Setup', path: 'procurement_setup', permission: 'PRC.setup.view' },
     ],
-    INV: [{ label: 'Goods issue', path: 'goods_issue', permission: 'INV.issue' }],
+    INV: [{ label: 'Goods issue', path: 'goods_issue', permission: 'INV.issue' }, { label: 'MRP Replenishment Requests', path: 'mrp_requests', permission: 'INV.mrp.view' }],
     FIN: [
         { label: 'GL Accounts', path: 'fin_gl', prefix: 'FIN.' },
         { label: 'Cost Centers', path: 'fin_cc', prefix: 'FIN.' },
@@ -408,6 +409,7 @@ export default function OrgHomePage({
     else if (activeMenu && section === 'fin_ap') content = <NotBuilt title='Accounts Payable' note='Supplier invoices matched against GR/IR, payments and the payable ledger will be built here. Until then, receipts and accepted services stay on the GR/IR account.' />;
     else if (activeMenu && section === 'fin_assets') content = <NotBuilt title='Asset Finance' note='Capitalisation of assets received (from the asset clearing account), depreciation and disposals will be built here.' />;
     else if (activeMenu && section === 'goods_issue') content = <GoodsIssue />;
+    else if (activeMenu && section === 'mrp_requests') content = <MrpRequests id={id} />;
     else if (section === 'my_access') content = <MyAccess back='organization_home' />;
     else if (section === 'my_workflow') content = <WorkflowInbox />;
     else if (activeMenu && section === 'material_catalog') content = <MaterialsMaster />;

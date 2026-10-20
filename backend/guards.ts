@@ -1,3 +1,4 @@
+import { notifyMaterialChanges, withChangeTracking } from './changeTracker';
 import { json, error } from './platform/sdk';
 import { assertHealthAccess } from './healthPolicy';
 import {
@@ -469,8 +470,11 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         if (permission && !granted) throw new HttpError(403, 'You do not have permission to do this.');
         const finishApproval = await enforceOrgTransactionGovernance({ orgId, name, permission, effectivePermissionGranted: granted, org, uid: ctx.uid, body:ctx.body });
         let result: unknown;
+        let tracked: Awaited<ReturnType<typeof withChangeTracking>> | null = null;
         try {
-            result = await fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain });
+            // Material changes made by this request are collected and handed to MRP once it has succeeded.
+            tracked = await withChangeTracking(() => fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain }));
+            result = tracked.result;
         } catch (err) {
             try { await finishApproval?.(false); }
             catch (finalError) { console.error('Could not reconcile failed governance execution', finalError instanceof Error ? finalError.message : 'unknown'); }
@@ -484,6 +488,9 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
             await audit([{category:'governance',action:'governance.approval.reconciliation_required',actor:ctx.actor,meta:ctx.meta,
                 target:{type:'transaction',label:name},outcome:'blocked',
                 details:'Business handler succeeded but approval completion write failed'}]);
+        }
+        if (tracked && (tracked.changes.length || tracked.unresolved.length)) {
+            await notifyMaterialChanges({ orgId, uid: ctx.uid, actorName: str(me.data.email), route: name, changes: tracked.changes.filter((c) => c.orgId === orgId), unresolved: tracked.unresolved });
         }
         return result;
     });

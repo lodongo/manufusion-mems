@@ -91,6 +91,10 @@ const PATH_RULES: Rule[] = [
     [/^org\/transactions\/access\//, 'ADM', 'SEC'],
     // ----- Inventory and warehousing -----
     [/^org\/inventory\/stocktake\//, 'INV', 'CNT'],
+    [/^org\/inventory\/mrp\/verify/, 'INV', 'RPL', 'VF'],
+    [/^org\/inventory\/mrp\/dismiss/, 'INV', 'RPL', 'RJ'],
+    [/^org\/inventory\/mrp\/run/, 'INV', 'RPL', 'RN'],
+    [/^org\/inventory\/mrp\//, 'INV', 'RPL'],
     [/^org\/inventory\/material\/bin\//, 'WHS', 'BIN'],
     [/^org\/inventory\/material\/isolation\//, 'INV', 'QRT'],
     [/^org\/inventory\/material\/opening-stock/, 'INV', 'OPN'],

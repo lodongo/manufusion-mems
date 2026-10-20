@@ -2,6 +2,7 @@ import { createHash, createVerify, randomBytes } from 'node:crypto';
 import { secrets } from './platform/sdk';
 import { GoogleAuth } from 'google-auth-library';
 import { PUBLIC_EMAIL_DOMAINS } from './defaults';
+import { observeFirestoreWrite } from './changeTracker';
 
 // ---------------------------------------------------------------------------
 // Configuration and utilities
@@ -251,11 +252,14 @@ export async function getAccessToken(): Promise<string> {
 export async function googleRequest(url: string, method: string, body?: unknown): Promise<FetchResponse> {
     const token = await getAccessToken();
     try {
-        return await fetch(url, {
+        const res = await fetch(url, {
             method,
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: body === undefined ? undefined : JSON.stringify(body),
         });
+        // Material changes made by an organization request are collected for MRP (see changeTracker).
+        if (res.ok && method !== 'GET') observeFirestoreWrite(url, method, body, FIRESTORE_BASE, DOCUMENT_NAME_ROOT);
+        return res;
     } catch (err) {
         console.error('Database network error', method, err instanceof Error ? err.message : err);
         throw new HttpError(503, 'The server could not connect to the database (network error). Please try again.');

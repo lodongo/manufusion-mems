@@ -1,5 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { PROJECT_ID, HttpError, getDoc, googleRequest, listDocs, nowIso, orderDesc, randomId, runQuery, str, writeDoc } from './core';
+import { sweepOrganization } from './mrp';
 import { json, error, type RouterContext } from './platform/sdk';
 import { audit } from './audit';
 import { staff } from './guards';
@@ -80,14 +81,27 @@ async function status() {
     // Older versions stored manual-refresh timestamps in lastReceivedAt too.
     const lastSeen = str(state?.data.lastVerifiedHeartbeatAt);
     const connected = !!lastSeen && Date.now() - Date.parse(lastSeen) < 20 * 60 * 1000;
+    const mrp = await mrpSweepConfig();
+    const mrpState = await getDoc(MRP_STATE);
     return {
-        engine: { name: 'MEMS shared automation engine', version: '1.0', registered: [JOB_ID],
+        engine: { name: 'MEMS shared automation engine', version: '2.0', registered: JOBS.map((j) => j.id),
             tickMinutes: 5, lastHeartbeat: lastSeen, connected, sharedTrigger: scheduler },
-        jobs: [{ id: JOB_ID, label: 'World currency rates (USD base)', category: 'Finance',
-            enabled: settings.enabled, schedule: settings,
-            lastStartedAt: str(state?.data.lastStartedAt), lastCompletedAt: str(state?.data.lastCompletedAt),
-            lastError: str(state?.data.lastError), lastErrorAt: str(state?.data.lastErrorAt),
-            lastResult: state?.data.lastResult || null }],
+        jobs: [
+            { id: JOB_ID, label: 'World currency rates (USD base)', category: 'Finance',
+                enabled: settings.enabled, schedule: settings,
+                scheduleText: settings.enabled ? `${settings.frequency.replace(/_/g, ' ')}${['daily', 'weekly'].includes(settings.frequency) ? ` at ${settings.timeUtc} UTC` : ''} · ${settings.provider}` : 'Disabled',
+                configurable: 'fx_monitor',
+                lastStartedAt: str(state?.data.lastStartedAt), lastCompletedAt: str(state?.data.lastCompletedAt),
+                lastError: str(state?.data.lastError), lastErrorAt: str(state?.data.lastErrorAt),
+                lastResult: state?.data.lastResult || null },
+            { id: MRP_JOB_ID, label: 'MRP replenishment safety sweep (Min/max and Reorder point)', category: 'Inventory',
+                enabled: mrp.enabled, schedule: mrp,
+                scheduleText: mrp.enabled ? `Every ${mrp.intervalHours} hour${mrp.intervalHours === 1 ? '' : 's'}${str(mrpState?.data.cursor) ? ' · resuming an unfinished sweep' : ''}` : 'Disabled (MRP still runs on every material change)',
+                configurable: 'inline',
+                lastStartedAt: str(mrpState?.data.lastStartedAt), lastCompletedAt: str(mrpState?.data.lastCompletedAt),
+                lastError: str(mrpState?.data.lastError), lastErrorAt: str(mrpState?.data.lastErrorAt),
+                lastResult: mrpState?.data.lastResult || null },
+        ],
         history: runs.map((r) => ({ id: r.id, ...r.data })),
     };
 }
@@ -134,6 +148,91 @@ export async function runFxNow() {
     developmentOnly();
     return executeFx('manual');
 }
+
+// ===== MRP replenishment safety sweep =====
+// MRP runs on every material change (see mrp.ts). The sweep is the safety net: it re-plans every Min/max and Reorder
+// point material of every active organization, catching changes that did not pass through an organization request
+// (for example stock posted by another automation). Long sweeps resume on the next tick from where they stopped.
+
+const MRP_JOB_ID = 'inv.mrp-sweep';
+const MRP_CONFIG = 'system/mrp_sweep_config';
+const MRP_STATE = 'system/mrp_sweep_state';
+const MRP_INTERVALS = [1, 3, 6, 12, 24];
+
+async function mrpSweepConfig(): Promise<{ enabled: boolean; intervalHours: number }> {
+    const d = await getDoc(MRP_CONFIG);
+    const hours = Number(d?.data.intervalHours);
+    return { enabled: d ? d.data.enabled !== false : true, intervalHours: MRP_INTERVALS.includes(hours) ? hours : 6 };
+}
+
+export function mrpSweepDue(c: { enabled: boolean; intervalHours: number }, state: { lastCompletedAt?: string; cursor?: string }, at: Date): boolean {
+    if (!c.enabled) return false;
+    if (state.cursor) return true;
+    const last = Date.parse(state.lastCompletedAt || '') || 0;
+    return at.getTime() - last >= c.intervalHours * 3_600_000;
+}
+
+async function executeMrpSweep(mode: 'scheduled' | 'manual', deadline: number) {
+    const startedAt = nowIso();
+    const t0 = Date.now();
+    const eventId = `${startedAt.replace(/[^0-9]/g, '')}_${randomId(4)}`;
+    const prior = (await getDoc(MRP_STATE))?.data ?? {};
+    await writeDoc(MRP_STATE, { ...prior, lastStartedAt: startedAt });
+    try {
+        const orgs = (await listDocs('organizations')).filter((o) => !['suspended', 'pending_approval', 'rejected'].includes(str(o.data.status))).map((o) => o.id).sort();
+        const cursor = str(prior.cursor);
+        const todo = cursor ? orgs.filter((id) => id >= cursor) : orgs;
+        const total = { organizations: 0, planned: 0, created: 0, replanned: 0, cancelled: 0, failed: 0 };
+        let next = '';
+        for (const orgId of todo) {
+            if (Date.now() > deadline) { next = orgId; break; }
+            const r = await sweepOrganization(orgId, deadline);
+            total.organizations++;
+            total.planned += r.planned; total.created += r.created; total.replanned += r.replanned; total.cancelled += r.cancelled; total.failed += r.failed;
+            if (!r.complete) { next = orgId; break; }
+        }
+        const completedAt = nowIso();
+        const result = { ...total, complete: !next, resumeFrom: next };
+        await writeDoc(MRP_STATE, { ...prior, lastStartedAt: startedAt, cursor: next, ...(next ? {} : { lastCompletedAt: completedAt }), lastResult: result, lastError: '', lastErrorAt: '' });
+        await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: MRP_JOB_ID, mode, status: 'success', startedAt, completedAt, durationMs: Date.now() - t0, ...result,
+            summary: `${total.planned} material(s) planned in ${total.organizations} organization(s): ${total.created} created, ${total.replanned} re-planned, ${total.cancelled} cancelled, ${total.failed} failed${next ? '; continues next tick' : ''}` }, { exists: false });
+        await audit([{ category: 'automation', action: 'inv.mrp_sweep.success', details: `${mode}: ${total.planned} planned, ${total.created} created, ${total.replanned} re-planned, ${total.cancelled} cancelled, ${total.failed} failed${next ? ' (partial)' : ''}` }]);
+        return result;
+    } catch (e) {
+        const message = e instanceof Error ? e.message : 'MRP sweep failed';
+        const completedAt = nowIso();
+        await writeDoc(MRP_STATE, { ...prior, lastStartedAt: startedAt, lastError: message.slice(0, 250), lastErrorAt: completedAt });
+        await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: MRP_JOB_ID, mode, status: 'failed', startedAt, completedAt, durationMs: Date.now() - t0, error: message.slice(0, 250) }, { exists: false });
+        await audit([{ category: 'automation', action: 'inv.mrp_sweep.failure', outcome: 'failure', details: message.slice(0, 400) }]);
+        throw e;
+    }
+}
+
+// ===== Job registry =====
+// One shared, OIDC-verified heartbeat drives every job. Each job decides whether it is due, runs under its own lock for
+// the tick, keeps its own state and history, and fails on its own without stopping the others.
+
+interface Job {
+    id: string;
+    due: (at: Date) => Promise<boolean>;
+    run: (mode: 'scheduled' | 'manual', deadline: number) => Promise<unknown>;
+}
+const JOBS: Job[] = [
+    {
+        id: JOB_ID,
+        due: async (at) => automationDue(settingsOf(await getDoc('system/fx_config')), str((await getDoc(STATE))?.data.lastCompletedAt), at),
+        run: (mode) => executeFx(mode),
+    },
+    {
+        id: MRP_JOB_ID,
+        due: async (at) => {
+            const s = (await getDoc(MRP_STATE))?.data ?? {};
+            return mrpSweepDue(await mrpSweepConfig(), { lastCompletedAt: str(s.lastCompletedAt), cursor: str(s.cursor) }, at);
+        },
+        run: (mode, deadline) => executeMrpSweep(mode, deadline),
+    },
+];
+const TICK_BUDGET_MS = 100_000;
 
 export const automationRoutes = {
     'POST /api/admin/automations/status': [staff('automations.status', 'super', async () => {
@@ -192,22 +291,56 @@ export const automationRoutes = {
                 ? 'Shared scheduler saved in me-central1 (Doha). A signed test callback was requested; tap Check connection to verify.'
                 : 'Shared scheduler saved in me-central1 (Doha). Initial test could not be started; wait for its next five-minute tick and check connection.' };
     })],
+    'POST /api/admin/automations/job/config': [staff('automations.job.config', 'super', async (ctx) => {
+        developmentOnly();
+        if (str(ctx.body.jobId) !== MRP_JOB_ID) throw new HttpError(400, 'Only the MRP sweep is configured here; exchange rates are configured under FX automation.');
+        const reason = str(ctx.body.reason).trim();
+        if (reason.length < 10 || reason.length > 300) throw new HttpError(400, 'Give the reason for the change (10 to 300 characters).');
+        const hours = Number(ctx.body.intervalHours);
+        if (!MRP_INTERVALS.includes(hours)) throw new HttpError(400, `Choose an interval of ${MRP_INTERVALS.join(', ')} hours.`);
+        const enabled = ctx.body.enabled === true;
+        const before = await mrpSweepConfig();
+        await writeDoc(MRP_CONFIG, { enabled, intervalHours: hours, updatedBy: ctx.uid, updatedByEmail: ctx.actor.email, updatedAt: nowIso(), reason });
+        await audit([{ category: 'admin', action: 'automations.job.config', actor: ctx.actor, meta: ctx.meta, target: { type: 'automation_job', label: MRP_JOB_ID },
+            details: `${before.enabled ? 'enabled' : 'disabled'} every ${before.intervalHours}h → ${enabled ? 'enabled' : 'disabled'} every ${hours}h. Reason: ${reason}` }]);
+        return { ok: true, enabled, intervalHours: hours };
+    })],
+    'POST /api/admin/automations/job/run': [staff('automations.job.run', 'super', async (ctx) => {
+        developmentOnly();
+        const job = JOBS.find((j) => j.id === str(ctx.body.jobId));
+        if (!job) throw new HttpError(404, 'Unknown automation job.');
+        const at = new Date();
+        const lock = await writeDoc(`automation_locks/${job.id.replace(/[^A-Za-z0-9_-]/g, '_')}_${at.toISOString().slice(0, 16).replace(/[^0-9]/g, '')}`,
+            { startedAt: at.toISOString(), expiresAt: new Date(at.getTime() + 5 * 60000).toISOString(), jobId: job.id, manual: true }, { exists: false });
+        if (!lock) throw new HttpError(409, 'This job is already running this minute. Try again shortly.');
+        await audit([{ category: 'admin', action: 'automations.job.run', actor: ctx.actor, meta: ctx.meta, target: { type: 'automation_job', label: job.id }, details: 'Manual run requested' }]);
+        const result = await job.run('manual', Date.now() + 50_000);
+        return { ok: true, result };
+    })],
     'POST /api/internal/automations/heartbeat': [async (ctx: RouterContext) => {
         try { await verifyHeartbeat(ctx); } catch { return error('Unauthorized automation caller.', 401); }
         const at = new Date();
+        const deadline = at.getTime() + TICK_BUDGET_MS;
         const previous = await getDoc(STATE);
         await writeDoc(STATE, { ...(previous?.data || {}), lastReceivedAt: at.toISOString(), lastVerifiedHeartbeatAt: at.toISOString() });
-        const cfg = settingsOf(await getDoc('system/fx_config'));
-        if (!automationDue(cfg, str(previous?.data.lastCompletedAt), at)) return json({ ok: true, skipped: 'No registered task is due.' });
         const bucket = at.toISOString().slice(0, 16).replace(/[^0-9]/g, '');
-        const lock = await writeDoc(`automation_locks/${JOB_ID.replace(/[^A-Za-z0-9_-]/g,'_')}_${bucket}`,
-            { startedAt: at.toISOString(), expiresAt: new Date(at.getTime() + 5 * 60000).toISOString(), jobId: JOB_ID }, { exists: false });
-        if (!lock) return json({ ok: true, skipped: 'Another scheduler attempt already acquired this tick.' });
-        try {
-            const result = await executeFx('scheduled');
-            return json({ ok: true, result: { currencies: result.matched, changed: result.changed } });
-        } catch {
-            return error('Automation failed; see MEMS Automation Center history.', 503);
+        const results: Record<string, string> = {};
+        let failures = 0;
+        let ran = 0;
+        for (const job of JOBS) {
+            if (Date.now() > deadline - 10_000) { results[job.id] = 'deferred: tick budget used'; continue; }
+            let due = false;
+            try { due = await job.due(at); } catch { results[job.id] = 'skipped: could not read its schedule'; continue; }
+            if (!due) { results[job.id] = 'not due'; continue; }
+            const lock = await writeDoc(`automation_locks/${job.id.replace(/[^A-Za-z0-9_-]/g, '_')}_${bucket}`,
+                { startedAt: at.toISOString(), expiresAt: new Date(at.getTime() + 5 * 60000).toISOString(), jobId: job.id }, { exists: false });
+            if (!lock) { results[job.id] = 'skipped: another scheduler attempt holds this tick'; continue; }
+            ran++;
+            try { await job.run('scheduled', deadline); results[job.id] = 'success'; }
+            catch { failures++; results[job.id] = 'failed (see Automation Center history)'; }
         }
+        // Retry the tick only when every job that ran failed; successful jobs are never repeated.
+        if (ran > 0 && failures === ran) return error('Automation failed; see MEMS Automation Center history.', 503);
+        return json({ ok: true, results });
     }],
 };
