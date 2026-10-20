@@ -5,7 +5,13 @@
  * separately verified, implemented server handler may activate a transaction.
  * Module/submodule visibility is also gated by tenant module enablement and a
  * validated security grant. This catalogue grants nothing by itself.
+ *
+ * Code format: MODULE-AREA-ACTION, e.g. PRC-PUR-AP (approve a purchase order).
+ * Codes are permanent: areas and actions may be added, never renamed or reused.
+ * Finance, Procurement, Inventory and Warehousing carry curated submodules with only the actions that make sense
+ * for each; other modules use the standard action set until they are designed.
  */
+import { createHash } from 'node:crypto';
 import { DEFAULT_MODULES } from './catalog';
 import { discoverTransactionActions } from './transactionRegistry';
 
@@ -14,6 +20,9 @@ export interface TransactionBlueprint {
   code: string;
   module: string;
   area: string;
+  areaName: string;
+  action: string;
+  actionName: string;
   name: string;
   state: BlueprintState;
   executable: false;
@@ -22,19 +31,126 @@ export interface TransactionBlueprint {
   legacyPermissionKeys: string[];
 }
 
-/** Each module has stable two-to-four-letter submodule mnemonic + short action mnemonic. */
+/** Action mnemonics. Two to four capital letters; permanent once used. */
+export const ACTION_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  VW: 'View', CR: 'Create', ED: 'Edit', SB: 'Submit', AP: 'Approve', RT: 'Return', RJ: 'Reject',
+  CN: 'Cancel', PS: 'Post', CL: 'Close', RV: 'Reverse', RP: 'Report', AM: 'Amend', SN: 'Send to supplier',
+  RO: 'Reopen', DL: 'Delete', DA: 'Deactivate', AK: 'Acknowledge', CF: 'Confirm', CV: 'Convert',
+  IN: 'Invite', EV: 'Evaluate', RC: 'Recommend', AW: 'Award', PB: 'Publish', OB: 'Open bids',
+  GR: 'Receive', AC: 'Accept', MT: 'Match', HD: 'Hold', RL: 'Release', SU: 'Suspend', RA: 'Reinstate',
+  OV: 'Override', RN: 'Run', SM: 'Simulate', LK: 'Lock', UL: 'Unlock', OP: 'Open period',
+  PY: 'Pay', AL: 'Allocate', RE: 'Reconcile', FL: 'File return', DP: 'Depreciate', DS: 'Dispose',
+  EX: 'Extend', BL: 'Block', RS: 'Reserve', IS: 'Issue', CT: 'Count', VF: 'Verify', RQ: 'Request recount',
+  AS: 'Assign', PK: 'Pick', PA: 'Pack', DI: 'Dispatch', PT: 'Put away', LN: 'Link', DN: 'Unlink',
+  PR: 'Print', RW: 'Review', WD: 'Withdraw', SP: 'Split', MG: 'Merge', TR: 'Terminate', RR: 'Renew',
+  IM: 'Import', XP: 'Export', CG: 'Configure',
+});
+
+/** Standard action set for modules that are not yet designed in detail. */
+const STANDARD = 'VW,CR,ED,SB,AP,RT,RJ,CN,PS,CL,RV,RP';
+
+/**
+ * Submodules per module: CODE:Name[:ACTIONS]. ACTIONS defaults to the standard set.
+ * Existing area codes are kept; new ones are appended.
+ */
 const AREAS: Record<string, string> = {
   ADM: 'ORG:Organization setup|USR:Users|SEC:Security roles|JBR:Job roles|GOA:Governance|AUD:Audit|TEN:Tenants|MDL:Module administration',
-  FIN: 'GLA:General ledger|COA:Chart of accounts|JRN:Journals|APY:Accounts payable|ARC:Accounts receivable|BNK:Bank and cash|TAX:Tax|PER:Financial periods|BUD:Budgets|FXR:Currency rates|REC:Reconciliations',
-  INV: 'MAT:Material master|STK:Stock on hand|MOV:Stock movements|TRF:Transfers|CNT:Stock counts|VAL:Valuation|RPL:Replenishment|BAT:Batches and serials',
+  FIN: [
+    'GLA:General ledger:VW,CR,ED,AP,PS,RV,RP',
+    'COA:Chart of accounts:VW,CR,ED,SB,AP,DA,RP',
+    'JRN:Journals:VW,CR,ED,SB,AP,RJ,RT,PS,RV,RP',
+    'RJN:Recurring journals:VW,CR,ED,SB,AP,RN,CN',
+    'APY:Supplier invoices (payables):VW,CR,ED,SB,AP,RJ,RT,MT,HD,RL,PS,CN,RV,RP',
+    'APP:Supplier payments:VW,CR,SB,AP,RJ,PY,RV,RP',
+    'ARC:Customer invoices (receivables):VW,CR,ED,SB,AP,PS,CN,RV,RP',
+    'RCP:Customer receipts:VW,CR,AP,PS,AL,RV',
+    'BNK:Bank and cash:VW,CR,ED,AP,RE,RP',
+    'PTC:Petty cash:VW,CR,SB,AP,PY,RE',
+    'EXP:Expense claims:VW,CR,SB,AP,RJ,RT,PY',
+    'ADV:Staff advances:VW,CR,SB,AP,PY,RE',
+    'TAX:Tax:VW,CR,ED,SB,AP,FL,RP',
+    'PER:Financial periods:VW,CR,OP,CL,LK,UL,AP',
+    'BUD:Budgets:VW,CR,ED,SB,AP,AM,LK,RP',
+    'FXR:Currency rates:VW,CR,AP,RV,RP',
+    'REC:Reconciliations:VW,CR,SB,AP,RE,RP',
+    'FAS:Fixed asset accounting:VW,CR,DP,RV,DS,RP',
+    'CCA:Cost centres and allocations:VW,CR,ED,SB,AP,AL,RP',
+    'ICO:Intercompany:VW,CR,AP,PS,RE',
+    'CON:Consolidation:VW,RN,AP,RP',
+    'CLS:Period and year-end close:VW,RN,SB,AP,LK,RO,RP',
+    'MAP:Account mapping and posting rules:VW,CR,ED,SB,AP,SM',
+    'OPN:Opening balances:VW,CR,SB,AP,PS',
+    'SET:Finance setup and go-live:VW,ED,SB,AP',
+    'APR:Finance approvals:VW,AP,RJ,WD',
+    'ENT:Legal entity finance:VW,ED',
+    'GLT:GL transaction catalogue:VW,SM',
+    'RPT:Financial statements:VW,RP,XP',
+  ].join('|'),
+  INV: [
+    'MAT:Material master:VW,CR,ED,SB,AP,RJ,EX,BL,DA',
+    'STK:Stock on hand:VW,RP,XP',
+    'MOV:Stock movements:VW,RP',
+    'TRF:Transfers between warehouses:VW,CR,SB,AP,DI,GR,CN',
+    'CNT:Stock counts:VW,CR,ED,CT,VF,RQ,SB,AP,PS,CL,CN',
+    'VAL:Valuation:VW,RN,AP,PS,RP',
+    'RPL:Replenishment:VW,CR,RN,AP',
+    'BAT:Batches and serials:VW,CR,ED,BL,RL',
+    'RSV:Reservations:VW,RS,RL,CN',
+    'GRC:Goods receipt to stock:VW,CR,PS,RV',
+    'GIS:Goods issue:VW,CR,SB,AP,IS,PS,RV',
+    'RTN:Returns to stock:VW,CR,AP,PS',
+    'ADJ:Stock adjustments:VW,CR,SB,AP,PS,RV',
+    'WOF:Write-offs and scrap:VW,CR,SB,AP,PS',
+    'QRT:Quarantine and isolation:VW,SB,AP,RJ,RL',
+    'CSG:Consignment stock:VW,CR,PS,RE',
+    'OBS:Obsolete and slow-moving:VW,RW,AP,DS',
+    'OPN:Opening stock:VW,CR,SB,AP,PS',
+  ].join('|'),
   MFG: 'BOM:Bills of materials|ROT:Routings|POD:Production orders|JOB:Job cards|CON:Consumption|OUT:Production output|SCR:Scrap|OEE:Production performance',
   PLN: 'MPS:Master schedule|MRP:Material requirements planning|CAP:Capacity planning|DEM:Demand forecast|SHT:Shortage management',
   CST: 'STD:Standard costing|ACT:Actual costing|OVH:Overheads|VAR:Variances|MRG:Margins',
   QLT: 'INS:Inspections|SPC:Specifications|NCR:Nonconformance|CAP:Corrective actions|COA:Certificates|REL:Quality release',
   MNT: 'WRQ:Work requests|WOR:Work orders|PMS:Preventive schedules|AMS:Autonomous maintenance|RCA:Root cause analysis|RISK:Risk and permits|BOM:Maintenance BOM|REL:Reliability',
   AST: 'REG:Asset register|EQP:Equipment|ASM:Assemblies|DEP:Depreciation|TRF:Transfers|DSP:Disposals|CAP:Capitalisation|TAG:Tagging',
-  PRC: 'REQ:Purchase requirements|RFQ:Quotations|PRQ:Purchase requisitions|PUR:Purchase orders|VEN:Vendors|GRN:Goods receipt|SVC:Services|CTR:Contracts|AUT:Procurement authority',
-  WHS: 'WHM:Warehouse master|BIN:Bins|REC:Receiving|PUT:Putaway|PIK:Picking|PAK:Packing|DSP:Dispatch|TRF:Warehouse transfers',
+  PRC: [
+    'REQ:Purchase requirements:VW,CR,ED,SB,AP,RJ,RT,CN,AK',
+    'RFQ:Quotations and sourcing:VW,CR,ED,IN,EV,RC,AP,CN,RO',
+    'TND:Tenders:VW,CR,PB,OB,EV,AW,CN',
+    'PRQ:Purchase requisitions:VW,CR,ED,SB,CF,AP,RJ,RT,SU,CN,RO,CV',
+    'PUR:Purchase orders:VW,CR,ED,SB,AP,RJ,RT,AM,SN,AK,AS,CN,CL,RO',
+    'GRN:Goods receipt:VW,CR,GR,PS,RV,RT',
+    'SVC:Service entry and acceptance:VW,CR,SB,AC,RJ,PS',
+    'RTV:Returns to vendor:VW,CR,AP,PS,CN',
+    'MCH:Invoice matching:VW,MT,AP,HD,RL',
+    'VEN:Vendors:VW,CR,ED,SB,AP,RJ,RT,SU,RA,OV,DL',
+    'VEV:Vendor performance and SRM:VW,CR,SB,AP,RP',
+    'CTR:Contracts and SLAs:VW,CR,ED,SB,AP,RR,TR',
+    'FWA:Framework agreements:VW,CR,SB,AP,CL',
+    'CAT:Material and service catalogue:VW,CR,ED,SB,AP,RJ,EX,DA',
+    'BGR:Buyer groups:VW,CR,ED,AL',
+    'AUT:Procurement authority:VW,ED,SB,AP',
+    'SET:Procurement setup:VW,ED,SB,AP',
+    'RPT:Procurement reporting:VW,RP,XP',
+  ].join('|'),
+  WHS: [
+    'WHM:Warehouse master:VW,CR,ED,CG,DA',
+    'SLC:Storage locations:VW,CR,ED,DA',
+    'BIN:Bins and clusters:VW,CR,AL,DL,LN,DN',
+    'REC:Receiving:VW,CR,GR,RW,PS',
+    'PUT:Putaway:VW,CR,PT,CF,RV',
+    'PIK:Picking:VW,CR,AS,PK,CF,RV',
+    'PAK:Packing:VW,CR,PA,CF',
+    'DSP:Dispatch:VW,CR,DI,CF,RV',
+    'TRF:Warehouse transfers:VW,CR,SB,AP,DI,GR',
+    'XDK:Cross-docking:VW,CR,CF',
+    'CYC:Cycle counting:VW,CR,CT,VF,AP',
+    'RPL:Bin replenishment:VW,CR,CF',
+    'YRD:Yard and docks:VW,CR,AS,CL',
+    'RTN:Warehouse returns:VW,CR,RW,PS',
+    'LBL:Labels:VW,PR',
+    'SLT:Slotting:VW,RN,AP',
+  ].join('|'),
+  SAF: 'RSK:Risk assessments|MTX:Risk matrix|PTW:Permits to work|INC:Incidents|ENE:Hazardous energy',
   LOG: 'SHP:Shipments|FLT:Fleet|TRN:Transporters|RTE:Routes|FRT:Freight|POD:Proof of delivery',
   DST: 'DIS:Distributors|DEP:Depots|RTE:Route sales|VAN:Van stock|REP:Replenishment|PRC:Channel prices',
   SAL: 'QUO:Sales quotations|ORD:Sales orders|DEL:Deliveries|INV:Sales invoicing|CRD:Credit management|RET:Returns|COL:Collections',
@@ -47,42 +163,76 @@ const AREAS: Record<string, string> = {
   PRJ: 'PRJ:Projects|WBS:Work breakdown|TSK:Tasks|BUD:Budgets|CST:Project costs|RSK:Risks|CHG:Changes|CLS:Closure',
 };
 
-/** Blueprint action patterns; not a claim that an endpoint exists. */
-const ACTIONS = [
-  ['VW','View'], ['CR','Create'], ['ED','Edit'], ['SB','Submit'],
-  ['AP','Approve'], ['RT','Return'], ['RJ','Reject'], ['CN','Cancel'],
-  ['PS','Post'], ['CL','Close'], ['RV','Reverse'], ['RP','Report'],
-] as const;
+/** Modules with transactions but no subscription tile of their own. */
+const EXTRA_MODULES = [{ code: 'SAF', name: 'Safety' }];
+
+export interface AreaDefinition { module: string; area: string; name: string; actions: string[] }
+
+/** Every submodule with its allowed actions (used by the catalogue, the route linker and the admin form). */
+export function areaDefinitions(): AreaDefinition[] {
+  const out: AreaDefinition[] = [];
+  for (const [module, spec] of Object.entries(AREAS)) {
+    for (const item of spec.split('|').filter(Boolean)) {
+      const [area, name, actions] = item.split(':');
+      out.push({ module, area, name, actions: (actions || STANDARD).split(',') });
+    }
+  }
+  return out;
+}
+
+function moduleList(): Array<{ code: string; name: string }> {
+  const seen = new Set<string>();
+  const list: Array<{ code: string; name: string }> = [];
+  for (const m of [...DEFAULT_MODULES.map((m) => ({ code: m.code, name: m.name })), ...EXTRA_MODULES]) {
+    if (seen.has(m.code)) continue;
+    seen.add(m.code);
+    list.push(m);
+  }
+  return list;
+}
+
+/** Stable legacy code: derived from the permission key itself, so adding or reordering permissions never renumbers. */
+function legacyCode(module: string, permission: string, taken: Set<string>): string {
+  for (let salt = 0; salt < 50; salt++) {
+    const digest = createHash('sha256').update(permission + (salt ? '#' + salt : '')).digest();
+    const tail = (digest.readUInt32BE(0) % 1679616).toString(36).toUpperCase().padStart(4, '0');
+    const code = `${module}-LEG-${tail}`;
+    if (!taken.has(code)) return code;
+  }
+  throw new Error('Could not derive a unique legacy transaction code for ' + permission);
+}
 
 export function plannedTransactionBlueprints(): TransactionBlueprint[] {
   const result: TransactionBlueprint[] = [];
-  for (const mod of DEFAULT_MODULES) {
+  const defs = areaDefinitions();
+  for (const mod of moduleList()) {
     const module = mod.code;
-    const root = `${module}-MOD-VW`;
-    result.push({ code: root, module, area: 'MOD', name: `Access ${mod.name}`, state: 'reserved', executable: false, requiredGate: 'verified_backend_handler_and_governance', kind: 'module_access', legacyPermissionKeys: [] });
-    const areas = (AREAS[module] ?? '').split('|').filter(Boolean);
-    for (const item of areas) {
-      const [area, label] = item.split(':');
-      result.push({ code: `${module}-${area}-VW`, module, area, name: `Access ${label}`, state: 'reserved', executable: false, requiredGate: 'verified_backend_handler_and_governance', kind: 'submodule_access', legacyPermissionKeys: [] });
-      for (const [suffix, verb] of ACTIONS.filter(([suffix])=>suffix!=='VW')) {
-        result.push({ code: `${module}-${area}-${suffix}`, module, area, name: `${verb}: ${label}`, state: 'reserved', executable: false, requiredGate: 'verified_backend_handler_and_governance', kind: 'transaction', legacyPermissionKeys: [] });
+    result.push({ code: `${module}-MOD-VW`, module, area: 'MOD', areaName: mod.name, action: 'VW', actionName: 'View', name: `Access ${mod.name}`, state: 'reserved', executable: false, requiredGate: 'verified_backend_handler_and_governance', kind: 'module_access', legacyPermissionKeys: [] });
+    for (const def of defs.filter((d) => d.module === module)) {
+      result.push({ code: `${module}-${def.area}-VW`, module, area: def.area, areaName: def.name, action: 'VW', actionName: 'View', name: `Access ${def.name}`, state: 'reserved', executable: false, requiredGate: 'verified_backend_handler_and_governance', kind: 'submodule_access', legacyPermissionKeys: [] });
+      for (const action of def.actions.filter((a) => a !== 'VW')) {
+        const verb = ACTION_NAMES[action];
+        if (!verb) throw new Error(`Unknown action ${action} in ${module}-${def.area}`);
+        result.push({ code: `${module}-${def.area}-${action}`, module, area: def.area, areaName: def.name, action, actionName: verb, name: `${verb}: ${def.name}`, state: 'reserved', executable: false, requiredGate: 'verified_backend_handler_and_governance', kind: 'transaction', legacyPermissionKeys: [] });
       }
     }
   }
   // Legacy action permissions are explicitly captured, not upgraded into live
   // canonical permissions; a reviewed mapping is required before cutover.
+  const taken = new Set(result.map((r) => r.code));
   for (const legacy of discoverTransactionActions()) {
-    const code = `${legacy.module}-LEG-${String(result.filter(r=>r.module===legacy.module&&r.area==='LEG').length+1).padStart(4,'0')}`;
-    result.push({ code, module: legacy.module, area: 'LEG', name: legacy.label, state: 'catalogued_legacy', executable: false, requiredGate: 'verified_backend_handler_and_governance', kind: 'transaction', legacyPermissionKeys: [legacy.legacyPermission] });
+    const code = legacyCode(legacy.module, legacy.legacyPermission, taken);
+    taken.add(code);
+    result.push({ code, module: legacy.module, area: 'LEG', areaName: 'Existing permission', action: 'LG', actionName: 'Existing permission', name: legacy.label, state: 'catalogued_legacy', executable: false, requiredGate: 'verified_backend_handler_and_governance', kind: 'transaction', legacyPermissionKeys: [legacy.legacyPermission] });
   }
   const codes = new Set<string>();
   for (const x of result) {
-    if (!/^[A-Z]{2,4}-[A-Z0-9]{3,4}-[A-Z0-9]{2,4}$/.test(x.code) || codes.has(x.code)) throw new Error('Invalid/duplicate transaction code: '+x.code);
+    if (!/^[A-Z]{2,4}-[A-Z0-9]{3,4}-[A-Z0-9]{2,4}$/.test(x.code) || codes.has(x.code)) throw new Error('Invalid/duplicate transaction code: ' + x.code);
     codes.add(x.code);
   }
   return result;
 }
 
 export function assertBlueprintNotExecutable(code: string): never {
-  throw new Error('Transaction '+code+' is a reserved blueprint. Implement, verify, classify, authorize and activate its backend handler first.');
+  throw new Error('Transaction ' + code + ' is a reserved blueprint. Implement, verify, classify, authorize and activate its backend handler first.');
 }

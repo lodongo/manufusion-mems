@@ -23,8 +23,8 @@ import {
     type Doc,
 } from './core';
 import { audit, queryAudit } from './audit';
-import { clearAccessCache, ensureOrgCode, hasPerm, loadRole, orgRoute, type OrgContext } from './guards';
-import { SOD_RULES, buildCatalogue, docStatus, reviewPermissions, sensitiveKeys, sodConflicts } from './permissionPolicy';
+import { clearAccessCache, ensureOrgCode, expandPermissions, hasPerm, jobGrants, loadRole, normalizeOrgRole, orgRoute, type OrgContext } from './guards';
+import { SOD_RULES, buildCatalogue, docStatus, requireCombinedSodAcknowledgement, reviewPermissions, sensitiveKeys, sodConflicts } from './permissionPolicy';
 import { adminTotals, guardedAdminChange, isOrgAdmin, MAX_ORG_ADMINS, MIN_ACTIVE_ORG_ADMINS } from './adminRoster';
 import { signedUrl } from './structure';
 import { standardRoleTemplates } from './standardRoleTemplates';
@@ -98,6 +98,34 @@ function requireSodAcknowledgement(raw: Record<string, unknown>, permissions: st
         throw new HttpError(409, `Segregation of duties: ${conflicts.map((c) => c.why).join(' ')} Acknowledge each conflict and give a reason of at least 10 characters to save this role.`);
     }
     return ` SoD acknowledged (${conflicts.map((c) => c.id).join(', ')}): ${reason}`;
+}
+
+/**
+ * A non-super administrator may change, disable, reset or remove a colleague only when they could grant that colleague's
+ * directly assigned security role (where administration rights live). Otherwise an administrator could demote a stronger
+ * administrator, or reset their password and sign in as them. Job-role rights are bound to places and are not compared,
+ * so ordinary help-desk work on employees stays possible; every reset forces a new password and is audited.
+ */
+async function assertCanManagePerson(ctx: OrgContext, target: Doc): Promise<void> {
+    if (ctx.role === 'org_super_admin') return;
+    const role = normalizeOrgRole(str(target.data.role));
+    if (role === 'org_super_admin') throw new HttpError(403, 'Only a super admin can change, reset or remove a super admin account.');
+    const direct = (await loadRole(ctx.orgId, role)).permissions;
+    if (!canGrant(ctx, direct)) {
+        throw new HttpError(403, "This person's security role carries rights you do not hold yourself, so only a super admin can change, reset or remove their account.");
+    }
+}
+
+/** Newly granted sensitive rights (approve, post, delete, configure, administer) must be acknowledged one by one. */
+function requireSensitiveAcknowledgement(raw: Record<string, unknown>, added: string[]): string {
+    const sensitive = new Set(sensitiveKeys());
+    const newlySensitive = added.filter((k) => sensitive.has(k));
+    if (!newlySensitive.length) return '';
+    const acknowledged = new Set((Array.isArray(raw.acknowledgeSensitive) ? raw.acknowledgeSensitive : []).map(str));
+    if (!newlySensitive.every((k) => acknowledged.has(k))) {
+        throw new HttpError(409, `Confirm the sensitive rights you are granting: ${newlySensitive.join(', ')}.`);
+    }
+    return ` Sensitive rights acknowledged: ${newlySensitive.join(', ')}.`;
 }
 
 function userOut(doc: Doc) {
@@ -273,8 +301,12 @@ export const orgRoutes = {
                 throw new HttpError(403, 'The original organization creator must remain an active organization super administrator.');
             }
             if (uid === ctx.uid && (role !== currentRole || status === 'disabled')) throw new HttpError(400, 'You cannot change your own role or disable your own account.');
+            if (role !== currentRole || status !== currentStatus || roleExpiresAt !== currentExpiry) await assertCanManagePerson(ctx, target);
             if (currentRole === 'org_super_admin' && ctx.role !== 'org_super_admin') throw new HttpError(403, 'Only a super admin can change super admin accounts.');
             if (role !== currentRole) await assignableRole(ctx, role);
+            const personSodNote = role !== currentRole && role !== 'org_super_admin'
+                ? requireCombinedSodAcknowledgement(body, [...(await loadRole(ctx.orgId, role)).permissions, ...(await jobGrants(ctx.orgId, target)).flatMap((g) => g.permissions)], 'This person')
+                : '';
             if (isOrgAdmin(role) && roleExpiresAt) throw new HttpError(400, 'The organization super administrator role cannot expire.');
             if (roleExpiresAt !== currentExpiry) {
                 if (role === 'org_super_admin' && roleExpiresAt) throw new HttpError(400, 'The super admin role cannot expire.');
@@ -316,7 +348,7 @@ export const orgRoutes = {
                 await writeDoc(`users/${uid}`, { ...target.data, ...patch });
             }
             await record(ctx, role !== currentRole ? 'org.admin.role_change' : 'org.user.update', str(target.data.email),
-                `Role: ${currentRole} to ${role}; status: ${currentStatus} to ${status}${roleExpiresAt ? `, role expires ${roleExpiresAt}` : ''}`);
+                `Role: ${currentRole} to ${role}; status: ${currentStatus} to ${status}${roleExpiresAt ? `, role expires ${roleExpiresAt}` : ''}${personSodNote ? `. ${personSodNote}` : ''}`);
             clearAccessCache(ctx.orgId);
             return { ok: true };
         }),
@@ -328,6 +360,7 @@ export const orgRoutes = {
             if (uid === ctx.uid) throw new HttpError(400, 'You cannot delete your own account.');
             if (uid === str(ctx.org.data.createdBy)) throw new HttpError(403, 'The original organization creator cannot be deleted or removed as super administrator.');
             const target = await getOrgUser(ctx, uid);
+            await assertCanManagePerson(ctx, target);
             if (isSuperRole(str(target.data.role))) {
                 if (ctx.role !== 'org_super_admin') throw new HttpError(403, 'Only a super admin can delete super admin accounts.');
                 await guardedAdminChange(ctx, { action: 'delete', uid, expected: target });
@@ -343,67 +376,6 @@ export const orgRoutes = {
             }
             await record(ctx, 'org.user.delete', str(target.data.email));
             return { ok: true };
-        }),
-    ],
-
-    // Organization admin adopts vetted transaction roles without manual permission binding.
-    'POST /api/org/roles/templates': [
-        orgRoute('org.roles.templates', 'ADM.roles', async (ctx) => {
-            const templates = standardRoleTemplates(await catalogue(ctx.org));
-            const existing = new Set((await listDocs(`organizations/${ctx.orgId}/roles`)).map(r => r.id));
-            return { templates: templates.map(t => ({
-                ...t, exists: existing.has(t.id), moduleAdopted: true, grantable: canGrant(ctx, t.permissions), conflicts: sodConflicts(t.permissions).length,
-            })) };
-        }),
-    ],
-
-    'POST /api/org/roles/templates/apply': [
-        orgRoute('org.roles.templates.apply', 'ADM.roles', async (ctx) => {
-            if (ctx.role !== 'org_super_admin') throw new HttpError(403, 'Only organization super admins can adopt standard roles.');
-            const ids = [...new Set((Array.isArray(ctx.body.ids) ? ctx.body.ids : []).map(str))];
-            if (!ids.length || ids.length > 100) throw new HttpError(400, 'Select between 1 and 100 standard roles.');
-            const available = new Map(standardRoleTemplates(await catalogue(ctx.org)).map(t => [t.id, t]));
-            const existing = await listDocs(`organizations/${ctx.orgId}/roles`);
-            const possibleNew = ids.filter(id => available.has(id) && !existing.some(r => r.id === id));
-            if (existing.length + possibleNew.length > 100) throw new HttpError(400, 'An organization can have at most 100 security roles.');
-            const created: string[] = [];
-            const skipped: Array<{ id: string; reason: string }> = [];
-            for (const id of ids) {
-                const template = available.get(id);
-                if (!template) { skipped.push({ id, reason: 'Not available for an enabled module.' }); continue; }
-                if (!canGrant(ctx, template.permissions)) { skipped.push({ id, reason: 'Missing grant authority.' }); continue; }
-                if (sodConflicts(template.permissions).length) { skipped.push({ id, reason: 'Incompatible duties.' }); continue; }
-                const now = nowIso();
-                const didCreate = await writeDoc(`organizations/${ctx.orgId}/roles/${id}`, {
-                    name: template.name, description: template.description, permissions: template.permissions,
-                    system: false, standardTemplateId: id, standardTemplateVersion: 1,
-                    createdAt: now, updatedAt: now, createdBy: ctx.uid,
-                }, { exists: false });
-                if (didCreate) created.push(id);
-                else skipped.push({ id, reason: 'Already adopted; preserved existing customizations.' });
-            }
-            // Recommend and assign only exact-name, non-sensitive job-role matches.
-            // Approval, posting, administration and existing mappings require deliberate assignment.
-            const mappedPositions: string[] = [];
-            if (created.length) {
-                const sensitive = new Set(sensitiveKeys());
-                const safeNew = [...available.values()].filter(t =>
-                    created.includes(t.id) && t.permissions.every(p => !sensitive.has(p)) &&
-                    !t.permissions.some(p => /\\.approve\\b|\\.admin\\b|\\.configure\\b/i.test(p)));
-                const byName = new Map(safeNew.map(t => [t.name.toLowerCase().trim(), t.id]));
-                for (const position of await listDocs(`organizations/${ctx.orgId}/positions`)) {
-                    const current = Array.isArray(position.data.securityRoles) ? (position.data.securityRoles as unknown[]).map(str).filter(Boolean) : [];
-                    if (current.length) continue;
-                    const roleId = byName.get(str(position.data.title).toLowerCase().trim());
-                    if (!roleId) continue;
-                    await updateFields(`organizations/${ctx.orgId}/positions/${position.id}`, { securityRoles: [roleId] });
-                    mappedPositions.push(position.id);
-                }
-                clearAccessCache(ctx.orgId);
-                await record(ctx, 'org.roles.templates.apply', 'Standard security roles', `Adopted: ${created.join(', ')}. Auto-mapped safe exact-title positions: ${mappedPositions.join(', ') || 'none'}`);
-            }
-            const documented = await fillMissingStandardRoleDocs(ctx.orgId,ctx.uid);
-            return { created, skipped, mappedPositions, documented };
         }),
     ],
 
@@ -460,7 +432,7 @@ export const orgRoutes = {
                 const existing = roles.find((r) => r.id === id);
                 if (!existing && id !== 'default_security') throw new HttpError(404, 'Role not found.');
                 if (!existing && id === 'default_security') {
-                    const note = requireSodAcknowledgement(raw, permissions);
+                    const note = requireSodAcknowledgement(raw, permissions) + requireSensitiveAcknowledgement(raw, permissions);
                     await writeDoc(`organizations/${ctx.orgId}/roles/default_security`, { name: 'Default Security Role', description: 'Baseline permissions for newly created security roles.', permissions, system: true, createdAt: nowIso(), updatedAt: nowIso(), updatedBy: ctx.uid });
                     await record(ctx, 'org.role.baseline.create', 'Default Security Role', `${permissions.length} permissions.${note}`);
                     clearAccessCache(ctx.orgId);
@@ -479,8 +451,11 @@ export const orgRoutes = {
                 const before = new Set(Array.isArray(existing.data.permissions) ? (existing.data.permissions as unknown[]).map(str) : []);
                 const added = permissions.filter((x) => !before.has(x));
                 const removed = [...before].filter((x) => !permissions.includes(x));
+                // Withdrawn keys grant nothing and are dropped on save; only rights that still work are protected.
+                if (!canGrant(ctx, removed.filter((k) => valid.has(k) || expandPermissions([k]).length > 1))) throw new HttpError(403, 'You cannot remove rights you do not hold yourself.');
+                const sensitiveNote = requireSensitiveAcknowledgement(raw, added);
                 await writeDoc(`organizations/${ctx.orgId}/roles/${id}`, { ...existing.data, name, description, permissions, updatedAt: now, updatedBy: ctx.uid });
-                await record(ctx, 'org.role.update', name, `${permissions.length} permissions. Added: ${added.join(', ') || 'none'}. Removed: ${removed.join(', ') || 'none'}.${note}`.slice(0, 1800));
+                await record(ctx, 'org.role.update', name, `${permissions.length} permissions. Added: ${added.join(', ') || 'none'}. Removed: ${removed.join(', ') || 'none'}.${note}${sensitiveNote}`.slice(0, 1800));
                 clearAccessCache(ctx.orgId);
                 return { id };
             }
@@ -490,7 +465,7 @@ export const orgRoutes = {
             if (roles.length >= 100) throw new HttpError(400, 'An organization can have up to 100 roles.');
             // Baseline self-service belongs to every authenticated user, NOT each role.
             const combined = permissions;
-            const note = requireSodAcknowledgement(raw, combined);
+            const note = requireSodAcknowledgement(raw, combined) + requireSensitiveAcknowledgement(raw, combined);
             const newId = `role_${randomId(6)}`;
             await writeDoc(`organizations/${ctx.orgId}/roles/${newId}`, { name, description, permissions: combined, system: false, createdAt: now, updatedAt: now, createdBy: ctx.uid });
             await record(ctx, 'org.role.create', name, `${combined.length} permissions: ${combined.join(', ')}.${note}`.slice(0, 1800));
@@ -521,6 +496,7 @@ export const orgRoutes = {
             if (uid === ctx.uid) throw new HttpError(400, 'Use My details to change your own password.');
             const target = await getOrgUser(ctx, uid);
             if (isSuperRole(str(target.data.role)) && ctx.role !== 'org_super_admin') throw new HttpError(403, 'Only a super admin can reset a super admin password.');
+            await assertCanManagePerson(ctx, target);
             const password = str(ctx.body.password);
             checkPassword(password);
             await updateAuthUser(uid, { password });

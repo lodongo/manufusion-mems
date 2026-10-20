@@ -133,89 +133,9 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export const billingRoutes = {
-    'POST /api/org/modules/list': [
-        orgRoute('org.modules.list', 'ADM.modules', async (ctx) => {
-            const [mods, users] = await Promise.all([catalog(), activeUserCount(ctx.orgId)]);
-            return { users, modules: mods.map((m) => ({ ...m, active: isOn(ctx.org, m.code, m.mandatory) })) };
-        }),
-    ],
-
-    'POST /api/org/modules/set': [
-        orgRoute('org.modules.set', 'ADM.modules', async (ctx) => {
-            const enable = ctx.body.enabled === true;
-            const codes = Array.from(new Set((Array.isArray(ctx.body.codes) ? ctx.body.codes : []).map(str)));
-            if (!codes.length) throw new HttpError(400, 'Select at least one module.');
-            const mods = await catalog();
-            const byCode = new Map(mods.map((m) => [m.code, m]));
-            const unknown = codes.filter((c) => !byCode.has(c));
-            if (unknown.length) throw new HttpError(400, `Not available: ${unknown.join(', ')}.`);
-            const current: Obj = isObj(ctx.org.data.modules) ? { ...ctx.org.data.modules } : {};
-            const added: string[] = [];
-            if (enable) {
-                // Switch on the selected modules and everything they depend on.
-                const stack = [...codes];
-                while (stack.length) {
-                    const code = stack.pop() as string;
-                    const mod = byCode.get(code);
-                    if (!mod) throw new HttpError(400, `${code} is needed but not available yet.`);
-                    if (current[code] === true) continue;
-                    current[code] = true;
-                    if (!codes.includes(code)) added.push(code);
-                    stack.push(...mod.dependencies);
-                }
-            } else {
-                const mandatory = codes.filter((c) => byCode.get(c)?.mandatory);
-                if (mandatory.length) throw new HttpError(400, `Required modules cannot be disabled: ${mandatory.join(', ')}.`);
-                const remaining = mods.filter((m) => isOn(ctx.org, m.code, m.mandatory) && !codes.includes(m.code));
-                const blockers = remaining.filter((m) => m.dependencies.some((d) => codes.includes(d)));
-                if (blockers.length) throw new HttpError(400, `Disable these first, they depend on your selection: ${blockers.map((b) => b.code).join(', ')}.`);
-                for (const c of codes) current[c] = false;
-            }
-            await updateFields(`organizations/${ctx.orgId}`, { modules: current, updatedAt: nowIso() });
-            await audit([
-                { category: 'data', action: enable ? 'org.modules.enable' : 'org.modules.disable', actor: ctx.actor, meta: ctx.meta, orgId: ctx.orgId, target: { label: codes.join(', ') }, details: added.length ? `Also enabled: ${added.join(', ')}` : '' },
-            ]);
-            return { added };
-        }),
-    ],
 
     'POST /api/org/subscription/get': [
         orgRoute('org.subscription.get', 'ADM.billing', async (ctx) => ({ ...(await subscriptionState(ctx.org)), provider: await paymentProvider() })),
-    ],
-
-    'POST /api/org/subscription/pay': [
-        orgRoute('org.subscription.pay', 'ADM.billing', async (ctx) => {
-            await rateLimit('org-pay', ctx.orgId, 10, 3600);
-            const state = await subscriptionState(ctx.org);
-            if (state.due <= 0) throw new HttpError(400, 'There is nothing to pay for this month.');
-            const provider = await paymentProvider();
-            const me = await getDoc(`users/${ctx.uid}`);
-            const code = str(ctx.org.data.code) || ctx.orgId.slice(0, 8);
-            const id = `INV-${code}-${state.period.replace('-', '')}-${randomId(4).toUpperCase()}`;
-            const now = nowIso();
-            await writeDoc(
-                `${invCol(ctx.orgId)}/${id}`,
-                { period: state.period, lines: state.lines as unknown as Plain, total: state.total, paidBefore: state.paid, amount: state.due, currency: 'KES', status: 'pending', provider, createdAt: now, createdBy: ctx.actor.email },
-                { exists: false }
-            );
-            const result = await startPayment(provider, {
-                apiRef: `${ctx.orgId}__${id}`,
-                amount: state.due,
-                email: ctx.actor.email,
-                firstName: str(me?.data.firstName),
-                lastName: str(me?.data.lastName),
-                phone: str(me?.data.phone),
-            });
-            if (result.status === 'paid') {
-                await updateFields(`${invCol(ctx.orgId)}/${id}`, { status: 'paid', paidAt: nowIso(), reference: result.reference });
-            } else {
-                await updateFields(`${invCol(ctx.orgId)}/${id}`, { checkoutUrl: result.checkoutUrl, reference: result.reference });
-            }
-            await audit([
-                { category: 'data', action: 'org.subscription.pay', actor: ctx.actor, meta: ctx.meta, orgId: ctx.orgId, target: { label: id }, details: `KES ${state.due} · ${provider === 'mock' ? 'simulated, paid' : 'checkout started'}` },
-            ]);
-            return { invoiceId: id, status: result.status, checkoutUrl: result.checkoutUrl };
-        }),
     ],
 
     // IntaSend calls this when a payment changes state. The request must carry the shared challenge,

@@ -1,5 +1,6 @@
 import { MNT_ACTIVITIES } from './maintenanceActivities';
 import { expandPermissions, hasPerm } from './guards';
+import { HttpError } from './core';
 
 // ---------------------------------------------------------------------------
 // Permission policy: the single source of truth for what a security role can hold.
@@ -88,13 +89,7 @@ export const BUILT_PERMISSIONS: Record<string, PermDef[]> = {
         p('AST.approve', 'Assets: approve changes', true),
         p('AST.delete', 'Assets: delete', true),
         p('AST.admin', 'Assets: administer', true),
-        p('AST.register.view', 'Asset register: view'),
-        p('AST.register.create', 'Asset register: create'),
-        p('AST.register.edit', 'Asset register: edit'),
-        p('AST.register.approve', 'Asset register: approve changes', true),
-        p('AST.register.dispose', 'Asset register: request disposal', true),
         p('AST.catalog.view', 'Asset catalog: view'),
-        p('AST.catalog.import', 'Asset catalog: import or update', true),
         p('AST.utilities.view', 'Equipment utilities: view'),
         p('AST.utilities.edit', 'Equipment utilities: maintain'),
     ],
@@ -103,9 +98,7 @@ export const BUILT_PERMISSIONS: Record<string, PermDef[]> = {
         p('PRC.create', 'Procurement: create'),
         p('PRC.edit', 'Procurement: edit'),
         p('PRC.admin', 'Procurement: administer', true),
-        p('PRC.materials.view', 'Material catalog: view'),
         p('PRC.materials.manage', 'Material catalog: manage', true),
-        p('PRC.services.view', 'Service catalog: view'),
         p('PRC.services.manage', 'Service catalog: manage', true),
         p('PRC.setup.view', 'Procurement setup and chart of authority: view'),
         p('PRC.setup.manage', 'Procurement setup: adopt categories and subcategories', true),
@@ -280,6 +273,23 @@ export const SOD_RULES: SodRule[] = [
     { id: 'inv-issue-verify', a: 'INV.issue', b: 'INV_ST_020', why: 'The person who issues stock must not verify stock counts.' },
 ];
 
+/**
+ * Segregation of duties across everything one person (or one job role) would hold together, not only within one
+ * security role. Conflicts block the change unless each is acknowledged (acknowledgeSod ids, or acknowledgeSodAll)
+ * with a reason of 10 to 300 characters. Returns the audit note.
+ */
+export function requireCombinedSodAcknowledgement(raw: Record<string, unknown>, permissions: string[], subject: string): string {
+    const conflicts = sodConflicts(permissions);
+    if (!conflicts.length) return '';
+    const list = Array.isArray(raw.acknowledgeSod) ? raw.acknowledgeSod.map((x) => String(x ?? '')) : [];
+    const all = raw.acknowledgeSodAll === true;
+    const reason = String(raw.sodReason ?? '').trim();
+    if ((!all && !conflicts.every((c) => list.includes(c.id))) || reason.length < 10 || reason.length > 300) {
+        throw new HttpError(409, `Segregation of duties: ${subject} would combine duties that must stay apart. ${conflicts.map((c) => c.why).join(' ')} To continue anyway, acknowledge the conflict and give a reason of at least 10 characters.`);
+    }
+    return `SoD acknowledged (${conflicts.map((c) => c.id).join(', ')}): ${reason}`;
+}
+
 export function sodConflicts(perms: string[]): SodRule[] {
     if (perms.includes('*')) return [];
     return SOD_RULES.filter((r) => hasPerm(perms, r.a) && hasPerm(perms, r.b));
@@ -314,13 +324,13 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     T('mnt_technician', 'MNT', 'Maintenance Technician', 'Executes assigned work orders.', ['MNT.view', 'MNT.WO.execute', 'MNT.activities.view']),
     T('mnt_safety', 'MNT', 'Maintenance Safety Officer', 'Performs the safety assessment of work orders.', ['MNT.view', 'MNT.WO.safety']),
     T('mnt_verifier', 'MNT', 'Maintenance Verifier', 'Verifies completed work and closes work orders.', ['MNT.view', 'MNT.WO.verify', 'MNT.WO.close']),
-    T('ast_clerk', 'AST', 'Asset Clerk', 'Registers and edits assets. Cannot approve.', ['AST.view', 'AST.create', 'AST.edit', 'AST.register.view', 'AST.register.create', 'AST.register.edit', 'AST.catalog.view']),
-    T('ast_approver', 'AST', 'Asset Approver', 'Approves asset changes. Cannot create or edit.', ['AST.view', 'AST.approve', 'AST.register.view', 'AST.register.approve', 'AST.catalog.view']),
-    T('ast_viewer', 'AST', 'Asset Viewer', 'Read-only view of assets.', ['AST.view', 'AST.register.view', 'AST.catalog.view']),
-    T('prc_catalog', 'PRC', 'Catalog Maintainer', 'Creates and maintains materials and services (approval stays with the workflow).', ['PRC.view', 'PRC.create', 'PRC.edit', 'PRC.materials.view', 'PRC.materials.manage', 'PRC.services.view', 'PRC.services.manage']),
-    T('prc_viewer', 'PRC', 'Catalog Viewer', 'Read-only view of materials and services.', ['PRC.view', 'PRC.materials.view', 'PRC.services.view']),
-    T('prc_materials', 'PRC', 'Materials Master Maintainer', 'Creates and maintains materials (approval stays with the material workflow).', ['PRC.view', 'PRC.create', 'PRC.edit', 'PRC.materials.view', 'PRC.materials.manage']),
-    T('prc_services', 'PRC', 'Service Catalog Maintainer', 'Maintains the service catalog.', ['PRC.view', 'PRC.create', 'PRC.edit', 'PRC.services.view', 'PRC.services.manage']),
+    T('ast_clerk', 'AST', 'Asset Clerk', 'Registers and edits assets. Cannot approve.', ['AST.view', 'AST.create', 'AST.edit', 'AST.catalog.view']),
+    T('ast_approver', 'AST', 'Asset Approver', 'Approves asset changes. Cannot create or edit.', ['AST.view', 'AST.approve', 'AST.catalog.view']),
+    T('ast_viewer', 'AST', 'Asset Viewer', 'Read-only view of assets.', ['AST.view', 'AST.catalog.view']),
+    T('prc_catalog', 'PRC', 'Catalog Maintainer', 'Creates and maintains materials and services (approval stays with the workflow).', ['PRC.view', 'PRC.create', 'PRC.edit', 'PRC.materials.manage', 'PRC.services.manage']),
+    T('prc_viewer', 'PRC', 'Catalog Viewer', 'Read-only view of materials and services.', ['PRC.view']),
+    T('prc_materials', 'PRC', 'Materials Master Maintainer', 'Creates and maintains materials (approval stays with the material workflow).', ['PRC.view', 'PRC.create', 'PRC.edit', 'PRC.materials.manage']),
+    T('prc_services', 'PRC', 'Service Catalog Maintainer', 'Maintains the service catalog.', ['PRC.view', 'PRC.create', 'PRC.edit', 'PRC.services.manage']),
     T('prc_asset_catalog', 'PRC', 'Asset Catalog Reader', 'Reads the asset catalog when specifying assets in procurement.', ['PRC.view', 'AST.view', 'AST.catalog.view']),
     T('prc_setup_admin', 'PRC', 'Procurement Setup Administrator', 'Decides which categories and subcategories the organization accepts, and views the chart of authority.', ['PRC.view', 'PRC.setup.view', 'PRC.setup.manage']),
     T('prc_req_approver', 'PRC', 'Requirement Approver', 'Immediate manager who approves, rejects or returns purchase requirements of the people who report to them. Cannot acknowledge.', ['PRC.view', 'PRC.req.approve']),

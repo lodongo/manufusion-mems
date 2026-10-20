@@ -22,6 +22,7 @@ import {
 import { audit } from './audit';
 import { hasPerm, orgRoute, staff, type OrgContext, type SecureContext } from './guards';
 import { allowedNodeIds, nextOrgCounter } from './positions';
+import { allowedAt } from './scopeGuard';
 import { identicalAssetEquipmentClass, assetIsAssignable, unitIsAssignable } from './assetEquipmentRules';
 
 // ---------------------------------------------------------------------------
@@ -565,6 +566,11 @@ async function readAssetAttributes(info: ClassInfo, raw: unknown, enforceRequire
 
 const assetCol = (orgId: string) => `organizations/${orgId}/assets`;
 const structPath = (orgId: string, id: string) => `organizations/${orgId}/structure/${id}`;
+
+/** Asset rights count where the asset sits: a job-role right only at its node and below, a direct right within scope. */
+async function requireAssetRight(ctx: OrgContext, perms: string[], nodeId: string): Promise<void> {
+    if (!(await allowedAt(ctx, perms, nodeId, 'write'))) throw new HttpError(403, 'You do not hold this asset right at the asset\'s location.');
+}
 
 function requireAst(ctx: OrgContext) {
     const map = isObj(ctx.org.data.modules) ? ctx.org.data.modules : {};
@@ -1293,6 +1299,7 @@ export const assetRoutes = {
             const nodeId = forWorkCenter || str(ctx.body.nodeId);
             if (!NODE_ID_RE.test(nodeId)) throw new HttpError(400, 'Choose where the asset is located.');
             if (!inScope(scope, nodeId)) throw new HttpError(403, 'You can only place assets inside your assigned scope.');
+            await requireAssetRight(ctx, [isNew ? 'AST.create' : 'AST.edit'], nodeId);
             const { node, siteId, legalEntityId } = await lineage(ctx.orgId, nodeId);
             if (!node || !LOCATION_LEVELS.includes(str(node.data.level))) throw new HttpError(400, 'Assets are located at a site, department, cost center or equipment unit.');
             if (!forWorkCenter && str(node.data.level) === 'work_center' && isNew) throw new HttpError(400, 'An asset at an equipment unit must be linked through the one-to-one equipment selector.');
@@ -1413,13 +1420,11 @@ export const assetRoutes = {
             const note = str(ctx.body.note).trim().slice(0, 300);
             const now = nowIso();
             const path = `${assetCol(ctx.orgId)}/${tag}`;
-            const need = (perm: string) => {
-                if (!hasPerm(ctx.permissions, perm)) throw new HttpError(403, 'You do not have permission to do this.');
-            };
+            const need = (perm: string) => requireAssetRight(ctx, [perm], str(doc.data.nodeId));
             const label = `${tag} ${str(doc.data.name)}`;
 
             if (action === 'submit') {
-                if (!hasPerm(ctx.permissions, 'AST.create') && !hasPerm(ctx.permissions, 'AST.edit')) throw new HttpError(403, 'You do not have permission to do this.');
+                await requireAssetRight(ctx, ['AST.create', 'AST.edit'], str(doc.data.nodeId));
                 if (status !== 'draft' && status !== 'rejected') throw new HttpError(400, 'Only drafts or rejected assets can be submitted.');
                 if (ctx.body.confirmed !== true) throw new HttpError(400, 'Review the attributes and tick the confirmation before submitting.');
                 const info = classOut(await orgDictionary(ctx), str(doc.data.classCode));
@@ -1430,7 +1435,7 @@ export const assetRoutes = {
             }
 
             if (action === 'request_disposal') {
-                need('AST.edit');
+                await need('AST.edit');
                 if (status !== 'active') throw new HttpError(400, 'Only active assets can be proposed for disposal.');
                 if (note.length < 5) throw new HttpError(400, 'Give the reason for disposal (at least 5 characters).');
                 await updateFields(path, { status: 'disposal_pending', pendingNote: note, submittedBy: ctx.uid, submittedByName: displayName(ctx), submittedAt: now, updatedAt: now, history: withHistory(doc, ctx, 'disposal_requested', note) });
@@ -1448,7 +1453,7 @@ export const assetRoutes = {
             }
 
             if (action === 'approve' || action === 'reject') {
-                need('AST.approve');
+                await need('AST.approve');
                 if (!['pending_approval', 'change_pending', 'disposal_pending'].includes(status)) throw new HttpError(400, 'Nothing is waiting for approval.');
                 // Segregation of duties: nobody approves their own submission or an asset they created.
                 if (str(doc.data.submittedBy) === ctx.uid || (status === 'pending_approval' && str(doc.data.createdBy) === ctx.uid)) {
@@ -1491,6 +1496,7 @@ export const assetRoutes = {
         orgRoute('org.assets.delete', 'AST.delete', async (ctx) => {
             requireAst(ctx);
             const doc = await getAsset(ctx, str(ctx.body.tag));
+            await requireAssetRight(ctx, ['AST.delete'], str(doc.data.nodeId));
             if (str(ctx.body.confirm) !== doc.id) throw new HttpError(400, 'Type the asset tag exactly to confirm.');
             if (!['draft', 'rejected'].includes(str(doc.data.status)) || str(doc.data.approvedAt)) throw new HttpError(400, 'Only drafts that were never approved can be deleted. Approved assets are disposed through approval.');
             await unlinkFromWorkCenter(ctx, doc);

@@ -21,6 +21,7 @@ import {
     type Plain,
 } from './core';
 import { clearAccessCache, hasPerm, orgRoute, type OrgContext } from './guards';
+import { requireCombinedSodAcknowledgement } from './permissionPolicy';
 import { detectImage } from './branding';
 import { ID_RE, childrenOf, col, designOf, getNode, managerContext, nodeOut, record } from './structure';
 import { matchingRoleNodes, employmentCoverage, type RoleStaffingRow, type StaffingUnit } from './positionStaffing';
@@ -249,6 +250,7 @@ export const positionRoutes = {
                 const role = rolesMap.get(r);
                 if (!role || r === 'org_super_admin') throw new HttpError(400, 'Choose security roles from the list. The super admin role cannot be mapped.');
             }
+            const positionSodNote = requireCombinedSodAcknowledgement(ctx.body, securityRoles.flatMap((r) => rolesMap.get(r)?.permissions ?? []), 'This job role');
             const rawSkills = ctx.body.coreSkills;
             if (rawSkills !== undefined && !Array.isArray(rawSkills)) throw new HttpError(400, 'Core skills must be a list.');
             // No business-imposed minimum or maximum. An empty list is valid. The underlying
@@ -314,7 +316,7 @@ export const positionRoutes = {
                 }
                 await updateFields(`${posCol(ctx.orgId)}/${code}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, staffingPlan, updatedAt: now, updatedBy: ctx.uid });
                 await syncRoleAtSites(ctx.orgId, code, operatingLevel, staffingPlan, nodeDocs.map(nodeOut), ctx.uid);
-                await record(ctx, 'org.position.update', `${code} ${title}`, added.length || removed.length ? `Security roles added: ${added.join(', ') || 'none'}; removed: ${removed.join(', ') || 'none'}` : '');
+                await record(ctx, 'org.position.update', `${code} ${title}`, `${added.length || removed.length ? `Security roles added: ${added.join(', ') || 'none'}; removed: ${removed.join(', ') || 'none'}` : ''} ${positionSodNote}`.trim());
                 if (added.length || removed.length) clearAccessCache(ctx.orgId);
                 return { code };
             }
@@ -326,7 +328,7 @@ export const positionRoutes = {
                 if (await writeDoc(`${posCol(ctx.orgId)}/${newCode}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, staffingPlan, createdAt: now, createdBy: ctx.uid, updatedAt: now }, { exists: false })) {
                     await syncRoleAtSites(ctx.orgId, newCode, operatingLevel, staffingPlan, nodeDocs.map(nodeOut), ctx.uid);
                     if (securityRoles.length) clearAccessCache(ctx.orgId);
-                    await record(ctx, 'org.position.create', `${newCode} ${title}`, parentCode ? `Reports to ${parentCode}` : 'Top role');
+                    await record(ctx, 'org.position.create', `${newCode} ${title}`, `${parentCode ? `Reports to ${parentCode}` : 'Top role'} ${positionSodNote}`.trim());
                     return { code: newCode };
                 }
             }
@@ -522,9 +524,15 @@ export const positionRoutes = {
                 .flatMap((a) => posMap.get(a.positionCode)?.securityRoles ?? [])
                 .flatMap((r) => rolesMap.get(r)?.permissions ?? []);
             if (!canGrantPerms(ctx, addedPerms)) throw new HttpError(403, 'These job roles carry security rights you do not hold yourself. Ask a super admin.');
+            const directRole = str(user.data.role);
+            const directPerms = directRole && directRole !== 'org_super_admin' ? (rolesMap.get(directRole)?.permissions ?? []) : [];
+            const jobPerms = assignments
+                .flatMap((a) => posMap.get(a.positionCode)?.securityRoles ?? [])
+                .flatMap((r) => (rolesMap.get(r)?.permissions ?? []).filter((x) => x !== '*' && !x.startsWith('ADM.')));
+            const scopeSodNote = requireCombinedSodAcknowledgement(ctx.body, [...directPerms, ...jobPerms], 'This person');
             for (const id of autoAdd) await updateFields(`${col(ctx.orgId)}/${id}`, { roleCodes: nodes.get(id)?.roleCodes ?? [], updatedAt: nowIso() });
             await updateFields(`users/${uid}`, { assignments, extraScopes, scopeUpdatedAt: nowIso(), scopeUpdatedBy: ctx.uid });
-            await record(ctx, 'org.user.scope', str(user.data.email), `${assignments.map((a) => `${a.positionCode}@${nodes.get(a.nodeId)?.code ?? a.nodeId}`).join(', ') || 'no job roles'}; ${extraScopes.length} special access`);
+            await record(ctx, 'org.user.scope', str(user.data.email), `${assignments.map((a) => `${a.positionCode}@${nodes.get(a.nodeId)?.code ?? a.nodeId}`).join(', ') || 'no job roles'}; ${extraScopes.length} special access ${scopeSodNote}`.trim());
             clearAccessCache(ctx.orgId);
             return { assignments, extraScopes };
         }),

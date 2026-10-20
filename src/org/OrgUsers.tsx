@@ -11,6 +11,7 @@ import UserScope from './UserScope';
 import RoleCoreSkills from './RoleCoreSkills';
 import type { OrgRole } from './types';
 import { appConfirm } from '../components/dialogs';
+import { withSodAcknowledgement } from '../lib/sod';
 
 interface OrgUser {
     uid: string;
@@ -218,7 +219,7 @@ function UserForm({
             if (isNew) {
                 await callBackend('/api/org/users/create', { emailLocal: emailLocal.trim().toLowerCase(), firstName, lastName, phone, role, password, skillCodes });
             } else {
-                await callBackend('/api/org/users/update', { uid: user.uid, firstName, lastName, phone, role, status, skillCodes, roleExpiresAt: role === 'org_super_admin' ? '' : roleExpiresAt });
+                await withSodAcknowledgement((extra) => callBackend('/api/org/users/update', { uid: user.uid, firstName, lastName, phone, role, status, skillCodes, roleExpiresAt: role === 'org_super_admin' ? '' : roleExpiresAt, ...extra }));
             }
             onDone();
         } catch (err) {
