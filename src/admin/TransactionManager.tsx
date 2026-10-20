@@ -21,7 +21,11 @@ type Row = {
     kind: 'module_access' | 'submodule_access' | 'transaction' | 'route'; state: State;
     source: 'built_in' | 'mems_admin' | 'installed_route'; routes: string[]; permissions: string[];
     addedBy?: string; addedAt?: string; reason?: string;
+    postings: Array<{ event: string; label: string; debit: string[]; credit: string[]; state: 'live' | 'planned' }>;
 };
+type GlRole = { code: string; label: string; statement: 'BS' | 'PL'; live: boolean; note: string; default: { code: string; name: string; basis: 'gl_master_role' | 'account_name' } | null };
+type GlEvent = { event: string; label: string; codes: string[]; debit: string[]; credit: string[]; state: 'live' | 'planned'; source: string; routes: string[] };
+type GlDefaults = { masterVersion: string; masterAccounts: number; roles: GlRole[]; events: GlEvent[] };
 type AreaDef = { module: string; area: string; name: string; actions: string[] };
 type Catalogue = {
     items: Row[];
@@ -29,6 +33,7 @@ type Catalogue = {
     modules: Array<{ code: string; name: string }>;
     areas: AreaDef[];
     actions: Array<{ code: string; name: string }>;
+    gl: GlDefaults;
 };
 
 const STATE_LABEL: Record<State, string> = {
@@ -45,7 +50,8 @@ const KIND_LABEL: Record<Row['kind'], string> = {
     module_access: 'Module access', submodule_access: 'Submodule access', transaction: 'Transaction', route: 'Installed route',
 };
 
-type Filter = 'all' | State;
+type Filter = 'all' | 'financial' | State;
+type View = 'transactions' | 'gl';
 
 export default function TransactionManager() {
     const [data, setData] = useState<Catalogue | null>(null);
@@ -56,6 +62,7 @@ export default function TransactionManager() {
     const [selected, setSelected] = useState<Row | null>(null);
     const [adding, setAdding] = useState(false);
     const [copied, setCopied] = useState('');
+    const [view, setView] = useState<View>('transactions');
     const { ask, sheet } = useConfirm();
 
     const load = () => {
@@ -69,7 +76,7 @@ export default function TransactionManager() {
     useEffect(load, []);
 
     const rows = useMemo(
-        () => (data?.items ?? []).filter((r) => (filter === 'all' || r.state === filter) && (!module || r.module === module)),
+        () => (data?.items ?? []).filter((r) => (filter === 'all' || (filter === 'financial' ? r.postings.length > 0 : r.state === filter)) && (!module || r.module === module)),
         [data, filter, module],
     );
     const moduleName = useMemo(() => new Map((data?.modules ?? []).map((m) => [m.code, m.name])), [data]);
@@ -95,6 +102,10 @@ export default function TransactionManager() {
         { key: 'area', label: 'Submodule', value: (r) => `${r.area} ${r.areaName}`, render: (r) => <span className='block min-w-[9rem] whitespace-normal'>{r.areaName}<span className='block font-mono text-xs text-muted'>{r.area}</span></span> },
         { key: 'action', label: 'Action', value: (r) => r.actionName || r.action },
         { key: 'routes', label: 'Installed routes', type: 'number', value: (r) => r.routes.length },
+        {
+            key: 'posting', label: 'GL posting', value: (r) => r.postings.map((p) => `${p.event} (${p.state})`).join(', '),
+            render: (r) => r.postings.length ? <span className='block max-w-[14rem] whitespace-normal text-xs'>{r.postings.map((p) => p.event).join(', ')}</span> : <span className='text-muted'>—</span>,
+        },
         { key: 'permissions', label: 'Permissions', value: (r) => r.permissions.join(', '), render: (r) => <span className='block max-w-[16rem] whitespace-normal break-words text-xs'>{r.permissions.join(', ') || '—'}</span> },
         { key: 'kind', label: 'Kind', hidden: true, value: (r) => KIND_LABEL[r.kind] },
         { key: 'routeList', label: 'Route paths', hidden: true, value: (r) => r.routes.join('; ') },
@@ -122,6 +133,7 @@ export default function TransactionManager() {
     const t = data?.totals;
     const filters: Array<{ value: Filter; label: string; count?: number }> = [
         { value: 'all', label: 'All', count: t?.codes },
+        { value: 'financial', label: 'Financial', count: data?.items.filter((r) => r.postings.length > 0).length },
         { value: 'live', label: 'Live', count: t?.live },
         { value: 'reserved', label: 'Reserved', count: t?.reserved },
         { value: 'live_unlinked', label: 'Not linked', count: t?.liveUnlinked },
@@ -166,6 +178,10 @@ export default function TransactionManager() {
                 </div>
             )}
             {data && (
+                <Segmented label='View' value={view} onChange={setView} options={[{ value: 'transactions', label: 'Transactions' }, { value: 'gl', label: 'GL posting defaults' }]} />
+            )}
+            {data && view === 'gl' && <GlDefaultsView gl={data.gl} />}
+            {data && view === 'transactions' && (
                 <>
                     <Segmented label='Transaction state' value={filter} options={filters} onChange={setFilter} />
                     <SelectField id='txn-module' label='Module' value={module} onChange={(e) => setModule(e.target.value)}>
@@ -197,6 +213,7 @@ export default function TransactionManager() {
             {selected && (
                 <DetailSheet
                     row={selected}
+                    gl={data?.gl}
                     moduleName={moduleName.get(selected.module) ?? selected.module}
                     copied={copied === selected.code}
                     onCopy={() => void copy(selected.code)}
@@ -250,7 +267,13 @@ function Sheet({ title, onClose, children, footer }: { title: string; onClose: (
     );
 }
 
-function DetailSheet({ row, moduleName, copied, onCopy, onRetire, onClose }: { row: Row; moduleName: string; copied: boolean; onCopy: () => void; onRetire: () => void; onClose: () => void }) {
+function accountFor(gl: GlDefaults | undefined, role: string): string {
+    if (role === 'EXPENSE') return 'Line account (cost center allowed accounts)';
+    const d = gl?.roles.find((r) => r.code === role)?.default;
+    return d ? `${d.code} ${d.name}` : 'No default in the GL master';
+}
+
+function DetailSheet({ row, gl, moduleName, copied, onCopy, onRetire, onClose }: { row: Row; gl?: GlDefaults; moduleName: string; copied: boolean; onCopy: () => void; onRetire: () => void; onClose: () => void }) {
     return (
         <Sheet
             title={row.code}
@@ -310,6 +333,23 @@ function DetailSheet({ row, moduleName, copied, onCopy, onRetire, onClose }: { r
                     <p className='text-sm text-muted'>Nothing is installed. This code is a placeholder and cannot run.</p>
                 )}
             </section>
+            {row.postings.length > 0 && (
+                <section className='space-y-2'>
+                    <h3 className='text-sm font-semibold text-ink'>General-ledger postings</h3>
+                    {row.postings.map((p) => (
+                        <div key={p.event} className='space-y-1 rounded-xl border border-line p-3'>
+                            <div className='flex flex-wrap items-center gap-2'>
+                                <span className='font-mono text-xs font-semibold text-ink'>{p.event}</span>
+                                <Badge tone={p.state === 'live' ? 'brand' : 'muted'}>{p.state === 'live' ? 'Posting live' : 'Planned'}</Badge>
+                            </div>
+                            <p className='text-sm text-soft'>{p.label}</p>
+                            <PostingLines side='Debit' roles={p.debit} gl={gl} />
+                            <PostingLines side='Credit' roles={p.credit} gl={gl} />
+                        </div>
+                    ))}
+                    <p className='text-xs text-muted'>Defaults come from the MEMS GL master. Each legal entity confirms its own accounts in Finance › GL accounts › Mapping (proposed and approved).</p>
+                </section>
+            )}
             {row.permissions.length > 0 && (
                 <section className='space-y-1'>
                     <h3 className='text-sm font-semibold text-ink'>Route permissions</h3>
@@ -437,5 +477,57 @@ function AddCodeSheet({ data, defaultModule, onClose, onSaved }: { data: Catalog
             </div>
             {error && <Alert tone='error'>{error}</Alert>}
         </Sheet>
+    );
+}
+
+function PostingLines({ side, roles, gl }: { side: 'Debit' | 'Credit'; roles: string[]; gl?: GlDefaults }) {
+    return (
+        <dl className='grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 text-xs'>
+            {roles.map((role, i) => (
+                <div key={role} className='contents'>
+                    <dt className='text-muted'>{i === 0 ? side : ''}</dt>
+                    <dd className='break-words text-ink'>
+                        <span className='font-mono'>{role}</span> · {accountFor(gl, role)}
+                    </dd>
+                </div>
+            ))}
+        </dl>
+    );
+}
+
+function GlDefaultsView({ gl }: { gl: GlDefaults }) {
+    const roleColumns: Array<Column<GlRole>> = [
+        { key: 'code', label: 'Role', value: (r) => r.code, render: (r) => <span className='whitespace-nowrap font-mono text-xs font-semibold text-ink'>{r.code}</span> },
+        { key: 'label', label: 'Accounting role', value: (r) => r.label, render: (r) => <span className='block min-w-[12rem] whitespace-normal'>{r.label}</span> },
+        { key: 'statement', label: 'Statement', value: (r) => (r.statement === 'BS' ? 'Balance sheet' : 'Profit and loss') },
+        { key: 'state', label: 'State', value: (r) => (r.live ? 'Live' : 'Planned'), render: (r) => <Badge tone={r.live ? 'brand' : 'muted'}>{r.live ? 'Live' : 'Planned'}</Badge> },
+        { key: 'default', label: 'Default GL account', value: (r) => (r.default ? `${r.default.code} ${r.default.name}` : ''), render: (r) => (r.default ? <span className='block min-w-[12rem] whitespace-normal'><span className='font-mono text-xs'>{r.default.code}</span> {r.default.name}</span> : <span className='text-amber-300'>No match in GL master</span>) },
+        { key: 'basis', label: 'Matched by', value: (r) => (r.default ? (r.default.basis === 'gl_master_role' ? 'GL master role' : 'Account name') : '') },
+        { key: 'note', label: 'Use', hidden: true, value: (r) => r.note },
+    ];
+    const eventColumns: Array<Column<GlEvent>> = [
+        { key: 'event', label: 'Posting event', value: (e) => e.event, render: (e) => <span className='whitespace-nowrap font-mono text-xs font-semibold text-ink'>{e.event}</span> },
+        { key: 'state', label: 'State', value: (e) => (e.state === 'live' ? 'Posting live' : 'Planned'), render: (e) => <Badge tone={e.state === 'live' ? 'brand' : 'muted'}>{e.state === 'live' ? 'Posting live' : 'Planned'}</Badge> },
+        { key: 'label', label: 'Movement', value: (e) => e.label, render: (e) => <span className='block min-w-[12rem] whitespace-normal'>{e.label}</span> },
+        { key: 'debit', label: 'Debit (default)', value: (e) => e.debit.map((r) => `${r} ${accountFor(gl, r)}`).join('; '), render: (e) => <span className='block min-w-[12rem] whitespace-normal text-xs'>{e.debit.map((r) => `${r} · ${accountFor(gl, r)}`).join('; ')}</span> },
+        { key: 'credit', label: 'Credit (default)', value: (e) => e.credit.map((r) => `${r} ${accountFor(gl, r)}`).join('; '), render: (e) => <span className='block min-w-[12rem] whitespace-normal text-xs'>{e.credit.map((r) => `${r} · ${accountFor(gl, r)}`).join('; ')}</span> },
+        { key: 'codes', label: 'Transaction codes', value: (e) => e.codes.join(', '), render: (e) => <span className='block whitespace-normal font-mono text-xs'>{e.codes.join(', ')}</span> },
+        { key: 'source', label: 'Source', hidden: true, value: (e) => e.source },
+        { key: 'routes', label: 'Installed routes', hidden: true, value: (e) => e.routes.join('; ') },
+    ];
+    const unmatched = gl.roles.filter((r) => !r.default).length;
+    return (
+        <div className='space-y-3'>
+            {!gl.masterAccounts ? (
+                <Alert tone='warn'>The MEMS GL master is not loaded, so no default accounts can be shown. Load it under Modules › FIN.</Alert>
+            ) : (
+                <p className='text-sm text-muted'>
+                    MEMS GL master {gl.masterVersion ? `version ${gl.masterVersion}` : ''} · {gl.masterAccounts} accounts. {gl.roles.length - unmatched} of {gl.roles.length} roles have a default account
+                    {unmatched ? `; ${unmatched} need an account added or tagged with its role in the GL master.` : '.'}
+                </p>
+            )}
+            <RichTable id='mems-gl-events' title='Financial movements' fileName='mems_gl_posting_events' height='h-[26rem]' columns={eventColumns} rows={gl.events} rowKey={(e) => e.event} />
+            <RichTable id='mems-gl-roles' title='Accounting roles and default accounts' fileName='mems_gl_role_defaults' height='h-[26rem]' columns={roleColumns} rows={gl.roles} rowKey={(r) => r.code} />
+        </div>
     );
 }

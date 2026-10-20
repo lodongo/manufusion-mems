@@ -10,7 +10,10 @@ import { HttpError, getDoc, listDocs, nowIso, str, writeDoc } from './core';
 import { audit } from './audit';
 import { staff, type StaffContext } from './guards';
 import { allSystemTransactions } from './transactionRuntime';
-import { ACTION_NAMES, areaDefinitions, plannedTransactionBlueprints } from './transactionBlueprints';
+import { ACTION_NAMES, EXTRA_MODULES, areaDefinitions, plannedTransactionBlueprints } from './transactionBlueprints';
+import { POSTING_EVENTS, postingRoles, suggestRoleAccounts, type ChartAccount } from './finPostingCatalogue';
+import { glMaster } from './procurement';
+import { postableOf, statementOf } from './finCore';
 import { transactionCatalogue, type CustomCode } from './transactionCatalogue';
 import { DEFAULT_MODULES } from './catalog';
 
@@ -41,8 +44,26 @@ async function customCodes(): Promise<CustomCode[]> {
 
 function moduleNames(): Map<string, string> {
     const names = new Map(DEFAULT_MODULES.map((m) => [m.code, m.name]));
-    names.set('SAF', 'Safety');
+    for (const m of EXTRA_MODULES) names.set(m.code, m.name);
     return names;
+}
+
+/** Default GL account per accounting role, drawn from the MEMS GL master (tenants adopt and approve their own mapping). */
+async function glDefaults() {
+    let master: Awaited<ReturnType<typeof glMaster>> = null;
+    try { master = await glMaster(); } catch { master = null; }
+    const accounts: ChartAccount[] = (master?.accounts ?? []).map((a) => ({
+        code: str(a.code), name: str(a.name), statement: statementOf(a), accountRole: str(a.accountRole),
+        accountType: str(a.accountType), postable: postableOf(a),
+    })).filter((a) => a.code);
+    const roles = postingRoles();
+    const suggested = suggestRoleAccounts(accounts, roles);
+    return {
+        masterVersion: master ? str(master.version) : '',
+        masterAccounts: accounts.length,
+        roles: roles.map((r) => ({ ...r, default: suggested[r.code] ?? null })),
+        events: POSTING_EVENTS.map(({ via, ...e }) => ({ ...e, routes: via ?? [] })),
+    };
 }
 
 export const platformTransactionRoutes = {
@@ -64,11 +85,12 @@ export const platformTransactionRoutes = {
                     added: byState.added_reserved ?? 0,
                     retired: byState.retired ?? 0,
                     installedRoutes: routes.length,
-                    linkedRoutes: rows.filter((r) => r.state === 'live').reduce((n, r) => n + r.routes.length, 0),
+                    linkedRoutes: new Set(rows.filter((r) => r.state === 'live').flatMap((r) => r.routes)).size,
                 },
                 modules,
                 areas: areaDefinitions(),
                 actions: Object.entries(ACTION_NAMES).map(([code, name]) => ({ code, name })),
+                gl: await glDefaults(),
             };
         }),
     ],
