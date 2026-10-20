@@ -4,7 +4,7 @@ import { orgRoute } from './guards';
 import { record } from './org';
 import { validateDocumentLocation } from './drkmsHierarchy';
 import { assessPublicationGate } from './drkmsPublicationGate';
-import {releaseManifest} from './drkmsPublish';
+import {publicationFingerprint} from './drkmsPublish';
 import {canAt,scopeOf,nodePath} from './access';
 
 const base = (orgId: string) => `organizations/${orgId}/drkms_documents`;
@@ -206,9 +206,11 @@ export const drkmsRoutes = {
                     str(f.data.availability)==='verified' && /^[a-f0-9]{64}$/.test(str(f.data.sha256)) &&
                     Number.isSafeInteger(Number(f.data.bytes)) && Number(f.data.bytes)>0);
             if(!ready)throw new HttpError(409,'All source files must be independently scanned and verified before preparing the CoA publication request.');
-            const contentFingerprint=releaseManifest(id,str(doc.data.revision),attachments.map(f=>({
+            const contentFingerprint=publicationFingerprint(id,str(doc.data.revision),attachments.map(f=>({
                 fileId:f.id,sha256:str(f.data.sha256),mime:str(f.data.mime),bytes:Number(f.data.bytes),
-            })));
+            })),{title:str(doc.data.title),classCode:str(doc.data.classCode),subtypeCode:str(doc.data.subtypeCode),
+                scopeNodeId:nodeId,verifiedBy:str(doc.data.verifiedBy),verifiedAt:str(doc.data.verifiedAt),
+                updatedAt:str(doc.data.updatedAt)});
             const transactionPayload={documentId:id,revision:str(doc.data.revision),contentFingerprint};
             return {documentId:id,documentFingerprint:contentFingerprint,payload:transactionPayload,
                 technicalVerification:payload,publicationEnabled:false,
