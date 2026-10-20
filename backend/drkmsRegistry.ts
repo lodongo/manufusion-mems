@@ -1,5 +1,5 @@
 /** Metadata-only DRKMS registry. No publishing, file upload or AI output execution. */
-import { HttpError, getDoc, listDocs, nowIso, randomId, str, writeDoc } from './core';
+import { HttpError, getDoc, listDocs, nowIso, randomId, str, writeDoc, updateFields } from './core';
 import { orgRoute } from './guards';
 import { record } from './org';
 import { validateDocumentLocation } from './drkmsHierarchy';
@@ -90,6 +90,27 @@ export const drkmsRoutes = {
                 validScope: !!d.scope, revisionId: str(d.effectiveRevisionId),
             });
             return { documentId: id, ...outcome, publicationEnabled: false };
+        }),
+    ],
+    'POST /api/org/drkms/documents/submit-review': [
+        orgRoute('drkms.documents.submit_review', 'ADM.document_registry', async ctx => {
+            const id = str(ctx.body.documentId);
+            if (!validId(id)) throw new HttpError(400, 'Invalid document identifier.');
+            const path = `${base(ctx.orgId)}/${id}`;
+            const document = await getDoc(path);
+            if (!document) throw new HttpError(404, 'Document not found.');
+            if (str(document.data.createdBy) !== ctx.uid && ctx.role !== 'org_super_admin')
+                throw new HttpError(403, 'Only the document author can submit a draft.');
+            if (str(document.data.status) !== 'draft')
+                throw new HttpError(409, 'Only drafts can be submitted for review.');
+            const scope = document.data.scope;
+            if (!scope || typeof scope !== 'object' || Array.isArray(scope))
+                throw new HttpError(409, 'Document has no approved organizational location.');
+            const validated = await resolveScope(ctx.orgId, str((scope as Record<string, unknown>).nodeId));
+            if (!validated.scope) throw new HttpError(409, 'Document location is no longer valid.');
+            await updateFields(path, { status: 'in_review', submittedBy: ctx.uid, submittedAt: nowIso() });
+            await record(ctx, 'drkms.document.submit_review', id, 'Submitted for review; no approval implied');
+            return { documentId: id, status: 'in_review', approvalStatus: 'awaiting_governance_configuration' };
         }),
     ],
     'POST /api/org/drkms/documents/create-draft': [
