@@ -37,6 +37,7 @@ import OrgRoles from './OrgRoles';
 import SecurityKnowledgeBase from './SecurityKnowledgeBase';
 import OrgAudit from './OrgAudit';
 import PlannedPage from './PlannedPage';
+import DocumentRegistryPage from './DocumentRegistryPage';
 import type { OrgContextData } from './types';
 
 type MenuItem = NavItem & { perm?: string; module?: string };
@@ -90,6 +91,10 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
     {
         title: 'Finance (FIN)',
         items: [{ key: 'gl_accounts', label: 'GL account master', Icon: Calculator, perm: 'FIN.view', module: 'FIN' }],
+    },
+    {
+        title: 'Documents & Knowledge',
+        items: [{ key: 'document_registry', label: 'Document registry', Icon: BookOpen, perm: 'ADM.roles' }],
     },
     {
         title: 'People and access',
@@ -210,6 +215,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
     switch (active) {
         case 'dashboard':
             content = <OrgOverview ctx={data} hasBranding={!!session.organization?.branding?.preset && !!session.organization?.branding?.displayName} />;
+            break;
+        case 'document_registry':
+            content = <DocumentRegistryPage />;
             break;
         case 'users':
             content = <OrgUsers id={id} myUid={session.user.uid} myRole={data.role} canRoles={hasPerm(data.permissions, 'ADM.roles')} />;
