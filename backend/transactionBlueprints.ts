@@ -43,18 +43,24 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = Object.freeze({
   EX: 'Extend', BL: 'Block', RS: 'Reserve', IS: 'Issue', CT: 'Count', VF: 'Verify', RQ: 'Request recount',
   AS: 'Assign', PK: 'Pick', PA: 'Pack', DI: 'Dispatch', PT: 'Put away', LN: 'Link', DN: 'Unlink',
   PR: 'Print', RW: 'Review', WD: 'Withdraw', SP: 'Split', MG: 'Merge', TR: 'Terminate', RR: 'Renew',
-  IM: 'Import', XP: 'Export', CG: 'Configure',
+  IM: 'Import', XP: 'Export', CG: 'Configure', AV: 'Activate', UP: 'Upload attachment', AN: 'Respond',
+  VO: 'Vote', AR: 'Archive',
 });
 
 /** Standard action set for modules that are not yet designed in detail. */
 const STANDARD = 'VW,CR,ED,SB,AP,RT,RJ,CN,PS,CL,RV,RP';
+/** Platform administration, collaboration and self-service action sets. */
+const PLATFORM = 'VW,CR,ED,DL,IM,XP,AP,RJ,PB,RW,CG,RN,AV,SU,RA';
+const WORKSPACE = 'VW,CR,ED,DL,SN,AN,AK,AC,CL,CN,LN,UP,AR,AS,VO';
+const SELF = 'VW,CR,ED,SB,UP,PY,RN';
 
 /**
  * Submodules per module: CODE:Name[:ACTIONS]. ACTIONS defaults to the standard set.
  * Existing area codes are kept; new ones are appended.
  */
 const AREAS: Record<string, string> = {
-  ADM: 'ORG:Organization setup|USR:Users|SEC:Security roles|JBR:Job roles|GOA:Governance|AUD:Audit|TEN:Tenants|MDL:Module administration',
+  ADM: 'ORG:Organization setup|USR:Users|SEC:Security roles|JBR:Job roles|GOA:Governance|AUD:Audit|TEN:Tenants|MDL:Module administration'
+    + '|SDC:Security documentation:VW,CR,ED,SB,AP,PB,RW,UP,CG|HOM:Home and setup progress:VW,ED|REF:Organization reference lists:VW',
   FIN: [
     'GLA:General ledger:VW,CR,ED,AP,PS,RV,RP',
     'COA:Chart of accounts:VW,CR,ED,SB,AP,DA,RP',
@@ -69,7 +75,7 @@ const AREAS: Record<string, string> = {
     'EXP:Expense claims:VW,CR,SB,AP,RJ,RT,PY',
     'ADV:Staff advances:VW,CR,SB,AP,PY,RE',
     'TAX:Tax:VW,CR,ED,SB,AP,FL,RP',
-    'PER:Financial periods:VW,CR,OP,CL,LK,UL,AP',
+    'PER:Financial periods:VW,CR,ED,OP,CL,LK,UL,AP',
     'BUD:Budgets:VW,CR,ED,SB,AP,AM,LK,RP',
     'FXR:Currency rates:VW,CR,AP,RV,RP',
     'REC:Reconciliations:VW,CR,SB,AP,RE,RP',
@@ -110,8 +116,10 @@ const AREAS: Record<string, string> = {
   PLN: 'MPS:Master schedule|MRP:Material requirements planning|CAP:Capacity planning|DEM:Demand forecast|SHT:Shortage management',
   CST: 'STD:Standard costing|ACT:Actual costing|OVH:Overheads|VAR:Variances|MRG:Margins',
   QLT: 'INS:Inspections|SPC:Specifications|NCR:Nonconformance|CAP:Corrective actions|COA:Certificates|REL:Quality release',
-  MNT: 'WRQ:Work requests|WOR:Work orders|PMS:Preventive schedules|AMS:Autonomous maintenance|RCA:Root cause analysis|RISK:Risk and permits|BOM:Maintenance BOM|REL:Reliability',
-  AST: 'REG:Asset register|EQP:Equipment|ASM:Assemblies|DEP:Depreciation|TRF:Transfers|DSP:Disposals|CAP:Capitalisation|TAG:Tagging',
+  MNT: 'WRQ:Work requests|WOR:Work orders|PMS:Preventive schedules|AMS:Autonomous maintenance|RCA:Root cause analysis|RISK:Risk and permits|BOM:Maintenance BOM|REL:Reliability'
+    + '|ASS:Work assessments:VW,ED,SB,AP,UP|TSK:Task library:VW,CR,ED,AP|MCD:Material candidates:VW,CR,SB,AP|SET:Maintenance setup and references:VW,ED,CG|WFL:Maintenance workflow configuration:VW,ED,AP',
+  AST: 'REG:Asset register|EQP:Equipment|ASM:Assemblies|DEP:Depreciation|TRF:Transfers|DSP:Disposals|CAP:Capitalisation|TAG:Tagging'
+    + '|DIC:Asset dictionary:VW,IM,ED|ACT:Assembly activities:VW,ED',
   PRC: [
     'REQ:Purchase requirements:VW,CR,ED,SB,AP,RJ,RT,CN,AK',
     'RFQ:Quotations and sourcing:VW,CR,ED,IN,EV,RC,AP,CN,RO',
@@ -161,10 +169,35 @@ const AREAS: Record<string, string> = {
   DOC: 'REC:Records|TMP:Templates|VER:Version control|APR:Document approvals|RET:Retention|PUB:Publication',
   RPT: 'DSH:Dashboards|RPT:Reports|AUD:Audit analytics|EXP:Exports|PUB:Publication|SCH:Scheduled reports',
   PRJ: 'PRJ:Projects|WBS:Work breakdown|TSK:Tasks|BUD:Budgets|CST:Project costs|RSK:Risks|CHG:Changes|CLS:Closure',
+  WSP: [
+    `CHT:Chat:${WORKSPACE}`, `CHA:Chat action requests:${WORKSPACE}`, `POL:Chat polls:${WORKSPACE}`, `MAI:Mail:${WORKSPACE}`,
+    `CAL:Calendar:${WORKSPACE}`, `ACT:Action requests:${WORKSPACE}`, `TOD:To-dos:${WORKSPACE}`, `NOT:Notes:${WORKSPACE}`,
+    `GEM:Gemba walks:${WORKSPACE}`, `TBL:Saved table views:${WORKSPACE}`, `HOM:Home and shortcuts:${WORKSPACE}`,
+    `WGR:Work groups:${WORKSPACE}`, `ACC:My access and activity:${WORKSPACE}`,
+  ].join('|'),
+  PLT: [
+    `TEN:Tenants:${PLATFORM}`, `APL:Applications and registrations:${PLATFORM}`, `USR:MEMS staff users:${PLATFORM}`,
+    `MDL:Modules and metadata:${PLATFORM}`, `REF:Reference data:${PLATFORM}`, `ASM:Asset master data:${PLATFORM}`,
+    `PRM:Procurement master data:${PLATFORM}`, `FNM:Finance master data and banks:${PLATFORM}`, `SDC:Security documentation standard:${PLATFORM}`,
+    `OPS:Operations and automation:${PLATFORM}`, `FXR:Currency rates:${PLATFORM}`, `AUD:Logs and audit:${PLATFORM}`,
+    `HLT:Health and dashboard:${PLATFORM}`, `TRX:Transaction catalogue:${PLATFORM}`, `BIL:Billing:${PLATFORM}`,
+    `SET:Platform settings and site:${PLATFORM}`, `SKL:Skills master:${PLATFORM}`, `SEQ:Code sequences:${PLATFORM}`,
+    `EXP:Data explorer:${PLATFORM}`, `BRD:Branding review:${PLATFORM}`,
+  ].join('|'),
+  SYS: [
+    `SES:Session and context:${SELF}`, `PRF:My profile:${SELF}`, `REG:Organization registration:${SELF}`,
+    `APL:Applications:${SELF}`, `AUD:Audit events:${SELF}`, `PAY:Payment callbacks:${SELF}`,
+    `INT:Internal schedulers:${SELF}`, `HLT:Health check:${SELF}`, `SET:Initial setup:${SELF}`, `SIT:Public site:${SELF}`,
+  ].join('|'),
 };
 
 /** Modules with transactions but no subscription tile of their own. */
-const EXTRA_MODULES = [{ code: 'SAF', name: 'Safety' }];
+export const EXTRA_MODULES = [
+  { code: 'SAF', name: 'Safety' },
+  { code: 'WSP', name: 'Workspace and collaboration' },
+  { code: 'PLT', name: 'MEMS platform administration' },
+  { code: 'SYS', name: 'Sign-in and self-service' },
+];
 
 export interface AreaDefinition { module: string; area: string; name: string; actions: string[] }
 

@@ -371,6 +371,7 @@ interface MapData {
     categories: Array<{ code: string; name: string }>;
     pending: Array<{ id: string; typeLabel: string; title: string; makerName: string }>;
     can: Record<string, boolean>;
+    suggested?: Record<string, { code: string; name: string; basis: 'gl_master_role' | 'account_name' } | null>;
 }
 function Mapping({ le }: { le: Entity }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<MapData>(`${FIN_API}/mapping/get`, { leId: le.id }), [le.id]);
@@ -392,6 +393,13 @@ function Mapping({ le }: { le: Entity }) {
     const activeRules=determinationRules??data.mapping.rules??[];
     const changed = JSON.stringify(r) !== JSON.stringify(data.mapping.roles) || JSON.stringify(bc) !== JSON.stringify(data.mapping.byCategory) || JSON.stringify(activeRules)!==JSON.stringify(data.mapping.rules??[]);
     const missing = data.roles.filter((x) => x.required && !r[x.code]);
+    const suggested = data.suggested ?? {};
+    const fillable = data.roles.filter((x) => !r[x.code] && suggested[x.code] && data.accounts.some((a) => a.code === suggested[x.code]?.code));
+    const suggestionText = (code: string) => {
+        const s = suggested[code];
+        if (!s) return 'No suggested default in your chart.';
+        return `Suggested default: ${s.code} ${s.name} (${s.basis === 'gl_master_role' ? 'GL master role' : 'account name'}).`;
+    };
     return (
         <>
             {msg && <Alert tone='success'>{msg}</Alert>}
@@ -401,8 +409,16 @@ function Mapping({ le }: { le: Entity }) {
             <details className='rounded-xl border border-line p-3'>
               <summary className='cursor-pointer text-sm font-semibold text-ink'>Advanced: default role mappings and category fallbacks · version {data.mapping.version}</summary>
             <Card title={`Account determination · version ${data.mapping.version}`}>
+                {can && fillable.length > 0 && (
+                    <div className='mb-3 space-y-2 rounded-xl border border-line bg-page p-3'>
+                        <p className='text-sm text-soft'>{fillable.length} unmapped role{fillable.length === 1 ? ' has' : 's have'} a suggested default from your approved chart. Review them, then propose the mapping for approval.</p>
+                        <Button variant='secondary' onClick={() => setRoles({ ...r, ...Object.fromEntries(fillable.map((x) => [x.code, suggested[x.code]!.code])) })}>
+                            Fill empty roles with suggested defaults
+                        </Button>
+                    </div>
+                )}
                 {data.roles.map((x) => (
-                    <SelectField key={x.code} id={`fm-${x.code}`} label={`${x.label}${x.required ? ' *' : ''}`} hint={`${x.note} ${x.statement === 'BS' ? 'Balance sheet account.' : 'Profit and loss account.'}`} value={r[x.code] ?? ''} disabled={!can} onChange={(e) => setRoles({ ...r, [x.code]: e.target.value })}>
+                    <SelectField key={x.code} id={`fm-${x.code}`} label={`${x.label}${x.required ? ' *' : ''}`} hint={`${x.note} ${x.statement === 'BS' ? 'Balance sheet account.' : 'Profit and loss account.'} ${suggestionText(x.code)}`} value={r[x.code] ?? ''} disabled={!can} onChange={(e) => setRoles({ ...r, [x.code]: e.target.value })}>
                         <option value=''>Not mapped</option>
                         {opts(x.statement).map((a) => (
                             <option key={a.code} value={a.code}>

@@ -1,6 +1,7 @@
 import {DETERMINATION_EVENTS,resolveAccountRule,validateRuleDraft,type AccountRule} from './finAccountRules';
 import {buildGlTransactionVariants} from './finTransactionVariants';
 import {registerGlContracts} from './finTransactionContracts';
+import { postingRoles, suggestRoleAccounts } from './finPostingCatalogue';
 import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, updateFields, writeDoc, type Fields } from './core';
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, orgUsers, record } from './org';
@@ -976,6 +977,13 @@ export const finRoutes = {
                 variants: buildGlTransactionVariants(Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable).map(a=>({code:a.code,name:a.name,statement:a.statement,classCode:a.classCode,className:a.className,categoryCode:a.categoryCode,categoryName:a.categoryName,groupCode:a.groupCode,groupName:a.groupName,accountRole:a.accountRole,accountType:a.accountType}))),
                 contracts: registerGlContracts(buildGlTransactionVariants(Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable).map(a=>({code:a.code,name:a.name,statement:a.statement,classCode:a.classCode,className:a.className,categoryCode:a.categoryCode,categoryName:a.categoryName,groupCode:a.groupCode,groupName:a.groupName,accountRole:a.accountRole,accountType:a.accountType})))),
                 mapping: map,
+                // Default account per role from this legal entity's approved chart. A suggestion only: it becomes the
+                // mapping through the normal proposal and FIN.mapping.approve decision.
+                suggested: suggestRoleAccounts(
+                    Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable)
+                        .map((a) => ({ code: a.code, name: a.name, statement: a.statement, accountRole: a.accountRole, accountType: a.accountType, postable: a.postable })),
+                    postingRoles().filter((r) => r.live),
+                ),
                 txns: TXNS.map((t) => ({ ...t, taxes: t.taxStage ? regimes.filter((r) => strs(r.appliesTo).includes(t.taxStage)).map((r) => `${str(r.code)} (${objs(r.rates).map((x) => `${str(x.code)} ${Number(x.rate)}%`).join(', ')})`) : [] })),
                 accounts: Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable).map((a) => ({ code: a.code, name: a.name, statement: a.statement })),
                 categories: cats.map((c) => ({ code: c.code, name: c.name })),

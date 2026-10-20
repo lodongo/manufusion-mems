@@ -13,6 +13,7 @@
  */
 import { ACTION_NAMES, areaDefinitions, plannedTransactionBlueprints, type AreaDefinition } from './transactionBlueprints';
 import { allSystemTransactions, type WiredTransaction } from './transactionRuntime';
+import { POSTING_EVENTS } from './finPostingCatalogue';
 
 export type CatalogueState = 'live' | 'reserved' | 'live_unlinked' | 'added_reserved' | 'retired';
 
@@ -32,6 +33,8 @@ export interface CatalogueRow {
     addedBy?: string;
     addedAt?: string;
     reason?: string;
+    /** General-ledger postings this transaction performs (live) or will perform (planned). */
+    postings: Array<{ event: string; label: string; debit: string[]; credit: string[]; state: 'live' | 'planned' }>;
 }
 
 export interface CustomCode {
@@ -48,94 +51,182 @@ export interface CustomCode {
     reason: string;
 }
 
-/** Path prefix (after /api/org/) to module and submodule. First match wins; most specific first. */
-const PATH_RULES: Array<[RegExp, string, string]> = [
-    // Procurement
-    [/^procurement\/req\//, 'PRC', 'REQ'],
-    [/^procurement\/quotes\//, 'PRC', 'RFQ'],
-    [/^procurement\/requisitions\//, 'PRC', 'PRQ'],
-    [/^procurement\/orders\/receive/, 'PRC', 'GRN'],
-    [/^procurement\/orders\/service\//, 'PRC', 'SVC'],
-    [/^procurement\/orders\//, 'PRC', 'PUR'],
-    [/^procurement\/vendors\/sla\//, 'PRC', 'CTR'],
-    [/^procurement\/vendors\/srm/, 'PRC', 'VEV'],
-    [/^procurement\/vendors\//, 'PRC', 'VEN'],
-    [/^procurement\/materials\/workflow/, 'PRC', 'SET'],
-    [/^procurement\/materials\//, 'PRC', 'CAT'],
-    [/^procurement\/authority/, 'PRC', 'AUT'],
-    [/^procurement\/buyers\//, 'PRC', 'BGR'],
-    [/^procurement\/(setup|policy|evaluation|finance|workflows)\//, 'PRC', 'SET'],
-    [/^procurement\/dashboard\//, 'PRC', 'RPT'],
-    // Finance
-    [/^fin\/calendar\//, 'FIN', 'PER'],
-    [/^fin\/chart\//, 'FIN', 'COA'],
-    [/^fin\/cc\//, 'FIN', 'CCA'],
-    [/^fin\/close\//, 'FIN', 'CLS'],
-    [/^(fin\/journal|finance\/journals)\//, 'FIN', 'JRN'],
-    [/^fin\/mapping\//, 'FIN', 'MAP'],
-    [/^fin\/(requests|roles)\//, 'FIN', 'APR'],
-    [/^fin\/setup\//, 'FIN', 'SET'],
-    [/^fin\/tax\//, 'FIN', 'TAX'],
-    [/^fin\/stock\//, 'FIN', 'OPN'],
-    [/^fin\/(entities|le\/)/, 'FIN', 'ENT'],
-    [/^fin\/transactions\//, 'FIN', 'GLT'],
-    // Inventory
-    [/^inventory\/stocktake\//, 'INV', 'CNT'],
-    [/^inventory\/material\/bin\//, 'WHS', 'BIN'],
-    [/^inventory\/material\/isolation\//, 'INV', 'QRT'],
-    [/^inventory\/material\/opening-stock/, 'INV', 'OPN'],
-    [/^inventory\/material\//, 'INV', 'MAT'],
-    [/^inventory\/(on-hand|dashboard)/, 'INV', 'STK'],
-    [/^inventory\/operations/, 'INV', 'MOV'],
-    [/^inv\/issue\//, 'INV', 'GIS'],
-    // Warehousing
-    [/^warehouse\/(cluster|bin)\//, 'WHS', 'BIN'],
-    [/^warehouse\//, 'WHS', 'WHM'],
-    // Other modules (standard action set)
-    [/^mnt\/wr\//, 'MNT', 'WRQ'],
-    [/^mnt\/wo\//, 'MNT', 'WOR'],
-    [/^(assets|ast)\//, 'AST', 'REG'],
-    [/^saf\/risk-matrix\//, 'SAF', 'MTX'],
-    [/^(activity-risk|saf)\//, 'SAF', 'RSK'],
-    [/^users\//, 'ADM', 'USR'],
-    [/^roles\//, 'ADM', 'SEC'],
-    [/^positions\//, 'ADM', 'JBR'],
-    [/^(structure|settings|branding)\//, 'ADM', 'ORG'],
-    [/^(governance|workflows)\//, 'ADM', 'GOA'],
-    [/^audit$/, 'ADM', 'AUD'],
-    [/^(modules|subscription)(\/|$)/, 'ADM', 'MDL'],
+/**
+ * Route path (after /api/) to module, submodule and, where the final word is ambiguous, the action.
+ * First match wins; most specific first. Every family of installed routes has a rule, so every route links.
+ */
+type Rule = [RegExp, string, string, string?];
+const PATH_RULES: Rule[] = [
+    // ----- Procurement -----
+    [/^org\/procurement\/req\//, 'PRC', 'REQ'],
+    [/^org\/procurement\/quotes\//, 'PRC', 'RFQ'],
+    [/^org\/procurement\/requisitions\//, 'PRC', 'PRQ'],
+    [/^org\/procurement\/orders\/receive/, 'PRC', 'GRN'],
+    [/^org\/procurement\/orders\/service\//, 'PRC', 'SVC'],
+    [/^org\/procurement\/orders\//, 'PRC', 'PUR'],
+    [/^org\/procurement\/vendors\/sla\//, 'PRC', 'CTR'],
+    [/^org\/procurement\/vendors\/srm/, 'PRC', 'VEV'],
+    [/^org\/procurement\/vendors\//, 'PRC', 'VEN'],
+    [/^org\/procurement\/materials\/workflow/, 'PRC', 'SET'],
+    [/^org\/procurement\/(materials|catalog)\//, 'PRC', 'CAT'],
+    [/^org\/procurement\/authority/, 'PRC', 'AUT'],
+    [/^org\/procurement\/buyers\//, 'PRC', 'BGR'],
+    [/^org\/procurement\/(setup|policy|evaluation|finance|workflows)\//, 'PRC', 'SET'],
+    [/^org\/procurement\/dashboard\//, 'PRC', 'RPT'],
+    // ----- Finance -----
+    [/^org\/fin\/calendar\/period\/status/, 'FIN', 'PER', 'ED'],
+    [/^org\/fin\/calendar\//, 'FIN', 'PER'],
+    [/^org\/(fin\/chart|finance\/catalog)\//, 'FIN', 'COA'],
+    [/^org\/fin\/cc\//, 'FIN', 'CCA'],
+    [/^org\/fin\/close\//, 'FIN', 'CLS'],
+    [/^org\/(fin\/journal|finance\/journals)\//, 'FIN', 'JRN'],
+    [/^org\/fin\/mapping\//, 'FIN', 'MAP'],
+    [/^org\/fin\/(requests|roles)\//, 'FIN', 'APR'],
+    [/^org\/fin\/setup\//, 'FIN', 'SET'],
+    [/^org\/fin\/tax\//, 'FIN', 'TAX'],
+    [/^org\/fin\/stock\//, 'FIN', 'OPN'],
+    [/^org\/fin\/(entities|le\/)/, 'FIN', 'ENT'],
+    [/^org\/fin\/transactions\//, 'FIN', 'GLT'],
+    // ----- Inventory and warehousing -----
+    [/^org\/inventory\/stocktake\//, 'INV', 'CNT'],
+    [/^org\/inventory\/material\/bin\//, 'WHS', 'BIN'],
+    [/^org\/inventory\/material\/isolation\//, 'INV', 'QRT'],
+    [/^org\/inventory\/material\/opening-stock/, 'INV', 'OPN'],
+    [/^org\/inventory\/material\//, 'INV', 'MAT'],
+    [/^org\/inventory\/(on-hand|dashboard)/, 'INV', 'STK'],
+    [/^org\/inventory\/operations/, 'INV', 'MOV'],
+    [/^org\/inv\/issue\//, 'INV', 'GIS'],
+    [/^org\/warehouse\/(cluster|bin)\//, 'WHS', 'BIN'],
+    [/^org\/warehouse\//, 'WHS', 'WHM'],
+    // ----- Maintenance, assets, safety -----
+    [/^org\/mnt\/wr\/photo/, 'MNT', 'WRQ', 'UP'],
+    [/^org\/mnt\/wr\//, 'MNT', 'WRQ'],
+    [/^org\/mnt\/wo\//, 'MNT', 'WOR'],
+    [/^org\/mnt\/operations/, 'MNT', 'WOR', 'ED'],
+    [/^org\/mnt\/assessment\/photo/, 'MNT', 'ASS', 'UP'],
+    [/^org\/mnt\/assessment\//, 'MNT', 'ASS'],
+    [/^org\/mnt\/tasks\/validate/, 'MNT', 'TSK', 'AP'],
+    [/^org\/mnt\/tasks\//, 'MNT', 'TSK'],
+    [/^org\/mnt\/material-candidates\/adopt/, 'MNT', 'MCD', 'CR'],
+    [/^org\/mnt\/material-candidates\//, 'MNT', 'MCD'],
+    [/^org\/mnt\/workflow\//, 'MNT', 'WFL'],
+    [/^org\/mnt\//, 'MNT', 'SET'],
+    [/^org\/bom\//, 'MNT', 'BOM'],
+    [/^org\/assets\/dictionary\//, 'AST', 'DIC'],
+    [/^org\/assembly\/activities\//, 'AST', 'ACT'],
+    [/^org\/ast\/stored-energy\//, 'SAF', 'ENE'],
+    [/^org\/ast\/utilities\//, 'AST', 'EQP'],
+    [/^org\/assets\//, 'AST', 'REG'],
+    [/^org\/saf\/risk-matrix\//, 'SAF', 'MTX'],
+    [/^org\/activity-risk\/register/, 'SAF', 'RSK', 'VW'],
+    [/^org\/(activity-risk|saf)\//, 'SAF', 'RSK'],
+    // ----- Organization administration -----
+    [/^org\/users\//, 'ADM', 'USR'],
+    [/^org\/(roles|security)\//, 'ADM', 'SEC'],
+    [/^org\/positions\//, 'ADM', 'JBR'],
+    [/^org\/structure\/site-roles/, 'ADM', 'ORG', 'ED'],
+    [/^org\/(structure|settings|branding)\//, 'ADM', 'ORG'],
+    [/^org\/(governance|workflows)\//, 'ADM', 'GOA'],
+    [/^org\/audit$/, 'ADM', 'AUD'],
+    [/^org\/(modules|subscription)(\/|$)/, 'ADM', 'MDL'],
+    [/^org\/security-docs\/signoff\/upload/, 'ADM', 'SDC', 'UP'],
+    [/^org\/security-docs\//, 'ADM', 'SDC'],
+    [/^org\/(setup|home)\//, 'ADM', 'HOM'],
+    [/^org\/reference\//, 'ADM', 'REF'],
+    // ----- Workspace and collaboration -----
+    [/^org\/quick\/chat\/action\//, 'WSP', 'CHA'],
+    [/^org\/quick\/chat\/poll\//, 'WSP', 'POL'],
+    [/^org\/quick\/chat\/(invitation\/respond)/, 'WSP', 'CHT', 'AN'],
+    [/^org\/quick\/chat\/policy\/accept/, 'WSP', 'CHT', 'AC'],
+    [/^org\/quick\/chat\//, 'WSP', 'CHT'],
+    [/^org\/mail\/calendar\//, 'WSP', 'CAL'],
+    [/^org\/mail\//, 'WSP', 'MAI'],
+    [/^org\/actions\//, 'WSP', 'ACT'],
+    [/^org\/quick\/todo\//, 'WSP', 'TOD'],
+    [/^org\/quick\/note\//, 'WSP', 'NOT'],
+    [/^org\/quick\/gemba\/resolve/, 'WSP', 'GEM', 'CL'],
+    [/^org\/quick\/gemba\//, 'WSP', 'GEM'],
+    [/^org\/my-tables\//, 'WSP', 'TBL'],
+    [/^org\/(home-layout|shortcuts)\//, 'WSP', 'HOM'],
+    [/^org\/quick\/status/, 'WSP', 'HOM', 'VW'],
+    [/^org\/work-groups\//, 'WSP', 'WGR'],
+    [/^(org\/my-access|org\/context|me\/activity)/, 'WSP', 'ACC', 'VW'],
+    // ----- MEMS platform administration (staff) -----
+    [/^admin\/tenants\/(status|module)/, 'PLT', 'TEN', 'ED'],
+    [/^admin\/tenants\//, 'PLT', 'TEN'],
+    [/^admin\/(applications|registrations)\//, 'PLT', 'APL'],
+    [/^admin\/users\//, 'PLT', 'USR'],
+    [/^admin\/modules\//, 'PLT', 'MDL'],
+    [/^admin\/reference\//, 'PLT', 'REF'],
+    [/^admin\/assets\//, 'PLT', 'ASM'],
+    [/^admin\/procurement\//, 'PLT', 'PRM'],
+    [/^admin\/(finance|banks)\//, 'PLT', 'FNM'],
+    [/^admin\/security-docs\//, 'PLT', 'SDC'],
+    [/^admin\/(ops|automations)\//, 'PLT', 'OPS'],
+    [/^admin\/fx\//, 'PLT', 'FXR'],
+    [/^admin\/logs$/, 'PLT', 'AUD', 'VW'],
+    [/^admin\/(health|dashboard)$/, 'PLT', 'HLT', 'VW'],
+    [/^admin\/transactions\//, 'PLT', 'TRX'],
+    [/^admin\/billing\//, 'PLT', 'BIL'],
+    [/^admin\/(settings|site)\//, 'PLT', 'SET'],
+    [/^admin\/skills\//, 'PLT', 'SKL'],
+    [/^admin\/sequences$/, 'PLT', 'SEQ', 'VW'],
+    [/^admin\/sequences\//, 'PLT', 'SEQ'],
+    [/^admin\/explorer\//, 'PLT', 'EXP'],
+    [/^admin\/branding\//, 'PLT', 'BRD'],
+    // ----- Sign-in and self-service -----
+    [/^(session|org\/context)$/, 'SYS', 'SES', 'VW'],
+    [/^profile\/health\//, 'SYS', 'PRF'],
+    [/^profile\//, 'SYS', 'PRF', 'ED'],
+    [/^(organizations\/register|setup\/register)$/, 'SYS', 'REG', 'CR'],
+    [/^registration\/settings$/, 'SYS', 'REG', 'VW'],
+    [/^applications\/upload/, 'SYS', 'APL', 'UP'],
+    [/^applications\//, 'SYS', 'APL'],
+    [/^audit\//, 'SYS', 'AUD', 'CR'],
+    [/^payments\//, 'SYS', 'PAY', 'PY'],
+    [/^internal\//, 'SYS', 'INT', 'RN'],
+    [/^_healthcheck$/, 'SYS', 'HLT', 'VW'],
+    [/^setup\/status$/, 'SYS', 'SET', 'VW'],
+    [/^(site|reference)$/, 'SYS', 'SIT', 'VW'],
 ];
 
-const VIEW_VERBS = new Set(['list', 'get', 'options', 'overview', 'detail', 'tree', 'masters', 'targets', 'trace', 'positions', 'tiers', 'resolve', 'records', 'summary', 'dashboard', 'on-hand', 'read', 'active', 'available', 'inbox', 'registry', 'similar', 'extensions', 'candidates', 'metadata', 'quotes', 'vendors', 'owners', 'visibility', 'orders', 'warehouses', 'materials', 'spec', 'gl', 'contract', 'entities', 'roles', 'tb', 'preview', 'configuration', 'file', 'validate', 'locations', 'status', 'operations', 'audit', 'subscription', 'staffing', 'review', 'inspect', 'passed', 'describe', 'progress', 'reports', 'blueprints', 'my', 'library', 'search', 'account', 'master']);
+const VIEW_VERBS = new Set(['list', 'get', 'options', 'overview', 'detail', 'tree', 'masters', 'targets', 'trace', 'positions', 'tiers', 'resolve', 'records', 'summary', 'dashboard', 'on-hand', 'read', 'active', 'available', 'inbox', 'registry', 'similar', 'extensions', 'candidates', 'metadata', 'quotes', 'vendors', 'owners', 'visibility', 'orders', 'warehouses', 'materials', 'spec', 'gl', 'contract', 'entities', 'roles', 'tb', 'preview', 'configuration', 'file', 'validate', 'locations', 'status', 'operations', 'audit', 'subscription', 'staffing', 'review', 'inspect', 'passed', 'describe', 'progress', 'reports', 'blueprints', 'my', 'library', 'search', 'account', 'master', 'class', 'item', 'domains', 'rates', 'collections', 'documents', 'document', 'orphans', 'logs', 'standard-preview', 'people', 'invitations', 'calendar', 'sent', 'assemblies', 'pending', 'proposals', 'templates', 'expand', 'manager-roles', 'node', 'site-roles', 'legacy-read', 'eligible-equipment', 'eligible-for-equipment', 'work-center', 'banks', 'core-skills', 'cost-center-types', 'skills', 'catalog-search', 'references', 'setup', 'assembly', 'room', 'reporting', 'preferences', 'activity', 'document-url', 'me', 'workspace', 'ownership-review', 'admin', 'context', 'health', 'session']);
 
 const VERB_ACTION: Record<string, string> = {
-    create: 'CR', draft: 'CR', start: 'CR', add: 'CR', init: 'CR', 'opening-stock': 'CR', new: 'CR',
-    save: 'ED', autosave: 'ED', update: 'ED', edit: 'ED', revise: 'ED', toggle: 'ED', settings: 'ED', drop: 'ED', attachment: 'ED', document: 'ED', set: 'ED', logo: 'ED', design: 'ED',
+    create: 'CR', draft: 'CR', start: 'CR', add: 'CR', init: 'CR', 'opening-stock': 'CR', new: 'CR', observe: 'CR', adopt: 'CR', register: 'CR',
+    save: 'ED', autosave: 'ED', update: 'ED', edit: 'ED', revise: 'ED', toggle: 'ED', settings: 'ED', drop: 'ED', attachment: 'ED', set: 'ED', logo: 'ED',
+    design: 'ED', entry: 'ED', repair: 'ED', 'reset-password': 'ED', module: 'ED', registration: 'ED', reset: 'ED', 'legacy-save': 'ED', change: 'ED',
+    progress: 'ED', comment: 'ED', react: 'ED', typing: 'ED', presence: 'ED', read: 'VW', folder: 'ED', member: 'AS', 'password-changed': 'ED',
     amend: 'AM', submit: 'SB', propose: 'SB', request: 'SB', render: 'SB',
     approve: 'AP', decide: 'AP', reject: 'RJ', return: 'RT', cancel: 'CN', discard: 'CN', withdraw: 'WD',
-    delete: 'DL', remove: 'DL', post: 'PS', close: 'CL', reopen: 'RO', suspend: 'SU', reinstate: 'RA',
+    delete: 'DL', remove: 'DL', clear: 'DL', post: 'PS', close: 'CL', reopen: 'RO', restore: 'RO', suspend: 'SU', reinstate: 'RA',
     send: 'SN', receive: 'GR', acknowledge: 'AK', confirm: 'CF', invite: 'IN', recommend: 'RC',
-    sign: 'EV', technical: 'EV', run: 'RN', simulate: 'SM', link: 'LN', unlink: 'DN', override: 'OV',
-    reassign: 'AS', extension: 'EX', action: 'ED', config: 'ED', lifecycle: 'ED', workflow: 'ED', prepare: 'CR', authority: 'VW', execute: 'SM', accept: 'AC', end: 'TR', srm: 'CR', pay: 'PY', import: 'IM', recode: 'ED',
+    sign: 'EV', technical: 'EV', run: 'RN', refresh: 'RN', dispatch: 'RN', retry: 'RN', heartbeat: 'RN', pulse: 'RN', 'scheduled-refresh': 'RN',
+    simulate: 'SM', link: 'LN', 'link-wr': 'LN', unlink: 'DN', override: 'OV',
+    reassign: 'AS', extension: 'EX', accept: 'AC', end: 'TR', srm: 'CR', pay: 'PY', webhook: 'PY',
+    import: 'IM', begin: 'IM', chunk: 'IM', finish: 'IM', load: 'IM', upload: 'UP', photo: 'UP', export: 'XP',
+    recode: 'ED', action: 'ED', config: 'ED', lifecycle: 'ED', workflow: 'ED', prepare: 'CR', authority: 'VW', execute: 'SM',
+    activate: 'AV', publish: 'PB', seed: 'CG', initialise: 'CG', defaults: 'CG', 'fresh-start': 'CG', sync: 'CG', apply: 'CG', 'fill-standard': 'CG', cleanup: 'CG',
+    respond: 'AN', vote: 'VO', archive: 'AR', hide: 'ED', subscribe: 'ED', unsubscribe: 'ED', 'login-attempt': 'CR', events: 'CR',
 };
 
-/** Module, submodule and action for an installed route, when it matches a reserved placeholder. */
+/** Module, submodule and action for an installed route, when its family has a reserved placeholder. */
 export function linkRouteToBlueprint(route: Pick<WiredTransaction, 'path'>, defs: AreaDefinition[] = areaDefinitions()): { module: string; area: string; action: string } | null {
-    if (!route.path.startsWith('/api/org/')) return null;
-    const rest = route.path.slice('/api/org/'.length);
+    if (!route.path.startsWith('/api/')) return null;
+    const rest = route.path.slice('/api/'.length);
     const rule = PATH_RULES.find(([pattern]) => pattern.test(rest));
     if (!rule) return null;
-    const [, module, area] = rule;
+    const [, module, area, fixed] = rule;
     const def = defs.find((d) => d.module === module && d.area === area);
     if (!def) return null;
     const segments = rest.split('/').filter(Boolean);
     const verb = (segments[segments.length - 1] ?? '').toLowerCase();
-    let action = VIEW_VERBS.has(verb) ? 'VW' : VERB_ACTION[verb] ?? '';
-    if (!action) return null;
+    let action = fixed || (VIEW_VERBS.has(verb) ? 'VW' : VERB_ACTION[verb] ?? '');
+    // A verb not seen before is treated as a change to the submodule; it still links and stays visible for review.
+    if (!action) action = 'ED';
     if (!def.actions.includes(action)) {
-        // A write the submodule does not list as its own action is the submodule's edit; a read is its view.
         if (action !== 'VW' && def.actions.includes('ED')) action = 'ED';
-        else if (def.actions.includes('VW') && VIEW_VERBS.has(verb)) action = 'VW';
+        else if (def.actions.includes('VW')) action = 'VW';
         else return null;
     }
     return { module, area, action };
@@ -160,8 +251,24 @@ export function transactionCatalogue(custom: CustomCode[] = [], routes: WiredTra
             name: b.name, kind: b.kind, state: hits.length ? 'live' : 'reserved', source: 'built_in',
             routes: hits.map((r) => `${r.method} ${r.path}`).sort(),
             permissions: [...new Set(hits.map((r) => r.permission).filter((p): p is string => !!p))].sort(),
+            postings: [],
         };
     });
+    // Financial movements: attach postings; a live posting performed through a shared route makes its code live.
+    const installed = new Set(routes.map((r) => `${r.method} ${r.path}`));
+    const byCode = new Map(rows.map((r) => [r.code, r]));
+    for (const e of POSTING_EVENTS) {
+        for (const code of e.codes) {
+            const row = byCode.get(code);
+            if (!row) continue;
+            row.postings.push({ event: e.event, label: e.label, debit: e.debit, credit: e.credit, state: e.state });
+            if (e.state !== 'live') continue;
+            const via = (e.via ?? []).map((p) => `POST ${p}`).filter((r) => installed.has(r));
+            if (!via.length) continue;
+            row.routes = [...new Set([...row.routes, ...via])].sort();
+            row.state = 'live';
+        }
+    }
     // Submodule access is live when any of its transactions is live; module access when any submodule is.
     const liveAreas = new Set(rows.filter((r) => r.state === 'live').map((r) => `${r.module}-${r.area}`));
     const liveModules = new Set(rows.filter((r) => r.state === 'live').map((r) => r.module));
@@ -174,7 +281,7 @@ export function transactionCatalogue(custom: CustomCode[] = [], routes: WiredTra
         rows.push({
             code: r.code, module: r.module, area: r.area, areaName: r.area, action: '', actionName: '',
             name: r.name, kind: 'route', state: 'live_unlinked', source: 'installed_route',
-            routes: [`${r.method} ${r.path}`], permissions: r.permission ? [r.permission] : [],
+            routes: [`${r.method} ${r.path}`], permissions: r.permission ? [r.permission] : [], postings: [],
         });
     }
     const builtIn = new Set(rows.map((r) => r.code));
@@ -183,7 +290,7 @@ export function transactionCatalogue(custom: CustomCode[] = [], routes: WiredTra
         rows.push({
             code: c.code, module: c.module, area: c.area, areaName: c.areaName, action: c.action, actionName: c.actionName,
             name: c.name, kind: 'transaction', state: c.status === 'retired' ? 'retired' : 'added_reserved', source: 'mems_admin',
-            routes: [], permissions: [], addedBy: c.addedBy, addedAt: c.addedAt, reason: c.reason,
+            routes: [], permissions: [], addedBy: c.addedBy, addedAt: c.addedAt, reason: c.reason, postings: [],
         });
     }
     return rows.sort((a, b) => a.module.localeCompare(b.module) || a.area.localeCompare(b.area) || a.code.localeCompare(b.code));
