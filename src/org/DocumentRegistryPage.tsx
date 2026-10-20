@@ -17,7 +17,7 @@ const CLASSES = [
  ['TMP','Template'], ['REG','Register'], ['REC','Record'], ['RPT','Report'],
 ] as const;
 
-export default function DocumentRegistryPage() {
+export default function DocumentRegistryPage({ canConfigure }: { canConfigure: boolean }) {
   const { data, error, loading, reload } = useLoad(
     () => callBackend<{ documents: DocumentRow[] }>('/api/org/drkms/documents/list', {}), []
   );
@@ -63,7 +63,7 @@ export default function DocumentRegistryPage() {
   };
   return <div className='space-y-4'>
     <PageTitle title='Document Registry' subtitle='Controlled document identities · Foundation release (drafts only)' />
-    <Card>
+    {canConfigure && <Card>
       <h2 className='mb-2 text-base font-semibold text-white'>Organization document settings</h2>
       <p className='mb-3 text-xs text-slate-400'>Global document classifications are inherited; locations come from the existing organization hierarchy.</p>
       <label className='block text-sm text-slate-200'>Default review cycle (months)
@@ -78,7 +78,7 @@ export default function DocumentRegistryPage() {
       <p className='mt-2 text-xs text-slate-400'>Current saved review cycle: {setup.data?.config.defaultReviewMonths ?? 24} months</p>
       {settingsNotice && <p role='status' className='mt-2 text-sm text-green-300'>{settingsNotice}</p>}
       {settingsError && <p role='alert' className='mt-2 text-sm text-red-300'>{settingsError}</p>}
-    </Card>
+    </Card>}
     <Card>
       <h2 className='mb-3 text-base font-semibold text-white'>Register a document draft</h2>
       <div className='grid min-w-0 gap-3'>
@@ -90,7 +90,7 @@ export default function DocumentRegistryPage() {
         <label className='block text-sm text-slate-200'>Document classification
           <select value={classCode} onChange={e => setClassCode(e.target.value)}
             className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
-            {CLASSES.map(([code,label]) => <option key={code} value={code}>{code} — {label}</option>)}
+            {CLASSES.filter(([code]) => !setup.data || setup.data.config.enabledClassCodes.includes(code)).map(([code,label]) => <option key={code} value={code}>{code} — {label}</option>)}
           </select>
         </label>
         <label className='block text-sm text-slate-200'>Applicability level
@@ -140,6 +140,6 @@ export default function DocumentRegistryPage() {
         </div>)}
       </div>
     </Card>
-    <p className='text-xs text-slate-400'>Restricted to existing organization administration permissions for the foundation stage. No files or published revisions are created here.</p>
+    <p className='text-xs text-slate-400'>Restricted to dedicated document permissions for the foundation stage. No files or published revisions are created here.</p>
   </div>;
 }
