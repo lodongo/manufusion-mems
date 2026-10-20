@@ -1,5 +1,5 @@
 /** Metadata-only DRKMS registry. No publishing, file upload or AI output execution. */
-import { HttpError, getDoc, listDocs, nowIso, randomId, str, writeDoc, updateFields } from './core';
+import { HttpError, getDoc, listDocs, nowIso, randomId, str, writeDoc } from './core';
 import { orgRoute } from './guards';
 import { record } from './org';
 import { validateDocumentLocation } from './drkmsHierarchy';
@@ -108,7 +108,8 @@ export const drkmsRoutes = {
                 throw new HttpError(409, 'Document has no approved organizational location.');
             const validated = await resolveScope(ctx.orgId, str((scope as Record<string, unknown>).nodeId));
             if (!validated.scope) throw new HttpError(409, 'Document location is no longer valid.');
-            await updateFields(path, { status: 'in_review', submittedBy: ctx.uid, submittedAt: nowIso() });
+            const submitted = await writeDoc(path, { ...document.data, status: 'in_review', submittedBy: ctx.uid, submittedAt: nowIso() }, { updateTime: document.updateTime });
+            if (!submitted) throw new HttpError(409, 'Document changed while submitting. Refresh and try again.');
             await record(ctx, 'drkms.document.submit_review', id, 'Submitted for review; no approval implied');
             return { documentId: id, status: 'in_review', approvalStatus: 'awaiting_governance_configuration' };
         }),
