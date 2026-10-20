@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, CheckCheck, Clock3, CornerUpLeft, Download, FileTex
 import type { ChatAttachment, ChatMessage, ChatPerson, ChatRoom } from './chatTypes';
 import { EMOJI_PICKER, MEMBER_PALETTE, REACTIONS } from './chatTypes';
 import { useQuickLeave } from './quickNavigation';
+import { appConfirm } from '../components/dialogs';
 
 const timeText = (value: string) => {
     const d = new Date(value);
@@ -175,7 +176,7 @@ export default function ChatThread({
         <div ref={scrollArea} className='min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 py-4 sm:px-6'
             role='log' aria-label='Conversation history' aria-live='polite'>
             {hasMore && <button type='button' disabled={loadingOlder} onClick={onOlder}
-                className='mx-auto flex min-h-10 items-center gap-2 rounded-full border border-line bg-panel px-4 text-xs font-semibold text-brand'>
+                className='mx-auto flex min-h-11 items-center gap-2 rounded-full border border-line bg-panel px-4 text-xs font-semibold text-brand'>
                 <ArrowUp className='h-4 w-4' /> {loadingOlder ? 'Loading history…' : 'Earlier messages'}
             </button>}
             {!messages.length && <div className='py-12 text-center text-sm text-muted'>
@@ -197,13 +198,13 @@ export default function ChatThread({
                     return <div key={message.id} className='space-y-1'>
                         {newDay&&<p className='my-3 text-center text-[11px] font-semibold text-muted'>{dateLabel(message.createdAt)}</p>}
                         <div className='mx-auto w-fit max-w-[90%] rounded-xl border border-brand/35 bg-brand/5 px-3 py-2'>
-                          <p className='text-[10px] font-semibold text-muted'>{personMap.get(message.senderUid)?.name||'Colleague'} shared in this conversation</p>
+                          <p className='text-[11px] font-semibold text-muted'>{personMap.get(message.senderUid)?.name||'Colleague'} shared in this conversation</p>
                           <button type='button' onClick={()=>onOpenTool?.(isAction?'action':'poll',false)}
                             className='mt-1 flex min-h-11 items-center gap-2 text-left text-xs font-semibold text-brand'>
                             {isAction?<ClipboardList className='h-5 w-5 shrink-0'/>:<BarChart3 className='h-5 w-5 shrink-0'/>}
                             <span>{isAction?'Monitored Action · view assignments and progress':'Group Poll · vote or view results'}</span>
                           </button>
-                          <p className='text-right text-[10px] text-muted'>{timeText(message.createdAt)}</p>
+                          <p className='text-right text-[11px] text-muted'>{timeText(message.createdAt)}</p>
                         </div>
                     </div>;
                 }
@@ -225,7 +226,7 @@ export default function ChatThread({
                                     {message.replyTo.imageUrl&&<img src={message.replyTo.imageUrl} alt='Replied photo'
                                         className='h-10 w-10 shrink-0 rounded-md object-cover'/>}
                                     <span className='min-w-0 flex-1'>
-                                        <span className='block truncate text-[10px] font-semibold text-brand'>{personMap.get(message.replyTo.senderUid)?.name || 'Colleague'}</span>
+                                        <span className='block truncate text-[11px] font-semibold text-brand'>{personMap.get(message.replyTo.senderUid)?.name || 'Colleague'}</span>
                                         <span className='block truncate text-xs text-muted'>
                                             {message.replyTo.imageUrl?'Photo':message.replyTo.text || message.replyTo.attachment || 'Attachment'}
                                         </span>
@@ -245,7 +246,7 @@ export default function ChatThread({
                                             <FileText className='h-6 w-6 shrink-0' />
                                             <span className='min-w-0 flex-1'>
                                                 <span className='block truncate font-semibold'>{message.attachment.name}</span>
-                                                <span className='block text-[10px] text-muted'>Open report / file</span>
+                                                <span className='block text-[11px] text-muted'>Open report / file</span>
                                             </span>
                                             <Download className='h-4 w-4 shrink-0' />
                                         </a>
@@ -254,7 +255,7 @@ export default function ChatThread({
                                 </div>}
                             </>}
                         </div>
-                            <div className='mt-0.5 flex items-center gap-1 px-1 text-[10px] text-muted'>
+                            <div className='mt-0.5 flex items-center gap-1 px-1 text-[11px] text-muted'>
                                 <time dateTime={message.createdAt} title={new Date(message.createdAt).toLocaleString()}>
                                     {timeText(message.createdAt)}
                                 </time>
@@ -274,22 +275,22 @@ export default function ChatThread({
                                 <div role='menu' aria-label='Message actions'
                                     className='mt-1 flex max-w-full flex-wrap items-center gap-1 rounded-xl border border-line bg-panel p-1.5 shadow-lg'>
                                     <button type='button' role='menuitem' onClick={() => { setReply(message); setContextMessage(''); }}
-                                        className='flex min-h-10 items-center gap-1 rounded-lg px-2 text-xs text-ink'>
+                                        className='flex min-h-11 items-center gap-1 rounded-lg px-2 text-xs text-ink'>
                                         <CornerUpLeft className='h-4 w-4'/>Reply</button>
                                     <button type='button' role='menuitem' onClick={() => setReactionFor(v => v===message.id?'':message.id)}
-                                        className='flex min-h-10 items-center gap-1 rounded-lg px-2 text-xs text-ink'>
+                                        className='flex min-h-11 items-center gap-1 rounded-lg px-2 text-xs text-ink'>
                                         <Smile className='h-4 w-4'/>React</button>
-                                    {eligibleDelete && <button type='button' role='menuitem' onClick={() => {
-                                        if(window.confirm('Delete this message for everyone?'))void onDelete(message.id);
+                                    {eligibleDelete && <button type='button' role='menuitem' onClick={async () => {
+                                        if((await appConfirm('Delete this message for everyone?')))void onDelete(message.id);
                                         setContextMessage('');
-                                    }} className='flex min-h-10 items-center gap-1 rounded-lg px-2 text-xs text-red-500'>
+                                    }} className='flex min-h-11 items-center gap-1 rounded-lg px-2 text-xs text-red-500'>
                                         <Trash2 className='h-4 w-4'/>Delete</button>}
                                     <button type='button' aria-label='Dismiss message actions' onClick={() => {setContextMessage('');setReactionFor('');}}
-                                        className='flex h-10 w-9 items-center justify-center rounded-lg text-muted'><X className='h-4 w-4'/></button>
+                                        className='flex h-11 w-9 items-center justify-center rounded-lg text-muted'><X className='h-4 w-4'/></button>
                                     {reactionFor===message.id&&<div className='flex w-full flex-wrap gap-1 border-t border-line pt-1'>
                                         {REACTIONS.map(emoji=><button key={emoji} type='button' onClick={() => {
                                             void onReact(message.id,emoji);setReactionFor('');setContextMessage('');
-                                        }} className='flex h-9 w-9 items-center justify-center rounded-lg bg-page text-lg'>{emoji}</button>)}
+                                        }} className='flex h-11 w-11 items-center justify-center rounded-lg bg-page text-lg'>{emoji}</button>)}
                                     </div>}
                                 </div>
                             )}
@@ -315,16 +316,16 @@ export default function ChatThread({
                 : <FileText className='h-9 w-9 text-brand' />}
             <span className='min-w-0 flex-1 truncate text-xs text-ink'>{attachment.name}</span>
             <button type='button' aria-label='Remove attachment' onClick={() => setAttachment(null)}
-                className='flex h-10 w-10 items-center justify-center text-muted'><X className='h-5 w-5' /></button>
+                className='flex h-11 w-11 items-center justify-center text-muted'><X className='h-5 w-5' /></button>
         </div>}
         {emojiOpen && <div className='flex max-h-28 shrink-0 flex-wrap items-center gap-2 overflow-y-auto border-t border-line bg-panel px-3 py-2'>
             {EMOJI_PICKER.map((emoji) => <button key={emoji} type='button' onClick={() => appendEmoji(emoji)}
-                className='flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-page text-xl'>{emoji}</button>)}
+                className='flex h-11 w-11 items-center justify-center rounded-lg border border-line bg-page text-xl'>{emoji}</button>)}
         </div>}
         {inlinePanel&&<div className='flex max-h-[58dvh] min-h-[180px] shrink-0 flex-col overflow-hidden border-t border-brand/35 bg-page'>
             <div className='flex shrink-0 items-center justify-between gap-2 border-b border-line bg-panel px-3 py-1'>
                 <span className='text-xs font-semibold text-ink'>{inlineTool==='action'?'Monitored Actions · this conversation':'Group Polls · this conversation'}</span>
-                <button type='button' onClick={onCloseTool} aria-label='Close work panel' className='flex h-10 w-10 items-center justify-center rounded-xl text-brand'><X className='h-5 w-5'/></button>
+                <button type='button' onClick={onCloseTool} aria-label='Close work panel' className='flex h-11 w-11 items-center justify-center rounded-xl text-brand'><X className='h-5 w-5'/></button>
             </div>
             <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>{inlinePanel}</div>
         </div>}
@@ -358,7 +359,7 @@ export default function ChatThread({
                 <div className='flex min-w-0 items-center justify-between gap-2 px-2 pb-2 pt-1'>
                     <div className='flex min-w-0 items-center gap-1'>
                         <button type='button' onClick={()=>setShowCreateMenu(v=>!v)} title='Actions and polls'
-                            aria-label='Open conversation tools' className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-brand hover:bg-brand/10'>
+                            aria-label='Open conversation tools' className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-brand hover:bg-brand/10'>
                             <Plus className='h-5 w-5'/>
                         </button>
                         <label className='flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-brand hover:bg-brand/10'
@@ -369,7 +370,7 @@ export default function ChatThread({
                                 onChange={(event) => { void attachFile(event); }} />
                         </label>
                         <button type='button' onClick={() => setEmojiOpen((x) => !x)} aria-label='Pick emoji'
-                            className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-brand hover:bg-brand/10'>
+                            className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-brand hover:bg-brand/10'>
                             <Smile className='h-5 w-5' />
                         </button>
                     </div>
@@ -381,7 +382,7 @@ export default function ChatThread({
                     </button>
                 </div>
             </div>
-            <p className='pt-1 text-center text-[10px] text-muted'>Photos and documents · max 5 MB</p>
+            <p className='pt-1 text-center text-[11px] text-muted'>Photos and documents · max 5 MB</p>
         </div>
         {preview && <div role='dialog' aria-modal='true' aria-label='Image preview'
             className='fixed inset-0 z-[65] flex flex-col bg-black/95 p-4'>

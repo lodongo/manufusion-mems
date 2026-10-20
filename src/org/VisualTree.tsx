@@ -67,7 +67,7 @@ function Branch({ item, byParent, depth, onSelect }: { item: TreeItem; byParent:
                     </span>
                     <span className='block truncate text-sm text-white'>{item.title}</span>
                     {item.subtitle && <span className='block truncate text-[11px] text-slate-500'>{item.subtitle}</span>}
-                    {kids.length > 0 && !open && <span className='block text-[10px] text-slate-500'>{kids.length} below</span>}
+                    {kids.length > 0 && !open && <span className='block text-[11px] text-slate-500'>{kids.length} below</span>}
                 </button>
             </div>
             {open && kids.length > 0 && (

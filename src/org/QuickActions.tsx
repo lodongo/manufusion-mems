@@ -6,6 +6,7 @@ import { Button, Spinner } from '../admin/kit';
 import RichTable, { type Column } from '../components/RichTable';
 import { compressPhoto } from './mntShared';
 import { useQuickLeave } from './quickNavigation';
+import { appConfirm, appPrompt } from '../components/dialogs';
 
 type Status = 'open'|'closed'|'canceled';
 type Period = 'mtd'|'ytd'|'all';
@@ -73,9 +74,9 @@ function Performance({rows,period,setPeriod}:{rows:ActionRow[];period:Period;set
     return <section aria-label='Action performance charts' className='space-y-3'>
         <div className='grid grid-cols-3 gap-2'>{all.map(s=><button key={s.p} aria-pressed={period===s.p}
             type='button' onClick={()=>setPeriod(s.p)} className={'min-h-24 rounded-xl border p-3 text-left '+(period===s.p?'border-brand bg-brand/10':'border-line bg-panel')}>
-            <span className='block text-[10px] font-bold uppercase text-muted'>{s.p==='mtd'?'MTD':s.p==='ytd'?'YTD':'All time'}</span>
+            <span className='block text-[11px] font-bold uppercase text-muted'>{s.p==='mtd'?'MTD':s.p==='ytd'?'YTD':'All time'}</span>
             <span className='mt-1 block text-2xl font-bold tabular-nums text-ink'>{s.open+s.closed?s.pct+'%':'—'}</span>
-            <span className='text-[10px] text-muted'>{s.closed}/{s.open+s.closed} closed</span>
+            <span className='text-[11px] text-muted'>{s.closed}/{s.open+s.closed} closed</span>
         </button>)}</div>
         <div className='flex flex-wrap items-center justify-center gap-5 rounded-xl border border-line bg-panel p-3'>
             <div className='relative h-36 w-36 shrink-0'>
@@ -91,7 +92,7 @@ function Performance({rows,period,setPeriod}:{rows:ActionRow[];period:Period;set
                 <span><strong className='block text-xl text-brand'>{current.closed}</strong><small className='text-muted'>Closed</small></span>
                 <span><strong className='block text-xl text-muted'>{current.canceled}</strong><small className='text-muted'>Canceled</small></span>
             </div>
-            <p className='w-full text-center text-[10px] text-muted'>Every action is counted once. Requested work is closed only after acknowledgement.</p>
+            <p className='w-full text-center text-[11px] text-muted'>Every action is counted once. Requested work is closed only after acknowledgement.</p>
         </div>
     </section>;
 }
@@ -205,7 +206,7 @@ export default function QuickActions({uid}:{uid:string}){
         {tab==='dashboard'&&<Performance rows={rows} period={period} setPeriod={setPeriod}/>}
         {tab==='dashboard'&&<div className='flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-panel p-3'>
             <p className='text-xs text-muted'>Performance includes active and completed work across every source, counting each action once.</p>
-            <button type='button' onClick={()=>setTab('table')} className='min-h-10 rounded-lg bg-brand px-4 text-xs font-semibold text-onbrand'>View action table →</button>
+            <button type='button' onClick={()=>setTab('table')} className='min-h-11 rounded-lg bg-brand px-4 text-xs font-semibold text-onbrand'>View action table →</button>
         </div>}
         {error&&<Alert tone='error'>{error}</Alert>}
         {info&&<Alert tone='success'>{info}</Alert>}
@@ -225,7 +226,7 @@ export default function QuickActions({uid}:{uid:string}){
                     <input type='checkbox' checked={showClosed} onChange={e=>setShowClosed(e.target.checked)} className='h-4 w-4 accent-[rgb(var(--c-brand))]'/>Show closed ({rows.filter(x=>x.complete).length})</label>
                 <label className='flex min-h-10 items-center gap-2 rounded-lg border border-line px-2 text-xs text-ink'>
                     <input type='checkbox' checked={showCanceled} onChange={e=>setShowCanceled(e.target.checked)} className='h-4 w-4 accent-[rgb(var(--c-brand))]'/>Canceled</label>
-                <button aria-label='Refresh actions' onClick={()=>{void reload()}} className='flex h-10 w-10 items-center justify-center rounded-lg border border-line text-brand'><RefreshCw className='h-4 w-4'/></button>
+                <button aria-label='Refresh actions' onClick={()=>{void reload()}} className='flex h-11 w-11 items-center justify-center rounded-lg border border-line text-brand'><RefreshCw className='h-4 w-4'/></button>
             </div>}/>)}
         {editor&&<section role='dialog' aria-modal='true' aria-label='Full-screen personal action form' className='fixed inset-0 z-[98] flex h-[100dvh] w-full flex-col overflow-hidden bg-page text-ink'>
             <div className='flex min-h-16 shrink-0 items-center justify-between border-b border-line bg-panel px-4 pt-[env(safe-area-inset-top)]'>
@@ -269,11 +270,11 @@ export default function QuickActions({uid}:{uid:string}){
             {picked.photoUrl&&<img src={picked.photoUrl} alt='Action attachment' className='max-h-44 w-full rounded-xl object-contain'/>}
             {picked.personal&&<div className='flex flex-wrap gap-2'>
                 <Button onClick={()=>editTask(picked.personal!)}>Edit action</Button>
-                {picked.personal.status==='open'&&<button className='min-h-10 rounded-lg border border-line px-3 text-xs text-brand'
+                {picked.personal.status==='open'&&<button className='min-h-11 rounded-lg border border-line px-3 text-xs text-brand'
                     onClick={()=>{void callBackend('/api/org/quick/todo/save',{id:picked.id,action:picked.title,description:picked.description,
                         deadline:picked.deadline,status:'closed',photoPath:picked.personal?.photoPath||''}).then(reload).catch(e=>setError(problem(e)))}}>Mark closed</button>}
-                <button className='flex min-h-10 items-center gap-1 rounded-lg border border-line px-3 text-xs text-red-500'
-                    onClick={()=>{if(!window.confirm('Delete this personal action?'))return;
+                <button className='flex min-h-11 items-center gap-1 rounded-lg border border-line px-3 text-xs text-red-500'
+                    onClick={async ()=>{if(!(await appConfirm('Delete this personal action?')))return;
                         void callBackend('/api/org/quick/todo/delete',{id:picked.id}).then(()=>{setSelected('');void reload()}).catch(e=>setError(problem(e)))}}>
                     <Trash2 className='h-4 w-4'/> Delete</button>
             </div>}
@@ -282,7 +283,7 @@ export default function QuickActions({uid}:{uid:string}){
                 {(assignment?.progressNotes||[]).slice(-12).map((n,i)=><div key={n.at+i} className='rounded-lg border border-line bg-page p-2 text-xs'>
                     <p className='whitespace-pre-wrap text-ink'>{n.note}</p>
                     {n.photoUrl&&<img src={n.photoUrl} alt='Progress attachment' className='mt-1 max-h-40 rounded-lg object-contain'/>}
-                    <span className='text-[10px] text-muted'>{new Date(n.at).toLocaleString()}</span>
+                    <span className='text-[11px] text-muted'>{new Date(n.at).toLocaleString()}</span>
                 </div>)}
                 {assignment&&assignment.decision==='pending'&&<Button disabled={busy} onClick={()=>{void update('/api/org/actions/respond',{actionId:picked.id,decision:'accept'})}}>Accept assignment</Button>}
                 {assignment&&assignment.decision==='accepted'&&!assignment.acknowledgedAt&&<>
@@ -303,10 +304,10 @@ export default function QuickActions({uid}:{uid:string}){
                     {picked.monitored.assignments.map(a=><div key={a.uid} className='flex flex-wrap items-center gap-2 rounded-lg bg-page p-2'>
                         <span className='min-w-0 flex-1 text-xs text-ink'>{a.uid.slice(0,12)} · {a.acknowledgedAt?'Acknowledged':a.status==='closed'?'Needs acknowledgement':a.decision==='pending'?'Pending acceptance':a.status}</span>
                         {a.status==='closed'&&!a.acknowledgedAt&&a.decision==='accepted'&&<>
-                            <button className='min-h-9 rounded-lg bg-brand px-2 text-xs text-onbrand' disabled={busy}
+                            <button className='min-h-11 rounded-lg bg-brand px-2 text-xs text-onbrand' disabled={busy}
                                 onClick={()=>{void update('/api/org/actions/acknowledge',{actionId:picked.id,uid:a.uid,decision:'acknowledge'})}}>Acknowledge</button>
-                            <button className='min-h-9 rounded-lg border border-line px-2 text-xs' disabled={busy}
-                                onClick={()=>{const reason=window.prompt('What still needs to be done?');if(reason&&reason.trim().length>=5)void update('/api/org/actions/acknowledge',{actionId:picked.id,uid:a.uid,decision:'return',note:reason})}}>Return</button>
+                            <button className='min-h-11 rounded-lg border border-line px-2 text-xs' disabled={busy}
+                                onClick={async ()=>{const reason=(await appPrompt('What still needs to be done?'));if(reason&&reason.trim().length>=5)void update('/api/org/actions/acknowledge',{actionId:picked.id,uid:a.uid,decision:'return',note:reason})}}>Return</button>
                         </>}
                     </div>)}
                 </div>}

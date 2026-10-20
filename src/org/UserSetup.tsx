@@ -79,7 +79,7 @@ export default function UserSetup({
                                 <span className='flex-1' style={{ background: session.organization?.branding?.theme.brand || '#10b981' }} />
                             </span>
                             <span className='block text-xs font-semibold text-ink'>{option.title}</span>
-                            <span className='mt-1 flex items-center gap-1 text-[10px] text-muted'>
+                            <span className='mt-1 flex items-center gap-1 text-[11px] text-muted'>
                                 {appearance === option.value && <CheckCircle2 className='h-3 w-3 text-brand' />}
                                 {option.value === 'organization' ? 'Corporate setting' : option.dark ? 'Dark' : 'Light'}
                             </span>

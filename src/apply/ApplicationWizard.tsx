@@ -167,7 +167,7 @@ export default function ApplicationWizard({ session, onSignOut }: { session: Ses
                     <div className='max-h-[80dvh] w-full overflow-y-auto rounded-t-3xl border-t border-slate-800 bg-slate-900 pb-[max(env(safe-area-inset-bottom),1rem)]' onClick={(e) => e.stopPropagation()}>
                         <div className='sticky top-0 flex items-center justify-between border-b border-slate-800 bg-slate-900 px-5 py-4'>
                             <p className='font-semibold text-white'>Registration steps</p>
-                            <button onClick={() => setSheet(false)} aria-label='Close steps' className='flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
+                            <button onClick={() => setSheet(false)} aria-label='Close steps' className='flex h-11 w-11 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
                                 <X className='h-4 w-4' />
                             </button>
                         </div>
@@ -382,7 +382,7 @@ function UploadRow({ slot, app, onChanged }: { slot: (typeof DOC_SLOTS)[number];
                     <p className='truncate text-xs text-slate-500'>{meta ? `${meta.name} · ${formatSize(meta.size)}` : slot.hint}</p>
                 </div>
                 {meta && (
-                    <button type='button' onClick={view} aria-label={`View ${slot.label}`} className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-700 text-slate-200'>
+                    <button type='button' onClick={view} aria-label={`View ${slot.label}`} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-700 text-slate-200'>
                         <Eye className='h-4 w-4' />
                     </button>
                 )}
@@ -559,7 +559,7 @@ function BrandingStep({ app, onSaved, onChanged, onBack }: StepProps) {
                             type='button'
                             aria-label={`Colour ${c}`}
                             onClick={() => setF({ ...f, brandColor: c })}
-                            className={`h-9 w-9 rounded-full border-2 ${f.brandColor.toLowerCase() === c ? 'border-white' : 'border-transparent'}`}
+                            className={`h-11 w-11 rounded-full border-2 ${f.brandColor.toLowerCase() === c ? 'border-white' : 'border-transparent'}`}
                             style={{ background: c }}
                         />
                     ))}

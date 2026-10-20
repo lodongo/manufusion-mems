@@ -11,6 +11,7 @@ import { ChatMuteAll, ChatWorkNotice, ChatOptions } from './ChatSettings';
 import { ChatActionsBoard, ChatPollsBoard } from './ChatBoards';
 import type { ChatAttachment, ChatLiveEvent, ChatMessage, ChatPerson, ChatRoom, ChatRoomPayload } from './chatTypes';
 import { useChatRealtime } from './useChatRealtime';
+import { appConfirm } from '../components/dialogs';
 
 type ChatMode = 'direct' | 'group';
 const errorText = (e: unknown) => e instanceof Error ? e.message : 'Could not complete the chat action.';
@@ -200,7 +201,7 @@ export default function QuickChat({ uid, roomId = '' }: Props) {
         } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
     };
     const hideRoom = async (room: ChatRoom) => {
-        if (!window.confirm('Remove this chat from your list? Its history is retained and colleagues are not affected.')) return;
+        if (!(await appConfirm('Remove this chat from your list? Its history is retained and colleagues are not affected.'))) return;
         setBusy(true); setError('');
         try {
             await callBackend('/api/org/quick/chat/hide', { roomId: room.id });
@@ -339,7 +340,7 @@ export default function QuickChat({ uid, roomId = '' }: Props) {
                     </div>
                     {!create&&<div className='mt-2 flex flex-wrap items-center gap-2'>
                         <button type='button' onClick={()=>setShowAssignments(x=>!x)}
-                            className={'min-h-10 rounded-xl border px-3 text-xs font-semibold '+(showAssignments?'border-brand bg-brand/10 text-brand':'border-line text-muted')}>
+                            className={'min-h-11 rounded-xl border px-3 text-xs font-semibold '+(showAssignments?'border-brand bg-brand/10 text-brand':'border-line text-muted')}>
                             My chat assignments
                         </button>
                         <ChatMuteAll/>
@@ -393,8 +394,8 @@ export default function QuickChat({ uid, roomId = '' }: Props) {
                             {invites.map(inv=><div key={inv.id} className='flex flex-wrap items-center gap-2 rounded-xl border border-line bg-panel p-3'>
                                 <Users className='h-5 w-5 text-brand'/>
                                 <span className='min-w-0 flex-1 text-xs font-semibold text-ink'>{inv.title}<span className='block text-[11px] font-normal text-muted'>Invitation pending · {inv.count} members</span></span>
-                                <button type='button' disabled={busy} onClick={()=>{void respondInvite(inv.id,'accept')}} className='min-h-10 rounded-lg bg-brand px-3 text-xs text-onbrand'>Accept</button>
-                                <button type='button' disabled={busy} onClick={()=>{void respondInvite(inv.id,'decline')}} className='min-h-10 rounded-lg border border-line px-3 text-xs text-ink'>Decline</button>
+                                <button type='button' disabled={busy} onClick={()=>{void respondInvite(inv.id,'accept')}} className='min-h-11 rounded-lg bg-brand px-3 text-xs text-onbrand'>Accept</button>
+                                <button type='button' disabled={busy} onClick={()=>{void respondInvite(inv.id,'decline')}} className='min-h-11 rounded-lg border border-line px-3 text-xs text-ink'>Decline</button>
                             </div>)}
                         </div>}
                         {loading ? <div className='flex justify-center p-8'><Loader2 className='h-6 w-6 animate-spin text-brand' /></div>
@@ -418,7 +419,7 @@ export default function QuickChat({ uid, roomId = '' }: Props) {
                                                 </span>
                                                 <span className={'block truncate text-xs ' + (r.unread ? 'font-semibold text-ink' : 'text-muted')}>{r.lastMessage || (r.kind==='group' ? r.members.length+' participants' : 'Tap to chat')}</span>
                                             </span>
-                                            <span className='shrink-0 text-[10px] text-muted'>{friendlyTime(r.lastMessageAt || r.updatedAt)}</span>
+                                            <span className='shrink-0 text-[11px] text-muted'>{friendlyTime(r.lastMessageAt || r.updatedAt)}</span>
                                             <ChevronRight className='h-4 w-4 shrink-0 text-muted' />
                                         </button>
                                         <button type='button' aria-label={'Hide chat '+titleFor(r,people,uid)}

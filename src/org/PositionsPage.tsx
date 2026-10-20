@@ -8,6 +8,7 @@ import { operatingLabel, upperName } from './structureDefs';
 import RoleCoreSkills from './RoleCoreSkills';
 import { parentSkillSources } from './skillAdoption';
 import { matchingRoleNodes, staffingSummary, type RoleStaffingRow, type RoleStaffingCount, type StaffingUnit } from './roleStaffing';
+import { appConfirm } from '../components/dialogs';
 
 export interface Position {
     code: string;
@@ -39,7 +40,7 @@ const open = (code?: string) => navigate(code ? `organization_admin/positions/${
 
 function IconButton({ label, onClick, danger, children }: { label: string; onClick: () => void; danger?: boolean; children: React.ReactNode }) {
     return (
-        <button type='button' aria-label={label} title={label} onClick={onClick} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${danger ? 'border-red-500/40 text-red-400' : 'border-slate-700 text-slate-200'}`}>
+        <button type='button' aria-label={label} title={label} onClick={onClick} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${danger ? 'border-red-500/40 text-red-400' : 'border-slate-700 text-slate-200'}`}>
             {children}
         </button>
     );
@@ -133,7 +134,7 @@ export default function PositionsPage({ canEdit, code }: { canEdit: boolean; cod
     }
 
     const remove = async () => {
-        if (!current || !window.confirm(`Delete ${current.code} ${current.title}?`)) return;
+        if (!current || !(await appConfirm(`Delete ${current.code} ${current.title}?`))) return;
         setBusy(true);
         setActionError('');
         try {
@@ -356,7 +357,7 @@ function PositionForm({
         <div className='space-y-4'>
             <div className='flex items-center justify-between'>
                 <PageTitle title={existing ? `Edit ${existing.code}` : 'New job role'} subtitle={reportsTo ? `Reports to ${reportsTo.code} ${reportsTo.title}` : 'Top of the role structure'} />
-                <button onClick={onCancel} aria-label='Cancel' className='flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
+                <button onClick={onCancel} aria-label='Cancel' className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-300'>
                     <X className='h-4 w-4' />
                 </button>
             </div>

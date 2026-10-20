@@ -29,13 +29,13 @@ export function AppFrame({
                         {title && <p className='truncate text-base font-semibold text-white'>{title}</p>}
                     </div>
                     {onSteps && step !== undefined && total !== undefined && (
-                        <button type='button' onClick={onSteps} aria-label='All steps' className='flex h-10 items-center gap-1.5 rounded-full border border-slate-700 px-3 text-xs font-medium text-slate-200'>
+                        <button type='button' onClick={onSteps} aria-label='All steps' className='flex h-11 items-center gap-1.5 rounded-full border border-slate-700 px-3 text-xs font-medium text-slate-200'>
                             <ListChecks className='h-4 w-4' />
                             {step + 1}/{total}
                         </button>
                     )}
                     {onSignOut && (
-                        <button type='button' onClick={onSignOut} aria-label='Log out' className='flex h-10 w-10 items-center justify-center rounded-full border border-slate-700 text-slate-200'>
+                        <button type='button' onClick={onSignOut} aria-label='Log out' className='flex h-11 w-11 items-center justify-center rounded-full border border-slate-700 text-slate-200'>
                             <LogOut className='h-4 w-4' />
                         </button>
                     )}

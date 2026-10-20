@@ -50,7 +50,7 @@ export default function PendingApproval({ session, onRefresh, onSignOut }: { ses
     };
 
     return (
-        <div className='flex min-h-screen items-center justify-center bg-slate-950 px-6 py-10'>
+        <div className='flex min-h-dvh items-center justify-center bg-slate-950 px-6 py-10'>
             <main className='w-full max-w-sm space-y-4 text-center'>
                 {rejected ? <CircleX className='mx-auto h-12 w-12 text-red-400' /> : <Clock className='mx-auto h-12 w-12 text-amber-400' />}
                 <h1 className='text-2xl font-semibold text-white'>{rejected ? 'Registration not approved' : 'Pending approval'}</h1>

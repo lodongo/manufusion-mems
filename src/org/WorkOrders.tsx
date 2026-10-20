@@ -206,7 +206,7 @@ function OrderList({ setup }: { setup: MntSetup }) {
         <div className='space-y-3'>
             <div className='flex gap-1 overflow-x-auto rounded-xl border border-slate-800 p-1'>
                 {tabs.map(([k, label]) => (
-                    <button key={k} type='button' onClick={() => setTab(k)} className={`h-9 shrink-0 rounded-lg px-3 text-sm ${tab === k ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
+                    <button key={k} type='button' onClick={() => setTab(k)} className={`h-11 shrink-0 rounded-lg px-3 text-sm ${tab === k ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
                         {label}
                     </button>
                 ))}

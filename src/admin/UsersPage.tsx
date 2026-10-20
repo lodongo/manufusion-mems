@@ -10,6 +10,7 @@ import { Badge, Button, Card, Empty, PageTitle, Spinner, useLoad } from './kit';
 import { passwordProblem } from '../lib/password';
 import ResetPassword from './ResetPassword';
 import OrphanAccounts from './OrphanAccounts';
+import { appConfirm } from '../components/dialogs';
 
 interface StaffUser {
     uid: string;
@@ -136,7 +137,7 @@ function UserForm({ user, isSelf, canEdit, onDone }: { user?: StaffUser; isSelf:
     };
 
     const remove = async () => {
-        if (!user || !window.confirm(`Delete ${user.email}? This cannot be undone.`)) return;
+        if (!user || !(await appConfirm(`Delete ${user.email}? This cannot be undone.`))) return;
         setError('');
         setBusy('delete');
         try {

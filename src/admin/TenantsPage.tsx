@@ -7,6 +7,7 @@ import { Alert } from '../components/ui';
 import { fmtDate, fmtKes } from './format';
 import { Badge, Button, Card, Empty, PageTitle, Spinner, SubTabs, TextArea, Toggle, useLoad } from './kit';
 import LogList, { type LogEntry } from './LogList';
+import { appConfirm } from '../components/dialogs';
 
 interface TenantRow {
     id: string;
@@ -141,7 +142,7 @@ function TenantDetail({ id, tab, canWrite, isSuper }: { id: string; tab?: Tab; c
     const active: Tab = tab ?? (isPending(status) || status === 'rejected' ? 'registration' : 'users');
 
     const setStatus = async (next: string) => {
-        if (!window.confirm(next === 'suspended' ? `Suspend ${t.name}? Its users will lose access.` : `Reactivate ${t.name}?`)) return;
+        if (!(await appConfirm(next === 'suspended' ? `Suspend ${t.name}? Its users will lose access.` : `Reactivate ${t.name}?`))) return;
         setBusy('status');
         setActionError('');
         try {
@@ -314,7 +315,7 @@ function RegistrationReview({ orgId, isSuper, onDecided }: { orgId: string; isSu
             delete: `Permanently delete ${data.name}, its account and all uploaded documents? This cannot be undone.`,
         };
         if (decision === 'reject' && reason.trim().length < 5) return setActionError('Give a reason for the rejection (at least 5 characters).');
-        if (!window.confirm(prompts[decision])) return;
+        if (!(await appConfirm(prompts[decision]))) return;
         setBusy(decision);
         setActionError('');
         try {

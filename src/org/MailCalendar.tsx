@@ -4,6 +4,7 @@ import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import type { WorkGroup, MailColleague } from './MailWorkGroups';
 import ActionPhotoInput from './ActionPhotoInput';
+import { appConfirm } from '../components/dialogs';
 
 interface CalEvent {
     id:string;title:string;description:string;location:string;startsAt:string;endsAt:string;
@@ -127,7 +128,7 @@ export default function MailCalendar({uid,people,groups,onClose}:{uid:string;peo
         finally{setBusy(false);}
     };
     const remove=async(ev:CalEvent)=>{
-        if(!window.confirm('Delete this calendar event for everyone invited?'))return;
+        if(!(await appConfirm('Delete this calendar event for everyone invited?')))return;
         setBusy(true);
         try{await callBackend('/api/org/mail/calendar/delete',{id:ev.id});setSelected(null);await reload();}
         catch(e){setError(e instanceof Error?e.message:'Could not delete event.');}
@@ -147,12 +148,12 @@ export default function MailCalendar({uid,people,groups,onClose}:{uid:string;peo
     return <div className='flex min-h-0 flex-1 flex-col overflow-hidden bg-page text-ink'>
         <header className='flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-3 py-2'>
             <CalendarDays className='h-5 w-5 text-brand'/><h2 className='min-w-0 flex-1 truncate text-base font-bold'>Calendar</h2>
-            {tab==='calendar'&&<><button type='button' onClick={()=>setMonth(new Date(new Date().getFullYear(),new Date().getMonth(),1))} className='min-h-10 rounded-lg border border-line px-3 text-xs'>Today</button>
-            <button type='button' aria-label='Previous month' onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()-1,1))} className='min-h-10 px-2'><ChevronLeft className='h-5 w-5'/></button>
+            {tab==='calendar'&&<><button type='button' onClick={()=>setMonth(new Date(new Date().getFullYear(),new Date().getMonth(),1))} className='min-h-11 rounded-lg border border-line px-3 text-xs'>Today</button>
+            <button type='button' aria-label='Previous month' onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()-1,1))} className='min-h-11 px-2'><ChevronLeft className='h-5 w-5'/></button>
             <span className='min-w-24 text-center text-xs font-semibold'>{monthLabel(month)}</span>
-            <button type='button' aria-label='Next month' onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()+1,1))} className='min-h-10 px-2'><ChevronRight className='h-5 w-5'/></button>
+            <button type='button' aria-label='Next month' onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()+1,1))} className='min-h-11 px-2'><ChevronRight className='h-5 w-5'/></button>
             </>}
-            <button type='button' title='Refresh' onClick={()=>{void reload()}} className='min-h-10 px-2'><RefreshCw className='h-4 w-4'/></button>
+            <button type='button' title='Refresh' onClick={()=>{void reload()}} className='min-h-11 px-2'><RefreshCw className='h-4 w-4'/></button>
             <button type='button' onClick={()=>openCreate()} aria-label='Add calendar event' className='flex min-h-11 items-center gap-1.5 rounded-xl bg-brand px-3 text-xs font-semibold text-onbrand'><Plus className='h-5 w-5'/><span className='hidden sm:inline'>New event</span></button>
         </header>
         <nav aria-label='Calendar tabs' className='grid shrink-0 grid-cols-2 gap-2 border-b border-line bg-panel p-2'>
@@ -164,26 +165,26 @@ export default function MailCalendar({uid,people,groups,onClose}:{uid:string;peo
         <div className='min-h-0 flex-1 overflow-y-auto p-3 sm:p-5'>
             {tab==='calendar'?<>
             <div className='mb-3 grid grid-cols-3 gap-2' aria-label='Intelligent calendar action overview'>
-                <button type='button' onClick={()=>{setChosenDay(new Date());setMonth(new Date(new Date().getFullYear(),new Date().getMonth(),1))}} className='rounded-xl border border-line bg-panel p-2 text-left'><span className='block text-lg font-bold text-ink'>{dueToday}</span><span className='text-[10px] text-muted'>Due today</span></button>
-                <button type='button' onClick={()=>setView('agenda')} className='rounded-xl border border-line bg-panel p-2 text-left'><span className='block text-lg font-bold text-ink'>{upcoming}</span><span className='text-[10px] text-muted'>Due next 7 days</span></button>
-                <button type='button' onClick={()=>setView('agenda')} className='rounded-xl border border-line bg-panel p-2 text-left'><span className={'block text-lg font-bold '+(overdue?'text-red-500':'text-ink')}>{overdue}</span><span className='text-[10px] text-muted'>Overdue</span></button>
+                <button type='button' onClick={()=>{setChosenDay(new Date());setMonth(new Date(new Date().getFullYear(),new Date().getMonth(),1))}} className='rounded-xl border border-line bg-panel p-2 text-left'><span className='block text-lg font-bold text-ink'>{dueToday}</span><span className='text-[11px] text-muted'>Due today</span></button>
+                <button type='button' onClick={()=>setView('agenda')} className='rounded-xl border border-line bg-panel p-2 text-left'><span className='block text-lg font-bold text-ink'>{upcoming}</span><span className='text-[11px] text-muted'>Due next 7 days</span></button>
+                <button type='button' onClick={()=>setView('agenda')} className='rounded-xl border border-line bg-panel p-2 text-left'><span className={'block text-lg font-bold '+(overdue?'text-red-500':'text-ink')}>{overdue}</span><span className='text-[11px] text-muted'>Overdue</span></button>
             </div>
             <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
                 <div className='flex rounded-lg border border-line bg-panel p-1'>
-                    {(['month','agenda'] as const).map(v=><button type='button' key={v} onClick={()=>setView(v)} className={'min-h-9 rounded-md px-4 text-xs font-semibold '+(view===v?'bg-brand/10 text-brand':'text-muted')}>{v==='month'?'Month':'Agenda'}</button>)}
+                    {(['month','agenda'] as const).map(v=><button type='button' key={v} onClick={()=>setView(v)} className={'min-h-11 rounded-md px-4 text-xs font-semibold '+(view===v?'bg-brand/10 text-brand':'text-muted')}>{v==='month'?'Month':'Agenda'}</button>)}
                 </div><span className='text-xs text-muted'>Select any day to see meetings and actions.</span>
             </div>
             {view==='month'&&<div className='grid grid-cols-7 overflow-hidden rounded-xl border border-line bg-panel'>
-                {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(day=><div key={day} className='border-b border-line bg-brand/5 p-2 text-center text-[10px] font-semibold text-muted'>{day}</div>)}
+                {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(day=><div key={day} className='border-b border-line bg-brand/5 p-2 text-center text-[11px] font-semibold text-muted'>{day}</div>)}
                 {days.map((day,i)=>{
                     const dayEvents=eventsOnDate(events,day);
                     const dayActions=actionsOnDate(actionMarkers,day);
                     return <button type='button' key={i} onClick={()=>setChosenDay(day)}
                         className={'min-h-[74px] min-w-0 border-b border-r border-line p-1 text-left sm:min-h-[100px] sm:p-2 '+(dayKey(day)===dayKey(chosenDay)?'bg-brand/10':'')+(day.getMonth()!==month.getMonth()?' opacity-45':'')}>
                         <span className={'inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold '+(dayKey(day)===dayKey(new Date())?'bg-brand text-onbrand':'text-ink')}>{day.getDate()}</span>
-                        {dayEvents.slice(0,2).map(ev=><span key={ev.id} className='mt-1 block truncate rounded bg-brand/15 px-1 py-0.5 text-[9px] text-brand'>{ev.title}</span>)}
-                        {!!dayActions.length&&<span className={'mt-0.5 block truncate rounded px-1 py-0.5 text-[9px] '+(dayActions.some(a=>a.kind==='due'&&a.status!=='closed')?'bg-amber-500/15 text-amber-600':'bg-emerald-500/15 text-emerald-600')}>{dayActions.length} action{dayActions.length===1?'':'s'}</span>}
-                        {dayEvents.length>2&&<span className='block text-[9px] text-muted'>+{dayEvents.length-2}</span>}
+                        {dayEvents.slice(0,2).map(ev=><span key={ev.id} className='mt-1 block truncate rounded bg-brand/15 px-1 py-0.5 text-[11px] text-brand'>{ev.title}</span>)}
+                        {!!dayActions.length&&<span className={'mt-0.5 block truncate rounded px-1 py-0.5 text-[11px] '+(dayActions.some(a=>a.kind==='due'&&a.status!=='closed')?'bg-amber-500/15 text-amber-600':'bg-emerald-500/15 text-emerald-600')}>{dayActions.length} action{dayActions.length===1?'':'s'}</span>}
+                        {dayEvents.length>2&&<span className='block text-[11px] text-muted'>+{dayEvents.length-2}</span>}
                     </button>;
                 })}
             </div>}
@@ -253,12 +254,12 @@ export default function MailCalendar({uid,people,groups,onClose}:{uid:string;peo
                 {!!selected.location&&<p className='text-sm'><MapPin className='mr-1 inline h-4 w-4 text-brand'/>{selected.location}</p>}
                 <p className='whitespace-pre-wrap text-sm'>{selected.description}</p>
                 <p className='text-xs text-muted'>{selected.attendeeUids.length} invited participants · {selected.recurrence==='none'?'One-time event':'Repeats '+selected.recurrence}</p>
-                {!!activity.length&&<div className='max-h-44 space-y-2 overflow-y-auto rounded-xl border border-line bg-page p-3'><h4 className='text-xs font-bold text-ink'>Action updates recorded against this event</h4>{activity.map(row=><div key={row.id} className='border-t border-line pt-2 text-xs'><p className='font-semibold text-ink'>{row.actionTitle} · {row.activity}</p>{row.note&&<p className='whitespace-pre-wrap text-soft'>{row.note}</p>}<p className='text-[10px] text-muted'>{new Date(row.createdAt).toLocaleString()}</p></div>)}</div>}
+                {!!activity.length&&<div className='max-h-44 space-y-2 overflow-y-auto rounded-xl border border-line bg-page p-3'><h4 className='text-xs font-bold text-ink'>Action updates recorded against this event</h4>{activity.map(row=><div key={row.id} className='border-t border-line pt-2 text-xs'><p className='font-semibold text-ink'>{row.actionTitle} · {row.activity}</p>{row.note&&<p className='whitespace-pre-wrap text-soft'>{row.note}</p>}<p className='text-[11px] text-muted'>{new Date(row.createdAt).toLocaleString()}</p></div>)}</div>}
                 {selected.organizerUid===uid?<div className='flex flex-wrap gap-2'>
                     <button type='button' onClick={()=>edit(selected)} className='min-h-11 rounded-lg bg-brand px-4 text-xs font-semibold text-onbrand'>Edit event / propose action</button>
                     <button type='button' disabled={busy} onClick={()=>{void remove(selected)}} className='min-h-11 rounded-lg border border-line px-4 text-xs text-red-500'>Delete</button>
-                </div>:<div className='flex flex-wrap gap-2'>{(['accepted','tentative','declined'] as const).map(r=><button type='button' disabled={busy} onClick={()=>{void rsvp(selected,r)}} key={r} className={'min-h-10 rounded-lg border px-3 text-xs capitalize '+(selected.attendeeStatus?.[uid]===r?'border-brand bg-brand/10 text-brand':'border-line')}>{r}</button>)}</div>}
-                <button type='button' onClick={()=>setSelected(null)} className='min-h-10 w-full text-xs text-brand'>Close</button>
+                </div>:<div className='flex flex-wrap gap-2'>{(['accepted','tentative','declined'] as const).map(r=><button type='button' disabled={busy} onClick={()=>{void rsvp(selected,r)}} key={r} className={'min-h-11 rounded-lg border px-3 text-xs capitalize '+(selected.attendeeStatus?.[uid]===r?'border-brand bg-brand/10 text-brand':'border-line')}>{r}</button>)}</div>}
+                <button type='button' onClick={()=>setSelected(null)} className='min-h-11 w-full text-xs text-brand'>Close</button>
             </div>
         </div>}
         {form&&<div className='fixed inset-0 z-[96] flex items-center justify-center bg-black/55 sm:p-4' role='dialog' aria-modal='true' aria-label='Edit calendar event'>

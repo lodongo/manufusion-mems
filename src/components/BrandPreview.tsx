@@ -13,7 +13,7 @@ export default function BrandPreview({ name, slogan, logoUrl, theme }: { name: s
                     <p className='truncate text-sm font-semibold' style={{ color: theme.text }}>
                         {name || 'Your brand'}
                     </p>
-                    <p className='truncate text-[10px]' style={{ color: theme.muted }}>
+                    <p className='truncate text-[11px]' style={{ color: theme.muted }}>
                         {slogan || 'Your slogan'}
                     </p>
                 </div>
@@ -26,7 +26,7 @@ export default function BrandPreview({ name, slogan, logoUrl, theme }: { name: s
                     {['Inventory', 'Production'].map((label) => (
                         <div key={label} className='rounded-xl p-2' style={{ background: theme.panel, border: `1px solid ${theme.border}` }}>
                             <div className='h-3 w-3 rounded' style={{ background: theme.brand }} />
-                            <p className='mt-2 text-[10px] font-medium' style={{ color: theme.text }}>
+                            <p className='mt-2 text-[11px] font-medium' style={{ color: theme.text }}>
                                 {label}
                             </p>
                         </div>

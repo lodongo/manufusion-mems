@@ -6,6 +6,7 @@ import { Alert } from '../components/ui';
 import AssetDictionaryBrowser from '../components/AssetDictionaryBrowser';
 import { fmtDate } from './format';
 import { Button, Card, PageTitle, Spinner, useLoad } from './kit';
+import { appConfirm } from '../components/dialogs';
 
 // MEMS admin: the asset catalog (asset master data). One catalog lives in the database. Uploading a file checks
 // its structure and replaces the catalog straight away; organizations read it from the database to classify their
@@ -56,7 +57,7 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
                 throw new Error('The file is not valid JSON.');
             }
             if (!Array.isArray(parsed.assetClasses) || !Array.isArray(parsed.attributes)) throw new Error('The file has no asset classes or attributes.');
-            if (data?.loaded && !window.confirm('This replaces the asset catalog in the database. Continue?')) {
+            if (data?.loaded && !(await appConfirm('This replaces the asset catalog in the database. Continue?'))) {
                 setProgress('');
                 return;
             }
@@ -127,7 +128,7 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
                             </p>
                         ) : null}
                         {data.sha256 && (
-                            <p className='mt-1 flex items-center gap-1 break-all font-mono text-[10px] text-slate-600'>
+                            <p className='mt-1 flex items-center gap-1 break-all font-mono text-[11px] text-slate-600'>
                                 <ShieldCheck className='h-3 w-3 shrink-0' />
                                 SHA-256 {data.sha256}
                             </p>

@@ -97,7 +97,7 @@ function Settings({ le, d, onDone }: { le: Entity; d: CcData; onDone: (m: string
                             <span className='font-mono text-xs text-muted'>{c}</span>
                             <span className='min-w-0 flex-1 truncate text-ink'>{nameOf(c)}</span>
                             {can && (
-                                <button type='button' aria-label={`Remove ${c}`} onClick={() => setList(list.filter((x) => x !== c))} className='flex h-10 w-10 items-center justify-center text-soft'>
+                                <button type='button' aria-label={`Remove ${c}`} onClick={() => setList(list.filter((x) => x !== c))} className='flex h-11 w-11 items-center justify-center text-soft'>
                                     <X className='h-4 w-4' />
                                 </button>
                             )}

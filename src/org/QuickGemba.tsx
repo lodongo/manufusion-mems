@@ -7,6 +7,7 @@ import { Button, Card, Spinner } from '../admin/kit';
 import { compressPhoto } from './mntShared';
 import { leaveQuick, useQuickLeave } from './quickNavigation';
 import { X } from 'lucide-react';
+import { appConfirm } from '../components/dialogs';
 
 interface Asset { tag: string; name: string }
 interface Type { code: string; label: string }
@@ -238,7 +239,7 @@ function GembaSession({ id, uid }: { id: string; uid: string }) {
         } catch (e) { setError(errText(e)); } finally { setBusy(false); }
     };
     const close = async () => {
-        if (!window.confirm('Close the Gemba and proceed to review? No further observations can be added.')) return;
+        if (!(await appConfirm('Close the Gemba and proceed to review? No further observations can be added.'))) return;
         setBusy(true); setError('');
         try {
             await callBackend('/api/org/quick/gemba/close', { id });
@@ -327,7 +328,7 @@ function GembaSession({ id, uid }: { id: string; uid: string }) {
     );
     return (
         <div className='space-y-4'>
-            <button type='button' onClick={() => leaveQuick('organization_home/quick/gemba')} className='flex h-10 items-center gap-2 text-sm font-medium text-brand'>
+            <button type='button' onClick={() => leaveQuick('organization_home/quick/gemba')} className='flex h-11 items-center gap-2 text-sm font-medium text-brand'>
                 <ArrowLeft className='h-4 w-4' /> All Gembas
             </button>
             <Card className='space-y-2'>

@@ -401,7 +401,7 @@ export default function RichTable<T>({
                     </label>
                     <button type='button' aria-label='Filters' title='Filter by criteria' onClick={() => setPanel(panel === 'filters' ? '' : 'filters')} className={iconBtn(panel === 'filters' || view.criteria.length > 0)}>
                         <Filter className='h-4 w-4' />
-                        {view.criteria.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[10px] font-bold text-onbrand'>{view.criteria.length}</span>}
+                        {view.criteria.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{view.criteria.length}</span>}
                     </button>
                     <button type='button' aria-label='Columns' title='Show, hide and move columns' onClick={() => setPanel(panel === 'columns' ? '' : 'columns')} className={iconBtn(panel === 'columns')}>
                         <Columns3 className='h-4 w-4' />
@@ -503,7 +503,7 @@ export default function RichTable<T>({
                                             }}
                                             className='min-w-0 flex-1 truncate rounded-lg px-2 py-1.5 text-left text-sm text-white active:bg-slate-800'
                                         >
-                                            {t.name}{t.online && <span className='ml-1 text-[10px] text-emerald-300'>· My Tables</span>}
+                                            {t.name}{t.online && <span className='ml-1 text-[11px] text-emerald-300'>· My Tables</span>}
                                             <span className='ml-2 text-xs text-slate-500'>
                                                 {t.order.length - t.hidden.length} columns{t.criteria.length ? ` · ${t.criteria.length} filters` : ''}
                                             </span>

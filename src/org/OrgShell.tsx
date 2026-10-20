@@ -332,11 +332,11 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             </div>
             <SideNav groups={groups} active={active} onSelect={go} />
             <div className='space-y-0.5 border-t border-slate-800 p-2'>
-                <button onClick={() => navigate('organization_home')} className='flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 active:bg-slate-800'>
+                <button onClick={() => navigate('organization_home')} className='flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 active:bg-slate-800'>
                     <Home className='h-[18px] w-[18px]' />
                     Organization home
                 </button>
-                <button onClick={onSignOut} className='flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 active:bg-slate-800'>
+                <button onClick={onSignOut} className='flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-300 active:bg-slate-800'>
                     <LogOut className='h-[18px] w-[18px]' />
                     Log out
                 </button>
@@ -348,13 +348,13 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
     const headerTitle = TITLES[active] ?? current?.label;
 
     return (
-        <div className='min-h-screen bg-slate-950'>
+        <div className='mems-shell-org min-h-dvh bg-slate-950'>
             <aside className='fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-slate-800 bg-slate-900 lg:block'>{nav}</aside>
             {open && (
                 <div className='fixed inset-0 z-40 lg:hidden'>
                     <button aria-label='Close menu' className='absolute inset-0 bg-black/60' onClick={() => setOpen(false)} />
                     <aside className='absolute inset-y-0 left-0 w-72 max-w-[85%] border-r border-slate-800 bg-slate-900'>
-                        <button aria-label='Close menu' onClick={() => setOpen(false)} className='absolute right-3 top-4 z-10 flex h-10 w-10 items-center justify-center text-slate-400'>
+                        <button aria-label='Close menu' onClick={() => setOpen(false)} className='absolute right-3 top-4 z-10 flex h-11 w-11 items-center justify-center text-slate-400'>
                             <X className='h-5 w-5' />
                         </button>
                         {nav}
@@ -363,7 +363,7 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             )}
             <div className='lg:pl-64'>
                 <header className='sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-slate-800 bg-slate-950/95 px-4 backdrop-blur lg:hidden'>
-                    <button aria-label='Open menu' onClick={() => setOpen(true)} className='flex h-10 w-10 items-center justify-center rounded-lg text-slate-200'>
+                    <button aria-label='Open menu' onClick={() => setOpen(true)} className='flex h-11 w-11 items-center justify-center rounded-lg text-slate-200'>
                         <Menu className='h-6 w-6' />
                     </button>
                     <span className='min-w-0 flex-1 truncate font-semibold text-white'>{headerTitle}</span>

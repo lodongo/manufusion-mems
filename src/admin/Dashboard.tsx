@@ -50,7 +50,7 @@ function Block({ title, action, children }: { title: string; action?: { label: s
             <div className='flex items-center justify-between'>
                 <h2 className='text-sm font-semibold uppercase tracking-wide text-slate-400'>{title}</h2>
                 {action && (
-                    <button type='button' onClick={() => navigate(action.path)} className='min-h-9 text-sm text-emerald-300'>
+                    <button type='button' onClick={() => navigate(action.path)} className='min-h-11 text-sm text-emerald-300'>
                         {action.label}
                     </button>
                 )}

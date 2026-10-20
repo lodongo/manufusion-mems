@@ -1,11 +1,25 @@
 import { useState } from 'react';
 import { callBackend } from '../lib/backend';
 import { Alert } from '../components/ui';
+import RichTable, { type Column } from '../components/RichTable';
 import { Button, Spinner, useLoad } from '../admin/kit';
 
 type Section={id:string;heading:string;markdown:string};
 type Doc={id:string;title:string;category:string;status:string;version:number;sections:Section[];publishedAt:string};
 type Snapshot={capturedAt:string;roles:Array<{id:string;name:string;permissions:string[]}>;positions:Array<{id:string;title:string;securityRoles:string[]}>};
+type SnapshotRole=Snapshot['roles'][number];
+type SnapshotPosition=Snapshot['positions'][number];
+const roleColumns:Array<Column<SnapshotRole>>=[
+  {key:'name',label:'Security role',value:(r)=>r.name},
+  {key:'count',label:'Permissions',type:'number',value:(r)=>r.permissions.length},
+  {key:'permissions',label:'Permission codes',value:(r)=>r.permissions.join(', ')||'Self-service baseline only',
+    render:(r)=><span className='block max-w-[20rem] whitespace-normal break-words'>{r.permissions.join(', ')||'Self-service baseline only'}</span>},
+];
+const assignmentColumns:Array<Column<SnapshotPosition>>=[
+  {key:'title',label:'Job role',value:(p)=>p.title},
+  {key:'roles',label:'Security roles',value:(p)=>p.securityRoles.join(', '),
+    render:(p)=><span className='block max-w-[20rem] whitespace-normal break-words'>{p.securityRoles.join(', ')||'None'}</span>},
+];
 export default function SecurityKnowledgeBase({canInspect=false}:{canInspect?:boolean}) {
   const {data,error,loading}=useLoad(()=>callBackend<{documents:Doc[]}>('/api/org/security-docs/list'));
   const [search,setSearch]=useState('');
@@ -86,9 +100,10 @@ export default function SecurityKnowledgeBase({canInspect=false}:{canInspect?:bo
       <Button variant='secondary' disabled={working} onClick={loadSnapshot}>{working?'Loading…':'View current configuration'}</Button>
       {snapshot&&<div className='mt-4 space-y-4'>
         <p className='text-xs text-muted'>Captured: {snapshot.capturedAt}</p>
-        <div className='overflow-x-auto'><table className='w-full min-w-[400px] text-left text-sm'><thead><tr><th className='p-2'>Security role</th><th className='p-2'>Permissions</th></tr></thead><tbody>{snapshot.roles.map(r=><tr key={r.id} className='border-t border-line'><td className='p-2'>{r.name}</td><td className='break-words p-2'>{r.permissions.join(', ')||'Self-service baseline only'}</td></tr>)}</tbody></table></div>
-        <h3 className='font-semibold'>User role assignments</h3>
-        <div className='overflow-x-auto'><table className='w-full min-w-[400px] text-left text-sm'><tbody>{snapshot.positions.map(p=><tr key={p.id} className='border-t border-line'><td className='p-2'>{p.title}</td><td className='p-2'>{p.securityRoles.join(', ')}</td></tr>)}</tbody></table></div>
+        <RichTable id='security-config-roles' title='Security roles' fileName='security_roles_snapshot' height='h-[28rem]'
+          columns={roleColumns} rows={snapshot.roles} rowKey={(r)=>r.id} empty='No security roles configured.' />
+        <RichTable id='security-config-assignments' title='User role assignments' fileName='security_role_assignments_snapshot' height='h-[28rem]'
+          columns={assignmentColumns} rows={snapshot.positions} rowKey={(p)=>p.id} empty='No role assignments yet.' />
       </div>}
     </section>}
   </main>;

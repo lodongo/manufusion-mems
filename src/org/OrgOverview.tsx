@@ -46,7 +46,7 @@ function Block({ title, action, children }: { title: string; action?: { label: s
             <div className='flex items-center justify-between'>
                 <h2 className='text-sm font-semibold uppercase tracking-wide text-muted'>{title}</h2>
                 {action && (
-                    <button type='button' onClick={() => navigate(action.path)} className='min-h-9 text-sm text-brandsoft'>
+                    <button type='button' onClick={() => navigate(action.path)} className='min-h-11 text-sm text-brandsoft'>
                         {action.label}
                     </button>
                 )}

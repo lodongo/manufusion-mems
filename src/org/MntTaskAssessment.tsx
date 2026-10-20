@@ -190,7 +190,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
        {sp.source==='warehouse'&&<p className='text-xs text-slate-400'>Warehouse {sp.warehouseId} · material {sp.materialId}</p>}
        {sp.source==='catalog'&&<p className='text-xs text-slate-400'>Catalogue code {sp.catalogCode}</p>}
        <div className='grid grid-cols-2 gap-2'>
-        <label className={label}>Quantity<input type='number' min='0.001' step='any' className={input} value={sp.qty} onChange={e=>patchSpare(i,{qty:Number(e.target.value)})}/></label>
+        <label className={label}>Quantity<input type='number' inputMode='decimal' min='0.001' step='any' className={input} value={sp.qty} onChange={e=>patchSpare(i,{qty:Number(e.target.value)})}/></label>
         <label className={label}>Unit<input className={input} value={sp.uom} onChange={e=>patchSpare(i,{uom:e.target.value})}/></label>
        </div>
        <button type='button' className='text-sm text-red-300 underline' onClick={()=>patch({spares:task.spares.filter((_,j)=>j!==i)})}>Remove spare</button>
@@ -208,15 +208,15 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
      <fieldset className='space-y-2'><legend className={label}>Internal resources required</legend>
       <div className='grid grid-cols-2 gap-2'>{roles.map(([code,name])=><label key={code} className='flex items-center gap-2 rounded-lg border border-slate-700 p-3 text-sm'><input type='checkbox' checked={(task.internalRoles||[]).includes(code)} onChange={e=>patch({internalRoles:e.target.checked?[...(task.internalRoles||[]),code]:(task.internalRoles||[]).filter(x=>x!==code)})}/>{name}</label>)}</div>
      </fieldset>
-     <label className={label}>Number of internal people<input type='number' min={0} max={50} className={input} value={task.persons} onChange={e=>patch({persons:Number(e.target.value)})}/></label>
+     <label className={label}>Number of internal people<input type='number' inputMode='decimal' min={0} max={50} className={input} value={task.persons} onChange={e=>patch({persons:Number(e.target.value)})}/></label>
      <label className={label}>External resources required<select data-native-select='true' className={input} value={task.externalResource?.type||''} onChange={e=>patch({externalResource:e.target.value?{type:e.target.value,persons:task.externalResource?.persons||1,notes:task.externalResource?.notes||''}:undefined})}>
        <option value=''>None</option>{externals.map(([code,name])=><option key={code} value={code}>{name}</option>)}</select></label>
      {task.externalResource?.type&&<div className='space-y-2 rounded-xl border border-slate-700 p-3'>
-       <label className={label}>How many external people?<input type='number' min={1} max={50} className={input} value={task.externalResource.persons} onChange={e=>patch({externalResource:{...task.externalResource!,persons:Number(e.target.value)}})}/></label>
+       <label className={label}>How many external people?<input type='number' inputMode='decimal' min={1} max={50} className={input} value={task.externalResource.persons} onChange={e=>patch({externalResource:{...task.externalResource!,persons:Number(e.target.value)}})}/></label>
        <label className={label}>External scope / qualification<textarea className={input} rows={2} value={task.externalResource.notes} onChange={e=>patch({externalResource:{...task.externalResource!,notes:e.target.value}})}/></label>
        <p className='text-xs text-slate-400'>The planner will secure the external resource through the applicable supplier and procurement process.</p>
      </div>}
-     <label className={label}>Time required (hours)<input type='number' min={0.25} step={0.25} className={input} value={task.hours} onChange={e=>patch({hours:Number(e.target.value)})}/></label>
+     <label className={label}>Time required (hours)<input type='number' inputMode='decimal' min={0.25} step={0.25} className={input} value={task.hours} onChange={e=>patch({hours:Number(e.target.value)})}/></label>
      <label className={label}>Special tools required<textarea className={input} rows={2} value={task.tools} onChange={e=>patch({tools:e.target.value})} placeholder='Tools, lifting gear, test instruments, calibration equipment…'/></label>
     </div>}
    {step===3&&<div className='space-y-3'>

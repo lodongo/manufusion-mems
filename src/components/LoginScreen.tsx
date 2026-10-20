@@ -94,7 +94,7 @@ export default function LoginScreen({ notice }: { notice?: string }) {
     };
 
     return (
-        <div className='flex min-h-screen flex-col bg-page px-6 py-10 text-ink'>
+        <div className='flex min-h-dvh flex-col bg-page px-6 py-10 text-ink'>
             <main className='mx-auto flex w-full max-w-sm flex-1 flex-col justify-center'>
                 {config.logoUrl&&<img src={config.logoUrl} alt='MEMS logo' className='mx-auto mb-4 max-h-28 max-w-[240px] object-contain'/>}
                 <h1 className='text-center text-3xl font-bold tracking-wide text-ink'>{config.brandName}</h1>

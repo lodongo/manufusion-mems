@@ -6,6 +6,7 @@ import RichTable, { type Column } from '../components/RichTable';
 import { Screen, Segmented, messageOf, useConfirm } from '../components/screen';
 import { Badge, Button, Empty } from './kit';
 import { Breadcrumb, DetailRow, DetailSheet, GroupList, TableToggle, type Crumb } from './browse';
+import { appPrompt } from '../components/dialogs';
 
 // MEMS staff administration › Modules › HRM › Metadata › Skills master (HRM.skillsMaster).
 // This is the list organisations pick skills from (module_workspaces/HRM/metadata/skillsMaster).
@@ -129,11 +130,9 @@ export default function SkillsBrowser({ items, canWrite, canReplace = false, onD
             setError('Save or undo pending skill status changes before replacing the catalogue.');
             return;
         }
-        const acknowledgement = window.prompt(
-            `Replace all ${items.length} existing HRM skills with the new 2,600-skill universal master?\n\n` +
+        const acknowledgement = (await appPrompt(`Replace all ${items.length} existing HRM skills with the new 2,600-skill universal master?\n\n` +
             'MEMS will back up the old catalogue first. Existing role references keep their legacy codes but should be reviewed.\n\n' +
-            'Type REPLACE SKILLS MASTER to confirm:'
-        );
+            'Type REPLACE SKILLS MASTER to confirm:'));
         if (acknowledgement !== 'REPLACE SKILLS MASTER') return;
         setError('');
         setReplacing(true);

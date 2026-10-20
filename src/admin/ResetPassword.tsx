@@ -4,6 +4,7 @@ import { callBackend } from '../lib/backend';
 import { PASSWORD_RULE, passwordProblem } from '../lib/password';
 import { Alert, Field } from '../components/ui';
 import { Button, Card } from './kit';
+import { appConfirm } from '../components/dialogs';
 
 export default function ResetPassword({ endpoint, uid }: { endpoint: string; uid: string }) {
     const [password, setPassword] = useState('');
@@ -16,7 +17,7 @@ export default function ResetPassword({ endpoint, uid }: { endpoint: string; uid
         setInfo('');
         const problem = passwordProblem(password);
         if (problem) return setError(problem);
-        if (!window.confirm('Reset this password? The user will be logged out everywhere and must set a new password at next login.')) return;
+        if (!(await appConfirm('Reset this password? The user will be logged out everywhere and must set a new password at next login.'))) return;
         setBusy(true);
         try {
             await callBackend(endpoint, { uid, password });

@@ -90,6 +90,94 @@ body,
     min-height: 100%;
 }
 
+/* ---------------------------------------------------------------------------
+   Mobile-first foundations (apply to every screen).
+   --------------------------------------------------------------------------- */
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+/* Shell metrics: page titles pin directly under each shell's sticky top bar. */
+.mems-shell-org,
+.mems-shell-admin {
+    --mems-top: 3.5rem;
+    --mems-gutter: 1rem;
+}
+.mems-shell-home {
+    --mems-top: 4rem;
+    --mems-gutter: 1rem;
+}
+@media (min-width: 640px) {
+    .mems-shell-home {
+        --mems-gutter: 1.5rem;
+    }
+}
+@media (min-width: 1024px) {
+    .mems-shell-org {
+        --mems-top: 0px;
+    }
+    .mems-shell-org,
+    .mems-shell-admin,
+    .mems-shell-home {
+        --mems-gutter: 2rem;
+    }
+}
+
+/* No double-tap zoom delay on controls. */
+button,
+a,
+summary,
+label,
+select,
+[role='button'],
+[role='tab'],
+[role='option'] {
+    touch-action: manipulation;
+}
+
+/* Phones: 16px text in fields so iOS never zooms the page when a field is focused. */
+@media (max-width: 639px) {
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']),
+    select,
+    textarea {
+        font-size: 16px !important;
+    }
+}
+
+/* Checkboxes and radios large enough to hit, in the tenant brand colour. */
+input[type='checkbox']:not(.sr-only),
+input[type='radio']:not(.sr-only) {
+    min-width: 1.25rem;
+    min-height: 1.25rem;
+    accent-color: rgb(var(--c-brand));
+}
+
+/* Visible keyboard focus where a screen has not styled its own. */
+:focus-visible {
+    outline: 2px solid rgb(var(--c-brand));
+    outline-offset: 2px;
+}
+
+/* Scroll areas: momentum scrolling and no scroll chaining into the page. */
+.overflow-auto,
+.overflow-y-auto,
+.overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Respect people who ask their device for less motion. */
+@media (prefers-reduced-motion: reduce) {
+    *:not(.animate-spin),
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
 body {
     margin: 0;
     background: rgb(var(--c-page));

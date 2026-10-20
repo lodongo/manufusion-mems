@@ -4,6 +4,7 @@ import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import { Alert } from '../components/ui';
 import { Button, Card, PageTitle, Spinner, useLoad } from './kit';
+import { appPrompt } from '../components/dialogs';
 
 type Run = { id: string; jobId: string; mode: string; status: string; startedAt: string; completedAt: string; provider: string; matched?: number; changed?: number; missing?: number; error?: string };
 type Job = { id: string; label: string; category: string; enabled: boolean; schedule: { frequency: string; timeUtc: string; provider: string };
@@ -21,7 +22,7 @@ export default function AutomationCenter() {
     const [fault, setFault] = useState('');
     const [notice, setNotice] = useState('');
     const activate = async () => {
-        if (window.prompt('To activate the shared MEMS automation scheduler, type ACTIVATE AUTOMATIONS') !== 'ACTIVATE AUTOMATIONS') return;
+        if ((await appPrompt('To activate the shared MEMS automation scheduler, type ACTIVATE AUTOMATIONS')) !== 'ACTIVATE AUTOMATIONS') return;
         setBusy(true); setFault(''); setNotice('');
         try {
             const result = await callBackend<{message:string}>('/api/admin/automations/activate', { confirm: 'ACTIVATE AUTOMATIONS' });

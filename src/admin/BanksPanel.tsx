@@ -5,6 +5,7 @@ import { fetchReference } from '../lib/reference';
 import { Alert, Field, SelectField } from '../components/ui';
 import { fmtDate } from './format';
 import { Badge, Button, Card, Empty, Spinner, TextArea, Toggle, useLoad } from './kit';
+import { appConfirm } from '../components/dialogs';
 
 interface Bank {
     id: string;
@@ -186,7 +187,7 @@ function BankForm({ bank, types, canWrite, onDone, onCancel }: { bank?: Bank; ty
     };
 
     const remove = async () => {
-        if (!bank || !window.confirm(`Delete ${bank.name}?`)) return;
+        if (!bank || !(await appConfirm(`Delete ${bank.name}?`))) return;
         setBusy('delete');
         try {
             await callBackend('/api/admin/banks/delete', { id: bank.id });
@@ -257,7 +258,7 @@ function BankImport({ onDone, onCancel }: { onDone: () => void; onCancel: () => 
 
     const submit = async (event: FormEvent) => {
         event.preventDefault();
-        if (mode === 'replace' && !window.confirm('Replace the entire bank list with these rows?')) return;
+        if (mode === 'replace' && !(await appConfirm('Replace the entire bank list with these rows?'))) return;
         setBusy(true);
         setError('');
         setInfo('');

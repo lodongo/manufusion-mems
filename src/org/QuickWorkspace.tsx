@@ -69,7 +69,7 @@ export default function QuickWorkspace({ mode, id, uid }: { mode?: string; id?: 
                     {tools.map((item) => (
                         <button key={item.value} type='button' onClick={() => switchTo(item.value)}
                             aria-current={active?.value === item.value ? 'page' : undefined}
-                            className={'flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl border px-0.5 text-[10px] font-semibold transition-colors sm:flex-row sm:gap-1.5 sm:px-1.5 sm:text-xs ' +
+                            className={'flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl border px-0.5 text-[11px] font-semibold transition-colors sm:flex-row sm:gap-1.5 sm:px-1.5 sm:text-xs ' +
                                 (active?.value === item.value
                                     ? 'border-brand bg-brand/10 text-brand'
                                     : 'border-line bg-page text-soft')}>

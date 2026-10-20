@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlignCenter, AlignLeft, AlignRight, AlignJustify, Bold, ChevronDown, Highlighter, Indent, Italic, Link2, List, ListOrdered, Minus, Outdent, Quote, Redo2, RemoveFormatting, Settings2, Strikethrough, Table2, Underline, Undo2, Maximize2, Minimize2 } from 'lucide-react';
 import { firebaseAuth } from '../firebase';
+import { appAlert, appPrompt } from '../components/dialogs';
 
 type EditorProps = {html:string;onChange:(html:string)=>void;placeholder?:string;ariaLabel?:string};
 type ToolKey='bold'|'italic'|'underline'|'bullets'|'link'|'numbered'|'strikethrough'|'alignleft'|'aligncenter'|'alignright'|'justify'|'indent'|'outdent'|'table'|'quote'|'rule'|'remove'|'undo'|'redo'|'font'|'size'|'color'|'highlight'|'heading';
@@ -33,7 +34,7 @@ const TOOLS:Tool[]=[
 ];
 const DEFAULT:ToolKey[]=['bold','italic','underline','bullets','link'];
 const key=()=> 'mems.mail.toolbar.v1.'+(firebaseAuth.currentUser?.uid||'guest');
-const buttonStyle='flex h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg px-2 text-xs text-ink hover:bg-brand/10';
+const buttonStyle='flex h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-lg px-2 text-xs text-ink hover:bg-brand/10';
 const HEIGHTS=[180,280,400,560];
 function savedTools():ToolKey[]{
     try{
@@ -70,11 +71,18 @@ export default function MailRichEditor({html,onChange,placeholder='Write your me
         document.execCommand(name,false,value);
         sync();
     };
-    const clickTool=(t:Tool)=>{
+    const clickTool=async (t:Tool)=>{
         if(t.id==='link'){
-            const href=window.prompt('Paste the web address (https://...)');
-            if(href&&/^https?:\/\/\S+$/i.test(href))command('createLink',href);
-            else if(href)window.alert('Use a valid https:// link.');
+            // The in-app dialog takes focus; keep the highlighted text so the link applies to it.
+            const selection=window.getSelection();
+            const range=selection&&selection.rangeCount&&editor.current?.contains(selection.anchorNode)?selection.getRangeAt(0).cloneRange():null;
+            const href=(await appPrompt('Paste the web address (https://...)'));
+            if(href&&/^https?:\/\/\S+$/i.test(href)){
+                editor.current?.focus();
+                if(range){const current=window.getSelection();current?.removeAllRanges();current?.addRange(range);}
+                command('createLink',href);
+            }
+            else if(href)void appAlert('Use a valid https:// link.');
         }else if(t.id==='table'){
             command('insertHTML','<table><tbody><tr><td>Cell 1</td><td>Cell 2</td></tr><tr><td>Cell 3</td><td>Cell 4</td></tr></tbody></table><p><br></p>');
         }else if(t.id==='quote')command('formatBlock','BLOCKQUOTE');
@@ -82,9 +90,9 @@ export default function MailRichEditor({html,onChange,placeholder='Write your me
         else if(t.cmd)command(t.cmd);
     };
     const control=(tool:Tool)=>{
-        if(tool.id==='font')return <select key={tool.id} aria-label='Font family' className='h-10 max-w-24 rounded-lg border border-line bg-page px-1 text-xs text-ink' defaultValue='Arial' onChange={e=>command('fontName',e.target.value)}>
+        if(tool.id==='font')return <select key={tool.id} aria-label='Font family' className='h-11 max-w-24 rounded-lg border border-line bg-page px-1 text-xs text-ink' defaultValue='Arial' onChange={e=>command('fontName',e.target.value)}>
             {['Arial','Calibri','Georgia','Times New Roman','Verdana','Courier New'].map(x=><option key={x}>{x}</option>)}</select>;
-        if(tool.id==='size')return <select key={tool.id} aria-label='Font size' className='h-10 w-16 rounded-lg border border-line bg-page px-1 text-xs text-ink' defaultValue='3' onChange={e=>command('fontSize',e.target.value)}>
+        if(tool.id==='size')return <select key={tool.id} aria-label='Font size' className='h-11 w-16 rounded-lg border border-line bg-page px-1 text-xs text-ink' defaultValue='3' onChange={e=>command('fontSize',e.target.value)}>
             {[2,3,4,5,6,7].map(x=><option key={x} value={x}>{x===2?'10':x===3?'12':x===4?'14':x===5?'18':x===6?'24':'28'} pt</option>)}</select>;
         if(tool.id==='color'||tool.id==='highlight')return <label key={tool.id} className={buttonStyle} title={tool.label}>
             {tool.id==='highlight'?<Highlighter className='h-4 w-4'/>:<span className='text-sm font-bold'>A</span>}
@@ -135,8 +143,8 @@ export default function MailRichEditor({html,onChange,placeholder='Write your me
                 {tool.label}
             </label>)}</div>
             <div className='mt-3 flex justify-end gap-2'>
-                <button type='button' onClick={()=>{setPrimary(DEFAULT);try{localStorage.setItem(key(),JSON.stringify(DEFAULT))}catch{}}} className='min-h-9 rounded-lg border border-line px-3 text-xs text-ink'>Reset five</button>
-                <button type='button' disabled={primary.length!==5} onClick={()=>setCustomize(false)} className='min-h-9 rounded-lg bg-brand px-3 text-xs text-onbrand disabled:opacity-50'>Done · {primary.length}/5</button>
+                <button type='button' onClick={()=>{setPrimary(DEFAULT);try{localStorage.setItem(key(),JSON.stringify(DEFAULT))}catch{}}} className='min-h-11 rounded-lg border border-line px-3 text-xs text-ink'>Reset five</button>
+                <button type='button' disabled={primary.length!==5} onClick={()=>setCustomize(false)} className='min-h-11 rounded-lg bg-brand px-3 text-xs text-onbrand disabled:opacity-50'>Done · {primary.length}/5</button>
             </div>
         </div>}
         <div ref={editor} role='textbox' aria-label={ariaLabel} aria-multiline='true' contentEditable
@@ -144,7 +152,7 @@ export default function MailRichEditor({html,onChange,placeholder='Write your me
             onInput={sync} onBlur={sync}
             style={{height:height,minHeight:140,maxHeight:'65dvh',resize:'vertical'}}
             className='mail-rich-editor w-full overflow-y-auto bg-transparent px-4 py-4 text-sm leading-relaxed text-ink outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand'/>
-        <div className='flex min-h-8 items-center justify-between border-t border-line px-3 text-[10px] text-muted'>
+        <div className='flex min-h-8 items-center justify-between border-t border-line px-3 text-[11px] text-muted'>
             <span>Five favorite tools · More for all formatting</span><span>{heightLabel} · drag bottom-right corner or resize <Maximize2 className='inline h-3 w-3'/></span>
         </div>
         <style>{'.mail-rich-editor:empty:before{content:attr(data-placeholder);color:rgb(var(--c-muted));pointer-events:none}.mail-rich-editor table{border-collapse:collapse}.mail-rich-editor td,.mail-rich-editor th{border:1px solid #a1a1aa;padding:6px}.mail-rich-editor ul{list-style:disc;padding-left:1.5rem}.mail-rich-editor ol{list-style:decimal;padding-left:1.5rem}.mail-rich-editor blockquote{border-left:3px solid #999;padding-left:1rem;margin:1rem}.mail-rich-editor h1{font-size:1.75rem;font-weight:700}.mail-rich-editor h2{font-size:1.4rem;font-weight:700}.mail-rich-editor h3{font-size:1.15rem;font-weight:700}'}</style>

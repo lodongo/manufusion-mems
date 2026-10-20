@@ -6,6 +6,7 @@ import { THEME_LABELS, THEME_PRESETS, applyTheme, useSite, type SiteConfig, type
 import { Alert, Field, SelectField } from '../components/ui';
 import { fmtDate } from './format';
 import { Button, Card, PageTitle, SubTabs, TextArea } from './kit';
+import { appConfirm } from '../components/dialogs';
 
 export default function SiteSetupPage({ canWrite }: { canWrite: boolean }) {
     const { config, locked, setConfig } = useSite();
@@ -40,7 +41,7 @@ export default function SiteSetupPage({ canWrite }: { canWrite: boolean }) {
     };
 
     const reset = async () => {
-        if (!window.confirm('Reset the MEMS website and theme to the defaults?')) return;
+        if (!(await appConfirm('Reset the MEMS website and theme to the defaults?'))) return;
         setBusy('reset');
         setError('');
         setInfo('');
@@ -133,7 +134,7 @@ export default function SiteSetupPage({ canWrite }: { canWrite: boolean }) {
                                     value={feature.icon}
                                     disabled={ro}
                                     onChange={(e) => update({ icon: e.target.value })}
-                                    className='h-10 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm text-white'
+                                    className='h-11 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm text-white'
                                 >
                                     {FEATURE_ICON_NAMES.map((name) => (
                                         <option key={name} value={name}>
@@ -146,7 +147,7 @@ export default function SiteSetupPage({ canWrite }: { canWrite: boolean }) {
                                         type='button'
                                         aria-label='Remove feature'
                                         onClick={() => set('features', draft.features.filter((_, i) => i !== index))}
-                                        className='flex h-10 w-10 items-center justify-center rounded-lg border border-red-500/40 text-red-400'
+                                        className='flex h-11 w-11 items-center justify-center rounded-lg border border-red-500/40 text-red-400'
                                     >
                                         <Trash2 className='h-4 w-4' />
                                     </button>

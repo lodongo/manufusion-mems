@@ -58,7 +58,7 @@ export default function UserChip({ session, roleLabel, compact, onClick }: { ses
                     }}
                     className={'relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-transparent text-brand transition-transform hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand '+(quickCount?.total?'animate-pulse':'')}>
                     <Zap className={'h-7 w-7 fill-current '+(quickCount?.total?'drop-shadow-[0_0_12px_rgba(244,114,182,0.95)]':'')} strokeWidth={1.7} />
-                    {!!quickCount?.total&&<span aria-label={quickCount.total+' quick items'} className='absolute -right-1 -top-0.5 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-extrabold leading-none text-onbrand shadow-[0_0_11px_rgba(244,114,182,0.9)]'>{quickCount.total>99?'99+':quickCount.total}</span>}
+                    {!!quickCount?.total&&<span aria-label={quickCount.total+' quick items'} className='absolute -right-1 -top-0.5 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1 text-[11px] font-extrabold leading-none text-onbrand shadow-[0_0_11px_rgba(244,114,182,0.9)]'>{quickCount.total>99?'99+':quickCount.total}</span>}
                 </button>
             )}
             <button type='button' onClick={onClick} aria-label='My details' className='flex min-w-0 items-center gap-2 text-left'>
@@ -66,7 +66,7 @@ export default function UserChip({ session, roleLabel, compact, onClick }: { ses
                 <span className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-700 bg-slate-800 ${compact ? 'h-9 w-9' : 'h-10 w-10'}`}>
                     {session.photoUrl ? <img src={session.photoUrl} alt={name} className='h-full w-full object-cover' /> : <UserRound className='h-5 w-5 text-slate-400' />}
                 </span>
-                <span className='flex items-center gap-1 whitespace-nowrap text-[9px] leading-none text-muted' title='Active MEMS time today and time until next rest'><Clock3 className='h-2.5 w-2.5' />{totalSeconds===null?'–':totalDuration}{restLimit!==null&&seconds!==null&&<span className='font-semibold text-green-600' title={'Next rest in '+duration}>· {duration} rest</span>}</span>
+                <span className='flex items-center gap-1 whitespace-nowrap text-[11px] leading-none text-muted' title='Active MEMS time today and time until next rest'><Clock3 className='h-2.5 w-2.5' />{totalSeconds===null?'–':totalDuration}{restLimit!==null&&seconds!==null&&<span className='font-semibold text-green-600' title={'Next rest in '+duration}>· {duration} rest</span>}</span>
             </span>
             {!compact && (
                 <span className='min-w-0'>

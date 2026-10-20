@@ -58,7 +58,7 @@ export default function SetupScreen({ onDone }: { onDone: (message?: string) => 
     };
 
     return (
-        <div className='flex min-h-screen items-center justify-center bg-slate-950 px-6 py-10'>
+        <div className='flex min-h-dvh items-center justify-center bg-slate-950 px-6 py-10'>
             <main className='w-full max-w-sm'>
                 <h1 className='text-center text-3xl font-bold tracking-wide text-white'>MEMS</h1>
                 <h2 className='mt-6 text-center text-lg font-semibold text-white'>Set up MEMS</h2>
