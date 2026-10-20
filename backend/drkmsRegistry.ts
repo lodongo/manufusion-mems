@@ -4,6 +4,7 @@ import { orgRoute } from './guards';
 import { record } from './org';
 import { validateDocumentLocation } from './drkmsHierarchy';
 import { assessPublicationGate } from './drkmsPublicationGate';
+import {canAt,scopeOf,nodePath} from './access';
 
 const base = (orgId: string) => `organizations/${orgId}/drkms_documents`;
 const validId = (v: string) => /^[a-f0-9]{20}$/.test(v);
@@ -62,7 +63,17 @@ export const drkmsRoutes = {
     'POST /api/org/drkms/documents/list': [
         orgRoute('drkms.documents.list', 'ADM.document_registry', async ctx => {
             const items = await listDocs(base(ctx.orgId));
-            return { documents: items.map(x => ({ id: x.id, ...x.data })) };
+            const scope = await scopeOf(ctx);
+            const visible = [];
+            for (const item of items) {
+                const location = item.data.scope && typeof item.data.scope === 'object' && !Array.isArray(item.data.scope) ? item.data.scope as Record<string,unknown> : {};
+                const nodeId = str(location.nodeId);
+                if (!nodeId) continue;
+                if (!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),scope)) continue;
+                if (str(item.data.status)!=='effective' && str(item.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin') continue;
+                visible.push({ id: item.id, ...item.data });
+            }
+            return { documents: visible };
         }),
     ],
     'POST /api/org/drkms/documents/get': [
@@ -71,6 +82,9 @@ export const drkmsRoutes = {
             if (!validId(id)) throw new HttpError(400, 'Invalid document identifier.');
             const doc = await getDoc(`${base(ctx.orgId)}/${id}`);
             if (!doc) throw new HttpError(404, 'Document not found.');
+            const location = doc.data.scope && typeof doc.data.scope === 'object' && !Array.isArray(doc.data.scope) ? doc.data.scope as Record<string,unknown> : {};
+            if (!str(location.nodeId) || !canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,str(location.nodeId)),await scopeOf(ctx))) throw new HttpError(403,'Document is outside authorized scope.');
+            if (str(doc.data.status)!=='effective' && str(doc.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin') throw new HttpError(403,'Unpublished document is restricted to its author.');
             return { document: { id: doc.id, ...doc.data } };
         }),
     ],
