@@ -7,6 +7,7 @@ import { HR_SKILL_EXPANDED, HR_SKILL_EXPANDED_COUNTS } from './hrSkillsExpanded'
 import { SAF_DEFAULT_LISTS } from './safDefaults';
 import { UNIVERSAL_STOCK_METADATA } from './universalStockMetadata';
 import { AST_UTILITY_ITEMS } from './astUtilityDefaults';
+import { DOC_DEFAULT_LISTS } from './docDefaults';
 import { orgRoute, staff } from './guards';
 
 // Default metadata lists that ship with modules. Loaded into
@@ -52,6 +53,7 @@ const COST_CENTER_TYPES: MetaItem[] = [
 
 export const DEFAULT_MODULE_METADATA: Record<string, Array<{ key: string; title: string; description: string; version: number; items: MetaItem[] }>> = {
     SAF: SAF_DEFAULT_LISTS,
+    DOC: DOC_DEFAULT_LISTS,
     AST: [{ key: 'utilitySupplies', title: 'Utility supplies master', description: 'Category → subcategory → utility supply → typed technical attributes, mandatory flags and controlled dropdown values.', version: 1, items: AST_UTILITY_ITEMS }],
     PRC: [{ key: 'unitsOfMeasure', title: 'Units of measure', description: 'Standard UOM by category, symbol, measurement system and conversion multiplier to category base unit. Packages with variable quantities are material-specific.', version: 1, items: PROCUREMENT_UNITS }, ...(VENDOR_META_LISTS as unknown as never[]), ...UNIVERSAL_STOCK_METADATA],
     MNT: [
