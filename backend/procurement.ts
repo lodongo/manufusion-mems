@@ -961,6 +961,15 @@ export const procurementRoutes = {
         const path=root+'/'+(section==='inventory'?'inventory_material_info':'procurement_material_info')+'/'+id+'_'+warehouseId;
         const old=await getDoc(path);
         const merged:Record<string,unknown>={...(old?.data||{}),...clean};
+        if(section==='inventory'&&has('replenishmentStrategy')&&stockedPolicyToMrp(str(merged.stockingPolicy))){
+            const owner=str(merged.stockOwnership);
+            const arrangement=str(merged.supplyArrangement);
+            // New automated replenishment requires a deliberate company-owned
+            // purchasing profile. Legacy MINMAX/REORDER records remain valid
+            // until their strategy is explicitly reconfigured.
+            if(owner!=='OW01'||!['SA01','SA05','SA06','SA11','SA14','SA15'].includes(arrangement))
+                throw new HttpError(409,'Automatic company replenishment requires Company-owned (OW01) and a permitted purchase arrangement. Choose both in Stock Control first; consignment and VMI need an owner-aware replenishment agreement.');
+        }
         const numOf=(k:string)=>merged[k]===''||merged[k]===null||merged[k]===undefined?null:Number(merged[k]);
         if(section==='inventory'){const min=numOf('minimumLevel'),max=numOf('maximumLevel'),safety=numOf('safetyStock'),reorder=numOf('reorderPoint');if(min!==null&&max!==null&&min>max)throw new HttpError(400,'Minimum level cannot be above maximum level.');if(safety!==null&&max!==null&&safety>max)throw new HttpError(400,'Safety stock cannot be above maximum level.');if(reorder!==null&&max!==null&&reorder>max)throw new HttpError(400,'Reorder point cannot be above maximum level.');}
         const changed=Object.keys(clean).filter(k=>JSON.stringify(old?.data?.[k]??null)!==JSON.stringify(clean[k]));
