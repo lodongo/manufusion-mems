@@ -37,6 +37,36 @@ export const drkmsIndustrialRoutes={
    return {id,status:'awaiting_technical_review',aiControlEnabled:false};
   }),
  ],
+ 'POST /api/org/drkms/industrial/verify':[
+  orgRoute('drkms.industrial.verify','ADM.document_review',async ctx=>{
+   const id=str(ctx.body.id);
+   if(!/^[a-f0-9]{20}$/.test(id))throw new HttpError(400,'Choose a registered industrial knowledge link.');
+   const path=ROOT(ctx.orgId)+'/'+id,entry=await getDoc(path);
+   if(!entry||str(entry.data.reviewStatus)!=='awaiting_technical_review')
+    throw new HttpError(409,'Link is not awaiting technical review.');
+   if(str(entry.data.createdBy)===ctx.uid)
+    throw new HttpError(403,'The original author cannot verify their own industrial link.');
+   const asset=await getDoc(assets(ctx.orgId,str(entry.data.assetTag)));
+   const nodeId=str(asset?.data.nodeId);
+   if(!nodeId||!canAt(ctx,'ADM.document_review',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))
+    throw new HttpError(403,'Reviewer lacks authority for this equipment.');
+   const documentId=str(entry.data.sourceDocumentId),revisionId=str(entry.data.sourceRevisionId);
+   const doc=await getDoc(docs(ctx.orgId,documentId));
+   const revision=await getDoc(docs(ctx.orgId,documentId)+'/revisions/'+revisionId);
+   if(!doc||str(doc.data.status)!=='effective'||str(doc.data.effectiveRevisionId)!==revisionId
+     ||!revision||revision.data.immutable!==true||str(revision.data.tenantId)!==ctx.orgId)
+    throw new HttpError(409,'Linked controlled source is no longer effective.');
+   const decision=str(ctx.body.decision),reason=str(ctx.body.reason).trim();
+   if(!['approve','reject'].includes(decision)||reason.length<10||reason.length>1000)
+    throw new HttpError(400,'Technical review decision and substantive reason required.');
+   const result={...entry.data,reviewStatus:decision==='approve'?'approved':'rejected',
+      reviewedBy:ctx.uid,reviewedAt:nowIso(),reviewReason:reason};
+   if(!(await writeDoc(path,result,{updateTime:entry.updateTime})))
+    throw new HttpError(409,'Record changed during review.');
+   await record(ctx,'drkms.industrial.review',id,decision);
+   return {id,status:result.reviewStatus,aiControlEnabled:false};
+  }),
+ ],
  'POST /api/org/drkms/industrial/list':[
   orgRoute('drkms.industrial.list','MNT.view',async ctx=>{
    const assetTag=str(ctx.body.assetTag);
