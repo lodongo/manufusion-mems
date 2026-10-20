@@ -199,3 +199,106 @@ body {
  .mnt-print-report h2, .mnt-print-report h3, .mnt-print-report h4 { break-after: avoid; }
  @page { size: A4; margin: 14mm; }
 }
+
+/* ---------------------------------------------------------------------------
+   Chat (WhatsApp-style messenger). Self-contained palette so conversations look the same in every
+   tenant theme; .wa-dark is chosen from the person's chat appearance setting.
+   --------------------------------------------------------------------------- */
+.wa {
+    --wa-bar: #ffffff; --wa-bar-ink: #111b21; --wa-accent: #00a884; --wa-accent-ink: #ffffff; --wa-accent-text: #008069;
+    --wa-chat-bg: #efeae2; --wa-in: #ffffff; --wa-out: #d9fdd3; --wa-ink: #111b21; --wa-sub: #667781;
+    --wa-read: #53bdeb; --wa-line: #e9edef; --wa-panel: #ffffff; --wa-panel2: #f0f2f5; --wa-chip: #ffffff;
+    --wa-badge: #25d366; --wa-quote-in: #f5f6f6; --wa-quote-out: #d1f4cc; --wa-system: #ffeecd; --wa-danger: #ea0038;
+    --wa-pattern: rgba(17, 27, 33, 0.055);
+    color-scheme: light;
+    background: var(--wa-panel);
+    color: var(--wa-ink);
+}
+.wa.wa-dark {
+    --wa-bar: #202c33; --wa-bar-ink: #e9edef; --wa-accent: #00a884; --wa-accent-ink: #111b21; --wa-accent-text: #00a884;
+    --wa-chat-bg: #0b141a; --wa-in: #202c33; --wa-out: #005c4b; --wa-ink: #e9edef; --wa-sub: #8696a0;
+    --wa-read: #53bdeb; --wa-line: #222d34; --wa-panel: #111b21; --wa-panel2: #202c33; --wa-chip: #182229;
+    --wa-badge: #00a884; --wa-quote-in: #1d282f; --wa-quote-out: #025144; --wa-system: #182229; --wa-danger: #f15c6d;
+    --wa-pattern: rgba(233, 237, 239, 0.035);
+    color-scheme: dark;
+}
+.wa input, .wa textarea, .wa select { color: var(--wa-ink); }
+.wa ::placeholder { color: var(--wa-sub); opacity: 1; }
+/* Original, subtle line pattern (not WhatsApp's artwork) on the conversation background. */
+.wa-wall {
+    background-color: var(--wa-chat-bg);
+    background-image:
+        radial-gradient(circle at 25% 25%, var(--wa-pattern) 1.5px, transparent 2px),
+        radial-gradient(circle at 75% 70%, var(--wa-pattern) 1.2px, transparent 1.7px),
+        linear-gradient(135deg, transparent 46%, var(--wa-pattern) 47%, var(--wa-pattern) 53%, transparent 54%);
+    background-size: 46px 46px, 46px 46px, 92px 92px;
+}
+.wa-bubble { position: relative; border-radius: 7.5px; box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13); }
+.wa-in { background: var(--wa-in); }
+.wa-out { background: var(--wa-out); }
+/* Tail on the first bubble of a run: the corner it leaves is squared. */
+.wa-tail-in { border-top-left-radius: 0; }
+.wa-tail-out { border-top-right-radius: 0; }
+.wa-tail-in::before, .wa-tail-out::before {
+    content: ''; position: absolute; top: 0; width: 8px; height: 13px;
+}
+.wa-tail-in::before { left: -8px; background: var(--wa-in); clip-path: polygon(100% 0, 0 0, 100% 100%); }
+.wa-tail-out::before { right: -8px; background: var(--wa-out); clip-path: polygon(0 0, 100% 0, 0 100%); }
+.wa-scroll { scrollbar-width: thin; scrollbar-color: rgba(134, 150, 160, 0.4) transparent; }
+.wa-noscroll { scrollbar-width: none; }
+.wa-noscroll::-webkit-scrollbar { display: none; }
+@keyframes wa-dot { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+.wa-typing span { display: inline-block; width: 6px; height: 6px; margin: 0 1.5px; border-radius: 9999px; background: var(--wa-sub); animation: wa-dot 1.2s infinite; }
+.wa-typing span:nth-child(2) { animation-delay: 0.15s; }
+.wa-typing span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes wa-pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.wa-pop { animation: wa-pop 0.16s ease-out; }
+.wa .wa-ink { color: var(--wa-ink); }
+.wa .wa-sub { color: var(--wa-sub); }
+.wa .wa-green { color: var(--wa-accent-text); }
+.wa .wa-danger { color: var(--wa-danger); }
+.wa .wa-bar { background: var(--wa-bar); color: var(--wa-bar-ink); }
+.wa .wa-panel { background: var(--wa-panel); }
+.wa .wa-panel2 { background: var(--wa-panel2); }
+.wa .wa-chip { background: var(--wa-chip); color: var(--wa-sub); box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13); }
+.wa .wa-line { border-color: var(--wa-line); }
+.wa .wa-btn { background: var(--wa-accent); color: var(--wa-accent-ink); }
+.wa .wa-badge { background: var(--wa-badge); color: var(--wa-accent-ink); }
+.wa .wa-hover:hover, .wa .wa-hover:focus-visible { background: var(--wa-panel2); }
+.wa .wa-selected { background: rgba(0, 168, 132, 0.16); }
+
+/* ---------------------------------------------------------------------------
+   Mail (Outlook-style). Self-contained palette, light or dark from the person's mail appearance setting.
+   --------------------------------------------------------------------------- */
+.ol {
+    --ol-brand: #0f6cbd; --ol-brand-hover: #115ea3; --ol-brand-ink: #ffffff; --ol-link: #0f6cbd;
+    --ol-bg: #f0f0f0; --ol-surface: #ffffff; --ol-surface2: #fafafa; --ol-ink: #242424; --ol-sub: #616161;
+    --ol-line: #e0e0e0; --ol-selected: #ebf3fc; --ol-hover: #f5f5f5; --ol-danger: #c50f1f; --ol-flag: #c50f1f;
+    --ol-chip: #e8ebfa; --ol-chip-ink: #3d4fb0; --ol-appbar: #0f6cbd; --ol-appbar-ink: #ffffff;
+    color-scheme: light; background: var(--ol-bg); color: var(--ol-ink);
+}
+.ol.ol-dark {
+    --ol-brand: #115ea3; --ol-brand-hover: #0f6cbd; --ol-brand-ink: #ffffff; --ol-link: #479ef5;
+    --ol-bg: #141414; --ol-surface: #292929; --ol-surface2: #1f1f1f; --ol-ink: #ffffff; --ol-sub: #adadad;
+    --ol-line: #3d3d3d; --ol-selected: #0e4775; --ol-hover: #333333; --ol-danger: #f1707b; --ol-flag: #f1707b;
+    --ol-chip: #2b3561; --ol-chip-ink: #b6c2ff; --ol-appbar: #0a2e4a; --ol-appbar-ink: #ffffff;
+    color-scheme: dark;
+}
+.ol input, .ol select, .ol textarea { color: var(--ol-ink); }
+.ol ::placeholder { color: var(--ol-sub); opacity: 1; }
+.ol .ol-ink { color: var(--ol-ink); }
+.ol .ol-sub { color: var(--ol-sub); }
+.ol .ol-link { color: var(--ol-link); }
+.ol .ol-danger { color: var(--ol-danger); }
+.ol .ol-surface { background: var(--ol-surface); }
+.ol .ol-surface2 { background: var(--ol-surface2); }
+.ol .ol-bg { background: var(--ol-bg); }
+.ol .ol-line { border-color: var(--ol-line); }
+.ol .ol-appbar { background: var(--ol-appbar); color: var(--ol-appbar-ink); }
+.ol .ol-primary { background: var(--ol-brand); color: var(--ol-brand-ink); }
+.ol .ol-primary:hover { background: var(--ol-brand-hover); }
+.ol .ol-hover:hover, .ol .ol-hover:focus-visible { background: var(--ol-hover); }
+.ol .ol-selected { background: var(--ol-selected); }
+.ol .ol-chip { background: var(--ol-chip); color: var(--ol-chip-ink); }
+.ol .ol-input { background: var(--ol-surface); border: 1px solid var(--ol-line); border-bottom-color: var(--ol-sub); border-radius: 4px; }
+.ol .ol-input:focus-within, .ol .ol-input:focus { border-bottom: 2px solid var(--ol-brand); outline: none; }

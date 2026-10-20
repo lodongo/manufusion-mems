@@ -2,7 +2,7 @@ import { HttpError, deleteDoc, getDoc, listDocs, nowIso, randomId, str, writeDoc
 import { orgRoute, type OrgContext } from './guards';
 import { audit } from './audit';
 import { actionPhotoUrl, validateActionPhoto } from './actionPhotos';
-import { allowedNoteAttachments, publicNoteAttachmentUrls, sanitizedNoteHtml } from './noteFiles';
+import { allowedNoteAttachments, inlineNoteFileIds, publicNoteAttachmentUrls, sanitizedNoteHtml } from './noteFiles';
 
 const todos = (uid: string) => 'users/' + uid + '/quick_todos';
 const notes = (uid: string) => 'users/' + uid + '/quick_notes';
@@ -109,10 +109,14 @@ export const quickPersonalRoutes = {
         if(old&&str(old.data.orgId)!==ctx.orgId)throw new HttpError(403,'This note is outside your organization.');
         const now = nowIso();
         const attachments=allowedNoteAttachments(ctx,ctx.body.attachments===undefined?old?.data.attachments:ctx.body.attachments);
+        // Every inline photo or drawing must be one of this note's own image files.
+        const inline=format==='html'?inlineNoteFileIds(body):[];
+        const images=new Set(attachments.filter(a=>a.mime.startsWith('image/')).map(a=>a.id));
+        if(inline.some(id=>!images.has(id)))throw new HttpError(400,'An inline photo is not one of this note\'s files. Insert it again.');
         await writeDoc(path, {topic,body,format,attachments,
             archivedAt:str(old?.data.archivedAt),orgId:ctx.orgId,
             createdAt:str(old?.data.createdAt)||now,updatedAt:now});
-        await rec(ctx, 'quick.note.save', topic);
+        await rec(ctx, 'quick.note.save', topic + (inline.length ? ' · ' + inline.length + ' inline photo/drawing' + (inline.length === 1 ? '' : 's') : ''));
         return { id };
     })],
     'POST /api/org/quick/note/archive': [orgRoute('quick.note.archive', null, async (ctx) => {

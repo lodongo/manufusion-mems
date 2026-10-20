@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Boxes, Check, Copy, Layers, Map as MapIcon, Pencil, Plus, Search, Trash2, Warehouse, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AlertTriangle, ArrowLeft, Boxes, Check, ChevronDown, Copy, Layers, Map as MapIcon, Pencil, Plus, Search, Trash2, Warehouse, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert, Field, SelectField } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
@@ -10,7 +10,8 @@ import { appConfirm, appPrompt } from '../components/dialogs';
 // Storage setup for Inventory (INV) and Warehousing (WHS) cost centers.
 // Warehouse › storage location › physical location:
 //   warehouse          material categories (one or more), layout per floor, capacity
-//   storage location   a name + a storage location type + a material classification (colour), both from MEMS INV metadata
+//   storage location   a name + a storage location type (INV metadata) + a warehouse restriction (colour) from the
+//                      restriction master shared with materials (Procurement metadata → warehouseRestrictions)
 //   physical location  bins in clusters; each cluster sits in one storage location and is for material subcategories
 //                      chosen from the warehouse's categories (subcategories are chosen only here)
 // Position code AB_01_C_02 = floor A, rack row B, rack 01, column C (from the bottom), position 02.
@@ -42,10 +43,16 @@ interface Loc {
     name: string;
     typeCode: string;
     typeLabel: string;
+    /** Warehouse restriction (RS…) from the master shared with materials. */
+    restrictionCode: string;
+    restrictionLabel: string;
+    /** Older material classification (MCL-…), kept only to suggest a restriction. */
     classificationCode: string;
     classificationLabel: string;
     color: string;
     active: boolean;
+    aligned: boolean;
+    suggestedRestrictionCode: string;
 }
 interface Setup {
     materialCategoryCodes: string[];
@@ -84,6 +91,9 @@ interface Cluster extends Range {
     locationCode: string;
     locationName: string;
     classificationLabel: string;
+    restrictionCode?: string;
+    restrictionLabel?: string;
+    aligned?: boolean;
     color: string;
     subcategories: Array<{ code: string; name: string; categoryCode: string }>;
     storageTypeCode: string;
@@ -105,6 +115,7 @@ interface Meta {
     label: string;
     color: string;
     active: boolean;
+    description?: string;
 }
 interface Data {
     costCenter: { id: string; code: string; name: string; costType: string };
@@ -114,7 +125,8 @@ interface Data {
     floorTotals?: Array<{ floor: string; positions: number; allocated: number }>;
     clusters: Cluster[];
     categories: Category[];
-    classifications: Meta[];
+    restrictions: Meta[];
+    alignment?: { pending: Array<{ code: string; name: string; suggestedRestrictionCode: string }>; binningOpen: boolean };
     locationTypes: Meta[];
     storageTypes: Opt[];
     conditions: Opt[];
@@ -200,7 +212,7 @@ function ownerAt(index: OwnerIndex, o: number): Cluster | undefined {
     return undefined;
 }
 
-// Colours come from the material classification of each storage location (codified by MEMS in INV metadata).
+// Colours come from the warehouse restriction of each storage location (the master shared with materials).
 function locationColors(clusters: Cluster[]) {
     return new Map(clusters.map((c) => [c.locationCode, c.color || '#64748B']));
 }
@@ -233,55 +245,75 @@ export default function WarehouseSetup({ costCenterId, onBack }: { costCenterId:
     if (newCluster && d.setup) return <ClusterForm data={d} onDone={(c) => (done(), setTab('clusters'), setOpenCluster(c))} onCancel={() => setNewCluster(false)} />;
     const cluster = d.clusters.find((c) => c.code === openCluster);
 
+    const pending = d.alignment?.pending ?? [];
+    const tabs: Array<[Tab, string, number | null]> = [
+        ['setup', 'Overview', null],
+        ['topology', 'Storage map', null],
+        ['clusters', 'Clusters', d.clusters.length],
+        ['positions', 'Bins', null],
+    ];
+
     return (
-        <div className='flex min-h-0 flex-col gap-3'>
-            <div className='shrink-0 space-y-3 rounded-2xl border border-line bg-panel p-3'>
+        // Fixed-height page: the action bar stays on top and only the content below it scrolls.
+        <div className='flex h-[calc(100dvh-7rem)] min-h-0 flex-col'>
+            <header className='shrink-0 space-y-2 border-b border-line bg-page pb-2'>
                 <div className='flex items-center gap-2'>
-                    <Button variant='secondary' aria-label='Back' onClick={cluster ? () => setOpenCluster('') : onBack}>
+                    <button type='button' aria-label='Back' onClick={cluster ? () => setOpenCluster('') : onBack} className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-line bg-panel text-ink'>
                         <ArrowLeft className='h-4 w-4' />
-                    </Button>
+                    </button>
                     <div className='min-w-0 flex-1'>
-                        <p className='font-mono text-xs text-soft'>{d.costCenter.code}</p>
-                        <p className='truncate font-semibold text-ink'>Warehouse · {d.costCenter.name}</p>
+                        <p className='truncate text-[15px] font-semibold leading-tight text-ink'>{d.costCenter.name}</p>
+                        <p className='truncate font-mono text-[11px] text-soft'>{d.costCenter.code} · Warehouse</p>
                     </div>
                     {d.canEdit && d.configured && !cluster && (
-                        <Button variant='secondary' onClick={() => setEditing(true)}>
+                        <button type='button' aria-label='Edit warehouse' onClick={() => (setTab('setup'), setEditing(true))} className='flex h-10 min-w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-panel px-2.5 text-sm font-medium text-ink'>
                             <Pencil className='h-4 w-4' />
-                            Edit
-                        </Button>
+                            <span className='hidden sm:inline'>Edit</span>
+                        </button>
                     )}
                     {d.canEdit && d.configured && !cluster && (
-                        <Button onClick={() => setNewCluster(true)}>
+                        <button type='button' aria-label='Add cluster' onClick={() => setNewCluster(true)} className='flex h-10 shrink-0 items-center justify-center gap-1 rounded-xl bg-brand px-3 text-sm font-semibold text-onbrand'>
                             <Plus className='h-4 w-4' />
-                            Cluster
-                        </Button>
+                            <span>Cluster</span>
+                        </button>
                     )}
                 </div>
-                <div className='grid grid-cols-2 gap-1 rounded-xl border border-line bg-page p-1 sm:grid-cols-4'>
-                    {(
-                        [
-                            ['setup', 'Overview'],
-                            ['topology', 'Storage map'],
-                            ['clusters', `Clusters · ${d.clusters.length}`],
-                            ['positions', 'Bin positions'],
-                        ] as Array<[Tab, string]>
-                    ).map(([k, label]) => (
-                        <button key={k} type='button' onClick={() => (setTab(k), setOpenCluster(''))} className={`min-h-11 rounded-lg px-2 py-2 text-center text-sm font-medium ${tab === k ? 'bg-brand text-onbrand' : 'text-ink active:bg-panel'}`}>
+                <nav role='tablist' aria-label='Warehouse views' className='flex gap-1 overflow-x-auto overscroll-x-contain rounded-xl bg-panel p-1 [scrollbar-width:none]'>
+                    {tabs.map(([k, label, count]) => (
+                        <button
+                            key={k}
+                            type='button'
+                            role='tab'
+                            aria-selected={tab === k}
+                            onClick={() => (setTab(k), setOpenCluster(''))}
+                            className={`flex min-h-9 flex-1 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-[13px] font-medium ${tab === k ? 'bg-brand text-onbrand shadow-sm' : 'text-soft'}`}
+                        >
                             {label}
+                            {count !== null && <span className={`rounded-full px-1.5 text-[11px] ${tab === k ? 'bg-white/25' : 'bg-page'}`}>{count}</span>}
                         </button>
                     ))}
-                </div>
-            </div>
+                </nav>
+            </header>
 
-            <div className='min-h-0 flex-1 space-y-3 pb-4'>
+            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pb-6 pt-3'>
                 {!d.configured && !d.canEdit && <Alert tone='info'>Storage has not been set up for this cost center yet.</Alert>}
-                {tab === 'setup' && d.setup && <>
-                    <div className='flex items-center justify-between gap-3 rounded-xl border border-line bg-panel px-3 py-2'>
-                        <p className='min-w-0 text-sm text-soft'>{d.summary.clusters} clusters · {d.summary.free.toLocaleString()} positions ready to allocate</p>
-                        {d.canEdit && <Button onClick={() => setNewCluster(true)}><Plus className='h-4 w-4'/> Add cluster</Button>}
+                {pending.length > 0 && (
+                    <div className='flex items-start gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3'>
+                        <AlertTriangle className='mt-0.5 h-5 w-5 shrink-0 text-amber-400' />
+                        <div className='min-w-0 flex-1'>
+                            <p className='text-sm font-semibold text-ink'>Binning blocked until restrictions are aligned</p>
+                            <p className='mt-0.5 text-xs text-soft'>
+                                {pending.length} storage location{pending.length === 1 ? '' : 's'} ({pending.map((x) => x.code).join(', ')}) {pending.length === 1 ? 'has' : 'have'} no warehouse restriction from the master materials use. Confirm each restriction to open binning.
+                            </p>
+                        </div>
+                        {d.canEdit && (
+                            <button type='button' onClick={() => (setTab('setup'), setEditing(true))} className='shrink-0 rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-black'>
+                                Align
+                            </button>
+                        )}
                     </div>
-                    <SetupView data={d} setup={d.setup} onTopology={() => setTab('topology')} />
-                </>}
+                )}
+                {tab === 'setup' && d.setup && <SetupView data={d} setup={d.setup} onTopology={() => setTab('topology')} />}
                 {tab === 'topology' && d.setup && <PhysicalStorage data={d} setup={d.setup} reload={reload} />}
                 {tab === 'clusters' && !cluster && <ClusterList data={d} onOpen={setOpenCluster} />}
                 {tab === 'clusters' && cluster && <ClusterDetail data={d} cluster={cluster} onDeleted={done} onPositions={() => (setPositionsOf(cluster.code), setTab('positions'), setOpenCluster(''))} />}
@@ -319,23 +351,98 @@ function floorSummary(f: FloorLayout) {
     return f.racking ? `${f.rows} rack rows × ${f.racks} racks × ${f.columns} columns × ${f.positions} positions` : `Floor storage · ${f.rows} rows × ${f.positions} positions`;
 }
 
+/** Collapsible section of the overview: a one-line summary when closed, so the page reads at a glance on a phone. */
+function Section({ title, count, summary, defaultOpen = false, action, children }: { title: string; count?: number; summary: string; defaultOpen?: boolean; action?: ReactNode; children: ReactNode }) {
+    const [open, setOpen] = useState(defaultOpen);
+    return (
+        <section className='overflow-hidden rounded-2xl border border-line bg-panel'>
+            <button type='button' aria-expanded={open} onClick={() => setOpen((v) => !v)} className='flex min-h-14 w-full items-center gap-3 px-4 py-3 text-left'>
+                <span className='min-w-0 flex-1'>
+                    <span className='flex items-center gap-2 text-sm font-semibold text-ink'>
+                        {title}
+                        {count !== undefined && <span className='rounded-full bg-page px-2 text-[11px] font-medium text-soft'>{count}</span>}
+                    </span>
+                    {!open && <span className='mt-0.5 block truncate text-xs text-soft'>{summary}</span>}
+                </span>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-soft transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+            {open && (
+                <div className='space-y-2 border-t border-line px-4 pb-4 pt-3'>
+                    {children}
+                    {action}
+                </div>
+            )}
+        </section>
+    );
+}
+
 function SetupView({ data, setup, onTopology }: { data: Data; setup: Setup; onTopology: () => void }) {
     const s = data.summary;
     const type = data.storageTypes.find((t) => t.code === setup.storageTypeCode)?.label ?? setup.storageTypeCode;
     const cond = data.conditions.find((t) => t.code === setup.conditionCode)?.label ?? setup.conditionCode;
     const c = setup.capacity;
     const catName = (code: string) => data.categories.find((x) => x.code === code)?.name ?? code;
+    const pct = s.totalPositions ? Math.round((s.allocated / s.totalPositions) * 100) : 0;
+    const aligned = setup.storageLocations.filter((l) => l.aligned).length;
     return (
         <>
-            <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
-                <Stat label='Positions' value={s.totalPositions.toLocaleString()} />
-                <Stat label='Allocated' value={s.allocated.toLocaleString()} />
-                <Stat label='Free' value={s.free.toLocaleString()} />
-                <Stat label='Allocation' value={s.totalPositions ? `${Math.round((s.allocated / s.totalPositions) * 100)}%` : '0%'} />
-            </div>
-            <Card className='space-y-2'>
-                <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Material categories ({setup.materialCategoryCodes.length})</p>
-                <div className='flex flex-wrap gap-1'>
+            <section className='rounded-2xl border border-line bg-panel p-4'>
+                <div className='flex items-end justify-between gap-3'>
+                    <div className='min-w-0'>
+                        <p className='text-[11px] font-semibold uppercase tracking-wider text-soft'>Positions allocated</p>
+                        <p className='mt-1 text-2xl font-bold tabular-nums text-ink'>
+                            {s.allocated.toLocaleString()}
+                            <span className='text-sm font-medium text-soft'> / {s.totalPositions.toLocaleString()}</span>
+                        </p>
+                    </div>
+                    <p className='text-3xl font-bold tabular-nums text-brand'>{pct}%</p>
+                </div>
+                <div className='mt-3 h-2 overflow-hidden rounded-full bg-page' role='progressbar' aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label='Allocation'>
+                    <div className='h-full rounded-full bg-brand' style={{ width: `${pct}%` }} />
+                </div>
+                <dl className='mt-3 grid grid-cols-3 divide-x divide-line text-center'>
+                    <div>
+                        <dt className='text-[11px] text-soft'>Free</dt>
+                        <dd className='text-sm font-semibold tabular-nums text-ink'>{s.free.toLocaleString()}</dd>
+                    </div>
+                    <div>
+                        <dt className='text-[11px] text-soft'>Clusters</dt>
+                        <dd className='text-sm font-semibold tabular-nums text-ink'>{s.clusters}</dd>
+                    </div>
+                    <div>
+                        <dt className='text-[11px] text-soft'>Floors</dt>
+                        <dd className='text-sm font-semibold tabular-nums text-ink'>{setup.layout.floors.length}</dd>
+                    </div>
+                </dl>
+            </section>
+
+            <Section title='Storage locations' count={setup.storageLocations.length} defaultOpen summary={`${aligned} of ${setup.storageLocations.length} aligned to the restriction master`}>
+                {setup.storageLocations.map((l) => {
+                    const used = data.clusters.filter((x) => x.locationCode === l.code).reduce((sum, x) => sum + x.positions, 0);
+                    return (
+                        <div key={l.code} className='flex items-center gap-3 rounded-xl bg-page px-3 py-2.5'>
+                            <LocDot color={l.color} size='h-8 w-1.5' />
+                            <div className='min-w-0 flex-1'>
+                                <p className='flex items-center gap-2'>
+                                    <span className='truncate text-sm font-medium text-ink'>{l.name}</span>
+                                    <span className='shrink-0 font-mono text-[11px] text-soft'>{l.code}</span>
+                                </p>
+                                <p className='mt-0.5 truncate text-xs text-soft'>
+                                    {l.aligned ? `${l.restrictionCode} · ${l.restrictionLabel}` : <span className='font-medium text-amber-500'>Restriction not aligned</span>} · {l.typeLabel}
+                                    {!l.active && ' · inactive'}
+                                </p>
+                            </div>
+                            <span className='shrink-0 text-right text-xs tabular-nums text-soft'>
+                                <span className='block text-sm font-semibold text-ink'>{used.toLocaleString()}</span>
+                                positions
+                            </span>
+                        </div>
+                    );
+                })}
+            </Section>
+
+            <Section title='Materials and storage' count={setup.materialCategoryCodes.length} summary={`${setup.materialCategoryCodes.length} categories · ${type} · ${cond}`}>
+                <div className='flex flex-wrap gap-1.5'>
                     {setup.materialCategoryCodes.map((code) => (
                         <Badge key={code}>
                             {code} · {catName(code)}
@@ -344,58 +451,41 @@ function SetupView({ data, setup, onTopology }: { data: Data; setup: Setup; onTo
                 </div>
                 <Row label='Type of storage' value={type} />
                 <Row label='Condition' value={cond} />
-            </Card>
-            <Card className='space-y-2'>
-                <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Storage locations ({setup.storageLocations.length})</p>
-                {setup.storageLocations.map((l) => {
-                    const used = data.clusters.filter((x) => x.locationCode === l.code).reduce((sum, x) => sum + x.positions, 0);
-                    return (
-                        <div key={l.code} className='rounded-xl border-l-4 border-slate-800 bg-slate-950 p-3' style={{ borderLeftColor: l.color }}>
-                            <div className='flex items-center gap-2'>
-                                <span className='min-w-0 flex-1 truncate text-sm font-medium text-white'>{l.name}</span>
-                                <span className='font-mono text-[11px] text-slate-500'>{l.code}</span>
-                            </div>
-                            <p className='mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-400'>
-                                <span>{l.typeLabel}</span>
-                                <span className='inline-flex items-center gap-1'>
-                                    <LocDot color={l.color} />
-                                    {l.classificationLabel}
-                                </span>
-                                <span>{used.toLocaleString()} positions</span>
-                                {!l.active && <span className='text-amber-300'>inactive</span>}
-                            </p>
-                        </div>
-                    );
-                })}
-            </Card>
-            <Card className='space-y-2'>
-                <div className='flex items-center justify-between'>
-                    <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Floors ({setup.layout.floors.length})</p>
-                    <button type='button' onClick={onTopology} className='flex items-center gap-1 text-xs text-emerald-300'>
-                        <MapIcon className='h-3.5 w-3.5' />
-                        View physical storage
+            </Section>
+
+            <Section
+                title='Floors'
+                count={setup.layout.floors.length}
+                summary={setup.layout.floors.map((f, i) => `${letter(i + 1)} ${f.name}`).join(' · ')}
+                action={
+                    <button type='button' onClick={onTopology} className='flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-line text-sm font-medium text-brand'>
+                        <MapIcon className='h-4 w-4' />
+                        Open storage map
                     </button>
-                </div>
+                }
+            >
                 {setup.layout.floors.map((f, i) => {
                     const t = data.floorTotals?.[i];
+                    const fp = floorPositions(f);
                     return (
-                        <div key={i} className='rounded-xl border border-slate-800 p-3'>
+                        <div key={i} className='rounded-xl bg-page p-3'>
                             <div className='flex items-center gap-2'>
-                                <span className='flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 font-mono text-sm font-bold text-emerald-300'>{letter(i + 1)}</span>
-                                <span className='min-w-0 flex-1 truncate text-sm font-medium text-white'>{f.name}</span>
-                                <span className='text-xs text-slate-400'>{floorPositions(f).toLocaleString()} positions</span>
+                                <span className='flex h-7 w-7 items-center justify-center rounded-lg bg-panel font-mono text-sm font-bold text-brand'>{letter(i + 1)}</span>
+                                <span className='min-w-0 flex-1 truncate text-sm font-medium text-ink'>{f.name}</span>
+                                <span className='text-xs tabular-nums text-soft'>
+                                    {(t?.allocated ?? 0).toLocaleString()} / {fp.toLocaleString()}
+                                </span>
                             </div>
-                            <p className='mt-1 text-xs text-slate-400'>{floorSummary(f)}</p>
-                            <p className='mt-0.5 font-mono text-[11px] text-slate-500'>
-                                {code(i + 1, 1, 1, 1, 1)} to {code(i + 1, f.rows, f.racks, f.columns, f.positions)}
-                                {t ? ` · ${t.allocated.toLocaleString()} in clusters` : ''}
+                            <p className='mt-1 text-xs text-soft'>{floorSummary(f)}</p>
+                            <p className='mt-0.5 truncate font-mono text-[11px] text-soft'>
+                                {code(i + 1, 1, 1, 1, 1)} → {code(i + 1, f.rows, f.racks, f.columns, f.positions)}
                             </p>
                         </div>
                     );
                 })}
-            </Card>
-            <Card className='space-y-2'>
-                <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Capacity and space</p>
+            </Section>
+
+            <Section title='Capacity and space' summary={`${n(c.totalAreaM2, 'm²')} floor · ${n(c.clearHeightM, 'm')} clear · ${n(c.positionMaxKg, 'kg')} per position`}>
                 <Row label='Total floor area' value={n(c.totalAreaM2, 'm²')} />
                 <Row label='Usable storage area' value={n(c.storageAreaM2, 'm²')} />
                 <Row label='Clear height' value={n(c.clearHeightM, 'm')} />
@@ -404,8 +494,8 @@ function SetupView({ data, setup, onTopology }: { data: Data; setup: Setup; onTo
                 <Row label='Max load per position' value={n(c.positionMaxKg, 'kg')} />
                 <Row label='Position size (L×W×H)' value={c.positionLengthCm ? `${c.positionLengthCm} × ${c.positionWidthCm ?? '—'} × ${c.positionHeightCm ?? '—'} cm` : '—'} />
                 <Row label='Total load capacity' value={c.positionMaxKg ? `${(c.positionMaxKg * s.totalPositions).toLocaleString()} kg` : '—'} />
-            </Card>
-            {setup.updatedAt && <p className='text-xs text-slate-500'>Last changed by {setup.updatedByName} · {fmtDate(setup.updatedAt)}</p>}
+            </Section>
+            {setup.updatedAt && <p className='px-1 text-[11px] text-soft'>Last changed by {setup.updatedByName} · {fmtDate(setup.updatedAt)}</p>}
         </>
     );
 }
@@ -433,11 +523,15 @@ interface LocDraft {
     code?: string;
     name: string;
     typeCode: string;
-    classificationCode: string;
+    restrictionCode: string;
+    /** Restriction saved before this edit: changing it is blocked by the server while bins hold material. */
+    savedRestrictionCode: string;
+    suggestedRestrictionCode: string;
+    legacyClassification: string;
     active: boolean;
 }
 let locDraftSeq = 0;
-const blankLoc = (): LocDraft => ({ key: `new-${++locDraftSeq}`, name: '', typeCode: '', classificationCode: '', active: true });
+const blankLoc = (): LocDraft => ({ key: `new-${++locDraftSeq}`, name: '', typeCode: '', restrictionCode: '', savedRestrictionCode: '', suggestedRestrictionCode: '', legacyClassification: '', active: true });
 const blankFloor = (i: number): FloorDraft => ({ name: i === 0 ? 'Ground floor' : `Floor ${letter(i + 1)}`, racking: null, rows: '', racks: '', columns: '', positions: '' });
 
 function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void; onCancel: () => void }) {
@@ -448,7 +542,7 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
     const [catQ, setCatQ] = useState('');
     const [storageType, setStorageType] = useState(s?.storageTypeCode ?? '');
     const [condition, setCondition] = useState(s?.conditionCode ?? 'AMB');
-    const [locs, setLocs] = useState<LocDraft[]>(s?.storageLocations.length ? s.storageLocations.map((l) => ({ key: l.code, code: l.code, name: l.name, typeCode: l.typeCode, classificationCode: l.classificationCode, active: l.active })) : [blankLoc()]);
+    const [locs, setLocs] = useState<LocDraft[]>(s?.storageLocations.length ? s.storageLocations.map((l) => ({ key: l.code, code: l.code, name: l.name, typeCode: l.typeCode, restrictionCode: l.restrictionCode, savedRestrictionCode: l.restrictionCode, suggestedRestrictionCode: l.suggestedRestrictionCode, legacyClassification: l.restrictionCode ? '' : l.classificationCode, active: l.active })) : [blankLoc()]);
     const usedLocations = new Set(data.clusters.map((c) => c.locationCode));
     const usedCategories = new Set(data.clusters.flatMap((c) => c.subcategories.map((x) => x.categoryCode)));
     const toggleCat = (code: string) => setCats((cur) => (cur.includes(code) ? (usedCategories.has(code)&&!forceRemove ? cur : cur.filter((x) => x !== code)) : [...cur, code]));
@@ -516,7 +610,9 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
         const out: string[] = [];
         if (l.name.trim().length < 2 || l.name.trim().length > 60) out.push('name of 2 to 60 characters');
         if (!data.locationTypes.some((t) => t.code === l.typeCode)) out.push('storage location type');
-        if (!data.classifications.some((t) => t.code === l.classificationCode)) out.push('material classification');
+        const rs = data.restrictions.find((t) => t.code === l.restrictionCode);
+        if (!rs) out.push('warehouse restriction');
+        else if (!rs.active && rs.code !== l.savedRestrictionCode) out.push('an enabled warehouse restriction');
         return out;
     });
     if (!locs.length) problems.push('Add at least one storage location.');
@@ -570,7 +666,7 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                 confirm: confirmed,
                 setup: {
                     materialCategoryCodes: cats,
-                    storageLocations: locs.map((l) => ({ code: l.code, name: l.name.trim(), typeCode: l.typeCode, classificationCode: l.classificationCode, active: l.active })),
+                    storageLocations: locs.map((l) => ({ code: l.code, name: l.name.trim(), typeCode: l.typeCode, restrictionCode: l.restrictionCode, active: l.active })),
                     storageTypeCode: storageType,
                     conditionCode: condition,
                     layout: { floors: layoutFloors.map((f, i) => ({ ...f, name: f.name || `Floor ${letter(i + 1)}` })) }, capacity },
@@ -649,9 +745,10 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
 
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-white'>2 · Storage locations *</p>
-                    <p className='text-xs text-slate-400'>Each storage location has a name, a storage location type and a material classification (its colour). Types and classifications are codified by MEMS. Codes SL-01, SL-02… are given automatically.</p>
+                    <p className='text-xs text-soft'>Each storage location has a name, a storage location type and a warehouse restriction (its colour). The restriction comes from the same master as the material&apos;s Stock Control restriction: a material is binned only where both match. Codes SL-01, SL-02… are given automatically.</p>
                     {locs.map((l, i) => {
-                        const cls = data.classifications.find((x) => x.code === l.classificationCode);
+                        const cls = data.restrictions.find((x) => x.code === l.restrictionCode);
+                        const suggestion = data.restrictions.find((x) => x.code === l.suggestedRestrictionCode && x.active);
                         const inUse = !!l.code && usedLocations.has(l.code);
                         return (
                             <div key={l.key} className='space-y-2 rounded-xl border-l-4 border-slate-800 bg-slate-950 p-3' style={{ borderLeftColor: cls?.color ?? '#334155' }}>
@@ -677,20 +774,35 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                                         </option>
                                     ))}
                                 </SelectField>
-                                <p className='text-sm text-slate-300'>Material classification *</p>
-                                <div className='flex flex-wrap gap-1.5'>
-                                    {data.classifications
-                                        .filter((x) => x.active || x.code === l.classificationCode)
-                                        .map((x) => {
-                                            const on = x.code === l.classificationCode;
-                                            return (
-                                                <button key={x.code} type='button' onClick={() => updLoc(l.key, { classificationCode: x.code })} className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs ${on ? 'text-white' : 'border-slate-700 text-slate-300'}`} style={on ? { borderColor: x.color, background: `${x.color}33` } : undefined}>
-                                                    <LocDot color={x.color} />
-                                                    {x.label}
-                                                </button>
-                                            );
-                                        })}
-                                </div>
+                                {!l.restrictionCode && l.code && (
+                                    <div className='rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200'>
+                                        <p className='font-semibold'>Not aligned to the warehouse restriction master — binning is blocked.</p>
+                                        {l.legacyClassification && <p className='mt-0.5'>Saved with the old material classification {l.legacyClassification}.</p>}
+                                        {suggestion && (
+                                            <button type='button' onClick={() => updLoc(l.key, { restrictionCode: suggestion.code })} className='mt-1.5 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-amber-400/60 px-3 font-medium'>
+                                                <LocDot color={suggestion.color} />
+                                                Use suggested {suggestion.label} ({suggestion.code})
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                                <SelectField id={`loc-rs-${l.key}`} label='Warehouse restriction *' value={l.restrictionCode} onChange={(e) => updLoc(l.key, { restrictionCode: e.target.value })}>
+                                    <option value=''>Select the restriction…</option>
+                                    {data.restrictions
+                                        .filter((x) => x.active || x.code === l.savedRestrictionCode)
+                                        .map((x) => (
+                                            <option key={x.code} value={x.code} disabled={!x.active && x.code !== l.savedRestrictionCode}>
+                                                {x.code} · {x.label}
+                                            </option>
+                                        ))}
+                                </SelectField>
+                                {cls && (
+                                    <p className='flex items-start gap-1.5 text-[11px] text-soft'>
+                                        <LocDot color={cls.color} size='mt-0.5 h-2.5 w-2.5' />
+                                        <span>{cls.description || cls.label}</span>
+                                    </p>
+                                )}
+                                {l.savedRestrictionCode && l.restrictionCode !== l.savedRestrictionCode && <p className='text-[11px] text-amber-300'>Changing the restriction is allowed only while no material is binned in this storage location.</p>}
                                 {inUse && <p className='text-[11px] text-amber-300'>Holds clusters: it cannot be removed.</p>}
                             </div>
                         );
@@ -885,7 +997,8 @@ function ClusterList({ data, onOpen }: { data: Data; onOpen: (code: string) => v
                     </span>
                 ),
             },
-            { key: 'class', label: 'Classification', value: (c) => c.classificationLabel },
+            { key: 'class', label: 'Warehouse restriction', value: (c) => (c.restrictionCode ? `${c.restrictionCode} ${c.restrictionLabel ?? ''}`.trim() : 'Not aligned') },
+            { key: 'aligned', label: 'Binning', value: (c) => (c.aligned ? 'Open' : 'Blocked until aligned') },
             { key: 'subs', label: 'Subcategories', value: (c) => c.subcategories.map((x) => `${x.code} ${x.name}`).join(', ') },
             { key: 'type', label: 'Storage type', value: (c) => c.storageTypeLabel },
             { key: 'by', label: 'Created by', value: (c) => c.createdByName, hidden: true },
@@ -929,7 +1042,7 @@ function ClusterDetail({ data, cluster, onDeleted, onPositions }: { data: Data; 
                 {cluster.kind === 'box' &&
                     FLOOR_AXES.map((a) => <Row key={a.dim} label={a.label} value={cluster[a.from] === cluster[a.to] ? a.fmt(cluster[a.from]) : `${a.fmt(cluster[a.from])} to ${a.fmt(cluster[a.to])}`} />)}
                 <Row label='Storage location' value={`${cluster.locationCode} · ${cluster.locationName}`} />
-                <Row label='Classification' value={cluster.classificationLabel || '—'} />
+                <Row label='Warehouse restriction' value={cluster.restrictionCode ? `${cluster.restrictionLabel} (${cluster.restrictionCode})` : 'Not aligned — binning blocked'} />
                 <Row label='Subcategories' value={cluster.subcategories.length ? cluster.subcategories.map((x) => `${x.code} ${x.name}`).join(', ') : '—'} />
                 <Row label='Storage type' value={cluster.storageTypeLabel} />
                 <Row label='Created' value={`${cluster.createdByName} · ${fmtDate(cluster.createdAt)}`} />
@@ -999,8 +1112,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const [start, setStart] = useState({ r: 1, k: 1, c: 1, p: 1 });
     const [name, setName] = useState('');
     const [location, setLocation] = useState(options.length === 1 ? options[0].code : '');
-    // Classification belongs to the selected storage location and is not a second independent field.
-    const [clusterClass,setClusterClass]=useState(options.length === 1 ? options[0].classificationCode : '');
+    // The warehouse restriction belongs to the selected storage location and is not a second independent field.
+    const [clusterClass,setClusterClass]=useState(options.length === 1 ? options[0].restrictionCode : '');
     const [q, setQ] = useState('');
     const [storageType, setStorageType] = useState(setup.storageTypeCode);
     const [confirmed, setConfirmed] = useState(false);
@@ -1022,7 +1135,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const fits = endOrd !== null && endOrd <= total - 1;
     const clash = startOrd !== null && endOrd !== null ? onFloor.find((c) => c.segments.some(([a, b]) => a <= endOrd && startOrd <= b)) : undefined;
     const startOwner = mode === 'start' && startOrd !== null ? ownerAt(index, startOrd) : undefined;
-    const shownOptions = options.filter((l) => (!clusterClass || l.classificationCode === clusterClass) && (!q.trim() || `${l.code} ${l.name} ${l.typeLabel} ${l.classificationLabel}`.toLowerCase().includes(q.trim().toLowerCase())));
+    const shownOptions = options.filter((l) => (!clusterClass || l.restrictionCode === clusterClass) && (!q.trim() || `${l.code} ${l.name} ${l.typeLabel} ${l.restrictionCode} ${l.restrictionLabel}`.toLowerCase().includes(q.trim().toLowerCase())));
     const chosen = options.find((l) => l.code === location);
     const problems: string[] = [];
     if (!sizeOk) problems.push(`Enter the number of positions: a whole number from 1 to ${data.limits.clusterPositions.toLocaleString()}.`);
@@ -1030,7 +1143,9 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     if (startOrd !== null && endOrd !== null && !fits) problems.push(`Only ${(total - startOrd).toLocaleString()} positions remain on this floor from ${codeAt(floorNo, floor, startOrd)}.`);
     if (clash) problems.push(`Overlaps cluster ${clash.code} (${clash.firstCode} to ${clash.lastCode}). Every position belongs to one cluster only.`);
     if (!chosen) problems.push('Choose a storage location.');
-    if (chosen && !chosen.classificationCode) problems.push('The selected storage location needs a material classification. Edit the warehouse setup.');
+    if (chosen && !chosen.aligned) problems.push('The selected storage location is not aligned to the warehouse restriction master. Edit the warehouse and confirm its restriction first.');
+    const chosenRestriction = chosen ? data.restrictions.find((x) => x.code === chosen.restrictionCode) : undefined;
+    if (chosen && ['RS02', 'RS08', 'RS12', 'RS14'].includes(chosen.restrictionCode) && subCodes.length > 1) problems.push(`${chosen.restrictionLabel} storage is segregated: choose one subcategory per cluster.`);
     if (!subCodes.length) problems.push('Choose at least one material subcategory.');
     if (subCodes.length > data.limits.clusterSubcategories) problems.push(`Up to ${data.limits.clusterSubcategories} subcategories per cluster.`);
     if (name.trim().length > 60) problems.push('The name can be up to 60 characters.');
@@ -1053,7 +1168,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 startPos: start.p,
                 name: name.trim(),
                 locationCode: location,
-                classificationCode: chosen?.classificationCode || clusterClass,
+                restrictionCode: chosen?.restrictionCode || clusterClass,
                 subcategoryCodes: subCodes,
                 storageTypeCode: storageType,
                 confirm: confirmed,
@@ -1149,12 +1264,12 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>3 · Choose storage location *</p><p className='text-xs text-soft'>Its existing material classification is automatically applied to the cluster. Hazardous materials still require segregation and compatibility checks.</p>
-                    <p className='text-xs text-slate-400'>A storage location has one configured classification. Selecting that location applies its classification automatically.</p>
-                    <SelectField id='cl-classification' label='Filter locations by material classification (optional)' value={clusterClass} onChange={(e)=>{setClusterClass(e.target.value);setLocation('');setConfirmed(false);}}>
-                        <option value=''>Show all classifications</option>
-                        {data.classifications.filter(x=>x.active||x.code===clusterClass).map(x=><option key={x.code} value={x.code}>{x.label} ({x.code})</option>)}
+                    <p className='text-sm font-semibold text-ink'>3 · Choose storage location *</p><p className='text-xs text-soft'>The cluster inherits the warehouse restriction of its storage location — the same master materials use in Stock Control. Only materials with that restriction can be binned here.</p>
+                    <SelectField id='cl-classification' label='Filter locations by warehouse restriction (optional)' value={clusterClass} onChange={(e)=>{setClusterClass(e.target.value);setLocation('');setConfirmed(false);}}>
+                        <option value=''>Show all restrictions</option>
+                        {data.restrictions.filter(x=>x.active||x.code===clusterClass).map(x=><option key={x.code} value={x.code}>{x.label} ({x.code})</option>)}
                     </SelectField>
+                    {options.some((l) => !l.aligned) && <p className='rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200'>{options.filter((l) => !l.aligned).length} storage location(s) are not aligned to the restriction master. Edit the warehouse to confirm their restriction; they cannot take clusters or bins until then.</p>}
                     {options.length === 0 && <Alert tone='error'>This warehouse has no active storage locations. Edit the setup and add one first.</Alert>}
                     {options.length > 6 && (
                         <div className='relative'>
@@ -1167,12 +1282,12 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                             const on = location === l.code;
                             return (
                                 <li key={l.code}>
-                                    <button type='button' onClick={() => {setLocation(l.code);setClusterClass(l.classificationCode);setConfirmed(false);}} className={`flex w-full items-start gap-3 rounded-xl border-2 p-3 text-left text-sm ${on ? 'text-white' : 'border-slate-800 text-slate-300'}`} style={on ? { borderColor: l.color, background: `${l.color}1f` } : undefined}>
+                                    <button type='button' disabled={!l.aligned} onClick={() => {setLocation(l.code);setClusterClass(l.restrictionCode);setConfirmed(false);}} className={`flex w-full items-start gap-3 rounded-xl border-2 p-3 text-left text-sm disabled:opacity-50 ${on ? 'text-white' : 'border-slate-800 text-slate-300'}`} style={on ? { borderColor: l.color, background: `${l.color}1f` } : undefined}>
                                         <LocDot color={l.color} size='mt-0.5 h-4 w-4' />
                                         <span className='min-w-0 flex-1'>
                                             {l.name}
                                             <span className='block text-xs text-slate-400'>
-                                                {l.typeLabel} · {l.classificationLabel}
+                                                {l.typeLabel} · {l.aligned ? `${l.restrictionLabel} (${l.restrictionCode})` : 'Not aligned — edit the warehouse first'}
                                             </span>
                                         </span>
                                         <span className='font-mono text-[11px] text-slate-500'>{l.code}</span>
@@ -1184,9 +1299,9 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                     </ul>
                     {chosen && <div className='rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-ink'>
                         <p className='font-semibold'>Selected: {chosen.code} · {chosen.name}</p>
-                        <p className='mt-1 text-xs text-soft'>Classification applied automatically: {chosen.classificationLabel} ({chosen.classificationCode}).</p>
+                        <p className='mt-1 text-xs text-soft'>Warehouse restriction applied automatically: {chosen.restrictionLabel} ({chosen.restrictionCode}).{chosenRestriction?.description ? ` ${chosenRestriction.description}` : ''}</p>
                     </div>}
-                    {!shownOptions.length && <p className='rounded-xl border border-amber-500/40 bg-amber-100 p-3 text-sm text-amber-950'>No storage locations match this filter. Clear the classification filter or edit the warehouse setup.</p>}
+                    {!shownOptions.length && <p className='rounded-xl border border-amber-500/40 bg-amber-100 p-3 text-sm text-amber-950'>No storage locations match this filter. Clear the restriction filter or edit the warehouse setup.</p>}
                 </Card>
 
                 <Card className='space-y-3'>
@@ -1256,7 +1371,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 )}
                 <label className='flex items-start gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-3 text-sm text-slate-200'>
                     <input type='checkbox' className='mt-0.5 h-5 w-5 accent-emerald-500' checked={confirmed} disabled={!preview} onChange={(e) => setConfirmed(e.target.checked)} />
-                    I confirm: allocate these {sizeOk ? size.toLocaleString() : 0} positions{preview ? ` (${preview.split(' · ')[1]})` : ''} to {chosen ? `${chosen.code} ${chosen.name} (${chosen.classificationLabel})` : 'the chosen storage location'} for {subCodes.length} subcategor{subCodes.length === 1 ? 'y' : 'ies'}. The cluster is numbered automatically.
+                    I confirm: allocate these {sizeOk ? size.toLocaleString() : 0} positions{preview ? ` (${preview.split(' · ')[1]})` : ''} to {chosen ? `${chosen.code} ${chosen.name} (${chosen.restrictionLabel})` : 'the chosen storage location'} for {subCodes.length} subcategor{subCodes.length === 1 ? 'y' : 'ies'}. The cluster is numbered automatically.
                 </label>
                 {error && <Alert tone='error'>{error}</Alert>}
             </div>
@@ -1278,11 +1393,11 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     );
 }
 
-function PhysicalStorage({data,setup,reload}:{data:Data;setup:Setup;reload:()=>void}){const [page,setPage]=useState(0);const [historyOpen,setHistoryOpen]=useState(false);const [selected,setSelected]=useState<{code:string;cluster?:Cluster;binId?:string;floor:number;rack:number;row:number;column:number;position:number}|null>(null);const [detail,setDetail]=useState<Record<string,unknown>|null>(null);const [busy,setBusy]=useState(false);const [candidates,setCandidates]=useState<Array<{id:string;materialNumber:string;name:string;shortText:string}>>([]);const [choice,setChoice]=useState('');const [actionError,setActionError]=useState('');const PAGE=200;const offsets=setup.layout.floors.map((_,i)=>setup.layout.floors.slice(0,i).reduce((n,x)=>n+floorPositions(x),0));const total=setup.layout.floors.reduce((n,f)=>n+floorPositions(f),0);const bins=Array.from({length:Math.max(0,Math.min(PAGE,total-page*PAGE))},(_,i)=>{const index=page*PAGE+i;let floorNo=1;for(let j=0;j<offsets.length;j++)if(index>=offsets[j])floorNo=j+1;const f=setup.layout.floors[floorNo-1],o=index-offsets[floorNo-1];const cluster=data.clusters.find(c=>c.floor===floorNo&&c.segments.some(([s,e])=>o>=s&&o<=e));const code=codeAt(floorNo,f,o);const binId=data.linkedBins?.find(x=>x.binId===cluster?.code+'__'+code||x.binId===code)?.binId;const positions=f.positions||1;const columns=f.racking?f.columns||1:1;const racks=f.racking?f.racks||1:1;return {code,cluster,binId,floor:floorNo,rack:Math.floor(o/(positions*columns))%racks+1,row:Math.floor(o/(positions*columns*racks))+1,column:Math.floor(o/positions)%columns+1,position:o%positions+1};});const open=async(b:typeof bins[number])=>{setSelected(b);setHistoryOpen(false);setDetail(null);setCandidates([]);setChoice('');setActionError('');if(!b.cluster)return;setBusy(true);try{const responseDetail=await callBackend<Record<string,unknown>>('/api/org/warehouse/bin/detail',{costCenterId:data.costCenter.id,binId:b.binId||b.cluster.code+'__'+b.code});setDetail(responseDetail);if(!b.binId){const response=await callBackend<{materials:Array<{id:string;materialNumber:string;name:string;shortText:string}>}>('/api/org/inventory/material/bin/candidates',{warehouseId:data.costCenter.id,binId:b.cluster.code+'__'+b.code});setCandidates(response.materials);return;}}catch(e){setDetail({error:String(e)});}finally{setBusy(false);}};const changeLink=async(unlink:boolean)=>{if(!selected||!selected.cluster)return;if(unlink&&!(await appConfirm('Delink this material? The event will be audited.')))return;setBusy(true);setActionError('');try{await callBackend(unlink?'/api/org/inventory/material/bin/unlink':'/api/org/inventory/material/bin/link',unlink?{id:detail?.materialId,warehouseId:data.costCenter.id,reason:'Manual delink from physical bin'}:{id:choice,warehouseId:data.costCenter.id,binId:selected.cluster.code+'__'+selected.code});setSelected(null);reload();}catch(e){setActionError(String(e));}finally{setBusy(false);}};const item=(label:string,value:unknown)=><div className='rounded-lg border border-slate-700 p-3'><p className='text-xs text-slate-400'>{label}</p><p className='mt-1 break-words font-semibold text-white'>{value===null||value===undefined||value===''?'Not recorded':String(value)}</p></div>;return <div className='space-y-3'><Card><h2 className='font-semibold text-white'>Physical locations · sequential positions</h2><p className='text-xs text-slate-300'>Tap a physical location to inspect its status and linked material. Position codes retain the original physical address.</p><div className='mt-3 flex flex-wrap gap-3 text-xs text-slate-200'><span>■ Grey: Unallocated</span><span>□ White: Allocated</span><span className='text-orange-300'>■ Orange: Linked</span></div><div className='mt-3 flex items-center justify-between text-xs text-slate-300'><span>{total?page*PAGE+1:0}–{Math.min(total,(page+1)*PAGE)} of {total.toLocaleString()}</span><div className='flex gap-2'><button disabled={page===0} onClick={()=>setPage(p=>p-1)} className='rounded border border-slate-600 px-3 py-2 disabled:opacity-30'>Previous</button><button disabled={(page+1)*PAGE>=total} onClick={()=>setPage(p=>p+1)} className='rounded border border-slate-600 px-3 py-2 disabled:opacity-30'>Next</button></div></div><div className='mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-8'>{bins.map(b=><button key={b.code} onClick={()=>void open(b)} className={'rounded-lg border p-2 font-mono text-[11px] font-semibold '+(b.binId?'border-orange-500 bg-orange-200 text-orange-950':b.cluster?'border-slate-400 bg-white text-slate-900':'border-slate-500 bg-slate-400 text-slate-950')}>{b.code}</button>)}</div></Card>{selected&&<div role='dialog' aria-modal='true' className='fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3'><div className='max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-slate-950 p-5'><div className='flex items-center justify-between'><h2 className='text-xl font-bold text-white'>Physical location {selected.code}</h2><button aria-label='Close' onClick={()=>setSelected(null)} className='rounded border border-slate-600 p-2 text-white'><X className='h-5 w-5'/></button></div><p className='mt-2 text-sm text-slate-300'>Status: {selected.binId?'Linked to material':selected.cluster?'Allocated, empty':'Unallocated'}</p>{selected.cluster&&<p className='mt-1 text-xs text-slate-300'>Cluster {selected.cluster.code} · {selected.cluster.name||selected.cluster.locationName}</p>}<div className='mt-3 grid grid-cols-3 gap-2'>{item('Floor',selected.floor)}{item('Rack',selected.rack)}{item('Row',selected.row)}{item('Column',selected.column)}{item('Position',selected.position)}{item('Physical location address',selected.code)}</div>{busy?<Spinner/>:selected.binId?<div className='mt-4 grid grid-cols-2 gap-2'>{item('Material number',detail?.materialNumber)}{item('Material name',detail?.name)}<div className='col-span-2'>{item('Short text',detail?.shortText)}</div>{item('Minimum',detail?.minimum)}{item('Maximum',detail?.maximum)}{item('Actual stock',detail?.actual)}{item('Cost / stock value',detail?.cost)}{detail?.error ? <p className='col-span-2 text-red-300'>{String(detail.error)}</p> : null}{data.canUnlink&&<button disabled={busy} onClick={()=>void changeLink(true)} className='col-span-2 rounded-lg bg-orange-700 p-3 font-semibold text-white'>Delink material</button>}</div>:<div className='mt-4 space-y-3'><p className='text-sm text-slate-300'>No material linked to this physical location.</p>{selected.cluster&&data.canLink&&<><label className='block text-sm text-white'>Link an eligible unlinked material</label><select value={choice} onChange={e=>setChoice(e.target.value)} className='w-full rounded border border-slate-500 bg-slate-900 p-3 text-white'><option value=''>Select compatible material</option>{candidates.map(m=><option key={m.id} value={m.id}>{m.materialNumber} · {m.shortText||m.name}</option>)}</select>{!candidates.length&&<p className='text-xs text-amber-300'>No unlinked materials match this physical location's classification, subcategory and warehouse mapping.</p>}<button disabled={!choice||busy} onClick={()=>void changeLink(false)} className='rounded bg-emerald-700 px-4 py-3 font-semibold text-white disabled:opacity-40'>Link selected material</button></>}</div>}<div className='mt-5 border-t border-slate-700 pt-4'>{data.canHistory&&<button type='button' onClick={()=>setHistoryOpen(true)} className='rounded-lg border border-slate-500 bg-slate-800 px-4 py-2 font-semibold text-white'>History</button>}</div>{historyOpen&&<div role='dialog' aria-modal='true' aria-label='Bin history' className='fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-3'><div className='max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-slate-950 p-5'><div className='flex items-center justify-between gap-3'><h3 className='text-lg font-semibold text-white'>Physical location {selected.code} · History</h3><button type='button' aria-label='Close history' onClick={()=>setHistoryOpen(false)} className='rounded-lg border border-slate-500 px-3 py-2 text-white'>Close</button></div><div className='mt-4'><h4 className='text-sm font-semibold text-slate-200'>Recorded events and material snapshots</h4>{Array.isArray(detail?.history)&&detail.history.length?<div className='mt-3 space-y-3'>{(detail.history as Array<Record<string,unknown>>).map((h,i)=><div key={String(h.id||i)} className='rounded-lg border border-slate-700 bg-slate-900 p-3'><p className='font-semibold text-white'>{String(h.event||'Event')} · {String(h.at||'')}</p><p className='text-xs text-slate-400'>Recorded by: {String(h.by||'Not recorded')}{h.reason?' · '+String(h.reason):''}</p><div className='mt-2 grid grid-cols-2 gap-2'>{Object.entries((h.snapshot&&typeof h.snapshot==='object'?h.snapshot:{}) as Record<string,unknown>).map(([k,v])=><div key={k}>{item(k.replace(/([A-Z])/g,' $1'),v)}</div>)}</div></div>)}</div>:<p className='mt-2 text-sm text-slate-400'>No link or delink history recorded for this physical location.</p>}</div></div></div>}{actionError&&<p className='mt-3 text-sm text-red-300'>{actionError}</p>}</div></div>}</div>}
+function PhysicalStorage({data,setup,reload}:{data:Data;setup:Setup;reload:()=>void}){const [page,setPage]=useState(0);const [historyOpen,setHistoryOpen]=useState(false);const [selected,setSelected]=useState<{code:string;cluster?:Cluster;binId?:string;floor:number;rack:number;row:number;column:number;position:number}|null>(null);const [detail,setDetail]=useState<Record<string,unknown>|null>(null);const [busy,setBusy]=useState(false);const [candidates,setCandidates]=useState<Array<{id:string;materialNumber:string;name:string;shortText:string}>>([]);const [choice,setChoice]=useState('');const [actionError,setActionError]=useState('');const PAGE=200;const offsets=setup.layout.floors.map((_,i)=>setup.layout.floors.slice(0,i).reduce((n,x)=>n+floorPositions(x),0));const total=setup.layout.floors.reduce((n,f)=>n+floorPositions(f),0);const bins=Array.from({length:Math.max(0,Math.min(PAGE,total-page*PAGE))},(_,i)=>{const index=page*PAGE+i;let floorNo=1;for(let j=0;j<offsets.length;j++)if(index>=offsets[j])floorNo=j+1;const f=setup.layout.floors[floorNo-1],o=index-offsets[floorNo-1];const cluster=data.clusters.find(c=>c.floor===floorNo&&c.segments.some(([s,e])=>o>=s&&o<=e));const code=codeAt(floorNo,f,o);const binId=data.linkedBins?.find(x=>x.binId===cluster?.code+'__'+code||x.binId===code)?.binId;const positions=f.positions||1;const columns=f.racking?f.columns||1:1;const racks=f.racking?f.racks||1:1;return {code,cluster,binId,floor:floorNo,rack:Math.floor(o/(positions*columns))%racks+1,row:Math.floor(o/(positions*columns*racks))+1,column:Math.floor(o/positions)%columns+1,position:o%positions+1};});const open=async(b:typeof bins[number])=>{setSelected(b);setHistoryOpen(false);setDetail(null);setCandidates([]);setChoice('');setActionError('');if(!b.cluster)return;setBusy(true);try{const responseDetail=await callBackend<Record<string,unknown>>('/api/org/warehouse/bin/detail',{costCenterId:data.costCenter.id,binId:b.binId||b.cluster.code+'__'+b.code});setDetail(responseDetail);if(!b.binId){const response=await callBackend<{materials:Array<{id:string;materialNumber:string;name:string;shortText:string}>;blockedReason?:string}>('/api/org/inventory/material/bin/candidates',{warehouseId:data.costCenter.id,binId:b.cluster.code+'__'+b.code});setCandidates(response.materials);if(response.blockedReason)setActionError(response.blockedReason);return;}}catch(e){setDetail({error:String(e)});}finally{setBusy(false);}};const changeLink=async(unlink:boolean)=>{if(!selected||!selected.cluster)return;if(unlink&&!(await appConfirm('Delink this material? The event will be audited.')))return;setBusy(true);setActionError('');try{await callBackend(unlink?'/api/org/inventory/material/bin/unlink':'/api/org/inventory/material/bin/link',unlink?{id:detail?.materialId,warehouseId:data.costCenter.id,reason:'Manual delink from physical bin'}:{id:choice,warehouseId:data.costCenter.id,binId:selected.cluster.code+'__'+selected.code});setSelected(null);reload();}catch(e){setActionError(String(e));}finally{setBusy(false);}};const item=(label:string,value:unknown)=><div className='rounded-lg border border-slate-700 p-3'><p className='text-xs text-slate-400'>{label}</p><p className='mt-1 break-words font-semibold text-white'>{value===null||value===undefined||value===''?'Not recorded':String(value)}</p></div>;return <div className='space-y-3'><Card><h2 className='font-semibold text-white'>Physical locations · sequential positions</h2><p className='text-xs text-slate-300'>Tap a physical location to inspect its status and linked material. Position codes retain the original physical address.</p><div className='mt-3 flex flex-wrap gap-3 text-xs text-slate-200'><span>■ Grey: Unallocated</span><span>□ White: Allocated</span><span className='text-orange-300'>■ Orange: Linked</span></div><div className='mt-3 flex items-center justify-between text-xs text-slate-300'><span>{total?page*PAGE+1:0}–{Math.min(total,(page+1)*PAGE)} of {total.toLocaleString()}</span><div className='flex gap-2'><button disabled={page===0} onClick={()=>setPage(p=>p-1)} className='rounded border border-slate-600 px-3 py-2 disabled:opacity-30'>Previous</button><button disabled={(page+1)*PAGE>=total} onClick={()=>setPage(p=>p+1)} className='rounded border border-slate-600 px-3 py-2 disabled:opacity-30'>Next</button></div></div><div className='mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-8'>{bins.map(b=><button key={b.code} onClick={()=>void open(b)} className={'rounded-lg border p-2 font-mono text-[11px] font-semibold '+(b.binId?'border-orange-500 bg-orange-200 text-orange-950':b.cluster?'border-slate-400 bg-white text-slate-900':'border-slate-500 bg-slate-400 text-slate-950')}>{b.code}</button>)}</div></Card>{selected&&<div role='dialog' aria-modal='true' className='fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3'><div className='max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-slate-950 p-5'><div className='flex items-center justify-between'><h2 className='text-xl font-bold text-white'>Physical location {selected.code}</h2><button aria-label='Close' onClick={()=>setSelected(null)} className='rounded border border-slate-600 p-2 text-white'><X className='h-5 w-5'/></button></div><p className='mt-2 text-sm text-slate-300'>Status: {selected.binId?'Linked to material':selected.cluster?'Allocated, empty':'Unallocated'}</p>{selected.cluster&&<p className='mt-1 text-xs text-slate-300'>Cluster {selected.cluster.code} · {selected.cluster.name||selected.cluster.locationName}</p>}<div className='mt-3 grid grid-cols-3 gap-2'>{item('Floor',selected.floor)}{item('Rack',selected.rack)}{item('Row',selected.row)}{item('Column',selected.column)}{item('Position',selected.position)}{item('Physical location address',selected.code)}</div>{busy?<Spinner/>:selected.binId?<div className='mt-4 grid grid-cols-2 gap-2'>{item('Material number',detail?.materialNumber)}{item('Material name',detail?.name)}<div className='col-span-2'>{item('Short text',detail?.shortText)}</div>{item('Minimum',detail?.minimum)}{item('Maximum',detail?.maximum)}{item('Actual stock',detail?.actual)}{item('Cost / stock value',detail?.cost)}{detail?.error ? <p className='col-span-2 text-red-300'>{String(detail.error)}</p> : null}{data.canUnlink&&<button disabled={busy} onClick={()=>void changeLink(true)} className='col-span-2 rounded-lg bg-orange-700 p-3 font-semibold text-white'>Delink material</button>}</div>:<div className='mt-4 space-y-3'><p className='text-sm text-slate-300'>No material linked to this physical location.</p>{selected.cluster&&data.canLink&&<><label className='block text-sm text-white'>Link an eligible unlinked material</label><select value={choice} onChange={e=>setChoice(e.target.value)} className='w-full rounded border border-slate-500 bg-slate-900 p-3 text-white'><option value=''>Select compatible material</option>{candidates.map(m=><option key={m.id} value={m.id}>{m.materialNumber} · {m.shortText||m.name}</option>)}</select>{!candidates.length&&<p className='text-xs text-amber-300'>No unlinked materials match this location's warehouse restriction, subcategory and warehouse mapping. A material's restriction is set in Stock Control (or on its material master).</p>}<button disabled={!choice||busy} onClick={()=>void changeLink(false)} className='rounded bg-emerald-700 px-4 py-3 font-semibold text-white disabled:opacity-40'>Link selected material</button></>}</div>}<div className='mt-5 border-t border-slate-700 pt-4'>{data.canHistory&&<button type='button' onClick={()=>setHistoryOpen(true)} className='rounded-lg border border-slate-500 bg-slate-800 px-4 py-2 font-semibold text-white'>History</button>}</div>{historyOpen&&<div role='dialog' aria-modal='true' aria-label='Bin history' className='fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-3'><div className='max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-slate-950 p-5'><div className='flex items-center justify-between gap-3'><h3 className='text-lg font-semibold text-white'>Physical location {selected.code} · History</h3><button type='button' aria-label='Close history' onClick={()=>setHistoryOpen(false)} className='rounded-lg border border-slate-500 px-3 py-2 text-white'>Close</button></div><div className='mt-4'><h4 className='text-sm font-semibold text-slate-200'>Recorded events and material snapshots</h4>{Array.isArray(detail?.history)&&detail.history.length?<div className='mt-3 space-y-3'>{(detail.history as Array<Record<string,unknown>>).map((h,i)=><div key={String(h.id||i)} className='rounded-lg border border-slate-700 bg-slate-900 p-3'><p className='font-semibold text-white'>{String(h.event||'Event')} · {String(h.at||'')}</p><p className='text-xs text-slate-400'>Recorded by: {String(h.by||'Not recorded')}{h.reason?' · '+String(h.reason):''}</p><div className='mt-2 grid grid-cols-2 gap-2'>{Object.entries((h.snapshot&&typeof h.snapshot==='object'?h.snapshot:{}) as Record<string,unknown>).map(([k,v])=><div key={k}>{item(k.replace(/([A-Z])/g,' $1'),v)}</div>)}</div></div>)}</div>:<p className='mt-2 text-sm text-slate-400'>No link or delink history recorded for this physical location.</p>}</div></div></div>}{actionError&&<p className='mt-3 text-sm text-red-300'>{actionError}</p>}</div></div>}</div>}
 
 // ---------------------------------------------------------------------------
 // Topology: every bin of a floor. Unallocated = grey, allocated = white with a border in the colour of the
-// material classification of its storage location. Racks are mounted lazily as you scroll.
+// warehouse restriction of its storage location. Racks are mounted lazily as you scroll.
 // ---------------------------------------------------------------------------
 
 const LIST_CAP = 20_000;
@@ -1294,7 +1409,7 @@ function describeCluster(data: Data, setup: Setup, c: Cluster) {
     return {
         locationName: loc?.name ?? c.locationName,
         locationType: loc?.typeLabel ?? '',
-        classification: loc?.classificationLabel ?? c.classificationLabel,
+        classification: loc ? (loc.restrictionCode ? `${loc.restrictionLabel} (${loc.restrictionCode})` : 'Not aligned') : c.classificationLabel,
         color: loc?.color ?? c.color ?? '#64748B',
         categories: catCodes.map((x) => `${x} ${data.categories.find((k) => k.code === x)?.name ?? ''}`.trim()).join(', '),
         subcategories: c.subcategories.map((s) => `${s.code} ${s.name}`).join(', '),
@@ -1348,7 +1463,7 @@ function Topology({ data, setup, onCluster }: { data: Data; setup: Setup; onClus
                         </span>
                     ))}
                 </div>
-                <p className='text-[11px] text-slate-500'>Allocated bins are white; their border is the colour of the storage location's material classification.</p>
+                <p className='text-[11px] text-slate-500'>Allocated bins are white; their border is the colour of the storage location's warehouse restriction.</p>
             </Card>
 
             <div className='grid grid-cols-2 gap-1 rounded-xl border border-slate-800 p-1'>
@@ -1380,7 +1495,7 @@ function Topology({ data, setup, onCluster }: { data: Data; setup: Setup; onClus
                         <>
                             <Row label='Storage location' value={`${owner.locationCode} · ${info.locationName}`} />
                             <Row label='Location type' value={info.locationType || '—'} />
-                            <Row label='Classification' value={info.classification || '—'} />
+                            <Row label='Warehouse restriction' value={info.classification || '—'} />
                             <Row label='Material category' value={info.categories || '—'} />
                             <Row label='Subcategories' value={info.subcategories || '—'} />
                             <Row label='Cluster' value={`${owner.code}${owner.name ? ` · ${owner.name}` : ''} · ${owner.storageTypeLabel}`} />
@@ -1554,7 +1669,7 @@ function FloorLocations({ data, setup, floorNo, floor, index }: { data: Data; se
             { key: 'sltype', label: 'Location type', value: (p) => p.locationType },
             {
                 key: 'class',
-                label: 'Classification',
+                label: 'Warehouse restriction',
                 value: (p) => p.classification,
                 render: (p) =>
                     p.classification ? (
@@ -1611,7 +1726,7 @@ interface Position {
     locationCode: string;
     locationName: string;
     locationType: string;
-    classification: string;
+    restriction: string;
     categories: string;
     subcategories: string;
     storageType: string;
@@ -1631,7 +1746,7 @@ function PositionList({ data, clusterCode, onCluster }: { data: Data; clusterCod
             { key: 'cluster', label: 'Cluster', value: (p) => p.cluster, className: 'font-mono whitespace-nowrap' },
             { key: 'location', label: 'Storage location', value: (p) => `${p.locationCode} ${p.locationName}` },
             { key: 'ltype', label: 'Location type', value: (p) => p.locationType, hidden: true },
-            { key: 'class', label: 'Classification', value: (p) => p.classification },
+            { key: 'class', label: 'Warehouse restriction', value: (p) => p.restriction },
             { key: 'cat', label: 'Material category', value: (p) => p.categories },
             { key: 'subs', label: 'Subcategories', value: (p) => p.subcategories },
             { key: 'type', label: 'Storage type', value: (p) => p.storageType, hidden: true },

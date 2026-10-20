@@ -17,7 +17,17 @@ export interface ChatRoom {
     lastMessage: string;
     lastSenderUid: string;
     lastMessageAt?: string;
+    lastMessageKind?: string;
     unread?: boolean;
+    unreadCount?: number;
+    /** Inbox: state of my last message (sent / delivered / read by everyone). */
+    lastStatus?: 'sent' | 'delivered' | 'read';
+    muted?: boolean;
+    pinned?: boolean;
+    workGroupId?: string;
+    /** Group: who may send messages / edit the group name and description. */
+    sendPolicy?: 'all' | 'admins';
+    infoPolicy?: 'all' | 'admins';
     updatedAt: string;
     createdAt: string;
 }
@@ -42,6 +52,9 @@ export interface ChatMessage {
     attachment: ChatAttachment | null;
     replyTo: { id: string; senderUid: string; text: string; attachment: string; imageUrl?: string } | null;
     reactions: Record<string, string[]>;
+    /** Browser only: optimistic message still being sent, or a send that failed. */
+    pending?: boolean;
+    failed?: boolean;
 }
 export interface ChatRoomPayload {
     room: ChatRoom;
@@ -52,8 +65,35 @@ export interface ChatRoomPayload {
     typing: Array<{ uid: string; until: string }>;
     presence: Array<{ uid: string; until: string }>;
     readMarks: Array<{ uid: string; readAt: string }>;
+    deliveryMarks?: Array<{ uid: string; at: string }>;
+    online?: Array<{ uid: string; online: boolean; lastSeen: string }>;
     serverTime: string;
 }
+/** Live state of the open room returned by the long-poll. */
+export interface ChatLiveState {
+    typing: Array<{ uid: string; until: string }>;
+    presence: Array<{ uid: string; until: string }>;
+    readMarks: Array<{ uid: string; readAt: string }>;
+    deliveryMarks: Array<{ uid: string; at: string }>;
+    online: Array<{ uid: string; online: boolean; lastSeen: string }>;
+}
+export interface ChatSettingsValue {
+    muteAll: boolean;
+    appearance: 'system' | 'light' | 'dark';
+    wallpaper: string;
+    fontSize: 'small' | 'medium' | 'large';
+    enterToSend: boolean;
+    readReceipts: boolean;
+    lastSeen: boolean;
+    showPreviews: boolean;
+    sound: boolean;
+}
+export const DEFAULT_CHAT_SETTINGS: ChatSettingsValue = {
+    muteAll: false, appearance: 'system', wallpaper: 'default', fontSize: 'medium', enterToSend: false,
+    readReceipts: true, lastSeen: true, showPreviews: true, sound: true,
+};
+export interface ChatMediaItem { messageId: string; kind: string; name: string; mime: string; size: number; url: string; createdAt: string; senderUid: string }
+/** @deprecated Older periodic-refresh event shape; live updates now come from the long-poll. */
 export interface ChatLiveEvent {
     type: 'entity.update';
     entity_type: 'chat.inbox' | 'chat.room';

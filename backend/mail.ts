@@ -4,7 +4,8 @@ import { orgRoute, type OrgContext } from './guards';
 import { people, displayName } from './chatCommon';
 import { audit } from './audit';
 import { createMonitoredAction } from './actionHub';
-import { sendAutoReply } from './mailPreferences';
+import { getMailPrefs, sendAutoReply } from './mailPreferences';
+import { deliver } from './mailRules';
 
 const root = (ctx: OrgContext, uid = ctx.uid) => 'organizations/' + ctx.orgId + '/mailboxes/' + uid + '/items';
 const fileRoot = (ctx: OrgContext) => 'organizations/' + ctx.orgId + '/mail_attachments';
@@ -153,8 +154,10 @@ export const mailRoutes={
         if(!identifier.test(id))throw new HttpError(400,'Invalid mail ID.');
         const doc=await getDoc(root(ctx)+'/'+id);
         if(!doc) throw new HttpError(404,'Mail not found in your mailbox.');
-        if(doc.data.read!==true && str(doc.data.folder)!=='drafts') await updateFields(root(ctx)+'/'+id,{read:true});
-        return {item:await mailView(ctx,{...doc,data:{...doc.data,read:true}},true)};
+        // Opening marks the message read unless the reader's "mark as read" setting defers it (markRead:false).
+        const mark=ctx.body.markRead!==false;
+        if(mark&&doc.data.read!==true && str(doc.data.folder)!=='drafts') await updateFields(root(ctx)+'/'+id,{read:true});
+        return {item:await mailView(ctx,{...doc,data:{...doc.data,read:mark?true:doc.data.read===true}},true)};
     })],
     'POST /api/org/mail/draft':[orgRoute('mail.draft',null,async(ctx)=>{
         await rateLimit('mail-draft',ctx.uid,120,3600);
@@ -237,10 +240,23 @@ export const mailRoutes={
             const self=member.id===ctx.uid;
             const copyId=self?id+'_self':id;
             const target=root(ctx,member.id)+'/'+copyId;
+            // The recipient's own junk list and rules decide where the copy lands (as in Outlook).
+            let placed={folder:'inbox',read:false,flagged:false,category:'',focus:true,rules:[] as string[],junk:false};
+            if(!self){
+                try{
+                    const prefs=await getMailPrefs(member.id);
+                    if(prefs.rules.length||prefs.blockedSenders.length||prefs.safeSenders.length){
+                        const own=new Set((await listDocs('organizations/'+ctx.orgId+'/mail_folders/'+member.id+'/items')).map(d=>d.id));
+                        placed=deliver({fromEmail:str(ctx.claims.email).toLowerCase(),subject:shared.subject,excerpt:shared.excerpt,hasAttachment:attachments.length>0,priority:fields.priority,to:fields.to,cc:fields.cc,recipient:email},
+                            prefs,(f)=>['inbox','archive','junk','deleted'].includes(f)||own.has(f));
+                    }
+                }catch(error){console.error('Mail rules skipped; delivered to Inbox',error instanceof Error?error.message:'unknown');}
+            }
             const copy={
                 ...shared,to:fields.to,cc:fields.cc,
                 bcc:fields.bcc.includes(email)?[email]:[],
-                folder:'inbox',read:false,
+                folder:placed.folder,read:placed.read,flagged:placed.flagged,category:placed.category,focus:placed.focus,
+                appliedRules:placed.rules,
             };
             const ok=await writeDoc(target,copy,{exists:false});
             if(!ok){

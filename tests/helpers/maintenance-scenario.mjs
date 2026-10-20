@@ -759,6 +759,7 @@ await route(procurementRoutes, '/api/org/procurement/materials/update', 'planner
         warehouseId: 'WAREHOUSE',
         uom: unit.code,
         materialClassification: 'SPARE',
+        warehouseRestriction: 'RS15',
         supplyType: 'GENERAL',
         generalPartNumber: 'SPECIAL-COUPLING-001',
         partyEntryMode: 'manual',

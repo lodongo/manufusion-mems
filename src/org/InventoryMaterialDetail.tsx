@@ -55,8 +55,12 @@ interface CurrentStatus {
 interface BinDiagnostics {
     configured: number;
     matchingClassification: number;
+    unalignedBins?: number;
     occupied: number;
+    /** The material's effective warehouse restriction (RS…) for this warehouse. */
     classification: string;
+    restrictionLabel?: string;
+    restrictionSource?: 'stock-control' | 'material-master' | '';
     warehouseId: string;
     linkedBin: string;
     required: string[];
@@ -171,7 +175,7 @@ const EXPLANATIONS: Record<string, string> = {
     traceabilityControl: 'Default lot, serial, expiry or compliance evidence requirement; transactions enforce detailed traceability separately.',
     titleTransferTrigger: 'Contract event transferring legal title. Must agree with supplier agreement; does not itself post a financial entry.',
     specialStockProgram: 'Overlay such as rotables, bonded, emergency or consignment without changing basic ownership.',
-    warehouseRestriction: 'Handling and placement constraint to be enforced by compatible warehouse/bin configuration.',
+    warehouseRestriction: 'Placement restriction from the shared warehouse restriction master. A bin can hold this material only when its storage location carries the same restriction. Not specified inherits the material master restriction.',
     stockPlanningControl: 'Planning and classification dimension supporting criticality, variability and demand.',
     ownershipSettlementTrigger: 'Contractual event for supplier settlement, which is distinct from stock movement and financial recognition.',
     minimumLevel: 'Minimum desired available stock quantity; falling below this level signals insufficient stock.',
@@ -511,7 +515,7 @@ function BinPanel({
         <Card className='space-y-3'>
             <HelpLabel
                 text='Physical location'
-                help='A bin must exist in this warehouse, permit the material classification and subcategory, be enabled and not be reserved by another material. Bins change only by linking and delinking here; both are recorded with a snapshot.'
+                help='A bin must exist in this warehouse, carry the same warehouse restriction as the material and permit its subcategory, be enabled and not be reserved by another material. Bins change only by linking and delinking here; both are recorded with a snapshot.'
                 className='text-sm font-semibold text-ink'
             />
             <p className='break-all font-mono text-lg font-semibold text-ink'>{linked || 'Not allocated'}</p>
@@ -546,15 +550,19 @@ function BinPanel({
                     <dl className='mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs'>
                         <dt>Configured bins</dt>
                         <dd>{diag?.configured ?? 0}</dd>
-                        <dt>Material classification</dt>
-                        <dd>{data.catalogNames[diag?.classification || ''] || diag?.classification || 'Missing'}</dd>
-                        <dt>Bins matching classification</dt>
+                        <dt>Warehouse restriction</dt>
+                        <dd>{diag?.classification ? `${diag.restrictionLabel || diag.classification} (${diag.classification})${diag.restrictionSource === 'material-master' ? ' · from material master' : ''}` : 'Not set — binning blocked'}</dd>
+                        <dt>Bins with this restriction</dt>
                         <dd>{diag?.matchingClassification ?? 0}</dd>
+                        <dt>Bins not aligned</dt>
+                        <dd>{diag?.unalignedBins ?? 0}</dd>
                         <dt>Occupied bins</dt>
                         <dd>{diag?.occupied ?? 0}</dd>
                     </dl>
                     <p className='mt-2 text-xs'>
-                        Configure a storage cluster in this warehouse with the material&apos;s classification and subcategory, then make sure an eligible physical position is free.
+                        {diag?.classification
+                            ? 'Binning needs a cluster whose storage location carries the same warehouse restriction and the material’s subcategory, with a free position. Align storage locations in Organization design → warehouse → Edit.'
+                            : 'Set the warehouse restriction in Stock Control (or on the material master) first. Materials and storage locations use the same restriction master, and binning stays blocked until both match.'}
                     </p>
                 </div>
             )}

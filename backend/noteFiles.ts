@@ -51,6 +51,11 @@ export async function publicNoteAttachmentUrls(ctx:OrgContext,raw:unknown){
         return {...item,url:link?.url||''};
     }));
 }
+const INLINE_ID=/^n_[A-Za-z0-9_-]{12,50}$/;
+/** Ids of the note files shown inline in the note body. */
+export function inlineNoteFileIds(html:string):string[]{
+    return [...new Set([...html.matchAll(/<img data-note-file="([^"]+)"/g)].map(m=>m[1]))];
+}
 export function sanitizedNoteHtml(input:unknown):string{
     const html=str(input);
     if(html.length>80_000)throw new HttpError(413,'Note content is too long.');
@@ -60,6 +65,16 @@ export function sanitizedNoteHtml(input:unknown):string{
         const m=/^<\s*(\/?)\s*([a-z][a-z0-9]*)\b([^>]*)>$/i.exec(tag);
         if(!m)return '';
         const name=m[2].toLowerCase();
+        if(name==='img'&&!m[1]){
+            // Inline photos and drawings: only a reference to one of the note's own files is kept (never a src URL),
+            // so a note can never load content from elsewhere. The browser resolves it to a signed link when shown.
+            const file=/\bdata-note-file\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(m[3]);
+            const id=(file?.[1]||file?.[2]||'').trim();
+            if(!INLINE_ID.test(id))return '';
+            const w=/\bdata-width\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(m[3]);
+            const width=['25','50','75','100'].includes((w?.[1]||w?.[2]||'').trim())?(w?.[1]||w?.[2]||'').trim():'100';
+            return '<img data-note-file="'+id+'" data-width="'+width+'" alt="">';
+        }
         if(!allowed.has(name))return '';
         if(m[1])return '</'+name+'>';
         if(name==='br'||name==='hr')return '<'+name+'>';

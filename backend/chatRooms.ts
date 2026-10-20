@@ -1,12 +1,13 @@
-import { HttpError, getDoc, isObj, listDocs, nowIso, randomId, str, updateFields, writeDoc, deleteDoc } from './core';
+import { HttpError, encodeValue, getDoc, isObj, listDocs, nowIso, randomId, runQuery, str, updateFields, writeDoc, deleteDoc } from './core';
 import { orgRoute } from './guards';
 import { audit } from './audit';
 import { fromChat, readWorkGroup, syncFromChat } from './workGroups';
 import {
-    CHAT_ROOT, ROOM_PATH, ROOM_SUBS, INBOX_SUBS, CONNECTION_RE, ID_RE, MAX_GROUP,
+    CHAT_ROOT, ROOM_PATH, MAX_GROUP,
     checkedRoom, directId, displayName, isCurrentMember, membersOf,
-    notifyRoom, notify, people, photoUrl, subscriptionExpiry, verifiedPeople,
+    notifyRoom, notify, people, photoUrl, verifiedPeople,
 } from './chatCommon';
+import { lastMessageStatus, waitForChanges } from './chatLive';
 
 function stamp(ctx: { actor: any; orgId: string; meta: any }, action: string, id: string) {
     return audit([{
@@ -23,7 +24,9 @@ const roomView = (id: string, d: Record<string, unknown>) => ({
     admins: Array.isArray(d.admins) ? d.admins.map(str) : [],
     createdBy: str(d.createdBy),
     lastMessage: str(d.lastMessage), lastSenderUid: str(d.lastSenderUid),
-    lastMessageAt: str(d.lastMessageAt),
+    lastMessageAt: str(d.lastMessageAt), lastMessageKind: str(d.lastMessageKind) || 'text',
+    sendPolicy: str(d.sendPolicy) === 'admins' ? 'admins' : 'all',
+    infoPolicy: str(d.infoPolicy) === 'all' ? 'all' : 'admins',
     updatedAt: str(d.updatedAt), createdAt: str(d.createdAt),
 });
 const prefPath = (uid: string, roomId: string) => 'users/' + uid + '/chat_hidden/' + roomId;
@@ -39,20 +42,41 @@ export const chatRoomRoutes = {
         };
     })],
     'POST /api/org/quick/chat/list': [orgRoute('chat.list', null, async (ctx) => {
-        const [all, hidden] = await Promise.all([listDocs(CHAT_ROOT(ctx.orgId)),
-            listDocs('users/' + ctx.uid + '/chat_hidden')]);
+        const [all, hidden, prefs] = await Promise.all([listDocs(CHAT_ROOT(ctx.orgId)),
+            listDocs('users/' + ctx.uid + '/chat_hidden'), listDocs('users/' + ctx.uid + '/chat_prefs')]);
+        const prefMap = new Map(prefs.map((d) => [d.id, d.data]));
+        const now = Date.now();
         const hiddenMap = new Map(hidden.map((d) => [d.id, str(d.data.hiddenAt)]));
         const rooms = all.filter((d) => isCurrentMember(d, ctx.uid) && (
             !hiddenMap.has(d.id) || str(d.data.updatedAt) > (hiddenMap.get(d.id) || '')
         )).sort((a,b) => str(b.data.updatedAt).localeCompare(str(a.data.updatedAt)));
         const visible = rooms.slice(0, 250);
-        return { rooms: await Promise.all(visible.map(async (d) => {
+        return { rooms: await Promise.all(visible.map(async (d, index) => {
             const read = await getDoc(ROOM_PATH(ctx.orgId, d.id) + '/read_marks/' + ctx.uid);
             const lastMessageAt = str(d.data.lastMessageAt);
+            const readAt = str(read?.data.readAt);
+            const unread = str(d.data.lastSenderUid) !== ctx.uid && !!lastMessageAt && lastMessageAt > readAt;
+            // Unread badge: messages from others after the person's read mark (capped at 99, as a badge shows).
+            let unreadCount = 0;
+            if (unread) {
+                const later = await runQuery({
+                    from: [{ collectionId: 'messages' }],
+                    where: { fieldFilter: { field: { fieldPath: 'createdAt' }, op: 'GREATER_THAN', value: encodeValue(readAt || '0') } },
+                    select: { fields: [{ fieldPath: 'senderUid' }] },
+                    limit: 99,
+                }, ROOM_PATH(ctx.orgId, d.id));
+                unreadCount = Math.max(1, later.filter((m) => str(m.data.senderUid) !== ctx.uid).length);
+            }
+            const local = prefMap.get('room_' + d.id) ?? {};
+            const muteUntil = str(local.muteUntil);
+            // Ticks for my last message on the 60 most recent chats (keeps the list fast for very long inboxes).
+            const lastStatus = str(d.data.lastSenderUid) === ctx.uid && lastMessageAt && index < 60
+                ? await lastMessageStatus(ctx, d.id, membersOf(d), str(d.data.kind) !== 'group', lastMessageAt) : '';
             return {
                 ...roomView(d.id, d.data),
-                unread: str(d.data.lastSenderUid) !== ctx.uid && !!lastMessageAt
-                    && lastMessageAt > str(read?.data.readAt),
+                unread, unreadCount, lastStatus,
+                muted: local.muted === true && (!muteUntil || Date.parse(muteUntil) > now),
+                pinned: local.pinned === true,
             };
         })) };
     })],
@@ -73,6 +97,7 @@ export const chatRoomRoutes = {
         if(linkedGroupId){
             const group=await readWorkGroup(ctx,linkedGroupId);
             if(str(group.data.chatRoomId))throw new HttpError(409,'Work group already has a conversation. Open it instead.');
+            if(str(group.data.automatic)&&str(group.data.ownerUid)!==ctx.uid)throw new HttpError(403,'Only the person whose reporting line forms this automatic team can open its group chat.');
             if(ids.some(uid=>!(Array.isArray(group.data.memberUids)&&group.data.memberUids.includes(uid))))throw new HttpError(403,'All chat participants must belong to the selected work group.');
         }
         const id = kind === 'direct' ? directId(ctx.uid, ids[0]) : 'g_' + randomId(14);
@@ -103,16 +128,27 @@ export const chatRoomRoutes = {
     'POST /api/org/quick/chat/group/update': [orgRoute('chat.group.update', null, async (ctx) => {
         const id = str(ctx.body.roomId);
         const room = await checkedRoom(ctx, id);
-        if (str(room.data.kind) !== 'group' || !(Array.isArray(room.data.admins) && room.data.admins.includes(ctx.uid))) {
+        const action = str(ctx.body.action);
+        const isAdmin = Array.isArray(room.data.admins) && room.data.admins.map(str).includes(ctx.uid);
+        // Group info (name and description) can be opened to every member by an administrator, as in WhatsApp.
+        const infoOpen = str(room.data.infoPolicy) === 'all' && (action === 'rename' || action === 'describe');
+        if (str(room.data.kind) !== 'group' || !(isAdmin || infoOpen)) {
             throw new HttpError(403, 'Only group administrators can edit this group.');
         }
-        const action = str(ctx.body.action);
         const original = membersOf(room);
         const admins = Array.isArray(room.data.admins) ? room.data.admins.map(str) : [ctx.uid];
         if (action === 'rename') {
             const title = str(ctx.body.title).trim();
             if (title.length < 3 || title.length > 90) throw new HttpError(400, 'Group name must be 3–90 characters.');
             await updateFields(ROOM_PATH(ctx.orgId, id), { title, updatedAt: nowIso() });
+        } else if (action === 'describe') {
+            const description = str(ctx.body.description).trim();
+            if (description.length > 500) throw new HttpError(400, 'The group description can be up to 500 characters.');
+            await updateFields(ROOM_PATH(ctx.orgId, id), { description, updatedAt: nowIso() });
+        } else if (action === 'policy') {
+            const sendPolicy = str(ctx.body.sendPolicy), infoPolicy = str(ctx.body.infoPolicy);
+            if (!['all', 'admins'].includes(sendPolicy) || !['all', 'admins'].includes(infoPolicy)) throw new HttpError(400, 'Choose who can send messages and who can edit group info.');
+            await updateFields(ROOM_PATH(ctx.orgId, id), { sendPolicy, infoPolicy, updatedAt: nowIso() });
         } else if (action === 'add') {
             const ids = [...new Set(Array.isArray(ctx.body.memberUids) ? ctx.body.memberUids.map(str) : [])];
             const pending = Array.isArray(room.data.pendingInvites) ? room.data.pendingInvites.map(str) : [];
@@ -157,33 +193,7 @@ export const chatRoomRoutes = {
         await notify(ctx, 'chat.inbox', ctx.uid);
         return { ok: true };
     })],
-    'POST /api/org/quick/chat/subscribe': [orgRoute('chat.subscribe', null, async (ctx) => {
-        const type = str(ctx.body.entity_type);
-        const id = str(ctx.body.entity_id);
-        const connectionId = str(ctx.body.connection_id);
-        if (!CONNECTION_RE.test(connectionId)) throw new HttpError(400, 'Invalid realtime connection.');
-        let path = '';
-        if (type === 'chat.room') {
-            await checkedRoom(ctx, id);
-            path = ROOM_SUBS(ctx.orgId, id) + '/' + connectionId;
-        } else if (type === 'chat.inbox' && id === ctx.uid) {
-            path = INBOX_SUBS(ctx.orgId, ctx.uid) + '/' + connectionId;
-        } else throw new HttpError(403, 'You may only subscribe to your own chats.');
-        const existing = await getDoc(path);
-        if (existing && str(existing.data.uid) !== ctx.uid) throw new HttpError(403, 'Realtime connection is already in use.');
-        await writeDoc(path, { uid: ctx.uid, expiresAt: subscriptionExpiry(), type, id });
-        return { subscribed: true };
-    })],
-    'POST /api/org/quick/chat/unsubscribe': [orgRoute('chat.unsubscribe', null, async (ctx) => {
-        const type = str(ctx.body.entity_type);
-        const id = str(ctx.body.entity_id);
-        const connectionId = str(ctx.body.connection_id);
-        if (!CONNECTION_RE.test(connectionId)) return { ok: true };
-        const path = type === 'chat.room' && ID_RE.test(id) ? ROOM_SUBS(ctx.orgId, id) + '/' + connectionId
-            : type === 'chat.inbox' && id === ctx.uid ? INBOX_SUBS(ctx.orgId, ctx.uid) + '/' + connectionId : '';
-        if (!path) throw new HttpError(403, 'Invalid chat subscription.');
-        const existing = await getDoc(path);
-        if (existing && str(existing.data.uid) === ctx.uid) await deleteDoc(path);
-        return { ok: true };
-    })],
+    // Live updates: a membership-checked long-poll that returns when the inbox or the open room changes.
+    'POST /api/org/quick/chat/subscribe': [orgRoute('chat.subscribe', null, async (ctx) => waitForChanges(ctx))],
+    'POST /api/org/quick/chat/unsubscribe': [orgRoute('chat.unsubscribe', null, async () => ({ ok: true }))],
 };

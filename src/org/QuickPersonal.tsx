@@ -1,20 +1,35 @@
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { Archive, ArchiveRestore, FileImage, FileText, Plus, Save, Search, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { Archive, ArchiveRestore, Brush, FileImage, FileText, ImagePlus, Plus, Save, Search, Trash2, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert } from '../components/ui';
 import { Button, Spinner } from '../admin/kit';
-import MailRichEditor from './MailRichEditor';
+import MailRichEditor, { type RichEditorApi } from './MailRichEditor';
+import NoteSketchPad from './NoteSketchPad';
+import { compressPhoto } from './mntShared';
 import { useQuickLeave } from './quickNavigation';
 import { appConfirm } from '../components/dialogs';
 
-type Attachment={id:string;path:string;name:string;mime:string;size:number;url:string};
+type Attachment={id:string;path:string;name:string;mime:string;size:number;url:string;inline?:boolean};
 type Note={id:string;topic:string;body:string;format?:string;attachments?:Attachment[];archivedAt?:string;updatedAt:string};
 type Draft={id:string;topic:string;html:string;attachments:Attachment[];dirty:boolean};
 const empty:Draft={id:'',topic:'',html:'',attachments:[],dirty:false};
 const field='min-h-12 w-full rounded-xl border border-line bg-page px-3 text-sm text-ink';
 const errorText=(e:unknown)=>e instanceof Error?e.message:'Could not complete the operation.';
 const safeText=(value:string)=>value.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
-const noteHtml=(n:Note)=>n.format==='html'?n.body:'<p>'+safeText(n.body).replaceAll('\n','<br>')+'</p>';
+/** Inline photos and drawings are stored as references to the note's own files; show them with their signed links. */
+function resolveInline(html:string,files:Attachment[]):string{
+    if(!html.includes('data-note-file'))return html;
+    const box=document.createElement('div');
+    box.innerHTML=html;
+    const urls=new Map(files.map(f=>[f.id,f.url]));
+    for(const img of Array.from(box.querySelectorAll('img[data-note-file]'))){
+        const url=urls.get(img.getAttribute('data-note-file')||'');
+        if(url)img.setAttribute('src',url);else img.remove();
+    }
+    return box.innerHTML;
+}
+const inlineIds=(html:string)=>new Set([...html.matchAll(/data-note-file="([^"]+)"/g)].map(m=>m[1]));
+const noteHtml=(n:Note)=>n.format==='html'?resolveInline(n.body,n.attachments||[]):'<p>'+safeText(n.body).replaceAll('\n','<br>')+'</p>';
 const textOnly=(html:string)=>html.replace(/<[^>]*>/g,' ').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim();
 const storageKey=(uid:string)=>'mems.quick.notepad.draft.v2.'+uid;
 function initial(uid:string):Draft{
@@ -40,6 +55,10 @@ export function QuickNotepad({uid}:{uid:string}){
     const [uploading,setUploading]=useState(false);
     const [error,setError]=useState('');
     const [info,setInfo]=useState('');
+    const [sketch,setSketch]=useState(false);
+    const [activeImg,setActiveImg]=useState<HTMLElement|null>(null);
+    const api=useRef<RichEditorApi|null>(null);
+    const photoInput=useRef<HTMLInputElement>(null);
     const reload=useCallback(async()=>{
         try {
             const r=await callBackend<{items:Note[]}>('/api/org/quick/note/list');
@@ -64,9 +83,11 @@ export function QuickNotepad({uid}:{uid:string}){
         }
         setBusy(true);setError('');
         try {
+            // Inline photos removed from the text are dropped with the note; other files stay attached.
+            const used=inlineIds(draft.html);
             await callBackend('/api/org/quick/note/save',{
                 id:draft.id||undefined,topic:draft.topic,body:draft.html,format:'html',
-                attachments:draft.attachments.map(({id,path,name,mime,size})=>({id,path,name,mime,size})),
+                attachments:draft.attachments.filter(a=>!a.inline||used.has(a.id)).map(({id,path,name,mime,size})=>({id,path,name,mime,size})),
             });
             close();await reload();
             if(!silent)setInfo('Your note and attachments were saved.');
@@ -105,6 +126,41 @@ export function QuickNotepad({uid}:{uid:string}){
         }catch(e){setError(errorText(e))}
         finally{setUploading(false)}
     };
+    /** Upload a photo or drawing and place it in the note text where the cursor was. */
+    const embed=async(data:string,name:string,mime:string)=>{
+        if(draft.attachments.length>=12){setError('A note may contain up to 12 photos and files.');return;}
+        setUploading(true);setError('');
+        try{
+            const r=await callBackend<{item:Attachment}>('/api/org/quick/note/upload',{data,name,mime});
+            const item={...r.item,inline:true};
+            setDraft(prev=>({...prev,attachments:[...prev.attachments,item],dirty:true}));
+            const img=document.createElement('img');
+            img.setAttribute('src',item.url);img.setAttribute('data-note-file',item.id);img.setAttribute('data-width','100');img.setAttribute('alt','');
+            api.current?.insertHtml(img.outerHTML+'<p><br></p>');
+        }catch(e){setError(errorText(e))}
+        finally{setUploading(false)}
+    };
+    const insertPhoto=async(event:ChangeEvent<HTMLInputElement>)=>{
+        const file=event.target.files?.[0];event.target.value='';
+        if(!file)return;
+        if(!/^image\/(jpeg|png|webp)$/.test(file.type))return setError('Insert a JPG, PNG or WebP photo.');
+        const big=file.size>4_500_000;
+        const data=big?await compressPhoto(file):await fileData(file);
+        await embed(data,big?file.name.replace(/\.[^.]+$/,'')+'.jpg':file.name,big?'image/jpeg':file.type);
+    };
+    const insertDrawing=async(png:Blob)=>{
+        const data=await fileData(new File([png],'drawing.png',{type:'image/png'}));
+        await embed(data,'Drawing '+new Date().toLocaleString().replace(/[/:]/g,'-')+'.png','image/png');
+        setSketch(false);
+    };
+    const imageSize=(width:string)=>{
+        if(!activeImg)return;
+        if(width==='remove')activeImg.remove();else activeImg.setAttribute('data-width',width);
+        activeImg.classList.remove('note-img-active');
+        setActiveImg(null);
+        api.current?.sync();
+    };
+    const used=inlineIds(draft.html);
     const visible=items.filter(n=>Boolean(n.archivedAt)===(tab==='archive')
         &&(n.topic+' '+textOnly(n.body)).toLowerCase().includes(search.toLowerCase()));
     return <section className='space-y-4 pb-5' aria-label='Private Notepad'>
@@ -130,6 +186,7 @@ export function QuickNotepad({uid}:{uid:string}){
                     <span className='block truncate text-sm font-semibold text-ink'>{n.topic}</span>
                     <span className='mt-1 block truncate text-xs text-muted'>{textOnly(n.body)||'Blank note'}</span>
                     <span className='mt-1 flex items-center gap-1 text-[11px] text-muted'>
+                        {inlineIds(n.body).size?<><ImagePlus className='h-3.5 w-3.5'/>{inlineIds(n.body).size} in text · </>:null}
                         {n.attachments?.length?<><FileText className='h-3.5 w-3.5'/>{n.attachments.length} files · </>:null}
                         {new Date(n.updatedAt).toLocaleDateString()}
                     </span>
@@ -161,8 +218,34 @@ export function QuickNotepad({uid}:{uid:string}){
                 </label>
                 <div className='space-y-2'>
                     <p className='text-sm font-semibold text-muted'>Note content</p>
+                    {activeImg&&<div className='sticky top-0 z-10 flex flex-wrap items-center gap-1 rounded-xl border border-brand/40 bg-panel p-1.5 shadow' role='toolbar' aria-label='Inline photo'>
+                        <span className='px-2 text-xs font-semibold text-muted'>Photo size</span>
+                        {[['25','S'],['50','M'],['75','L'],['100','Full']].map(([w,label])=><button key={w} type='button' onClick={()=>imageSize(w)}
+                            className={'min-h-10 min-w-10 rounded-lg px-2 text-xs font-semibold '+(activeImg.getAttribute('data-width')===w?'bg-brand text-onbrand':'text-ink')}>{label}</button>)}
+                        <span className='flex-1'/>
+                        <button type='button' onClick={()=>imageSize('remove')} className='flex min-h-10 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-red-500'><Trash2 className='h-4 w-4'/>Remove</button>
+                        <button type='button' aria-label='Close photo tools' onClick={()=>{activeImg.classList.remove('note-img-active');setActiveImg(null);}} className='flex h-10 w-10 items-center justify-center'><X className='h-4 w-4'/></button>
+                    </div>}
                     <MailRichEditor key={draft.id||'new'} html={draft.html} placeholder='Write and format your notes…'
-                        ariaLabel='Rich text note' onChange={html=>setDraft(d=>({...d,html,dirty:true}))}/>
+                        ariaLabel='Rich text note' apiRef={api} onChange={html=>setDraft(d=>({...d,html,dirty:true}))}
+                        onEditorClick={el=>{
+                            activeImg?.classList.remove('note-img-active');
+                            if(el.tagName==='IMG'&&el.hasAttribute('data-note-file')){el.classList.add('note-img-active');setActiveImg(el);}
+                            else setActiveImg(null);
+                        }}
+                        extraTools={<>
+                            <button type='button' title='Insert photo' aria-label='Insert photo in the note' disabled={uploading}
+                                onMouseDown={e=>{e.preventDefault();api.current?.saveSelection();}} onClick={()=>photoInput.current?.click()}
+                                className='flex h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-lg px-2 text-xs font-semibold text-brand hover:bg-brand/10'>
+                                <ImagePlus className='h-[18px] w-[18px]'/><span className='hidden sm:inline'>Photo</span></button>
+                            <button type='button' title='Draw' aria-label='Draw on a canvas and insert it' disabled={uploading}
+                                onMouseDown={e=>{e.preventDefault();api.current?.saveSelection();}} onClick={()=>setSketch(true)}
+                                className='flex h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-lg px-2 text-xs font-semibold text-brand hover:bg-brand/10'>
+                                <Brush className='h-[18px] w-[18px]'/><span className='hidden sm:inline'>Draw</span></button>
+                            <span className='mx-0.5 h-6 w-px shrink-0 bg-line'/>
+                        </>}/>
+                    <input ref={photoInput} type='file' accept='image/jpeg,image/png,image/webp' className='hidden' onChange={e=>{void insertPhoto(e)}}/>
+                    <p className='text-[11px] text-muted'>Tap <b>Photo</b> or <b>Draw</b> to place a picture inside the text. Tap a picture to resize or remove it.</p>
                 </div>
                 <section className='space-y-3 rounded-xl border border-line bg-panel p-3'>
                     <h4 className='flex items-center gap-2 text-sm font-semibold text-ink'><FileImage className='h-5 w-5 text-brand'/>Photos and documents</h4>
@@ -171,7 +254,7 @@ export function QuickNotepad({uid}:{uid:string}){
                         <input type='file' multiple disabled={uploading||busy} accept='image/jpeg,image/png,image/webp,.pdf,.docx,.xlsx,.pptx,.txt,.csv'
                             className='sr-only' onChange={e=>{void upload(e)}}/>
                     </label>
-                    {draft.attachments.map(file=><div key={file.path} className='flex items-center gap-3 rounded-lg border border-line bg-page p-2'>
+                    {draft.attachments.filter(file=>!file.inline&&!used.has(file.id)).map(file=><div key={file.path} className='flex items-center gap-3 rounded-lg border border-line bg-page p-2'>
                         {file.mime.startsWith('image/')&&file.url?<img src={file.url} alt={file.name} className='h-14 w-14 rounded-lg object-cover'/>:<FileText className='h-6 w-6 shrink-0 text-brand'/>}
                         <a className='min-w-0 flex-1 truncate text-xs font-semibold text-brand underline' href={file.url} target='_blank' rel='noopener noreferrer'>{file.name}</a>
                         <button type='button' aria-label={'Remove '+file.name} onClick={()=>setDraft(d=>({...d,attachments:d.attachments.filter(a=>a.path!==file.path),dirty:true}))}
@@ -185,6 +268,7 @@ export function QuickNotepad({uid}:{uid:string}){
                     <Save className='h-5 w-5'/> Save note
                 </Button></div>
             </footer>
+            {sketch&&<NoteSketchPad busy={uploading} onCancel={()=>setSketch(false)} onSave={png=>{void insertDrawing(png)}}/>}
         </div>}
     </section>;
 }

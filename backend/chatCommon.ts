@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import { ws } from './platform/sdk';
 import { HttpError, getDoc, listDocs, nowIso, randomId, str, updateFields, writeDoc, type Doc } from './core';
 import { orgUsers } from './org';
 import { signedUrl } from './structure';
 import type { OrgContext } from './guards';
+import { bumpSignal, inboxSignal, roomSignal } from './chatSignals';
 
 export const CHAT_ROOT = (orgId: string) => 'organizations/' + orgId + '/chat_rooms';
 export const ROOM_PATH = (orgId: string, id: string) => CHAT_ROOT(orgId) + '/' + id;
@@ -56,20 +56,9 @@ export function tokenId() { return randomId(12); }
 
 export async function notify(ctx: OrgContext, entityType: 'chat.room' | 'chat.inbox', entityId: string,
     extra: Record<string, unknown> = {}) {
-    const path = entityType === 'chat.room'
-        ? ROOM_SUBS(ctx.orgId, entityId) : INBOX_SUBS(ctx.orgId, entityId);
-    const subscriptions = await listDocs(path);
-    const validUntil = Date.now();
-    const eligible = subscriptions.filter((s) => Date.parse(str(s.data.expiresAt)) > validUntil);
-    // Include no message text or files in WebSocket payloads. The recipient must
-    // refetch through a separately authenticated, membership-checked API route.
-    const ids = eligible.map((s) => s.id).filter((id) => CONNECTION_RE.test(id));
-    const payload = { type: 'entity.update', entity_type: entityType, entity_id: entityId,
-        at: nowIso(), ...extra };
-    for (let i = 0; i < ids.length; i += 100) {
-        try { await ws.send(ids.slice(i, i + 100), payload); }
-        catch (error) { console.error('Chat websocket delivery failed', error); }
-    }
+    // Live delivery: bump the revision the browsers' long-polls wait on. Signals carry no message
+    // text or files; the browser refetches through the membership-checked routes.
+    await bumpSignal(ctx.orgId, entityType === 'chat.room' ? roomSignal(entityId) : inboxSignal(entityId), str(extra.event));
 }
 export async function notifyRoom(ctx: OrgContext, room: Doc, extra: Record<string, unknown> = {}) {
     const people = membersOf(room);
