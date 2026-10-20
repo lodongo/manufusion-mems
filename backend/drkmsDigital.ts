@@ -5,6 +5,7 @@ import {record} from './org';
 import {validateDocumentLocation} from './drkmsHierarchy';
 import {canAt,scopeOf,nodePath} from './access';
 import {validateAiProposal,type AiProposal} from './drkmsKnowledgeContracts';
+import {validateRcaAnalysis,type RcaAiAnalysis} from './drkmsRcaAi';
 const docs=(org:string,id:string)=>`organizations/${org}/drkms_documents/${id}`;
 const idOk=(s:string)=>/^[a-f0-9]{20}$/.test(s);
 export const drkmsDigitalRoutes={
@@ -33,6 +34,25 @@ export const drkmsDigitalRoutes={
    if(!(await writeDoc(docs(ctx.orgId,id),entry,{exists:false})))throw new HttpError(409,'Try again.');
    await record(ctx,'drkms.rca.create',id,incidentReference);
    return {document:entry,stagingEnabled:false};
+  }),
+ ],
+ 'POST /api/org/drkms/rca/ai-analysis':[
+  orgRoute('drkms.rca.ai_analysis','ADM.document_registry',async ctx=>{
+   const documentId=str(ctx.body.documentId);
+   if(!idOk(documentId))throw new HttpError(400,'Invalid RCA document identifier.');
+   const doc=await getDoc(docs(ctx.orgId,documentId));
+   if(!doc||str(doc.data.subtypeCode)!=='RCA'||str(doc.data.status)!=='draft')
+     throw new HttpError(409,'A draft digital RCA is required.');
+   if(str(doc.data.createdBy)!==ctx.uid)throw new HttpError(403,'Only the investigator may add AI analysis proposals.');
+   const proposal=ctx.body.analysis as RcaAiAnalysis;
+   if(!proposal||proposal.documentId!==documentId||!validateRcaAnalysis(proposal)||JSON.stringify(proposal).length>50000)
+     throw new HttpError(400,'AI analysis requires traceable evidence, candidate-only hypotheses and human validation.');
+   const id=randomId(10);
+   const candidate={...proposal,id,createdBy:ctx.uid,createdAt:nowIso(),status:'candidate',humanValidated:false,publishable:false};
+   if(!(await writeDoc(`${docs(ctx.orgId,documentId)}/rca_ai_analysis/${id}`,candidate,{exists:false})))
+     throw new HttpError(409,'AI proposal conflict.');
+   await record(ctx,'drkms.rca.ai_candidate',documentId,proposal.mode);
+   return {analysisId:id,status:'candidate',needsInvestigatorValidation:true};
   }),
  ],
  'POST /api/org/drkms/ai/proposal':[
