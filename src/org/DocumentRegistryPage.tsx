@@ -183,7 +183,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
         </select>
       </div>
       <div className='space-y-2'>
-        {(data?.documents ?? []).filter(d=>(statusFilter==='all'||d.status===statusFilter) &&
+        {(data?.documents ?? []).filter(d=>(mode!=='review'||d.status==='in_review'||d.status==='technical_verified') && (statusFilter==='all'||d.status===statusFilter) &&
            [d.title,d.classCode,d.documentId].some(v=>String(v??'').toLowerCase().includes(documentSearch.trim().toLowerCase()))).map(d => <div key={d.documentId} className='min-w-0 rounded-lg border border-slate-700 p-3'>
           <div className='flex items-start gap-2'><FileText className='mt-0.5 shrink-0 text-blue-300' size={18}/>
             <div className='min-w-0 flex-1'>
