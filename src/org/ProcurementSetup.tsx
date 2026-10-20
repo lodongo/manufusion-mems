@@ -187,6 +187,41 @@ function KindEditor({ kind, canManage, onSaved }: { kind: Kind; canManage: boole
     );
 }
 
+/** Read the exact same MEMS Admin Procurement metadata used by material setup.
+ * This is a catalogue viewer, not a second independently managed master. */
+function StockConfigurationCatalogue(){
+    type Dim={key:string;title:string;description:string;items:Array<{code:string;label:string;description:string;enabled:boolean;category:string}>};
+    const {data,loading,error}=useLoad(()=>callBackend<{stockDimensions:Dim[]}>('/api/org/inventory/material/metadata'));
+    const [selected,setSelected]=useState('stockOwnership');
+    const [search,setSearch]=useState('');
+    if(loading&&!data)return <Spinner/>;
+    if(error||!data)return <Alert tone='error'>{error||'Unable to load universal stock policy metadata.'}</Alert>;
+    const groups=data.stockDimensions||[];
+    const current=groups.find(x=>x.key===selected)||groups[0];
+    const records=(current?.items||[]).filter(i=>(i.code+' '+i.label+' '+i.description).toLowerCase().includes(search.toLowerCase()));
+    return <div className='min-w-0 space-y-3'>
+        <section className='rounded-2xl border border-line bg-panel p-4'>
+            <h2 className='text-sm font-semibold text-ink'>Universal stock policy metadata</h2>
+            <p className='mt-1 text-xs text-muted'>Canonical codified masters maintained in MEMS Admin → Procurement → Metadata. These definitions are shared with Inventory material configuration; they are not duplicated as tenant-specific lists.</p>
+            <p className='mt-2 text-xs text-soft'>{groups.length} master dimensions · {groups.reduce((n,g)=>n+g.items.length,0)} codified values</p>
+        </section>
+        <label className='block text-xs font-medium text-ink'>Configuration dimension
+          <select className='mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink' value={current?.key||''} onChange={e=>{setSelected(e.target.value);setSearch('');}}>
+            {groups.map(g=><option key={g.key} value={g.key}>{g.title} ({g.items.length})</option>)}
+          </select>
+        </label>
+        {current&&<div className='space-y-2'>
+            <p className='text-sm font-semibold text-ink'>{current.title}</p>
+            <p className='text-xs text-muted'>{current.description}</p>
+            <label className='block text-xs text-ink'>Filter entries (optional)<input type='search' className='mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink' placeholder='Code, label or description' value={search} onChange={e=>setSearch(e.target.value)}/></label>
+            <div className='space-y-2'>{records.map(item=><div className='min-w-0 rounded-xl border border-line bg-panel p-3' key={item.code}>
+                <div className='flex flex-wrap items-center justify-between gap-2'><p className='text-sm font-semibold text-ink'><span className='font-mono text-xs text-brandsoft'>{item.code}</span> · {item.label}</p><Badge tone={item.enabled?'brand':'muted'}>{item.enabled?'Enabled':'Disabled'}</Badge></div>
+                <p className='mt-1 text-xs text-muted'>{item.description}</p>
+            </div>)}</div>
+        </div>}
+    </div>;
+}
+
 export default function ProcurementSetup({ back }: { back: string }) {
     const overview = useLoad(() => callBackend<Overview>('/api/org/procurement/setup/overview'));
     const authority = useLoad(() => callBackend<Authority>('/api/org/procurement/authority').catch(() => null));
@@ -194,12 +229,14 @@ export default function ProcurementSetup({ back }: { back: string }) {
 
     const kinds = overview.data?.kinds ?? [];
     const short: Record<string, string> = { material: 'Materials', service: 'Services', asset: 'Assets' };
-    const options = [...kinds.map((k) => ({ value: k.kind as string, label: short[k.kind] ?? k.label })), { value: 'buying', label: 'Buying rules' }, { value: 'limits', label: 'Authority limits' }, { value: 'metrics', label: 'Evaluation metrics' }, { value: 'buyers', label: 'Buyer groups' }, { value: 'chart', label: 'Chart of authority' }];
+    const options = [...kinds.map((k) => ({ value: k.kind as string, label: short[k.kind] ?? k.label })), { value: 'buying', label: 'Buying rules' }, { value: 'limits', label: 'Authority limits' }, { value: 'metrics', label: 'Evaluation metrics' }, { value: 'buyers', label: 'Buyer groups' }, { value: 'chart', label: 'Chart of authority' }, {value:'stock',label:'Stock policies'}];
     const kind = kinds.find((k) => k.kind === tab);
 
     return (
         <Screen title='Procurement setup' subtitle='Accepted categories and chart of authority' onBack={() => navigate(back)} toolbar={<Segmented label='Setup sections' value={tab} options={options} onChange={setTab} />}>
-            {tab === 'buying' ? (
+            {tab === 'stock' ? (
+                <StockConfigurationCatalogue />
+            ) : tab === 'buying' ? (
                 <BuyingRules />
             ) : tab === 'limits' ? (
                 <AuthorityTiers />
