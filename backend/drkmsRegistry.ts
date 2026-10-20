@@ -39,13 +39,13 @@ const defaults = { enabledClassCodes: Array.from(classes), defaultReviewMonths: 
 
 export const drkmsRoutes = {
     'POST /api/org/drkms/setup': [
-        orgRoute('drkms.setup', 'ADM.roles', async ctx => {
+        orgRoute('drkms.setup', 'ADM.document_registry', async ctx => {
             const [settings, locations] = await Promise.all([getDoc(configPath(ctx.orgId)), resolveScope(ctx.orgId, '')]);
             return { config: settings?.data ?? defaults, locations: locations.nodes };
         }),
     ],
     'POST /api/org/drkms/configure': [
-        orgRoute('drkms.configure', 'ADM.roles', async ctx => {
+        orgRoute('drkms.configure', 'ADM.document_config', async ctx => {
             const incoming = ctx.body.enabledClassCodes;
             if (!Array.isArray(incoming) || !incoming.length || incoming.length > classes.size ||
                 incoming.some(x => typeof x !== 'string' || !classes.has(x)) ||
@@ -59,13 +59,13 @@ export const drkmsRoutes = {
         }),
     ],
     'POST /api/org/drkms/documents/list': [
-        orgRoute('drkms.documents.list', 'ADM.roles', async ctx => {
+        orgRoute('drkms.documents.list', 'ADM.document_registry', async ctx => {
             const items = await listDocs(base(ctx.orgId));
             return { documents: items.map(x => ({ id: x.id, ...x.data })) };
         }),
     ],
     'POST /api/org/drkms/documents/get': [
-        orgRoute('drkms.documents.get', 'ADM.roles', async ctx => {
+        orgRoute('drkms.documents.get', 'ADM.document_registry', async ctx => {
             const id = str(ctx.body.documentId);
             if (!validId(id)) throw new HttpError(400, 'Invalid document identifier.');
             const doc = await getDoc(`${base(ctx.orgId)}/${id}`);
@@ -74,7 +74,7 @@ export const drkmsRoutes = {
         }),
     ],
     'POST /api/org/drkms/documents/create-draft': [
-        orgRoute('drkms.documents.create_draft', 'ADM.roles', async ctx => {
+        orgRoute('drkms.documents.create_draft', 'ADM.document_registry', async ctx => {
             const title = str(ctx.body.title).trim();
             const classCode = str(ctx.body.classCode).toUpperCase();
             if (title.length < 3 || title.length > 200) throw new HttpError(400, 'Title must contain 3–200 characters.');
