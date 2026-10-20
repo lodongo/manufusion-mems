@@ -41,3 +41,12 @@ test('Procurement and Inventory add tabs without replicating master definitions'
  assert.match(prc,/StockConfigurationCatalogue/);
  assert.match(prc,/callBackend<.*stockDimensions:Dim\[\]/);
 });
+
+test('MEMS Admin Procurement editor preserves item descriptions and does not regenerate catalogue codes',()=>{
+ const admin=read('src/admin/ModulesPage.tsx');
+ assert.match(admin,/isStockMeta/);
+ assert.match(admin,/\(isMnt \|\| isStockMeta\) \? mntItems : items/);
+ assert.match(admin,/Detailed description/);
+ assert.match(admin,/maxLength=\{500\}/);
+ assert.match(admin,/code=prefix\+String\(next\)\.padStart\(2,'0'\)/);
+});
