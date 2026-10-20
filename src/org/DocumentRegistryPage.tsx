@@ -35,7 +35,9 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
   const [busy, setBusy] = useState(false);
   const [configBusy, setConfigBusy] = useState(false);
   const [reviewMonths, setReviewMonths] = useState(24);
+  const [enabledClasses, setEnabledClasses] = useState<string[]>([]);
   useEffect(() => { if (setup.data?.config.defaultReviewMonths) setReviewMonths(setup.data.config.defaultReviewMonths); }, [setup.data?.config.defaultReviewMonths]);
+  useEffect(() => { if (setup.data?.config.enabledClassCodes) setEnabledClasses(setup.data.config.enabledClassCodes); }, [setup.data?.config.enabledClassCodes]);
   const [settingsNotice, setSettingsNotice] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [reviewing, setReviewing] = useState('');
@@ -45,7 +47,7 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
     setConfigBusy(true); setSettingsError(''); setSettingsNotice('');
     try {
       await callBackend('/api/org/drkms/configure', {
-        enabledClassCodes: setup.data?.config.enabledClassCodes ?? CLASSES.map(([code]) => code),
+        enabledClassCodes: enabledClasses,
         defaultReviewMonths: reviewMonths,
       });
       setSettingsNotice('Document settings saved.');
@@ -83,7 +85,16 @@ export default function DocumentRegistryPage({ canConfigure }: { canConfigure: b
           onChange={e => setReviewMonths(Number(e.target.value))}
           className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'/>
       </label>
-      <button type='button' disabled={configBusy || !Number.isInteger(reviewMonths) || reviewMonths < 1 || reviewMonths > 120}
+      <fieldset className='mt-3 space-y-2'><legend className='mb-2 text-sm font-medium text-slate-200'>Enabled document classes</legend>
+        <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+          {CLASSES.map(([code,label])=><label key={code} className='flex min-h-11 items-center gap-2 rounded-lg border border-slate-700 p-2 text-sm text-slate-200'>
+            <input type='checkbox' checked={enabledClasses.includes(code)} onChange={e=>setEnabledClasses(old=>e.target.checked?[...old,code]:old.filter(x=>x!==code))} className='h-4 w-4' />
+            <span>{code} · {label}</span>
+          </label>)}
+        </div>
+        <p className='text-xs text-slate-400'>Other global classifications retain their existing enabled status.</p>
+      </fieldset>
+      <button type='button' disabled={configBusy || enabledClasses.length===0 || !Number.isInteger(reviewMonths) || reviewMonths < 1 || reviewMonths > 120}
         onClick={() => void updateSettings()} className='mt-3 min-h-11 rounded-lg border border-slate-600 px-4 text-sm font-semibold text-white'>
         {configBusy ? 'Saving…' : 'Save settings'}
       </button>
