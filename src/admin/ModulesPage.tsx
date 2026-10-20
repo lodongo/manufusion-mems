@@ -405,7 +405,15 @@ function MetaListForm({ code, list, canWrite, onDone, onCancel }: { code: string
     const [key, setKey] = useState(list?.key ?? '');
     const [title, setTitle] = useState(list?.title ?? '');
     const [description, setDescription] = useState(list?.description ?? '');
-    const [entries, setEntries] = useState((list?.items ?? []).map((i) => `${i.code} | ${i.label}${i.active ? '' : ' | inactive'}`).join('\n')); const [mntItems, setMntItems] = useState(list?.items ?? []); const isMnt = (code === 'MNT' || (code === 'INV' && (list?.key === 'materialClassifications' || list?.key === 'storageLocationTypes'))) && !!list; const canAddColor = code === 'INV' && list?.key === 'materialClassifications' && canWrite;
+    const [entries, setEntries] = useState((list?.items ?? []).map((i) => `${i.code} | ${i.label}${i.active ? '' : ' | inactive'}`).join('\n'));
+    const [mntItems, setMntItems] = useState(list?.items ?? []);
+    const isMnt = (code === 'MNT' || (code === 'INV' && (list?.key === 'materialClassifications' || list?.key === 'storageLocationTypes'))) && !!list;
+    const isStockMeta=code==='PRC'&&!!list&&['stockOwnership','supplyArrangements','stockCustody','stockConditions','replenishmentStrategies','stockPurposes','stockAllocations','financialProfiles','valuationMethods','traceabilityControls','titleTransferTriggers','specialStockPrograms','warehouseRestrictions','stockPlanningControls','ownershipSettlementTriggers'].includes(list.key);
+    const [filterStock,setFilterStock]=useState('');
+    const [newStockLabel,setNewStockLabel]=useState('');
+    const [newStockDescription,setNewStockDescription]=useState('');
+    const [stockError,setStockError]=useState('');
+    const canAddColor = code === 'INV' && list?.key === 'materialClassifications' && canWrite;
     const [busy, setBusy] = useState('');
     const [error, setError] = useState('');
     const ro = !canWrite;
@@ -423,7 +431,7 @@ function MetaListForm({ code, list, canWrite, onDone, onCancel }: { code: string
             });
         setBusy('save');
         try {
-            await callBackend('/api/admin/modules/metadata/save', { code, isNew, list: { key, title, description, items: isMnt ? mntItems : items } });
+            await callBackend('/api/admin/modules/metadata/save', { code, isNew, list: { key, title, description, items: (isMnt || isStockMeta) ? mntItems : items } });
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save.');
@@ -458,7 +466,41 @@ function MetaListForm({ code, list, canWrite, onDone, onCancel }: { code: string
                 <Field id='meta-description' label='Description (optional)' maxLength={300} value={description} disabled={ro} onChange={(e) => setDescription(e.target.value)} />
                 {isMnt && <div className='max-h-[60dvh] space-y-2 overflow-y-auto rounded-xl border border-slate-700 p-2'>{mntItems.map((entry, idx) => <div key={entry.code} className='flex items-center gap-2 rounded-lg bg-slate-900 p-2'><input aria-label={'Color for ' + entry.label} type='color' value={entry.color || '#64748B'} disabled={ro} onChange={e => setMntItems(prev => prev.map((x,i)=>i===idx?{...x,color:e.target.value}:x))} className='h-8 w-9 shrink-0 cursor-pointer rounded' /><div className='min-w-0 flex-1'><div className='text-sm text-white'>{entry.label}</div><div className='font-mono text-[11px] text-slate-500'>{entry.code}{entry.selectable === false ? ' · Category' : ''}</div></div><label className='flex shrink-0 items-center gap-2 text-xs text-slate-300'><input type='checkbox' checked={entry.active !== false} disabled={ro} onChange={e=>setMntItems(prev=>prev.map((x,i)=>i===idx?{...x,active:e.target.checked}:x))} />Enabled</label></div>)}</div>}
                 {isMnt && canAddColor && <AddColorEntry items={mntItems} onAdd={(entry) => setMntItems((prev) => [...prev, entry])} />}
-                {!isMnt && <TextArea
+                {isStockMeta && <div className='space-y-3'>
+                  <p className='text-xs text-slate-400'>Descriptions are part of the controlled MEMS master. Edit the label, description or enabled status; codes remain stable so material references never silently change.</p>
+                  <label className='block text-xs text-slate-300'>Filter values (optional)
+                    <input type='search' value={filterStock} onChange={e=>setFilterStock(e.target.value)} placeholder='Code, label or description' className='mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 p-3 text-base text-white'/>
+                  </label>
+                  <div className='max-h-[56dvh] space-y-2 overflow-y-auto pr-1'>
+                   {mntItems.map((entry,i)=>({entry,i})).filter(({entry})=>(entry.code+' '+entry.label+' '+(entry.description||'')).toLowerCase().includes(filterStock.toLowerCase())).map(({entry,i})=><div key={entry.code} className='space-y-2 rounded-xl border border-slate-700 p-3'>
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='font-mono text-xs font-semibold text-emerald-300'>{entry.code}</span>
+                        <label className='flex items-center gap-2 text-xs text-slate-300'>
+                          <input type='checkbox' checked={entry.active!==false} disabled={ro} onChange={e=>setMntItems(old=>old.map((x,j)=>i===j?{...x,active:e.target.checked}:x))}/>Enabled
+                        </label>
+                      </div>
+                      <Field id={'meta-stock-label-'+i} label='Name' maxLength={120} value={entry.label} disabled={ro} onChange={e=>setMntItems(old=>old.map((x,j)=>i===j?{...x,label:e.target.value}:x))}/>
+                      <TextArea id={'meta-stock-desc-'+i} label='Detailed description' rows={3} maxLength={500} value={entry.description||''} disabled={ro} onChange={e=>setMntItems(old=>old.map((x,j)=>i===j?{...x,description:e.target.value}:x))}/>
+                   </div>)}
+                  </div>
+                  {canWrite&&<div className='space-y-2 rounded-xl border border-dashed border-slate-700 p-3'>
+                    <p className='text-sm font-semibold text-white'>Add a codified variable</p>
+                    <Field id='new-stock-name' label='Name' value={newStockLabel} maxLength={120} onChange={e=>setNewStockLabel(e.target.value)}/>
+                    <TextArea id='new-stock-description' label='Description' value={newStockDescription} rows={3} maxLength={500} onChange={e=>setNewStockDescription(e.target.value)}/>
+                    <Button type='button' variant='secondary' onClick={()=>{
+                      if(newStockLabel.trim().length<2||newStockDescription.trim().length<20){setStockError('Provide a name and a detailed description of at least 20 characters.');return;}
+                      const prefix=(mntItems[0]?.code||'ST01').replace(/\d+$/,'');
+                      const next=mntItems.reduce((m,x)=>Math.max(m,Number(x.code.slice(prefix.length))||0),0)+1;
+                      if(next>99){setStockError('This code series has reached 99 values. Contact MEMS Admin for a catalogue extension.');return;}
+                      const code=prefix+String(next).padStart(2,'0');
+                      if(mntItems.some(x=>x.code===code)){setStockError('Code already exists. Reload and retry.');return;}
+                      setMntItems(old=>[...old,{code,label:newStockLabel.trim(),description:newStockDescription.trim(),active:true,selectable:true}]);
+                      setNewStockLabel('');setNewStockDescription('');setStockError('');
+                    }}>+ Add value</Button>
+                    {stockError&&<p className='text-xs text-amber-300'>{stockError}</p>}
+                  </div>}
+                </div>}
+                {!isMnt && !isStockMeta && <TextArea
                     id='meta-entries'
                     label='Entries: one per line as CODE | Label (add "| inactive" to hide)'
                     rows={10}
