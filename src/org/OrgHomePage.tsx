@@ -142,7 +142,7 @@ function canOpen(permissions: string[], link: LinkItem): boolean {
 
 function moduleMenus(data: OrgContextData, canAdmin: boolean): ModuleMenu[] {
     return data.modules
-        .filter((module) => module.code !== 'ADM' && (hasAny(data.permissions, module.code) || module.code === 'PRC' || (module.code === 'DOC' && hasAny(data.permissions,'ADM')))
+        .filter((module) => module.code !== 'ADM' && (hasAny(data.permissions, module.code) || module.code === 'PRC' || (module.code === 'DOC' && hasAny(data.permissions,'ADM'))))
         .map((module) => {
             const links = (MODULE_LINKS[module.code] ?? []).filter((link) => canOpen(data.permissions, link));
             // GL-linked contracts are owned by their operational modules, while
