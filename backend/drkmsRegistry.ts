@@ -3,6 +3,7 @@ import { HttpError, getDoc, listDocs, nowIso, randomId, str, writeDoc } from './
 import { orgRoute } from './guards';
 import { record } from './org';
 import { validateDocumentLocation } from './drkmsHierarchy';
+import { assessPublicationGate } from './drkmsPublicationGate';
 
 const base = (orgId: string) => `organizations/${orgId}/drkms_documents`;
 const validId = (v: string) => /^[a-f0-9]{20}$/.test(v);
@@ -71,6 +72,24 @@ export const drkmsRoutes = {
             const doc = await getDoc(`${base(ctx.orgId)}/${id}`);
             if (!doc) throw new HttpError(404, 'Document not found.');
             return { document: { id: doc.id, ...doc.data } };
+        }),
+    ],
+    'POST /api/org/drkms/documents/readiness': [
+        orgRoute('drkms.documents.readiness', 'ADM.document_registry', async ctx => {
+            const id = str(ctx.body.documentId);
+            if (!validId(id)) throw new HttpError(400, 'Invalid document identifier.');
+            const doc = await getDoc(`${base(ctx.orgId)}/${id}`);
+            if (!doc) throw new HttpError(404, 'Document not found.');
+            // This is a non-mutating diagnostic, NOT governance approval evidence.
+            const d = doc.data;
+            const outcome = assessPublicationGate({
+                state: str(d.status), creatorUid: str(d.createdBy),
+                reviewerUid: str(d.verifiedBy), hasSourceEvidence: d.hasSourceEvidence === true,
+                verificationRequired: d.representation === 'ai_candidate',
+                verified: d.verified === true, hasApprovalProof: false,
+                validScope: !!d.scope, revisionId: str(d.effectiveRevisionId),
+            });
+            return { documentId: id, ...outcome, publicationEnabled: false };
         }),
     ],
     'POST /api/org/drkms/documents/create-draft': [
