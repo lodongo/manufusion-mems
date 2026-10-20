@@ -147,7 +147,7 @@ function ReplenishmentSweepControls({ job, onDone }: { job: Job; onDone: () => v
         finally { setBusy(''); }
     };
     return <div className='space-y-2'>
-        <p className='text-xs text-soft'>Replenishment already runs whenever a material, its warehouse settings or its stock change, for every automated strategy (MRP is one of them). This sweep is the safety net for changes made outside a user request, periodic reviews falling due and usage-based levels moving with consumption.</p>
+        <p className='text-xs text-soft'>Replenishment already runs whenever a material, its warehouse settings or its stock change, for the automated strategies chosen in Stock Control (RP01 Min-Max, RP02 Reorder Point, RP03 EOQ, RP04 Just-in-Time, RP06 MRP). This sweep is the safety net for changes made outside a user request, usage-based levels moving with consumption.</p>
         <div className='grid grid-cols-2 gap-2'>
             <label className='flex min-h-11 items-center gap-2 rounded-xl border border-line px-3 text-sm text-ink'>
                 <input type='checkbox' className='h-5 w-5' checked={enabled} onChange={(e)=>setEnabled(e.target.checked)}/> Enabled

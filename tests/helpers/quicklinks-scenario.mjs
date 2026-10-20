@@ -78,6 +78,8 @@ assert.equal(snapshot(r + '/warehouse_bin_occupancy/WH_' + BIN).data.restriction
 await rejects(call(warehouseRoutes, '/api/org/warehouse/save', 'me', setup('RS02')), /Delink them before changing the restriction/, 'retag with stock');
 // Nor can the material's restriction drift away from its bin.
 await rejects(call(procurementRoutes, '/api/org/inventory/material/update', 'me', { id: 'MAT1', warehouseId: 'WH', section: 'inventory', values: { warehouseRestriction: 'RS02' } }), /Delink the bin/, 'material restriction locked by bin');
+// Keeping the bin's own restriction in Stock Control is allowed, and only the changed field is checked.
+assert.equal((await call(procurementRoutes, '/api/org/inventory/material/update', 'me', { id: 'MAT1', warehouseId: 'WH', section: 'inventory', values: { warehouseRestriction: 'RS15' } })).changed, 1, 'same restriction as the bin');
 console.log('restrictions ok');
 
 // 4. Chat: live revisions, WhatsApp settings, group permissions.

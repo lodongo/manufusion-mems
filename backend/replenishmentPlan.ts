@@ -69,21 +69,22 @@ export const METHODS: Record<string, MethodDef> = {
     RP02: { code: 'RP02', name: 'Reorder Point', automated: true, required: [P.rop], optional: [P.roq, P.max, P.safety], explain: 'When projected stock falls to or below the reorder point, order the reorder quantity (as many times as needed), or up to the maximum.' },
     RP03: { code: 'RP03', name: 'Economic Order Quantity', automated: true, required: [P.rop, 'orderCost', 'holdingCostRate'], optional: ['annualDemand', 'demandLookbackDays', P.safety], explain: 'At the reorder point, order the economic order quantity √(2 × annual demand × order cost ÷ yearly holding cost per unit). Annual demand is entered or derived from consumption.' },
     RP04: { code: 'RP04', name: 'Just-in-Time', automated: true, required: [], optional: [], explain: 'Hold no buffer: order exactly what reserved demand needs beyond available stock and open supply.' },
-    RP05: { code: 'RP05', name: 'Demand-driven', automated: true, required: [], optional: ['demandLookbackDays', 'coverageDays', P.safety], explain: 'Average daily consumption over the look-back window sets a reorder level (usage × lead time + safety) and a target (reorder level + usage × coverage days).' },
+    RP05: { code: 'RP05', name: 'Demand-driven', automated: false, required: [], optional: ['demandLookbackDays', 'coverageDays', P.safety], explain: 'Average daily consumption over the look-back window sets a reorder level (usage × lead time + safety) and a target (reorder level + usage × coverage days).' },
     RP06: { code: 'RP06', name: 'MRP-controlled', automated: true, required: [], optional: [P.safety], explain: 'Material requirements planning: net requirement = safety stock − (available after reservations + open supply), ordered lot for lot.' },
     RP07: { code: 'RP07', name: 'Direct purchase', automated: false, required: [], optional: [], explain: 'Bought directly against each demand; not replenished to stock.' },
-    RP08: { code: 'RP08', name: 'Emergency reserve', automated: true, required: [], optional: ['emergencyLevel', P.min, P.max], explain: 'Keep the emergency level at all times; any shortfall is ordered with high urgency.' },
-    RP09: { code: 'RP09', name: 'Rotable replenishment', automated: true, required: [P.min, P.max], optional: ['rotablesInRepair'], explain: 'Min-Max on serviceable units; units out for repair count as supply.' },
-    RP10: { code: 'RP10', name: 'Seasonal stocking', automated: true, required: [P.min, P.max, 'seasonalFactors'], optional: [], explain: 'Min-Max with both levels scaled by the seasonal factor of the month the order would arrive.' },
-    RP11: { code: 'RP11', name: 'Strategic buffer', automated: true, required: [], optional: ['strategicLevel', P.max], explain: 'Keep a strategic buffer level for supply security; any shortfall is ordered.' },
-    RP12: { code: 'RP12', name: 'Supplier-replenished', automated: true, required: [P.min], optional: [P.max, P.rop], explain: 'The supplier replenishes (VMI); MEMS raises a replenishment signal for the supplier instead of a purchase.' },
-    RP13: { code: 'RP13', name: 'Two-bin', automated: true, required: ['binQuantity'], optional: [], explain: 'When the first bin is empty (projected ≤ one bin), refill one bin.' },
-    RP14: { code: 'RP14', name: 'Kanban', automated: true, required: ['kanbanCardQuantity', 'kanbanCards'], optional: [], explain: 'Each empty kanban card triggers one card quantity.' },
-    RP15: { code: 'RP15', name: 'Periodic review', automated: true, required: ['reviewPeriodDays', P.max], optional: [], explain: 'Every review period, order up to the maximum. Between reviews nothing is ordered.' },
-    RP16: { code: 'RP16', name: 'Order-up-to', automated: true, required: [P.max], optional: [P.rop], explain: 'Whenever projected stock is below the reorder point (or the maximum), order up to the maximum.' },
-    RP17: { code: 'RP17', name: 'Forecast-driven', automated: true, required: ['forecastMonthlyDemand'], optional: ['coverageDays', P.safety], explain: 'Forecast monthly demand sets a reorder level (daily forecast × lead time + safety) and a target (reorder level + daily forecast × coverage days).' },
+    RP08: { code: 'RP08', name: 'Emergency reserve', automated: false, required: [], optional: ['emergencyLevel', P.min, P.max], explain: 'Keep the emergency level at all times; any shortfall is ordered with high urgency.' },
+    RP09: { code: 'RP09', name: 'Rotable replenishment', automated: false, required: [P.min, P.max], optional: ['rotablesInRepair'], explain: 'Min-Max on serviceable units; units out for repair count as supply.' },
+    RP10: { code: 'RP10', name: 'Seasonal stocking', automated: false, required: [P.min, P.max, 'seasonalFactors'], optional: [], explain: 'Min-Max with both levels scaled by the seasonal factor of the month the order would arrive.' },
+    RP11: { code: 'RP11', name: 'Strategic buffer', automated: false, required: [], optional: ['strategicLevel', P.max], explain: 'Keep a strategic buffer level for supply security; any shortfall is ordered.' },
+    RP12: { code: 'RP12', name: 'Supplier-replenished', automated: false, required: [P.min], optional: [P.max, P.rop], explain: 'The supplier replenishes (VMI) against the agreed levels; MEMS does not raise purchases or signals for it.' },
+    RP13: { code: 'RP13', name: 'Two-bin', automated: false, required: ['binQuantity'], optional: [], explain: 'When the first bin is empty (projected ≤ one bin), refill one bin.' },
+    RP14: { code: 'RP14', name: 'Kanban', automated: false, required: ['kanbanCardQuantity', 'kanbanCards'], optional: [], explain: 'Each empty kanban card triggers one card quantity.' },
+    RP15: { code: 'RP15', name: 'Periodic review', automated: false, required: ['reviewPeriodDays', P.max], optional: [], explain: 'Every review period, order up to the maximum. Between reviews nothing is ordered.' },
+    RP16: { code: 'RP16', name: 'Order-up-to', automated: false, required: [P.max], optional: [P.rop], explain: 'Whenever projected stock is below the reorder point (or the maximum), order up to the maximum.' },
+    RP17: { code: 'RP17', name: 'Forecast-driven', automated: false, required: ['forecastMonthlyDemand'], optional: ['coverageDays', P.safety], explain: 'Forecast monthly demand sets a reorder level (daily forecast × lead time + safety) and a target (reorder level + daily forecast × coverage days).' },
     RP18: { code: 'RP18', name: 'Non-stock', automated: false, required: [], optional: [], explain: 'Not held in stock; never replenished automatically.' },
 };
+/** Only these strategies start automatic replenishment: Min-Max, Reorder Point, EOQ, Just-in-Time and MRP. */
 export const AUTOMATED_METHODS = Object.values(METHODS).filter((m) => m.automated).map((m) => m.code);
 
 /** Labels and help for every parameter (also used by the material screen). */
@@ -113,10 +114,18 @@ export const PARAMS: Record<keyof Params, { label: string; hint: string }> = {
     forecastMonthlyDemand: { label: 'Forecast monthly demand', hint: 'Expected usage per month.' },
 };
 
-/** Legacy stocking policies map onto the strategies. */
-export function methodOf(strategy: unknown, legacyPolicy: unknown): string {
+/**
+ * The strategy that plans a material is the one chosen in Stock Control (replenishmentStrategy) and nothing else: an
+ * older stocking policy on its own never starts automatic replenishment. `_legacyPolicy` is accepted for callers that
+ * still pass it and is deliberately ignored; use `legacyMethodOf` only to label records written by the earlier engine.
+ */
+export function methodOf(strategy: unknown, _legacyPolicy?: unknown): string {
     const s = String(strategy ?? '').trim().toUpperCase();
-    if (METHODS[s]) return s;
+    return METHODS[s] ? s : '';
+}
+
+/** Label of a record written by the earlier MRP engine (stocking policy MINMAX / REORDER …). Display only. */
+export function legacyMethodOf(legacyPolicy: unknown): string {
     const legacy = String(legacyPolicy ?? '').trim().toUpperCase();
     if (METHODS[legacy]) return legacy;
     return ({ MINMAX: 'RP01', REORDER: 'RP02', JIT: 'RP04', NONSTOCK: 'RP18', ONDEMAND: 'RP07' } as Record<string, string>)[legacy] ?? '';
@@ -137,10 +146,18 @@ const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const pos = (v: number | null | undefined) => (v !== null && v !== undefined && Number.isFinite(v) && v > 0 ? v : null);
 const set = (v: number | null | undefined) => v !== null && v !== undefined && Number.isFinite(v) && v >= 0;
 
+/** Plans one material: only the automated strategies (RP01-RP04, RP06) ever produce a quantity. */
 export function plan(method: string, p: Params, s: Situation): PlanResult {
     const def = METHODS[method];
-    if (!def) return { kind: 'not_planned', reason: 'No replenishment strategy is set for this material and warehouse.' };
-    if (!def.automated) return { kind: 'not_planned', reason: `${def.code} ${def.name}: ${def.explain}` };
+    if (!def) return { kind: 'not_planned', reason: 'No replenishment strategy is set in Stock Control for this material and warehouse.' };
+    if (!def.automated) return { kind: 'not_planned', reason: `${def.code} ${def.name} is recorded for planning only; automatic replenishment runs for ${AUTOMATED_METHODS.join(', ')}.` };
+    return calculate(method, p, s);
+}
+
+/** The arithmetic of a strategy, without the automation gate (what-if figures and tests). Never raises anything by itself. */
+export function calculate(method: string, p: Params, s: Situation): PlanResult {
+    const def = METHODS[method];
+    if (!def) return { kind: 'not_planned', reason: 'No replenishment strategy is set in Stock Control for this material and warehouse.' };
     const missing = def.required.filter((k) => (k === 'seasonalFactors' ? !p.seasonalFactors : !set(p[k] as number | null)));
     if (missing.length) return { kind: 'incomplete', reason: `${def.code} ${def.name} needs ${missing.map((k) => PARAMS[k].label.toLowerCase()).join(', ')}.` };
 

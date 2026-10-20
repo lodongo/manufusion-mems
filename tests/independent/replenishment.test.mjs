@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { AUTOMATED_METHODS, METHODS, PARAMS, factorsOf, methodOf, openQuantity, plan, routeFor } from '../../backend/replenishmentPlan.ts';
+import { AUTOMATED_METHODS, METHODS, PARAMS, calculate, factorsOf, legacyMethodOf, methodOf, openQuantity, plan, routeFor } from '../../backend/replenishmentPlan.ts';
 import { STOCK_META_BY_KEY } from '../../backend/universalStockMetadata.ts';
 import { observeFirestoreWrite, withChangeTracking } from '../../backend/changeTracker.ts';
 import { mrpSweepDue } from '../../backend/automationEngine.ts';
@@ -17,15 +17,22 @@ const P = {
 };
 const S = { available: 0, openSupply: 0, consumed: 0, consumedDays: 90, arrivalMonth: 0, daysSinceReview: null };
 const run = (m, p = {}, s = {}) => plan(m, { ...P, ...p }, { ...S, ...s });
+// The arithmetic of strategies that are recorded for planning but not automated (what-if only).
+const calc = (m, p = {}, s = {}) => calculate(m, { ...P, ...p }, { ...S, ...s });
 
 test('every replenishment strategy of the MEMS stock metadata has a defined method; MRP is one of them', () => {
   const codes = STOCK_META_BY_KEY.get('replenishmentStrategies').items.map((i) => i.code);
   assert.deepEqual(Object.keys(METHODS).sort(), codes.sort());
   assert.equal(METHODS.RP06.name, 'MRP-controlled');
-  assert.deepEqual(Object.values(METHODS).filter((m) => !m.automated).map((m) => m.code).sort(), ['RP07', 'RP18']);
+  // Automatic replenishment runs only for Min-Max, Reorder Point, EOQ, Just-in-Time and MRP.
+  assert.deepEqual(AUTOMATED_METHODS, ['RP01', 'RP02', 'RP03', 'RP04', 'RP06']);
   for (const m of Object.values(METHODS)) for (const k of [...m.required, ...m.optional]) assert.ok(PARAMS[k], `${m.code} uses unknown parameter ${k}`);
-  assert.equal(methodOf('', 'MINMAX'), 'RP01');
-  assert.equal(methodOf('', 'REORDER'), 'RP02');
+  // The strategy comes from Stock Control only: an older stocking policy alone never starts replenishment.
+  assert.equal(methodOf('', 'MINMAX'), '');
+  assert.equal(methodOf('', 'REORDER'), '');
+  assert.equal(methodOf('RP01', 'MINMAX'), 'RP01');
+  assert.equal(legacyMethodOf('MINMAX'), 'RP01');
+  assert.equal(legacyMethodOf('REORDER'), 'RP02');
   assert.equal(methodOf('RP14', 'MINMAX'), 'RP14');
   assert.equal(methodOf('', 'STOCK'), '');
 });
@@ -36,8 +43,9 @@ test('Min-Max, Reorder Point and order-up-to', () => {
   assert.equal(run('RP01', { minimumLevel: 6 }).kind, 'incomplete');
   assert.equal(run('RP02', { reorderPoint: 10, reorderQuantity: 30 }, { available: -40 }).quantity, 60);
   assert.equal(run('RP02', { reorderPoint: 10, maximumLevel: 25 }, { available: 3 }).quantity, 22);
-  assert.equal(run('RP16', { maximumLevel: 50 }, { available: 49 }).quantity, 1);
-  assert.equal(run('RP16', { maximumLevel: 50, reorderPoint: 20 }, { available: 30 }).kind, 'no_need');
+  assert.equal(calc('RP16', { maximumLevel: 50 }, { available: 49 }).quantity, 1);
+  assert.equal(calc('RP16', { maximumLevel: 50, reorderPoint: 20 }, { available: 30 }).kind, 'no_need');
+  assert.equal(run('RP16', { maximumLevel: 50 }, { available: 49 }).kind, 'not_planned');
 });
 
 test('Economic order quantity from entered or derived annual demand', () => {
@@ -61,46 +69,50 @@ test('Just-in-time orders exactly the uncovered reserved demand; MRP nets requir
 
 test('Demand-driven and forecast-driven levels follow usage', () => {
   // 90 used in 90 days → 1/day; reorder level = 1 × 10 + 5 = 15; target = 15 + 1 × 30 = 45
-  const d = run('RP05', { safetyStock: 5 }, { available: 12, consumed: 90, consumedDays: 90 });
+  const d = calc('RP05', { safetyStock: 5 }, { available: 12, consumed: 90, consumedDays: 90 });
   assert.equal(d.trigger, 15);
   assert.equal(d.quantity, 33);
-  assert.equal(run('RP05', { safetyStock: 5 }, { available: 20, consumed: 0 }).kind, 'no_need');
-  const f = run('RP17', { forecastMonthlyDemand: 304, coverageDays: 20 }, { available: 50 });
+  assert.equal(calc('RP05', { safetyStock: 5 }, { available: 20, consumed: 0 }).kind, 'no_need');
+  const f = calc('RP17', { forecastMonthlyDemand: 304, coverageDays: 20 }, { available: 50 });
   assert.equal(f.trigger, 100);
   assert.equal(f.quantity, 250);
 });
 
 test('Emergency, strategic, rotable and seasonal stock', () => {
-  const e = run('RP08', { emergencyLevel: 4 }, { available: 1 });
+  const e = calc('RP08', { emergencyLevel: 4 }, { available: 1 });
   assert.equal(e.quantity, 3);
   assert.equal(e.urgency, 'high');
-  assert.equal(run('RP11', { strategicLevel: 100 }, { available: 70, openSupply: 10 }).quantity, 20);
-  assert.equal(run('RP09', { minimumLevel: 2, maximumLevel: 6, rotablesInRepair: 3 }, { available: 0 }).kind, 'no_need');
-  assert.equal(run('RP09', { minimumLevel: 2, maximumLevel: 6, rotablesInRepair: 1 }, { available: 0 }).quantity, 5);
+  assert.equal(calc('RP11', { strategicLevel: 100 }, { available: 70, openSupply: 10 }).quantity, 20);
+  assert.equal(calc('RP09', { minimumLevel: 2, maximumLevel: 6, rotablesInRepair: 3 }, { available: 0 }).kind, 'no_need');
+  assert.equal(calc('RP09', { minimumLevel: 2, maximumLevel: 6, rotablesInRepair: 1 }, { available: 0 }).quantity, 5);
   const factors = factorsOf('1,1,1,1,1,1,1,1,1,1,2,2');
-  assert.equal(run('RP10', { minimumLevel: 10, maximumLevel: 20, seasonalFactors: factors }, { available: 15, arrivalMonth: 10 }).quantity, 25);
-  assert.equal(run('RP10', { minimumLevel: 10, maximumLevel: 20, seasonalFactors: factors }, { available: 15, arrivalMonth: 3 }).kind, 'no_need');
+  assert.equal(calc('RP10', { minimumLevel: 10, maximumLevel: 20, seasonalFactors: factors }, { available: 15, arrivalMonth: 10 }).quantity, 25);
+  assert.equal(calc('RP10', { minimumLevel: 10, maximumLevel: 20, seasonalFactors: factors }, { available: 15, arrivalMonth: 3 }).kind, 'no_need');
   assert.equal(factorsOf('1,2,3'), null);
   assert.equal(factorsOf('1,1,1,1,1,1,1,1,1,1,1,11'), null);
 });
 
 test('Two-bin, kanban and periodic review', () => {
-  assert.equal(run('RP13', { binQuantity: 25 }, { available: 20 }).quantity, 25);
-  assert.equal(run('RP13', { binQuantity: 25 }, { available: 0 }).quantity, 50);
-  assert.equal(run('RP13', { binQuantity: 25 }, { available: 30 }).kind, 'no_need');
-  assert.equal(run('RP14', { kanbanCardQuantity: 10, kanbanCards: 5 }, { available: 27 }).quantity, 20);
-  assert.equal(run('RP14', { kanbanCardQuantity: 10, kanbanCards: 5 }, { available: 45 }).kind, 'no_need');
-  assert.equal(run('RP15', { reviewPeriodDays: 7, maximumLevel: 100 }, { available: 40, daysSinceReview: 3 }).kind, 'not_due');
-  assert.equal(run('RP15', { reviewPeriodDays: 7, maximumLevel: 100 }, { available: 40, daysSinceReview: 8 }).quantity, 60);
-  assert.equal(run('RP15', { reviewPeriodDays: 7, maximumLevel: 100 }, { available: 40, daysSinceReview: null }).quantity, 60);
+  assert.equal(calc('RP13', { binQuantity: 25 }, { available: 20 }).quantity, 25);
+  assert.equal(calc('RP13', { binQuantity: 25 }, { available: 0 }).quantity, 50);
+  assert.equal(calc('RP13', { binQuantity: 25 }, { available: 30 }).kind, 'no_need');
+  assert.equal(calc('RP14', { kanbanCardQuantity: 10, kanbanCards: 5 }, { available: 27 }).quantity, 20);
+  assert.equal(calc('RP14', { kanbanCardQuantity: 10, kanbanCards: 5 }, { available: 45 }).kind, 'no_need');
+  assert.equal(calc('RP15', { reviewPeriodDays: 7, maximumLevel: 100 }, { available: 40, daysSinceReview: 3 }).kind, 'not_due');
+  assert.equal(calc('RP15', { reviewPeriodDays: 7, maximumLevel: 100 }, { available: 40, daysSinceReview: 8 }).quantity, 60);
+  assert.equal(calc('RP15', { reviewPeriodDays: 7, maximumLevel: 100 }, { available: 40, daysSinceReview: null }).quantity, 60);
 });
 
 test('direct purchase and non-stock are never replenished; minimum order quantity and multiple apply to every method', () => {
   assert.equal(run('RP07').kind, 'not_planned');
   assert.equal(run('RP18').kind, 'not_planned');
   assert.equal(run('').kind, 'not_planned');
-  assert.equal(run('RP14', { kanbanCardQuantity: 10, kanbanCards: 5, orderMultiple: 12 }, { available: 37 }).quantity, 12);
-  assert.equal(run('RP08', { emergencyLevel: 4, minimumOrderQuantity: 10 }, { available: 1 }).quantity, 10);
+  assert.equal(calc('RP14', { kanbanCardQuantity: 10, kanbanCards: 5, orderMultiple: 12 }, { available: 37 }).quantity, 12);
+  assert.equal(run('RP01', { minimumLevel: 2, maximumLevel: 4, minimumOrderQuantity: 10 }, { available: 1 }).quantity, 10);
+  assert.equal(run('RP01', { minimumLevel: 2, maximumLevel: 4, orderMultiple: 12 }, { available: 1 }).quantity, 12);
+  // Every strategy outside RP01-RP04 and RP06 is recorded only: the engine never plans it, whatever its parameters.
+  for (const code of ['RP05', 'RP07', 'RP08', 'RP09', 'RP10', 'RP11', 'RP12', 'RP13', 'RP14', 'RP15', 'RP16', 'RP17', 'RP18'])
+    assert.equal(run(code, { minimumLevel: 5, maximumLevel: 10, emergencyLevel: 4, strategicLevel: 9, binQuantity: 3, kanbanCardQuantity: 2, kanbanCards: 2, reviewPeriodDays: 7, forecastMonthlyDemand: 30 }, { available: 0, consumed: 90 }).kind, 'not_planned', code);
 });
 
 test('who acts: company buying raises a purchase; consignment, VMI and owners get signals; unresolved ownership is blocked', () => {
@@ -154,7 +166,7 @@ test('Replenishment rights, segregation, templates, codes; earlier MRP rights ke
     const l = linkRouteToBlueprint({ path });
     assert.equal(l && `${l.module}-${l.area}-${l.action}`, code, path);
   }
-  assert.ok(AUTOMATED_METHODS.length === 16);
+  assert.ok(AUTOMATED_METHODS.length === 5);
 });
 
 test('engine and screens: unverified requests are private, verified in scope, audited; tabs save only their own fields', () => {
