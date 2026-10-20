@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import {MATERIAL_STOCK_DIMENSIONS,UNIVERSAL_STOCK_METADATA,STOCK_META_BY_KEY,stockedPolicyToMrp} from './stockPolicyConfig';
 import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, num, str, writeDoc, type Obj, type Plain } from './core';
 import { audit } from './audit';
 import { allowedNodeIds } from './positions';
@@ -833,7 +834,12 @@ export const procurementRoutes = {
         const existing=await getDoc(path);
         if(!existing&&ctx.role==='org_super_admin')await writeDoc(path,{items:incoterms,version:1,updatedAt:nowIso()},{exists:false});
         const [termDoc,uomDoc,stockDoc,paymentDoc]=await Promise.all([getDoc(path),getDoc('module_workspaces/PRC/metadata/unitsOfMeasure'),getDoc('module_workspaces/PRC/metadata/stockingPolicies'),getDoc('module_workspaces/PRC/metadata/paymentTerms')]);const defaultStock=[['STOCK','Stock held'],['NONSTOCK','Non-stock'],['ONDEMAND','Order on demand'],['CONSIGN','Consignment'],['MINMAX','Min/max replenishment'],['REORDER','Reorder point'],['JIT','Just in time']].map(([code,description])=>({code,description,enabled:true}));const defaultPayment=[['NET0','Due on receipt'],['NET7','Net 7 days'],['NET14','Net 14 days'],['NET15','Net 15 days'],['NET30','Net 30 days'],['NET45','Net 45 days'],['NET60','Net 60 days'],['NET90','Net 90 days'],['PREPAID','Payment in advance'],['COD','Cash on delivery'],['MILESTONE','Milestone payment'],['LC','Letter of credit']].map(([code,description])=>({code,description,enabled:true}));if(ctx.role==='org_super_admin')await Promise.all([stockDoc?Promise.resolve():writeDoc('module_workspaces/PRC/metadata/stockingPolicies',{items:defaultStock,version:1,updatedAt:nowIso()},{exists:false}),paymentDoc?Promise.resolve():writeDoc('module_workspaces/PRC/metadata/paymentTerms',{items:defaultPayment,version:1,updatedAt:nowIso()},{exists:false})]);
-        const raw=Array.isArray(uomDoc?.data.items)?uomDoc.data.items:[];const uoms=raw.filter(isObj).map(x=>({code:str(x.code)||str(x.id),name:str(x.name)||str(x.label)||str(x.title)||str(x.unitName)||str(x.description)||str(x.code),description:str(x.description)||str(x.name)||str(x.label)||str(x.code),categoryCode:str(x.categoryCode)||str(x.categoryId)||str(x.category),categoryName:str(x.categoryName)||str(x.categoryLabel)||str(x.category),subcategoryCode:str(x.subcategoryCode)||str(x.subCategoryCode)||str(x.subcategoryId)||str(x.subcategory),subcategoryName:str(x.subcategoryName)||str(x.subCategoryName)||str(x.subcategoryLabel)||str(x.subcategory),enabled:x.active!==false&&x.enabled!==false}));return {incoterms:Array.isArray(termDoc?.data.items)?termDoc.data.items:incoterms,uoms,stockingPolicies:Array.isArray(stockDoc?.data.items)?stockDoc.data.items:defaultStock,paymentTerms:Array.isArray(paymentDoc?.data.items)?paymentDoc.data.items:defaultPayment};
+        const stockDimensions=await Promise.all(UNIVERSAL_STOCK_METADATA.map(async def=>{
+            const doc=await getDoc('module_workspaces/PRC/metadata/'+def.key);
+            const items=Array.isArray(doc?.data.items)?doc.data.items.filter(isObj):def.items;
+            return {key:def.key,title:def.title,description:def.description,items:items.map(x=>({code:str(x.code),label:str(x.label)||str(x.name),description:str(x.description)||str(x.label),enabled:x.active!==false&&x.enabled!==false,category:str(x.category)})).filter(x=>x.code&&x.label)};
+        }));
+        const raw=Array.isArray(uomDoc?.data.items)?uomDoc.data.items:[];const uoms=raw.filter(isObj).map(x=>({code:str(x.code)||str(x.id),name:str(x.name)||str(x.label)||str(x.title)||str(x.unitName)||str(x.description)||str(x.code),description:str(x.description)||str(x.name)||str(x.label)||str(x.code),categoryCode:str(x.categoryCode)||str(x.categoryId)||str(x.category),categoryName:str(x.categoryName)||str(x.categoryLabel)||str(x.category),subcategoryCode:str(x.subcategoryCode)||str(x.subCategoryCode)||str(x.subcategoryId)||str(x.subcategory),subcategoryName:str(x.subcategoryName)||str(x.subCategoryName)||str(x.subcategoryLabel)||str(x.subcategory),enabled:x.active!==false&&x.enabled!==false}));return {incoterms:Array.isArray(termDoc?.data.items)?termDoc.data.items:incoterms,uoms,stockingPolicies:Array.isArray(stockDoc?.data.items)?stockDoc.data.items:defaultStock,paymentTerms:Array.isArray(paymentDoc?.data.items)?paymentDoc.data.items:defaultPayment,stockDimensions};
     })],
     'POST /api/org/inventory/material/bin/link': [orgRoute('org.inventory.material.bin.link', null, async ctx => {
         if(ctx.role!=='org_super_admin'&&!['INV.edit','INV.bin.link','WHS.bin.link','WMS.bin.link'].some(p=>hasPerm(ctx.permissions,p)))throw new HttpError(403,'Bin link permission required.');
@@ -921,12 +927,37 @@ export const procurementRoutes = {
         if(!links.includes(warehouseId))throw new HttpError(403,'Material not mapped to warehouse.');
         // Bins are linked and delinked only through the controlled bin link flow, never edited here.
         const numberFields=section==='inventory'?['reorderPoint','minimumLevel','maximumLevel','safetyStock','reorderQuantity','leadTimeDays']:['minimumOrderQuantity','orderMultiple','leadTimeDays','unitPrice'];
-        const textFields=section==='inventory'?['stockingPolicy','remarks']:['preferredVendor','vendorPartNumber','purchaseUom','priceCurrency','paymentTerms','incoterms','remarks'];
+        const textFields=section==='inventory'?['stockingPolicy','remarks',...MATERIAL_STOCK_DIMENSIONS.map(([field])=>field)]:['preferredVendor','vendorPartNumber','purchaseUom','priceCurrency','paymentTerms','incoterms','remarks'];
         const updates=isObj(ctx.body.values)?ctx.body.values:{};
         const has=(key:string)=>Object.prototype.hasOwnProperty.call(updates,key);
         const clean:Obj={};
         for(const key of numberFields)if(has(key)){const raw=updates[key];if(raw===''||raw===null){clean[key]='';continue;}const n=Number(raw);if(!Number.isFinite(n)||n<0||n>1e12)throw new HttpError(400,key+' must be a number of 0 or more.');if(key==='leadTimeDays'&&(!Number.isInteger(n)||n>3650))throw new HttpError(400,'Lead time must be a whole number of days up to 3650.');clean[key]=n;}
         for(const key of textFields)if(has(key)){const v=updates[key];if(v!==null&&typeof v!=='string'&&typeof v!=='number')throw new HttpError(400,'Invalid '+key+'.');const s=str(v).trim();if(s.length>(key==='remarks'?1000:120))throw new HttpError(400,key+' is too long.');clean[key]=s;}
+        if(section==='inventory'){
+            for(const [field,key] of MATERIAL_STOCK_DIMENSIONS){
+                if(!has(field)||!str(clean[field]))continue;
+                const master=STOCK_META_BY_KEY.get(key);
+                const db=await getDoc('module_workspaces/PRC/metadata/'+key);
+                const options=Array.isArray(db?.data.items)?db.data.items.filter(isObj):master?.items||[];
+                const selected=options.find(v=>str(v.code)===str(clean[field]));
+                if(!selected||selected.active===false||selected.enabled===false||selected.selectable===false)
+                    throw new HttpError(400,field+' must use an enabled code from MEMS Admin → Procurement metadata.');
+            }
+            if(has('replenishmentStrategy')){
+                // Preserve the MRP engine's existing stockingPolicy index and
+                // change tracker. The strategy is the canonical code for new records.
+                const newStrategy=str(clean.replenishmentStrategy);
+                const effective=stockedPolicyToMrp(newStrategy);
+                clean.stockingPolicy=effective||newStrategy;
+            }
+            if(has('stockingPolicy')&& !has('replenishmentStrategy')){
+                const stockCode=str(clean.stockingPolicy).toUpperCase();
+                if(!['','MINMAX','REORDER','STOCK','NONSTOCK','ONDEMAND','CONSIGN','JIT',...UNIVERSAL_STOCK_METADATA.find(x=>x.key==='replenishmentStrategies')!.items.map(x=>x.code)].includes(stockCode))
+                    throw new HttpError(400,'Choose an enabled replenishment policy from Procurement metadata.');
+                // Do not overwrite any separately adopted strategy if only the
+                // original legacy stocking policy is being updated.
+            }
+        }
         const path=root+'/'+(section==='inventory'?'inventory_material_info':'procurement_material_info')+'/'+id+'_'+warehouseId;
         const old=await getDoc(path);
         const merged:Record<string,unknown>={...(old?.data||{}),...clean};
