@@ -66,7 +66,6 @@ export const drkmsEngineeringRoutes={
     const path=await nodePath(ctx.orgId,nodeId);
     if(!canAt(ctx,'ADM.document_registry',path,scope))throw new HttpError(403,'No document access at the technical target location.');
     const documentScope=isObj(doc.data.scope)?doc.data.scope:{};
-    const ancestors=Array.isArray(documentScope.ancestorIds)?documentScope.ancestorIds.map(str):[];
     if(!path.includes(str(documentScope.nodeId)))throw new HttpError(403,'Equipment is outside this document’s applicable organizational hierarchy.');
     const key=`${type}_${targetId}`;
     const link={documentId:id,subtypeCode:subtype,targetType:type,targetId,orgId:ctx.orgId,
@@ -91,7 +90,9 @@ export const drkmsEngineeringRoutes={
     if(!canAt(ctx,'ADM.document_registry',path,scope))throw new HttpError(403,'No access to this asset location.');
     const applied=isObj(doc.data.scope)?str(doc.data.scope.nodeId):'';
     if(!applied||!path.includes(applied))throw new HttpError(403,'The model is outside the document applicability area.');
-    const modelKey={categoryCode:str(target.data.categoryCode),subcategoryCode:str(target.data.subcategoryCode),
+    if(!str(target.data.manufacturer)||!str(target.data.model))
+      throw new HttpError(409,'Model-wide document reuse requires a verified manufacturer and model on the asset.');
+    const modelKey={manufacturer:str(target.data.manufacturer),model:str(target.data.model),categoryCode:str(target.data.categoryCode),subcategoryCode:str(target.data.subcategoryCode),
        classCode:str(target.data.classCode)};
     if(!modelKey.categoryCode||!modelKey.subcategoryCode||!modelKey.classCode)throw new HttpError(409,'The asset needs its category, subcategory and class.');
     const link={documentId:id,subtypeCode:subtype,targetType:'equipment_model',modelKey,sourceAssetTag:assetId,
@@ -124,7 +125,7 @@ export const drkmsEngineeringRoutes={
       for(const link of links){
         const isExact=str(link.data.targetType)===type&&str(link.data.targetId)===targetId;
         const model=isObj(link.data.modelKey)?link.data.modelKey:null;
-        const modelMatch=str(link.data.targetType)==='equipment_model'&&!!model&&!!assetForModel&&matchingModel({categoryCode:str(model.categoryCode),subcategoryCode:str(model.subcategoryCode),classCode:str(model.classCode)}, {categoryCode:str(assetForModel.data.categoryCode),subcategoryCode:str(assetForModel.data.subcategoryCode),classCode:str(assetForModel.data.classCode)});
+        const modelMatch=str(link.data.targetType)==='equipment_model'&&!!model&&!!assetForModel&&matchingModel({manufacturer:str(model.manufacturer),model:str(model.model),categoryCode:str(model.categoryCode),subcategoryCode:str(model.subcategoryCode),classCode:str(model.classCode)}, {manufacturer:str(assetForModel.data.manufacturer),model:str(assetForModel.data.model),categoryCode:str(assetForModel.data.categoryCode),subcategoryCode:str(assetForModel.data.subcategoryCode),classCode:str(assetForModel.data.classCode)});
         if(isExact||modelMatch){
           visible.push({documentId:doc.id,title:str(doc.data.title),classCode:str(doc.data.classCode),
             subtypeCode:str(link.data.subtypeCode),status:str(doc.data.status)});
