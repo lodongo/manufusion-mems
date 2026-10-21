@@ -9,11 +9,12 @@ import DigitalRcaDraft from './DigitalRcaDraft';
 import DigitalRcaWorkspace from './DigitalRcaWorkspace';
 import EffectiveDocumentFiles from './EffectiveDocumentFiles';
 import DocumentRevisionHistory from './DocumentRevisionHistory';
+import DocumentSigning from './DocumentSigning';
 
 type ScopeNode = { id: string; name: string; level: string; parentId: string };
 type DocumentSetup = { config: { enabledClassCodes: string[]; defaultReviewMonths: number; enabledSubmodules?: string[] }; locations: ScopeNode[] };
 type DocumentRow = {
-  documentId: string; title: string; classCode: string; status: string;
+  documentId: string; title: string; classCode: string; status: string; createdBy?:string;
   revision: string; updatedAt: string; subtypeCode?:string; dmaicStage?:string;methodCode?:string;frameworkCode?:string;
 };
 const CLASSES = [
@@ -246,6 +247,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
                   <button type='button' disabled={!!reviewing||reviewReason.trim().length<10} onClick={()=>void reviewDecision(d.documentId,'reject')} className='min-h-10 rounded-lg border border-red-700 px-3 text-xs text-red-200 disabled:opacity-50'>Reject</button>
                 </div>
               </div>}
+              <DocumentSigning documentId={d.documentId} creatorDraft={d.status==='draft'}/>
               {d.status==='effective' && <EffectiveDocumentFiles documentId={d.documentId} />}
               {['effective','superseded','withdrawn','archived'].includes(d.status) && <DocumentRevisionHistory documentId={d.documentId}/> }
               {d.status==='draft' && <button type='button' disabled={!!reviewing} onClick={()=>void submitReview(d.documentId)} className='mt-2 min-h-10 rounded-lg border border-blue-500 px-3 text-xs font-semibold text-blue-200 disabled:opacity-40'>{reviewing===d.documentId?'Submitting…':'Submit for review'}</button>}
