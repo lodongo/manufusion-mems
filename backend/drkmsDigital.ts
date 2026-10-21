@@ -11,7 +11,7 @@ import {RCA_METHODS,RCA_METADATA_LISTS} from './docRcaDefaults';
 import {analyzeSteps,validMethodAnalysis} from './docRcaMethods';
 const DMAIC_PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'] as const;
 const PHASE_FIELDS:Record<string,string[]>={
- DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses','methodAnalysis'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan']
+ DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses','methodAnalysis','causeFindings'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan']
 };
 const master=async(key:string)=>{
  const source=await getDoc(`module_workspaces/DOC/metadata/${key}`);
@@ -51,7 +51,8 @@ export const drkmsDigitalRoutes={
    if(!doc||str(doc.data.subtypeCode)!=='RCA'||str(doc.data.createdBy)!==ctx.uid)throw new HttpError(403,'Only the investigator may edit this RCA.');
    const factors=(await master('rca5m1wFactors')).filter(x=>x.active!==false).map(x=>x.code);
    return {documentId:id,title:doc.data.title,rcaMethodCode:doc.data.rcaMethodCode,frameworkCode:doc.data.frameworkCode,
-      analyzeSteps:analyzeSteps(str(doc.data.rcaMethodCode),str(doc.data.frameworkCode),factors),rcaDmaic:doc.data.rcaDmaic};
+      analyzeSteps:analyzeSteps(str(doc.data.rcaMethodCode),str(doc.data.frameworkCode),factors),rcaDmaic:doc.data.rcaDmaic,
+      evidence:(await listDocs(`${docs(ctx.orgId,id)}/evidence`)).map(e=>({id:e.id,type:e.data.type,description:e.data.description,reference:e.data.reference,verificationStatus:e.data.verificationStatus}))};
   }),
  ],
 
@@ -116,11 +117,28 @@ export const drkmsDigitalRoutes={
      if(!validMethodAnalysis(str(doc.data.rcaMethodCode),str(doc.data.frameworkCode),factors,rows,false))
        throw new HttpError(400,'Analysis steps must match the RCA method and enabled MEMS Admin reference taxonomy.');
    }
+   if(phase==='ANALYZE' && data.causeFindings!==undefined){
+     const findings=data.causeFindings;
+     if(!Array.isArray(findings)||findings.length>25||findings.some(v=>!v||typeof v!=='object'||Array.isArray(v)
+       ||typeof v.text!=='string'||v.text.trim().length<10||v.text.length>2000
+       ||!['hypothesis','verified'].includes(v.status)
+       ||!Array.isArray(v.evidenceIds)||v.evidenceIds.length>20||v.evidenceIds.some((id:unknown)=>typeof id!=='string')))
+       throw new HttpError(400,'Each causal finding needs a description, verification status and evidence references.');
+     const evidence=await listDocs(`${docs(ctx.orgId,documentId)}/evidence`);
+     const ids=new Set(evidence.map(e=>e.id));
+     if(findings.some(v=>v.evidenceIds.some((id:string)=>!ids.has(id)) || (v.status==='verified'&&!v.evidenceIds.length)))
+       throw new HttpError(400,'Verified causes must cite registered evidence belonging to this investigation.');
+   }
    const existing=state.phases&&typeof state.phases==='object'?state.phases as Record<string,unknown>:{};
    const phaseData={...(existing[phase]&&typeof existing[phase]==='object'?existing[phase] as Record<string,unknown>:{}),...data};
    const completed=Array.isArray(state.completedPhases)?state.completedPhases.filter(v=>typeof v==='string') as string[]:[];
    const advance=ctx.body.complete===true;
    if(advance&&phase==='ANALYZE'){
+     const findings=phaseData.causeFindings;
+     if(!Array.isArray(findings)||!findings.some(v=>v&&typeof v==='object'&&v.status==='verified'
+         &&Array.isArray(v.evidenceIds)&&v.evidenceIds.length>0))
+       throw new HttpError(400,'Validate at least one root cause against registered evidence before completing Analyze.');
+
      const factors=(await master('rca5m1wFactors')).filter(item=>item.active!==false).map(item=>item.code);
      const rows=phaseData.methodAnalysis;
      if(!Array.isArray(rows)||!validMethodAnalysis(str(doc.data.rcaMethodCode),str(doc.data.frameworkCode),factors,rows as {key:string;text:string}[],true))
