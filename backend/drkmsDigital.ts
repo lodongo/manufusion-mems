@@ -7,14 +7,14 @@ import {canAt,scopeOf,nodePath} from './access';
 import {validateAiProposal,type AiProposal} from './drkmsKnowledgeContracts';
 import {validateRcaAnalysis,type RcaAiAnalysis} from './drkmsRcaAi';
 import {DOC_DEFAULT_LISTS} from './docDefaults';
-import {RCA_METHODS} from './docRcaDefaults';
+import {RCA_METHODS,RCA_METADATA_LISTS} from './docRcaDefaults';
 const DMAIC_PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'] as const;
 const PHASE_FIELDS:Record<string,string[]>={
  DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses','methodAnalysis'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan']
 };
 const master=async(key:string)=>{
  const source=await getDoc(`module_workspaces/DOC/metadata/${key}`);
- const fallback=DOC_DEFAULT_LISTS.find(list=>list.key===key);
+ const fallback=[...DOC_DEFAULT_LISTS,...RCA_METADATA_LISTS].find(list=>list.key===key);
  return (Array.isArray(source?.data.items)?source.data.items:fallback?.items??[]) as Array<{code:string;label:string;active?:boolean}>;
 };
 const allowedMethod=async(code:string)=>(await master('rcaMethods')).some(item=>item.code===code&&item.active!==false);
@@ -37,7 +37,7 @@ export const drkmsDigitalRoutes={
 
  'POST /api/org/drkms/rca/masters':[
   orgRoute('drkms.rca.masters','ADM.document_registry',async()=>{
-   const keys=['rcaMethods','rcaDmaicPhases','rca5m1e','rca5w1h','rcaCauseTypes','rcaVerification'];
+   const keys=['rcaMethods','rcaDmaicStages','rcaFrameworks','rca5m1wFactors','rca5w1h','rcaCauseTypes','rcaActionTypes','rcaVerification'];
    const entries=await Promise.all(keys.map(async key=>[key,(await master(key)).filter(item=>item.active!==false)] as const));
    return {masters:Object.fromEntries(entries)};
   }),
@@ -114,7 +114,7 @@ export const drkmsDigitalRoutes={
      const method=str(doc.data.rcaMethodCode);
      if(method==='5WHY'&&keys.some(k=>!/^WHY-[1-9][0-9]?$/.test(k)))throw new HttpError(400,'Five Whys needs numbered Why steps.');
      if(method==='ISH'){
-       const controlled=(await master('rca5m1e')).filter(item=>item.active!==false).map(item=>item.code);
+       const controlled=(await master('rca5m1wFactors')).filter(item=>item.active!==false).map(item=>item.code);
        if(keys.some(k=>!controlled.includes(k)))throw new HttpError(400,'Fishbone entries must use enabled MEMS Admin 5M1E categories.');
      }
    }
