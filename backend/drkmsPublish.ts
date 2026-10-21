@@ -1,4 +1,5 @@
 /** CoA-bound immutable document publication. Always fail closed without scanned source and reviewed authority. */
+import {rcaDmaicComplete} from './drkmsRcaGate';
 import {createHash} from 'node:crypto';
 import {HttpError,commitChecked,getDoc,isObj,listDocs,nowIso,str} from './core';
 import {orgRoute} from './guards';
@@ -33,7 +34,8 @@ export const drkmsPublishRoutes={
     throw new HttpError(400,'Unexpected transaction payload fields.');
    const path=`${ROOT(ctx.orgId)}/${documentId}`;
    const doc=await getDoc(path);
-   if(!doc||str(doc.data.status)!=='technical_verified'||str(doc.data.revision)!==revision)
+   if(doc && !rcaDmaicComplete(doc.data))throw new HttpError(409,'RCA must complete all DMAIC phases before publication.');
+    if(!doc||str(doc.data.status)!=='technical_verified'||str(doc.data.revision)!==revision)
     throw new HttpError(409,'An unchanged, independently verified revision is required.');
    if(str(doc.data.createdBy)!==ctx.uid)
     throw new HttpError(403,'Only the original submitter can execute their approved publication.');
