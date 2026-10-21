@@ -7,7 +7,7 @@ import MntTaskAssessment,{type TaskAssessment} from './MntTaskAssessment';
 import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
-import { AssemblyPicker, ChoicePicker, Info, useFullScreen, LEVEL_LABEL, compressPhoto, critColor, findIn, type ListGroup, type MntLists, type MntSetup, type Place } from './mntShared';
+import { AssemblyPicker, ChoicePicker, GroupPicker, Info, useFullScreen, LEVEL_LABEL, compressPhoto, critColor, findIn, type ListGroup, type MntLists, type MntSetup, type Place } from './mntShared';
 import { appConfirm } from '../components/dialogs';
 
 // Maintenance (MNT): work requests. A finding raised against an assembly, numbered WR + 8 digits by the server.
@@ -477,7 +477,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                         <TextArea id='wr-desc' label='What did you find? *' rows={3} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
                         <p className='text-right text-xs text-slate-500'>{description.length}/2000</p>
                         {pendingLink?.gembaTypeName && <p className='rounded-lg bg-brand/10 px-3 py-2 text-xs text-brand'>From {pendingLink.gembaTypeName} · linked Gemba observation</p>}
-                        <ChoicePicker title='Source of the finding' required groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
+                        <GroupPicker title='Source of the finding *' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
                     </>
                 )}
 
@@ -487,7 +487,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                         required
                         multi
                         max={MAX_IMPACTS}
-                        hint='Choose a category, then tick what this finding affects. The assessor sets the criticality.'
+                        hint='Select one or more impacts (up to 5): choose a category, tick the impacts, then change category to add more. The assessor sets the criticality.'
                         groups={lists.impacts}
                         selected={impactCodes}
                         onToggle={(c) => setImpactCodes(toggleImpact(c))}
@@ -1072,7 +1072,7 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
                 {detail.returnNote && <Alert tone='info'>Requested: {detail.returnNote}</Alert>}
                 <Field id='ed-title' label='Short title *' maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} />
                 <TextArea id='ed-desc' label='What did you find? *' rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
-                <ChoicePicker title='Source of the finding' required groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
+                <GroupPicker title='Source of the finding *' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
                 <ChoicePicker title='Impact' required multi max={MAX_IMPACTS} groups={lists.impacts} selected={impactCodes} onToggle={(c) => setImpactCodes(toggleImpact(c))} />
                 <div className='grid grid-cols-3 gap-2'>
                     {photos.map((p) => (
