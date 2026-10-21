@@ -259,6 +259,42 @@ export const drkmsRoutes = {
                 approvalStatus:'submit_via_existing_coa_transaction'};
         }),
     ],
+    'POST /api/org/drkms/documents/revise': [
+        orgRoute('drkms.documents.revise','ADM.document_registry',async ctx=>{
+            const predecessorId=str(ctx.body.documentId);
+            const reason=str(ctx.body.reason).trim();
+            if(!validId(predecessorId)||reason.length<12||reason.length>2000)
+                throw new HttpError(400,'Choose an effective document and explain the revision (12–2000 characters).');
+            const predecessor=await getDoc(`${base(ctx.orgId)}/${predecessorId}`);
+            if(!predecessor||str(predecessor.data.status)!=='effective'||!str(predecessor.data.effectiveRevisionId))
+                throw new HttpError(409,'Only a currently effective document can be revised.');
+            const location=predecessor.data.scope && typeof predecessor.data.scope==='object'
+                ? predecessor.data.scope as Record<string,unknown>:{};
+            const nodeId=str(location.nodeId);
+            if(!nodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))
+                throw new HttpError(403,'You cannot revise documents at this location.');
+            const existing=await listDocs(base(ctx.orgId));
+            if(existing.some(d=>str(d.data.supersedesDocumentId)===predecessorId &&
+                !['rejected','withdrawn','archived'].includes(str(d.data.status))))
+                throw new HttpError(409,'An active successor already exists. Continue that revision instead.');
+            const revNumber=Number(str(predecessor.data.revision));
+            if(!Number.isInteger(revNumber)||revNumber<0||revNumber>=999)
+                throw new HttpError(409,'Revision numbering requires administrator review.');
+            const id=randomId(10),now=nowIso();
+            const document={tenantId:ctx.orgId,documentId:id,title:str(predecessor.data.title),
+                classCode:str(predecessor.data.classCode),subtypeCode:str(predecessor.data.subtypeCode),
+                representation:str(predecessor.data.representation)||'native',scope:predecessor.data.scope,
+                securityClass:str(predecessor.data.securityClass)||'internal',
+                status:'draft',revision:String(revNumber+1).padStart(2,'0'),
+                supersedesDocumentId:predecessorId,supersedesRevisionId:str(predecessor.data.effectiveRevisionId),
+                revisionReason:reason,createdBy:ctx.uid,ownerUid:ctx.uid,createdAt:now,updatedAt:now,
+                verified:false,verifiedBy:'',effectiveRevisionId:'',hasSourceEvidence:false};
+            if(!(await writeDoc(`${base(ctx.orgId)}/${id}`,document,{exists:false})))
+                throw new HttpError(409,'Could not reserve new revision.');
+            await record(ctx,'drkms.document.revision_started',id,predecessorId);
+            return {document,previousDocumentId:predecessorId,previousStatus:'effective'};
+        }),
+    ],
     'POST /api/org/drkms/documents/create-draft': [
         orgRoute('drkms.documents.create_draft', 'ADM.document_registry', async ctx => {
             const title = str(ctx.body.title).trim();
