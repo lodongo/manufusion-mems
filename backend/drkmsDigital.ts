@@ -22,6 +22,20 @@ const allowedMethod=async(code:string)=>(await master('rcaMethods')).some(item=>
 const docs=(org:string,id:string)=>`organizations/${org}/drkms_documents/${id}`;
 const idOk=(s:string)=>/^[a-f0-9]{20}$/.test(s);
 export const drkmsDigitalRoutes={
+ 'POST /api/org/drkms/rca/reference':[
+  orgRoute('drkms.rca.reference','ADM.document_registry',async ()=>{
+   const keys=['rcaMethods','rcaFrameworks','rca5m1wFactors','rcaDmaicStages','rcaCauseTypes','rcaActionTypes'] as const;
+   const fallback=(await import('./docRcaDefaults')).RCA_METADATA_LISTS;
+   const lists=await Promise.all(keys.map(async key=>{
+     const stored=await getDoc(`module_workspaces/DOC/metadata/${key}`);
+     const def=fallback.find(x=>x.key===key);
+     const items=Array.isArray(stored?.data.items)?stored.data.items:def?.items??[];
+     return {key,items:items.filter((v):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v)).filter(v=>v.active!==false).map(v=>({code:str(v.code),label:str(v.label),description:str(v.description)}))};
+   }));
+   return {lists};
+  }),
+ ],
+
  'POST /api/org/drkms/rca/masters':[
   orgRoute('drkms.rca.masters','ADM.document_registry',async()=>{
    const keys=['rcaMethods','rcaDmaicPhases','rca5m1e','rca5w1h','rcaCauseTypes','rcaVerification'];
@@ -44,8 +58,15 @@ export const drkmsDigitalRoutes={
    const title=str(ctx.body.title).trim(),incidentReference=str(ctx.body.incidentReference).trim(),
     problem=str(ctx.body.problemStatement).trim(),scopeNodeId=str(ctx.body.scopeNodeId),
     methodCode=str(ctx.body.methodCode||'5WHY'),frameworkCode=str(ctx.body.frameworkCode||'5M1W');
-   if(!RCA_METHODS.some(m=>m[0]===methodCode))throw new HttpError(400,'Select a recognized RCA method.');
-   if(!['5M1E','5M1W','6M','4M','5W2H','ISNOT','6W'].includes(frameworkCode))throw new HttpError(400,'Select a recognized causal reference framework.');
+   const methodList=await getDoc('module_workspaces/DOC/metadata/rcaMethods');
+   const frameworkList=await getDoc('module_workspaces/DOC/metadata/rcaFrameworks');
+   const permitted=(doc:typeof methodList,code:string,fallbackCodes:readonly string[])=>{
+     if(!Array.isArray(doc?.data.items))return fallbackCodes.includes(code);
+     return doc.data.items.some(x=>x&&typeof x==='object'&&!Array.isArray(x)&&str(x.code)===code&&x.active!==false);
+   };
+   if(!permitted(methodList,methodCode,RCA_METHODS.map(m=>m[0])))throw new HttpError(400,'Choose an enabled RCA method in MEMS Admin.');
+   if(!permitted(frameworkList,frameworkCode,['5M1E','5M1W','6M','4M','5W2H','ISNOT','6W']))
+     throw new HttpError(400,'Choose an enabled reference framework in MEMS Admin.');
    if(title.length<3||title.length>200||problem.length<20||problem.length>8000||incidentReference.length>100)
     throw new HttpError(400,'Provide an RCA title, incident reference and substantive problem statement.');
    const node=await getDoc(`organizations/${ctx.orgId}/structure/${scopeNodeId}`);
