@@ -1,4 +1,4 @@
-import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc} from './core';
+import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc,commitChecked} from './core';
 import {orgRoute} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 const ID=/^[a-f0-9]{20}$/;
@@ -108,6 +108,34 @@ export const drkmsFormRoutes={
    if(nodeId&&canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),scope))visible.push({id:r.id,...r.data});
   }
   return {records:visible};
+ })],
+ 'POST /api/org/drkms/forms/review/inbox':[orgRoute('drkms.forms.review_inbox','ADM.document_review',async ctx=>{
+  const records=await listDocs(recordPath(ctx.orgId)),scope=await scopeOf(ctx),results=[];
+  for(const row of records){
+   if(str(row.data.status)!=='submitted_for_review')continue;
+   const nodeId=str(row.data.scopeNodeId);
+   if(str(row.data.createdBy)===ctx.uid||!nodeId||!canAt(ctx,'ADM.document_review',await nodePath(ctx.orgId,nodeId),scope))continue;
+   results.push({id:row.id,templateTitle:str(row.data.templateTitle),submittedAt:str(row.data.submittedAt),createdBy:str(row.data.createdBy),values:row.data.values,scopeNodeId:nodeId});
+  }
+  return {records:results};
+ })],
+ 'POST /api/org/drkms/forms/review/decision':[orgRoute('drkms.forms.review_decision','ADM.document_review',async ctx=>{
+  const id=str(ctx.body.recordId),decision=str(ctx.body.decision),reason=str(ctx.body.reason).trim();
+  if(!ID.test(id)||!['return','technical_reviewed'].includes(decision)||reason.length<12||reason.length>2000)
+   throw new HttpError(400,'Review decision and 12–2000 character justification required.');
+  const path=recordPath(ctx.orgId)+'/'+id,record=await getDoc(path);
+  if(!record||str(record.data.status)!=='submitted_for_review')throw new HttpError(409,'No submitted record to review.');
+  if(str(record.data.createdBy)===ctx.uid)throw new HttpError(403,'Document creator cannot independently review their own record.');
+  const nodeId=str(record.data.scopeNodeId);
+  if(!nodeId||!canAt(ctx,'ADM.document_review',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))
+   throw new HttpError(403,'Review is outside your scope.');
+  const date=nowIso(),next={...record.data,status:decision==='return'?'draft':'technical_reviewed',
+   unapproved:true,reviewedBy:ctx.uid,reviewedAt:date,reviewReason:reason,updatedAt:date};
+  const evidencePath=path+'/review_history/'+randomId(10);
+  if(!(await commitChecked([{path,data:next,precondition:{updateTime:record.updateTime}},
+   {path:evidencePath,data:{decision,reviewerUid:ctx.uid,reviewedAt:date,reason,recordId:id},precondition:{exists:false}}])))
+    throw new HttpError(409,'Form changed during review. Refresh.');
+  return {record:{id,...next},approved:false,published:false};
  })],
  'POST /api/org/drkms/forms/records/submit':[
   orgRoute('drkms.forms.records_submit','ADM.document_registry',async ctx=>{
