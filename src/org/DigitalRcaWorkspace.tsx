@@ -20,6 +20,9 @@ const EXTRA:Record<string,string[]>={
  'FMEA':['FAILURE-MODE','EFFECT','CAUSE','DETECTION-CONTROL'],
  'PARETO':['DATASET','RANKED-CAUSES','VITAL-FEW'],
  '8D':['TEAM','CONTAINMENT','ROOT-CAUSE','CORRECTIVE-VERIFICATION'],
+ 'A3':['BACKGROUND','CURRENT-STATE','TARGET','COUNTERMEASURES'],
+ 'CAUSAL':['EVENTS','CONDITIONS','ROOT-CAUSES'],
+ 'DMAIC':['BASELINE','HYPOTHESIS','STATISTICAL-TEST'],
  'KT':['IS-IS-NOT','DISTINCTIONS','CHANGES','POSSIBLE-CAUSES'],
  'BOWTIE':['TOP-EVENT','THREATS','PREVENTIVE-BARRIERS','CONSEQUENCES','RECOVERY-BARRIERS'],
  'CHANGE':['BASELINE','CHANGES','DIFFERENCES'],
@@ -53,7 +56,7 @@ export default function DigitalRcaWorkspace({documents}:{documents:Array<{docume
  };
  const phase=workspace?.rcaDmaic?.currentPhase??'DEFINE';
  const method=workspace?.rcaMethodCode??'5WHY';
- const prompts=method==='ISH'?(master?.masters.rca5m1e??[]).map(m=>[m.code,m.label]):(EXTRA[method]??['OBSERVATIONS','HYPOTHESES','VERIFICATION']).map(k=>[k,k.replaceAll('-',' ')]);
+ const prompts=method==='ISH'?(master?.masters.rca5m1wFactors??[]).map(m=>[m.code,m.label]):(EXTRA[method]??['OBSERVATIONS','HYPOTHESES','VERIFICATION']).map(k=>[k,k.replaceAll('-',' ')]);
  const candidates=documents.filter(d=>d.subtypeCode==='RCA'&&d.status==='draft');
  return <Card><div className='space-y-3'>
    <h2 className='font-semibold text-white'>Continue DMAIC investigation</h2>
@@ -76,7 +79,7 @@ export default function DigitalRcaWorkspace({documents}:{documents:Array<{docume
        {prompts.map(([key,label])=><label key={key} className='block text-sm text-slate-200'>{label}
          <textarea rows={2} className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white' value={analysis[key]??''} onChange={e=>setAnalysis(prev=>({...prev,[key]:e.target.value}))}/>
        </label>)}
-       <p className='text-xs text-slate-400'>Record source references and distinguish hypotheses from verified root causes. 5M1E categories are centrally controlled.</p>
+       <p className='text-xs text-slate-400'>Record source references and distinguish hypotheses from verified root causes. 5M1W/5M1E categories are centrally controlled in MEMS Admin.</p>
     </div>}
     <div className='grid grid-cols-2 gap-2'>
       <button type='button' disabled={busy} onClick={()=>void save(false)} className='min-h-11 rounded-lg border border-slate-600 text-sm text-white disabled:opacity-50'>Save progress</button>
