@@ -9,7 +9,7 @@ import DigitalRcaDraft from './DigitalRcaDraft';
 import EffectiveDocumentFiles from './EffectiveDocumentFiles';
 
 type ScopeNode = { id: string; name: string; level: string; parentId: string };
-type DocumentSetup = { config: { enabledClassCodes: string[]; defaultReviewMonths: number }; locations: ScopeNode[] };
+type DocumentSetup = { config: { enabledClassCodes: string[]; defaultReviewMonths: number; enabledSubmodules?: string[] }; locations: ScopeNode[] };
 type DocumentRow = {
   documentId: string; title: string; classCode: string; status: string;
   revision: string; updatedAt: string;
@@ -22,7 +22,7 @@ const CLASSES = [
  ['TMP','Template'], ['REG','Register'], ['REC','Record'], ['RPT','Report'],
 ] as const;
 
-export default function DocumentRegistryPage({ canConfigure, canReview, mode = 'register' }: { canConfigure: boolean; canReview: boolean; mode?: 'register'|'engineering'|'sds'|'rca'|'review'|'knowledge'|'forms' }) {
+export default function DocumentRegistryPage({ canConfigure, canReview, mode = 'register' }: { canConfigure: boolean; canReview: boolean; mode?: 'register'|'engineering'|'sds'|'rca'|'review'|'knowledge'|'forms'|'config' }) {
   const { data, error, loading, reload } = useLoad(
     () => callBackend<{ documents: DocumentRow[] }>('/api/org/drkms/documents/list', {}), []
   );
@@ -40,6 +40,8 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
   const [configBusy, setConfigBusy] = useState(false);
   const [reviewMonths, setReviewMonths] = useState(24);
   const [enabledClasses, setEnabledClasses] = useState<string[]>([]);
+  const [enabledSubmodules,setEnabledSubmodules]=useState<string[]>(['register','engineering','sds','rca','review','knowledge','forms']);
+  useEffect(()=>{if(setup.data?.config) setEnabledSubmodules(setup.data.config.enabledSubmodules??['register','engineering','sds','rca','review','knowledge','forms']);},[setup.data?.config]);
   useEffect(() => { if (setup.data?.config.defaultReviewMonths) setReviewMonths(setup.data.config.defaultReviewMonths); }, [setup.data?.config.defaultReviewMonths]);
   useEffect(() => { if (setup.data?.config.enabledClassCodes) setEnabledClasses(setup.data.config.enabledClassCodes); }, [setup.data?.config.enabledClassCodes]);
   const [settingsNotice, setSettingsNotice] = useState('');
@@ -56,6 +58,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
       await callBackend('/api/org/drkms/configure', {
         enabledClassCodes: enabledClasses,
         defaultReviewMonths: reviewMonths,
+        enabledSubmodules,
       });
       setSettingsNotice('Document settings saved.');
       setup.reload();
@@ -92,8 +95,8 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
     finally { setBusy(false); }
   };
   return <div className='space-y-4'>
-    <PageTitle title={({register:'Document register',engineering:'Engineering & equipment library',sds:'SHEQ SDS / MSDS',rca:'Digital RCA & investigations',review:'Review & approvals',knowledge:'Knowledge & troubleshooting',forms:'Digital forms & records'} as Record<string,string>)[mode]} subtitle='Documentation & Records (DOC) · Controlled enterprise knowledge' />
-    {mode==='register' && canConfigure && <Card>
+    <PageTitle title={({register:'Document register',engineering:'Engineering & equipment library',sds:'SHEQ SDS / MSDS',rca:'Digital RCA & investigations',review:'Review & approvals',knowledge:'Knowledge & troubleshooting',forms:'Digital forms & records',config:'DOC configuration'} as Record<string,string>)[mode]} subtitle='Documentation & Records (DOC) · Controlled enterprise knowledge' />
+    {(mode==='config'||mode==='register') && canConfigure && <Card>
       <h2 className='mb-2 text-base font-semibold text-white'>Organization document settings</h2>
       <p className='mb-3 text-xs text-slate-400'>Global document classifications are inherited; locations come from the existing organization hierarchy.</p>
       <label className='block text-sm text-slate-200'>Default review cycle (months)
@@ -109,6 +112,11 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
           </label>)}
         </div>
         <p className='text-xs text-slate-400'>Other global classifications retain their existing enabled status.</p>
+      </fieldset>
+      <fieldset className='mt-3 space-y-2'><legend className='text-sm font-medium text-slate-200'>Enabled DOC submodules</legend>
+        {([['register','Document register'],['engineering','Engineering & equipment library'],['sds','SHEQ SDS / MSDS'],['rca','Digital RCA & investigations'],['review','Review & approvals'],['knowledge','Knowledge & troubleshooting'],['forms','Digital forms & records']] as const).map(([key,label])=><label key={key} className='flex min-h-10 items-center gap-2 text-sm text-slate-200'>
+          <input type='checkbox' checked={enabledSubmodules.includes(key)} onChange={e=>setEnabledSubmodules(old=>e.target.checked?[...old,key]:old.filter(v=>v!==key))}/>{label}
+        </label>)}
       </fieldset>
       <button type='button' disabled={configBusy || enabledClasses.length===0 || !Number.isInteger(reviewMonths) || reviewMonths < 1 || reviewMonths > 120}
         onClick={() => void updateSettings()} className='mt-3 min-h-11 rounded-lg border border-slate-600 px-4 text-sm font-semibold text-white'>
