@@ -6,6 +6,7 @@ export default function DigitalRcaDraft({locations,onCreated}:{locations:Node[];
  const [title,setTitle]=useState(''),[incidentReference,setReference]=useState(''),[problemStatement,setProblem]=useState('');
  const [methodCode,setMethod]=useState('5WHY');
  const [scopeNodeId,setScope]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
+ const [methodCode,setMethod]=useState('5WHY'),[frameworkCode,setFramework]=useState('5M1W');
  const create=async()=>{
   setBusy(true);setNotice('');
   try{
@@ -28,6 +29,17 @@ export default function DigitalRcaDraft({locations,onCreated}:{locations:Node[];
    </select>
   </label>
   <p className='text-xs text-slate-400'>The selected method guides analysis within the mandatory Define → Measure → Analyze → Improve → Control workflow. 5W1H supports problem definition; 5M1E supports cause classification.</p>
+  <label className='block text-sm text-white'>RCA analysis method
+   <select value={methodCode} onChange={e=>setMethod(e.target.value)} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
+    {[['5WHY','Five Whys'],['ISH','Ishikawa / Fishbone'],['FTA','Fault Tree Analysis'],['FMEA','FMEA'],['8D','Eight Disciplines'],['A3','A3 Problem Solving'],['KT','Kepner-Tregoe'],['PARETO','Pareto Analysis'],['CAUSAL','Causal Factor Tree'],['BOWTIE','Bow-Tie'],['DMAIC','DMAIC Analysis']].map(([code,label])=><option key={code} value={code}>{label}</option>)}
+   </select>
+  </label>
+  <label className='block text-sm text-white'>Standardized causal reference
+   <select value={frameworkCode} onChange={e=>setFramework(e.target.value)} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
+    {[['5M1W','5M1W · People, Machine, Method, Material, Measurement, Workplace'],['5M1E','5M + Environment'],['6M','6M'],['4M','4M'],['5W2H','5W2H'],['ISNOT','Is / Is Not'],['6W','5W1H']].map(([code,label])=><option key={code} value={code}>{label}</option>)}
+   </select>
+  </label>
+  <p className='text-xs text-slate-400'>All methods follow DMAIC: Define → Measure → Analyze → Improve → Control. Standard reference definitions are maintained under MEMS Admin → DOC Metadata.</p>
   <label className='block text-sm text-white'>Problem statement<textarea rows={4} value={problemStatement} onChange={e=>setProblem(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/></label>
   <button type='button' onClick={()=>void create()} disabled={busy||title.trim().length<3||problemStatement.trim().length<20||!scopeNodeId} className='min-h-11 w-full rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white disabled:opacity-50'>{busy?'Registering…':'Start RCA investigation'}</button>
   {notice&&<p role='status' className='text-xs text-slate-200'>{notice}</p>}
