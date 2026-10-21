@@ -369,7 +369,7 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
                     <span className='min-w-0 flex-1 truncate font-semibold text-white'>{headerTitle}</span>
                     <UserChip session={session} compact onClick={() => go('profile')} />
                 </header>
-                <main className='mx-auto w-full max-w-4xl px-4 py-6 lg:px-8 lg:py-8'>
+                <main className='w-full min-w-0 max-w-none px-4 py-6 lg:px-6 xl:px-8 lg:py-8'>
 
                     {content}
                 </main>
