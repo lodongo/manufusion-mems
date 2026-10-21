@@ -27,6 +27,12 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
    setRecordId(result.record.id);records.reload();setNotice('Unapproved draft record saved.');
   }catch(e){setNotice(e instanceof Error?e.message:'Could not save form.')}finally{setBusy(false)}
  };
+ const submit=async()=>{if(!recordId)return;setBusy(true);setNotice('');
+  try{await callBackend('/api/org/drkms/forms/records/submit',{recordId});
+   setNotice('Submitted for review. This form remains unapproved and cannot be published or officially signed.');records.reload();
+  }catch(e){setNotice(e instanceof Error?e.message:'Could not submit draft.');}
+  finally{setBusy(false);}
+ };
  const exportDraft=()=>{if(!template)return;
   const pdf=new jsPDF({unit:'mm',format:'a4'}),w=pdf.internal.pageSize.getWidth();
   pdf.setFont('helvetica','bold');pdf.setFontSize(15);pdf.text(template.title,15,22);
@@ -100,7 +106,7 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
     </select>
     {referenceModule&&<input aria-label='Source record identifier' value={referenceId} onChange={e=>setReferenceId(e.target.value)} placeholder='Existing event or asset record ID' className='min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/>}
    </div>}
-   {template&&<div className='flex flex-wrap gap-2'><button type='button' disabled={busy} onClick={()=>void save()} className='min-h-11 rounded-lg bg-blue-600 px-3 text-sm text-white'>Save unapproved draft</button><button type='button' onClick={exportDraft} className='min-h-11 rounded-lg border border-amber-600 px-3 text-sm text-amber-200'>Export draft PDF</button></div>}
+   {template&&<div className='flex flex-wrap gap-2'><button type='button' disabled={busy} onClick={()=>void save()} className='min-h-11 rounded-lg bg-blue-600 px-3 text-sm text-white'>Save unapproved draft</button><button type='button' onClick={exportDraft} className='min-h-11 rounded-lg border border-amber-600 px-3 text-sm text-amber-200'>Export draft PDF</button>{recordId&&<button type='button' disabled={busy} onClick={()=>void submit()} className='min-h-11 rounded-lg border border-blue-500 px-3 text-sm text-blue-200 disabled:opacity-50'>Submit for review (not approval)</button>}</div>}
    <h3 className='mt-4 text-sm font-medium text-white'>My draft records</h3>
    {records.data?.records.map(r=><button key={r.id} type='button' onClick={()=>{setSelected(r.templateId);setValues(r.values);setRecordId(r.id);setReferenceModule(r.operationalReference?.module??'');setReferenceId(r.operationalReference?.recordId??'')}} className='mt-2 block min-h-10 w-full rounded-lg border border-slate-700 px-3 text-left text-sm text-slate-200'>{r.id} · Draft (unapproved)</button>)}
   </Card>
