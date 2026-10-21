@@ -61,6 +61,11 @@ export const drkmsPublishRoutes={
    };
    const fingerprint=publicationFingerprint(documentId,revision,sources,metadata);
    if(fingerprint!==contentFingerprint)throw new HttpError(409,'Document source changed after approval was requested.');
+   // A creator-assigned signing schedule is a mandatory release condition.
+   const slots=await listDocs(path+'/signature_slots');
+   if(slots.some(slot=>str(slot.data.status)!=='signed'||str(slot.data.contentHash)!==fingerprint
+      ||str(slot.data.signedBy)!==str(slot.data.signerUid)||!/^[a-f0-9]{64}$/.test(str(slot.data.proof))))
+    throw new HttpError(409,'All assigned authorities must sign the exact verified document before publication.');
    const installed=wiredTransactionInventory().filter(r=>r.name==='drkms.documents.publish');
    if(installed.length!==1||!installed[0].code)throw new HttpError(409,'Publication transaction not installed.');
    const code=installed[0].code;
@@ -101,7 +106,8 @@ export const drkmsPublishRoutes={
     documentFingerprint:fingerprint,sourceFiles:sources.map(({fileId,sha256,mime,bytes})=>({fileId,sha256,mime,bytes})),
     title:str(doc.data.title),classCode:str(doc.data.classCode),subtypeCode:str(doc.data.subtypeCode),
     scope:doc.data.scope,approvedBy:approvalId,verifiedBy:str(doc.data.verifiedBy),
-    publishedBy:ctx.uid,publishedAt:releasedAt,status:'effective',immutable:true};
+    publishedBy:ctx.uid,publishedAt:releasedAt,status:'effective',immutable:true,
+    signatureProofs:slots.map(s=>({slotId:s.id,signerUid:str(s.data.signedBy),label:str(s.data.label),signedAt:str(s.data.signedAt),proof:str(s.data.proof),position:s.data.position}))};
    const saved=await commitChecked([
     {path:path+'/revisions/'+revisionId,data:snapshot,precondition:{exists:false}},
     {path,data:{...doc.data,status:'effective',effectiveRevisionId:revisionId,publishedAt:releasedAt,
