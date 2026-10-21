@@ -29,6 +29,27 @@ async function fingerprint(orgId:string,documentId:string){
  scopeNodeId:str(location.nodeId),verifiedBy:str(doc.data.verifiedBy),verifiedAt:str(doc.data.verifiedAt),updatedAt:str(doc.data.updatedAt)})};
 }
 export const drkmsSignatureRoutes={
+ 'POST /api/org/drkms/signatures/verify':[
+  orgRoute('drkms.signatures.verify',null,async ctx=>{
+   const documentId=str(ctx.body.documentId),proof=str(ctx.body.proof);
+   if(!ID.test(documentId)||!/^[a-f0-9]{64}$/.test(proof))throw new HttpError(400,'Valid document and verification code required.');
+   const path=root(ctx.orgId,documentId),doc=await getDoc(path);
+   if(!doc)throw new HttpError(404,'Document not found in your organization.');
+   const location=doc.data.scope&&typeof doc.data.scope==='object'?doc.data.scope as Record<string,unknown>:{};
+   if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,str(location.nodeId)),await scopeOf(ctx)))
+    throw new HttpError(403,'Document is outside your organizational access.');
+   const revisions=await listDocs(path+'/revisions');
+   for(const revision of revisions){
+    if(revision.data.immutable!==true||str(revision.data.tenantId)!==ctx.orgId)continue;
+    const proofs=Array.isArray(revision.data.signatureProofs)?revision.data.signatureProofs as Array<Record<string,unknown>>:[];
+    const match=proofs.find(item=>str(item.proof)===proof);
+    if(match)return {authentic:true,documentId,title:str(revision.data.title),revision:str(revision.data.revision),
+      revisionId:revision.id,signerUid:str(match.signerUid),label:str(match.label),signedAt:str(match.signedAt),
+      currentStatus:str(doc.data.status),isCurrent:str(doc.data.effectiveRevisionId)===revision.id&&str(doc.data.status)==='effective'};
+   }
+   return {authentic:false,documentId};
+  }),
+ ],
  'POST /api/org/drkms/signatures/assign':[
   orgRoute('drkms.signatures.assign','ADM.document_registry',async ctx=>{
    const documentId=str(ctx.body.documentId),signerUid=str(ctx.body.signerUid),label=str(ctx.body.label).trim();
