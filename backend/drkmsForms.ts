@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {transactionPayloadHash} from './unifiedApprovalProof';
 import {validPosition} from './drkmsSignatures';
 import {orgRoute} from './guards';
+import {orgUsers} from './org';
 import {canAt,nodePath,scopeOf} from './access';
 const ID=/^[a-f0-9]{20}$/;
 const types=new Set(['text','long_text','number','date','yes_no','select']);
@@ -86,6 +87,13 @@ export function formRecordFingerprint(record:Record<string,unknown>):string{
 const templatePath=(o:string)=>`organizations/${o}/drkms_form_templates`;
 const recordPath=(o:string)=>`organizations/${o}/drkms_form_records`;
 export const drkmsFormRoutes={
+ 'POST /api/org/drkms/forms/signers/list':[orgRoute('drkms.forms.signers_list','ADM.document_registry',async ctx=>{
+  const rows=await orgUsers(ctx.orgId);
+  const users=rows.filter(u=>str(u.data.status)!=='disabled'&&str(u.data.status)!=='deleted')
+   .slice(0,1000).map(u=>({uid:u.id,firstName:str(u.data.firstName),lastName:str(u.data.lastName),
+      role:str(u.data.role)})).sort((a,b)=>`${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
+  return {users};
+ })],
  'POST /api/org/drkms/forms/templates/list':[orgRoute('drkms.forms.templates_list','ADM.document_registry',async ctx=>{
   const data=await listDocs(templatePath(ctx.orgId)),scope=await scopeOf(ctx),templates=[];
   for(const t of data){const nodeId=str(t.data.scopeNodeId);if(nodeId&&canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),scope))templates.push({id:t.id,...t.data});}
