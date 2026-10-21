@@ -69,6 +69,7 @@ const toHome = (path = '') => navigate(path ? `${ROUTE}/${path}` : ROUTE);
 
 const MODULE_LINKS: Record<string, LinkItem[]> = {
     DOC: [
+        {label:'DOC configuration',path:'doc_config',permission:'ADM.document_config'},
         {label:'Document register',path:'doc_register',permission:'ADM.document_registry'},
         {label:'Engineering & equipment library',path:'doc_engineering',permission:'ADM.document_registry'},
         {label:'SHEQ SDS / MSDS',path:'doc_sds',permission:'ADM.document_registry'},
@@ -386,10 +387,10 @@ export default function OrgHomePage({
         content = <ModuleWorkspace menu={activeModule} selectedFeature={featureIndex !== undefined && Number.isInteger(featureIndex) && featureIndex >= 0 && featureIndex < activeModule.capabilities.length ? featureIndex : undefined} />;
     } else if (activeMenu?.module.code === 'DOC' && section.startsWith('doc_')) {
         const mode = section.slice(4);
-        const supported = ['register','engineering','sds','rca','review','knowledge','forms'];
+        const supported = ['register','engineering','sds','rca','review','knowledge','forms','config'];
         if (supported.includes(mode)) {
             content = <DocumentRegistryPage
-                mode={mode as 'register'|'engineering'|'sds'|'rca'|'review'|'knowledge'|'forms'}
+                mode={mode as 'register'|'engineering'|'sds'|'rca'|'review'|'knowledge'|'forms'|'config'}
                 canConfigure={hasPerm(data.permissions,'ADM.document_config')}
                 canReview={hasPerm(data.permissions,'ADM.document_review')} />;
         } else content = <Alert tone='error'>Unknown documentation workspace.</Alert>;
