@@ -15,6 +15,18 @@ export const RCA_METHODS=[
 const mk=(values:readonly (readonly [string,string,...string[]])[])=>
  values.map(([code,label,description])=>({code,label,description:description??label,active:true}));
 export const RCA_METADATA_LISTS=[
+ {key:'rcaTriggerTypes',title:'RCA incident and event triggers',description:'Codified originating sources for investigations; source verification and tenant scope are mandatory.',version:1,items:mk([
+ ['MNT_WR','Maintenance breakdown / work request','Maintenance work request linked to the investigated breakdown'],
+ ['MNT_WO','Maintenance work order / equipment failure','Maintenance work order linked to equipment failure'],
+ ['MFG_QUALITY','Manufacturing quality deviation','Product, process, packaging or production quality failure'],
+ ['MFG_PROCESS','Manufacturing process incident','Production interruption, scrap, yield or process instability'],
+ ['SAF_INCIDENT','Safety incident','Injury, unsafe event or reportable safety occurrence'],
+ ['SAF_NEAR_MISS','Safety near miss','Potential incident or hazardous occurrence without harm'],
+ ['QLT_NONCONFORMANCE','Quality nonconformance','Product, audit or process nonconformance'],
+ ['ENV_EVENT','Environmental incident','Spill, emission, waste or environmental deviation'],
+ ['AUD_FINDING','Audit finding','Internal, supplier, customer or statutory audit finding'],
+ ['OTHER','Other controlled event','Source event not yet supported by a direct MEMS connector']
+ ])},
  {key:'rcaMethods',title:'RCA analysis methods',description:'User-selectable investigation techniques governed by DMAIC stages.',version:1,items:mk(RCA_METHODS)},
  {key:'rcaFrameworks',title:'RCA standardized reference frameworks',description:'Controlled causal taxonomies and observation prompts.',version:1,items:mk([
  ['5M1E','5M + Environment','Man/People, Machine, Method, Material, Measurement, Mother Nature/Environment'],
