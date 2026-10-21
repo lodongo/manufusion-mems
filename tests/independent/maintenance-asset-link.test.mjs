@@ -23,7 +23,10 @@ test('missing, disagreeing and duplicate mappings fail instead of offering unrel
 test('Work Request wizard has five steps, no asset selection page, and backend is authoritative',()=>{
  const ui=readFileSync(new URL('../../src/org/WorkRequests.tsx',import.meta.url),'utf8');
  const backend=readFileSync(new URL('../../backend/maintenance.ts',import.meta.url),'utf8');
- assert.match(ui,/STEPS = \['Where', 'Finding', 'Criticality', 'Photos', 'Review'\]/);
+ assert.match(ui,/STEPS = \['Where', 'Finding', 'Impact', 'Photos', 'Review'\]/);
+ assert.doesNotMatch(ui,/Failure mode \(optional\)/,'The requester no longer chooses a failure mode');
+ assert.match(ui,/MAX_IMPACTS = 5/);
+ assert.match(ui,/useFullScreen\(!created\)/,'Raising a request runs full screen on phones');
  assert.doesNotMatch(ui,/\{step === 1 && place &&/);
  assert.match(ui,/setAssetTag\(p.defaultAssetTag\)/);
  assert.match(backend,/resolveMaintenanceEquipmentAsset/);

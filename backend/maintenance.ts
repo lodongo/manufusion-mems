@@ -354,30 +354,32 @@ function wrOut(doc: Doc) {
     };
 }
 
+/**
+ * What the requester reports. Criticality is set by the assessor during assessment, and the failure mode is optional;
+ * either is kept only when supplied, so a requester edit never clears what is already recorded.
+ */
+const MAX_IMPACTS = 5;
 async function readFinding(l: Lists, b: Record<string, unknown>) {
     const title = clean(b.title, 120);
     const description = str(b.description).trim().slice(0, 2000);
     if (title.length < 5) throw new HttpError(400, 'Give the request a short title (5 to 120 characters).');
     if (description.length < 10) throw new HttpError(400, 'Describe what you found (10 to 2000 characters).');
     const source = pickGrouped(l.sources, str(b.sourceCode), 'source of the finding')!;
-    const crit = pick(l.criticality, str(b.criticalityCode), 'criticality')!;
+    const crit = str(b.criticalityCode) ? pick(l.criticality, str(b.criticalityCode), 'criticality') : null;
     const impactCodes = [...new Set(strs(b.impactCodes))];
-    if (!impactCodes.length || impactCodes.length > 6) throw new HttpError(400, 'Choose between 1 and 6 impacts.');
+    if (!impactCodes.length || impactCodes.length > MAX_IMPACTS) throw new HttpError(400, `Choose between 1 and ${MAX_IMPACTS} impacts.`);
     const impacts = impactCodes.map((c) => findIn(l.impacts, c));
     if (impacts.some((i) => !i)) throw new HttpError(400, 'Choose impacts from the list.');
-    const failure = pickGrouped(l.failureModes, str(b.failureModeCode), 'failure mode', false);
+    const failure = str(b.failureModeCode) ? pickGrouped(l.failureModes, str(b.failureModeCode), 'failure mode', false) : null;
     return {
         title,
         description,
         sourceCode: source.code,
         sourceLabel: source.label,
         sourceGroup: source.group,
-        criticalityCode: crit.code,
-        criticalityLabel: crit.label,
-        criticalityColor: crit.color,
+        ...(crit ? { criticalityCode: crit.code, criticalityLabel: crit.label, criticalityColor: crit.color } : {}),
         impacts: impacts.map((i) => ({ code: i!.code, label: i!.label, group: i!.group })),
-        failureModeCode: failure?.code ?? '',
-        failureModeLabel: failure ? `${failure.group} · ${failure.label}` : '',
+        ...(failure ? { failureModeCode: failure.code, failureModeLabel: `${failure.group} · ${failure.label}` } : {}),
     };
 }
 
@@ -1081,7 +1083,7 @@ export const maintenanceRoutes = {
                     { exists: false }
                 );
                 if (created) {
-                    await rec(ctx, 'mnt.wr.submitted', code, `${finding.title} · ${loc.assemblyCode} · ${loc.assetTag} · ${finding.criticalityLabel}`);
+                    await rec(ctx, 'mnt.wr.submitted', code, `${finding.title} · ${loc.assemblyCode} · ${loc.assetTag}`);
                     return { code };
                 }
             }
@@ -1230,7 +1232,7 @@ export const maintenanceRoutes = {
                             criticalityCode: crit.code,
                             criticalityLabel: crit.label,
                             criticalityColor: crit.color,
-                            ...(changedCrit && !str(doc.data.criticalityOriginalLabel) ? { criticalityOriginalLabel: str(doc.data.criticalityLabel) } : {}),
+                            ...(changedCrit && str(doc.data.criticalityCode) && !str(doc.data.criticalityOriginalLabel) ? { criticalityOriginalLabel: str(doc.data.criticalityLabel) } : {}),
                             duplicateOf,
                             assessmentNote: note,
                             assessedBy: ctx.uid,
@@ -1240,7 +1242,7 @@ export const maintenanceRoutes = {
                         },
                         'Assessed',
                         'mnt.wr.assessed',
-                        `${mtype.label} · ${wtype.label} · ${prio.label} · ${disc.label}${changedCrit ? ` · criticality ${str(doc.data.criticalityLabel)} → ${crit.label}` : ''}${note ? ` · ${note}` : ''}`
+                        `${mtype.label} · ${wtype.label} · ${prio.label} · ${disc.label}${changedCrit ? ` · criticality ${str(doc.data.criticalityLabel) || 'not set'} → ${crit.label}` : ''}${note ? ` · ${note}` : ''}`
                     );
                     return { ok: true };
                 }
