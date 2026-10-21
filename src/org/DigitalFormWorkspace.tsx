@@ -74,6 +74,12 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
   if((template.signOffPlan??[]).length){if(y>245){pdf.addPage();y=22;}pdf.setFont('helvetica','bold');pdf.text('Planned sign-off spaces - NOT SIGNED',15,y);y+=8;
    pdf.setFont('helvetica','normal');for(const signer of template.signOffPlan??[]){const line=signer.label+' - '+signer.signerUid+' (page '+(signer.position?.page??'?')+')';if(y>275){pdf.addPage();y=22;}pdf.text(line,15,y);y+=7;}
   }
+  for(let page=1;page<=pdf.getNumberOfPages();page++){
+   pdf.setPage(page);pdf.setFont('helvetica','bold');pdf.setFontSize(8);pdf.setTextColor(180,35,35);
+   pdf.text('UNAPPROVED DRAFT - NOT A VALID CONTROLLED RECORD',15,12);
+   pdf.setFont('helvetica','normal');pdf.setTextColor(100,100,100);
+   pdf.text('Manufusion MEMS · Page '+page+' of '+pdf.getNumberOfPages(),15,289);
+  }
   pdf.save('MEMS-DRAFT-'+(recordId||'form')+'.pdf');
  };
  const entry=(f:Field)=>{const value=values[f.code];const set=(v:string|number|boolean|null)=>setValues(old=>({...old,[f.code]:v}));
@@ -131,6 +137,7 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
   </Card>
   <Card><h2 className='font-semibold text-white'>Complete a draft form</h2>
    <select value={selected} onChange={e=>{setSelected(e.target.value);setRecordId('');setValues({})}} className='my-2 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'><option value=''>Select a draft template</option>{templates.data?.templates.filter(t=>t.status==='draft').map(t=><option key={t.id} value={t.id} >{t.title}{t.successorId?' (older revision — existing records only)':''}</option>)}</select>
+   <fieldset disabled={locked} className={locked?'opacity-80':''}>
    {template?.fields.map((f,i)=>{const visible=!f.visibleWhen||values[f.visibleWhen.fieldCode]===f.visibleWhen.equals;
     if(!visible)return null;
     const preceding=template.fields[i-1],showHeading=!preceding||preceding.section!==f.section;
@@ -144,6 +151,7 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
     </select>
     {referenceModule&&<input aria-label='Source record identifier' value={referenceId} onChange={e=>setReferenceId(e.target.value)} placeholder='Existing event or asset record ID' className='min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/>}
    </div>}
+   </fieldset>
    {recordId&&<div className='mb-3 space-y-2'>
     <FormEvidenceLinks recordId={recordId} locked={locked} onLinked={()=>records.reload()}/>
     {(selectedRecord?.attachments??[]).map(v=><div key={v.documentId+'-'+v.fileId} className='rounded-lg border border-slate-700 p-2 text-xs text-slate-300'>
