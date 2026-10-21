@@ -10,6 +10,7 @@ import {DOC_DEFAULT_LISTS} from './docDefaults';
 import {RCA_METHODS,RCA_METADATA_LISTS} from './docRcaDefaults';
 import {analyzeSteps,validMethodAnalysis} from './docRcaMethods';
 import {findingsValid,checksValid} from './docRcaEvidence';
+import {triggerType,validTriggerId} from './docRcaTriggers';
 const DMAIC_PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'] as const;
 const PHASE_FIELDS:Record<string,string[]>={
  DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses','methodAnalysis','causeFindings'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan','verificationResults']
@@ -62,6 +63,17 @@ export const drkmsDigitalRoutes={
    const title=str(ctx.body.title).trim(),incidentReference=str(ctx.body.incidentReference).trim(),
     problem=str(ctx.body.problemStatement).trim(),scopeNodeId=str(ctx.body.scopeNodeId),
     methodCode=str(ctx.body.methodCode||'5WHY'),frameworkCode=str(ctx.body.frameworkCode||'5M1W');
+   const triggerCode=str(ctx.body.triggerTypeCode),triggerRecordId=str(ctx.body.triggerRecordId).trim();
+   const type=triggerType(triggerCode);
+   const triggerMaster=await master('rcaTriggerTypes');
+   if(!type||!triggerMaster.some(v=>v.code===triggerCode&&v.active!==false)||!validTriggerId(triggerRecordId))
+    throw new HttpError(400,'Choose an enabled RCA trigger type and a valid originating record ID.');
+   const source=type[2]?await getDoc(`organizations/${ctx.orgId}/${type[2]}/${triggerRecordId}`):null;
+   if(type[2]&&!source)throw new HttpError(404,'Originating incident or maintenance record was not found in this organization.');
+   if(triggerCode==='SAF_NEARMISS'&&source&&!/near.?miss/i.test(str(source.data.classification)))
+    throw new HttpError(400,'Selected safety record is not classified as a near miss.');
+   const trigger={typeCode:triggerCode,recordId:triggerRecordId,recordTitle:source?str(source.data.title||source.data.narrative||source.data.description||triggerRecordId):incidentReference||triggerRecordId,
+     sourceModule:triggerCode.split('_')[0],verification:source?'linked':'pending_source_integration'};
    const methodList=await getDoc('module_workspaces/DOC/metadata/rcaMethods');
    const frameworkList=await getDoc('module_workspaces/DOC/metadata/rcaFrameworks');
    const permitted=(doc:typeof methodList,code:string,fallbackCodes:readonly string[])=>{
