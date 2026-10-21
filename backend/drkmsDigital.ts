@@ -115,7 +115,7 @@ export const drkmsDigitalRoutes={
      if(method==='5WHY'&&keys.some(k=>!/^WHY-[1-9][0-9]?$/.test(k)))throw new HttpError(400,'Five Whys needs numbered Why steps.');
      if(method==='ISH'){
        const controlled=(await master('rca5m1wFactors')).filter(item=>item.active!==false).map(item=>item.code);
-       if(keys.some(k=>!controlled.includes(k)))throw new HttpError(400,'Fishbone entries must use enabled MEMS Admin 5M1E categories.');
+       if(keys.some(k=>!controlled.includes(k)))throw new HttpError(400,'Fishbone entries must use enabled MEMS Admin 5M1W factor categories.');
      }
    }
    const existing=state.phases&&typeof state.phases==='object'?state.phases as Record<string,unknown>:{};
@@ -124,7 +124,7 @@ export const drkmsDigitalRoutes={
    const advance=ctx.body.complete===true;
    if(advance&&phase==='ANALYZE'&&(!Array.isArray(phaseData.methodAnalysis)||phaseData.methodAnalysis.filter((r:unknown)=>!!r && typeof r==='object' && String((r as Record<string,unknown>).text??'').trim().length>=10).length<2))
      throw new HttpError(400,'Record at least two substantive entries using the selected RCA method before advancing.');
-   if(advance && PHASE_FIELDS[phase].some(key=>typeof phaseData[key]!=='string'||String(phaseData[key]).trim().length<12))
+   if(advance && PHASE_FIELDS[phase].filter(key=>key!=='methodAnalysis').some(key=>typeof phaseData[key]!=='string'||String(phaseData[key]).trim().length<12))
      throw new HttpError(400,'Complete every required phase field (at least 12 characters) before advancing.');
    const next=advance?DMAIC_PHASES[DMAIC_PHASES.indexOf(phase as typeof DMAIC_PHASES[number])+1]??'CONTROL':phase;
    const updated={currentPhase:next,completedPhases:advance?[...completed.filter(p=>p!==phase),phase]:completed,phases:{...existing,[phase]:phaseData}};
