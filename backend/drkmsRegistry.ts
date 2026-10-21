@@ -38,7 +38,9 @@ async function resolveScope(orgId: string, requestedId: string) {
         scope: { nodeId: selected.id, level: str(selected.data.level), name: str(selected.data.name), ancestorIds: verifiedAncestors } };
 }
 const configPath = (orgId: string) => `organizations/${orgId}/drkms_config/default`;
-const defaults = { enabledClassCodes: Array.from(classes), defaultReviewMonths: 24, updatedAt: '' };
+export const DOC_SUBMODULE_KEYS = ['register','engineering','sds','rca','review','knowledge','forms'] as const;
+const defaults = { enabledClassCodes: Array.from(classes), defaultReviewMonths: 24,
+ enabledSubmodules:[...DOC_SUBMODULE_KEYS], updatedAt: '' };
 
 export const drkmsRoutes = {
     'POST /api/org/drkms/setup': [
@@ -61,7 +63,14 @@ export const drkmsRoutes = {
                 new Set(incoming).size !== incoming.length) throw new HttpError(400, 'Invalid enabled document classes.');
             const months = Number(ctx.body.defaultReviewMonths);
             if (!Number.isInteger(months) || months < 1 || months > 120) throw new HttpError(400, 'Review interval must be 1–120 months.');
-            const config = { enabledClassCodes: incoming, defaultReviewMonths: months, updatedAt: nowIso(), updatedBy: ctx.uid };
+            const selected=ctx.body.enabledSubmodules;
+            if(selected!==undefined && (!Array.isArray(selected) || selected.some(x=>typeof x!=='string'||!DOC_SUBMODULE_KEYS.includes(x as typeof DOC_SUBMODULE_KEYS[number])) || new Set(selected).size!==selected.length))
+                throw new HttpError(400,'Invalid DOC submodules.');
+            const existing=await getDoc(configPath(ctx.orgId));
+            const config = { ...existing?.data, enabledClassCodes: incoming, defaultReviewMonths: months,
+                enabledSubmodules: selected===undefined
+                    ? (Array.isArray(existing?.data.enabledSubmodules)?existing.data.enabledSubmodules:[...DOC_SUBMODULE_KEYS])
+                    :selected, updatedAt: nowIso(), updatedBy: ctx.uid };
             await writeDoc(configPath(ctx.orgId), config);
             await record(ctx, 'drkms.configure', 'Document controls');
             return { config };
