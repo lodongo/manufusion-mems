@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowLeft, ClipboardCheck, Package, ShieldCheck, Wrench, CalendarClock, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ClipboardCheck, Package, ShieldCheck, Wrench, CalendarClock, CheckCircle2, ChevronDown } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert } from '../components/ui';
@@ -580,6 +580,65 @@ function ConsumptionForm({ task, issues, onSubmit }: { task: MntData; issues: Mn
     );
 }
 
+/** Task picker as a menu above the task (replaces the side column), so the task content gets the full width. */
+function TaskMenu({ tasks, current, executions, onPick }: { tasks: MntData[]; current: MntData; executions: MntData; onPick: (id: string) => void }) {
+    const [open, setOpen] = useState(false);
+    const index = tasks.indexOf(current);
+    const codeOf = (t: MntData, i: number) => t.code || 'ASSMTASK_' + (i + 1);
+    return (
+        <div className="relative">
+            <button
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={open}
+                onClick={() => setOpen((o) => !o)}
+                className="flex min-h-[52px] w-full items-center gap-3 rounded-2xl border border-line bg-panel px-4 text-left"
+            >
+                <span className="min-w-0 flex-1">
+                    <span className="block font-mono text-xs text-muted">
+                        {codeOf(current, index)} · task {index + 1} of {tasks.length}
+                    </span>
+                    <span className="block truncate font-semibold">{current.title || current.description}</span>
+                </span>
+                <ChevronDown className={`h-5 w-5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+            {open && (
+                <>
+                    <button type="button" aria-label="Close task menu" className="fixed inset-0 z-20 cursor-default" onClick={() => setOpen(false)} />
+                    <ul role="listbox" aria-label="Maintenance tasks" className="absolute left-0 right-0 z-30 mt-1 max-h-[60dvh] overflow-y-auto overscroll-contain rounded-2xl border border-line bg-panel p-1 shadow-xl">
+                        {tasks.map((t, i) => {
+                            const e = executions[t.id] || {};
+                            return (
+                                <li key={t.id}>
+                                    <button
+                                        type="button"
+                                        role="option"
+                                        aria-selected={t.id === current.id}
+                                        onClick={() => {
+                                            onPick(t.id);
+                                            setOpen(false);
+                                        }}
+                                        className={`w-full rounded-xl px-3 py-3 text-left ${t.id === current.id ? 'bg-brand/10' : 'active:bg-page'}`}
+                                    >
+                                        <span className="block font-mono text-xs text-muted">
+                                            {codeOf(t, i)} · {e.status?.replaceAll('_', ' ') || 'Not started'}
+                                            {e.reconciled ? ' · reconciled' : ''}
+                                        </span>
+                                        <span className="block truncate font-medium">{t.title || t.description}</span>
+                                        <span className="block text-xs text-soft">
+                                            {t.spares?.length || 0} spares · {t.services?.length || 0} services · {t.risk?.length || 0} risks
+                                        </span>
+                                    </button>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </>
+            )}
+        </div>
+    );
+}
+
 export default function MntWorkOrder({ code }: { code: string }) {
     const { data, error, loading, reload } = useLoad(() => mntApi({ action: 'read', code }), [code]);
     const [selected, setSelected] = useState(''),
@@ -652,6 +711,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
         return (
             <MntTaskAssessment
                 code={code}
+                context={{ asset: `${wo.assetTag} · ${wo.assetName || ''}`, assembly: wo.assemblyName, equipment: wo.unitName }}
                 recordType="wo"
                 initial={tasks as any}
                 editable
@@ -742,38 +802,19 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     )}
                 </Card>
             ) : (
-                <div className="grid items-start gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-                    <nav aria-label="Maintenance tasks" className="flex min-w-0 gap-2 overflow-x-auto lg:block lg:space-y-2">
-                        {tasks.map((t, i) => {
-                            const e = wo.taskExecution?.[t.id] || {};
-                            return (
-                                <button
-                                    key={t.id}
-                                    onClick={() => {
-                                        setSelected(t.id);
-                                        setTab('Details');
-                                    }}
-                                    className={`w-full min-w-[220px] shrink-0 rounded-2xl border p-4 text-left lg:min-w-0 ${t.id === task.id ? 'border-brand bg-brand/10' : 'border-line bg-panel'}`}
-                                >
-                                    <span className="text-xs text-muted">
-                                        Task {i + 1} · {e.status?.replaceAll('_', ' ') || 'Not started'}
-                                    </span>
-                                    <span className="mt-1 block font-semibold">{t.title || t.description}</span>
-                                    <span className="mt-2 block text-xs text-soft">
-                                        {t.spares?.length || 0} spares · {t.services?.length || 0} services · {t.risk?.length || 0} risks
-                                    </span>
-                                    {e.reconciled && (
-                                        <span className="mt-2 flex items-center gap-1 text-xs text-emerald-500">
-                                            <CheckCircle2 size={13} />
-                                            Reconciled
-                                        </span>
-                                    )}
-                                </button>
-                            );
-                        })}
-                    </nav>
+                <div className="space-y-3">
+                    <TaskMenu
+                        tasks={tasks}
+                        current={task}
+                        executions={wo.taskExecution || {}}
+                        onPick={(id) => {
+                            setSelected(id);
+                            setTab('Details');
+                        }}
+                    />
                     <Card className="min-w-0 space-y-4">
                         <div>
+                            <p className="font-mono text-xs font-semibold text-brandsoft">{task.code || 'ASSMTASK_' + (tasks.indexOf(task) + 1)}</p>
                             <h2 className="text-lg font-semibold">{task.title || task.description}</h2>
                             <p className="text-xs text-soft">
                                 {task.priority || 'normal'} priority · {task.hours} estimated hours

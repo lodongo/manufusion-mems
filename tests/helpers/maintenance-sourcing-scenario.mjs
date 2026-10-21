@@ -328,6 +328,19 @@ seed(r + '/procurement_requirements/REQ000000900', {
     createdAt: now, updatedAt: now, version: 1,
 });
 const requirements = async () => (await listDocs(r + '/procurement_requirements')).filter((d) => d.id !== 'REQ000000900');
+// A catalogue entry with technical attributes (one mandatory) and a registered material with that specification.
+{
+    const base = 'module_workspaces/PRC/catalogs/materials';
+    const items = JSON.parse(snapshot(base + '/parts/items_0').data.json);
+    items.push({ code: 'BRKT-CAT', name: 'Bearing bracket', categoryCode: 'MAT', subcategoryCode: 'SPARES', familyCode: 'COMP', attributes: ['MATL', 'HOLES'], requiredAttributes: ['MATL'] });
+    seed(base + '/parts/items_0', { json: JSON.stringify(items) });
+    seed(base + '/parts/attributes_0', { json: JSON.stringify([{ code: 'MATL', name: 'Material', dataType: 'text' }, { code: 'HOLES', name: 'Holes', dataType: 'integer' }]) });
+    seed(base, { ...snapshot(base).data, sha256: 'materials-attributes', sections: { ...snapshot(base).data.sections, attributes: 1 } });
+    seed(r + '/materials/BRKT', {
+        materialNumber: 'MAT000020', name: 'Bearing bracket steel 4 holes', shortText: 'Bearing bracket', status: 'active', categoryCode: 'MAT', subcategoryCode: 'SPARES', familyCode: 'COMP',
+        materialCode: 'BRKT-CAT', attributes: { MATL: 'Steel', HOLES: '4' }, warehouseIds: ['WAREHOUSE'], uom: unit.code,
+    });
+}
 const search = (who, code, q) => route(maintenanceSourcingRoutes, '/api/org/mnt/sourcing/materials', who, { code, q });
 
 const wr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', finding);
@@ -395,7 +408,32 @@ assert.deepEqual(vendorList.others.map((v) => v.id), ['VND000002']);
 assert.equal(vendorList.make.manufacturer, 'Krones');
 assert.ok(vendorList.categories.some((c) => c.code === 'VCL-001' && c.kind === 'oem') && vendorList.categories.some((c) => c.code === 'VCL-002' && c.kind === 'ocm'));
 
+// Catalogue drill-down, mandatory attributes and the check for registered materials of the same specification.
+const cat = (body) => route(maintenanceSourcingRoutes, '/api/org/mnt/sourcing/catalogue', 'assessor', { code: wr.code, ...body });
+assert.ok((await cat({})).categories.some((c) => c.code === 'MAT' && c.subcategories.some((x) => x.code === 'SPARES')));
+const tree = await cat({ categoryCode: 'MAT', subcategoryCode: 'SPARES' });
+assert.ok(tree.families.some((f) => f.code === 'COMP') && tree.items.some((i) => i.code === 'BRKT-CAT' && i.familyCode === 'COMP'));
+const bracketSpec = (await cat({ itemCode: 'BRKT-CAT' })).spec;
+assert.deepEqual(bracketSpec.attributes.filter((a) => a.required).map((a) => a.code), ['MATL']);
+const similar = (attributes) => route(maintenanceSourcingRoutes, '/api/org/mnt/sourcing/similar', 'assessor', { code: wr.code, itemCode: 'BRKT-CAT', attributes, warehouseId: 'WAREHOUSE' });
+await assert.rejects(() => similar({ HOLES: '4' }), /mandatory attributes: Material/);
+const same = (await similar({ MATL: 'steel', HOLES: '4' })).items;
+assert.equal(same[0].materialId, 'BRKT');
+assert.equal(same[0].exact, true, 'Same family and attribute values are reported as the same specification');
+assert.equal(same[0].linked, true);
+const close = (await similar({ MATL: 'Steel', HOLES: '6' })).items;
+assert.equal(close[0].exact, false);
+assert.equal(close[0].score, 50);
+const catalogSpare = (attributes) => ({ id: 'brkt', source: 'catalog', catalogCode: 'BRKT-CAT', description: 'Bearing bracket', attributes, qty: 2, uom: unit.code, warehouseId: 'WAREHOUSE' });
+await assert.rejects(() => save([catalogSpare({ HOLES: '6' })]), /mandatory attributes: Material/);
+await assert.rejects(() => save([catalogSpare({ MATL: 'Steel', HOLES: '4' })]), /MAT000020 is already registered/);
+await assert.rejects(() => save([{ ...catalogSpare({ MATL: 'Steel', HOLES: '6' }), warehouseId: 'NOT_A_WAREHOUSE' }]), /warehouse you have access to/);
+await save([catalogSpare({ MATL: 'Steel', HOLES: '6' })]);
+assert.equal(snapshot(r + '/work_requests/' + wr.code).data.assessmentTasks[0].spares[0].familyCode, 'COMP');
+
 await save(goodSpares());
+const savedTasks = snapshot(r + '/work_requests/' + wr.code).data.assessmentTasks;
+assert.deepEqual(savedTasks.map((t) => t.code), ['ASSMTASK_1', 'ASSMTASK_2'], 'Tasks are referenced ASSMTASK_1, ASSMTASK_2 …');
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: wr.code, action: 'review_assessment', note: 'Independent review of spares, services and risks.' });
 const wo = (await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'convert', confirm: wr.code })).woCode;
 assert.equal((await requirements()).length, 0, 'Conversion from assessment creates no procurement requirement');

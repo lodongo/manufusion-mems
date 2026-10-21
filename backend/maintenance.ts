@@ -51,6 +51,11 @@ const WO_RE = /^WO\d{8}$/;
 const PHOTO_RE = /^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/wr_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png)$/;
 const MAX_PHOTOS = 4;
 const ASSESSMENT_PHOTO_RE=/^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/assessment_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png|pdf)$/;
+/** A reused library task is unchanged when it equals the approved template, ignoring its ASSMTASK reference. */
+const sameTemplate=(template:unknown,task:unknown)=>{
+    const strip=(x:unknown)=>{const {code:_c,templateStatus:_s,...rest}=(isObj(x)?x:{}) as Record<string,unknown>;return JSON.stringify(rest);};
+    return strip(template)===strip(task);
+};
 /** Every photo or document path referenced by an assessment (spares and services). */
 const assessmentFiles=(tasks:unknown)=>objs(tasks).flatMap(t=>[...objs(t.spares).flatMap(sp=>[str(sp.photoPath),...strs(sp.attachments)]),...objs(t.services).flatMap(sv=>strs(sv.attachments))]).filter(Boolean);
 const wrCol = (orgId: string) => `organizations/${orgId}/work_requests`;
@@ -1272,7 +1277,7 @@ export const maintenanceRoutes = {
                         const adopted=await getDoc(dest);
                         if(task.templateStatus==='existing'&&(!adopted||str(adopted.data.status)!=='approved'))
                             throw new HttpError(400,'Selected reusable task has not been validated for this assembly.');
-                        if(task.templateStatus==='existing'&&JSON.stringify({...adopted.data.task as Obj,templateStatus:'existing'})!==JSON.stringify(task))task.templateStatus='pending_validation';
+                        if(task.templateStatus==='existing'&&!sameTemplate(adopted.data.task,task))task.templateStatus='pending_validation';
                     }
                     // Snapshot each newly created task as a separate validation candidate.
                     // These entries are not active equipment/assembly templates yet.
@@ -1522,7 +1527,7 @@ export const maintenanceRoutes = {
                         const approved=await getDoc(`organizations/${ctx.orgId}/asset_task_templates/${t.assemblyId||assemblyId}_${t.id}`);
                         if(t.templateStatus==='existing'&&(!approved||str(approved.data.status)!=='approved'))
                             throw new HttpError(400,'Selected task template must be validated for the assembly.');
-                        if(t.templateStatus==='existing'&&JSON.stringify({...approved.data.task as Obj,templateStatus:'existing'})!==JSON.stringify(t))t.templateStatus='pending_validation';
+                        if(t.templateStatus==='existing'&&!sameTemplate(approved.data.task,t))t.templateStatus='pending_validation';
                     }
                     for(const t of tasks.filter(x=>x.templateStatus!=='existing')){
                         const id=`${doc.id}_${t.id}_v${version}`;

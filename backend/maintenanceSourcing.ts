@@ -27,7 +27,7 @@ import { orgRoute, type OrgContext } from './guards';
 import { canAt, scopeOf } from './access';
 import { audit } from './audit';
 import { materialIn, physicalOf } from './finCore';
-import { searchCatalog } from './procurement';
+import { catalogItemSpec, catalogSummary, catalogTree, searchCatalog, type ItemSpec } from './procurement';
 import { metaList, vendorsPath } from './vendors';
 import { requirementsPath } from './procurementSetup';
 import { verifyMaintenanceStockLedger } from './maintenanceInventory';
@@ -206,6 +206,40 @@ export async function searchMaterials(ctx: OrgContext, record: Doc, q: string) {
     return { warehouse, registered, catalogue, counts, receiptId };
 }
 
+
+// ----- Catalogue selection and similar registered materials -----
+
+const normValue = (v: unknown) => str(v).trim().toLowerCase().replace(/\s+/g, ' ');
+/** Same catalogue entry and the same value for every attribute the entry defines. */
+export function sameSpecification(m: Obj, spec: ItemSpec, attrs: Obj) {
+    if (str(m.materialCode) !== spec.code) return false;
+    const ma = object(m.attributes);
+    return spec.attributes.every((a) => normValue(ma[a.code]) === normValue(attrs[a.code]));
+}
+
+/** Approved materials with the same category, subcategory and family, best attribute match first. */
+export async function similarMaterials(ctx: OrgContext, spec: ItemSpec, attrs: Obj, warehouseId: string) {
+    const [materials, extensions] = await Promise.all([listDocs(`${root(ctx.orgId)}/materials`), listDocs(`${root(ctx.orgId)}/material_extensions`)]);
+    const filled = spec.attributes.filter((a) => normValue(attrs[a.code]));
+    const out: Obj[] = [];
+    for (const m of materials) {
+        const d = m.data;
+        if (!APPROVED_MATERIAL.includes(str(d.status)) || !str(d.materialNumber)) continue;
+        if (str(d.categoryCode) !== spec.categoryCode || str(d.subcategoryCode) !== spec.subcategoryCode || str(d.familyCode) !== spec.familyCode) continue;
+        const ma = object(d.attributes);
+        const matched = filled.filter((a) => normValue(ma[a.code]) === normValue(attrs[a.code])).length;
+        const exact = sameSpecification(d, spec, attrs);
+        const linked = !!warehouseId && linkedWarehouses(m, extensions).includes(warehouseId);
+        out.push({
+            materialId: m.id, materialNumber: str(d.materialNumber), name: str(d.name) || str(d.shortText), shortText: str(d.shortText), uom: str(d.uom) || 'EA',
+            exact, score: filled.length ? Math.round((100 * matched) / filled.length) : 0, matched, compared: filled.length,
+            linked, available: linked ? await usable(ctx.orgId, warehouseId, m.id) : null,
+            differences: spec.attributes.filter((a) => normValue(ma[a.code]) !== normValue(attrs[a.code])).slice(0, 6).map((a) => ({ name: a.name, theirs: str(ma[a.code]) || '—', yours: str(attrs[a.code]) || '—' })),
+        });
+    }
+    return out.sort((a, b) => Number(b.exact) - Number(a.exact) || Number(b.score) - Number(a.score)).slice(0, 15);
+}
+
 // ----- Backend enforcement of the hierarchy at assessment save -----
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -249,11 +283,27 @@ export async function enforceSourcingRules(ctx: OrgContext, record: Doc, tasks: 
                 s.categoryCode = str(m.data.categoryCode);
                 s.subcategoryCode = str(m.data.subcategoryCode);
             } else if (source === 'catalog') {
+                // Category → subcategory → family → catalogue entry with its attributes; mandatory attributes filled.
+                const spec = await catalogItemSpec('materials', str(s.catalogCode));
+                if (!spec) throw new HttpError(400, `${at}choose a valid catalogue entry.`);
+                const attrs = object(s.attributes);
+                const missing = spec.attributes.filter((a) => a.required && !str(attrs[a.code]).trim()).map((a) => a.name);
+                if (missing.length) throw new HttpError(400, `${at}fill in the mandatory attributes: ${missing.join(', ')}.`);
+                const unknown = Object.keys(attrs).filter((k) => !spec.attributes.some((a) => a.code === k));
+                if (unknown.length) throw new HttpError(400, `${at}unknown attribute ${unknown[0]}.`);
                 materialsCache ??= await listDocs(`${root(ctx.orgId)}/materials`);
-                const registered = materialsCache.find((m) => str(m.data.materialCode) === str(s.catalogCode) && APPROVED_MATERIAL.includes(str(m.data.status)) && str(m.data.materialNumber));
-                if (registered)
-                    throw new HttpError(400, `${at}${str(registered.data.materialNumber)} is already registered for this catalogue entry. Select the registered material instead.`);
-            } else if (source === 'description') {
+                const twin = materialsCache.find((m) => APPROVED_MATERIAL.includes(str(m.data.status)) && str(m.data.materialNumber) && sameSpecification(m.data, spec, attrs));
+                if (twin)
+                    throw new HttpError(400, `${at}${str(twin.data.materialNumber)} is already registered with this classification and these attributes. Select it instead.`);
+                s.categoryCode = spec.categoryCode;
+                s.subcategoryCode = spec.subcategoryCode;
+                s.familyCode = spec.familyCode;
+            }
+            if ((source === 'catalog' || source === 'description') && str(s.warehouseId)) {
+                warehousesCache ??= await reachableWarehouses(ctx);
+                if (!warehousesCache.has(str(s.warehouseId))) throw new HttpError(400, `${at}choose a warehouse you have access to.`);
+            }
+            if (source === 'description') {
                 const receipt = RECEIPT_RE.test(str(s.searchReceiptId)) ? await getDoc(`${root(ctx.orgId)}/mnt_search_receipts/${str(s.searchReceiptId)}`) : null;
                 const fresh = receipt && Date.now() - Date.parse(str(receipt.data.at)) < RECEIPT_HOURS * 3_600_000;
                 if (!receipt || !fresh || str(receipt.data.uid) !== ctx.uid || str(receipt.data.recordCode) !== record.id || str(receipt.data.q).length < 3)
@@ -422,6 +472,40 @@ export const maintenanceSourcingRoutes = {
             const q = str(ctx.body.q).replace(/\s+/g, ' ').trim().slice(0, 80);
             if (q.length < 2) return { warehouse: [], registered: [], catalogue: [], counts: { warehouse: 0, registered: 0, catalogue: 0 }, receiptId: '' };
             return searchMaterials(ctx, record, q);
+        }),
+    ],
+    // Material catalogue drill-down for a spare: categories → families and entries → entry specification.
+    'POST /api/org/mnt/sourcing/catalogue': [
+        orgRoute('org.mnt.sourcing.catalogue', 'MNT.view', async (ctx) => {
+            await sourcingRecord(ctx, ctx.body.code);
+            const itemCode = str(ctx.body.itemCode);
+            if (itemCode) {
+                const spec = await catalogItemSpec('materials', itemCode);
+                if (!spec) throw new HttpError(404, 'That catalogue entry does not exist.');
+                return { spec };
+            }
+            const categoryCode = str(ctx.body.categoryCode),
+                subcategoryCode = str(ctx.body.subcategoryCode);
+            if (categoryCode && subcategoryCode) {
+                const tree = await catalogTree('materials', categoryCode, subcategoryCode);
+                return { families: tree?.families ?? [], items: tree?.items ?? [] };
+            }
+            const summary = await catalogSummary('materials');
+            return { categories: summary?.categories ?? [] };
+        }),
+    ],
+    // Registered materials with the same classification and attributes, so an existing code is reused.
+    'POST /api/org/mnt/sourcing/similar': [
+        orgRoute('org.mnt.sourcing.similar', 'MNT.view', async (ctx) => {
+            await sourcingRecord(ctx, ctx.body.code);
+            const spec = await catalogItemSpec('materials', str(ctx.body.itemCode));
+            if (!spec) throw new HttpError(400, 'Choose a catalogue entry.');
+            const attrs = object(ctx.body.attributes);
+            const missing = spec.attributes.filter((a) => a.required && !str(attrs[a.code]).trim()).map((a) => a.name);
+            if (missing.length) throw new HttpError(400, `Fill in the mandatory attributes: ${missing.join(', ')}.`);
+            const warehouseId = str(ctx.body.warehouseId);
+            if (warehouseId && !(await reachableWarehouses(ctx)).has(warehouseId)) throw new HttpError(403, 'Choose a warehouse you have access to.');
+            return { items: await similarMaterials(ctx, spec, attrs, warehouseId) };
         }),
     ],
     // Supplier categories and qualified vendors for one service of the record.

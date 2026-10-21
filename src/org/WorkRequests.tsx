@@ -702,20 +702,18 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
 
             </div>
 
-            <div className='grid min-h-0 min-w-0 flex-1 grid-cols-[64px_minmax(0,1fr)] overflow-hidden'>
-              <nav aria-label='Assessment sections' className='flex min-h-0 flex-col gap-2 overflow-y-auto border-r border-slate-700 bg-slate-900/70 px-1 py-3'>
+            <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
+              <nav aria-label='Work request menu' className='flex shrink-0 gap-1 overflow-x-auto border-b border-slate-800 py-2'>
                 {([
-                   ['request','Request',<ClipboardList className='h-5 w-5'/>],
-                   ['tasks','Tasks',<Wrench className='h-5 w-5'/>],
-                   ['summary','Summary',<CheckCircle2 className='h-5 w-5'/>],
+                   ['request','Request',<ClipboardList key='r' className='h-4 w-4'/>],
+                   ['tasks','Tasks'+(r.assessmentTasks?.length?' ('+r.assessmentTasks.length+')':''),<Wrench key='t' className='h-4 w-4'/>],
+                   ['summary','Summary',<CheckCircle2 key='s' className='h-4 w-4'/>],
                 ] as const).map(([key,title,icon])=><button type='button' key={key} aria-current={section===key?'page':undefined}
-                  aria-label={title==='Request'?'Review work request':title==='Tasks'?'Tasks and task assessments':'Assessment summary'}
                   onClick={()=>goSection(key)}
-                  className={'flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center text-[11px] font-semibold leading-tight '+(section===key?'bg-emerald-900/50 text-emerald-200 ring-1 ring-emerald-700':'text-slate-400')}>
+                  className={'flex min-h-[44px] flex-1 shrink-0 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold '+(section===key?'bg-emerald-900/50 text-emerald-200 ring-1 ring-emerald-700':'text-slate-400')}>
                   {icon}<span>{title}</span></button>)}
-                <span className='mt-auto break-words text-center text-[11px] text-slate-500'>{r.code.slice(-4)}</span>
               </nav>
-              <div className='min-w-0 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-3 sm:px-4'>
+              <div className='min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-1 py-3 sm:px-4'>
                 {actionError && !mode && <Alert tone='error'>{actionError}</Alert>}
 
                 {mode === 'assess' && <AssessPanel detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />}
@@ -821,7 +819,6 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                         {r.assessment.workTypeLabel && <Info label='Work type' value={r.assessment.workTypeLabel} />}
                         {r.assessment.priorityLabel && <Info label='Priority' value={r.assessment.priorityLabel} />}
                         {r.assessment.disciplineLabel && <Info label='Discipline' value={r.assessment.disciplineLabel} />}
-                        {r.assessment.duplicateOf && <Info label='Related request' value={r.assessment.duplicateOf} />}
                         {r.assessment.note && <Info label='Reviewer note' value={r.assessment.note} />}
                         {r.reviewerName && <Info label='Reviewer' value={r.reviewerName} />}
                     </Card>
@@ -849,7 +846,8 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
 
                 <HistoryCard history={r.history} />
                 </>}
-                {section==='tasks' && <MntTaskAssessment key={r.code} code={r.code} initial={r.assessmentTasks||[]} editable={can.assess&&!can.reviewAssessment} onSaved={reload} onDirtyChange={setTasksDirty}/>}
+                {section==='tasks' && <MntTaskAssessment key={r.code} code={r.code} initial={r.assessmentTasks||[]} editable={can.assess&&!can.reviewAssessment} onSaved={reload} onDirtyChange={setTasksDirty}
+                    context={{asset:`${r.assetTag} · ${r.assetName}`,assembly:`${r.assemblyCode} · ${r.assemblyName}`,equipment:`${r.unitCode} · ${r.unitName}`}}/>}
                 {section==='summary' && <AssessmentSummary
                     detail={r}
                     canReview={!!can.reviewAssessment&&assessed&&r.assessmentTasks.length>0}
@@ -971,16 +969,15 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
     const [prio, setPrio] = useState(a.priorityCode);
     const [disc, setDisc] = useState(a.disciplineCode);
     const [crit, setCrit] = useState(detail.criticalityCode);
-    const [dup, setDup] = useState(a.duplicateOf);
     const [note, setNote] = useState(a.note);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const ok = mtype && wtype && prio && disc && crit && (!dup || /^WR\d{8}$/.test(dup.trim().toUpperCase()));
+    const ok = mtype && wtype && prio && disc && crit;
     const save = async () => {
         setBusy(true);
         setError('');
         try {
-            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'assess', maintenanceTypeCode: mtype, workTypeCode: wtype, priorityCode: prio, disciplineCode: disc, criticalityCode: crit, duplicateOf: dup.trim().toUpperCase(), note: note.trim() });
+            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'assess', maintenanceTypeCode: mtype, workTypeCode: wtype, priorityCode: prio, disciplineCode: disc, criticalityCode: crit, note: note.trim() });
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save the assessment.');
@@ -1001,7 +998,7 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
     return (
         <Card className='space-y-3'>
             <p className='font-medium text-white'>Assess the request</p>
-            <p className='text-xs text-slate-400'>Check it is valid and not a duplicate, confirm the criticality and classify the work.</p>
+            <p className='text-xs text-slate-400'>Check it is valid, confirm the criticality and classify the work.</p>
             <div>
                 <p className='mb-1 text-sm text-slate-300'>Criticality (confirm or adjust)</p>
                 <div className='grid grid-cols-2 gap-2 sm:grid-cols-5'>
@@ -1020,7 +1017,6 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
             {select('as-wtype', 'Work type *', wtype, setWtype, lists.workTypes)}
             {select('as-prio', 'Priority *', prio, setPrio, lists.priorities)}
             {select('as-disc', 'Discipline *', disc, setDisc, lists.disciplines)}
-            <Field id='as-dup' label='Related or duplicate request (optional)' placeholder='WR00000000' value={dup} onChange={(e) => setDup(e.target.value)} />
             <TextArea id='as-note' label='Assessment note (optional)' rows={3} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
             {error && <Alert tone='error'>{error}</Alert>}
             <div className='flex gap-2'>
