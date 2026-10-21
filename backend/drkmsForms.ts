@@ -109,6 +109,42 @@ export const drkmsFormRoutes={
   if(!(await writeDoc(templatePath(ctx.orgId)+'/'+id,template,{exists:false})))throw new HttpError(409,'Template conflict.');
   return {template};
  })],
+ 'POST /api/org/drkms/forms/templates/revise':[orgRoute('drkms.forms.templates_revise','ADM.document_registry',async ctx=>{
+  const sourceId=str(ctx.body.sourceTemplateId),reason=str(ctx.body.reason).trim(),title=str(ctx.body.title).trim();
+  if(!ID.test(sourceId)||reason.length<12||reason.length>2000||title.length<3||title.length>180)
+   throw new HttpError(400,'Choose an existing template and provide a meaningful revision reason.');
+  const path=templatePath(ctx.orgId)+'/'+sourceId,source=await getDoc(path);
+  if(!source||str(source.data.status)!=='draft'||str(source.data.createdBy)!==ctx.uid||
+    str(source.data.successorId))
+   throw new HttpError(409,'Template is not an editable original or already has a newer revision.');
+  const scopeNodeId=str(source.data.scopeNodeId);
+  if(!scopeNodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,scopeNodeId),await scopeOf(ctx)))
+   throw new HttpError(403,'Template is outside your authorized location.');
+  const revision=Number(str(source.data.revision));
+  if(!Number.isSafeInteger(revision)||revision<0||revision>=999)
+   throw new HttpError(409,'Template revision numbering requires administrative review.');
+  const fields=validateFormFields(ctx.body.fields),signers=ctx.body.signers;
+  if(!Array.isArray(signers)||signers.length>12)throw new HttpError(400,'Invalid revised sign-off plan.');
+  const signOffPlan:Array<{signerUid:string;label:string}>=[];
+  for(const item of signers){
+   if(!item||typeof item!=='object'||Array.isArray(item))throw new HttpError(400,'Invalid signer.');
+   const row=item as Record<string,unknown>,uid=str(row.signerUid),label=str(row.label).trim();
+   if(!/^[a-zA-Z0-9_-]{6,128}$/.test(uid)||uid===ctx.uid||label.length<3||label.length>80||
+      signOffPlan.some(s=>s.signerUid===uid))throw new HttpError(400,'Invalid or duplicate revised signer.');
+   const user=await getDoc('users/'+uid);
+   if(!user||str(user.data.orgId)!==ctx.orgId||str(user.data.status)==='disabled')
+    throw new HttpError(403,'Revised signatory must be active in the same organization.');
+   signOffPlan.push({signerUid:uid,label});
+  }
+  const id=randomId(10),now=nowIso(),next={id,title,scopeNodeId,fields,signOffPlan,
+   revision:String(revision+1).padStart(2,'0'),status:'draft',createdBy:ctx.uid,createdAt:now,
+   updatedAt:now,previousTemplateId:sourceId,revisionReason:reason};
+  if(!(await commitChecked([
+   {path,data:{...source.data,successorId:id,updatedAt:now},precondition:{updateTime:source.updateTime}},
+   {path:templatePath(ctx.orgId)+'/'+id,data:next,precondition:{exists:false}}
+  ])))throw new HttpError(409,'Template changed while creating the revision.');
+  return {template:next,previousTemplateId:sourceId,approvalStatus:'not_published'};
+ })],
  'POST /api/org/drkms/forms/records/list':[orgRoute('drkms.forms.records_list','ADM.document_registry',async ctx=>{
   const rows=await listDocs(recordPath(ctx.orgId)),scope=await scopeOf(ctx),visible=[];
   for(const r of rows){
@@ -249,6 +285,7 @@ export const drkmsFormRoutes={
   if(!ID.test(templateId)||(recordId&&!ID.test(recordId)))throw new HttpError(400,'Invalid form record identifier.');
   const template=await getDoc(templatePath(ctx.orgId)+'/'+templateId);
   if(!template||str(template.data.status)!=='draft')throw new HttpError(409,'This form template is not available for draft records.');
+  if(!recordId&&str(template.data.successorId))throw new HttpError(409,'Use the newer template revision for new draft records.');
   const nodeId=str(template.data.scopeNodeId);
   if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))throw new HttpError(403,'Form out of scope.');
   const fields=validateFormFields(template.data.fields),values=validateFormValues(fields,ctx.body.values,true);
