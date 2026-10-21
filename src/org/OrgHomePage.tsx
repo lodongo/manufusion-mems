@@ -356,7 +356,7 @@ export default function OrgHomePage({
 
     const menus = moduleMenus(data, canAdmin).map(menu => menu.module.code==='DOC' && docAvailability.data
         ? {...menu,links:menu.links.filter(link => {
-            if(!link.path.startsWith('doc_')||link.path==='doc_config')return true;
+            if(!link.path.startsWith('doc_')||link.path==='doc_config'||link.path==='doc_my_signatures')return true;
             return docAvailability.data!.enabledSubmodules.includes(link.path.slice(4));
           })} : menu);
     const currentPath = route.startsWith(`${ROUTE}/`) ? route.slice(ROUTE.length + 1) : '';
