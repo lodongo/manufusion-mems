@@ -20,6 +20,7 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
  const [referenceModule,setReferenceModule]=useState(''),[referenceId,setReferenceId]=useState('');
  const [signers,setSigners]=useState<FormSigner[]>([]);
  const [revisionSource,setRevisionSource]=useState(''),[revisionReason,setRevisionReason]=useState('');
+ const [retireTemplateId,setRetireTemplateId]=useState(''),[retireReason,setRetireReason]=useState('');
  const [signerSearch,setSignerSearch]=useState('');
  const add=()=>setFields(v=>[...v,{code:'field_'+(v.length+1),label:'New field',type:'text',required:false}]);
  const patch=(i:number,part:Partial<Field>)=>setFields(v=>v.map((f,j)=>i===j?{...f,...part}:f));
@@ -29,6 +30,11 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
    setNotice(revisionSource?'New controlled draft template revision created. Earlier draft records remain linked to the previous revision.':'Draft form template created. It is not an approved or published form.');
    setRevisionSource('');setRevisionReason('');templates.reload();
   }catch(e){setNotice(e instanceof Error?e.message:'Unable to create template.')}finally{setBusy(false)}
+ };
+ const retireDraft=async()=>{setBusy(true);setNotice('');
+  try{await callBackend('/api/org/drkms/forms/templates/retire-draft',{templateId:retireTemplateId,reason:retireReason});
+   setNotice('Unused unpublished template retired with an auditable justification.');setRetireTemplateId('');setRetireReason('');templates.reload();
+  }catch(e){setNotice(e instanceof Error?e.message:'Could not retire template.');}finally{setBusy(false)}
  };
  const template=templates.data?.templates.find(t=>t.id===selected);
  const selectedRecord=records.data?.records.find(r=>r.id===recordId);
@@ -135,6 +141,15 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
    </div>
    <button type='button' onClick={add} disabled={fields.length>=60} className='min-h-10 rounded-lg border border-slate-600 px-3 text-sm text-white'>Add field</button>
    <button type='button' onClick={()=>void create()} disabled={busy||title.trim().length<3||!location||!fields.length||(!!revisionSource&&revisionReason.trim().length<12)} className='ml-2 min-h-10 rounded-lg bg-blue-600 px-3 text-sm text-white disabled:opacity-50'>{revisionSource?'Create next draft revision':'Save draft template'}</button>
+  </Card>
+  <Card><h2 className='text-sm font-semibold text-white'>Retire an unused draft template</h2>
+   <p className='my-2 text-xs text-slate-400'>Retirement is permitted only for an unpublished template with no associated records. This does not withdraw an approved document.</p>
+   <select value={retireTemplateId} onChange={e=>setRetireTemplateId(e.target.value)} className='min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
+    <option value=''>Select unused draft template</option>{templates.data?.templates.filter(t=>t.status==='draft').map(t=><option key={t.id} value={t.id}>{t.title} · Rev {t.revision}</option>)}
+   </select>
+   {retireTemplateId&&<><label className='mt-2 block text-xs text-slate-200'>Reason for retirement (minimum 12 characters)
+    <textarea rows={2} value={retireReason} onChange={e=>setRetireReason(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
+   </label><button type='button' disabled={busy||retireReason.trim().length<12} onClick={()=>void retireDraft()} className='mt-2 min-h-11 rounded-lg border border-amber-600 px-3 text-sm text-amber-200 disabled:opacity-50'>Retire unpublished template</button></>}
   </Card>
   <Card><h2 className='font-semibold text-white'>Complete a draft form</h2>
    <select value={selected} onChange={e=>{setSelected(e.target.value);setRecordId('');setValues({})}} className='my-2 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'><option value=''>Select a draft template</option>{templates.data?.templates.filter(t=>t.status==='draft').map(t=><option key={t.id} value={t.id} >{t.title}{t.successorId?' (older revision — existing records only)':''}</option>)}</select>
