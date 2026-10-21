@@ -94,6 +94,8 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
     } catch (err) { setCreateError(err instanceof Error ? err.message : 'Could not create document.'); }
     finally { setBusy(false); }
   };
+  if(mode!=='config' && setup.data?.config.enabledSubmodules &&
+    !setup.data.config.enabledSubmodules.includes(mode)) return <div className='rounded-xl border border-slate-700 p-4 text-sm text-slate-200'>This DOC submodule is disabled in organization configuration.</div>;
   return <div className='space-y-4'>
     <PageTitle title={({register:'Document register',engineering:'Engineering & equipment library',sds:'SHEQ SDS / MSDS',rca:'Digital RCA & investigations',review:'Review & approvals',knowledge:'Knowledge & troubleshooting',forms:'Digital forms & records',config:'DOC configuration'} as Record<string,string>)[mode]} subtitle='Documentation & Records (DOC) · Controlled enterprise knowledge' />
     {(mode==='config'||mode==='register') && canConfigure && <Card>
