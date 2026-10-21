@@ -86,7 +86,7 @@ export const drkmsSignatureRoutes={
    const authorized=str(doc.data.createdBy)===ctx.uid||result.some(s=>str(s.data.signerUid)===ctx.uid)
      ||canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,str(loc.nodeId)),await scopeOf(ctx));
    if(!authorized)throw new HttpError(403,'Signature assignments are restricted to participants and authorized reviewers.');
-   return {slots:result.map(v=>({slotId:v.id,label:v.data.label,signerUid:v.data.signerUid,position:v.data.position,status:v.data.status,signedAt:v.data.signedAt}))};
+   return {slots:result.map(v=>({slotId:v.id,label:v.data.label,signerUid:v.data.signerUid,position:v.data.position,status:v.data.status,signedAt:v.data.signedAt,proof:str(doc.data.status)==='effective'?v.data.proof:undefined}))};
   }),
  ],
  'POST /api/org/drkms/signatures/sign':[
