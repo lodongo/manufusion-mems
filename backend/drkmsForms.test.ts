@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateFormFields,validateFormValues} from './drkmsForms';
+import {validateFormFields,validateFormValues,formFieldVisible} from './drkmsForms';
 const fields=validateFormFields([{code:'description',label:'Observation',type:'text',required:true},{code:'safe',label:'Safe condition',type:'yes_no',required:true},{code:'result',label:'Decision',type:'select',required:true,options:['Pass','Fail']}]);
 test('form schema enforces codified unique fields',()=>{
  assert.equal(fields.length,3);
@@ -12,4 +12,20 @@ test('draft submission validates required typed values without extra fields',()=
  assert.throws(()=>validateFormValues(fields,{description:'Observed',safe:'false',result:'Fail'}));
  assert.throws(()=>validateFormValues(fields,{description:'Observed',safe:true,result:'Unknown'}));
  assert.throws(()=>validateFormValues(fields,{description:'Observed',safe:true,result:'Pass',injected:'value'}));
+});
+
+test('conditional required fields apply only when visible and partial drafts are allowed',()=>{
+ const fields=validateFormFields([
+  {code:'needs_followup',label:'Follow-up required',type:'yes_no',required:true,section:'Initial'},
+  {code:'followup_reason',label:'Explain follow-up',type:'long_text',required:true,section:'Details',
+   visibleWhen:{fieldCode:'needs_followup',equals:true}}
+ ]);
+ assert.equal(formFieldVisible(fields[1],{needs_followup:false}),false);
+ assert.deepEqual(validateFormValues(fields,{needs_followup:false,followup_reason:'stale'}),{needs_followup:false,followup_reason:null});
+ assert.throws(()=>validateFormValues(fields,{needs_followup:true}));
+ assert.deepEqual(validateFormValues(fields,{needs_followup:true},true),{needs_followup:true,followup_reason:null});
+ assert.throws(()=>validateFormFields([
+  {code:'child',label:'Child',type:'text',required:true,visibleWhen:{fieldCode:'parent',equals:true}},
+  {code:'parent',label:'Parent',type:'yes_no',required:false}
+ ]));
 });
