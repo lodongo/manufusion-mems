@@ -7,6 +7,7 @@ import { assessPublicationGate } from './drkmsPublicationGate';
 import {publicationFingerprint} from './drkmsPublish';
 import {rcaDmaicComplete} from './drkmsRcaGate';
 import {canAt,scopeOf,nodePath} from './access';
+import {nextReviewDate,reviewState} from './docReviewSchedule';
 
 const base = (orgId: string) => `organizations/${orgId}/drkms_documents`;
 const validId = (v: string) => /^[a-f0-9]{20}$/.test(v);
@@ -84,6 +85,27 @@ export const drkmsRoutes = {
             await writeDoc(configPath(ctx.orgId), config);
             await record(ctx, 'drkms.configure', 'Document controls');
             return { config };
+        }),
+    ],
+    'POST /api/org/drkms/documents/review-schedule': [
+        orgRoute('drkms.documents.review_schedule', 'ADM.document_registry', async ctx => {
+            const [documents,config]=await Promise.all([listDocs(base(ctx.orgId)),getDoc(configPath(ctx.orgId))]);
+            const value=Number(config?.data.defaultReviewMonths??24);
+            const months=Number.isInteger(value)&&value>=1&&value<=120?value:24;
+            const today=nowIso().slice(0,10),scope=await scopeOf(ctx);
+            const schedule=[];
+            for(const item of documents){
+                if(str(item.data.status)!=='effective')continue;
+                const location=item.data.scope&&typeof item.data.scope==='object'&&!Array.isArray(item.data.scope)
+                    ?item.data.scope as Record<string,unknown>:{};
+                const nodeId=str(location.nodeId);
+                if(!nodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),scope))continue;
+                const nextReview=nextReviewDate(str(item.data.publishedAt),months);
+                schedule.push({documentId:item.id,title:str(item.data.title),revision:str(item.data.revision),
+                    publishedAt:str(item.data.publishedAt),nextReview,status:reviewState(nextReview,today)});
+            }
+            schedule.sort((a,b)=>(a.nextReview??'9999').localeCompare(b.nextReview??'9999'));
+            return {schedule,reviewMonths:months,asOf:today};
         }),
     ],
     'POST /api/org/drkms/documents/list': [
