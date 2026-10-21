@@ -6,6 +6,7 @@ import { Alert } from '../components/ui';
 import { Button, Card, Spinner, useLoad } from '../admin/kit';
 import MntTaskAssessment, { WarehouseSparePicker, CatalogPicker } from './MntTaskAssessment';
 import { FulfilmentTrack, ResourceStatus, SOURCE_LABEL, useVendors } from './mntSourcing';
+import { useFullScreen } from './mntShared';
 
 export type MntData = Record<string, any>;
 export const mntInput = 'mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink';
@@ -650,6 +651,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
         [failure, setFailure] = useState(''),
         [busy, setBusy] = useState(false),
         [form, setForm] = useState<MntData>({});
+    const screen = useFullScreen(assessing);
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone="error">{error || 'Work order unavailable.'}</Alert>;
     const wo = data.wo,
@@ -709,6 +711,15 @@ export default function MntWorkOrder({ code }: { code: string }) {
     };
     if (assessing)
         return (
+            <div className={screen.full ? screen.className + ' overflow-y-auto overscroll-contain' : ''} onFocusCapture={screen.keepInView}>
+            {screen.full && (
+                <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-page py-2">
+                    <Button variant="secondary" aria-label="Back to work order" onClick={() => setAssessing(false)}>
+                        <ArrowLeft size={16} />
+                    </Button>
+                    <p className="min-w-0 flex-1 truncate font-semibold">{wo.code} · task assessment</p>
+                </div>
+            )}
             <MntTaskAssessment
                 code={code}
                 context={{ asset: `${wo.assetTag} · ${wo.assetName || ''}`, assembly: wo.assemblyName, equipment: wo.unitName }}
@@ -721,6 +732,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 }}
                 onCancel={() => setAssessing(false)}
             />
+            </div>
         );
     return (
         <div className="space-y-5 text-ink">

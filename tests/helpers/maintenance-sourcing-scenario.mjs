@@ -343,10 +343,18 @@ const requirements = async () => (await listDocs(r + '/procurement_requirements'
 }
 const search = (who, code, q) => route(maintenanceSourcingRoutes, '/api/org/mnt/sourcing/materials', who, { code, q });
 
-const wr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', finding);
+// Raising a request: no criticality or failure mode from the requester; 1 to 5 impacts.
+const { criticalityCode: _crit, ...raised } = finding;
+const sixImpacts = l.impacts.flatMap((g) => g.items.map((i) => i.code)).slice(0, 6);
+assert.equal(sixImpacts.length, 6);
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', { ...raised, impactCodes: sixImpacts }), /between 1 and 5 impacts/);
+const wr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', { ...raised, impactCodes: sixImpacts.slice(0, 5) });
+assert.equal(snapshot(r + '/work_requests/' + wr.code).data.criticalityCode, undefined, 'Criticality is left to the assessor');
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'start_review' });
 const header = { maintenanceTypeCode: l.maintenanceTypes[0].code, workTypeCode: l.workTypes[0].code, priorityCode: l.priorities[0].code, disciplineCode: l.disciplines[0].code };
-await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'assess', ...header });
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'assess', ...header }), /criticality/i);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'assess', ...header, criticalityCode: l.criticality.at(-1).code });
+assert.equal(snapshot(r + '/work_requests/' + wr.code).data.criticalityOriginalLabel, undefined);
 
 // 1. Warehouse first: stocked materials show usable quantity; registered-without-stock and catalogue come next.
 const bearingHits = await search('assessor', wr.code, 'drive bearing');

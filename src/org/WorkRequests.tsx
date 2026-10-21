@@ -7,7 +7,7 @@ import MntTaskAssessment,{type TaskAssessment} from './MntTaskAssessment';
 import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
-import { AssemblyPicker, GroupPicker, Info, LEVEL_LABEL, compressPhoto, critColor, findIn, type ListGroup, type MntLists, type MntSetup, type Place } from './mntShared';
+import { AssemblyPicker, ChoicePicker, Info, useFullScreen, LEVEL_LABEL, compressPhoto, critColor, findIn, type ListGroup, type MntLists, type MntSetup, type Place } from './mntShared';
 import { appConfirm } from '../components/dialogs';
 
 // Maintenance (MNT): work requests. A finding raised against an assembly, numbered WR + 8 digits by the server.
@@ -132,11 +132,11 @@ function useColumns(): Array<Column<Row>> {
             {
                 key: 'criticality',
                 label: 'Criticality',
-                value: (r) => r.criticalityLabel,
+                value: (r) => r.criticalityLabel || 'Not assessed',
                 render: (r) => (
                     <span className='inline-flex items-center gap-1.5 whitespace-nowrap'>
-                        <span className='h-2.5 w-2.5 rounded-full' style={{ background: critColor(r.criticalityCode, r.criticalityColor) }} />
-                        {r.criticalityLabel}
+                        <span className='h-2.5 w-2.5 rounded-full' style={{ background: r.criticalityCode ? critColor(r.criticalityCode, r.criticalityColor) : '#94a3b8' }} />
+                        {r.criticalityLabel || 'Not assessed'}
                     </span>
                 ),
             },
@@ -216,7 +216,9 @@ function RequestList({ setup }: { setup: MntSetup }) {
 // New request wizard
 // ---------------------------------------------------------------------------
 
-const STEPS = ['Where', 'Finding', 'Criticality', 'Photos', 'Review'] as const;
+const STEPS = ['Where', 'Finding', 'Impact', 'Photos', 'Review'] as const;
+const MAX_IMPACTS = 5;
+const toggleImpact = (c: string) => (cur: string[]) => (cur.includes(c) ? cur.filter((x) => x !== c) : cur.length >= MAX_IMPACTS ? cur : [...cur, c]);
 interface GembaWrHandoff { id: string; observationId: string; assemblyId: string; assetTag: string; title: string; description: string; gembaTypeCode?: string; gembaTypeName?: string; photoPath?: string; photoUrl?: string }
 function pendingGembaWr(assemblyId: string): GembaWrHandoff | null {
     try {
@@ -238,8 +240,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [sourceCode, setSourceCode] = useState('');
-    const [failureCode, setFailureCode] = useState('');
-    const [critCode, setCritCode] = useState('');
     const [impactCodes, setImpactCodes] = useState<string[]>([]);
     const [photos, setPhotos] = useState<Array<{ token: string; url: string }>>([]);
     const [uploading, setUploading] = useState(0);
@@ -300,8 +300,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         setTitle('');
         setDescription('');
         setSourceCode('');
-        setFailureCode('');
-        setCritCode('');
         setImpactCodes([]);
         setPhotos([]);
         setConfirmed(false);
@@ -310,18 +308,17 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     };
 
     const source = findIn(lists.sources, sourceCode);
-    const failure = findIn(lists.failureModes, failureCode);
-    const crit = lists.criticality.find((c) => c.code === critCode);
     const asset = place?.assets.find((a) => a.tag === place.defaultAssetTag && a.linked);
 
     const problems: string[][] = [
         place && asset && assetTag===place.defaultAssetTag ? [] : ['Choose an assembly with a valid linked equipment asset.'],
         [...(title.trim().length < 5 ? ['Give a short title (at least 5 characters).'] : []), ...(description.trim().length < 10 ? ['Describe what you found (at least 10 characters).'] : []), ...(source ? [] : ['Choose the source of the finding.'])],
-        [...(crit ? [] : ['Choose the criticality.']), ...(impactCodes.length ? [] : ['Choose at least one impact.'])],
+        [...(impactCodes.length ? [] : ['Choose at least one impact.'])],
         [...(uploading ? ['Wait for the photos to finish uploading.'] : [])],
         confirmed ? [] : ['Confirm that the details are correct.'],
     ];
     const canNext = problems[step].length === 0;
+    const screen = useFullScreen(!created);
     const swipeStart = useRef<{ x: number; y: number; at: number } | null>(null);
     const startSwipe = (event: TouchEvent<HTMLDivElement>) => {
         swipeStart.current = null;
@@ -372,8 +369,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                 title: title.trim(),
                 description: description.trim(),
                 sourceCode,
-                failureModeCode: failureCode,
-                criticalityCode: critCode,
                 impactCodes,
                 photos: photos.map((p) => p.token),
                 gembaId: pendingLink?.id || '', gembaObservationId: pendingLink?.observationId || '',
@@ -421,9 +416,9 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         );
 
     return (
-        <div className='flex h-[calc(100dvh-7rem)] flex-col'>
+        <div className={screen.className} onFocusCapture={screen.keepInView}>
             {/* Action bar: always visible at the top */}
-            <div className='sticky top-0 z-10 shrink-0 space-y-2 border-b border-slate-800 bg-slate-950 pb-3'>
+            <div className='sticky top-0 z-10 shrink-0 space-y-2 border-b border-line bg-page pb-2'>
                 <div className='flex items-center gap-2'>
                     <Button variant='secondary' onClick={() => (step === 0 ? navigate('organization_admin/work_requests') : setStep(step - 1))} aria-label='Back'>
                         <ArrowLeft className='h-4 w-4' />
@@ -458,9 +453,9 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                         />
                     ))}
                 </div>
-                <p className='text-xs text-slate-500 sm:hidden'>Swipe left for next, right for back. Submit on the final step.</p>
+                <p className='text-xs text-slate-500 sm:hidden mems-compact-hide'>Swipe left for next, right for back.</p>
                 {place && step > 0 && (
-                    <p className='flex items-center gap-1 truncate text-xs text-slate-400'>
+                    <p className='flex items-center gap-1 truncate text-xs text-slate-400 mems-compact-hide'>
                         <MapPin className='h-3 w-3 shrink-0' />
                         {place.path.map((p) => p.code).join(' › ')}
                     </p>
@@ -479,37 +474,24 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                 {step === 1 && (
                     <>
                         <Field id='wr-title' label='Short title *' maxLength={120} placeholder='e.g. Oil leak at gearbox output seal' value={title} onChange={(e) => setTitle(e.target.value)} />
-                        <TextArea id='wr-desc' label='What did you find? *' rows={4} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
+                        <TextArea id='wr-desc' label='What did you find? *' rows={3} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
                         <p className='text-right text-xs text-slate-500'>{description.length}/2000</p>
                         {pendingLink?.gembaTypeName && <p className='rounded-lg bg-brand/10 px-3 py-2 text-xs text-brand'>From {pendingLink.gembaTypeName} · linked Gemba observation</p>}
-                        <GroupPicker title='Source of the finding *' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
-                        <GroupPicker title='Failure mode (optional)' groups={lists.failureModes} selected={failureCode ? [failureCode] : []} onToggle={(c) => setFailureCode(c === failureCode ? '' : c)} collapsed />
+                        <ChoicePicker title='Source of the finding' required groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
                     </>
                 )}
 
                 {step === 2 && (
-                    <>
-                        <p className='text-sm font-medium text-slate-200'>Criticality *</p>
-                        <div className='grid grid-cols-2 gap-2 sm:grid-cols-5'>
-                            {lists.criticality.map((c) => {
-                                const color = critColor(c.code, c.color, lists.criticality);
-                                const on = critCode === c.code;
-                                return (
-                                    <button
-                                        key={c.code}
-                                        type='button'
-                                        onClick={() => setCritCode(c.code)}
-                                        className={`flex h-16 flex-col items-center justify-center rounded-2xl border-2 text-sm font-semibold ${on ? 'text-white' : 'text-slate-200'}`}
-                                        style={{ borderColor: color, background: on ? color : `${color}22` }}
-                                    >
-                                        {c.label}
-                                        {on && <Check className='mt-0.5 h-4 w-4' />}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                        <GroupPicker title='Impact * (choose up to 6)' groups={lists.impacts} selected={impactCodes} multi onToggle={(c) => setImpactCodes((cur) => (cur.includes(c) ? cur.filter((x) => x !== c) : cur.length >= 6 ? cur : [...cur, c]))} />
-                    </>
+                    <ChoicePicker
+                        title='Impact'
+                        required
+                        multi
+                        max={MAX_IMPACTS}
+                        hint='Choose a category, then tick what this finding affects. The assessor sets the criticality.'
+                        groups={lists.impacts}
+                        selected={impactCodes}
+                        onToggle={(c) => setImpactCodes(toggleImpact(c))}
+                    />
                 )}
 
                 {step === 3 && (
@@ -565,19 +547,16 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                             <p className='whitespace-pre-wrap text-sm text-slate-300'>{description}</p>
                             <p className='mt-1 text-xs text-slate-400'>
                                 Source: {source?.group} · {source?.label}
-                                {failure ? ` · Failure mode: ${failure.group} · ${failure.label}` : ''}
                             </p>
                         </ReviewBlock>
-                        <ReviewBlock label='Criticality and impact' onEdit={() => setStep(2)}>
-                            <span className='inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold text-white' style={{ background: critColor(critCode, crit?.color ?? '', lists.criticality) }}>
-                                {crit?.label}
-                            </span>
-                            <div className='mt-2 flex flex-wrap gap-1'>
+                        <ReviewBlock label={`Impact (${impactCodes.length}/${MAX_IMPACTS})`} onEdit={() => setStep(2)}>
+                            <div className='flex flex-wrap gap-1'>
                                 {impactCodes.map((c) => {
                                     const i = findIn(lists.impacts, c);
                                     return <Badge key={c}>{i ? `${i.group} · ${i.label}` : c}</Badge>;
                                 })}
                             </div>
+                            <p className='mt-1 text-xs text-slate-400'>Criticality is set by the assessor.</p>
                         </ReviewBlock>
                         <ReviewBlock label={`Photos (${photos.length})`} onEdit={() => setStep(3)}>
                             <div className='flex gap-2 overflow-x-auto'>
@@ -641,6 +620,8 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
         if(next!==section&&tasksDirty&&!(await appConfirm('You have unsaved task changes. Leave without saving them?')))return;
         setMode('');setActionError('');setSection(next);
     };
+    // Phones: assessing (classification or tasks) runs full screen, above the app header and footer.
+    const screen = useFullScreen(section === 'tasks' || mode === 'assess');
 
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load the work request.'}</Alert>;
@@ -682,9 +663,9 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const noteNeeded = mode === 'return' || mode === 'decline' || mode === 'cancel' || mode === 'review_assessment' || mode === 'return_assessment';
 
     return (
-        <div className='flex h-[calc(100dvh-7rem)] flex-col'>
+        <div className={screen.className} onFocusCapture={screen.keepInView}>
             {/* Action bar on top */}
-            <div className='shrink-0 space-y-2 border-b border-slate-800 bg-slate-950 pb-3'>
+            <div className='shrink-0 space-y-2 border-b border-line bg-page pb-2'>
                 <div className='flex items-center gap-2'>
                     <Button variant='secondary' aria-label='Back' onClick={async () => { if(tasksDirty&&!(await appConfirm('You have unsaved task changes. Leave without saving?')))return; navigate('organization_admin/work_requests'); }}>
                         <ArrowLeft className='h-4 w-4' />
@@ -790,9 +771,13 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                             <h2 className='text-lg font-semibold text-white'>{r.title}</h2>
                             <div className='mt-2 flex flex-wrap gap-1'>
                                 <Badge tone={WR_TONE[r.status] ?? 'muted'}>{r.statusLabel}</Badge>
-                                <span className='rounded-full px-2 py-0.5 text-xs font-semibold text-white' style={{ background: critColor(r.criticalityCode, r.criticalityColor) }}>
-                                    {r.criticalityLabel}
-                                </span>
+                                {r.criticalityCode ? (
+                                    <span className='rounded-full px-2 py-0.5 text-xs font-semibold text-white' style={{ background: critColor(r.criticalityCode, r.criticalityColor) }}>
+                                        {r.criticalityLabel}
+                                    </span>
+                                ) : (
+                                    <Badge>Criticality: set at assessment</Badge>
+                                )}
                                 {r.criticalityOriginalLabel && <Badge>Raised as {r.criticalityOriginalLabel}</Badge>}
                             </div>
                         </div>
@@ -1036,14 +1021,13 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
     const [title, setTitle] = useState(detail.title);
     const [description, setDescription] = useState(detail.description);
     const [sourceCode, setSourceCode] = useState(detail.sourceCode);
-    const [failureCode, setFailureCode] = useState(detail.failureModeCode);
-    const [critCode, setCritCode] = useState(detail.criticalityCode);
     const [impactCodes, setImpactCodes] = useState(detail.impacts.map((i) => i.code));
     const [photos, setPhotos] = useState(detail.photos);
     const [uploading, setUploading] = useState(0);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const ok = title.trim().length >= 5 && description.trim().length >= 10 && sourceCode && critCode && impactCodes.length > 0 && !uploading;
+    const ok = title.trim().length >= 5 && description.trim().length >= 10 && sourceCode && impactCodes.length > 0 && impactCodes.length <= MAX_IMPACTS && !uploading;
+    const screen = useFullScreen(true);
 
     const addPhotos = async (e: ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files ?? []);
@@ -1064,7 +1048,7 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
         setBusy(true);
         setError('');
         try {
-            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'edit', title, description, sourceCode, failureModeCode: failureCode, criticalityCode: critCode, impactCodes, photos: photos.map((p) => p.token) });
+            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'edit', title, description, sourceCode, impactCodes, photos: photos.map((p) => p.token) });
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save.');
@@ -1073,8 +1057,8 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
         }
     };
     return (
-        <div className='flex h-[calc(100dvh-7rem)] flex-col'>
-            <div className='flex shrink-0 items-center gap-2 border-b border-slate-800 pb-3'>
+        <div className={screen.className} onFocusCapture={screen.keepInView}>
+            <div className='flex shrink-0 items-center gap-2 border-b border-line bg-page pb-3'>
                 <Button variant='secondary' aria-label='Back' onClick={onCancel}>
                     <ArrowLeft className='h-4 w-4' />
                 </Button>
@@ -1088,20 +1072,8 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
                 {detail.returnNote && <Alert tone='info'>Requested: {detail.returnNote}</Alert>}
                 <Field id='ed-title' label='Short title *' maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} />
                 <TextArea id='ed-desc' label='What did you find? *' rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
-                <GroupPicker title='Source of the finding *' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
-                <GroupPicker title='Failure mode (optional)' groups={lists.failureModes} selected={failureCode ? [failureCode] : []} onToggle={(c) => setFailureCode(c === failureCode ? '' : c)} collapsed />
-                <div className='grid grid-cols-2 gap-2 sm:grid-cols-5'>
-                    {lists.criticality.map((c) => {
-                        const color = critColor(c.code, c.color, lists.criticality);
-                        const on = critCode === c.code;
-                        return (
-                            <button key={c.code} type='button' onClick={() => setCritCode(c.code)} className={`h-12 rounded-xl border-2 text-sm font-semibold ${on ? 'text-white' : 'text-slate-200'}`} style={{ borderColor: color, background: on ? color : `${color}22` }}>
-                                {c.label}
-                            </button>
-                        );
-                    })}
-                </div>
-                <GroupPicker title='Impact * (up to 6)' groups={lists.impacts} selected={impactCodes} multi onToggle={(c) => setImpactCodes((cur) => (cur.includes(c) ? cur.filter((x) => x !== c) : cur.length >= 6 ? cur : [...cur, c]))} />
+                <ChoicePicker title='Source of the finding' required groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
+                <ChoicePicker title='Impact' required multi max={MAX_IMPACTS} groups={lists.impacts} selected={impactCodes} onToggle={(c) => setImpactCodes(toggleImpact(c))} />
                 <div className='grid grid-cols-3 gap-2'>
                     {photos.map((p) => (
                         <div key={p.token} className='relative overflow-hidden rounded-xl border border-slate-800'>

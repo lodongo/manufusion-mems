@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState, type FocusEvent } from 'react';
 import { Check, CheckCircle2, ChevronRight, Cog, Home, Layers, Search, Wrench, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert } from '../components/ui';
@@ -105,6 +105,127 @@ export async function compressPhoto(file: File): Promise<string> {
     });
 }
 
+
+/**
+ * Choose a category from a drop-down, then tick items on cards. Selected items are listed above with a clear
+ * count (for example 1/5) and the limit is enforced: once it is reached, the other cards are disabled.
+ */
+export function ChoicePicker({ title, groups, selected, onToggle, multi = false, max = 1, required = false, hint }: { title: string; groups: ListGroup[]; selected: string[]; onToggle: (code: string) => void; multi?: boolean; max?: number; required?: boolean; hint?: string }) {
+    const groupOf = (code: string) => groups.find((g) => g.items.some((i) => i.code === code))?.code ?? '';
+    const [group, setGroup] = useState(selected[0] ? groupOf(selected[0]) : '');
+    const all = groups.flatMap((g) => g.items.map((i) => ({ ...i, group: g.label })));
+    const chosen = all.filter((i) => selected.includes(i.code));
+    const current = groups.find((g) => g.code === group);
+    const full = multi && selected.length >= max;
+    return (
+        <section className='space-y-3 rounded-2xl border border-line bg-panel p-3'>
+            <div className='flex items-center justify-between gap-2'>
+                <p className='text-sm font-semibold text-ink'>
+                    {title}
+                    {required && ' *'}
+                </p>
+                {multi && (
+                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums ${full ? 'bg-brand text-onbrand' : 'bg-page text-soft ring-1 ring-line'}`} aria-label={`${selected.length} of ${max} selected`}>
+                        {selected.length}/{max}
+                    </span>
+                )}
+            </div>
+            {hint && <p className='text-xs text-muted'>{hint}</p>}
+            {chosen.length > 0 && (
+                <ul className='flex flex-wrap gap-1.5' aria-label='Selected'>
+                    {chosen.map((c) => (
+                        <li key={c.code}>
+                            <button type='button' onClick={() => onToggle(c.code)} aria-label={`Remove ${c.label}`} className='flex min-h-[36px] items-center gap-1.5 rounded-full bg-brand/10 px-3 text-sm font-medium text-ink ring-1 ring-brand/50'>
+                                <span className='max-w-[60vw] truncate'>{c.label}</span>
+                                <X className='h-3.5 w-3.5 shrink-0 text-soft' />
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            <label className='block text-xs text-soft'>
+                Category
+                <select data-native-select='true' value={group} onChange={(e) => setGroup(e.target.value)} className='mt-1 block h-12 w-full rounded-xl border border-line bg-page px-3 text-base text-ink'>
+                    <option value=''>Choose a category…</option>
+                    {groups.map((g) => {
+                        const count = g.items.filter((i) => selected.includes(i.code)).length;
+                        return (
+                            <option key={g.code} value={g.code}>
+                                {g.label}
+                                {count ? ` (${count} selected)` : ''}
+                            </option>
+                        );
+                    })}
+                </select>
+            </label>
+            {current && (
+                <div className='grid grid-cols-1 gap-2 sm:grid-cols-2' role={multi ? 'group' : 'radiogroup'} aria-label={current.label}>
+                    {current.items.map((i) => {
+                        const on = selected.includes(i.code);
+                        const blocked = !on && full;
+                        return (
+                            <button
+                                key={i.code}
+                                type='button'
+                                role={multi ? 'checkbox' : 'radio'}
+                                aria-checked={on}
+                                disabled={blocked}
+                                onClick={() => onToggle(i.code)}
+                                className={`flex min-h-[52px] items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm ${on ? 'border-brand bg-brand/10 font-semibold text-ink' : 'border-line bg-panel text-ink active:bg-page'} ${blocked ? 'opacity-40' : ''}`}
+                            >
+                                <span className={`flex h-5 w-5 shrink-0 items-center justify-center ${multi ? 'rounded' : 'rounded-full'} border ${on ? 'border-brand bg-brand text-onbrand' : 'border-line'}`}>{on && <Check className='h-3.5 w-3.5' />}</span>
+                                <span className='min-w-0 flex-1 break-words'>{i.label}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+            {full && <p className='text-xs text-soft'>Maximum of {max} reached. Remove one to choose another.</p>}
+        </section>
+    );
+}
+
+/**
+ * Full-screen working mode for phones (raising a request, assessing): the screen covers the app header and footer,
+ * asks the browser for full screen where allowed, and keeps the focused field in view above the keyboard.
+ */
+export function useFullScreen(active: boolean) {
+    const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches);
+    useEffect(() => {
+        const mq = window.matchMedia('(max-width: 639px)');
+        const on = () => setPhone(mq.matches);
+        mq.addEventListener('change', on);
+        return () => mq.removeEventListener('change', on);
+    }, []);
+    const full = active && phone;
+    useEffect(() => {
+        if (!full) return;
+        let entered = false;
+        const el = document.documentElement;
+        if (!document.fullscreenElement && el.requestFullscreen)
+            el.requestFullscreen({ navigationUI: 'hide' })
+                .then(() => (entered = true))
+                .catch(() => undefined);
+        const overflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = overflow;
+            if (entered && document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
+        };
+    }, [full]);
+    const keepInView = (e: FocusEvent<HTMLElement>) => {
+        const t = e.target as HTMLElement;
+        if (t.matches('input, textarea, select')) setTimeout(() => t.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+    };
+    return {
+        full,
+        className: full
+            ? 'fixed inset-0 z-[80] flex flex-col bg-page px-3 pb-[env(safe-area-inset-bottom)] pt-[max(env(safe-area-inset-top),0.5rem)]'
+            : 'flex h-[calc(100dvh-7rem)] flex-col',
+        keepInView,
+    };
+}
+
 /** Two-tap picker for grouped lists: choose the group (chips), then the item (big buttons). */
 export function GroupPicker({ title, groups, selected, onToggle, multi = false, collapsed = false }: { title: string; groups: ListGroup[]; selected: string[]; onToggle: (code: string) => void; multi?: boolean; collapsed?: boolean }) {
     const groupOf = (code: string) => groups.find((g) => g.items.some((i) => i.code === code))?.code ?? '';
@@ -144,7 +265,7 @@ export function GroupPicker({ title, groups, selected, onToggle, multi = false, 
             {chosen.length > 0 && (
                 <div className='flex flex-wrap gap-1'>
                     {chosen.map((c) => (
-                        <button key={c.code} type='button' onClick={() => onToggle(c.code)} className='flex items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-xs text-emerald-200 ring-1 ring-emerald-500/40'>
+                        <button key={c.code} type='button' onClick={() => onToggle(c.code)} className='flex items-center gap-1 rounded-full bg-brand/10 px-3 py-1 text-xs font-medium text-ink ring-1 ring-brand/50'>
                             {c.group} · {c.label}
                             <X className='h-3 w-3' />
                         </button>

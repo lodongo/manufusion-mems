@@ -302,3 +302,10 @@ body {
 .ol .ol-chip { background: var(--ol-chip); color: var(--ol-chip-ink); }
 .ol .ol-input { background: var(--ol-surface); border: 1px solid var(--ol-line); border-bottom-color: var(--ol-sub); border-radius: 4px; }
 .ol .ol-input:focus-within, .ol .ol-input:focus { border-bottom: 2px solid var(--ol-brand); outline: none; }
+
+/* Phones with the on-screen keyboard open (little height left): hide secondary hints so the field stays visible. */
+@media (max-height: 560px) {
+    .mems-compact-hide {
+        display: none !important;
+    }
+}
