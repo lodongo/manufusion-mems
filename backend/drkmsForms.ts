@@ -76,6 +76,31 @@ export async function resolveFormReference(orgId:string,reference:{module:string
   return {...reference,verification:'pending_scope_validation'};
  return {...reference,verification:'linked',sourceTitle:str(doc.data.title)||str(doc.data.name)||reference.recordId};
 }
+async function verifiedEvidenceCurrent(orgId:string,scopeNodeId:string,raw:unknown):Promise<void>{
+ if(raw===undefined||raw===null)return;
+ if(!Array.isArray(raw)||raw.length>20||raw.some(x=>!isObj(x)))
+  throw new HttpError(409,'Invalid controlled evidence manifest.');
+ for(const item of raw as Array<Record<string,unknown>>){
+  const documentId=str(item.documentId),revisionId=str(item.revisionId),fileId=str(item.fileId);
+  if(!ID.test(documentId)||!/^[a-f0-9]{64}$/.test(revisionId)||!ID.test(fileId))
+   throw new HttpError(409,'Invalid controlled evidence identity.');
+  const path=`organizations/${orgId}/drkms_documents/${documentId}`,doc=await getDoc(path);
+  if(!doc||str(doc.data.status)!=='effective'||str(doc.data.effectiveRevisionId)!==revisionId)
+   throw new HttpError(409,'Controlled evidence is no longer the effective revision.');
+  const sourceNode=isObj(doc.data.scope)?str(doc.data.scope.nodeId):'';
+  if(!sourceNode||sourceNode!==scopeNodeId)
+   throw new HttpError(403,'Cross-location evidence requires a separate governance review.');
+  const [rev,file]=await Promise.all([getDoc(path+'/revisions/'+revisionId),getDoc(path+'/files/'+fileId)]);
+  if(!rev||rev.data.immutable!==true||str(rev.data.tenantId)!==orgId||!file||
+    str(file.data.scanStatus)!=='clean'||str(file.data.availability)!=='verified')
+   throw new HttpError(409,'Linked evidence failed its controlled source verification.');
+  const manifest=Array.isArray(rev.data.sourceFiles)?rev.data.sourceFiles.filter(isObj):[];
+  const matched=manifest.find(x=>str(x.fileId)===fileId);
+  if(!matched||str(matched.sha256)!==str(item.sha256)||str(file.data.sha256)!==str(item.sha256)||
+    str(matched.mime)!==str(file.data.mime)||Number(matched.bytes)!==Number(file.data.bytes))
+   throw new HttpError(409,'Evidence content differs from its immutable approved source.');
+ }
+}
 export function formRecordFingerprint(record:Record<string,unknown>):string{
  return transactionPayloadHash({
   templateId:str(record.templateId),templateRevision:str(record.templateRevision),
@@ -217,6 +242,7 @@ export const drkmsFormRoutes={
   if(!str(record.data.reviewedBy)||str(record.data.reviewedBy)===ctx.uid||
     str(record.data.createdBy)===ctx.uid)
    throw new HttpError(403,'Form creator or technical reviewer cannot sign in a separate authority stream.');
+  await verifiedEvidenceCurrent(ctx.orgId,str(record.data.scopeNodeId),record.data.attachments);
   const hash=formRecordFingerprint(record.data);
   if(hash!==str(record.data.reviewedFingerprint)||hash!==str(slot.data.recordFingerprint)||
     str(record.data.reviewId)!==str(slot.data.reviewId))
@@ -265,7 +291,7 @@ export const drkmsFormRoutes={
   const docPath=`organizations/${ctx.orgId}/drkms_documents/${documentId}`,doc=await getDoc(docPath);
   if(!doc||str(doc.data.status)!=='effective')throw new HttpError(409,'Evidence must be an effective controlled document.');
   const sourceNodeId=isObj(doc.data.scope)?str(doc.data.scope.nodeId):'';
-  if(!sourceNodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,sourceNodeId),scope))
+  if(!sourceNodeId||sourceNodeId!==nodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,sourceNodeId),scope))
    throw new HttpError(403,'Evidence document is outside your current scope.');
   const revisionId=str(doc.data.effectiveRevisionId),rev=await getDoc(docPath+'/revisions/'+revisionId),file=await getDoc(docPath+'/files/'+fileId);
   if(!rev||rev.data.immutable!==true||str(rev.data.tenantId)!==ctx.orgId||
@@ -305,6 +331,7 @@ export const drkmsFormRoutes={
   const nodeId=str(record.data.scopeNodeId);
   if(!nodeId||!canAt(ctx,'ADM.document_review',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))
    throw new HttpError(403,'Review is outside your scope.');
+  if(decision==='technical_reviewed')await verifiedEvidenceCurrent(ctx.orgId,nodeId,record.data.attachments);
   const date=nowIso(),reviewId=randomId(10),hash=formRecordFingerprint(record.data);
   const next={...record.data,status:decision==='return'?'draft':'technical_reviewed',
    unapproved:true,reviewedBy:ctx.uid,reviewedAt:date,reviewReason:reason,reviewId,
@@ -354,6 +381,7 @@ export const drkmsFormRoutes={
     throw new HttpError(403,'Form is outside authorized scope.');
    const fields=validateFormFields(template.data.fields);
    const values=validateFormValues(fields,record.data.values,false);
+   await verifiedEvidenceCurrent(ctx.orgId,nodeId,record.data.attachments);
    const source=record.data.operationalReference as {module:string;recordId:string}|null;
    if(source?.module){
     const resolved=await resolveFormReference(ctx.orgId,source,nodeId);
