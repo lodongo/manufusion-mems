@@ -12,10 +12,11 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
  const [selected,setSelected]=useState(''),[recordId,setRecordId]=useState(''),[values,setValues]=useState<Record<string,string|number|boolean|null>>({});
  const [busy,setBusy]=useState(false),[notice,setNotice]=useState('');
  const [referenceModule,setReferenceModule]=useState(''),[referenceId,setReferenceId]=useState('');
+ const [signers,setSigners]=useState<Array<{signerUid:string;label:string}>>([]);
  const add=()=>setFields(v=>[...v,{code:'field_'+(v.length+1),label:'New field',type:'text',required:false}]);
  const patch=(i:number,part:Partial<Field>)=>setFields(v=>v.map((f,j)=>i===j?{...f,...part}:f));
  const create=async()=>{setBusy(true);setNotice('');
-  try{await callBackend('/api/org/drkms/forms/templates/create',{title,scopeNodeId:location,fields});
+  try{await callBackend('/api/org/drkms/forms/templates/create',{title,scopeNodeId:location,fields,signers});
    setNotice('Draft form template created. It is not an approved or published form.');templates.reload();
   }catch(e){setNotice(e instanceof Error?e.message:'Unable to create template.')}finally{setBusy(false)}
  };
@@ -45,6 +46,16 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
     <label className='flex gap-2 text-xs text-slate-200'><input type='checkbox' checked={f.required} onChange={e=>patch(i,{required:e.target.checked})}/>Required</label>
     <button type='button' onClick={()=>setFields(v=>v.filter((_,j)=>j!==i))} className='text-xs text-red-300'>Remove field</button>
    </div>)}
+   <div className='my-3 space-y-2 rounded-lg border border-slate-700 p-3'>
+    <h3 className='text-sm font-semibold text-white'>Creator-assigned sign-off plan</h3>
+    <p className='text-xs text-slate-400'>Configure future required signatories. These are draft assignments only; signatures and publication are not yet active for forms.</p>
+    {signers.map((s,i)=><div key={i} className='grid grid-cols-1 gap-2 rounded-lg border border-slate-700 p-2'>
+     <label className='text-xs text-slate-200'>MEMS user ID<input value={s.signerUid} onChange={e=>setSigners(v=>v.map((row,j)=>j===i?{...row,signerUid:e.target.value}:row))} className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/></label>
+     <label className='text-xs text-slate-200'>Authority role<input value={s.label} onChange={e=>setSigners(v=>v.map((row,j)=>j===i?{...row,label:e.target.value}:row))} className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/></label>
+     <button type='button' onClick={()=>setSigners(v=>v.filter((_,j)=>i!==j))} className='text-left text-xs text-red-300'>Remove signatory</button>
+    </div>)}
+    <button type='button' disabled={signers.length>=12} onClick={()=>setSigners(v=>[...v,{signerUid:'',label:'Approved by'}])} className='min-h-10 rounded-lg border border-slate-600 px-3 text-xs text-white'>Add signatory</button>
+   </div>
    <button type='button' onClick={add} disabled={fields.length>=60} className='min-h-10 rounded-lg border border-slate-600 px-3 text-sm text-white'>Add field</button>
    <button type='button' onClick={()=>void create()} disabled={busy||title.trim().length<3||!location||!fields.length} className='ml-2 min-h-10 rounded-lg bg-blue-600 px-3 text-sm text-white disabled:opacity-50'>Save draft template</button>
   </Card>
