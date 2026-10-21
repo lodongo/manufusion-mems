@@ -135,7 +135,7 @@ export const drkmsFormRoutes={
    throw new HttpError(409,'Template revision numbering requires administrative review.');
   const fields=validateFormFields(ctx.body.fields),signers=ctx.body.signers;
   if(!Array.isArray(signers)||signers.length>12)throw new HttpError(400,'Invalid revised sign-off plan.');
-  const signOffPlan:Array<{signerUid:string;label:string}>=[];
+  const signOffPlan:Array<{signerUid:string;label:string;position:{page:number;xPercent:number;yPercent:number;widthPercent:number}}>=[];
   for(const item of signers){
    if(!item||typeof item!=='object'||Array.isArray(item))throw new HttpError(400,'Invalid signer.');
    const row=item as Record<string,unknown>,uid=str(row.signerUid),label=str(row.label).trim();
