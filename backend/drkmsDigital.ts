@@ -8,7 +8,6 @@ import {validateAiProposal,type AiProposal} from './drkmsKnowledgeContracts';
 import {validateRcaAnalysis,type RcaAiAnalysis} from './drkmsRcaAi';
 import {DOC_DEFAULT_LISTS} from './docDefaults';
 import {RCA_METHODS} from './docRcaDefaults';
-const RCA_METHODS=new Set(['5WHY','ISH','FTA','FMEA','PARETO','8D','KT','BOWTIE','CHANGE','EVENT','TRIPOD','APOLLO','BARRIER','C&E']);
 const DMAIC_PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'] as const;
 const PHASE_FIELDS:Record<string,string[]>={
  DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses','methodAnalysis'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan']
@@ -78,8 +77,6 @@ export const drkmsDigitalRoutes={
    catch{throw new HttpError(400,'RCA location has an invalid organizational hierarchy.');}
    if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,scopeNodeId),await scopeOf(ctx)))
      throw new HttpError(403,'You do not have document access at this organizational location.');
-   const methodCode=str(ctx.body.methodCode).trim().toUpperCase();
-   if(!RCA_METHODS.has(methodCode)||!(await allowedMethod(methodCode)))throw new HttpError(400,'Select a recognized RCA analysis method from MEMS Admin DOC metadata.');
    const id=randomId(10);
    const entry={tenantId:ctx.orgId,documentId:id,title,classCode:'RPT',subtypeCode:'RCA',
      representation:'digital_structured',status:'draft',rcaStage:'DEFINE',rcaMethodCode:methodCode,rcaDmaic:{currentPhase:'DEFINE',completedPhases:[],phases:{}},
