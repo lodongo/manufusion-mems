@@ -56,6 +56,18 @@ export function validateFormValues(fields:FormField[],raw:unknown,allowIncomplet
  }
  return out;
 }
+const VERIFIED_SOURCES:Record<string,string>={
+ MNT:'work_orders',SAF:'safety_incidents',AST:'assets'
+};
+export async function resolveFormReference(orgId:string,reference:{module:string;recordId:string}|null){
+ if(!reference)return null;
+ const collection=VERIFIED_SOURCES[reference.module];
+ if(!collection)return {...reference,verification:'unsupported_connector'};
+ const doc=await getDoc(`organizations/${orgId}/${collection}/${reference.recordId}`);
+ if(!doc||str(doc.data.orgId)&&str(doc.data.orgId)!==orgId)
+  throw new HttpError(404,'Operational source record not found in this organization.');
+ return {...reference,verification:'linked',sourceTitle:str(doc.data.title)||str(doc.data.name)||reference.recordId};
+}
 const templatePath=(o:string)=>`organizations/${o}/drkms_form_templates`;
 const recordPath=(o:string)=>`organizations/${o}/drkms_form_records`;
 export const drkmsFormRoutes={
@@ -93,6 +105,32 @@ export const drkmsFormRoutes={
   }
   return {records:visible};
  })],
+ 'POST /api/org/drkms/forms/records/submit':[
+  orgRoute('drkms.forms.records_submit','ADM.document_registry',async ctx=>{
+   const id=str(ctx.body.recordId);
+   if(!ID.test(id))throw new HttpError(400,'Invalid form record identifier.');
+   const path=recordPath(ctx.orgId)+'/'+id,record=await getDoc(path);
+   if(!record||str(record.data.createdBy)!==ctx.uid||str(record.data.status)!=='draft')
+    throw new HttpError(403,'Only the owner may submit an editable draft.');
+   const template=await getDoc(templatePath(ctx.orgId)+'/'+str(record.data.templateId));
+   if(!template||str(template.data.revision)!==str(record.data.templateRevision))
+    throw new HttpError(409,'Form template revision changed. Reconcile this draft.');
+   const nodeId=str(record.data.scopeNodeId);
+   if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))
+    throw new HttpError(403,'Form is outside authorized scope.');
+   const fields=validateFormFields(template.data.fields);
+   const values=validateFormValues(fields,record.data.values,false);
+   const source=record.data.operationalReference as {module:string;recordId:string}|null;
+   if(source?.module){
+    const resolved=await resolveFormReference(ctx.orgId,source);
+    if(resolved?.verification!=='linked')throw new HttpError(409,'Operational source requires a verified connector before submission.');
+   }
+   const date=nowIso();
+   const next={...record.data,values,status:'submitted_for_review',unapproved:true,submittedAt:date,submittedBy:ctx.uid,updatedAt:date};
+   if(!(await writeDoc(path,next,{updateTime:record.updateTime})))throw new HttpError(409,'Draft changed while submitting.');
+   return {record:{id,...next},publicationEnabled:false};
+  }),
+ ],
  'POST /api/org/drkms/forms/records/save':[orgRoute('drkms.forms.records_save','ADM.document_registry',async ctx=>{
   const templateId=str(ctx.body.templateId),recordId=str(ctx.body.recordId);
   if(!ID.test(templateId)||(recordId&&!ID.test(recordId)))throw new HttpError(400,'Invalid form record identifier.');
@@ -112,8 +150,9 @@ export const drkmsFormRoutes={
    if(!['MNT','SAF','MFG','QLT','AST'].includes(module)||!/^[a-zA-Z0-9_-]{3,100}$/.test(sourceId))throw new HttpError(400,'Invalid operational reference.');
    reference={module,recordId:sourceId};
   }
+  const resolvedReference=await resolveFormReference(ctx.orgId,reference);
   const id=recordId||randomId(10),date=nowIso();
-  const record={id,templateId,templateRevision:str(template.data.revision),templateTitle:str(template.data.title),scopeNodeId:nodeId,values,operationalReference:reference,
+  const record={id,templateId,templateRevision:str(template.data.revision),templateTitle:str(template.data.title),scopeNodeId:nodeId,values,operationalReference:resolvedReference,
     status:'draft',createdBy:ctx.uid,createdAt:existing?.data.createdAt??date,updatedAt:date,unapproved:true};
   if(!(await writeDoc(recordPath(ctx.orgId)+'/'+id,record,existing?{updateTime:existing.updateTime}:{exists:false})))throw new HttpError(409,'Draft was modified. Refresh.');
   return {record};
