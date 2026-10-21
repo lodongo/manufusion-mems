@@ -271,7 +271,7 @@ function App() {
             if (session.organization.status === 'suspended') {
                 return <ErrorScreen message='Your organization has been suspended. Please contact MEMS support.' onRetry={() => setReloadKey((key) => key + 1)} onSignOut={handleSignOut} />;
             }
-            const signatureRoute = new RegExp('^verify/document/([a-f0-9]{20})/([a-f0-9]{64})
+            const signatureRoute = new RegExp('^verify/document/([a-f0-9]{20})/([a-f0-9]{64})' + String.fromCharCode(36)).exec(route);
             if(signatureRoute)return <DocumentSignatureVerification documentId={signatureRoute[1]} proof={signatureRoute[2]}/>;
             const canAdmin = session.landing === 'organization_admin';
             if (route === 'organization_home/quick' || route.startsWith('organization_home/quick/')) {
