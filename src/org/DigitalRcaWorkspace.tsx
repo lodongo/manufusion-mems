@@ -25,10 +25,15 @@ export default function DigitalRcaWorkspace({documents}:{documents:Array<{docume
  useEffect(()=>{let live=true;callBackend<MasterResponse>('/api/org/drkms/rca/masters',{}).then(v=>{if(live)setMaster(v)}).catch(()=>{});return()=>{live=false}},[]);
  const load=async(id:string)=>{setSelected(id);setNotice('');setWorkspace(null);if(!id)return;
   try{const v=await callBackend<Workspace>('/api/org/drkms/rca/workspace',{documentId:id});setWorkspace(v);
+   const registered=await callBackend<{evidence:Array<{id:string;description:string;reference:string}>}>('/api/org/drkms/rca/evidence/list',{documentId:id});setEvidence(registered.evidence);
    const phase=v.rcaDmaic?.currentPhase??'DEFINE',saved=v.rcaDmaic?.phases?.[phase]??{};
    setFields(Object.fromEntries(FIELDS[phase].map(([key])=>[key,String(saved[key]??'')])));
    const rows=Array.isArray(saved.methodAnalysis)?saved.methodAnalysis as Array<{key:string;text:string}>:[];
    setAnalysis(Object.fromEntries(rows.map(r=>[r.key,r.text])));
+   const causeRow=(Array.isArray(saved.causeFindings)?saved.causeFindings:[])[0] as {cause?:string;verificationRationale?:string;evidenceIds?:string[]}|undefined;
+   setCause(causeRow?.cause??'');setCauseReason(causeRow?.verificationRationale??'');setCauseEvidence(causeRow?.evidenceIds?.[0]??'');
+   const check=(Array.isArray(saved.verificationResults)?saved.verificationResults:[])[0] as {criterion?:string;verifiedBy?:string;evidenceIds?:string[]}|undefined;
+   setVerification(check?.criterion??'');setVerificationBy(check?.verifiedBy??'');setVerificationEvidence(check?.evidenceIds?.[0]??'');
    setFindings(Array.isArray(saved.causeFindings)?saved.causeFindings as Array<{text:string;status:string;evidenceIds:string[]}>:[]);
   }catch(e){setNotice(e instanceof Error?e.message:'Unable to open investigation.')};
  };
@@ -45,6 +50,11 @@ export default function DigitalRcaWorkspace({documents}:{documents:Array<{docume
    try{await callBackend('/api/org/drkms/rca/evidence',{documentId:workspace.documentId,type:evidenceType,description:evidenceDescription,reference:evidenceReference});
       setEvidenceDescription('');setEvidenceReference('');await load(workspace.documentId);
    }catch(e){setNotice(e instanceof Error?e.message:'Cannot register evidence.')}finally{setBusy(false)}
+ };
+ const registerEvidence=async()=>{if(!workspace)return;setBusy(true);setNotice('');
+  try{await callBackend('/api/org/drkms/rca/evidence',{documentId:workspace.documentId,type:'observation',description:evidenceText.trim(),reference:evidenceReference.trim()});
+   setEvidenceText('');setEvidenceReference('');await load(workspace.documentId);setNotice('Evidence registered.');
+  }catch(e){setNotice(e instanceof Error?e.message:'Evidence could not be registered.')}finally{setBusy(false)}
  };
  const phase=workspace?.rcaDmaic?.currentPhase??'DEFINE';
  const method=workspace?.rcaMethodCode??'5WHY';
@@ -97,6 +107,30 @@ export default function DigitalRcaWorkspace({documents}:{documents:Array<{docume
        <button type='button' disabled={causeText.trim().length<10||(causeStatus==='verified'&&!causeEvidence)} onClick={()=>{setFindings(v=>[...v,{text:causeText.trim(),status:causeStatus,evidenceIds:causeEvidence?[causeEvidence]:[]}]);setCauseText('');setCauseEvidence('')}} className='min-h-11 rounded-lg border border-slate-600 px-3 text-sm text-white disabled:opacity-50'>Add causal finding</button>
        <p className='text-xs text-slate-400'>Record source references and distinguish hypotheses from verified root causes. 5M1W/5M1E categories are centrally controlled in MEMS Admin.</p>
     </div>}
+    {(phase==='ANALYZE'||phase==='CONTROL')&&<section className='space-y-2 rounded-lg border border-slate-700 p-3'>
+      <h3 className='text-sm font-semibold text-white'>Investigation evidence</h3>
+      <p className='text-xs text-slate-400'>Register traceable observations. Evidence remains unverified until reviewed; it does not independently prove a cause.</p>
+      {evidence.map(item=><p key={item.id} className='text-xs text-slate-300'>{item.description} · {item.reference||item.id}</p>)}
+      <textarea rows={2} aria-label='Evidence description' placeholder='Observation and measured facts (at least 10 characters)' value={evidenceText} onChange={e=>setEvidenceText(e.target.value)} className='w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
+      <input aria-label='Evidence source reference' placeholder='Source record, work order or measurement ID' value={evidenceReference} onChange={e=>setEvidenceReference(e.target.value)} className='min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
+      <button type='button' disabled={busy||evidenceText.trim().length<10} onClick={()=>void registerEvidence()} className='min-h-11 rounded-lg border border-slate-500 px-3 text-sm text-white disabled:opacity-50'>Register evidence</button>
+    </section>}
+    {phase==='ANALYZE'&&<section className='space-y-2 rounded-lg border border-slate-700 p-3'>
+      <h3 className='text-sm font-semibold text-white'>Verified causal finding</h3>
+      <textarea rows={2} aria-label='Verified root cause' placeholder='Specific root cause with physical or systemic explanation' value={cause} onChange={e=>setCause(e.target.value)} className='w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
+      <textarea rows={2} aria-label='Cause verification rationale' placeholder='How the investigation verified this cause' value={causeReason} onChange={e=>setCauseReason(e.target.value)} className='w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
+      <select aria-label='Supporting cause evidence' value={causeEvidence} onChange={e=>setCauseEvidence(e.target.value)} className='min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'>
+        <option value=''>Select supporting evidence</option>{evidence.map(e=><option key={e.id} value={e.id}>{e.description.slice(0,75)}</option>)}
+      </select>
+    </section>}
+    {phase==='CONTROL'&&<section className='space-y-2 rounded-lg border border-slate-700 p-3'>
+      <h3 className='text-sm font-semibold text-white'>Effectiveness verification</h3>
+      <textarea rows={2} aria-label='Effectiveness criterion' placeholder='Measured pass criterion and result' value={verification} onChange={e=>setVerification(e.target.value)} className='w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
+      <input aria-label='Effectiveness verifier' placeholder='Verifier name or position' value={verificationBy} onChange={e=>setVerificationBy(e.target.value)} className='min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
+      <select aria-label='Effectiveness evidence' value={verificationEvidence} onChange={e=>setVerificationEvidence(e.target.value)} className='min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'>
+        <option value=''>Select verification evidence</option>{evidence.map(e=><option key={e.id} value={e.id}>{e.description.slice(0,75)}</option>)}
+      </select>
+    </section>}
     <div className='grid grid-cols-2 gap-2'>
       <button type='button' disabled={busy} onClick={()=>void save(false)} className='min-h-11 rounded-lg border border-slate-600 text-sm text-white disabled:opacity-50'>Save progress</button>
       <button type='button' disabled={busy||workspace.rcaDmaic.completedPhases?.includes('CONTROL')} onClick={()=>void save(true)} className='min-h-11 rounded-lg bg-blue-600 text-sm font-semibold text-white disabled:opacity-50'>Complete phase</button>
