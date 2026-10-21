@@ -117,6 +117,50 @@ export const drkmsFormRoutes={
   }
   return {records:visible};
  })],
+ 'POST /api/org/drkms/forms/signatures/inbox':[orgRoute('drkms.forms.signature_inbox',null,async ctx=>{
+  const rows=await listDocs(`organizations/${ctx.orgId}/form_signature_inbox/${ctx.uid}/assignments`);
+  const items=[];
+  for(const row of rows.slice(0,250)){
+   const recordId=str(row.data.recordId),slotId=str(row.data.slotId);
+   if(!ID.test(recordId)||!ID.test(slotId))continue;
+   const [record,slot]=await Promise.all([getDoc(recordPath(ctx.orgId)+'/'+recordId),
+    getDoc(recordPath(ctx.orgId)+'/'+recordId+'/signatures/'+slotId)]);
+   if(!record||!slot||str(slot.data.signerUid)!==ctx.uid||str(slot.data.recordId)!==recordId)continue;
+   items.push({recordId,slotId,templateTitle:str(record.data.templateTitle),status:str(record.data.status),
+    signerStatus:str(slot.data.status),label:str(slot.data.label),signedAt:str(slot.data.signedAt),
+    recordFingerprint:str(slot.data.recordFingerprint),values:record.data.values,
+    submittedAt:str(record.data.submittedAt)});
+  }
+  return {assignments:items};
+ })],
+ 'POST /api/org/drkms/forms/signatures/sign':[orgRoute('drkms.forms.sign',null,async ctx=>{
+  const recordId=str(ctx.body.recordId),slotId=str(ctx.body.slotId);
+  if(!ID.test(recordId)||!ID.test(slotId)||ctx.body.attest!==true)
+   throw new HttpError(400,'Assigned record, signature and explicit attestation required.');
+  const path=recordPath(ctx.orgId)+'/'+recordId;
+  const [record,slot]=await Promise.all([getDoc(path),getDoc(path+'/signatures/'+slotId)]);
+  if(!record||!slot||str(record.data.status)!=='technical_reviewed'||
+    str(slot.data.signerUid)!==ctx.uid||str(slot.data.status)!=='pending')
+   throw new HttpError(403,'Signature is not available for your account.');
+  if(!str(record.data.reviewedBy)||str(record.data.reviewedBy)===ctx.uid||
+    str(record.data.createdBy)===ctx.uid)
+   throw new HttpError(403,'Form creator or technical reviewer cannot sign in a separate authority stream.');
+  const hash=formRecordFingerprint(record.data);
+  if(hash!==str(record.data.reviewedFingerprint)||hash!==str(slot.data.recordFingerprint)||
+    str(record.data.reviewId)!==str(slot.data.reviewId))
+   throw new HttpError(409,'Record contents or review have changed; signing blocked.');
+  const signer=await getDoc('users/'+ctx.uid);
+  if(!signer||str(signer.data.orgId)!==ctx.orgId||str(signer.data.status)==='disabled')
+   throw new HttpError(403,'Signer is no longer an eligible organization user.');
+  const signedAt=nowIso(),proof=createHash('sha256').update(JSON.stringify({
+   orgId:ctx.orgId,recordId,slotId,uid:ctx.uid,fingerprint:hash,signedAt,reviewId:str(record.data.reviewId)
+  })).digest('hex');
+  if(!(await commitChecked([{path:path+'/signatures/'+slotId,data:{...slot.data,
+   status:'signed',signedAt,signedBy:ctx.uid,proof,authMethod:'firebase_authenticated_session'},
+   precondition:{updateTime:slot.updateTime}}])))
+   throw new HttpError(409,'This signing assignment changed; refresh.');
+  return {recordId,slotId,proof,signedAt,approved:false,published:false};
+ })],
  'POST /api/org/drkms/forms/review/inbox':[orgRoute('drkms.forms.review_inbox','ADM.document_review',async ctx=>{
   const records=await listDocs(recordPath(ctx.orgId)),scope=await scopeOf(ctx),results=[];
   for(const row of records){
