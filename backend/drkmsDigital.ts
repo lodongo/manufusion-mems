@@ -6,6 +6,7 @@ import {validateDocumentLocation} from './drkmsHierarchy';
 import {canAt,scopeOf,nodePath} from './access';
 import {validateAiProposal,type AiProposal} from './drkmsKnowledgeContracts';
 import {validateRcaAnalysis,type RcaAiAnalysis} from './drkmsRcaAi';
+import {RCA_METHODS} from './docRcaDefaults';
 const RCA_METHODS=new Set(['5WHY','ISH','FTA','FMEA','PARETO','8D','KT','BOWTIE','CHANGE','EVENT','TRIPOD','APOLLO','BARRIER','C&E']);
 const DMAIC_PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'] as const;
 const PHASE_FIELDS:Record<string,string[]>={
@@ -17,7 +18,10 @@ export const drkmsDigitalRoutes={
  'POST /api/org/drkms/rca/create':[
   orgRoute('drkms.rca.create','ADM.document_registry',async ctx=>{
    const title=str(ctx.body.title).trim(),incidentReference=str(ctx.body.incidentReference).trim(),
-    problem=str(ctx.body.problemStatement).trim(),scopeNodeId=str(ctx.body.scopeNodeId);
+    problem=str(ctx.body.problemStatement).trim(),scopeNodeId=str(ctx.body.scopeNodeId),
+    methodCode=str(ctx.body.methodCode||'5WHY'),frameworkCode=str(ctx.body.frameworkCode||'5M1W');
+   if(!RCA_METHODS.some(m=>m[0]===methodCode))throw new HttpError(400,'Select a recognized RCA method.');
+   if(!['5M1E','5M1W','6M','4M','5W2H','ISNOT','6W'].includes(frameworkCode))throw new HttpError(400,'Select a recognized causal reference framework.');
    if(title.length<3||title.length>200||problem.length<20||problem.length>8000||incidentReference.length>100)
     throw new HttpError(400,'Provide an RCA title, incident reference and substantive problem statement.');
    const node=await getDoc(`organizations/${ctx.orgId}/structure/${scopeNodeId}`);
@@ -34,7 +38,7 @@ export const drkmsDigitalRoutes={
    const id=randomId(10);
    const entry={tenantId:ctx.orgId,documentId:id,title,classCode:'RPT',subtypeCode:'RCA',
      representation:'digital_structured',status:'draft',rcaStage:'DEFINE',rcaMethodCode:methodCode,rcaDmaic:{currentPhase:'DEFINE',completedPhases:[],phases:{}},
-     incidentReference,problemStatement:problem,rootCauses:[],correctiveActions:[],
+     incidentReference,problemStatement:problem,methodCode,frameworkCode,dmaicStage:'DEFINE',dmaicStages:{},rootCauses:[],correctiveActions:[],
      effectivenessChecks:[],scope:{nodeId:scopeNodeId,level:str(node.data.level),name:str(node.data.name),ancestorIds:ancestry},
      revision:'00',effectiveRevisionId:'',verified:false,
      securityClass:'internal',createdBy:ctx.uid,ownerUid:ctx.uid,createdAt:nowIso(),updatedAt:nowIso()};
@@ -69,6 +73,42 @@ export const drkmsDigitalRoutes={
    await writeDoc(docs(ctx.orgId,documentId),{...doc.data,rcaDmaic:updated,rcaStage:next,updatedAt:nowIso()});
    await record(ctx,'drkms.rca.dmaic.save',documentId,phase);
    return {currentPhase:next,completedPhases:updated.completedPhases};
+  }),
+ ],
+ 'POST /api/org/drkms/rca/stage':[
+  orgRoute('drkms.rca.stage','ADM.document_registry',async ctx=>{
+   const documentId=str(ctx.body.documentId),stage=str(ctx.body.stage).toUpperCase();
+   if(!idOk(documentId))throw new HttpError(400,'Invalid RCA document.');
+   const doc=await getDoc(docs(ctx.orgId,documentId));
+   if(!doc||str(doc.data.subtypeCode)!=='RCA'||str(doc.data.status)!=='draft')
+     throw new HttpError(409,'Only draft RCA investigations can be progressed.');
+   if(str(doc.data.createdBy)!==ctx.uid)throw new HttpError(403,'Only the responsible investigator may update DMAIC.');
+   const order=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'];
+   const current=str(doc.data.dmaicStage||'DEFINE');
+   if(!order.includes(stage)||order.indexOf(stage)>order.indexOf(current)+1)
+     throw new HttpError(409,'Complete DMAIC stages in sequence.');
+   const statement=str(ctx.body.findings).trim(),references=ctx.body.evidenceIds;
+   if(statement.length<20||statement.length>8000||!Array.isArray(references)||references.length>100||
+       references.some(x=>typeof x!=='string'))
+     throw new HttpError(400,'Record substantive findings and valid evidence identifiers.');
+   const registered=await listDocs(`${docs(ctx.orgId,documentId)}/evidence`);
+   const valid=new Set(registered.map(x=>x.id));
+   if(references.some(x=>!valid.has(x)))throw new HttpError(400,'Evidence must belong to this RCA.');
+   const prior=(doc.data.dmaicStages&&typeof doc.data.dmaicStages==='object'&&!Array.isArray(doc.data.dmaicStages)?doc.data.dmaicStages:{}) as Record<string,unknown>;
+   // Advancing requires a completed stage; editing the current phase never skips quality gates.
+   if(order.indexOf(stage)>order.indexOf(current)){
+     const previous=prior[current] as Record<string,unknown>|undefined;
+     if(!previous||str(previous.findings).length<20)
+       throw new HttpError(409,'Complete the current DMAIC stage before advancing.');
+     if(current==='MEASURE'&&(!Array.isArray(previous.evidenceIds)||previous.evidenceIds.length===0))
+       throw new HttpError(409,'Measure requires registered supporting evidence.');
+     if(current==='ANALYZE'&&(!Array.isArray(previous.evidenceIds)||previous.evidenceIds.length===0))
+       throw new HttpError(409,'Analyze requires evidence for verified causal reasoning.');
+   }
+   const updated={...prior,[stage]:{findings:statement,evidenceIds:references,updatedBy:ctx.uid,updatedAt:nowIso()}};
+   await writeDoc(docs(ctx.orgId,documentId),{...doc.data,dmaicStages:updated,dmaicStage:stage,updatedAt:nowIso()});
+   await record(ctx,'drkms.rca.stage',documentId,stage);
+   return {documentId,dmaicStage:stage,methodCode:doc.data.methodCode,frameworkCode:doc.data.frameworkCode};
   }),
  ],
  'POST /api/org/drkms/rca/evidence':[
