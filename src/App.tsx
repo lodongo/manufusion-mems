@@ -20,6 +20,7 @@ import ApplicationWizard from './apply/ApplicationWizard';
 import AdminShell from './admin/AdminShell';
 import OrgShell from './org/OrgShell';
 import OrgHomePage from './org/OrgHomePage';
+import DocumentSignatureVerification from './org/DocumentSignatureVerification';
 import QuickWorkspace from './org/QuickWorkspace';
 import OrganizationFooter from './components/OrganizationFooter';
 import HealthTracker from './components/HealthTracker';
@@ -175,7 +176,7 @@ function App() {
                 setSession(res);
                 setSessionState('ready');
                 const current = window.location.hash.replace(/^#\/?/, '');
-                if (current === 'site') return;
+                if (current === 'site' || /^verify\/document\/[a-f0-9]{20}\/[a-f0-9]{64}$/.test(current)) return;
                 // Personal landing preference applies on login; intentional deep links win.
                 if (res.landing === 'organization_admin' || res.landing === 'organization_home') {
                     const last = res.lastRoute ?? '';
@@ -270,6 +271,8 @@ function App() {
             if (session.organization.status === 'suspended') {
                 return <ErrorScreen message='Your organization has been suspended. Please contact MEMS support.' onRetry={() => setReloadKey((key) => key + 1)} onSignOut={handleSignOut} />;
             }
+            const signatureRoute=/^verify\\/document\\/([a-f0-9]{20})\\/([a-f0-9]{64})$/.exec(route);
+            if(signatureRoute)return <DocumentSignatureVerification documentId={signatureRoute[1]} proof={signatureRoute[2]}/>;
             const canAdmin = session.landing === 'organization_admin';
             if (route === 'organization_home/quick' || route.startsWith('organization_home/quick/')) {
                 const [, , mode, id] = route.split('/');
