@@ -76,15 +76,16 @@ export const drkmsSignatureRoutes={
   }),
  ],
  'POST /api/org/drkms/signatures/list':[
-  orgRoute('drkms.signatures.list','ADM.document_registry',async ctx=>{
+  orgRoute('drkms.signatures.list',null,async ctx=>{
    const documentId=str(ctx.body.documentId);
    if(!ID.test(documentId))throw new HttpError(400,'Invalid document.');
    const doc=await getDoc(root(ctx.orgId,documentId));
    if(!doc)throw new HttpError(404,'Document not found.');
    const loc=doc.data.scope&&typeof doc.data.scope==='object'?doc.data.scope as Record<string,unknown>:{};
-   if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,str(loc.nodeId)),await scopeOf(ctx)))
-    throw new HttpError(403,'Document is outside your scope.');
    const result=await listDocs(slots(ctx.orgId,documentId));
+   const authorized=str(doc.data.createdBy)===ctx.uid||result.some(s=>str(s.data.signerUid)===ctx.uid)
+     ||canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,str(loc.nodeId)),await scopeOf(ctx));
+   if(!authorized)throw new HttpError(403,'Signature assignments are restricted to participants and authorized reviewers.');
    return {slots:result.map(v=>({slotId:v.id,label:v.data.label,signerUid:v.data.signerUid,position:v.data.position,status:v.data.status,signedAt:v.data.signedAt}))};
   }),
  ],
