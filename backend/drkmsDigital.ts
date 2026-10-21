@@ -163,6 +163,16 @@ export const drkmsDigitalRoutes={
    return {currentPhase:next,completedPhases:updated.completedPhases};
   }),
  ],
+ 'POST /api/org/drkms/rca/evidence/list':[
+  orgRoute('drkms.rca.evidence.list','ADM.document_registry',async ctx=>{
+   const id=str(ctx.body.documentId);
+   if(!idOk(id))throw new HttpError(400,'Invalid RCA identifier.');
+   const doc=await getDoc(docs(ctx.orgId,id));
+   if(!doc||str(doc.data.subtypeCode)!=='RCA'||str(doc.data.createdBy)!==ctx.uid)
+    throw new HttpError(403,'Only the investigator may read this evidence workspace.');
+   return {evidence:(await listDocs(`${docs(ctx.orgId,id)}/evidence`)).map(e=>({id:e.id,type:e.data.type,description:e.data.description,reference:e.data.reference,verificationStatus:e.data.verificationStatus}))};
+  }),
+ ],
  'POST /api/org/drkms/rca/evidence':[
   orgRoute('drkms.rca.evidence','ADM.document_registry',async ctx=>{
    const documentId=str(ctx.body.documentId);
