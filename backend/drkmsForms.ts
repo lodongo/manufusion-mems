@@ -1,4 +1,4 @@
-import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc,commitChecked} from './core';
+import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc,commitChecked,isObj} from './core';
 import {createHash} from 'node:crypto';
 import {transactionPayloadHash} from './unifiedApprovalProof';
 import {orgRoute} from './guards';
@@ -78,6 +78,7 @@ export function formRecordFingerprint(record:Record<string,unknown>):string{
  return transactionPayloadHash({
   templateId:str(record.templateId),templateRevision:str(record.templateRevision),
   scopeNodeId:str(record.scopeNodeId),values:record.values,operationalReference:record.operationalReference,
+  attachments:record.attachments,
   createdBy:str(record.createdBy),recordId:str(record.id)
  });
 }
@@ -201,6 +202,39 @@ export const drkmsFormRoutes={
    throw new HttpError(409,'This signing assignment changed; refresh.');
   return {recordId,slotId,proof,signedAt,approved:false,published:false};
  })],
+ 'POST /api/org/drkms/forms/records/evidence/link':[orgRoute('drkms.forms.evidence_link','ADM.document_registry',async ctx=>{
+  const id=str(ctx.body.recordId),documentId=str(ctx.body.documentId),fileId=str(ctx.body.fileId);
+  if(!ID.test(id)||!ID.test(documentId)||!ID.test(fileId))
+   throw new HttpError(400,'Valid draft, document and source file are required.');
+  const recordPathKey=recordPath(ctx.orgId)+'/'+id,record=await getDoc(recordPathKey);
+  if(!record||str(record.data.status)!=='draft'||str(record.data.createdBy)!==ctx.uid)
+   throw new HttpError(403,'Only the draft creator may link controlled evidence.');
+  const scope=await scopeOf(ctx),nodeId=str(record.data.scopeNodeId);
+  if(!nodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),scope))
+   throw new HttpError(403,'Draft is outside your current organizational scope.');
+  const docPath=`organizations/${ctx.orgId}/drkms_documents/${documentId}`,doc=await getDoc(docPath);
+  if(!doc||str(doc.data.status)!=='effective')throw new HttpError(409,'Evidence must be an effective controlled document.');
+  const sourceNodeId=isObj(doc.data.scope)?str(doc.data.scope.nodeId):'';
+  if(!sourceNodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,sourceNodeId),scope))
+   throw new HttpError(403,'Evidence document is outside your current scope.');
+  const revisionId=str(doc.data.effectiveRevisionId),rev=await getDoc(docPath+'/revisions/'+revisionId),file=await getDoc(docPath+'/files/'+fileId);
+  if(!rev||rev.data.immutable!==true||str(rev.data.tenantId)!==ctx.orgId||
+     str(rev.data.documentId)!==documentId||!file||
+     str(file.data.scanStatus)!=='clean'||str(file.data.availability)!=='verified')
+   throw new HttpError(409,'Controlled evidence source is not verified.');
+  const manifest=Array.isArray(rev.data.sourceFiles)?rev.data.sourceFiles.filter(isObj):[];
+  const item=manifest.find(v=>str(v.fileId)===fileId);
+  if(!item||str(item.sha256)!==str(file.data.sha256)||Number(item.bytes)!==Number(file.data.bytes)||
+     str(item.mime)!==str(file.data.mime))throw new HttpError(409,'Evidence source differs from the published manifest.');
+  const existing=Array.isArray(record.data.attachments)?record.data.attachments.filter(isObj):[];
+  if(existing.length>=20||existing.some(a=>str(a.documentId)===documentId&&str(a.fileId)===fileId))
+   throw new HttpError(409,'Evidence limit reached or document already linked.');
+  const evidence={documentId,revisionId,fileId,sha256:str(item.sha256),mime:str(item.mime),
+    bytes:Number(item.bytes),name:str(file.data.name),linkedBy:ctx.uid,linkedAt:nowIso(),verification:'effective_snapshot'};
+  if(!(await writeDoc(recordPathKey,{...record.data,attachments:[...existing,evidence],updatedAt:nowIso()},
+    {updateTime:record.updateTime})))throw new HttpError(409,'Draft changed while linking evidence.');
+  return {evidence,unapproved:true};
+ })],
  'POST /api/org/drkms/forms/review/inbox':[orgRoute('drkms.forms.review_inbox','ADM.document_review',async ctx=>{
   const records=await listDocs(recordPath(ctx.orgId)),scope=await scopeOf(ctx),results=[];
   for(const row of records){
@@ -302,7 +336,7 @@ export const drkmsFormRoutes={
   }
   const resolvedReference=await resolveFormReference(ctx.orgId,reference,nodeId);
   const id=recordId||randomId(10),date=nowIso();
-  const record={id,templateId,templateRevision:str(template.data.revision),templateTitle:str(template.data.title),scopeNodeId:nodeId,values,operationalReference:resolvedReference,
+  const record={id,templateId,templateRevision:str(template.data.revision),templateTitle:str(template.data.title),scopeNodeId:nodeId,values,operationalReference:resolvedReference,attachments:existing?.data.attachments??[],
     status:'draft',createdBy:ctx.uid,createdAt:existing?.data.createdAt??date,updatedAt:date,unapproved:true};
   if(!(await writeDoc(recordPath(ctx.orgId)+'/'+id,record,existing?{updateTime:existing.updateTime}:{exists:false})))throw new HttpError(409,'Draft was modified. Refresh.');
   return {record};
