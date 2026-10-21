@@ -39,6 +39,15 @@ export async function updateFields(path: string, data: Record<string, unknown>) 
 export async function deleteDoc(path: string) {
     documents.delete(path);
 }
+/** All-or-nothing batch with per-document preconditions (like the Firestore commit). */
+export async function commitChecked(writes: Array<{ path: string; data: Record<string, unknown>; precondition: { exists?: boolean; updateTime?: string } }>) {
+    for (const w of writes) {
+        const d = documents.get(w.path);
+        if ((w.precondition.exists !== undefined && w.precondition.exists !== !!d) || (w.precondition.updateTime && w.precondition.updateTime !== d?.updateTime)) return false;
+    }
+    for (const w of writes) seed(w.path, w.data);
+    return true;
+}
 export async function commitCreates(items: Array<{ collection: string; data: Record<string, unknown> }>) {
     for (const i of items) seed(i.collection + '/fixture_' + ++sequence, i.data);
 }

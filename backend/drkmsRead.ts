@@ -1,3 +1,4 @@
+import {fileReleased} from './drkmsScanPolicy';
 /** Controlled time-limited download of an immutable, effective DRKMS revision. */
 import {storage} from './platform/sdk';
 import {HttpError,getDoc,isObj,str,rateLimit,listDocs} from './core';
@@ -49,7 +50,7 @@ export const drkmsReadRoutes={
     const fileId=str(item.fileId);
     if(!ID.test(fileId))throw new HttpError(409,'Invalid file in controlled revision.');
     const file=await getDoc(root+'/files/'+fileId);
-    if(!file||str(file.data.scanStatus)!=='clean'||str(file.data.availability)!=='verified'
+    if(!file||!fileReleased(file.data)
        ||str(file.data.sha256)!==str(item.sha256)||Number(file.data.bytes)!==Number(item.bytes))
       throw new HttpError(409,'A published file has failed validation.');
     entries.push({fileId,name:str(file.data.name),mime:str(item.mime),bytes:Number(item.bytes)});
@@ -82,7 +83,7 @@ export const drkmsReadRoutes={
    if(!manifest||str(manifest.sha256)!==str(file.data.sha256)
       ||str(manifest.mime)!==str(file.data.mime)||Number(manifest.bytes)!==Number(file.data.bytes))
     throw new HttpError(409,'Source content no longer matches the approved revision.');
-   if(str(file.data.scanStatus)!=='clean'||str(file.data.availability)!=='verified')
+   if(!fileReleased(file.data))
     throw new HttpError(403,'Source file has not passed the controlled safety verification.');
    const expectedPrefix=`organizations/${ctx.orgId}/drkms_quarantine/${documentId}/${fileId}.`;
    const sourcePath=str(file.data.storagePath);

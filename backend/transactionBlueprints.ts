@@ -172,7 +172,13 @@ const AREAS: Record<string, string> = {
   POS: 'REG:Register sales|TIL:Tills|PAY:Payments|REF:Refunds|SHF:Cashier shifts|REC:Reconciliation',
   HRM: 'EMP:Employees|POS:Positions|REC:Recruitment|ONB:Onboarding|LEA:Leave|ATT:Attendance|PER:Performance|TRN:Training|SKL:Skills|DSC:Discipline',
   PAY: 'RUN:Payroll runs|ERN:Earnings|DED:Deductions|TAX:Payroll taxes|BEN:Benefits|PAY:Disbursement|REC:Payroll reconciliation',
-  DOC: 'REC:Records|TMP:Templates|VER:Version control|APR:Document approvals|RET:Retention|PUB:Publication',
+  DOC: [
+    'REC:Records', 'TMP:Templates', 'VER:Version control', 'APR:Document approvals', 'RET:Retention', 'PUB:Publication',
+    'DRF:Controlled documents:VW,CR,ED', 'SRC:Document source files:VW,UP,RL,DL', 'RVW:Document review:VW,SB,VF,RT,RJ',
+    'SGN:Document sign-off:VW,AS,EV', 'PBL:Document publication:VW,SB,PB', 'CFG:Document settings:VW,CG',
+    'ENG:Engineering and equipment library:VW,CR,ED,LN,VF', 'SDS:Safety data sheets:VW,CR,ED', 'RCA:Investigations (RCA):VW,CR,ED,SB',
+    'FRM:Digital forms and records:VW,CR,ED,SB,AP,RT,RJ,EV,LN,DA', 'KNW:Knowledge and troubleshooting:VW,SB',
+  ].join('|'),
   RPT: 'DSH:Dashboards|RPT:Reports|AUD:Audit analytics|EXP:Exports|PUB:Publication|SCH:Scheduled reports',
   PRJ: 'PRJ:Projects|WBS:Work breakdown|TSK:Tasks|BUD:Budgets|CST:Project costs|RSK:Risks|CHG:Changes|CLS:Closure',
   WSP: [

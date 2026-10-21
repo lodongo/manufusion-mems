@@ -1,3 +1,4 @@
+import {fileReleased} from './drkmsScanPolicy';
 import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc,commitChecked,isObj} from './core';
 import {createHash} from 'node:crypto';
 import {transactionPayloadHash} from './unifiedApprovalProof';
@@ -92,7 +93,7 @@ async function verifiedEvidenceCurrent(orgId:string,scopeNodeId:string,raw:unkno
    throw new HttpError(403,'Cross-location evidence requires a separate governance review.');
   const [rev,file]=await Promise.all([getDoc(path+'/revisions/'+revisionId),getDoc(path+'/files/'+fileId)]);
   if(!rev||rev.data.immutable!==true||str(rev.data.tenantId)!==orgId||!file||
-    str(file.data.scanStatus)!=='clean'||str(file.data.availability)!=='verified')
+    !fileReleased(file.data))
    throw new HttpError(409,'Linked evidence failed its controlled source verification.');
   const manifest=Array.isArray(rev.data.sourceFiles)?rev.data.sourceFiles.filter(isObj):[];
   const matched=manifest.find(x=>str(x.fileId)===fileId);
@@ -296,7 +297,7 @@ export const drkmsFormRoutes={
   const revisionId=str(doc.data.effectiveRevisionId),rev=await getDoc(docPath+'/revisions/'+revisionId),file=await getDoc(docPath+'/files/'+fileId);
   if(!rev||rev.data.immutable!==true||str(rev.data.tenantId)!==ctx.orgId||
      str(rev.data.documentId)!==documentId||!file||
-     str(file.data.scanStatus)!=='clean'||str(file.data.availability)!=='verified')
+     !fileReleased(file.data))
    throw new HttpError(409,'Controlled evidence source is not verified.');
   const manifest=Array.isArray(rev.data.sourceFiles)?rev.data.sourceFiles.filter(isObj):[];
   const item=manifest.find(v=>str(v.fileId)===fileId);

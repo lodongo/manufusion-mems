@@ -8,6 +8,19 @@ import {publicationFingerprint} from './drkmsPublish';
 import {rcaDmaicComplete} from './drkmsRcaGate';
 import {canAt,scopeOf,nodePath} from './access';
 import {nextReviewDate,reviewState} from './docReviewSchedule';
+import {DOC_TEMPLATES,templateByCode} from './docTemplates';
+import {fileReleased,scanPolicy} from './drkmsScanPolicy';
+import {wiredTransactionInventory} from './transactionRuntime';
+
+/** Native documents need at least one source file, and every file must be released (scan clean or scanning off). */
+async function sourcesReady(orgId:string,id:string,data:Record<string,unknown>):Promise<string>{
+    if(str(data.representation)==='digital_structured')return '';
+    const files=await listDocs(`${base(orgId)}/${id}/files`);
+    if(!files.length)return 'Upload the document file (PDF, Word, Excel, PowerPoint or image) before submitting it.';
+    const waiting=files.filter(f=>!fileReleased(f.data));
+    if(waiting.length)return `${waiting.length} file${waiting.length===1?' is':'s are'} not released yet (waiting for, or failed, the malware scan). Release or remove ${waiting.length===1?'it':'them'} first.`;
+    return '';
+}
 
 const base = (orgId: string) => `organizations/${orgId}/drkms_documents`;
 const validId = (v: string) => /^[a-f0-9]{20}$/.test(v);
@@ -63,7 +76,8 @@ export const drkmsRoutes = {
                 if(canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,node.id),permissionScope))
                     allowedLocations.push(node);
             }
-            return { config: settings?.data ?? defaults, locations: allowedLocations };
+            const policy=await scanPolicy();
+            return { config: settings?.data ?? defaults, locations: allowedLocations, templates: DOC_TEMPLATES, scanning: { enabled: policy.enabled } };
         }),
     ],
     'POST /api/org/drkms/configure': [
@@ -172,6 +186,8 @@ export const drkmsRoutes = {
             if (str(document.data.status) !== 'draft')
                 throw new HttpError(409, 'Only drafts can be submitted for review.');
             if(!rcaDmaicComplete(document.data))throw new HttpError(409,'Complete and verify all five DMAIC stages and selected RCA method before submitting an RCA for review.');
+            const notReady=await sourcesReady(ctx.orgId,id,document.data);
+            if(notReady)throw new HttpError(409,notReady);
             const scope = document.data.scope;
             if (!scope || typeof scope !== 'object' || Array.isArray(scope))
                 throw new HttpError(409, 'Document has no approved organizational location.');
@@ -209,6 +225,10 @@ export const drkmsRoutes = {
             if (decision === 'verify' && str(doc.data.representation) === 'digital_structured' &&
                 str(doc.data.subtypeCode) === 'RCA')
                 throw new HttpError(409, 'Digital RCAs require evidence and causal verification before technical approval can be enabled.');
+            if (decision === 'verify') {
+                const notReady = await sourcesReady(ctx.orgId, id, doc.data);
+                if (notReady) throw new HttpError(409, 'Cannot verify: ' + notReady);
+            }
             const revision = {
                 ...doc.data, status: decision === 'return' ? 'draft' : decision === 'verify' ? 'technical_verified' : 'rejected',
                 ...(decision === 'verify' ? { verifiedBy:ctx.uid, verifiedAt:nowIso(), verified:true } : { verified:false, verifiedBy:'' }),
@@ -244,17 +264,17 @@ export const drkmsRoutes = {
                 throw new HttpError(409,'An independent technical verifier is required.');
             const attachments=await listDocs(`${base(ctx.orgId)}/${id}/files`);
             const ready=attachments.length>0 && attachments.length<=50 &&
-                attachments.every(f=>str(f.data.scanStatus)==='clean' &&
-                    str(f.data.availability)==='verified' && /^[a-f0-9]{64}$/.test(str(f.data.sha256)) &&
+                attachments.every(f=>fileReleased(f.data) && /^[a-f0-9]{64}$/.test(str(f.data.sha256)) &&
                     Number.isSafeInteger(Number(f.data.bytes)) && Number(f.data.bytes)>0);
-            if(!ready)throw new HttpError(409,'All source files must be independently scanned and verified before preparing the CoA publication request.');
+            if(!ready)throw new HttpError(409,'All source files must be released (scanned clean, or released while scanning is off in MEMS Admin) before requesting publication approval.');
             const contentFingerprint=publicationFingerprint(id,str(doc.data.revision),attachments.map(f=>({
                 fileId:f.id,sha256:str(f.data.sha256),mime:str(f.data.mime),bytes:Number(f.data.bytes),
             })),{title:str(doc.data.title),classCode:str(doc.data.classCode),subtypeCode:str(doc.data.subtypeCode),
                 scopeNodeId:nodeId,verifiedBy:str(doc.data.verifiedBy),verifiedAt:str(doc.data.verifiedAt),
                 updatedAt:str(doc.data.updatedAt)});
             const transactionPayload={documentId:id,revision:str(doc.data.revision),contentFingerprint};
-            return {documentId:id,documentFingerprint:contentFingerprint,payload:transactionPayload,
+            const installed=wiredTransactionInventory().filter(r=>r.name==='drkms.documents.publish');
+            return {documentId:id,documentFingerprint:contentFingerprint,payload:transactionPayload,transactionCode:installed.length===1?installed[0].code:'',
                 technicalVerification:payload,publicationEnabled:false,
                 approvalStatus:'submit_via_existing_coa_transaction'};
         }),
@@ -308,6 +328,9 @@ export const drkmsRoutes = {
                 throw new HttpError(403,'You are not authorized to register documents at this location.');
             const enabled = settings?.data.enabledClassCodes;
             if (Array.isArray(enabled) && !enabled.includes(classCode)) throw new HttpError(400, 'Document class disabled by organization.');
+            const templateCode = str(ctx.body.templateCode);
+            const template = templateCode ? templateByCode(templateCode) : undefined;
+            if (templateCode && (!template || (template.classCode && template.classCode !== classCode))) throw new HttpError(400, 'Choose a template that matches the document class.');
             const id = randomId(10);
             const now = nowIso();
             const document = {
@@ -316,6 +339,7 @@ export const drkmsRoutes = {
                 revision: '00', ownerUid: ctx.uid, createdBy: ctx.uid,
                 createdAt: now, updatedAt: now, securityClass: 'internal',
                 effectiveRevisionId: '', verified: false, signatureRequired:true,
+                ...(template ? { templateCode: template.code, templateName: template.name, outline: template.sections.map(x => x.heading), plannedSignOff: template.signOff } : {}),
             };
             const created = await writeDoc(`${base(ctx.orgId)}/${id}`, document, { exists: false });
             if (!created) throw new HttpError(409, 'Identifier conflict, please try again.');
