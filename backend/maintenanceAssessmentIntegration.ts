@@ -4,6 +4,7 @@ import { nodePath } from './access';
 import { catalogItemSpec } from './procurement';
 import { materialIn, stockValOf } from './finCore';
 import type { AssessedTask } from './maintenanceTaskAssessment';
+import { enforceSourcingRules } from './maintenanceSourcing';
 
 /** Persist canonical equipment links and catalogue specifications at assessment time. */
 export async function prepareMaintenanceAssessment(ctx: OrgContext, record: Doc, tasks: AssessedTask[]) {
@@ -37,6 +38,9 @@ export async function prepareMaintenanceAssessment(ctx: OrgContext, record: Doc,
                 if (!m || !['active', 'approved'].includes(str(m.data.status)))
                     throw new HttpError(400, 'Select an approved material linked to the warehouse.');
                 s.unitCost = (await stockValOf(ctx.orgId, s.warehouseId, s.materialId)).avg || null;
+            } else if (s.source === 'material') {
+                const m = await getDoc(`organizations/${ctx.orgId}/materials/${s.materialId}`);
+                if (!m || !['active', 'approved'].includes(str(m.data.status))) throw new HttpError(400, 'Select an approved registered material.');
             } else if (s.source === 'catalog') {
                 const spec = await catalogItemSpec('materials', s.catalogCode);
                 if (!spec) throw new HttpError(400, 'Select a valid technical material catalogue entry.');
@@ -53,6 +57,8 @@ export async function prepareMaintenanceAssessment(ctx: OrgContext, record: Doc,
             }
         }
     }
+    // Selection hierarchy (warehouse → registered material / catalogue → free text) and supplier qualification.
+    await enforceSourcingRules(ctx, record, tasks as unknown as Parameters<typeof enforceSourcingRules>[2]);
     if (Buffer.byteLength(JSON.stringify(tasks), 'utf8') > 450000)
         throw new HttpError(
             400,

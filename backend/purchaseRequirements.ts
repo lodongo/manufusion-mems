@@ -4,7 +4,7 @@ import { orgUsers, record } from './org';
 import { allowedNodeIds, nextOrgCounter } from './positions';
 import { catalogItemSpec, catalogSummary, catalogTree, searchCatalog, type ItemSpec, type TreeOut } from './procurement';
 import { assetClassSpec, assetClassTree } from './assets';
-import { col as structureCol } from './structure';
+import { col as structureCol, signedUrl } from './structure';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { buyingPolicy } from './procurementPolicy';
 import { covers, deskScope } from './buyerGroups';
@@ -60,7 +60,7 @@ function uomGroups() {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-    unverified: 'Unverified (Replenishment), awaiting a planner',
+    unverified: 'Unverified (automatic), awaiting a planner',
     draft: 'Draft',
     pending_approval: 'Pending manager approval',
     approved: 'Approved, awaiting procurement',
@@ -156,7 +156,7 @@ function flags(ctx: OrgContext, d: Obj) {
 function waitingOn(d: Obj): string {
     switch (str(d.status)) {
         case 'unverified':
-            return 'Planner (verify the replenishment request)';
+            return str(d.source) === 'maintenance' ? 'Maintenance planner (verify the work-order request)' : 'Planner (verify the replenishment request)';
         case 'draft':
             return 'Requester (not yet submitted)';
         case 'pending_approval':
@@ -568,10 +568,28 @@ async function mutate(ctx: OrgContext, body: Obj, action: string, statuses: stri
 }
 
 /** Maintenance sourcing uses the same item checks, manager routing and approval lifecycle. */
+/** The open requirement already raised for this work-order task resource, whatever assessment revision raised it. */
+async function openMaintenanceRequirement(orgId: string, source: Obj): Promise<Doc | null> {
+    const same = (d: Obj) => {
+        const m = isObj(d.maintenanceSource) ? d.maintenanceSource : {};
+        return d.maintenanceSourceKey === source.key || (str(m.woCode) === str(source.woCode) && str(m.taskId) === str(source.taskId) && str(m.resourceId) === str(source.resourceId));
+    };
+    return (await listDocs(requirementsPath(orgId))).find((d) => same(d.data) && !['cancelled', 'rejected'].includes(str(d.data.status))) ?? null;
+}
+
+/**
+ * Raises (or reuses) the procurement requirement for a work-order task resource. One open requirement per task
+ * resource: repeated calls, reassessment and task edits return the same requirement instead of a duplicate. A
+ * requirement raised automatically when a new material was approved is verified here by the planner, who then
+ * becomes its requester; it then follows the standard manager approval (and chart of authority).
+ */
 export async function createMaintenanceRequirement(ctx: OrgContext, input: Obj, source: Obj) {
     requireProcurement(ctx);
-    const existing = (await listDocs(requirementsPath(ctx.orgId))).find(d => d.data.maintenanceSourceKey === source.key && !['cancelled','rejected'].includes(str(d.data.status)));
-    if (existing) return existing.id;
+    const existing = await openMaintenanceRequirement(ctx.orgId, source);
+    if (existing) {
+        if (str(existing.data.status) === 'unverified' && str(existing.data.source) === 'maintenance') await verifyMaintenanceRequest(ctx, existing, input);
+        return existing.id;
+    }
     const line = await prepareItem(ctx, input, 10);
     const missing = missingOf(line);
     if (missing.length) throw new HttpError(400, 'Complete procurement specifications: ' + missing.join(', '));
@@ -580,7 +598,7 @@ export async function createMaintenanceRequirement(ctx: OrgContext, input: Obj, 
     const id = `REQ${String(await nextOrgCounter(ctx.orgId, 'requirementSeq')).padStart(9, '0')}`;
     const at = nowIso();
     if (!await writeDoc(`${requirementsPath(ctx.orgId)}/${id}`, {
-        number:id,title:requiredMaintenanceTitle(source),status:'pending_approval',
+        number:id,title:requiredMaintenanceTitle(source),status:'pending_approval',source:'maintenance',
         requesterUid:ctx.uid,requesterName:nameOfUser(ctx.me),requesterEmail:str(ctx.me.data.email),
         requesterPosition:approver.position,approverPosition:approver.managerPosition,approverTitle:approver.managerTitle,
         lines:[{...line,maintenanceSource:source}],attachments:[],attachmentSeq:0,
@@ -589,6 +607,86 @@ export async function createMaintenanceRequirement(ctx: OrgContext, input: Obj, 
     }, {exists:false})) throw new HttpError(409, 'Purchase requirement number already exists.');
     await record(ctx,'org.procurement.req.submit',id,`Maintenance ${str(source.woCode)} / ${str(source.taskId)}`);
     return id;
+}
+
+/** Planner verification of a requirement raised automatically for a work-order task (material approved after free-text entry). */
+async function verifyMaintenanceRequest(ctx: OrgContext, doc: Doc, input: Obj) {
+    const d = doc.data;
+    const cur = objs(d.lines)[0] ?? {};
+    const line = await prepareItem(ctx, {
+        ...cur, source: 'warehouse', costCenterId: str(cur.warehouseId), glCode: str(input.glCode),
+        dateRequired: str(input.dateRequired) || str(cur.dateRequired), urgency: str(input.urgency) || str(cur.urgency) || 'medium',
+        budget: input.budget ?? cur.budget ?? null,
+    }, 10);
+    if (str(line.materialId) !== str(cur.materialId) || str(line.warehouseId) !== str(cur.warehouseId)) throw new HttpError(409, 'The material or warehouse of this request cannot be changed.');
+    const missing = missingOf(line);
+    if (missing.length) throw new HttpError(400, `Complete before verifying: ${missing.join(', ')}.`);
+    const approver = await approverFor(ctx, ctx.me);
+    if (approver.problem) throw new HttpError(409, approver.problem);
+    const at = nowIso();
+    const ok = await writeDoc(`${requirementsPath(ctx.orgId)}/${doc.id}`, {
+        ...d, status: 'pending_approval', requesterUid: ctx.uid, requesterName: nameOfUser(ctx.me), requesterEmail: str(ctx.me.data.email),
+        requesterPosition: approver.position, approverPosition: approver.managerPosition, approverTitle: approver.managerTitle,
+        lines: [{ ...line, maintenanceSource: cur.maintenanceSource ?? d.maintenanceSource }], submittedAt: at, verifiedBy: ctx.uid, verifiedByName: nameOfUser(ctx.me), verifiedAt: at,
+        updatedAt: at, version: (Number(d.version) || 1) + 1,
+        history: [...history(d), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: 'verified', note: 'Verified by the maintenance planner', from: 'unverified', to: 'pending_approval' }],
+    }, { updateTime: doc.updateTime });
+    if (!ok) throw new HttpError(409, 'The requirement changed at the same time. Refresh and try again.');
+    await record(ctx, 'org.procurement.req.verify', doc.id, `Maintenance ${str(object(d.maintenanceSource).woCode)}`);
+}
+const object = (v: unknown): Obj => (isObj(v) ? v : {});
+
+/**
+ * Pushes the need of a work-order task into Procurement Requirements once its new material is approved (free-text
+ * or catalogue spare → material creation → approval). Raised as an automatic request waiting for the planner to
+ * verify it (the planner becomes the requester), exactly like replenishment requests. Returns the requirement id.
+ */
+export async function raiseMaintenanceSupplyRequest(orgId: string, input: { material: Doc; warehouse: Doc | null; warehouseId: string; quantity: number; dateRequired: string; technical: string; source: Obj }): Promise<string> {
+    const existing = await openMaintenanceRequirement(orgId, input.source);
+    if (existing) return existing.id;
+    const m = input.material.data;
+    const name = (str(m.name) || str(m.shortText) || 'Material').slice(0, 160);
+    const uom = PROCUREMENT_UNITS.find((u) => u.active && u.selectable && (u.code === str(m.uom) || u.symbol === str(m.uom)));
+    const due = /^\d{4}-\d{2}-\d{2}$/.test(input.dateRequired) && input.dateRequired >= today() ? input.dateRequired : new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
+    const line = {
+        no: 10, type: 'material', source: 'warehouse',
+        categoryCode: str(m.categoryCode), subcategoryCode: str(m.subcategoryCode), familyCode: str(m.familyCode), itemCode: '', itemName: name,
+        master: { code: str(m.materialNumber), name },
+        warehouseId: input.warehouseId, warehouseCode: str(input.warehouse?.data.code), warehouseName: str(input.warehouse?.data.name),
+        materialId: input.material.id, materialNumber: str(m.materialNumber),
+        requirement: `${name} (${str(m.materialNumber)})`.slice(0, 300), technical: input.technical.slice(0, 2000),
+        attributes: {}, attributeView: [], requiredAttrs: [],
+        quantity: Math.round(input.quantity * 1000) / 1000,
+        unit: uom?.symbol ?? str(m.uom), uomCode: uom?.code ?? '', uomLabel: uom?.label ?? '', uomCategoryCode: uom?.categoryCode ?? '', uomCategoryName: uom?.category ?? '',
+        dateRequired: due, urgency: 'medium', budget: null,
+        costCenterId: input.warehouseId, costCenterCode: str(input.warehouse?.data.code), costCenterName: str(input.warehouse?.data.name),
+        glCode: '', glName: '', maintenanceSource: input.source,
+    };
+    const id = `REQ${String(await nextOrgCounter(orgId, 'requirementSeq')).padStart(9, '0')}`;
+    const at = nowIso();
+    const ok = await writeDoc(`${requirementsPath(orgId)}/${id}`, {
+        number: id, title: requiredMaintenanceTitle(input.source), status: 'unverified', source: 'maintenance',
+        requesterUid: 'maintenance', requesterName: 'Maintenance (automatic)', requesterEmail: '',
+        lines: [line], attachments: [], attachmentSeq: 0, maintenanceSourceKey: input.source.key, maintenanceSource: input.source,
+        createdAt: at, updatedAt: at, version: 1,
+        history: [{ at, by: 'maintenance', byName: 'Maintenance', action: 'created', note: `Material ${str(m.materialNumber)} approved for ${str(input.source.woCode)}. Waiting for the maintenance planner to verify.`, from: '', to: 'unverified' }],
+    }, { exists: false });
+    if (!ok) throw new HttpError(409, 'Purchase requirement number already exists.');
+    return id;
+}
+/** What a maintenance-raised requirement carries forward, with short-lived links to its photos and drawings. */
+async function maintenanceSourceOut(orgId: string, d: Obj) {
+    if (!isObj(d.maintenanceSource)) return null;
+    const m = d.maintenanceSource;
+    const prefix = `organizations/${orgId}/mnt/assessment_photos/`;
+    const files = (Array.isArray(m.attachments) ? m.attachments.map(str) : []).filter((f) => f.startsWith(prefix) && /^[A-Za-z0-9_/-]+\.(jpg|png|pdf)$/.test(f)).slice(0, 10);
+    return {
+        woCode: str(m.woCode), taskId: str(m.taskId), description: str(m.description), quantity: Number(m.quantity) || 0,
+        supplierCategory: str(m.supplierCategoryLabel) || str(m.supplierCategory), preferredVendor: isObj(m.preferredVendor) ? { id: str(m.preferredVendor.id), name: str(m.preferredVendor.name) } : null,
+        supplierOnboarding: !!str(m.supplierOnboardingRequestId), executionDate: str(m.executionDate),
+        planningGroup: isObj(m.planningGroup) ? str(m.planningGroup.label) : '', raisedBy: str(m.raisedBy),
+        attachments: await Promise.all(files.map(async (f) => ({ kind: f.endsWith('.pdf') ? 'drawing' : 'photo', url: await signedUrl(f) }))),
+    };
 }
 const requiredMaintenanceTitle = (s: Obj) => `${str(s.woCode)} · ${str(s.description)}`.slice(0,120);
 
@@ -1029,6 +1127,7 @@ export const purchaseRequirementRoutes = {
                 history: history(d).map((h) => ({ at: str(h.at), byName: str(h.byName), action: str(h.action), note: str(h.note), from: str(h.from), to: str(h.to) })),
                 approverTitle: str(d.approverTitle),
                 returnReason: str(d.status) === 'returned_user' ? str(d.returnReason) : '',
+                maintenance: await maintenanceSourceOut(ctx.orgId, d),
                 currency: str(ctx.org.data.currencyCode),
                 version: Number(d.version) || 1,
                 can: f,

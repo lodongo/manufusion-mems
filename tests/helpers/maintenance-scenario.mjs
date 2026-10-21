@@ -9,6 +9,7 @@ import { finOpsRoutes } from '../../backend/finOps.ts';
 import { physicalOf } from '../../backend/finCore.ts';
 import { MAINTENANCE_GATES } from '../../backend/maintenanceWorkflowConfig.ts';
 import { PROCUREMENT_UNITS } from '../../backend/procurementUnits.ts';
+import { maintenanceSourcingRoutes } from '../../backend/maintenanceSourcing.ts';
 
 const org = 'maintenance_fixture',
     r = 'organizations/' + org;
@@ -282,6 +283,10 @@ for (const [id, number, name, qty] of [
         postedAt: now,
     });
 }
+seed(r + '/vendors/VND000001', {
+    status: 'approved', legalName: 'Gearbox Services Ltd', classCode: 'VCL-007', classLabel: 'Service contractor', brands: [],
+    scopes: [{ kind: 'service', categoryCode: 'MAT', subcategoryCode: 'SPARES' }],
+});
 const setup = await route(maintenanceRoutes, '/api/org/mnt/setup', 'requester', {}),
     l = setup.lists;
 const first = (groups) => groups.flatMap((g) => g.items)[0].code;
@@ -369,6 +374,8 @@ const tasks = [
                 catalogCode: 'GEARBOX-SVC',
                 attributes: {},
                 proposedVendorIds: [],
+                supplierCategory: 'VCL-007',
+                executionDate: date,
                 scope: 'Inspect gearbox, verify backlash and service seals.',
                 deliverables: 'Inspection report and operational test results',
                 qualifications: 'OEM certified gearbox technician',
@@ -429,6 +436,12 @@ seed(r + '/material_journal/RECEIPT_SENSOR', {
     postedAt: now,
 });
 await op('planner', 'reserve', { code: wo, taskId: 'sensors', resourceId: 'sensor' });
+await assert.rejects(
+    () => op('planner', 'procure', { code: wo, taskId: 'gearbox', resourceId: 'rewind', dateRequired: date, glCode: '610000' }),
+    /supplier category/,
+    'A service requirement needs confirmed supplier sourcing',
+);
+await op('planner', 'service_sourcing', { code: wo, taskId: 'gearbox', resourceId: 'rewind', supplierCategory: 'VCL-007', preferredVendorId: 'VND000001' });
 const svc = await op('planner', 'procure', { code: wo, taskId: 'gearbox', resourceId: 'rewind', dateRequired: date, glCode: '610000' });
 seed(r + '/procurement_orders/PO00000001-V1', {
     number: 'PO00000001-V1',
@@ -677,12 +690,13 @@ await assert.rejects(
     }),
     /Direct work order creation is disabled/,
 );
-async function createAssessedWorkOrder(title,description,assemblyId,assessedTasks){
+async function createAssessedWorkOrder(title,description,assemblyId,assessedTasks,prepare){
     const wrNew=await route(maintenanceRoutes,'/api/org/mnt/wr/create','requester',{
         ...finding,title,description,assemblyId,assetTag:assemblyId==='OTHER_ASSEMBLY'?'AST000002':'AST000001'
     });
     await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'start_review'});
     await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'assess',...header});
+    if(prepare)await prepare(wrNew.code);
     await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'save_task_assessment',tasks:assessedTasks});
     await assert.rejects(
         () => route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'convert',confirm:wrNew.code}),
@@ -711,7 +725,13 @@ const hiddenTask = task('hidden_task', 'Unselected historical-style task', 'BEAR
 hiddenTask.risk = [{ ...risk[0], hazard: 'EXCLUDED_TASK_HAZARD' }];
 const direct = await createAssessedWorkOrder(
     'Follow-up conveyor work','Assess coupling and mounting bracket for the conveyor.','BEARINGS',
-    [candidateTask,hiddenTask]
+    [candidateTask,hiddenTask],
+    async(code)=>{
+        // Free text only after searching the warehouse and catalogue and confirming nothing suitable exists.
+        const search=await route(maintenanceSourcingRoutes,'/api/org/mnt/sourcing/materials','assessor',{code,q:'mounting bracket'});
+        Object.assign(candidateTask.spares[1],{searchReceiptId:search.receiptId,noMatchConfirmed:true,function:'Holds the drive bearing housing',
+            specifications:'Steel bracket, 4 x M12 holes, fits the conveyor drive bearing housing',requiredDate:date});
+    },
 );
 const proposal = (await listDocs(r + '/asset_task_proposals')).find((p) => p.data.taskId === 'coupling' && (p.data.woCode === direct || p.data.wrCode));
 assert.ok(proposal, 'Task registry proposal should be retained across WR assessment and conversion');

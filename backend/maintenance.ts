@@ -50,7 +50,9 @@ const WR_RE = /^WR\d{8}$/;
 const WO_RE = /^WO\d{8}$/;
 const PHOTO_RE = /^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/wr_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png)$/;
 const MAX_PHOTOS = 4;
-const ASSESSMENT_PHOTO_RE=/^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/assessment_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png)$/;
+const ASSESSMENT_PHOTO_RE=/^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/assessment_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png|pdf)$/;
+/** Every photo or document path referenced by an assessment (spares and services). */
+const assessmentFiles=(tasks:unknown)=>objs(tasks).flatMap(t=>[...objs(t.spares).flatMap(sp=>[str(sp.photoPath),...strs(sp.attachments)]),...objs(t.services).flatMap(sv=>strs(sv.attachments))]).filter(Boolean);
 const wrCol = (orgId: string) => `organizations/${orgId}/work_requests`;
 const woCol = (orgId: string) => `organizations/${orgId}/work_orders`;
 
@@ -665,7 +667,7 @@ async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:Assesse
     };
     const energies=master(energyDoc,'hazardousEnergy'),permits=master(permitDoc,'permitTypes');
     const energyIds=new Set(energies.map(e=>str(e.code))),permitIds=new Set(permits.map(e=>str(e.code)));
-    const oldPaths=new Set(objs(record.data.assessmentTasks).flatMap(t=>objs(t.spares).map(sp=>str(sp.photoPath)).filter(Boolean)));
+    const oldPaths=new Set(assessmentFiles(record.data.assessmentTasks));
     for(const task of tasks){
         if(task.energySourceCodes?.some(code=>!energyIds.has(code)))
             throw new HttpError(400,'Choose hazardous energy sources from the active SAF list.');
@@ -685,12 +687,11 @@ async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:Assesse
             if(livePermit&&!task.permitCodes?.includes(str(livePermit.code)))
                 throw new HttpError(400,'Add the SAF live work permit for this task.');
         }
-        for(const spare of task.spares){
-            if(!spare.photoPath)continue;
-            if(!ASSESSMENT_PHOTO_RE.test(spare.photoPath)||
-                !spare.photoPath.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`)||
-                !(spare.photoPath.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/${ctx.uid}/`)||oldPaths.has(spare.photoPath)))
-                throw new HttpError(400,'Invalid or unauthorized assessment spare photo.');
+        for(const file of assessmentFiles([task])){
+            if(!ASSESSMENT_PHOTO_RE.test(file)||
+                !file.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`)||
+                !(file.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/${ctx.uid}/`)||oldPaths.has(file)))
+                throw new HttpError(400,'Invalid or unauthorized assessment photo or document.');
         }
     }
 }
@@ -911,11 +912,13 @@ export const maintenanceRoutes = {
             await rateLimit('mnt-assessment-photo',ctx.uid,30,3600);
             const data=str(ctx.body.data);
             if(!data||data.length>2_000_000||!/^[A-Za-z0-9+/=]+$/.test(data))
-                throw new HttpError(400,'Upload a JPEG or PNG photo smaller than 1.5 MB.');
+                throw new HttpError(400,'Upload a JPEG or PNG photo, or a PDF drawing, smaller than 1.5 MB.');
             const buffer=Buffer.from(data,'base64');
-            if(!buffer.length||buffer.length>1_500_000)throw new HttpError(400,'Photo too large.');
-            const detected=detectImage(buffer);
-            if(!detected)throw new HttpError(400,'Only JPEG and PNG images are allowed.');
+            if(!buffer.length||buffer.length>1_500_000)throw new HttpError(400,'File too large (1.5 MB maximum).');
+            // Content is identified by its signature, never by the name or declared type.
+            const pdf=buffer.subarray(0,5).toString('latin1')==='%PDF-'&&!/\/(JavaScript|JS|Launch|EmbeddedFile|OpenAction)\b/.test(buffer.toString('latin1'));
+            const detected=pdf?{ext:'pdf',contentType:'application/pdf'}:detectImage(buffer);
+            if(!detected)throw new HttpError(400,'Only JPEG or PNG photos and PDF drawings without active content are allowed.');
             const path=`organizations/${ctx.orgId}/mnt/assessment_photos/${ctx.uid}/${randomId(6)}.${detected.ext}`;
             const [ok]=await storage.write([{path,content:data,contentType:detected.contentType}]);
             if(!ok)throw new HttpError(502,'Photo could not be stored.');
@@ -944,9 +947,8 @@ export const maintenanceRoutes = {
             if(record){need(ctx,'MNT.view',pathOf(record),await scopeOf(ctx));const nodes=await listDocs(col(ctx.orgId));for(const n of nodes){if(n.id===str(record.data.unitId)||(str(n.data.level)==='assembly'&&(await nodePath(ctx.orgId,n.id)).includes(str(record.data.unitId))))equipmentOptions.push({id:n.id,name:str(n.data.name),code:str(n.data.code)});}}
             const skillMaster=await getDoc('module_workspaces/HRM/metadata/skillsMaster');const skills=objs(skillMaster?.data.items).filter(s=>s.active!==false).map(s=>({code:str(s.code),label:str(s.label)||str(s.name),category:str(s.category)}));
             const photos:Record<string,string>={};
-            if(record)for(const task of objs(record.data.assessmentTasks))for(const spare of objs(task.spares)){
-                const path=str(spare.photoPath);
-                if(path&&ASSESSMENT_PHOTO_RE.test(path)&&path.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`))
+            if(record)for(const path of assessmentFiles(record.data.assessmentTasks).slice(0,200)){
+                if(ASSESSMENT_PHOTO_RE.test(path)&&path.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`))
                     photos[path]=await signedUrl(path);
             }
             return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),photos,serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
