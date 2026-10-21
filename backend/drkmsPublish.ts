@@ -86,6 +86,15 @@ export const drkmsPublishRoutes={
     if(!user||str(user.data.orgId)!==ctx.orgId||str(user.data.status)==='disabled')
      throw new HttpError(403,'An approver is no longer eligible.');
    }
+   const predecessorId=str(doc.data.supersedesDocumentId);
+   const predecessor=predecessorId?await getDoc(`${ROOT(ctx.orgId)}/${predecessorId}`):null;
+   if(predecessorId){
+    if(!ID.test(predecessorId)||!predecessor||str(predecessor.data.status)!=='effective'||
+       str(predecessor.data.effectiveRevisionId)!==str(doc.data.supersedesRevisionId))
+     throw new HttpError(409,'The predecessor is no longer the expected effective revision. Reassess the change.');
+    if(str(predecessor.data.classCode)!==str(doc.data.classCode))
+     throw new HttpError(409,'Document classification cannot change during a revision.');
+   }
    const releasedAt=nowIso();
    const revisionId=createHash('sha256').update(documentId+':'+revision+':'+fingerprint).digest('hex');
    const snapshot={documentId,revisionId,revision,tenantId:ctx.orgId,
@@ -97,6 +106,9 @@ export const drkmsPublishRoutes={
     {path:path+'/revisions/'+revisionId,data:snapshot,precondition:{exists:false}},
     {path,data:{...doc.data,status:'effective',effectiveRevisionId:revisionId,publishedAt:releasedAt,
       publicationApprovalId:approvalId,updatedAt:releasedAt},precondition:{updateTime:doc.updateTime}},
+    ...(predecessor&&predecessorId?[{path:`${ROOT(ctx.orgId)}/${predecessorId}`,
+      data:{...predecessor.data,status:'superseded',supersededByDocumentId:documentId,
+       supersededAt:releasedAt,updatedAt:releasedAt},precondition:{updateTime:predecessor.updateTime}}]:[]),
     {path:APPROVAL(ctx.orgId,approvalId),data:{...approval.data,status:'executed',
       executionBy:ctx.uid,executionCompletedAt:releasedAt},precondition:{updateTime:approval.updateTime}},
    ]);
