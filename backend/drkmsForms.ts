@@ -1,5 +1,6 @@
 import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc,commitChecked} from './core';
 import {createHash} from 'node:crypto';
+import {transactionPayloadHash} from './unifiedApprovalProof';
 import {orgRoute} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 const ID=/^[a-f0-9]{20}$/;
@@ -74,11 +75,11 @@ export async function resolveFormReference(orgId:string,reference:{module:string
  return {...reference,verification:'linked',sourceTitle:str(doc.data.title)||str(doc.data.name)||reference.recordId};
 }
 export function formRecordFingerprint(record:Record<string,unknown>):string{
- return createHash('sha256').update(JSON.stringify({
+ return transactionPayloadHash({
   templateId:str(record.templateId),templateRevision:str(record.templateRevision),
   scopeNodeId:str(record.scopeNodeId),values:record.values,operationalReference:record.operationalReference,
   createdBy:str(record.createdBy),recordId:str(record.id)
- })).digest('hex');
+ });
 }
 const templatePath=(o:string)=>`organizations/${o}/drkms_form_templates`;
 const recordPath=(o:string)=>`organizations/${o}/drkms_form_records`;
@@ -142,6 +143,9 @@ export const drkmsFormRoutes={
   if(!record||!slot||str(record.data.status)!=='technical_reviewed'||
     str(slot.data.signerUid)!==ctx.uid||str(slot.data.status)!=='pending')
    throw new HttpError(403,'Signature is not available for your account.');
+  const signerScope=await scopeOf(ctx),scopeNodeId=str(record.data.scopeNodeId);
+  if(!scopeNodeId||(signerScope!=='all'&&!signerScope.has(scopeNodeId)))
+   throw new HttpError(403,'Assigned signer no longer has access to the document location.');
   if(!str(record.data.reviewedBy)||str(record.data.reviewedBy)===ctx.uid||
     str(record.data.createdBy)===ctx.uid)
    throw new HttpError(403,'Form creator or technical reviewer cannot sign in a separate authority stream.');
