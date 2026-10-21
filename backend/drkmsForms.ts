@@ -59,13 +59,17 @@ export function validateFormValues(fields:FormField[],raw:unknown,allowIncomplet
 const VERIFIED_SOURCES:Record<string,string>={
  MNT:'work_orders',SAF:'safety_incidents',AST:'assets'
 };
-export async function resolveFormReference(orgId:string,reference:{module:string;recordId:string}|null){
+export async function resolveFormReference(orgId:string,reference:{module:string;recordId:string}|null,allowedNodeId=''){
  if(!reference)return null;
  const collection=VERIFIED_SOURCES[reference.module];
  if(!collection)return {...reference,verification:'unsupported_connector'};
  const doc=await getDoc(`organizations/${orgId}/${collection}/${reference.recordId}`);
  if(!doc||str(doc.data.orgId)&&str(doc.data.orgId)!==orgId)
   throw new HttpError(404,'Operational source record not found in this organization.');
+ const sourceScope=doc.data.scope&&typeof doc.data.scope==='object'&&!Array.isArray(doc.data.scope)
+  ?str((doc.data.scope as Record<string,unknown>).nodeId):str(doc.data.scopeNodeId);
+ if(!sourceScope||!allowedNodeId||sourceScope!==allowedNodeId)
+  return {...reference,verification:'pending_scope_validation'};
  return {...reference,verification:'linked',sourceTitle:str(doc.data.title)||str(doc.data.name)||reference.recordId};
 }
 const templatePath=(o:string)=>`organizations/${o}/drkms_form_templates`;
@@ -122,7 +126,7 @@ export const drkmsFormRoutes={
    const values=validateFormValues(fields,record.data.values,false);
    const source=record.data.operationalReference as {module:string;recordId:string}|null;
    if(source?.module){
-    const resolved=await resolveFormReference(ctx.orgId,source);
+    const resolved=await resolveFormReference(ctx.orgId,source,nodeId);
     if(resolved?.verification!=='linked')throw new HttpError(409,'Operational source requires a verified connector before submission.');
    }
    const date=nowIso();
@@ -150,7 +154,7 @@ export const drkmsFormRoutes={
    if(!['MNT','SAF','MFG','QLT','AST'].includes(module)||!/^[a-zA-Z0-9_-]{3,100}$/.test(sourceId))throw new HttpError(400,'Invalid operational reference.');
    reference={module,recordId:sourceId};
   }
-  const resolvedReference=await resolveFormReference(ctx.orgId,reference);
+  const resolvedReference=await resolveFormReference(ctx.orgId,reference,nodeId);
   const id=recordId||randomId(10),date=nowIso();
   const record={id,templateId,templateRevision:str(template.data.revision),templateTitle:str(template.data.title),scopeNodeId:nodeId,values,operationalReference:resolvedReference,
     status:'draft',createdBy:ctx.uid,createdAt:existing?.data.createdAt??date,updatedAt:date,unapproved:true};
