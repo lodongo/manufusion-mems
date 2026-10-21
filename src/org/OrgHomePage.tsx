@@ -296,6 +296,7 @@ export default function OrgHomePage({
     onSessionChange: (s: Session) => void;
 }) {
     const { data, error, loading } = useLoad(() => callBackend<OrgContextData>('/api/org/context'));
+    const docAvailability = useLoad(() => callBackend<{enabledSubmodules:string[]}>('/api/org/drkms/submodules/status',{}),[]);
     const [menuOpen, setMenuOpen] = useState(false);
     const menuPrefsKey='mems.menu.preferences.'+session.user.uid;
     const personalItems = [
@@ -351,7 +352,11 @@ export default function OrgHomePage({
     if (loading && !data) return <Spinner />;
     if (error || !data) return <div className='p-6'><Alert tone='error'>{error || 'Could not load your organization.'}</Alert></div>;
 
-    const menus = moduleMenus(data, canAdmin);
+    const menus = moduleMenus(data, canAdmin).map(menu => menu.module.code==='DOC' && docAvailability.data
+        ? {...menu,links:menu.links.filter(link => {
+            if(!link.path.startsWith('doc_')||link.path==='doc_config')return true;
+            return docAvailability.data!.enabledSubmodules.includes(link.path.slice(4));
+          })} : menu);
     const currentPath = route.startsWith(`${ROUTE}/`) ? route.slice(ROUTE.length + 1) : '';
     const activeMenu = menus.find((m) =>
         currentPath === `module/${m.module.code}`
