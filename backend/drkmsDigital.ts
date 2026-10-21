@@ -100,7 +100,7 @@ export const drkmsDigitalRoutes={
      incidentReference,trigger,problemStatement:problem,methodCode,frameworkCode,dmaicStage:'DEFINE',dmaicStages:{},rootCauses:[],correctiveActions:[],
      effectivenessChecks:[],scope:{nodeId:scopeNodeId,level:str(node.data.level),name:str(node.data.name),ancestorIds:ancestry},
      revision:'00',effectiveRevisionId:'',verified:false,
-     securityClass:'internal',createdBy:ctx.uid,ownerUid:ctx.uid,createdAt:nowIso(),updatedAt:nowIso()};
+     securityClass:'internal',signatureRequired:true,createdBy:ctx.uid,ownerUid:ctx.uid,createdAt:nowIso(),updatedAt:nowIso()};
    if(!(await writeDoc(docs(ctx.orgId,id),entry,{exists:false})))throw new HttpError(409,'Try again.');
    await record(ctx,'drkms.rca.create',id,incidentReference);
    return {document:entry,stagingEnabled:false};
