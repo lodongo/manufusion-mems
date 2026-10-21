@@ -271,7 +271,44 @@ function App() {
             if (session.organization.status === 'suspended') {
                 return <ErrorScreen message='Your organization has been suspended. Please contact MEMS support.' onRetry={() => setReloadKey((key) => key + 1)} onSignOut={handleSignOut} />;
             }
-            const signatureRoute=/^verify\\/document\\/([a-f0-9]{20})\\/([a-f0-9]{64})$/.exec(route);
+            const signatureRoute = new RegExp('^verify/document/([a-f0-9]{20})/([a-f0-9]{64})
+            if(signatureRoute)return <DocumentSignatureVerification documentId={signatureRoute[1]} proof={signatureRoute[2]}/>;
+            const canAdmin = session.landing === 'organization_admin';
+            if (route === 'organization_home/quick' || route.startsWith('organization_home/quick/')) {
+                const [, , mode, id] = route.split('/');
+                return <QuickWorkspace uid={session.user.uid} mode={mode} id={id} />;
+            }
+            if (canAdmin && route.startsWith('organization_admin')) {
+                return <OrgShell session={session} route={route} onSignOut={handleSignOut} onSessionChange={setSession} />;
+            }
+            return <OrgHomePage session={session} route={route} canAdmin={canAdmin} onSignOut={handleSignOut} onSessionChange={setSession} />;
+        }
+        return (
+            <ErrorScreen
+                message='Your account has not been given access to MEMS yet. Please contact your administrator.'
+                onRetry={() => setReloadKey((key) => key + 1)}
+                onSignOut={handleSignOut}
+            />
+        );
+    };
+
+    const organizationReady = !!session?.organization && session.user.uid === authUser?.uid
+        && sessionState === 'ready' && !!authUser && !session.mustChangePassword && !session.photoRequired
+        && session.role !== 'applicant' && route !== 'site';
+    const quickFullScreen = route === 'organization_home/quick' || route.startsWith('organization_home/quick/');
+    return (
+        <SiteContext.Provider value={siteState}>
+            <GlobalSelectEnhancer />
+            <DialogHost />
+            <div className={organizationReady ? 'mems-organization-ui' + (quickFullScreen ? '' : ' pb-12') : ''}>{render()}</div>
+            {organizationReady && session && <HealthTracker session={session} />}
+            {organizationReady && !quickFullScreen && <OrganizationFooter />}
+        </SiteContext.Provider>
+    );
+}
+
+export default App;
+).exec(route);
             if(signatureRoute)return <DocumentSignatureVerification documentId={signatureRoute[1]} proof={signatureRoute[2]}/>;
             const canAdmin = session.landing === 'organization_admin';
             if (route === 'organization_home/quick' || route.startsWith('organization_home/quick/')) {
