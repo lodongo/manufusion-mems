@@ -3,11 +3,11 @@ import {orgRoute} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 const ID=/^[a-f0-9]{20}$/;
 const types=new Set(['text','long_text','number','date','yes_no','select']);
-export type FormField={code:string;label:string;type:string;required:boolean;options?:string[]};
+export type FormField={code:string;label:string;type:string;required:boolean;options?:string[];section?:string;visibleWhen?:{fieldCode:string;equals:string|boolean}};
 export function validateFormFields(raw:unknown):FormField[]{
  if(!Array.isArray(raw)||!raw.length||raw.length>60)throw new HttpError(400,'Form needs 1–60 fields.');
  const seen=new Set<string>();
- return raw.map(entry=>{
+ const normalized=raw.map(entry=>{
   if(!entry||typeof entry!=='object'||Array.isArray(entry))throw new HttpError(400,'Invalid field.');
   const e=entry as Record<string,unknown>,code=str(e.code).trim(),label=str(e.label).trim(),type=str(e.type);
   if(!/^[a-z][a-z0-9_]{1,39}$/.test(code)||seen.has(code)||label.length<2||label.length>120||!types.has(type))
@@ -16,14 +16,33 @@ export function validateFormFields(raw:unknown):FormField[]{
   const options=type==='select'&&Array.isArray(e.options)?e.options.map(x=>str(x).trim()):[];
   if(type==='select'&&(!options.length||options.length>30||options.some(x=>!x||x.length>80)||new Set(options).size!==options.length))
    throw new HttpError(400,'Select fields require distinct options.');
-  return {code,label,type,required:e.required===true,...(type==='select'?{options}:{})};
+  const section=str(e.section||'General').trim();
+  if(section.length<2||section.length>80)throw new HttpError(400,'Invalid form section.');
+  let visibleWhen:FormField['visibleWhen'];
+  if(e.visibleWhen!==undefined){
+   if(!e.visibleWhen||typeof e.visibleWhen!=='object'||Array.isArray(e.visibleWhen))throw new HttpError(400,'Invalid condition.');
+   const w=e.visibleWhen as Record<string,unknown>;
+   if(typeof w.fieldCode!=='string'||(typeof w.equals!=='string'&&typeof w.equals!=='boolean'))throw new HttpError(400,'Invalid conditional field.');
+   visibleWhen={fieldCode:w.fieldCode,equals:w.equals};
+  }
+  return {code,label,type,required:e.required===true,section,...(visibleWhen?{visibleWhen}:{}),...(type==='select'?{options}:{})};
  });
+ normalized.forEach((f,i)=>{if(!f.visibleWhen)return;
+  const parent=normalized.findIndex(x=>x.code===f.visibleWhen?.fieldCode);
+  if(parent<0||parent>=i||!['select','yes_no'].includes(normalized[parent].type))throw new HttpError(400,'Condition must reference an earlier selection or yes/no field.');
+  const p=normalized[parent];if(p.type==='yes_no'&&typeof f.visibleWhen.equals!=='boolean'||p.type==='select'&&!p.options?.includes(String(f.visibleWhen.equals)))throw new HttpError(400,'Condition is not valid for its parent field.');
+ });
+ return normalized;
+}
+export function formFieldVisible(f:FormField,values:Record<string,unknown>):boolean{
+ return !f.visibleWhen||values[f.visibleWhen.fieldCode]===f.visibleWhen.equals;
 }
 export function validateFormValues(fields:FormField[],raw:unknown){
  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new HttpError(400,'Form values are required.');
  const values=raw as Record<string,unknown>,out:Record<string,string|number|boolean|null>={};
  if(Object.keys(values).some(k=>!fields.some(f=>f.code===k)))throw new HttpError(400,'Unexpected form field.');
  for(const f of fields){
+  if(!formFieldVisible(f,values)){out[f.code]=null;continue;}
   const v=values[f.code];
   if(v===null||v===undefined||v===''){if(f.required)throw new HttpError(400,'Required field: '+f.label);out[f.code]=null;continue;}
   if(f.type==='number'){if(typeof v!=='number'||!Number.isFinite(v))throw new HttpError(400,'Invalid number: '+f.label);out[f.code]=v;}
@@ -61,8 +80,16 @@ export const drkmsFormRoutes={
   const fields=validateFormFields(template.data.fields),values=validateFormValues(fields,ctx.body.values);
   const existing=recordId?await getDoc(recordPath(ctx.orgId)+'/'+recordId):null;
   if(recordId&&(!existing||str(existing.data.createdBy)!==ctx.uid||str(existing.data.status)!=='draft'||str(existing.data.templateId)!==templateId))throw new HttpError(403,'Draft record is not editable.');
+  const operationalReference=ctx.body.operationalReference;
+  let reference:null|{module:string;recordId:string}=null;
+  if(operationalReference!==undefined&&operationalReference!==null){
+   if(typeof operationalReference!=='object'||Array.isArray(operationalReference))throw new HttpError(400,'Invalid record reference.');
+   const r=operationalReference as Record<string,unknown>,module=str(r.module),sourceId=str(r.recordId);
+   if(!['MNT','SAF','MFG','QLT','AST'].includes(module)||!/^[a-zA-Z0-9_-]{3,100}$/.test(sourceId))throw new HttpError(400,'Invalid operational reference.');
+   reference={module,recordId:sourceId};
+  }
   const id=recordId||randomId(10),date=nowIso();
-  const record={id,templateId,templateRevision:str(template.data.revision),templateTitle:str(template.data.title),scopeNodeId:nodeId,values,
+  const record={id,templateId,templateRevision:str(template.data.revision),templateTitle:str(template.data.title),scopeNodeId:nodeId,values,operationalReference:reference,
     status:'draft',createdBy:ctx.uid,createdAt:existing?.data.createdAt??date,updatedAt:date,unapproved:true};
   if(!(await writeDoc(recordPath(ctx.orgId)+'/'+id,record,existing?{updateTime:existing.updateTime}:{exists:false})))throw new HttpError(409,'Draft was modified. Refresh.');
   return {record};
