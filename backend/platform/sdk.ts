@@ -81,6 +81,11 @@ function bucket() {
     return gs.bucket(name);
 }
 export const storage = {
+    /** Privileged server-only original read; call only after DRKMS scope and revision authorization. */
+    async read(path: string): Promise<Buffer> {
+        const [bytes] = await bucket().file(safeObjectPath(path)).download();
+        return bytes;
+    },
     async write(items: Array<{ path: string; content: string; contentType: string }>): Promise<boolean[]> {
         return Promise.all(items.map(async item => {
             try {
