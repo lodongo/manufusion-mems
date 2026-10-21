@@ -1,6 +1,7 @@
 import {useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Card,PageTitle,useLoad} from '../admin/kit';
+import DigitalFormSignatures from './DigitalFormSignatures';
 type Assignment={documentId:string;slotId:string;label:string;title:string;documentStatus:string;signatureStatus:string;signedAt:string};
 export default function MyDocSignatures(){
  const {data,error,loading,reload}=useLoad(()=>callBackend<{assignments:Assignment[]}>('/api/org/drkms/signatures/my-inbox',{}),[]);
@@ -34,5 +35,6 @@ export default function MyDocSignatures(){
    {item.documentStatus!=='technical_verified'&&item.signatureStatus==='pending'&&<p className='text-xs text-slate-400'>Available after independent technical verification.</p>}
   </Card>)}
   {notice&&<p role='status' className='text-sm text-slate-200'>{notice}</p>}
+  <DigitalFormSignatures/>
  </div>;
 }
