@@ -2,9 +2,11 @@ import {useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Card,useLoad} from '../admin/kit';
 import {jsPDF} from 'jspdf';
+import FormEvidenceLinks from './FormEvidenceLinks';
 type Field={code:string;label:string;type:string;required:boolean;options?:string[];section?:string;visibleWhen?:{fieldCode:string;equals:string|boolean}};
 type Template={id:string;title:string;status:string;fields:Field[];revision:string;scopeNodeId?:string;signOffPlan?:Array<{signerUid:string;label:string}>;successorId?:string;previousTemplateId?:string};
-type RecordRow={id:string;templateId:string;values:Record<string,string|number|boolean|null>;status:string;operationalReference?:{module:string;recordId:string}};
+type FormEvidence={documentId:string;revisionId:string;fileId:string;name:string;sha256:string};
+type RecordRow={id:string;templateId:string;values:Record<string,string|number|boolean|null>;status:string;operationalReference?:{module:string;recordId:string};attachments?:FormEvidence[]};
 const choices=['text','long_text','number','date','yes_no','select'];
 export default function DigitalFormWorkspace({locations}:{locations:Array<{id:string;name:string}>}){
  const templates=useLoad(()=>callBackend<{templates:Template[]}>('/api/org/drkms/forms/templates/list',{}),[]);
@@ -61,6 +63,10 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
    y+=3;
   }
   if(referenceModule&&referenceId){if(y>269){pdf.addPage();y=22;}pdf.text('Unverified source reference: '+referenceModule+' / '+referenceId,15,y);}
+  const evidence=selectedRecord?.attachments??[];
+  if(evidence.length){if(y>260){pdf.addPage();y=22;}pdf.setFont('helvetica','bold');pdf.text('Controlled source evidence (linked)',15,y);y+=7;
+   pdf.setFont('helvetica','normal');for(const item of evidence){for(const part of pdf.splitTextToSize(item.name+' · '+item.sha256,w-30) as string[]){if(y>274){pdf.addPage();y=22;}pdf.text(part,15,y);y+=5;}}
+  }
   pdf.save('MEMS-DRAFT-'+(recordId||'form')+'.pdf');
  };
  const entry=(f:Field)=>{const value=values[f.code];const set=(v:string|number|boolean|null)=>setValues(old=>({...old,[f.code]:v}));
@@ -119,6 +125,13 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
      <option value=''>No linked record</option>{[['MNT','Maintenance'],['SAF','Safety'],['MFG','Manufacturing'],['QLT','Quality'],['AST','Asset']].map(([code,label])=><option key={code} value={code}>{label}</option>)}
     </select>
     {referenceModule&&<input aria-label='Source record identifier' value={referenceId} onChange={e=>setReferenceId(e.target.value)} placeholder='Existing event or asset record ID' className='min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/>}
+   </div>}
+   {recordId&&<div className='mb-3 space-y-2'>
+    <FormEvidenceLinks recordId={recordId} locked={locked} onLinked={()=>records.reload()}/>
+    {(selectedRecord?.attachments??[]).map(v=><div key={v.documentId+'-'+v.fileId} className='rounded-lg border border-slate-700 p-2 text-xs text-slate-300'>
+     <p className='break-words'>{v.name} · Approved revision {v.revisionId.slice(0,12)}</p>
+     <p className='break-all text-slate-400'>SHA-256: {v.sha256}</p>
+    </div>)}
    </div>}
    {locked&&<p className='mb-2 text-xs text-amber-300'>Record status: {selectedRecord?.status}. Locked against further editing; not approved or published.</p>}
    {template&&<div className='flex flex-wrap gap-2'><button type='button' disabled={busy||locked||(!recordId&&!!template?.successorId)} onClick={()=>void save()} className='min-h-11 rounded-lg bg-blue-600 px-3 text-sm text-white'>Save unapproved draft</button><button type='button' onClick={exportDraft} className='min-h-11 rounded-lg border border-amber-600 px-3 text-sm text-amber-200'>Export draft PDF</button>{recordId&&!locked&&<button type='button' disabled={busy} onClick={()=>void submit()} className='min-h-11 rounded-lg border border-blue-500 px-3 text-sm text-blue-200 disabled:opacity-50'>Submit for review (not approval)</button>}</div>}
