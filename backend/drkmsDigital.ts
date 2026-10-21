@@ -25,7 +25,7 @@ const idOk=(s:string)=>/^[a-f0-9]{20}$/.test(s);
 export const drkmsDigitalRoutes={
  'POST /api/org/drkms/rca/reference':[
   orgRoute('drkms.rca.reference','ADM.document_registry',async ()=>{
-   const keys=['rcaMethods','rcaFrameworks','rca5m1wFactors','rcaDmaicStages','rcaCauseTypes','rcaActionTypes'] as const;
+   const keys=['rcaMethods','rcaFrameworks','rca5m1wFactors','rcaDmaicStages','rcaCauseTypes','rcaActionTypes','rcaTriggerTypes'] as const;
    const fallback=(await import('./docRcaDefaults')).RCA_METADATA_LISTS;
    const lists=await Promise.all(keys.map(async key=>{
      const stored=await getDoc(`module_workspaces/DOC/metadata/${key}`);
@@ -39,7 +39,7 @@ export const drkmsDigitalRoutes={
 
  'POST /api/org/drkms/rca/masters':[
   orgRoute('drkms.rca.masters','ADM.document_registry',async()=>{
-   const keys=['rcaMethods','rcaDmaicStages','rcaFrameworks','rca5m1wFactors','rca5w1h','rcaCauseTypes','rcaActionTypes','rcaVerification'];
+   const keys=['rcaMethods','rcaDmaicStages','rcaFrameworks','rca5m1wFactors','rca5w1h','rcaCauseTypes','rcaActionTypes','rcaVerification','rcaTriggerTypes'];
    const entries=await Promise.all(keys.map(async key=>[key,(await master(key)).filter(item=>item.active!==false)] as const));
    return {masters:Object.fromEntries(entries)};
   }),
@@ -73,6 +73,19 @@ export const drkmsDigitalRoutes={
      throw new HttpError(400,'Choose an enabled reference framework in MEMS Admin.');
    if(title.length<3||title.length>200||problem.length<20||problem.length>8000||incidentReference.length>100)
     throw new HttpError(400,'Provide an RCA title, incident reference and substantive problem statement.');
+   const triggerType=str(ctx.body.triggerType),triggerRecordId=str(ctx.body.triggerRecordId).trim();
+   const knownTriggers=(await master('rcaTriggerTypes')).filter(item=>item.active!==false).map(item=>item.code);
+   if(!triggerType||!knownTriggers.includes(triggerType)||triggerRecordId.length<2||triggerRecordId.length>120)
+    throw new HttpError(400,'Choose an enabled incident trigger and provide the source record identifier.');
+   let sourceVerification:'verified'|'pending_source_integration'='pending_source_integration';
+   let triggerSnapshot:Record<string,unknown>={};
+   if(triggerType==='MNT_WR'||triggerType==='MNT_WO'){
+     const sourceCollection=triggerType==='MNT_WR'?'work_requests':'work_orders';
+     const source=await getDoc(`organizations/${ctx.orgId}/${sourceCollection}/${triggerRecordId}`);
+     if(!source)throw new HttpError(400,'The maintenance trigger does not exist in your organization.');
+     sourceVerification='verified';
+     triggerSnapshot={sourceStatus:str(source.data.status),sourceAssetId:str(source.data.assetId)};
+   }
    const node=await getDoc(`organizations/${ctx.orgId}/structure/${scopeNodeId}`);
    if(!node||!['legal_entity','site','department','cost_center'].includes(str(node.data.level))||
      str(node.data.status)==='inactive')throw new HttpError(400,'Choose an active organization location.');
@@ -85,7 +98,7 @@ export const drkmsDigitalRoutes={
    const id=randomId(10);
    const entry={tenantId:ctx.orgId,documentId:id,title,classCode:'RPT',subtypeCode:'RCA',
      representation:'digital_structured',status:'draft',rcaStage:'DEFINE',rcaMethodCode:methodCode,rcaDmaic:{currentPhase:'DEFINE',completedPhases:[],phases:{}},
-     incidentReference,problemStatement:problem,methodCode,frameworkCode,dmaicStage:'DEFINE',dmaicStages:{},rootCauses:[],correctiveActions:[],
+     incidentReference,trigger:{typeCode:triggerType,recordId:triggerRecordId,sourceModule:triggerType.split('_')[0],verificationStatus:sourceVerification,sourceSnapshot:triggerSnapshot,linkedAt:nowIso(),linkedBy:ctx.uid},problemStatement:problem,methodCode,frameworkCode,dmaicStage:'DEFINE',dmaicStages:{},rootCauses:[],correctiveActions:[],
      effectivenessChecks:[],scope:{nodeId:scopeNodeId,level:str(node.data.level),name:str(node.data.name),ancestorIds:ancestry},
      revision:'00',effectiveRevisionId:'',verified:false,
      securityClass:'internal',createdBy:ctx.uid,ownerUid:ctx.uid,createdAt:nowIso(),updatedAt:nowIso()};
