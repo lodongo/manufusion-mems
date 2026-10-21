@@ -133,7 +133,7 @@ export const drkmsFormRoutes={
   for(const raw of Array.isArray(signers)?signers:[]){
    if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new HttpError(400,'Invalid signatory.');
    const row=raw as Record<string,unknown>,signerUid=str(row.signerUid),label=str(row.label).trim();
-   if(!/^[a-zA-Z0-9_-]{6,128}$/.test(signerUid)||label.length<3||label.length>80||!validPosition(row.position)||signOffPlan.some(s=>s.signerUid===signerUid))
+   if(!/^[a-zA-Z0-9_-]{6,128}$/.test(signerUid)||label.length<3||label.length>80||(!validPosition(row.position)||Number((row.position as {page?:number})?.page)>20)||signOffPlan.some(s=>s.signerUid===signerUid))
     throw new HttpError(400,'Duplicate or invalid signatory.');
    const user=await getDoc('users/'+signerUid);
    if(!user||signerUid===ctx.uid||str(user.data.orgId)!==ctx.orgId||str(user.data.status)==='disabled')
