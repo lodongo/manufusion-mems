@@ -14,7 +14,7 @@ type ScopeNode = { id: string; name: string; level: string; parentId: string };
 type DocumentSetup = { config: { enabledClassCodes: string[]; defaultReviewMonths: number; enabledSubmodules?: string[] }; locations: ScopeNode[] };
 type DocumentRow = {
   documentId: string; title: string; classCode: string; status: string;
-  revision: string; updatedAt: string; subtypeCode?: string; subtypeCode?:string; dmaicStage?:string;methodCode?:string;frameworkCode?:string;
+  revision: string; updatedAt: string; subtypeCode?:string; dmaicStage?:string;methodCode?:string;frameworkCode?:string;
 };
 const CLASSES = [
  ['POL','Policy'], ['STR','Strategy'], ['PRG','Management program'],
