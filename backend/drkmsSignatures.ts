@@ -1,6 +1,6 @@
 /** Authenticated document sign-off, bound to the exact reviewed source fingerprint. */
 import {createHash} from 'node:crypto';
-import {HttpError,getDoc,listDocs,writeDoc,nowIso,str,commitChecked} from './core';
+import {HttpError,getDoc,listDocs,writeDoc,nowIso,str,commitChecked,listDocs} from './core';
 import {orgRoute} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 import {publicationFingerprint} from './drkmsPublish';
@@ -29,6 +29,21 @@ async function fingerprint(orgId:string,documentId:string){
  scopeNodeId:str(location.nodeId),verifiedBy:str(doc.data.verifiedBy),verifiedAt:str(doc.data.verifiedAt),updatedAt:str(doc.data.updatedAt)})};
 }
 export const drkmsSignatureRoutes={
+ 'POST /api/org/drkms/signatures/my-inbox':[
+  orgRoute('drkms.signatures.my_inbox',null,async ctx=>{
+   const items=await listDocs(`organizations/${ctx.orgId}/signature_inbox/${ctx.uid}/assignments`);
+   const visible=[];
+   for(const item of items.slice(0,250)){
+    const documentId=str(item.data.documentId),slotId=str(item.data.slotId);
+    if(!ID.test(documentId)||!ID.test(slotId))continue;
+    const [slot,doc]=await Promise.all([getDoc(slots(ctx.orgId,documentId)+'/'+slotId),getDoc(root(ctx.orgId,documentId))]);
+    if(!slot||!doc||str(slot.data.signerUid)!==ctx.uid)continue;
+    visible.push({documentId,slotId,label:str(slot.data.label),title:str(doc.data.title),
+       documentStatus:str(doc.data.status),signatureStatus:str(slot.data.status),signedAt:str(slot.data.signedAt)});
+   }
+   return {assignments:visible};
+  }),
+ ],
  'POST /api/org/drkms/signatures/verify':[
   orgRoute('drkms.signatures.verify',null,async ctx=>{
    const documentId=str(ctx.body.documentId),proof=str(ctx.body.proof);
@@ -69,8 +84,10 @@ export const drkmsSignatureRoutes={
     throw new HttpError(409,'Signatory limit or duplicate signature assignment.');
    const slotId=createHash('sha256').update(signerUid+':'+label).digest('hex').slice(0,20);
    const entry={slotId,signerUid,label,position:ctx.body.position,status:'pending',assignedBy:ctx.uid,assignedAt:nowIso()};
-   if(!(await writeDoc(slots(ctx.orgId,documentId)+'/'+slotId,entry,{exists:false})))
-    throw new HttpError(409,'Signature assignment already exists.');
+   const inboxPath=`organizations/${ctx.orgId}/signature_inbox/${signerUid}/assignments/${documentId}_${slotId}`;
+   if(!(await commitChecked([{path:slots(ctx.orgId,documentId)+'/'+slotId,data:entry,precondition:{exists:false}},
+     {path:inboxPath,data:{documentId,slotId,assignedAt:entry.assignedAt},precondition:{exists:false}}])))
+    throw new HttpError(409,'Signature assignment already exists or could not be indexed.');
    await record(ctx,'drkms.signatures.assign',documentId,slotId);
    return {slot:entry};
   }),
