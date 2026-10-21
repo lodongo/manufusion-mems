@@ -1,9 +1,11 @@
 import {useState} from 'react';
+import {useLoad} from '../admin/kit';
 import {callBackend} from '../lib/backend';
 import {Card} from '../admin/kit';
 type Node={id:string;name:string;level:string};
 export default function DigitalRcaDraft({locations,onCreated}:{locations:Node[];onCreated:()=>void}){
  const [title,setTitle]=useState(''),[incidentReference,setReference]=useState(''),[problemStatement,setProblem]=useState('');
+ const {data:catalog}=useLoad(()=>callBackend<{masters:{rcaMethods:Array<{code:string;label:string}>}}>('/api/org/drkms/rca/masters',{}),[]);
  const [methodCode,setMethod]=useState('5WHY');
  const [scopeNodeId,setScope]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
  const [methodCode,setMethod]=useState('5WHY'),[frameworkCode,setFramework]=useState('5M1W');
@@ -25,7 +27,7 @@ export default function DigitalRcaDraft({locations,onCreated}:{locations:Node[];
   </select></label>
   <label className='block text-sm text-white'>RCA analytical method
    <select value={methodCode} onChange={e=>setMethod(e.target.value)} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
-   {([['5WHY','5 Whys'],['ISH','Ishikawa / Fishbone (5M1E)'],['FTA','Fault Tree Analysis'],['FMEA','FMEA'],['PARETO','Pareto'],['8D','8D'],['KT','Kepner-Tregoe'],['BOWTIE','Bow-Tie'],['CHANGE','Change Analysis'],['EVENT','Event and Causal Factor'],['TRIPOD','Tripod Beta'],['APOLLO','Apollo'],['BARRIER','Barrier Analysis'],['C&E','Cause and Effect Matrix']] as const).map(([key,name])=><option key={key} value={key}>{name}</option>)}
+   {(catalog?.masters.rcaMethods??[]).map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
    </select>
   </label>
   <p className='text-xs text-slate-400'>The selected method guides analysis within the mandatory Define → Measure → Analyze → Improve → Control workflow. 5W1H supports problem definition; 5M1E supports cause classification.</p>
