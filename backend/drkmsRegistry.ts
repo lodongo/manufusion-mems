@@ -5,6 +5,7 @@ import { record } from './org';
 import { validateDocumentLocation } from './drkmsHierarchy';
 import { assessPublicationGate } from './drkmsPublicationGate';
 import {publicationFingerprint} from './drkmsPublish';
+import {rcaDmaicComplete} from './drkmsRcaGate';
 import {canAt,scopeOf,nodePath} from './access';
 
 const base = (orgId: string) => `organizations/${orgId}/drkms_documents`;
@@ -148,6 +149,7 @@ export const drkmsRoutes = {
                 throw new HttpError(403, 'Only the document author can submit a draft.');
             if (str(document.data.status) !== 'draft')
                 throw new HttpError(409, 'Only drafts can be submitted for review.');
+            if(!rcaDmaicComplete(document.data))throw new HttpError(409,'Complete and verify all five DMAIC stages and selected RCA method before submitting an RCA for review.');
             const scope = document.data.scope;
             if (!scope || typeof scope !== 'object' || Array.isArray(scope))
                 throw new HttpError(409, 'Document has no approved organizational location.');
