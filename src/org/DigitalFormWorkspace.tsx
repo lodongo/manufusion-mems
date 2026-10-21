@@ -3,7 +3,7 @@ import {callBackend} from '../lib/backend';
 import {Card,useLoad} from '../admin/kit';
 import {jsPDF} from 'jspdf';
 type Field={code:string;label:string;type:string;required:boolean;options?:string[];section?:string;visibleWhen?:{fieldCode:string;equals:string|boolean}};
-type Template={id:string;title:string;status:string;fields:Field[];revision:string};
+type Template={id:string;title:string;status:string;fields:Field[];revision:string;scopeNodeId?:string;signOffPlan?:Array<{signerUid:string;label:string}>;successorId?:string;previousTemplateId?:string};
 type RecordRow={id:string;templateId:string;values:Record<string,string|number|boolean|null>;status:string;operationalReference?:{module:string;recordId:string}};
 const choices=['text','long_text','number','date','yes_no','select'];
 export default function DigitalFormWorkspace({locations}:{locations:Array<{id:string;name:string}>}){
@@ -14,16 +14,19 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
  const [busy,setBusy]=useState(false),[notice,setNotice]=useState('');
  const [referenceModule,setReferenceModule]=useState(''),[referenceId,setReferenceId]=useState('');
  const [signers,setSigners]=useState<Array<{signerUid:string;label:string}>>([]);
+ const [revisionSource,setRevisionSource]=useState(''),[revisionReason,setRevisionReason]=useState('');
  const add=()=>setFields(v=>[...v,{code:'field_'+(v.length+1),label:'New field',type:'text',required:false}]);
  const patch=(i:number,part:Partial<Field>)=>setFields(v=>v.map((f,j)=>i===j?{...f,...part}:f));
  const create=async()=>{setBusy(true);setNotice('');
-  try{await callBackend('/api/org/drkms/forms/templates/create',{title,scopeNodeId:location,fields,signers});
-   setNotice('Draft form template created. It is not an approved or published form.');templates.reload();
+  try{await callBackend(revisionSource?'/api/org/drkms/forms/templates/revise':'/api/org/drkms/forms/templates/create',{
+    title,scopeNodeId:location,fields,signers,...(revisionSource?{sourceTemplateId:revisionSource,reason:revisionReason}:{})});
+   setNotice(revisionSource?'New controlled draft template revision created. Earlier draft records remain linked to the previous revision.':'Draft form template created. It is not an approved or published form.');
+   setRevisionSource('');setRevisionReason('');templates.reload();
   }catch(e){setNotice(e instanceof Error?e.message:'Unable to create template.')}finally{setBusy(false)}
  };
  const template=templates.data?.templates.find(t=>t.id===selected);
  const selectedRecord=records.data?.records.find(r=>r.id===recordId);
- const locked=selectedRecord?.status==='submitted_for_review';
+ const locked=!!selectedRecord&&selectedRecord.status!=='draft';
  const save=async()=>{if(!template)return;setBusy(true);setNotice('');
   try{const result=await callBackend<{record:RecordRow}>('/api/org/drkms/forms/records/save',{templateId:selected,recordId,values,operationalReference:referenceModule&&referenceId.trim()?{module:referenceModule,recordId:referenceId.trim()}:null});
    setRecordId(result.record.id);records.reload();setNotice('Unapproved draft record saved.');
@@ -68,6 +71,15 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
  };
  return <div className='space-y-3'>
   <Card><h2 className='font-semibold text-white'>Draft form template designer</h2><p className='my-2 text-xs text-amber-300'>Draft-only foundation. These forms cannot be published or represented as approved signed records.</p>
+   <label className='mb-2 block text-sm text-slate-200'>Continue an existing template revision (optional)
+    <select value={revisionSource} onChange={e=>{const t=templates.data?.templates.find(x=>x.id===e.target.value);
+     setRevisionSource(e.target.value);if(t){setTitle(t.title);setLocation(t.scopeNodeId??'');setFields(t.fields);setSigners(t.signOffPlan??[]);} }} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
+     <option value=''>Create a new template</option>{templates.data?.templates.filter(t=>t.status==='draft'&&!t.successorId).map(t=><option key={t.id} value={t.id}>{t.title} · Revision {t.revision}</option>)}
+    </select>
+   </label>
+   {revisionSource&&<label className='mb-2 block text-xs text-slate-200'>Reason for revision (minimum 12 characters)
+    <textarea rows={2} value={revisionReason} onChange={e=>setRevisionReason(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
+   </label>}
    <label className='block text-sm text-slate-200'>Template name<input value={title} onChange={e=>setTitle(e.target.value)} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'/></label>
    <label className='mt-2 block text-sm text-slate-200'>Applicable organization location<select value={location} onChange={e=>setLocation(e.target.value)} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'><option value=''>Select location</option>{locations.map(l=><option value={l.id} key={l.id}>{l.name}</option>)}</select></label>
    {fields.map((f,i)=><div key={i} className='my-2 space-y-2 rounded-lg border border-slate-700 p-3'>
@@ -91,10 +103,10 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
     <button type='button' disabled={signers.length>=12} onClick={()=>setSigners(v=>[...v,{signerUid:'',label:'Approved by'}])} className='min-h-10 rounded-lg border border-slate-600 px-3 text-xs text-white'>Add signatory</button>
    </div>
    <button type='button' onClick={add} disabled={fields.length>=60} className='min-h-10 rounded-lg border border-slate-600 px-3 text-sm text-white'>Add field</button>
-   <button type='button' onClick={()=>void create()} disabled={busy||title.trim().length<3||!location||!fields.length} className='ml-2 min-h-10 rounded-lg bg-blue-600 px-3 text-sm text-white disabled:opacity-50'>Save draft template</button>
+   <button type='button' onClick={()=>void create()} disabled={busy||title.trim().length<3||!location||!fields.length||(!!revisionSource&&revisionReason.trim().length<12)} className='ml-2 min-h-10 rounded-lg bg-blue-600 px-3 text-sm text-white disabled:opacity-50'>{revisionSource?'Create next draft revision':'Save draft template'}</button>
   </Card>
   <Card><h2 className='font-semibold text-white'>Complete a draft form</h2>
-   <select value={selected} onChange={e=>{setSelected(e.target.value);setRecordId('');setValues({})}} className='my-2 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'><option value=''>Select a draft template</option>{templates.data?.templates.filter(t=>t.status==='draft').map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select>
+   <select value={selected} onChange={e=>{setSelected(e.target.value);setRecordId('');setValues({})}} className='my-2 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'><option value=''>Select a draft template</option>{templates.data?.templates.filter(t=>t.status==='draft').map(t=><option key={t.id} value={t.id} >{t.title}{t.successorId?' (older revision — existing records only)':''}</option>)}</select>
    {template?.fields.map((f,i)=>{const visible=!f.visibleWhen||values[f.visibleWhen.fieldCode]===f.visibleWhen.equals;
     if(!visible)return null;
     const preceding=template.fields[i-1],showHeading=!preceding||preceding.section!==f.section;
@@ -108,8 +120,8 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
     </select>
     {referenceModule&&<input aria-label='Source record identifier' value={referenceId} onChange={e=>setReferenceId(e.target.value)} placeholder='Existing event or asset record ID' className='min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/>}
    </div>}
-   {locked&&<p className='mb-2 text-xs text-amber-300'>Submitted for review — locked against further draft edits. Not yet approved or signed.</p>}
-   {template&&<div className='flex flex-wrap gap-2'><button type='button' disabled={busy||locked} onClick={()=>void save()} className='min-h-11 rounded-lg bg-blue-600 px-3 text-sm text-white'>Save unapproved draft</button><button type='button' onClick={exportDraft} className='min-h-11 rounded-lg border border-amber-600 px-3 text-sm text-amber-200'>Export draft PDF</button>{recordId&&!locked&&<button type='button' disabled={busy} onClick={()=>void submit()} className='min-h-11 rounded-lg border border-blue-500 px-3 text-sm text-blue-200 disabled:opacity-50'>Submit for review (not approval)</button>}</div>}
+   {locked&&<p className='mb-2 text-xs text-amber-300'>Record status: {selectedRecord?.status}. Locked against further editing; not approved or published.</p>}
+   {template&&<div className='flex flex-wrap gap-2'><button type='button' disabled={busy||locked||(!recordId&&!!template?.successorId)} onClick={()=>void save()} className='min-h-11 rounded-lg bg-blue-600 px-3 text-sm text-white'>Save unapproved draft</button><button type='button' onClick={exportDraft} className='min-h-11 rounded-lg border border-amber-600 px-3 text-sm text-amber-200'>Export draft PDF</button>{recordId&&!locked&&<button type='button' disabled={busy} onClick={()=>void submit()} className='min-h-11 rounded-lg border border-blue-500 px-3 text-sm text-blue-200 disabled:opacity-50'>Submit for review (not approval)</button>}</div>}
    <h3 className='mt-4 text-sm font-medium text-white'>My draft records</h3>
    {records.data?.records.map(r=><button key={r.id} type='button' onClick={()=>{setSelected(r.templateId);setValues(r.values);setRecordId(r.id);setReferenceModule(r.operationalReference?.module??'');setReferenceId(r.operationalReference?.recordId??'')}} className='mt-2 block min-h-10 w-full rounded-lg border border-slate-700 px-3 text-left text-sm text-slate-200'>{r.id} · Draft (unapproved)</button>)}
   </Card>
