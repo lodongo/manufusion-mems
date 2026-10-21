@@ -67,6 +67,7 @@ import {
 import { orgRoutes } from './org';
 import { drkmsRoutes } from './drkmsRegistry';
 import { drkmsFileRoutes } from './drkmsFiles';
+import {drkmsScannerRoutes} from './drkmsScanner';
 import { drkmsEngineeringRoutes } from './drkmsEngineering';
 import { drkmsSdsRoutes } from './drkmsSds';
 import { drkmsDigitalRoutes } from './drkmsDigital';
@@ -1533,6 +1534,7 @@ export const handler = router(recordWiredRoutes({
     ...orgRoutes,
     ...drkmsRoutes,
     ...drkmsFileRoutes,
+    ...drkmsScannerRoutes,
     ...drkmsEngineeringRoutes,
     ...drkmsSdsRoutes,
     ...drkmsDigitalRoutes,
