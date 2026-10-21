@@ -7,6 +7,7 @@ export default function DigitalRcaDraft({locations,onCreated}:{locations:Node[];
  const [title,setTitle]=useState(''),[incidentReference,setReference]=useState(''),[problemStatement,setProblem]=useState('');
  const [scopeNodeId,setScope]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
  const [methodCode,setMethod]=useState('5WHY'),[frameworkCode,setFramework]=useState('5M1W');
+ const [triggerTypeCode,setTriggerType]=useState(''),[triggerRecordId,setTriggerRecord]=useState('');
  const [triggerType,setTriggerType]=useState(''),[triggerRecordId,setTriggerRecordId]=useState('');
  const masters=useLoad(()=>callBackend<{lists:{key:string;items:ReferenceItem[]}[]}>('/api/org/drkms/rca/reference',{}),[]);
  const items=(key:string)=>masters.data?.lists.find(x=>x.key===key)?.items??[];
@@ -36,6 +37,15 @@ export default function DigitalRcaDraft({locations,onCreated}:{locations:Node[];
   </label>
   <p className='text-xs text-slate-400'>Maintenance work requests and orders are verified against existing organization records. Manufacturing, Quality and Safety references remain marked pending source integration until their native record connectors are implemented.</p>
   {masters.error&&<p role='alert' className='text-xs text-amber-300'>Cannot load controlled RCA methods: {masters.error}</p>}
+  <label className='block text-sm text-white'>Originating incident / event category
+   <select value={triggerTypeCode} onChange={e=>setTriggerType(e.target.value)} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
+     <option value=''>Select event category</option>{items('rcaTriggerTypes').map(x=><option key={x.code} value={x.code}>{x.label}</option>)}
+   </select>
+  </label>
+  <label className='block text-sm text-white'>Originating record ID
+   <input value={triggerRecordId} onChange={e=>setTriggerRecord(e.target.value)} placeholder='Existing WO, WR, incident or event reference' className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'/>
+  </label>
+  <p className='text-xs text-slate-400'>Maintenance and safety records are checked against the organization database. Manufacturing and quality triggers remain explicitly pending source integration until those source registries are connected.</p>
   <label className='block text-sm text-white'>RCA analytical method
    <select value={methodCode} onChange={e=>setMethod(e.target.value)} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
     {items('rcaMethods').map(x=><option key={x.code} value={x.code}>{x.label}</option>)}
