@@ -8,6 +8,7 @@ import SheqSdsRegistry from './SheqSdsRegistry';
 import DigitalRcaDraft from './DigitalRcaDraft';
 import DigitalRcaWorkspace from './DigitalRcaWorkspace';
 import EffectiveDocumentFiles from './EffectiveDocumentFiles';
+import DocumentRevisionHistory from './DocumentRevisionHistory';
 
 type ScopeNode = { id: string; name: string; level: string; parentId: string };
 type DocumentSetup = { config: { enabledClassCodes: string[]; defaultReviewMonths: number; enabledSubmodules?: string[] }; locations: ScopeNode[] };
@@ -246,6 +247,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
                 </div>
               </div>}
               {d.status==='effective' && <EffectiveDocumentFiles documentId={d.documentId} />}
+              {['effective','superseded','withdrawn','archived'].includes(d.status) && <DocumentRevisionHistory documentId={d.documentId}/> }
               {d.status==='draft' && <button type='button' disabled={!!reviewing} onClick={()=>void submitReview(d.documentId)} className='mt-2 min-h-10 rounded-lg border border-blue-500 px-3 text-xs font-semibold text-blue-200 disabled:opacity-40'>{reviewing===d.documentId?'Submitting…':'Submit for review'}</button>}
             </div>
           </div>
