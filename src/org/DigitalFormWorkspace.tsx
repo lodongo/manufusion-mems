@@ -13,12 +13,14 @@ const choices=['text','long_text','number','date','yes_no','select'];
 export default function DigitalFormWorkspace({locations}:{locations:Array<{id:string;name:string}>}){
  const templates=useLoad(()=>callBackend<{templates:Template[]}>('/api/org/drkms/forms/templates/list',{}),[]);
  const records=useLoad(()=>callBackend<{records:RecordRow[]}>('/api/org/drkms/forms/records/list',{}),[]);
+ const directory=useLoad(()=>callBackend<{users:Array<{uid:string;firstName:string;lastName:string;role:string}>}>('/api/org/drkms/forms/signers/list',{}),[]);
  const [title,setTitle]=useState(''),[location,setLocation]=useState(''),[fields,setFields]=useState<Field[]>([{code:'observation',label:'Observation',type:'long_text',required:true}]);
  const [selected,setSelected]=useState(''),[recordId,setRecordId]=useState(''),[values,setValues]=useState<Record<string,string|number|boolean|null>>({});
  const [busy,setBusy]=useState(false),[notice,setNotice]=useState('');
  const [referenceModule,setReferenceModule]=useState(''),[referenceId,setReferenceId]=useState('');
  const [signers,setSigners]=useState<FormSigner[]>([]);
  const [revisionSource,setRevisionSource]=useState(''),[revisionReason,setRevisionReason]=useState('');
+ const [signerSearch,setSignerSearch]=useState('');
  const add=()=>setFields(v=>[...v,{code:'field_'+(v.length+1),label:'New field',type:'text',required:false}]);
  const patch=(i:number,part:Partial<Field>)=>setFields(v=>v.map((f,j)=>i===j?{...f,...part}:f));
  const create=async()=>{setBusy(true);setNotice('');
@@ -106,8 +108,13 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
    <div className='my-3 space-y-2 rounded-lg border border-slate-700 p-3'>
     <h3 className='text-sm font-semibold text-white'>Creator-assigned sign-off plan</h3>
     <p className='text-xs text-slate-400'>Configure future required signatories. These are draft assignments only; signatures and publication are not yet active for forms.</p>
+    <label className='block text-xs text-slate-200'>Search organization signatories<input value={signerSearch} onChange={e=>setSignerSearch(e.target.value)} placeholder='Search by name or role' className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/></label>
     {signers.map((s,i)=><div key={i} className='grid grid-cols-1 gap-2 rounded-lg border border-slate-700 p-2'>
-     <label className='text-xs text-slate-200'>MEMS user ID<input value={s.signerUid} onChange={e=>setSigners(v=>v.map((row,j)=>j===i?{...row,signerUid:e.target.value}:row))} className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/></label>
+     <label className='text-xs text-slate-200'>Assigned MEMS authority
+      <select value={s.signerUid} onChange={e=>setSigners(v=>v.map((row,j)=>j===i?{...row,signerUid:e.target.value}:row))} className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'>
+       <option value=''>Select active user</option>{(directory.data?.users??[]).filter(u=>u.uid===s.signerUid||!signerSearch||(`${u.firstName} ${u.lastName} ${u.role}`).toLowerCase().includes(signerSearch.trim().toLowerCase())).map(u=><option key={u.uid} value={u.uid}>{u.firstName} {u.lastName} · {u.role}</option>)}
+      </select>
+     </label>
      <label className='text-xs text-slate-200'>Authority role<input value={s.label} onChange={e=>setSigners(v=>v.map((row,j)=>j===i?{...row,label:e.target.value}:row))} className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/></label>
      <p className='text-xs font-medium text-slate-300'>Signature space on the printed form</p>
      <div className='grid grid-cols-2 gap-2'>
