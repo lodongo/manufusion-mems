@@ -1,6 +1,7 @@
 import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc,commitChecked,isObj} from './core';
 import {createHash} from 'node:crypto';
 import {transactionPayloadHash} from './unifiedApprovalProof';
+import {validPosition} from './drkmsSignatures';
 import {orgRoute} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 const ID=/^[a-f0-9]{20}$/;
@@ -95,16 +96,16 @@ export const drkmsFormRoutes={
   if(title.length<3||title.length>180||!scopeNodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,scopeNodeId),await scopeOf(ctx)))throw new HttpError(403,'Invalid title or organizational access.');
   const signers=ctx.body.signers;
   if(signers!==undefined&&(!Array.isArray(signers)||signers.length>12))throw new HttpError(400,'Invalid sign-off plan.');
-  const signOffPlan:Array<{signerUid:string;label:string}>=[];
+  const signOffPlan:Array<{signerUid:string;label:string;position:{page:number;xPercent:number;yPercent:number;widthPercent:number}}>=[];
   for(const raw of Array.isArray(signers)?signers:[]){
    if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new HttpError(400,'Invalid signatory.');
    const row=raw as Record<string,unknown>,signerUid=str(row.signerUid),label=str(row.label).trim();
-   if(!/^[a-zA-Z0-9_-]{6,128}$/.test(signerUid)||label.length<3||label.length>80||signOffPlan.some(s=>s.signerUid===signerUid))
+   if(!/^[a-zA-Z0-9_-]{6,128}$/.test(signerUid)||label.length<3||label.length>80||!validPosition(row.position)||signOffPlan.some(s=>s.signerUid===signerUid))
     throw new HttpError(400,'Duplicate or invalid signatory.');
    const user=await getDoc('users/'+signerUid);
    if(!user||signerUid===ctx.uid||str(user.data.orgId)!==ctx.orgId||str(user.data.status)==='disabled')
     throw new HttpError(403,'Signatories must be distinct active MEMS organization users.');
-   signOffPlan.push({signerUid,label});
+   signOffPlan.push({signerUid,label,position:row.position as {page:number;xPercent:number;yPercent:number;widthPercent:number}});
   }
   const id=randomId(10),date=nowIso(),template={id,title,scopeNodeId,fields,signOffPlan,revision:'00',status:'draft',createdBy:ctx.uid,createdAt:date,updatedAt:date};
   if(!(await writeDoc(templatePath(ctx.orgId)+'/'+id,template,{exists:false})))throw new HttpError(409,'Template conflict.');
@@ -130,12 +131,12 @@ export const drkmsFormRoutes={
   for(const item of signers){
    if(!item||typeof item!=='object'||Array.isArray(item))throw new HttpError(400,'Invalid signer.');
    const row=item as Record<string,unknown>,uid=str(row.signerUid),label=str(row.label).trim();
-   if(!/^[a-zA-Z0-9_-]{6,128}$/.test(uid)||uid===ctx.uid||label.length<3||label.length>80||
+   if(!/^[a-zA-Z0-9_-]{6,128}$/.test(uid)||uid===ctx.uid||label.length<3||label.length>80||!validPosition(row.position)||
       signOffPlan.some(s=>s.signerUid===uid))throw new HttpError(400,'Invalid or duplicate revised signer.');
    const user=await getDoc('users/'+uid);
    if(!user||str(user.data.orgId)!==ctx.orgId||str(user.data.status)==='disabled')
     throw new HttpError(403,'Revised signatory must be active in the same organization.');
-   signOffPlan.push({signerUid:uid,label});
+   signOffPlan.push({signerUid:uid,label,position:row.position as {page:number;xPercent:number;yPercent:number;widthPercent:number}});
   }
   const id=randomId(10),now=nowIso(),next={id,title,scopeNodeId,fields,signOffPlan,
    revision:String(revision+1).padStart(2,'0'),status:'draft',createdBy:ctx.uid,createdAt:now,
@@ -277,7 +278,7 @@ export const drkmsFormRoutes={
     const user=await getDoc('users/'+uid);
     if(!user||str(user.data.orgId)!==ctx.orgId||str(user.data.status)==='disabled')throw new HttpError(409,'An assigned signatory is no longer eligible.');
     const slotId=createHash('sha256').update(uid+':'+reviewId).digest('hex').slice(0,20);
-    const slot={slotId,recordId:id,reviewId,recordFingerprint:hash,signerUid:uid,label:str(signer.label),
+    const slot={slotId,recordId:id,reviewId,recordFingerprint:hash,signerUid:uid,label:str(signer.label),position:signer.position,
       assignedBy:str(record.data.createdBy),assignedAt:date,status:'pending'};
     writes.push({path:path+'/signatures/'+slotId,data:slot,precondition:{exists:false}});
     writes.push({path:`organizations/${ctx.orgId}/form_signature_inbox/${uid}/assignments/${id}_${slotId}`,
