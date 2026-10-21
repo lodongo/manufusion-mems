@@ -9,6 +9,13 @@ type Listing={documentId:string;revisionId:string;files:ApprovedFile[]};
 export default function EffectiveDocumentFiles({documentId}:{documentId:string}){
  const [open,setOpen]=useState(false),[busy,setBusy]=useState(''),[error,setError]=useState('');
  const {data,loading,error:loadError}=useLoad(()=>open?callBackend<Listing>('/api/org/drkms/documents/effective-files',{documentId}):Promise.resolve(null),[documentId,open]);
+ const signedCopy=async(fileId:string)=>{setBusy(fileId+'-signed');setError('');
+  try{const v=await callBackend<{url:string}>('/api/org/drkms/documents/signed-copy',{documentId,fileId});
+   if(!v.url.startsWith('https://'))throw new Error('Secure signed-copy link could not be generated.');
+   window.location.assign(v.url);
+  }catch(e){setError(e instanceof Error?e.message:'Signed copy is not ready.');}
+  finally{setBusy('');}
+ };
  const download=async(fileId:string)=>{
   setBusy(fileId);setError('');
   try{
@@ -29,6 +36,7 @@ export default function EffectiveDocumentFiles({documentId}:{documentId:string})
    {data?.files.map(f=><div key={f.fileId} className='flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-700 p-2'>
     <p className='min-w-0 break-all text-xs text-slate-200'>{f.name} · {Math.round(f.bytes/1024)} KB</p>
     <button type='button' disabled={!!busy} className='min-h-10 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white disabled:opacity-50' onClick={()=>void download(f.fileId)}>{busy===f.fileId?'Opening…':'Open securely'}</button>
+    {f.mime==='application/pdf'&&<button type='button' disabled={!!busy} onClick={()=>void signedCopy(f.fileId)} className='min-h-10 rounded-lg border border-green-700 px-3 text-xs text-green-200 disabled:opacity-50'>{busy===f.fileId+'-signed'?'Rendering…':'Download QR-signed PDF'}</button>}
    </div>)}
    {error&&<p role='alert' className='text-xs text-red-300'>{error}</p>}
   </>}
