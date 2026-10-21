@@ -1,6 +1,7 @@
 /** Authenticated document sign-off, bound to the exact reviewed source fingerprint. */
 import {createHash} from 'node:crypto';
-import {HttpError,getDoc,listDocs,writeDoc,nowIso,str,commitChecked,listDocs} from './core';
+import {storage} from './platform/sdk';
+import {HttpError,getDoc,listDocs,writeDoc,nowIso,str,commitChecked,listDocs,rateLimit} from './core';
 import {orgRoute} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 import {publicationFingerprint} from './drkmsPublish';
@@ -29,6 +30,28 @@ async function fingerprint(orgId:string,documentId:string){
  scopeNodeId:str(location.nodeId),verifiedBy:str(doc.data.verifiedBy),verifiedAt:str(doc.data.verifiedAt),updatedAt:str(doc.data.updatedAt)})};
 }
 export const drkmsSignatureRoutes={
+ 'POST /api/org/drkms/signatures/preview':[
+  orgRoute('drkms.signatures.preview',null,async ctx=>{
+   await rateLimit('drkms-signer-preview',ctx.uid,50,3600);
+   const documentId=str(ctx.body.documentId),slotId=str(ctx.body.slotId);
+   if(!ID.test(documentId)||!ID.test(slotId))throw new HttpError(400,'Invalid signing assignment.');
+   const slot=await getDoc(slots(ctx.orgId,documentId)+'/'+slotId);
+   if(!slot||str(slot.data.signerUid)!==ctx.uid)
+    throw new HttpError(403,'Only the assigned document signatory may review this source.');
+   const {doc}=await fingerprint(ctx.orgId,documentId);
+   const files=await listDocs(root(ctx.orgId,documentId)+'/files');
+   const entries=[];
+   for(const file of files){
+    const stored=str(file.data.storagePath);
+    if(!stored.startsWith(`organizations/${ctx.orgId}/drkms_quarantine/${documentId}/${file.id}.`))
+     throw new HttpError(409,'Unsafe source file reference.');
+    const [signed]=await storage.url([stored]);
+    if(!signed?.url)throw new HttpError(502,'Could not open verified source.');
+    entries.push({fileId:file.id,name:str(file.data.name),mime:str(file.data.mime),url:signed.url});
+   }
+   return {documentId,title:str(doc.data.title),revision:str(doc.data.revision),files:entries,expiresWithinSeconds:900};
+  }),
+ ],
  'POST /api/org/drkms/signatures/my-inbox':[
   orgRoute('drkms.signatures.my_inbox',null,async ctx=>{
    const items=await listDocs(`organizations/${ctx.orgId}/signature_inbox/${ctx.uid}/assignments`);
