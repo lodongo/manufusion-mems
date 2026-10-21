@@ -1,7 +1,7 @@
 /** Authenticated document sign-off, bound to the exact reviewed source fingerprint. */
 import {createHash} from 'node:crypto';
 import {storage} from './platform/sdk';
-import {HttpError,getDoc,listDocs,writeDoc,nowIso,str,commitChecked,listDocs,rateLimit} from './core';
+import {HttpError,getDoc,listDocs,writeDoc,nowIso,str,commitChecked,rateLimit} from './core';
 import {orgRoute} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 import {publicationFingerprint} from './drkmsPublish';
