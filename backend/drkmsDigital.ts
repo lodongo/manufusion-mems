@@ -11,7 +11,7 @@ import {RCA_METHODS} from './docRcaDefaults';
 const RCA_METHODS=new Set(['5WHY','ISH','FTA','FMEA','PARETO','8D','KT','BOWTIE','CHANGE','EVENT','TRIPOD','APOLLO','BARRIER','C&E']);
 const DMAIC_PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'] as const;
 const PHASE_FIELDS:Record<string,string[]>={
- DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan']
+ DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses','methodAnalysis'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan']
 };
 const master=async(key:string)=>{
  const source=await getDoc(`module_workspaces/DOC/metadata/${key}`);
@@ -86,10 +86,26 @@ export const drkmsDigitalRoutes={
     throw new HttpError(400,'Invalid DMAIC phase data.');
    const data=fields as Record<string,unknown>;
    if(!Object.keys(data).every(k=>PHASE_FIELDS[phase].includes(k)))throw new HttpError(400,'Unexpected DMAIC fields.');
+   if(phase==='ANALYZE' && data.methodAnalysis!==undefined){
+     const rows=data.methodAnalysis;
+     if(!Array.isArray(rows)||rows.length>40||rows.some(row=>!row||typeof row!=='object'||Array.isArray(row)
+       ||typeof row.key!=='string'||row.key.length>40||typeof row.text!=='string'||row.text.length>2000))
+       throw new HttpError(400,'Provide valid method-specific analysis entries.');
+     const keys=rows.map(row=>row.key as string);
+     if(new Set(keys).size!==keys.length)throw new HttpError(400,'Duplicate method analysis steps.');
+     const method=str(doc.data.rcaMethodCode);
+     if(method==='5WHY'&&keys.some(k=>!/^WHY-[1-9][0-9]?$/.test(k)))throw new HttpError(400,'Five Whys needs numbered Why steps.');
+     if(method==='ISH'){
+       const controlled=(await master('rca5m1e')).filter(item=>item.active!==false).map(item=>item.code);
+       if(keys.some(k=>!controlled.includes(k)))throw new HttpError(400,'Fishbone entries must use enabled MEMS Admin 5M1E categories.');
+     }
+   }
    const existing=state.phases&&typeof state.phases==='object'?state.phases as Record<string,unknown>:{};
    const phaseData={...(existing[phase]&&typeof existing[phase]==='object'?existing[phase] as Record<string,unknown>:{}),...data};
    const completed=Array.isArray(state.completedPhases)?state.completedPhases.filter(v=>typeof v==='string') as string[]:[];
    const advance=ctx.body.complete===true;
+   if(advance&&phase==='ANALYZE'&&(!Array.isArray(phaseData.methodAnalysis)||phaseData.methodAnalysis.filter((r:unknown)=>!!r && typeof r==='object' && String((r as Record<string,unknown>).text??'').trim().length>=10).length<2))
+     throw new HttpError(400,'Record at least two substantive entries using the selected RCA method before advancing.');
    if(advance && PHASE_FIELDS[phase].some(key=>typeof phaseData[key]!=='string'||String(phaseData[key]).trim().length<12))
      throw new HttpError(400,'Complete every required phase field (at least 12 characters) before advancing.');
    const next=advance?DMAIC_PHASES[DMAIC_PHASES.indexOf(phase as typeof DMAIC_PHASES[number])+1]??'CONTROL':phase;
