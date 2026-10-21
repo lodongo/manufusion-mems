@@ -472,6 +472,23 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         const gate = permission && permission.startsWith('ADM.') ? access.directPermissions : access.permissions;
         const granted = role === 'org_super_admin' || (permission !== null && hasPerm(gate, permission));
         if (permission && !granted) throw new HttpError(403, 'You do not have permission to do this.');
+        // DOC submodule switches are an additional tenant boundary, never a substitute for role security.
+        // Existing tenants without configuration inherit all submodules enabled.
+        if (name.startsWith('drkms.') && !['drkms.setup','drkms.configure'].includes(name)) {
+            const parts=name.split('.');
+            const family=parts[1] ?? '';
+            const area= family==='engineering'||family==='industrial' ? 'engineering'
+                : family==='sds' ? 'sds'
+                : family==='rca' ? 'rca'
+                : family==='troubleshoot' ? 'knowledge'
+                : family==='documents' && ['review_decision','review-decision','submit_review','submit-review','approval_packet','approval-packet','publish'].includes(parts[2]??'') ? 'review'
+                : family==='digital' ? 'forms'
+                : 'register';
+            const config=await getDoc(`organizations/${orgId}/drkms_config/default`);
+            const selected=config?.data.enabledSubmodules;
+            if(Array.isArray(selected)&&!selected.includes(area))
+                throw new HttpError(403,'This DOC submodule is disabled for your organization.');
+        }
         const finishApproval = await enforceOrgTransactionGovernance({ orgId, name, permission, effectivePermissionGranted: granted, org, uid: ctx.uid, body:ctx.body });
         let result: unknown;
         let tracked: Awaited<ReturnType<typeof withChangeTracking>> | null = null;
