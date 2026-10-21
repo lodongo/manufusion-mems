@@ -1001,7 +1001,21 @@ export const maintenanceRoutes = {
             }));
             const keep = new Set<string>();
             for (const n of nodes) if (n.inScope) for (const id of pathTo(n.id)) keep.add(id);
-            return { nodes: nodes.filter((n) => keep.has(n.id)) };
+            // Start the picker at the legal entity of the person raising the request (current primary assignment
+            // first), when it holds assemblies the person may use.
+            const today = nowIso().slice(0, 10);
+            const assignments = objs(ctx.me.data.assignments)
+                .filter((a) => (!str(a.startsOn) || str(a.startsOn) <= today) && (!str(a.endsOn) || str(a.endsOn) >= today))
+                .sort((a, b) => Number(str(b.type) === 'primary') - Number(str(a.type) === 'primary'));
+            let homeId = '';
+            for (const a of assignments) {
+                const entity = pathTo(str(a.nodeId)).find((id) => str(byId.get(id)?.data.level) === 'legal_entity');
+                if (entity && keep.has(entity)) {
+                    homeId = entity;
+                    break;
+                }
+            }
+            return { nodes: nodes.filter((n) => keep.has(n.id)), homeId };
         }),
     ],
 

@@ -343,6 +343,8 @@ const requirements = async () => (await listDocs(r + '/procurement_requirements'
 }
 const search = (who, code, q) => route(maintenanceSourcingRoutes, '/api/org/mnt/sourcing/materials', who, { code, q });
 
+// The location picker opens at the legal entity of the person raising the request.
+assert.equal((await route(maintenanceRoutes, '/api/org/mnt/locations', 'assessor', { purpose: 'wr' })).homeId, 'LE');
 // Raising a request: no criticality or failure mode from the requester; 1 to 5 impacts.
 const { criticalityCode: _crit, ...raised } = finding;
 const sixImpacts = l.impacts.flatMap((g) => g.items.map((i) => i.code)).slice(0, 6);

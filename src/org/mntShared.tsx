@@ -300,9 +300,16 @@ export function GroupPicker({ title, groups, selected, onToggle, multi = false, 
 
 /** Drill down the organization design to an assembly, or search assemblies directly. */
 export function AssemblyPicker({ selected, onPick, purpose = 'wr' }: { selected?: string; onPick: (id: string) => void; purpose?: 'wr' | 'wo' }) {
-    const { data, error, loading } = useLoad(() => callBackend<{ nodes: LocNode[] }>('/api/org/mnt/locations', { purpose }), [purpose]);
+    const { data, error, loading } = useLoad(() => callBackend<{ nodes: LocNode[]; homeId?: string }>('/api/org/mnt/locations', { purpose }), [purpose]);
     const [at, setAt] = useState('root');
     const [q, setQ] = useState('');
+    // Open at the legal entity of the person raising the request; "All" still goes up to the whole organization.
+    const [homed, setHomed] = useState(false);
+    useEffect(() => {
+        if (homed || !data) return;
+        if (data.homeId && data.nodes.some((n) => n.id === data.homeId)) setAt(data.homeId);
+        setHomed(true);
+    }, [data, homed]);
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load your locations.'}</Alert>;
     const nodes = data.nodes;
