@@ -1,3 +1,4 @@
+import {fileReleased} from './drkmsScanPolicy';
 /** CoA-bound immutable document publication. Always fail closed without scanned source and reviewed authority. */
 import {rcaDmaicComplete} from './drkmsRcaGate';
 import {createHash} from 'node:crypto';
@@ -49,11 +50,11 @@ export const drkmsPublishRoutes={
     throw new HttpError(409,'A controlled source document is required before publication.');
    const sources=files.map(f=>({
     fileId:f.id,sha256:str(f.data.sha256),mime:str(f.data.mime),bytes:Number(f.data.bytes),
-    scanStatus:str(f.data.scanStatus),availability:str(f.data.availability),
+    released:fileReleased(f.data),
    }));
-   if(sources.some(f=>f.scanStatus!=='clean'||f.availability!=='verified'||!/^[a-f0-9]{64}$/.test(f.sha256)
+   if(sources.some(f=>!f.released||!/^[a-f0-9]{64}$/.test(f.sha256)
      ||!Number.isSafeInteger(f.bytes)||f.bytes<=0))
-    throw new HttpError(409,'All source files must first pass independent malware scanning and verification.');
+    throw new HttpError(409,'All source files must be released first (scanned clean, or released while scanning is off in MEMS Admin).');
    const metadata={
     title:str(doc.data.title),classCode:str(doc.data.classCode),subtypeCode:str(doc.data.subtypeCode),
     scopeNodeId:nodeId,verifiedBy:str(doc.data.verifiedBy),verifiedAt:str(doc.data.verifiedAt),

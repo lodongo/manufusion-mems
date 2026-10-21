@@ -1,3 +1,4 @@
+import {fileReleased} from './drkmsScanPolicy';
 /** Server-rendered signed copy: verified PDF original remains immutable in storage. */
 import {createHash} from 'node:crypto';
 import QRCode from 'qrcode';
@@ -38,7 +39,7 @@ export const drkmsSignedExportRoutes={
    const proofs=Array.isArray(revision.data.signatureProofs)?revision.data.signatureProofs.filter(isObj):[];
    if(!proofs.length)throw new HttpError(409,'No approved signatories were captured for this document.');
    const original=await getDoc(path+'/files/'+fileId);
-   if(!original||str(original.data.scanStatus)!=='clean'||str(original.data.availability)!=='verified'
+   if(!original||!fileReleased(original.data)
       ||str(original.data.sha256)!==str(item.sha256)||str(original.data.mime)!==str(item.mime))
     throw new HttpError(409,'The source file does not match the approved manifest.');
    const destination=`organizations/${ctx.orgId}/drkms_signed/${documentId}/${revId}/${fileId}.pdf`;

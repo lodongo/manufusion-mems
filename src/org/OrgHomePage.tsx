@@ -70,15 +70,15 @@ const toHome = (path = '') => navigate(path ? `${ROUTE}/${path}` : ROUTE);
 
 const MODULE_LINKS: Record<string, LinkItem[]> = {
     DOC: [
+        {label:'Documents',path:'doc_register',permission:'ADM.document_registry'},
         {label:'My document signatures',path:'doc_my_signatures',everyone:true},
-        {label:'DOC configuration',path:'doc_config',permission:'ADM.document_config'},
-        {label:'Document register',path:'doc_register',permission:'ADM.document_registry'},
         {label:'Engineering & equipment library',path:'doc_engineering',permission:'ADM.document_registry'},
         {label:'SHEQ SDS / MSDS',path:'doc_sds',permission:'ADM.document_registry'},
         {label:'Digital RCA & investigations',path:'doc_rca',permission:'ADM.document_registry'},
         {label:'Document review & approvals',path:'doc_review',permission:'ADM.document_review'},
         {label:'Knowledge & troubleshooting',path:'doc_knowledge',permission:'ADM.document_registry'},
         {label:'Digital forms & records',path:'doc_forms',permission:'ADM.document_registry'},
+        {label:'Document settings',path:'doc_config',permission:'ADM.document_config'},
     ],
     SAF: [{ label: 'Configuration', path: 'saf_configuration', prefix: 'SAF.' }],
     MNT: [
@@ -272,7 +272,7 @@ function MenuSection({ menu, open, activePath, search, onToggle, onSelect, favor
             {expanded && (
                 <div className='ml-5 border-l border-slate-700 py-1 pl-3'>
                     <button onClick={() => onSelect(menu.module.code==='DOC'?'doc_register':`module/${menu.module.code}`)} className={`mb-0.5 flex min-h-11 w-full items-center rounded-lg px-3 text-left text-xs ${activePath === `module/${menu.module.code}` ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-400 hover:bg-slate-800'}`}>
-                        {menu.module.code==='DOC'?'Document register':'Module overview'}
+                        {menu.module.code==='DOC'?'Documents':'Module overview'}
                     </button>
                     {menu.module.code === 'FIN' && <FinEntityMenu onPick={() => onSelect(activePath.startsWith('fin_') ? activePath.split('/')[0] : 'fin_gl')} />}
                     {links.map(link => (
@@ -400,7 +400,8 @@ export default function OrgHomePage({
             content = <DocumentRegistryPage
                 mode={mode as 'register'|'engineering'|'sds'|'rca'|'review'|'knowledge'|'forms'|'config'}
                 canConfigure={hasPerm(data.permissions,'ADM.document_config')}
-                canReview={hasPerm(data.permissions,'ADM.document_review')} />;
+                canReview={hasPerm(data.permissions,'ADM.document_review')}
+                documentId={id ?? ''} />;
         } else content = <Alert tone='error'>Unknown documentation workspace.</Alert>;
     } else if (activeMenu && section === 'saf_configuration') content = <SafConfiguration />;
     else if (activeMenu && section === 'maintenance_windows') content = <MntWindows />;

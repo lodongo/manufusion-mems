@@ -1,3 +1,4 @@
+import {fileReleased} from './drkmsScanPolicy';
 /** Authenticated document sign-off, bound to the exact reviewed source fingerprint. */
 import {createHash} from 'node:crypto';
 import {storage} from './platform/sdk';
@@ -22,8 +23,8 @@ async function fingerprint(orgId:string,documentId:string){
  if(!doc||str(doc.data.status)!=='technical_verified'||doc.data.verified!==true)
   throw new HttpError(409,'A technically verified document is required for signing.');
  const files=await listDocs(path+'/files');
- if(!files.length||files.some(f=>str(f.data.scanStatus)!=='clean'||str(f.data.availability)!=='verified'))
-  throw new HttpError(409,'All source files must pass independent security verification.');
+ if(!files.length||files.some(f=>!fileReleased(f.data)))
+  throw new HttpError(409,'All source files must be released (scanned clean, or released while scanning is off in MEMS Admin).');
  const location=doc.data.scope&&typeof doc.data.scope==='object'?doc.data.scope as Record<string,unknown>:{};
  return {doc,fingerprint:publicationFingerprint(documentId,str(doc.data.revision),files.map(f=>({fileId:f.id,sha256:str(f.data.sha256),mime:str(f.data.mime),bytes:Number(f.data.bytes)})),
  {title:str(doc.data.title),classCode:str(doc.data.classCode),subtypeCode:str(doc.data.subtypeCode),

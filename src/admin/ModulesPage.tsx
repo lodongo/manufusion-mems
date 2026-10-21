@@ -12,6 +12,7 @@ import UtilityBrowser, { type Utility } from './UtilityBrowser';
 import AssetDictionaryAdmin from './AssetDictionaryAdmin';
 import ProcurementUnits, { type UomEntry } from './ProcurementUnits';
 import { appConfirm } from '../components/dialogs';
+import DocScanningCard from './DocScanningCard';
 
 export interface Module {
     code: string;
@@ -223,6 +224,7 @@ function ModuleDetail({
                 />
             )}
             {active === 'overview' && module && <ModuleOverview module={module} kesPerUsd={kesPerUsd} />}
+            {active === 'overview' && module?.code === 'DOC' && <div className='mt-4'><DocScanningCard isSuper={isSuper} /></div>}
             {active === 'setup' && <ModuleForm module={module} all={all} categories={categories} kesPerUsd={kesPerUsd} canWrite={canWrite} onSaved={onSaved} />}
             {(active === 'metadata' || active === 'files') && module && <Workspace module={module} view={active} canWrite={canWrite} isSuper={isSuper} />}
             {active === 'dictionary' && module?.code === 'PRC' && (module.initialized ? <AssetDictionaryAdmin canWrite={canWrite} isSuper={isSuper} /> : <Card tone='danger'><p className='text-sm text-slate-300'>Initialise PRC first.</p></Card>)}
