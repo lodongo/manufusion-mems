@@ -14,6 +14,17 @@ import { maintenancePermission, requireMaintenanceRole } from './maintenanceAcce
 import { assessmentReviewCurrent } from './maintenanceAssessmentReview';
 import { maintenanceKey, reserveTaskSpare, releaseMaintenanceReservations, verifyMaintenanceStockLedger } from './maintenanceInventory';
 import {
+    equipmentMake,
+    linkPath,
+    openReplenishmentCover,
+    procurementTrace,
+    qualifiedServiceVendors,
+    raiseSupplierOnboarding,
+    requireQualifiedVendor,
+    supplierCategories,
+} from './maintenanceSourcing';
+import { planningGroup } from './maintenanceMaterialHook';
+import {
     closurePrerequisites,
     criticalPath,
     identifier,
@@ -202,10 +213,25 @@ export async function enforceMaintenanceTransition(ctx: OrgContext, wo: Doc, act
     if (action === 'reopen')
         throw new HttpError(409, 'Closed maintenance history is immutable. Raise a follow-up work request for further work.');
 }
+/**
+ * Task and work-order readiness, recalculated on every read and before scheduling approval from the live stock,
+ * reservation and procurement records. A spare is ready only when its full quantity is reserved or issued; a
+ * service only when it is secured on a placed purchase order raised from this task's requirement.
+ */
 async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
     const items: Obj[] = [],
         problems: string[] = [];
-    for (const t of tasksOf(wo).filter((t) => !selected || selected.has(str(t.id)))) {
+    const chosen = tasksOf(wo).filter((t) => !selected || selected.has(str(t.id)));
+    const links = new Map(
+        (await listDocs(`${root(ctx)}/mnt_supply_links`)).filter((l) => l.data.woCode === wo.id && l.data.status === 'active').map((l) => [l.id, l.data]),
+    );
+    const reqIds: string[] = [...[...links.values()].map((l) => str(l.requirementId))];
+    for (const t of chosen) {
+        const planning = object(object(wo.data.taskPlanning)[str(t.id)]);
+        for (const r of [...rows(t.spares), ...rows(t.services)]) reqIds.push(str(object(planning[str(r.id)]).requirementId));
+    }
+    const trace = await procurementTrace(ctx.orgId, reqIds);
+    for (const t of chosen) {
         const planning = object(object(wo.data.taskPlanning)[str(t.id)]),
             allocation = object(planning.allocation);
         if (
@@ -215,8 +241,9 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
         )
             problems.push(`${str(t.description)}: allocate qualified personnel and confirm tools.`);
         for (const spare of rows(t.spares)) {
+            const key = maintenanceKey(wo.id, str(t.id), str(spare.id));
             const p = object(planning[str(spare.id)]),
-                materialId = str(p.materialId) || str(spare.materialId),
+                materialId = str(p.materialId) || (['warehouse', 'material'].includes(str(spare.source)) ? str(spare.materialId) : ''),
                 warehouseId = str(p.warehouseId) || str(spare.warehouseId);
             let available: number | null = null,
                 unitCost: number | null = null,
@@ -232,25 +259,36 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
                     }
                     unitCost = (await stockValOf(ctx.orgId, warehouseId, materialId)).avg || null;
                 }
-                const r = await getDoc(`${root(ctx)}/inventory_reservations/${maintenanceKey(wo.id, str(t.id), str(spare.id))}`);
+                const r = await getDoc(`${root(ctx)}/inventory_reservations/${key}`);
                 reserved = Number(r?.data.qty) || 0;
                 reserved += Number(r?.data.issued) || 0;
             }
             if (materialId && warehouseId && available === null)
                 problems.push(`${str(t.description)}: reconcile stock movements and verify the approved material.`);
-            const shortage = Math.max(0, Number(spare.qty) - reserved),
-                status =
-                    shortage === 0
-                        ? 'reserved'
-                        : p.status === 'needs_specification' || p.status === 'ready_for_material_creation'
-                          ? p.status
-                          : p.materialDraftId
-                          ? 'awaiting_material_approval'
-                          : p.requirementId
-                            ? 'awaiting_procurement'
-                            : !materialId
-                              ? 'awaiting_material_creation'
-                              : 'shortage';
+            const link = links.get(key);
+            const requirementId = str(link?.requirementId) || str(p.requirementId);
+            const procurement = requirementId ? trace.get(requirementId) : undefined;
+            const shortage = Math.max(0, Number(spare.qty) - reserved);
+            const status =
+                shortage === 0
+                    ? 'reserved'
+                    : ['needs_specification', 'ready_for_material_creation', 'material_rejected'].includes(str(p.status))
+                      ? str(p.status)
+                      : p.materialDraftId && !p.materialId
+                        ? 'awaiting_material_approval'
+                        : procurement && procurement.open === false
+                          ? 'supply_closed'
+                          : procurement && ['received', 'partially_received'].includes(str(procurement.stage)) && (available ?? 0) > 0
+                            ? 'received_reserve'
+                            : str(link?.kind) === 'replenishment'
+                              ? 'linked_replenishment'
+                              : procurement?.stage === 'verification'
+                                ? 'awaiting_verification'
+                                : requirementId
+                                  ? 'awaiting_procurement'
+                                  : !materialId
+                                    ? 'awaiting_material_creation'
+                                    : 'shortage';
             items.push({
                 taskId: t.id,
                 spareId: spare.id,
@@ -263,12 +301,45 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
                 reserved,
                 shortage,
                 status,
+                requirementId,
+                supply: link ? { kind: str(link.kind), requirementId: str(link.requirementId), qty: Number(link.qty) || 0, at: str(link.at) } : null,
+                procurement: procurement ?? null,
             });
             if (shortage > 0) problems.push(`${str(t.description)}: secure ${shortage} ${str(spare.uom)} of ${str(spare.description)}.`);
+            if (status === 'supply_closed') problems.push(`${str(t.description)}: requirement ${requirementId} for ${str(spare.description)} was cancelled or rejected; secure the spare again.`);
         }
         for (const s of rows(t.services)) {
             const p = object(planning[str(s.id)]);
-            if (p.status !== 'secured') problems.push(`${str(t.description)}: secure service ${str(s.description)}.`);
+            const procurement = str(p.requirementId) ? trace.get(str(p.requirementId)) : undefined;
+            let orderLive = false;
+            if (p.status === 'secured' && str(p.poId)) {
+                const po = await getDoc(`${root(ctx)}/procurement_orders/${identifier(p.poId)}`);
+                orderLive = !!po && ['open', 'sent', 'partial', 'full'].includes(str(po.data.status));
+            }
+            const ready = p.status === 'secured' && orderLive;
+            const orderReady = procurement ? rows(procurement.orders).find((o) => o.live === true) ?? null : null;
+            const status = ready
+                ? 'secured'
+                : p.status === 'secured'
+                  ? 'order_inactive'
+                  : procurement && procurement.open === false
+                    ? 'supply_closed'
+                    : orderReady
+                      ? 'order_placed'
+                      : str(p.requirementId)
+                        ? 'awaiting_procurement'
+                        : str(p.status) === 'awaiting_supplier_onboarding'
+                          ? 'awaiting_supplier_onboarding'
+                          : object(p.sourcing).supplierCategory
+                            ? 'sourcing_confirmed'
+                            : 'awaiting_sourcing';
+            items.push({ taskId: t.id, serviceId: s.id, kind: 'service', ...p, status, procurement: procurement ?? null, orderReady });
+            if (!ready)
+                problems.push(
+                    status === 'order_inactive'
+                        ? `${str(t.description)}: the purchase order securing ${str(s.description)} is no longer active.`
+                        : `${str(t.description)}: secure service ${str(s.description)}.`,
+                );
         }
     }
     return { items, problems, ready: problems.length === 0 };
@@ -398,59 +469,188 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
         await reserveTaskSpare(ctx, wo, task, spare, previous);
         await event(ctx, 'task.spare.reserved', wo.id, str(task.id));
         return { ok: true };
-    } else if (action === 'procure') {
-        const materialId = str(previous.materialId) || str(spare?.materialId),
-            warehouseId = str(previous.warehouseId) || str(spare?.warehouseId);
-        let m: Doc | null = null,
-            required = 1;
-        if (spare) {
-            m = await materialIn(ctx.orgId, materialId, warehouseId);
-            if (!m || !['approved', 'active'].includes(str(m.data.status)))
-                throw new HttpError(409, 'Material approval and warehouse extension must complete before purchasing.');
-            const r = await getDoc(`${root(ctx)}/inventory_reservations/${maintenanceKey(wo.id, str(task.id), str(spare.id))}`);
-            required = Math.max(0, Number(spare.qty) - (Number(r?.data.qty) || 0) - (Number(r?.data.issued) || 0));
-            if (!required) throw new HttpError(409, 'No shortage remains.');
-            await maintenancePermission(ctx, 'INV.issue', await nodePath(ctx.orgId, warehouseId));
+    } else if (action === 'secure_spare' || (action === 'procure' && spare)) {
+        // Warehouse first: reserve what is usable and uncommitted, then cover only the shortage, by linking an
+        // existing open replenishment or raising (or reusing) this task's procurement requirement.
+        if (!spare) throw new HttpError(400, 'Select a spare requirement.');
+        const materialId = str(previous.materialId) || (['warehouse', 'material'].includes(str(spare.source)) ? str(spare.materialId) : '');
+        const warehouseId = (str(b.warehouseId) ? identifier(b.warehouseId) : '') || str(previous.warehouseId) || str(spare.warehouseId);
+        if (!materialId)
+            throw new HttpError(409, 'This spare has no approved material code yet. Material creation and approval must complete first; the need is then pushed to procurement automatically.');
+        const m = await materialIn(ctx.orgId, materialId, warehouseId);
+        if (!m || !['approved', 'active'].includes(str(m.data.status)))
+            throw new HttpError(409, 'Choose a warehouse where this approved material is stocked (material approval and warehouse extension must be complete).');
+        await maintenancePermission(ctx, 'INV.issue', await nodePath(ctx.orgId, warehouseId));
+        const key = maintenanceKey(wo.id, str(task.id), str(spare.id));
+        let current = wo;
+        if (action === 'secure_spare') {
+            await reserveTaskSpare(ctx, wo, task, spare, { ...previous, materialId, warehouseId });
+            current = (await getDoc(`${root(ctx)}/work_orders/${wo.id}`))!;
         }
-        const r = spare || service!,
-            uom = PROCUREMENT_UNITS.find(
-                (u) => u.active && u.selectable && (u.code === str(r.uom) || u.symbol.toLowerCase() === str(r.uom).toLowerCase()),
-            );
+        const reservation = await getDoc(`${root(ctx)}/inventory_reservations/${key}`);
+        if (reservation && (str(reservation.data.warehouseId) !== warehouseId || str(reservation.data.materialId) !== materialId) && Number(reservation.data.qty) > 0)
+            throw new HttpError(409, 'Release the existing reservation before sourcing from another warehouse.');
+        const reserved = (Number(reservation?.data.qty) || 0) + (Number(reservation?.data.issued) || 0);
+        const shortage = Math.max(0, Number(spare.qty) - reserved);
+        const cp = object(object(current.data.taskPlanning)[str(task.id)]),
+            cur = object(cp[str(spare.id)]);
+        state = { ...cur, materialId, warehouseId };
+        if (!shortage) {
+            if (action === 'procure') throw new HttpError(409, 'No shortage remains.');
+            await event(ctx, 'task.spare.secured', wo.id, `${str(task.id)}/${str(spare.id)} reserved in full`);
+            return { ok: true, reserved, shortage: 0 };
+        }
+        const linkDoc = await getDoc(linkPath(ctx.orgId, key));
+        const trace = linkDoc && linkDoc.data.status === 'active' ? (await procurementTrace(ctx.orgId, [str(linkDoc.data.requirementId)])).get(str(linkDoc.data.requirementId)) : undefined;
+        let requirementId = '',
+            kind: 'maintenance' | 'replenishment' = 'maintenance';
+        if (linkDoc && linkDoc.data.status === 'active' && trace?.open && Number(linkDoc.data.qty) >= shortage) {
+            requirementId = str(linkDoc.data.requirementId);
+            kind = str(linkDoc.data.kind) === 'replenishment' ? 'replenishment' : 'maintenance';
+            if (kind === 'maintenance' && trace.stage === 'verification')
+                await createMaintenanceRequirement(ctx, { glCode: b.glCode, dateRequired: b.dateRequired, urgency: b.urgency, budget: b.budget ?? null }, { key, woCode: wo.id, taskId: task.id, resourceId: spare.id });
+        } else {
+            const cover = await openReplenishmentCover(ctx.orgId, materialId, warehouseId, shortage, key);
+            if (cover) {
+                requirementId = cover.requirementId;
+                kind = 'replenishment';
+            } else {
+                const uom = PROCUREMENT_UNITS.find((u) => u.active && u.selectable && (u.code === str(spare.uom) || u.code === str(m.data.uom) || u.symbol.toLowerCase() === str(spare.uom).toLowerCase()));
+                if (!str(b.glCode)) throw new HttpError(400, `No open supply covers the shortage of ${shortage}. Choose the GL account and date required to raise the purchase requirement.`);
+                requirementId = await createMaintenanceRequirement(
+                    ctx,
+                    {
+                        type: 'material',
+                        source: 'warehouse',
+                        requirement: str(spare.description) || str(m.data.name),
+                        technical: [str(spare.specifications), str(spare.function) ? 'Function: ' + str(spare.function) : '', `Work order ${wo.id}, task ${str(task.title) || str(task.description)}`].filter(Boolean).join('\n'),
+                        categoryCode: str(m.data.categoryCode),
+                        subcategoryCode: str(m.data.subcategoryCode),
+                        familyCode: str(m.data.familyCode),
+                        materialId,
+                        warehouseId,
+                        quantity: shortage,
+                        uomCode: uom?.code || str(b.uomCode),
+                        dateRequired: b.dateRequired || str(spare.requiredDate),
+                        urgency: ['low', 'medium', 'high'].includes(str(b.urgency)) ? b.urgency : 'medium',
+                        costCenterId: warehouseId,
+                        glCode: b.glCode,
+                        budget: b.budget ?? null,
+                    },
+                    {
+                        key,
+                        woCode: wo.id,
+                        taskId: task.id,
+                        resourceId: spare.id,
+                        description: spare.description,
+                        quantity: shortage,
+                        assessedRequirement: spare,
+                        assessmentVersion: Number(wo.data.assessmentTasksVersion) || 1,
+                        costCenterId: str(wo.data.costCenterId),
+                        planningGroup: planningGroup(wo),
+                        attachments: [str(spare.photoPath), ...texts(spare.attachments)].filter(Boolean),
+                    },
+                );
+            }
+        }
+        await commit([
+            {
+                path: linkPath(ctx.orgId, key),
+                fields: { woCode: wo.id, taskId: str(task.id), resourceId: str(spare.id), requirementId, kind, qty: shortage, materialId, warehouseId, status: 'active', at: nowIso(), by: ctx.uid },
+            },
+        ]);
+        state = { ...state, requirementId, supplyKind: kind, status: kind === 'replenishment' ? 'linked_replenishment' : 'awaiting_procurement' };
+        result = { requirementId, kind, reserved, shortage };
+        wo = current;
+    } else if (action === 'service_sourcing') {
+        // The planner confirms the supplier category and a qualified registered vendor, or routes the need to
+        // supplier onboarding when no suitable approved vendor exists. Never a free-text vendor.
+        if (!service) throw new HttpError(400, 'Select a service.');
+        if (str(previous.requirementId)) throw new HttpError(409, 'Supplier sourcing is fixed once the purchase requirement is raised. Change it through Procurement.');
+        const category = (await supplierCategories()).find((c) => c.code === str(b.supplierCategory));
+        if (!category) throw new HttpError(400, 'Choose the supplier category.');
+        const make = await equipmentMake(ctx.orgId, wo);
+        const q = { supplierCategory: category.code, categoryCode: str(service.categoryCode), subcategoryCode: str(service.subcategoryCode), make };
+        const at = nowIso();
+        if (str(b.preferredVendorId)) {
+            const vendor = await requireQualifiedVendor(ctx.orgId, identifier(b.preferredVendorId), q);
+            state = {
+                ...state,
+                status: 'sourcing_confirmed',
+                sourcing: { supplierCategory: category.code, supplierCategoryLabel: category.label, preferredVendorId: vendor.id, preferredVendorName: vendor.name, manufacturerMatch: vendor.manufacturerMatch, by: ctx.uid, at },
+            };
+        } else {
+            const { vendors } = await qualifiedServiceVendors(ctx.orgId, q);
+            const reason = requiredText(b.onboardingReason, 'Reason no approved vendor is suitable', vendors.length ? 20 : 10, 600);
+            const suggested = requiredText(b.suggestedVendor, 'Suggested supplier name', 3, 120);
+            const onboardingRequestId = await raiseSupplierOnboarding(ctx, wo, task, service, { supplierCategory: category, name: suggested, contact: str(b.suggestedContact).trim().slice(0, 160), reason });
+            state = {
+                ...state,
+                status: 'awaiting_supplier_onboarding',
+                sourcing: { supplierCategory: category.code, supplierCategoryLabel: category.label, preferredVendorId: '', preferredVendorName: '', onboardingRequestId, suggestedVendor: suggested, approvedAlternatives: vendors.length, by: ctx.uid, at },
+            };
+        }
+        result = { status: state.status };
+    } else if (action === 'procure') {
+        // External service → Procurement Requirement, carrying the full scope, supplier category and preferred vendor.
+        if (!service) throw new HttpError(400, 'Select a service.');
+        const sourcing = object(previous.sourcing);
+        if (!str(sourcing.supplierCategory)) throw new HttpError(409, 'Confirm the supplier category and vendor (or supplier onboarding) first.');
+        if (str(sourcing.preferredVendorId))
+            await requireQualifiedVendor(ctx.orgId, str(sourcing.preferredVendorId), {
+                supplierCategory: str(sourcing.supplierCategory), categoryCode: str(service.categoryCode), subcategoryCode: str(service.subcategoryCode), make: await equipmentMake(ctx.orgId, wo),
+            });
+        const technical = [
+            `Scope: ${str(service.scope)}`,
+            str(service.instructions) && `Instructions: ${str(service.instructions)}`,
+            `Deliverables: ${str(service.deliverables)}`,
+            `Acceptance: ${str(service.acceptanceCriteria)}`,
+            `Competencies: ${str(service.qualifications)}${str(service.certifications) ? '; certifications: ' + str(service.certifications) : ''}`,
+            (service.personnel || service.durationHours) && `Personnel ${Number(service.personnel) || '—'}, duration ${Number(service.durationHours) || '—'} h`,
+            `Supplier category: ${str(sourcing.supplierCategoryLabel)}${str(sourcing.preferredVendorName) ? '; preferred vendor ' + str(sourcing.preferredVendorName) + ' (' + str(sourcing.preferredVendorId) + ')' : '; supplier onboarding requested: ' + str(sourcing.suggestedVendor)}`,
+            `Work order ${wo.id}, task ${str(task.title) || str(task.description)}; planning group ${planningGroup(wo).label}`,
+        ]
+            .filter(Boolean)
+            .join('\n');
         const requirementId = await createMaintenanceRequirement(
             ctx,
             {
-                type: spare ? 'material' : 'service',
-                source: spare ? 'warehouse' : str(r.catalogCode) ? 'catalogue' : 'description',
-                requirement: r.description,
-                technical: [str(spare?.specifications) || str(service?.scope), str(r.description), str(task.instructions)]
-                    .filter(Boolean)
-                    .join('\n'),
-                categoryCode: m ? str(m.data.categoryCode) : str(r.categoryCode),
-                subcategoryCode: m ? str(m.data.subcategoryCode) : str(r.subcategoryCode),
-                familyCode: m ? str(m.data.familyCode) : str(r.classCode),
-                itemCode: spare ? '' : str(r.catalogCode),
-                attributes: object(r.attributes),
-                materialId,
-                warehouseId,
-                quantity: required,
-                uomCode: uom?.code || str(b.uomCode),
-                dateRequired: b.dateRequired,
-                urgency: 'medium',
-                costCenterId: spare ? warehouseId : str(wo.data.costCenterId),
+                type: 'service',
+                source: str(service.catalogCode) ? 'catalogue' : 'description',
+                requirement: service.description,
+                technical,
+                categoryCode: str(service.categoryCode),
+                subcategoryCode: str(service.subcategoryCode),
+                familyCode: str(service.classCode),
+                itemCode: str(service.catalogCode),
+                attributes: object(service.attributes),
+                quantity: 1,
+                dateRequired: b.dateRequired || str(service.executionDate),
+                urgency: ['low', 'medium', 'high'].includes(str(b.urgency)) ? b.urgency : 'medium',
+                costCenterId: str(wo.data.costCenterId),
                 glCode: b.glCode,
-                budget: b.budget ?? null,
+                budget: b.budget ?? service.expectedCost ?? null,
             },
             {
-                key: maintenanceKey(wo.id, str(task.id), str(r.id), String(wo.data.assessmentTasksVersion || 1)),
+                key: maintenanceKey(wo.id, str(task.id), str(service.id)),
                 woCode: wo.id,
                 taskId: task.id,
-                resourceId: r.id,
-                description: r.description,
-                quantity: required,
-                assessedRequirement: r,
+                resourceId: service.id,
+                description: service.description,
+                quantity: Number(service.quantity) || 1,
+                serviceCode: str(service.catalogCode),
+                assessedRequirement: service,
                 assessmentVersion: Number(wo.data.assessmentTasksVersion) || 1,
+                supplierCategory: str(sourcing.supplierCategory),
+                supplierCategoryLabel: str(sourcing.supplierCategoryLabel),
+                preferredVendor: str(sourcing.preferredVendorId) ? { id: str(sourcing.preferredVendorId), name: str(sourcing.preferredVendorName) } : null,
+                supplierOnboardingRequestId: str(sourcing.onboardingRequestId),
+                executionDate: str(service.executionDate),
+                costCenterId: str(wo.data.costCenterId),
+                planningGroup: planningGroup(wo),
+                attachments: texts(service.attachments),
                 proposedVendors: await Promise.all(
-                    texts(service?.proposedVendorIds).map(async (id) => {
+                    texts(service.proposedVendorIds).map(async (id) => {
                         const vendor = await getDoc(`${root(ctx)}/vendors/${id}`);
                         return { id, name: str(vendor?.data.tradeName) || str(vendor?.data.legalName) || id };
                     }),
@@ -481,17 +681,21 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
             poId: po.id,
             lineNo: line.no,
             vendorId: po.data.vendorId || '',
+            vendorName: str(po.data.vendorName),
             cost: Number(line.net) || Number(line.total) || 0,
             readyAt: requiredText(b.readyAt, 'Service readiness date'),
             scopeConfirmation: requiredText(b.note, 'Service scope confirmation'),
             status: 'secured',
         };
     } else throw new HttpError(400, 'Unknown resource action.');
+    // Re-read the planning map from the record being saved (a reservation may have just updated it).
+    const latest = object(wo.data.taskPlanning),
+        latestTask = object(latest[str(task.id)]);
     await saveWo(
         ctx,
         wo,
         {
-            taskPlanning: { ...planning, [str(task.id)]: { ...p, [str((spare || service)!.id)]: state } },
+            taskPlanning: { ...latest, [str(task.id)]: { ...latestTask, [str((spare || service)!.id)]: state } },
             plannedBy: ctx.uid,
             plannedByName: name(ctx),
         },
@@ -1693,7 +1897,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         )
             return windowAction(ctx, action);
         const wo = await order(ctx, b.code);
-        if (['match_spare', 'candidate', 'reserve', 'procure', 'secure_service', 'allocate'].includes(action))
+        if (['match_spare', 'candidate', 'reserve', 'procure', 'secure_spare', 'service_sourcing', 'secure_service', 'allocate'].includes(action))
             return resourceAction(ctx, wo, action);
         return executeMaintenanceAction(ctx, wo, action);
     });

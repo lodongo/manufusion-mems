@@ -12,12 +12,13 @@ test('work request has a compact left viewer with request, tasks, and summary',(
  assert.match(ui,/overflow-x-hidden/);
  assert.doesNotMatch(ui,/flex gap-2 overflow-x-auto pb-1'>\s*\{buttons.map/);
 });
-test('tasks start as a list, with add action and individual 4-part editor',()=>{
+test('tasks start as a list, with add action and individual 5-part editor (services per addendum)',()=>{
  const ui=src('MntTaskAssessment.tsx');
  assert.match(ui,/useState<TaskAssessment\[]>\(initial\)/);
  assert.match(ui,/useState<number\|null>\(null\)/);
  assert.match(ui,/\+ Add Task/);
- assert.match(ui,/\['Task','Spares','People & tools','Safety'\]/);
+ assert.match(ui,/\['Task','Spares','Services','People & tools','Safety'\]/);
+ assert.match(ui,/<SpareFinder /,'Spares are found through the warehouse → catalogue → free-text finder');
  assert.match(ui,/Done — back to tasks/);
  assert.match(ui,/Save assessment for review/);
 });

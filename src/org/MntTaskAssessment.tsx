@@ -1,15 +1,15 @@
-import {useEffect,useState,type ChangeEvent} from 'react';
+import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert} from '../components/ui';
 import {Button,Card,useLoad} from '../admin/kit';
-import {compressPhoto} from './mntShared';
+import {Attachments,ServiceEditor,SpareFinder,SOURCE_LABEL,freeTextProblems,newService,serviceProblems,type ServiceHierarchy} from './mntSourcing';
 
-type Spare={id:string;source:'warehouse'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;photoPath?:string;specifications?:string;attributes?:Record<string,string>};
-type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string};
+type Spare={id:string;source:'warehouse'|'material'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;photoPath?:string;specifications?:string;attributes?:Record<string,string>;function?:string;categoryCode?:string;subcategoryCode?:string;requiredDate?:string;attachments?:string[];searchReceiptId?:string;noMatchConfirmed?:boolean;noMatchReason?:string};
+type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;instructions?:string;certifications?:string;personnel?:number;durationHours?:number;executionDate?:string;supplierCategory?:string;attachments?:string[]};
 type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;energyCode?:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;exposedPersonnel?:string;responsiblePerson?:string;precautions?:string};
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
 type SafetyOption={code:string;label:string;category:string;subcategory:string};
-type Options={vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
+type Options={serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
 export type TaskAssessment={id:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
 const id=()=>Math.random().toString(36).slice(2,10);
 const newRisk=():Risk=>({hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}});
@@ -66,8 +66,14 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
    <p>Special tools: {t.tools||'None declared'}</p>
    <p className='font-medium text-white'>Spares ({t.spares?.length||0})</p>
    {t.spares?.map(sp=><div key={sp.id} className='rounded-lg bg-slate-800 p-2'>
-    {sp.description} · {sp.qty} {sp.uom} · {sp.source}{sp.warehouseId?' · warehouse '+sp.warehouseId:''}
+    {sp.description} · {sp.qty} {sp.uom} · {SOURCE_LABEL[sp.source]||sp.source}{sp.warehouseId?' · warehouse '+sp.warehouseId:''}
+    {sp.source==='description'&&<span className='block text-xs text-slate-400'>Function: {sp.function||'—'} · {sp.specifications||'No specification'}{sp.requiredDate?' · by '+sp.requiredDate:''}</span>}
     {sp.photoPath&&<div>{options?.photos?.[sp.photoPath]?<a href={options.photos[sp.photoPath]} target='_blank' rel='noreferrer' className='text-emerald-300 underline'>View spare photo</a>:<span>Photo attached</span>}</div>}
+   </div>)}
+   <p className='font-medium text-white'>External services ({t.services?.length||0})</p>
+   {t.services?.map(sv=><div key={sv.id} className='rounded-lg bg-slate-800 p-2'>
+    {sv.description} · {sv.supplierCategory||'No supplier category'} · execute {sv.executionDate||'—'}
+    <span className='block text-xs text-slate-400'>Scope: {sv.scope} · Acceptance: {sv.acceptanceCriteria}</span>
    </div>)}
    <p>LOTO required: {t.lotoRequired?'Yes':'No'} · Working live: {t.liveEquipment?'Yes':'No'}</p>
    {!!t.energySourceCodes?.length&&<p>Hazardous energy: {t.energySourceCodes.map(code=>options?.hazardousEnergy.find(x=>x.code===code)?.label||code).join(', ')}</p>}
@@ -85,11 +91,13 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const [dirty,setDirty]=useState(false);
  const options=useLoad(()=>callBackend<Options>('/api/org/mnt/assessment/options',{code}),[code]);
  const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
- const [current,setCurrent]=useState<number|null>(null),[step,setStep]=useState(0),[saving,setSaving]=useState(false),[uploading,setUploading]=useState(''),[message,setMessage]=useState(''),[photoUrls,setPhotoUrls]=useState<Record<string,string>>({});
- const [showStock,setShowStock]=useState(false),[showCatalog,setShowCatalog]=useState(false),[energySearch,setEnergySearch]=useState(''),[permitSearch,setPermitSearch]=useState('');
+ const [current,setCurrent]=useState<number|null>(null),[step,setStep]=useState(0),[saving,setSaving]=useState(false),[message,setMessage]=useState(''),[photoUrls,setPhotoUrls]=useState<Record<string,string>>({});
+ const [finder,setFinder]=useState(false),[openService,setOpenService]=useState<number|null>(null),[energySearch,setEnergySearch]=useState(''),[permitSearch,setPermitSearch]=useState('');
  useEffect(()=>{onDirtyChange?.(dirty);return()=>onDirtyChange?.(false);},[dirty,onDirtyChange]);
  const task=tasks[current??0]||seed();
- const sections=['Task','Spares','People & tools','Safety'];
+ const sections=['Task','Spares','Services','People & tools','Safety'];
+ const urls={...(options.data?.photos||{}),...photoUrls};
+ const taskProblems=(t:TaskAssessment)=>[...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp).map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
  const patch=(next:Partial<TaskAssessment>)=>{setDirty(true);setTasks(old=>old.map((t,i)=>i===current?{...t,...next}:t));};
  const patchSpare=(i:number,next:Partial<Spare>)=>patch({spares:task.spares.map((sp,j)=>i===j?{...sp,...next}:sp)});
  const addSpare=(sp:Spare)=>patch({spares:[...task.spares,sp]});
@@ -107,20 +115,15 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    const risk=key==='liveEquipment'?(yes?[...task.risk.filter(x=>x.hazard||x.impact||x.controls),newEnergyRisk('LIVE_EQUIPMENT')]:task.risk.filter(x=>x.energyCode!=='LIVE_EQUIPMENT')):yes?task.risk:task.risk.filter(x=>!(task.energySourceCodes||[]).includes(x.energyCode||''));
    patch({[key]:yes,permitCodes,risk:risk.length?risk:[newRisk()],...(key==='lotoRequired'&&!yes?{energySourceCodes:[]}: {})});
  };
- const uploadPhoto=async(index:number,event:ChangeEvent<HTMLInputElement>)=>{
-  const file=event.target.files?.[0];if(!file)return;setUploading(task.spares[index].id);setMessage('');
-  try{const data=await compressPhoto(file);const res=await callBackend<{token:string;url:string}>('/api/org/mnt/assessment/photo',{code,data});
-    patchSpare(index,{photoPath:res.token});setPhotoUrls(old=>({...old,[res.token]:res.url}));}
-  catch(e){setMessage(e instanceof Error?e.message:'Photo upload failed.');}
-  finally{setUploading('');event.target.value='';}
- };
  const save=async()=>{
+  const problems=tasks.flatMap((t,i)=>taskProblems(t).map(x=>'Task '+(i+1)+' — '+x));
+  if(problems.length){setMessage('Complete before saving: '+problems.slice(0,4).join('; ')+(problems.length>4?' …':''));return;}
   setSaving(true);setMessage('');try{
    await callBackend(recordType==='wo'?'/api/org/mnt/wo/action':'/api/org/mnt/wr/action',{code,action:'save_task_assessment',tasks});
    setDirty(false);setCurrent(null);setMessage('Assessment saved. Independent review is required before conversion.');onSaved();
   }catch(e){setMessage(e instanceof Error?e.message:'Assessment could not be saved.');}finally{setSaving(false);}
  };
- const openTask=(i:number)=>{setCurrent(i);setStep(0);setMessage('');};
+ const openTask=(i:number)=>{setCurrent(i);setStep(0);setMessage('');setFinder(false);setOpenService(null);};
  const addTask=()=>{
    if(!editable)return;
    setTasks(old=>[...old,seed()]);
@@ -147,6 +150,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
      <span className='mt-2 flex flex-wrap gap-1 text-[11px] text-slate-300'>
       <span className='rounded-lg bg-slate-800 px-2 py-1'>{t.hours||0}h</span>
       <span className='rounded-lg bg-slate-800 px-2 py-1'>{t.spares?.length||0} spares</span>
+      <span className='rounded-lg bg-slate-800 px-2 py-1'>{t.services?.length||0} services</span>
       <span className='rounded-lg bg-slate-800 px-2 py-1'>{t.persons||0} people</span>
       {t.lotoRequired&&<span className='rounded-lg bg-amber-900/40 px-2 py-1 text-amber-300'>LOTO</span>}
      </span>
@@ -155,7 +159,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    </button>)}</div>
   {editable&&tasks.length>0&&<div className='space-y-2 rounded-xl border border-slate-700 bg-slate-900/50 p-3'>
     <p className='text-xs text-slate-400'>Save all task changes to the work request before an independent reviewer can approve them.</p>
-    <Button busy={saving} disabled={saving||!!uploading} onClick={save}>Save assessment for review</Button>
+    <Button busy={saving} disabled={saving} onClick={save}>Save assessment for review</Button>
   </div>}
   {dirty&&<p className='text-xs text-amber-300'>Unsaved task changes. Save before leaving this section.</p>}
   {message&&<Alert tone='info'>{message}</Alert>}
@@ -166,11 +170,11 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  </div>;
  return <Card className='min-w-0 space-y-4'>
    <button type='button' className='text-sm text-emerald-300 underline' onClick={()=>setCurrent(null)}>← All tasks</button>
-   <div><p className='text-xs font-semibold uppercase text-emerald-300'>Task ${current+1} of ${tasks.length}</p>
+   <div><p className='text-xs font-semibold uppercase text-emerald-300'>{`Task ${current+1} of ${tasks.length}`}</p>
     <h3 className='mt-1 break-words text-lg font-semibold text-white'>{task.title||'Configure task'}</h3>
-    <p className='text-xs text-slate-400'>Complete the four sections, then return to the task list and save the assessment.</p>
+    <p className='text-xs text-slate-400'>Complete the five sections, then return to the task list and save the assessment.</p>
    </div>
-   <div className='grid grid-cols-4 gap-1'>{sections.map((name,i)=><button type='button' key={name} onClick={()=>setStep(i)} className={'rounded-lg p-2 text-xs '+(step===i?'bg-emerald-800 text-white':'bg-slate-800 text-slate-300')}>{name}</button>)}</div>
+   <div className='flex gap-1 overflow-x-auto pb-1 sm:grid sm:grid-cols-5'>{sections.map((name,i)=><button type='button' key={name} onClick={()=>setStep(i)} className={'min-h-[40px] shrink-0 rounded-lg px-3 py-2 text-xs '+(step===i?'bg-emerald-800 text-white':'bg-slate-800 text-slate-300')}>{name}</button>)}</div>
    {step===0&&<div className='space-y-3'>
      {library.data?.items.length?<details className='rounded-xl border border-slate-700 p-3'><summary className='text-sm text-slate-200'>Reuse an approved assembly task</summary>
       {library.data.items.map(x=><button type='button' key={x.id} className='mt-2 block w-full rounded-lg border border-slate-700 p-2 text-left text-sm' onClick={()=>{if(tasks.some(t=>t.id===x.id)){setMessage('Task already selected.');return;}setTasks(old=>[...old,{...x.task,id:x.id,templateStatus:'existing'}]);setDirty(true);openTask(tasks.length);}}>{x.task.description}</button>)}
@@ -181,29 +185,47 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     </div>}
    {step===1&&<div className='space-y-3'>
      <p className='font-semibold text-white'>Spares for this task</p>
-     {task.spares.map((sp,i)=><div key={sp.id} className='space-y-2 rounded-xl border border-slate-700 p-3'>
-       <p className='text-xs text-slate-400'>{i+1}. {sp.source==='warehouse'?'From inventory':sp.source==='catalog'?'From technical catalogue':'Describe or photograph'}</p>
-       <label className={label}>Spare description<input className={input} value={sp.description} placeholder='Describe the part, or attach a photo' onChange={e=>patchSpare(i,{description:e.target.value})}/></label>
-       {sp.source==='description'&&<label className={label}>Spare photo (optional instead of description)<input type='file' accept='image/jpeg,image/png' className={input} onChange={e=>void uploadPhoto(i,e)}/></label>}
-       {uploading===sp.id&&<p className='text-xs text-slate-400'>Uploading photo…</p>}
-       {sp.photoPath&&<a className='text-sm text-emerald-300 underline' href={photoUrls[sp.photoPath]||options.data?.photos?.[sp.photoPath]||'#'} target='_blank' rel='noreferrer'>View attached photo</a>}
-       {sp.source==='warehouse'&&<p className='text-xs text-slate-400'>Warehouse {sp.warehouseId} · material {sp.materialId}</p>}
-       {sp.source==='catalog'&&<p className='text-xs text-slate-400'>Catalogue code {sp.catalogCode}</p>}
-       <div className='grid grid-cols-2 gap-2'>
-        <label className={label}>Quantity<input type='number' inputMode='decimal' min='0.001' step='any' className={input} value={sp.qty} onChange={e=>patchSpare(i,{qty:Number(e.target.value)})}/></label>
-        <label className={label}>Unit<input className={input} value={sp.uom} onChange={e=>patchSpare(i,{uom:e.target.value})}/></label>
+     <p className='text-xs text-slate-400'>Search first. Stock in a warehouse is reserved; registered materials and catalogue items go to procurement; a new material can only be described when nothing suitable exists.</p>
+     {task.spares.map((sp,i)=>{const problems=sp.source==='description'?freeTextProblems(sp):[];return <div key={sp.id} className='min-w-0 space-y-2 rounded-xl border border-slate-700 p-3'>
+       <div className='flex items-start justify-between gap-2'>
+        <p className='min-w-0 text-xs text-slate-400'>{i+1}. {SOURCE_LABEL[sp.source]||sp.source}</p>
+        <button type='button' className='shrink-0 text-xs text-red-300 underline' onClick={()=>patch({spares:task.spares.filter((_,j)=>j!==i)})}>Remove</button>
        </div>
-       <button type='button' className='text-sm text-red-300 underline' onClick={()=>patch({spares:task.spares.filter((_,j)=>j!==i)})}>Remove spare</button>
-     </div>)}
-     <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
-       <Button variant='secondary' onClick={()=>{setShowStock(v=>!v);setShowCatalog(false);}}>+ Choose inventory</Button>
-       <Button variant='secondary' onClick={()=>{setShowCatalog(v=>!v);setShowStock(false);}}>+ Choose catalogue</Button>
-       <Button variant='secondary' onClick={()=>addSpare(newSpare())}>+ Describe / photo</Button>
-     </div>
-     {showStock&&<WarehouseSparePicker onSelect={x=>{addSpare({...newSpare(),source:'warehouse',materialId:x.materialId,warehouseId:x.warehouseId,description:x.name,uom:x.uom});setShowStock(false);}}/>}
-     {showCatalog&&<CatalogPicker kind='materials' onSelect={x=>{addSpare({...newSpare(),source:'catalog',catalogCode:x.code,description:x.name});setShowCatalog(false);}}/>}
+       {sp.source==='description'?<>
+        <label className={label}>Material name and technical description<input className={input} value={sp.description} onChange={e=>patchSpare(i,{description:e.target.value})}/></label>
+        <label className={label}>Intended function<input className={input} value={sp.function||''} placeholder='What the part does on this equipment' onChange={e=>patchSpare(i,{function:e.target.value})}/></label>
+        <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+         <label className={label}>Category (if known)<input className={input} value={sp.categoryCode||''} onChange={e=>patchSpare(i,{categoryCode:e.target.value})}/></label>
+         <label className={label}>Subcategory (if known)<input className={input} value={sp.subcategoryCode||''} onChange={e=>patchSpare(i,{subcategoryCode:e.target.value})}/></label>
+        </div>
+        <label className={label}>Detailed specifications and attributes<textarea className={input} rows={3} value={sp.specifications||''} placeholder='Dimensions, material, rating, part or drawing number…' onChange={e=>patchSpare(i,{specifications:e.target.value})}/></label>
+       </>:<p className='break-words text-sm font-medium text-white'>{sp.description}<span className='block text-xs font-normal text-slate-400'>{sp.source==='catalog'?'Catalogue '+sp.catalogCode+' · material creation and approval before purchase':sp.source==='material'?'Approved material · purchased for '+(sp.warehouseId||'a warehouse chosen by the planner'):'Warehouse '+sp.warehouseId+' · reserved by the planner'}</span></p>}
+       <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+        <label className={label}>Quantity<input type='number' inputMode='decimal' min='0.001' step='any' className={input} value={sp.qty} onChange={e=>patchSpare(i,{qty:Number(e.target.value)})}/></label>
+        <label className={label}>Unit<input className={input} value={sp.uom} readOnly={sp.source==='warehouse'||sp.source==='material'} onChange={e=>patchSpare(i,{uom:e.target.value})}/></label>
+        <label className={label+' col-span-2 sm:col-span-1'}>Required by<input type='date' className={input} value={sp.requiredDate||''} min={new Date().toISOString().slice(0,10)} onChange={e=>patchSpare(i,{requiredDate:e.target.value})}/></label>
+       </div>
+       {sp.photoPath&&<a className='text-sm text-emerald-300 underline' href={urls[sp.photoPath]||'#'} target='_blank' rel='noreferrer noopener'>View attached photo</a>}
+       <Attachments code={code} files={sp.attachments||[]} urls={urls} onChange={(files,u)=>{patchSpare(i,{attachments:files});setPhotoUrls(old=>({...old,...u}));}}/>
+       {problems.length>0&&<p className='text-xs text-amber-300'>Still needed: {problems.join(', ')}.</p>}
+     </div>;})}
+     {finder?<SpareFinder code={code} onClose={()=>setFinder(false)} onAdd={x=>{addSpare({...newSpare(),...x});setFinder(false);}}/>:<Button onClick={()=>setFinder(true)}>+ Find a spare</Button>}
     </div>}
    {step===2&&<div className='space-y-3'>
+     <p className='font-semibold text-white'>External services for this task</p>
+     <p className='text-xs text-slate-400'>Each service carries its scope, competencies, deliverables and a supplier category. Vendors come only from the approved vendor registry.</p>
+     {task.services.map((sv,i)=>{const problems=serviceProblems(sv);const editing=openService===i;return <div key={sv.id} className='min-w-0 space-y-2 rounded-xl border border-slate-700 p-3'>
+       <button type='button' className='flex w-full items-start justify-between gap-2 text-left' onClick={()=>setOpenService(editing?null:i)} aria-expanded={editing}>
+        <span className='min-w-0'><span className='block break-words text-sm font-medium text-white'>{sv.description||'New service'}</span>
+         <span className='block text-xs text-slate-400'>{problems.length?'Incomplete: '+problems.slice(0,3).join(', '):'Complete · '+(sv.executionDate||'')}</span></span>
+        <span className='shrink-0 text-lg text-slate-400' aria-hidden='true'>{editing?'−':'+'}</span>
+       </button>
+       {editing&&<ServiceEditor code={code} value={sv} hierarchy={options.data?.serviceHierarchy} urls={urls} onUrls={u=>setPhotoUrls(old=>({...old,...u}))} onChange={next=>patch({services:task.services.map((x,j)=>j===i?next as Service:x)})}/>}
+       {editing&&<button type='button' className='text-xs text-red-300 underline' onClick={()=>{patch({services:task.services.filter((_,j)=>j!==i)});setOpenService(null);}}>Remove service</button>}
+     </div>;})}
+     <Button variant='secondary' onClick={()=>{patch({services:[...task.services,newService() as Service]});setOpenService(task.services.length);}}>+ Add external service</Button>
+    </div>}
+   {step===3&&<div className='space-y-3'>
      <p className='font-semibold text-white'>People and special tools for this task</p>
      <fieldset className='space-y-2'><legend className={label}>Internal resources required</legend>
       <div className='grid grid-cols-2 gap-2'>{roles.map(([code,name])=><label key={code} className='flex items-center gap-2 rounded-lg border border-slate-700 p-3 text-sm'><input type='checkbox' checked={(task.internalRoles||[]).includes(code)} onChange={e=>patch({internalRoles:e.target.checked?[...(task.internalRoles||[]),code]:(task.internalRoles||[]).filter(x=>x!==code)})}/>{name}</label>)}</div>
@@ -219,7 +241,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
      <label className={label}>Time required (hours)<input type='number' inputMode='decimal' min={0.25} step={0.25} className={input} value={task.hours} onChange={e=>patch({hours:Number(e.target.value)})}/></label>
      <label className={label}>Special tools required<textarea className={input} rows={2} value={task.tools} onChange={e=>patch({tools:e.target.value})} placeholder='Tools, lifting gear, test instruments, calibration equipment…'/></label>
     </div>}
-   {step===3&&<div className='space-y-3'>
+   {step===4&&<div className='space-y-3'>
      <p className='font-semibold text-white'>Safety requirements for this task</p>
      <label className='flex items-center gap-3 rounded-xl border border-slate-700 p-3 text-sm'><input type='checkbox' checked={!!task.lotoRequired} onChange={e=>toggleSafety('lotoRequired',e.target.checked)}/>Lock-out/tag-out (LOTO) required</label>
      {task.lotoRequired&&<div className='space-y-2 rounded-xl border border-amber-700 p-3'>
@@ -258,11 +280,13 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     </div>}
    <div className='flex flex-wrap gap-2'>
      <Button variant='secondary' disabled={step===0} onClick={()=>setStep(i=>Math.max(0,i-1))}>← Previous section</Button>
-     <Button variant='secondary' disabled={step===3} onClick={()=>setStep(i=>Math.min(3,i+1))}>Next section →</Button>
+     <Button variant='secondary' disabled={step===4} onClick={()=>setStep(i=>Math.min(4,i+1))}>Next section →</Button>
    </div>
    <div className='flex flex-col gap-2 sm:flex-row'>
     <Button className='flex-1' onClick={()=>{
       if(!(task.title||task.description).trim()||task.description.trim().length<3){setStep(0);setMessage('Enter the task name and a work description before returning.');return;}
+      const problems=taskProblems(task);
+      if(problems.length){setMessage('Complete before returning: '+problems.slice(0,4).join('; ')+(problems.length>4?' …':''));return;}
       setMessage('');setCurrent(null);
     }}>Done — back to tasks</Button>
     <Button variant='secondary' onClick={()=>{setDirty(true);setTasks(old=>old.filter((_,i)=>i!==current));setCurrent(null);}}>Remove task</Button>

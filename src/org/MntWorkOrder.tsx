@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, ClipboardCheck, Package, ShieldCheck, Wrench, CalendarClock, CheckCircle2 } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert } from '../components/ui';
 import { Button, Card, Spinner, useLoad } from '../admin/kit';
 import MntTaskAssessment, { WarehouseSparePicker, CatalogPicker } from './MntTaskAssessment';
+import { FulfilmentTrack, ResourceStatus, SOURCE_LABEL, useVendors } from './mntSourcing';
 
 export type MntData = Record<string, any>;
 export const mntInput = 'mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink';
@@ -149,6 +150,7 @@ function ResourceForm({
     resource,
     previous,
     people,
+    item = {},
     onRun,
     onClose,
 }: {
@@ -158,6 +160,7 @@ function ResourceForm({
     resource: MntData;
     previous: MntData;
     people: MntData[];
+    item?: MntData;
     onRun: (action: string, b?: MntData) => Promise<boolean>;
     onClose: () => void;
 }) {
@@ -167,7 +170,24 @@ function ResourceForm({
         warehouseId: '',
         catalogCode: resource.catalogCode || '',
         attributes: { ...resource.attributes },
+        dateRequired: resource.requiredDate || resource.executionDate || '',
+        urgency: 'medium',
+        supplierCategory: previous.sourcing?.supplierCategory || resource.supplierCategory || '',
+        preferredVendorId: previous.sourcing?.preferredVendorId || resource.proposedVendorIds?.[0] || '',
+        poId: item.orderReady?.id || '',
+        lineNo: item.orderReady?.lineNo || '',
+        readyAt: resource.executionDate || '',
     });
+    const isService = !!resource.scope || 'acceptanceCriteria' in resource;
+    const vendors = useVendors(kind === 'service_sourcing' ? code : '', data.supplierCategory, resource.categoryCode || '', resource.subcategoryCode || '');
+    const [warehouses, setWarehouses] = useState<Array<{ id: string; name: string }>>([]);
+    const needsWarehouse = kind === 'secure_spare' && !previous.warehouseId && !resource.warehouseId;
+    useEffect(() => {
+        if (!needsWarehouse) return;
+        callBackend<{ warehouses: Array<{ id: string; name: string }> }>('/api/org/mnt/warehouse-spares/search', { mode: 'warehouses' })
+            .then((r) => setWarehouses(r.warehouses || []))
+            .catch(() => setWarehouses([]));
+    }, [needsWarehouse]);
     const [spec, setSpec] = useState<MntData | null>(null),
         [error, setError] = useState(''),
         [busy, setBusy] = useState(false);
@@ -182,6 +202,12 @@ function ResourceForm({
         }
     };
     const submit = async () => {
+        setError('');
+        if (kind === 'service_sourcing' && !data.supplierCategory) return setError('Choose the supplier category.');
+        if (kind === 'service_sourcing' && !data.preferredVendorId && (String(data.suggestedVendor || '').trim().length < 3 || String(data.onboardingReason || '').trim().length < (vendors.vendors.length ? 20 : 10)))
+            return setError('Give the suggested supplier and the reason for onboarding.');
+        if (kind === 'secure_spare' && needsWarehouse && !data.warehouseId) return setError('Choose the warehouse.');
+        if (kind === 'procure' && (!data.glCode || !data.dateRequired)) return setError('Enter the GL account and the date required.');
         setBusy(true);
         if (await onRun(kind, { taskId: task.id, resourceId: resource.id, ...data })) onClose();
         setBusy(false);
@@ -260,24 +286,97 @@ function ResourceForm({
                     )}
                 </>
             )}
-            {kind === 'procure' && (
+            {(kind === 'procure' || kind === 'secure_spare') && (
                 <>
                     <p className="text-sm text-soft">
-                        A purchase requirement will enter the standard manager approval and procurement process.
+                        {kind === 'secure_spare'
+                            ? 'Usable stock is reserved first. Only the shortage is covered: by an open replenishment when one already covers it, otherwise by a purchase requirement that follows manager approval and the chart of authority.'
+                            : isService
+                              ? 'The requirement carries the scope, acceptance criteria, supplier category and preferred vendor into the standard approval and procurement process.'
+                              : 'Only the shortage is requested. An open replenishment that covers it is linked instead of buying twice.'}
                     </p>
+                    {needsWarehouse && (
+                        <label className="block text-sm text-soft">
+                            Warehouse that will receive and issue it
+                            <select data-native-select="true" className={mntInput} value={data.warehouseId} onChange={(e) => patch('warehouseId', e.target.value)}>
+                                <option value="">Choose warehouse</option>
+                                {warehouses.map((w) => (
+                                    <option key={w.id} value={w.id}>{w.name}</option>
+                                ))}
+                            </select>
+                        </label>
+                    )}
                     <MntField label="Date required" type="date" value={data.dateRequired} onChange={(v) => patch('dateRequired', v)} />
-                    <MntField label="Approved GL account for this purchase" value={data.glCode} onChange={(v) => patch('glCode', v)} />
+                    <MntField label={kind === 'secure_spare' ? 'GL account (used only if a purchase is needed)' : 'Approved GL account for this purchase'} value={data.glCode} onChange={(v) => patch('glCode', v)} />
+                    <label className="block text-sm text-soft">
+                        Urgency
+                        <select data-native-select="true" className={mntInput} value={data.urgency} onChange={(e) => patch('urgency', e.target.value)}>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </label>
                     <MntField label="Indicative budget (optional)" type="number" value={data.budget} onChange={(v) => patch('budget', v)} />
+                </>
+            )}
+            {kind === 'service_sourcing' && (
+                <>
+                    <p className="text-sm text-soft">
+                        Choose the supplier category, then an approved vendor qualified for this service. For OEM and OCM, vendors representing the equipment make are listed. If none is suitable, request supplier onboarding.
+                    </p>
+                    <label className="block text-sm text-soft">
+                        Supplier category
+                        <select data-native-select="true" className={mntInput} value={data.supplierCategory} onChange={(e) => setData((o) => ({ ...o, supplierCategory: e.target.value, preferredVendorId: '' }))}>
+                            <option value="">Choose</option>
+                            {vendors.categories.map((c) => (
+                                <option key={c.code} value={c.code}>{c.label}</option>
+                            ))}
+                        </select>
+                    </label>
+                    {vendors.error && <Alert tone="error">{vendors.error}</Alert>}
+                    {data.supplierCategory && !vendors.loading && (
+                        <fieldset className="space-y-2">
+                            <legend className="text-sm text-soft">Approved vendors ({vendors.vendors.length})</legend>
+                            {vendors.vendors.map((v) => (
+                                <label key={v.id} className="flex items-start gap-3 rounded-xl border border-line p-3 text-sm">
+                                    <input type="radio" name="vendor" className="mt-1" checked={data.preferredVendorId === v.id} onChange={() => patch('preferredVendorId', v.id)} />
+                                    <span className="min-w-0">
+                                        <span className="block truncate font-medium">{v.name}</span>
+                                        <span className="block truncate text-xs text-muted">{[v.id, v.manufacturerMatch ? 'Represents ' + (vendors.make.manufacturer || vendors.make.brand) : '', v.brands.join(', ')].filter(Boolean).join(' · ')}</span>
+                                    </span>
+                                </label>
+                            ))}
+                            <label className="flex items-start gap-3 rounded-xl border border-dashed border-line p-3 text-sm">
+                                <input type="radio" name="vendor" className="mt-1" checked={data.preferredVendorId === ''} onChange={() => patch('preferredVendorId', '')} />
+                                <span>No suitable approved vendor — request supplier onboarding</span>
+                            </label>
+                            {vendors.others.length > 0 && <p className="text-xs text-muted">{vendors.others.length} other vendor(s) of this category do not represent the equipment make.</p>}
+                        </fieldset>
+                    )}
+                    {data.supplierCategory && data.preferredVendorId === '' && (
+                        <div className="space-y-3 rounded-xl border border-line p-3">
+                            <MntField label="Suggested supplier name" value={data.suggestedVendor} onChange={(v) => patch('suggestedVendor', v)} />
+                            <MntField label="Contact (optional)" value={data.suggestedContact} onChange={(v) => patch('suggestedContact', v)} />
+                            <MntField
+                                label={vendors.vendors.length ? 'Why none of the approved vendors is suitable (20+ characters)' : 'Why this supplier is needed (10+ characters)'}
+                                value={data.onboardingReason}
+                                onChange={(v) => patch('onboardingReason', v)}
+                                multiline
+                            />
+                            <p className="text-xs text-muted">Procurement registers and approves the supplier. No purchase order can go to an unapproved vendor.</p>
+                        </div>
+                    )}
                 </>
             )}
             {kind === 'secure_service' && (
                 <>
+                    {item.orderReady && <p className="rounded-lg bg-page p-3 text-sm">Order {item.orderReady.number} line {item.orderReady.lineNo} was raised from this task requirement.</p>}
                     <MntField label="Approved purchase order number" value={data.poId} onChange={(v) => patch('poId', v)} />
                     <MntField label="Purchase order line number" type="number" value={data.lineNo} onChange={(v) => patch('lineNo', v)} />
                     <MntField label="Service ready on" type="date" value={data.readyAt} onChange={(v) => patch('readyAt', v)} />
                 </>
             )}
-            {kind !== 'candidate' && kind !== 'procure' && (
+            {!['candidate', 'procure', 'secure_spare', 'service_sourcing'].includes(kind) && (
                 <MntField
                     label={kind === 'allocate' ? 'Allocation and competency evidence' : 'Review notes'}
                     value={data.note}
@@ -291,7 +390,13 @@ function ResourceForm({
                     ? 'Submit material creation candidate'
                     : kind === 'procure'
                       ? 'Submit purchase requirement'
-                      : 'Save task resource plan'}
+                      : kind === 'secure_spare'
+                        ? 'Reserve and cover the shortage'
+                        : kind === 'service_sourcing'
+                          ? data.preferredVendorId
+                              ? 'Confirm supplier'
+                              : 'Request supplier onboarding'
+                          : 'Save task resource plan'}
             </Button>
         </div>
     );
@@ -501,8 +606,12 @@ export default function MntWorkOrder({ code }: { code: string }) {
         try {
             const result = await mntApi({ code, action, ...body });
             setMessage(
-                result.requirementId
-                    ? 'Purchase requirement ' + result.requirementId + ' submitted for approval.'
+                result.kind === 'replenishment'
+                    ? 'Shortage linked to the open replenishment ' + result.requirementId + '; no duplicate purchase was raised.'
+                    : result.shortage === 0
+                      ? 'Reserved in full from the warehouse.'
+                      : result.requirementId
+                    ? 'Purchase requirement ' + result.requirementId + ' is in approval.'
                     : result.materialDraftId
                       ? 'Material draft ' + result.materialDraftId + ' created. Open Materials Master to complete and submit it.'
                       : 'Saved.',
@@ -688,71 +797,77 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                 {(task.spares || []).map((s: MntData) => {
                                     const r = data.readiness.items.find((r: MntData) => r.taskId === task.id && r.spareId === s.id) || {},
                                         p = planning[s.id] || {};
+                                    const editable = can.plan && ['planning', 'plan_ready', 'released', 'scheduled', 'in_progress'].includes(wo.status) && !execution.startedAt;
+                                    const hasCode = !!(p.materialId || ['warehouse', 'material'].includes(s.source));
                                     return (
-                                        <section key={s.id} className="space-y-3 rounded-xl border border-line p-4">
-                                            <h3 className="font-semibold">{s.description}</h3>
-                                            <p className="text-sm text-soft">
-                                                Required {s.qty} {s.uom} · {s.source} · {r.status?.replaceAll('_', ' ')}
-                                            </p>
+                                        <section key={s.id} className="min-w-0 space-y-3 rounded-xl border border-line p-4">
+                                            <div className="flex flex-wrap items-start justify-between gap-2">
+                                                <div className="min-w-0">
+                                                    <h3 className="break-words font-semibold">{s.description}</h3>
+                                                    <p className="text-xs text-soft">
+                                                        {SOURCE_LABEL[s.source] || s.source} · required {s.qty} {s.uom}
+                                                        {s.requiredDate ? ' by ' + s.requiredDate : ''}
+                                                    </p>
+                                                </div>
+                                                <ResourceStatus status={r.status} />
+                                            </div>
                                             <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                                                 {[
-                                                    ['Available', r.available ?? 'Pending'],
+                                                    ['Usable in warehouse', r.available ?? '—'],
                                                     ['Reserved / issued', r.reserved ?? 0],
                                                     ['Shortage', r.shortage ?? s.qty],
                                                     ['Unit cost', r.unitCost ?? 'Pending sourcing'],
                                                 ].map(([k, v]) => (
-                                                    <div key={k}>
-                                                        <p className="text-xs text-muted">{k}</p>
-                                                        <p className="mt-1 font-semibold">{v}</p>
+                                                    <div key={k} className="min-w-0">
+                                                        <p className="truncate text-xs text-muted">{k}</p>
+                                                        <p className="mt-1 font-semibold tabular-nums">{v}</p>
                                                     </div>
                                                 ))}
                                             </div>
-                                            {s.specifications && <p className="text-sm">{s.specifications}</p>}
-                                            {p.requirementId && (
-                                                <button
-                                                    className="text-sm underline"
-                                                    onClick={() => navigate('organization_admin/purchase_requirements/' + p.requirementId)}
-                                                >
-                                                    Purchase requirement {p.requirementId}
-                                                </button>
+                                            {(s.specifications || s.function) && (
+                                                <p className="break-words text-sm text-soft">
+                                                    {s.function ? 'Function: ' + s.function + '. ' : ''}
+                                                    {s.specifications}
+                                                </p>
                                             )}
+                                            {r.supply?.kind === 'replenishment' && (
+                                                <p className="text-xs text-soft">Shortage of {r.supply.qty} is covered by the open replenishment {r.supply.requirementId}; no second purchase was raised.</p>
+                                            )}
+                                            <FulfilmentTrack procurement={r.procurement} onOpen={(id) => navigate('organization_admin/purchase_requirements/' + id)} />
                                             {p.candidateId && !p.materialDraftId && (
-                                                <p className='text-xs text-amber-500'>Material candidate {p.candidateId.slice(0,12)} queued for Materials Master review ({String(p.status||'pending').replaceAll('_',' ')}).</p>
+                                                <p className="text-xs text-amber-500">
+                                                    Material candidate queued for Materials Master review ({String(p.status || 'pending').replaceAll('_', ' ')}).
+                                                </p>
                                             )}
-                                            {p.materialDraftId && (
-                                                <button
-                                                    className="text-sm underline"
-                                                    onClick={() => navigate('organization_admin/material_catalog')}
-                                                >
-                                                    Complete material draft {p.materialDraftId}
+                                            {p.materialDraftId && !p.materialId && (
+                                                <button className="text-sm underline" onClick={() => navigate('organization_admin/material_catalog')}>
+                                                    Material draft {p.materialDraftId} in approval
                                                 </button>
                                             )}
-                                            {can.plan &&
-                                                ['planning', 'plan_ready', 'released', 'scheduled', 'in_progress'].includes(wo.status) &&
-                                                !execution.startedAt && (
-                                                    <div className="flex flex-wrap gap-2">
+                                            {editable && (
+                                                <div className="flex flex-wrap gap-2">
+                                                    {hasCode && r.shortage > 0 && !['awaiting_procurement', 'linked_replenishment', 'received_reserve'].includes(r.status) && (
+                                                        <Button onClick={() => open('secure_spare', s, p)}>
+                                                            {r.status === 'awaiting_verification' ? 'Verify and submit requirement' : 'Reserve and cover shortage'}
+                                                        </Button>
+                                                    )}
+                                                    {r.status === 'received_reserve' && (
+                                                        <Button busy={busy} onClick={() => run('reserve', { taskId: task.id, resourceId: s.id })}>
+                                                            Reserve received stock
+                                                        </Button>
+                                                    )}
+                                                    {!hasCode && (
+                                                        <Button disabled={!!p.materialDraftId} onClick={() => open('candidate', s, p)}>
+                                                            Send for material creation
+                                                        </Button>
+                                                    )}
+                                                    {!hasCode && !p.materialDraftId && (
                                                         <Button variant="secondary" onClick={() => open('match_spare', s, p)}>
-                                                            Match approved stock material
+                                                            Match an approved stock material
                                                         </Button>
-                                                        <Button
-                                                            variant="secondary"
-                                                            disabled={!!p.materialDraftId}
-                                                            onClick={() => open('candidate', s, p)}
-                                                        >
-                                                            Material creation candidate
-                                                        </Button>
-                                                        <Button
-                                                            variant="secondary"
-                                                            busy={busy}
-                                                            onClick={() => run('reserve', { taskId: task.id, resourceId: s.id })}
-                                                        >
-                                                            Reserve available stock
-                                                        </Button>
-                                                        <Button variant="secondary" onClick={() => open('procure', s, p)}>
-                                                            Source shortage through Stores
-                                                        </Button>
-                                                    </div>
-                                                )}
+                                                    )}
+                                                </div>
+                                            )}
                                         </section>
                                     );
                                 })}
@@ -762,35 +877,50 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         {tab === 'Services' && (
                             <div className="space-y-3">
                                 {(task.services || []).map((s: MntData) => {
-                                    const p = planning[s.id] || {};
+                                    const p = planning[s.id] || {},
+                                        r = data.readiness.items.find((x: MntData) => x.taskId === task.id && x.serviceId === s.id) || {};
+                                    const editable = can.plan && ['planning', 'plan_ready', 'released', 'scheduled', 'in_progress'].includes(wo.status) && !execution.startedAt;
                                     return (
-                                        <section key={s.id} className="space-y-3 rounded-xl border border-line p-4">
-                                            <h3 className="font-semibold">{s.description}</h3>
-                                            <p className="text-sm">{s.scope}</p>
-                                            <p className="text-sm text-soft">
-                                                Deliverables: {s.deliverables} · Acceptance: {s.acceptanceCriteria}
-                                            </p>
-                                            <p className="text-sm">Readiness: {p.status?.replaceAll('_', ' ') || 'Awaiting sourcing'}</p>
-                                            {p.requirementId && (
-                                                <button
-                                                    className="text-sm underline"
-                                                    onClick={() => navigate('organization_admin/purchase_requirements/' + p.requirementId)}
-                                                >
-                                                    Purchase requirement {p.requirementId}
-                                                </button>
-                                            )}
-                                            {can.plan &&
-                                                ['planning', 'plan_ready', 'released', 'scheduled', 'in_progress'].includes(wo.status) &&
-                                                !execution.startedAt && (
-                                                    <div className="flex flex-wrap gap-2">
-                                                        <Button variant="secondary" onClick={() => open('procure', s, p)}>
-                                                            Procure assessed service
-                                                        </Button>
-                                                        <Button variant="secondary" onClick={() => open('secure_service', s, p)}>
-                                                            Link approved service order
-                                                        </Button>
+                                        <section key={s.id} className="min-w-0 space-y-3 rounded-xl border border-line p-4">
+                                            <div className="flex flex-wrap items-start justify-between gap-2">
+                                                <h3 className="min-w-0 break-words font-semibold">{s.description}</h3>
+                                                <ResourceStatus status={r.status || 'awaiting_sourcing'} />
+                                            </div>
+                                            <p className="break-words text-sm">{s.scope}</p>
+                                            <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                                                {[
+                                                    ['Deliverables', s.deliverables],
+                                                    ['Acceptance', s.acceptanceCriteria],
+                                                    ['Competencies', [s.qualifications, s.certifications].filter(Boolean).join(' · ')],
+                                                    ['People / duration', `${s.personnel ?? '—'} people · ${s.durationHours ?? '—'} h · qty ${s.quantity ?? 1}`],
+                                                    ['Execution date', s.executionDate],
+                                                    ['Supplier', p.sourcing ? `${p.sourcing.supplierCategoryLabel}${p.sourcing.preferredVendorName ? ' · ' + p.sourcing.preferredVendorName : ' · onboarding requested (' + (p.sourcing.suggestedVendor || '') + ')'}` : s.supplierCategoryLabel || s.supplierCategory || 'Not confirmed'],
+                                                ].map(([k, v]) => (
+                                                    <div key={k} className="min-w-0 rounded-lg bg-page p-2">
+                                                        <dt className="text-xs text-muted">{k}</dt>
+                                                        <dd className="break-words">{v || '—'}</dd>
                                                     </div>
-                                                )}
+                                                ))}
+                                            </dl>
+                                            <FulfilmentTrack procurement={r.procurement} onOpen={(id) => navigate('organization_admin/purchase_requirements/' + id)} />
+                                            {p.status === 'secured' && <p className="text-xs text-soft">Secured on {p.poId} line {p.lineNo}{p.vendorName ? ' · ' + p.vendorName : ''} · ready {p.readyAt}</p>}
+                                            {editable && (
+                                                <div className="flex flex-wrap gap-2">
+                                                    {!p.requirementId && (
+                                                        <Button variant={p.sourcing ? 'secondary' : 'primary'} onClick={() => open('service_sourcing', s, p)}>
+                                                            {p.sourcing ? 'Change supplier' : 'Choose supplier'}
+                                                        </Button>
+                                                    )}
+                                                    {p.sourcing && !p.requirementId && (
+                                                        <Button onClick={() => open('procure', s, p)}>Raise purchase requirement</Button>
+                                                    )}
+                                                    {p.requirementId && p.status !== 'secured' && (
+                                                        <Button variant={r.orderReady ? 'primary' : 'secondary'} onClick={() => open('secure_service', s, { ...p, item: r })}>
+                                                            Confirm service order
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            )}
                                         </section>
                                     );
                                 })}
@@ -961,14 +1091,15 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 </ol>
             </details>
             {dialog && (
-                <MntDialog title={dialog.kind.replaceAll('_', ' ')} onClose={() => setDialog(null)}>
-                    {['allocate', 'match_spare', 'candidate', 'procure', 'secure_service'].includes(dialog.kind) ? (
+                <MntDialog title={({ secure_spare: 'Secure spare', service_sourcing: 'Supplier for this service', procure: 'Raise purchase requirement', secure_service: 'Confirm service order' } as Record<string, string>)[dialog.kind] || dialog.kind.replaceAll('_', ' ')} onClose={() => setDialog(null)}>
+                    {['allocate', 'match_spare', 'candidate', 'procure', 'secure_spare', 'service_sourcing', 'secure_service'].includes(dialog.kind) ? (
                         <ResourceForm
                             kind={dialog.kind}
                             code={code}
                             task={task}
                             resource={dialog.resource}
                             previous={dialog.previous}
+                            item={dialog.previous?.item || data.readiness.items.find((x: MntData) => x.taskId === task.id && (x.spareId === dialog.resource?.id || x.serviceId === dialog.resource?.id)) || {}}
                             people={data.people}
                             onRun={run}
                             onClose={() => setDialog(null)}

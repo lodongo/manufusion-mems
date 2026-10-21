@@ -1,6 +1,17 @@
 /** Work assessments own every task and its resources, not work order header. */
-export interface AssessedSpare {id:string;source:'warehouse'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;specifications?:string;attributes?:Record<string,string>;photoPath?:string;}
-export interface AssessedService {id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;}
+/**
+ * Spare sources follow the mandatory selection hierarchy (maintenance addendum):
+ *   warehouse    approved material with stock in a warehouse (reserve; shortage goes to procurement)
+ *   material     approved registered material without usable stock (procurement requirement for the full quantity)
+ *   catalog      technical catalogue entry not yet registered as a material (material creation and approval first)
+ *   description  free text, only after a recorded warehouse + catalogue search found nothing suitable
+ */
+export type SpareSource='warehouse'|'material'|'catalog'|'description';
+export interface AssessedSpare {id:string;source:SpareSource;materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;specifications?:string;attributes?:Record<string,string>;photoPath?:string;
+ function?:string;categoryCode?:string;subcategoryCode?:string;requiredDate?:string;attachments?:string[];searchReceiptId?:string;noMatchConfirmed?:boolean;noMatchReason?:string;}
+export interface AssessedService {id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;
+ instructions?:string;certifications?:string;personnel?:number;durationHours?:number;executionDate?:string;supplierCategory?:string;attachments?:string[];}
+const DATE=/^\d{4}-\d{2}-\d{2}$/;
 export interface AssessedRisk {hazard:string;impact:string;controls:string;before:string;after:string;permit:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;exposedPersonnel?:string;responsiblePerson?:string;precautions?:string;energyCode?:string;}
 export interface AssessedTask {id:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:AssessedSpare[];services:AssessedService[];risk:AssessedRisk[];templateStatus:'pending_validation'|'existing';skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[];}
 export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
@@ -29,10 +40,16 @@ export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
   if(rawSpares.length>60)throw Error('Maximum 60 spares per task.');
   const spares=rawSpares.map((s,j)=>{
    const a=(s&&typeof s==='object'&&!Array.isArray(s)?s:{}) as Record<string,unknown>;
-   const source:AssessedSpare['source']=a.source==='warehouse'?'warehouse':a.source==='catalog'?'catalog':'description';
+   const source:SpareSource=a.source==='warehouse'?'warehouse':a.source==='material'?'material':a.source==='catalog'?'catalog':'description';
    const description=text(a.description,200),materialId=text(a.materialId,100),warehouseId=text(a.warehouseId,100),catalogCode=text(a.catalogCode,80);
-   if((description.length<2&&!text(a.photoPath,300))||source==='warehouse'&&(!materialId||!warehouseId)||source==='catalog'&&!catalogCode)throw Error('Task '+(i+1)+', spare '+(j+1)+': select a source and item.');
-   return {id:text(a.id,50)||'spare_'+(j+1),source,description:description||'Spare identified by photo — specification pending',photoPath:text(a.photoPath,300),materialId,warehouseId,catalogCode,qty:number(a.qty,0.001,1000000),uom:text(a.uom,12)||'EA',specifications:text(a.specifications,2000),attributes:(a.attributes&&typeof a.attributes==='object'?Object.fromEntries(Object.entries(a.attributes).slice(0,40).map(([k,v])=>[text(k,80),text(v,500)])):{}),unitCost:source==='warehouse'&&a.unitCost!==null&&a.unitCost!==undefined?number(a.unitCost,0,1e9):null};
+   if((description.length<2&&!text(a.photoPath,300))||source==='warehouse'&&(!materialId||!warehouseId)||source==='material'&&!materialId||source==='catalog'&&!catalogCode)throw Error('Task '+(i+1)+', spare '+(j+1)+': select a source and item.');
+   const requiredDate=text(a.requiredDate,10);
+   if(requiredDate&&!DATE.test(requiredDate))throw Error('Task '+(i+1)+', spare '+(j+1)+': enter the required date as YYYY-MM-DD.');
+   const attachments=Array.isArray(a.attachments)?[...new Set(a.attachments.map(v=>text(v,300)).filter(Boolean))]:[];
+   if(attachments.length>5)throw Error('Task '+(i+1)+', spare '+(j+1)+': attach up to 5 photos or documents.');
+   return {id:text(a.id,50)||'spare_'+(j+1),source,description:description||'Spare identified by photo — specification pending',photoPath:text(a.photoPath,300),materialId,warehouseId:source==='material'||source==='warehouse'?warehouseId:'',catalogCode,qty:number(a.qty,0.001,1000000),uom:text(a.uom,12)||'EA',specifications:text(a.specifications,2000),attributes:(a.attributes&&typeof a.attributes==='object'?Object.fromEntries(Object.entries(a.attributes).slice(0,40).map(([k,v])=>[text(k,80),text(v,500)])):{}),unitCost:source==='warehouse'&&a.unitCost!==null&&a.unitCost!==undefined?number(a.unitCost,0,1e9):null,
+    function:text(a.function,300),categoryCode:text(a.categoryCode,80),subcategoryCode:text(a.subcategoryCode,80),requiredDate,attachments,
+    searchReceiptId:source==='description'?text(a.searchReceiptId,64):'',noMatchConfirmed:source==='description'&&a.noMatchConfirmed===true,noMatchReason:source==='description'?text(a.noMatchReason,600):''};
   });
   const rawServices=Array.isArray(t.services)?t.services:[];
   if(rawServices.length>20)throw Error('Maximum 20 services per task.');
@@ -44,7 +61,13 @@ export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
    if(description.length<3||!categoryCode||!subcategoryCode||!classCode)throw Error('Task '+(i+1)+', service '+(j+1)+': category, subcategory, class and description are required.');
    const attributes:Record<string,string>={};
    if(a.attributes&&typeof a.attributes==='object'&&!Array.isArray(a.attributes))for(const [key,value] of Object.entries(a.attributes as Record<string,unknown>).slice(0,40))attributes[text(key,80)]=text(value,200);
-   return {id:text(a.id,50)||'service_'+(j+1),description,categoryCode,subcategoryCode,classCode,catalogCode:text(a.catalogCode,80),attributes,proposedVendorIds,scope:text(a.scope,2000),deliverables:text(a.deliverables,1000),quantity:number(a.quantity??1,0.001,1000000),qualifications:text(a.qualifications,1000),expectedCost:a.expectedCost==null?null:number(a.expectedCost,0,1e9),acceptanceCriteria:text(a.acceptanceCriteria,1000)};
+   const executionDate=text(a.executionDate,10);
+   if(executionDate&&!DATE.test(executionDate))throw Error('Task '+(i+1)+', service '+(j+1)+': enter the execution date as YYYY-MM-DD.');
+   const attachments=Array.isArray(a.attachments)?[...new Set(a.attachments.map(v=>text(v,300)).filter(Boolean))]:[];
+   if(attachments.length>5)throw Error('Task '+(i+1)+', service '+(j+1)+': attach up to 5 photos or documents.');
+   const optional=(v:unknown,min:number,max:number)=>v===undefined||v===null||v===''?undefined:number(v,min,max);
+   return {id:text(a.id,50)||'service_'+(j+1),description,categoryCode,subcategoryCode,classCode,catalogCode:text(a.catalogCode,80),attributes,proposedVendorIds,scope:text(a.scope,2000),deliverables:text(a.deliverables,1000),quantity:number(a.quantity??1,0.001,1000000),qualifications:text(a.qualifications,1000),expectedCost:a.expectedCost==null||a.expectedCost===''?null:number(a.expectedCost,0,1e9),acceptanceCriteria:text(a.acceptanceCriteria,1000),
+    instructions:text(a.instructions,2000),certifications:text(a.certifications,1000),personnel:optional(a.personnel,1,500),durationHours:optional(a.durationHours,0.25,10000),executionDate,supplierCategory:text(a.supplierCategory,40),attachments};
   });
   const internalRoles=Array.isArray(t.internalRoles)?[...new Set(t.internalRoles.map(v=>text(v,30)).filter(Boolean))]:['technician'];
   if(internalRoles.some(v=>!['operator','technician','specialist','engineer'].includes(v)))throw Error('Choose a valid internal resource type.');

@@ -113,6 +113,7 @@ interface DetailFull extends Omit<Row, 'attachments'> {
     history: Array<{ at: string; byName: string; action: string; note: string; from: string; to: string }>;
     approverTitle: string;
     returnReason: string;
+    maintenance?: { woCode: string; taskId: string; description: string; quantity: number; supplierCategory: string; preferredVendor: { id: string; name: string } | null; supplierOnboarding: boolean; executionDate: string; planningGroup: string; raisedBy: string; attachments: Array<{ kind: string; url: string }> } | null;
     currency: string;
     version: number;
     mine: boolean;
@@ -1312,6 +1313,33 @@ function Detail({ id }: { id: string }) {
                     Raised by {data.requester}{data.submittedAt ? ` on ${fmtDate(data.submittedAt)}` : ''} · approver {data.approverTitle || o?.approver.title || 'not set'}
                     {total > 0 ? ` · total budget ${money(total, data.currency)}` : ''}
                 </p>
+                {data.maintenance && (
+                    <div className='space-y-1 rounded-xl bg-page p-3 text-xs text-soft'>
+                        <p className='text-sm font-semibold text-ink'>
+                            Maintenance {data.maintenance.woCode} · task {data.maintenance.taskId}
+                        </p>
+                        <p className='break-words'>
+                            {[
+                                data.maintenance.planningGroup && 'Planning group ' + data.maintenance.planningGroup,
+                                data.maintenance.supplierCategory && 'Supplier category ' + data.maintenance.supplierCategory,
+                                data.maintenance.preferredVendor && 'Preferred vendor ' + data.maintenance.preferredVendor.name + ' (' + data.maintenance.preferredVendor.id + ')',
+                                data.maintenance.supplierOnboarding && 'Supplier onboarding requested',
+                                data.maintenance.executionDate && 'Execute ' + data.maintenance.executionDate,
+                            ]
+                                .filter(Boolean)
+                                .join(' · ') || data.maintenance.description}
+                        </p>
+                        {data.maintenance.attachments.length > 0 && (
+                            <p className='flex flex-wrap gap-2'>
+                                {data.maintenance.attachments.map((a, i) => (
+                                    <a key={i} href={a.url} target='_blank' rel='noreferrer noopener' className='text-brandsoft underline'>
+                                        {a.kind === 'drawing' ? 'Drawing' : 'Photo'} {i + 1}
+                                    </a>
+                                ))}
+                            </p>
+                        )}
+                    </div>
+                )}
                 {c.edit && (
                     <div className='space-y-2 pt-1'>
                         <Field id='req-title' label='Title' value={title ?? data.title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />

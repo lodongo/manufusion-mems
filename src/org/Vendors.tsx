@@ -1310,7 +1310,7 @@ function Detail({ id }: { id: string }) {
 function List() {
     const options = useLoad(() => callBackend<Options>(`${API}/options`));
     const [view, setView] = useState('approved');
-    const list = useLoad(() => callBackend<{ rows: Row[]; counts: Record<string, number> }>(`${API}/list`, { view }), [view]);
+    const list = useLoad(() => callBackend<{ rows: Row[]; counts: Record<string, number> }>(`${API}/list`, { view: view === 'onboarding' ? 'approved' : view }), [view]);
     const can = options.data?.can;
     const tabs = useMemo(() => {
         const counts = list.data?.counts ?? {};
@@ -1319,6 +1319,7 @@ function List() {
             { value: 'mine', label: 'Registered by me', show: !!can?.manage },
             { value: 'approvals', label: 'Needs my approval', show: !!can?.approve },
             { value: 'all', label: 'All vendors', show: !!can?.manage || !!can?.approve || !!can?.override },
+            { value: 'onboarding', label: 'Onboarding requests', show: !!can?.manage },
         ];
         return all.filter((t) => t.show).map((t) => ({ value: t.value, label: t.label, count: counts[t.value] }));
     }, [can, list.data]);
@@ -1337,7 +1338,9 @@ function List() {
             }
             toolbar={<Segmented label='Views' value={view} options={tabs} onChange={setView} />}
         >
-            {list.error ? (
+            {view === 'onboarding' ? (
+                <OnboardingRequests approved={list.data?.rows ?? []} />
+            ) : list.error ? (
                 <Alert tone='error'>{list.error}</Alert>
             ) : list.loading && !list.data ? (
                 <Spinner />
@@ -1355,6 +1358,86 @@ function List() {
                 />
             )}
         </Screen>
+    );
+}
+
+// ----- Supplier onboarding requested from Maintenance (no approved vendor was suitable for a work-order service) -----
+
+interface Onboarding { id: string; status: string; woCode: string; serviceDescription: string; supplierCategory: string; supplierCategoryLabel: string; suggestedName: string; suggestedContact: string; reason: string; requestedByName: string; requestedAt: string; siteName: string; vendorId?: string; resolutionNote?: string }
+function OnboardingRequests({ approved }: { approved: Row[] }) {
+    const { data, error, loading, reload } = useLoad(() => callBackend<{ items: Onboarding[] }>(`${API}/onboarding-requests`), []);
+    const [open, setOpen] = useState(''),
+        [vendorId, setVendorId] = useState(''),
+        [note, setNote] = useState(''),
+        [problem, setProblem] = useState(''),
+        [busy, setBusy] = useState(false);
+    const resolve = async (id: string, outcome: 'registered' | 'declined') => {
+        setProblem('');
+        if (note.trim().length < 10) return setProblem('Record the outcome (at least 10 characters).');
+        if (outcome === 'registered' && !vendorId) return setProblem('Choose the approved vendor that was registered.');
+        setBusy(true);
+        try {
+            await callBackend(`${API}/onboarding-requests/resolve`, { id, outcome, vendorId, note: note.trim() });
+            setOpen('');
+            setNote('');
+            setVendorId('');
+            reload();
+        } catch (e) {
+            setProblem(messageOf(e));
+        } finally {
+            setBusy(false);
+        }
+    };
+    if (loading && !data) return <Spinner />;
+    if (error) return <Alert tone='error'>{error}</Alert>;
+    const items = data?.items ?? [];
+    return (
+        <div className='h-[calc(100dvh-17rem)] min-h-[320px] space-y-2 overflow-y-auto overscroll-contain'>
+            <p className='text-xs text-muted'>Maintenance planners raise these when no approved vendor suits a work-order service. Register the supplier through Add vendor, have it approved, then link it here.</p>
+            {!items.length && <p className='rounded-xl border border-dashed border-line p-6 text-center text-sm text-muted'>No onboarding requests.</p>}
+            {items.map((r) => (
+                <section key={r.id} className='space-y-2 rounded-2xl border border-line bg-panel p-3'>
+                    <button type='button' className='flex w-full items-start justify-between gap-2 text-left' onClick={() => setOpen(open === r.id ? '' : r.id)} aria-expanded={open === r.id}>
+                        <span className='min-w-0'>
+                            <span className='block truncate font-medium text-ink'>{r.suggestedName}</span>
+                            <span className='block truncate text-xs text-muted'>
+                                {r.supplierCategoryLabel} · {r.serviceDescription} · {r.woCode}
+                            </span>
+                        </span>
+                        <Badge tone={r.status === 'open' ? 'warn' : r.status === 'registered' ? 'brand' : 'muted'}>{r.status}</Badge>
+                    </button>
+                    {open === r.id && (
+                        <div className='space-y-2 text-sm'>
+                            <p className='break-words text-soft'>{r.reason}</p>
+                            <p className='text-xs text-muted'>
+                                {r.suggestedContact ? r.suggestedContact + ' · ' : ''}requested by {r.requestedByName} on {fmtDate(r.requestedAt)}
+                                {r.siteName ? ' · ' + r.siteName : ''}
+                            </p>
+                            {r.status === 'open' ? (
+                                <>
+                                    <SelectField id={'onb-v-' + r.id} label='Approved vendor registered for this request' value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
+                                        <option value=''>Choose</option>
+                                        {approved.map((v) => (
+                                            <option key={v.id} value={v.id}>
+                                                {v.id} · {v.legalName}
+                                            </option>
+                                        ))}
+                                    </SelectField>
+                                    <Field id={'onb-n-' + r.id} label='Outcome note' value={note} maxLength={600} onChange={(e) => setNote(e.target.value)} />
+                                    {problem && <Alert tone='error'>{problem}</Alert>}
+                                    <div className='flex flex-wrap gap-2'>
+                                        <Button busy={busy} onClick={() => void resolve(r.id, 'registered')}>Link approved vendor</Button>
+                                        <Button variant='secondary' busy={busy} onClick={() => void resolve(r.id, 'declined')}>Decline</Button>
+                                    </div>
+                                </>
+                            ) : (
+                                <p className='text-xs text-muted'>{r.vendorId ? 'Vendor ' + r.vendorId + ' · ' : ''}{r.resolutionNote}</p>
+                            )}
+                        </div>
+                    )}
+                </section>
+            ))}
+        </div>
     );
 }
 

@@ -123,7 +123,7 @@ const AREAS: Record<string, string> = {
   CST: 'STD:Standard costing|ACT:Actual costing|OVH:Overheads|VAR:Variances|MRG:Margins',
   QLT: 'INS:Inspections|SPC:Specifications|NCR:Nonconformance|CAP:Corrective actions|COA:Certificates|REL:Quality release',
   MNT: 'WRQ:Work requests|WOR:Work orders|PMS:Preventive schedules|AMS:Autonomous maintenance|RCA:Root cause analysis|RISK:Risk and permits|BOM:Maintenance BOM|REL:Reliability'
-    + '|ASS:Work assessments:VW,ED,SB,AP,UP|TSK:Task library:VW,CR,ED,AP|MCD:Material candidates:VW,CR,SB,AP|SET:Maintenance setup and references:VW,ED,CG|WFL:Maintenance workflow configuration:VW,ED,AP',
+    + '|ASS:Work assessments:VW,ED,SB,AP,UP|TSK:Task library:VW,CR,ED,AP|MCD:Material candidates:VW,CR,SB,AP|SET:Maintenance setup and references:VW,ED,CG|WFL:Maintenance workflow configuration:VW,ED,AP|SRC:Maintenance sourcing (warehouse, catalogue, vendors):VW',
   AST: 'REG:Asset register|EQP:Equipment|ASM:Assemblies|DEP:Depreciation|TRF:Transfers|DSP:Disposals|CAP:Capitalisation|TAG:Tagging'
     + '|DIC:Asset dictionary:VW,IM,ED|ACT:Assembly activities:VW,ED',
   PRC: [
@@ -138,6 +138,7 @@ const AREAS: Record<string, string> = {
     'MCH:Invoice matching:VW,MT,AP,HD,RL',
     'VEN:Vendors:VW,CR,ED,SB,AP,RJ,RT,SU,RA,OV,DL',
     'VEV:Vendor performance and SRM:VW,CR,SB,AP,RP',
+    'VON:Supplier onboarding requests:VW,ED',
     'CTR:Contracts and SLAs:VW,CR,ED,SB,AP,RR,TR',
     'FWA:Framework agreements:VW,CR,SB,AP,CL',
     'CAT:Material and service catalogue:VW,CR,ED,SB,AP,RJ,EX,DA',

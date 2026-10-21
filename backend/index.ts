@@ -150,6 +150,7 @@ import { shortcutRoutes } from './shortcuts';
 import { maintenanceRoutes } from './maintenance';
 import { maintenanceOperationRoutes } from './maintenanceOperations';
 import {maintenanceMaterialCandidateRoutes} from './maintenanceMaterialCandidates';
+import { maintenanceSourcingRoutes } from './maintenanceSourcing';
 import { warehouseRoutes } from './warehouse';
 import { maintenanceReferenceRoutes } from './maintenanceReferences';
 import { utilityRoutes } from './astUtilities';
@@ -1622,6 +1623,7 @@ export const handler = router(recordWiredRoutes({
     ...maintenanceRoutes,
     ...maintenanceOperationRoutes,
     ...maintenanceMaterialCandidateRoutes,
+    ...maintenanceSourcingRoutes,
     ...warehouseRoutes,
     ...maintenanceReferenceRoutes,
     ...utilityRoutes,
