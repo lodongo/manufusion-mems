@@ -49,6 +49,8 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
   const [settingsNotice, setSettingsNotice] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [reviewing, setReviewing] = useState('');
+  const [revisionSource,setRevisionSource]=useState('');
+  const [revisionReason,setRevisionReason]=useState('');
   const [reviewReason,setReviewReason]=useState('');
   const [documentSearch, setDocumentSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -84,6 +86,14 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
       reload();
     }catch(error){setCreateError(error instanceof Error?error.message:'Could not submit for review.');}
     finally{setReviewing('');}
+  };
+  const revise=async()=>{if(!revisionSource||revisionReason.trim().length<12)return;
+    setBusy(true);setNotice('');setCreateError('');
+    try{await callBackend('/api/org/drkms/documents/revise',{documentId:revisionSource,reason:revisionReason.trim()});
+      setRevisionSource('');setRevisionReason('');
+      setNotice('New revision draft registered. Existing effective version remains available until independent verification and approved replacement publication.');reload();
+    }catch(e){setCreateError(e instanceof Error?e.message:'Unable to start revision.')}
+    finally{setBusy(false)}
   };
   const create = async () => {
     if (busy || title.trim().length < 3 || !scopeNodeId) return;
@@ -181,6 +191,16 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
       </div>
       {notice && <p role='status' className='mt-3 text-sm text-green-300'>{notice}</p>}
       {createError && <p role='alert' className='mt-3 text-sm text-red-300'>{createError}</p>}
+    </Card>}
+    {mode==='register'&&<Card>
+      <h2 className='mb-2 font-semibold text-white'>Create a controlled revision</h2>
+      <p className='mb-3 text-xs text-slate-400'>The existing effective document stays published until its successor passes fresh review, file security checks and CoA approval.</p>
+      <select aria-label='Document to revise' value={revisionSource} onChange={e=>setRevisionSource(e.target.value)} className='min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
+        <option value=''>Select an effective document</option>
+        {(data?.documents??[]).filter(d=>d.status==='effective').map(d=><option key={d.documentId} value={d.documentId}>{d.title} · rev {d.revision}</option>)}
+      </select>
+      <textarea aria-label='Revision reason' value={revisionReason} onChange={e=>setRevisionReason(e.target.value)} rows={2} placeholder='Reason for the change (minimum 12 characters)' className='mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
+      <button type='button' disabled={busy||!revisionSource||revisionReason.trim().length<12} onClick={()=>void revise()} className='mt-2 min-h-11 rounded-lg border border-blue-500 px-4 text-sm font-medium text-blue-200 disabled:opacity-50'>Create revision draft</button>
     </Card>}
     {(mode==='register'||mode==='engineering') && <DocumentSourceStaging documents={data?.documents ?? []} />}
     {mode==='engineering' && <EngineeringDocumentLinks documents={data?.documents ?? []} />}
