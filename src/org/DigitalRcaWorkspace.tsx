@@ -5,7 +5,7 @@ import {Card} from '../admin/kit';
 type Master={code:string;label:string;active?:boolean};
 type MasterResponse={masters:Record<string,Master[]>};
 type Dmaic={currentPhase:string;completedPhases:string[];phases:Record<string,Record<string,unknown>>};
-type Workspace={documentId:string;title:string;rcaMethodCode:string;rcaDmaic:Dmaic};
+type Workspace={documentId:string;title:string;rcaMethodCode:string;frameworkCode:string;analyzeSteps:string[];rcaDmaic:Dmaic};
 const PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'];
 const FIELDS:Record<string,[string,string][]> = {
  DEFINE:[['problem','Defined problem and desired outcome'],['impact','Impact and business significance'],['scope','Investigation scope and 5W1H description']],
@@ -13,24 +13,6 @@ const FIELDS:Record<string,[string,string][]> = {
  ANALYZE:[['causalAnalysis','Causal reasoning: how the failure occurred'],['validatedCauses','Validated causes, competing hypotheses and evidence references']],
  IMPROVE:[['correctiveActions','Corrective / preventive actions with due dates'],['actionOwners','Accountable owners, safeguards and implementation evidence']],
  CONTROL:[['effectivenessCriteria','Effectiveness verification and recurrence criteria'],['monitoringPlan','Monitoring plan, intervals, triggers and responsible positions']]
-};
-const EXTRA:Record<string,string[]>={
- '5WHY':['WHY-1','WHY-2','WHY-3','WHY-4','WHY-5'],
- 'FTA':['TOP-EVENT','CAUSAL-BRANCH','BASIC-EVENT'],
- 'FMEA':['FAILURE-MODE','EFFECT','CAUSE','DETECTION-CONTROL'],
- 'PARETO':['DATASET','RANKED-CAUSES','VITAL-FEW'],
- '8D':['TEAM','CONTAINMENT','ROOT-CAUSE','CORRECTIVE-VERIFICATION'],
- 'A3':['BACKGROUND','CURRENT-STATE','TARGET','COUNTERMEASURES'],
- 'CAUSAL':['EVENTS','CONDITIONS','ROOT-CAUSES'],
- 'DMAIC':['BASELINE','HYPOTHESIS','STATISTICAL-TEST'],
- 'KT':['IS-IS-NOT','DISTINCTIONS','CHANGES','POSSIBLE-CAUSES'],
- 'BOWTIE':['TOP-EVENT','THREATS','PREVENTIVE-BARRIERS','CONSEQUENCES','RECOVERY-BARRIERS'],
- 'CHANGE':['BASELINE','CHANGES','DIFFERENCES'],
- 'EVENT':['EVENT-SEQUENCE','CAUSAL-FACTORS','BARRIERS'],
- 'TRIPOD':['IMMEDIATE-CAUSES','PRECONDITIONS','LATENT-FAILURES'],
- 'APOLLO':['EFFECT','CAUSAL-PATHS','EVIDENCE'],
- 'BARRIER':['REQUIRED-BARRIERS','FAILED-BARRIERS','GAPS'],
- 'C&E':['INPUT-FACTORS','OUTPUT-EFFECTS','RELATIONSHIPS']
 };
 export default function DigitalRcaWorkspace({documents}:{documents:Array<{documentId:string;title:string;status:string;subtypeCode?:string}>}){
  const [selected,setSelected]=useState(''),[workspace,setWorkspace]=useState<Workspace|null>(null);
@@ -56,7 +38,8 @@ export default function DigitalRcaWorkspace({documents}:{documents:Array<{docume
  };
  const phase=workspace?.rcaDmaic?.currentPhase??'DEFINE';
  const method=workspace?.rcaMethodCode??'5WHY';
- const prompts=method==='ISH'?(master?.masters.rca5m1wFactors??[]).map(m=>[m.code,m.label]):(EXTRA[method]??['OBSERVATIONS','HYPOTHESES','VERIFICATION']).map(k=>[k,k.replaceAll('-',' ')]);
+ const prompts=(workspace?.analyzeSteps??[]).map(k=>[k,
+   method==='ISH'?(master?.masters.rca5m1wFactors??[]).find(x=>x.code===k)?.label??k:k.replaceAll('-',' ')]);
  const candidates=documents.filter(d=>d.subtypeCode==='RCA'&&d.status==='draft');
  return <Card><div className='space-y-3'>
    <h2 className='font-semibold text-white'>Continue DMAIC investigation</h2>
@@ -69,7 +52,7 @@ export default function DigitalRcaWorkspace({documents}:{documents:Array<{docume
    </label>
    {workspace&&<div className='space-y-3'>
     <div className='flex flex-wrap gap-2'>{PHASES.map(p=><span key={p} className={`rounded-full border px-2 py-1 text-xs ${p===phase?'border-blue-400 text-blue-300':workspace.rcaDmaic.completedPhases?.includes(p)?'border-green-700 text-green-400':'border-slate-700 text-slate-400'}`}>{p}</span>)}</div>
-    <p className='text-sm text-white'>Analysis method: {master?.masters.rcaMethods?.find(m=>m.code===method)?.label??method}</p>
+    <p className='text-sm text-white'>Analysis method: {master?.masters.rcaMethods?.find(m=>m.code===method)?.label??method} · Reference: {master?.masters.rcaFrameworks?.find(m=>m.code===workspace.frameworkCode)?.label??workspace.frameworkCode}</p>
     {(FIELDS[phase]??[]).map(([key,label])=><label key={key} className='block text-sm text-slate-200'>{label}
       <textarea rows={3} value={fields[key]??''} onChange={e=>setFields(v=>({...v,[key]:e.target.value}))} className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
     </label>)}
