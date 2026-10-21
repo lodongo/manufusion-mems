@@ -9,9 +9,10 @@ import {validateRcaAnalysis,type RcaAiAnalysis} from './drkmsRcaAi';
 import {DOC_DEFAULT_LISTS} from './docDefaults';
 import {RCA_METHODS,RCA_METADATA_LISTS} from './docRcaDefaults';
 import {analyzeSteps,validMethodAnalysis} from './docRcaMethods';
+import {findingsValid,checksValid} from './docRcaEvidence';
 const DMAIC_PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'] as const;
 const PHASE_FIELDS:Record<string,string[]>={
- DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses','methodAnalysis','causeFindings'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan']
+ DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses','methodAnalysis','causeFindings'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan','verificationResults']
 };
 const master=async(key:string)=>{
  const source=await getDoc(`module_workspaces/DOC/metadata/${key}`);
@@ -144,7 +145,16 @@ export const drkmsDigitalRoutes={
      if(!Array.isArray(rows)||!validMethodAnalysis(str(doc.data.rcaMethodCode),str(doc.data.frameworkCode),factors,rows as {key:string;text:string}[],true))
        throw new HttpError(400,'Complete every required step for the selected RCA method using evidence-based analysis.');
    }
-   if(advance && PHASE_FIELDS[phase].filter(key=>key!=='methodAnalysis').some(key=>typeof phaseData[key]!=='string'||String(phaseData[key]).trim().length<12))
+   if(advance&&(phase==='ANALYZE'||phase==='CONTROL')){
+     const evidence=await listDocs(`${docs(ctx.orgId,documentId)}/evidence`);
+     const registered=new Set(evidence.map(v=>v.id));
+     if(phase==='ANALYZE'&&(!findingsValid(phaseData.causeFindings,registered)||
+        !(phaseData.causeFindings as Array<{status:string}>).some(v=>v.status==='verified')))
+       throw new HttpError(400,'Analyze requires a verified cause and evidence-linked findings; hypotheses alone cannot complete this stage.');
+     if(phase==='CONTROL'&&!checksValid(phaseData.verificationResults,registered))
+       throw new HttpError(400,'Control requires passing effectiveness verification with registered evidence and reviewer details.');
+   }
+   if(advance && PHASE_FIELDS[phase].filter(key=>!['methodAnalysis','causeFindings','verificationResults'].includes(key)).some(key=>typeof phaseData[key]!=='string'||String(phaseData[key]).trim().length<12))
      throw new HttpError(400,'Complete every required phase field (at least 12 characters) before advancing.');
    const next=advance?DMAIC_PHASES[DMAIC_PHASES.indexOf(phase as typeof DMAIC_PHASES[number])+1]??'CONTROL':phase;
    const updated={currentPhase:next,completedPhases:advance?[...completed.filter(p=>p!==phase),phase]:completed,phases:{...existing,[phase]:phaseData}};
