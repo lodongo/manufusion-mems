@@ -1,11 +1,32 @@
 /** Controlled time-limited download of an immutable, effective DRKMS revision. */
 import {storage} from './platform/sdk';
-import {HttpError,getDoc,isObj,str,rateLimit} from './core';
+import {HttpError,getDoc,isObj,str,rateLimit,listDocs} from './core';
 import {orgRoute} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 const ID=/^[a-f0-9]{20}$/;
 const REV=/^[a-f0-9]{64}$/;
 export const drkmsReadRoutes={
+ 'POST /api/org/drkms/documents/revision-history':[
+  orgRoute('drkms.revision_history','ADM.document_registry',async ctx=>{
+   const documentId=str(ctx.body.documentId);
+   if(!ID.test(documentId))throw new HttpError(400,'Choose a valid document.');
+   const root=`organizations/${ctx.orgId}/drkms_documents/${documentId}`;
+   const doc=await getDoc(root);
+   if(!doc)throw new HttpError(404,'Document not found.');
+   const nodeId=isObj(doc.data.scope)?str(doc.data.scope.nodeId):'';
+   if(!nodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))
+    throw new HttpError(403,'Document is outside your authorized scope.');
+   if(!['effective','superseded','withdrawn','archived'].includes(str(doc.data.status)) &&
+     str(doc.data.createdBy)!==ctx.uid && ctx.role!=='org_super_admin')
+    throw new HttpError(403,'Unpublished revision history is author-restricted.');
+   const revisions=await listDocs(root+'/revisions');
+   return {documentId,currentStatus:str(doc.data.status),predecessorId:str(doc.data.supersedesDocumentId),
+    successorId:str(doc.data.supersededByDocumentId),revisions:revisions.filter(r=>r.data.immutable===true&&str(r.data.tenantId)===ctx.orgId
+     &&str(r.data.documentId)===documentId).map(r=>({revisionId:r.id,revision:str(r.data.revision),
+      status:str(r.data.status),publishedAt:str(r.data.publishedAt),verifiedBy:str(r.data.verifiedBy),
+      publishedBy:str(r.data.publishedBy),fingerprint:str(r.data.documentFingerprint)}))};
+  }),
+ ],
  'POST /api/org/drkms/documents/effective-files':[
   orgRoute('drkms.effective_files','ADM.document_registry',async ctx=>{
    const documentId=str(ctx.body.documentId);
