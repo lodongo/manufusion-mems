@@ -5,7 +5,7 @@ import {Card} from '../admin/kit';
 type Master={code:string;label:string;active?:boolean};
 type MasterResponse={masters:Record<string,Master[]>};
 type Dmaic={currentPhase:string;completedPhases:string[];phases:Record<string,Record<string,unknown>>};
-type Workspace={documentId:string;title:string;rcaMethodCode:string;frameworkCode:string;analyzeSteps:string[];rcaDmaic:Dmaic;evidence:Array<{id:string;type:string;description:string;verificationStatus:string}>};
+type Workspace={documentId:string;title:string;rcaMethodCode:string;frameworkCode:string;trigger?:{typeCode:string;recordId:string;verificationStatus:string};analyzeSteps:string[];rcaDmaic:Dmaic;evidence:Array<{id:string;type:string;description:string;verificationStatus:string}>};
 const PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'];
 const FIELDS:Record<string,[string,string][]> = {
  DEFINE:[['problem','Defined problem and desired outcome'],['impact','Impact and business significance'],['scope','Investigation scope and 5W1H description']],
@@ -72,6 +72,7 @@ export default function DigitalRcaWorkspace({documents}:{documents:Array<{docume
    </label>
    {workspace&&<div className='space-y-3'>
     <div className='flex flex-wrap gap-2'>{PHASES.map(p=><span key={p} className={`rounded-full border px-2 py-1 text-xs ${p===phase?'border-blue-400 text-blue-300':workspace.rcaDmaic.completedPhases?.includes(p)?'border-green-700 text-green-400':'border-slate-700 text-slate-400'}`}>{p}</span>)}</div>
+    {workspace.trigger&&<p className='rounded-lg border border-slate-700 p-3 text-xs text-slate-200'>Origin: {workspace.trigger.typeCode} · {workspace.trigger.recordId} · {workspace.trigger.verificationStatus==='verified'?'Source record verified':'Source connector pending verification'}</p>}
     <p className='text-sm text-white'>Analysis method: {master?.masters.rcaMethods?.find(m=>m.code===method)?.label??method} · Reference: {master?.masters.rcaFrameworks?.find(m=>m.code===workspace.frameworkCode)?.label??workspace.frameworkCode}</p>
     {(FIELDS[phase]??[]).map(([key,label])=><label key={key} className='block text-sm text-slate-200'>{label}
       <textarea rows={3} value={fields[key]??''} onChange={e=>setFields(v=>({...v,[key]:e.target.value}))} className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white'/>
