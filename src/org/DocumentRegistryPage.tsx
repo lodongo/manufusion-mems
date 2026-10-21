@@ -6,7 +6,6 @@ import DocumentSourceStaging from './DocumentSourceStaging';
 import EngineeringDocumentLinks from './EngineeringDocumentLinks';
 import SheqSdsRegistry from './SheqSdsRegistry';
 import DigitalRcaDraft from './DigitalRcaDraft';
-import RcaDmaicWorkspace from './RcaDmaicWorkspace';
 import DigitalRcaWorkspace from './DigitalRcaWorkspace';
 import EffectiveDocumentFiles from './EffectiveDocumentFiles';
 
@@ -174,7 +173,6 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
     {mode==='engineering' && <EngineeringDocumentLinks documents={data?.documents ?? []} />}
     {mode==='sds' && <SheqSdsRegistry canConfigure={canConfigure} />}
     {mode==='rca' && <><DigitalRcaDraft locations={setup.data?.locations ?? []} onCreated={reload} /><DigitalRcaWorkspace documents={data?.documents ?? []}/></>}
-    {mode==='rca' && <RcaDmaicWorkspace documents={data?.documents ?? []} onSaved={reload} />}
     {(mode==='register'||mode==='review') && <Card>
       <div className='mb-3 flex items-center justify-between gap-2'>
         <h2 className='font-semibold text-white'>{mode==='review'?'Document review queue':'Registered documents'}</h2>
