@@ -1,6 +1,7 @@
 import {useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Card,useLoad} from '../admin/kit';
+import {jsPDF} from 'jspdf';
 type Field={code:string;label:string;type:string;required:boolean;options?:string[];section?:string;visibleWhen?:{fieldCode:string;equals:string|boolean}};
 type Template={id:string;title:string;status:string;fields:Field[];revision:string};
 type RecordRow={id:string;templateId:string;values:Record<string,string|number|boolean|null>;status:string;operationalReference?:{module:string;recordId:string}};
@@ -25,6 +26,31 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
   try{const result=await callBackend<{record:RecordRow}>('/api/org/drkms/forms/records/save',{templateId:selected,recordId,values,operationalReference:referenceModule&&referenceId.trim()?{module:referenceModule,recordId:referenceId.trim()}:null});
    setRecordId(result.record.id);records.reload();setNotice('Unapproved draft record saved.');
   }catch(e){setNotice(e instanceof Error?e.message:'Could not save form.')}finally{setBusy(false)}
+ };
+ const exportDraft=()=>{if(!template)return;
+  const pdf=new jsPDF({unit:'mm',format:'a4'}),w=pdf.internal.pageSize.getWidth();
+  pdf.setFont('helvetica','bold');pdf.setFontSize(15);pdf.text(template.title,15,22);
+  pdf.setFontSize(11);pdf.setTextColor(160,40,40);
+  pdf.text('DRAFT - UNAPPROVED / NOT VALID FOR OPERATIONAL RELEASE',15,32);
+  pdf.setFont('helvetica','normal');pdf.setTextColor(35,45,60);pdf.setFontSize(9);
+  pdf.text('Template revision '+template.revision+'   Draft record '+(recordId||'not saved'),15,41);
+  let y=53,previousSection='';
+  for(const f of template.fields){
+   if(f.visibleWhen&&values[f.visibleWhen.fieldCode]!==f.visibleWhen.equals)continue;
+   if(f.section!==previousSection){
+    if(y>255){pdf.addPage();y=22;}
+    pdf.setFont('helvetica','bold');pdf.setFontSize(11);pdf.text(f.section??'General',15,y);y+=8;previousSection=f.section??'General';
+   }
+   pdf.setFont('helvetica','normal');pdf.setFontSize(9);
+   const val=values[f.code],line=f.label+': '+(val===null||val===undefined||val===''?'(not completed)':String(val));
+   for(const part of pdf.splitTextToSize(line,w-30) as string[]){
+    if(y>275){pdf.addPage();y=22;}
+    pdf.text(part,15,y);y+=5;
+   }
+   y+=3;
+  }
+  if(referenceModule&&referenceId){if(y>269){pdf.addPage();y=22;}pdf.text('Unverified source reference: '+referenceModule+' / '+referenceId,15,y);}
+  pdf.save('MEMS-DRAFT-'+(recordId||'form')+'.pdf');
  };
  const entry=(f:Field)=>{const value=values[f.code];const set=(v:string|number|boolean|null)=>setValues(old=>({...old,[f.code]:v}));
   if(f.type==='yes_no')return <select aria-label={f.label} value={value===true?'true':value===false?'false':''} onChange={e=>set(e.target.value===''?null:e.target.value==='true')} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'><option value=''>Select</option><option value='true'>Yes</option><option value='false'>No</option></select>;
@@ -74,7 +100,7 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
     </select>
     {referenceModule&&<input aria-label='Source record identifier' value={referenceId} onChange={e=>setReferenceId(e.target.value)} placeholder='Existing event or asset record ID' className='min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/>}
    </div>}
-   {template&&<button type='button' disabled={busy} onClick={()=>void save()} className='min-h-11 rounded-lg bg-blue-600 px-3 text-sm text-white'>Save unapproved draft</button>}
+   {template&&<div className='flex flex-wrap gap-2'><button type='button' disabled={busy} onClick={()=>void save()} className='min-h-11 rounded-lg bg-blue-600 px-3 text-sm text-white'>Save unapproved draft</button><button type='button' onClick={exportDraft} className='min-h-11 rounded-lg border border-amber-600 px-3 text-sm text-amber-200'>Export draft PDF</button></div>}
    <h3 className='mt-4 text-sm font-medium text-white'>My draft records</h3>
    {records.data?.records.map(r=><button key={r.id} type='button' onClick={()=>{setSelected(r.templateId);setValues(r.values);setRecordId(r.id);setReferenceModule(r.operationalReference?.module??'');setReferenceId(r.operationalReference?.recordId??'')}} className='mt-2 block min-h-10 w-full rounded-lg border border-slate-700 px-3 text-left text-sm text-slate-200'>{r.id} · Draft (unapproved)</button>)}
   </Card>
