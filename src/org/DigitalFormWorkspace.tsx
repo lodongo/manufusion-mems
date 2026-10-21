@@ -4,7 +4,9 @@ import {Card,useLoad} from '../admin/kit';
 import {jsPDF} from 'jspdf';
 import FormEvidenceLinks from './FormEvidenceLinks';
 type Field={code:string;label:string;type:string;required:boolean;options?:string[];section?:string;visibleWhen?:{fieldCode:string;equals:string|boolean}};
-type Template={id:string;title:string;status:string;fields:Field[];revision:string;scopeNodeId?:string;signOffPlan?:Array<{signerUid:string;label:string}>;successorId?:string;previousTemplateId?:string};
+type SignPosition={page:number;xPercent:number;yPercent:number;widthPercent:number};
+type FormSigner={signerUid:string;label:string;position:SignPosition};
+type Template={id:string;title:string;status:string;fields:Field[];revision:string;scopeNodeId?:string;signOffPlan?:FormSigner[];successorId?:string;previousTemplateId?:string};
 type FormEvidence={documentId:string;revisionId:string;fileId:string;name:string;sha256:string};
 type RecordRow={id:string;templateId:string;values:Record<string,string|number|boolean|null>;status:string;operationalReference?:{module:string;recordId:string};attachments?:FormEvidence[]};
 const choices=['text','long_text','number','date','yes_no','select'];
@@ -15,7 +17,7 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
  const [selected,setSelected]=useState(''),[recordId,setRecordId]=useState(''),[values,setValues]=useState<Record<string,string|number|boolean|null>>({});
  const [busy,setBusy]=useState(false),[notice,setNotice]=useState('');
  const [referenceModule,setReferenceModule]=useState(''),[referenceId,setReferenceId]=useState('');
- const [signers,setSigners]=useState<Array<{signerUid:string;label:string}>>([]);
+ const [signers,setSigners]=useState<FormSigner[]>([]);
  const [revisionSource,setRevisionSource]=useState(''),[revisionReason,setRevisionReason]=useState('');
  const add=()=>setFields(v=>[...v,{code:'field_'+(v.length+1),label:'New field',type:'text',required:false}]);
  const patch=(i:number,part:Partial<Field>)=>setFields(v=>v.map((f,j)=>i===j?{...f,...part}:f));
@@ -67,6 +69,9 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
   if(evidence.length){if(y>260){pdf.addPage();y=22;}pdf.setFont('helvetica','bold');pdf.text('Controlled source evidence (linked)',15,y);y+=7;
    pdf.setFont('helvetica','normal');for(const item of evidence){for(const part of pdf.splitTextToSize(item.name+' · '+item.sha256,w-30) as string[]){if(y>274){pdf.addPage();y=22;}pdf.text(part,15,y);y+=5;}}
   }
+  if((template.signOffPlan??[]).length){if(y>245){pdf.addPage();y=22;}pdf.setFont('helvetica','bold');pdf.text('Planned sign-off spaces - NOT SIGNED',15,y);y+=8;
+   pdf.setFont('helvetica','normal');for(const signer of template.signOffPlan??[]){const line=signer.label+' - '+signer.signerUid+' (page '+(signer.position?.page??'?')+')';if(y>275){pdf.addPage();y=22;}pdf.text(line,15,y);y+=7;}
+  }
   pdf.save('MEMS-DRAFT-'+(recordId||'form')+'.pdf');
  };
  const entry=(f:Field)=>{const value=values[f.code];const set=(v:string|number|boolean|null)=>setValues(old=>({...old,[f.code]:v}));
@@ -79,7 +84,7 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
   <Card><h2 className='font-semibold text-white'>Draft form template designer</h2><p className='my-2 text-xs text-amber-300'>Draft-only foundation. These forms cannot be published or represented as approved signed records.</p>
    <label className='mb-2 block text-sm text-slate-200'>Continue an existing template revision (optional)
     <select value={revisionSource} onChange={e=>{const t=templates.data?.templates.find(x=>x.id===e.target.value);
-     setRevisionSource(e.target.value);if(t){setTitle(t.title);setLocation(t.scopeNodeId??'');setFields(t.fields);setSigners(t.signOffPlan??[]);} }} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
+     setRevisionSource(e.target.value);if(t){setTitle(t.title);setLocation(t.scopeNodeId??'');setFields(t.fields);setSigners((t.signOffPlan??[]).map(s=>({...s,position:s.position??{page:1,xPercent:55,yPercent:75,widthPercent:40}})));} }} className='mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-white'>
      <option value=''>Create a new template</option>{templates.data?.templates.filter(t=>t.status==='draft'&&!t.successorId).map(t=><option key={t.id} value={t.id}>{t.title} · Revision {t.revision}</option>)}
     </select>
    </label>
@@ -104,9 +109,15 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
     {signers.map((s,i)=><div key={i} className='grid grid-cols-1 gap-2 rounded-lg border border-slate-700 p-2'>
      <label className='text-xs text-slate-200'>MEMS user ID<input value={s.signerUid} onChange={e=>setSigners(v=>v.map((row,j)=>j===i?{...row,signerUid:e.target.value}:row))} className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/></label>
      <label className='text-xs text-slate-200'>Authority role<input value={s.label} onChange={e=>setSigners(v=>v.map((row,j)=>j===i?{...row,label:e.target.value}:row))} className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/></label>
+     <p className='text-xs font-medium text-slate-300'>Signature space on the printed form</p>
+     <div className='grid grid-cols-2 gap-2'>
+      {([['Page','page',1,10000],['Horizontal %','xPercent',0,90],['Vertical %','yPercent',0,90],['Width %','widthPercent',10,100-s.position.xPercent]] as const).map(([label,key,min,max])=><label key={key} className='text-xs text-slate-200'>{label}
+       <input type='number' min={min} max={max} value={s.position[key]} onChange={e=>setSigners(v=>v.map((row,j)=>j===i?{...row,position:{...row.position,[key]:Number(e.target.value)}}:row))} className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/>
+      </label>)}
+     </div>
      <button type='button' onClick={()=>setSigners(v=>v.filter((_,j)=>i!==j))} className='text-left text-xs text-red-300'>Remove signatory</button>
     </div>)}
-    <button type='button' disabled={signers.length>=12} onClick={()=>setSigners(v=>[...v,{signerUid:'',label:'Approved by'}])} className='min-h-10 rounded-lg border border-slate-600 px-3 text-xs text-white'>Add signatory</button>
+    <button type='button' disabled={signers.length>=12} onClick={()=>setSigners(v=>[...v,{signerUid:'',label:'Approved by',position:{page:1,xPercent:55,yPercent:75,widthPercent:40}}])} className='min-h-10 rounded-lg border border-slate-600 px-3 text-xs text-white'>Add signatory</button>
    </div>
    <button type='button' onClick={add} disabled={fields.length>=60} className='min-h-10 rounded-lg border border-slate-600 px-3 text-sm text-white'>Add field</button>
    <button type='button' onClick={()=>void create()} disabled={busy||title.trim().length<3||!location||!fields.length||(!!revisionSource&&revisionReason.trim().length<12)} className='ml-2 min-h-10 rounded-lg bg-blue-600 px-3 text-sm text-white disabled:opacity-50'>{revisionSource?'Create next draft revision':'Save draft template'}</button>
