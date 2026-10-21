@@ -81,6 +81,20 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
   if((template.signOffPlan??[]).length){if(y>245){pdf.addPage();y=22;}pdf.setFont('helvetica','bold');pdf.text('Planned sign-off spaces - NOT SIGNED',15,y);y+=8;
    pdf.setFont('helvetica','normal');for(const signer of template.signOffPlan??[]){const line=signer.label+' - '+signer.signerUid+' (page '+(signer.position?.page??'?')+')';if(y>275){pdf.addPage();y=22;}pdf.text(line,15,y);y+=7;}
   }
+  for(const signer of template.signOffPlan??[]){
+   const pos=signer.position;
+   if(!pos||!Number.isInteger(pos.page)||pos.page<1||pos.page>20)continue;
+   while(pdf.getNumberOfPages()<pos.page)pdf.addPage();
+   pdf.setPage(pos.page);
+   const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight();
+   const left=pageWidth*pos.xPercent/100,top=pageHeight*pos.yPercent/100;
+   const width=Math.min(pageWidth-left,pageWidth*pos.widthPercent/100);
+   if(top+22>pageHeight-5||width<20)continue;
+   pdf.setDrawColor(115,115,115);pdf.rect(left,top,width,22);
+   pdf.setTextColor(125,35,35);pdf.setFontSize(7);
+   const lines=pdf.splitTextToSize('NOT SIGNED / DRAFT - '+signer.label,Math.max(20,width-6)) as string[];
+   pdf.text(lines.slice(0,2),left+3,top+7);
+  }
   for(let page=1;page<=pdf.getNumberOfPages();page++){
    pdf.setPage(page);pdf.setFont('helvetica','bold');pdf.setFontSize(8);pdf.setTextColor(180,35,35);
    pdf.text('UNAPPROVED DRAFT - NOT A VALID CONTROLLED RECORD',15,12);
@@ -131,7 +145,7 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
      <label className='text-xs text-slate-200'>Authority role<input value={s.label} onChange={e=>setSigners(v=>v.map((row,j)=>j===i?{...row,label:e.target.value}:row))} className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/></label>
      <p className='text-xs font-medium text-slate-300'>Signature space on the printed form</p>
      <div className='grid grid-cols-2 gap-2'>
-      {([['Page','page',1,10000],['Horizontal %','xPercent',0,90],['Vertical %','yPercent',0,90],['Width %','widthPercent',10,100-s.position.xPercent]] as const).map(([label,key,min,max])=><label key={key} className='text-xs text-slate-200'>{label}
+      {([['Page','page',1,20],['Horizontal %','xPercent',0,90],['Vertical %','yPercent',0,90],['Width %','widthPercent',10,100-s.position.xPercent]] as const).map(([label,key,min,max])=><label key={key} className='text-xs text-slate-200'>{label}
        <input type='number' min={min} max={max} value={s.position[key]} onChange={e=>setSigners(v=>v.map((row,j)=>j===i?{...row,position:{...row.position,[key]:Number(e.target.value)}}:row))} className='mt-1 min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 text-white'/>
       </label>)}
      </div>
