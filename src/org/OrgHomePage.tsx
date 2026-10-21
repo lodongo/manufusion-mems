@@ -393,7 +393,7 @@ export default function OrgHomePage({
         const featureIndex = sub === 'feature' ? Number(route.split('/')[4]) : undefined;
         content = <ModuleWorkspace menu={activeModule} selectedFeature={featureIndex !== undefined && Number.isInteger(featureIndex) && featureIndex >= 0 && featureIndex < activeModule.capabilities.length ? featureIndex : undefined} />;
     } else if (activeMenu?.module.code === 'DOC' && section === 'doc_my_signatures') content = <MyDocSignatures />;
-    } else if (activeMenu?.module.code === 'DOC' && section.startsWith('doc_')) {
+    else if (activeMenu?.module.code === 'DOC' && section.startsWith('doc_')) {
         const mode = section.slice(4);
         const supported = ['register','engineering','sds','rca','review','knowledge','forms','config'];
         if (supported.includes(mode)) {
