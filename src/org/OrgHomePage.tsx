@@ -58,6 +58,7 @@ import Quotations from './Quotations';
 import BuyerGroups from './BuyerGroups';
 import WarehouseOverview from './WarehouseOverview';
 import DocumentRegistryPage from './DocumentRegistryPage';
+import MyDocSignatures from './MyDocSignatures';
 import type { OrgContextData } from './types';
 
 type Module = OrgContextData['modules'][number];
@@ -69,6 +70,7 @@ const toHome = (path = '') => navigate(path ? `${ROUTE}/${path}` : ROUTE);
 
 const MODULE_LINKS: Record<string, LinkItem[]> = {
     DOC: [
+        {label:'My document signatures',path:'doc_my_signatures',everyone:true},
         {label:'DOC configuration',path:'doc_config',permission:'ADM.document_config'},
         {label:'Document register',path:'doc_register',permission:'ADM.document_registry'},
         {label:'Engineering & equipment library',path:'doc_engineering',permission:'ADM.document_registry'},
@@ -143,7 +145,7 @@ function canOpen(permissions: string[], link: LinkItem): boolean {
 
 function moduleMenus(data: OrgContextData, canAdmin: boolean): ModuleMenu[] {
     return data.modules
-        .filter((module) => module.code !== 'ADM' && (hasAny(data.permissions, module.code) || module.code === 'PRC' || (module.code === 'DOC' && hasAny(data.permissions,'ADM'))))
+        .filter((module) => module.code !== 'ADM' && (hasAny(data.permissions, module.code) || module.code === 'PRC' || (module.code === 'DOC')))
         .map((module) => {
             const links = (MODULE_LINKS[module.code] ?? []).filter((link) => canOpen(data.permissions, link));
             // GL-linked contracts are owned by their operational modules, while
@@ -390,6 +392,7 @@ export default function OrgHomePage({
     else if (section === 'module' && activeModule) {
         const featureIndex = sub === 'feature' ? Number(route.split('/')[4]) : undefined;
         content = <ModuleWorkspace menu={activeModule} selectedFeature={featureIndex !== undefined && Number.isInteger(featureIndex) && featureIndex >= 0 && featureIndex < activeModule.capabilities.length ? featureIndex : undefined} />;
+    } else if (activeMenu?.module.code === 'DOC' && section === 'doc_my_signatures') content = <MyDocSignatures />;
     } else if (activeMenu?.module.code === 'DOC' && section.startsWith('doc_')) {
         const mode = section.slice(4);
         const supported = ['register','engineering','sds','rca','review','knowledge','forms','config'];
