@@ -51,7 +51,7 @@ export function validateFormValues(fields:FormField[],raw:unknown,allowIncomplet
  const values=raw as Record<string,unknown>,out:Record<string,string|number|boolean|null>={};
  if(Object.keys(values).some(k=>!fields.some(f=>f.code===k)))throw new HttpError(400,'Unexpected form field.');
  for(const f of fields){
-  if(!formFieldVisible(f,values)){out[f.code]=null;continue;}
+  if(!formFieldVisible(f,out)){out[f.code]=null;continue;}
   const v=values[f.code];
   if(v===null||v===undefined||v===''){if(f.required&&!allowIncomplete)throw new HttpError(400,'Required field: '+f.label);out[f.code]=null;continue;}
   if(f.type==='number'){if(typeof v!=='number'||!Number.isFinite(v))throw new HttpError(400,'Invalid number: '+f.label);out[f.code]=v;}
@@ -166,13 +166,15 @@ export const drkmsFormRoutes={
  })],
  'POST /api/org/drkms/forms/signatures/inbox':[orgRoute('drkms.forms.signature_inbox',null,async ctx=>{
   const rows=await listDocs(`organizations/${ctx.orgId}/form_signature_inbox/${ctx.uid}/assignments`);
-  const items=[];
+  const items=[],signerScope=await scopeOf(ctx);
   for(const row of rows.slice(0,250)){
    const recordId=str(row.data.recordId),slotId=str(row.data.slotId);
    if(!ID.test(recordId)||!ID.test(slotId))continue;
    const [record,slot]=await Promise.all([getDoc(recordPath(ctx.orgId)+'/'+recordId),
     getDoc(recordPath(ctx.orgId)+'/'+recordId+'/signatures/'+slotId)]);
    if(!record||!slot||str(slot.data.signerUid)!==ctx.uid||str(slot.data.recordId)!==recordId)continue;
+   const nodeId=str(record.data.scopeNodeId);
+   if(!nodeId||(signerScope!=='all'&&!signerScope.has(nodeId)))continue;
    items.push({recordId,slotId,templateTitle:str(record.data.templateTitle),status:str(record.data.status),
     signerStatus:str(slot.data.status),label:str(slot.data.label),signedAt:str(slot.data.signedAt),
     recordFingerprint:str(slot.data.recordFingerprint),values:record.data.values,
