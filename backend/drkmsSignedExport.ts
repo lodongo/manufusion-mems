@@ -10,7 +10,7 @@ const ID=/^[a-f0-9]{20}$/;
 const REV=/^[a-f0-9]{64}$/;
 const root=(o:string,d:string)=>`organizations/${o}/drkms_documents/${d}`;
 const verifiedUrl=(doc:string,proof:string)=>{
- const origin=(process.env.MEMS_PUBLIC_APP_URL??'').replace(/\/$/,'');
+ const origin=(process.env.MEMS_PUBLIC_APP_URL??process.env.MEMS_PUBLIC_URL??'').replace(/\/$/,'');
  if(!/^https:\/\/[-a-zA-Z0-9.]+(?::[0-9]{2,5})?$/.test(origin))
   throw new HttpError(503,'Configure a trusted MEMS_PUBLIC_APP_URL before issuing signed originals.');
  return origin+'/#/verify/document/'+doc+'/'+proof;
