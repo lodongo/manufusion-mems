@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {transactionPayloadHash} from './unifiedApprovalProof';
 import {validPosition} from './drkmsSignatures';
 import {orgRoute} from './guards';
-import {orgUsers} from './org';
+import {orgUsers,record as recordAudit} from './org';
 import {canAt,nodePath,scopeOf} from './access';
 const ID=/^[a-f0-9]{20}$/;
 const types=new Set(['text','long_text','number','date','yes_no','select']);
@@ -211,7 +211,26 @@ export const drkmsFormRoutes={
    status:'signed',signedAt,signedBy:ctx.uid,proof,authMethod:'firebase_authenticated_session'},
    precondition:{updateTime:slot.updateTime}}])))
    throw new HttpError(409,'This signing assignment changed; refresh.');
+  await recordAudit(ctx,'drkms.form.signed',recordId,slotId);
   return {recordId,slotId,proof,signedAt,approved:false,published:false};
+ })],
+ 'POST /api/org/drkms/forms/records/history':[orgRoute('drkms.forms.record_history',null,async ctx=>{
+  const id=str(ctx.body.recordId);
+  if(!ID.test(id))throw new HttpError(400,'Choose a valid form record.');
+  const path=recordPath(ctx.orgId)+'/'+id,form=await getDoc(path);
+  if(!form)throw new HttpError(404,'Record not found.');
+  const nodeId=str(form.data.scopeNodeId),scope=await scopeOf(ctx);
+  if(!nodeId||(str(form.data.createdBy)!==ctx.uid&&
+    !canAt(ctx,'ADM.document_review',await nodePath(ctx.orgId,nodeId),scope)))
+   throw new HttpError(403,'History is restricted to the author and authorized reviewers.');
+  if(scope!=='all'&&!scope.has(nodeId)&&!canAt(ctx,'ADM.document_review',await nodePath(ctx.orgId,nodeId),scope))
+   throw new HttpError(403,'Record is outside your current scope.');
+  const [reviewRows,signatureRows]=await Promise.all([listDocs(path+'/review_history'),listDocs(path+'/signatures')]);
+  return {recordId:id,status:str(form.data.status),unapproved:form.data.unapproved!==false,
+   reviews:reviewRows.map(r=>({reviewId:r.id,decision:str(r.data.decision),reviewerUid:str(r.data.reviewerUid),
+     reviewedAt:str(r.data.reviewedAt),reason:str(r.data.reason),fingerprint:str(r.data.fingerprint)})),
+   signatures:signatureRows.map(s=>({slotId:s.id,signerUid:str(s.data.signerUid),label:str(s.data.label),
+     status:str(s.data.status),signedAt:str(s.data.signedAt),fingerprint:str(s.data.recordFingerprint)}))};
  })],
  'POST /api/org/drkms/forms/records/evidence/link':[orgRoute('drkms.forms.evidence_link','ADM.document_registry',async ctx=>{
   const id=str(ctx.body.recordId),documentId=str(ctx.body.documentId),fileId=str(ctx.body.fileId);
@@ -297,6 +316,7 @@ export const drkmsFormRoutes={
   }
   if(!(await commitChecked(writes)))
     throw new HttpError(409,'Form changed during review. Refresh.');
+  await recordAudit(ctx,'drkms.form.review',id,decision);
   return {record:{id,...next},approved:false,published:false};
  })],
  'POST /api/org/drkms/forms/records/submit':[
