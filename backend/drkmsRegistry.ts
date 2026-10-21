@@ -288,7 +288,7 @@ export const drkmsRoutes = {
                 status:'draft',revision:String(revNumber+1).padStart(2,'0'),
                 supersedesDocumentId:predecessorId,supersedesRevisionId:str(predecessor.data.effectiveRevisionId),
                 revisionReason:reason,createdBy:ctx.uid,ownerUid:ctx.uid,createdAt:now,updatedAt:now,
-                verified:false,verifiedBy:'',effectiveRevisionId:'',hasSourceEvidence:false};
+                verified:false,verifiedBy:'',effectiveRevisionId:'',hasSourceEvidence:false,signatureRequired:true};
             if(!(await writeDoc(`${base(ctx.orgId)}/${id}`,document,{exists:false})))
                 throw new HttpError(409,'Could not reserve new revision.');
             await record(ctx,'drkms.document.revision_started',id,predecessorId);
@@ -315,7 +315,7 @@ export const drkmsRoutes = {
                 status: 'draft', representation: 'native', digitalMaturity: 'D0',
                 revision: '00', ownerUid: ctx.uid, createdBy: ctx.uid,
                 createdAt: now, updatedAt: now, securityClass: 'internal',
-                effectiveRevisionId: '', verified: false,
+                effectiveRevisionId: '', verified: false, signatureRequired:true,
             };
             const created = await writeDoc(`${base(ctx.orgId)}/${id}`, document, { exists: false });
             if (!created) throw new HttpError(409, 'Identifier conflict, please try again.');
