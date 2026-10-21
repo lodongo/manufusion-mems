@@ -6,6 +6,7 @@ import DocumentSourceStaging from './DocumentSourceStaging';
 import EngineeringDocumentLinks from './EngineeringDocumentLinks';
 import SheqSdsRegistry from './SheqSdsRegistry';
 import DigitalRcaDraft from './DigitalRcaDraft';
+import DigitalFormWorkspace from './DigitalFormWorkspace';
 import DigitalRcaWorkspace from './DigitalRcaWorkspace';
 import EffectiveDocumentFiles from './EffectiveDocumentFiles';
 import DocumentRevisionHistory from './DocumentRevisionHistory';
@@ -257,7 +258,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
       </div>
     </Card>}
     {mode==='knowledge' && <Card><p className='text-sm text-slate-200'>Open Asset Management and select an equipment item to access its scoped technical dossier, maintenance evidence and troubleshooting search. Full manual indexing and AI diagnosis are not yet enabled.</p></Card>}
-    {mode==='forms' && <Card><p className='text-sm text-slate-200'>Controlled digital form schemas and OCR contracts are in development. Executable forms and OCR processing are not yet released.</p></Card>}
+    {mode==='forms' && <DigitalFormWorkspace locations={setup.data?.locations ?? []}/> }
     <p className='text-xs text-slate-400'>Restricted to dedicated document permissions for the foundation stage. Files are available only after controlled verification and approved publication.</p>
   </div>;
 }
