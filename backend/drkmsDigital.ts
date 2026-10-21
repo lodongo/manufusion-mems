@@ -28,7 +28,7 @@ export const drkmsDigitalRoutes={
    const lists=await Promise.all(keys.map(async key=>{
      const stored=await getDoc(`module_workspaces/DOC/metadata/${key}`);
      const def=fallback.find(x=>x.key===key);
-     const items=Array.isArray(stored?.data.items)?stored.data.items:def?.items??[];
+     const items=(Array.isArray(stored?.data.items)?stored.data.items:def?.items??[]) as unknown[];
      return {key,items:(items as readonly unknown[]).filter((v):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v)).filter(v=>v.active!==false).map(v=>({code:str(v.code),label:str(v.label),description:str(v.description)}))};
    }));
    return {lists};
