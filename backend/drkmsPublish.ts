@@ -63,6 +63,8 @@ export const drkmsPublishRoutes={
    if(fingerprint!==contentFingerprint)throw new HttpError(409,'Document source changed after approval was requested.');
    // A creator-assigned signing schedule is a mandatory release condition.
    const slots=await listDocs(path+'/signature_slots');
+   if(doc.data.signatureRequired===true && slots.length===0)
+    throw new HttpError(409,'Document creator must assign at least one required authority sign-off before publication.');
    if(slots.some(slot=>str(slot.data.status)!=='signed'||str(slot.data.contentHash)!==fingerprint
       ||str(slot.data.signedBy)!==str(slot.data.signerUid)||!/^[a-f0-9]{64}$/.test(str(slot.data.proof))))
     throw new HttpError(409,'All assigned authorities must sign the exact verified document before publication.');
