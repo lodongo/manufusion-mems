@@ -52,7 +52,7 @@ export const drkmsDigitalRoutes={
    const doc=await getDoc(docs(ctx.orgId,id));
    if(!doc||str(doc.data.subtypeCode)!=='RCA'||str(doc.data.createdBy)!==ctx.uid)throw new HttpError(403,'Only the investigator may edit this RCA.');
    const factors=(await master('rca5m1wFactors')).filter(x=>x.active!==false).map(x=>x.code);
-   return {documentId:id,title:doc.data.title,rcaMethodCode:doc.data.rcaMethodCode,frameworkCode:doc.data.frameworkCode,
+   return {documentId:id,title:doc.data.title,rcaMethodCode:doc.data.rcaMethodCode,frameworkCode:doc.data.frameworkCode,trigger:doc.data.trigger,
       analyzeSteps:analyzeSteps(str(doc.data.rcaMethodCode),str(doc.data.frameworkCode),factors),rcaDmaic:doc.data.rcaDmaic,
       evidence:(await listDocs(`${docs(ctx.orgId,id)}/evidence`)).map(e=>({id:e.id,type:e.data.type,description:e.data.description,reference:e.data.reference,verificationStatus:e.data.verificationStatus}))};
   }),
