@@ -25,6 +25,7 @@
     "react-dom": "^19.0.0",
     "jspdf": "^2.5.2",
     "qrcode": "^1.5.4",
+    "pdf-lib": "^1.17.1",
     "jspdf-autotable": "^3.8.4",
     "exceljs": "^4.4.0",
     "@google-cloud/storage": "^7.18.0",
