@@ -36,3 +36,9 @@ test('calendar dates reject impossible days and accept leap day',()=>{
  assert.equal(validIsoDate('2026-13-01'),false);
  assert.equal(validIsoDate('2026-10-21'),true);
 });
+
+test('strict submission rejects an incomplete required answer',()=>{
+ const fields=validateFormFields([{code:'inspection_result',label:'Inspection result',type:'select',required:true,options:['Pass','Fail']}]);
+ assert.throws(()=>validateFormValues(fields,{},false));
+ assert.deepEqual(validateFormValues(fields,{},true),{inspection_result:null});
+});
