@@ -2,6 +2,17 @@
 
 Every material and external service belongs to a task of a work assessment, and later of a work order. The assessment estimates what is needed. The work-order planner confirms reservations, procurement demands and allocations. Procurement happens only in the existing Procurement Requirements process.
 
+## Assessment screens
+
+- **Menus, not side columns.** The work request page has a top menu: Request, Tasks, Summary. The work order uses a task menu above the task in place of the side column.
+- **Asset, assembly and equipment** are adopted from the work assessment and shown read-only on each task. The assessment no longer asks for a related or duplicate request.
+- **Adding a task.** A task is added with only its name and description (**Save task**), then opened to configure Task, Spares, Services, People & tools and Safety.
+- **Task references.** The server gives each task a stable reference, `ASSMTASK_1`, `ASSMTASK_2` and so on. The internal task identifier stays unique, so the reusable task library is unaffected.
+- **Spares.** Choose the warehouse first, then **Add spare** as many times as needed. Each spare comes from one of three sources, and every path asks for the quantity:
+  - **Warehouse:** stock of that warehouse.
+  - **Material catalogue:** category, then subcategory, then family, then the catalogue entry, then its attributes, with the mandatory ones required. The person then checks for registered materials of the same category, subcategory and family. Exact specification matches and close matches (attribute score and the differing values) are suggested. A new catalogue material cannot be added when a registered material has exactly the same specification.
+  - **Free text:** the warehouse and catalogue are searched first, matches are offered, and the person must confirm that none is suitable.
+
 ## Materials: the selection hierarchy
 
 The server enforces the order on every assessment save (`enforceSourcingRules`). The finder in the assessment Spares step follows the same order:
@@ -23,7 +34,9 @@ Conditions for free text:
 The server also refuses these shortcuts:
 
 - A `material` spare whose material has usable stock. The spare must come from the warehouse so the stock is reserved.
-- A `catalog` spare whose catalogue entry is already registered as a material.
+- A `catalog` spare with a mandatory attribute missing.
+- A `catalog` spare whose specification (catalogue entry plus every attribute value) already exists as a registered material.
+- A receiving warehouse the person cannot reach.
 
 Spares saved earlier and left unchanged are not re-validated, so legacy assessments stay editable.
 
@@ -95,6 +108,8 @@ Each read of the work order recalculates readiness from live records. Readiness 
 |---|---|---|
 | `org/mnt/sourcing/materials` | `MNT.view` | Assessment, planning or review rights at the record location |
 | `org/mnt/sourcing/vendors` | `MNT.view` | Same as above |
+| `org/mnt/sourcing/catalogue` | `MNT.view` | Same as above |
+| `org/mnt/sourcing/similar` | `MNT.view` | Same as above |
 | `org/procurement/vendors/onboarding-requests` | `PRC.vendors.manage` | Scoped to locations |
 | `org/procurement/vendors/onboarding-requests/resolve` | `PRC.vendors.manage` | Scoped to locations |
 

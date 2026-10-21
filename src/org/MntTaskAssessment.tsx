@@ -2,15 +2,15 @@ import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert} from '../components/ui';
 import {Button,Card,useLoad} from '../admin/kit';
-import {Attachments,ServiceEditor,SpareFinder,SOURCE_LABEL,freeTextProblems,newService,serviceProblems,type ServiceHierarchy} from './mntSourcing';
+import {AddSpare,Attachments,ServiceEditor,SOURCE_LABEL,freeTextProblems,newService,serviceProblems,type ServiceHierarchy} from './mntSourcing';
 
-type Spare={id:string;source:'warehouse'|'material'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;photoPath?:string;specifications?:string;attributes?:Record<string,string>;function?:string;categoryCode?:string;subcategoryCode?:string;requiredDate?:string;attachments?:string[];searchReceiptId?:string;noMatchConfirmed?:boolean;noMatchReason?:string};
+type Spare={id:string;source:'warehouse'|'material'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;photoPath?:string;specifications?:string;attributes?:Record<string,string>;function?:string;categoryCode?:string;subcategoryCode?:string;familyCode?:string;requiredDate?:string;attachments?:string[];searchReceiptId?:string;noMatchConfirmed?:boolean;noMatchReason?:string};
 type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;instructions?:string;certifications?:string;personnel?:number;durationHours?:number;executionDate?:string;supplierCategory?:string;attachments?:string[]};
 type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;energyCode?:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;exposedPersonnel?:string;responsiblePerson?:string;precautions?:string};
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
 type SafetyOption={code:string;label:string;category:string;subcategory:string};
 type Options={serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
-export type TaskAssessment={id:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
+export type TaskAssessment={id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
 const id=()=>Math.random().toString(36).slice(2,10);
 const newRisk=():Risk=>({hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}});
 const seed=():TaskAssessment=>({id:'task_'+id(),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[newRisk()],templateStatus:'pending_validation',internalRoles:[],externalResource:undefined,lotoRequired:false,liveEquipment:false,energySourceCodes:[],permitCodes:[]});
@@ -18,7 +18,7 @@ const input='mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 p-3 tex
 const label='block text-sm text-slate-300';
 const roles=[['operator','Operator'],['technician','Technician'],['specialist','Specialist'],['engineer','Engineer']] as const;
 const externals=[['OEM','OEM'],['OCM','OCM'],['verified_supplier','Verified external supplier'],['other','Other external resource']] as const;
-const newSpare=():Spare=>({id:'sp_'+id(),source:'description',materialId:'',warehouseId:'',catalogCode:'',description:'',qty:1,uom:'EA',unitCost:null});
+const newSpare=():Spare=>({id:'sp_'+id(),source:'warehouse',materialId:'',warehouseId:'',catalogCode:'',description:'',qty:1,uom:'EA',unitCost:null});
 export function WarehouseSparePicker({onSelect}:{onSelect:(item:{materialId:string;warehouseId:string;materialNumber:string;name:string;uom:string;available:number|null;stockVerified:boolean;warehouseName:string})=>void}){
  const {data:warehouseData,error:warehouseError}=useLoad(()=>callBackend<{warehouses:Array<{id:string;name:string}>}>('/api/org/mnt/warehouse-spares/search',{mode:'warehouses'}));
  const [warehouse,setWarehouse]=useState(''),[query,setQuery]=useState(''),[items,setItems]=useState<Array<{materialId:string;warehouseId:string;materialNumber:string;name:string;uom:string;available:number|null;stockVerified:boolean;warehouseName:string}>>([]),[busy,setBusy]=useState(false);
@@ -86,13 +86,13 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
   </section>)}
  </Card>;
 }
-export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange}:{code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
+export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context}:{context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial);
  const [dirty,setDirty]=useState(false);
  const options=useLoad(()=>callBackend<Options>('/api/org/mnt/assessment/options',{code}),[code]);
  const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
  const [current,setCurrent]=useState<number|null>(null),[step,setStep]=useState(0),[saving,setSaving]=useState(false),[message,setMessage]=useState(''),[photoUrls,setPhotoUrls]=useState<Record<string,string>>({});
- const [finder,setFinder]=useState(false),[openService,setOpenService]=useState<number|null>(null),[energySearch,setEnergySearch]=useState(''),[permitSearch,setPermitSearch]=useState('');
+ const [adding,setAdding]=useState(false),[draft,setDraft]=useState<{title:string;description:string}|null>(null),[spareWarehouse,setSpareWarehouse]=useState(''),[openService,setOpenService]=useState<number|null>(null),[energySearch,setEnergySearch]=useState(''),[permitSearch,setPermitSearch]=useState('');
  useEffect(()=>{onDirtyChange?.(dirty);return()=>onDirtyChange?.(false);},[dirty,onDirtyChange]);
  const task=tasks[current??0]||seed();
  const sections=['Task','Spares','Services','People & tools','Safety'];
@@ -123,11 +123,17 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    setDirty(false);setCurrent(null);setMessage('Assessment saved. Independent review is required before conversion.');onSaved();
   }catch(e){setMessage(e instanceof Error?e.message:'Assessment could not be saved.');}finally{setSaving(false);}
  };
- const openTask=(i:number)=>{setCurrent(i);setStep(0);setMessage('');setFinder(false);setOpenService(null);};
+ const openTask=(i:number)=>{setCurrent(i);setStep(0);setMessage('');setAdding(false);setOpenService(null);setSpareWarehouse(tasks[i]?.spares.find(sp=>sp.warehouseId)?.warehouseId||'');};
+ const warehouses=useLoad(()=>callBackend<{warehouses:Array<{id:string;name:string}>}>('/api/org/mnt/warehouse-spares/search',{mode:'warehouses'}),[]);
+ const nextCode=()=>'ASSMTASK_'+(Math.max(0,...tasks.map(t=>Number(/^ASSMTASK_(\d+)$/.exec(t.code||'')?.[1]||0)))+1);
+ const codeOf=(t:TaskAssessment,i:number)=>t.code||'ASSMTASK_'+(i+1);
+ // A new task starts with only its name and description; it is then opened to configure the five sections.
  const addTask=()=>{
-   if(!editable)return;
-   setTasks(old=>[...old,seed()]);
-   setDirty(true);openTask(tasks.length);
+   if(!editable||!draft)return;
+   const title=draft.title.trim(),description=draft.description.trim();
+   if(title.length<3||description.length<3){setMessage('Enter a task name and a description (at least 3 characters each).');return;}
+   setTasks(old=>[...old,{...seed(),code:nextCode(),title,description}]);
+   setDraft(null);setDirty(true);setMessage('Task added. Open it to add spares, services, people and safety, then save the assessment.');
  };
  if(current===null)return <div className='min-w-0 space-y-3'>
   <div className='flex min-w-0 flex-wrap items-start justify-between gap-2'>
@@ -135,16 +141,28 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     <h3 className='text-lg font-semibold text-white'>Tasks <span className='text-sm font-normal text-slate-400'>({tasks.length})</span></h3>
     <p className='mt-1 text-xs text-slate-400'>{editable?'Open any task to configure its spares, people, time, tools and safety.':'Open any task to inspect the saved assessment (read-only).'}</p>
    </div>
-   {editable&&<Button onClick={addTask} className='shrink-0'>+ Add Task</Button>}
+   {editable&&!draft&&<Button onClick={()=>{setDraft({title:'',description:''});setMessage('');}} className='shrink-0'>+ Add Task</Button>}
   </div>
-  {!tasks.length&&<div className='rounded-xl border border-dashed border-slate-600 bg-slate-900/40 px-4 py-8 text-center'>
+  {draft&&<div className='space-y-3 rounded-xl border border-emerald-700 bg-slate-900 p-3'>
+   <p className='text-sm font-semibold text-white'>New task · {nextCode()}</p>
+   <label className={label}>Task name *<input className={input} autoFocus maxLength={120} value={draft.title} onChange={e=>setDraft({...draft,title:e.target.value})}/></label>
+   <label className={label}>Description *<textarea className={input} rows={3} maxLength={300} value={draft.description} onChange={e=>setDraft({...draft,description:e.target.value})} placeholder='What work is required?'/></label>
+   <div className='flex gap-2'>
+    <Button disabled={draft.title.trim().length<3||draft.description.trim().length<3} onClick={addTask}>Save task</Button>
+    <Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button>
+   </div>
+   {library.data?.items.length?<details className='rounded-xl border border-slate-700 p-3'><summary className='text-sm text-slate-200'>Or reuse an approved assembly task</summary>
+    {library.data.items.map(x=><button type='button' key={x.id} className='mt-2 block w-full rounded-lg border border-slate-700 p-2 text-left text-sm' onClick={()=>{if(tasks.some(t=>t.id===x.id)){setMessage('Task already selected.');return;}setTasks(old=>[...old,{...x.task,id:x.id,code:nextCode(),templateStatus:'existing'}]);setDraft(null);setDirty(true);}}>{x.task.description}</button>)}
+   </details>:null}
+  </div>}
+  {!tasks.length&&!draft&&<div className='rounded-xl border border-dashed border-slate-600 bg-slate-900/40 px-4 py-8 text-center'>
    <p className='font-semibold text-white'>No tasks added yet</p>
    <p className='mt-1 text-sm text-slate-400'>{editable?'Use + Add Task to start the work assessment.':'The assessor has not saved any tasks yet.'}</p>
   </div>}
   <div className='space-y-2'>{tasks.map((t,i)=><button key={t.id} type='button' onClick={()=>openTask(i)}
    className='flex w-full min-w-0 items-start gap-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-left active:bg-slate-800'>
-    <span className='flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-xs font-bold text-white'>{i+1}</span>
     <span className='min-w-0 flex-1'>
+     <span className='block font-mono text-[11px] font-semibold tracking-wide text-emerald-300'>{codeOf(t,i)}</span>
      <strong className='block break-words text-sm text-white'>{t.title||t.description||'Untitled task'}</strong>
      {t.title&&t.description&&<span className='mt-1 block line-clamp-2 text-xs text-slate-400'>{t.description}</span>}
      <span className='mt-2 flex flex-wrap gap-1 text-[11px] text-slate-300'>
@@ -170,22 +188,24 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  </div>;
  return <Card className='min-w-0 space-y-4'>
    <button type='button' className='text-sm text-emerald-300 underline' onClick={()=>setCurrent(null)}>← All tasks</button>
-   <div><p className='text-xs font-semibold uppercase text-emerald-300'>{`Task ${current+1} of ${tasks.length}`}</p>
+   <div><p className='font-mono text-xs font-semibold text-emerald-300'>{codeOf(task,current)} · {`task ${current+1} of ${tasks.length}`}</p>
     <h3 className='mt-1 break-words text-lg font-semibold text-white'>{task.title||'Configure task'}</h3>
     <p className='text-xs text-slate-400'>Complete the five sections, then return to the task list and save the assessment.</p>
    </div>
    <div className='flex gap-1 overflow-x-auto pb-1 sm:grid sm:grid-cols-5'>{sections.map((name,i)=><button type='button' key={name} onClick={()=>setStep(i)} className={'min-h-[40px] shrink-0 rounded-lg px-3 py-2 text-xs '+(step===i?'bg-emerald-800 text-white':'bg-slate-800 text-slate-300')}>{name}</button>)}</div>
    {step===0&&<div className='space-y-3'>
-     {library.data?.items.length?<details className='rounded-xl border border-slate-700 p-3'><summary className='text-sm text-slate-200'>Reuse an approved assembly task</summary>
-      {library.data.items.map(x=><button type='button' key={x.id} className='mt-2 block w-full rounded-lg border border-slate-700 p-2 text-left text-sm' onClick={()=>{if(tasks.some(t=>t.id===x.id)){setMessage('Task already selected.');return;}setTasks(old=>[...old,{...x.task,id:x.id,templateStatus:'existing'}]);setDirty(true);openTask(tasks.length);}}>{x.task.description}</button>)}
-     </details>:null}
      <label className={label}>Task name<input className={input} value={task.title||''} onChange={e=>patch({title:e.target.value})}/></label>
      <label className={label}>Describe the work<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='What is required?'/></label>
-     <label className={label}>Assembly<select data-native-select='true' className={input} value={task.assemblyId||''} onChange={e=>patch({assemblyId:e.target.value,equipmentId:options.data?.equipmentId})}><option value=''>Use the request assembly</option>{options.data?.equipmentOptions.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+     {context&&<dl className='grid gap-2 rounded-xl border border-slate-700 p-3 text-sm sm:grid-cols-3'>
+      {([['Asset',context.asset],['Assembly',context.assembly],['Equipment',context.equipment]] as const).map(([k,v])=><div key={k} className='min-w-0'><dt className='text-xs text-slate-400'>{k}</dt><dd className='break-words text-white'>{v||'—'}</dd></div>)}
+      <p className='text-xs text-slate-400 sm:col-span-3'>Adopted from the work assessment.</p>
+     </dl>}
     </div>}
    {step===1&&<div className='space-y-3'>
      <p className='font-semibold text-white'>Spares for this task</p>
-     <p className='text-xs text-slate-400'>Search first. Stock in a warehouse is reserved; registered materials and catalogue items go to procurement; a new material can only be described when nothing suitable exists.</p>
+     <label className={label}>Warehouse (select first) *<select data-native-select='true' className={input} value={spareWarehouse} onChange={e=>{setSpareWarehouse(e.target.value);setAdding(false);}}>
+      <option value=''>Choose the warehouse</option>{warehouses.data?.warehouses.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
+     <p className='text-xs text-slate-400'>Then add as many spares as needed, each from the warehouse, the material catalogue or free text, with its quantity.</p>
      {task.spares.map((sp,i)=>{const problems=sp.source==='description'?freeTextProblems(sp):[];return <div key={sp.id} className='min-w-0 space-y-2 rounded-xl border border-slate-700 p-3'>
        <div className='flex items-start justify-between gap-2'>
         <p className='min-w-0 text-xs text-slate-400'>{i+1}. {SOURCE_LABEL[sp.source]||sp.source}</p>
@@ -199,7 +219,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
          <label className={label}>Subcategory (if known)<input className={input} value={sp.subcategoryCode||''} onChange={e=>patchSpare(i,{subcategoryCode:e.target.value})}/></label>
         </div>
         <label className={label}>Detailed specifications and attributes<textarea className={input} rows={3} value={sp.specifications||''} placeholder='Dimensions, material, rating, part or drawing number…' onChange={e=>patchSpare(i,{specifications:e.target.value})}/></label>
-       </>:<p className='break-words text-sm font-medium text-white'>{sp.description}<span className='block text-xs font-normal text-slate-400'>{sp.source==='catalog'?'Catalogue '+sp.catalogCode+' · material creation and approval before purchase':sp.source==='material'?'Approved material · purchased for '+(sp.warehouseId||'a warehouse chosen by the planner'):'Warehouse '+sp.warehouseId+' · reserved by the planner'}</span></p>}
+       </>:<p className='break-words text-sm font-medium text-white'>{sp.description}{sp.source==='catalog'&&sp.attributes&&Object.keys(sp.attributes).length>0&&<span className='block text-xs font-normal text-slate-400'>{Object.entries(sp.attributes).map(([k,v])=>k+': '+v).join(' · ')}</span>}<span className='block text-xs font-normal text-slate-400'>{(()=>{const wh=warehouses.data?.warehouses.find(w=>w.id===sp.warehouseId)?.name||sp.warehouseId;return sp.source==='catalog'?'Catalogue '+sp.catalogCode+' · new material, approved before purchase'+(wh?' · for '+wh:''):sp.source==='material'?'Registered material · purchased for '+(wh||'a warehouse the planner chooses'):(wh||'Warehouse')+' · reserved by the planner';})()}</span></p>}
        <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
         <label className={label}>Quantity<input type='number' inputMode='decimal' min='0.001' step='any' className={input} value={sp.qty} onChange={e=>patchSpare(i,{qty:Number(e.target.value)})}/></label>
         <label className={label}>Unit<input className={input} value={sp.uom} readOnly={sp.source==='warehouse'||sp.source==='material'} onChange={e=>patchSpare(i,{uom:e.target.value})}/></label>
@@ -209,7 +229,8 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
        <Attachments code={code} files={sp.attachments||[]} urls={urls} onChange={(files,u)=>{patchSpare(i,{attachments:files});setPhotoUrls(old=>({...old,...u}));}}/>
        {problems.length>0&&<p className='text-xs text-amber-300'>Still needed: {problems.join(', ')}.</p>}
      </div>;})}
-     {finder?<SpareFinder code={code} onClose={()=>setFinder(false)} onAdd={x=>{addSpare({...newSpare(),...x});setFinder(false);}}/>:<Button onClick={()=>setFinder(true)}>+ Find a spare</Button>}
+     {adding&&spareWarehouse?<AddSpare code={code} warehouseId={spareWarehouse} warehouseName={warehouses.data?.warehouses.find(w=>w.id===spareWarehouse)?.name||spareWarehouse} onClose={()=>setAdding(false)} onAdd={x=>{addSpare({...newSpare(),...x});setAdding(false);setMessage('Spare added. Add more from the warehouse, the catalogue or free text.');}}/>
+      :<Button disabled={!spareWarehouse} onClick={()=>{setAdding(true);setMessage('');}}>+ Add spare</Button>}
     </div>}
    {step===2&&<div className='space-y-3'>
      <p className='font-semibold text-white'>External services for this task</p>
@@ -283,7 +304,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
      <Button variant='secondary' disabled={step===4} onClick={()=>setStep(i=>Math.min(4,i+1))}>Next section →</Button>
    </div>
    <div className='flex flex-col gap-2 sm:flex-row'>
-    <Button className='flex-1' onClick={()=>{
+    <Button className='sm:flex-1' onClick={()=>{
       if(!(task.title||task.description).trim()||task.description.trim().length<3){setStep(0);setMessage('Enter the task name and a work description before returning.');return;}
       const problems=taskProblems(task);
       if(problems.length){setMessage('Complete before returning: '+problems.slice(0,4).join('; ')+(problems.length>4?' …':''));return;}
