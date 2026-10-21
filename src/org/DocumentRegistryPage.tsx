@@ -7,7 +7,6 @@ import EngineeringDocumentLinks from './EngineeringDocumentLinks';
 import SheqSdsRegistry from './SheqSdsRegistry';
 import DigitalRcaDraft from './DigitalRcaDraft';
 import DigitalRcaWorkspace from './DigitalRcaWorkspace';
-import RcaDmaicWorkspace from './RcaDmaicWorkspace';
 import EffectiveDocumentFiles from './EffectiveDocumentFiles';
 
 type ScopeNode = { id: string; name: string; level: string; parentId: string };
