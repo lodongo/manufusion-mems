@@ -62,7 +62,20 @@ export const drkmsFormRoutes={
  'POST /api/org/drkms/forms/templates/create':[orgRoute('drkms.forms.templates_create','ADM.document_registry',async ctx=>{
   const title=str(ctx.body.title).trim(),scopeNodeId=str(ctx.body.scopeNodeId),fields=validateFormFields(ctx.body.fields);
   if(title.length<3||title.length>180||!scopeNodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,scopeNodeId),await scopeOf(ctx)))throw new HttpError(403,'Invalid title or organizational access.');
-  const id=randomId(10),date=nowIso(),template={id,title,scopeNodeId,fields,revision:'00',status:'draft',createdBy:ctx.uid,createdAt:date,updatedAt:date};
+  const signers=ctx.body.signers;
+  if(signers!==undefined&&(!Array.isArray(signers)||signers.length>12))throw new HttpError(400,'Invalid sign-off plan.');
+  const signOffPlan:Array<{signerUid:string;label:string}>=[];
+  for(const raw of Array.isArray(signers)?signers:[]){
+   if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new HttpError(400,'Invalid signatory.');
+   const row=raw as Record<string,unknown>,signerUid=str(row.signerUid),label=str(row.label).trim();
+   if(!/^[a-zA-Z0-9_-]{6,128}$/.test(signerUid)||label.length<3||label.length>80||signOffPlan.some(s=>s.signerUid===signerUid))
+    throw new HttpError(400,'Duplicate or invalid signatory.');
+   const user=await getDoc('users/'+signerUid);
+   if(!user||str(user.data.orgId)!==ctx.orgId||str(user.data.status)==='disabled')
+    throw new HttpError(403,'Signatories must be active MEMS organization users.');
+   signOffPlan.push({signerUid,label});
+  }
+  const id=randomId(10),date=nowIso(),template={id,title,scopeNodeId,fields,signOffPlan,revision:'00',status:'draft',createdBy:ctx.uid,createdAt:date,updatedAt:date};
   if(!(await writeDoc(templatePath(ctx.orgId)+'/'+id,template,{exists:false})))throw new HttpError(409,'Template conflict.');
   return {template};
  })],
