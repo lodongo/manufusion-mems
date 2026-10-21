@@ -37,6 +37,11 @@ export function validateFormFields(raw:unknown):FormField[]{
 export function formFieldVisible(f:FormField,values:Record<string,unknown>):boolean{
  return !f.visibleWhen||values[f.visibleWhen.fieldCode]===f.visibleWhen.equals;
 }
+export function validIsoDate(value:string):boolean{
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
+ const d=new Date(value+'T00:00:00.000Z');
+ return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value;
+}
 export function validateFormValues(fields:FormField[],raw:unknown,allowIncomplete=false){
  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new HttpError(400,'Form values are required.');
  const values=raw as Record<string,unknown>,out:Record<string,string|number|boolean|null>={};
@@ -47,7 +52,7 @@ export function validateFormValues(fields:FormField[],raw:unknown,allowIncomplet
   if(v===null||v===undefined||v===''){if(f.required&&!allowIncomplete)throw new HttpError(400,'Required field: '+f.label);out[f.code]=null;continue;}
   if(f.type==='number'){if(typeof v!=='number'||!Number.isFinite(v))throw new HttpError(400,'Invalid number: '+f.label);out[f.code]=v;}
   else if(f.type==='yes_no'){if(typeof v!=='boolean')throw new HttpError(400,'Invalid yes/no: '+f.label);out[f.code]=v;}
-  else {if(typeof v!=='string'||v.length>(f.type==='long_text'?5000:500)|| (f.type==='date'&&!/^\d{4}-\d{2}-\d{2}$/.test(v))||(f.type==='select'&&!f.options?.includes(v)))throw new HttpError(400,'Invalid value: '+f.label);out[f.code]=v;}
+  else {if(typeof v!=='string'||v.length>(f.type==='long_text'?5000:500)|| (f.type==='date'&&!validIsoDate(v))||(f.type==='select'&&!f.options?.includes(v)))throw new HttpError(400,'Invalid value: '+f.label);out[f.code]=v;}
  }
  return out;
 }
@@ -80,8 +85,13 @@ export const drkmsFormRoutes={
   return {template};
  })],
  'POST /api/org/drkms/forms/records/list':[orgRoute('drkms.forms.records_list','ADM.document_registry',async ctx=>{
-  const rows=await listDocs(recordPath(ctx.orgId));
-  return {records:rows.filter(r=>str(r.data.createdBy)===ctx.uid).map(r=>({id:r.id,...r.data}))};
+  const rows=await listDocs(recordPath(ctx.orgId)),scope=await scopeOf(ctx),visible=[];
+  for(const r of rows){
+   if(str(r.data.createdBy)!==ctx.uid)continue;
+   const nodeId=str(r.data.scopeNodeId);
+   if(nodeId&&canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),scope))visible.push({id:r.id,...r.data});
+  }
+  return {records:visible};
  })],
  'POST /api/org/drkms/forms/records/save':[orgRoute('drkms.forms.records_save','ADM.document_registry',async ctx=>{
   const templateId=str(ctx.body.templateId),recordId=str(ctx.body.recordId);
@@ -91,6 +101,7 @@ export const drkmsFormRoutes={
   const nodeId=str(template.data.scopeNodeId);
   if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))throw new HttpError(403,'Form out of scope.');
   const fields=validateFormFields(template.data.fields),values=validateFormValues(fields,ctx.body.values,true);
+  if(str(template.data.status)!=='draft')throw new HttpError(409,'Template is not editable.');
   const existing=recordId?await getDoc(recordPath(ctx.orgId)+'/'+recordId):null;
   if(recordId&&(!existing||str(existing.data.createdBy)!==ctx.uid||str(existing.data.status)!=='draft'||str(existing.data.templateId)!==templateId))throw new HttpError(403,'Draft record is not editable.');
   const operationalReference=ctx.body.operationalReference;
