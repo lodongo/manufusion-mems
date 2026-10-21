@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateFormFields,validateFormValues,formFieldVisible} from './drkmsForms';
+import {validateFormFields,validateFormValues,formFieldVisible,validIsoDate} from './drkmsForms';
 const fields=validateFormFields([{code:'description',label:'Observation',type:'text',required:true},{code:'safe',label:'Safe condition',type:'yes_no',required:true},{code:'result',label:'Decision',type:'select',required:true,options:['Pass','Fail']}]);
 test('form schema enforces codified unique fields',()=>{
  assert.equal(fields.length,3);
@@ -28,4 +28,11 @@ test('conditional required fields apply only when visible and partial drafts are
   {code:'child',label:'Child',type:'text',required:true,visibleWhen:{fieldCode:'parent',equals:true}},
   {code:'parent',label:'Parent',type:'yes_no',required:false}
  ]));
+});
+
+test('calendar dates reject impossible days and accept leap day',()=>{
+ assert.equal(validIsoDate('2024-02-29'),true);
+ assert.equal(validIsoDate('2025-02-29'),false);
+ assert.equal(validIsoDate('2026-13-01'),false);
+ assert.equal(validIsoDate('2026-10-21'),true);
 });
