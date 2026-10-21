@@ -119,6 +119,26 @@ export const drkmsFormRoutes={
   if(!(await writeDoc(templatePath(ctx.orgId)+'/'+id,template,{exists:false})))throw new HttpError(409,'Template conflict.');
   return {template};
  })],
+ 'POST /api/org/drkms/forms/templates/retire-draft':[orgRoute('drkms.forms.templates_retire_draft','ADM.document_registry',async ctx=>{
+  const id=str(ctx.body.templateId),reason=str(ctx.body.reason).trim();
+  if(!ID.test(id)||reason.length<12||reason.length>2000)
+   throw new HttpError(400,'A valid template and documented retirement justification are required.');
+  const path=templatePath(ctx.orgId)+'/'+id,template=await getDoc(path);
+  if(!template||str(template.data.status)!=='draft'||str(template.data.createdBy)!==ctx.uid)
+   throw new HttpError(403,'Only the creator may retire an unpublished draft template.');
+  const nodeId=str(template.data.scopeNodeId);
+  if(!nodeId||!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))
+   throw new HttpError(403,'Template is outside your authorized organizational scope.');
+  const records=await listDocs(recordPath(ctx.orgId));
+  if(records.some(r=>str(r.data.templateId)===id))
+   throw new HttpError(409,'This template has records. Retain its revision history and do not retire it.');
+  const now=nowIso();
+  if(!(await writeDoc(path,{...template.data,status:'retired_draft',retiredAt:now,retiredBy:ctx.uid,
+    retirementReason:reason,updatedAt:now},{updateTime:template.updateTime})))
+   throw new HttpError(409,'Template changed during retirement.');
+  await recordAudit(ctx,'drkms.form.template_retired',id,reason);
+  return {templateId:id,status:'retired_draft',published:false};
+ })],
  'POST /api/org/drkms/forms/templates/revise':[orgRoute('drkms.forms.templates_revise','ADM.document_registry',async ctx=>{
   const sourceId=str(ctx.body.sourceTemplateId),reason=str(ctx.body.reason).trim(),title=str(ctx.body.title).trim();
   if(!ID.test(sourceId)||reason.length<12||reason.length>2000||title.length<3||title.length>180)
