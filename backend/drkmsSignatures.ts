@@ -8,7 +8,7 @@ import {record} from './org';
 const ID=/^[a-f0-9]{20}$/;
 const root=(o:string,d:string)=>`organizations/${o}/drkms_documents/${d}`;
 const slots=(o:string,d:string)=>root(o,d)+'/signature_slots';
-function validPosition(v:unknown){if(!v||typeof v!=='object'||Array.isArray(v))return false;
+export function validPosition(v:unknown){if(!v||typeof v!=='object'||Array.isArray(v))return false;
  const p=v as Record<string,unknown>;
  return ['page','xPercent','yPercent','widthPercent'].every(k=>typeof p[k]==='number'&&Number.isFinite(p[k]))
  &&Number(p.page)>=1&&Number.isInteger(p.page)&&Number(p.page)<=10000
