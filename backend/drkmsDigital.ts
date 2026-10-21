@@ -8,6 +8,7 @@ import {validateAiProposal,type AiProposal} from './drkmsKnowledgeContracts';
 import {validateRcaAnalysis,type RcaAiAnalysis} from './drkmsRcaAi';
 import {DOC_DEFAULT_LISTS} from './docDefaults';
 import {RCA_METHODS,RCA_METADATA_LISTS} from './docRcaDefaults';
+import {analyzeSteps,validMethodAnalysis} from './docRcaMethods';
 const DMAIC_PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'] as const;
 const PHASE_FIELDS:Record<string,string[]>={
  DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses','methodAnalysis'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan']
@@ -48,7 +49,9 @@ export const drkmsDigitalRoutes={
    if(!idOk(id))throw new HttpError(400,'Invalid RCA identifier.');
    const doc=await getDoc(docs(ctx.orgId,id));
    if(!doc||str(doc.data.subtypeCode)!=='RCA'||str(doc.data.createdBy)!==ctx.uid)throw new HttpError(403,'Only the investigator may edit this RCA.');
-   return {documentId:id,title:doc.data.title,rcaMethodCode:doc.data.rcaMethodCode,rcaDmaic:doc.data.rcaDmaic};
+   const factors=(await master('rca5m1wFactors')).filter(x=>x.active!==false).map(x=>x.code);
+   return {documentId:id,title:doc.data.title,rcaMethodCode:doc.data.rcaMethodCode,frameworkCode:doc.data.frameworkCode,
+      analyzeSteps:analyzeSteps(str(doc.data.rcaMethodCode),str(doc.data.frameworkCode),factors),rcaDmaic:doc.data.rcaDmaic};
   }),
  ],
 
@@ -109,21 +112,20 @@ export const drkmsDigitalRoutes={
      if(!Array.isArray(rows)||rows.length>40||rows.some(row=>!row||typeof row!=='object'||Array.isArray(row)
        ||typeof row.key!=='string'||row.key.length>40||typeof row.text!=='string'||row.text.length>2000))
        throw new HttpError(400,'Provide valid method-specific analysis entries.');
-     const keys=rows.map(row=>row.key as string);
-     if(new Set(keys).size!==keys.length)throw new HttpError(400,'Duplicate method analysis steps.');
-     const method=str(doc.data.rcaMethodCode);
-     if(method==='5WHY'&&keys.some(k=>!/^WHY-[1-9][0-9]?$/.test(k)))throw new HttpError(400,'Five Whys needs numbered Why steps.');
-     if(method==='ISH'){
-       const controlled=(await master('rca5m1wFactors')).filter(item=>item.active!==false).map(item=>item.code);
-       if(keys.some(k=>!controlled.includes(k)))throw new HttpError(400,'Fishbone entries must use enabled MEMS Admin 5M1W factor categories.');
-     }
+     const factors=(await master('rca5m1wFactors')).filter(item=>item.active!==false).map(item=>item.code);
+     if(!validMethodAnalysis(str(doc.data.rcaMethodCode),str(doc.data.frameworkCode),factors,rows,false))
+       throw new HttpError(400,'Analysis steps must match the RCA method and enabled MEMS Admin reference taxonomy.');
    }
    const existing=state.phases&&typeof state.phases==='object'?state.phases as Record<string,unknown>:{};
    const phaseData={...(existing[phase]&&typeof existing[phase]==='object'?existing[phase] as Record<string,unknown>:{}),...data};
    const completed=Array.isArray(state.completedPhases)?state.completedPhases.filter(v=>typeof v==='string') as string[]:[];
    const advance=ctx.body.complete===true;
-   if(advance&&phase==='ANALYZE'&&(!Array.isArray(phaseData.methodAnalysis)||phaseData.methodAnalysis.filter((r:unknown)=>!!r && typeof r==='object' && String((r as Record<string,unknown>).text??'').trim().length>=10).length<2))
-     throw new HttpError(400,'Record at least two substantive entries using the selected RCA method before advancing.');
+   if(advance&&phase==='ANALYZE'){
+     const factors=(await master('rca5m1wFactors')).filter(item=>item.active!==false).map(item=>item.code);
+     const rows=phaseData.methodAnalysis;
+     if(!Array.isArray(rows)||!validMethodAnalysis(str(doc.data.rcaMethodCode),str(doc.data.frameworkCode),factors,rows as {key:string;text:string}[],true))
+       throw new HttpError(400,'Complete every required step for the selected RCA method using evidence-based analysis.');
+   }
    if(advance && PHASE_FIELDS[phase].filter(key=>key!=='methodAnalysis').some(key=>typeof phaseData[key]!=='string'||String(phaseData[key]).trim().length<12))
      throw new HttpError(400,'Complete every required phase field (at least 12 characters) before advancing.');
    const next=advance?DMAIC_PHASES[DMAIC_PHASES.indexOf(phase as typeof DMAIC_PHASES[number])+1]??'CONTROL':phase;
