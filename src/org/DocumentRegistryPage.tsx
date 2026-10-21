@@ -6,6 +6,7 @@ import DocumentSourceStaging from './DocumentSourceStaging';
 import EngineeringDocumentLinks from './EngineeringDocumentLinks';
 import SheqSdsRegistry from './SheqSdsRegistry';
 import DigitalRcaDraft from './DigitalRcaDraft';
+import RcaDmaicWorkspace from './RcaDmaicWorkspace';
 import DigitalRcaWorkspace from './DigitalRcaWorkspace';
 import EffectiveDocumentFiles from './EffectiveDocumentFiles';
 
