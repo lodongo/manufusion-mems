@@ -32,6 +32,7 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
  };
  const template=templates.data?.templates.find(t=>t.id===selected);
  const selectedRecord=records.data?.records.find(r=>r.id===recordId);
+ const history=useLoad(()=>recordId?callBackend<{status:string;reviews:Array<{reviewId:string;decision:string;reason:string;reviewedAt:string;reviewerUid:string}>;signatures:Array<{slotId:string;label:string;status:string;signedAt:string}>}>('/api/org/drkms/forms/records/history',{recordId}):Promise.resolve(null),[recordId]);
  const locked=!!selectedRecord&&selectedRecord.status!=='draft';
  const save=async()=>{if(!template)return;setBusy(true);setNotice('');
   try{const result=await callBackend<{record:RecordRow}>('/api/org/drkms/forms/records/save',{templateId:selected,recordId,values,operationalReference:referenceModule&&referenceId.trim()?{module:referenceModule,recordId:referenceId.trim()}:null});
@@ -161,8 +162,21 @@ export default function DigitalFormWorkspace({locations}:{locations:Array<{id:st
    </div>}
    {locked&&<p className='mb-2 text-xs text-amber-300'>Record status: {selectedRecord?.status}. Locked against further editing; not approved or published.</p>}
    {template&&<div className='flex flex-wrap gap-2'><button type='button' disabled={busy||locked||(!recordId&&!!template?.successorId)} onClick={()=>void save()} className='min-h-11 rounded-lg bg-blue-600 px-3 text-sm text-white'>Save unapproved draft</button><button type='button' onClick={exportDraft} className='min-h-11 rounded-lg border border-amber-600 px-3 text-sm text-amber-200'>Export draft PDF</button>{recordId&&!locked&&<button type='button' disabled={busy} onClick={()=>void submit()} className='min-h-11 rounded-lg border border-blue-500 px-3 text-sm text-blue-200 disabled:opacity-50'>Submit for review (not approval)</button>}</div>}
+   {selectedRecord&&<div className='mt-3 space-y-2 rounded-lg border border-slate-700 p-3'>
+    <h3 className='text-sm font-semibold text-white'>Record history · {selectedRecord.status.replaceAll('_',' ')}</h3>
+    {history.error&&<p role='alert' className='text-xs text-red-300'>{history.error}</p>}
+    {history.data?.reviews.map(r=><div key={r.reviewId} className='rounded-lg border border-slate-700 p-2'>
+     <p className='text-xs text-white'>{r.decision.replaceAll('_',' ')} · {r.reviewedAt}</p>
+     <p className='break-words text-xs text-slate-300'>{r.reason}</p>
+     <p className='text-xs text-slate-400'>Reviewer: {r.reviewerUid}</p>
+    </div>)}
+    {history.data?.signatures.map(s=><div key={s.slotId} className='rounded-lg border border-slate-700 p-2'>
+     <p className='text-xs text-white'>{s.label} · {s.status}</p>
+     {s.signedAt&&<p className='text-xs text-slate-300'>Signed: {s.signedAt}</p>}
+    </div>)}
+   </div>}
    <h3 className='mt-4 text-sm font-medium text-white'>My draft records</h3>
-   {records.data?.records.map(r=><button key={r.id} type='button' onClick={()=>{setSelected(r.templateId);setValues(r.values);setRecordId(r.id);setReferenceModule(r.operationalReference?.module??'');setReferenceId(r.operationalReference?.recordId??'')}} className='mt-2 block min-h-10 w-full rounded-lg border border-slate-700 px-3 text-left text-sm text-slate-200'>{r.id} · Draft (unapproved)</button>)}
+   {records.data?.records.map(r=><button key={r.id} type='button' onClick={()=>{setSelected(r.templateId);setValues(r.values);setRecordId(r.id);setReferenceModule(r.operationalReference?.module??'');setReferenceId(r.operationalReference?.recordId??'')}} className='mt-2 block min-h-10 w-full rounded-lg border border-slate-700 px-3 text-left text-sm text-slate-200' >{r.id} · {r.status.replaceAll('_',' ')} (unapproved)</button>)}
   </Card>
   {notice&&<p role='status' className='text-sm text-slate-200'>{notice}</p>}
  </div>;
