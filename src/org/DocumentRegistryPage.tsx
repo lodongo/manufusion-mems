@@ -28,6 +28,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
     () => callBackend<{ documents: DocumentRow[] }>('/api/org/drkms/documents/list', {}), []
   );
   const setup = useLoad(() => callBackend<DocumentSetup>('/api/org/drkms/setup', {}), []);
+  const reviews = useLoad(() => callBackend<{schedule:Array<{documentId:string;title:string;revision:string;nextReview:string|null;status:string}>;reviewMonths:number}>('/api/org/drkms/documents/review-schedule', {}), []);
   const [scopeNodeId, setScopeNodeId] = useState('');
   const [searchLocation, setSearchLocation] = useState('');
   const [locationLevel, setLocationLevel] = useState('legal_entity');
@@ -128,6 +129,18 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
       <p className='mt-2 text-xs text-slate-400'>Current saved review cycle: {setup.data?.config.defaultReviewMonths ?? 24} months</p>
       {settingsNotice && <p role='status' className='mt-2 text-sm text-green-300'>{settingsNotice}</p>}
       {settingsError && <p role='alert' className='mt-2 text-sm text-red-300'>{settingsError}</p>}
+    </Card>}
+    {(mode==='review'||mode==='register') && <Card>
+      <h2 className='mb-2 text-base font-semibold text-white'>Controlled document review schedule</h2>
+      <p className='mb-3 text-xs text-slate-400'>Effective documents only. Review dates use the organization default cycle; this schedule does not itself approve, withdraw or revise a document.</p>
+      {reviews.loading&&<p className='text-sm text-slate-400'>Loading review schedule…</p>}
+      {reviews.error&&<p role='alert' className='text-sm text-red-300'>{reviews.error}</p>}
+      {reviews.data?.schedule.length===0&&<p className='text-sm text-slate-400'>No effective documents are available for this scope.</p>}
+      <div className='space-y-2'>{reviews.data?.schedule.map(item=><div key={item.documentId} className='flex min-w-0 flex-wrap justify-between gap-2 rounded-lg border border-slate-700 p-3'>
+        <div className='min-w-0'><p className='break-words text-sm font-medium text-white'>{item.title}</p><p className='text-xs text-slate-400'>Revision {item.revision} · Review by {item.nextReview??'Not scheduled'}</p></div>
+        <span className={`text-xs ${item.status==='overdue'?'text-red-300':item.status==='due_soon'?'text-amber-300':'text-slate-300'}`}>{item.status.replaceAll('_',' ')}</span>
+      </div>)}</div>
+      <button type='button' onClick={()=>reviews.reload()} className='mt-3 min-h-11 rounded-lg border border-slate-600 px-3 text-sm text-white'>Refresh schedule</button>
     </Card>}
     {mode==='register' && <Card>
       <h2 className='mb-3 text-base font-semibold text-white'>Register a document draft</h2>
