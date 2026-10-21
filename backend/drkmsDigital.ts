@@ -6,6 +6,11 @@ import {validateDocumentLocation} from './drkmsHierarchy';
 import {canAt,scopeOf,nodePath} from './access';
 import {validateAiProposal,type AiProposal} from './drkmsKnowledgeContracts';
 import {validateRcaAnalysis,type RcaAiAnalysis} from './drkmsRcaAi';
+const RCA_METHODS=new Set(['5WHY','ISH','FTA','FMEA','PARETO','8D','KT','BOWTIE','CHANGE','EVENT','TRIPOD','APOLLO','BARRIER','C&E']);
+const DMAIC_PHASES=['DEFINE','MEASURE','ANALYZE','IMPROVE','CONTROL'] as const;
+const PHASE_FIELDS:Record<string,string[]>={
+ DEFINE:['problem','impact','scope'],MEASURE:['baseline','evidence'],ANALYZE:['causalAnalysis','validatedCauses'],IMPROVE:['correctiveActions','actionOwners'],CONTROL:['effectivenessCriteria','monitoringPlan']
+};
 const docs=(org:string,id:string)=>`organizations/${org}/drkms_documents/${id}`;
 const idOk=(s:string)=>/^[a-f0-9]{20}$/.test(s);
 export const drkmsDigitalRoutes={
@@ -24,9 +29,11 @@ export const drkmsDigitalRoutes={
    catch{throw new HttpError(400,'RCA location has an invalid organizational hierarchy.');}
    if(!canAt(ctx,'ADM.document_registry',await nodePath(ctx.orgId,scopeNodeId),await scopeOf(ctx)))
      throw new HttpError(403,'You do not have document access at this organizational location.');
+   const methodCode=str(ctx.body.methodCode).trim().toUpperCase();
+   if(!RCA_METHODS.has(methodCode))throw new HttpError(400,'Select a recognized RCA analysis method from MEMS Admin DOC metadata.');
    const id=randomId(10);
    const entry={tenantId:ctx.orgId,documentId:id,title,classCode:'RPT',subtypeCode:'RCA',
-     representation:'digital_structured',status:'draft',rcaStage:'investigation',
+     representation:'digital_structured',status:'draft',rcaStage:'DEFINE',rcaMethodCode:methodCode,rcaDmaic:{currentPhase:'DEFINE',completedPhases:[],phases:{}},
      incidentReference,problemStatement:problem,rootCauses:[],correctiveActions:[],
      effectivenessChecks:[],scope:{nodeId:scopeNodeId,level:str(node.data.level),name:str(node.data.name),ancestorIds:ancestry},
      revision:'00',effectiveRevisionId:'',verified:false,
@@ -34,6 +41,34 @@ export const drkmsDigitalRoutes={
    if(!(await writeDoc(docs(ctx.orgId,id),entry,{exists:false})))throw new HttpError(409,'Try again.');
    await record(ctx,'drkms.rca.create',id,incidentReference);
    return {document:entry,stagingEnabled:false};
+  }),
+ ],
+ 'POST /api/org/drkms/rca/dmaic/save':[
+  orgRoute('drkms.rca.dmaic.save','ADM.document_registry',async ctx=>{
+   const documentId=str(ctx.body.documentId),phase=str(ctx.body.phase).toUpperCase();
+   if(!idOk(documentId)||!DMAIC_PHASES.includes(phase as typeof DMAIC_PHASES[number]))throw new HttpError(400,'Invalid RCA or DMAIC phase.');
+   const doc=await getDoc(docs(ctx.orgId,documentId));
+   if(!doc||str(doc.data.subtypeCode)!=='RCA'||str(doc.data.status)!=='draft')throw new HttpError(409,'Only draft RCA investigations may be edited.');
+   if(str(doc.data.createdBy)!==ctx.uid)throw new HttpError(403,'Only the investigator may update the RCA.');
+   const state=(doc.data.rcaDmaic??{}) as Record<string,unknown>;
+   const current=str(state.currentPhase)||'DEFINE';
+   if(phase!==current)throw new HttpError(409,'Complete the current DMAIC phase first.');
+   const fields=ctx.body.fields;
+   if(!fields||typeof fields!=='object'||Array.isArray(fields)||JSON.stringify(fields).length>18000)
+    throw new HttpError(400,'Invalid DMAIC phase data.');
+   const data=fields as Record<string,unknown>;
+   if(!Object.keys(data).every(k=>PHASE_FIELDS[phase].includes(k)))throw new HttpError(400,'Unexpected DMAIC fields.');
+   const existing=state.phases&&typeof state.phases==='object'?state.phases as Record<string,unknown>:{};
+   const phaseData={...(existing[phase]&&typeof existing[phase]==='object'?existing[phase] as Record<string,unknown>:{}),...data};
+   const completed=Array.isArray(state.completedPhases)?state.completedPhases.filter(v=>typeof v==='string') as string[]:[];
+   const advance=ctx.body.complete===true;
+   if(advance && PHASE_FIELDS[phase].some(key=>typeof phaseData[key]!=='string'||String(phaseData[key]).trim().length<12))
+     throw new HttpError(400,'Complete every required phase field (at least 12 characters) before advancing.');
+   const next=advance?DMAIC_PHASES[DMAIC_PHASES.indexOf(phase as typeof DMAIC_PHASES[number])+1]??'CONTROL':phase;
+   const updated={currentPhase:next,completedPhases:advance?[...completed.filter(p=>p!==phase),phase]:completed,phases:{...existing,[phase]:phaseData}};
+   await writeDoc(docs(ctx.orgId,documentId),{...doc.data,rcaDmaic:updated,rcaStage:next,updatedAt:nowIso()});
+   await record(ctx,'drkms.rca.dmaic.save',documentId,phase);
+   return {currentPhase:next,completedPhases:updated.completedPhases};
   }),
  ],
  'POST /api/org/drkms/rca/evidence':[
