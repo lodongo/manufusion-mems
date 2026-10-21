@@ -1,4 +1,5 @@
 import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc,commitChecked} from './core';
+import {createHash} from 'node:crypto';
 import {orgRoute} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 const ID=/^[a-f0-9]{20}$/;
@@ -72,6 +73,13 @@ export async function resolveFormReference(orgId:string,reference:{module:string
   return {...reference,verification:'pending_scope_validation'};
  return {...reference,verification:'linked',sourceTitle:str(doc.data.title)||str(doc.data.name)||reference.recordId};
 }
+export function formRecordFingerprint(record:Record<string,unknown>):string{
+ return createHash('sha256').update(JSON.stringify({
+  templateId:str(record.templateId),templateRevision:str(record.templateRevision),
+  scopeNodeId:str(record.scopeNodeId),values:record.values,operationalReference:record.operationalReference,
+  createdBy:str(record.createdBy),recordId:str(record.id)
+ })).digest('hex');
+}
 const templatePath=(o:string)=>`organizations/${o}/drkms_form_templates`;
 const recordPath=(o:string)=>`organizations/${o}/drkms_form_records`;
 export const drkmsFormRoutes={
@@ -92,8 +100,8 @@ export const drkmsFormRoutes={
    if(!/^[a-zA-Z0-9_-]{6,128}$/.test(signerUid)||label.length<3||label.length>80||signOffPlan.some(s=>s.signerUid===signerUid))
     throw new HttpError(400,'Duplicate or invalid signatory.');
    const user=await getDoc('users/'+signerUid);
-   if(!user||str(user.data.orgId)!==ctx.orgId||str(user.data.status)==='disabled')
-    throw new HttpError(403,'Signatories must be active MEMS organization users.');
+   if(!user||signerUid===ctx.uid||str(user.data.orgId)!==ctx.orgId||str(user.data.status)==='disabled')
+    throw new HttpError(403,'Signatories must be distinct active MEMS organization users.');
    signOffPlan.push({signerUid,label});
   }
   const id=randomId(10),date=nowIso(),template={id,title,scopeNodeId,fields,signOffPlan,revision:'00',status:'draft',createdBy:ctx.uid,createdAt:date,updatedAt:date};
@@ -129,11 +137,36 @@ export const drkmsFormRoutes={
   const nodeId=str(record.data.scopeNodeId);
   if(!nodeId||!canAt(ctx,'ADM.document_review',await nodePath(ctx.orgId,nodeId),await scopeOf(ctx)))
    throw new HttpError(403,'Review is outside your scope.');
-  const date=nowIso(),next={...record.data,status:decision==='return'?'draft':'technical_reviewed',
-   unapproved:true,reviewedBy:ctx.uid,reviewedAt:date,reviewReason:reason,updatedAt:date};
-  const evidencePath=path+'/review_history/'+randomId(10);
-  if(!(await commitChecked([{path,data:next,precondition:{updateTime:record.updateTime}},
-   {path:evidencePath,data:{decision,reviewerUid:ctx.uid,reviewedAt:date,reason,recordId:id},precondition:{exists:false}}])))
+  const date=nowIso(),reviewId=randomId(10),hash=formRecordFingerprint(record.data);
+  const next={...record.data,status:decision==='return'?'draft':'technical_reviewed',
+   unapproved:true,reviewedBy:ctx.uid,reviewedAt:date,reviewReason:reason,reviewId,
+   reviewedFingerprint:decision==='return'?'':hash,updatedAt:date};
+  const evidencePath=path+'/review_history/'+reviewId;
+  const writes:[{path:string;data:Record<string,unknown>;precondition:{updateTime:string}}|{path:string;data:Record<string,unknown>;precondition:{exists:false}},...Array<{path:string;data:Record<string,unknown>;precondition:{exists:false}}>] = [
+   {path,data:next,precondition:{updateTime:record.updateTime}},
+   {path:evidencePath,data:{decision,reviewerUid:ctx.uid,reviewedAt:date,reason,recordId:id,fingerprint:hash},precondition:{exists:false}}
+  ];
+  if(decision==='technical_reviewed'){
+   const template=await getDoc(templatePath(ctx.orgId)+'/'+str(record.data.templateId));
+   if(!template||str(template.data.revision)!==str(record.data.templateRevision))throw new HttpError(409,'Template revision no longer matches the reviewed record.');
+   const signers=Array.isArray(template.data.signOffPlan)?template.data.signOffPlan:[];
+   if(signers.length>12)throw new HttpError(409,'Signatory plan exceeds supported capacity.');
+   for(const s of signers){
+    if(!s||typeof s!=='object')throw new HttpError(409,'Invalid configured signer.');
+    const signer=s as Record<string,unknown>,uid=str(signer.signerUid);
+    if(!/^[a-zA-Z0-9_-]{6,128}$/.test(uid)||uid===str(record.data.createdBy))
+     throw new HttpError(409,'Invalid or self-assigned signatory.');
+    const user=await getDoc('users/'+uid);
+    if(!user||str(user.data.orgId)!==ctx.orgId||str(user.data.status)==='disabled')throw new HttpError(409,'An assigned signatory is no longer eligible.');
+    const slotId=createHash('sha256').update(uid+':'+reviewId).digest('hex').slice(0,20);
+    const slot={slotId,recordId:id,reviewId,recordFingerprint:hash,signerUid:uid,label:str(signer.label),
+      assignedBy:str(record.data.createdBy),assignedAt:date,status:'pending'};
+    writes.push({path:path+'/signatures/'+slotId,data:slot,precondition:{exists:false}});
+    writes.push({path:`organizations/${ctx.orgId}/form_signature_inbox/${uid}/assignments/${id}_${slotId}`,
+     data:{recordId:id,slotId,assignedAt:date},precondition:{exists:false}});
+   }
+  }
+  if(!(await commitChecked(writes)))
     throw new HttpError(409,'Form changed during review. Refresh.');
   return {record:{id,...next},approved:false,published:false};
  })],
