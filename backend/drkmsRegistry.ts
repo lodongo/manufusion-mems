@@ -43,6 +43,15 @@ const defaults = { enabledClassCodes: Array.from(classes), defaultReviewMonths: 
  enabledSubmodules:[...DOC_SUBMODULE_KEYS], updatedAt: '' };
 
 export const drkmsRoutes = {
+    'POST /api/org/drkms/submodules/status': [
+        orgRoute('drkms.submodules.status', null, async ctx => {
+            const settings=await getDoc(configPath(ctx.orgId));
+            const selected=settings?.data.enabledSubmodules;
+            const enabled=Array.isArray(selected)?DOC_SUBMODULE_KEYS.filter(key=>selected.includes(key)):[...DOC_SUBMODULE_KEYS];
+            return {enabledSubmodules:enabled};
+        }),
+    ],
+
     'POST /api/org/drkms/setup': [
         orgRoute('drkms.setup', 'ADM.document_registry', async ctx => {
             const [settings, locations] = await Promise.all([getDoc(configPath(ctx.orgId)), resolveScope(ctx.orgId, '')]);
