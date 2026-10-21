@@ -6,6 +6,7 @@ import DocumentSourceStaging from './DocumentSourceStaging';
 import EngineeringDocumentLinks from './EngineeringDocumentLinks';
 import SheqSdsRegistry from './SheqSdsRegistry';
 import DigitalRcaDraft from './DigitalRcaDraft';
+import DigitalRcaWorkspace from './DigitalRcaWorkspace';
 import RcaDmaicWorkspace from './RcaDmaicWorkspace';
 import EffectiveDocumentFiles from './EffectiveDocumentFiles';
 
@@ -13,7 +14,7 @@ type ScopeNode = { id: string; name: string; level: string; parentId: string };
 type DocumentSetup = { config: { enabledClassCodes: string[]; defaultReviewMonths: number; enabledSubmodules?: string[] }; locations: ScopeNode[] };
 type DocumentRow = {
   documentId: string; title: string; classCode: string; status: string;
-  revision: string; updatedAt: string; subtypeCode?:string; dmaicStage?:string;methodCode?:string;frameworkCode?:string;
+  revision: string; updatedAt: string; subtypeCode?: string; subtypeCode?:string; dmaicStage?:string;methodCode?:string;frameworkCode?:string;
 };
 const CLASSES = [
  ['POL','Policy'], ['STR','Strategy'], ['PRG','Management program'],
@@ -172,7 +173,7 @@ export default function DocumentRegistryPage({ canConfigure, canReview, mode = '
     {(mode==='register'||mode==='engineering') && <DocumentSourceStaging documents={data?.documents ?? []} />}
     {mode==='engineering' && <EngineeringDocumentLinks documents={data?.documents ?? []} />}
     {mode==='sds' && <SheqSdsRegistry canConfigure={canConfigure} />}
-    {mode==='rca' && <DigitalRcaDraft locations={setup.data?.locations ?? []} onCreated={reload} />}
+    {mode==='rca' && <><DigitalRcaDraft locations={setup.data?.locations ?? []} onCreated={reload} /><DigitalRcaWorkspace documents={data?.documents ?? []}/></>}
     {mode==='rca' && <RcaDmaicWorkspace documents={data?.documents ?? []} onSaved={reload} />}
     {(mode==='register'||mode==='review') && <Card>
       <div className='mb-3 flex items-center justify-between gap-2'>
