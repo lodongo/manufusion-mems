@@ -1144,12 +1144,25 @@ export const maintenanceRoutes = {
             }
             const currentReview=!!assignedReviewerRole&&assessmentReviewCurrent(doc.data,assignedReviewerRole);
             can.convert = can.convert && currentReview;
-            // Show review controls only after both security permission and scoped
-            // organizational job-role assignment are in effect.
-            if (can.reviewAssessment) {
+            // Return precise, actionable review readiness instead of silently hiding approval.
+            const reviewBlockers: string[] = [];
+            if (str(doc.data.status) !== 'under_review') reviewBlockers.push('Start work request review first.');
+            if (!assignedReviewerRole) reviewBlockers.push('MEMS Admin > Maintenance Workflows: assign MNT.ASSESS.REVIEW to the Maintenance Lead job role.');
+            if (!canAt(ctx, P.assessment_review, pathOf(doc), scope)) reviewBlockers.push('Grant MNT.assessment.review security permission at this asset/location.');
+            if (assignedReviewerRole) {
                 try { await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc)); }
-                catch { can.reviewAssessment = false; }
+                catch { reviewBlockers.push('Assign your employee to the configured Maintenance Lead organizational position at this asset/location.'); }
             }
+            if ([doc.data.requestedBy,doc.data.createdBy,doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid))
+                reviewBlockers.push('A requester or technical assessor cannot approve their own assessment.');
+            if (!str(doc.data.maintenanceTypeCode)||!str(doc.data.workTypeCode)||!str(doc.data.priorityCode)||!str(doc.data.disciplineCode))
+                reviewBlockers.push('The technical assessor must complete maintenance type, work type, priority and discipline.');
+            if (!Array.isArray(doc.data.assessmentTasks)||doc.data.assessmentTasks.length===0)
+                reviewBlockers.push('The technical assessor must save at least one fully assessed task.');
+            else if (!Number(doc.data.assessmentTasksVersion)||!str(doc.data.assessmentTasksAt))
+                reviewBlockers.push('The technical assessor must save the latest task assessment revision.');
+            can.reviewAssessment = reviewBlockers.length===0 && !currentReview;
+            if (currentReview) can.reviewAssessment = false;
             if (!can.view) throw new HttpError(403, 'This work request is outside your access.');
             const d = doc.data;
             const photoPaths = objs(d.photos).map((p) => str(p.path));
@@ -1184,6 +1197,7 @@ export const maintenanceRoutes = {
                 declineReason: str(d.declineReason),
                 history: objs(d.history).map((h) => ({ at: str(h.at), name: str(h.name), action: str(h.action), note: str(h.note) })),
                 can,
+                assessmentReviewBlockers: reviewBlockers,
             };
         }),
     ],
