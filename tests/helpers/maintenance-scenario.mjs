@@ -395,7 +395,7 @@ await assert.rejects(
 );
 await assert.rejects(
     () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:wr.code,action:'review_assessment',note:'Attempt to self approve completed task assessment'}),
-    /cannot approve/,
+    /cannot approve|configured MNT\.ASSESS\.REVIEW organizational job role is required/,
 );
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', {
     code: wr.code, action: 'review_assessment', note: 'Independent check confirms all tasks, scope, risks and required resources.',
