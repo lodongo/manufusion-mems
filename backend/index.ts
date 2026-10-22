@@ -65,6 +65,7 @@ import {
     type SecureContext,
 } from './guards';
 import { orgRoutes } from './org';
+import { hrReadRoutes } from './hrReadRoutes';
 import { drkmsRoutes } from './drkmsRegistry';
 import {drkmsFormRoutes} from './drkmsForms';
 import { drkmsFileRoutes } from './drkmsFiles';
@@ -1536,6 +1537,7 @@ export const handler = router(recordWiredRoutes({
     ],
 
     ...orgRoutes,
+    ...hrReadRoutes,
     ...drkmsRoutes,
     ...drkmsFormRoutes,
     ...drkmsFileRoutes,
