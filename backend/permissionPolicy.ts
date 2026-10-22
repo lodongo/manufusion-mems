@@ -83,7 +83,7 @@ const SENSITIVE_MNT = new Set(['MNT.WO.safety', 'MNT.WO.release', 'MNT.WO.verify
 
 /** Permissions of every module that has working screens or actions. Nothing else is ever offered. */
 export const BUILT_PERMISSIONS: Record<string, PermDef[]> = {
-    HRM: [p('HRM.shell.view', 'HR: view read-only module architecture (no employee records)')],
+    HRM: [p('HRM.shell.view', 'HR: view read-only module architecture (no employee records)'), p('HRM.employee.site.read', 'HR: read minimum employee directory within verified assigned site', true)],
     INV: [p('INV.view', 'Inventory: view'), p('INV.edit', 'Inventory: maintain materials and settings'), p('INV.issue', 'Inventory: issue stock to a cost center or work order (posts to the ledger when finance is live)', true), p('INV.replenishment.view', 'Replenishment: view requests, signals and the run log'), p('INV.replenishment.run', 'Replenishment: run planning on demand for a warehouse or material'), p('INV.replenishment.verify', 'Replenishment: verify purchase requests (becomes the requester, manager approves), dismiss them, acknowledge signals to suppliers and owners', true), ...warehouse('INV'), ...STOCK_TAKE],
     WHS: [p('WHS.view', 'Warehousing: view'), ...warehouse('WHS')],
     MNT: MNT_ACTIVITIES.map((a) => p(a.key, a.label, SENSITIVE_MNT.has(a.key))),
