@@ -83,6 +83,7 @@ interface Detail extends Row {
     };
     assessmentReview: {status:string;version?:number;name?:string;at?:string;note?:string};
     assessmentReviewCurrent: boolean;
+    assessmentReviewBlockers?: string[];
     returnNote: string;
     declineReason: string;
     history: Array<{ at: string; name: string; action: string; note: string }>;
@@ -696,6 +697,14 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
               </nav>
               <div className='min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-1 py-3 sm:px-4'>
                 {actionError && !mode && <Alert tone='error'>{actionError}</Alert>}
+                {section==='summary' && !r.assessmentReviewCurrent && !can.reviewAssessment && (r.assessmentReviewBlockers?.length||0)>0 && (
+                  <Card className='space-y-2'>
+                    <p className='font-semibold text-amber-200'>Why assessment approval is unavailable</p>
+                    <ul className='list-disc space-y-1 pl-5 text-sm text-slate-200'>
+                      {r.assessmentReviewBlockers?.map((reason,i)=><li key={i}>{reason}</li>)}
+                    </ul>
+                  </Card>
+                )}
 
                 {mode === 'assess' && <AssessPanel detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />}
 
