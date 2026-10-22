@@ -167,6 +167,9 @@ function ResourceForm({
 }) {
     const [data, setData] = useState<MntData>({
         personnel: previous.personnel || [],
+        externalProvider:previous.externalProvider||'',
+        externalEngagementRef:previous.externalEngagementRef||'',
+        externalConfirmed:previous.externalConfirmed===true,
         materialId: '',
         warehouseId: '',
         catalogCode: resource.catalogCode || '',
@@ -233,6 +236,13 @@ function ResourceForm({
                             />
                         ))}
                     </fieldset>
+                    {task.externalResource?.type&&<div className="space-y-2 rounded-xl border border-line p-3">
+                        <p className="font-semibold">Secure external resource</p>
+                        <p className="text-sm text-soft">{task.externalResource.type} · {task.externalResource.persons} external people · {task.externalResource.notes}</p>
+                        <MntField label="External provider name" value={data.externalProvider} onChange={v=>patch('externalProvider',v)}/>
+                        <MntField label="Approved contract or purchase order reference" value={data.externalEngagementRef} onChange={v=>patch('externalEngagementRef',v)}/>
+                        <MntCheck label="Approved engagement and required external people are confirmed" value={!!data.externalConfirmed} onChange={v=>patch('externalConfirmed',v)}/>
+                    </div>}
                     <MntCheck
                         label="The allocated personnel have the required skills and competencies."
                         value={!!data.competenciesConfirmed}
@@ -986,6 +996,12 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                     {task.persons} people · Skills: {task.skills}
                                 </p>
                                 <p>Tools: {task.tools || 'None'}</p>
+                                {!!task.internalRoles?.length&&<p>Internal roles: {task.internalRoles.join(', ')}</p>}
+                                {task.externalResource?.type&&<div className="rounded-lg border border-line p-3 text-sm">
+                                   <p>External: {task.externalResource.type} · {task.externalResource.persons} people</p>
+                                   <p>Scope: {task.externalResource.notes}</p>
+                                   <p>Engagement: {planning.allocation?.externalConfirmed?planning.allocation.externalEngagementRef:'Not yet secured'}</p>
+                                </div>}
                                 <p>
                                     Allocated:{' '}
                                     {(planning.allocation?.personnel || [])

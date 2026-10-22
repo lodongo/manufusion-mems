@@ -7,3 +7,32 @@ test('risk required for every task',()=>assert.throws(()=>validateAssessmentTask
 test('catalogue spare requires code',()=>assert.throws(()=>validateAssessmentTasks([{...valid(),spares:[{source:'catalog',description:'Bearing',qty:1}]}]),/select a source/));
 test('at most three proposed suppliers',()=>assert.throws(()=>validateAssessmentTasks([{...valid(),services:[{description:'Vibration analysis',categoryCode:'SERV',subcategoryCode:'PRED',classCode:'VIB',proposedVendorIds:['A','B','C','D']}]}]),/up to 3/));
 test('only warehouse sourced spares may carry cost',()=>{const tasks=validateAssessmentTasks([valid()]);assert.equal(tasks[0].spares[0].unitCost,null);});
+
+test('new tasks require internal role selection or an external provider',()=>{
+ assert.throws(()=>validateAssessmentTasks([{...valid(),internalRoles:[],externalResource:undefined}]),/internal role or an external resource/);
+ const tasks=validateAssessmentTasks([{...valid(),internalRoles:[],externalResource:{type:'OEM',persons:2,notes:'OEM mechanical specialist'}}]);
+ assert.equal(tasks[0].persons,0);
+ assert.equal(tasks[0].externalResource.type,'OEM');
+ assert.equal(tasks[0].externalResource.persons,2);
+});
+test('only recognized internal and external roles are accepted',()=>{
+ assert.throws(()=>validateAssessmentTasks([{...valid(),internalRoles:['security_guard']}]),/valid internal resource/);
+ assert.throws(()=>validateAssessmentTasks([{...valid(),externalResource:{type:'unknown',persons:1}}]),/valid external resource/);
+ const tasks=validateAssessmentTasks([{...valid(),internalRoles:['operator','technician','specialist','engineer']}]);
+ assert.equal(tasks[0].internalRoles.length,4);
+});
+test('spare can be specified using photo alone or description alone',()=>{
+ const photo='organizations/demo/mnt/assessment_photos/author/123456789abc.jpg';
+ const [t]=validateAssessmentTasks([{...valid(),spares:[{source:'description',description:'',photoPath:photo,qty:1,uom:'EA'}]}]);
+ assert.equal(t.spares[0].photoPath,photo);
+ assert.match(t.spares[0].description,/photo/);
+ assert.throws(()=>validateAssessmentTasks([{...valid(),spares:[{source:'description',description:'',qty:1}]}]),/source and item/);
+});
+test('LOTO requires explicit source selection and retains live-equipment and SAF permit flags',()=>{
+ assert.throws(()=>validateAssessmentTasks([{...valid(),lotoRequired:true,energySourceCodes:[]}]),/hazardous energy source/);
+ const [t]=validateAssessmentTasks([{...valid(),lotoRequired:true,energySourceCodes:['SAF_03_01_001'],liveEquipment:true,permitCodes:['SAF_08_01_003','SAF_08_01_004']}]);
+ assert.equal(t.lotoRequired,true);
+ assert.equal(t.liveEquipment,true);
+ assert.deepEqual(t.energySourceCodes,['SAF_03_01_001']);
+ assert.equal(t.permitCodes.length,2);
+});

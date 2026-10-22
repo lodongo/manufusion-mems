@@ -240,6 +240,9 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
             allocation.competenciesConfirmed !== true
         )
             problems.push(`${str(t.description)}: allocate qualified personnel and confirm tools.`);
+        const external=object(t.externalResource);
+        if(str(external.type)&&(!allocation.externalConfirmed||!str(allocation.externalProvider)||!str(allocation.externalEngagementRef)))
+            problems.push(`${str(t.description)}: secure the ${str(external.type)} external resource (${Number(external.persons)||1} people) and record contract or purchase order evidence.`);
         for (const spare of rows(t.spares)) {
             const key = maintenanceKey(wo.id, str(t.id), str(spare.id));
             const p = object(planning[str(spare.id)]),
@@ -381,6 +384,15 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
             throw new HttpError(409, 'Allocated employees do not collectively cover the task HRM competencies.');
         if (b.toolsReady !== true || b.competenciesConfirmed !== true)
             throw new HttpError(400, 'Confirm tool availability and personnel competencies.');
+        const ext=object(task.externalResource);
+        let externalEvidence:Obj={};
+        if(str(ext.type)){
+            const provider=requiredText(b.externalProvider,'Confirmed external provider',2),
+                reference=requiredText(b.externalEngagementRef,'Approved contract or PO reference',3);
+            if(b.externalConfirmed!==true)throw new HttpError(409,'Confirm the external people and approved engagement before planning.');
+            externalEvidence={externalConfirmed:true,externalProvider:provider,externalEngagementRef:reference,
+                externalPersons:Number(ext.persons)||1,externalType:str(ext.type)};
+        }
         await saveWo(
             ctx,
             wo,
@@ -393,6 +405,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                             personnel: ids,
                             toolsReady: true,
                             competenciesConfirmed: true,
+                            ...externalEvidence,
                             notes: requiredText(b.note, 'Allocation evidence'),
                             by: ctx.uid,
                             at: nowIso(),
