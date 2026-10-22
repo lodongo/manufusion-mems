@@ -183,6 +183,7 @@ export default function RichTable<T>({
     fileName,
     height = 'h-[calc(100dvh-12rem)]',
     rowClassName,
+    allowExport = true,
 }: {
     /** Unique id used to remember templates for this table. */
     id: string;
@@ -199,6 +200,8 @@ export default function RichTable<T>({
     fileName?: string;
     height?: string;
     rowClassName?: (row: T) => string;
+    /** Set false when data export is restricted pending a server-audited export handler. */
+    allowExport?: boolean;
 }) {
     // Keep device templates isolated by the authenticated account. Older browser-only
     // templates are available to import explicitly rather than silently assigning
@@ -494,9 +497,9 @@ export default function RichTable<T>({
                     <button type='button' aria-label='Templates' title='Saved templates' onClick={() => setPanel(panel === 'templates' ? '' : 'templates')} className={iconBtn(panel === 'templates')}>
                         <BookmarkPlus className='h-4 w-4' />
                     </button>
-                    <button type='button' aria-label='Download Excel' title='Download Excel' onClick={exportExcel} disabled={!filtered.length} className={`${iconBtn(false)} disabled:opacity-40`}>
+                    {allowExport && <button type='button' aria-label='Download Excel' title='Download Excel' onClick={exportExcel} disabled={!filtered.length} className={`${iconBtn(false)} disabled:opacity-40`}>
                         <Download className='h-4 w-4' />
-                    </button>
+                    </button>}
                 </div>
                 <div className='flex items-center justify-between gap-2'>
                     <p className='truncate text-xs text-slate-500'>
