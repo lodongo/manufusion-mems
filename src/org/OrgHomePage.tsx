@@ -36,6 +36,7 @@ import StockTake from './StockTake';
 import WorkflowInbox from './WorkflowInbox';
 import MyAccess from './MyAccess';
 import OrgUserHome from './OrgUserHome';
+import HrShell from './HrShell';
 import OrgMail from './OrgMail';
 import PurchaseRequirements from './PurchaseRequirements';
 import ProcurementSetup from './ProcurementSetup';
@@ -69,6 +70,24 @@ const ROUTE = 'organization_home';
 const toHome = (path = '') => navigate(path ? `${ROUTE}/${path}` : ROUTE);
 
 const MODULE_LINKS: Record<string, LinkItem[]> = {
+    HRM: [
+        { label: 'My HR Portal', path: 'hr/HR01', permission: 'HRM.shell.view' },
+        { label: 'Employee Records & Administration', path: 'hr/HR02', permission: 'HRM.shell.view' },
+        { label: 'HR Policies & Procedures', path: 'hr/HR03', permission: 'HRM.shell.view' },
+        { label: 'Organization Structure & Design', path: 'hr/HR04', permission: 'HRM.shell.view' },
+        { label: 'Job Roles & Position Profiles', path: 'hr/HR05', permission: 'HRM.shell.view' },
+        { label: 'Employment Types & Categories', path: 'hr/HR06', permission: 'HRM.shell.view' },
+        { label: 'Job Grading & Classification', path: 'hr/HR07', permission: 'HRM.shell.view' },
+        { label: 'Workforce Establishment, Deployment & Vacancies', path: 'hr/HR08', permission: 'HRM.shell.view' },
+        { label: 'Recruitment, Onboarding & Confirmation', path: 'hr/HR09', permission: 'HRM.shell.view' },
+        { label: 'Leave & Absence Management', path: 'hr/HR10', permission: 'HRM.shell.view' },
+        { label: 'Compensation, Benefits & Payroll Interface', path: 'hr/HR11', permission: 'HRM.shell.view' },
+        { label: 'Performance Management', path: 'hr/HR12', permission: 'HRM.shell.view' },
+        { label: 'Learning, Skills & Career Development', path: 'hr/HR13', permission: 'HRM.shell.view' },
+        { label: 'Employee Relations & Disciplinary Management', path: 'hr/HR14', permission: 'HRM.shell.view' },
+        { label: 'Employee Engagement & Feedback', path: 'hr/HR15', permission: 'HRM.shell.view' },
+        { label: 'Employee Movements, Separation & Offboarding', path: 'hr/HR16', permission: 'HRM.shell.view' },
+    ],
     DOC: [
         {label:'Documents',path:'doc_register',permission:'ADM.document_registry'},
         {label:'My document signatures',path:'doc_my_signatures',everyone:true},
@@ -383,6 +402,8 @@ export default function OrgHomePage({
     else if (section === 'quick') content = <QuickWorkspace mode={id} id={sub} uid={session.user.uid} />;
     else if (section === 'mail') content = <OrgMail myEmail={session.user.email} initialId={id==='read'?sub:''} />;
     else if (showActivity) content = <MyActivity />;
+    else if (section === 'module' && activeModule && activeModule.module.code==='HRM') content = <HrShell />;
+    else if (activeMenu?.module.code === 'HRM' && section === 'hr' && /^HR(0[1-9]|1[0-6])$/.test(id||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrShell sectionCode={id} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='DOC') content = <DocumentRegistryPage mode='register' canConfigure={hasPerm(data.permissions,'ADM.document_config')} canReview={hasPerm(data.permissions,'ADM.document_review')} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='0') content = <InventoryDashboard />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='3') content = <StockTake />;
