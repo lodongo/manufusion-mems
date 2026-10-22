@@ -1134,6 +1134,14 @@ export const maintenanceRoutes = {
             const can = wrCan(ctx, doc, scope);
             const workflowConfig=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
             const assignedReviewerRole=str(isObj(workflowConfig?.data.approverRoles)?workflowConfig.data.approverRoles['MNT.ASSESS.REVIEW']:'');
+            // The configured assessment approver reviews only; technical assessors edit.
+            // Never offer editing to the same assigned Maintenance Lead.
+            if (assignedReviewerRole) {
+                try {
+                    await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
+                    can.assess = false;
+                } catch { /* Not assigned to this location: normal assessor permissions apply. */ }
+            }
             const currentReview=!!assignedReviewerRole&&assessmentReviewCurrent(doc.data,assignedReviewerRole);
             can.convert = can.convert && currentReview;
             // Show review controls only after both security permission and scoped
@@ -1188,6 +1196,15 @@ export const maintenanceRoutes = {
             const scope = await scopeOf(ctx);
             const doc = await getWr(ctx, str(ctx.body.code));
             const can = wrCan(ctx, doc, scope);
+            // Enforce assessor/approver separation on the server as well as in the UI.
+            const workflowSettings = await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const assessmentLeadRole = str(isObj(workflowSettings?.data.approverRoles) ? workflowSettings.data.approverRoles['MNT.ASSESS.REVIEW'] : '');
+            if (assessmentLeadRole) {
+                try {
+                    await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
+                    can.assess = false;
+                } catch { /* The employee is not assigned as Maintenance Lead at this location. */ }
+            }
             const ref = `${wrCol(ctx.orgId)}/${doc.id}`;
             const now = nowIso();
             const done = async (fields: Record<string, Plain>, label: string, auditAction: string, details = note) => {
