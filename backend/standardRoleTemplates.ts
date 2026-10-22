@@ -22,6 +22,11 @@ export function standardRoleTemplates(groups: PermGroup[]): StandardRoleTemplate
   const enabled = new Map(groups.map(g => [g.module, new Set(g.permissions.map(p => p.key))]));
   const templates: StandardRoleTemplate[] = [];
   const assigned = new Set<string>();
+  // Explicit least-privilege role. Never bundles employee access or approval rights.
+  if (enabled.get('HRM')?.has('HRM.shell.view')) {
+    templates.push({ id: 'std_hrm_shell_viewer', module: 'HRM', name: 'HR – Shell Viewer', description: 'Read-only HR navigation and technical descriptions. No access to employee data, financial records, or approvals.', permissions: ['HRM.shell.view'] });
+    assigned.add('HRM.shell.view');
+  }
   for (const template of ROLE_TEMPLATES) {
     const valid = enabled.get(template.module);
     if (!valid) continue;
