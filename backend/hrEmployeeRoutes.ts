@@ -102,22 +102,27 @@ function readPrivate(items:unknown,kind:'education'|'family'){
 }
 export const hrEmployeeRoutes={
   'POST /api/org/hr/private/get':[orgRoute('org.hr.private.get','HRM.shell.view',async ctx=>{
-    // Only the owner can retrieve family/contact and educational self-records.
-    const doc=await getDoc(privatePath(ctx.orgId,ctx.uid));
+    const uid=clean(ctx.body.uid,128)||ctx.uid;
+    if(uid!==ctx.uid&&ctx.role!=='org_super_admin')throw new HttpError(403,'Only the employee or organization super administrator may view private HR records.');
+    await personnel(ctx,uid);
+    const doc=await getDoc(privatePath(ctx.orgId,uid));
     return {education:Array.isArray(doc?.data.education)?doc.data.education:[],
       family:Array.isArray(doc?.data.family)?doc.data.family:[]};
   })],
-  'POST /api/org/hr/private/save':[orgRoute('org.hr.private.save','HRM.shell.view',async ctx=>
-    withLock(ctx.orgId,'hr_self_'+ctx.uid,async()=>{
+  'POST /api/org/hr/private/save':[orgRoute('org.hr.private.save','HRM.shell.view',async ctx=>{
+    const uid=clean(ctx.body.uid,128)||ctx.uid;
+    if(uid!==ctx.uid&&ctx.role!=='org_super_admin')throw new HttpError(403,'Only the employee or organization super administrator may update private HR records.');
+    await personnel(ctx,uid);
+    return withLock(ctx.orgId,'hr_self_'+uid,async()=>{
       const kind=clean(ctx.body.kind,20);
       if(kind!=='education'&&kind!=='family')throw new HttpError(400,'Select education or family.');
       const values=readPrivate(ctx.body.items,kind);
-      const path=privatePath(ctx.orgId,ctx.uid);
+      const path=privatePath(ctx.orgId,uid);
       const old=await getDoc(path);
       await writeDoc(path,{...old?.data,[kind]:values,updatedAt:nowIso(),updatedBy:ctx.uid});
       return {ok:true,items:values};
-    })
-  )],
+    });
+  })],
   'POST /api/org/hr/skills/catalog':[orgRoute('org.hr.skills.catalog','HRM.shell.view',async ctx=>({
     skills:await skillCatalog(ctx),canManage:hrCanManage(ctx),
   }))],
