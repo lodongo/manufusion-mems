@@ -4,6 +4,7 @@ import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { withLock } from './finCore';
 import { hrSiteOf } from './hrHierarchy';
 import {resolveHrManagerFor} from './hrManagerResolver';
+import {checkEducationEntry} from './hrEducationConfig';
 import { HR_SKILL_DEFAULTS } from './hrSkillsDefaults';
 import { HR_SKILL_EXPANDED } from './hrSkillsExpanded';
 import { requiredRoleSkills, makeSkillFit } from './hrSkillFit';
@@ -59,6 +60,8 @@ function readPrivate(items:unknown,kind:'education'|'family'){
     const x=kind==='education'?{
       id:clean(item.id,60)||randomUUID(),institution:clean(item.institution,160),
       qualification:clean(item.qualification,140),field:clean(item.field,140),completionYear:clean(item.completionYear,4),
+      levelCode:clean(item.levelCode,64),qualificationCode:clean(item.qualificationCode,64),
+      gradingSystemCode:clean(item.gradingSystemCode,64),gradeCode:clean(item.gradeCode,64),
     }:{
       id:clean(item.id,60)||randomUUID(),name:clean(item.name,140),
       relationship:clean(item.relationship,70),phone:clean(item.phone,32),
@@ -166,6 +169,18 @@ export const hrEmployeeRoutes={
       const values=readPrivate(ctx.body.items,kind);
       const path=privatePath(ctx.orgId,uid);
       const old=await getDoc(path);
+      if(kind==='education'){
+        const existing=Array.isArray(old?.data.education)?old.data.education.filter(isObj):[];
+        for(const value of values){
+          if(!('levelCode' in value))continue;
+          if(!value.levelCode||!value.qualificationCode){
+            const prior=existing.find(x=>str(x.id)===value.id);
+            const unchanged=prior&&!str(prior.levelCode)&&
+              ['institution','qualification','field','completionYear'].every(key=>str(prior[key])===str(value[key as keyof typeof value]));
+            if(!unchanged)throw new HttpError(400,'Select an educational level and qualification from the legal-entity master.');
+          }else await checkEducationEntry(ctx.orgId,uid,value);
+        }
+      }
       await writeDoc(path,{...old?.data,[kind]:values,updatedAt:nowIso(),updatedBy:ctx.uid});
       return {ok:true,items:values};
     });
