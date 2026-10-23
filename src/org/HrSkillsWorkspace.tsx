@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Award, Check, ClipboardCheck, Plus, RefreshCw, ShieldCheck, ThumbsUp, Users, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { SelectField } from '../components/ui';
-import RichTable from '../components/RichTable';
+import HrSkillCatalogueBrowser from './HrSkillCatalogueBrowser';
 
 type Skill={code:string;name:string;category:string;subcategory:string;description:string;enabled:boolean};
 type Proposal={id:string;skillCode:string;skillName:string;status:string;proposedBy:string;proposerName:string;managerUid:string;endorsements:Array<{uid:string;name:string}>;createdAt:string;reviewedAt:string};
@@ -70,6 +70,7 @@ export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownU
 export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
  const [tab,setTab]=useState<'catalog'|'peers'|'approvals'>('catalog');
  const [catalog,setCatalog]=useState<Skill[]>([]);
+ const [catalogLoading,setCatalogLoading]=useState(true);
  const [canManage,setCanManage]=useState(false);
  const [peers,setPeers]=useState<Peer[]>([]);
  const [selected,setSelected]=useState('');
@@ -79,6 +80,7 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [note,setNote]=useState('');
  const load=async()=>{
+   setCatalogLoading(true);
    try{
      const [c,p,i]=await Promise.all([
        callBackend<{skills:Skill[];canManage:boolean}>('/api/org/hr/skills/catalog'),
@@ -87,6 +89,7 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
      ]);
      setCatalog(c.skills);setCanManage(c.canManage);setPeers(p.employees);setInbox(i.items);
    }catch(e){setError(e instanceof Error?e.message:'HR skills unavailable.')}
+   finally{setCatalogLoading(false)}
  };
  useEffect(()=>{void load()},[]);
  const begin=(s?:Skill)=>{setEdit(s||null);setCreating(true);setName(s?.name||'');setCategory(s?.category||'');setSubcategory(s?.subcategory||'');setDescription(s?.description||'');setEnabled(s?.enabled!==false);setError('');setNotice('')};
@@ -102,13 +105,6 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
    try{await callBackend('/api/org/hr/skills/decide',{id,action,note});setNote('');setNotice(action==='approve'?'Skill confirmed by manager.':'Skill proposal returned as not confirmed.');await load()}
    catch(e){setError(e instanceof Error?e.message:'Review failed.')}finally{setBusy(false)}
  };
- const cols=[
-  {key:'code',label:'Code',value:(s:Skill)=>s.code},
-  {key:'name',label:'Skill',value:(s:Skill)=>s.name},
-  {key:'category',label:'Category',value:(s:Skill)=>s.category},
-  {key:'subcategory',label:'Subcategory',value:(s:Skill)=>s.subcategory},
-  {key:'status',label:'Status',value:(s:Skill)=>s.enabled?'Enabled':'Disabled'}
- ];
  const selectedPeer=useMemo(()=>peers.find(x=>x.uid===selected),[peers,selected]);
  return <div className="min-w-0 space-y-3">
    <div className="grid grid-cols-3 gap-1 rounded-xl border border-line bg-panel p-1">
@@ -118,7 +114,7 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
    <Message error={error} notice={notice}/>
    {tab==='catalog'&&<>
      {canManage&&<button onClick={()=>begin()} className={button}><Plus className="mr-1 inline h-4 w-4"/>Add skill</button>}
-     {creating&&<div className={panel}>
+     {creating&&<div id="hr-skill-editor" className={panel}>
        <h3 className="mb-3 font-bold">{edit?'Update skill':'Add HR skill'}</h3>
        <div className="grid gap-3 sm:grid-cols-2">
          {[['Skill name',name,setName],['Category',category,setCategory],['Subcategory',subcategory,setSubcategory],['Description',description,setDescription]] .map(([label,value,setter])=>
@@ -127,9 +123,9 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
        </div>
        <div className="mt-3 flex gap-2"><button type="button" onClick={()=>setCreating(false)} className="min-h-11 rounded-xl border border-line px-4">Cancel</button><button type="button" disabled={busy||!name.trim()||!category.trim()||!subcategory.trim()} onClick={()=>void save()} className={button}>Save skill</button></div>
      </div>}
-     <div className={panel}><h3 className="mb-2 font-bold">HR skills master · {catalog.length} skills</h3>
-       <RichTable id="hr-skills-master" title="Skills master" rows={catalog} columns={cols} rowKey={x=>x.code} height="h-[53dvh]" onRowClick={canManage?begin:undefined}/>
-       <p className="mt-2 text-xs text-muted">{canManage?'Tap a skill to edit its HR-controlled definition or enabled status.':'Skill definitions are maintained by the HR skills administrator.'}</p>
+     <div className={panel}>
+       {catalogLoading&&<p role="status" className="mb-3 text-sm text-muted">Loading HR skills catalogue…</p>}
+       {!catalogLoading&&<HrSkillCatalogueBrowser skills={catalog} canManage={canManage} onEdit={begin}/>}
      </div>
    </>}
    {tab==='peers'&&<div className={panel}>
