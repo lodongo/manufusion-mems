@@ -8,7 +8,7 @@ import HrSkillCategoryFields from './HrSkillCategoryFields';
 type Skill={code:string;name:string;category:string;subcategory:string;description:string;enabled:boolean};
 type Proposal={id:string;skillCode:string;skillName:string;status:string;proposedBy:string;proposerName:string;managerUid:string;endorsements:Array<{uid:string;name:string}>;createdAt:string;reviewedAt:string};
 type Peer={uid:string;name:string;employeeNumber:string};
-type Approval={id:string;employeeUid:string;employeeName:string;skillCode:string;skillName:string;proposedBy:string;proposerName:string;endorsements:number;createdAt:string};
+type Approval={id:string;employeeUid:string;employeeName:string;skillCode:string;skillName:string;proposedBy:string;proposerName:string;endorsements:number;requiredForRole:boolean;roleFit:number|null;createdAt:string};
 const panel='min-w-0 rounded-2xl border border-line bg-panel p-3 sm:p-4';
 const button='min-h-11 rounded-xl bg-brand px-4 text-sm font-semibold text-onbrand disabled:opacity-40';
 const field='min-h-11 w-full rounded-xl border border-line bg-page px-3 text-base text-ink';
@@ -253,6 +253,10 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
      {inbox.length===0&&<div className={panel}><p className="text-sm text-muted">No skills awaiting your confirmation.</p></div>}
      {inbox.map(p=><div key={p.id} className={panel}>
        <h3 className="font-semibold">{p.employeeName} · {p.skillName}</h3>
+       <div className="mt-2 flex flex-wrap items-center gap-2">
+         {p.requiredForRole&&<span className="rounded-lg bg-brand/10 px-2 py-1 text-xs font-bold text-brand">Required for role</span>}
+         <span className="rounded-lg border border-line px-2 py-1 text-xs">Current confirmed fit: {p.roleFit===null?'Not configured':p.roleFit+'%'}</span>
+       </div>
        <p className="mt-1 text-xs text-muted">Proposed by {p.proposerName||'colleague'} · {p.endorsements} endorsements</p>
        <label className="mt-3 block text-sm text-muted">Review note<input className={field} value={note} onChange={e=>setNote(e.target.value)} placeholder="Reason or confirmation note" maxLength={400}/></label>
        <div className="mt-3 flex gap-2"><button type="button" disabled={busy||note.trim().length<5} onClick={()=>void decide(p.id,'reject')} className="flex min-h-11 items-center gap-1 rounded-xl border border-line px-3 text-sm"><X className="h-4 w-4"/>Decline</button><button type="button" disabled={busy||p.proposedBy===ownUid} onClick={()=>void decide(p.id,'approve')} className={button}><Check className="mr-1 inline h-4 w-4"/>Confirm</button></div>
