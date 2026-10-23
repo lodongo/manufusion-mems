@@ -61,7 +61,26 @@ assert.equal((await call(hrLeaveRoutes,'hr','/api/org/hr/leave/list',{uid:'emplo
 await assert.rejects(()=>call(hrLeaveRoutes,'hr','/api/org/hr/leave/review',{id:actual.id,decision:'approve'}),/immediate manager/);
 await call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{id:actual.id,decision:'approve'});
 assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'employee'})).items.length,2);
-await assert.rejects(()=>call(hrLeaveRoutes,'admin','/api/org/hr/leave/create',{employeeUid:'admin',kind:'plan',leaveType:'annual',start:'2026-12-01',end:'2026-12-02'}),/cannot apply/);
+// A Super Administrator has ordinary self-service rights, but not the right
+// to approve their own leave; the configured immediate manager is required.
+seed(root+'/structure/SITE_A',{name:'SITE_A',level:'site',parentId:'LE',managerUid:'manager',status:'active'});
+const adminLeave=await call(hrLeaveRoutes,'admin','/api/org/hr/leave/create',{
+ employeeUid:'admin',kind:'plan',leaveType:'annual',start:'2026-12-01',end:'2026-12-02',
+});
+assert.ok(adminLeave.id,'Super Administrator may submit own leave plans');
+const adminActual=await call(hrLeaveRoutes,'admin','/api/org/hr/leave/create',{
+ employeeUid:'admin',kind:'application',leaveType:'annual',start:'2026-12-01',end:'2026-12-02',
+});
+assert.ok(adminActual.id,'Super Administrator may submit own actual leave');
+assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'admin'})).permissions.canApply,true);
+assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'admin'})).permissions.canApprove,false);
+await assert.rejects(()=>call(hrLeaveRoutes,'admin','/api/org/hr/leave/review',{
+ id:adminLeave.id,decision:'approve',
+}),/immediate manager|own record/);
+await call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{
+ id:adminLeave.id,decision:'approve',
+});
+assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'admin'})).items.some(x=>x.id===adminLeave.id&&x.status==='approved'),true);
 const mgrProposed=await call(hrLeaveRoutes,'manager','/api/org/hr/leave/create',{
  employeeUid:'employee',kind:'plan',leaveType:'annual',start:'2026-12-01',end:'2026-12-02'});
 await assert.rejects(()=>call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{id:mgrProposed.id,decision:'approve'}),/submitter cannot approve/);
