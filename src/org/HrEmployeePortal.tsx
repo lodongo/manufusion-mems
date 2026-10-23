@@ -43,7 +43,7 @@ function EmptyRecords({label}:{label:string}) {
   <p className="max-w-md text-xs leading-relaxed text-muted">No employee data is displayed in this tab until its HR data source and record-specific access controls are configured. No information has been fabricated.</p>
  </section>;
 }
-export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?:'HR02'|'HR08'}) {
+export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?:'HR01'|'HR02'|'HR08'}) {
  const [data,setData]=useState<PortalData|null>(null);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState('');
