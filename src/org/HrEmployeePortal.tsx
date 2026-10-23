@@ -8,11 +8,12 @@ import type { LucideIcon } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { SelectField } from '../components/ui';
 import { navigate } from '../lib/route';
+import { firebaseAuth } from '../firebase';
 
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
 type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string};
 type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string};
-type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];access:{scope:string;readOnly:boolean}};
+type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];access:{scope:string;readOnlyTabs:string[]}};
 type TabKey = 'basic'|'education'|'family'|'skills'|'deployment'|'records'|'roles'|'payroll'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
 const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'basic',label:'Basic Information',Icon:IdCard},
@@ -101,6 +102,7 @@ export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?
         <Info label="Assigned location" value={data.profile.primaryLocation}/>
         <Info label="Employee ID" value={data.profile.uid}/>
        </div>
+       {firebaseAuth.currentUser?.uid===data.profile.uid&&<button type="button" onClick={()=>navigate('organization_home/profile')} className="mt-4 flex min-h-11 w-full items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-onbrand">Edit my basic information</button>}
       </Panel>}
       {tab==='deployment'&&<Panel title="Organization deployments">
        {data.deployments.length? <div className="space-y-3">{data.deployments.map((dep,i)=><div key={dep.nodeId+dep.positionCode+i} className="rounded-xl border border-line bg-page p-3">
