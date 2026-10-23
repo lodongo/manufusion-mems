@@ -249,7 +249,8 @@ export const hrEmployeeRoutes={
     const target=clean(ctx.body.uid,128)||ctx.uid;
     const employee=await personnel(ctx,target);
     const nodes=await nodeMap(ctx.orgId);
-    const manager=await managerFor(ctx,employee.data,nodes);
+    const managerResolution=await resolveHrManagerFor(ctx,employee.data,nodes);
+    const manager=managerResolution.uid;
     const allowed=target===ctx.uid||ctx.role==='org_super_admin'||
       sameSite(ctx.me.data,employee.data,nodes)||
       (hasPerm(ctx.directPermissions,'HRM.manager.hierarchy.read')&&manager===ctx.uid);
@@ -263,7 +264,9 @@ export const hrEmployeeRoutes={
         createdAt:clean(d.data.createdAt,40),reviewedAt:clean(d.data.reviewedAt,40),
       })).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
     return {proposals,canPropose:target===ctx.uid||ctx.role==='org_super_admin'||sameSite(ctx.me.data,employee.data,nodes),
-      managerAssigned:!!manager};
+      managerAssigned:!!manager,
+      managerStatus:managerResolution.reason,
+      managerRoleCode:managerResolution.roleCode};
   })],
   'POST /api/org/hr/skills/propose':[orgRoute('org.hr.skills.propose','HRM.shell.view',async ctx=>{
     const uid=clean(ctx.body.employeeUid,128)||ctx.uid;
