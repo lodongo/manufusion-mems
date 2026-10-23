@@ -5,6 +5,7 @@ import { withLock } from './finCore';
 import { hrSiteOf } from './hrHierarchy';
 import { HR_SKILL_DEFAULTS } from './hrSkillsDefaults';
 import { HR_SKILL_EXPANDED } from './hrSkillsExpanded';
+import { requiredRoleSkills, makeSkillFit } from './hrSkillFit';
 
 const clean=(value:unknown,max=160)=>str(value).trim().slice(0,max);
 const privatePath=(org:string,uid:string)=>`organizations/${org}/hr_private/${uid}`;
@@ -292,6 +293,8 @@ export const hrEmployeeRoutes={
     const records=(await listDocs(proposalsPath(ctx.orgId))).filter(d=>str(d.data.status)==='pending' && str(d.data.managerUid)===ctx.uid);
     const results=[];
     const nodes=await nodeMap(ctx.orgId);
+    const roles=new Map((await listDocs(`organizations/${ctx.orgId}/positions`)).map(r=>[r.id,r.data]));
+    const confirmed=await listDocs(proposalsPath(ctx.orgId));
     for(const doc of records){
       const employee=await getDoc(`users/${str(doc.data.employeeUid)}`);
       if(!employee||str(employee.data.orgId)!==ctx.orgId||str(employee.data.status)==='disabled')continue;
@@ -300,6 +303,8 @@ export const hrEmployeeRoutes={
         skillCode:clean(doc.data.skillCode,65),skillName:clean(doc.data.skillName,160),
         proposedBy:clean(doc.data.proposedBy,128),proposerName:clean(doc.data.proposerName,140),
         endorsements:Array.isArray(doc.data.endorsements)?doc.data.endorsements.length:0,
+        requiredForRole:requiredRoleSkills(employee.data,roles).includes(clean(doc.data.skillCode,65)),
+        roleFit:makeSkillFit(employee.id,employee.data,roles,confirmed).percentage,
         createdAt:clean(doc.data.createdAt,40)});
     }
     return {items:results};
