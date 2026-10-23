@@ -126,7 +126,12 @@ export const hrReadRoutes = {
         },
         deployments, roles, requiredSkills,
         skillFit:makeSkillFit(uid,employee.data,positions,skillDocs),
-        access: {scope,allowedTabs:hrVisibleTabs(scope,rules),readOnlyTabs:['roles','deployment','basic'],selfEditingBlocked:isSuperAdmin&&isSelf},
+        access: {
+          scope,allowedTabs:hrVisibleTabs(scope,rules),
+          selfServiceTabs:hrVisibleTabs('self',rules),
+          isOwnRecord:isSelf,
+          readOnlyTabs:['roles','deployment','basic'],
+        },
       };
     }),
   ],
