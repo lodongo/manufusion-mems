@@ -19,6 +19,7 @@ export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownU
  const [catalog,setCatalog]=useState<Skill[]>([]);
  const [items,setItems]=useState<Proposal[]>([]);
  const [skill,setSkill]=useState('');
+ const [selectedSkills,setSelectedSkills]=useState<string[]>([]);
  const [skillCategory,setSkillCategory]=useState('');
  const [skillSubcategory,setSkillSubcategory]=useState('');
  const [loading,setLoading]=useState(true);
@@ -38,6 +39,22 @@ export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownU
    }catch(e){setError(e instanceof Error?e.message:'Skill records unavailable.')}finally{setLoading(false)}
  };
  useEffect(()=>{void load()},[employeeUid]);
+ const addSelected=()=>{
+   if(!skill||selectedSkills.includes(skill)||selectedSkills.length>=25)return;
+   setSelectedSkills(v=>[...v,skill]);setSkill('');
+ };
+ const submitSelected=async()=>{
+   if(!selectedSkills.length||busy)return;
+   setBusy(true);setError('');setNotice('');
+   try{
+     const result=await callBackend<{submittedCount:number;skippedCount:number}>('/api/org/hr/skills/propose/bulk',{
+       employeeUid,skillCodes:selectedSkills,
+     });
+     setNotice(`${result.submittedCount} skill(s) submitted to the immediate manager.${result.skippedCount?' '+result.skippedCount+' already pending or confirmed.':''}`);
+     setSelectedSkills([]);setSkill('');await load();
+   }catch(e){setError(e instanceof Error?e.message:'Skill submission failed.')}
+   finally{setBusy(false)}
+ };
  const act=async(path:string,body:Record<string,unknown>,message:string)=>{
    setBusy(true);setError('');setNotice('');
    try{await callBackend(path,body);setNotice(message);await load()}
@@ -75,9 +92,28 @@ export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownU
           <p className="font-mono font-semibold text-brand">{skill}</p>
           <p className="mt-1 leading-relaxed">{skillChoices.find(x=>x.code===skill)?.description||'No description recorded.'}</p>
        </div>}
+       <button type="button" onClick={addSelected} disabled={!skill||selectedSkills.includes(skill)||selectedSkills.length>=25}
+         className="mt-3 flex min-h-11 items-center gap-2 rounded-xl border border-line px-4 text-sm font-semibold text-brand disabled:opacity-40">
+         <Plus className="h-4 w-4"/>Add to selection
+       </button>
+     </div>
+     <div className="mt-3 rounded-xl border border-line bg-page p-3">
+       <h4 className="text-sm font-semibold">Selected skills ({selectedSkills.length}/25)</h4>
+       <p className="mt-1 text-xs text-muted">You can select further categories and subcategories without losing previous selections.</p>
+       {!selectedSkills.length&&<p className="mt-3 text-sm text-muted">No skills selected yet.</p>}
+       <div className="mt-3 flex flex-wrap gap-2">{selectedSkills.map(code=>{
+         const entry=catalog.find(x=>x.code===code);
+         return <span key={code} className="inline-flex max-w-full items-center gap-2 rounded-lg border border-line bg-panel px-2 py-1 text-xs">
+           <span className="min-w-0 break-words">{entry?.name||code} <span className="font-mono text-muted">({code})</span></span>
+           <button type="button" aria-label={`Remove ${entry?.name||code}`} disabled={busy}
+             onClick={()=>setSelectedSkills(v=>v.filter(x=>x!==code))}
+             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted"><X className="h-4 w-4"/></button>
+         </span>;
+       })}</div>
      </div>
      {!managerAssigned&&<p className="mt-2 text-sm text-amber-600">An immediate manager must be configured in Organization Structure before a proposal can be submitted.</p>}
-     <button type="button" className={'mt-3 '+button} disabled={!skill||!skillCategory||!skillSubcategory||busy||!managerAssigned} onClick={()=>void act('/api/org/hr/skills/propose',{employeeUid,skillCode:skill},'Skill sent to the immediate manager for confirmation.')}> <Plus className="mr-1 inline h-4 w-4"/>Submit skill proposal</button>
+     <button type="button" className={'mt-3 '+button} disabled={!selectedSkills.length||busy||!managerAssigned}
+       onClick={()=>void submitSelected()}><Plus className="mr-1 inline h-4 w-4"/>Submit {selectedSkills.length} skill(s) for manager confirmation</button>
    </div>}
    <Message error={error} notice={notice}/>
  </div>;
