@@ -30,6 +30,7 @@ export function EmployeeSkillPanel({employeeUid,ownUid,requiredCodes=[]}:{employ
  const eligibleChoices=useMemo(()=>skillChoices.filter(item=>!existingCodes.has(item.code)),[skillChoices,existingCodes]);
  const [canPropose,setCanPropose]=useState(false);
  const [managerAssigned,setManagerAssigned]=useState(false);
+ const [managerProblem,setManagerProblem]=useState('');
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
  const load=async()=>{
@@ -37,9 +38,10 @@ export function EmployeeSkillPanel({employeeUid,ownUid,requiredCodes=[]}:{employ
    try{
      const [c,p]=await Promise.all([
        callBackend<{skills:Skill[]}>('/api/org/hr/skills/catalog'),
-       callBackend<{proposals:Proposal[];canPropose:boolean;managerAssigned:boolean}>('/api/org/hr/skills/proposals',{uid:employeeUid}),
+       callBackend<{proposals:Proposal[];canPropose:boolean;managerAssigned:boolean;managerStatus?:string;managerRoleCode?:string}>('/api/org/hr/skills/proposals',{uid:employeeUid}),
      ]);
      setCatalog(c.skills.filter(x=>x.enabled));setItems(p.proposals);setCanPropose(p.canPropose);setManagerAssigned(p.managerAssigned);
+     setManagerProblem(p.managerStatus==='ambiguous'?'Multiple active people hold the same configured manager role. Ask Organization Admin to correct the assignment.':'The configured manager job role must have one active holder at the correct site or legal entity.');
    }catch(e){setError(e instanceof Error?e.message:'Skill records unavailable.')}finally{setLoading(false)}
  };
  useEffect(()=>{void load()},[employeeUid]);
@@ -143,7 +145,7 @@ export function EmployeeSkillPanel({employeeUid,ownUid,requiredCodes=[]}:{employ
          </span>;
        })}</div>
      </div>
-     {!managerAssigned&&<p className="mt-2 text-sm text-amber-600">An immediate manager must be configured in Organization Structure before a proposal can be submitted.</p>}
+     {!managerAssigned&&<p className="mt-2 text-sm text-amber-600">{managerProblem||'A manager role holder must be assigned before submitting skills.'}</p>}
      <button type="button" className={'mt-3 '+button} disabled={!selectedSkills.length||busy||!managerAssigned}
        onClick={()=>void submitSelected()}><Plus className="mr-1 inline h-4 w-4"/>Submit {selectedSkills.length} skill(s) for manager confirmation</button>
    </div>}
