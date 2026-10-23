@@ -36,7 +36,7 @@ const call=(routes,uid,path,body={})=>{
 assert.equal(hrVisibleTabs('manager',hrRules({...HR_RULE_DEFAULTS,managerTabs:['basic','payslips','family','leave']})).includes('payslips'),false);
 assert.equal(hrVisibleTabs('superadmin',hrRules({})).includes('payslips'),true);
 assert.equal(hrVisibleTabs('self',hrRules({})).includes('family'),true);
-assert.equal((await call(hrRulesRoutes,'manager','/api/org/hr/reportees')).employees.length,2,'Manager sees own two direct reports');
+assert.equal((await call(hrRulesRoutes,'manager','/api/org/hr/reportees')).employees.length,3,'Manager sees all three verified direct reports');
 assert.equal((await call(hrRulesRoutes,'other','/api/org/hr/reportees')).employees.length,0);
 await assert.rejects(()=>call(hrRulesRoutes,'employee','/api/org/hr/access-rules/save',{rules:HR_RULE_DEFAULTS}),/permission/);
 const simulated=await call(hrRulesRoutes,'admin','/api/org/hr/access-rules/simulate',{rules:HR_RULE_DEFAULTS});
