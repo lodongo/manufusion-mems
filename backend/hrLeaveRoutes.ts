@@ -5,7 +5,7 @@ import {managerFor} from './hrEmployeeRoutes';
 import {withLock} from './finCore';
 import {hrSiteOf} from './hrHierarchy';
 import {currentHrRules} from './hrRulesRoutes';
-import {hrMayAccess,type HrScope} from './hrPrivacyRules';
+import {hrMayAccess,hrMayChangeRecord,type HrScope} from './hrPrivacyRules';
 const coll=(org:string)=>`organizations/${org}/hr_leave_requests`;
 const s=(v:unknown,n=200)=>str(v).trim().slice(0,n);
 const assignments=(d:Record<string,unknown>)=>Array.isArray(d.assignments)?d.assignments.filter(isObj).filter(x=>s(x.type)==='primary'):[];
@@ -26,10 +26,12 @@ const scope=async(ctx:OrgContext,uid:string)=>{
  const manager=(await managerFor(ctx,person.data,nodes))===ctx.uid&&!isSelf;
  const hr=hasPerm(ctx.directPermissions,'HRM.employee.site.read')&&sites(ctx,person.data,nodes);
  const policy=await currentHrRules(ctx.orgId);
- const viewScope:HrScope=isAdmin?'superadmin':isSelf?'self':manager?'manager':'hr';
+ // Super Administrators retain full access to other employees, but must use
+ // the same self-service permissions as any employee for their own requests.
+ const viewScope:HrScope=isSelf?'self':isAdmin?'superadmin':manager?'manager':'hr';
  const visible=hrMayAccess(viewScope,'leave',policy);
  return {person,isSelf,isAdmin,manager,hr,canRead:visible&&(isAdmin||isSelf||manager||hr),
-  canApply:visible&&(!isAdmin||!isSelf),canApprove:visible&&!isSelf&&(isAdmin||manager)};
+  canApply:visible,canApprove:visible&&!isSelf&&(isAdmin||manager)};
 };
 function record(doc:{id:string;data:Record<string,unknown>},includePrivate:boolean){
  const d=doc.data;
@@ -49,7 +51,7 @@ export const hrLeaveRoutes={
    return {items:docs.filter(d=>s(d.data.employeeUid)===uid).map(d=>record(d,access.isSelf||access.isAdmin))
     .sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),
     permissions:{canApply:access.canApply&&(access.isSelf||access.isAdmin||access.manager||access.hr),
-      canApprove:access.canApprove,scope:access.isAdmin?'superadmin':access.isSelf?'self':access.manager?'manager':'hr'}};
+      canApprove:access.canApprove,scope:access.isSelf?'self':access.isAdmin?'superadmin':access.manager?'manager':'hr'}};
  })],
  'POST /api/org/hr/leave/create':[orgRoute('org.hr.leave.create','HRM.shell.view',async ctx=>{
    const uid=s(ctx.body.employeeUid,128)||ctx.uid;
@@ -57,6 +59,8 @@ export const hrLeaveRoutes={
    if(!a.canRead||!a.canApply)throw new HttpError(403,'You cannot apply for this employee.');
    if(!a.isSelf&&!a.isAdmin&&!a.hr&&!a.manager)throw new HttpError(403,'No on-behalf leave permission.');
    const kind=s(ctx.body.kind,20),leaveType=s(ctx.body.leaveType,60);
+   if((kind==='plan'||kind==='application')&&!hrMayChangeRecord(ctx.uid,uid,kind==='plan'?'leavePlan':'leaveApplication'))
+      throw new HttpError(403,'Protected leave records cannot be modified by their owner.');
    const start=s(ctx.body.start,10),end=s(ctx.body.end,10);
    if(kind==='plan'&&a.hr&&!a.isSelf&&!a.manager&&!a.isAdmin)throw new HttpError(403,'HR may submit actual leave applications on behalf, but cannot manage leave plans.');
    if(!['plan','application'].includes(kind)||!['annual','sick','compassionate','maternity','paternity','study','unpaid','other'].includes(leaveType))
@@ -67,7 +71,8 @@ export const hrLeaveRoutes={
    if(days>366)throw new HttpError(400,'Leave request exceeds one year.');
    const nodes=new Map((await listDocs(`organizations/${ctx.orgId}/structure`)).map(d=>[d.id,d.data]));
    const managerUid=await managerFor(ctx,a.person.data,nodes);
-   if(!managerUid&&!a.isAdmin)throw new HttpError(409,'Immediate manager must be configured before requesting leave.');
+   if(!managerUid&&(!a.isAdmin||a.isSelf))
+      throw new HttpError(409,'Immediate manager must be configured before requesting leave.');
    const planId=s(ctx.body.planId,50);
    if(planId){
      const plan=await getDoc(coll(ctx.orgId)+'/'+planId);
