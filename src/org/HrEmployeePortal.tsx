@@ -11,12 +11,14 @@ import { navigate } from '../lib/route';
 import { firebaseAuth } from '../firebase';
 import HrSelfRecords from './HrSelfRecords';
 import { EmployeeSkillPanel } from './HrSkillsWorkspace';
+import HrLeavePanel from './HrLeavePanel';
+import { Network } from 'lucide-react';
 
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
 type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string};
-type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string};
-type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];access:{scope:string;readOnlyTabs:string[]}};
-type TabKey = 'basic'|'education'|'family'|'skills'|'deployment'|'records'|'roles'|'payroll'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
+type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;department:string;site:string};
+type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];access:{scope:string;readOnlyTabs:string[];allowedTabs:string[];selfEditingBlocked:boolean}};
+type TabKey = 'basic'|'education'|'family'|'skills'|'deployment'|'records'|'roles'|'payslips'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
 const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'basic',label:'Basic Information',Icon:IdCard},
   {key:'education',label:'Education',Icon:GraduationCap},
@@ -25,7 +27,7 @@ const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'deployment',label:'Deployment',Icon:MapPin},
   {key:'records',label:'Records',Icon:FileText},
   {key:'roles',label:'Roles & Responsibilities',Icon:BriefcaseBusiness},
-  {key:'payroll',label:'Payroll',Icon:Wallet},
+  {key:'payslips',label:'Payslips',Icon:Wallet},
   {key:'talent',label:'Talent Pipeline',Icon:Network},
   {key:'leave',label:'Leave Management',Icon:CalendarDays},
   {key:'capability',label:'Capability Assessment',Icon:ClipboardList},
@@ -33,7 +35,7 @@ const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'learning',label:'Learning & Development',Icon:BookOpen},
   {key:'history',label:'Employment History',Icon:Layers},
 ];
-const RESTRICTED=new Set<TabKey>(['payroll','records','talent','leave','capability','performance','learning','history']);
+const RESTRICTED=new Set<TabKey>(['payslips','records','talent','leave','capability','performance','learning','history']);
 function Info({label,value}:{label:string;value?:string}) {
  return <div className="min-w-0 rounded-xl border border-line bg-page p-3"><div className="text-xs text-muted">{label}</div><div className="mt-1 break-words text-sm font-semibold text-ink">{value||'Not recorded'}</div></div>;
 }
@@ -47,12 +49,14 @@ function EmptyRecords({label}:{label:string}) {
   <p className="max-w-md text-xs leading-relaxed text-muted">No verified records are connected to this tab.</p>
  </section>;
 }
-export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?:'HR01'|'HR02'|'HR08'}) {
+export default function HrEmployeePortal({uid,origin='HR02',selfView=false,reporteeView=false}:{uid:string;origin?:'HR01'|'HR02'|'HR08';selfView?:boolean;reporteeView?:boolean}) {
  const [data,setData]=useState<PortalData|null>(null);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState('');
  const [tab,setTab]=useState<TabKey>('basic');
- const back=()=>navigate('organization_home/hr/'+origin);
+ const [reportees,setReportees]=useState<number>(0);
+ const [qualification,setQualification]=useState('');
+ const back=()=>navigate(reporteeView?'organization_home/hr/HR01/reportees':'organization_home/hr/'+origin);
  useEffect(()=>{
   let alive=true;setLoading(true);setData(null);setError('');setTab('basic');
   callBackend<PortalData>('/api/org/hr/employee/portal',{uid})
@@ -61,33 +65,54 @@ export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?
     .finally(()=>{if(alive)setLoading(false)});
   return()=>{alive=false};
  },[uid]);
+ useEffect(()=>{
+  if(!selfView)return;
+  let active=true;
+  callBackend<{employees:Array<{uid:string}>}>('/api/org/hr/reportees').then(r=>{if(active)setReportees(r.employees.length)}).catch(()=>{});
+  callBackend<{education:Array<{qualification?:string;completionYear?:string}>}>('/api/org/hr/private/get',{uid})
+    .then(r=>{if(active)setQualification(r.education?.slice().sort((a,b)=>(b.completionYear||'').localeCompare(a.completionYear||''))[0]?.qualification||'')}).catch(()=>{});
+  return()=>{active=false};
+ },[uid,selfView]);
+ const visibleTabs=TABS.filter(item=>data?.access.allowedTabs?.includes(item.key));
  const active=TABS.find(item=>item.key===tab)||TABS[0];
  const ActiveIcon=active.Icon;
  return <div className="flex h-[calc(100dvh-9rem)] min-h-[420px] min-w-0 flex-col overflow-hidden bg-page text-ink">
   <header className="flex shrink-0 items-center gap-3 border-b border-line bg-page px-3 py-3 sm:px-5">
-   <button type="button" onClick={back} aria-label="Back to employee list" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-panel"><ArrowLeft className="h-5 w-5"/></button>
-   <div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase tracking-wider text-blue-500">Human Resources · Employee portal</p><h1 className="truncate text-base font-bold sm:text-xl">{data?.profile.name||'Employee HR portal'}</h1></div>
+   {!selfView&&<button type="button" onClick={back} aria-label="Back to employee list" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-panel"><ArrowLeft className="h-5 w-5"/></button>}
+   <div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase tracking-wider text-blue-500">Human Resources · Employee portal</p><h1 className="truncate text-base font-bold sm:text-xl">{selfView?'My HR Portal':data?.profile.name||'Employee HR portal'}</h1></div>
 
   </header>
   <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5">
    {loading&&<div role="status" className="rounded-xl border border-line bg-panel p-4 text-sm text-muted">Loading the authorized employee record…</div>}
    {error&&<div role="alert" className="rounded-xl border border-line bg-panel p-4 text-sm text-red-600">{error}<button type="button" className="mt-3 block text-sm font-semibold text-brand underline" onClick={back}>Return to employees</button></div>}
    {data&&<>
-    <section className="mb-4 flex items-center gap-3 rounded-2xl border border-line bg-panel p-4">
-      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600"><UserRound className="h-8 w-8"/></div>
-      <div className="min-w-0 flex-1"><h2 className="truncate text-lg font-bold">{data.profile.name||'Unnamed employee'}</h2><p className="truncate text-xs text-muted">{data.profile.employeeNumber||'No employee number'} · {data.profile.primaryRole||'No position assigned'}</p><p className="mt-1 truncate text-xs text-muted">{data.profile.primaryLocation||'No deployment location'}</p></div>
-      <span className="rounded-full bg-blue-500/10 px-2 py-1 text-[11px] font-semibold text-blue-600">{data.profile.status||'Unknown'}</span>
+    <section className={`relative mb-4 overflow-hidden rounded-2xl ${selfView?'bg-brand text-onbrand shadow-lg':'border border-line bg-panel p-4'}`}>
+      {selfView&&<div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-16 h-52 w-52 rounded-full border-[28px] border-white/10"/>}
+      <div className="relative flex min-w-0 items-center gap-3 p-4 sm:p-5">
+       <div className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl ${selfView?'bg-white/20':'bg-brand/10 text-brand'}`}><UserRound className="h-9 w-9"/></div>
+       <div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase tracking-widest opacity-80">{selfView?'My employee card':'Employee record'}</p>
+        <h2 className="truncate text-xl font-bold">{data.profile.name||'Unnamed employee'}</h2>
+        <p className="truncate text-xs opacity-90">{data.profile.employeeNumber||'Employee number not recorded'} · {data.profile.primaryRole||'Position not assigned'}</p>
+        <p className="truncate text-xs opacity-80">{data.profile.department||data.profile.primaryLocation||'Department not recorded'}</p>
+       </div>
+      </div>
+      {selfView&&<div className="relative grid grid-cols-2 gap-2 border-t border-white/20 bg-black/10 p-3 sm:grid-cols-3">
+       {[[ 'Highest qualification',qualification||'Not recorded'],['Site',data.profile.site||'Not recorded'],['Status',data.profile.status||'Not recorded']].map(([label,value])=>
+        <div key={label} className="min-w-0 rounded-xl bg-white/15 p-3"><p className="text-[11px] opacity-80">{label}</p><p className="mt-1 break-words text-sm font-semibold">{value}</p></div>)}
+      </div>}
     </section>
+    {selfView&&reportees>0&&<button type="button" onClick={()=>navigate('organization_home/hr/HR01/reportees')} className="mb-4 flex min-h-14 w-full items-center gap-3 rounded-xl border border-line bg-panel px-4 text-left text-brand">
+      <Network className="h-5 w-5"/><span className="flex-1 font-semibold">My Reportees <span className="ml-1 text-sm font-normal text-muted">({reportees})</span></span><ChevronRight className="h-5 w-5"/></button>}
     <div className="grid min-w-0 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
      <nav aria-label="Employee HR portal tabs" className="min-w-0 lg:sticky lg:top-0 lg:self-start">
       <div className="lg:hidden">
        <SelectField id="employee-hr-portal-section" label="Employee HR section" value={tab}
         onChange={e=>setTab(e.target.value as TabKey)}>
-        {TABS.map(item=><option key={item.key} value={item.key}>{item.label}</option>)}
+        {visibleTabs.map(item=><option key={item.key} value={item.key}>{item.label}</option>)}
        </SelectField>
       </div>
       <div className="hidden max-h-[65dvh] space-y-1 overflow-y-auto rounded-2xl border border-line bg-panel p-2 lg:block">
-       {TABS.map(({key,label,Icon})=><button key={key} type="button" onClick={()=>setTab(key)} aria-current={tab===key?'page':undefined}
+       {visibleTabs.map(({key,label,Icon})=><button key={key} type="button" onClick={()=>setTab(key)} aria-current={tab===key?'page':undefined}
         className={`flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-left text-sm ${tab===key?'bg-blue-500/10 font-semibold text-blue-600':'text-ink hover:bg-page'}`}>
          <Icon className="h-4 w-4 shrink-0"/><span className="min-w-0 flex-1">{label}</span>{tab===key&&<ChevronRight className="h-4 w-4"/>}
        </button>)}
@@ -119,8 +144,9 @@ export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?
         <EmployeeSkillPanel employeeUid={data.profile.uid} ownUid={firebaseAuth.currentUser?.uid||''}/>
         {data.requiredSkills.length>0&&<Panel title="Required job-role skills"><div className="flex flex-wrap gap-2">{data.requiredSkills.map(skill=><span key={skill} className="rounded-lg border border-line bg-page px-3 py-2 text-sm">{skill}</span>)}</div></Panel>}
       </>}
-      {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid||data.access.scope==='organization'?<HrSelfRecords kind={tab} employeeUid={data.profile.uid}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
-      {RESTRICTED.has(tab)&&tab!=='education'&&tab!=='family'&&<EmptyRecords label={active.label}/>}
+      {(tab==='education'||tab==='family')&&((firebaseAuth.currentUser?.uid===data.profile.uid||data.access.scope==='superadmin')&&!data.access.selfEditingBlocked?<HrSelfRecords kind={tab} employeeUid={data.profile.uid}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
+      {tab==='leave'&&<HrLeavePanel employeeUid={data.profile.uid} showInbox={selfView}/>}
+      {RESTRICTED.has(tab)&&tab!=='education'&&tab!=='family'&&tab!=='leave'&&<EmptyRecords label={active.label}/>}
      </div>
     </div>
     <div className="mt-5 flex items-center gap-2 border-t border-line py-3 text-xs text-muted"><ShieldCheck className="h-4 w-4"/> Employee record access is verified for this session.</div>
