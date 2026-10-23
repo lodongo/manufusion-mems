@@ -42,7 +42,9 @@ await call('employee','/api/org/hr/private/save',{kind:'education',items:educati
 await call('employee','/api/org/hr/private/save',{kind:'family',items:[{name:'Family Member',relationship:'Parent',phone:'+254700000000'}]});
 const mine=await call('employee','/api/org/hr/private/get');
 assert.equal(mine.education.length,1);assert.equal(mine.family.length,1);
-assert.equal((await call('peer','/api/org/hr/private/get',{uid:'employee'})).family.length,0,'Self-private data cannot be read with a forged target uid');
+await assert.rejects(()=>call('peer','/api/org/hr/private/get',{uid:'employee'}),/Only the employee/);
+await assert.rejects(()=>call('peer','/api/org/hr/private/save',{uid:'employee',kind:'family',items:[]}),/Only the employee/);
+assert.equal((await call('admin','/api/org/hr/private/get',{uid:'employee'})).family.length,1,'Organization super administrator can inspect audited employee records');
 const catalog=await call('employee','/api/org/hr/skills/catalog');
 assert.ok(catalog.skills.some(s=>s.code==='HR_SK_001_001'),'Existing standard skills must remain available');
 await assert.rejects(()=>call('peer','/api/org/hr/skills/catalog/save',{name:'Unsafe',category:'A',subcategory:'B'}),/permission|manage/i);
