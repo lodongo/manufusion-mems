@@ -243,8 +243,8 @@ function normalizeItem(x:unknown,grades:Set<string>,countryCode:string,currency:
   !['none','basic','gross','taxable','pensionable','net','hourly','daily','units','eligibleAmount'].includes(base)||
   !['earning','employee_deduction','employer_cost','noncash','informational'].includes(treatment))
   throw new HttpError(400,'A component needs a valid code, name, category, method, base and payroll treatment.');
- const stat=code.startsWith('KE_')&&countryCode==='KE'&&
-  ['statutory','taxes','taxReliefs','employerCosts'].includes(category);
+ const stat=countryCode==='KE'&&kenyaCompensationTemplate().items
+  .some(row=>row.mandatory&&row.code===code&&row.category===category);
  const n=(v:unknown,key:string)=>{
   const a=Number(v??0);
   if(!Number.isFinite(a)||a<0||a>1e12)throw new HttpError(400,'Invalid '+key);
@@ -256,7 +256,7 @@ function normalizeItem(x:unknown,grades:Set<string>,countryCode:string,currency:
  // Statutory obligations must not be disabled by job-grade applicability or
  // by a tenant user. Valid exemptions belong on individual employee records.
  const gradeCodes=stat?[]:values;
- if(stat&&x.enabled===false)throw new HttpError(400,'Statutory components cannot be disabled; use documented employee exemptions.');
+ if(stat&&x.enabled===false)throw new HttpError(400,'Mandatory Kenya components cannot be disabled; use documented legal exemptions where applicable.');
  const options=isObj(x.options)?Object.fromEntries(Object.entries(x.options)
   .slice(0,30).filter(([k,v])=>k.length<=75&&['string','number','boolean'].includes(typeof v))
   .map(([k,v])=>[k,v as string|number|boolean])):{};
@@ -285,10 +285,9 @@ export function validatePayConfig(raw:unknown,grades:Set<string>,countryCode:str
  const items=raw.items.map(x=>normalizeItem(x,grades,countryCode,currency));
  if(new Set(items.map(x=>x.code)).size!==items.length)throw new HttpError(400,'Duplicate compensation codes.');
  if(countryCode==='KE'){
-  const mandatory=kenyaCompensationTemplate().items.filter(x=>x.mandatory&&
-   ['statutory','taxes','taxReliefs','employerCosts'].includes(x.category));
+  const mandatory=kenyaCompensationTemplate().items.filter(x=>x.mandatory);
   if(mandatory.some(x=>!items.some(a=>a.code===x.code&&a.category===x.category&&a.mandatory)))
-   throw new HttpError(400,'Kenya statutory reference rows must remain present and mandatory.');
+   throw new HttpError(400,'Kenya mandatory reference rows must remain present and mandatory.');
  }
  return {countryCode,currency,items,version:0,status:'draft',lastReviewed:sc(raw.lastReviewed,10)};
 }
