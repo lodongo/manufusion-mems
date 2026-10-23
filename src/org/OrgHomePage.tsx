@@ -37,6 +37,7 @@ import WorkflowInbox from './WorkflowInbox';
 import MyAccess from './MyAccess';
 import OrgUserHome from './OrgUserHome';
 import HrShell from './HrShell';
+import HrEmployeePortal from './HrEmployeePortal';
 import OrgMail from './OrgMail';
 import PurchaseRequirements from './PurchaseRequirements';
 import ProcurementSetup from './ProcurementSetup';
@@ -403,6 +404,7 @@ export default function OrgHomePage({
     else if (section === 'mail') content = <OrgMail myEmail={session.user.email} initialId={id==='read'?sub:''} />;
     else if (showActivity) content = <MyActivity />;
     else if (section === 'module' && activeModule && activeModule.module.code==='HRM') content = <HrShell sectionCode='HR01' />;
+    else if (activeMenu?.module.code === 'HRM' && section === 'hr' && ['HR01','HR02','HR08'].includes(id||'') && sub === 'employee' && /^[A-Za-z0-9_-]{1,128}$/.test(route.split('/')[4]||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrEmployeePortal uid={route.split('/')[4]} origin={id as 'HR01'|'HR02'|'HR08'} />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && /^HR(0[1-9]|1[0-6])$/.test(id||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrShell sectionCode={id} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='DOC') content = <DocumentRegistryPage mode='register' canConfigure={hasPerm(data.permissions,'ADM.document_config')} canReview={hasPerm(data.permissions,'ADM.document_review')} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='0') content = <InventoryDashboard />;
