@@ -49,4 +49,45 @@ await assert.rejects(()=>checkEducationEntry(org,'employee',{
 }),/configured grading/);
 assert.equal((await call('administrator','/api/org/hr/education/admin',{legalEntityId:'LE2'})).config.qualifications.some(q=>q.code==='NBI_ENGINEERING'),false,
  'One legal entity must not change another legal entity education catalogue');
+// Education Rank is ordered, but job grading is an independent employment catalogue.
+const ranks=(await call('employee','/api/org/hr/education/config')).config.levels;
+assert.ok(ranks.find(x=>x.code==='MASTER').rank>ranks.find(x=>x.code==='BACHELOR').rank);
+assert.ok(ranks.find(x=>x.code==='DOCTORATE').rank>ranks.find(x=>x.code==='MASTER').rank);
+assert.equal((await call('employee','/api/org/hr/education/config')).config.jobGrades[0].title,'Unskilled / casual');
+// An employee assigned to a different entity cannot retrieve another entity's
+// qualifications, even when their organization contains only one active entity.
+seed('users/unassigned',{uid:'unassigned',orgId:org,status:'active',assignments:[]});
+assert.equal(await legalEntityForEmployee(org,snapshot('users/unassigned').data),null);
+await assert.rejects(()=>checkEducationEntry(org,'unassigned',{
+ levelCode:'BACHELOR',qualificationCode:'NBI_ENGINEERING',
+}),/primary legal-entity assignment/);
+seed('users/employee',{...snapshot('users/employee').data,
+ assignments:[{nodeId:'SITE1',type:'primary',positionCode:'ROL_001'},
+ {nodeId:'LE2',type:'primary',positionCode:'ROL_010'}]});
+assert.equal(await legalEntityForEmployee(org,snapshot('users/employee').data),null,
+ 'Two conflicting legal entities must fail closed');
+seed('users/employee',{...snapshot('users/employee').data,
+ assignments:[{nodeId:'SITE1',type:'primary',positionCode:'ROL_001'}]});
+await assert.rejects(()=>call('employee','/api/org/hr/education/admin/adopt',{
+ sourceLegalEntityId:'LE1',targetLegalEntityId:'LE2',confirmAdoption:true,
+}),/permission/i);
+await assert.rejects(()=>call('administrator','/api/org/hr/education/admin/adopt',{
+ sourceLegalEntityId:'LE1',targetLegalEntityId:'LE1',confirmAdoption:true,
+}),/different active legal entities/);
+await assert.rejects(()=>call('administrator','/api/org/hr/education/admin/adopt',{
+ sourceLegalEntityId:'LE1',targetLegalEntityId:'LE2',
+}),/Confirm copying/);
+const adopted=await call('administrator','/api/org/hr/education/admin/adopt',{
+ sourceLegalEntityId:'LE1',targetLegalEntityId:'LE2',confirmAdoption:true,
+});
+assert.equal(adopted.config.qualifications.some(x=>x.code==='NBI_ENGINEERING'),true);
+assert.equal((await call('administrator','/api/org/hr/education/admin',{legalEntityId:'LE2'})).config.jobGrades.length,
+ configured.jobGrades.length);
+const sourceBefore=(await call('administrator','/api/org/hr/education/admin',{legalEntityId:'LE1'})).config;
+const modifiedTarget={...adopted.config,levels:adopted.config.levels.map(x=>x.code==='DOCTORATE'?{...x,rank:10}:x)};
+await call('administrator','/api/org/hr/education/admin/save',{legalEntityId:'LE2',config:modifiedTarget});
+const sourceAfter=(await call('administrator','/api/org/hr/education/admin',{legalEntityId:'LE1'})).config;
+assert.deepEqual(sourceAfter,sourceBefore,'Target updates must never affect source education master');
+assert.equal((await call('administrator','/api/org/hr/education/admin',{legalEntityId:'LE2'})).config.levels
+ .find(x=>x.code==='DOCTORATE').rank,10);
 console.log('HR legal-entity education and grading scenario passed');
