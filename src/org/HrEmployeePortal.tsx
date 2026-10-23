@@ -18,7 +18,7 @@ import HrRoleSkillRequirements from './HrRoleSkillRequirements';
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
 type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string;requiredSkillCodes:string[]};
 type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;department:string;site:string};
-type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];skillFit:SkillFit;access:{scope:string;readOnlyTabs:string[];allowedTabs:string[];selfEditingBlocked:boolean}};
+type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];skillFit:SkillFit;access:{scope:string;readOnlyTabs:string[];allowedTabs:string[];selfServiceTabs:string[];isOwnRecord:boolean}};
 type TabKey = 'basic'|'education'|'family'|'skills'|'roleSkills'|'deployment'|'records'|'roles'|'payslips'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
 const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'basic',label:'Basic Information',Icon:IdCard},
@@ -149,13 +149,13 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
       </Panel>}
       {tab==='roleSkills'&&<HrRoleSkillRequirements
         employeeUid={data.profile.uid} roles={data.roles} fit={data.skillFit}
-        canSubmit={data.access.scope==='self'&&!data.access.selfEditingBlocked&&firebaseAuth.currentUser?.uid===data.profile.uid}
+        canSubmit={data.access.isOwnRecord&&data.access.selfServiceTabs.includes('roleSkills')&&firebaseAuth.currentUser?.uid===data.profile.uid}
         onRefresh={refreshFit}/>}
       {tab==='skills'&&<>
         <HrRoleSkillFit fit={data.skillFit} detailed/>
         <EmployeeSkillPanel employeeUid={data.profile.uid} ownUid={firebaseAuth.currentUser?.uid||''}/>
       </>}
-      {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid||data.access.scope==='superadmin'?<HrSelfRecords kind={tab} employeeUid={data.profile.uid} readOnly={data.access.selfEditingBlocked}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
+      {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid||data.access.scope==='superadmin'?<HrSelfRecords kind={tab} employeeUid={data.profile.uid} readOnly={data.access.isOwnRecord&&!data.access.selfServiceTabs.includes(tab)}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
       {tab==='leave'&&<HrLeavePanel employeeUid={data.profile.uid} showInbox={selfView}/>}
       {RESTRICTED.has(tab)&&tab!=='education'&&tab!=='family'&&tab!=='leave'&&<EmptyRecords label={active.label}/>}
      </div>
