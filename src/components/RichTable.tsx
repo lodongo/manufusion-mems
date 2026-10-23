@@ -467,8 +467,8 @@ export default function RichTable<T>({
         <div className={`flex ${height} min-h-[22rem] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900`}>
             {/* Action bar: always visible */}
             <div className='shrink-0 space-y-2 border-b border-slate-800 p-2'>
-                <div className='flex flex-wrap items-center gap-2'>
-                    <label className='relative min-w-0 basis-full sm:basis-auto sm:flex-1'>
+                <div className='flex items-center gap-2'>
+                    <label className='relative min-w-0 flex-1'>
                         <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
                         <input
                             type='search'
@@ -480,11 +480,11 @@ export default function RichTable<T>({
                             className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm'
                         />
                     </label>
-                    <div className='relative w-full sm:hidden'>
-                        <button type='button' aria-expanded={mobileToolsOpen} aria-label='Table options' onClick={() => setMobileToolsOpen(!mobileToolsOpen)} className='flex h-11 w-full items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-semibold text-white'>
-                            <span>Table options</span><ChevronDown className='h-4 w-4' />
+                    <div className='relative shrink-0 sm:hidden'>
+                        <button type='button' aria-expanded={mobileToolsOpen} aria-label='Table options' onClick={() => setMobileToolsOpen(!mobileToolsOpen)} className='flex h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-semibold text-white'>
+                            <Columns3 className='h-4 w-4'/><span className='hidden min-[390px]:inline'>Options</span><ChevronDown className='h-4 w-4' />
                         </button>
-                        {mobileToolsOpen && <div className='grid grid-cols-2 gap-2 rounded-xl border border-slate-700 bg-slate-900 p-2'>
+                        {mobileToolsOpen && <div className='absolute right-0 top-full z-40 mt-2 grid w-64 max-w-[calc(100vw-3rem)] grid-cols-1 gap-1 rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-xl'>
                             {([['filters','Filters'],['group','Group by'],['formulas','Formula columns'],['columns','Columns'],['templates','Saved templates']] as const).map(([key,label])=><button key={key} type='button' onClick={()=>{setPanel(panel===key?'':key);setMobileToolsOpen(false)}} className='min-h-11 rounded-lg border border-slate-700 px-2 text-left text-sm text-white'>{label}{key==='filters'&&view.criteria.length>0?' ('+view.criteria.length+')':''}</button>)}
                             {allowExport&&<button type='button' onClick={()=>{setMobileToolsOpen(false);exportExcel()}} disabled={!filtered.length} className='min-h-11 rounded-lg border border-slate-700 px-2 text-left text-sm text-white disabled:opacity-40'>Export Excel</button>}
                         </div>}
