@@ -58,7 +58,7 @@ export default function HrLeavePanel({employeeUid,showInbox=false}:{employeeUid:
  {open&&permissions.canApply&&<section className="rounded-2xl border border-line bg-panel p-4">
   <h3 className="mb-3 font-semibold">Submit leave {employeeUid===firebaseAuth.currentUser?.uid?'':'on behalf of employee'}</h3>
   <div className="grid gap-3 sm:grid-cols-2">
-   <SelectField id="hr-leave-kind" label="Request stage" value={kind} onChange={e=>setKind(e.target.value)}><option value="plan">Leave plan</option><option value="application">Actual application</option></SelectField>
+   <SelectField id="hr-leave-kind" label="Request stage" value={kind} onChange={e=>setKind(e.target.value)}>{permissions.scope!=='hr'&&<option value="plan">Leave plan</option>}<option value="application">Actual application</option></SelectField>
    <SelectField id="hr-leave-type" label="Leave category" value={leaveType} onChange={e=>setLeaveType(e.target.value)}>{Object.entries(labels).map(([code,title])=><option key={code} value={code}>{title}</option>)}</SelectField>
    <label className="text-sm text-muted">From<input type="date" value={start} onChange={e=>setStart(e.target.value)} className={field}/></label>
    <label className="text-sm text-muted">To<input type="date" value={end} onChange={e=>setEnd(e.target.value)} className={field}/></label>
