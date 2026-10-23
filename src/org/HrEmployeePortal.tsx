@@ -9,6 +9,8 @@ import { callBackend } from '../lib/backend';
 import { SelectField } from '../components/ui';
 import { navigate } from '../lib/route';
 import { firebaseAuth } from '../firebase';
+import HrSelfRecords from './HrSelfRecords';
+import { EmployeeSkillPanel } from './HrSkillsWorkspace';
 
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
 type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string};
@@ -31,7 +33,7 @@ const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'learning',label:'Learning & Development',Icon:BookOpen},
   {key:'history',label:'Employment History',Icon:Layers},
 ];
-const RESTRICTED=new Set<TabKey>(['family','payroll','records','talent','leave','capability','performance','education','learning','history']);
+const RESTRICTED=new Set<TabKey>(['payroll','records','talent','leave','capability','performance','learning','history']);
 function Info({label,value}:{label:string;value?:string}) {
  return <div className="min-w-0 rounded-xl border border-line bg-page p-3"><div className="text-xs text-muted">{label}</div><div className="mt-1 break-words text-sm font-semibold text-ink">{value||'Not recorded'}</div></div>;
 }
@@ -102,7 +104,7 @@ export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?
         <Info label="Assigned location" value={data.profile.primaryLocation}/>
         <Info label="Employee ID" value={data.profile.uid}/>
        </div>
-       {firebaseAuth.currentUser?.uid===data.profile.uid&&<button type="button" onClick={()=>navigate('organization_home/profile')} className="mt-4 flex min-h-11 w-full items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-onbrand">Edit my basic information</button>}
+
       </Panel>}
       {tab==='deployment'&&<Panel title="Organization deployments">
        {data.deployments.length? <div className="space-y-3">{data.deployments.map((dep,i)=><div key={dep.nodeId+dep.positionCode+i} className="rounded-xl border border-line bg-page p-3">
@@ -113,11 +115,12 @@ export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?
       {tab==='roles'&&<Panel title="Job roles and responsibilities">
        {data.roles.length?<div className="space-y-3">{data.roles.map(role=><article key={role.code} className="rounded-xl border border-line bg-page p-4"><h3 className="font-semibold">{role.title}</h3><p className="mt-1 text-xs text-muted">{role.code} · {role.operatingLevel||'Level not recorded'} · Reports to: {role.reportsToCode||'Not recorded'}</p><p className="mt-3 whitespace-pre-wrap text-sm">{role.description||'No responsibilities description is recorded for this role.'}</p></article>)}</div>:<p className="text-sm text-muted">No assigned job role is recorded.</p>}
       </Panel>}
-      {tab==='skills'&&<Panel title="Skills associated with assigned roles">
-       <p className="mb-3 text-xs text-muted">These are required role skills from the approved job-role master, not verified personal skill ratings.</p>
-       {data.requiredSkills.length?<div className="flex flex-wrap gap-2">{data.requiredSkills.map(skill=><span key={skill} className="rounded-lg border border-line bg-page px-3 py-2 text-sm">{skill}</span>)}</div>:<p className="text-sm text-muted">No role skill requirements are recorded.</p>}
-      </Panel>}
-      {RESTRICTED.has(tab)&&<EmptyRecords label={active.label}/>}
+      {tab==='skills'&&<>
+        <EmployeeSkillPanel employeeUid={data.profile.uid} ownUid={firebaseAuth.currentUser?.uid||''}/>
+        {data.requiredSkills.length>0&&<Panel title="Required job-role skills"><div className="flex flex-wrap gap-2">{data.requiredSkills.map(skill=><span key={skill} className="rounded-lg border border-line bg-page px-3 py-2 text-sm">{skill}</span>)}</div></Panel>}
+      </>}
+      {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid?<HrSelfRecords kind={tab}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
+      {RESTRICTED.has(tab)&&tab!=='education'&&tab!=='family'&&<EmptyRecords label={active.label}/>}
      </div>
     </div>
     <div className="mt-5 flex items-center gap-2 border-t border-line py-3 text-xs text-muted"><ShieldCheck className="h-4 w-4"/> Employee record access is verified for this session.</div>
