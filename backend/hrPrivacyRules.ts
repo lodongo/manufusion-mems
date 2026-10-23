@@ -42,6 +42,21 @@ export function hrVisibleTabs(scope:HrScope,rules:HrRules):HrTab[]{
 export function hrMayAccess(scope:HrScope,tab:HrTab,rules:HrRules):boolean{
  return hrVisibleTabs(scope,rules).includes(tab);
 }
-export function hrAssertNotSelfWrite(actorUid:string,targetUid:string,role:string){
- if(role==='org_super_admin'&&actorUid===targetUid)throw new Error('Organization Super Administrators cannot modify or approve their own HR records.');
+/** Employee self-service is role-neutral: Super Administrators have the same
+ * personal update rights as every employee. Protected records and approvals
+ * never become self-editable through administrative permissions.
+ */
+export type HrOwnRecordAction=
+ 'education'|'family'|'skillProposal'|'roleSkillProposal'|'leavePlan'|'leaveApplication'|
+ 'basic'|'deployment'|'roleAssignment'|'roleDefinition'|'payslip'|'managerApproval'|'privacyApproval';
+const selfServiceWrites=new Set<HrOwnRecordAction>([
+ 'education','family','skillProposal','roleSkillProposal','leavePlan','leaveApplication',
+]);
+export function hrMayChangeOwnRecord(action:HrOwnRecordAction):boolean{
+ return selfServiceWrites.has(action);
+}
+export function hrMayChangeRecord(actorUid:string,targetUid:string,action:HrOwnRecordAction):boolean{
+ // This helper only assesses self-edit restrictions; all other edits must also
+ // pass their separate tenant, role, purpose, scope and workflow checks.
+ return actorUid!==targetUid||hrMayChangeOwnRecord(action);
 }
