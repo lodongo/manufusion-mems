@@ -99,7 +99,7 @@ export const hrReadRoutes = {
           primaryRole:deployments[0]?.positionTitle||'', primaryLocation:deployments[0]?.location||'',
         },
         deployments, roles, requiredSkills,
-        access: {scope:isSelf?'self':isSuperAdmin?'organization':sitePermitted?'site':'manager_hierarchy',readOnly:true},
+        access: {scope:isSelf?'self':isSuperAdmin?'organization':sitePermitted?'site':'manager_hierarchy',readOnlyTabs:['roles']},
       };
     }),
   ],
