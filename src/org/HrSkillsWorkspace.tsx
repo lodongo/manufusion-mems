@@ -215,7 +215,7 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
            disabled={busy||!bulkCategory.trim()||!bulkSubcategory.trim()||!bulkRows.every(row=>row.name.trim())}
            className={button}>Save {bulkRows.length} skills</button>
        </div>
-     </section>
+     </section>}
      {creating&&<div id="hr-skill-editor" className={panel}>
        <h3 className="mb-3 font-bold">{edit?'Update skill':'Add HR skill'}</h3>
        <div className="grid gap-3 sm:grid-cols-2">
