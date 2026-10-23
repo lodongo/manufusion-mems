@@ -225,6 +225,7 @@ async function casUpdateUser(uid: string, current: Doc, fields: Fields): Promise
         throw new HttpError(502, 'Could not update your wellbeing records.');
     }
     await fail(res, 'MEMS health update');
+    throw new HttpError(502, 'Could not update your wellbeing records.');
 }
 
 export async function saveHealthSettings(uid: string, payload: unknown) {
