@@ -26,6 +26,14 @@ export function standardRoleTemplates(groups: PermGroup[]): StandardRoleTemplate
   if (enabled.get('HRM')?.has('HRM.shell.view')) {
     templates.push({ id: 'std_hrm_shell_viewer', module: 'HRM', name: 'HR – Workspace Access', description: 'Open HR submodules. Employee record viewing and changes require separately authorized permissions.', permissions: ['HRM.shell.view'] });
     assigned.add('HRM.shell.view');
+    if(enabled.get('HRM')?.has('HRM.skills.manage')){
+      templates.push({
+        id:'std_hrm_skills_administrator',module:'HRM',name:'HR – Skills Administrator',
+        description:'Maintain the tenant skills catalogue; manager confirmation remains tied to the actual reporting hierarchy.',
+        permissions:['HRM.shell.view','HRM.skills.manage'],
+      });
+      assigned.add('HRM.skills.manage');
+    }
   }
   for (const template of ROLE_TEMPLATES) {
     const valid = enabled.get(template.module);
