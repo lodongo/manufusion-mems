@@ -74,7 +74,7 @@ export default function HrAccessRules(){
    </section>
    {canConfigure&&<section className="rounded-2xl border border-line bg-panel p-4">
     <h3 className="mb-2 font-semibold">Mandatory access simulation</h3>
-    <p className="mb-3 text-xs text-muted">Simulate the exact proposed settings. Manager Family/Payslips restrictions and the Super Administrator's self-write prohibition cannot be overridden.</p>
+    <p className="mb-3 text-xs text-muted">Simulate the exact proposed settings. Manager Family/Payslips restrictions and the restriction on protected self-edits and self-approval cannot be overridden.</p>
     <div className="flex flex-wrap gap-2"><button type="button" onClick={()=>void simulate()} disabled={saving||!!pending} className="min-h-12 rounded-xl border border-line px-4 font-semibold disabled:opacity-40">Simulate rule change</button>
     <button type="button" onClick={()=>void save()} disabled={saving||!simulationDigest||!!pending} className="flex min-h-12 items-center gap-2 rounded-xl bg-brand px-5 font-semibold text-onbrand disabled:opacity-40"><Save className="h-5 w-5"/>Submit for independent approval</button></div>
     {preview&&<p className="mt-3 rounded-xl bg-page p-3 text-xs text-muted">Simulated: Employee {preview.employee?.length||0} tabs; Manager {preview.manager?.length||0} tabs; HR {preview.hr?.length||0} tabs; Super Administrator {preview.superadmin?.length||0} tabs.</p>}
