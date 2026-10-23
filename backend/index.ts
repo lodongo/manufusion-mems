@@ -720,7 +720,7 @@ export const handler = router(recordWiredRoutes({
                     await activateIfVerified(org, claims, actor, meta);
                     org.data.code = code;
                     if (domain && emailDomain(claims.email) !== domain) throw new HttpError(403, 'Your account does not belong to this organization.');
-                    const access = await effectiveAccess(orgId, role, user);
+                    const access = await effectiveAccess(orgId, role, user, org.data.modules);
                     permissions = access.permissions;
                     roleName = access.roleName;
                     landing = landingFor(role, permissions);
