@@ -109,7 +109,7 @@ function normalizeConfig(raw:unknown):EducationConfig{
   const unique=grades.map(y=>{
    if(!isObj(y))throw new HttpError(400,'Invalid grade option.');
    const code=clean(y.code,64),name=clean(y.name,100);
-   if(!idOk(code)||!name)throw new HttpError(400,'Grade codes and labels are required.');
+   if(!/^[A-Za-z0-9_.-]{1,64}$/.test(code)||!name)throw new HttpError(400,'Grade codes and labels are required.');
    return {code,name};
   });
   if(new Set(unique.map(y=>y.code)).size!==unique.length)throw new HttpError(400,'Duplicate grade codes.');
