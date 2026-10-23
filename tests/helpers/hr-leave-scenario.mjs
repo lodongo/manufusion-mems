@@ -17,7 +17,7 @@ for(const [id,level,parent,managerUid] of [
 }
 for(const [uid,node,role] of [
  ['manager','DEPT_A','member'],['employee','TEAM_A','member'],
- ['hr','TEAM_A','member'],['other','TEAM_B','member'],['admin','SITE_A','org_super_admin'],
+ ['hr','TEAM_A','member'],['dpo','TEAM_A','member'],['other','TEAM_B','member'],['admin','SITE_A','org_super_admin'],
 ]){
  seed('users/'+uid,{uid,orgId:org,status:'active',role,firstName:uid,lastName:'Fixture',
   assignments:[{type:'primary',nodeId:node,positionCode:'P'}]});
@@ -25,7 +25,7 @@ for(const [uid,node,role] of [
 const ctx=(uid,body={})=>({
  uid,orgId:org,role:uid==='admin'?'org_super_admin':'member',
  me:snapshot('users/'+uid),org:snapshot(root),
- permissions:['HRM.shell.view',...(uid==='hr'?['HRM.employee.site.read']:[]),...(uid==='admin'?['HRM.rules.manage']:[])],
+ permissions:['HRM.shell.view',...(uid==='hr'?['HRM.employee.site.read']:[]),...(uid==='admin'?['HRM.rules.manage']:[]),...(uid==='dpo'?['HRM.rules.approve']:[])],
  directPermissions:['HRM.shell.view',...(uid==='hr'?['HRM.employee.site.read']:[]),...(uid==='admin'?['HRM.rules.manage']:[])],
  body,actor:{uid,orgId:org},meta:{},claims:{email:'test@example.com'},
 });
@@ -39,7 +39,12 @@ assert.equal(hrVisibleTabs('self',hrRules({})).includes('family'),true);
 assert.equal((await call(hrRulesRoutes,'manager','/api/org/hr/reportees')).employees.length,2,'Manager sees own two direct reports');
 assert.equal((await call(hrRulesRoutes,'other','/api/org/hr/reportees')).employees.length,0);
 await assert.rejects(()=>call(hrRulesRoutes,'employee','/api/org/hr/access-rules/save',{rules:HR_RULE_DEFAULTS}),/permission/);
-await call(hrRulesRoutes,'admin','/api/org/hr/access-rules/save',{rules:HR_RULE_DEFAULTS});
+const simulated=await call(hrRulesRoutes,'admin','/api/org/hr/access-rules/simulate',{rules:HR_RULE_DEFAULTS});
+await assert.rejects(()=>call(hrRulesRoutes,'admin','/api/org/hr/access-rules/save',{rules:HR_RULE_DEFAULTS}),/Simulate/);
+await call(hrRulesRoutes,'admin','/api/org/hr/access-rules/save',{rules:HR_RULE_DEFAULTS,simulationDigest:simulated.digest});
+await assert.rejects(()=>call(hrRulesRoutes,'admin','/api/org/hr/access-rules/review',{decision:'approve'}),/own privacy rule/);
+await call(hrRulesRoutes,'dpo','/api/org/hr/access-rules/review',{decision:'approve'});
+assert.equal((await call(hrRulesRoutes,'admin','/api/org/hr/access-rules/get')).rules.managerTabs.includes('leave'),true);
 const plan=await call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
  employeeUid:'employee',kind:'plan',leaveType:'annual',start:'2026-11-09',end:'2026-11-13'});
 assert.ok(plan.id);
