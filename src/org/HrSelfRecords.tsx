@@ -65,6 +65,6 @@ export default function HrSelfRecords({kind,employeeUid,readOnly=false}:{kind:Ki
   </div>}
   {error&&<p role="alert" className="text-sm text-red-500">{error}</p>}
   {notice&&<p role="status" className="text-sm text-brand">{notice}</p>}
-  <p className="flex items-center gap-2 text-xs text-muted"><LockKeyhole className="h-4 w-4"/>These records are restricted to the employee and organization super administrator. A Super Administrator may not change their own HR records.</p>
+  <p className="flex items-center gap-2 text-xs text-muted"><LockKeyhole className="h-4 w-4"/>These private records are accessible to the employee and authorized Super Administrator. Both may update their own permitted self-service information.</p>
  </section>;
 }
