@@ -26,6 +26,8 @@ export default function RoleCoreSkills({
     const [search, setSearch] = useState('');
     const [sourceCode, setSourceCode] = useState('');
     const [parentSearch, setParentSearch] = useState('');
+    const [parentCategory, setParentCategory] = useState('');
+    const [parentSubcategory, setParentSubcategory] = useState('');
     const [parentExpanded,setParentExpanded] = useState(false);
 
     const all = data?.skills ?? [];
@@ -39,11 +41,17 @@ export default function RoleCoreSkills({
     const source = sources.find((p) => p.code === sourceCode) ?? sources[0];
     const inherited = [...new Set(source?.coreSkills ?? [])];
     const adoptable = inherited.filter((code) => availableCodes.has(code));
-    const missing = adoptable.filter((code) => !selectedCodes.has(code));
+    const parentCats = [...new Set(adoptable.map(code=>byCode.get(code)?.category||'Uncategorized'))].sort();
+    const parentSubs = [...new Set(adoptable.filter(code=>(byCode.get(code)?.category||'Uncategorized')===parentCategory)
+        .map(code=>byCode.get(code)?.subcategory||'Uncategorized'))].sort();
+    const parentFiltered = adoptable.filter(code=>
+        (byCode.get(code)?.category||'Uncategorized')===parentCategory &&
+        (byCode.get(code)?.subcategory||'Uncategorized')===parentSubcategory);
+    const missing = parentFiltered.filter((code) => !selectedCodes.has(code));
     const unavailable = inherited.filter((code) => !availableCodes.has(code));
     const parentQuery = parentSearch.trim().toLowerCase();
-    const parentChoices = adoptable.filter((code) =>
-        !parentQuery || `${byCode.get(code)?.label ?? code} ${byCode.get(code)?.description ?? ''}`.toLowerCase().includes(parentQuery));
+    const parentChoices = parentFiltered.filter((code) =>
+        !parentQuery || `${byCode.get(code)?.label ?? code} ${byCode.get(code)?.description ?? ''} ${code}`.toLowerCase().includes(parentQuery));
     const nameOf = (code: string) => byCode.get(code)?.label || code;
     const toggle = (code: string) =>
         onChange(selectedCodes.has(code) ? value.filter((x) => x !== code) : adoptSkillCodes(value, [code], availableCodes));
@@ -69,18 +77,30 @@ export default function RoleCoreSkills({
                             <p className='text-xs text-soft'>Select a reporting role and adopt all or individual skills. Copies are saved to this role and can be changed independently later.</p>
                         </div>
                     </div>
-                    <SelectField id='parent-skills-role' label='Source role in reporting hierarchy' value={source?.code ?? ''} onChange={(e) => { setSourceCode(e.target.value); setParentSearch(''); }}>
+                    <SelectField id='parent-skills-role' label='Source role in reporting hierarchy' value={source?.code ?? ''} onChange={(e) => { setSourceCode(e.target.value); setParentSearch(''); setParentCategory(''); setParentSubcategory(''); }}>
                         {sources.map((role, i) =>
                             <option key={role.code} value={role.code}>{i === 0 ? 'Direct parent' : `Ancestor ${i}`} · {role.title} ({role.code})</option>)}
                     </SelectField>
+                    <div className='grid min-w-0 gap-3 sm:grid-cols-2'>
+                        <SelectField id='parent-skill-category' label='Adopt skills — category' value={parentCategory}
+                            onChange={e=>{setParentCategory(e.target.value);setParentSubcategory('');setParentSearch('')}}>
+                            <option value=''>Select category</option>
+                            {parentCats.map(c=><option key={c} value={c}>{c}</option>)}
+                        </SelectField>
+                        <SelectField id='parent-skill-subcategory' label='Subcategory' value={parentSubcategory}
+                            disabled={!parentCategory} onChange={e=>{setParentSubcategory(e.target.value);setParentSearch('')}}>
+                            <option value=''>Select subcategory</option>
+                            {parentSubs.map(c=><option key={c} value={c}>{c}</option>)}
+                        </SelectField>
+                    </div>
                     <div className='flex flex-wrap items-center justify-between gap-2'>
-                        <p className='text-xs text-soft'>{inherited.length} source skills · {missing.length} available to add · {adoptable.length - missing.length} already selected</p>
-                        <Button type='button' variant='secondary' disabled={!missing.length} onClick={() => onChange(adoptSkillCodes(value, adoptable, availableCodes))}>
+                        <p className='text-xs text-soft'>{inherited.length} source skills · {missing.length} available in selected category/subcategory · {parentFiltered.length - missing.length} already selected</p>
+                        <Button type='button' variant='secondary' disabled={!missing.length} onClick={() => onChange(adoptSkillCodes(value, parentFiltered, availableCodes))}>
                             <Copy className='h-4 w-4'/> Adopt all missing
                         </Button>
                     </div>
                     {unavailable.length > 0 && <Alert tone='warn'>{unavailable.length} skills in the source role are no longer enabled in HRM Skills Master and cannot be newly adopted. Existing role skills are not removed.</Alert>}
-                    {adoptable.length > 0 && <>
+                    {parentSubcategory && parentFiltered.length > 0 && <>
                         <Field id='source-skill-search' label='Search parent role skills' type='search' value={parentSearch}
                             onChange={(e) => setParentSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()} />
                         <ul aria-label='Skills available from the parent role' className='min-w-0 max-w-full max-h-64 space-y-1 overflow-y-auto overscroll-contain'>
@@ -97,6 +117,7 @@ export default function RoleCoreSkills({
                         </ul>
                     </>}
                     {!inherited.length && <p className='text-xs text-soft'>This reporting role does not have any skills assigned yet. Select an ancestor or add skills manually below.</p>}
+                    {!!inherited.length && !parentSubcategory && <p className='text-xs text-soft'>Choose a category and subcategory to select or adopt skills from this reporting role.</p>}
                     </div>}
                 </div>
             )}
