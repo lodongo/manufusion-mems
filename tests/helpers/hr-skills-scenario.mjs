@@ -108,4 +108,34 @@ assert.equal(repeatBatch.skippedCount,1);
 await assert.rejects(()=>call('peer','/api/org/hr/skills/catalog/save/bulk',{
  category:'Engineering',subcategory:'Reliability',items:[{name:'Unauthorized skill'}],
 }),/permission|manage/i);
+// Dedicated role requirements are selectable only by the employee and must
+// match a currently assigned role; approval is still manager-owned.
+seed(root+'/positions/ROLE',{title:'Engineering Technician',coreSkills:[added.code,'HR_SK_001_001','HR_SK_001_003']});
+await assert.rejects(()=>call('employee','/api/org/hr/skills/role-requirements/propose',{
+ employeeUid:'employee',skillCodes:['HR_SK_001_004']
+}),/required by the employee/);
+await assert.rejects(()=>call('peer','/api/org/hr/skills/role-requirements/propose',{
+ employeeUid:'employee',skillCodes:['HR_SK_001_003']
+}),/Only the employee/);
+await assert.rejects(()=>call('admin','/api/org/hr/skills/role-requirements/propose',{
+ employeeUid:'employee',skillCodes:['HR_SK_001_003']
+}),/Only the employee/);
+const roleSubmission=await call('employee','/api/org/hr/skills/role-requirements/propose',{
+ employeeUid:'employee',skillCodes:['HR_SK_001_003']
+});
+assert.equal(roleSubmission.submittedCount,1);
+const proposedRequirement=(await listDocs(root+'/hr_skill_proposals'))
+ .find(p=>p.data.skillCode==='HR_SK_001_003');
+assert.ok(proposedRequirement);
+assert.equal(proposedRequirement.data.status,'pending');
+await assert.rejects(()=>call('peer','/api/org/hr/skills/decide',{
+ id:proposedRequirement.id,action:'approve'
+}),/immediate manager/);
+await call('manager','/api/org/hr/skills/decide',{
+ id:proposedRequirement.id,action:'approve'
+});
+const finalFit=roleFitModule.makeSkillFit('employee',snapshot('users/employee').data,
+ new Map([['ROLE',{coreSkills:[added.code,'HR_SK_001_001','HR_SK_001_003']}]]),
+ await listDocs(root+'/hr_skill_proposals'));
+assert.equal(finalFit.percentage,100);
 console.log('HR skills and self-service scenario passed');
