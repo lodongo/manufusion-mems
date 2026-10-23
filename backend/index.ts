@@ -66,6 +66,7 @@ import {
 } from './guards';
 import { orgRoutes } from './org';
 import { hrReadRoutes } from './hrReadRoutes';
+import { hrEmployeeRoutes } from './hrEmployeeRoutes';
 import { drkmsRoutes } from './drkmsRegistry';
 import {drkmsFormRoutes} from './drkmsForms';
 import { drkmsFileRoutes } from './drkmsFiles';
@@ -1538,6 +1539,7 @@ export const handler = router(recordWiredRoutes({
 
     ...orgRoutes,
     ...hrReadRoutes,
+    ...hrEmployeeRoutes,
     ...drkmsRoutes,
     ...drkmsFormRoutes,
     ...drkmsFileRoutes,
