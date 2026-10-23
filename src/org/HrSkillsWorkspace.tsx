@@ -3,6 +3,7 @@ import { Award, Check, ClipboardCheck, Plus, RefreshCw, ShieldCheck, ThumbsUp, U
 import { callBackend } from '../lib/backend';
 import { SelectField } from '../components/ui';
 import HrSkillCatalogueBrowser from './HrSkillCatalogueBrowser';
+import HrSkillCategoryFields from './HrSkillCategoryFields';
 
 type Skill={code:string;name:string;category:string;subcategory:string;description:string;enabled:boolean};
 type Proposal={id:string;skillCode:string;skillName:string;status:string;proposedBy:string;proposerName:string;managerUid:string;endorsements:Array<{uid:string;name:string}>;createdAt:string;reviewedAt:string};
@@ -18,7 +19,10 @@ export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownU
  const [catalog,setCatalog]=useState<Skill[]>([]);
  const [items,setItems]=useState<Proposal[]>([]);
  const [skill,setSkill]=useState('');
+ const [skillCategory,setSkillCategory]=useState('');
+ const [skillSubcategory,setSkillSubcategory]=useState('');
  const [loading,setLoading]=useState(true);
+ const skillChoices=useMemo(()=>catalog.filter(x=>x.category===skillCategory&&x.subcategory===skillSubcategory),[catalog,skillCategory,skillSubcategory]);
  const [canPropose,setCanPropose]=useState(false);
  const [managerAssigned,setManagerAssigned]=useState(false);
  const [busy,setBusy]=useState(false);
@@ -56,12 +60,24 @@ export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownU
    </div>
    {canPropose&&<div className={panel}>
      <h3 className="mb-3 font-bold">{employeeUid===ownUid?'Propose my skill':'Propose a colleague’s skill'}</h3>
-     <SelectField id={'skill-propose-'+employeeUid} label="Skill from approved catalogue" value={skill} onChange={e=>setSkill(e.target.value)}>
-       <option value="">Select a skill</option>
-       {catalog.map(x=><option key={x.code} value={x.code}>{x.name} · {x.category} / {x.subcategory}</option>)}
-     </SelectField>
+     <HrSkillCategoryFields idPrefix={'skill-propose-'+employeeUid} skills={catalog}
+       category={skillCategory} subcategory={skillSubcategory}
+       onCategory={v=>{setSkillCategory(v);setSkillSubcategory('');setSkill('')}}
+       onSubcategory={v=>{setSkillSubcategory(v);setSkill('')}}/>
+     <div className="mt-3 space-y-2">
+       <SelectField id={'skill-propose-'+employeeUid+'-skill'} label="Skill" required
+         value={skill} disabled={!skillSubcategory} onChange={e=>setSkill(e.target.value)}
+         hint={!skillSubcategory?'Choose a category and subcategory first':undefined}>
+         <option value="">Select skill</option>
+         {skillChoices.map(x=><option key={x.code} value={x.code}>{x.name} ({x.code})</option>)}
+       </SelectField>
+       {skill&&<div className="rounded-xl border border-line bg-page p-3 text-xs text-soft">
+          <p className="font-mono font-semibold text-brand">{skill}</p>
+          <p className="mt-1 leading-relaxed">{skillChoices.find(x=>x.code===skill)?.description||'No description recorded.'}</p>
+       </div>}
+     </div>
      {!managerAssigned&&<p className="mt-2 text-sm text-amber-600">An immediate manager must be configured in Organization Structure before a proposal can be submitted.</p>}
-     <button type="button" className={'mt-3 '+button} disabled={!skill||busy||!managerAssigned} onClick={()=>void act('/api/org/hr/skills/propose',{employeeUid,skillCode:skill},'Skill sent to the immediate manager for confirmation.')}> <Plus className="mr-1 inline h-4 w-4"/>Submit skill proposal</button>
+     <button type="button" className={'mt-3 '+button} disabled={!skill||!skillCategory||!skillSubcategory||busy||!managerAssigned} onClick={()=>void act('/api/org/hr/skills/propose',{employeeUid,skillCode:skill},'Skill sent to the immediate manager for confirmation.')}> <Plus className="mr-1 inline h-4 w-4"/>Submit skill proposal</button>
    </div>}
    <Message error={error} notice={notice}/>
  </div>;
@@ -123,8 +139,18 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
      {creating&&<div id="hr-skill-editor" className={panel}>
        <h3 className="mb-3 font-bold">{edit?'Update skill':'Add HR skill'}</h3>
        <div className="grid gap-3 sm:grid-cols-2">
-         {[['Skill name',name,setName],['Category',category,setCategory],['Subcategory',subcategory,setSubcategory],['Description',description,setDescription]] .map(([label,value,setter])=>
-           <label key={label as string} className="block text-sm text-muted">{label as string}<input className={field} value={value as string} onChange={e=>(setter as (v:string)=>void)(e.target.value)} maxLength={label==='Description'?600:160}/></label>)}
+         <label className="block text-sm text-muted">Skill name
+           <input className={field} required maxLength={160} value={name} onChange={e=>setName(e.target.value)}/>
+         </label>
+         <label className="block text-sm text-muted">Description
+           <textarea className={field+' min-h-24 p-3'} maxLength={600} value={description} onChange={e=>setDescription(e.target.value)}/>
+         </label>
+         <div className="sm:col-span-2">
+           <HrSkillCategoryFields key={edit?.code||'new-skill'} idPrefix="hr-skill-editor"
+             skills={catalog} category={category} subcategory={subcategory}
+             onCategory={v=>{setCategory(v);setSubcategory('')}}
+             onSubcategory={setSubcategory} allowCreate/>
+         </div>
          <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/>Enabled</label>
        </div>
        <div className="mt-3 flex gap-2"><button type="button" onClick={()=>setCreating(false)} className="min-h-11 rounded-xl border border-line px-4">Cancel</button><button type="button" disabled={busy||!name.trim()||!category.trim()||!subcategory.trim()} onClick={()=>void save()} className={button}>Save skill</button></div>
