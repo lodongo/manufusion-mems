@@ -66,4 +66,30 @@ await call('manager','/api/org/hr/skills/decide',{id:docs[0].id,action:'approve'
 assert.equal((await listDocs(root+'/hr_skill_proposals'))[0].data.status,'approved');
 await assert.rejects(()=>call('manager','/api/org/hr/skills/decide',{id:docs[0].id,action:'reject',note:'No'}),/no longer pending/);
 assert.equal((await call('peer','/api/org/hr/skills/proposals',{uid:'employee'})).proposals[0].endorsements.length,1);
+seed(root+'/positions/ROLE',{title:'Engineering Technician',coreSkills:[added.code,'HR_SK_001_001']});
+const firstBulk=await call('employee','/api/org/hr/skills/propose/bulk',{
+ employeeUid:'employee',skillCodes:[added.code,'HR_SK_001_001','HR_SK_001_002'],
+});
+assert.equal(firstBulk.submittedCount,2);
+assert.equal(firstBulk.skippedCount,1,'Already approved skills do not create duplicates');
+let afterBulk=await listDocs(root+'/hr_skill_proposals');
+assert.equal(afterBulk.length,3);
+await assert.rejects(()=>call('employee','/api/org/hr/skills/propose/bulk',{
+ employeeUid:'employee',skillCodes:['HR_SK_001_003','HR_SK_001_003']
+}),/only once/);
+await assert.rejects(()=>call('outsider','/api/org/hr/skills/propose/bulk',{
+ employeeUid:'employee',skillCodes:['HR_SK_001_003']
+}),/same site/);
+const roleFitModule=await import('../../backend/hrSkillFit.ts');
+const positionDoc={id:'ROLE',data:{coreSkills:[added.code,'HR_SK_001_001']}};
+let fit=roleFitModule.makeSkillFit('employee',snapshot('users/employee').data,
+ new Map([['ROLE',positionDoc.data]]),afterBulk);
+assert.equal(fit.percentage,50,'Pending skills do not count toward confirmed role fit');
+const pendingRequired=afterBulk.find(x=>x.data.skillCode==='HR_SK_001_001');
+assert.ok(pendingRequired);
+await call('manager','/api/org/hr/skills/decide',{id:pendingRequired.id,action:'approve'});
+afterBulk=await listDocs(root+'/hr_skill_proposals');
+fit=roleFitModule.makeSkillFit('employee',snapshot('users/employee').data,
+ new Map([['ROLE',positionDoc.data]]),afterBulk);
+assert.equal(fit.percentage,100,'Role fit increases only after manager confirmation');
 console.log('HR skills and self-service scenario passed');
