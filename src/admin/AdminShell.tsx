@@ -21,7 +21,6 @@ import ProfilePage from './ProfilePage';
 import HealthPage from './HealthPage';
 import LogsPage from './LogsPage';
 import AppDeployPage from './AppDeployPage';
-import SkillsMasterPage from './SkillsMasterPage';
 import OperationsCenter from './OperationsCenter';
 import FxMonitor from './FxMonitor';
 import AutomationCenter from './AutomationCenter';
@@ -107,7 +106,6 @@ export default function AdminShell({
                 { key: 'material_catalog', label: 'Material catalog (PRC)', Icon: Package },
                 { key: 'service_catalog', label: 'Service catalog (PRC)', Icon: Wrench },
                 { key: 'gl_accounts', label: 'GL account master (FIN)', Icon: Calculator },
-                { key: 'hr_skills', label: 'Skills master (HR)', Icon: ListChecks },
             ],
         },
         {
@@ -203,9 +201,6 @@ export default function AdminShell({
             break;
         case 'gl_accounts':
             content = <ProcurementCatalogAdmin key='gl_accounts' kind='gl_accounts' canWrite={canWrite} />;
-            break;
-        case 'hr_skills':
-            content = <SkillsMasterPage isSuper={isSuper} />;
             break;
         case 'site':
             content = <SiteSetupPage canWrite={canWrite} />;
