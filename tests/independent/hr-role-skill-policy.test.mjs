@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {HR_RULE_DEFAULTS,hrRules,hrVisibleTabs} from '../../backend/hrPrivacyRules.ts';
+import {HR_RULE_DEFAULTS,hrRules,hrVisibleTabs,hrMayChangeOwnRecord,hrMayChangeRecord} from '../../backend/hrPrivacyRules.ts';
 
 test('new role skill requirements tab appears for authorized employees, managers and HR',()=>{
  for(const scope of ['self','manager','hr','superadmin']){
@@ -27,4 +27,17 @@ test('independently approved schema-two rules may explicitly disable role requir
   assert.equal(hrVisibleTabs(scope,disabled).includes('roleSkills'),false);
  }
  assert.ok(hrVisibleTabs('superadmin',disabled).includes('roleSkills'));
+});
+
+test('superadmin is not deprived of normal employee self-service, but protected self-edits remain denied',()=>{
+ for(const action of ['education','family','skillProposal','roleSkillProposal','leavePlan','leaveApplication']){
+  assert.equal(hrMayChangeOwnRecord(action),true,action);
+  assert.equal(hrMayChangeRecord('admin','admin',action),true,action);
+ }
+ for(const action of ['basic','deployment','roleAssignment','roleDefinition','payslip','managerApproval','privacyApproval']){
+  assert.equal(hrMayChangeOwnRecord(action),false,action);
+  assert.equal(hrMayChangeRecord('admin','admin',action),false,action);
+ }
+ assert.equal(hrMayChangeRecord('admin','employee','roleAssignment'),true,
+  'This check is self-write only; other edit permissions must be verified by separate scoped policies.');
 });
