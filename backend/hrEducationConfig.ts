@@ -175,7 +175,9 @@ export const hrEducationConfigRoutes={
   const entities=await activeEntities(ctx.orgId);
   const requested=clean(ctx.body.legalEntityId,128);
   const entity=entities.find(e=>e.id===requested)||(!requested?entities[0]:undefined);
-  return {entities,entity:entity||null,config:entity?await getEducationConfig(ctx.orgId,entity.id):null};
+  const saved=entity?await getDoc(configPath(ctx.orgId,entity.id)):null;
+  return {entities,entity:entity||null,configured:!!saved,
+   config:entity?resolveEducationConfig(saved?.data):null};
  })],
  'POST /api/org/hr/education/admin/save':[orgRoute('org.hr.education.admin.save','ADM.settings',async ctx=>{
   if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'ADM.settings'))
