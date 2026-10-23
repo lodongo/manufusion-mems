@@ -12,7 +12,6 @@ import { firebaseAuth } from '../firebase';
 import HrSelfRecords from './HrSelfRecords';
 import { EmployeeSkillPanel } from './HrSkillsWorkspace';
 import HrLeavePanel from './HrLeavePanel';
-import { Network } from 'lucide-react';
 
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
 type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string};
