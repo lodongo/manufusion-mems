@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronRight, Building2, BriefcaseBusiness, Users, UserRound
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import RichTable from '../components/RichTable';
+import HrSkillsWorkspace from './HrSkillsWorkspace';
 
 type Person={uid:string;name:string;employeeNumber:string;status:string;jobRole:string};
 type Node={id:string;name:string;code:string;level:string;parentId:string;status:string};
@@ -67,7 +68,8 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
    {show('HR04')&&nodes&&<Panel title="Approved organization structure"><div className="mb-3 flex flex-wrap gap-2 text-xs text-muted"><Building2 className="h-4 w-4"/>{nodes.filter(n=>n.level==='site').length} sites · {nodes.filter(n=>n.level==='department').length} departments · {nodes.filter(n=>n.level==='cost_center').length} cost centres</div><RichTable id="hr-structure-v2" columns={structureColumns} rows={nodes} rowKey={r=>r.id} onRowClick={n=>setNodeId(n.id)} height="h-[43dvh]"/>{chosenNode&&<div className="mt-3 rounded-xl bg-page p-3 text-sm"><strong>{chosenNode.name}</strong><div className="mt-1 text-muted">{chosenNode.code} · {chosenNode.level.replaceAll('_',' ')} · Parent: {chosenNode.parentId||'Root'}</div><div className="mt-2 font-semibold">Child units</div><div className="mt-1 space-y-1">{nodes.filter(n=>n.parentId===chosenNode.id).map(n=><button key={n.id} className="block w-full rounded-lg border border-line p-2 text-left" onClick={()=>setNodeId(n.id)}>{n.name} ({n.code})</button>)}</div></div>}</Panel>}
    {show('HR05')&&roles&&<Panel title="Approved role catalogue"><div className="mb-3 flex items-center gap-2 text-xs text-muted"><BriefcaseBusiness className="h-4 w-4"/>{roles.length} registered job roles</div><RichTable id="hr-roles-v2" columns={roleColumns} rows={roles} rowKey={r=>r.code} onRowClick={r=>setRoleCode(r.code)} height="h-[45dvh]"/>{chosenRole&&<div className="mt-3 rounded-xl bg-page p-3 text-sm"><strong>{chosenRole.title}</strong><div className="mt-1 text-muted">{chosenRole.code} · {chosenRole.operatingLevel}</div><p className="mt-2">{chosenRole.description||'No description recorded.'}</p><p className="mt-2 text-muted">Reports to: {roles.find(r=>r.code===chosenRole.parentCode)?.title||chosenRole.parentCode||'Not recorded'}</p></div>}</Panel>}
    {show('HR08')&&<><div className="grid grid-cols-2 gap-3">{[['Registered roles',roles?.length],['Organization units',nodes?.length],['Authorized site employees',directory?.length],['Manager team',team?.length]].map(([k,v])=><div key={String(k)} className="rounded-xl border border-line bg-panel p-4"><div className="text-xs text-muted">{k}</div><div className="mt-2 text-2xl font-bold">{v??'—'}</div></div>)}</div>{team&&<Panel title="My management hierarchy"><RichTable id="hr-team-v2" columns={personColumns} rows={team} rowKey={r=>r.uid} onRowClick={employee=>navigate("organization_home/hr/HR08/employee/"+employee.uid)} allowExport={false} height="h-[40dvh]"/></Panel>}</>}
-   {sectionCode&&!loading&&!showData&&<Unavailable/>}
+   {show('HR13')&&<HrSkillsWorkspace ownUid={window.__not_available__} />}
+   {sectionCode!=='HR13'&&sectionCode&&!loading&&!showData&&<Unavailable/>}
   </main>
  </div>;
 }
