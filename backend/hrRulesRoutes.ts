@@ -5,6 +5,7 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { managerFor } from './hrEmployeeRoutes';
 import { HR_RULE_DEFAULTS, hrRules, hrVisibleTabs, type HrRules } from './hrPrivacyRules';
 import { hrSiteOf } from './hrHierarchy';
+import { buildFitIndex } from './hrSkillFit';
 
 const path=(org:string)=>`organizations/${org}/hr_access_rules/default`;
 export const currentHrRules=async(org:string):Promise<HrRules>=>hrRules((await getDoc(path(org)))?.data);
@@ -76,12 +77,18 @@ export const hrRulesRoutes={
   });
  })],
  'POST /api/org/hr/reportees':[orgRoute('org.hr.reportees','HRM.shell.view',async ctx=>{
-  const users=await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
-  const nodes=new Map((await listDocs(`organizations/${ctx.orgId}/structure`)).map(d=>[d.id,d.data]));
+  const [users,nodeDocs,positionDocs,skillDocs]=await Promise.all([
+    runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)}),
+    listDocs(`organizations/${ctx.orgId}/structure`),
+    listDocs(`organizations/${ctx.orgId}/positions`),
+    listDocs(`organizations/${ctx.orgId}/hr_skill_proposals`),
+  ]);
+  const nodes=new Map(nodeDocs.map(d=>[d.id,d.data]));
+  const fit=buildFitIndex(users,positionDocs,skillDocs);
   const reports=[];
   for(const u of users){
     if(u.id===ctx.uid||str(u.data.status)==='disabled')continue;
-    if(await managerFor(ctx,u.data,nodes)===ctx.uid)reports.push(basic(u));
+    if(await managerFor(ctx,u.data,nodes)===ctx.uid)reports.push({...basic(u),skillFit:fit.get(u.id)});
   }
   return {employees:reports.sort((a,b)=>a.name.localeCompare(b.name)),scope:'direct'};
  })],
