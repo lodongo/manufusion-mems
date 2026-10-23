@@ -88,7 +88,7 @@ export const hrRulesRoutes={
   const reports=[];
   for(const u of users){
     if(u.id===ctx.uid||str(u.data.status)==='disabled')continue;
-    if(await managerFor(ctx,u.data,nodes)===ctx.uid)reports.push({...basic(u),skillFit:fit.get(u.id)});
+    if(await managerFor(ctx,u.data,nodes,users)===ctx.uid)reports.push({...basic(u),skillFit:fit.get(u.id)});
   }
   return {employees:reports.sort((a,b)=>a.name.localeCompare(b.name)),scope:'direct'};
  })],
