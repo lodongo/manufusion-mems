@@ -108,8 +108,8 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
       </div>}
     </section>
     {data.access.allowedTabs?.includes('skills')&&<div className="mb-4"><HrRoleSkillFit fit={data.skillFit}/></div>}
-    {selfView&&reportees>0&&<button type="button" onClick={()=>navigate('organization_home/hr/HR01/reportees')} className="mb-4 flex min-h-14 w-full items-center gap-3 rounded-xl border border-line bg-panel px-4 text-left text-brand">
-      <Network className="h-5 w-5"/><span className="flex-1 font-semibold">My Reportees <span className="ml-1 text-sm font-normal text-muted">({reportees})</span></span><ChevronRight className="h-5 w-5"/></button>}
+    {selfView&&<button type="button" onClick={()=>navigate('organization_home/hr/HR01/reportees')} className="mb-4 flex min-h-14 w-full items-center gap-3 rounded-xl border border-line bg-panel px-4 text-left text-brand">
+      <Network className="h-5 w-5"/><span className="flex-1 font-semibold">Manage My Reportees <span className="ml-1 text-sm font-normal text-muted">({reportees})</span></span><ChevronRight className="h-5 w-5"/></button>}
     <div className="grid min-w-0 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
      <nav aria-label="Employee HR portal tabs" className="min-w-0 lg:sticky lg:top-0 lg:self-start">
       <div className="lg:hidden">
