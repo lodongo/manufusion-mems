@@ -6,7 +6,7 @@ import { hrSiteOf } from './hrHierarchy';
 import { HR_SKILL_DEFAULTS } from './hrSkillsDefaults';
 import { HR_SKILL_EXPANDED } from './hrSkillsExpanded';
 import { requiredRoleSkills, makeSkillFit } from './hrSkillFit';
-import { hrMayAccess, hrRules } from './hrPrivacyRules';
+import { hrMayAccess, hrRules, hrMayChangeRecord } from './hrPrivacyRules';
 
 const clean=(value:unknown,max=160)=>str(value).trim().slice(0,max);
 const privatePath=(org:string,uid:string)=>`organizations/${org}/hr_private/${uid}`;
@@ -115,8 +115,13 @@ async function submitSkills(ctx:OrgContext,roleRequirementsOnly=false){
       if(!hrMayAccess('self','roleSkills',hrRules(configured?.data)))
         throw new HttpError(403,'Role Skill Requirements are disabled for employee self-service by the approved HR privacy policy.');
     }
-    if(ctx.role==='org_super_admin'&&uid===ctx.uid)
-      throw new HttpError(403,'Super administrator cannot modify own HR records.');
+    if(!hrMayChangeRecord(ctx.uid,uid,roleRequirementsOnly?'roleSkillProposal':'skillProposal'))
+      throw new HttpError(403,'This protected employee record cannot be modified by its owner.');
+    if(uid===ctx.uid&&!roleRequirementsOnly){
+      const configured=await getDoc(`organizations/${ctx.orgId}/hr_access_rules/default`);
+      if(!hrMayAccess('self','skills',hrRules(configured?.data)))
+        throw new HttpError(403,'Employee skills self-service is disabled by the approved HR privacy policy.');
+    }
     if(uid!==ctx.uid&&ctx.role!=='org_super_admin'&&!sameSite(ctx.me.data,employee.data,nodes))
       throw new HttpError(403,'Only colleagues at the same site can propose another employee’s skills.');
     const input=ctx.body.skillCodes;
@@ -171,11 +176,24 @@ export const hrEmployeeRoutes={
   'POST /api/org/hr/private/save':[orgRoute('org.hr.private.save','HRM.shell.view',async ctx=>{
     const uid=clean(ctx.body.uid,128)||ctx.uid;
     if(uid!==ctx.uid&&ctx.role!=='org_super_admin')throw new HttpError(403,'Only the employee or organization super administrator may update private HR records.');
-    if(ctx.role==='org_super_admin'&&uid===ctx.uid)throw new HttpError(403,'Super administrator cannot modify own HR records.');
+    if(!hrMayChangeRecord(ctx.uid,uid,'skillProposal'))
+      throw new HttpError(403,'This protected employee record cannot be modified by its owner.');
+    if(uid===ctx.uid){
+      const configured=await getDoc(`organizations/${ctx.orgId}/hr_access_rules/default`);
+      if(!hrMayAccess('self','skills',hrRules(configured?.data)))
+        throw new HttpError(403,'Employee skills self-service is disabled by the approved HR privacy policy.');
+    }
     await personnel(ctx,uid);
     return withLock(ctx.orgId,'hr_self_'+uid,async()=>{
       const kind=clean(ctx.body.kind,20);
       if(kind!=='education'&&kind!=='family')throw new HttpError(400,'Select education or family.');
+      if(!hrMayChangeRecord(ctx.uid,uid,kind))
+        throw new HttpError(403,'Protected HR fields cannot be changed by their owner.');
+      if(uid===ctx.uid){
+        const configured=await getDoc(`organizations/${ctx.orgId}/hr_access_rules/default`);
+        if(!hrMayAccess('self',kind,hrRules(configured?.data)))
+          throw new HttpError(403,'This employee self-service section is disabled by the approved HR privacy policy.');
+      }
       const values=readPrivate(ctx.body.items,kind);
       const path=privatePath(ctx.orgId,uid);
       const old=await getDoc(path);
@@ -265,7 +283,7 @@ export const hrEmployeeRoutes={
   })],
   'POST /api/org/hr/skills/propose':[orgRoute('org.hr.skills.propose','HRM.shell.view',async ctx=>{
     const uid=clean(ctx.body.employeeUid,128)||ctx.uid;
-    if(ctx.role==='org_super_admin'&&uid===ctx.uid)throw new HttpError(403,'Super administrator cannot modify own HR records.');
+
     const employee=await personnel(ctx,uid),nodes=await nodeMap(ctx.orgId);
     if(uid!==ctx.uid&&ctx.role!=='org_super_admin'&&!sameSite(ctx.me.data,employee.data,nodes))
       throw new HttpError(403,'Only colleagues at the same site can propose another employee’s skills.');
