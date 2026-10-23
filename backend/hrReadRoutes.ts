@@ -21,7 +21,10 @@ export const hrReadRoutes = {
   'POST /api/org/hr/structure': [
     orgRoute('org.hr.structure', 'HRM.shell.view', async ctx => {
       const docs=await listDocs(`organizations/${ctx.orgId}/structure`);
-      const nodes=docs.filter(d=>str(d.data.status)!=='inactive').map(d=>({
+      const nodeMap=new Map(docs.map(d=>[d.id,d.data]));
+      const permittedSites=new Set(assignedNodeIds(ctx).map(id=>hrSiteOf(id,nodeMap)).filter(Boolean));
+      if(!permittedSites.size) return {nodes:[],readOnly:true};
+      const nodes=docs.filter(d=>str(d.data.status)!=='inactive' && permittedSites.has(hrSiteOf(d.id,nodeMap))).map(d=>({
         id:d.id,name:str(d.data.name),code:str(d.data.code),level:str(d.data.level),
         parentId:str(d.data.parentId),status:str(d.data.status)||'active'
       }));
