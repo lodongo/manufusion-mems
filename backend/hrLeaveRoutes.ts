@@ -4,6 +4,8 @@ import {orgRoute,hasPerm,type OrgContext} from './guards';
 import {managerFor} from './hrEmployeeRoutes';
 import {withLock} from './finCore';
 import {hrSiteOf} from './hrHierarchy';
+import {currentHrRules} from './hrRulesRoutes';
+import {hrMayAccess,type HrScope} from './hrPrivacyRules';
 const coll=(org:string)=>`organizations/${org}/hr_leave_requests`;
 const s=(v:unknown,n=200)=>str(v).trim().slice(0,n);
 const assignments=(d:Record<string,unknown>)=>Array.isArray(d.assignments)?d.assignments.filter(isObj).filter(x=>s(x.type)==='primary'):[];
@@ -23,8 +25,11 @@ const scope=async(ctx:OrgContext,uid:string)=>{
  const isSelf=uid===ctx.uid,isAdmin=ctx.role==='org_super_admin';
  const manager=(await managerFor(ctx,person.data,nodes))===ctx.uid&&!isSelf;
  const hr=hasPerm(ctx.directPermissions,'HRM.employee.site.read')&&sites(ctx,person.data,nodes);
- return {person,isSelf,isAdmin,manager,hr,canRead:isAdmin||isSelf||manager||hr,
-  canApply:!isAdmin||!isSelf,canApprove:!isSelf&&(isAdmin||manager)};
+ const policy=await currentHrRules(ctx.orgId);
+ const viewScope:HrScope=isAdmin?'superadmin':isSelf?'self':manager?'manager':'hr';
+ const visible=hrMayAccess(viewScope,'leave',policy);
+ return {person,isSelf,isAdmin,manager,hr,canRead:visible&&(isAdmin||isSelf||manager||hr),
+  canApply:visible&&(!isAdmin||!isSelf),canApprove:visible&&!isSelf&&(isAdmin||manager)};
 };
 function record(doc:{id:string;data:Record<string,unknown>},includePrivate:boolean){
  const d=doc.data;
@@ -77,6 +82,8 @@ export const hrLeaveRoutes={
    return {ok:true,id};
  })],
  'POST /api/org/hr/leave/inbox':[orgRoute('org.hr.leave.inbox','HRM.shell.view',async ctx=>{
+   const rules=await currentHrRules(ctx.orgId);
+   if(ctx.role!=='org_super_admin'&&!hrMayAccess('manager','leave',rules))return {items:[]};
    const requests=(await listDocs(coll(ctx.orgId))).filter(d=>s(d.data.status)==='pending');
    const nodes=new Map((await listDocs(`organizations/${ctx.orgId}/structure`)).map(d=>[d.id,d.data]));
    const items=[];
