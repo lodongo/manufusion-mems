@@ -5,7 +5,7 @@ import HrRoleSkillFit,{type SkillFit} from './HrRoleSkillFit';
 
 type Role={code:string;title:string;requiredSkillCodes:string[]};
 type CatalogueSkill={code:string;name:string;category:string;subcategory:string;description:string;enabled:boolean};
-type Proposals={managerAssigned:boolean};
+type Proposals={managerAssigned:boolean;managerStatus?:'resolved'|'unassigned'|'ambiguous';managerRoleCode?:string};
 const limit=25;
 export default function HrRoleSkillRequirements({
   employeeUid,roles,fit,canSubmit,onRefresh,
@@ -15,6 +15,7 @@ export default function HrRoleSkillRequirements({
  const [skills,setSkills]=useState<CatalogueSkill[]>([]);
  const [catalogueError,setCatalogueError]=useState('');
  const [managerAssigned,setManagerAssigned]=useState(false);
+ const [managerProblem,setManagerProblem]=useState('');
  const [selected,setSelected]=useState<string[]>([]);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -24,7 +25,7 @@ export default function HrRoleSkillRequirements({
   const skillRequest=callBackend<{skills:CatalogueSkill[]}>('/api/org/hr/skills/catalog');
   const managerRequest=canSubmit?callBackend<Proposals>('/api/org/hr/skills/proposals',{uid:employeeUid}):Promise.resolve({managerAssigned:false});
   void Promise.all([skillRequest,managerRequest]).then(([s,m])=>{
-    if(alive){setSkills(s.skills);setManagerAssigned(m.managerAssigned)}
+    if(alive){setSkills(s.skills);setManagerAssigned(m.managerAssigned);setManagerProblem(m.managerStatus==='ambiguous'?'Multiple employees hold the same configured manager role. HR must resolve the manager assignment before approval.':'No unique active employee has been assigned to the configured manager job role at the correct organization level. Ask Organization Admin to check the role holder.')}
   }).catch(e=>{if(alive)setCatalogueError(e instanceof Error?e.message:'Cannot load the skills catalogue.')})
    .finally(()=>{if(alive)setLoading(false)});
   return()=>{alive=false};
@@ -97,7 +98,7 @@ export default function HrRoleSkillRequirements({
       className="flex min-h-11 items-center gap-2 rounded-xl bg-brand px-4 font-semibold text-onbrand disabled:opacity-40">
       <Send className="h-4 w-4"/>Submit for approval</button>
     </div>
-    {!managerAssigned&&!loading&&<p className="mt-2 text-xs text-amber-700">An immediate manager must be configured in Organization Structure before submission.</p>}
+    {!managerAssigned&&!loading&&<p className="mt-2 text-xs text-amber-700">{managerProblem||'A verified manager role holder is required before submission.'}</p>}
    </section>}
    {!canSubmit&&fit.requiredCodes.length>0&&<p className="flex items-center gap-2 rounded-xl border border-line bg-panel p-3 text-xs text-muted">
     <LockKeyhole className="h-4 w-4"/>This is an authorized read-only view. Only the employee may select and submit their own required skills.
