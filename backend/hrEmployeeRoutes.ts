@@ -3,6 +3,8 @@ import { HttpError, fieldEq, getDoc, isObj, listDocs, nowIso, runQuery, str, wri
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { withLock } from './finCore';
 import { hrSiteOf } from './hrHierarchy';
+import { HR_SKILL_DEFAULTS } from './hrSkillsDefaults';
+import { HR_SKILL_EXPANDED } from './hrSkillsExpanded';
 
 const clean=(value:unknown,max=160)=>str(value).trim().slice(0,max);
 const privatePath=(org:string,uid:string)=>`organizations/${org}/hr_private/${uid}`;
@@ -49,7 +51,10 @@ async function managerFor(ctx:OrgContext,employee:Record<string,unknown>,nodes:M
       id=str(node.parentId);
     }
   }
-  return primary(person.data).some(a=>responsible.has(str(a.nodeId)))?uid:'';
+  return primary(person.data).some(a=>{
+    const managerSite=hrSiteOf(str(a.nodeId),nodes);
+    return responsible.has(str(a.nodeId)) || (!!managerSite && [...responsible].some(id=>hrSiteOf(id,nodes)===managerSite));
+  })?uid:'';
 }
 const employeeSafe=(d:{id:string;data:Record<string,unknown>})=>({uid:d.id,name:[clean(d.data.firstName,50),clean(d.data.lastName,50)].filter(Boolean).join(' '),employeeNumber:clean(d.data.employeeNumber,40)});
 function hrCanManage(ctx:OrgContext){return ctx.role==='org_super_admin'||hasPerm(ctx.directPermissions,'HRM.skills.manage')}
@@ -58,8 +63,21 @@ const skillOut=(id:string,d:Record<string,unknown>)=>({
   name:clean(d.name,160),description:clean(d.description,600),enabled:d.enabled!==false,
 });
 async function skillCatalog(ctx:OrgContext){
-  const [base,local]=await Promise.all([listDocs('reference/skills_master/items'),listDocs(catalogPath(ctx.orgId))]);
-  const skills=new Map(base.map(d=>[d.id,skillOut(d.id,d.data)]));
+  const [base,metadata,local]=await Promise.all([
+    listDocs('reference/skills_master/items'),getDoc('module_workspaces/HRM/metadata/skillsMaster'),
+    listDocs(catalogPath(ctx.orgId)),
+  ]);
+  // Preserve existing standard and already-initialised MEMS skill masters.
+  // Tenant HR edits live only in tenant overlays; no tenant can change the shared reference.
+  const defaults=[...HR_SKILL_DEFAULTS,...HR_SKILL_EXPANDED];
+  const skills=new Map(defaults.map(x=>[x.code,skillOut(x.code,{
+    name:x.label,category:x.category,subcategory:x.subcategory,description:x.description,enabled:x.active,
+  })]));
+  const meta=Array.isArray(metadata?.data.items)?metadata.data.items.filter(isObj):[];
+  for(const x of meta){const code=clean(x.code,65);if(code)skills.set(code,skillOut(code,{
+    name:x.label,category:x.category,subcategory:x.subcategory,description:x.description,enabled:x.active!==false,
+  }));}
+  for(const d of base)skills.set(d.id,skillOut(d.id,d.data));
   for(const doc of local)skills.set(doc.id,skillOut(doc.id,{...skills.get(doc.id),...doc.data}));
   return [...skills.values()].sort((a,b)=>a.name.localeCompare(b.name));
 }
@@ -158,14 +176,19 @@ export const hrEmployeeRoutes={
     if(!skill)throw new HttpError(400,'Choose an enabled skill in the HR catalogue.');
     const manager=await managerFor(ctx,employee.data,nodes);
     if(!manager)throw new HttpError(409,'The employee needs a verified immediate manager in Organization Structure before a skill can be proposed.');
-    const path=`${proposalsPath(ctx.orgId)}/${randomUUID().replace(/-/g,'')}`;
-    await writeDoc(path,{
-      employeeUid:uid,skillCode:code,skillName:skill.name,
-      status:'pending',managerUid:manager,proposedBy:ctx.uid,
-      proposerName:[clean(ctx.me.data.firstName,50),clean(ctx.me.data.lastName,50)].join(' ').trim(),
-      endorsements:[],createdAt:nowIso(),updatedAt:nowIso(),reviewedAt:'',reviewedBy:'',decisionNote:'',
-    },{exists:false});
-    return {ok:true};
+    return withLock(ctx.orgId,'hr_skill_nomination_'+uid+'_'+code,async()=>{
+      const existing=(await listDocs(proposalsPath(ctx.orgId))).some(d=>
+        str(d.data.employeeUid)===uid&&str(d.data.skillCode)===code&&['pending','approved'].includes(str(d.data.status)));
+      if(existing)throw new HttpError(409,'This employee already has a pending or confirmed nomination for the selected skill. Second the existing skill instead.');
+      const path=`${proposalsPath(ctx.orgId)}/${randomUUID().replace(/-/g,'')}`;
+      await writeDoc(path,{
+        employeeUid:uid,skillCode:code,skillName:skill.name,
+        status:'pending',managerUid:manager,proposedBy:ctx.uid,
+        proposerName:[clean(ctx.me.data.firstName,50),clean(ctx.me.data.lastName,50)].join(' ').trim(),
+        endorsements:[],createdAt:nowIso(),updatedAt:nowIso(),reviewedAt:'',reviewedBy:'',decisionNote:'',
+      },{exists:false});
+      return {ok:true};
+    });
   })],
   'POST /api/org/hr/skills/endorse':[orgRoute('org.hr.skills.endorse','HRM.shell.view',async ctx=>{
     const id=clean(ctx.body.id,64);
