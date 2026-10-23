@@ -19,6 +19,7 @@ import StructurePage from './StructurePage';
 import PositionsPage from './PositionsPage';
 import OdChart from './OdChart';
 import OrgSettings from './OrgSettings';
+import HrEducationAdmin from './HrEducationAdmin';
 import MyActivity from './MyActivity';
 import OrgBrandMark from '../components/OrgBrandMark';
 import OrgBranding from './OrgBranding';
@@ -92,6 +93,10 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
         items: [{ key: 'gl_accounts', label: 'GL account master', Icon: Calculator, perm: 'FIN.view', module: 'FIN' }],
     },
     {
+        title: 'HR administration',
+        items: [{ key: 'hr_education_config', label: 'Education, qualifications & grading', Icon: BookOpen, perm: 'ADM.settings' }],
+    },
+    {
         title: 'People and access',
         items: [
             { key: 'users', label: 'Users', Icon: Users, perm: 'ADM.users' },
@@ -148,6 +153,7 @@ const TITLES: Record<string, string> = {
     positions: 'Job roles',
     positions_view: 'Job role structure',
     roles: 'Security roles',
+    hr_education_config: 'Education, qualifications & grading',
     transaction_governance: 'Transaction governance',
     transaction_catalogue: 'Transaction access',
     modules: 'All modules',
@@ -293,6 +299,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             break;
         case 'structure_view':
             content = <OdChart show='structure' />;
+            break;
+        case 'hr_education_config':
+            content = <HrEducationAdmin />;
             break;
         case 'settings':
             content = <OrgSettings />;
