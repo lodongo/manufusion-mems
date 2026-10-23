@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import {ArrowRightLeft,BriefcaseBusiness,GraduationCap,Plus,Save,ShieldCheck,Trash2} from 'lucide-react';
 import {callBackend} from '../lib/backend';
 import {SelectField} from '../components/ui';
+import HrCompensationAdmin from './HrCompensationAdmin';
 
 type Level={code:string;name:string;description:string;enabled:boolean;rank:number};
 type Qualification={code:string;levelCode:string;name:string;description:string;enabled:boolean};
@@ -13,6 +14,7 @@ const input='min-h-11 w-full min-w-0 rounded-xl border border-line bg-page px-3 
 const button='min-h-11 rounded-xl border border-line px-3 text-sm font-semibold text-ink disabled:opacity-40';
 const token=()=>Math.random().toString(36).slice(2,8).toUpperCase();
 export default function HrEducationAdmin(){
+ const [workspace,setWorkspace]=useState<'education'|'compensation'>('education');
  const [entities,setEntities]=useState<Entity[]>([]),[entity,setEntity]=useState('');
  const [config,setConfig]=useState<Config|null>(null);
  const [tab,setTab]=useState<'levels'|'qualifications'|'jobGrades'>('levels');
@@ -63,7 +65,18 @@ export default function HrEducationAdmin(){
   }catch(e){setError(e instanceof Error?e.message:'Unable to adopt legal-entity settings.')}
   finally{setBusy(false)}
  };
+ if(workspace==='compensation')return <div className="min-w-0 space-y-4">
+  <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-panel p-1">
+   <button className="min-h-11 rounded-lg px-2 text-sm text-muted" onClick={()=>setWorkspace('education')} type="button">Education & Job Grades</button>
+   <button className="min-h-11 rounded-lg bg-brand/10 px-2 text-sm font-semibold text-brand" type="button">Compensation & Benefits</button>
+  </div>
+  <HrCompensationAdmin/>
+ </div>;
  return <div className="min-w-0 space-y-4">
+  <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-panel p-1">
+   <button className="min-h-11 rounded-lg bg-brand/10 px-2 text-sm font-semibold text-brand" type="button">Education & Job Grades</button>
+   <button className="min-h-11 rounded-lg px-2 text-sm text-muted" onClick={()=>setWorkspace('compensation')} type="button">Compensation & Benefits</button>
+  </div>
   <header className="rounded-2xl border border-line bg-panel p-4">
    <h2 className="flex items-center gap-2 text-lg font-bold"><GraduationCap className="h-5 w-5 text-brand"/>Education hierarchy & job grading</h2>
    <p className="mt-2 text-sm text-muted">Configure educational attainment ranks, qualifications and employment job grades separately for each legal entity. Higher Education Rank numbers represent higher typical attainment; job grades are not examination marks.</p>
