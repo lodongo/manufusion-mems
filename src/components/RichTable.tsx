@@ -225,6 +225,7 @@ export default function RichTable<T>({
     const [templateError, setTemplateError] = useState('');
     const [search, setSearch] = useState('');
     const [panel, setPanel] = useState<'' | 'filters' | 'columns' | 'templates' | 'group' | 'formulas'>('');
+    const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
     const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
     const [limit, setLimit] = useState(PAGE);
     const scroller = useRef<HTMLDivElement>(null);
@@ -479,6 +480,16 @@ export default function RichTable<T>({
                             className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm'
                         />
                     </label>
+                    <div className='relative w-full sm:hidden'>
+                        <button type='button' aria-expanded={mobileToolsOpen} aria-label='Table options' onClick={() => setMobileToolsOpen(!mobileToolsOpen)} className='flex h-11 w-full items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-semibold text-white'>
+                            <span>Table options</span><ChevronDown className='h-4 w-4' />
+                        </button>
+                        {mobileToolsOpen && <div className='grid grid-cols-2 gap-2 rounded-xl border border-slate-700 bg-slate-900 p-2'>
+                            {([['filters','Filters'],['group','Group by'],['formulas','Formula columns'],['columns','Columns'],['templates','Saved templates']] as const).map(([key,label])=><button key={key} type='button' onClick={()=>{setPanel(panel===key?'':key);setMobileToolsOpen(false)}} className='min-h-11 rounded-lg border border-slate-700 px-2 text-left text-sm text-white'>{label}{key==='filters'&&view.criteria.length>0?' ('+view.criteria.length+')':''}</button>)}
+                            {allowExport&&<button type='button' onClick={()=>{setMobileToolsOpen(false);exportExcel()}} disabled={!filtered.length} className='min-h-11 rounded-lg border border-slate-700 px-2 text-left text-sm text-white disabled:opacity-40'>Export Excel</button>}
+                        </div>}
+                    </div>
+                    <div className='hidden items-center gap-2 sm:flex'>
                     <button type='button' aria-label='Filters' title='Filter by criteria' onClick={() => setPanel(panel === 'filters' ? '' : 'filters')} className={iconBtn(panel === 'filters' || view.criteria.length > 0)}>
                         <Filter className='h-4 w-4' />
                         {view.criteria.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{view.criteria.length}</span>}
@@ -500,6 +511,7 @@ export default function RichTable<T>({
                     {allowExport && <button type='button' aria-label='Download Excel' title='Download Excel' onClick={exportExcel} disabled={!filtered.length} className={`${iconBtn(false)} disabled:opacity-40`}>
                         <Download className='h-4 w-4' />
                     </button>}
+                    </div>
                 </div>
                 <div className='flex items-center justify-between gap-2'>
                     <p className='truncate text-xs text-slate-500'>
