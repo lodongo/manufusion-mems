@@ -43,10 +43,10 @@ await checkEducationEntry(org,'employee',{
 });
 await assert.rejects(()=>checkEducationEntry(org,'employee',{
  levelCode:'BACHELOR',qualificationCode:'DIPLOMA_GENERAL',
-}),/qualification valid/);
+}),/qualification belonging/);
 await assert.rejects(()=>checkEducationEntry(org,'employee',{
  levelCode:'BACHELOR',qualificationCode:'NBI_ENGINEERING',gradingSystemCode:'CUSTOM',gradeCode:'Z',
-}),/configured grading/);
+}),/legacy academic grade/);
 assert.equal((await call('administrator','/api/org/hr/education/admin',{legalEntityId:'LE2'})).config.qualifications.some(q=>q.code==='NBI_ENGINEERING'),false,
  'One legal entity must not change another legal entity education catalogue');
 // Education Rank is ordered, but job grading is an independent employment catalogue.
