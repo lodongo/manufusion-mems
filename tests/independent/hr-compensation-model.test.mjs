@@ -33,7 +33,7 @@ test('Kenya mandatory statutory rows cannot be disabled or restricted by grade',
  const modified=structuredClone(kenya);
  const nssf=modified.items.find(x=>x.code==='KE_NSSF');
  nssf.enabled=false;
- assert.throws(()=>validatePayConfig(modified,chosen,'KE','KES'),/Statutory components cannot be disabled/);
+ assert.throws(()=>validatePayConfig(modified,chosen,'KE','KES'),/Mandatory Kenya components cannot be disabled/);
  nssf.enabled=true;nssf.gradeCodes=['JG01'];
  const valid=validatePayConfig(modified,chosen,'KE','KES');
  assert.deepEqual(valid.items.find(x=>x.code==='KE_NSSF').gradeCodes,[]);
