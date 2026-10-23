@@ -23,7 +23,7 @@ export default function HrRoleSkillRequirements({
  useEffect(()=>{
   let alive=true;setLoading(true);setCatalogueError('');setSelected([]);setError('');setNotice('');
   const skillRequest=callBackend<{skills:CatalogueSkill[]}>('/api/org/hr/skills/catalog');
-  const managerRequest=canSubmit?callBackend<Proposals>('/api/org/hr/skills/proposals',{uid:employeeUid}):Promise.resolve({managerAssigned:false});
+  const managerRequest=canSubmit?callBackend<Proposals>('/api/org/hr/skills/proposals',{uid:employeeUid}):Promise.resolve<Proposals>({managerAssigned:false});
   void Promise.all([skillRequest,managerRequest]).then(([s,m])=>{
     if(alive){setSkills(s.skills);setManagerAssigned(m.managerAssigned);setManagerProblem(m.managerStatus==='ambiguous'?'Multiple employees hold the same configured manager role. HR must resolve the manager assignment before approval.':'No unique active employee has been assigned to the configured manager job role at the correct organization level. Ask Organization Admin to check the role holder.')}
   }).catch(e=>{if(alive)setCatalogueError(e instanceof Error?e.message:'Cannot load the skills catalogue.')})
