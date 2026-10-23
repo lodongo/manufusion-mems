@@ -92,7 +92,7 @@ function normalizeConfig(raw:unknown):EducationConfig{
    if(!isObj(x))throw new HttpError(400,'Invalid '+kind+' entry '+(i+1));
    const code=clean(x.code,64),name=clean(x.name,150);
    if(!idOk(code)||!name)throw new HttpError(400,'Each '+kind+' needs a valid code and name.');
-   return {...x,code,name,description:clean(x.description,350),enabled:x.enabled!==false};
+   return {...x,code,name,description:clean(x.description,350),enabled:x.enabled!==false,levelCode:x.levelCode,grades:x.grades};
   });
   if(new Set(result.map(x=>x.code)).size!==result.length)throw new HttpError(400,'Duplicate '+kind+' codes.');
   return result;
