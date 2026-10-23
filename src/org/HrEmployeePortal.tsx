@@ -24,8 +24,8 @@ const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'basic',label:'Basic Information',Icon:IdCard},
   {key:'education',label:'Education',Icon:GraduationCap},
   {key:'family',label:'Family',Icon:Users},
-  {key:'skills',label:'Skills',Icon:Award},
-  {key:'roleSkills',label:'Role Skill Requirements',Icon:Target},
+  {key:'roleSkills',label:'Required Skills',Icon:Target},
+  {key:'skills',label:'Other Skills',Icon:Award},
   {key:'deployment',label:'Deployment',Icon:MapPin},
   {key:'records',label:'Records',Icon:FileText},
   {key:'roles',label:'Roles & Responsibilities',Icon:BriefcaseBusiness},
@@ -151,10 +151,10 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
         employeeUid={data.profile.uid} roles={data.roles} fit={data.skillFit}
         canSubmit={data.access.isOwnRecord&&data.access.selfServiceTabs.includes('roleSkills')&&firebaseAuth.currentUser?.uid===data.profile.uid}
         onRefresh={refreshFit}/>}
-      {tab==='skills'&&<>
-        <HrRoleSkillFit fit={data.skillFit} detailed/>
-        <EmployeeSkillPanel employeeUid={data.profile.uid} ownUid={firebaseAuth.currentUser?.uid||''}/>
-      </>}
+      {tab==='skills'&&<EmployeeSkillPanel
+        employeeUid={data.profile.uid} ownUid={firebaseAuth.currentUser?.uid||''}
+        requiredCodes={data.requiredSkills}/>}
+
       {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid||data.access.scope==='superadmin'?<HrSelfRecords kind={tab} employeeUid={data.profile.uid} readOnly={data.access.isOwnRecord&&!data.access.selfServiceTabs.includes(tab)}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
       {tab==='leave'&&<HrLeavePanel employeeUid={data.profile.uid} showInbox={selfView}/>}
       {RESTRICTED.has(tab)&&tab!=='education'&&tab!=='family'&&tab!=='leave'&&<EmptyRecords label={active.label}/>}
