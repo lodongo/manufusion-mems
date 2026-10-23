@@ -12,7 +12,6 @@ import MntHome from './MntHome';
 import MntWindows from './MntWindows';
 import SafConfiguration from './SafConfiguration';
 import OrgModules from './OrgModules';
-import HrShell from './HrShell';
 import OrgSubscription from './OrgSubscription';
 import UserChip from '../components/UserChip';
 import SideNav, { type NavGroup, type NavItem } from '../components/SideNav';
@@ -93,10 +92,6 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
         items: [{ key: 'gl_accounts', label: 'GL account master', Icon: Calculator, perm: 'FIN.view', module: 'FIN' }],
     },
     {
-        title: 'Human Resources (HR)',
-        items: [{ key: 'hr_shell', label: 'HR workspace', Icon: Users, perm: 'HRM.shell.view', module: 'HRM' }],
-    },
-    {
         title: 'People and access',
         items: [
             { key: 'users', label: 'Users', Icon: Users, perm: 'ADM.users' },
@@ -145,7 +140,6 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
 
 const TITLES: Record<string, string> = {
     dashboard: 'Organization dashboard',
-    hr_shell: 'Human Resources',
     my_setup: 'My setup',
     my_tables: 'My Tables',
     keep_alive: 'Keep Alive',
@@ -216,9 +210,6 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
     switch (active) {
         case 'dashboard':
             content = <OrgOverview ctx={data} hasBranding={!!session.organization?.branding?.preset && !!session.organization?.branding?.displayName} />;
-            break;
-        case 'hr_shell':
-            content = <HrShell />;
             break;
         case 'users':
             content = <OrgUsers id={id} myUid={session.user.uid} myRole={data.role} canRoles={hasPerm(data.permissions, 'ADM.roles')} />;
