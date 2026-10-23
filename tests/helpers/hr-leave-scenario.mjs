@@ -26,7 +26,7 @@ const ctx=(uid,body={})=>({
  uid,orgId:org,role:uid==='admin'?'org_super_admin':'member',
  me:snapshot('users/'+uid),org:snapshot(root),
  permissions:['HRM.shell.view',...(uid==='hr'?['HRM.employee.site.read']:[]),...(uid==='admin'?['HRM.rules.manage']:[]),...(uid==='dpo'?['HRM.rules.approve']:[])],
- directPermissions:['HRM.shell.view',...(uid==='hr'?['HRM.employee.site.read']:[]),...(uid==='admin'?['HRM.rules.manage']:[])],
+ directPermissions:['HRM.shell.view',...(uid==='hr'?['HRM.employee.site.read']:[]),...(uid==='admin'?['HRM.rules.manage']:[]),...(uid==='dpo'?['HRM.rules.approve']:[])],
  body,actor:{uid,orgId:org},meta:{},claims:{email:'test@example.com'},
 });
 const call=(routes,uid,path,body={})=>{
