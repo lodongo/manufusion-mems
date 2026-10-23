@@ -1,4 +1,4 @@
-import { HttpError, fieldEq, isObj, listDocs, runQuery, str } from './core';
+import { HttpError, fieldEq, getDoc, isObj, listDocs, runQuery, str } from './core';
 import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canReadHrBasicProfile } from './hrAccessPolicy';
 import { hrSiteOf, managedRoots, underManagedRoot } from './hrHierarchy';
@@ -38,6 +38,69 @@ export const hrReadRoutes = {
         code:d.id,title:str(d.data.title),description:str(d.data.description),
         parentCode:str(d.data.parentCode),operatingLevel:str(d.data.operatingLevel)
       })),readOnly:true };
+    }),
+  ],
+  'POST /api/org/hr/employee/portal': [
+    orgRoute('org.hr.employee.portal', 'HRM.shell.view', async ctx => {
+      const uid=str(ctx.body.uid).trim();
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid))
+        throw new HttpError(400,'Select a valid employee.');
+      const employee=uid===ctx.uid ? ctx.me : await getDoc(`users/${uid}`);
+      if (!employee || str(employee.data.orgId)!==ctx.orgId || str(employee.data.status)==='disabled')
+        throw new HttpError(404,'Employee not found.');
+      const [nodeDocs, positionDocs]=await Promise.all([
+        listDocs(`organizations/${ctx.orgId}/structure`),
+        listDocs(`organizations/${ctx.orgId}/positions`),
+      ]);
+      const nodes=new Map(nodeDocs.map(d=>[d.id,d.data]));
+      const positions=new Map(positionDocs.map(d=>[d.id,d.data]));
+      const assignments=Array.isArray(employee.data.assignments)
+        ? employee.data.assignments.filter(isObj).filter(a=>str(a.type)==='primary')
+        : [];
+      const ownSiteIds=new Set(assignedNodeIds(ctx).map(id=>hrSiteOf(id,nodes)).filter(Boolean));
+      const managed=ctx.role==='org_super_admin' ? new Set<string>()
+        : managedRoots(ctx.uid,assignedNodeIds(ctx),nodes);
+      const isSelf=uid===ctx.uid;
+      const isSuperAdmin=ctx.role==='org_super_admin';
+      const sitePermitted=hasPerm(ctx.directPermissions,'HRM.employee.site.read') &&
+        assignments.some(a=>{const site=hrSiteOf(str(a.nodeId),nodes);return !!site && ownSiteIds.has(site);});
+      const managerPermitted=hasPerm(ctx.directPermissions,'HRM.manager.hierarchy.read') &&
+        assignments.some(a=>underManagedRoot(str(a.nodeId),managed,nodes));
+      if(!isSelf && !isSuperAdmin && !sitePermitted && !managerPermitted)
+        throw new HttpError(403,'Employee record outside your HR authorization scope.');
+      // Use only the verified shared employee record, organization and job-role masters.
+      // No bank, payroll, family, medical, disciplinary or personal contact fields are returned.
+      const deployments=assignments.map(a=>{
+        const nodeId=str(a.nodeId);
+        const node=nodes.get(nodeId);
+        const positionCode=str(a.positionCode);
+        const position=positions.get(positionCode);
+        return {
+          nodeId, location: str(node?.name)||nodeId, level:str(node?.level),
+          positionCode, positionTitle:str(position?.title)||positionCode,
+          startDate:str(a.startsOn), endDate:str(a.endsOn),
+          siteId:hrSiteOf(nodeId,nodes),
+        };
+      });
+      const roleCodes=[...new Set(deployments.map(d=>d.positionCode).filter(Boolean))];
+      const roles=roleCodes.map(code=>{
+        const p=positions.get(code);
+        return {code,title:str(p?.title)||code,description:str(p?.description),
+          reportsToCode:str(p?.parentCode),operatingLevel:str(p?.operatingLevel)};
+      });
+      const requiredSkills=[...new Set(roleCodes.flatMap(code=>{
+        const skills=positions.get(code)?.coreSkills;
+        return Array.isArray(skills)?skills.filter((x):x is string=>typeof x==='string').map(x=>x.trim()).filter(Boolean):[];
+      }))];
+      return {
+        profile: {
+          uid, name:[str(employee.data.firstName),str(employee.data.lastName)].filter(Boolean).join(' '),
+          employeeNumber:str(employee.data.employeeNumber),status:str(employee.data.status),
+          primaryRole:deployments[0]?.positionTitle||'', primaryLocation:deployments[0]?.location||'',
+        },
+        deployments, roles, requiredSkills,
+        access: {scope:isSelf?'self':isSuperAdmin?'organization':sitePermitted?'site':'manager_hierarchy',readOnly:true},
+      };
     }),
   ],
   'POST /api/org/hr/self': [
