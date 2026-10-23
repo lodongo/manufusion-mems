@@ -92,4 +92,20 @@ afterBulk=await listDocs(root+'/hr_skill_proposals');
 fit=roleFitModule.makeSkillFit('employee',snapshot('users/employee').data,
  new Map([['ROLE',positionDoc.data]]),afterBulk);
 assert.equal(fit.percentage,100,'Role fit increases only after manager confirmation');
+const addedBatch=await call('admin','/api/org/hr/skills/catalog/save/bulk',{
+ category:'Engineering',subcategory:'Reliability',
+ items:[{name:'Motor diagnostic review',description:'Analyze motor condition.'},
+        {name:'Seal inspection',description:'Inspect mechanical seals.'}],
+});
+assert.equal(addedBatch.createdCount,2);
+assert.equal(addedBatch.skippedCount,0);
+const repeatBatch=await call('admin','/api/org/hr/skills/catalog/save/bulk',{
+ category:'Engineering',subcategory:'Reliability',
+ items:[{name:'Motor diagnostic review',description:'Duplicate should be skipped.'}],
+});
+assert.equal(repeatBatch.createdCount,0);
+assert.equal(repeatBatch.skippedCount,1);
+await assert.rejects(()=>call('peer','/api/org/hr/skills/catalog/save/bulk',{
+ category:'Engineering',subcategory:'Reliability',items:[{name:'Unauthorized skill'}],
+}),/permission|manage/i);
 console.log('HR skills and self-service scenario passed');
