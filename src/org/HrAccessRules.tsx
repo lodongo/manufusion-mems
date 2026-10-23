@@ -53,7 +53,7 @@ export default function HrAccessRules(){
   </header>
   <section className="rounded-2xl border border-line bg-panel p-4">
    <p className="flex items-center gap-2 font-semibold"><LockKeyhole className="h-5 w-5 text-brand"/>Protected permissions</p>
-   <p className="mt-2 text-sm text-muted">No rule can expose family or payslip records to managers. Super Administrators have organization-wide access, but cannot modify or approve their own employee records. Access is checked by the backend for each employee.</p>
+   <p className="mt-2 text-sm text-muted">No rule can expose family or payslip records to managers. Super Administrators retain full access to other employees and may update their own permitted self-service data (education, family, skill proposals and leave applications). They cannot change protected employment fields or approve their own transactions. Access is checked by the backend for each employee.</p>
   </section>
   {!rules&&!error&&<p className="text-sm text-muted">Loading rules…</p>}
   {error&&<p role="alert" className="rounded-xl border border-red-500/40 p-3 text-sm text-red-600">{error}</p>}
