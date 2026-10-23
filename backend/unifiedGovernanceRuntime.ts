@@ -92,7 +92,9 @@ export async function enforceOrgTransactionGovernance(input: {
   const matches=wiredTransactionInventory().filter(r=>r.name===input.name);
   if(matches.length!==1 || !matches[0].code)throw new HttpError(403,'Transaction endpoint has no unique registered handler.');
   const route=matches[0];
-  const bindingDoc=await getDoc(BINDING(input.orgId,route.code));
+  const routeCode=route.code;
+  if(!routeCode)throw new HttpError(403,'Transaction endpoint has no registered code.');
+  const bindingDoc=await getDoc(BINDING(input.orgId,routeCode));
   const b=bindingDoc?.data??null;
   // Built-in bindings are supplied by the deployed router itself.
   // A tenant does not have to create or approve a Firestore binding document.
@@ -119,7 +121,7 @@ export async function enforceOrgTransactionGovernance(input: {
     approvalDoc=await getDoc(approvalPath);
     if(!approvalDoc)throw new HttpError(403,'Approval request not found.');
     const issues=validateApprovalEvidence(approvalDoc.data as unknown as ApprovalEvidence,{
-      orgId:input.orgId,code:route.code,handlerName:input.name,
+      orgId:input.orgId,code:routeCode,handlerName:input.name,
       requesterUid:input.uid,payload:input.body,
     });
     if(issues.length)throw new HttpError(403,'Approval evidence invalid: '+issues.join('; '));
