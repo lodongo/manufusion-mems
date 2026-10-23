@@ -101,6 +101,58 @@ function readPrivate(items:unknown,kind:'education'|'family'){
     return x;
   });
 }
+
+/** Enforces self-only role requirements for the new tab, reusing the same governed nomination writer. */
+async function submitSkills(ctx:OrgContext,roleRequirementsOnly=false){
+
+    const uid=clean(ctx.body.employeeUid,128)||ctx.uid;
+    const employee=await personnel(ctx,uid),nodes=await nodeMap(ctx.orgId);
+    if(roleRequirementsOnly&&uid!==ctx.uid)
+      throw new HttpError(403,'Only the employee can nominate their own required-role skills.');
+    if(ctx.role==='org_super_admin'&&uid===ctx.uid)
+      throw new HttpError(403,'Super administrator cannot modify own HR records.');
+    if(uid!==ctx.uid&&ctx.role!=='org_super_admin'&&!sameSite(ctx.me.data,employee.data,nodes))
+      throw new HttpError(403,'Only colleagues at the same site can propose another employee’s skills.');
+    const input=ctx.body.skillCodes;
+    if(!Array.isArray(input)||!input.length||input.length>25||
+       input.some(x=>typeof x!=='string'||x.length>65||!x.trim()))
+      throw new HttpError(400,'Select between 1 and 25 valid skills per submission.');
+    const codes=[...new Set(input.map(x=>clean(x,65)))];
+    if(codes.length!==input.length)throw new HttpError(400,'Select each skill only once.');
+    if(roleRequirementsOnly){
+      const roles=new Map((await listDocs(`organizations/${ctx.orgId}/positions`)).map(r=>[r.id,r.data]));
+      const required=new Set(requiredRoleSkills(employee.data,roles));
+      if(!required.size)throw new HttpError(409,'No role skill requirements are configured for this employee.');
+      if(codes.some(code=>!required.has(code)))
+        throw new HttpError(400,'Select only skills required by the employee’s assigned role.');
+    }
+    const catalogue=await skillCatalog(ctx);
+    const byCode=new Map(catalogue.filter(x=>x.enabled).map(x=>[x.code,x]));
+    if(codes.some(code=>!byCode.has(code)))
+      throw new HttpError(400,'Some selected skills are not enabled in the HR catalogue.');
+    const manager=await managerFor(ctx,employee.data,nodes);
+    if(!manager)throw new HttpError(409,'Assign a verified immediate manager before proposing skills.');
+    const submitted:string[]=[],skipped:string[]=[];
+    for(const code of codes){
+      await withLock(ctx.orgId,'hr_skill_nomination_'+uid+'_'+code,async()=>{
+        const existing=(await listDocs(proposalsPath(ctx.orgId))).some(d=>
+          str(d.data.employeeUid)===uid&&str(d.data.skillCode)===code &&
+          ['pending','approved'].includes(str(d.data.status)));
+        if(existing){skipped.push(code);return;}
+        const skill=byCode.get(code)!;
+        await writeDoc(`${proposalsPath(ctx.orgId)}/${randomUUID().replace(/-/g,'')}`,{
+          employeeUid:uid,skillCode:code,skillName:skill.name,status:'pending',
+          managerUid:manager,proposedBy:ctx.uid,
+          proposerName:[clean(ctx.me.data.firstName,50),clean(ctx.me.data.lastName,50)].join(' ').trim(),
+          endorsements:[],createdAt:nowIso(),updatedAt:nowIso(),reviewedAt:'',reviewedBy:'',decisionNote:'',
+        },{exists:false});
+        submitted.push(code);
+      });
+    }
+    return {ok:true,submitted,skipped,submittedCount:submitted.length,skippedCount:skipped.length};
+
+}
+
 export const hrEmployeeRoutes={
   'POST /api/org/hr/private/get':[orgRoute('org.hr.private.get','HRM.shell.view',async ctx=>{
     const uid=clean(ctx.body.uid,128)||ctx.uid;
@@ -230,44 +282,8 @@ export const hrEmployeeRoutes={
       return {ok:true};
     });
   })],
-  'POST /api/org/hr/skills/propose/bulk':[orgRoute('org.hr.skills.propose.bulk','HRM.shell.view',async ctx=>{
-    const uid=clean(ctx.body.employeeUid,128)||ctx.uid;
-    const employee=await personnel(ctx,uid),nodes=await nodeMap(ctx.orgId);
-    if(ctx.role==='org_super_admin'&&uid===ctx.uid)
-      throw new HttpError(403,'Super administrator cannot modify own HR records.');
-    if(uid!==ctx.uid&&ctx.role!=='org_super_admin'&&!sameSite(ctx.me.data,employee.data,nodes))
-      throw new HttpError(403,'Only colleagues at the same site can propose another employee’s skills.');
-    const input=ctx.body.skillCodes;
-    if(!Array.isArray(input)||!input.length||input.length>25||
-       input.some(x=>typeof x!=='string'||x.length>65||!x.trim()))
-      throw new HttpError(400,'Select between 1 and 25 valid skills per submission.');
-    const codes=[...new Set(input.map(x=>clean(x,65)))];
-    if(codes.length!==input.length)throw new HttpError(400,'Select each skill only once.');
-    const catalogue=await skillCatalog(ctx);
-    const byCode=new Map(catalogue.filter(x=>x.enabled).map(x=>[x.code,x]));
-    if(codes.some(code=>!byCode.has(code)))
-      throw new HttpError(400,'Some selected skills are not enabled in the HR catalogue.');
-    const manager=await managerFor(ctx,employee.data,nodes);
-    if(!manager)throw new HttpError(409,'Assign a verified immediate manager before proposing skills.');
-    const submitted:string[]=[],skipped:string[]=[];
-    for(const code of codes){
-      await withLock(ctx.orgId,'hr_skill_nomination_'+uid+'_'+code,async()=>{
-        const existing=(await listDocs(proposalsPath(ctx.orgId))).some(d=>
-          str(d.data.employeeUid)===uid&&str(d.data.skillCode)===code &&
-          ['pending','approved'].includes(str(d.data.status)));
-        if(existing){skipped.push(code);return;}
-        const skill=byCode.get(code)!;
-        await writeDoc(`${proposalsPath(ctx.orgId)}/${randomUUID().replace(/-/g,'')}`,{
-          employeeUid:uid,skillCode:code,skillName:skill.name,status:'pending',
-          managerUid:manager,proposedBy:ctx.uid,
-          proposerName:[clean(ctx.me.data.firstName,50),clean(ctx.me.data.lastName,50)].join(' ').trim(),
-          endorsements:[],createdAt:nowIso(),updatedAt:nowIso(),reviewedAt:'',reviewedBy:'',decisionNote:'',
-        },{exists:false});
-        submitted.push(code);
-      });
-    }
-    return {ok:true,submitted,skipped,submittedCount:submitted.length,skippedCount:skipped.length};
-  })],
+  'POST /api/org/hr/skills/propose/bulk':[orgRoute('org.hr.skills.propose.bulk','HRM.shell.view',async ctx=>submitSkills(ctx))],
+  'POST /api/org/hr/skills/role-requirements/propose':[orgRoute('org.hr.skills.role_requirements.propose','HRM.shell.view',async ctx=>submitSkills(ctx,true))],
   'POST /api/org/hr/skills/endorse':[orgRoute('org.hr.skills.endorse','HRM.shell.view',async ctx=>{
     const id=clean(ctx.body.id,64);
     if(!/^[a-f0-9]{32}$/.test(id))throw new HttpError(400,'Invalid proposal.');
