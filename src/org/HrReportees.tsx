@@ -38,7 +38,7 @@ export default function HrReportees(){
         const valid=employees.filter(e=>e.skillFit?.percentage!==null&&e.skillFit?.percentage!==undefined);
         return valid.length?Math.round(valid.reduce((n,e)=>n+(e.skillFit?.percentage||0),0)/valid.length)+'%':'Not configured';
        })()}</p></div>
-   </div>
+   </div>}
    {!loading&&!error&&<RichTable id="hr-my-reportees" columns={columns} rows={employees}
      rowKey={r=>r.uid} onRowClick={r=>navigate('organization_home/hr/HR01/reportee/'+r.uid)}
      allowExport={false} height="h-[65dvh]" empty="No direct reportees are assigned."/>}
