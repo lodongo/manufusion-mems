@@ -247,13 +247,21 @@ export function roleExpired(user: Doc): boolean {
 }
 
 /** Everything a member may do: direct security role (unless expired) plus job-role grants. */
-export async function effectiveAccess(orgId: string, role: string, user: Doc) {
+export async function effectiveAccess(orgId: string, role: string, user: Doc, adoptedModules?: unknown) {
     const loaded = await loadRole(orgId, role);
     if (role === 'org_super_admin') return { roleName: loaded.name, directPermissions: loaded.permissions, grants: [] as Grant[], permissions: loaded.permissions, expired: false };
     const expired = roleExpired(user);
     const directPermissions = expired ? [] : loaded.permissions.filter((p) => p !== '*');
     const grants = await jobGrants(orgId, user);
-    const permissions = Array.from(new Set([...directPermissions, ...grants.flatMap((g) => g.permissions)]));
+    // HR workspace access is a baseline employee self-service entitlement when HRM is adopted.
+    // It grants no site-wide directory, HR administration, or payroll permissions.
+    const modules = adoptedModules && typeof adoptedModules === 'object' && !Array.isArray(adoptedModules)
+        ? adoptedModules as Record<string, unknown> : {};
+    const hrSelfService = modules.HRM === true || modules.HRM === 'enabled';
+    const permissions = Array.from(new Set([
+        ...directPermissions, ...grants.flatMap((g) => g.permissions),
+        ...(hrSelfService ? ['HRM.shell.view'] : []),
+    ]));
     return { roleName: expired ? `${loaded.name} (expired)` : loaded.name, directPermissions, grants, permissions, expired };
 }
 
@@ -468,7 +476,7 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         }
         const role = normalizeOrgRole(str(me.data.role));
         ctx.actor.role = role;
-        const access = await effectiveAccess(orgId, role, me);
+        const access = await effectiveAccess(orgId, role, me, org.data.modules);
         // Administration rights (ADM.*) only ever come from the directly assigned security role.
         const gate = permission && permission.startsWith('ADM.') ? access.directPermissions : access.permissions;
         const granted = role === 'org_super_admin' || (permission !== null && hasPerm(gate, permission));
