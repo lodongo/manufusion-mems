@@ -80,18 +80,24 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [note,setNote]=useState('');
  const load=async()=>{
-   setCatalogLoading(true);
+   setCatalogLoading(true);setError('');
    try{
-     const [c,p,i]=await Promise.all([
+     const [c,p,i]=await Promise.allSettled([
        callBackend<{skills:Skill[];canManage:boolean}>('/api/org/hr/skills/catalog'),
        callBackend<{employees:Peer[]}>('/api/org/hr/skills/peers'),
        callBackend<{items:Approval[]}>('/api/org/hr/skills/inbox'),
      ]);
-     setCatalog(c.skills);setCanManage(c.canManage);setPeers(p.employees);setInbox(i.items);
+     if(c.status==='rejected')throw c.reason;
+     setCatalog(c.value.skills);setCanManage(c.value.canManage);
+     if(p.status==='fulfilled')setPeers(p.value.employees);
+     if(i.status==='fulfilled')setInbox(i.value.items);
    }catch(e){setError(e instanceof Error?e.message:'HR skills unavailable.')}
    finally{setCatalogLoading(false)}
  };
  useEffect(()=>{void load()},[]);
+ useEffect(()=>{
+   if(tab==='catalog'&&creating)document.getElementById('hr-skill-editor')?.scrollIntoView({behavior:'smooth',block:'start'});
+ },[creating,tab]);
  const begin=(s?:Skill)=>{setEdit(s||null);setCreating(true);setName(s?.name||'');setCategory(s?.category||'');setSubcategory(s?.subcategory||'');setDescription(s?.description||'');setEnabled(s?.enabled!==false);setError('');setNotice('')};
  const save=async()=>{
    setBusy(true);setError('');setNotice('');
