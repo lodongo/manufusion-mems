@@ -145,6 +145,38 @@ export const hrEmployeeRoutes={
     });
     return {ok:true,code:resolved};
   })],
+  'POST /api/org/hr/skills/catalog/save/bulk':[orgRoute('org.hr.skills.catalog.save.bulk','HRM.skills.manage',async ctx=>{
+    if(!hrCanManage(ctx))throw new HttpError(403,'HR skills administrator permission required.');
+    const category=clean(ctx.body.category,100),subcategory=clean(ctx.body.subcategory,100);
+    const items=ctx.body.items;
+    if(!category||!subcategory||!Array.isArray(items)||!items.length||items.length>25)
+      throw new HttpError(400,'Provide a category, subcategory and 1–25 skills.');
+    const input=items.map((raw:unknown)=>{
+      if(!isObj(raw))throw new HttpError(400,'Invalid skill entry.');
+      const name=clean(raw.name,160),description=clean(raw.description,600);
+      if(!name)throw new HttpError(400,'Each skill requires a name.');
+      return {name,description};
+    });
+    const keys=input.map(x=>x.name.toLocaleLowerCase());
+    if(new Set(keys).size!==keys.length)throw new HttpError(400,'Duplicate skill names in this submission.');
+    return withLock(ctx.orgId,'hr_skill_catalog_bulk',async()=>{
+      const existing=await skillCatalog(ctx);
+      const names=new Set(existing.filter(x=>x.category.toLocaleLowerCase()===category.toLocaleLowerCase()&&
+        x.subcategory.toLocaleLowerCase()===subcategory.toLocaleLowerCase())
+        .map(x=>x.name.toLocaleLowerCase()));
+      const created:string[]=[],skipped:string[]=[];
+      for(const item of input){
+        if(names.has(item.name.toLocaleLowerCase())){skipped.push(item.name);continue;}
+        const code='HR_SK_LOCAL_'+randomUUID().replace(/-/g,'').slice(0,20);
+        await writeDoc(`${catalogPath(ctx.orgId)}/${code}`,{
+          code,name:item.name,category,subcategory,description:item.description,enabled:true,
+          createdAt:nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid,
+        },{exists:false});
+        names.add(item.name.toLocaleLowerCase());created.push(code);
+      }
+      return {ok:true,created,skipped,createdCount:created.length,skippedCount:skipped.length};
+    });
+  })],
   'POST /api/org/hr/skills/peers':[orgRoute('org.hr.skills.peers','HRM.shell.view',async ctx=>{
     const nodes=await nodeMap(ctx.orgId);
     const records=await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
