@@ -229,8 +229,9 @@ export async function readPayConfig(org:string,entity:string,countryCode:string,
 }
 const entities=async(org:string)=>(await listDocs(`organizations/${org}/structure`))
  .filter(d=>str(d.data.level)==='legal_entity'&&str(d.data.status)!=='inactive')
- .map(d=>({id:d.id,name:str(d.data.name),countryCode:sc(d.data.countryCode||d.data.country,2).toUpperCase(),
-  currency:sc(d.data.currency,3).toUpperCase()}))
+ .map(d=>({id:d.id,name:str(d.data.name),
+  countryCode:sc((isObj(d.data.attributes)?d.data.attributes.countryCode:'')||d.data.countryCode||d.data.country,2).toUpperCase(),
+  currency:sc((isObj(d.data.attributes)?d.data.attributes.currencyCode:'')||d.data.currencyCode||d.data.currency,3).toUpperCase()}))
  .sort((a,b)=>a.name.localeCompare(b.name));
 function normalizeItem(x:unknown,grades:Set<string>,countryCode:string,currency:string):PayItem{
  if(!isObj(x))throw new HttpError(400,'Invalid compensation component.');
@@ -303,7 +304,7 @@ export const hrCompensationRoutes={
   const current=all.find(e=>e.id===id)||(!id?all[0]:undefined);
   const orgCountry=sc(ctx.org.data.countryCode||ctx.org.data.country,2).toUpperCase();
   const country=current?countryOf(current,orgCountry):'';
-  const currency=current?.currency||sc(ctx.org.data.currency,3)|| (country==='KE'?'KES':'');
+  const currency=current?.currency||sc(ctx.org.data.currencyCode||ctx.org.data.currency,3)||(country==='KE'?'KES':'');
   return {entities:all,current:current||null,countryCode:country,currency,
    config:current?await readPayConfig(ctx.orgId,current.id,country,currency):null,
    saved:!!(current&&await getDoc(docPath(ctx.orgId,current.id))),
@@ -316,7 +317,7 @@ export const hrCompensationRoutes={
   const current=all.find(e=>e.id===id);
   if(!current)throw new HttpError(404,'Select an active legal entity.');
   const country=countryOf(current,sc(ctx.org.data.countryCode||ctx.org.data.country,2).toUpperCase());
-  const currency=current.currency||sc(ctx.org.data.currency,3)||(country==='KE'?'KES':'');
+  const currency=current.currency||sc(ctx.org.data.currencyCode||ctx.org.data.currency,3)||(country==='KE'?'KES':'');
   if(!country||!currency)throw new HttpError(409,'Configure legal-entity country and currency before compensation.');
   const gradeConfig=await getEducationConfig(ctx.orgId,id);
   const valid=validatePayConfig(ctx.body.config,new Set(gradeConfig.jobGrades.filter(g=>g.enabled).map(g=>g.code)),country,currency);
