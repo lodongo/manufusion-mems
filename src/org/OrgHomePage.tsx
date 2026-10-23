@@ -290,9 +290,9 @@ function MenuSection({ menu, open, activePath, search, onToggle, onSelect, favor
             </button>
             {expanded && (
                 <div className='ml-5 border-l border-slate-700 py-1 pl-3'>
-                    <button onClick={() => onSelect(menu.module.code==='DOC'?'doc_register':`module/${menu.module.code}`)} className={`mb-0.5 flex min-h-11 w-full items-center rounded-lg px-3 text-left text-xs ${activePath === `module/${menu.module.code}` ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-400 hover:bg-slate-800'}`}>
+                    {menu.module.code!=='HRM' && <button onClick={() => onSelect(menu.module.code==='DOC'?'doc_register':`module/${menu.module.code}`)} className={`mb-0.5 flex min-h-11 w-full items-center rounded-lg px-3 text-left text-xs ${activePath === `module/${menu.module.code}` ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-400 hover:bg-slate-800'}`}>
                         {menu.module.code==='DOC'?'Documents':'Module overview'}
-                    </button>
+                    </button>}
                     {menu.module.code === 'FIN' && <FinEntityMenu onPick={() => onSelect(activePath.startsWith('fin_') ? activePath.split('/')[0] : 'fin_gl')} />}
                     {links.map(link => (
                         <div key={link.path} className='flex min-h-10 items-center gap-1 rounded-lg'>
@@ -402,7 +402,7 @@ export default function OrgHomePage({
     else if (section === 'quick') content = <QuickWorkspace mode={id} id={sub} uid={session.user.uid} />;
     else if (section === 'mail') content = <OrgMail myEmail={session.user.email} initialId={id==='read'?sub:''} />;
     else if (showActivity) content = <MyActivity />;
-    else if (section === 'module' && activeModule && activeModule.module.code==='HRM') content = <HrShell />;
+    else if (section === 'module' && activeModule && activeModule.module.code==='HRM') content = <HrShell sectionCode='HR01' />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && /^HR(0[1-9]|1[0-6])$/.test(id||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrShell sectionCode={id} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='DOC') content = <DocumentRegistryPage mode='register' canConfigure={hasPerm(data.permissions,'ADM.document_config')} canReview={hasPerm(data.permissions,'ADM.document_review')} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='0') content = <InventoryDashboard />;
