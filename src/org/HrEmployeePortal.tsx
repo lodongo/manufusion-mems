@@ -12,11 +12,12 @@ import { firebaseAuth } from '../firebase';
 import HrSelfRecords from './HrSelfRecords';
 import { EmployeeSkillPanel } from './HrSkillsWorkspace';
 import HrLeavePanel from './HrLeavePanel';
+import HrRoleSkillFit, {type SkillFit} from './HrRoleSkillFit';
 
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
 type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string};
 type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;department:string;site:string};
-type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];access:{scope:string;readOnlyTabs:string[];allowedTabs:string[];selfEditingBlocked:boolean}};
+type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];skillFit:SkillFit;access:{scope:string;readOnlyTabs:string[];allowedTabs:string[];selfEditingBlocked:boolean}};
 type TabKey = 'basic'|'education'|'family'|'skills'|'deployment'|'records'|'roles'|'payslips'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
 const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'basic',label:'Basic Information',Icon:IdCard},
@@ -100,6 +101,7 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
         <div key={label} className="min-w-0 rounded-xl bg-white/15 p-3"><p className="text-[11px] opacity-80">{label}</p><p className="mt-1 break-words text-sm font-semibold">{value}</p></div>)}
       </div>}
     </section>
+    {data.access.allowedTabs?.includes('skills')&&<div className="mb-4"><HrRoleSkillFit fit={data.skillFit}/></div>}
     {selfView&&reportees>0&&<button type="button" onClick={()=>navigate('organization_home/hr/HR01/reportees')} className="mb-4 flex min-h-14 w-full items-center gap-3 rounded-xl border border-line bg-panel px-4 text-left text-brand">
       <Network className="h-5 w-5"/><span className="flex-1 font-semibold">My Reportees <span className="ml-1 text-sm font-normal text-muted">({reportees})</span></span><ChevronRight className="h-5 w-5"/></button>}
     <div className="grid min-w-0 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
@@ -140,8 +142,8 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
        {data.roles.length?<div className="space-y-3">{data.roles.map(role=><article key={role.code} className="rounded-xl border border-line bg-page p-4"><h3 className="font-semibold">{role.title}</h3><p className="mt-1 text-xs text-muted">{role.code} · {role.operatingLevel||'Level not recorded'} · Reports to: {role.reportsToCode||'Not recorded'}</p><p className="mt-3 whitespace-pre-wrap text-sm">{role.description||'No responsibilities description is recorded for this role.'}</p></article>)}</div>:<p className="text-sm text-muted">No assigned job role is recorded.</p>}
       </Panel>}
       {tab==='skills'&&<>
+        <HrRoleSkillFit fit={data.skillFit} detailed/>
         <EmployeeSkillPanel employeeUid={data.profile.uid} ownUid={firebaseAuth.currentUser?.uid||''}/>
-        {data.requiredSkills.length>0&&<Panel title="Required job-role skills"><div className="flex flex-wrap gap-2">{data.requiredSkills.map(skill=><span key={skill} className="rounded-lg border border-line bg-page px-3 py-2 text-sm">{skill}</span>)}</div></Panel>}
       </>}
       {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid||data.access.scope==='superadmin'?<HrSelfRecords kind={tab} employeeUid={data.profile.uid} readOnly={data.access.selfEditingBlocked}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
       {tab==='leave'&&<HrLeavePanel employeeUid={data.profile.uid} showInbox={selfView}/>}
