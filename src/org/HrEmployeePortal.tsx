@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { callBackend } from '../lib/backend';
+import { SelectField } from '../components/ui';
 import { navigate } from '../lib/route';
 
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
@@ -63,7 +64,7 @@ export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?
   <header className="flex shrink-0 items-center gap-3 border-b border-line bg-page px-3 py-3 sm:px-5">
    <button type="button" onClick={back} aria-label="Back to employee list" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-panel"><ArrowLeft className="h-5 w-5"/></button>
    <div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase tracking-wider text-blue-500">Human Resources · Employee portal</p><h1 className="truncate text-base font-bold sm:text-xl">{data?.profile.name||'Employee HR portal'}</h1></div>
-   <span className="shrink-0 rounded-full border border-line px-2 py-1 text-xs text-muted">Read only</span>
+
   </header>
   <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5">
    {loading&&<div role="status" className="rounded-xl border border-line bg-panel p-4 text-sm text-muted">Loading the authorized employee record…</div>}
@@ -76,13 +77,11 @@ export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?
     </section>
     <div className="grid min-w-0 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
      <nav aria-label="Employee HR portal tabs" className="min-w-0 lg:sticky lg:top-0 lg:self-start">
-      <div className="relative lg:hidden">
-       <ActiveIcon className="pointer-events-none absolute left-3 top-3.5 h-5 w-5 text-blue-500"/>
-       <select aria-label="Employee portal section" value={tab} onChange={e=>setTab(e.target.value as TabKey)}
-        className="h-12 w-full appearance-none rounded-xl border border-line bg-panel pl-10 pr-9 text-sm font-semibold text-ink">
+      <div className="lg:hidden">
+       <SelectField id="employee-hr-portal-section" label="Employee HR section" value={tab}
+        onChange={e=>setTab(e.target.value as TabKey)}>
         {TABS.map(item=><option key={item.key} value={item.key}>{item.label}</option>)}
-       </select>
-       <ChevronRight className="pointer-events-none absolute right-3 top-3.5 h-5 w-5 rotate-90 text-muted"/>
+       </SelectField>
       </div>
       <div className="hidden max-h-[65dvh] space-y-1 overflow-y-auto rounded-2xl border border-line bg-panel p-2 lg:block">
        {TABS.map(({key,label,Icon})=><button key={key} type="button" onClick={()=>setTab(key)} aria-current={tab===key?'page':undefined}
@@ -92,7 +91,7 @@ export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?
       </div>
      </nav>
      <div className="min-w-0 space-y-3">
-      <div className="flex items-center gap-2"><ActiveIcon className="h-5 w-5 text-blue-500"/><h2 className="text-lg font-bold">{active.label}</h2></div>
+      <div className="flex items-center gap-2"><ActiveIcon className="h-5 w-5 text-blue-500"/><h2 className="min-w-0 flex-1 text-lg font-bold">{active.label}</h2>{tab==='roles'&&<span className="rounded-full border border-line px-2 py-1 text-xs text-muted">Read only</span>}</div>
       {tab==='basic'&&<Panel title="Employee profile">
        <div className="grid gap-2 sm:grid-cols-2">
         <Info label="Full name" value={data.profile.name}/>
