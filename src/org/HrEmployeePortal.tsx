@@ -119,7 +119,7 @@ export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?
         <EmployeeSkillPanel employeeUid={data.profile.uid} ownUid={firebaseAuth.currentUser?.uid||''}/>
         {data.requiredSkills.length>0&&<Panel title="Required job-role skills"><div className="flex flex-wrap gap-2">{data.requiredSkills.map(skill=><span key={skill} className="rounded-lg border border-line bg-page px-3 py-2 text-sm">{skill}</span>)}</div></Panel>}
       </>}
-      {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid?<HrSelfRecords kind={tab}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
+      {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid||data.access.scope==='organization'?<HrSelfRecords kind={tab} employeeUid={data.profile.uid}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
       {RESTRICTED.has(tab)&&tab!=='education'&&tab!=='family'&&<EmptyRecords label={active.label}/>}
      </div>
     </div>
