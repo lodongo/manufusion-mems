@@ -26,6 +26,12 @@ export function standardRoleTemplates(groups: PermGroup[]): StandardRoleTemplate
   if (enabled.get('HRM')?.has('HRM.shell.view')) {
     templates.push({ id: 'std_hrm_shell_viewer', module: 'HRM', name: 'HR – Workspace Access', description: 'Open HR submodules. Employee record viewing and changes require separately authorized permissions.', permissions: ['HRM.shell.view'] });
     assigned.add('HRM.shell.view');
+    if(enabled.get('HRM')?.has('HRM.rules.approve')){
+      templates.push({id:'std_hrm_privacy_approver',module:'HRM',name:'HR – Privacy Officer Approver',
+        description:'Independently approve or reject HR access policy changes; cannot approve own submissions.',
+        permissions:['HRM.shell.view','HRM.rules.approve']});
+      assigned.add('HRM.rules.approve');
+    }
     if(enabled.get('HRM')?.has('HRM.skills.manage')){
       templates.push({
         id:'std_hrm_skills_administrator',module:'HRM',name:'HR – Skills Administrator',
