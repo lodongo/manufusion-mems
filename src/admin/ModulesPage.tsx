@@ -6,7 +6,6 @@ import { Alert, Field, SelectField } from '../components/ui';
 import { fmtDate, fmtKes, fmtUsdFromKes } from './format';
 import { Badge, Button, Card, Empty, PageTitle, Spinner, SubTabs, TextArea, Toggle, useLoad } from './kit';
 import DefaultLists from './DefaultLists';
-import SkillsBrowser from './SkillsBrowser';
 import SafMetadataBrowser from './SafMetadataBrowser';
 import UtilityBrowser, { type Utility } from './UtilityBrowser';
 import AssetDictionaryAdmin from './AssetDictionaryAdmin';
@@ -339,7 +338,6 @@ function Workspace({ module, view, canWrite, isSuper }: { module: Module; view: 
 
     if (editing && editing !== 'new' && module.code === 'SAF') return <SafMetadataBrowser title={editing.title} items={editing.items} onCancel={()=>setEditing(null)}/>;
 
-    if (editing && editing !== 'new' && module.code === 'HRM' && editing.key === 'skillsMaster') return <SkillsBrowser items={editing.items} canWrite={canWrite} canReplace={isSuper} onDone={()=>{setEditing(null);reload()}} onCancel={()=>setEditing(null)}/>;
 
     if (editing && editing !== 'new' && module.code === 'PRC' && editing.key === 'unitsOfMeasure') {
         return <ProcurementUnits items={editing.items as UomEntry[]} canWrite={canWrite} onDone={() => { setEditing(null); reload(); }} onCancel={() => setEditing(null)} />;
@@ -381,7 +379,7 @@ function Workspace({ module, view, canWrite, isSuper }: { module: Module; view: 
             {data.metadata.length === 0 ? (
                 <Empty>No metadata lists yet.</Empty>
             ) : (
-                data.metadata.filter(list => module.code !== 'PRC' || list.key !== 'stockingPolicies').map((list) => (
+                data.metadata.filter(list => !(module.code === 'PRC' && list.key === 'stockingPolicies') && !(module.code === 'HRM' && list.key === 'skillsMaster')).map((list) => (
                     <button key={list.key} onClick={() => setEditing(list)} className='block w-full text-left'>
                         <Card>
                             <div className='flex items-start justify-between gap-3'>
