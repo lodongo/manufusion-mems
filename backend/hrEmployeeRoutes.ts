@@ -6,6 +6,7 @@ import { hrSiteOf } from './hrHierarchy';
 import { HR_SKILL_DEFAULTS } from './hrSkillsDefaults';
 import { HR_SKILL_EXPANDED } from './hrSkillsExpanded';
 import { requiredRoleSkills, makeSkillFit } from './hrSkillFit';
+import { hrMayAccess, hrRules } from './hrPrivacyRules';
 
 const clean=(value:unknown,max=160)=>str(value).trim().slice(0,max);
 const privatePath=(org:string,uid:string)=>`organizations/${org}/hr_private/${uid}`;
@@ -109,6 +110,11 @@ async function submitSkills(ctx:OrgContext,roleRequirementsOnly=false){
     const employee=await personnel(ctx,uid),nodes=await nodeMap(ctx.orgId);
     if(roleRequirementsOnly&&uid!==ctx.uid)
       throw new HttpError(403,'Only the employee can nominate their own required-role skills.');
+    if(roleRequirementsOnly){
+      const configured=await getDoc(`organizations/${ctx.orgId}/hr_access_rules/default`);
+      if(!hrMayAccess('self','roleSkills',hrRules(configured?.data)))
+        throw new HttpError(403,'Role Skill Requirements are disabled for employee self-service by the approved HR privacy policy.');
+    }
     if(ctx.role==='org_super_admin'&&uid===ctx.uid)
       throw new HttpError(403,'Super administrator cannot modify own HR records.');
     if(uid!==ctx.uid&&ctx.role!=='org_super_admin'&&!sameSite(ctx.me.data,employee.data,nodes))
