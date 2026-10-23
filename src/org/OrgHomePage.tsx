@@ -38,6 +38,8 @@ import MyAccess from './MyAccess';
 import OrgUserHome from './OrgUserHome';
 import HrShell from './HrShell';
 import HrEmployeePortal from './HrEmployeePortal';
+import HrReportees from './HrReportees';
+import HrAccessRules from './HrAccessRules';
 import OrgMail from './OrgMail';
 import PurchaseRequirements from './PurchaseRequirements';
 import ProcurementSetup from './ProcurementSetup';
@@ -85,6 +87,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Compensation, Benefits & Payroll Interface', path: 'hr/HR11', permission: 'HRM.shell.view' },
         { label: 'Performance Management', path: 'hr/HR12', permission: 'HRM.shell.view' },
         { label: 'Learning, Skills & Career Development', path: 'hr/HR13', permission: 'HRM.shell.view' },
+        { label: 'Privacy & Access Rules', path: 'hr/HR17', permission: 'HRM.rules.manage' },
         { label: 'Employee Relations & Disciplinary Management', path: 'hr/HR14', permission: 'HRM.shell.view' },
         { label: 'Employee Engagement & Feedback', path: 'hr/HR15', permission: 'HRM.shell.view' },
         { label: 'Employee Movements, Separation & Offboarding', path: 'hr/HR16', permission: 'HRM.shell.view' },
@@ -403,7 +406,11 @@ export default function OrgHomePage({
     else if (section === 'quick') content = <QuickWorkspace mode={id} id={sub} uid={session.user.uid} />;
     else if (section === 'mail') content = <OrgMail myEmail={session.user.email} initialId={id==='read'?sub:''} />;
     else if (showActivity) content = <MyActivity />;
-    else if (section === 'module' && activeModule && activeModule.module.code==='HRM') content = <HrShell sectionCode='HR01' />;
+    else if (section === 'module' && activeModule && activeModule.module.code==='HRM') content = <HrEmployeePortal uid={session.user.uid} origin='HR01' selfView />;
+    else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR01' && sub === 'reportees' && hasPerm(data.permissions,'HRM.shell.view')) content = <HrReportees />;
+    else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR01' && sub === 'reportee' && /^[A-Za-z0-9_-]{1,128}$/.test(route.split('/')[4]||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrEmployeePortal uid={route.split('/')[4]} origin='HR01' reporteeView />;
+    else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR17' && hasPerm(data.permissions,'HRM.rules.manage')) content = <HrAccessRules />;
+    else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR01' && !sub && hasPerm(data.permissions,'HRM.shell.view')) content = <HrEmployeePortal uid={session.user.uid} origin='HR01' selfView />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && ['HR01','HR02','HR08'].includes(id||'') && sub === 'employee' && /^[A-Za-z0-9_-]{1,128}$/.test(route.split('/')[4]||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrEmployeePortal uid={route.split('/')[4]} origin={id as 'HR01'|'HR02'|'HR08'} />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && /^HR(0[1-9]|1[0-6])$/.test(id||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrShell sectionCode={id} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='DOC') content = <DocumentRegistryPage mode='register' canConfigure={hasPerm(data.permissions,'ADM.document_config')} canReview={hasPerm(data.permissions,'ADM.document_review')} />;
