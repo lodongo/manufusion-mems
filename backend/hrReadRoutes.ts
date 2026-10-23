@@ -94,7 +94,10 @@ export const hrReadRoutes = {
       const roles=roleCodes.map(code=>{
         const p=positions.get(code);
         return {code,title:str(p?.title)||code,description:str(p?.description),
-          reportsToCode:str(p?.parentCode),operatingLevel:str(p?.operatingLevel)};
+          reportsToCode:str(p?.parentCode),operatingLevel:str(p?.operatingLevel),
+          requiredSkillCodes:Array.isArray(p?.coreSkills)
+            ? [...new Set(p.coreSkills.filter((x):x is string=>typeof x==='string').map(x=>x.trim()).filter(Boolean))]
+            : []};
       });
       const requiredSkills=[...new Set(roleCodes.flatMap(code=>{
         const skills=positions.get(code)?.coreSkills;
