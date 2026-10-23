@@ -75,8 +75,17 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
   if(!selfView)return;
   let active=true;
   callBackend<{employees:Array<{uid:string}>}>('/api/org/hr/reportees').then(r=>{if(active)setReportees(r.employees.length)}).catch(()=>{});
-  callBackend<{education:Array<{qualification?:string;completionYear?:string}>}>('/api/org/hr/private/get',{uid})
-    .then(r=>{if(active)setQualification(r.education?.slice().sort((a,b)=>(b.completionYear||'').localeCompare(a.completionYear||''))[0]?.qualification||'')}).catch(()=>{});
+  Promise.all([
+   callBackend<{education:Array<{qualification?:string;levelCode?:string;completionYear?:string}>}>('/api/org/hr/private/get',{uid}),
+   callBackend<{config:{levels:Array<{code:string;rank:number}>}|null}>('/api/org/hr/education/config',{uid}),
+  ]).then(([records,settings])=>{
+   if(!active)return;
+   const ranks=new Map((settings.config?.levels||[]).map(level=>[level.code,level.rank]));
+   const highest=(records.education||[]).slice().sort((a,b)=>
+    (ranks.get(b.levelCode||'')||0)-(ranks.get(a.levelCode||'')||0)||
+    (b.completionYear||'').localeCompare(a.completionYear||''))[0];
+   setQualification(highest?.qualification||'');
+  }).catch(()=>{});
   return()=>{active=false};
  },[uid,selfView]);
  const visibleTabs=TABS.filter(item=>data?.access.allowedTabs?.includes(item.key));
