@@ -18,6 +18,25 @@ function assignedNodeIds(ctx: OrgContext): string[] {
   return direct.filter(a=>str(a.type)==='primary').map(a=>str(a.nodeId)).filter(Boolean);
 }
 export const hrReadRoutes = {
+  'POST /api/org/hr/structure': [
+    orgRoute('org.hr.structure', 'HRM.shell.view', async ctx => {
+      const docs=await listDocs(`organizations/${ctx.orgId}/structure`);
+      const nodes=docs.filter(d=>str(d.data.status)!=='inactive').map(d=>({
+        id:d.id,name:str(d.data.name),code:str(d.data.code),level:str(d.data.level),
+        parentId:str(d.data.parentId),status:str(d.data.status)||'active'
+      }));
+      return { nodes, readOnly:true };
+    }),
+  ],
+  'POST /api/org/hr/roles': [
+    orgRoute('org.hr.roles', 'HRM.shell.view', async ctx => {
+      const docs=await listDocs(`organizations/${ctx.orgId}/positions`);
+      return { roles:docs.map(d=>({
+        code:d.id,title:str(d.data.title),description:str(d.data.description),
+        parentCode:str(d.data.parentCode),operatingLevel:str(d.data.operatingLevel)
+      })),readOnly:true };
+    }),
+  ],
   'POST /api/org/hr/self': [
     orgRoute('org.hr.self', null, async ctx => {
       const read=canReadHrBasicProfile(
