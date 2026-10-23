@@ -138,4 +138,12 @@ const finalFit=roleFitModule.makeSkillFit('employee',snapshot('users/employee').
  new Map([['ROLE',{coreSkills:[added.code,'HR_SK_001_001','HR_SK_001_003']}]]),
  await listDocs(root+'/hr_skill_proposals'));
 assert.equal(finalFit.percentage,100);
+// A hidden tab must also be inaccessible by directly calling the backend.
+seed(root+'/hr_access_rules/default',{
+  schemaVersion:2,selfTabs:['basic','skills'],managerTabs:['basic','skills'],
+  hrTabs:['basic','skills'],managerIndirectReports:false,
+});
+await assert.rejects(()=>call('employee','/api/org/hr/skills/role-requirements/propose',{
+  employeeUid:'employee',skillCodes:['HR_SK_001_004'],
+}),/disabled for employee self-service/);
 console.log('HR skills and self-service scenario passed');
