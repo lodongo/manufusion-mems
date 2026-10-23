@@ -3,6 +3,7 @@ import { HttpError, fieldEq, getDoc, isObj, listDocs, nowIso, runQuery, str, wri
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { withLock } from './finCore';
 import { hrSiteOf } from './hrHierarchy';
+import {resolveHrManagerFor} from './hrManagerResolver';
 import { HR_SKILL_DEFAULTS } from './hrSkillsDefaults';
 import { HR_SKILL_EXPANDED } from './hrSkillsExpanded';
 import { requiredRoleSkills, makeSkillFit } from './hrSkillFit';
@@ -22,41 +23,9 @@ const personnel=async(ctx:OrgContext,uid:string)=>{
   if(!doc||str(doc.data.orgId)!==ctx.orgId||str(doc.data.status)==='disabled')throw new HttpError(404,'Employee unavailable.');
   return doc;
 };
-function immediateManagerUid(data:Record<string,unknown>,nodes:Map<string,Record<string,unknown>>):string{
-  // Closest configured reporting manager; no implicit seniority or arbitrary approver role.
-  for(const assignment of primary(data)){
-    const visited=new Set<string>();
-    let id=str(assignment.nodeId);
-    while(id&&!visited.has(id)){
-      visited.add(id);
-      const node=nodes.get(id);
-      if(!node||str(node.status)==='inactive')break;
-      const manager=str(node.managerUid);
-      if(manager && manager!==str(data.uid))return manager;
-      id=str(node.parentId);
-    }
-  }
-  return '';
-}
-export async function managerFor(ctx:OrgContext,employee:Record<string,unknown>,nodes:Map<string,Record<string,unknown>>){
-  const uid=immediateManagerUid(employee,nodes);
-  if(!uid)return '';
-  const person=await getDoc(`users/${uid}`);
-  if(!person||str(person.data.orgId)!==ctx.orgId||str(person.data.status)==='disabled')return '';
-  // The configured manager must have a primary assignment at the responsible node.
-  const responsible=new Set<string>();
-  for(const assignment of primary(employee)){
-    const seen=new Set<string>();let id=str(assignment.nodeId);
-    while(id&&!seen.has(id)){
-      seen.add(id);const node=nodes.get(id);if(!node||str(node.status)==='inactive')break;
-      if(str(node.managerUid)===uid){responsible.add(id);break}
-      id=str(node.parentId);
-    }
-  }
-  return primary(person.data).some(a=>{
-    const managerSite=hrSiteOf(str(a.nodeId),nodes);
-    return responsible.has(str(a.nodeId)) || (!!managerSite && [...responsible].some(id=>hrSiteOf(id,nodes)===managerSite));
-  })?uid:'';
+export async function managerFor(ctx:OrgContext,employee:Record<string,unknown>,nodes:Map<string,Record<string,unknown>>,users?:readonly {id:string;data:Record<string,unknown>}[]){
+ const result=await resolveHrManagerFor(ctx,employee,nodes,users);
+ return result.uid;
 }
 const employeeSafe=(d:{id:string;data:Record<string,unknown>})=>({uid:d.id,name:[clean(d.data.firstName,50),clean(d.data.lastName,50)].filter(Boolean).join(' '),employeeNumber:clean(d.data.employeeNumber,40)});
 function hrCanManage(ctx:OrgContext){return ctx.role==='org_super_admin'||hasPerm(ctx.directPermissions,'HRM.skills.manage')}
@@ -142,7 +111,7 @@ async function submitSkills(ctx:OrgContext,roleRequirementsOnly=false){
     if(codes.some(code=>!byCode.has(code)))
       throw new HttpError(400,'Some selected skills are not enabled in the HR catalogue.');
     const manager=await managerFor(ctx,employee.data,nodes);
-    if(!manager)throw new HttpError(409,'Assign a verified immediate manager before proposing skills.');
+    if(!manager)throw new HttpError(409,'The manager role has no unique assigned employee. In Organization Admin, assign one employee to its managing job role at the correct legal entity or site.');
     const submitted:string[]=[],skipped:string[]=[];
     for(const code of codes){
       await withLock(ctx.orgId,'hr_skill_nomination_'+uid+'_'+code,async()=>{
@@ -291,7 +260,7 @@ export const hrEmployeeRoutes={
     const skill=(await skillCatalog(ctx)).find(x=>x.code===code&&x.enabled);
     if(!skill)throw new HttpError(400,'Choose an enabled skill in the HR catalogue.');
     const manager=await managerFor(ctx,employee.data,nodes);
-    if(!manager)throw new HttpError(409,'The employee needs a verified immediate manager in Organization Structure before a skill can be proposed.');
+    if(!manager)throw new HttpError(409,'The configured manager job role must be held by one active employee at the relevant level before a skill can be proposed.');
     return withLock(ctx.orgId,'hr_skill_nomination_'+uid+'_'+code,async()=>{
       const existing=(await listDocs(proposalsPath(ctx.orgId))).some(d=>
         str(d.data.employeeUid)===uid&&str(d.data.skillCode)===code&&['pending','approved'].includes(str(d.data.status)));
