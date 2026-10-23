@@ -138,6 +138,36 @@ const finalFit=roleFitModule.makeSkillFit('employee',snapshot('users/employee').
  new Map([['ROLE',{coreSkills:[added.code,'HR_SK_001_001','HR_SK_001_003']}]]),
  await listDocs(root+'/hr_skill_proposals'));
 assert.equal(finalFit.percentage,100);
+// Super Administrators retain standard personal self-service rights while
+// approvals must still be performed by an independent direct manager.
+seed(root+'/structure/SITE_A',{code:'SITE_A',name:'SITE_A',level:'site',parentId:'LE',status:'active',managerUid:'manager'});
+const ownEducation=await call('admin','/api/org/hr/private/save',{
+ uid:'admin',kind:'education',items:[{institution:'University',qualification:'Degree',field:'Engineering',completionYear:'2024'}],
+});
+assert.equal(ownEducation.items[0].qualification,'Degree');
+const ownFamily=await call('admin','/api/org/hr/private/save',{
+ uid:'admin',kind:'family',items:[{name:'Family Test',relationship:'Spouse',phone:''}],
+});
+assert.equal(ownFamily.items[0].relationship,'Spouse');
+assert.equal((await call('admin','/api/org/hr/private/get')).education.length,1);
+const ownSkill=await call('admin','/api/org/hr/skills/propose/bulk',{
+ employeeUid:'admin',skillCodes:['HR_SK_001_004'],
+});
+assert.equal(ownSkill.submittedCount,1);
+const adminNomination=(await listDocs(root+'/hr_skill_proposals'))
+ .find(p=>p.data.employeeUid==='admin'&&p.data.skillCode==='HR_SK_001_004');
+assert.ok(adminNomination);
+await assert.rejects(()=>call('admin','/api/org/hr/skills/decide',{
+ id:adminNomination.id,action:'approve',
+}),/own skill|own nomination/);
+await call('manager','/api/org/hr/skills/decide',{
+ id:adminNomination.id,action:'approve',
+});
+const ownRequired=await call('admin','/api/org/hr/skills/role-requirements/propose',{
+ employeeUid:'admin',skillCodes:['HR_SK_001_003'],
+});
+assert.equal(ownRequired.submittedCount,1);
+
 // A hidden tab must also be inaccessible by directly calling the backend.
 seed(root+'/hr_access_rules/default',{
   schemaVersion:2,selfTabs:['basic','skills'],managerTabs:['basic','skills'],
