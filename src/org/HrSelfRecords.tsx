@@ -3,7 +3,8 @@ import { Plus, Pencil, Trash2, X, Save, LockKeyhole } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { SelectField } from '../components/ui';
 
-type Education={id:string;institution:string;qualification:string;field:string;completionYear:string};
+type Education={id:string;institution:string;qualification:string;field:string;completionYear:string;levelCode:string;qualificationCode:string;gradingSystemCode:string;gradeCode:string};
+type EducationConfig={levels:Array<{code:string;name:string;enabled:boolean}>;qualifications:Array<{code:string;levelCode:string;name:string;enabled:boolean}>;gradingSystems:Array<{code:string;name:string;enabled:boolean;grades:Array<{code:string;name:string}>}>};
 type Family={id:string;name:string;relationship:string;phone:string};
 type Kind='education'|'family';
 const input='h-11 w-full rounded-xl border border-line bg-page px-3 text-base text-ink';
@@ -14,6 +15,16 @@ export default function HrSelfRecords({kind,employeeUid,readOnly=false}:{kind:Ki
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
  const [editing,setEditing]=useState<number|null>(null);
  const [draft,setDraft]=useState<Record<string,string>>({});
+ const [eduConfig,setEduConfig]=useState<EducationConfig|null>(null);
+ const [legalEntityName,setLegalEntityName]=useState('');
+ useEffect(()=>{
+   if(kind!=='education')return;
+   let alive=true;
+   void callBackend<{entity:{id:string;name:string}|null;config:EducationConfig|null}>('/api/org/hr/education/config',{uid:employeeUid})
+     .then(result=>{if(alive){setEduConfig(result.config);setLegalEntityName(result.entity?.name||'')}})
+     .catch(e=>{if(alive)setError(e instanceof Error?e.message:'Education configuration unavailable.')});
+   return()=>{alive=false};
+ },[kind,employeeUid]);
  useEffect(()=>{
    let alive=true;setLoading(true);setError('');
    callBackend<{education:Education[];family:Family[]}>('/api/org/hr/private/get',{uid:employeeUid})
@@ -24,7 +35,7 @@ export default function HrSelfRecords({kind,employeeUid,readOnly=false}:{kind:Ki
  },[kind,employeeUid]);
  const begin=(idx:number)=>{
    setEditing(idx);
-   setDraft(idx<0 ? kind==='education'?{id:'',institution:'',qualification:'',field:'',completionYear:''}:{id:'',name:'',relationship:'',phone:''}: {...items[idx]} as Record<string,string>);
+   setDraft(idx<0 ? kind==='education'?{id:'',institution:'',qualification:'',field:'',completionYear:'',levelCode:'',qualificationCode:'',gradingSystemCode:'',gradeCode:''}:{id:'',name:'',relationship:'',phone:''}: {...items[idx]} as Record<string,string>);
    setError('');setNotice('');
  };
  const save=async(next:Array<Education|Family>)=>{
@@ -42,7 +53,7 @@ export default function HrSelfRecords({kind,employeeUid,readOnly=false}:{kind:Ki
  };
  const label=kind==='education'?'Education':'Family';
  return <section className="min-w-0 space-y-3">
-  <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{label} records</h3><p className="text-xs text-muted">Private · authorized employee or super administrator</p></div>{!readOnly&&<button type="button" onClick={()=>begin(-1)} className={btn+' bg-brand text-onbrand'}><Plus className="h-4 w-4"/>Add</button>}</div>
+  <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{label} records</h3><p className="text-xs text-muted">Private · authorized employee or super administrator</p></div>{!readOnly&&<button type="button" disabled={kind==='education'&&!eduConfig} onClick={()=>begin(-1)} className={btn+' bg-brand text-onbrand disabled:opacity-40'}><Plus className="h-4 w-4"/>Add</button>}</div>
   {loading&&<p className="text-sm text-muted">Loading records…</p>}
   {!loading&&!items.length&&<div className="rounded-2xl border border-dashed border-line bg-panel p-5 text-center text-sm text-muted">No {label.toLowerCase()} records saved.</div>}
   <div className="space-y-2">{items.map((item,idx)=><article key={item.id||idx} className="flex items-start gap-2 rounded-2xl border border-line bg-panel p-3">
@@ -53,7 +64,42 @@ export default function HrSelfRecords({kind,employeeUid,readOnly=false}:{kind:Ki
   {editing!==null&&<div className="rounded-2xl border border-line bg-panel p-4">
    <h3 className="mb-3 font-bold">{editing===-1?'Add':'Update'} {label.toLowerCase()} record</h3>
    {kind==='education'?<div className="grid gap-3 sm:grid-cols-2">
-     {([['institution','Institution'],['qualification','Qualification'],['field','Field of study'],['completionYear','Completion year']] as const).map(([key,title])=><label key={key} className="block text-sm text-muted">{title}<input className={input} type={key==='completionYear'?'number':'text'} maxLength={key==='completionYear'?4:160} value={draft[key]||''} onChange={e=>setDraft(v=>({...v,[key]:e.target.value}))}/></label>)}
+     <div className="sm:col-span-2 rounded-lg bg-page p-3 text-xs text-muted">Legal entity: <strong>{legalEntityName||'Not assigned'}</strong>. Education levels, qualifications and grading are defined in Organization Admin.</div>
+     <label className="block text-sm text-muted">Institution<input className={input} value={draft.institution||''} maxLength={160}
+       onChange={e=>setDraft(v=>({...v,institution:e.target.value}))}/></label>
+     <SelectField id="employee-education-level" label="Educational level" required
+       value={draft.levelCode||''} onChange={e=>setDraft(v=>({...v,levelCode:e.target.value,qualificationCode:'',qualification:'',gradingSystemCode:'',gradeCode:''}))}>
+       <option value="">Select educational level</option>
+       {eduConfig?.levels.filter(x=>x.enabled||x.code===draft.levelCode).map(x=><option key={x.code} value={x.code}>{x.name}</option>)}
+     </SelectField>
+     <SelectField id="employee-education-qualification" label="Qualification" required
+       value={draft.qualificationCode||''} disabled={!draft.levelCode}
+       onChange={e=>{
+         const qual=eduConfig?.qualifications.find(q=>q.code===e.target.value);
+         setDraft(v=>({...v,qualificationCode:e.target.value,qualification:qual?.name||''}));
+       }}>
+       <option value="">Select qualification</option>
+       {eduConfig?.qualifications.filter(x=>x.levelCode===draft.levelCode&&(x.enabled||x.code===draft.qualificationCode))
+        .map(x=><option key={x.code} value={x.code}>{x.name}</option>)}
+     </SelectField>
+     <label className="block text-sm text-muted">Field of study / specialization<input className={input} value={draft.field||''} maxLength={140}
+       onChange={e=>setDraft(v=>({...v,field:e.target.value}))}/></label>
+     <label className="block text-sm text-muted">Completion year<input className={input} type="number" min={1900} max={2100}
+       value={draft.completionYear||''} onChange={e=>setDraft(v=>({...v,completionYear:e.target.value}))}/></label>
+     <SelectField id="employee-education-grading" label="Grading system (optional)"
+       value={draft.gradingSystemCode||''}
+       onChange={e=>setDraft(v=>({...v,gradingSystemCode:e.target.value,gradeCode:''}))}>
+       <option value="">Not graded / Not provided</option>
+       {eduConfig?.gradingSystems.filter(x=>x.enabled||x.code===draft.gradingSystemCode)
+         .map(x=><option key={x.code} value={x.code}>{x.name}</option>)}
+     </SelectField>
+     {draft.gradingSystemCode&&<SelectField id="employee-education-grade" label="Grade"
+       value={draft.gradeCode||''} onChange={e=>setDraft(v=>({...v,gradeCode:e.target.value}))}>
+       <option value="">Select grade</option>
+       {eduConfig?.gradingSystems.find(x=>x.code===draft.gradingSystemCode)?.grades.map(x=>
+          <option key={x.code} value={x.code}>{x.name}</option>)}
+     </SelectField>}
+     {editing!==-1&&!draft.levelCode&&<p className="sm:col-span-2 text-xs text-amber-700">Legacy record: select the educational level and qualification to align it with the legal-entity master.</p>}
    </div>:<div className="grid gap-3 sm:grid-cols-2">
      <label className="block text-sm text-muted">Name<input className={input} maxLength={140} value={draft.name||''} onChange={e=>setDraft(v=>({...v,name:e.target.value}))}/></label>
      <SelectField id="employee-family-relationship" label="Relationship" value={draft.relationship||''} onChange={e=>setDraft(v=>({...v,relationship:e.target.value}))}>
@@ -61,7 +107,7 @@ export default function HrSelfRecords({kind,employeeUid,readOnly=false}:{kind:Ki
      </SelectField>
      <label className="block text-sm text-muted">Contact number (optional)<input className={input} maxLength={32} value={draft.phone||''} onChange={e=>setDraft(v=>({...v,phone:e.target.value}))}/></label>
    </div>}
-   <div className="mt-4 flex gap-2"><button type="button" onClick={()=>setEditing(null)} className={btn+' border border-line'}><X className="h-4 w-4"/>Cancel</button><button type="button" disabled={busy||(kind==='education'?(!draft.institution?.trim()||!draft.qualification?.trim()):(!draft.name?.trim()||!draft.relationship?.trim()))} onClick={submit} className={btn+' bg-brand text-onbrand disabled:opacity-40'}><Save className="h-4 w-4"/>Save</button></div>
+   <div className="mt-4 flex gap-2"><button type="button" onClick={()=>setEditing(null)} className={btn+' border border-line'}><X className="h-4 w-4"/>Cancel</button><button type="button" disabled={busy||(kind==='education'?(!draft.institution?.trim()||!draft.levelCode||!draft.qualificationCode||!!draft.gradingSystemCode&&!draft.gradeCode):(!draft.name?.trim()||!draft.relationship?.trim()))} onClick={submit} className={btn+' bg-brand text-onbrand disabled:opacity-40'}><Save className="h-4 w-4"/>Save</button></div>
   </div>}
   {error&&<p role="alert" className="text-sm text-red-500">{error}</p>}
   {notice&&<p role="status" className="text-sm text-brand">{notice}</p>}
