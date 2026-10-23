@@ -39,8 +39,8 @@ function Panel({title,children}:{title:string;children:ReactNode}) {
 function EmptyRecords({label}:{label:string}) {
  return <section className="flex min-h-44 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-line bg-panel p-5 text-center">
   <LockKeyhole className="h-7 w-7 text-muted"/>
-  <h2 className="text-sm font-bold">{label} records are not connected</h2>
-  <p className="max-w-md text-xs leading-relaxed text-muted">No employee data is displayed in this tab until its HR data source and record-specific access controls are configured. No information has been fabricated.</p>
+  <h2 className="text-sm font-bold">No accessible {label.toLowerCase()} records</h2>
+  <p className="max-w-md text-xs leading-relaxed text-muted">No verified records are connected to this tab.</p>
  </section>;
 }
 export default function HrEmployeePortal({uid,origin='HR02'}:{uid:string;origin?:'HR01'|'HR02'|'HR08'}) {
