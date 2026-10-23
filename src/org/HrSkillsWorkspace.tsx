@@ -128,6 +128,9 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
  const [selected,setSelected]=useState('');
  const [inbox,setInbox]=useState<Approval[]>([]);
  const [edit,setEdit]=useState<Skill|null>(null),[creating,setCreating]=useState(false);
+ const [bulkCreating,setBulkCreating]=useState(false);
+ const [bulkCategory,setBulkCategory]=useState(''),[bulkSubcategory,setBulkSubcategory]=useState('');
+ const [bulkRows,setBulkRows]=useState<Array<{name:string;description:string}>>([{name:'',description:''}]);
  const [name,setName]=useState(''),[category,setCategory]=useState(''),[subcategory,setSubcategory]=useState(''),[description,setDescription]=useState(''),[enabled,setEnabled]=useState(true);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [note,setNote]=useState('');
@@ -158,6 +161,18 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
      setCreating(false);setNotice('HR skill catalogue updated.');await load();
    }catch(e){setError(e instanceof Error?e.message:'Skill could not be saved.')}finally{setBusy(false)}
  };
+ const saveBulk=async()=>{
+   if(!bulkCategory.trim()||!bulkSubcategory.trim()||!bulkRows.every(x=>x.name.trim())||busy)return;
+   setBusy(true);setError('');setNotice('');
+   try{
+     const result=await callBackend<{createdCount:number;skippedCount:number}>('/api/org/hr/skills/catalog/save/bulk',{
+       category:bulkCategory,subcategory:bulkSubcategory,items:bulkRows,
+     });
+     setNotice(`${result.createdCount} skill(s) created.${result.skippedCount?' '+result.skippedCount+' already in the HR catalogue.':''}`);
+     setBulkCreating(false);setBulkRows([{name:'',description:''}]);await load();
+   }catch(e){setError(e instanceof Error?e.message:'Could not add the selected skills.')}
+   finally{setBusy(false)}
+ };
  const decide=async(id:string,action:'approve'|'reject')=>{
    setBusy(true);setError('');setNotice('');
    try{await callBackend('/api/org/hr/skills/decide',{id,action,note});setNote('');setNotice(action==='approve'?'Skill confirmed by manager.':'Skill proposal returned as not confirmed.');await load()}
@@ -171,7 +186,36 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
    </div>
    <Message error={error} notice={notice}/>
    {tab==='catalog'&&<>
-     {canManage&&<button onClick={()=>begin()} className={button}><Plus className="mr-1 inline h-4 w-4"/>Add skill</button>}
+     {canManage&&<div className="flex flex-wrap gap-2">
+       <button type="button" onClick={()=>{setBulkCreating(false);begin()}} className={button}><Plus className="mr-1 inline h-4 w-4"/>Add skill</button>
+       <button type="button" onClick={()=>{setCreating(false);setBulkCreating(true)}} className="min-h-11 rounded-xl border border-line bg-panel px-4 text-sm font-semibold text-brand"><Plus className="mr-1 inline h-4 w-4"/>Add multiple skills</button>
+     </div>}
+     {canManage&&bulkCreating&&<section className={panel}>
+       <h3 className="mb-3 font-bold">Add multiple HR skills (up to 25)</h3>
+       <HrSkillCategoryFields idPrefix="hr-bulk-skill-master" skills={catalog}
+         category={bulkCategory} subcategory={bulkSubcategory} allowCreate
+         onCategory={v=>{setBulkCategory(v);setBulkSubcategory('')}} onSubcategory={setBulkSubcategory}/>
+       <div className="mt-4 space-y-3">{bulkRows.map((row,index)=><div key={index} className="rounded-xl border border-line bg-page p-3">
+         <div className="mb-2 flex items-center justify-between gap-2"><h4 className="text-sm font-semibold">Skill {index+1}</h4>
+         <button type="button" disabled={bulkRows.length===1||busy}
+           className="min-h-11 rounded-lg border border-line px-3 text-xs disabled:opacity-40"
+           onClick={()=>setBulkRows(rows=>rows.filter((_,i)=>i!==index))}>Remove</button></div>
+         <label className="block text-sm text-muted">Skill name<input className={field} maxLength={160}
+           value={row.name} onChange={e=>setBulkRows(rows=>rows.map((x,i)=>i===index?{...x,name:e.target.value}:x))}/></label>
+         <label className="mt-2 block text-sm text-muted">Description<textarea className={field+' min-h-20 p-3'}
+           maxLength={600} value={row.description}
+           onChange={e=>setBulkRows(rows=>rows.map((x,i)=>i===index?{...x,description:e.target.value}:x))}/></label>
+       </div>)}</div>
+       <button type="button" disabled={bulkRows.length>=25||busy}
+         onClick={()=>setBulkRows(rows=>[...rows,{name:'',description:''}])}
+         className="mt-3 min-h-11 rounded-xl border border-line px-4 text-sm font-semibold text-brand disabled:opacity-40"><Plus className="mr-1 inline h-4 w-4"/>Add another skill</button>
+       <div className="mt-4 flex flex-wrap gap-2">
+         <button type="button" onClick={()=>setBulkCreating(false)} className="min-h-11 rounded-xl border border-line px-4">Cancel</button>
+         <button type="button" onClick={()=>void saveBulk()}
+           disabled={busy||!bulkCategory.trim()||!bulkSubcategory.trim()||!bulkRows.every(row=>row.name.trim())}
+           className={button}>Save {bulkRows.length} skills</button>
+       </div>
+     </section>
      {creating&&<div id="hr-skill-editor" className={panel}>
        <h3 className="mb-3 font-bold">{edit?'Update skill':'Add HR skill'}</h3>
        <div className="grid gap-3 sm:grid-cols-2">
