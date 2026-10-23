@@ -477,18 +477,16 @@ export default function RichTable<T>({
                             value={search}
                             maxLength={100}
                             onChange={(e) => setSearch(e.target.value)}
-                            className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm'
+                            className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-14 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm'
                         />
-                    </label>
-                    <div className='relative shrink-0 sm:hidden'>
-                        <button type='button' aria-expanded={mobileToolsOpen} aria-label='Table options' onClick={() => setMobileToolsOpen(!mobileToolsOpen)} className='flex h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-semibold text-white'>
-                            <Columns3 className='h-4 w-4'/><span className='hidden min-[390px]:inline'>Options</span><ChevronDown className='h-4 w-4' />
+                        <button type='button' aria-expanded={mobileToolsOpen} aria-label='Table tools' title='Table tools' onClick={() => setMobileToolsOpen(!mobileToolsOpen)} className='absolute right-1 top-1/2 flex h-9 w-10 -translate-y-1/2 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-white sm:hidden'>
+                            <Columns3 className='h-5 w-5'/>
                         </button>
-                        {mobileToolsOpen && <div className='absolute right-0 top-full z-40 mt-2 grid w-64 max-w-[calc(100vw-3rem)] grid-cols-1 gap-1 rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-xl'>
-                            {([['filters','Filters'],['group','Group by'],['formulas','Formula columns'],['columns','Columns'],['templates','Saved templates']] as const).map(([key,label])=><button key={key} type='button' onClick={()=>{setPanel(panel===key?'':key);setMobileToolsOpen(false)}} className='min-h-11 rounded-lg border border-slate-700 px-2 text-left text-sm text-white'>{label}{key==='filters'&&view.criteria.length>0?' ('+view.criteria.length+')':''}</button>)}
-                            {allowExport&&<button type='button' onClick={()=>{setMobileToolsOpen(false);exportExcel()}} disabled={!filtered.length} className='min-h-11 rounded-lg border border-slate-700 px-2 text-left text-sm text-white disabled:opacity-40'>Export Excel</button>}
+                        {mobileToolsOpen && <div className='absolute right-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-3rem)] rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-xl sm:hidden'>
+                            {([['filters','Filters',Filter],['group','Group by',Layers],['formulas','Formula columns',Sigma],['columns','Columns',Columns3],['templates','Saved templates',BookmarkPlus]] as const).map(([key,label,Icon])=><button key={key} type='button' onClick={()=>{setPanel(panel===key?'':key);setMobileToolsOpen(false)}} className='flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-white hover:bg-slate-800'><Icon className='h-4 w-4'/><span>{label}{key==='filters'&&view.criteria.length>0?' ('+view.criteria.length+')':''}</span></button>)}
+                            {allowExport&&<button type='button' onClick={()=>{setMobileToolsOpen(false);exportExcel()}} disabled={!filtered.length} className='flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-white hover:bg-slate-800 disabled:opacity-40'><Download className='h-4 w-4'/>Export Excel</button>}
                         </div>}
-                    </div>
+                    </label>
                     <div className='hidden items-center gap-2 sm:flex'>
                     <button type='button' aria-label='Filters' title='Filter by criteria' onClick={() => setPanel(panel === 'filters' ? '' : 'filters')} className={iconBtn(panel === 'filters' || view.criteria.length > 0)}>
                         <Filter className='h-4 w-4' />
