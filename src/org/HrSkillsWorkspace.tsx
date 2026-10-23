@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Award, Check, ClipboardCheck, Plus, RefreshCw, ShieldCheck, ThumbsUp, Users, X } from 'lucide-react';
+import { Award, Check, ClipboardCheck, Plus, RefreshCw, Search, ShieldCheck, ThumbsUp, Users, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { SelectField } from '../components/ui';
 import HrSkillCatalogueBrowser from './HrSkillCatalogueBrowser';
 import HrSkillCategoryFields from './HrSkillCategoryFields';
+import {MAX_SKILL_NOMINATIONS,otherSkillOptions,selectVisibleSkills,toggleSelectedSkill} from './hrSkillSelection';
 
 type Skill={code:string;name:string;category:string;subcategory:string;description:string;enabled:boolean};
 type Proposal={id:string;skillCode:string;skillName:string;status:string;proposedBy:string;proposerName:string;managerUid:string;endorsements:Array<{uid:string;name:string}>;createdAt:string;reviewedAt:string};
@@ -15,15 +16,18 @@ const field='min-h-11 w-full rounded-xl border border-line bg-page px-3 text-bas
 const status=(s:string)=>s==='approved'?'Confirmed':s==='rejected'?'Not confirmed':'Awaiting manager';
 function Message({error,notice}:{error:string;notice:string}){return <>{error&&<p role="alert" className="rounded-xl border border-red-500/40 p-3 text-sm text-red-600">{error}</p>}{notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-ink">{notice}</p>}</>}
 
-export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownUid:string}){
+export function EmployeeSkillPanel({employeeUid,ownUid,requiredCodes=[]}:{employeeUid:string;ownUid:string;requiredCodes?:string[]}){
  const [catalog,setCatalog]=useState<Skill[]>([]);
  const [items,setItems]=useState<Proposal[]>([]);
- const [skill,setSkill]=useState('');
+ const [skillSearch,setSkillSearch]=useState('');
+ const [skillPageSize,setSkillPageSize]=useState(40);
  const [selectedSkills,setSelectedSkills]=useState<string[]>([]);
  const [skillCategory,setSkillCategory]=useState('');
  const [skillSubcategory,setSkillSubcategory]=useState('');
  const [loading,setLoading]=useState(true);
- const skillChoices=useMemo(()=>catalog.filter(x=>x.category===skillCategory&&x.subcategory===skillSubcategory),[catalog,skillCategory,skillSubcategory]);
+ const skillChoices=useMemo(()=>otherSkillOptions(catalog,skillCategory,skillSubcategory,skillSearch,requiredCodes),[catalog,skillCategory,skillSubcategory,skillSearch,requiredCodes.join('|')]);
+ const existingCodes=useMemo(()=>new Set(items.filter(item=>item.status==='pending'||item.status==='approved').map(item=>item.skillCode)),[items]);
+ const eligibleChoices=useMemo(()=>skillChoices.filter(item=>!existingCodes.has(item.code)),[skillChoices,existingCodes]);
  const [canPropose,setCanPropose]=useState(false);
  const [managerAssigned,setManagerAssigned]=useState(false);
  const [busy,setBusy]=useState(false);
@@ -39,10 +43,15 @@ export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownU
    }catch(e){setError(e instanceof Error?e.message:'Skill records unavailable.')}finally{setLoading(false)}
  };
  useEffect(()=>{void load()},[employeeUid]);
- const addSelected=()=>{
-   if(!skill||selectedSkills.includes(skill)||selectedSkills.length>=25)return;
-   setSelectedSkills(v=>[...v,skill]);setSkill('');
+ const toggleSkill=(code:string,checked:boolean)=>{
+   setSelectedSkills(v=>toggleSelectedSkill(v,code,checked));
  };
+ const selectAllVisible=()=>setSelectedSkills(v=>selectVisibleSkills(v,eligibleChoices.map(x=>x.code)));
+ useEffect(()=>{setSkillPageSize(40)},[skillCategory,skillSubcategory,skillSearch]);
+ useEffect(()=>{
+   setSelectedSkills([]);
+   setSkillCategory('');setSkillSubcategory('');setSkillSearch('');
+ },[employeeUid]);
  const submitSelected=async()=>{
    if(!selectedSkills.length||busy)return;
    setBusy(true);setError('');setNotice('');
@@ -51,7 +60,7 @@ export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownU
        employeeUid,skillCodes:selectedSkills,
      });
      setNotice(`${result.submittedCount} skill(s) submitted to the immediate manager.${result.skippedCount?' '+result.skippedCount+' already pending or confirmed.':''}`);
-     setSelectedSkills([]);setSkill('');await load();
+     setSelectedSkills([]);await load();
    }catch(e){setError(e instanceof Error?e.message:'Skill submission failed.')}
    finally{setBusy(false)}
  };
@@ -63,11 +72,11 @@ export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownU
  };
  return <div className="space-y-3">
    <div className={panel}>
-     <h3 className="mb-2 text-base font-bold">Verified and proposed skills</h3>
+     <h3 className="mb-2 text-base font-bold">Other skills — verified and proposed</h3>
      <p className="mb-3 text-xs text-muted">Skills become confirmed only after review by the employee's immediate manager. Colleague endorsements are recorded separately.</p>
      {loading&&<p className="text-sm text-muted">Loading skill records…</p>}
-     {items.length===0&&!loading&&<p className="rounded-xl bg-page p-3 text-sm text-muted">No skill nominations recorded.</p>}
-     <div className="space-y-2">{items.map(item=><article key={item.id} className="rounded-xl border border-line bg-page p-3">
+     {items.filter(item=>!requiredCodes.includes(item.skillCode)).length===0&&!loading&&<p className="rounded-xl bg-page p-3 text-sm text-muted">No other skill nominations recorded.</p>}
+     <div className="space-y-2">{items.filter(item=>!requiredCodes.includes(item.skillCode)).map(item=><article key={item.id} className="rounded-xl border border-line bg-page p-3">
        <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{item.skillName}</strong><span className="rounded-full border border-line px-2 py-1 text-xs">{status(item.status)}</span></div>
        <p className="mt-1 text-xs text-muted">Proposed by {item.proposerName||'colleague'} · {item.endorsements.length} endorsements</p>
        {item.endorsements.length>0&&<p className="mt-1 text-xs text-muted">Seconded by {item.endorsements.map(x=>x.name).join(', ')}</p>}
@@ -76,29 +85,52 @@ export function EmployeeSkillPanel({employeeUid,ownUid}:{employeeUid:string;ownU
      </article>)}</div>
    </div>
    {canPropose&&<div className={panel}>
-     <h3 className="mb-3 font-bold">{employeeUid===ownUid?'Propose my skill':'Propose a colleague’s skill'}</h3>
-     <HrSkillCategoryFields idPrefix={'skill-propose-'+employeeUid} skills={catalog}
+     <h3 className="mb-3 font-bold">{employeeUid===ownUid?'Propose my other skills':'Propose a colleague’s other skills'}</h3>
+     <p className="mb-3 text-xs text-muted">Choose a category and subcategory, then tick as many skills as needed. Selections are kept when you move to another subcategory.</p>
+     <HrSkillCategoryFields idPrefix={'skill-propose-'+employeeUid} skills={catalog.filter(x=>!requiredCodes.includes(x.code))}
        category={skillCategory} subcategory={skillSubcategory}
-       onCategory={v=>{setSkillCategory(v);setSkillSubcategory('');setSkill('')}}
-       onSubcategory={v=>{setSkillSubcategory(v);setSkill('')}}/>
-     <div className="mt-3 space-y-2">
-       <SelectField id={'skill-propose-'+employeeUid+'-skill'} label="Skill" required
-         value={skill} disabled={!skillSubcategory} onChange={e=>setSkill(e.target.value)}
-         hint={!skillSubcategory?'Choose a category and subcategory first':undefined}>
-         <option value="">Select skill</option>
-         {skillChoices.map(x=><option key={x.code} value={x.code}>{x.name} ({x.code})</option>)}
-       </SelectField>
-       {skill&&<div className="rounded-xl border border-line bg-page p-3 text-xs text-soft">
-          <p className="font-mono font-semibold text-brand">{skill}</p>
-          <p className="mt-1 leading-relaxed">{skillChoices.find(x=>x.code===skill)?.description||'No description recorded.'}</p>
-       </div>}
-       <button type="button" onClick={addSelected} disabled={!skill||selectedSkills.includes(skill)||selectedSkills.length>=25}
-         className="mt-3 flex min-h-11 items-center gap-2 rounded-xl border border-line px-4 text-sm font-semibold text-brand disabled:opacity-40">
-         <Plus className="h-4 w-4"/>Add to selection
-       </button>
-     </div>
+       onCategory={v=>{setSkillCategory(v);setSkillSubcategory('');setSkillSearch('')}}
+       onSubcategory={v=>{setSkillSubcategory(v);setSkillSearch('')}}/>
+     {skillCategory&&skillSubcategory&&<section className="mt-3 space-y-3" aria-label="Select multiple skills">
+       <label className="relative block">
+         <span className="sr-only">Search skills in the selected subcategory</span>
+         <Search className="pointer-events-none absolute left-3 top-3.5 h-5 w-5 text-muted"/>
+         <input type="search" value={skillSearch} onChange={e=>setSkillSearch(e.target.value)}
+           placeholder="Search skill names, codes or descriptions" autoComplete="off"
+           className="min-h-12 w-full rounded-xl border border-line bg-page py-2 pl-10 pr-3 text-base text-ink"/>
+       </label>
+       <div className="flex flex-wrap items-center justify-between gap-2">
+         <p className="text-xs text-muted">{skillChoices.length} skills in this selection · {eligibleChoices.length} available to propose</p>
+         <button type="button" disabled={busy||selectedSkills.length>=MAX_SKILL_NOMINATIONS||!eligibleChoices.length}
+           onClick={selectAllVisible}
+           className="min-h-11 rounded-xl border border-line bg-panel px-3 text-sm font-semibold text-brand disabled:opacity-40">
+           <Check className="mr-1 inline h-4 w-4"/>Select all available (up to {MAX_SKILL_NOMINATIONS})
+         </button>
+       </div>
+       <div className="max-h-[45dvh] space-y-2 overflow-y-auto rounded-xl border border-line bg-page p-2" role="group" aria-label="Skills in selected subcategory">
+         {skillChoices.length===0&&<p className="p-3 text-sm text-muted">No other skills match this category and subcategory.</p>}
+         {skillChoices.slice(0,skillPageSize).map(entry=>{
+           const previouslySubmitted=existingCodes.has(entry.code);
+           const selected=selectedSkills.includes(entry.code);
+           const disabled=busy||previouslySubmitted||(!selected&&selectedSkills.length>=MAX_SKILL_NOMINATIONS);
+           return <label key={entry.code} className={`flex min-w-0 min-h-14 items-start gap-3 rounded-xl border border-line p-3 text-left ${selected?'bg-brand/10 border-brand/40':'bg-panel'} ${disabled?'opacity-65':''}`}>
+             <input type="checkbox" aria-label={`Select ${entry.name}`}
+               className="mt-1 h-5 w-5 shrink-0 accent-brand" checked={selected} disabled={disabled}
+               onChange={e=>toggleSkill(entry.code,e.target.checked)}/>
+             <span className="min-w-0 flex-1">
+               <span className="block break-words text-sm font-semibold">{entry.name}</span>
+               <span className="mt-1 block break-all font-mono text-xs text-brand">{entry.code}</span>
+               {entry.description&&<span className="mt-1 block whitespace-pre-wrap break-words text-xs text-muted">{entry.description}</span>}
+               {previouslySubmitted&&<span className="mt-1 block text-xs text-muted">Already confirmed or awaiting manager</span>}
+             </span>
+           </label>;
+         })}
+         {skillChoices.length>skillPageSize&&<button type="button" className="min-h-11 w-full rounded-xl border border-line text-sm font-semibold text-brand"
+           onClick={()=>setSkillPageSize(v=>v+40)}>Show more skills</button>}
+       </div>
+     </section>}
      <div className="mt-3 rounded-xl border border-line bg-page p-3">
-       <h4 className="text-sm font-semibold">Selected skills ({selectedSkills.length}/25)</h4>
+       <h4 className="text-sm font-semibold">Selected other skills ({selectedSkills.length}/{MAX_SKILL_NOMINATIONS})</h4>
        <p className="mt-1 text-xs text-muted">You can select further categories and subcategories without losing previous selections.</p>
        {!selectedSkills.length&&<p className="mt-3 text-sm text-muted">No skills selected yet.</p>}
        <div className="mt-3 flex flex-wrap gap-2">{selectedSkills.map(code=>{
