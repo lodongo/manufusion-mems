@@ -8,7 +8,7 @@ type Family={id:string;name:string;relationship:string;phone:string};
 type Kind='education'|'family';
 const input='h-11 w-full rounded-xl border border-line bg-page px-3 text-base text-ink';
 const btn='flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold';
-export default function HrSelfRecords({kind,employeeUid}:{kind:Kind;employeeUid:string}){
+export default function HrSelfRecords({kind,employeeUid,readOnly=false}:{kind:Kind;employeeUid:string;readOnly?:boolean}){
  const [items,setItems]=useState<Array<Education|Family>>([]);
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -42,13 +42,13 @@ export default function HrSelfRecords({kind,employeeUid}:{kind:Kind;employeeUid:
  };
  const label=kind==='education'?'Education':'Family';
  return <section className="min-w-0 space-y-3">
-  <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{label} records</h3><p className="text-xs text-muted">Private · authorized employee or super administrator</p></div><button type="button" onClick={()=>begin(-1)} className={btn+' bg-brand text-onbrand'}><Plus className="h-4 w-4"/>Add</button></div>
+  <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{label} records</h3><p className="text-xs text-muted">Private · authorized employee or super administrator</p></div>{!readOnly&&<button type="button" onClick={()=>begin(-1)} className={btn+' bg-brand text-onbrand'}><Plus className="h-4 w-4"/>Add</button>}</div>
   {loading&&<p className="text-sm text-muted">Loading records…</p>}
   {!loading&&!items.length&&<div className="rounded-2xl border border-dashed border-line bg-panel p-5 text-center text-sm text-muted">No {label.toLowerCase()} records saved.</div>}
   <div className="space-y-2">{items.map((item,idx)=><article key={item.id||idx} className="flex items-start gap-2 rounded-2xl border border-line bg-panel p-3">
    <div className="min-w-0 flex-1"><h4 className="font-semibold">{kind==='education'?(item as Education).qualification:(item as Family).name}</h4><p className="mt-1 text-xs text-muted">{kind==='education'?[(item as Education).institution,(item as Education).field,(item as Education).completionYear].filter(Boolean).join(' · '):[(item as Family).relationship,(item as Family).phone].filter(Boolean).join(' · ')}</p></div>
-   <button type="button" aria-label="Edit record" onClick={()=>begin(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line"><Pencil className="h-4 w-4"/></button>
-   <button type="button" aria-label="Delete record" disabled={busy} onClick={()=>remove(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line text-red-500"><Trash2 className="h-4 w-4"/></button>
+   {!readOnly&&<button type="button" aria-label="Edit record" onClick={()=>begin(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line"><Pencil className="h-4 w-4"/></button>
+   <button type="button" aria-label="Delete record" disabled={busy} onClick={()=>remove(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line text-red-500"><Trash2 className="h-4 w-4"/></button>}
   </article>)}</div>
   {editing!==null&&<div className="rounded-2xl border border-line bg-panel p-4">
    <h3 className="mb-3 font-bold">{editing===-1?'Add':'Update'} {label.toLowerCase()} record</h3>
@@ -65,6 +65,6 @@ export default function HrSelfRecords({kind,employeeUid}:{kind:Kind;employeeUid:
   </div>}
   {error&&<p role="alert" className="text-sm text-red-500">{error}</p>}
   {notice&&<p role="status" className="text-sm text-brand">{notice}</p>}
-  <p className="flex items-center gap-2 text-xs text-muted"><LockKeyhole className="h-4 w-4"/>These records are restricted to the employee and organization super administrator.</p>
+  <p className="flex items-center gap-2 text-xs text-muted"><LockKeyhole className="h-4 w-4"/>These records are restricted to the employee and organization super administrator. A Super Administrator may not change their own HR records.</p>
  </section>;
 }
