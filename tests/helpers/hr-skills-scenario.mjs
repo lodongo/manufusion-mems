@@ -37,7 +37,7 @@ const call=(who,path,body={})=>{
  const h=hrEmployeeRoutes['POST '+path]?.[0];assert.ok(h,'Route not found '+path);
  return h(context(who,body));
 };
-const education=[{institution:'Technical College',qualification:'Diploma',field:'Electrical',completionYear:'2023'}];
+const education=[{institution:'Technical College',qualification:'Diploma',field:'Electrical',completionYear:'2023',levelCode:'DIPLOMA',qualificationCode:'DIPLOMA_GENERAL',gradingSystemCode:'PASS_FAIL',gradeCode:'PASS'}];
 await call('employee','/api/org/hr/private/save',{kind:'education',items:education});
 await call('employee','/api/org/hr/private/save',{kind:'family',items:[{name:'Family Member',relationship:'Parent',phone:'+254700000000'}]});
 const mine=await call('employee','/api/org/hr/private/get');
@@ -142,9 +142,9 @@ assert.equal(finalFit.percentage,100);
 // approvals must still be performed by an independent direct manager.
 seed(root+'/structure/SITE_A',{code:'SITE_A',name:'SITE_A',level:'site',parentId:'LE',status:'active',managerUid:'manager'});
 const ownEducation=await call('admin','/api/org/hr/private/save',{
- uid:'admin',kind:'education',items:[{institution:'University',qualification:'Degree',field:'Engineering',completionYear:'2024'}],
+ uid:'admin',kind:'education',items:[{institution:'University',qualification:'Bachelor degree',field:'Engineering',completionYear:'2024',levelCode:'BACHELOR',qualificationCode:'BACHELOR_GENERAL',gradingSystemCode:'DEGREE_CLASS',gradeCode:'FIRST'}],
 });
-assert.equal(ownEducation.items[0].qualification,'Degree');
+assert.equal(ownEducation.items[0].qualification,'Bachelor degree');
 const ownFamily=await call('admin','/api/org/hr/private/save',{
  uid:'admin',kind:'family',items:[{name:'Family Test',relationship:'Spouse',phone:''}],
 });
