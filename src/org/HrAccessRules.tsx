@@ -7,11 +7,11 @@ type RuleKey='selfTabs'|'managerTabs'|'hrTabs';
 type Rules={selfTabs:string[];managerTabs:string[];hrTabs:string[];managerIndirectReports:boolean};
 type Pending={rules:Rules;proposedBy:string;proposedAt:string;status:string};
 const titles:Record<string,string>={
- basic:'Basic Information',education:'Education',family:'Family',skills:'Skills',deployment:'Department & Deployment',
+ basic:'Basic Information',education:'Education',family:'Family',skills:'Skills',roleSkills:'Role Skill Requirements',deployment:'Department & Deployment',
  records:'Records',roles:'Roles & Responsibilities',payslips:'Payslips',talent:'Talent Pipeline',
  leave:'Leave Management',capability:'Capability Assessment',performance:'Performance Management',learning:'Learning',history:'Employment History'};
 const protectedTabs:Record<RuleKey,string[]>={
- selfTabs:['basic','education','family','skills','deployment','roles','payslips','leave','capability','performance','learning'],
+ selfTabs:['basic','education','family','skills','roleSkills','deployment','roles','payslips','leave','capability','performance','learning'],
  managerTabs:['basic','skills','deployment','roles','leave','capability','performance'],
  hrTabs:['basic','education','skills','deployment','records','roles','talent','leave','capability','performance','learning','history'],
 };
