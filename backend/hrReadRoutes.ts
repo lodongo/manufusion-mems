@@ -23,8 +23,8 @@ export const hrReadRoutes = {
       const docs=await listDocs(`organizations/${ctx.orgId}/structure`);
       const nodeMap=new Map(docs.map(d=>[d.id,d.data]));
       const permittedSites=new Set(assignedNodeIds(ctx).map(id=>hrSiteOf(id,nodeMap)).filter(Boolean));
-      if(!permittedSites.size) return {nodes:[],readOnly:true};
-      const nodes=docs.filter(d=>str(d.data.status)!=='inactive' && permittedSites.has(hrSiteOf(d.id,nodeMap))).map(d=>({
+      if(!permittedSites.size && ctx.role!=='org_super_admin') return {nodes:[],readOnly:true};
+      const nodes=docs.filter(d=>str(d.data.status)!=='inactive' && (ctx.role==='org_super_admin'||permittedSites.has(hrSiteOf(d.id,nodeMap)))).map(d=>({
         id:d.id,name:str(d.data.name),code:str(d.data.code),level:str(d.data.level),
         parentId:str(d.data.parentId),status:str(d.data.status)||'active'
       }));
@@ -51,16 +51,16 @@ export const hrReadRoutes = {
   ],
   'POST /api/org/hr/manager-team': [
     orgRoute('org.hr.manager_team', 'HRM.manager.hierarchy.read', async ctx => {
-      if (!hasPerm(ctx.directPermissions,'HRM.manager.hierarchy.read'))
+      if (ctx.role!=='org_super_admin' && !hasPerm(ctx.directPermissions,'HRM.manager.hierarchy.read'))
         throw new HttpError(403,'Direct manager view security role required.');
       const nodes=new Map((await listDocs(`organizations/${ctx.orgId}/structure`)).map(d=>[d.id,d.data]));
       const actorNodes=assignedNodeIds(ctx);
       const allowedRoots=managedRoots(ctx.uid,actorNodes,nodes);
-      if(!allowedRoots.size) throw new HttpError(403,'No verified managed organizational assignment.');
+      if(!allowedRoots.size && ctx.role!=='org_super_admin') throw new HttpError(403,'No verified managed organizational assignment.');
       const users=await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
       const employees=users.filter(u=>u.id!==ctx.uid&&str(u.data.status)!=='disabled').filter(u=>{
         const a=Array.isArray(u.data.assignments)?u.data.assignments.filter(isObj):[];
-        return a.some(v=>str(v.type)==='primary'&&underManagedRoot(str(v.nodeId),allowedRoots,nodes));
+        return ctx.role==='org_super_admin'||a.some(v=>str(v.type)==='primary'&&underManagedRoot(str(v.nodeId),allowedRoots,nodes));
       }).map(publicEmployee);
       return { employees, readOnly:true };
     }),
@@ -73,12 +73,12 @@ export const hrReadRoutes = {
         throw new HttpError(403,'Direct HR security role required.');
       const nodes=new Map((await listDocs(`organizations/${ctx.orgId}/structure`)).map(d=>[d.id,d.data]));
       const ownSites=new Set(assignedNodeIds(ctx).map(id=>hrSiteOf(id,nodes)).filter(Boolean));
-      if (!ownSites.size) throw new HttpError(403,'Verified site assignment is required.');
+      if (!ownSites.size && ctx.role!=='org_super_admin') throw new HttpError(403,'Verified site assignment is required.');
       const users=await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
       const records=users.filter(u=>{
         if(str(u.data.status)==='disabled')return false;
         const a=Array.isArray(u.data.assignments)?u.data.assignments.filter(isObj).filter(v=>str(v.type)==='primary'):[];
-        return a.some(v=>{const site=hrSiteOf(str(v.nodeId),nodes);return !!site && ownSites.has(site);});
+        return ctx.role==='org_super_admin'||a.some(v=>{const site=hrSiteOf(str(v.nodeId),nodes);return !!site && ownSites.has(site);});
       }).map(publicEmployee);
       return { employees:records, readOnly:true, sites:[...ownSites] };
     }),
