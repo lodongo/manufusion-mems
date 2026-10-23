@@ -5,6 +5,7 @@ import { hrSiteOf, managedRoots, underManagedRoot } from './hrHierarchy';
 import { managerFor } from './hrEmployeeRoutes';
 import { currentHrRules } from './hrRulesRoutes';
 import { hrVisibleTabs } from './hrPrivacyRules';
+import { buildFitIndex, makeSkillFit } from './hrSkillFit';
 
 // Read-only HR endpoints. No salaries, banking, medical, disciplinary,
 // contact details, identity documents or unrelated security information.
@@ -51,9 +52,10 @@ export const hrReadRoutes = {
       const employee=uid===ctx.uid ? ctx.me : await getDoc(`users/${uid}`);
       if (!employee || str(employee.data.orgId)!==ctx.orgId || str(employee.data.status)==='disabled')
         throw new HttpError(404,'Employee not found.');
-      const [nodeDocs, positionDocs]=await Promise.all([
+      const [nodeDocs, positionDocs, skillDocs]=await Promise.all([
         listDocs(`organizations/${ctx.orgId}/structure`),
         listDocs(`organizations/${ctx.orgId}/positions`),
+        listDocs(`organizations/${ctx.orgId}/hr_skill_proposals`),
       ]);
       const nodes=new Map(nodeDocs.map(d=>[d.id,d.data]));
       const positions=new Map(positionDocs.map(d=>[d.id,d.data]));
@@ -120,6 +122,7 @@ export const hrReadRoutes = {
           department:str(nodes.get(departmentId||'')?.name),site:str(nodes.get(siteId||'')?.name),
         },
         deployments, roles, requiredSkills,
+        skillFit:makeSkillFit(uid,employee.data,positions,skillDocs),
         access: {scope,allowedTabs:hrVisibleTabs(scope,rules),readOnlyTabs:['roles','deployment','basic'],selfEditingBlocked:isSuperAdmin&&isSelf},
       };
     }),
@@ -141,11 +144,16 @@ export const hrReadRoutes = {
       const actorNodes=assignedNodeIds(ctx);
       const allowedRoots=managedRoots(ctx.uid,actorNodes,nodes);
       if(!allowedRoots.size && ctx.role!=='org_super_admin') throw new HttpError(403,'No verified managed organizational assignment.');
-      const users=await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
+      const [users,roleDocs,skillDocs]=await Promise.all([
+        runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)}),
+        listDocs(`organizations/${ctx.orgId}/positions`),
+        listDocs(`organizations/${ctx.orgId}/hr_skill_proposals`),
+      ]);
+      const fit=buildFitIndex(users,roleDocs,skillDocs);
       const employees=users.filter(u=>u.id!==ctx.uid&&str(u.data.status)!=='disabled').filter(u=>{
         const a=Array.isArray(u.data.assignments)?u.data.assignments.filter(isObj):[];
         return ctx.role==='org_super_admin'||a.some(v=>str(v.type)==='primary'&&underManagedRoot(str(v.nodeId),allowedRoots,nodes));
-      }).map(publicEmployee);
+      }).map(u=>({...publicEmployee(u),skillFit:fit.get(u.id)}));
       return { employees, readOnly:true };
     }),
   ],
@@ -158,12 +166,17 @@ export const hrReadRoutes = {
       const nodes=new Map((await listDocs(`organizations/${ctx.orgId}/structure`)).map(d=>[d.id,d.data]));
       const ownSites=new Set(assignedNodeIds(ctx).map(id=>hrSiteOf(id,nodes)).filter(Boolean));
       if (!ownSites.size && ctx.role!=='org_super_admin') throw new HttpError(403,'Verified site assignment is required.');
-      const users=await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
+      const [users,roleDocs,skillDocs]=await Promise.all([
+        runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)}),
+        listDocs(`organizations/${ctx.orgId}/positions`),
+        listDocs(`organizations/${ctx.orgId}/hr_skill_proposals`),
+      ]);
+      const fit=buildFitIndex(users,roleDocs,skillDocs);
       const records=users.filter(u=>{
         if(str(u.data.status)==='disabled')return false;
         const a=Array.isArray(u.data.assignments)?u.data.assignments.filter(isObj).filter(v=>str(v.type)==='primary'):[];
         return ctx.role==='org_super_admin'||a.some(v=>{const site=hrSiteOf(str(v.nodeId),nodes);return !!site && ownSites.has(site);});
-      }).map(publicEmployee);
+      }).map(u=>({...publicEmployee(u),skillFit:fit.get(u.id)}));
       return { employees:records, readOnly:true, sites:[...ownSites] };
     }),
   ],
