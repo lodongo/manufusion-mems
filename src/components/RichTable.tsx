@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronDown, ChevronRight, ChevronUp, Columns3, Download, Eye, EyeOff, Filter, Layers, Plus, RotateCcw, Search, Sigma, Trash2, X } from 'lucide-react';
 import { FUNCTIONS, FormulaError, QUICK, evaluate, parseFormula, toNumber } from '../lib/tableFormula';
 import { MAX_GROUP_LEVELS, aggregate, allPaths, buildGroups, detectValueColumns, flatten, fmtNumber, type Agg, type FlatItem } from '../lib/tableGroups';
@@ -226,6 +227,7 @@ export default function RichTable<T>({
     const [search, setSearch] = useState('');
     const [panel, setPanel] = useState<'' | 'filters' | 'columns' | 'templates' | 'group' | 'formulas'>('');
     const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+    const [mobileSnapshot, setMobileSnapshot] = useState<View | null>(null);
     const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
     const [limit, setLimit] = useState(PAGE);
     const scroller = useRef<HTMLDivElement>(null);
@@ -460,67 +462,28 @@ export default function RichTable<T>({
         !!t && typeof t.name === 'string' && !allTemplates.some((saved) => saved.name === t.name));
 
 
-    const iconBtn = (active: boolean) =>
-        `relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${active ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 text-slate-300'}`;
 
-    return (
-        <div className={`flex ${height} min-h-[22rem] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900`}>
-            {/* Action bar: always visible */}
-            <div className='shrink-0 space-y-2 border-b border-slate-800 p-2'>
-                <div className='flex items-center gap-2'>
-                    <label className='relative min-w-0 flex-1'>
-                        <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
-                        <input
-                            type='search'
-                            aria-label='Search all columns'
-                            placeholder='Search everything'
-                            value={search}
-                            maxLength={100}
-                            onChange={(e) => setSearch(e.target.value)}
-                            className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-14 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm'
-                        />
-                        <button type='button' aria-expanded={mobileToolsOpen} aria-label='Table tools' title='Table tools' onClick={() => setMobileToolsOpen(!mobileToolsOpen)} className='absolute right-1 top-1/2 flex h-9 w-10 -translate-y-1/2 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-white sm:hidden'>
-                            <Columns3 className='h-5 w-5'/>
-                        </button>
-                        {mobileToolsOpen && <div className='absolute right-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-3rem)] rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-xl sm:hidden'>
-                            {([['filters','Filters',Filter],['group','Group by',Layers],['formulas','Formula columns',Sigma],['columns','Columns',Columns3],['templates','Saved templates',BookmarkPlus]] as const).map(([key,label,Icon])=><button key={key} type='button' onClick={()=>{setPanel(panel===key?'':key);setMobileToolsOpen(false)}} className='flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-white hover:bg-slate-800'><Icon className='h-4 w-4'/><span>{label}{key==='filters'&&view.criteria.length>0?' ('+view.criteria.length+')':''}</span></button>)}
-                            {allowExport&&<button type='button' onClick={()=>{setMobileToolsOpen(false);exportExcel()}} disabled={!filtered.length} className='flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-white hover:bg-slate-800 disabled:opacity-40'><Download className='h-4 w-4'/>Export Excel</button>}
-                        </div>}
-                    </label>
-                    <div className='hidden items-center gap-2 sm:flex'>
-                    <button type='button' aria-label='Filters' title='Filter by criteria' onClick={() => setPanel(panel === 'filters' ? '' : 'filters')} className={iconBtn(panel === 'filters' || view.criteria.length > 0)}>
-                        <Filter className='h-4 w-4' />
-                        {view.criteria.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{view.criteria.length}</span>}
-                    </button>
-                    <button type='button' aria-label='Group by' title='Group by up to four columns' onClick={() => setPanel(panel === 'group' ? '' : 'group')} className={iconBtn(panel === 'group' || groupBy.length > 0)}>
-                        <Layers className='h-4 w-4' />
-                        {groupBy.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{groupBy.length}</span>}
-                    </button>
-                    <button type='button' aria-label='Formula columns' title='Formula columns' onClick={() => setPanel(panel === 'formulas' ? '' : 'formulas')} className={iconBtn(panel === 'formulas' || formulaColumns.length > 0)}>
-                        <Sigma className='h-4 w-4' />
-                        {formulaColumns.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{formulaColumns.length}</span>}
-                    </button>
-                    <button type='button' aria-label='Columns' title='Show, hide and move columns' onClick={() => setPanel(panel === 'columns' ? '' : 'columns')} className={iconBtn(panel === 'columns')}>
-                        <Columns3 className='h-4 w-4' />
-                    </button>
-                    <button type='button' aria-label='Templates' title='Saved templates' onClick={() => setPanel(panel === 'templates' ? '' : 'templates')} className={iconBtn(panel === 'templates')}>
-                        <BookmarkPlus className='h-4 w-4' />
-                    </button>
-                    {allowExport && <button type='button' aria-label='Download Excel' title='Download Excel' onClick={exportExcel} disabled={!filtered.length} className={`${iconBtn(false)} disabled:opacity-40`}>
-                        <Download className='h-4 w-4' />
-                    </button>}
-                    </div>
-                </div>
-                <div className='flex items-center justify-between gap-2'>
-                    <p className='truncate text-xs text-slate-500'>
-                        {title ? <span className='font-medium text-slate-300'>{title} · </span> : null}
-                        {filtered.length === rows.length ? `${rows.length} rows` : `${filtered.length} of ${rows.length} rows`}
-                        {groupBy.length ? ` · ${groups.length} groups` : ''}
-                        {view.sort ? ` · sorted by ${byKey.get(view.sort.col)?.label ?? ''} ${view.sort.dir === 'asc' ? '↑' : '↓'}` : ''}
-                    </p>
-                    {actions && <div className='flex shrink-0 items-center gap-2'>{actions}</div>}
-                </div>
-
+    const closeMobile = (restore: boolean) => {
+        if (restore && mobileSnapshot) setView(mobileSnapshot);
+        setMobileToolsOpen(false);
+        setPanel('');
+        setMobileSnapshot(null);
+    };
+    useEffect(() => {
+        if (!mobileToolsOpen) return;
+        const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') closeMobile(true); };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [mobileToolsOpen, mobileSnapshot]);
+    const mobileActions = [
+    { key:'filters', label:'Filters', Icon:Filter },
+    { key:'group', label:'Group by', Icon:Layers },
+    { key:'formulas', label:'Formula columns', Icon:Sigma },
+    { key:'columns', label:'Columns', Icon:Columns3 },
+    { key:'templates', label:'Saved templates', Icon:BookmarkPlus }
+] as const;
+    const activeAction = mobileActions.find(action => action.key === panel);
+    const panelContent = <>
                 {panel === 'filters' && (
                     <FiltersPanel
                         columns={order.map((k) => byKey.get(k) as Column<T>)}
@@ -669,6 +632,94 @@ export default function RichTable<T>({
                         )}
                     </div>
                 )}
+
+</>;
+
+    const iconBtn = (active: boolean) =>
+        `relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${active ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 text-slate-300'}`;
+
+    return (
+        <div className={`flex ${height} min-h-[22rem] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900`}>
+
+            {mobileToolsOpen && createPortal(
+                <div className='fixed inset-0 z-[9999] flex items-end justify-center bg-black/70 sm:hidden' role='presentation'>
+                    <button type='button' aria-label='Close table tools' onClick={() => closeMobile(true)} className='absolute inset-0 cursor-default' />
+                    <section role='dialog' aria-modal='true' aria-label={activeAction ? activeAction.label : 'Table tools'} className='relative z-10 flex max-h-[90dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-slate-700 bg-slate-900 text-white shadow-2xl'>
+                        <div className='flex shrink-0 items-center gap-3 border-b border-slate-700 px-4 py-3'>
+                            {activeAction && <button type='button' onClick={() => { setPanel(''); setMobileSnapshot(null); }} aria-label='Back to table tools' className='flex h-10 w-10 items-center justify-center rounded-lg border border-slate-700'><ChevronRight className='h-5 w-5 rotate-180'/></button>}
+                            <h2 className='min-w-0 flex-1 text-base font-semibold'>{activeAction?.label ?? 'Table tools'}</h2>
+                            <button type='button' onClick={() => closeMobile(true)} aria-label='Close table tools' className='flex h-10 w-10 items-center justify-center rounded-lg border border-slate-700'><X className='h-5 w-5'/></button>
+                        </div>
+                        <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain p-3'>
+                            {!panel && <div className='space-y-1'>
+                                {mobileActions.map(({key,label,Icon})=><button key={key} type='button' onClick={() => { setMobileSnapshot(view); setPanel(key); }} className='flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400'><Icon className='h-5 w-5 shrink-0 text-emerald-300'/><span className='flex-1'>{label}</span><ChevronRight className='h-4 w-4 text-slate-400'/></button>)}
+                                {allowExport && <button type='button' onClick={() => { exportExcel(); closeMobile(false); }} disabled={!filtered.length} className='flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm disabled:opacity-40'><Download className='h-5 w-5 text-emerald-300'/>Export Excel</button>}
+                            </div>}
+                            {panel && panelContent}
+                        </div>
+                        <div className='flex shrink-0 gap-2 border-t border-slate-700 bg-slate-900 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]'>
+                            {panel ? <>
+                                <button type='button' onClick={() => closeMobile(true)} className='flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-600 px-4 text-sm font-semibold'>Cancel</button>
+                                <button type='button' onClick={() => closeMobile(false)} className='flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-onbrand'><Eye className='h-4 w-4'/>Apply & close</button>
+                            </> : <button type='button' onClick={() => closeMobile(false)} className='min-h-11 w-full rounded-xl border border-slate-600 text-sm font-semibold'>Done · Return to table</button>}
+                        </div>
+                    </section>
+                </div>,
+                document.body
+            )}
+            {/* Action bar: always visible */}
+            <div className='shrink-0 space-y-2 border-b border-slate-800 p-2'>
+                <div className='flex items-center gap-2'>
+                    <div className='relative min-w-0 flex-1'>
+                        <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
+                        <input
+                            type='search'
+                            aria-label='Search all columns'
+                            placeholder='Search everything'
+                            value={search}
+                            maxLength={100}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-14 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm'
+                        />
+                        <button type='button' aria-expanded={mobileToolsOpen} aria-label='Table tools' title='Table tools' onClick={() => { setPanel(''); setMobileSnapshot(null); setMobileToolsOpen(true); }} className='absolute right-1 top-1/2 flex h-9 w-10 -translate-y-1/2 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-white sm:hidden'>
+                            <Columns3 className='h-5 w-5'/>
+                        </button>
+                    </div>
+                    <div className='hidden items-center gap-2 sm:flex'>
+                    <button type='button' aria-label='Filters' title='Filter by criteria' onClick={() => setPanel(panel === 'filters' ? '' : 'filters')} className={iconBtn(panel === 'filters' || view.criteria.length > 0)}>
+                        <Filter className='h-4 w-4' />
+                        {view.criteria.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{view.criteria.length}</span>}
+                    </button>
+                    <button type='button' aria-label='Group by' title='Group by up to four columns' onClick={() => setPanel(panel === 'group' ? '' : 'group')} className={iconBtn(panel === 'group' || groupBy.length > 0)}>
+                        <Layers className='h-4 w-4' />
+                        {groupBy.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{groupBy.length}</span>}
+                    </button>
+                    <button type='button' aria-label='Formula columns' title='Formula columns' onClick={() => setPanel(panel === 'formulas' ? '' : 'formulas')} className={iconBtn(panel === 'formulas' || formulaColumns.length > 0)}>
+                        <Sigma className='h-4 w-4' />
+                        {formulaColumns.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{formulaColumns.length}</span>}
+                    </button>
+                    <button type='button' aria-label='Columns' title='Show, hide and move columns' onClick={() => setPanel(panel === 'columns' ? '' : 'columns')} className={iconBtn(panel === 'columns')}>
+                        <Columns3 className='h-4 w-4' />
+                    </button>
+                    <button type='button' aria-label='Templates' title='Saved templates' onClick={() => setPanel(panel === 'templates' ? '' : 'templates')} className={iconBtn(panel === 'templates')}>
+                        <BookmarkPlus className='h-4 w-4' />
+                    </button>
+                    {allowExport && <button type='button' aria-label='Download Excel' title='Download Excel' onClick={exportExcel} disabled={!filtered.length} className={`${iconBtn(false)} disabled:opacity-40`}>
+                        <Download className='h-4 w-4' />
+                    </button>}
+                    </div>
+                </div>
+                <div className='flex items-center justify-between gap-2'>
+                    <p className='truncate text-xs text-slate-500'>
+                        {title ? <span className='font-medium text-slate-300'>{title} · </span> : null}
+                        {filtered.length === rows.length ? `${rows.length} rows` : `${filtered.length} of ${rows.length} rows`}
+                        {groupBy.length ? ` · ${groups.length} groups` : ''}
+                        {view.sort ? ` · sorted by ${byKey.get(view.sort.col)?.label ?? ''} ${view.sort.dir === 'asc' ? '↑' : '↓'}` : ''}
+                    </p>
+                    {actions && <div className='flex shrink-0 items-center gap-2'>{actions}</div>}
+                </div>
+
+                <div className='hidden sm:block'>{panelContent}</div>
             </div>
 
             {/* Scrollable content: only this area scrolls */}
