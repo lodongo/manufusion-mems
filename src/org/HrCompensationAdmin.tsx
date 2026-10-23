@@ -121,7 +121,7 @@ export default function HrCompensationAdmin(){
     <button type="button" className={action} onClick={create} disabled={config.items.length>=250}><Plus className="mr-1 inline h-4 w-4"/>Add</button>
    </div>
    <div className="space-y-2">{visible.map(x=>{
-    const opened=openCode===x.code,locked=x.mandatory&&x.code.startsWith('KE_')&&country==='KE';
+    const opened=openCode===x.code,locked=x.mandatory&&country==='KE';
     return <section key={x.code} className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel">
      <button type="button" aria-expanded={opened} onClick={()=>setOpenCode(opened?'':x.code)}
       className="flex min-h-16 w-full items-start gap-3 p-3 text-left">
