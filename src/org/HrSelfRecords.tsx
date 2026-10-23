@@ -47,8 +47,8 @@ export default function HrSelfRecords({kind,employeeUid,readOnly=false}:{kind:Ki
   {!loading&&!items.length&&<div className="rounded-2xl border border-dashed border-line bg-panel p-5 text-center text-sm text-muted">No {label.toLowerCase()} records saved.</div>}
   <div className="space-y-2">{items.map((item,idx)=><article key={item.id||idx} className="flex items-start gap-2 rounded-2xl border border-line bg-panel p-3">
    <div className="min-w-0 flex-1"><h4 className="font-semibold">{kind==='education'?(item as Education).qualification:(item as Family).name}</h4><p className="mt-1 text-xs text-muted">{kind==='education'?[(item as Education).institution,(item as Education).field,(item as Education).completionYear].filter(Boolean).join(' · '):[(item as Family).relationship,(item as Family).phone].filter(Boolean).join(' · ')}</p></div>
-   {!readOnly&&<button type="button" aria-label="Edit record" onClick={()=>begin(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line"><Pencil className="h-4 w-4"/></button>
-   <button type="button" aria-label="Delete record" disabled={busy} onClick={()=>remove(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line text-red-500"><Trash2 className="h-4 w-4"/></button>}
+   {!readOnly&&<><button type="button" aria-label="Edit record" onClick={()=>begin(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line"><Pencil className="h-4 w-4"/></button>
+   <button type="button" aria-label="Delete record" disabled={busy} onClick={()=>remove(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line text-red-500"><Trash2 className="h-4 w-4"/></button></>}
   </article>)}</div>
   {editing!==null&&<div className="rounded-2xl border border-line bg-panel p-4">
    <h3 className="mb-3 font-bold">{editing===-1?'Add':'Update'} {label.toLowerCase()} record</h3>
