@@ -134,7 +134,7 @@ export const hrEmployeeRoutes={
     const nodes=await nodeMap(ctx.orgId);
     const manager=await managerFor(ctx,employee.data,nodes);
     const allowed=target===ctx.uid||ctx.role==='org_super_admin'||
-      (hasPerm(ctx.directPermissions,'HRM.employee.site.read')&&sameSite(ctx.me.data,employee.data,nodes))||
+      sameSite(ctx.me.data,employee.data,nodes)||
       (hasPerm(ctx.directPermissions,'HRM.manager.hierarchy.read')&&manager===ctx.uid);
     if(!allowed)throw new HttpError(403,'Skill record outside your access scope.');
     const proposals=(await listDocs(proposalsPath(ctx.orgId))).filter(d=>str(d.data.employeeUid)===target)
