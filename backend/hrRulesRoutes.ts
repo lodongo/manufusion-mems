@@ -32,7 +32,7 @@ export const hrRulesRoutes={
   return {digest,preview:{
    employee:hrVisibleTabs('self',proposed),manager:hrVisibleTabs('manager',proposed),
    hr:hrVisibleTabs('hr',proposed),superadmin:hrVisibleTabs('superadmin',proposed),
-   managerFamilyDenied:true,managerPayslipsDenied:true,superadminSelfWriteDenied:true,
+   managerFamilyDenied:true,managerPayslipsDenied:true,superadminRestrictedSelfWriteDenied:true,superadminStandardSelfServiceAllowed:true,
   }};
  })],
  'POST /api/org/hr/access-rules/save':[orgRoute('org.hr.access_rules.save','HRM.rules.manage',async ctx=>{
