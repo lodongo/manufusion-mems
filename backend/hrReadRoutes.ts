@@ -151,17 +151,20 @@ export const hrReadRoutes = {
       const nodes=new Map((await listDocs(`organizations/${ctx.orgId}/structure`)).map(d=>[d.id,d.data]));
       const actorNodes=assignedNodeIds(ctx);
       const allowedRoots=managedRoots(ctx.uid,actorNodes,nodes);
-      if(!allowedRoots.size && ctx.role!=='org_super_admin') throw new HttpError(403,'No verified managed organizational assignment.');
       const [users,roleDocs,skillDocs]=await Promise.all([
         runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)}),
         listDocs(`organizations/${ctx.orgId}/positions`),
         listDocs(`organizations/${ctx.orgId}/hr_skill_proposals`),
       ]);
       const fit=buildFitIndex(users,roleDocs,skillDocs);
-      const employees=users.filter(u=>u.id!==ctx.uid&&str(u.data.status)!=='disabled').filter(u=>{
-        const a=Array.isArray(u.data.assignments)?u.data.assignments.filter(isObj):[];
-        return ctx.role==='org_super_admin'||a.some(v=>str(v.type)==='primary'&&underManagedRoot(str(v.nodeId),allowedRoots,nodes));
-      }).map(u=>({...publicEmployee(u),skillFit:fit.get(u.id)}));
+      const resolved=await Promise.all(users.filter(u=>u.id!==ctx.uid&&str(u.data.status)!=='disabled').map(async u=>{
+        const assignment=Array.isArray(u.data.assignments)?u.data.assignments.filter(isObj):[];
+        const direct=await managerFor(ctx,u.data,nodes,users)===ctx.uid;
+        const inherited=assignment.some(a=>str(a.type)==='primary'&&underManagedRoot(str(a.nodeId),allowedRoots,nodes));
+        return {user:u,allowed:direct||inherited};
+      }));
+      const employees=resolved.filter(x=>x.allowed||ctx.role==='org_super_admin')
+        .map(x=>({...publicEmployee(x.user),skillFit:fit.get(x.user.id)}));
       return { employees, readOnly:true };
     }),
   ],
