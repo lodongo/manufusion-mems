@@ -8,7 +8,7 @@ type Family={id:string;name:string;relationship:string;phone:string};
 type Kind='education'|'family';
 const input='h-11 w-full rounded-xl border border-line bg-page px-3 text-base text-ink';
 const btn='flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold';
-export default function HrSelfRecords({kind}:{kind:Kind}){
+export default function HrSelfRecords({kind,employeeUid}:{kind:Kind;employeeUid:string}){
  const [items,setItems]=useState<Array<Education|Family>>([]);
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -16,12 +16,12 @@ export default function HrSelfRecords({kind}:{kind:Kind}){
  const [draft,setDraft]=useState<Record<string,string>>({});
  useEffect(()=>{
    let alive=true;setLoading(true);setError('');
-   callBackend<{education:Education[];family:Family[]}>('/api/org/hr/private/get')
+   callBackend<{education:Education[];family:Family[]}>('/api/org/hr/private/get',{uid:employeeUid})
     .then(data=>{if(alive)setItems(data[kind])})
     .catch(e=>{if(alive)setError(e instanceof Error?e.message:'Unable to read private records.')})
     .finally(()=>{if(alive)setLoading(false)});
    return()=>{alive=false};
- },[kind]);
+ },[kind,employeeUid]);
  const begin=(idx:number)=>{
    setEditing(idx);
    setDraft(idx<0 ? kind==='education'?{id:'',institution:'',qualification:'',field:'',completionYear:''}:{id:'',name:'',relationship:'',phone:''}: {...items[idx]} as Record<string,string>);
@@ -30,7 +30,7 @@ export default function HrSelfRecords({kind}:{kind:Kind}){
  const save=async(next:Array<Education|Family>)=>{
    setBusy(true);setError('');setNotice('');
    try{
-     const result=await callBackend<{items:Array<Education|Family>}>('/api/org/hr/private/save',{kind,items:next});
+     const result=await callBackend<{items:Array<Education|Family>}>('/api/org/hr/private/save',{uid:employeeUid,kind,items:next});
      setItems(result.items);setEditing(null);setNotice('Your records were saved.');
    }catch(e){setError(e instanceof Error?e.message:'Save failed.')}finally{setBusy(false)}
  };
@@ -42,7 +42,7 @@ export default function HrSelfRecords({kind}:{kind:Kind}){
  };
  const label=kind==='education'?'Education':'Family';
  return <section className="min-w-0 space-y-3">
-  <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{label} records</h3><p className="text-xs text-muted">Private · editable by you</p></div><button type="button" onClick={()=>begin(-1)} className={btn+' bg-brand text-onbrand'}><Plus className="h-4 w-4"/>Add</button></div>
+  <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{label} records</h3><p className="text-xs text-muted">Private · authorized employee or super administrator</p></div><button type="button" onClick={()=>begin(-1)} className={btn+' bg-brand text-onbrand'}><Plus className="h-4 w-4"/>Add</button></div>
   {loading&&<p className="text-sm text-muted">Loading records…</p>}
   {!loading&&!items.length&&<div className="rounded-2xl border border-dashed border-line bg-panel p-5 text-center text-sm text-muted">No {label.toLowerCase()} records saved.</div>}
   <div className="space-y-2">{items.map((item,idx)=><article key={item.id||idx} className="flex items-start gap-2 rounded-2xl border border-line bg-panel p-3">
@@ -65,6 +65,6 @@ export default function HrSelfRecords({kind}:{kind:Kind}){
   </div>}
   {error&&<p role="alert" className="text-sm text-red-500">{error}</p>}
   {notice&&<p role="status" className="text-sm text-brand">{notice}</p>}
-  <p className="flex items-center gap-2 text-xs text-muted"><LockKeyhole className="h-4 w-4"/>These records are available only in your authenticated personal HR record.</p>
+  <p className="flex items-center gap-2 text-xs text-muted"><LockKeyhole className="h-4 w-4"/>These records are restricted to the employee and organization super administrator.</p>
  </section>;
 }
