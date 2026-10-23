@@ -2,6 +2,9 @@ import { HttpError, fieldEq, getDoc, isObj, listDocs, runQuery, str } from './co
 import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canReadHrBasicProfile } from './hrAccessPolicy';
 import { hrSiteOf, managedRoots, underManagedRoot } from './hrHierarchy';
+import { managerFor } from './hrEmployeeRoutes';
+import { currentHrRules } from './hrRulesRoutes';
+import { hrVisibleTabs } from './hrPrivacyRules';
 
 // Read-only HR endpoints. No salaries, banking, medical, disciplinary,
 // contact details, identity documents or unrelated security information.
@@ -64,8 +67,11 @@ export const hrReadRoutes = {
       const isSuperAdmin=ctx.role==='org_super_admin';
       const sitePermitted=hasPerm(ctx.directPermissions,'HRM.employee.site.read') &&
         assignments.some(a=>{const site=hrSiteOf(str(a.nodeId),nodes);return !!site && ownSiteIds.has(site);});
-      const managerPermitted=hasPerm(ctx.directPermissions,'HRM.manager.hierarchy.read') &&
+      const rules=await currentHrRules(ctx.orgId);
+      const directManager=!isSelf && (await managerFor(ctx,employee.data,nodes))===ctx.uid;
+      const indirectManager=rules.managerIndirectReports&&hasPerm(ctx.directPermissions,'HRM.manager.hierarchy.read') &&
         assignments.some(a=>underManagedRoot(str(a.nodeId),managed,nodes));
+      const managerPermitted=directManager||indirectManager;
       if(!isSelf && !isSuperAdmin && !sitePermitted && !managerPermitted)
         throw new HttpError(403,'Employee record outside your HR authorization scope.');
       // Use only the verified shared employee record, organization and job-role masters.
@@ -92,14 +98,29 @@ export const hrReadRoutes = {
         const skills=positions.get(code)?.coreSkills;
         return Array.isArray(skills)?skills.filter((x):x is string=>typeof x==='string').map(x=>x.trim()).filter(Boolean):[];
       }))];
+      const scope=isSuperAdmin?'superadmin':isSelf?'self':managerPermitted?'manager':'hr';
+      const initial=assignments[0];
+      const ancestors:string[]=[];
+      if(initial){
+        const seen=new Set<string>();
+        let id=str(initial.nodeId);
+        while(id&&!seen.has(id)){
+          seen.add(id);const node=nodes.get(id);
+          if(!node||str(node.status)==='inactive')break;
+          ancestors.push(id);id=str(node.parentId);
+        }
+      }
+      const departmentId=ancestors.find(id=>str(nodes.get(id)?.level)==='department');
+      const siteId=ancestors.find(id=>str(nodes.get(id)?.level)==='site');
       return {
         profile: {
           uid, name:[str(employee.data.firstName),str(employee.data.lastName)].filter(Boolean).join(' '),
           employeeNumber:str(employee.data.employeeNumber),status:str(employee.data.status),
           primaryRole:deployments[0]?.positionTitle||'', primaryLocation:deployments[0]?.location||'',
+          department:str(nodes.get(departmentId||'')?.name),site:str(nodes.get(siteId||'')?.name),
         },
         deployments, roles, requiredSkills,
-        access: {scope:isSelf?'self':isSuperAdmin?'organization':sitePermitted?'site':'manager_hierarchy',readOnlyTabs:['roles']},
+        access: {scope,allowedTabs:hrVisibleTabs(scope,rules),readOnlyTabs:['roles','deployment','basic'],selfEditingBlocked:isSuperAdmin&&isSelf},
       };
     }),
   ],
