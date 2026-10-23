@@ -17,6 +17,7 @@ export default function HrEducationAdmin(){
  const [config,setConfig]=useState<Config|null>(null);
  const [tab,setTab]=useState<'levels'|'qualifications'|'jobGrades'>('levels');
  const [sourceEntity,setSourceEntity]=useState(''),[sourcePreview,setSourcePreview]=useState<Config|null>(null);
+ const [sourceConfigured,setSourceConfigured]=useState(false);
  const [confirmAdoption,setConfirmAdoption]=useState(false);
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -25,7 +26,7 @@ export default function HrEducationAdmin(){
   try{
    const r=await callBackend<{entities:Entity[];entity:Entity|null;config:Config|null}>('/api/org/hr/education/admin',{legalEntityId:id});
    setEntities(r.entities);setEntity(r.entity?.id||'');setConfig(r.config);
-   setSourceEntity('');setSourcePreview(null);setConfirmAdoption(false);
+   setSourceEntity('');setSourcePreview(null);setSourceConfigured(false);setConfirmAdoption(false);
   }catch(e){setError(e instanceof Error?e.message:'Unable to load education and job grade configuration.')}
   finally{setLoading(false)}
  };
@@ -43,11 +44,11 @@ export default function HrEducationAdmin(){
   finally{setBusy(false)}
  };
  const selectSource=async(id:string)=>{
-  setSourceEntity(id);setSourcePreview(null);setConfirmAdoption(false);setError('');
+  setSourceEntity(id);setSourcePreview(null);setSourceConfigured(false);setConfirmAdoption(false);setError('');
   if(!id)return;
   try{
-   const r=await callBackend<{config:Config|null}>('/api/org/hr/education/admin',{legalEntityId:id});
-   setSourcePreview(r.config);
+   const r=await callBackend<{config:Config|null;configured:boolean}>('/api/org/hr/education/admin',{legalEntityId:id});
+   setSourcePreview(r.config);setSourceConfigured(r.configured);
   }catch(e){setError(e instanceof Error?e.message:'Unable to inspect source legal entity.')}
  };
  const adopt=async()=>{
@@ -83,12 +84,13 @@ export default function HrEducationAdmin(){
     <SelectField id="education-adopt-source" label="Source legal entity" value={sourceEntity} onChange={e=>void selectSource(e.target.value)}>
      <option value="">Select source entity</option>{entities.filter(e=>e.id!==entity).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
     </SelectField>
-    {sourcePreview&&<p className="rounded-xl bg-page p-3 text-xs text-muted">Source preview: {sourcePreview.levels.length} education levels, {sourcePreview.qualifications.length} qualifications and {sourcePreview.jobGrades.length} job grades.</p>}
+    {sourceEntity&&!sourceConfigured&&sourcePreview&&<p className="rounded-xl bg-page p-3 text-xs text-amber-700">The source entity has not saved its configuration yet. Save it first before adopting.</p>}
+    {sourceConfigured&&sourcePreview&&<p className="rounded-xl bg-page p-3 text-xs text-muted">Source preview: {sourcePreview.levels.length} education levels, {sourcePreview.qualifications.length} qualifications and {sourcePreview.jobGrades.length} job grades.</p>}
     {sourceEntity&&<label className="flex min-h-11 items-start gap-3 rounded-xl border border-line p-3 text-sm">
      <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-brand" checked={confirmAdoption} onChange={e=>setConfirmAdoption(e.target.checked)}/>
      <span>I confirm: replace the target legal entity's current configuration with the saved source configuration.</span>
     </label>}
-    <button type="button" disabled={busy||!sourcePreview||!confirmAdoption} onClick={()=>void adopt()}
+    <button type="button" disabled={busy||!sourcePreview||!sourceConfigured||!confirmAdoption} onClick={()=>void adopt()}
      className="min-h-11 w-full rounded-xl border border-line px-4 font-semibold text-brand disabled:opacity-40">
      <ArrowRightLeft className="mr-2 inline h-4 w-4"/>Adopt configuration
     </button>
