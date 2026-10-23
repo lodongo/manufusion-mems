@@ -13,17 +13,19 @@ import HrSelfRecords from './HrSelfRecords';
 import { EmployeeSkillPanel } from './HrSkillsWorkspace';
 import HrLeavePanel from './HrLeavePanel';
 import HrRoleSkillFit, {type SkillFit} from './HrRoleSkillFit';
+import HrRoleSkillRequirements from './HrRoleSkillRequirements';
 
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
-type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string};
+type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string;requiredSkillCodes:string[]};
 type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;department:string;site:string};
 type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];skillFit:SkillFit;access:{scope:string;readOnlyTabs:string[];allowedTabs:string[];selfEditingBlocked:boolean}};
-type TabKey = 'basic'|'education'|'family'|'skills'|'deployment'|'records'|'roles'|'payslips'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
+type TabKey = 'basic'|'education'|'family'|'skills'|'roleSkills'|'deployment'|'records'|'roles'|'payslips'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
 const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'basic',label:'Basic Information',Icon:IdCard},
   {key:'education',label:'Education',Icon:GraduationCap},
   {key:'family',label:'Family',Icon:Users},
   {key:'skills',label:'Skills',Icon:Award},
+  {key:'roleSkills',label:'Role Skill Requirements',Icon:Target},
   {key:'deployment',label:'Deployment',Icon:MapPin},
   {key:'records',label:'Records',Icon:FileText},
   {key:'roles',label:'Roles & Responsibilities',Icon:BriefcaseBusiness},
@@ -57,6 +59,10 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
  const [reportees,setReportees]=useState<number>(0);
  const [qualification,setQualification]=useState('');
  const back=()=>navigate(reporteeView?'organization_home/hr/HR01/reportees':'organization_home/hr/'+origin);
+ const refreshFit=async()=>{
+  const updated=await callBackend<PortalData>('/api/org/hr/employee/portal',{uid});
+  setData(updated);
+ };
  useEffect(()=>{
   let alive=true;setLoading(true);setData(null);setError('');setTab('basic');
   callBackend<PortalData>('/api/org/hr/employee/portal',{uid})
@@ -141,6 +147,10 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
       {tab==='roles'&&<Panel title="Job roles and responsibilities">
        {data.roles.length?<div className="space-y-3">{data.roles.map(role=><article key={role.code} className="rounded-xl border border-line bg-page p-4"><h3 className="font-semibold">{role.title}</h3><p className="mt-1 text-xs text-muted">{role.code} · {role.operatingLevel||'Level not recorded'} · Reports to: {role.reportsToCode||'Not recorded'}</p><p className="mt-3 whitespace-pre-wrap text-sm">{role.description||'No responsibilities description is recorded for this role.'}</p></article>)}</div>:<p className="text-sm text-muted">No assigned job role is recorded.</p>}
       </Panel>}
+      {tab==='roleSkills'&&<HrRoleSkillRequirements
+        employeeUid={data.profile.uid} roles={data.roles} fit={data.skillFit}
+        canSubmit={data.access.scope==='self'&&!data.access.selfEditingBlocked&&firebaseAuth.currentUser?.uid===data.profile.uid}
+        onRefresh={refreshFit}/>}
       {tab==='skills'&&<>
         <HrRoleSkillFit fit={data.skillFit} detailed/>
         <EmployeeSkillPanel employeeUid={data.profile.uid} ownUid={firebaseAuth.currentUser?.uid||''}/>
