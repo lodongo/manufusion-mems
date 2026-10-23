@@ -58,6 +58,7 @@ export const hrLeaveRoutes={
    if(!a.isSelf&&!a.isAdmin&&!a.hr&&!a.manager)throw new HttpError(403,'No on-behalf leave permission.');
    const kind=s(ctx.body.kind,20),leaveType=s(ctx.body.leaveType,60);
    const start=s(ctx.body.start,10),end=s(ctx.body.end,10);
+   if(kind==='plan'&&a.hr&&!a.isSelf&&!a.manager&&!a.isAdmin)throw new HttpError(403,'HR may submit actual leave applications on behalf, but cannot manage leave plans.');
    if(!['plan','application'].includes(kind)||!['annual','sick','compassionate','maternity','paternity','study','unpaid','other'].includes(leaveType))
     throw new HttpError(400,'Select a supported leave request and category.');
    if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||!/^\d{4}-\d{2}-\d{2}$/.test(end)||start>end||!Number.isFinite(Date.parse(start))||!Number.isFinite(Date.parse(end)))
