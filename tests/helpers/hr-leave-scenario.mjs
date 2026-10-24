@@ -122,6 +122,36 @@ await assert.rejects(()=>call(hrLeaveRoutes,'manager','/api/org/hr/leave/create'
 await assert.rejects(()=>call(hrLeaveRoutes,'admin','/api/org/hr/leave/review',{
  id:plan.id,decision:'approve',
 }),/no longer pending/);
+// Plans reserve entitlement at submission, not only once actual leave is booked.
+// Existing approved applications must not be counted a second time beside their plan.
+await assert.rejects(()=>call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'plan',leaveType:'LEAVE_ANNUAL',
+ start:'2026-12-07',end:'2026-12-31',
+}),/Planned leave exceeds/);
+const secondPlan=await call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'plan',leaveType:'LEAVE_ANNUAL',
+ start:'2026-12-01',end:'2026-12-02',
+});
+await call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{id:secondPlan.id,decision:'approve'});
+const teamView=await call(hrLeaveRoutes,'manager','/api/org/hr/leave/team');
+assert.ok(teamView.items.some(x=>x.id===secondPlan.id));
+assert.ok(teamView.counts.planned>=2);
+assert.equal(teamView.items.some(x=>x.note),false,'Leave planning overview must redact private notes');
+const changedConfig=structuredClone(leaveConfig);
+changedConfig.items.find(x=>x.code==='LEAVE_ANNUAL').leaveEntitlements.JG01.daysPerYear=22;
+seed(root+'/hr_compensation_config/LE',{...changedConfig,version:2});
+await assert.rejects(()=>call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'application',leaveType:'LEAVE_ANNUAL',
+ start:'2026-12-01',end:'2026-12-02',planId:secondPlan.id,
+}),/entitlement changed/);
+seed(root+'/hr_compensation_config/LE',{...leaveConfig,version:1});
+const resumed=await call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'application',leaveType:'LEAVE_ANNUAL',
+ start:'2026-12-01',end:'2026-12-02',planId:secondPlan.id,
+});
+assert.ok(resumed.id,'Employee can apply only after the previously approved plan is valid again');
+await call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{id:resumed.id,decision:'approve'});
+
 // An employee with no job-grade mapping is never allowed to choose a leave type.
 seed(root+'/positions/P',{title:'Production Operator',jobGradeByLegalEntity:{}});
 const unable=await call(hrLeaveRoutes,'employee','/api/org/hr/leave/list',{uid:'employee'});
