@@ -320,6 +320,13 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                 </div>
             )}
 
+            {!node && <button type='button' onClick={()=>navigate('organization_admin/corporate_governance')}
+             className='flex min-h-14 w-full items-center gap-3 rounded-xl border border-line bg-panel px-4 text-left text-brand'>
+             <Building2 className='h-5 w-5 shrink-0'/>
+             <span className='min-w-0 flex-1'><span className='block font-semibold'>Corporate Office & Governance</span>
+              <span className='block text-xs text-muted'>Corporate functions, governing bodies and legal-entity oversight — separate from operating units</span></span>
+             <ChevronRight className='h-5 w-5 shrink-0'/>
+            </button>}
             {!node && !design.mode && (
                 <Card className='space-y-4'>
                     <div>
