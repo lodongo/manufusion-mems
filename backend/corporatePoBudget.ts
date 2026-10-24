@@ -100,20 +100,23 @@ export async function preparePoApprovalBudget(
   costCenterId:str(l.costCenterId)||str(l.costCenterCode),
   type:str(l.type),total:Number(l.total),
  }));
- try{verifyPoServicePilot(facts,Number(po.total),policy);}
- catch(e){throw new HttpError(409,(e as Error).message);}
  const currency=str(po.currency);
  if(!currency)throw new HttpError(409,'PO currency is required.');
  const units=await unitsOf(ctx.orgId);
  const refs=new Map<string,{leId:string;ccId:string}>();
+ const invalidCentres:string[]=[];
  for(const fact of facts){
   const cc=units.get(fact.costCenterId),le=leOf(units,fact.costCenterId);
-  if(!cc||cc.level!=='cost_center'||cc.status==='inactive'||!le||le.level!=='legal_entity'||le.status==='inactive')
-   throw new HttpError(409,'Each PO service cost centre must map to an active financial legal entity.');
+  if(!cc||cc.level!=='cost_center'||cc.status==='inactive'||!le||le.level!=='legal_entity'||le.status==='inactive'){
+   invalidCentres.push(fact.costCenterId);continue;
+  }
   refs.set(fact.costCenterId,{leId:le.id,ccId:cc.id});
  }
  const les=[...new Set([...refs.values()].map(x=>x.leId))];
  if(!les.includes(policy.legalEntityId))return null;
+ if(invalidCentres.length)throw new HttpError(409,'Every line of a pilot PO must have a valid cost centre and legal entity.');
+ try{verifyPoServicePilot(facts,Number(po.total),policy);}
+ catch(e){throw new HttpError(409,(e as Error).message);}
  if(!poBudgetServerEnabled())
   throw new HttpError(409,'Budget pilot is not enabled on a verified isolated development server.');
  const fcr=await getDoc('organizations/'+ctx.orgId+'/fin_requests/'+policy.approvalRef);
