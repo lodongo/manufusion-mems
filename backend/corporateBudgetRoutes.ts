@@ -275,7 +275,7 @@ export const corporateBudgetRoutes={
    if(!Number.isSafeInteger(totalMinor))throw new HttpError(400,'Budget total exceeds supported precision.');
    return createRequest(ctx,{leId,type:'corp.budget.activate',scopeKey:'corp.budget.'+leId+'.'+fy,
     title:'Budget plan FY'+fy,summary:lines.length+' lines; '+currency+' '+moneyNumber(totalMinor,currency),
-    payload:{fy,currency,totalMinor,lines} as unknown as Obj,amount:moneyNumber(totalMinor),
+    payload:{fy,currency,totalMinor,lines} as unknown as Obj,amount:moneyNumber(totalMinor,currency),
     reason:safeReason(ctx)});
  })],
  'POST /api/org/corporate/budget/revision/propose':[route('org.corporate.budget.revision.propose',async ctx=>{
@@ -321,7 +321,7 @@ export const corporateBudgetRoutes={
     title:'Budget transfer FY'+fy,summary:transfer.fromCostCenterId+' '+transfer.fromCategory+
       ' → '+transfer.toCostCenterId+' '+transfer.toCategory+' '+plan.currency+' '+moneyNumber(transfer.amountMinor,transfer.currency),
     payload:{transfer,expectedPlanVersion:plan.version} as unknown as Obj,
-    amount:moneyNumber(transfer.amountMinor),reason:safeReason(ctx)});
+    amount:moneyNumber(transfer.amountMinor,transfer.currency),reason:safeReason(ctx)});
  })],
  'POST /api/org/corporate/budget/exception/propose':[route('org.corporate.budget.exception.propose',async ctx=>{
    const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
@@ -407,6 +407,6 @@ export const corporateBudgetRoutes={
    return createRequest(ctx,{leId,type:'corp.funding.counterparty',
      scopeKey:'corp.funding.counterparty.'+agreementId,title:'Accept funding terms '+ag.agreementReference,
      summary:ag.method+' '+ag.currency+' '+moneyNumber(ag.limitMinor,ag.currency)+' from '+ag.providerLegalEntityId,
-     payload:{agreementId},amount:moneyNumber(ag.limitMinor),reason:safeReason(ctx)});
+     payload:{agreementId},amount:moneyNumber(ag.limitMinor,ag.currency),reason:safeReason(ctx)});
  })],
 };
