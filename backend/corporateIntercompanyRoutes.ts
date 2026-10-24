@@ -6,7 +6,7 @@ import {HttpError,getDoc,listDocs,nowIso,str,writeDoc,type Fields} from './core'
 import {orgRoute,type OrgContext} from './guards';
 import {
   chartOf,createRequest,entityOf,fxRate,hashKey,leOf,needEntity,permAt,
-  registerHandler,requireFinance,scopeOf,unitsOf,withLock,yearsOf,periodAt,
+  registerHandler,scopeOf,unitsOf,withLock,yearsOf,periodAt,
   type Obj,type Unit,
 } from './finCore';
 import {moneyMinor,majorFromMinor,minorFactor} from './corporateBudget';
@@ -293,10 +293,8 @@ registerHandler('corp.ic.settlement.plan',{
   });
  },
 });
-const route=(name:string,run:(ctx:OrgContext)=>Promise<unknown>)=>
- orgRoute(name,null,async ctx=>{await requireFinance(ctx);return run(ctx);});
 export const corporateIntercompanyRoutes={
- 'POST /api/org/corporate/ic/options':[route('org.corporate.ic.options',async ctx=>{
+ 'POST /api/org/corporate/ic/options':[orgRoute('org.corporate.ic.options','FIN.view',async ctx=>{
   const [units,scope]=await Promise.all([unitsOf(ctx.orgId),scopeOf(ctx)]);
   const entities=[...units.values()].filter(u=>u.level==='legal_entity'&&u.status!=='inactive')
    .map(u=>({id:u.id,code:u.code,name:u.name,
@@ -306,14 +304,14 @@ export const corporateIntercompanyRoutes={
    status:'nonposting_policy_and_matching',
    note:'No bilateral GL journal posting or payment execution is enabled.'};
  })],
- 'POST /api/org/corporate/ic/agreements':[route('org.corporate.ic.agreements',async ctx=>{
+ 'POST /api/org/corporate/ic/agreements':[orgRoute('org.corporate.ic.agreements','FIN.view',async ctx=>{
   const leId=clean(ctx.body.legalEntityId,128);await canRead(ctx,leId);
   const docs=await listDocs(agreementDir(ctx.orgId));
   return {agreements:docs.map(d=>d.data).filter(d=>
    clean((d.provider as IcParty|undefined)?.legalEntityId)===leId||
    clean((d.beneficiary as IcParty|undefined)?.legalEntityId)===leId)};
  })],
- 'POST /api/org/corporate/ic/agreements/propose':[route('org.corporate.ic.agreements.propose',async ctx=>{
+ 'POST /api/org/corporate/ic/agreements/propose':[orgRoute('org.corporate.ic.agreements.propose','FIN.setup.manage',async ctx=>{
   const agreement=parseAgreement(ctx.body.agreement);
   await permit(ctx,agreement.provider.legalEntityId,'FIN.setup.manage');
   await validateChart(ctx,agreement);
@@ -330,7 +328,7 @@ export const corporateIntercompanyRoutes={
    payload:{agreement,...authority} as unknown as Obj,
    amount:authority.approvalAmount,reason});
  })],
- 'POST /api/org/corporate/ic/agreements/accept':[route('org.corporate.ic.agreements.accept',async ctx=>{
+ 'POST /api/org/corporate/ic/agreements/accept':[orgRoute('org.corporate.ic.agreements.accept','FIN.setup.manage',async ctx=>{
   const id=clean(ctx.body.agreementId,128),doc=await getDoc(agreementPath(ctx.orgId,id));
   if(!safeId(id)||!doc)throw new HttpError(404,'Agreement not found.');
   const a=doc.data as unknown as IcAgreement;
@@ -345,13 +343,13 @@ export const corporateIntercompanyRoutes={
    scopeKey:'corp.ic.accept.'+a.id,
    payload:{agreementId:a.id,...authority},amount:authority.approvalAmount,reason});
  })],
- 'POST /api/org/corporate/ic/vouchers':[route('org.corporate.ic.vouchers',async ctx=>{
+ 'POST /api/org/corporate/ic/vouchers':[orgRoute('org.corporate.ic.vouchers','FIN.view',async ctx=>{
   const leId=clean(ctx.body.legalEntityId,128);await canRead(ctx,leId);
   const docs=await listDocs(voucherDir(ctx.orgId));
   return {vouchers:docs.map(d=>d.data).filter(d=>
    clean(d.providerLegalEntityId)===leId||clean(d.beneficiaryLegalEntityId)===leId)};
  })],
- 'POST /api/org/corporate/ic/vouchers/propose':[route('org.corporate.ic.vouchers.propose',async ctx=>{
+ 'POST /api/org/corporate/ic/vouchers/propose':[orgRoute('org.corporate.ic.vouchers.propose','FIN.close.run',async ctx=>{
   const id=clean(ctx.body.agreementId,128),doc=await getDoc(agreementPath(ctx.orgId,id));
   if(!safeId(id)||!doc)throw new HttpError(404,'Intercompany agreement not found.');
   const a=doc.data as unknown as IcAgreement;
@@ -379,7 +377,7 @@ export const corporateIntercompanyRoutes={
    payload:{voucher,...authority} as unknown as Obj,
    amount:authority.approvalAmount,reason});
  })],
- 'POST /api/org/corporate/ic/vouchers/accept':[route('org.corporate.ic.vouchers.accept',async ctx=>{
+ 'POST /api/org/corporate/ic/vouchers/accept':[orgRoute('org.corporate.ic.vouchers.accept','FIN.close.run',async ctx=>{
   const id=clean(ctx.body.voucherId,128),doc=await getDoc(voucherPath(ctx.orgId,id));
   if(!safeId(id)||!doc)throw new HttpError(404,'Transaction voucher not found.');
   const v=doc.data as unknown as IcVoucher;
@@ -394,7 +392,7 @@ export const corporateIntercompanyRoutes={
    scopeKey:'corp.ic.match.'+v.id,
    payload:{voucherId:v.id,...authority},amount:authority.approvalAmount,reason});
  })],
- 'POST /api/org/corporate/ic/vouchers/preview':[route('org.corporate.ic.vouchers.preview',async ctx=>{
+ 'POST /api/org/corporate/ic/vouchers/preview':[orgRoute('org.corporate.ic.vouchers.preview','FIN.view',async ctx=>{
   const id=clean(ctx.body.voucherId,128),doc=await getDoc(voucherPath(ctx.orgId,id));
   if(!safeId(id)||!doc)throw new HttpError(404,'Intercompany voucher not found.');
   const v=doc.data as unknown as IcVoucher;
@@ -409,7 +407,7 @@ export const corporateIntercompanyRoutes={
   return {...previewIntercompany(v,a),status:v.status,
    providerApprovalRef:v.providerApprovalRef,beneficiaryApprovalRef:v.beneficiaryApprovalRef};
  })],
- 'POST /api/org/corporate/ic/reconciliation':[route('org.corporate.ic.reconciliation',async ctx=>{
+ 'POST /api/org/corporate/ic/reconciliation':[orgRoute('org.corporate.ic.reconciliation','FIN.view',async ctx=>{
   const legalEntityId=clean(ctx.body.legalEntityId,128);await canRead(ctx,legalEntityId);
   const [agreements,vouchers,settlements]=await Promise.all([
    listDocs(agreementDir(ctx.orgId)),listDocs(voucherDir(ctx.orgId)),listDocs(scheduleDir(ctx.orgId)),
@@ -424,13 +422,13 @@ export const corporateIntercompanyRoutes={
    settlements.map(d=>d.data as unknown as IcSettlementPlan).filter(s=>voucherIds.has(s.voucherId)),
   );
  })],
- 'POST /api/org/corporate/ic/settlements':[route('org.corporate.ic.settlements',async ctx=>{
+ 'POST /api/org/corporate/ic/settlements':[orgRoute('org.corporate.ic.settlements','FIN.view',async ctx=>{
   const leId=clean(ctx.body.legalEntityId,128);await canRead(ctx,leId);
   const [docs,vouchers]=await Promise.all([listDocs(scheduleDir(ctx.orgId)),listDocs(voucherDir(ctx.orgId))]);
   const visible=new Set(vouchers.filter(v=>[clean(v.data.providerLegalEntityId),clean(v.data.beneficiaryLegalEntityId)].includes(leId)).map(v=>v.id));
   return {plans:docs.map(d=>d.data).filter(d=>visible.has(clean(d.voucherId)))};
  })],
- 'POST /api/org/corporate/ic/settlements/propose':[route('org.corporate.ic.settlements.propose',async ctx=>{
+ 'POST /api/org/corporate/ic/settlements/propose':[orgRoute('org.corporate.ic.settlements.propose','FIN.close.run',async ctx=>{
   const voucherId=clean(ctx.body.voucherId,128),doc=await getDoc(voucherPath(ctx.orgId,voucherId));
   if(!safeId(voucherId)||!doc)throw new HttpError(404,'Matched voucher required.');
   const v=doc.data as unknown as IcVoucher;
