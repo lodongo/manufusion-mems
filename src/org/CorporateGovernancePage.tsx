@@ -1,6 +1,7 @@
 import {useEffect,useState} from 'react';
 import {Building2,Landmark,Network,Plus,Save,ShieldCheck,Trash2,Users} from 'lucide-react';
 import {callBackend} from '../lib/backend';
+import CorporateFinancialHomePage from './CorporateFinancialHomePage';
 import {SelectField} from '../components/ui';
 
 type FunctionUnit={code:string;name:string;description:string;enabled:boolean;headRoleCode:string;reportsToCode:string;oversightEntityIds:string[]};
@@ -30,7 +31,7 @@ function EntitySelection({entities,selected,onChange,label}:{entities:Entity[];s
 export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
  const [data,setData]=useState<Config|null>(null),[entities,setEntities]=useState<Entity[]>([]),
  [groups,setGroups]=useState<Unit[]>([]),[roles,setRoles]=useState<Position[]>([]);
- const [section,setSection]=useState<'office'|'functions'|'bodies'>('office');
+ const [section,setSection]=useState<'office'|'functions'|'bodies'|'funding'>('office');
  const [expanded,setExpanded]=useState(''),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [saved,setSaved]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const load=async()=>{
@@ -70,6 +71,7 @@ export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
   {loading&&<p role="status" className="text-sm text-muted">Loading corporate defaults…</p>}
   {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
   {notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{notice}</p>}
+  {section==='funding'&&<CorporateFinancialHomePage canEdit={canEdit}/>}
   {data&&<>
    <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
     {[
@@ -81,8 +83,8 @@ export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
      <p className="text-xs text-muted">{label}</p><p className="mt-1 break-words text-sm font-semibold">{value}</p>
     </div>)}
    </section>
-   <div className="grid grid-cols-3 gap-1 rounded-xl border border-line bg-panel p-1">
-    {([['office','Corporate Office'],['functions','Functions'],['bodies','Governance']] as const).map(([key,title])=>
+   <div className="grid grid-cols-4 gap-1 rounded-xl border border-line bg-panel p-1">
+    {([['office','Corporate Office'],['functions','Functions'],['bodies','Governance'],['funding','Financial Home']] as const).map(([key,title])=>
      <button key={key} type="button" onClick={()=>{setSection(key);setExpanded('')}}
       className={`min-h-11 rounded-lg px-2 text-xs font-semibold ${section===key?'bg-brand/10 text-brand':'text-muted'}`}>{title}</button>)}
    </div>
