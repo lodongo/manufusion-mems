@@ -56,6 +56,31 @@ jobs:
           npm run check
           npm run build
 
+      - name: Verify backend can boot and serve /health before container push
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PORT=18080
+          node --import tsx backend/platform/server.ts >"$RUNNER_TEMP/mems-startup.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 35); do
+            if curl --fail --silent http://127.0.0.1:18080/health >"$RUNNER_TEMP/mems-boot-health.json"; then
+              cat "$RUNNER_TEMP/mems-boot-health.json"
+              echo 'Backend HTTP boot smoke test passed'
+              exit 0
+            fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo 'Backend process exited before opening port:'
+              cat "$RUNNER_TEMP/mems-startup.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          echo 'Backend did not serve port 18080 in time'
+          cat "$RUNNER_TEMP/mems-startup.log"
+          exit 1
+
       - name: Build, push and deploy MEMS development service
         shell: bash
         run: |
@@ -110,4 +135,16 @@ jobs:
             echo 'Access: governed by Cloud Run service security settings, managed separately in the Google Cloud Console'
             echo 'No live Firebase project has been used.'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Diagnose failed Cloud Run revision
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          if command -v gcloud >/dev/null 2>&1 && [ -n "${GCP_DEV_PROJECT_ID:-}" ]; then
+            echo 'Recent Cloud Run startup errors (redacted log sampling):'
+            gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="mems-dev" AND severity>=ERROR' \
+              --project="$GCP_DEV_PROJECT_ID" --freshness=20m --limit=12 \
+              --format='value(timestamp,textPayload,jsonPayload.message)' | tail -120
+          fi
 
