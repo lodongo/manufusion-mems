@@ -82,7 +82,7 @@ export async function postIntercompanyPair(ctx:OrgContext,voucherId:string,appro
  const prov=await getDoc(P(ctx.orgId).request(v.providerApprovalRef));
  const bene=await getDoc(P(ctx.orgId).request(v.beneficiaryApprovalRef));
  if(!prov||!bene||prov.data.status!=='approved'||bene.data.status!=='approved'||
-  prov.data.type!=='corp.ic.voucher'||bene.data.type!=='corp.ic.voucher.accept'||
+  !['corp.ic.voucher','corp.allocation.execute'].includes(String(prov.data.type))||bene.data.type!=='corp.ic.voucher.accept'||
   prov.data.leId!==v.providerLegalEntityId||bene.data.leId!==v.beneficiaryLegalEntityId)
   throw new HttpError(409,'Voucher must have two valid approved Finance transaction requests.');
  if([v.createdBy,v.beneficiaryApprovedBy,prov.data.decidedBy,bene.data.decidedBy].includes(ctx.uid))
