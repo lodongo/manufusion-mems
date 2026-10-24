@@ -64,7 +64,15 @@ export function postingInput(v:IcVoucher,a:IcAgreement,side:'provider'|'benefici
   sourceKey:'P6-IC-'+v.id+'-'+side,approvalRef};
 }
 /** The source and BOTH journals, all balances, periods and postkeys share one commit. */
-export async function postIntercompanyPair(ctx:OrgContext,voucherId:string,approvalRef:string):Promise<IcPostingPair>{
+export type FinalFinanceApproval={steps:Record<string,unknown>[];history:Record<string,unknown>[];at:string;note:string};
+export function validateFinalFinanceApproval(meta:FinalFinanceApproval|undefined,uid:string):void{
+ if(!meta||!Array.isArray(meta.steps)||!meta.steps.length||
+    meta.steps.some(s=>s.status!=='approved')||!Array.isArray(meta.history)||
+    !meta.history.length||meta.history[meta.history.length-1].by!==uid||
+    typeof meta.at!=='string'||!/^\\d{4}-\\d{2}-\\d{2}T/.test(meta.at))
+  throw new HttpError(409,'The authoritative final Finance approval evidence is missing or invalid.');
+}
+export async function postIntercompanyPair(ctx:OrgContext,voucherId:string,approvalRef:string,finalApproval:FinalFinanceApproval):Promise<IcPostingPair>{
  if(!icPostingEnabled())throw new HttpError(409,'P6 real intercompany GL posting is disabled on this server.');
  if(!safe(voucherId)||!safe(approvalRef))throw new HttpError(400,'Invalid IC source or approval reference.');
  const vp=voucherPath(ctx.orgId,voucherId),doc=await getDoc(vp);
@@ -96,8 +104,14 @@ export async function postIntercompanyPair(ctx:OrgContext,voucherId:string,appro
  const pendingSteps=Array.isArray(finalFcr.data.steps)?finalFcr.data.steps as Array<Record<string,unknown>>:[];
  if(pendingSteps.filter(x=>x.status==='pending').length!==1)
   throw new HttpError(409,'Final Finance authority step is not the last outstanding approval.');
- const decidedAt=nowIso();
- const updatedSteps=pendingSteps.map(x=>x.status==='pending'?{...x,status:'approved',by:ctx.uid,at:decidedAt}:x);
+ validateFinalFinanceApproval(finalApproval,ctx.uid);
+ if(finalApproval.steps.length!==pendingSteps.length||
+    !pendingSteps.every((step,i)=>step.status==='pending'?
+      finalApproval.steps[i].status==='approved'&&finalApproval.steps[i].by===ctx.uid:
+      finalApproval.steps[i].status===step.status&&finalApproval.steps[i].by===step.by))
+  throw new HttpError(409,'Finance final approval evidence does not match the saved authority steps.');
+ const decidedAt=finalApproval.at;
+ const updatedSteps=finalApproval.steps;
  const [p,b]=await Promise.all([
   preparePosting(ctx,postingInput(v,a,'provider',approvalRef)),
   preparePosting(ctx,postingInput(v,a,'beneficiary',approvalRef)),
@@ -113,7 +127,7 @@ export async function postIntercompanyPair(ctx:OrgContext,voucherId:string,appro
   providerJournalId:p.id,beneficiaryJournalId:b.id};
  await commit([...p.writes,...b.writes,
   {path:P(ctx.orgId).request(approvalRef),updateTime:finalFcr.updateTime,
-   fields:{...finalFcr.data,status:'approved',steps:updatedSteps,decidedAt,decidedBy:ctx.uid,
+   fields:{...finalFcr.data,status:'approved',steps:updatedSteps,history:finalApproval.history,decidedAt,decidedBy:ctx.uid,
     result:{pairId:v.id,providerJournal:p.id,beneficiaryJournal:b.id}}},
   {path:vp,fields:posted as unknown as Record<string,unknown>,updateTime:doc.updateTime},
   {path:pairPath(ctx.orgId,v.id),fields:pair as unknown as Record<string,unknown>,exists:false},
