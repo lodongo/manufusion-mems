@@ -12,6 +12,9 @@ on:
       - 'backend/poFinance.ts'
       - 'backend/finOps.ts'
       - 'tests/p5/**'
+      - 'tests/p6/**'
+      - 'backend/corporateIntercompany*.ts'
+      - 'backend/corporateAllocationExecution*.ts'
       - '.github/workflows/p5-firestore-emulator.yml'
       - 'package.json'
   workflow_dispatch:
@@ -54,4 +57,4 @@ jobs:
             --project mems-p5-emulator-test \
             --config tests/p5/firebase.json \
             --only firestore \
-            'npm run test:p5:emulator'
+            'npm run test:p5:emulator && npm run test:p6:emulator'

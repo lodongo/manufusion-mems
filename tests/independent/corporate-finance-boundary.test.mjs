@@ -5,7 +5,8 @@ import {readFileSync} from 'node:fs';
 const configured=[
  ['backend/corporateBudgetRoutes.ts',10],
  ['backend/corporateAllocationRoutes.ts',6],
- ['backend/corporateIntercompanyRoutes.ts',11],
+ ['backend/corporateIntercompanyRoutes.ts',14],
+ ['backend/corporateAllocationExecutionRoutes.ts',2],
 ];
 test('Corporate finance endpoints declare their own FIN route-level permissions',()=>{
  for(const [file,expected] of configured){

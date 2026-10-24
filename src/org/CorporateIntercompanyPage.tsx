@@ -5,6 +5,7 @@ import {SelectField} from '../components/ui';
 import {IC_TYPES,IC_ROLES,IC_SETTLEMENT,accountRequirements,
  type IcType,type IcAgreement,type IcVoucher,type IcAccounts,type IcSettlementPlan} from '../../backend/corporateIntercompany';
 import {majorFromMinor,currencyDigits} from '../../backend/corporateBudget';
+import type {PostedIcReport} from '../../backend/corporateIntercompanyPostedReport';
 import type {IcStagingReport} from '../../backend/corporateIntercompanyReconciliation';
 
 type LE={id:string;code:string;name:string;canView:boolean;canEdit:boolean};
@@ -20,12 +21,15 @@ const blankAgreement=()=>({
 const blankVoucher=()=>({
  agreementId:'',sourceReference:'',type:'SERVICE_RECHARGE' as IcType,
  amount:0,valueDate:'',taxReviewReference:'',transferPricingEvidence:'',
- supportingDocumentReferences:'',description:'',
+ supportingDocumentReferences:'',description:'',providerCostCenterId:'',beneficiaryCostCenterId:'',
 });
 const blankSettlement=()=>({voucherId:'',amount:0,plannedDate:'',method:'BANK_TRANSFER',
  paymentReference:'',reason:''});
 export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
  const [entities,setEntities]=useState<LE[]>([]),[leId,setLeId]=useState('');
+ const [centers,setCenters]=useState<Array<{id:string;name:string;code:string;legalEntityId:string}>>([]);
+ const [postingEnabled,setPostingEnabled]=useState(false);
+ const [postedReport,setPostedReport]=useState<PostedIcReport|null>(null);
  const [agreements,setAgreements]=useState<IcAgreement[]>([]);
  const [vouchers,setVouchers]=useState<IcVoucher[]>([]);
  const [settlements,setSettlements]=useState<IcSettlementPlan[]>([]);
@@ -59,6 +63,10 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
    try{
     const o=await callBackend<{entities:LE[]}>('/api/org/corporate/ic/options');
     setEntities(o.entities||[]);
+    const options=await callBackend<{costCenters:typeof centers}>('/api/org/corporate/allocation/options');
+    setCenters(options.costCenters||[]);
+    const state=await callBackend<{postingEnabled:boolean}>('/api/org/corporate/ic/post/status');
+    setPostingEnabled(!!state.postingEnabled);
     setLeId(o.entities?.find(x=>x.canView)?.id||'');
    }catch(e){setError(err(e))}
   })()
@@ -95,7 +103,7 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
  return <div className="min-w-0 space-y-4">
   <header className="rounded-2xl border border-line bg-panel p-4 space-y-2">
    <h3 className="flex items-center gap-2 font-bold text-lg"><Landmark className="h-5 w-5 text-brand"/>Intercompany & Treasury</h3>
-   <p className="text-sm text-muted">P4: bilateral legal-entity financial agreements, transaction matching and planned settlements. GL journals, bank transfers, statutory invoices and intercompany netting are <strong>not executed</strong> in this version.</p>
+   <p className="text-sm text-muted">P4: bilateral legal-entity financial agreements, transaction matching and planned settlements. Bilateral Finance journals are available only after independent approvals and explicit development activation. Bank transfers, statutory invoices and intercompany netting are <strong>not executed</strong> by this workspace.</p>
   </header>
   {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
   {info&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{info}</p>}
@@ -191,6 +199,10 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
      onChange={e=>setVoucher(a=>({...a,type:e.target.value as IcType}))}>
     {selectedAgreement.allowedTypes.map(x=><option key={x} value={x}>{IC_TYPES.find(t=>t.code===x)?.label}</option>)}
    </SelectField>}
+   {selectedAgreement&&<>
+    {select('ic-provider-cc','Provider service cost centre',voucher.providerCostCenterId,v=>setVoucher(a=>({...a,providerCostCenterId:v})),centers.filter(c=>c.legalEntityId===selectedAgreement.provider.legalEntityId).map(c=>({value:c.id,label:c.name+' ('+c.code+')'})))}
+    {select('ic-beneficiary-cc','Beneficiary service cost centre',voucher.beneficiaryCostCenterId,v=>setVoucher(a=>({...a,beneficiaryCostCenterId:v})),centers.filter(c=>c.legalEntityId===selectedAgreement.beneficiary.legalEntityId).map(c=>({value:c.id,label:c.name+' ('+c.code+')'})))}
+   </>}
    {textField('Source document / invoice / loan instrument reference',voucher.sourceReference,v=>setVoucher(a=>({...a,sourceReference:v})))}
    <label className="text-sm text-muted">Document amount ({selectedAgreement?.invoiceCurrency||'agreement currency'})
     <input type="number" min="0" step="any" className={field} disabled={!canEdit} value={voucher.amount}
@@ -221,6 +233,9 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
      {canEdit&&v.beneficiaryLegalEntityId===leId&&v.status==='awaiting_counterparty'&&
       <button type="button" className={btn} disabled={busy||reason.trim().length<10} onClick={()=>void submit('/api/org/corporate/ic/vouchers/accept',{voucherId:v.id,reason})}>
        Confirm beneficiary matching</button>}
+     {v.status==='posted'&&<p className="text-xs text-muted">Posted journals: {v.providerJournalId} / {v.beneficiaryJournalId}</p>}
+     {v.status==='matched_ready'&&v.providerLegalEntityId===leId&&canEdit&&<button type="button" className={btn} disabled={!postingEnabled||busy||reason.trim().length<10}
+       onClick={()=>void submit('/api/org/corporate/ic/post/propose',{voucherId:v.id,reason})}>Request atomic bilateral GL posting</button>}
      {v.providerLegalEntityId===leId&&<button type="button" className={btn} onClick={async()=>{
       try{
        const r=await callBackend<Record<string,unknown>>('/api/org/corporate/ic/vouchers/preview',{voucherId:v.id});
@@ -275,6 +290,20 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
       setReport(r);setError('');
      }catch(e){setError(err(e))}
     }}>Refresh matching and settlement coverage</button>
+    <button type="button" className={btn+' w-full'} onClick={async()=>{
+     try{setPostedReport(await callBackend<PostedIcReport>('/api/org/corporate/ic/posted-reconciliation',{legalEntityId:leId}));setError('')}catch(e){setError(err(e))}
+    }}>Reconcile posted bilateral GL journals</button>
+    {postedReport&&<div className="space-y-2">
+     <p className="text-sm font-semibold">Posted pairs: {postedReport.postedCount} · Exceptions: {postedReport.exceptions}</p>
+     {postedReport.rows.map(r=><div key={r.voucherId} className="rounded-lg border border-line p-3 space-y-1">
+      <strong className="text-sm">{r.sourceReference} · {r.status}</strong>
+      <p className="text-xs text-muted">Provider {r.providerJournalId} · Beneficiary {r.beneficiaryJournalId}</p>
+      <p className="text-xs text-muted">{fmt(r.documentAmountMinor,r.currency)} · {r.providerFunctionalCurrency} / {r.beneficiaryFunctionalCurrency}</p>
+      {r.exception&&<p role="alert" className="text-xs text-red-600">{r.exception}</p>}
+      <p className="text-xs text-muted">{r.consolidationAction}</p>
+     </div>)}
+     <p className="text-xs text-muted">{postedReport.note}</p>
+    </div>}
     {report&&<>
      <p className="text-sm">Matched, unposted: <strong>{report.readyUnpostedCount}</strong> · Pending/requires review: <strong>{report.unmatchedCount}</strong></p>
      {report.currencies.map(r=><div key={r.currency} className="rounded-lg border border-line p-3 space-y-1">

@@ -31,9 +31,13 @@ export default function CorporateAllocationPage({canEdit}:{canEdit:boolean}){
   beneficiaries:AllocationBeneficiary[]}>>([]);
  const [draft,setDraft]=useState<Draft>(emptyDraft());
  const [reason,setReason]=useState('');
- const [view,setView]=useState<'policies'|'create'|'beneficiary'|'preview'>('policies');
+ const [view,setView]=useState<'policies'|'create'|'beneficiary'|'preview'|'execute'>('policies');
  const [policyId,setPolicyId]=useState('');
  const [previewCost,setPreviewCost]=useState(0);
+ const [sourceJournalId,setSourceJournalId]=useState('');
+ const [sourceLineNo,setSourceLineNo]=useState(1);
+ const [taxReviewRef,setTaxReviewRef]=useState('');
+ const [verifiedPreview,setVerifiedPreview]=useState<{runId:string;previouslyExecuted:boolean;postingEnabled:boolean;currency:string;source:{amountMinor:number};allocation:AllocationCalculation}|null>(null);
  const [drivers,setDrivers]=useState<Record<string,string>>({});
  const [result,setResult]=useState<AllocationCalculation|null>(null);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -102,8 +106,8 @@ export default function CorporateAllocationPage({canEdit}:{canEdit:boolean}){
   {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
   {notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{notice}</p>}
   {selector('alloc-owner','Finance legal entity',legalEntityId,setLegalEntityId,entityOptions)}
-  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-   {([['policies','Pools'],['create','Add pool'],['beneficiary','Confirmations'],['preview','Preview']] as const).map(([id,label])=>
+  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+   {([['policies','Pools'],['create','Add pool'],['beneficiary','Confirmations'],['preview','Preview'],['execute','Execute GL-backed']] as const).map(([id,label])=>
     <button type="button" key={id} className={'min-h-11 rounded-lg border border-line px-2 text-xs font-semibold '+(view===id?'bg-brand/10 text-brand':'bg-panel text-muted')}
       onClick={()=>{setView(id);setError('')}}>{label}</button>)}
   </div>
@@ -239,7 +243,31 @@ export default function CorporateAllocationPage({canEdit}:{canEdit:boolean}){
     <p className="text-xs text-muted">Advisory simulation only; manual driver inputs are not verified source readings. The calculation has not created GL journals, intercompany balances, invoices, spending commitments or cash transfers.</p>
    </div>}
   </section>}
+  {view==='execute'&&<section className="rounded-xl border border-line bg-panel p-3 space-y-3">
+   <h4 className="font-semibold">Execute approved, verified corporate allocation</h4>
+   <p className="text-xs text-muted">Only a posted P&L expense journal line from an approved fixed-percentage pool qualifies. Finance approval is required. Internal cost-centre reallocations and cross-entity beneficiary vouchers are committed atomically; each beneficiary must still independently approve its voucher before intercompany GL posting.</p>
+   {selector('alloc-exec-policy','Approved pool',policyId,v=>{setPolicyId(v);setVerifiedPreview(null)},policies.filter(p=>p.status==='approved_policy').map(p=>({value:p.id,label:p.code+' — '+p.name})))}
+   <label className="block text-sm text-muted">Posted source GL journal ID
+    <input className={field} value={sourceJournalId} onChange={e=>{setSourceJournalId(e.target.value);setVerifiedPreview(null)}}/></label>
+   <label className="block text-sm text-muted">Source expense journal line number
+    <input className={field} type="number" min="1" step="1" value={sourceLineNo} onChange={e=>{setSourceLineNo(Number(e.target.value));setVerifiedPreview(null)}}/></label>
+   <label className="block text-sm text-muted">Independent tax treatment review reference
+    <input className={field} value={taxReviewRef} onChange={e=>setTaxReviewRef(e.target.value)}/></label>
+   <button type="button" className={btn+' w-full'} onClick={async()=>{
+    try{const p=await callBackend<typeof verifiedPreview>('/api/org/corporate/allocation/verified-preview',
+     {policyId,journalId:sourceJournalId,lineNo:sourceLineNo});setVerifiedPreview(p);setError('')}catch(e){setError(err(e))}
+   }}>Verify posted expense and calculate allocation</button>
+   {verifiedPreview&&<div className="space-y-2 rounded-xl border border-line p-3">
+    <p className="text-sm font-semibold">Verified amount: {format(verifiedPreview.source.amountMinor,verifiedPreview.currency)}</p>
+    {verifiedPreview.allocation.rows.map(r=><p key={r.legalEntityId+'|'+r.costCenterId} className="text-xs text-muted">{r.legalEntityId} · {r.costCenterId}: {format(r.amountMinor,verifiedPreview.currency)} — {r.intercompany?'beneficiary voucher':'same-entity allocation'}</p>)}
+    <p className="text-xs text-muted">{verifiedPreview.postingEnabled?'P6 developer-only posting server enabled':'Execution disabled on this server'} · {verifiedPreview.previouslyExecuted?'Source already allocated':'Source not previously executed under this policy'}</p>
+    {canEdit&&<button type="button" className={btn+' w-full'} disabled={busy||!verifiedPreview.postingEnabled||verifiedPreview.previouslyExecuted||taxReviewRef.trim().length<6||reason.trim().length<10}
+      onClick={()=>void submit('/api/org/corporate/allocation/execute/propose',{policyId,journalId:sourceJournalId,lineNo:sourceLineNo,taxReviewReference:taxReviewRef,reason})}>Submit allocation execution to Finance maker-checker</button>}
+   </div>}
+   <label className="block text-sm text-muted">Reason for financial approval
+    <textarea className={field+' min-h-20 p-3'} disabled={!canEdit} value={reason} onChange={e=>setReason(e.target.value)}/></label>
+  </section>}
   <p className="flex gap-2 text-xs text-muted"><ShieldCheck className="h-4 w-4 shrink-0 text-brand"/>
-   Policies require approval and documented basis. These controls do not change existing procurement, payroll, HR security or general-ledger balances.</p>
+   Draft policies and previews never post. Only a separately approved, GL-evidenced P6 allocation run can reallocate costs in the explicitly enabled development environment; procurement, payroll and HR remain unchanged.</p>
  </div>;
 }
