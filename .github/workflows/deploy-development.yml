@@ -96,6 +96,34 @@ jobs:
             --build-arg "VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}" \
             --build-arg "VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}" \
             -t "${IMAGE}" .
+          # Exercise the final production-stage image, not the repository tree.
+          # This catches runtime files missing from Docker COPY (e.g. src/shared).
+          SMOKE_ID="$(docker run --rm -d -p 127.0.0.1:18081:8080 \
+            -e PORT=8080 -e MEMS_FIREBASE_PROJECT_ID="${MEMS_FIREBASE_PROJECT_ID}" \
+            -e MEMS_STORAGE_BUCKET="${MEMS_STORAGE_BUCKET}" "${IMAGE}")"
+          smoke_cleanup() { docker logs "${SMOKE_ID}" 2>&1 | tail -80 || true; docker stop "${SMOKE_ID}" >/dev/null 2>&1 || true; }
+          trap smoke_cleanup EXIT
+          READY=0
+          for i in $(seq 1 35); do
+            if curl --fail --silent http://127.0.0.1:18081/health >"$RUNNER_TEMP/mems-image-health.json"; then
+              READY=1
+              echo 'Cloud Run image HTTP boot verified before upload'
+              break
+            fi
+            if [ "$(docker inspect --format='{{.State.Running}}' "${SMOKE_ID}" 2>/dev/null)" != true ]; then
+              echo 'Production-stage container exited before serving /health'
+              docker logs "${SMOKE_ID}" 2>&1 | tail -100
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ "${READY}" != 1 ]; then
+            echo 'Production-stage image never served /health'
+            docker logs "${SMOKE_ID}" 2>&1 | tail -100
+            exit 1
+          fi
+          docker stop "${SMOKE_ID}" >/dev/null 2>&1 || true
+          trap - EXIT
           docker push "${IMAGE}"
           gcloud run deploy mems-dev \
             --project="${GCP_DEV_PROJECT_ID}" \
