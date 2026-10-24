@@ -101,7 +101,9 @@ registerHandler('corp.budget.activate',{
   const {currency}=await yearCurrency(ctx,le,fy);
   if(currency!==clean(payload.currency,3))throw new HttpError(409,'Legal-entity currency has changed.');
   const {units}=await setup(ctx,le,'FIN.setup.approve');
-  const lines=verifyBudgetLines(payload.lines,le,units);
+  if(!Array.isArray(payload.lines))throw new HttpError(409,'Approved budget payload is missing.');
+  const lines=validateNewPlan(payload.lines as BudgetLine[]);
+  for(const line of lines)costCenterOf(line.costCenterId,le,units);
   const total=lines.reduce((n,l)=>n+l.approvedMinor,0);
   if(total!==Number(payload.totalMinor))throw new HttpError(409,'Proposal total is inconsistent.');
   const path=planPath(ctx.orgId,le,fy);
