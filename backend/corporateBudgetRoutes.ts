@@ -7,7 +7,7 @@ import {HttpError,getDoc,listDocs,nowIso,str,writeDoc,type Fields} from './core'
 import {orgRoute,type OrgContext} from './guards';
 import {
   commit,createRequest,entityOf,fxRate,hashKey,leOf,needEntity,permAt,reasonOf,registerHandler,
-  requireFinance,scopeOf,unitsOf,withLock,yearsOf,today,
+  scopeOf,unitsOf,withLock,yearsOf,today,
   type Obj,type Unit,
 } from './finCore';
 import {
@@ -255,11 +255,8 @@ registerHandler('corp.funding.counterparty',{
  },
 });
 
-const route=(name:string,fn:(ctx:OrgContext)=>Promise<unknown>)=>orgRoute(name,null,async ctx=>{
- await requireFinance(ctx);return fn(ctx);
-});
 export const corporateBudgetRoutes={
- 'POST /api/org/corporate/budget/options':[route('org.corporate.budget.options',async ctx=>{
+ 'POST /api/org/corporate/budget/options':[orgRoute('org.corporate.budget.options','FIN.view',async ctx=>{
    const [units,scope]=await Promise.all([unitsOf(ctx.orgId),scopeOf(ctx)]);
    const entities=Array.from(units.values()).filter(u=>u.level==='legal_entity'&&
       ['FIN.view','FIN.setup.manage','FIN.cc.manage','FIN.post.approve'].some(p=>permAt(ctx,p,u.id,units,scope)));
@@ -267,7 +264,7 @@ export const corporateBudgetRoutes={
     classes:BUDGET_CLASSES,methods:FUNDING_METHODS,enforcement:'BLOCK_UNLESS_EXCEPTION_APPROVED',
     note:'Actual purchase/order budget enforcement is not yet connected in P2.'};
  })],
- 'POST /api/org/corporate/budget/get':[route('org.corporate.budget.get',async ctx=>{
+ 'POST /api/org/corporate/budget/get':[orgRoute('org.corporate.budget.get','FIN.view',async ctx=>{
    const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
    await setup(ctx,leId,'FIN.view');
    const [plan,financial,units]=await Promise.all([getPlan(ctx,leId,fy),entityOf(ctx.orgId,leId),unitsOf(ctx.orgId)]);
@@ -276,7 +273,7 @@ export const corporateBudgetRoutes={
    return {plan,currency:financial.functionalCurrency,centres,fy,
     note:'Budget preview and records are not a live procurement commitment gate.'};
  })],
- 'POST /api/org/corporate/budget/propose':[route('org.corporate.budget.propose',async ctx=>{
+ 'POST /api/org/corporate/budget/propose':[orgRoute('org.corporate.budget.propose','FIN.setup.manage',async ctx=>{
    const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
    const {units}=await setup(ctx,leId,'FIN.setup.manage');
    const {currency}=await yearCurrency(ctx,leId,fy);
@@ -289,7 +286,7 @@ export const corporateBudgetRoutes={
     payload:{fy,currency,totalMinor,lines} as unknown as Obj,amount:moneyNumber(totalMinor,currency),
     reason:safeReason(ctx)});
  })],
- 'POST /api/org/corporate/budget/revision/propose':[route('org.corporate.budget.revision.propose',async ctx=>{
+ 'POST /api/org/corporate/budget/revision/propose':[orgRoute('org.corporate.budget.revision.propose','FIN.setup.manage',async ctx=>{
    const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
    const {units}=await setup(ctx,leId,'FIN.setup.manage');
    const plan=await getPlan(ctx,leId,fy);
@@ -318,7 +315,7 @@ export const corporateBudgetRoutes={
     payload:{revision,expectedPlanVersion:plan.version} as unknown as Obj,
     amount:moneyNumber(requested,plan.currency),reason});
  })],
- 'POST /api/org/corporate/budget/transfer/propose':[route('org.corporate.budget.transfer.propose',async ctx=>{
+ 'POST /api/org/corporate/budget/transfer/propose':[orgRoute('org.corporate.budget.transfer.propose','FIN.cc.manage',async ctx=>{
    const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
    const {units}=await setup(ctx,leId,'FIN.cc.manage');
    const plan=await getPlan(ctx,leId,fy);
@@ -334,7 +331,7 @@ export const corporateBudgetRoutes={
     payload:{transfer,expectedPlanVersion:plan.version} as unknown as Obj,
     amount:moneyNumber(transfer.amountMinor,transfer.currency),reason:safeReason(ctx)});
  })],
- 'POST /api/org/corporate/budget/exception/propose':[route('org.corporate.budget.exception.propose',async ctx=>{
+ 'POST /api/org/corporate/budget/exception/propose':[orgRoute('org.corporate.budget.exception.propose','FIN.cc.manage',async ctx=>{
    const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
    const {units}=await setup(ctx,leId,'FIN.cc.manage');
    const plan=await getPlan(ctx,leId,fy);
@@ -356,7 +353,7 @@ export const corporateBudgetRoutes={
     payload:{fy,currency:plan.currency,costCenterId:cc,category:cat,
       sourceDocumentId,expiresOn,maxExtraMinor},amount:moneyNumber(maxExtraMinor,plan.currency),reason:safeReason(ctx)});
  })],
- 'POST /api/org/corporate/budget/simulate':[route('org.corporate.budget.simulate',async ctx=>{
+ 'POST /api/org/corporate/budget/simulate':[orgRoute('org.corporate.budget.simulate','FIN.view',async ctx=>{
    const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
    await setup(ctx,leId,'FIN.view');
    const cc=clean(ctx.body.costCenterId,128),cat=category(ctx.body.category);
@@ -371,14 +368,14 @@ export const corporateBudgetRoutes={
     currency:plan?.currency||'',advisoryOnly:true,
     note:'Simulation only. Existing PR, PO, expense and payroll posting routes do not yet consume reservations or exceptions.'};
  })],
- 'POST /api/org/corporate/funding/list':[route('org.corporate.funding.list',async ctx=>{
+ 'POST /api/org/corporate/funding/list':[orgRoute('org.corporate.funding.list','FIN.view',async ctx=>{
    const leId=clean(ctx.body.leId,128);
    await setup(ctx,leId,'FIN.view');
    const docs=await listDocs(root(ctx.orgId)+'/corp_funding_agreements');
    return {agreements:docs.map(d=>d.data).filter(d=>
       clean(d.providerLegalEntityId)===leId||clean(d.beneficiaryLegalEntityId)===leId).slice(0,500)};
  })],
- 'POST /api/org/corporate/funding/propose':[route('org.corporate.funding.propose',async ctx=>{
+ 'POST /api/org/corporate/funding/propose':[orgRoute('org.corporate.funding.propose','FIN.setup.manage',async ctx=>{
    const leId=clean(ctx.body.providerLegalEntityId,128);
    const {units}=await setup(ctx,leId,'FIN.setup.manage');
    const beneficiaryLegalEntityId=clean(ctx.body.beneficiaryLegalEntityId,128);
@@ -407,7 +404,7 @@ export const corporateBudgetRoutes={
       moneyNumber(ag.limitMinor,ag.currency)+' to '+beneficiary.code,
     payload:{...ag,...authority} as unknown as Obj,amount:authority.approvalAmount,reason:safeReason(ctx)});
  })],
- 'POST /api/org/corporate/funding/counterparty/propose':[route('org.corporate.funding.counterparty.propose',async ctx=>{
+ 'POST /api/org/corporate/funding/counterparty/propose':[orgRoute('org.corporate.funding.counterparty.propose','FIN.setup.manage',async ctx=>{
    const agreementId=clean(ctx.body.agreementId,128);
    if(!safeId(agreementId))throw new HttpError(400,'Invalid agreement reference.');
    const d=await getDoc(fundingPath(ctx.orgId,agreementId));
