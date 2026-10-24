@@ -11,12 +11,9 @@ export const PAY_CATEGORIES:PayCategory[]=[
 ];
 export type PayBase='none'|'basic'|'gross'|'taxable'|'pensionable'|'net'|'hourly'|'daily'|'units'|'eligibleAmount';
 export type PayMethod='fixed'|'percent'|'progressive'|'multiplier'|'formula'|'days'|'manual';
-export type LeaveGradeEntitlement={eligible:boolean;daysPerYear:number;accrueMonthly:boolean;unit:'working_days'|'calendar_days'|'months';carryForwardDays:number;requiresApprovedPlan:boolean};
-export const defaultLeaveEntitlement=(mandatory:boolean,amount:number,code:string):LeaveGradeEntitlement=>({
- eligible:mandatory,daysPerYear:amount,accrueMonthly:code==='LEAVE_ANNUAL',
- unit:code==='LEAVE_MATERNITY'?'months':code==='LEAVE_ANNUAL'?'working_days':'calendar_days',
- carryForwardDays:0,requiresApprovedPlan:true,
-});
+export {defaultLeaveEntitlement} from '../src/shared/hrLeaveDefaults';
+export type {LeaveGradeEntitlement} from '../src/shared/hrLeaveDefaults';
+import {defaultLeaveEntitlement,type LeaveGradeEntitlement} from '../src/shared/hrLeaveDefaults';
 export type PayItem={
  code:string;name:string;description:string;category:PayCategory;
  mandatory:boolean;enabled:boolean;gradeCodes:string[];
