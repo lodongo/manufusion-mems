@@ -139,7 +139,7 @@ export const corporateAllocationRoutes={
  'POST /api/org/corporate/allocation/options':[route('org.corporate.allocation.options',async ctx=>{
   const r=await refs(ctx),{units}=await scopedAll(ctx);
   const scope=await scopeOf(ctx);
-  return {...r,legalEntities:r.legalEntities.filter(l=>
+  return {...r,allLegalEntities:r.legalEntities,legalEntities:r.legalEntities.filter(l=>
    ['FIN.view','FIN.setup.manage','FIN.setup.approve'].some(perm=>permAt(ctx,perm,l.id,units,scope))),
    // Only structural destinations, not financial amounts, are exposed here.
    // A corporate Finance policy owner needs to select beneficiary cost centres in other entities.
