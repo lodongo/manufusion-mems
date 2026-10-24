@@ -50,6 +50,7 @@ jobs:
         env:
           MEMS_FIREBASE_PROJECT_ID: mems-p5-emulator-test
           MEMS_P5_EMULATOR_TEST: 'true'
+          MEMS_P6_INTERCOMPANY_POSTING_ENABLED: 'true' # isolated dummy Firestore ID only
           CI: 'true'
         run: |
           set -euo pipefail
