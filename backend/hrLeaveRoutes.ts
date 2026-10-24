@@ -130,6 +130,8 @@ export const hrLeaveRoutes={
       throw new HttpError(409,'Select an approved leave plan belonging to this employee.');
      if(s(plan.data.leaveType)!==leaveType||start<s(plan.data.start,10)||end>s(plan.data.end,10))
       throw new HttpError(409,'Leave application must match the approved plan type and fall within its approved dates.');
+     if(s(plan.data.jobGradeCode)!==eligibility.gradeCode)
+      throw new HttpError(409,'The employee job grade changed after plan approval. Submit a new plan against the current grade.');
      if(records.some(d=>s(d.data.kind)==='application'&&s(d.data.employeeUid)===uid&&
        ['pending','approved'].includes(s(d.data.status))&&
        overlap(start,end,s(d.data.start,10),s(d.data.end,10))))
@@ -183,6 +185,8 @@ export const hrLeaveRoutes={
      if(decision==='approve'){
        const eligibility=await leaveEligibility(ctx.orgId,a.person.data);
        const type=requireLeaveType(eligibility,s(doc.data.leaveType));
+       if(s(doc.data.jobGradeCode)!==eligibility.gradeCode)
+         throw new HttpError(409,'The employee job grade changed since submission; review eligibility and resubmit leave.');
        if(s(doc.data.kind)==='application'){
          const plan=await getDoc(coll(ctx.orgId)+'/'+s(doc.data.planId,50));
          if(!plan||s(plan.data.status)!=='approved'||s(plan.data.employeeUid)!==uid||
