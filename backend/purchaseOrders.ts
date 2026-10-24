@@ -1089,8 +1089,7 @@ export const purchaseOrderRoutes = {
             const reason = reasonOf(ctx.body);
             return mutate(ctx, 'req', doc.id, 'cancel', async (d) => {
                 if (!['draft', 'returned', 'confirmed', 'suspended'].includes(str(d.status))) throw new HttpError(409, 'This requisition can no longer be cancelled.');
-                const budget=await preparePoCancellationBudget(ctx,doc.id,d,nowIso());
-                return { patch: { status: 'cancelled', cancelReason: reason,...(budget?.summary||{}) },atomicWrites:budget?.writes,event: 'cancelled', note: reason, label: 'Cancelled' };
+                return { patch: { status: 'cancelled', cancelReason: reason }, event: 'cancelled', note: reason, label: 'Cancelled' };
             });
         }),
     ],
@@ -1784,7 +1783,8 @@ export const purchaseOrderRoutes = {
                 const late = can(ctx, 'PRC.po.approve') && ['open', 'sent'].includes(status) && !objs(d.deliveries).length && !owner;
                 if (!early && !late) throw new HttpError(403, 'You cannot cancel this order now.');
                 if (late && (await versionsOf(ctx.orgId, baseOf(doc.id))).some((p) => verOf(p.id) > verOf(doc.id) && inForce(str(p.data.status)))) throw new HttpError(409, 'A newer version is open. Cancel that first.');
-                return { patch: { status: 'cancelled', cancelReason: reason }, event: 'cancelled', note: reason, label: 'Cancelled' };
+                const budget=await preparePoCancellationBudget(ctx,doc.id,d,nowIso());
+                return { patch: { status: 'cancelled', cancelReason: reason,...(budget?.summary||{}) },atomicWrites:budget?.writes,event: 'cancelled', note: reason, label: 'Cancelled' };
             });
             await releaseRequisitions(ctx, doc.data, doc.id, 'order cancelled');
             return out;
