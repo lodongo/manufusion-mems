@@ -139,6 +139,7 @@ import { explorerRoutes } from './explorer';
 import { settingsRoutes } from './settings';
 import { brandingOut, brandingRoutes, THEME_PRESETS as ORG_THEME_PRESETS } from './branding';
 import { signedUrl, structureRoutes } from './structure';
+import { corporateGovernanceRoutes } from './corporateGovernance';
 import { adminOperationsRoutes } from './adminOperations';
 import { fxManagementRoutes } from './fxManagement';
 import { fxSchedulerRoutes } from './fxScheduler';
@@ -1618,6 +1619,7 @@ export const handler = router(recordWiredRoutes({
     ...settingsRoutes,
     ...brandingRoutes,
     ...structureRoutes,
+    ...corporateGovernanceRoutes,
     ...setupProgressRoutes,
     ...adminOperationsRoutes,
     ...fxManagementRoutes,
