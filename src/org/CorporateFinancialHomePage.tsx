@@ -1,6 +1,7 @@
 import {useEffect,useMemo,useState} from 'react';
 import {Banknote,Building2,CheckCircle2,Plus,Save,ShieldCheck,Trash2} from 'lucide-react';
 import {callBackend} from '../lib/backend';
+import {navigate} from '../lib/route';
 import {SelectField} from '../components/ui';
 import type {CorporateFinancialHome,CorporateFunctionFunding,CorporateFundingMethod,CorporateCostClass,AllocationBasis,FinanceNode,FinanceReferences} from '../../backend/corporateFinance';
 
@@ -103,6 +104,21 @@ export default function CorporateFinancialHomePage({canEdit}:{canEdit:boolean}){
   {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
   {notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{notice}</p>}
   {config&&<>
+   <section className="rounded-2xl border border-line bg-panel p-3 sm:p-4">
+    <h3 className="font-bold">Configuration sequence</h3>
+    <div className="mt-3 space-y-2">
+     {[
+      '1. Select the legally registered corporate employing/cost-owning entity below',
+      '2. Under that entity, create an HQ site of type Office',
+      '3. Under HQ, create corporate Finance, HR, Engineering and other departments',
+      '4. Under each department, create its own Cost Centre and manager job role',
+      '5. Return here to map each corporate function and define how its costs are funded',
+     ].map(step=><p key={step} className="rounded-lg bg-page p-2 text-xs text-muted">{step}</p>)}
+    </div>
+    <button type="button" className={button+' mt-3'} onClick={()=>navigate('organization_admin/structure')}>
+     <Building2 className="mr-2 inline h-4 w-4"/>Open Organization Structure
+    </button>
+   </section>
    <div className="grid grid-cols-2 gap-2">
     <div className="rounded-xl border border-line bg-panel p-3"><p className="text-xs text-muted">Status</p><p className="font-bold">{saved?'Saved draft v'+config.version:'Not yet saved'}</p></div>
     <div className="rounded-xl border border-line bg-panel p-3"><p className="text-xs text-muted">Mapped corporate functions</p><p className="font-bold">{config.functions.length} / {enabledFunctions.length}</p></div>
