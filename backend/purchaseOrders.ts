@@ -355,6 +355,8 @@ export interface Change {
     result?: Obj;
     /** Additional budget CAS writes committed atomically alongside the PO mutation. */
     atomicWrites?: Write[];
+    /** One strictly atomic Finance service journal that saves the PO and budget. */
+    atomicJournal?: (next:Obj,fresh:Doc)=>Promise<void>;
 }
 /** One change to a requisition or order under a lock, re-read, checked, added to its history and audited. */
 export async function mutate(ctx: OrgContext, col: 'req' | 'po', id: string, action: string, run: (d: Obj) => Promise<Change>) {
@@ -367,7 +369,11 @@ export async function mutate(ctx: OrgContext, col: 'req' | 'po', id: string, act
         const at = nowIso();
         const next: Obj = { ...d, ...c.patch, updatedAt: at, version: (Number(d.version) || 1) + 1 };
         if (c.event) next.history = [...objs(d.history), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: c.event, note: c.note ?? '', from: str(d.status), to: str(next.status) }];
-        if(c.atomicWrites){
+        if(c.atomicJournal){
+            if(col!=='po'||c.atomicWrites)throw new HttpError(500,'Unsupported mixed source commit method.');
+            if(!fresh.updateTime)throw new HttpError(409,'Service receipt source precondition is missing.');
+            await c.atomicJournal(next,fresh);
+        }else if(c.atomicWrites){
             if(!fresh.updateTime)throw new HttpError(409,'A current PO version is required for atomic budget approval.');
             await commit([...c.atomicWrites,{path,fields:next,updateTime:fresh.updateTime}]);
         }else await writeDoc(path, next);
