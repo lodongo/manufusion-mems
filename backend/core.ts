@@ -10,7 +10,18 @@ import { observeFirestoreWrite } from './changeTracker';
 
 export const PROJECT_ID = process.env.MEMS_FIREBASE_PROJECT_ID || 'UNCONFIGURED';
 export const STAFF_DOMAIN = 'manufusion.com';
-export const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
+/**
+ * Exact-project, local-only Firestore emulator test escape hatch. A production,
+ * development or staging Firebase ID CANNOT enable anonymous emulator transport.
+ * This must never be used for application hosting or real tenant credentials.
+ */
+const P5_LOCAL_FIRESTORE_EMULATOR =
+    PROJECT_ID === 'mems-p5-emulator-test' &&
+    process.env.MEMS_P5_EMULATOR_TEST === 'true' &&
+    process.env.FIRESTORE_EMULATOR_HOST === '127.0.0.1:8083';
+export const FIRESTORE_BASE = P5_LOCAL_FIRESTORE_EMULATOR
+    ? `http://127.0.0.1:8083/v1/projects/${PROJECT_ID}/databases/(default)/documents`
+    : `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 export const DOCUMENT_NAME_ROOT = `projects/${PROJECT_ID}/databases/(default)/documents`;
 export const IDENTITY_BASE = `https://identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}`;
 const CERTS_URL = 'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
@@ -234,6 +245,7 @@ export async function verifyIdToken(token: unknown): Promise<TokenClaims> {
 const googleAuth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
 /** Workload Identity / ADC. Uses the attached Cloud Run service account. */
 export async function getAccessToken(): Promise<string> {
+    if (P5_LOCAL_FIRESTORE_EMULATOR) return 'owner'; // Emulator-only fake token, never issued to Cloud APIs.
     if (PROJECT_ID === 'UNCONFIGURED') {
         throw new HttpError(503, 'MEMS_FIREBASE_PROJECT_ID is required.');
     }

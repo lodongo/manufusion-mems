@@ -18,7 +18,8 @@
     "audit:routes:strict": "node scripts/governance-route-audit.mjs --strict",
     "audit:future-routes": "node scripts/future-route-check.mjs",
     "test:hr": "node --import tsx --test backend/hrAccessPolicy.test.ts backend/hrHierarchy.test.ts",
-    "test:corporate": "node --import tsx --test backend/corporateStructure.test.ts backend/corporateBudget.test.ts backend/corporateAllocation.test.ts backend/corporateCommitment.test.ts backend/corporateIntercompany.test.ts backend/corporatePoBudget.test.ts backend/corporateServiceBudget.test.ts"
+    "test:corporate": "node --import tsx --test backend/corporateStructure.test.ts backend/corporateBudget.test.ts backend/corporateAllocation.test.ts backend/corporateCommitment.test.ts backend/corporateIntercompany.test.ts backend/corporatePoBudget.test.ts backend/corporateServiceBudget.test.ts",
+    "test:p5:emulator": "node --import tsx --test tests/p5/firestore-emulator.test.ts"
   },
   "dependencies": {
     "firebase": "^11.0.0",

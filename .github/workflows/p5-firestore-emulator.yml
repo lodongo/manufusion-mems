@@ -1,0 +1,57 @@
+name: P5 isolated Firestore concurrency integration
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'backend/core.ts'
+      - 'backend/finCore.ts'
+      - 'backend/corporateCommitment*.ts'
+      - 'backend/corporateServiceBudget*.ts'
+      - 'backend/corporatePoBudget*.ts'
+      - 'backend/purchaseOrders.ts'
+      - 'backend/poFinance.ts'
+      - 'backend/finOps.ts'
+      - 'tests/p5/**'
+      - '.github/workflows/p5-firestore-emulator.yml'
+      - 'package.json'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  p5-emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - name: Verify no Google Cloud project can be touched by these tests
+        env:
+          MEMS_FIREBASE_PROJECT_ID: mems-p5-emulator-test
+          MEMS_P5_EMULATOR_TEST: 'true'
+        run: |
+          set -euo pipefail
+          test "${MEMS_FIREBASE_PROJECT_ID}" = 'mems-p5-emulator-test'
+          test "${MEMS_P5_EMULATOR_TEST}" = 'true'
+          test -z "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+          test -z "${GCP_DEV_PROJECT_ID:-}"
+      - name: Run Firestore emulator and real REST/CAS tests
+        timeout-minutes: 12
+        env:
+          MEMS_FIREBASE_PROJECT_ID: mems-p5-emulator-test
+          MEMS_P5_EMULATOR_TEST: 'true'
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@14 emulators:exec \
+            --project mems-p5-emulator-test \
+            --config tests/p5/firebase.json \
+            --only firestore \
+            'npm run test:p5:emulator'
