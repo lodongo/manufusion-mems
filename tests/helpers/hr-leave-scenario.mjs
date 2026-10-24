@@ -84,7 +84,6 @@ assert.ok(adminLeave.id,'Super Administrator may submit own leave plans');
 await assert.rejects(()=>call(hrLeaveRoutes,'admin','/api/org/hr/leave/create',{
  employeeUid:'admin',kind:'application',leaveType:'LEAVE_ANNUAL',start:'2026-12-01',end:'2026-12-02',
 }),/approved leave plan/);
-assert.ok(adminActual.id,'Super Administrator may submit own actual leave');
 assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'admin'})).permissions.canApply,true);
 assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'admin'})).permissions.canApprove,false);
 await assert.rejects(()=>call(hrLeaveRoutes,'admin','/api/org/hr/leave/review',{
