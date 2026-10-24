@@ -1584,7 +1584,7 @@ export const purchaseOrderRoutes = {
                 if (!['open', 'sent', 'partial'].includes(str(d.status))) throw new HttpError(409, 'Only an approved order can be amended. A draft is edited directly; a submitted order waits for its decision.');
                 if ((await versionsOf(ctx.orgId, baseOf(doc.id))).some((p) => verOf(p.id) > verOf(doc.id) && inForce(str(p.data.status)))) throw new HttpError(409, 'A newer version of this order is already open.');
                 if (objs(d.receipts).some((r) => str(r.status) === 'submitted')) throw new HttpError(409, 'A service receipt is waiting for acceptance. Decide it first.');
-                if(parsePoGatePolicy((await getDoc(PO_GATE_PATH(ctx.orgId)))?.data||null))
+                if(d.budgetControlled===true||parsePoGatePolicy((await getDoc(PO_GATE_PATH(ctx.orgId)))?.data||null))
                     throw new HttpError(409,'PO amendment in budget pilot requires verified budget/actual transfer integration. It is blocked rather than creating a new version.');
                 newId = await forkVersion(ctx, d, doc.id, 'amend', reason);
                 return { patch: { nextVersion: newId }, event: 'amendment started', note: `${newId}: ${reason}`, label: `Amendment ${newId} started` };
