@@ -11,7 +11,7 @@
 import {HttpError,getDoc,str} from './core';
 import {type OrgContext} from './guards';
 import {type Obj,type Write,entityOf,fxRate,leOf,periodAt,unitsOf,yearsOf} from './finCore';
-import {type BudgetClass,isBudgetClass,minorFactor} from './corporateBudget';
+import {type BudgetClass,isBudgetClass,minorFactor,currencyDigits} from './corporateBudget';
 import {
   prepareCommitmentWrites,type PreparedCommitment,
   commitmentRecordPath,
@@ -97,6 +97,8 @@ export async function preparePoApprovalBudget(
   throw new HttpError(409,'Split the service PO by legal entity before using the budget pilot.');
  const leId=les[0];
  const fin=await entityOf(ctx.orgId,leId);
+ if(currencyDigits(currency)!==2||currencyDigits(fin.functionalCurrency)!==2)
+  throw new HttpError(409,'Service PO pilot supports only two-decimal document and functional currencies until the GL engine supports other minor units.');
  if(fin.status!=='active'||!fin.functionalCurrency)
   throw new HttpError(409,'Service budget gate requires a live Finance entity and functional currency.');
  const [years,rate]=await Promise.all([yearsOf(ctx.orgId,leId),fxRate(currency,fin.functionalCurrency)]);
@@ -126,7 +128,7 @@ export async function preparePoApprovalBudget(
  const prepared=await prepareCommitmentWrites(ctx.orgId,source,now.slice(0,10));
  return {writes:prepared.writes,prepared,summary:{
   budgetControlled:true,budgetGate:'service_pilot',budgetApprovalRef:policy.approvalRef,
-  budgetSource:sourceKey,budgetCurrency:fin.functionalCurrency,budgetFy:at.year.fy,
+  budgetSource:sourceKey,budgetCurrency:fin.functionalCurrency,budgetLegalEntityId:leId,budgetFy:at.year.fy,
   budgetCommittedMinor:[...key.values()].reduce((n,l)=>n+l.amountMinor,0),budgetFxRate:rate,
   budgetNote:'PO service net commitments only; not VAT, GL actuals or payment authorization.',
  }};
