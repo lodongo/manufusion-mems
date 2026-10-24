@@ -10,7 +10,7 @@
  */
 import {HttpError,getDoc,str} from './core';
 import {type OrgContext} from './guards';
-import {type Obj,type Write,entityOf,fxRate,leOf,periodAt,unitsOf,yearsOf} from './finCore';
+import {type Obj,type Write,chartOf,entityOf,fxRate,leOf,periodAt,unitsOf,yearsOf} from './finCore';
 import {type BudgetClass,isBudgetClass,minorFactor,currencyDigits} from './corporateBudget';
 import {
   prepareCommitmentWrites,type PreparedCommitment,
@@ -101,7 +101,15 @@ export async function preparePoApprovalBudget(
   throw new HttpError(409,'Service PO pilot supports only two-decimal document and functional currencies until the GL engine supports other minor units.');
  if(fin.status!=='active'||!fin.functionalCurrency)
   throw new HttpError(409,'Service budget gate requires a live Finance entity and functional currency.');
- const [years,rate]=await Promise.all([yearsOf(ctx.orgId,leId),fxRate(currency,fin.functionalCurrency)]);
+ const [years,rate,chart]=await Promise.all([yearsOf(ctx.orgId,leId),fxRate(currency,fin.functionalCurrency),chartOf(ctx.orgId,leId)]);
+ for(const line of lines){
+  const acc=chart.get(str(line.glCode));
+  if(!acc||acc.statement!=='PL'||acc.status!=='active'||!acc.postable)
+   throw new HttpError(409,'Budget pilot service lines must use active postable P&L expense accounts; capital or prepaid services require a different transaction policy.');
+  if(fin.doc?.data.glScopeConfigured===true&&
+     !(Array.isArray(fin.doc.data.allowedGl)&&fin.doc.data.allowedGl.includes(acc.code)))
+   throw new HttpError(409,'A service expense GL is not in the legal entity approved account selection.');
+ }
  const at=periodAt(years,now.slice(0,10));
  if(!at||at.period.status!=='open')
   throw new HttpError(409,'Open fiscal period and approved budget are required at PO approval.');
