@@ -273,7 +273,10 @@ export const positionRoutes = {
             const nodes = nodeDocs.map(nodeOut).filter(n => SCOPE_LEVELS.includes(n.level));
             const rawGrades=ctx.body.jobGradeByLegalEntity;
             if(rawGrades!==undefined&&!isObj(rawGrades))throw new HttpError(400,'Job grade assignments must be mapped by legal entity.');
-            const supplied=isObj(rawGrades)?rawGrades:{};
+            // Preserve existing grade assignments when older role-edit clients omit this new field.
+            const oldGradeDoc=code?await getDoc(`${posCol(ctx.orgId)}/${code}`):null;
+            const previouslyAssigned=isObj(oldGradeDoc?.data.jobGradeByLegalEntity)?oldGradeDoc!.data.jobGradeByLegalEntity:{};
+            const supplied=isObj(rawGrades)?rawGrades:previouslyAssigned;
             const entityNodes=nodeDocs.filter(d=>str(d.data.level)==='legal_entity'&&str(d.data.status)!=='inactive');
             const entityIds=new Set(entityNodes.map(d=>d.id));
             const jobGradeByLegalEntity:Record<string,string>={};
