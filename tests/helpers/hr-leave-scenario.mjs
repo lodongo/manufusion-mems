@@ -3,6 +3,8 @@ import {seed,listDocs,snapshot} from './maintenance-fixture.ts';
 import {hrLeaveRoutes} from '../../backend/hrLeaveRoutes.ts';
 import {hrRulesRoutes} from '../../backend/hrRulesRoutes.ts';
 import {HR_RULE_DEFAULTS,hrRules,hrVisibleTabs} from '../../backend/hrPrivacyRules.ts';
+import {kenyaCompensationTemplate} from '../../backend/hrCompensationConfig.ts';
+import {defaultLeaveEntitlement} from '../../src/shared/hrLeaveDefaults.ts';
 const org='hr_leave_fixture',root='organizations/'+org;
 seed(root,{status:'active',modules:{HRM:true}});
 for(const [id,level,parent,managerUid] of [
@@ -22,6 +24,13 @@ for(const [uid,node,role] of [
  seed('users/'+uid,{uid,orgId:org,status:'active',role,firstName:uid,lastName:'Fixture',
   assignments:[{type:'primary',nodeId:node,positionCode:'P'}]});
 }
+seed(root+'/positions/P',{title:'Production Operator',jobGradeByLegalEntity:{LE:'JG01'}});
+const leaveConfig=kenyaCompensationTemplate();
+for(const item of leaveConfig.items.filter(x=>x.category==='leave')){
+ item.leaveEntitlements={JG01:defaultLeaveEntitlement(item.mandatory,item.amount,item.code)};
+}
+seed(root+'/hr_compensation_config/LE',{...leaveConfig,version:1});
+
 const ctx=(uid,body={})=>({
  uid,orgId:org,role:uid==='admin'?'org_super_admin':'member',
  me:snapshot('users/'+uid),org:snapshot(root),
@@ -45,8 +54,12 @@ await call(hrRulesRoutes,'admin','/api/org/hr/access-rules/save',{rules:HR_RULE_
 await assert.rejects(()=>call(hrRulesRoutes,'admin','/api/org/hr/access-rules/review',{decision:'approve'}),/own privacy rule/);
 await call(hrRulesRoutes,'dpo','/api/org/hr/access-rules/review',{decision:'approve'});
 assert.equal((await call(hrRulesRoutes,'admin','/api/org/hr/access-rules/get')).rules.managerTabs.includes('leave'),true);
+await assert.rejects(()=>call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'application',leaveType:'LEAVE_ANNUAL',
+ start:'2026-11-09',end:'2026-11-13',
+}),/approved leave plan/);
 const plan=await call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
- employeeUid:'employee',kind:'plan',leaveType:'annual',start:'2026-11-09',end:'2026-11-13'});
+ employeeUid:'employee',kind:'plan',leaveType:'LEAVE_ANNUAL',start:'2026-11-09',end:'2026-11-13'});
 assert.ok(plan.id);
 assert.equal((await call(hrLeaveRoutes,'manager','/api/org/hr/leave/inbox')).items.length,1);
 await assert.rejects(()=>call(hrLeaveRoutes,'hr','/api/org/hr/leave/review',{id:plan.id,decision:'approve'}),/immediate manager/);
@@ -56,7 +69,7 @@ await call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{id:plan.id,decisi
 const approved=(await call(hrLeaveRoutes,'employee','/api/org/hr/leave/list',{uid:'employee'})).items;
 assert.equal(approved[0].status,'approved');
 const actual=await call(hrLeaveRoutes,'hr','/api/org/hr/leave/create',{
- employeeUid:'employee',kind:'application',leaveType:'annual',start:'2026-11-09',end:'2026-11-13',planId:plan.id});
+ employeeUid:'employee',kind:'application',leaveType:'LEAVE_ANNUAL',start:'2026-11-09',end:'2026-11-13',planId:plan.id});
 assert.equal((await call(hrLeaveRoutes,'hr','/api/org/hr/leave/list',{uid:'employee'})).items.length,2);
 await assert.rejects(()=>call(hrLeaveRoutes,'hr','/api/org/hr/leave/review',{id:actual.id,decision:'approve'}),/immediate manager/);
 await call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{id:actual.id,decision:'approve'});
@@ -65,12 +78,12 @@ assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'em
 // to approve their own leave; the configured immediate manager is required.
 seed(root+'/structure/SITE_A',{name:'SITE_A',level:'site',parentId:'LE',managerUid:'manager',status:'active'});
 const adminLeave=await call(hrLeaveRoutes,'admin','/api/org/hr/leave/create',{
- employeeUid:'admin',kind:'plan',leaveType:'annual',start:'2026-12-01',end:'2026-12-02',
+ employeeUid:'admin',kind:'plan',leaveType:'LEAVE_ANNUAL',start:'2026-12-01',end:'2026-12-02',
 });
 assert.ok(adminLeave.id,'Super Administrator may submit own leave plans');
-const adminActual=await call(hrLeaveRoutes,'admin','/api/org/hr/leave/create',{
- employeeUid:'admin',kind:'application',leaveType:'annual',start:'2026-12-01',end:'2026-12-02',
-});
+await assert.rejects(()=>call(hrLeaveRoutes,'admin','/api/org/hr/leave/create',{
+ employeeUid:'admin',kind:'application',leaveType:'LEAVE_ANNUAL',start:'2026-12-01',end:'2026-12-02',
+}),/approved leave plan/);
 assert.ok(adminActual.id,'Super Administrator may submit own actual leave');
 assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'admin'})).permissions.canApply,true);
 assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'admin'})).permissions.canApprove,false);
@@ -80,9 +93,19 @@ await assert.rejects(()=>call(hrLeaveRoutes,'admin','/api/org/hr/leave/review',{
 await call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{
  id:adminLeave.id,decision:'approve',
 });
+const adminActual=await call(hrLeaveRoutes,'admin','/api/org/hr/leave/create',{
+ employeeUid:'admin',kind:'application',leaveType:'LEAVE_ANNUAL',start:'2026-12-01',end:'2026-12-02',
+ planId:adminLeave.id,
+});
+assert.ok(adminActual.id);
+await call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{id:adminActual.id,decision:'approve'});
 assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'admin'})).items.some(x=>x.id===adminLeave.id&&x.status==='approved'),true);
-const mgrProposed=await call(hrLeaveRoutes,'manager','/api/org/hr/leave/create',{
- employeeUid:'employee',kind:'plan',leaveType:'annual',start:'2026-12-01',end:'2026-12-02'});
-await assert.rejects(()=>call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{id:mgrProposed.id,decision:'approve'}),/submitter cannot approve/);
-await call(hrLeaveRoutes,'admin','/api/org/hr/leave/review',{id:mgrProposed.id,decision:'approve'});
+// Planning is employee-initiated; even superadmin cannot bypass immediate manager.
+await assert.rejects(()=>call(hrLeaveRoutes,'manager','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'plan',leaveType:'LEAVE_ANNUAL',
+ start:'2026-12-01',end:'2026-12-02',
+}),/employee must submit their own/);
+await assert.rejects(()=>call(hrLeaveRoutes,'admin','/api/org/hr/leave/review',{
+ id:plan.id,decision:'approve',
+}),/no longer pending/);
 console.log('HR leave privacy and manager approval scenario passed');
