@@ -6,13 +6,13 @@
 import {HttpError,getDoc,listDocs,nowIso,str,writeDoc,type Fields} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {
-  commit,createRequest,entityOf,hashKey,leOf,needEntity,permAt,reasonOf,registerHandler,
+  commit,createRequest,entityOf,fxRate,hashKey,leOf,needEntity,permAt,reasonOf,registerHandler,
   requireFinance,scopeOf,unitsOf,withLock,yearsOf,today,
   type Obj,type Unit,
 } from './finCore';
 import {
   applyApprovedRevision,applyApprovedTransfer,BUDGET_CLASSES,FUNDING_METHODS,isBudgetClass,isFundingMethod,
-  moneyMinor,majorFromMinor,validDate,validateFundingAgreement,validateNewPlan,checkBudget,
+  moneyMinor,majorFromMinor,minorFactor,validDate,validateFundingAgreement,validateNewPlan,checkBudget,
   type BudgetLine,type BudgetPlan,type BudgetTransfer,type BudgetRevision,type BudgetException,
   type BudgetClass,type FundingAgreement,type FundingMethod,
 } from './corporateBudget';
@@ -31,6 +31,17 @@ const getObject=(raw:unknown):Record<string,unknown>=>{
 };
 const amount=(raw:unknown,currency:string)=>{try{return moneyMinor(raw,currency);}catch(e){throw new HttpError(400,(e as Error).message);}};
 const moneyNumber=(minor:number,currency:string)=>majorFromMinor(minor,currency);
+/** Convert approval amount to the legal entity's functional currency; round upward to preserve authority thresholds. */
+async function authorityAmount(ctx:OrgContext,leId:string,minor:number,currency:string){
+ const financial=await entityOf(ctx.orgId,leId);
+ const baseCurrency=financial.functionalCurrency;
+ if(!baseCurrency)throw new HttpError(409,'Set legal-entity functional currency before a valued funding request.');
+ const rate=await fxRate(currency,baseCurrency);
+ const converted=moneyNumber(minor,currency)*rate*minorFactor(baseCurrency);
+ if(!Number.isSafeInteger(Math.ceil(converted)))throw new HttpError(400,'Converted approval amount is out of range.');
+ return {approvalCurrency:baseCurrency,approvalFxRate:rate,
+  approvalAmount:moneyNumber(Math.ceil(converted),baseCurrency)};
+}
 const integer=(raw:unknown)=>{
  const v=Number(raw);
  if(!Number.isSafeInteger(v)||v<1900||v>2500)throw new HttpError(400,'Invalid financial year.');
@@ -389,11 +400,12 @@ export const corporateBudgetRoutes={
    try{validateFundingAgreement(ag);}catch(e){throw new HttpError(400,(e as Error).message);}
    if(!isFundingMethod(ag.method))throw new HttpError(400,'Unknown funding method.');
    if(await getDoc(fundingPath(ctx.orgId,ag.id)))throw new HttpError(409,'An approved agreement with this party and reference already exists.');
+   const authority=await authorityAmount(ctx,leId,ag.limitMinor,ag.currency);
    return createRequest(ctx,{leId,type:'corp.funding.agreement',
     scopeKey:'corp.funding.agreement.'+leId+'.'+ag.agreementReference,
     title:'Funding agreement '+ag.agreementReference,summary:ag.method+' '+ag.currency+' '+
       moneyNumber(ag.limitMinor,ag.currency)+' to '+beneficiary.code,
-    payload:ag as unknown as Obj,amount:moneyNumber(ag.limitMinor,ag.currency),reason:safeReason(ctx)});
+    payload:{...ag,...authority} as unknown as Obj,amount:authority.approvalAmount,reason:safeReason(ctx)});
  })],
  'POST /api/org/corporate/funding/counterparty/propose':[route('org.corporate.funding.counterparty.propose',async ctx=>{
    const agreementId=clean(ctx.body.agreementId,128);
@@ -404,9 +416,10 @@ export const corporateBudgetRoutes={
    const leId=ag.beneficiaryLegalEntityId;
    await setup(ctx,leId,'FIN.setup.manage');
    if(ag.status!=='awaiting_counterparty')throw new HttpError(409,'Agreement no longer awaits beneficiary approval.');
+   const authority=await authorityAmount(ctx,leId,ag.limitMinor,ag.currency);
    return createRequest(ctx,{leId,type:'corp.funding.counterparty',
      scopeKey:'corp.funding.counterparty.'+agreementId,title:'Accept funding terms '+ag.agreementReference,
      summary:ag.method+' '+ag.currency+' '+moneyNumber(ag.limitMinor,ag.currency)+' from '+ag.providerLegalEntityId,
-     payload:{agreementId},amount:moneyNumber(ag.limitMinor,ag.currency),reason:safeReason(ctx)});
+     payload:{agreementId,...authority},amount:authority.approvalAmount,reason:safeReason(ctx)});
  })],
 };
