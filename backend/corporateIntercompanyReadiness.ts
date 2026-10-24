@@ -1,5 +1,5 @@
 /** Read-only P6 financial readiness: no posting, approval, policy mutation, or cash movement. */
-import {getDoc,nowIso,HttpError,str} from './core';
+import {getDoc,nowIso,HttpError} from './core';
 import {chartOf,entityOf,periodAt,yearsOf,P} from './finCore';
 import {agreementPath,voucherPath,icPostingEnabled,validatePostablePair,pairPath} from './corporateIntercompanyPosting';
 import {IC_ROLES,type IcRole,type IcAgreement,type IcVoucher} from './corporateIntercompany';
@@ -12,7 +12,12 @@ export function assessP6Readiness(input:{voucher:IcVoucher;agreement:IcAgreement
  try{if(a){validatePostablePair(v,a);postable=true;}}catch{postable=false;}
  const proofVoucher=(p?.payload as Record<string,unknown>|undefined)?.voucher as Record<string,unknown>|undefined;
  const proofProvider=(p?.result as Record<string,unknown>|undefined)?.voucherId===v.id&&proofVoucher?.id===v.id;
- const approvalProvider=!!p&&p.status==='approved'&&p.type==='corp.ic.voucher'&&p.leId===v.providerLegalEntityId&&proofProvider;
+ const allocationProvider=!!p&&p.status==='approved'&&p.type==='corp.allocation.execute'&&p.leId===v.providerLegalEntityId&&
+  !!v.allocationPolicyId&&!!v.allocationSourceJournalId&&
+  Array.isArray((p.result as Record<string,unknown>|undefined)?.voucherIds)&&
+  ((p.result as Record<string,unknown>).voucherIds as unknown[]).includes(v.id);
+ const approvalProvider=!!p&&p.status==='approved'&&p.leId===v.providerLegalEntityId&&
+  (p.type==='corp.ic.voucher'&&proofProvider||allocationProvider);
  const approvalBeneficiary=!!b&&b.status==='approved'&&b.type==='corp.ic.voucher.accept'&&b.leId===v.beneficiaryLegalEntityId&&
    (b.payload as Record<string,unknown>|undefined)?.voucherId===v.id&&(b.result as Record<string,unknown>|undefined)?.voucherId===v.id;
  const checks=[
@@ -55,8 +60,8 @@ export async function inspectP6Readiness(orgId:string,voucherId:string):Promise<
  if(!d)throw new HttpError(404,'Intercompany voucher not found.');
  const v=d.data as unknown as IcVoucher;
  const [ad,provider,beneficiary,paired]=await Promise.all([
-  getDoc(agreementPath(orgId,v.agreementId)),getDoc(P(orgId).request(v.providerApprovalRef)),
-  getDoc(P(orgId).request(v.beneficiaryApprovalRef)),getDoc(pairPath(orgId,v.id)),
+  getDoc(agreementPath(orgId,v.agreementId)),v.providerApprovalRef?getDoc(P(orgId).request(v.providerApprovalRef)):Promise.resolve(null),
+  v.beneficiaryApprovalRef?getDoc(P(orgId).request(v.beneficiaryApprovalRef)):Promise.resolve(null),getDoc(pairPath(orgId,v.id)),
  ]);
  const a=ad?.data as unknown as IcAgreement|null;
  const [pReady,bReady]=a?await Promise.all([financeReady(orgId,v,a,'provider'),financeReady(orgId,v,a,'beneficiary')]):[false,false];
