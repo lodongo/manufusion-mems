@@ -60,7 +60,7 @@ export function currencyDigits(currency:string):number{
  if(!/^[A-Z]{3}$/.test(currency))throw Error('Choose a valid ISO 4217 currency.');
  try{
   const d=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
-  if(!Number.isInteger(d)||d<0||d>4)throw Error('Unsupported currency exponent.');
+  if(typeof d!=='number'||!Number.isInteger(d)||d<0||d>4)throw Error('Unsupported currency exponent.');
   return d;
  }catch{throw Error('Currency code is unsupported by the active ISO 4217 runtime.');}
 }
