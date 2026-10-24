@@ -28,6 +28,7 @@ jobs:
           VITE_FIREBASE_APP_ID: 1:123456789012:web:ci-fixture
       - run: npm run test:drkms
       - run: npm run test:hr
+      - run: npm run test:corporate
       - run: node --import tsx --test tests/independent/*.test.mjs automation/test/*.test.mjs
 
   # Only a fully green, current develop commit may dispatch the isolated development
