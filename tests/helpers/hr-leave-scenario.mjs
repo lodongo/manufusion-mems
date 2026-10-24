@@ -22,7 +22,7 @@ for(const [uid,node,role] of [
  ['hr','TEAM_A','member'],['dpo','TEAM_A','member'],['other','TEAM_B','member'],['admin','SITE_A','org_super_admin'],
 ]){
  seed('users/'+uid,{uid,orgId:org,status:'active',role,firstName:uid,lastName:'Fixture',
-  assignments:[{type:'primary',nodeId:node,positionCode:'P'}]});
+  assignments:[{type:'primary',nodeId:node,positionCode:'P',startsOn:'2025-01-01'}]});
 }
 seed(root+'/positions/P',{title:'Production Operator',jobGradeByLegalEntity:{LE:'JG01'}});
 const leaveConfig=kenyaCompensationTemplate();
