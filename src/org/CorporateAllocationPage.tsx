@@ -268,6 +268,6 @@ export default function CorporateAllocationPage({canEdit}:{canEdit:boolean}){
     <textarea className={field+' min-h-20 p-3'} disabled={!canEdit} value={reason} onChange={e=>setReason(e.target.value)}/></label>
   </section>}
   <p className="flex gap-2 text-xs text-muted"><ShieldCheck className="h-4 w-4 shrink-0 text-brand"/>
-   Policies require approval and documented basis. These controls do not change existing procurement, payroll, HR security or general-ledger balances.</p>
+   Draft policies and previews never post. Only a separately approved, GL-evidenced P6 allocation run can reallocate costs in the explicitly enabled development environment; procurement, payroll and HR remain unchanged.</p>
  </div>;
 }
