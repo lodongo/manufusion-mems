@@ -264,12 +264,12 @@ registerHandler('corp.ic.voucher.accept',{
  },
 });
 registerHandler('corp.ic.post',{
- label:'Atomic bilateral intercompany GL posting',approvePerm:'FIN.post.approve',valued:true,
+ label:'Atomic bilateral intercompany GL posting',approvePerm:'FIN.post.approve',valued:true,atomicFinalization:true,
  apply:async(ctx,req,id)=>{
   const vid=clean(rec(req.payload).voucherId,128);
   if(!safeId(vid))throw new HttpError(409,'Missing approved bilateral voucher.');
   if(!icPostingEnabled())throw new HttpError(409,'P6 posting requires explicit isolated development release.');
-  const pair=await postIntercompanyPair(ctx,vid,id);
+  const pair=await postIntercompanyPair(ctx,vid,id,req._finalApproval as {steps:Record<string,unknown>[];history:Record<string,unknown>[];at:string;note:string});
   return {pairId:pair.id,providerJournal:pair.providerJournalId,beneficiaryJournal:pair.beneficiaryJournalId,
    note:'Both Finance journals, balances and source record committed atomically; no treasury payment was made.'};
  },

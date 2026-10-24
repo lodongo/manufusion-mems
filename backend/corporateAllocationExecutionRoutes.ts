@@ -13,7 +13,7 @@ async function scoped(ctx:OrgContext,leId:string,perm:string){
  if(!permAt(ctx,perm,leId,units,scope))throw new HttpError(403,perm+' permission required in provider legal entity.');
 }
 registerHandler('corp.allocation.execute',{
- label:'Execute verified GL-backed corporate cost allocation',approvePerm:'FIN.post.approve',valued:true,
+ label:'Execute verified GL-backed corporate cost allocation',approvePerm:'FIN.post.approve',valued:true,atomicFinalization:true,
  apply:async(ctx,req,id)=>{
   const x=req.payload as Obj;
   const poolId=clean(x.policyId),source=clean(x.journalId),lineNo=Number(x.lineNo);
@@ -22,7 +22,7 @@ registerHandler('corp.allocation.execute',{
   if(preview.policy.providerLegalEntityId!==clean(req.leId)||preview.source.amountMinor!==Number(x.sourceAmountMinor))
    throw new HttpError(409,'Signed allocation scope or source amount changed since proposal.');
   if(await getDoc(allocationRunPath(ctx.orgId,preview.runId)))throw new HttpError(409,'Source GL expense has already been allocated.');
-  const outcome=await executeVerifiedAllocation(ctx,preview,id,clean(x.taxReviewReference,200),clean(req.makerUid));
+  const outcome=await executeVerifiedAllocation(ctx,preview,id,clean(x.taxReviewReference,200),clean(req.makerUid),req._finalApproval as {steps:Record<string,unknown>[];history:Record<string,unknown>[];at:string;note:string});
   return {runId:outcome.id,voucherIds:outcome.voucherIds,sameEntityJournal:outcome.sameEntityJournalId,
    note:'Intra-entity GL reallocation posted atomically and cross-entity charge vouchers prepared for independent beneficiary matching; no cash settlement.'};
  },

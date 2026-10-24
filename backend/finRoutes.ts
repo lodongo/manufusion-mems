@@ -1317,7 +1317,22 @@ export const finRoutes = {
                 }
                 const h = HANDLERS[str(d.data.type)];
                 if (!h) throw new HttpError(500, 'Unknown request type.');
-                const result = await h.apply(ctx, { ...d.data, id }, id);
+                const result = await h.apply(ctx, { ...d.data, id, ...(h.atomicFinalization ? { _finalApproval: { steps: nextSteps, history, at, note } } : {}) }, id);
+                if (h.atomicFinalization) {
+                    // The journal/ledger commit already contains final FCR status and history.
+                    // NEVER replay a stale request document after an immutable posting.
+                    const finalized = await getDoc(P(ctx.orgId).request(id));
+                    if (!finalized || finalized.data.status !== 'approved' || finalized.data.decidedBy !== ctx.uid
+                        || finalized.data.result == null) {
+                        throw new HttpError(409, 'Atomic financial posting approval could not be verified. Check the transaction before retrying.');
+                    }
+                    try {
+                        await record(ctx, 'org.fin.request.approve', id, `${str(d.data.typeLabel)}: ${str(d.data.title)}. ${JSON.stringify(result).slice(0, 200)}`.slice(0, 400));
+                    } catch (auditError) {
+                        console.error('Atomic Finance posting committed, secondary activity audit requires reconciliation', id, auditError instanceof Error ? auditError.message : 'unknown');
+                    }
+                    return { ok: true, status: 'approved', result };
+                }
                 await writeDoc(P(ctx.orgId).request(id), { ...d.data, steps: nextSteps as unknown as Fields[keyof Fields], status: 'approved', decidedAt: at, decidedBy: ctx.uid, result: result as unknown as Fields[keyof Fields], history } as unknown as Fields);
                 await record(ctx, 'org.fin.request.approve', id, `${str(d.data.typeLabel)}: ${str(d.data.title)}. ${JSON.stringify(result).slice(0, 200)}`.slice(0, 400));
                 return { ok: true, status: 'approved', result };
