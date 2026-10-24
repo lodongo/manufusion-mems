@@ -5,6 +5,7 @@ import {SelectField} from '../components/ui';
 import {IC_TYPES,IC_ROLES,IC_SETTLEMENT,accountRequirements,
  type IcType,type IcAgreement,type IcVoucher,type IcAccounts,type IcSettlementPlan} from '../../backend/corporateIntercompany';
 import {majorFromMinor,currencyDigits} from '../../backend/corporateBudget';
+import type {IcStagingReport} from '../../backend/corporateIntercompanyReconciliation';
 
 type LE={id:string;code:string;name:string;canView:boolean;canEdit:boolean};
 const field='min-h-11 w-full min-w-0 rounded-xl border border-line bg-page px-3 text-base text-ink';
@@ -28,12 +29,13 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
  const [agreements,setAgreements]=useState<IcAgreement[]>([]);
  const [vouchers,setVouchers]=useState<IcVoucher[]>([]);
  const [settlements,setSettlements]=useState<IcSettlementPlan[]>([]);
- const [tab,setTab]=useState<'agreements'|'voucher'|'matching'|'settlement'>('agreements');
+ const [tab,setTab]=useState<'agreements'|'voucher'|'matching'|'settlement'|'reconciliation'>('agreements');
  const [agreement,setAgreement]=useState(blankAgreement());
  const [voucher,setVoucher]=useState(blankVoucher());
  const [settlement,setSettlement]=useState(blankSettlement());
  const [reason,setReason]=useState('');
  const [preview,setPreview]=useState<Record<string,unknown>|null>(null);
+ const [report,setReport]=useState<IcStagingReport|null>(null);
  const [error,setError]=useState(''),[info,setInfo]=useState(''),[busy,setBusy]=useState(false);
  const err=(e:unknown)=>e instanceof Error?e.message:'Unable to complete action.';
  const fmt=(minor:number,currency:string)=>{
@@ -98,8 +100,8 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
   {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
   {info&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{info}</p>}
   {select('ic-entity','Select finance legal entity',leId,setLeId,options.filter(o=>entities.find(e=>e.id===o.value)?.canView))}
-  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-   {([['agreements','Agreements'],['voucher','Transactions'],['matching','Matching'],['settlement','Settlement Plans']] as const).map(([code,label])=>
+  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+   {([['agreements','Agreements'],['voucher','Transactions'],['matching','Matching'],['settlement','Settlement Plans'],['reconciliation','Reconciliation']] as const).map(([code,label])=>
     <button type="button" key={code} className={'min-h-11 rounded-lg border border-line text-xs font-semibold px-2 '+(tab===code?'text-brand bg-brand/10':'bg-panel text-muted')}
      onClick={()=>setTab(code)}>{label}</button>)}
   </div>
@@ -264,6 +266,32 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
     <p className="text-xs text-muted">Status: {s.status} · no bank or GL movement</p>
    </div>)}
   </section>}
+  {tab==='reconciliation'&&<section className="rounded-xl border border-line bg-panel p-3 space-y-3">
+    <h4 className="font-semibold">Intercompany reconciliation — planning register</h4>
+    <p className="text-xs text-muted">This reconciles approved provider/beneficiary voucher agreement and settlement-plan information only, NOT actual GL balances, clearing, receipts or cash settlements.</p>
+    <button type="button" className={btn+' w-full'} onClick={async()=>{
+     try{
+      const r=await callBackend<IcStagingReport>('/api/org/corporate/ic/reconciliation',{legalEntityId:leId});
+      setReport(r);setError('');
+     }catch(e){setError(err(e))}
+    }}>Refresh matching and settlement coverage</button>
+    {report&&<>
+     <p className="text-sm">Matched, unposted: <strong>{report.readyUnpostedCount}</strong> · Pending/requires review: <strong>{report.unmatchedCount}</strong></p>
+     {report.currencies.map(r=><div key={r.currency} className="rounded-lg border border-line p-3 space-y-1">
+      <strong className="text-sm">{r.currency}</strong>
+      <p className="text-xs text-muted">Matched but unposted: {fmt(r.matchedUnpostedMinor,r.currency)}</p>
+      <p className="text-xs text-muted">Awaiting beneficiary: {fmt(r.awaitingMinor,r.currency)}</p>
+      <p className="text-xs text-muted">Planned settlement (not paid): {fmt(r.plannedSettlementMinor,r.currency)}</p>
+      <p className="text-xs text-muted">Without settlement plan: {fmt(r.unplannedMinor,r.currency)}</p>
+     </div>)}
+     {report.rows.map(r=><div key={r.voucherId} className="rounded-lg border border-line p-3">
+      <strong className="text-sm">{r.reference} — {r.stage.replaceAll('_',' ')}</strong>
+      <p className="text-xs text-muted">{r.providerLegalEntityId} → {r.beneficiaryLegalEntityId}, {fmt(r.amountMinor,r.currency)}</p>
+      {r.exception&&<p role="alert" className="text-xs text-red-600">{r.exception}</p>}
+     </div>)}
+     <p className="text-xs text-muted">{report.warning}</p>
+    </>}
+   </section>}
   <label className="block text-sm text-muted">Reason for Finance approval
    <textarea className={field+' min-h-20 p-3'} disabled={!canEdit} value={reason}
     onChange={e=>setReason(e.target.value)} maxLength={500}/></label>
