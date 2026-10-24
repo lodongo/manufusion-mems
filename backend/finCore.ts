@@ -697,6 +697,8 @@ export interface PostInput {
     approvalRef?: string;
     stock?: StockMove[];
     extra?: Write[];
+    /** Strict source-linked writes evaluated after the journal ID exists, in the same GL commit. */
+    extraForJournal?: (journalId:string)=>Promise<Write[]>;
 }
 export interface Posted {
     id: string;
@@ -749,7 +751,10 @@ export async function post(ctx: OrgContext, input: PostInput): Promise<Posted> {
     const keyId = hashKey(`${input.sourceKey}`);
     for (let attempt = 0; attempt < 3; attempt++) {
         const existing = await getDoc(P(ctx.orgId).postkey(keyId));
-        if (existing) return { id: str(existing.data.journalId), reused: true, fy: Number(existing.data.fy), period: Number(existing.data.period) };
+        if (existing) {
+            if(input.extraForJournal)throw new HttpError(409,'A source-linked GL journal already exists. Reopen the source record for reconciliation; no budget or PO updates were made.');
+            return { id: str(existing.data.journalId), reused: true, fy: Number(existing.data.fy), period: Number(existing.data.period) };
+        }
         try {
             return await postOnce(ctx, input, keyId);
         } catch (e) {
@@ -904,6 +909,7 @@ async function postOnce(ctx: OrgContext, input: PostInput, keyId: string): Promi
         writes.push(w);
     }
     for (const x of input.extra ?? []) writes.push(x);
+    if(input.extraForJournal)writes.push(...await input.extraForJournal(id));
     await commit(writes);
     await record(ctx, 'org.finance.journal.post', id, `${TXN_LABEL[input.type] ?? input.type}: ${entity.functionalCurrency} ${(dr / 100).toFixed(2)}; ${input.source.kind} ${input.source.id}${input.approvalRef ? `; approval ${input.approvalRef}` : ''}`.slice(0, 400));
     return { id, reused: false, fy: year.fy, period: period.no };
