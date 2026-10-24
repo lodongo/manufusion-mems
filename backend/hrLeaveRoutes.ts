@@ -69,20 +69,47 @@ function earned(type:LeaveOption,start:string,person:Record<string,unknown>){
  const endMonth=Number(start.slice(5,7));
  return Math.max(0,(endMonth-fromMonth+1)*type.monthlyAccrual)+type.carryForwardDays;
 }
+/** Plan stage reserves entitlement; actual applications consume approved
+ * reservations. Never count an application and its plan twice.
+ */
 function validateCapacity(type:LeaveOption,start:string,end:string,person:Record<string,unknown>,
- records:Array<{id:string;data:Record<string,unknown>}>,uid:string,excludeId=''){
+ records:Array<{id:string;data:Record<string,unknown>}>,uid:string,kind:'plan'|'application',excludeId=''){
  const requested=daysFor(type,start,end);
  const ceiling=earned(type,start,person);
- if(type.unit==='months')return;
+ if(type.unit==='months')return; // Calendar-month entitlement follows approved exact dates.
  if(requested>type.daysPerYear+type.carryForwardDays)
-  throw new HttpError(409,'Requested days exceed the configured annual leave entitlement.');
+  throw new HttpError(409,'Requested days exceed the configured leave entitlement.');
  const year=start.slice(0,4);
- const booked=records.filter(d=>d.id!==excludeId&&s(d.data.employeeUid)===uid&&
-   s(d.data.kind)==='application'&&['approved','pending'].includes(s(d.data.status))&&
-   s(d.data.leaveType)===type.code&&s(d.data.start,10).startsWith(year))
-  .reduce((sum,d)=>sum+leaveDays(s(d.data.start,10),s(d.data.end,10),type.unit),0);
- if(requested+booked>ceiling+0.0001)
-  throw new HttpError(409,'Requested leave exceeds accrued/annual entitlement after existing applications. Verify balances and employment start date.');
+ const matching=(d:{id:string;data:Record<string,unknown>})=>
+  d.id!==excludeId&&s(d.data.employeeUid)===uid&&
+  ['approved','pending'].includes(s(d.data.status))&&
+  s(d.data.leaveType)===type.code&&s(d.data.start,10).startsWith(year);
+ const relevant=records.filter(matching);
+ if(kind==='plan'){
+  const reserved=relevant.filter(d=>s(d.data.kind)==='plan')
+   .reduce((sum,d)=>sum+leaveDays(s(d.data.start,10),s(d.data.end,10),type.unit),0);
+  // Count unlinked legacy applications once, not applications already tied to plans.
+  const legacy=relevant.filter(d=>s(d.data.kind)==='application'&&!s(d.data.planId))
+   .reduce((sum,d)=>sum+leaveDays(s(d.data.start,10),s(d.data.end,10),type.unit),0);
+  if(requested+reserved+legacy>ceiling+0.0001)
+   throw new HttpError(409,'Planned leave exceeds the accrued/annual entitlement after existing approved and pending plans.');
+ }else{
+  const booked=relevant.filter(d=>s(d.data.kind)==='application')
+   .reduce((sum,d)=>sum+leaveDays(s(d.data.start,10),s(d.data.end,10),type.unit),0);
+  if(requested+booked>ceiling+0.0001)
+   throw new HttpError(409,'Requested leave exceeds accrued/annual entitlement after existing applications.');
+ }
+}
+function confirmPlanTerms(
+ plan:Record<string,unknown>,eligibility:LeaveEligibility,type:LeaveOption
+){
+ if(s(plan.jobGradeCode)!==eligibility.gradeCode||s(plan.legalEntityId)!==eligibility.legalEntityId)
+  throw new HttpError(409,'The employee’s grade or legal entity changed after plan approval; submit a new plan.');
+ if(Number(plan.entitlementDays)!==type.daysPerYear||
+   plan.accruesMonthly!==type.accrueMonthly||
+   s(plan.unit)!==type.unit||
+   (plan.carryForwardDays!==undefined&&Number(plan.carryForwardDays)!==type.carryForwardDays))
+  throw new HttpError(409,'Configured leave entitlement changed since plan approval; a revised plan needs manager approval.');
 }
 export const hrLeaveRoutes={
  'POST /api/org/hr/leave/list':[orgRoute('org.hr.leave.list','HRM.shell.view',async ctx=>{
@@ -133,8 +160,7 @@ export const hrLeaveRoutes={
       throw new HttpError(409,'Select an approved leave plan belonging to this employee.');
      if(s(plan.data.leaveType)!==leaveType||start<s(plan.data.start,10)||end>s(plan.data.end,10))
       throw new HttpError(409,'Leave application must match the approved plan type and fall within its approved dates.');
-     if(s(plan.data.jobGradeCode)!==eligibility.gradeCode)
-      throw new HttpError(409,'The employee job grade changed after plan approval. Submit a new plan against the current grade.');
+     confirmPlanTerms(plan.data,eligibility,type);
      if(records.some(d=>s(d.data.kind)==='application'&&s(d.data.employeeUid)===uid&&
        ['pending','approved'].includes(s(d.data.status))&&
        overlap(start,end,s(d.data.start,10),s(d.data.end,10))))
@@ -144,12 +170,12 @@ export const hrLeaveRoutes={
        overlap(start,end,s(d.data.start,10),s(d.data.end,10)))){
       throw new HttpError(409,'A pending or approved leave plan already covers these dates.');
     }
-    validateCapacity(type,start,end,a.person.data,records,uid);
+    validateCapacity(type,start,end,a.person.data,records,uid,kind);
     const entry={employeeUid:uid,employeeName:[s(a.person.data.firstName,55),s(a.person.data.lastName,55)].filter(Boolean).join(' '),
      kind,leaveType,start,end,status:'pending',createdAt:nowIso(),updatedAt:nowIso(),
      proposedBy:ctx.uid,submittedFor:uid,managerUid,planId,
      legalEntityId:eligibility.legalEntityId,jobGradeCode:eligibility.gradeCode,
-     compensationVersion:eligibility.payConfigVersion,entitlementDays:type.daysPerYear,
+     compensationVersion:eligibility.payConfigVersion,entitlementDays:type.daysPerYear,carryForwardDays:type.carryForwardDays,
      accruesMonthly:type.accrueMonthly,unit:type.unit,note:s(ctx.body.note,280),
      reviewedBy:'',reviewedAt:'',decisionNote:''};
     const id=randomUUID().replace(/-/g,'');
@@ -188,13 +214,16 @@ export const hrLeaveRoutes={
      if(decision==='approve'){
        const eligibility=await leaveEligibility(ctx.orgId,a.person.data);
        const type=requireLeaveType(eligibility,s(doc.data.leaveType));
-       if(s(doc.data.jobGradeCode)!==eligibility.gradeCode)
-         throw new HttpError(409,'The employee job grade changed since submission; review eligibility and resubmit leave.');
+       confirmPlanTerms(doc.data,eligibility,type);
+       const otherRecords=await listDocs(coll(ctx.orgId));
+       validateCapacity(type,s(doc.data.start,10),s(doc.data.end,10),a.person.data,
+        otherRecords,uid,s(doc.data.kind)==='plan'?'plan':'application',id);
        if(s(doc.data.kind)==='application'){
          const plan=await getDoc(coll(ctx.orgId)+'/'+s(doc.data.planId,50));
          if(!plan||s(plan.data.status)!=='approved'||s(plan.data.employeeUid)!==uid||
             s(plan.data.leaveType)!==type.code||s(doc.data.start)<s(plan.data.start)||s(doc.data.end)>s(plan.data.end))
           throw new HttpError(409,'The approved leave plan is no longer valid for this application.');
+         confirmPlanTerms(plan.data,eligibility,type);
        }
      }
      await writeDoc(path,{...doc.data,status:decision==='approve'?'approved':'rejected',
