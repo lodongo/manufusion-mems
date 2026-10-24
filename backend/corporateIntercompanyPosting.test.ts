@@ -15,7 +15,7 @@ const agreement=():IcAgreement=>({
 });
 const voucher=():IcVoucher=>({
  id:'V001',agreementId:'AGR01',sourceReference:'INV-001',type:'SERVICE_RECHARGE',currency:'KES',
- amountMinor:50000000,valueDate:'2026-10-23',providerLegalEntityId:'LEA',beneficiaryLegalEntityId:'LEB',
+ amountMinor:5000000,valueDate:'2026-10-23',providerLegalEntityId:'LEA',beneficiaryLegalEntityId:'LEB',
  taxReviewReference:'TAX-NO-VAT-REVIEWED',transferPricingEvidence:'',
  supportingDocumentReferences:['DOC001'],description:'Group IT services',
  status:'matched_ready',createdAt:'2026-10-23',createdBy:'maker',
