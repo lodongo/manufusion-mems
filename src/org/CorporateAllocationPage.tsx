@@ -23,6 +23,7 @@ const emptyDraft=():Draft=>({
 const emptyRefs:AllocationReferences={legalEntities:[],costCenters:[],functions:[]};
 export default function CorporateAllocationPage({canEdit}:{canEdit:boolean}){
  const [refs,setRefs]=useState<AllocationReferences>(emptyRefs);
+ const [beneficiaryEntities,setBeneficiaryEntities]=useState<AllocationReferences['legalEntities']>([]);
  const [legalEntityId,setLegalEntityId]=useState('');
  const [policies,setPolicies]=useState<AllocationPolicy[]>([]);
  const [pending,setPending]=useState<Array<{id:string;code:string;name:string;
@@ -48,8 +49,9 @@ export default function CorporateAllocationPage({canEdit}:{canEdit:boolean}){
  const err=(e:unknown)=>e instanceof Error?e.message:'Could not complete request.';
  const loadOptions=async()=>{
   try{
-   const data=await callBackend<AllocationReferences>('/api/org/corporate/allocation/options');
+   const data=await callBackend<AllocationReferences & {allLegalEntities:AllocationReferences['legalEntities']}>('/api/org/corporate/allocation/options');
    setRefs({legalEntities:data.legalEntities||[],costCenters:data.costCenters||[],functions:data.functions||[]});
+   setBeneficiaryEntities(data.allLegalEntities||data.legalEntities||[]);
    setLegalEntityId(old=>old||data.legalEntities?.[0]?.id||'');
   }catch(e){setError(err(e));}
  };
@@ -85,6 +87,7 @@ export default function CorporateAllocationPage({canEdit}:{canEdit:boolean}){
   </SelectField>;
  const centerOptions=(le:string)=> (byEntity.get(le)||[]).map(c=>({value:c.id,label:c.name+' ('+c.code+')'}));
  const entityOptions=refs.legalEntities.map(e=>({value:e.id,label:e.name+' ('+e.code+')'}));
+ const allEntityOptions=beneficiaryEntities.map(e=>({value:e.id,label:e.name+' ('+e.code+')'}));
  const currentCurrency=chosen?.currency||'';
  const format=(minor:number,curr:string)=>{
   let digit=2;try{digit=currencyDigits(curr)}catch{}
@@ -163,7 +166,7 @@ export default function CorporateAllocationPage({canEdit}:{canEdit:boolean}){
    {draft.beneficiaries.map((b,i)=><section key={i} className="rounded-lg border border-line p-3 space-y-2">
     <div className="flex justify-between items-center"><strong className="text-sm">Beneficiary {i+1}</strong>
      {canEdit&&<button type="button" className={btn} onClick={()=>setDraft(x=>({...x,beneficiaries:x.beneficiaries.filter((_,j)=>j!==i)}))}><Trash2 className="h-4 w-4"/></button>}</div>
-    {selector('alloc-be-'+i,'Beneficiary legal entity',b.legalEntityId,v=>editBeneficiary(i,{legalEntityId:v,costCenterId:''}),entityOptions)}
+    {selector('alloc-be-'+i,'Beneficiary legal entity',b.legalEntityId,v=>editBeneficiary(i,{legalEntityId:v,costCenterId:''}),allEntityOptions)}
     {selector('alloc-bc-'+i,'Beneficiary cost centre',b.costCenterId,v=>editBeneficiary(i,{costCenterId:v}),centerOptions(b.legalEntityId))}
     {draft.basis==='FIXED_PCT'&&<label className="text-sm text-muted">Fixed allocation (%)
      <input type="number" min="0" max="100" step="any" className={field} value={b.fixedPercent}
