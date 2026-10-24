@@ -117,7 +117,16 @@ export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
        enabled:true,headRoleCode:'',reportsToCode:'',oversightEntityIds:[]}]}));setExpanded(code);
      }}><Plus className="mr-1 inline h-4 w-4"/>Add function</button>}
     </div>
-    <p className="text-xs text-muted">Defaults cover Finance, HR, Engineering, Procurement, IT, Legal, Strategy and Sustainability. Assign a functional head and reporting function when positions are ready.</p>
+    <p className="text-xs text-muted">Defaults cover Group Executive Office, Corporate Secretariat, Finance, HR, Engineering, Procurement, IT, Legal, Strategy and Sustainability. Assign a functional head and reporting function when positions are ready.</p>
+    {canEdit&&(['EXEC','SEC'] as const).some(code=>!data.functions.some(f=>f.code===code))&&
+     <button type="button" className="min-h-11 rounded-xl border border-line bg-panel px-3 text-sm font-semibold text-brand"
+      onClick={()=>edit(c=>({...c,functions:[
+       ...c.functions,
+       ...([['EXEC','Group Executive Office','Group CEO, corporate leadership and shared administration'],
+            ['SEC','Corporate Secretariat','Board administration, statutory governance and governance records']] as const)
+         .filter(([code])=>!c.functions.some(f=>f.code===code))
+         .map(([code,name,description])=>({code,name,description,enabled:true,headRoleCode:'',reportsToCode:'',oversightEntityIds:[]})),
+      ]}))}>Adopt missing Executive Office and Secretariat defaults</button>}
     {data.functions.map((f,index)=><section key={index} className="min-w-0 rounded-xl border border-line bg-panel">
      <button type="button" className="flex min-h-14 w-full items-center justify-between gap-2 px-3 py-2 text-left"
       onClick={()=>setExpanded(expanded===f.code?'':f.code)} aria-expanded={expanded===f.code}>
