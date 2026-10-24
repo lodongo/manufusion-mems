@@ -103,7 +103,7 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
  return <div className="min-w-0 space-y-4">
   <header className="rounded-2xl border border-line bg-panel p-4 space-y-2">
    <h3 className="flex items-center gap-2 font-bold text-lg"><Landmark className="h-5 w-5 text-brand"/>Intercompany & Treasury</h3>
-   <p className="text-sm text-muted">P4: bilateral legal-entity financial agreements, transaction matching and planned settlements. GL journals, bank transfers, statutory invoices and intercompany netting are <strong>not executed</strong> in this version.</p>
+   <p className="text-sm text-muted">P4: bilateral legal-entity financial agreements, transaction matching and planned settlements. Bilateral Finance journals are available only after independent approvals and explicit development activation. Bank transfers, statutory invoices and intercompany netting are <strong>not executed</strong> by this workspace.</p>
   </header>
   {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
   {info&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{info}</p>}
