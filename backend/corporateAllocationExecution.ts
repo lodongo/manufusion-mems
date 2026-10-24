@@ -4,7 +4,7 @@
  */
 import {HttpError,getDoc,listDocs,nowIso,type Fields} from './core';
 import {type OrgContext} from './guards';
-import {P,hashKey,commit,preparePosting,fxRate,type PostInput,type Write} from './finCore';
+import {P,hashKey,commit,preparePosting,fxRate,entityOf,type PostInput,type Write} from './finCore';
 import {currencyDigits,majorFromMinor} from './corporateBudget';
 import {allocationIsEffective,calculateAllocation,type AllocationPolicy} from './corporateAllocation';
 import {icPostingEnabled} from './corporateIntercompanyPosting';
@@ -70,8 +70,9 @@ export async function executeVerifiedAllocation(ctx:OrgContext,preview:VerifiedP
    a.allowedTypes.includes('SERVICE_RECHARGE')&&a.invoiceCurrency===refreshed.policy.currency&&
    a.startDate<=refreshed.source.postingDate&&(!a.endDate||a.endDate>=refreshed.source.postingDate));
   if(matching.length!==1)throw new HttpError(409,'One approved intercompany recharge agreement must match beneficiary, currency, dates and service agreement reference.');
-  const a=matching[0],fx=await fxRate(refreshed.policy.currency,(await import('./finCore')).entityOf(ctx.orgId,x.legalEntityId).then(e=>e.functionalCurrency));
-  const beneficiaryCurrency=(await (await import('./finCore')).entityOf(ctx.orgId,x.legalEntityId)).functionalCurrency;
+  const a=matching[0];
+  const beneficiaryCurrency=(await entityOf(ctx.orgId,x.legalEntityId)).functionalCurrency;
+  const fx=await fxRate(refreshed.policy.currency,beneficiaryCurrency);
   if(currencyDigits(beneficiaryCurrency)!==2)throw new HttpError(409,'Beneficiary ledger currency is not supported by the two-decimal P6 GL.');
   const id=hashKey('P6ALLOCV|'+refreshed.runId+'|'+x.legalEntityId+'|'+x.costCenterId);
   const v:IcVoucher={id,agreementId:a.id,sourceReference:'ALLOC-'+refreshed.runId+'-'+x.costCenterId,
@@ -88,6 +89,14 @@ export async function executeVerifiedAllocation(ctx:OrgContext,preview:VerifiedP
   voucherWrites.push({path:root(ctx.orgId)+'/corp_ic_vouchers/'+id,exists:false,fields:v as unknown as Record<string,unknown>});
   voucherIds.push(id);
  }
+ // Guard source evidence globally and policy annual cap with optimistic Firestore CAS.
+ const policyDoc=await getDoc(poolPath(ctx.orgId,refreshed.policy.id));
+ if(!policyDoc||!policyDoc.updateTime||policyDoc.data.status!=='approved_policy')
+  throw new HttpError(409,'Approved allocation policy was changed or removed.');
+ const spent=Number(policyDoc.data.allocatedToDateMinor||0);
+ if(!Number.isSafeInteger(spent)||spent<0||spent+refreshed.source.amountMinor>refreshed.policy.annualCeilingMinor)
+  throw new HttpError(409,'Allocation policy annual ceiling has been exhausted.');
+ const claimPath=root(ctx.orgId)+'/corp_allocation_source_claims/'+hashKey(refreshed.policy.providerLegalEntityId+'|'+refreshed.source.journalId+'|'+refreshed.source.lineNo);
  const postInput:PostInput={leId:refreshed.policy.providerLegalEntityId,type:'REALLOC',date:refreshed.source.postingDate,
   docCurrency:refreshed.source.currency,fxRate:1,lines:rows,narrative:'Verified P6 allocation '+refreshed.policy.code,
   source:{kind:'corporate-allocation',id:refreshed.runId,ref:refreshed.source.journalId,route:'corp.allocation.execute'},
@@ -96,7 +105,10 @@ export async function executeVerifiedAllocation(ctx:OrgContext,preview:VerifiedP
  const outcome:AllocationExecution={id:refreshed.runId,policyId:refreshed.policy.id,source:refreshed.source,
   totalMinor:refreshed.source.amountMinor,currency:refreshed.source.currency,executedAt:nowIso(),
   approvedBy:ctx.uid,approvalRef,sameEntityJournalId:internalPosting?.id||'',voucherIds,status:'executed'};
- await commit([...(internalPosting?.writes||[]),...voucherWrites,{path:allocationRunPath(ctx.orgId,outcome.id),exists:false,
-  fields:outcome as unknown as Record<string,unknown>}]);
+ await commit([...(internalPosting?.writes||[]),...voucherWrites,
+  {path:poolPath(ctx.orgId,refreshed.policy.id),updateTime:policyDoc.updateTime,
+   mask:['allocatedToDateMinor','lastAllocationAt'],fields:{allocatedToDateMinor:spent+refreshed.source.amountMinor,lastAllocationAt:nowIso()}},
+  {path:claimPath,exists:false,fields:{runId:outcome.id,sourceJournalId:refreshed.source.journalId,sourceLineNo:refreshed.source.lineNo}},
+  {path:allocationRunPath(ctx.orgId,outcome.id),exists:false,fields:outcome as unknown as Record<string,unknown>}]);
  return outcome;
 }
