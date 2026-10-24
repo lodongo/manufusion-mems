@@ -9,7 +9,8 @@ import { covers, deskScope, lineKeyOf, ownersOf, type DeskScope } from './buyerG
 import { METHODS, getAuthority, resolveAuthority, type Authority } from './procurementPolicy';
 import { vendorsPath } from './vendors';
 import { receiveGoods, receiptPlan } from './finOps';
-import { checkChosenGl } from './finCore';
+import { checkChosenGl, commit, type Write } from './finCore';
+import {preparePoApprovalBudget,preparePoCancellationBudget,parsePoGatePolicy,PO_GATE_PATH} from './corporatePoBudget';
 
 // Purchase requisitions (PRQ + 9 digits) and purchase orders (PO + 9 digits).
 //   organizations/{org}/procurement_requisitions/{PRQ000000001}   one per recommended quotation
@@ -352,6 +353,8 @@ export interface Change {
     event?: string;
     note?: string;
     result?: Obj;
+    /** Additional budget CAS writes committed atomically alongside the PO mutation. */
+    atomicWrites?: Write[];
 }
 /** One change to a requisition or order under a lock, re-read, checked, added to its history and audited. */
 export async function mutate(ctx: OrgContext, col: 'req' | 'po', id: string, action: string, run: (d: Obj) => Promise<Change>) {
@@ -364,7 +367,10 @@ export async function mutate(ctx: OrgContext, col: 'req' | 'po', id: string, act
         const at = nowIso();
         const next: Obj = { ...d, ...c.patch, updatedAt: at, version: (Number(d.version) || 1) + 1 };
         if (c.event) next.history = [...objs(d.history), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: c.event, note: c.note ?? '', from: str(d.status), to: str(next.status) }];
-        await writeDoc(path, next);
+        if(c.atomicWrites){
+            if(!fresh.updateTime)throw new HttpError(409,'A current PO version is required for atomic budget approval.');
+            await commit([...c.atomicWrites,{path,fields:next,updateTime:fresh.updateTime}]);
+        }else await writeDoc(path, next);
         await record(ctx, `org.procurement.${col === 'req' ? 'requisition' : 'order'}.${action}`, id, `${c.label}${c.note ? `. ${c.note}` : ''}`.slice(0, 400));
         return { ok: true, id, status: str(next.status), ...(c.result ?? {}) } as { ok: boolean; id: string; status: string; done?: boolean; [k: string]: unknown };
     });
@@ -1083,7 +1089,8 @@ export const purchaseOrderRoutes = {
             const reason = reasonOf(ctx.body);
             return mutate(ctx, 'req', doc.id, 'cancel', async (d) => {
                 if (!['draft', 'returned', 'confirmed', 'suspended'].includes(str(d.status))) throw new HttpError(409, 'This requisition can no longer be cancelled.');
-                return { patch: { status: 'cancelled', cancelReason: reason }, event: 'cancelled', note: reason, label: 'Cancelled' };
+                const budget=await preparePoCancellationBudget(ctx,doc.id,d,nowIso());
+                return { patch: { status: 'cancelled', cancelReason: reason,...(budget?.summary||{}) },atomicWrites:budget?.writes,event: 'cancelled', note: reason, label: 'Cancelled' };
             });
         }),
     ],
@@ -1567,6 +1574,8 @@ export const purchaseOrderRoutes = {
                 if (!['open', 'sent', 'partial'].includes(str(d.status))) throw new HttpError(409, 'Only an approved order can be amended. A draft is edited directly; a submitted order waits for its decision.');
                 if ((await versionsOf(ctx.orgId, baseOf(doc.id))).some((p) => verOf(p.id) > verOf(doc.id) && inForce(str(p.data.status)))) throw new HttpError(409, 'A newer version of this order is already open.');
                 if (objs(d.receipts).some((r) => str(r.status) === 'submitted')) throw new HttpError(409, 'A service receipt is waiting for acceptance. Decide it first.');
+                if(parsePoGatePolicy((await getDoc(PO_GATE_PATH(ctx.orgId)))?.data||null))
+                    throw new HttpError(409,'PO amendment in budget pilot requires verified budget/actual transfer integration. It is blocked rather than creating a new version.');
                 newId = await forkVersion(ctx, d, doc.id, 'amend', reason);
                 return { patch: { nextVersion: newId }, event: 'amendment started', note: `${newId}: ${reason}`, label: `Amendment ${newId} started` };
             });
@@ -1712,7 +1721,9 @@ export const purchaseOrderRoutes = {
                         }
                     }
                 }
-                return { patch, event: `approved ${cur.level} (${cur.positionTitle})`, note, label: done ? 'Fully approved' : `Approved level ${cur.level}`, result: { done } };
+                const budget=done?await preparePoApprovalBudget(ctx,doc.id,d,at):null;
+                if(budget)Object.assign(patch,budget.summary);
+                return { patch,atomicWrites:budget?.writes,event: `approved ${cur.level} (${cur.positionTitle})`, note, label: done ? 'Fully approved' : `Approved level ${cur.level}`, result: { done } };
             });
             if (result.done === true) {
                 if (prevId) {
