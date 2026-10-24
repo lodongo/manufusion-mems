@@ -71,7 +71,6 @@ export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
   {loading&&<p role="status" className="text-sm text-muted">Loading corporate defaults…</p>}
   {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
   {notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{notice}</p>}
-  {section==='funding'&&<CorporateFinancialHomePage canEdit={canEdit}/>}
   {data&&<>
    <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
     {[
@@ -88,6 +87,7 @@ export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
      <button key={key} type="button" onClick={()=>{setSection(key);setExpanded('')}}
       className={`min-h-11 rounded-lg px-2 text-xs font-semibold ${section===key?'bg-brand/10 text-brand':'text-muted'}`}>{title}</button>)}
    </div>
+   {section==='funding'&&<CorporateFinancialHomePage canEdit={canEdit}/>}
    {section==='office'&&<section className="space-y-3 rounded-2xl border border-line bg-panel p-4">
     <div className="flex items-center gap-2"><Building2 className="h-5 w-5 text-brand"/><h3 className="font-semibold">Corporate Office</h3></div>
     <p className="text-xs text-muted">The Corporate Office is a management branch. It is not itself a new company, employing legal entity, or financial cost centre.</p>
@@ -204,14 +204,14 @@ export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
      </div>}
     </section>)}
    </div>}
-   <section className="space-y-2 rounded-xl border border-line bg-panel p-3">
+   {section!=='funding'&&<section className="space-y-2 rounded-xl border border-line bg-panel p-3">
     <div className="flex items-start gap-2"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand"/>
      <p className="text-xs text-muted">Governance scope is a policy reference only. It grants no new user permissions, workflow approvals, employment contracts or cost allocations. Those require their own governed configuration.</p></div>
     {canEdit&&<button type="button" disabled={busy||loading} onClick={()=>void save()}
      className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 font-semibold text-onbrand disabled:opacity-40">
      <Save className="h-5 w-5"/>Save Corporate Governance configuration
     </button>}
-   </section>
+   </section>}
   </>}
  </div>;
 }
