@@ -765,7 +765,14 @@ export async function post(ctx: OrgContext, input: PostInput): Promise<Posted> {
     throw new HttpError(409, 'The ledger is busy. Please try again.');
 }
 
-async function postOnce(ctx: OrgContext, input: PostInput, keyId: string): Promise<Posted> {
+/** Build the same validated journal/period/GL/balance CAS writes without committing.
+ * A dual-party posting MUST combine both preparations in one Firestore commit.
+ * Journal counters may have gaps after a failed atomic commit, but no half posting.
+ */
+export async function preparePosting(ctx: OrgContext, input: PostInput): Promise<PreparedPosting> {
+    const keyId=hashKey(input.sourceKey);
+    if(await getDoc(P(ctx.orgId).postkey(keyId)))
+      throw new HttpError(409,'This source has already posted. No duplicate journal is permitted.');
     const orgId = ctx.orgId;
     const paths = P(orgId);
     const [entity, years, chart, units] = await Promise.all([entityOf(orgId, input.leId), yearsOf(orgId, input.leId), chartOf(orgId, input.leId), unitsOf(orgId)]);
@@ -910,14 +917,23 @@ async function postOnce(ctx: OrgContext, input: PostInput, keyId: string): Promi
     }
     for (const x of input.extra ?? []) writes.push(x);
     if(input.extraForJournal)writes.push(...await input.extraForJournal(id));
+    return {id,fy:year.fy,period:period.no,dr,currency:entity.functionalCurrency,writes};
+}
+export interface PreparedPosting {
+    id:string;fy:number;period:number;dr:number;currency:string;writes:Write[];
+}
+async function postOnce(ctx: OrgContext, input: PostInput, keyId: string): Promise<Posted> {
+    const prepared=await preparePosting(ctx,input);
+    const {id,fy,period,dr,currency,writes}=prepared;
+    if(hashKey(input.sourceKey)!==keyId)throw new HttpError(409,'Source idempotency key changed.');
     await commit(writes);
     try {
-        await record(ctx, 'org.finance.journal.post', id, `${TXN_LABEL[input.type] ?? input.type}: ${entity.functionalCurrency} ${(dr / 100).toFixed(2)}; ${input.source.kind} ${input.source.id}${input.approvalRef ? `; approval ${input.approvalRef}` : ''}`.slice(0, 400));
+        await record(ctx, 'org.finance.journal.post', id, `${TXN_LABEL[input.type] ?? input.type}: ${currency} ${(dr / 100).toFixed(2)}; ${input.source.kind} ${input.source.id}${input.approvalRef ? `; approval ${input.approvalRef}` : ''}`.slice(0, 400));
     } catch(e) {
         if(!input.extraForJournal)throw e;
         console.error('Atomic GL+PO journal committed but secondary audit logging requires reconciliation',id,e instanceof Error?e.message:'unknown');
     }
-    return { id, reused: false, fy: year.fy, period: period.no };
+    return {id, reused: false, fy, period};
 }
 
 // ----- Stock valuation -----
