@@ -33,3 +33,20 @@ The pilot is DEFAULT OFF and cannot be activated by merely setting a Boolean; ru
 - No budget enforcement for uncovered transaction flows. Do not claim global budget control or company-wide availability until every PR/PO/WO/payroll/expense source is connected.
 - Finance owner validates GL actuals against reservation, fiscal periods, FX, exception provenance and reconciliation.
 - Deploy and activate only in isolated development with documented tests; production remains untouched.
+
+## P5 service acceptance and actual spending integration (implementation update)
+- New `backend/corporateServiceBudget.ts`: receipt-ID-keyed actual expense recognition against the PO source reservation, with partial and final acceptance handling. Strictly maintains `budget actual + outstanding commitment` conservation.
+- Service cost is derived from the **same approved service receipt debit lines** used by the existing `SVC_ACCEPT` Finance posting. The recognized cost and released commitment are in legal-entity functional currency minor units. GL expense lines are validated using existing Finance chart, cost-centre and period rules.
+- `backend/finCore.ts` now accepts a deferred `extraForJournal(journalId)` callback. For a budget-controlled service receipt, `backend/finOps.ts` passes the PO receipt update and both budget CAS writes into **the very same Firestore commit** as the immutable GL journal, year preconditions, balance updates and posting idempotency key. A failure rejects the entire operation; it does not mark the receipt accepted.
+- The PO source receipt records its GL journal ID, cumulative actual minor units and outstanding reserved amount. A receipt cannot be double-consumed. Full service completion releases unused FX/rounding residue; partial acceptance retains the unconsumed reservation.
+- Cancelled **purchase orders**, not cancelled purchase requisitions, release the PO reservation using the existing atomic PO mutation. This corrects an earlier location error in the budget pilot hook.
+- The pilot is limited to verified P&L expense service GL codes and to currencies with two decimal places because the existing Finance GL journal and balance implementation currently stores cents, not generalized minor units.
+- Finance service recognition must occur in the same open fiscal year as the PO reservation until a governed carry-forward facility exists. Cross-year accruals, PO amendments, over-reservation, unsupported currencies and non-expense GL mappings fail closed.
+- Strict source-linked GL and PO journaling records include the transaction reference and journal ID atomically. Separate best-effort activity logging failure is logged for reconciliation rather than misleading a user that the completed atomic journal failed.
+
+## Remaining operational release controls
+**This code is still a disabled-by-default pilot.** It is not an active spending-control configuration and no tenant can activate it without a verified independent Finance FCR. The tenant approval/activation workflow is not implemented.
+
+Before enabling: authenticated Firestore transaction/concurrency tests across two tenants; reconciliation of existing service invoices and posted Finance expenses; source FX changes; accrued services spanning fiscal periods; service PO amendments/returns; partial cancellations, credit notes, reverse entries; tax-inclusive/nonrecoverable expense determination; accounts-payable invoice lifecycle and supplier duplicate invoice protection; broader material/asset/work-order/payroll commitments.
+
+Source-linked strict service acceptance is implemented only when the approved service PO contains `budgetControlled:true`. Existing unrelated accounting handlers and non-pilot orders are not changed to enforce this budget gate.
