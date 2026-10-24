@@ -25,6 +25,7 @@ import { requireCombinedSodAcknowledgement } from './permissionPolicy';
 import { detectImage } from './branding';
 import { ID_RE, childrenOf, col, designOf, getNode, managerContext, nodeOut, record } from './structure';
 import { matchingRoleNodes, employmentCoverage, type RoleStaffingRow, type StaffingUnit } from './positionStaffing';
+import {getEducationConfig} from './hrEducationConfig';
 
 // Organization roles (job positions such as CEO or Manufacturing Manager).
 // These are NOT system access roles: they describe the org chart, not what a user can do in MEMS.
@@ -74,6 +75,7 @@ function positionOut(doc: Doc) {
         defaultNodeId: str(d.defaultNodeId),
         securityRoles: ['org_user', ...(Array.isArray(d.securityRoles) ? (d.securityRoles as Plain[]).map(str).filter(Boolean) : []).filter(id => id !== 'org_user')],
         coreSkills: Array.isArray(d.coreSkills) ? (d.coreSkills as Plain[]).map(str).filter(Boolean) : [],
+        jobGradeByLegalEntity: isObj(d.jobGradeByLegalEntity) ? Object.fromEntries(Object.entries(d.jobGradeByLegalEntity).map(([id,code])=>[id,str(code)]).filter(([,code])=>!!code)) : {},
         staffingPlan: (Array.isArray(d.staffingPlan) ? d.staffingPlan : []).filter(isObj).map((item) => ({
             nodeId: str(item.nodeId), enabled: item.enabled === true, required: Number(item.required) || 0,
         })),
@@ -233,6 +235,16 @@ export const positionRoutes = {
             return { updated, total: positions.length };
         }),
     ],
+    'POST /api/org/positions/job-grades': [
+        orgRoute('org.positions.job_grades','ADM.structure',async(ctx)=>{
+          const entityDocs=(await listDocs(col(ctx.orgId))).filter(d=>str(d.data.level)==='legal_entity'&&str(d.data.status)!=='inactive');
+          const entities=await Promise.all(entityDocs.map(async d=>({
+            id:d.id,name:str(d.data.name),grades:(await getEducationConfig(ctx.orgId,d.id)).jobGrades
+              .filter(x=>x.enabled).map(x=>({code:x.code,rank:x.rank,title:x.title})),
+          })));
+          return {entities};
+        }),
+    ],
     'POST /api/org/positions/save': [
         orgRoute('org.positions.save', 'ADM.structure', async (ctx) => {
             const title = text(ctx.body, 'title', 2, 80, 'Enter the role title (2 to 80 characters).');
@@ -259,6 +271,23 @@ export const positionRoutes = {
             const positions = await allPositions(ctx.orgId);
             const nodeDocs = await listDocs(col(ctx.orgId));
             const nodes = nodeDocs.map(nodeOut).filter(n => SCOPE_LEVELS.includes(n.level));
+            const rawGrades=ctx.body.jobGradeByLegalEntity;
+            if(rawGrades!==undefined&&!isObj(rawGrades))throw new HttpError(400,'Job grade assignments must be mapped by legal entity.');
+            const supplied=isObj(rawGrades)?rawGrades:{};
+            const entityNodes=nodeDocs.filter(d=>str(d.data.level)==='legal_entity'&&str(d.data.status)!=='inactive');
+            const entityIds=new Set(entityNodes.map(d=>d.id));
+            const jobGradeByLegalEntity:Record<string,string>={};
+            if(Object.keys(supplied).length>entityIds.size)
+                throw new HttpError(400,'Job grades may be mapped only to this organization’s legal entities.');
+            for(const [legalEntityId,value] of Object.entries(supplied)){
+                const grade=str(value);
+                if(!entityIds.has(legalEntityId))throw new HttpError(400,'Unknown legal entity in role job grades.');
+                if(!grade)continue;
+                const conf=await getEducationConfig(ctx.orgId,legalEntityId);
+                if(!conf.jobGrades.some(g=>g.enabled&&g.code===grade))
+                    throw new HttpError(400,'Choose an enabled job grade configured for the selected legal entity.');
+                jobGradeByLegalEntity[legalEntityId]=grade;
+            }
             const staffingPlan = validateStaffingPlan(ctx.body.staffingPlan, operatingLevel, nodes);
             const matchedNodes = matchingRoleNodes(operatingLevel, nodes);
             if (staffingPlan.length && staffingPlan.length !== matchedNodes.length) {
@@ -314,7 +343,7 @@ export const positionRoutes = {
                     const mine = (Array.isArray(ctx.me.data.assignments) ? (ctx.me.data.assignments as Plain[]) : []).filter(isObj).some((a) => str(a.positionCode) === code);
                     if (mine && ctx.role !== 'org_super_admin') throw new HttpError(403, 'You cannot change the security roles of a job role you hold.');
                 }
-                await updateFields(`${posCol(ctx.orgId)}/${code}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, staffingPlan, updatedAt: now, updatedBy: ctx.uid });
+                await updateFields(`${posCol(ctx.orgId)}/${code}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, jobGradeByLegalEntity, staffingPlan, updatedAt: now, updatedBy: ctx.uid });
                 await syncRoleAtSites(ctx.orgId, code, operatingLevel, staffingPlan, nodeDocs.map(nodeOut), ctx.uid);
                 await record(ctx, 'org.position.update', `${code} ${title}`, `${added.length || removed.length ? `Security roles added: ${added.join(', ') || 'none'}; removed: ${removed.join(', ') || 'none'}` : ''} ${positionSodNote}`.trim());
                 if (added.length || removed.length) clearAccessCache(ctx.orgId);
@@ -325,7 +354,7 @@ export const positionRoutes = {
                 const n = await nextOrgCounter(ctx.orgId, 'positionSeq');
                 if (n > 999999) throw new HttpError(400, 'Your organization has reached 999999 job roles.');
                 const newCode = `ROL_${String(n).padStart(6, '0')}`;
-                if (await writeDoc(`${posCol(ctx.orgId)}/${newCode}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, staffingPlan, createdAt: now, createdBy: ctx.uid, updatedAt: now }, { exists: false })) {
+                if (await writeDoc(`${posCol(ctx.orgId)}/${newCode}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, jobGradeByLegalEntity, staffingPlan, createdAt: now, createdBy: ctx.uid, updatedAt: now }, { exists: false })) {
                     await syncRoleAtSites(ctx.orgId, newCode, operatingLevel, staffingPlan, nodeDocs.map(nodeOut), ctx.uid);
                     if (securityRoles.length) clearAccessCache(ctx.orgId);
                     await record(ctx, 'org.position.create', `${newCode} ${title}`, `${parentCode ? `Reports to ${parentCode}` : 'Top role'} ${positionSodNote}`.trim());
