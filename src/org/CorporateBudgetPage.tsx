@@ -2,14 +2,17 @@ import {useEffect,useState} from 'react';
 import {Banknote,FileCheck2,Plus,Save,ShieldCheck,ArrowLeftRight} from 'lucide-react';
 import {callBackend} from '../lib/backend';
 import {SelectField} from '../components/ui';
-import {BUDGET_CLASSES,FUNDING_METHODS,type BudgetPlan,type FundingAgreement} from '../../backend/corporateBudget';
+import {BUDGET_CLASSES,FUNDING_METHODS,currencyDigits,majorFromMinor,type BudgetPlan,type FundingAgreement} from '../../backend/corporateBudget';
 
 type Entity={id:string;code:string;name:string};
 type Centre={id:string;code:string;name:string};
 type InputLine={costCenterId:string;category:string;amount:number};
 const field='min-h-11 w-full min-w-0 rounded-xl border border-line bg-page px-3 text-base text-ink';
 const btn='min-h-11 rounded-xl border border-line bg-panel px-3 text-sm font-semibold text-ink disabled:opacity-40';
-const currencyFormat=(amount:number,currency:string)=>currency+' '+new Intl.NumberFormat('en',{minimumFractionDigits:2,maximumFractionDigits:2}).format(amount);
+const currencyFormat=(amount:number,currency:string)=>{
+ let digits=2;try{digits=currencyDigits(currency)}catch{}
+ return currency+' '+new Intl.NumberFormat('en',{minimumFractionDigits:digits,maximumFractionDigits:digits}).format(amount);
+};
 export default function CorporateBudgetPage({canEdit}:{canEdit:boolean}){
  const [entities,setEntities]=useState<Entity[]>([]),[centres,setCentres]=useState<Centre[]>([]);
  const [leId,setLeId]=useState(''),[fy,setFy]=useState(new Date().getFullYear());
@@ -70,7 +73,7 @@ export default function CorporateBudgetPage({canEdit}:{canEdit:boolean}){
    {BUDGET_CLASSES.map(c=><option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
   </SelectField>;
  const amountField=(label:string,value:number,cb:(v:number)=>void)=>
-  <label className="block text-sm text-muted">{label}<input className={field} type="number" min="0" step="0.01" disabled={!canEdit}
+  <label className="block text-sm text-muted">{label}<input className={field} type="number" min="0" step="any" disabled={!canEdit}
     value={value} onChange={e=>cb(Number(e.target.value))}/></label>;
  const reasonField=<label className="block text-sm text-muted">Business reason (mandatory, at least 10 characters)
    <textarea className={field+' min-h-20 p-3'} value={reason} disabled={!canEdit} onChange={e=>setReason(e.target.value)} maxLength={300}/>
@@ -103,8 +106,8 @@ export default function CorporateBudgetPage({canEdit}:{canEdit:boolean}){
      <p className="text-xs text-muted">Approved plan · Version {plan.version} · Reference {plan.approvalRef}</p>
      {plan.lines.map(line=><div key={line.costCenterId+'|'+line.category} className="rounded-lg border border-line p-3">
        <p className="text-sm font-semibold">{centres.find(c=>c.id===line.costCenterId)?.name||line.costCenterId} · {line.category}</p>
-       <p className="text-xs text-muted">Approved {currencyFormat(line.approvedMinor/100,currency)} · Adjusted {currencyFormat(line.adjustmentsMinor/100,currency)}</p>
-       <p className="text-sm">Available {currencyFormat((line.approvedMinor+line.adjustmentsMinor-line.committedMinor-line.actualMinor)/100,currency)}</p>
+       <p className="text-xs text-muted">Approved {currencyFormat(majorFromMinor(line.approvedMinor,currency),currency)} · Adjusted {currencyFormat(majorFromMinor(line.adjustmentsMinor,currency),currency)}</p>
+       <p className="text-sm">Available {currencyFormat(majorFromMinor(line.approvedMinor+line.adjustmentsMinor-line.committedMinor-line.actualMinor,currency),currency)}</p>
      </div>)}
      {canEdit&&<section className="rounded-lg border border-line bg-page p-3 space-y-3">
        <h5 className="font-semibold">Governed budget revision</h5>
@@ -112,7 +115,7 @@ export default function CorporateBudgetPage({canEdit}:{canEdit:boolean}){
        {centreSelect('rev-cc',revision.costCenterId,v=>setRevision(a=>({...a,costCenterId:v})),'Revised cost centre')}
        {classSelect('rev-class',revision.category,v=>setRevision(a=>({...a,category:v})),'Revised budget class')}
        <label className="block text-sm text-muted">Revision (+ increase / − decrease), {currency}
-        <input className={field} type="number" step="0.01" value={revision.delta}
+        <input className={field} type="number" step="any" value={revision.delta}
           disabled={!canEdit} onChange={e=>setRevision(a=>({...a,delta:Number(e.target.value)}))}/>
        </label>
        {reasonField}
@@ -177,7 +180,7 @@ export default function CorporateBudgetPage({canEdit}:{canEdit:boolean}){
        catch(e){setError(errorOf(e))}
      }}>Simulate (no reservation)</button>
      {simulation&&<p className="rounded-lg border border-line p-3 text-sm">
-       Result: <strong>{String(simulation.status)}</strong> · Available {currencyFormat(Number(simulation.availableMinor||0)/100,currency)} · Shortfall {currencyFormat(Number(simulation.shortfallMinor||0)/100,currency)} · Advisory only
+       Result: <strong>{String(simulation.status)}</strong> · Available {currencyFormat(majorFromMinor(Number(simulation.availableMinor||0),currency),currency)} · Shortfall {currencyFormat(majorFromMinor(Number(simulation.shortfallMinor||0),currency),currency)} · Advisory only
       </p>}
     </div>
    </>}
@@ -211,7 +214,7 @@ export default function CorporateBudgetPage({canEdit}:{canEdit:boolean}){
    {agreements.length===0&&<p className="text-sm text-muted">No approved funding policy records for this legal entity.</p>}
    {agreements.map(ag=><div key={ag.id} className="rounded-lg border border-line p-3 space-y-1">
     <p className="text-sm font-semibold">{ag.agreementReference} · {ag.method}</p>
-    <p className="text-xs text-muted">{ag.providerLegalEntityId} → {ag.beneficiaryLegalEntityId} · {currencyFormat(ag.limitMinor/100,ag.currency)}</p>
+    <p className="text-xs text-muted">{ag.providerLegalEntityId} → {ag.beneficiaryLegalEntityId} · {currencyFormat(majorFromMinor(ag.limitMinor,ag.currency),ag.currency)}</p>
     <p className="text-xs text-muted">Status: {ag.status.replaceAll('_',' ')} · no cash posted</p>
     {canEdit&&ag.status==='awaiting_counterparty'&&ag.beneficiaryLegalEntityId===leId&&
       <button type="button" className={btn} disabled={busy}
