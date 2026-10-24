@@ -11,9 +11,16 @@ export const PAY_CATEGORIES:PayCategory[]=[
 ];
 export type PayBase='none'|'basic'|'gross'|'taxable'|'pensionable'|'net'|'hourly'|'daily'|'units'|'eligibleAmount';
 export type PayMethod='fixed'|'percent'|'progressive'|'multiplier'|'formula'|'days'|'manual';
+export type LeaveGradeEntitlement={eligible:boolean;daysPerYear:number;accrueMonthly:boolean;unit:'working_days'|'calendar_days'|'months';carryForwardDays:number;requiresApprovedPlan:boolean};
+export const defaultLeaveEntitlement=(mandatory:boolean,amount:number,code:string):LeaveGradeEntitlement=>({
+ eligible:mandatory,daysPerYear:amount,accrueMonthly:code==='LEAVE_ANNUAL',
+ unit:code==='LEAVE_MATERNITY'?'months':code==='LEAVE_ANNUAL'?'working_days':'calendar_days',
+ carryForwardDays:0,requiresApprovedPlan:true,
+});
 export type PayItem={
  code:string;name:string;description:string;category:PayCategory;
  mandatory:boolean;enabled:boolean;gradeCodes:string[];
+ leaveEntitlements?:Record<string,LeaveGradeEntitlement>;
  amount:number;rate:number;minimum:number;maximum:number;currency:string;
  method:PayMethod;base:PayBase;employerRate:number;employerAmount:number;
  effectiveFrom:string;effectiveTo:string;
@@ -121,7 +128,7 @@ export function kenyaCompensationTemplate():PayConfig{
   legal('leave','LEAVE_SICK_HALF','Sick leave at half pay','Seven days half pay after the full-pay period.',{
     method:'days',amount:7,reference:sources.employment,options:{paidFraction:0.5,qualificationMonths:2}}),
   legal('leave','LEAVE_MATERNITY','Maternity leave','Three months maternity leave with full pay under the Employment Act.',{
-    method:'manual',reference:sources.employment,options:{durationMonths:3,paid:true}}),
+    method:'manual',amount:3,reference:sources.employment,options:{durationMonths:3,paid:true}}),
   legal('leave','LEAVE_PATERNITY','Paternity leave','Two weeks paternity leave with full pay.',{
     method:'days',amount:14,reference:sources.employment,options:{calendarWeeks:2,paid:true}}),
   ...[
@@ -265,8 +272,29 @@ function normalizeItem(x:unknown,grades:Set<string>,countryCode:string,currency:
   return {upTo:v.upTo===null?null:n(v.upTo,'band ceiling'),rate:n(v.rate,'band rate')};
  }):[];
  if(bands.length>12||bands.some(b=>b.rate>1))throw new HttpError(400,'Tax rates must be decimal fractions from 0 to 1.');
+ let leaveEntitlements:Record<string,LeaveGradeEntitlement>|undefined;
+ if(category==='leave'){
+   const raw=isObj(x.leaveEntitlements)?x.leaveEntitlements:{};
+   if(Object.keys(raw).some(g=>!grades.has(g)))throw new HttpError(400,'Leave entitlement references an unknown job grade.');
+   leaveEntitlements={};
+   for(const grade of grades){
+     const record=isObj(raw[grade])?raw[grade]:{};
+     const defaults=defaultLeaveEntitlement(stat||x.mandatory===true,n(x.amount,'annual entitlement'),code);
+     const eligible=record.eligible===undefined?defaults.eligible:record.eligible===true;
+     const daysPerYear=record.daysPerYear===undefined?defaults.daysPerYear:n(record.daysPerYear,'annual leave entitlement');
+     const accrueMonthly=record.accrueMonthly===undefined?defaults.accrueMonthly:record.accrueMonthly===true;
+     const unit=record.unit==='months'||record.unit==='calendar_days'||record.unit==='working_days'?record.unit:defaults.unit;
+     const carryForwardDays=record.carryForwardDays===undefined?0:n(record.carryForwardDays,'carry forward days');
+     if(daysPerYear>366||carryForwardDays>366)throw new HttpError(400,'Leave entitlement is outside the supported annual range.');
+     if(stat&&countryCode==='KE'&&category==='leave'&&!eligible)
+       throw new HttpError(400,'Mandatory Kenya leave cannot be made ineligible by job grade.');
+     if(code==='LEAVE_ANNUAL'&&countryCode==='KE'&&daysPerYear<21)
+       throw new HttpError(400,'Annual leave must not be below the Kenya statutory 21 working days.');
+     leaveEntitlements[grade]={eligible,daysPerYear,accrueMonthly,unit,carryForwardDays,requiresApprovedPlan:true};
+   }
+ }
  const item:PayItem={code,name,category,description:sc(x.description,600),
-  mandatory:stat||x.mandatory===true,enabled:stat||x.enabled!==false,gradeCodes,
+  mandatory:stat||x.mandatory===true,enabled:stat||x.enabled!==false,gradeCodes,leaveEntitlements,
   amount:n(x.amount,'amount'),rate:n(x.rate,'rate'),minimum:n(x.minimum,'minimum'),
   maximum:n(x.maximum,'maximum'),employerRate:n(x.employerRate,'employer rate'),
   employerAmount:n(x.employerAmount,'employer amount'),currency,
