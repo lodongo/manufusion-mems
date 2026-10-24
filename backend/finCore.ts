@@ -1001,6 +1001,8 @@ export interface Handler {
     approvePerm: string;
     /** Value-bearing requests are approved level by level under the finance chart of authority. */
     valued?: boolean;
+    /** Handler commits its final FCR status/history atomically with immutable financial journals. */
+    atomicFinalization?: boolean;
     apply: (ctx: OrgContext, req: Obj, id: string) => Promise<Obj>;
 }
 export const HANDLERS: Record<string, Handler> = {};
