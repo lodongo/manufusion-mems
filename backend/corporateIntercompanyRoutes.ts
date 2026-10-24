@@ -413,9 +413,10 @@ export const corporateIntercompanyRoutes={
   if(!safeId(id)||!doc)throw new HttpError(404,'Intercompany voucher not found.');
   const v=doc.data as unknown as IcVoucher;
   const {units,scope}=await (async()=>({units:await unitsOf(ctx.orgId),scope:await scopeOf(ctx)}))();
-  if(![v.providerLegalEntityId,v.beneficiaryLegalEntityId].some(le=>
-   ['FIN.view','FIN.setup.manage','FIN.setup.approve','FIN.journal.view'].some(p=>permAt(ctx,p,le,units,scope))))
-   throw new HttpError(403,'Finance access to a voucher party is required.');
+  for(const le of [v.providerLegalEntityId,v.beneficiaryLegalEntityId]){
+   if(!['FIN.view','FIN.setup.manage','FIN.setup.approve','FIN.journal.view'].some(p=>permAt(ctx,p,le,units,scope)))
+    throw new HttpError(403,'Finance access to both voucher parties is required for bilateral GL preview.');
+  }
   const aDoc=await getDoc(agreementPath(ctx.orgId,v.agreementId));
   if(!aDoc)throw new HttpError(409,'Intercompany contract missing.');
   const a=aDoc.data as unknown as IcAgreement;
@@ -460,7 +461,10 @@ export const corporateIntercompanyRoutes={
  'POST /api/org/corporate/ic/posted-reconciliation':[orgRoute('org.corporate.ic.posted-reconciliation','FIN.view',async ctx=>{
   const legalEntityId=clean(ctx.body.legalEntityId,128);
   await canRead(ctx,legalEntityId);
-  return postedIcReport(ctx.orgId,legalEntityId);
+  const report=await postedIcReport(ctx.orgId,legalEntityId);
+  const parties=new Set(report.rows.flatMap(row=>[row.providerLegalEntityId,row.beneficiaryLegalEntityId]));
+  for(const party of parties)await canRead(ctx,party);
+  return report;
  })],
  'POST /api/org/corporate/ic/reconciliation':[orgRoute('org.corporate.ic.reconciliation','FIN.view',async ctx=>{
   const legalEntityId=clean(ctx.body.legalEntityId,128);await canRead(ctx,legalEntityId);
