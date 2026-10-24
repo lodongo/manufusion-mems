@@ -222,7 +222,7 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
 
 // ===== Service acceptance =====
 
-export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string; receiptId: string; invoiceNo: string; lines: Array<{ no: number; qty: number; amount: number }>; strictBudget?: { extraForJournal:(journalId:string,accepted:Array<{costCenterId:string;amountMinor:number}>,leId:string,fxRate:number,leCurrency:string)=>Promise<Write[]> } }): Promise<{ journals: string[]; note: string }> {
+export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string; receiptId: string; invoiceNo: string; lines: Array<{ no: number; qty: number; amount: number }>; strictBudget?: {postingDate:string;extraForJournal:(journalId:string,accepted:Array<{costCenterId:string;amountMinor:number}>,leId:string,fxRate:number,leCurrency:string)=>Promise<Write[]> } }): Promise<{ journals: string[]; note: string }> {
     const units = await unitsOf(ctx.orgId);
     const cache = new Map<string, LeInfo>();
     const byLe = new Map<string, Array<{ l: Obj; amount: number; info: LeInfo }>>();
@@ -257,6 +257,7 @@ export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string;
         const p = await post(ctx, {
             leId,
             type: 'SVC_ACCEPT',
+            ...(a.strictBudget?{date:a.strictBudget.postingDate}:{}),
             docCurrency: str(a.po.currency),
             fxRate: rate,
             lines,
