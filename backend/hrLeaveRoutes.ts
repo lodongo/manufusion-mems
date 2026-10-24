@@ -202,7 +202,7 @@ export const hrLeaveRoutes={
      }
      if(cache.get(uid)){
        // Exclude sensitive notes and reasons. Planning needs dates, type and stage only.
-       items.push(record(d,false));
+       items.push({...record(d,false),decisionNote:''});
      }
    }
    items.sort((a,b)=>a.start.localeCompare(b.start)||a.employeeName.localeCompare(b.employeeName));
