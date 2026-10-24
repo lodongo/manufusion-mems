@@ -1,5 +1,6 @@
 import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc} from './core';
 import {orgRoute,type OrgContext} from './guards';
+import {withLock} from './finCore';
 
 export type CorporateFundingMethod='corporate_budget'|'shareholder_funding'|'service_recharge'|'hybrid';
 export type CorporateCostClass='shareholder'|'shared_service'|'direct_service'|'mixed';
@@ -103,6 +104,8 @@ export function validateCorporateFinancialHome(
   const crossCompany=allocations.some(a=>a.legalEntityId!==entity&&a.percentage>0);
   if(costClass==='shareholder'&&(crossCompany||fundingMethod==='service_recharge'))
    throw new HttpError(400,'Shareholder-only governance activity cannot be recharged to operating subsidiaries.');
+  if(costClass==='mixed'&&crossCompany)
+   throw new HttpError(400,'Mixed shareholder and service activities must have separated, evidenced cost pools before intercompany allocation.');
   if(['corporate_budget','shareholder_funding'].includes(fundingMethod)&&crossCompany)
    throw new HttpError(400,'Corporate-budget-funded costs must remain in the legal employing entity. Choose service recharge or hybrid instead.');
   const agreement=short(value.serviceAgreementRef,180),evidence=short(value.allocationEvidence,300);
@@ -142,14 +145,16 @@ export const corporateFinanceRoutes={
  'POST /api/org/corporate/finance/save':[orgRoute('org.corporate.finance.save','ADM.structure',async ctx=>{
   const refs=await references(ctx);
   const config=validateCorporateFinancialHome(ctx.body.config,refs);
-  const prior=await getDoc(key(ctx.orgId));
-  const oldVersion=Number(prior?.data.version||0);
-  if(Number(ctx.body.expectedVersion)!==oldVersion)
-   throw new HttpError(409,'Corporate financial home was updated elsewhere. Reload before saving.');
-  const version=oldVersion+1;
-  const saved:CorporateFinancialHome={...config,version,updatedAt:nowIso(),updatedBy:ctx.uid};
-  await writeDoc(key(ctx.orgId),saved);
-  return {ok:true,config:saved,status:'draft',
-   warning:'This is a governed planning configuration, not payroll allocation, an approved budget or an intercompany invoice.'};
+  return withLock(ctx.orgId,'corporate_finance_home',async()=>{
+   const prior=await getDoc(key(ctx.orgId));
+   const oldVersion=Number(prior?.data.version||0);
+   if(Number(ctx.body.expectedVersion)!==oldVersion)
+    throw new HttpError(409,'Corporate financial home was updated elsewhere. Reload before saving.');
+   const version=oldVersion+1;
+   const saved:CorporateFinancialHome={...config,version,updatedAt:nowIso(),updatedBy:ctx.uid};
+   await writeDoc(key(ctx.orgId),saved);
+   return {ok:true,config:saved,status:'draft',
+    warning:'This is a governed planning configuration, not payroll allocation, an approved budget or an intercompany invoice.'};
+  });
  })],
 };
