@@ -3,10 +3,10 @@
  * Uses existing Finance maker/checker (FCR requests, CoA bands, SoD).
  * No API here posts GL, commits procurement spend, transfers cash or changes payroll.
  */
-import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc,type Fields} from './core';
+import {HttpError,getDoc,listDocs,nowIso,str,writeDoc,type Fields} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {
-  commit,createRequest,entityOf,leOf,needEntity,permAt,reasonOf,registerHandler,
+  commit,createRequest,entityOf,hashKey,leOf,needEntity,permAt,reasonOf,registerHandler,
   requireFinance,scopeOf,unitsOf,withLock,yearsOf,today,
   type Obj,type Unit,
 } from './finCore';
@@ -170,7 +170,6 @@ registerHandler('corp.funding.agreement',{
  apply:async(ctx,req,id)=>{
   const p=getObject(req.payload),providerLegalEntityId=clean(req.leId,128);
   const beneficiaryLegalEntityId=clean(p.beneficiaryLegalEntityId,128);
-  await setup(ctx,providerLegalEntityId,'FIN.setup.approve');
   const {units}=await setup(ctx,providerLegalEntityId,'FIN.setup.approve');
   const beneficiary=units.get(beneficiaryLegalEntityId);
   if(!beneficiary||beneficiary.level!=='legal_entity'||beneficiary.status==='inactive')
@@ -314,7 +313,7 @@ export const corporateBudgetRoutes={
    if(!beneficiary||beneficiary.level!=='legal_entity'||beneficiary.status==='inactive')
     throw new HttpError(400,'Choose a registered and active beneficiary legal entity.');
    const ag:FundingAgreement={
-    id:randomId(10),providerLegalEntityId:leId,beneficiaryLegalEntityId,
+    id:hashKey('corp.funding|'+leId+'|'+beneficiaryLegalEntityId+'|'+clean(ctx.body.agreementReference,160)),providerLegalEntityId:leId,beneficiaryLegalEntityId,
     method:clean(ctx.body.method,15) as FundingMethod,
     currency:clean(ctx.body.currency,3),limitMinor:amount(ctx.body.amount),
     agreementReference:clean(ctx.body.agreementReference,160),
@@ -327,6 +326,7 @@ export const corporateBudgetRoutes={
    };
    try{validateFundingAgreement(ag);}catch(e){throw new HttpError(400,(e as Error).message);}
    if(!isFundingMethod(ag.method))throw new HttpError(400,'Unknown funding method.');
+   if(await getDoc(fundingPath(ctx.orgId,ag.id)))throw new HttpError(409,'An approved agreement with this party and reference already exists.');
    return createRequest(ctx,{leId,type:'corp.funding.agreement',
     scopeKey:'corp.funding.agreement.'+leId+'.'+ag.agreementReference,
     title:'Funding agreement '+ag.agreementReference,summary:ag.method+' '+ag.currency+' '+
