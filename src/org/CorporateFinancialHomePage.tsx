@@ -125,10 +125,12 @@ export default function CorporateFinancialHomePage({canEdit}:{canEdit:boolean}){
    </section>
    <section className="space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Corporate function cost centres and funding</h3>
-     <select aria-label="Map another corporate function" disabled={!canEdit||!config.headquartersSiteId||!newFunctionOptions.length}
-      value="" onChange={e=>create(e.target.value)} className={button+' max-w-full'}>
-      <option value="">+ Map function</option>{newFunctionOptions.map(f=><option key={f.code} value={f.code}>{f.name}</option>)}
-     </select>
+     <SelectField id="corp-fin-add-function" label="Add function cost centre mapping"
+      disabled={!canEdit||!config.headquartersSiteId||!newFunctionOptions.length}
+      value="" onChange={e=>create(e.target.value)}>
+      <option value="">+ Select corporate function</option>
+      {newFunctionOptions.map(f=><option key={f.code} value={f.code}>{f.name}</option>)}
+     </SelectField>
     </div>
     {!enabledFunctions.length&&<p className="rounded-xl border border-line p-3 text-sm text-muted">First save the default corporate functions in the Corporate Office / Functions section.</p>}
     {!hasMapping&&<p className="rounded-xl border border-dashed border-line p-4 text-sm text-muted">Once you have selected a legal entity and an HQ site, map one corporate function at a time to its real department and cost centre. Default funding is 100% to its employing entity.</p>}
