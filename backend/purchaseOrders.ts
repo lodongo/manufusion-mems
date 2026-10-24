@@ -377,7 +377,12 @@ export async function mutate(ctx: OrgContext, col: 'req' | 'po', id: string, act
             if(!fresh.updateTime)throw new HttpError(409,'A current PO version is required for atomic budget approval.');
             await commit([...c.atomicWrites,{path,fields:next,updateTime:fresh.updateTime}]);
         }else await writeDoc(path, next);
-        await record(ctx, `org.procurement.${col === 'req' ? 'requisition' : 'order'}.${action}`, id, `${c.label}${c.note ? `. ${c.note}` : ''}`.slice(0, 400));
+        try {
+            await record(ctx, `org.procurement.${col === 'req' ? 'requisition' : 'order'}.${action}`, id, `${c.label}${c.note ? `. ${c.note}` : ''}`.slice(0, 400));
+        } catch(e) {
+            if(!c.atomicJournal)throw e;
+            console.error('Atomic PO+GL operation committed; separate audit record failed and must be reconciled',id,e instanceof Error?e.message:'unknown');
+        }
         return { ok: true, id, status: str(next.status), ...(c.result ?? {}) } as { ok: boolean; id: string; status: string; done?: boolean; [k: string]: unknown };
     });
 }
