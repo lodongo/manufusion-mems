@@ -56,7 +56,7 @@ export type BudgetAvailability={
  shortfallMinor:number;exceptionUsable:boolean;
 };
 export const moneyMinor=(value:unknown)=>{
- if(typeof value!=='number'||!Number.isFinite(value)||value<0||value>1e13||Math.round(value*100)!==value*100)
+ if(typeof value!=='number'||!Number.isFinite(value)||value<0||value>1e13||Math.abs(value*100-Math.round(value*100))>1e-6)
    throw Error('Enter a valid positive or zero amount with no more than two decimal places.');
  return Math.round(value*100);
 };
@@ -82,6 +82,40 @@ export function validateNewPlan(lines:readonly BudgetLine[]):BudgetLine[]{
   return {...row};
  });
 }
+export type BudgetRevision={
+ legalEntityId:string;fy:number;currency:string;
+ changes:Array<{costCenterId:string;category:BudgetClass;deltaMinor:number}>;
+ reason:string;
+};
+/** Governed appropriation revisions are budget-only. They do not move cash or post GL. */
+export function applyApprovedRevision(plan:BudgetPlan,revision:BudgetRevision):BudgetPlan{
+ if(plan.status!=='approved'||plan.legalEntityId!==revision.legalEntityId||
+    plan.fy!==revision.fy||plan.currency!==revision.currency)
+   throw Error('Revision must match the approved legal entity, currency and fiscal year.');
+ if(!revision.changes.length||revision.changes.length>100)
+   throw Error('A budget revision needs 1–100 change lines.');
+ const keys=new Set<string>();
+ const nextLines=plan.lines.map(l=>({...l}));
+ for(const c of revision.changes){
+  if(!c.costCenterId||!isBudgetClass(c.category)||!Number.isSafeInteger(c.deltaMinor)||!c.deltaMinor)
+   throw Error('Revision lines must have a cost centre, category and nonzero whole-unit change.');
+  const key=budgetKey(c.costCenterId,c.category);
+  if(keys.has(key))throw Error('Duplicate revision line.');keys.add(key);
+  let line=nextLines.find(x=>budgetKey(x.costCenterId,x.category)===key);
+  if(!line){
+   if(c.deltaMinor<0)throw Error('Cannot reduce a budget line that does not exist.');
+   line={costCenterId:c.costCenterId,category:c.category,
+    approvedMinor:0,adjustmentsMinor:0,committedMinor:0,actualMinor:0};
+   nextLines.push(line);
+  }
+  line.adjustmentsMinor+=c.deltaMinor;
+  if(remainingMinor(line)<0)
+   throw Error('Budget reductions cannot cut into actual or committed spending.');
+ }
+ if(nextLines.length>200)throw Error('Maximum 200 budget lines per legal entity and financial year.');
+ return {...plan,version:plan.version+1,lines:nextLines};
+}
+
 export function applyApprovedTransfer(plan:BudgetPlan,transfer:BudgetTransfer):BudgetPlan{
  if(plan.status!=='approved'||plan.legalEntityId!==transfer.legalEntityId||
     plan.fy!==transfer.fy||plan.currency!==transfer.currency)
