@@ -16,6 +16,8 @@ export type CorporateDesign={
  version:number;updatedAt:string;updatedBy:string;
 };
 const FUNCTION_DEFAULTS:Array<[string,string,string]>= [
+ ['EXEC','Group Executive Office','Group CEO, corporate leadership, group administration and strategy coordination'],
+ ['SEC','Corporate Secretariat','Board administration, corporate governance records and statutory board support'],
  ['FIN','Group Finance','Financial strategy, reporting, treasury and assurance'],
  ['HR','Group Human Resources','People strategy, talent, employee policies and development'],
  ['ENG','Group Engineering','Asset care, reliability, technology and standards'],
