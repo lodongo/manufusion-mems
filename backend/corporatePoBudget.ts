@@ -21,6 +21,7 @@ export const PO_GATE_PATH=(orgId:string)=>'organizations/'+orgId+'/procurement_s
 export type PoGateMode='off'|'service_pilot';
 export type PoGatePolicy={
  mode:PoGateMode;
+ legalEntityId:string;
  approvalRef:string;
  scope:'service_purchase_orders';
  category:BudgetClass;
@@ -41,10 +42,33 @@ export interface PoPreviewLine{
  originalTotal:number;
 }
 const validDate=(x:string)=>/^\d{4}-\d{2}-\d{2}$/.test(x)&&!Number.isNaN(new Date(x+'T00:00:00Z').getTime())&&new Date(x+'T00:00:00Z').toISOString().slice(0,10)===x;
+
+/** The gate may run only on a dedicated development Firebase project and explicit opt-in. */
+export function poBudgetServerEnabled(env:Record<string,string|undefined>=process.env):boolean{
+ const project=env.MEMS_FIREBASE_PROJECT_ID||'';
+ return env.MEMS_PO_BUDGET_PILOT_ENABLED==='true'&&
+  /(?:^|[-_])(dev|development|test|staging|sandbox)(?:[-_]|$)/i.test(project)&&
+  !/(?:^|[-_])(prod|production|live)(?:[-_]|$)/i.test(project);
+}
+export function verifyPoGateApproval(policy:PoGatePolicy,approval:Record<string,unknown>|null):void{
+ const payload=approval&&typeof approval.payload==='object'&&approval.payload&&!Array.isArray(approval.payload)?
+  approval.payload as Record<string,unknown>:{};
+ const result=approval&&typeof approval.result==='object'&&approval.result&&!Array.isArray(approval.result)?
+  approval.result as Record<string,unknown>:{};
+ if(!approval||approval.type!=='corp.po.budget.gate'||approval.status!=='approved'||
+  approval.id!==policy.approvalRef||approval.leId!==policy.legalEntityId||
+  !approval.decidedBy||approval.decidedBy!==policy.signedOffBy||
+  approval.makerUid===approval.decidedBy||
+  payload.mode!==policy.mode||payload.legalEntityId!==policy.legalEntityId||
+  payload.category!==policy.category||payload.activationDate!==policy.activationDate||
+  result.mode!==policy.mode||result.legalEntityId!==policy.legalEntityId)
+  throw new HttpError(409,'Budget gate activation has no matching independently approved Finance request.');
+}
+
 export function parsePoGatePolicy(data:Record<string,unknown>|null):PoGatePolicy|null{
  if(!data||str(data.mode)==='off'||!str(data.mode))return null;
  if(data.mode!=='service_pilot'||data.scope!=='service_purchase_orders'||data.valuation!=='po_line_net'||
-  data.effectiveVersion!==1||!/^FCR\d{8}$/.test(str(data.approvalRef))||
+  data.effectiveVersion!==1||!/^[A-Za-z0-9_-]{1,128}$/.test(str(data.legalEntityId))||!/^FCR\d{8}$/.test(str(data.approvalRef))||
   !str(data.signedOffBy)||!validDate(str(data.activationDate))||
   !isBudgetClass(str(data.category)))
   throw new HttpError(409,'Budget gate configuration is incomplete or not approved; posting is blocked.');
@@ -68,11 +92,7 @@ export async function preparePoApprovalBudget(
  const setting=await getDoc(PO_GATE_PATH(ctx.orgId));
  const policy=parsePoGatePolicy(setting?.data||null);
  if(!policy)return null;
- const fcr=await getDoc('organizations/'+ctx.orgId+'/fin_requests/'+policy.approvalRef);
- if(!fcr||str(fcr.data.type)!=='corp.po.budget.gate'||str(fcr.data.status)!=='approved'||
-    str(fcr.data.decidedBy)!==policy.signedOffBy)
-  throw new HttpError(409,'Budget pilot cannot run without a verified independent Finance activation approval.');
- if(now.slice(0,10)<policy.activationDate)throw new HttpError(409,'Budget gate has not reached its approved activation date.');
+
  const amendment=!!str(po.amendOf)||/-V(?!1$)\d+$/.test(poId);
  if(amendment)throw new HttpError(409,'Budget-controlled PO amendments require the full lifecycle adapter. Do not override this control.');
  const lines=(Array.isArray(po.lines)?po.lines:[]).filter(x=>x&&typeof x==='object'&&!Array.isArray(x)) as Obj[];
@@ -93,9 +113,17 @@ export async function preparePoApprovalBudget(
   refs.set(fact.costCenterId,{leId:le.id,ccId:cc.id});
  }
  const les=[...new Set([...refs.values()].map(x=>x.leId))];
+ if(!les.includes(policy.legalEntityId))return null;
+ if(!poBudgetServerEnabled())
+  throw new HttpError(409,'Budget pilot is not enabled on a verified isolated development server.');
+ const fcr=await getDoc('organizations/'+ctx.orgId+'/fin_requests/'+policy.approvalRef);
+ verifyPoGateApproval(policy,fcr?{...fcr.data,id:fcr.id}:null);
+ if(now.slice(0,10)<policy.activationDate)
+  throw new HttpError(409,'Budget gate has not reached its approved activation date.');
  if(les.length!==1)
   throw new HttpError(409,'Split the service PO by legal entity before using the budget pilot.');
  const leId=les[0];
+ if(leId!==policy.legalEntityId)throw new HttpError(409,'PO belongs to a different legal entity than the approved pilot.');
  const fin=await entityOf(ctx.orgId,leId);
  if(currencyDigits(currency)!==2||currencyDigits(fin.functionalCurrency)!==2)
   throw new HttpError(409,'Service PO pilot supports only two-decimal document and functional currencies until the GL engine supports other minor units.');
