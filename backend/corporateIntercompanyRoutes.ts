@@ -10,6 +10,7 @@ import {
   type Obj,type Unit,
 } from './finCore';
 import {moneyMinor,majorFromMinor,minorFactor} from './corporateBudget';
+import {reconcileStaging} from './corporateIntercompanyReconciliation';
 import {
  IC_TYPES,IC_ROLES,IC_SETTLEMENT,validateAgreement,validateVoucher,
  previewIntercompany,validateSettlementPlan,accountRequirements,
@@ -407,6 +408,21 @@ export const corporateIntercompanyRoutes={
   await validateChart(ctx,a);
   return {...previewIntercompany(v,a),status:v.status,
    providerApprovalRef:v.providerApprovalRef,beneficiaryApprovalRef:v.beneficiaryApprovalRef};
+ })],
+ 'POST /api/org/corporate/ic/reconciliation':[route('org.corporate.ic.reconciliation',async ctx=>{
+  const legalEntityId=clean(ctx.body.legalEntityId,128);await canRead(ctx,legalEntityId);
+  const [agreements,vouchers,settlements]=await Promise.all([
+   listDocs(agreementDir(ctx.orgId)),listDocs(voucherDir(ctx.orgId)),listDocs(scheduleDir(ctx.orgId)),
+  ]);
+  const visibleVouchers=vouchers.map(d=>d.data as unknown as IcVoucher)
+   .filter(v=>[v.providerLegalEntityId,v.beneficiaryLegalEntityId].includes(legalEntityId));
+  const contractIds=new Set(visibleVouchers.map(v=>v.agreementId));
+  const voucherIds=new Set(visibleVouchers.map(v=>v.id));
+  return reconcileStaging(
+   agreements.map(d=>d.data as unknown as IcAgreement).filter(a=>contractIds.has(a.id)),
+   visibleVouchers,
+   settlements.map(d=>d.data as unknown as IcSettlementPlan).filter(s=>voucherIds.has(s.voucherId)),
+  );
  })],
  'POST /api/org/corporate/ic/settlements':[route('org.corporate.ic.settlements',async ctx=>{
   const leId=clean(ctx.body.legalEntityId,128);await canRead(ctx,leId);
