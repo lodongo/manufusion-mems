@@ -144,6 +144,7 @@ import { corporateFinanceRoutes } from './corporateFinance';
 import { corporateStructureRoutes } from './corporateStructureRoutes';
 import { corporateBudgetRoutes } from './corporateBudgetRoutes';
 import { corporateAllocationRoutes } from './corporateAllocationRoutes';
+import { corporateIntercompanyRoutes } from './corporateIntercompanyRoutes';
 import { adminOperationsRoutes } from './adminOperations';
 import { fxManagementRoutes } from './fxManagement';
 import { fxSchedulerRoutes } from './fxScheduler';
@@ -1628,6 +1629,7 @@ export const handler = router(recordWiredRoutes({
     ...corporateStructureRoutes,
     ...corporateBudgetRoutes,
     ...corporateAllocationRoutes,
+    ...corporateIntercompanyRoutes,
     ...setupProgressRoutes,
     ...adminOperationsRoutes,
     ...fxManagementRoutes,
