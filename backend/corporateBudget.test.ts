@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {
- BUDGET_CLASSES,FUNDING_METHODS,moneyMinor,validateNewPlan,remainingMinor,
+ BUDGET_CLASSES,FUNDING_METHODS,moneyMinor,currencyDigits,majorFromMinor,validateNewPlan,remainingMinor,
  applyApprovedRevision,applyApprovedTransfer,checkBudget,validateFundingAgreement,type BudgetPlan,type BudgetTransfer,
  type BudgetException,type FundingAgreement,
 } from './corporateBudget';
@@ -31,11 +31,11 @@ test('P2 publishes organization-independent codified budget and funding categori
  assert.deepEqual(FUNDING_METHODS.map(x=>x.code),['COR','ENT','REI','LOAN','EQU','CPOOL','HYB']);
 });
 test('P2 money conversion rejects negative/unsupported fractional minor units',()=>{
- assert.equal(moneyMinor(100.25),10025);
- assert.equal(moneyMinor(0.29),29);
- assert.equal(moneyMinor(0.57),57);
- assert.throws(()=>moneyMinor(-1));
- assert.throws(()=>moneyMinor(1.234));
+ assert.equal(moneyMinor(100.25,'KES'),10025);
+ assert.equal(moneyMinor(0.29,'KES'),29);
+ assert.equal(moneyMinor(0.57,'KES'),57);
+ assert.throws(()=>moneyMinor(-1,'KES'));
+ assert.throws(()=>moneyMinor(1.234,'KES'));
 });
 test('P2 approves a budget only from new, unique, positive starting lines',()=>{
  const b=plan().lines.map(x=>({...x,committedMinor:0,actualMinor:0}));
@@ -105,4 +105,14 @@ test('P2 revision prevents reducing budget below existing commitments/actual cos
  assert.throws(()=>applyApprovedRevision(plan(),r),/cannot cut into/);
  assert.throws(()=>applyApprovedRevision(plan(),{...r,changes:[{costCenterId:'CC3',category:'OPEX' as const,deltaMinor:-1000}]}),/does not exist/);
  assert.throws(()=>applyApprovedRevision(plan(),{...r,legalEntityId:'LE2'}),/must match/);
+});
+
+test('P2 supports ISO minor units for zero-decimal and three-decimal currencies',()=>{
+ assert.equal(currencyDigits('JPY'),0);
+ assert.equal(currencyDigits('KWD'),3);
+ assert.equal(moneyMinor(1234,'JPY'),1234);
+ assert.equal(moneyMinor(5.125,'KWD'),5125);
+ assert.equal(majorFromMinor(5125,'KWD'),5.125);
+ assert.throws(()=>moneyMinor(1234.50,'JPY'),/0 minor-currency/);
+ assert.throws(()=>moneyMinor(5.1234,'KWD'),/3 minor-currency/);
 });
