@@ -5,7 +5,7 @@
 import {HttpError,getDoc,listDocs,nowIso,str,writeDoc,type Fields} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {
-  chartOf,createRequest,entityOf,fxRate,hashKey,leOf,needEntity,permAt,
+  chartOf,createRequest,entityOf,fxRate,hashKey,leOf,needEntity,permAt,reasonOf,
   registerHandler,scopeOf,unitsOf,withLock,yearsOf,periodAt,
   type Obj,type Unit,
 } from './finCore';
