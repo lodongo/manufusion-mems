@@ -93,8 +93,7 @@ export async function preparePoApprovalBudget(
  const policy=parsePoGatePolicy(setting?.data||null);
  if(!policy)return null;
 
- const amendment=!!str(po.amendOf)||/-V(?!1$)\d+$/.test(poId);
- if(amendment)throw new HttpError(409,'Budget-controlled PO amendments require the full lifecycle adapter. Do not override this control.');
+
  const lines=(Array.isArray(po.lines)?po.lines:[]).filter(x=>x&&typeof x==='object'&&!Array.isArray(x)) as Obj[];
  const facts:PoLineFact[]=lines.map(l=>({
   costCenterId:str(l.costCenterId)||str(l.costCenterCode),
@@ -114,6 +113,8 @@ export async function preparePoApprovalBudget(
  }
  const les=[...new Set([...refs.values()].map(x=>x.leId))];
  if(!les.includes(policy.legalEntityId))return null;
+ const amendment=!!str(po.amendOf)||/-V(?!1$)\d+$/.test(poId);
+ if(amendment)throw new HttpError(409,'Budget-controlled PO amendments require the full lifecycle adapter. Do not override this control.');
  if(invalidCentres.length)throw new HttpError(409,'Every line of a pilot PO must have a valid cost centre and legal entity.');
  try{verifyPoServicePilot(facts,Number(po.total),policy);}
  catch(e){throw new HttpError(409,(e as Error).message);}
