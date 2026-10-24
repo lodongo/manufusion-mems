@@ -69,7 +69,7 @@ export function validateFinalFinanceApproval(meta:FinalFinanceApproval|undefined
  if(!meta||!Array.isArray(meta.steps)||!meta.steps.length||
     meta.steps.some(s=>s.status!=='approved')||!Array.isArray(meta.history)||
     !meta.history.length||meta.history[meta.history.length-1].by!==uid||
-    typeof meta.at!=='string'||!/^\\d{4}-\\d{2}-\\d{2}T/.test(meta.at))
+    typeof meta.at!=='string'||!/^\d{4}-\d{2}-\d{2}T/.test(meta.at))
   throw new HttpError(409,'The authoritative final Finance approval evidence is missing or invalid.');
 }
 export async function postIntercompanyPair(ctx:OrgContext,voucherId:string,approvalRef:string,finalApproval:FinalFinanceApproval):Promise<IcPostingPair>{
