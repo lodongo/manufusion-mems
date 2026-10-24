@@ -97,6 +97,15 @@ export async function executeVerifiedAllocation(ctx:OrgContext,preview:VerifiedP
  if(!Number.isSafeInteger(spent)||spent<0||spent+refreshed.source.amountMinor>refreshed.policy.annualCeilingMinor)
   throw new HttpError(409,'Allocation policy annual ceiling has been exhausted.');
  const claimPath=root(ctx.orgId)+'/corp_allocation_source_claims/'+hashKey(refreshed.policy.providerLegalEntityId+'|'+refreshed.source.journalId+'|'+refreshed.source.lineNo);
+ const fcrDoc=await getDoc(P(ctx.orgId).request(approvalRef));
+ if(!fcrDoc||!fcrDoc.updateTime||fcrDoc.data.type!=='corp.allocation.execute'||fcrDoc.data.status!=='pending'||
+    fcrDoc.data.leId!==refreshed.policy.providerLegalEntityId||fcrDoc.data.makerUid===ctx.uid)
+  throw new HttpError(409,'Approved allocation Finance request is no longer valid for this source.');
+ const reqSteps=Array.isArray(fcrDoc.data.steps)?fcrDoc.data.steps as Array<Record<string,unknown>>:[];
+ if(reqSteps.filter(x=>x.status==='pending').length!==1)
+  throw new HttpError(409,'Allocation Finance request must reach the final sign-off before execution.');
+ const fcrAt=nowIso();
+ const decidedSteps=reqSteps.map(x=>x.status==='pending'?{...x,status:'approved',at:fcrAt,by:ctx.uid}:x);
  const postInput:PostInput={leId:refreshed.policy.providerLegalEntityId,type:'REALLOC',date:refreshed.source.postingDate,
   docCurrency:refreshed.source.currency,fxRate:1,lines:rows,narrative:'Verified P6 allocation '+refreshed.policy.code,
   source:{kind:'corporate-allocation',id:refreshed.runId,ref:refreshed.source.journalId,route:'corp.allocation.execute'},
@@ -106,6 +115,9 @@ export async function executeVerifiedAllocation(ctx:OrgContext,preview:VerifiedP
   totalMinor:refreshed.source.amountMinor,currency:refreshed.source.currency,executedAt:nowIso(),
   approvedBy:ctx.uid,approvalRef,sameEntityJournalId:internalPosting?.id||'',voucherIds,status:'executed'};
  await commit([...(internalPosting?.writes||[]),...voucherWrites,
+  {path:P(ctx.orgId).request(approvalRef),updateTime:fcrDoc.updateTime,
+   fields:{...fcrDoc.data,status:'approved',steps:decidedSteps,decidedAt:fcrAt,decidedBy:ctx.uid,
+    result:{runId:outcome.id,voucherIds,sameEntityJournal:outcome.sameEntityJournalId}}},
   {path:poolPath(ctx.orgId,refreshed.policy.id),updateTime:policyDoc.updateTime,
    mask:['allocatedToDateMinor','lastAllocationAt'],fields:{allocatedToDateMinor:spent+refreshed.source.amountMinor,lastAllocationAt:nowIso()}},
   {path:claimPath,exists:false,fields:{runId:outcome.id,sourceJournalId:refreshed.source.journalId,sourceLineNo:refreshed.source.lineNo}},
