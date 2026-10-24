@@ -10,6 +10,7 @@ import {
   type Obj,type Unit,
 } from './finCore';
 import {moneyMinor,majorFromMinor,minorFactor} from './corporateBudget';
+import {icPostingEnabled,postIntercompanyPair,validatePostablePair,pairPath} from './corporateIntercompanyPosting';
 import {reconcileStaging} from './corporateIntercompanyReconciliation';
 import {
  IC_TYPES,IC_ROLES,IC_SETTLEMENT,validateAgreement,validateVoucher,
@@ -139,6 +140,8 @@ function parseVoucher(raw:unknown,a:IcAgreement,fxP:number,fxB:number,
   transferPricingEvidence:clean(x.transferPricingEvidence,200),
   supportingDocumentReferences:array(x.supportingDocumentReferences,50).map(v=>clean(v,160)),
   description:clean(x.description,500),
+  providerCostCenterId:clean(x.providerCostCenterId,128),beneficiaryCostCenterId:clean(x.beneficiaryCostCenterId,128),
+  allocationPolicyId:clean(x.allocationPolicyId,128),allocationSourceJournalId:clean(x.allocationSourceJournalId,128),
   status:'awaiting_counterparty',createdAt:nowIso(),createdBy:'',
   providerApprovedAt:'',providerApprovalRef:'',
   beneficiaryApprovedAt:'',beneficiaryApprovedBy:'',beneficiaryApprovalRef:'',
@@ -259,6 +262,17 @@ registerHandler('corp.ic.voucher.accept',{
    note:'Voucher matched between legal entities, but journal posting/settlement remains disabled.'};
  },
 });
+registerHandler('corp.ic.post',{
+ label:'Atomic bilateral intercompany GL posting',approvePerm:'FIN.post.approve',valued:true,
+ apply:async(ctx,req,id)=>{
+  const vid=clean(rec(req.payload).voucherId,128);
+  if(!safeId(vid))throw new HttpError(409,'Missing approved bilateral voucher.');
+  if(!icPostingEnabled())throw new HttpError(409,'P6 posting requires explicit isolated development release.');
+  const pair=await postIntercompanyPair(ctx,vid,id);
+  return {pairId:pair.id,providerJournal:pair.providerJournalId,beneficiaryJournal:pair.beneficiaryJournalId,
+   note:'Both Finance journals, balances and source record committed atomically; no treasury payment was made.'};
+ },
+});
 registerHandler('corp.ic.settlement.plan',{
  label:'Intercompany settlement schedule approval',approvePerm:'FIN.post.approve',valued:true,
  apply:async(ctx,req,id)=>{
@@ -301,8 +315,8 @@ export const corporateIntercompanyRoutes={
     canEdit:permAt(ctx,'FIN.setup.manage',u.id,units,scope),
     canView:['FIN.view','FIN.setup.manage','FIN.setup.approve','FIN.journal.view'].some(p=>permAt(ctx,p,u.id,units,scope))}));
   return {entities,types:IC_TYPES,settlementPolicies:IC_SETTLEMENT,glRoles:IC_ROLES,
-   status:'nonposting_policy_and_matching',
-   note:'No bilateral GL journal posting or payment execution is enabled.'};
+   status:icPostingEnabled()?'atomic_posting_dev_optin':'nonposting_policy_and_matching',
+   note:'Bilateral journal posting is opt-in on isolated development only; bank settlement and tax invoice execution remain disabled.'};
  })],
  'POST /api/org/corporate/ic/agreements':[orgRoute('org.corporate.ic.agreements','FIN.view',async ctx=>{
   const leId=clean(ctx.body.legalEntityId,128);await canRead(ctx,leId);
@@ -406,6 +420,29 @@ export const corporateIntercompanyRoutes={
   await validateChart(ctx,a);
   return {...previewIntercompany(v,a),status:v.status,
    providerApprovalRef:v.providerApprovalRef,beneficiaryApprovalRef:v.beneficiaryApprovalRef};
+ })],
+ 'POST /api/org/corporate/ic/post/status':[orgRoute('org.corporate.ic.post.status','FIN.view',async ctx=>({
+  postingEnabled:icPostingEnabled(),
+  note:'Atomic dual-entity Finance posting requires explicit isolated development release. No bank or tax invoice execution is included.',
+ }))],
+ 'POST /api/org/corporate/ic/post/propose':[orgRoute('org.corporate.ic.post.propose','FIN.close.run',async ctx=>{
+  const vid=clean(ctx.body.voucherId,128);
+  if(!safeId(vid))throw new HttpError(400,'Invalid voucher.');
+  const doc=await getDoc(voucherPath(ctx.orgId,vid));
+  if(!doc)throw new HttpError(404,'Matched voucher not found.');
+  const v=doc.data as unknown as IcVoucher;
+  await permit(ctx,v.providerLegalEntityId,'FIN.close.run');
+  const aDoc=await getDoc(agreementPath(ctx.orgId,v.agreementId));
+  if(!aDoc)throw new HttpError(409,'Intercompany agreement is missing.');
+  try{validatePostablePair(v,aDoc.data as unknown as IcAgreement);}catch(e){throw new HttpError(409,(e as Error).message);}
+  if(!icPostingEnabled())throw new HttpError(409,'P6 atomic posting is not enabled in this isolated environment.');
+  if(await getDoc(pairPath(ctx.orgId,v.id)))throw new HttpError(409,'The voucher already has a posted pair.');
+  const authority=await amountForApproval(ctx,v.providerLegalEntityId,v.amountMinor,v.currency);
+  return createRequest(ctx,{leId:v.providerLegalEntityId,type:'corp.ic.post',
+   scopeKey:'corp.ic.post.'+v.id,title:'Post bilateral IC journal '+v.sourceReference,
+   summary:'Paired legal entities: '+v.providerLegalEntityId+' and '+v.beneficiaryLegalEntityId+
+    '; '+v.currency+' '+majorFromMinor(v.amountMinor,v.currency),
+   payload:{voucherId:v.id,...authority},reason:reasonOf(ctx.body),amount:authority.approvalAmount});
  })],
  'POST /api/org/corporate/ic/reconciliation':[orgRoute('org.corporate.ic.reconciliation','FIN.view',async ctx=>{
   const legalEntityId=clean(ctx.body.legalEntityId,128);await canRead(ctx,legalEntityId);
