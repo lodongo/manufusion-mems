@@ -20,6 +20,7 @@ export interface Position {
     defaultNodeId?: string;
     securityRoles?: string[];
     coreSkills?: string[];
+    jobGradeByLegalEntity?:Record<string,string>;
     staffingPlan?: RoleStaffingRow[];
 }
 
@@ -111,6 +112,7 @@ export default function PositionsPage({ canEdit, code }: { canEdit: boolean; cod
                     <Detail label='Direct reports' value={String(children.length)} />
                     {current.description && <Detail label='Purpose' value={current.description} />}
                 </Card>
+                <Card className='space-y-2 text-sm'><p className='font-medium text-white'>Job grades by legal entity</p>{Object.entries(current.jobGradeByLegalEntity||{}).length?Object.entries(current.jobGradeByLegalEntity||{}).map(([e,g])=><p key={e} className='text-xs text-slate-200'>{e}: {g}</p>):<p className='text-xs text-slate-400'>No job grade assigned — leave unavailable until configured.</p>}</Card>
                 <Card className='space-y-2 text-sm'><p className='font-medium text-white'>Core skills (optional · {(current.coreSkills??[]).length} selected)</p>{(current.coreSkills??[]).length?(current.coreSkills??[]).map(x=><p key={x} className='rounded-lg border border-slate-700 p-2 font-mono text-slate-200'>{x}</p>):<p className='text-slate-400'>No core skills assigned.</p>}</Card>
                 <Card className='space-y-2 text-sm'>
                     <p className='flex items-center gap-2 font-medium text-white'>
@@ -334,6 +336,8 @@ function PositionForm({
     };
     const [securityRoles, setSecurityRoles] = useState<string[]>(existing?.securityRoles ?? []);
     const [coreSkills,setCoreSkills]=useState<string[]>(existing?.coreSkills??[]);
+    const [jobGradeByLegalEntity,setJobGradeByLegalEntity]=useState<Record<string,string>>(existing?.jobGradeByLegalEntity??{});
+    const gradeOptions=useLoad(()=>callBackend<{entities:Array<{id:string;name:string;grades:Array<{code:string;rank:number;title:string}>}>}>('/api/org/positions/job-grades'));
     const toggleRole = (id: string) => setSecurityRoles((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
@@ -346,7 +350,7 @@ function PositionForm({
         if (rows.some(r => !Number.isSafeInteger(r.required) || r.required < 0 || r.required > 999999)) return setError('Enter a valid non-negative whole-number requirement for every enabled unit.');
         setBusy(true);
         try {
-            await withSodAcknowledgement((extra) => callBackend('/api/org/positions/save', { code: existing?.code, title: title.trim(), description, parentCode: parent, operatingLevel, securityRoles, coreSkills, staffingPlan: rows, ...extra }));
+            await withSodAcknowledgement((extra) => callBackend('/api/org/positions/save', { code: existing?.code, title: title.trim(), description, parentCode: parent, operatingLevel, securityRoles, coreSkills,jobGradeByLegalEntity, staffingPlan: rows, ...extra }));
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save.');
@@ -457,6 +461,21 @@ function PositionForm({
                     )}
                 </Card>
                 <TextArea id='pos-desc' label='Purpose and responsibilities (optional)' rows={3} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
+                <Card className='space-y-3 border border-line bg-panel'>
+                    <h3 className='text-base font-semibold text-ink'>Job grade assignment by legal entity</h3>
+                    <p className='text-xs text-soft'>Assign this organizational job role to an enabled job grade in each legal entity. Employees inherit leave eligibility from the grade for their own primary legal entity. This is not a Security role.</p>
+                    {gradeOptions.loading&&<p className='text-xs text-soft'>Loading legal-entity job grades…</p>}
+                    {gradeOptions.error&&<Alert tone='warn'>Job grade options are unavailable: {gradeOptions.error}</Alert>}
+                    {gradeOptions.data?.entities.map(entity=><SelectField key={entity.id} id={'pos-job-grade-'+entity.id}
+                        label={entity.name+' · Job grade'} value={jobGradeByLegalEntity[entity.id]||''}
+                        onChange={e=>setJobGradeByLegalEntity(current=>({...current,[entity.id]:e.target.value}))}>
+                        <option value=''>Not assigned — leave eligibility blocked</option>
+                        {entity.grades.map(grade=><option key={grade.code} value={grade.code}>
+                            Grade {grade.rank} · {grade.title} ({grade.code})
+                        </option>)}
+                    </SelectField>)}
+                    {!gradeOptions.data?.entities.length&&!gradeOptions.loading&&<p className='text-xs text-soft'>Configure legal entities and job-grade definitions first.</p>}
+                </Card>
                 <RoleCoreSkills value={coreSkills} onChange={setCoreSkills} sources={parentSkillSources(parent, positions, existing?.code)}/>
                 <fieldset className='space-y-2'>
                     <legend className='text-sm font-medium text-slate-200'>Security roles (what this job role may do)</legend>
