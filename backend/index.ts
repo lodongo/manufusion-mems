@@ -143,6 +143,7 @@ import { corporateGovernanceRoutes } from './corporateGovernance';
 import { corporateFinanceRoutes } from './corporateFinance';
 import { corporateStructureRoutes } from './corporateStructureRoutes';
 import { corporateBudgetRoutes } from './corporateBudgetRoutes';
+import { corporatePoBudgetRoutes } from './corporatePoBudgetRoutes';
 import { corporateAllocationRoutes } from './corporateAllocationRoutes';
 import { corporateIntercompanyRoutes } from './corporateIntercompanyRoutes';
 import { adminOperationsRoutes } from './adminOperations';
@@ -1628,6 +1629,7 @@ export const handler = router(recordWiredRoutes({
     ...corporateFinanceRoutes,
     ...corporateStructureRoutes,
     ...corporateBudgetRoutes,
+    ...corporatePoBudgetRoutes,
     ...corporateAllocationRoutes,
     ...corporateIntercompanyRoutes,
     ...setupProgressRoutes,

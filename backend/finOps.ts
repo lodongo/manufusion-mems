@@ -222,7 +222,7 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
 
 // ===== Service acceptance =====
 
-export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string; receiptId: string; invoiceNo: string; lines: Array<{ no: number; qty: number; amount: number }> }): Promise<{ journals: string[]; note: string }> {
+export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string; receiptId: string; invoiceNo: string; lines: Array<{ no: number; qty: number; amount: number }>; strictBudget?: {postingDate:string;extraForJournal:(journalId:string,accepted:Array<{costCenterId:string;amountMinor:number}>,leId:string,fxRate:number,leCurrency:string)=>Promise<Write[]> } }): Promise<{ journals: string[]; note: string }> {
     const units = await unitsOf(ctx.orgId);
     const cache = new Map<string, LeInfo>();
     const byLe = new Map<string, Array<{ l: Obj; amount: number; info: LeInfo }>>();
@@ -234,9 +234,11 @@ export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string;
     }
     const journals: string[] = [];
     const notLive: string[] = [];
+    if(a.strictBudget&&byLe.size!==1)throw new HttpError(409,'Budget-controlled service receipts must belong to exactly one legal entity.');
     for (const [leId, list] of byLe) {
         const info = list[0].info;
         if (info.state === 'not_live') {
+            if(a.strictBudget)throw new HttpError(409,'Budget-controlled service acceptance requires Finance to be live, or actual spending cannot be recognized.');
             notLive.push(info.le.code);
             continue;
         }
@@ -244,15 +246,18 @@ export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string;
         const map = await mappingOf(ctx.orgId, leId);
         const grir = roleAccount(map, 'GRIR','',{event:'SVC_ACCEPT'});
         const lines: PostLine[] = [];
+        const acceptedBudgetCosts:Array<{costCenterId:string;amountMinor:number}>=[];
         for (const x of list) {
             const value = round2(x.amount * rate);
             const cc = ccOfLine(x.l);
+            acceptedBudgetCosts.push({costCenterId:cc,amountMinor:cents(value)});
             lines.push({ side: 'D', glCode: str(x.l.glCode), ccId: cc, amount: value, docAmount: x.amount, description: `${a.poId} line ${Number(x.l.no)}: ${str(x.l.itemName) || str(x.l.requirement)}`.slice(0, 200) });
             lines.push({ side: 'C', glCode: grir, ccId: cc, amount: value, docAmount: x.amount, description: `GR/IR ${a.poId} service ${a.receiptId}, invoice ${a.invoiceNo}`.slice(0, 200) });
         }
         const p = await post(ctx, {
             leId,
             type: 'SVC_ACCEPT',
+            ...(a.strictBudget?{date:a.strictBudget.postingDate}:{}),
             docCurrency: str(a.po.currency),
             fxRate: rate,
             lines,
@@ -260,6 +265,7 @@ export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string;
             source: { kind: 'purchase_order', id: a.poId, ref: a.receiptId, route: `organization_home/procurement_orders/${a.poId}` },
             trace: { poId: a.poId, receiptId: a.receiptId, invoiceNo: a.invoiceNo, vendorName: str(a.po.vendorName), requisitionIds: Array.from(new Set(list.map((x) => str(x.l.requisitionId)).filter(Boolean))), requirementIds: Array.from(new Set(list.map((x) => str(x.l.requirementId)).filter(Boolean))), quotationIds: Array.from(new Set(list.map((x) => str(x.l.quotationId)).filter(Boolean))) },
             sourceKey: `SVC_${a.receiptId}_${leId}`,
+            ...(a.strictBudget?{extraForJournal:(journalId:string)=>a.strictBudget!.extraForJournal(journalId,acceptedBudgetCosts,leId,rate,info.currency)}:{}),
         });
         journals.push(p.id);
     }

@@ -28,6 +28,11 @@ jobs:
           VITE_FIREBASE_APP_ID: 1:123456789012:web:ci-fixture
       - run: npm run test:drkms
       - run: npm run test:hr
+      # Legacy route inventory contains 72 pre-existing unclassified declarations.
+      # Keep static visibility and strict per-P5 endpoint checks; full strict audit is
+      # a separate organization-wide remediation gate, not silently marked passed.
+      - run: npm run audit:routes
+      - run: npm run test:governance
       - run: npm run test:corporate
       - run: node --import tsx --test tests/independent/*.test.mjs automation/test/*.test.mjs
 

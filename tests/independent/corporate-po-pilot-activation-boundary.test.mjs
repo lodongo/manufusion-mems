@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const src=(path)=>readFileSync(path,'utf8');
+test('P5 pilot activation remains behind explicit FIN permissions and independent FCR approval',()=>{
+ const routes=src('backend/corporatePoBudgetRoutes.ts');
+ const adapter=src('backend/corporatePoBudget.ts');
+ assert.match(routes,/'POST \/api\/org\/corporate\/po-budget\/status':\[\s*orgRoute\('org\.corporate\.po-budget\.status','FIN\.view'/);
+ assert.match(routes,/'POST \/api\/org\/corporate\/po-budget\/propose':\[\s*orgRoute\('org\.corporate\.po-budget\.propose','FIN\.setup\.manage'/);
+ assert.match(routes,/registerHandler\('corp\.po\.budget\.gate'/);
+ assert.match(routes,/approvePerm:'FIN\.setup\.approve'/);
+ assert.match(routes,/withLock\(ctx\.orgId,'corp_po_budget_gate'/);
+ assert.match(routes,/expectedVersion/);
+ assert.match(routes,/mode:intent\.mode,legalEntityId:intent\.legalEntityId/);
+ assert.match(adapter,/poBudgetServerEnabled/);
+ assert.match(adapter,/verifyPoGateApproval\(policy/);
+ assert.match(adapter,/policy\.legalEntityId/);
+ assert.match(adapter,/MEMS_PO_BUDGET_PILOT_ENABLED/);
+ assert.match(adapter,/MEMS_FIREBASE_PROJECT_ID/);
+});
+test('P5 service PO costs are atomically accepted only after Finance period, chart and source validation',()=>{
+ const purchase=src('backend/purchaseOrders.ts');
+ const poBudget=src('backend/corporatePoBudget.ts');
+ const receipt=src('backend/poFinance.ts');
+ const finance=src('backend/finCore.ts');
+ assert.match(poBudget,/statement!=='PL'/);
+ assert.match(poBudget,/currencyDigits\(currency\)!==2/);
+ assert.match(poBudget,/prepareCommitmentWrites\(ctx\.orgId,source/);
+ assert.match(purchase,/commit\(\[\.\.\.c\.atomicWrites,\{path,fields:next,updateTime:fresh\.updateTime\}\]\)/);
+ assert.match(receipt,/prepareServiceAcceptanceBudget/);
+ assert.match(receipt,/postingDate:at\.slice\(0,10\)/);
+ assert.match(finance,/writes\.push\(\.\.\.await input\.extraForJournal\(id\)\)/);
+});
