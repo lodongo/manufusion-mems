@@ -1,5 +1,5 @@
 import {HttpError,getDoc,isObj,str} from './core';
-import {legalEntityForEmployee} from './hrEducationConfig';
+import {legalEntityForEmployee,getEducationConfig} from './hrEducationConfig';
 import {defaultLeaveEntitlement, type LeaveGradeEntitlement, type PayConfig, type PayItem} from './hrCompensationConfig';
 
 export type LeaveOption={
@@ -38,6 +38,10 @@ export async function leaveEligibility(org:string,employee:Record<string,unknown
  const map=isObj(role.data.jobGradeByLegalEntity)?role.data.jobGradeByLegalEntity:{};
  const gradeCode=str(map[legal.id]);
  if(!gradeCode)throw new HttpError(409,'Assign a job grade to the employee’s role for this legal entity under Organization Admin → Roles.');
+ const gradeMaster=await getEducationConfig(org,legal.id);
+ if(!gradeMaster.jobGrades.some(g=>g.enabled&&g.code===gradeCode))
+  throw new HttpError(409,'This job grade is disabled or missing in the employee’s legal entity. Update role grading in Organization Admin.');
+
  const cfg=await getDoc(collection(org,legal.id));
  if(!cfg)throw new HttpError(409,'Configure and save leave entitlements for the employee’s legal entity before planning leave.');
  const payroll=cfg.data as unknown as PayConfig;
