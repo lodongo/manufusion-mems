@@ -11,15 +11,16 @@ import {
   type Obj,type Unit,
 } from './finCore';
 import {
-  applyApprovedTransfer,BUDGET_CLASSES,FUNDING_METHODS,isBudgetClass,isFundingMethod,
+  applyApprovedRevision,applyApprovedTransfer,BUDGET_CLASSES,FUNDING_METHODS,isBudgetClass,isFundingMethod,
   moneyMinor,validDate,validateFundingAgreement,validateNewPlan,checkBudget,
-  type BudgetLine,type BudgetPlan,type BudgetTransfer,type BudgetException,
+  type BudgetLine,type BudgetPlan,type BudgetTransfer,type BudgetRevision,type BudgetException,
   type BudgetClass,type FundingAgreement,type FundingMethod,
 } from './corporateBudget';
 
 const root=(org:string)=>'organizations/'+org;
 const planPath=(org:string,le:string,fy:number)=>root(org)+'/corp_budgets/'+le+'_'+fy;
 const movePath=(org:string,id:string)=>root(org)+'/corp_budget_moves/'+id;
+const revisionPath=(org:string,id:string)=>root(org)+'/corp_budget_revisions/'+id;
 const exceptionPath=(org:string,id:string)=>root(org)+'/corp_budget_exceptions/'+id;
 const fundingPath=(org:string,id:string)=>root(org)+'/corp_funding_agreements/'+id;
 const clean=(value:unknown,max=250)=>str(value).trim().slice(0,max);
@@ -114,6 +115,36 @@ registerHandler('corp.budget.activate',{
   if(!await writeDoc(path,plan as unknown as Fields,{exists:false}))
    throw new HttpError(409,'Approved budget already exists.');
   return {leId:le,fy,total:moneyNumber(total),currency,version:1};
+ },
+});
+registerHandler('corp.budget.revise',{
+ label:'Annual budget revision / supplementary appropriation',
+ approvePerm:'FIN.setup.approve',valued:true,
+ apply:async(ctx,req,id)=>{
+  const payload=getObject(req.payload),revision=payload.revision as BudgetRevision;
+  if(!revision||typeof revision!=='object')throw new HttpError(400,'Missing budget revision.');
+  const {units}=await setup(ctx,revision.legalEntityId,'FIN.setup.approve');
+  const {currency}=await yearCurrency(ctx,revision.legalEntityId,revision.fy);
+  if(currency!==revision.currency)throw new HttpError(409,'Legal-entity currency has changed.');
+  for(const change of revision.changes)
+   costCenterOf(change.costCenterId,revision.legalEntityId,units);
+  const path=planPath(ctx.orgId,revision.legalEntityId,revision.fy),prior=await getDoc(path);
+  if(!prior)throw new HttpError(409,'Approved budget no longer exists.');
+  const plan=prior.data as unknown as BudgetPlan;
+  if(plan.version!==Number(payload.expectedPlanVersion))
+   throw new HttpError(409,'Plan changed since the proposal. Submit an updated revision.');
+  let next:BudgetPlan;
+  try{next=applyApprovedRevision(plan,revision);}
+  catch(e){throw new HttpError(409,(e as Error).message);}
+  await commit([
+   {path,fields:next as unknown as Obj,updateTime:prior.updateTime},
+   {path:revisionPath(ctx.orgId,id),exists:false,fields:{
+     ...revision,id,approvedBy:ctx.uid,proposedBy:clean(req.makerUid),
+     approvedAt:nowIso(),approvalRef:id,status:'approved',
+     priorVersion:plan.version,newVersion:next.version} as unknown as Obj},
+  ]);
+  return {fy:revision.fy,leId:revision.legalEntityId,version:next.version,currency,
+    netBudgetChange:moneyNumber(revision.changes.reduce((n,c)=>n+c.deltaMinor,0))};
  },
 });
 registerHandler('corp.budget.transfer',{
@@ -246,6 +277,35 @@ export const corporateBudgetRoutes={
     title:'Budget plan FY'+fy,summary:lines.length+' lines; '+currency+' '+moneyNumber(totalMinor),
     payload:{fy,currency,totalMinor,lines} as unknown as Obj,amount:moneyNumber(totalMinor),
     reason:safeReason(ctx)});
+ })],
+ 'POST /api/org/corporate/budget/revision/propose':[route('org.corporate.budget.revision.propose',async ctx=>{
+   const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
+   const {units}=await setup(ctx,leId,'FIN.setup.manage');
+   const plan=await getPlan(ctx,leId,fy);
+   if(!plan)throw new HttpError(409,'Approve an opening annual budget before requesting revisions.');
+   const raw=ctx.body.changes;
+   if(!Array.isArray(raw)||!raw.length||raw.length>100)
+    throw new HttpError(400,'Provide 1–100 revision lines.');
+   const changes=raw.map(item=>{
+    const x=getObject(item);
+    const costCenterId=clean(x.costCenterId,128);costCenterOf(costCenterId,leId,units);
+    const value=Number(x.delta);
+    if(!Number.isFinite(value)||value===0)
+     throw new HttpError(400,'Each revision delta must be nonzero.');
+    return {costCenterId,category:category(x.category),
+      deltaMinor:Math.sign(value)*amount(Math.abs(value))};
+   });
+   const reason=safeReason(ctx);
+   const revision:BudgetRevision={legalEntityId:leId,fy,currency:plan.currency,changes,reason};
+   try{applyApprovedRevision(plan,revision);}catch(e){throw new HttpError(400,(e as Error).message);}
+   const requested=changes.reduce((sum,c)=>sum+Math.abs(c.deltaMinor),0);
+   if(!Number.isSafeInteger(requested))throw new HttpError(400,'Revision total exceeds supported precision.');
+   return createRequest(ctx,{leId,type:'corp.budget.revise',
+    scopeKey:'corp.budget.revise.'+leId+'.'+fy,
+    title:'Budget revision FY'+fy,summary:changes.length+' changes; '+plan.currency+
+      ' '+moneyNumber(changes.reduce((sum,c)=>sum+c.deltaMinor,0))+' net amendment',
+    payload:{revision,expectedPlanVersion:plan.version} as unknown as Obj,
+    amount:moneyNumber(requested),reason});
  })],
  'POST /api/org/corporate/budget/transfer/propose':[route('org.corporate.budget.transfer.propose',async ctx=>{
    const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
