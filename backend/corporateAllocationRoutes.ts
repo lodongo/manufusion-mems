@@ -9,7 +9,7 @@ import {
   requireFinance,scopeOf,unitsOf,
   type Unit,type Obj,
 } from './finCore';
-import {moneyMinor,majorFromMinor} from './corporateBudget';
+import {moneyMinor,majorFromMinor,minorFactor} from './corporateBudget';
 import {
   ALLOCATION_BASIS,POOL_TYPES,validateAllocationPolicy,calculateAllocation,pendingCounterparties,
   allocationIsEffective,
@@ -141,8 +141,9 @@ export const corporateAllocationRoutes={
   const scope=await scopeOf(ctx);
   return {...r,legalEntities:r.legalEntities.filter(l=>
    ['FIN.view','FIN.setup.manage','FIN.setup.approve'].some(perm=>permAt(ctx,perm,l.id,units,scope))),
-   costCenters:r.costCenters.filter(c=>
-   ['FIN.view','FIN.setup.manage','FIN.setup.approve'].some(perm=>permAt(ctx,perm,c.legalEntityId,units,scope))),
+   // Only structural destinations, not financial amounts, are exposed here.
+   // A corporate Finance policy owner needs to select beneficiary cost centres in other entities.
+   costCenters:r.costCenters,
    basis:ALLOCATION_BASIS,costNature:POOL_TYPES};
  })],
  'POST /api/org/corporate/allocation/list':[route('org.corporate.allocation.list',async ctx=>{
@@ -197,7 +198,7 @@ export const corporateAllocationRoutes={
   // Cross-currency agreement approved under beneficiary's CoA at conservative rounded-up value.
   const rate=p.currency===fin.functionalCurrency?1:await (await import('./finCore')).fxRate(p.currency,fin.functionalCurrency);
   const base=majorFromMinor(p.annualCeilingMinor,p.currency)*rate;
-  const approvalAmount=Math.ceil(base*100)/100;
+  const approvalAmount=Math.ceil(base*minorFactor(fin.functionalCurrency))/minorFactor(fin.functionalCurrency);
   return createRequest(ctx,{leId,type:'corp.allocation.counterparty',
    scopeKey:'corp.allocation.accept.'+policyId+'.'+leId,
    title:'Accept allocation pool '+p.code,summary:p.name+' from '+p.providerLegalEntityId+
