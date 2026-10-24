@@ -58,8 +58,11 @@ function daysFor(type:LeaveOption,start:string,end:string){
 function earned(type:LeaveOption,start:string,person:Record<string,unknown>){
  if(!type.accrueMonthly||type.unit==='months')return type.daysPerYear+type.carryForwardDays;
  const year=Number(start.slice(0,4));
- const employmentDate=s(person.employmentStartDate||person.hireDate||person.startDate,10);
- if(employmentDate&&isDate(employmentDate)&&employmentDate>start)
+ const roleStart=assignments(person).map(x=>s(x.startsOn,10)).find(x=>isDate(x))||'';
+ const employmentDate=s(person.employmentStartDate||person.hireDate||person.startDate||roleStart,10);
+ if(!employmentDate||!isDate(employmentDate))
+  throw new HttpError(409,'Monthly leave accrual requires an employee employment start date or effective primary role assignment date.');
+ if(employmentDate>start)
   throw new HttpError(409,'Employee employment start is after the requested leave.');
  const fromMonth=employmentDate&&isDate(employmentDate)&&Number(employmentDate.slice(0,4))===year?
   Number(employmentDate.slice(5,7)):1;
