@@ -3,7 +3,8 @@ import {Banknote,BookOpenText,CheckCircle2,ChevronDown,Copy,FileWarning,Plus,Sav
 import {callBackend} from '../lib/backend';
 import {SelectField} from '../components/ui';
 import {estimateKenyaMonthly} from './hrPayPreview';
-import {defaultLeaveEntitlement,type PayBase,type PayCategory,type PayConfig,type PayItem,type PayMethod,type LeaveGradeEntitlement} from '../../backend/hrCompensationConfig';
+import {defaultLeaveEntitlement,type LeaveGradeEntitlement} from '../shared/hrLeaveDefaults';
+import type {PayBase,PayCategory,PayConfig,PayItem,PayMethod} from '../../backend/hrCompensationConfig';
 
 type Entity={id:string;name:string;countryCode:string;currency:string};
 type Grade={code:string;title:string;rank:number;enabled:boolean};
