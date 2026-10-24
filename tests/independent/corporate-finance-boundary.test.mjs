@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 const configured=[
  ['backend/corporateBudgetRoutes.ts',10],
  ['backend/corporateAllocationRoutes.ts',6],
- ['backend/corporateIntercompanyRoutes.ts',14],
+ ['backend/corporateIntercompanyRoutes.ts',15],
  ['backend/corporateAllocationExecutionRoutes.ts',2],
 ];
 test('Corporate finance endpoints declare their own FIN route-level permissions',()=>{
@@ -19,4 +19,16 @@ test('Corporate finance endpoints declare their own FIN route-level permissions'
     file+' '+match[1]+' needs an explicit FIN permission at the route boundary');
   }
  }
+});
+
+test('P6 bilateral GL preview and posted reconciliation require access to both entities',()=>{
+ const code=readFileSync('backend/corporateIntercompanyRoutes.ts','utf8');
+ const preview=code.slice(code.indexOf("'POST /api/org/corporate/ic/vouchers/preview':"),code.indexOf("'POST /api/org/corporate/ic/post/status':"));
+ const posted=code.slice(code.indexOf("'POST /api/org/corporate/ic/posted-reconciliation':"),code.indexOf("'POST /api/org/corporate/ic/reconciliation':"));
+ const preflight=code.slice(code.indexOf("'POST /api/org/corporate/ic/post/readiness':"),code.indexOf("'POST /api/org/corporate/ic/post/propose':"));
+ assert.match(preview,/for\(const le of \[v\.providerLegalEntityId,v\.beneficiaryLegalEntityId\]\)/);
+ assert.match(preview,/throw new HttpError\(403/);
+ assert.match(posted,/for\(const party of parties\)await canRead\(ctx,party\)/);
+ assert.match(preflight,/await canRead\(ctx,v\.providerLegalEntityId\)/);
+ assert.match(preflight,/await canRead\(ctx,v\.beneficiaryLegalEntityId\)/);
 });

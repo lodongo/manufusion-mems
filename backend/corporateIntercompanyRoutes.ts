@@ -12,6 +12,7 @@ import {
 import {moneyMinor,majorFromMinor,minorFactor} from './corporateBudget';
 import {icPostingEnabled,postIntercompanyPair,validatePostablePair,pairPath} from './corporateIntercompanyPosting';
 import {postedIcReport} from './corporateIntercompanyPostedReport';
+import {inspectP6Readiness} from './corporateIntercompanyReadiness';
 import {reconcileStaging} from './corporateIntercompanyReconciliation';
 import {
  IC_TYPES,IC_ROLES,IC_SETTLEMENT,validateAgreement,validateVoucher,
@@ -412,9 +413,10 @@ export const corporateIntercompanyRoutes={
   if(!safeId(id)||!doc)throw new HttpError(404,'Intercompany voucher not found.');
   const v=doc.data as unknown as IcVoucher;
   const {units,scope}=await (async()=>({units:await unitsOf(ctx.orgId),scope:await scopeOf(ctx)}))();
-  if(![v.providerLegalEntityId,v.beneficiaryLegalEntityId].some(le=>
-   ['FIN.view','FIN.setup.manage','FIN.setup.approve','FIN.journal.view'].some(p=>permAt(ctx,p,le,units,scope))))
-   throw new HttpError(403,'Finance access to a voucher party is required.');
+  for(const le of [v.providerLegalEntityId,v.beneficiaryLegalEntityId]){
+   if(!['FIN.view','FIN.setup.manage','FIN.setup.approve','FIN.journal.view'].some(p=>permAt(ctx,p,le,units,scope)))
+    throw new HttpError(403,'Finance access to both voucher parties is required for bilateral GL preview.');
+  }
   const aDoc=await getDoc(agreementPath(ctx.orgId,v.agreementId));
   if(!aDoc)throw new HttpError(409,'Intercompany contract missing.');
   const a=aDoc.data as unknown as IcAgreement;
@@ -426,6 +428,17 @@ export const corporateIntercompanyRoutes={
   postingEnabled:icPostingEnabled(),
   note:'Atomic dual-entity Finance posting requires explicit isolated development release. No bank or tax invoice execution is included.',
  }))],
+ 'POST /api/org/corporate/ic/post/readiness':[orgRoute('org.corporate.ic.post.readiness','FIN.view',async ctx=>{
+  const vid=clean(ctx.body.voucherId,128);
+  if(!safeId(vid))throw new HttpError(400,'Select a valid intercompany voucher.');
+  const d=await getDoc(voucherPath(ctx.orgId,vid));
+  if(!d)throw new HttpError(404,'Voucher not found.');
+  const v=d.data as unknown as IcVoucher;
+  // No cross-entity finance configuration may be disclosed to a one-sided observer.
+  await canRead(ctx,v.providerLegalEntityId);
+  await canRead(ctx,v.beneficiaryLegalEntityId);
+  return inspectP6Readiness(ctx.orgId,vid);
+ })],
  'POST /api/org/corporate/ic/post/propose':[orgRoute('org.corporate.ic.post.propose','FIN.close.run',async ctx=>{
   const vid=clean(ctx.body.voucherId,128);
   if(!safeId(vid))throw new HttpError(400,'Invalid voucher.');
@@ -448,7 +461,10 @@ export const corporateIntercompanyRoutes={
  'POST /api/org/corporate/ic/posted-reconciliation':[orgRoute('org.corporate.ic.posted-reconciliation','FIN.view',async ctx=>{
   const legalEntityId=clean(ctx.body.legalEntityId,128);
   await canRead(ctx,legalEntityId);
-  return postedIcReport(ctx.orgId,legalEntityId);
+  const report=await postedIcReport(ctx.orgId,legalEntityId);
+  const parties=new Set(report.rows.flatMap(row=>[row.providerLegalEntityId,row.beneficiaryLegalEntityId]));
+  for(const party of parties)await canRead(ctx,party);
+  return report;
  })],
  'POST /api/org/corporate/ic/reconciliation':[orgRoute('org.corporate.ic.reconciliation','FIN.view',async ctx=>{
   const legalEntityId=clean(ctx.body.legalEntityId,128);await canRead(ctx,legalEntityId);
