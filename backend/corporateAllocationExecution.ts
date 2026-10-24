@@ -7,7 +7,7 @@ import {type OrgContext} from './guards';
 import {P,hashKey,commit,preparePosting,fxRate,entityOf,type PostInput,type Write} from './finCore';
 import {currencyDigits,majorFromMinor} from './corporateBudget';
 import {allocationIsEffective,calculateAllocation,type AllocationPolicy} from './corporateAllocation';
-import {icPostingEnabled} from './corporateIntercompanyPosting';
+import {icPostingEnabled,validateFinalFinanceApproval,type FinalFinanceApproval} from './corporateIntercompanyPosting';
 import type {IcVoucher,IcAgreement} from './corporateIntercompany';
 export interface AllocationSource {journalId:string;lineNo:number;amountMinor:number;glCode:string;ccId:string;postingDate:string;currency:string;}
 export interface AllocationExecution {id:string;policyId:string;source:AllocationSource;totalMinor:number;currency:string;executedAt:string;approvedBy:string;approvalRef:string;sameEntityJournalId:string;voucherIds:string[];status:'executed';}
@@ -45,7 +45,7 @@ export async function previewVerifiedAllocation(orgId:string,policyId:string,jou
  return {policy:p,source:{journalId,lineNo,amountMinor:minor,glCode:String(line.glCode),ccId:String(line.ccId),postingDate:date,currency:p.currency},
   runId:id,allocation};
 }
-export async function executeVerifiedAllocation(ctx:OrgContext,preview:VerifiedPreview,approvalRef:string,taxRef:string,makerUid:string):Promise<AllocationExecution>{
+export async function executeVerifiedAllocation(ctx:OrgContext,preview:VerifiedPreview,approvalRef:string,taxRef:string,makerUid:string,finalApproval:FinalFinanceApproval):Promise<AllocationExecution>{
  if(!icPostingEnabled())throw new HttpError(409,'P6 allocation execution is disabled on this server.');
  if(!/^[A-Za-z0-9_-]{3,128}$/.test(approvalRef)||taxRef.trim().length<6)
   throw new HttpError(409,'Approved Finance request and tax review reference are required.');
@@ -104,8 +104,14 @@ export async function executeVerifiedAllocation(ctx:OrgContext,preview:VerifiedP
  const reqSteps=Array.isArray(fcrDoc.data.steps)?fcrDoc.data.steps as Array<Record<string,unknown>>:[];
  if(reqSteps.filter(x=>x.status==='pending').length!==1)
   throw new HttpError(409,'Allocation Finance request must reach the final sign-off before execution.');
- const fcrAt=nowIso();
- const decidedSteps=reqSteps.map(x=>x.status==='pending'?{...x,status:'approved',at:fcrAt,by:ctx.uid}:x);
+ validateFinalFinanceApproval(finalApproval,ctx.uid);
+ if(finalApproval.steps.length!==reqSteps.length||
+    !reqSteps.every((step,i)=>step.status==='pending'?
+      finalApproval.steps[i].status==='approved'&&finalApproval.steps[i].by===ctx.uid:
+      finalApproval.steps[i].status===step.status&&finalApproval.steps[i].by===step.by))
+  throw new HttpError(409,'Finance allocation approval steps no longer match the pending request.');
+ const fcrAt=finalApproval.at;
+ const decidedSteps=finalApproval.steps;
  const postInput:PostInput={leId:refreshed.policy.providerLegalEntityId,type:'REALLOC',date:refreshed.source.postingDate,
   docCurrency:refreshed.source.currency,fxRate:1,lines:rows,narrative:'Verified P6 allocation '+refreshed.policy.code,
   source:{kind:'corporate-allocation',id:refreshed.runId,ref:refreshed.source.journalId,route:'corp.allocation.execute'},
@@ -116,7 +122,7 @@ export async function executeVerifiedAllocation(ctx:OrgContext,preview:VerifiedP
   approvedBy:ctx.uid,approvalRef,sameEntityJournalId:internalPosting?.id||'',voucherIds,status:'executed'};
  await commit([...(internalPosting?.writes||[]),...voucherWrites,
   {path:P(ctx.orgId).request(approvalRef),updateTime:fcrDoc.updateTime,
-   fields:{...fcrDoc.data,status:'approved',steps:decidedSteps,decidedAt:fcrAt,decidedBy:ctx.uid,
+   fields:{...fcrDoc.data,status:'approved',steps:decidedSteps,history:finalApproval.history,decidedAt:fcrAt,decidedBy:ctx.uid,
     result:{runId:outcome.id,voucherIds,sameEntityJournal:outcome.sameEntityJournalId}}},
   {path:poolPath(ctx.orgId,refreshed.policy.id),updateTime:policyDoc.updateTime,
    mask:['allocatedToDateMinor','lastAllocationAt'],fields:{allocatedToDateMinor:spent+refreshed.source.amountMinor,lastAllocationAt:nowIso()}},
