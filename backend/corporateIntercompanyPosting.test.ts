@@ -46,7 +46,7 @@ test('P6 blocks cash, loan, equity, missing cost centres and currencies unsuppor
  a.allowedTypes=['LOAN_ADVANCE'];v.type='LOAN_ADVANCE';
  assert.throws(()=>validatePostablePair(v,a),/treasury release/);
  const b=agreement(),z=voucher();z.providerCostCenterId='';
- assert.throws(()=>validatePostablePair(z,b),/cost-centre/);
+ assert.throws(()=>validatePostablePair(z,b),/cost centres/);
  z.providerCostCenterId='CC_A';z.beneficiaryFunctionalCurrency='KWD';
  assert.throws(()=>validatePostablePair(z,b),/two-decimal/);
 });
