@@ -5,6 +5,7 @@ import { record } from './org';
 import { can, requireProcurement } from './procurementSetup';
 import { catalogSummary } from './procurement';
 import { acceptService } from './finOps';
+import {prepareServiceAcceptanceBudget} from './corporateServiceBudget';
 import { getAuthority } from './procurementPolicy';
 import {
     DELIVERING,
@@ -254,7 +255,12 @@ export const poFinanceRoutes = {
                 const dup = orders.find((p) => str(p.data.vendorId) === str(d.vendorId) && objs(p.data.receipts).some((x) => str(x.status) === 'accepted' && str(x.id) !== rid && str(x.invoiceNo).toLowerCase() === str(r.invoiceNo).toLowerCase()));
                 if (dup) throw new HttpError(409, `Invoice ${str(r.invoiceNo)} from this supplier was already accepted on ${dup.id}.`);
                 // The ledger of the cost center's legal entity: Dr the line account on the cost center, Cr GR/IR (cleared later by the invoice in Accounts Payable).
-                const posted = await acceptService(ctx, { po: d, poId: doc.id, receiptId: rid, invoiceNo: str(r.invoiceNo), lines: rlines.map((x) => ({ no: Number(x.no), qty: Number(x.qty) || 0, amount: Number(x.amount) || 0 })) });
+                const isBudgetPilot=d.budgetControlled===true;
+                const acceptedLines=rlines.map((x) => ({ no: Number(x.no), qty: Number(x.qty) || 0, amount: Number(x.amount) || 0 }));
+                // In the service pilot, posting must happen only after the complete PO patch is
+                // prepared. The Finance journal owns the sole atomic commit (source+budget+GL).
+                const posted=isBudgetPilot?{journals:[] as string[],note:''}:
+                    await acceptService(ctx,{po:d,poId:doc.id,receiptId:rid,invoiceNo:str(r.invoiceNo),lines:acceptedLines});
                 journalId = posted.journals.join(', ');
                 const at = nowIso();
                 const lines = objs(d.lines).map((l) => {
@@ -274,6 +280,32 @@ export const poFinanceRoutes = {
                         ...(full ? { deliveredAt: at } : {}),
                         ...(!str(d.firstDeliveryAt) ? { firstDeliveryAt: at } : {}),
                     },
+                    ...(isBudgetPilot?{atomicJournal:async(next:Obj,fresh:Doc)=>{
+                        if(!fresh.updateTime)throw new HttpError(409,'Purchase order is stale for atomic service acceptance.');
+                        const booked=await acceptService(ctx,{
+                            po:d,poId:doc.id,receiptId:rid,invoiceNo:str(r.invoiceNo),lines:acceptedLines,
+                            strictBudget:{extraForJournal:async(glJournalId,costs,leId,_rate,currency)=>{
+                                if(currency!==str(d.budgetCurrency)||leId!==str(d.budgetLegalEntityId))
+                                    throw new HttpError(409,'Posting legal entity/currency differs from approved PO budget commitment.');
+                                const prepared=await prepareServiceAcceptanceBudget(
+                                    ctx.orgId,baseOf(doc.id),rid,costs,full);
+                                const nextReceipts=objs(next.receipts).map(x=>str(x.id)===rid?
+                                    {...x,journalId:glJournalId,financeNote:'GL and budget accepted together'}:x);
+                                next.receipts=nextReceipts;
+                                const nextDeliveries=objs(next.deliveries).map(x=>str(x.ref).startsWith(rid+' /')?
+                                    {...x,note:('Service accepted, journal '+glJournalId).slice(0,300)}:x);
+                                next.deliveries=nextDeliveries;
+                                next.budgetActualMinor=(Number(d.budgetActualMinor)||0)+prepared.actualMinor;
+                                next.budgetRemainingMinor=prepared.remainingMinor;
+                                next.budgetLastJournal=glJournalId;
+                                return [...prepared.writes,{path:ordersPath(ctx.orgId)+'/'+doc.id,
+                                    fields:next,updateTime:fresh.updateTime!}];
+                            }},
+                        });
+                        if(booked.journals.length!==1)
+                            throw new HttpError(409,'Strict pilot requires exactly one successful GL journal.');
+                        journalId=booked.journals[0];
+                    }}:{}),
                     event: 'service accepted and reconciled',
                     note: `${rid}${journalId ? `, journal ${journalId}` : ''}${posted.note ? `. ${posted.note}` : ''}${note ? `. ${note}` : ''}`.slice(0, 380),
                     label: journalId ? `Service accepted: journal ${journalId} posted` : 'Service accepted (finance not live: not posted)',
