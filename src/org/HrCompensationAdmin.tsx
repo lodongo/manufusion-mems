@@ -3,7 +3,7 @@ import {Banknote,BookOpenText,CheckCircle2,ChevronDown,Copy,FileWarning,Plus,Sav
 import {callBackend} from '../lib/backend';
 import {SelectField} from '../components/ui';
 import {estimateKenyaMonthly} from './hrPayPreview';
-import type {PayBase,PayCategory,PayConfig,PayItem,PayMethod} from '../../backend/hrCompensationConfig';
+import {defaultLeaveEntitlement,type PayBase,type PayCategory,type PayConfig,type PayItem,type PayMethod,type LeaveGradeEntitlement} from '../../backend/hrCompensationConfig';
 
 type Entity={id:string;name:string;countryCode:string;currency:string};
 type Grade={code:string;title:string;rank:number;enabled:boolean};
@@ -43,6 +43,14 @@ export default function HrCompensationAdmin(){
  };
  useEffect(()=>{void load()},[]);
  const update=(code:string,patch:Partial<PayItem>)=>setConfig(c=>c?{...c,items:c.items.map(x=>x.code===code?{...x,...patch}:x)}:c);
+ const entitlement=(entry:PayItem,grade:string):LeaveGradeEntitlement=>
+  entry.leaveEntitlements?.[grade]||defaultLeaveEntitlement(entry.mandatory,entry.amount,entry.code);
+ const setEntitlement=(entry:PayItem,grade:string,change:Partial<LeaveGradeEntitlement>)=>{
+  update(entry.code,{leaveEntitlements:{
+   ...(entry.leaveEntitlements||{}),
+   [grade]:{...entitlement(entry,grade),...change,requiresApprovedPlan:true},
+  }});
+ };
  const visible=useMemo(()=>config?.items.filter(x=>x.category===tab&&
   (!query.trim()||[x.name,x.code,x.description,x.applicability].some(v=>v.toLowerCase().includes(query.toLowerCase()))))||[],[config,tab,query]);
  const mandatory=useMemo(()=>config?.items.filter(x=>x.mandatory).length||0,[config]);
@@ -179,19 +187,56 @@ export default function HrCompensationAdmin(){
        onChange={e=>update(x.code,{payrollTreatment:e.target.value as PayItem['payrollTreatment']})}>
        {['earning','employee_deduction','employer_cost','noncash','informational'].map(p=><option key={p} value={p}>{p}</option>)}
       </SelectField>
-      <div className="rounded-xl border border-line bg-page p-3">
+      {tab==='leave'?<div className="space-y-3 rounded-xl border border-line bg-page p-3">
+       <h4 className="font-semibold">Leave entitlement by job grade</h4>
+       <p className="text-xs text-muted">For every enabled grade, configure eligibility, annual entitlement, whether to accrue monthly and carry-forward. Employees must have an approved plan before applying. Statutory minimum leave types cannot be disabled by grade.</p>
+       {grades.filter(g=>g.enabled).map(g=>{
+        const e=entitlement(x,g.code);
+        return <section key={g.code} className="space-y-3 rounded-xl border border-line bg-panel p-3">
+         <strong className="text-sm">Grade {g.rank} · {g.title}</strong>
+         <label className="flex min-h-11 items-center gap-2 text-sm">
+          <input type="checkbox" className="h-5 w-5 accent-brand"
+           disabled={locked} checked={e.eligible}
+           onChange={event=>setEntitlement(x,g.code,{eligible:event.target.checked})}/>Eligible for this leave type
+         </label>
+         <div className="grid grid-cols-2 gap-3">
+          <label className="min-w-0 text-xs text-muted">Entitlement per year
+           <input type="number" min={0} max={366} step="0.25" className={field}
+            value={e.daysPerYear} onChange={event=>setEntitlement(x,g.code,{daysPerYear:Number(event.target.value)})}/>
+          </label>
+          <SelectField id={'leave-unit-'+x.code+'-'+g.code} label="Entitlement unit"
+           value={e.unit} onChange={event=>setEntitlement(x,g.code,{unit:event.target.value as LeaveGradeEntitlement['unit']})}>
+           <option value="working_days">Working days</option><option value="calendar_days">Calendar days</option><option value="months">Calendar months</option>
+          </SelectField>
+          <label className="min-w-0 text-xs text-muted">Carry-forward allowance
+           <input type="number" min={0} max={366} step="0.25" className={field}
+            value={e.carryForwardDays} onChange={event=>setEntitlement(x,g.code,{carryForwardDays:Number(event.target.value)})}/>
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+           <input type="checkbox" className="h-5 w-5 accent-brand"
+            checked={e.accrueMonthly} onChange={event=>setEntitlement(x,g.code,{accrueMonthly:event.target.checked})}/>
+           Accrue monthly
+          </label>
+         </div>
+         <p className="text-xs text-muted">{e.accrueMonthly?
+          'Monthly accrual: '+(e.daysPerYear/12).toFixed(3)+' '+e.unit+' per month':
+          'Entitlement made available annually (subject to employment and statutory eligibility)'} · Approved plan required</p>
+        </section>;
+       })}
+       {!grades.some(g=>g.enabled)&&<p className="text-xs text-amber-700">Configure enabled job grades first under Education & Job Grades.</p>}
+      </div>:<div className="rounded-xl border border-line bg-page p-3">
        <h4 className="text-sm font-semibold">Job grade applicability</h4>
-       {locked?<p className="mt-2 text-xs text-amber-700">Legally mandatory reference: applies to all relevant employees regardless of job grade. Only an individual verified exemption can vary the treatment.</p>
-       :<p className="mt-2 text-xs text-muted">No selected grades = all eligible job grades. Select individual grades for a restricted company policy.</p>}
+       {locked?<p className="mt-2 text-xs text-amber-700">Legally mandatory reference applies regardless of grade; employee-specific statutory exemptions require verified evidence.</p>
+       :<p className="mt-2 text-xs text-muted">No selected grades = all eligible grades. Select grades for a company-specific policy.</p>}
        <div className="mt-2 grid gap-2 sm:grid-cols-2">
         {grades.filter(g=>g.enabled).map(g=><label key={g.code} className="flex min-h-11 items-center gap-2 rounded-lg border border-line p-2 text-xs">
          <input type="checkbox" className="h-5 w-5 shrink-0 accent-brand" disabled={locked}
-          checked={x.gradeCodes.includes(g.code)} onChange={e=>update(x.code,{gradeCodes:e.target.checked?[...x.gradeCodes,g.code]:x.gradeCodes.filter(c=>c!==g.code)})}/>
+          checked={x.gradeCodes.includes(g.code)}
+          onChange={e=>update(x.code,{gradeCodes:e.target.checked?[...x.gradeCodes,g.code]:x.gradeCodes.filter(c=>c!==g.code)})}/>
          <span className="min-w-0 break-words">Grade {g.rank} · {g.title}</span>
         </label>)}
        </div>
-       {!grades.some(g=>g.enabled)&&<p className="mt-2 text-xs text-muted">Configure Job Grades on the Education & Job Grade tab first.</p>}
-      </div>
+      </div>}
       <div className="flex flex-wrap items-center gap-4">
        <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" className="h-5 w-5 accent-brand" disabled={locked}
         checked={x.enabled} onChange={e=>update(x.code,{enabled:e.target.checked})}/> Enabled</label>
