@@ -17,6 +17,7 @@ import UserChip from '../components/UserChip';
 import SideNav, { type NavGroup, type NavItem } from '../components/SideNav';
 import StructurePage from './StructurePage';
 import CorporateGovernancePage from './CorporateGovernancePage';
+import CorporateFinancialControlsPage from './CorporateFinancialControlsPage';
 import PositionsPage from './PositionsPage';
 import OdChart from './OdChart';
 import OrgSettings from './OrgSettings';
@@ -92,7 +93,10 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
     },
     {
         title: 'Finance (FIN)',
-        items: [{ key: 'gl_accounts', label: 'GL account master', Icon: Calculator, perm: 'FIN.view', module: 'FIN' }],
+        items: [
+            { key: 'gl_accounts', label: 'GL account master', Icon: Calculator, perm: 'FIN.view', module: 'FIN' },
+            { key: 'corporate_finance', label: 'Corporate budgets & allocation', Icon: Landmark, perm: 'FIN.', module: 'FIN' },
+        ],
     },
     {
         title: 'HR administration',
@@ -299,6 +303,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             break;
         case 'corporate_governance':
             content = <CorporateGovernancePage canEdit={canDesign}/>;
+            break;
+        case 'corporate_finance':
+            content = <CorporateFinancialControlsPage canEdit={hasPerm(data.permissions,'FIN.setup.manage') || hasPerm(data.permissions,'FIN.cc.manage')}/>;
             break;
         case 'structure':
             content = <StructurePage nodeId={id} sub={parts[3]} canEdit={canDesign} />;
