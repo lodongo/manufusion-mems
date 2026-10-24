@@ -17,7 +17,8 @@
     "audit:routes": "node scripts/governance-route-audit.mjs",
     "audit:routes:strict": "node scripts/governance-route-audit.mjs --strict",
     "audit:future-routes": "node scripts/future-route-check.mjs",
-    "test:hr": "node --import tsx --test backend/hrAccessPolicy.test.ts backend/hrHierarchy.test.ts"
+    "test:hr": "node --import tsx --test backend/hrAccessPolicy.test.ts backend/hrHierarchy.test.ts",
+    "test:corporate": "node --import tsx --test backend/corporateStructure.test.ts"
   },
   "dependencies": {
     "firebase": "^11.0.0",
