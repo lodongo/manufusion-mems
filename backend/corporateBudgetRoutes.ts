@@ -12,7 +12,7 @@ import {
 } from './finCore';
 import {
   applyApprovedRevision,applyApprovedTransfer,BUDGET_CLASSES,FUNDING_METHODS,isBudgetClass,isFundingMethod,
-  moneyMinor,validDate,validateFundingAgreement,validateNewPlan,checkBudget,
+  moneyMinor,majorFromMinor,validDate,validateFundingAgreement,validateNewPlan,checkBudget,
   type BudgetLine,type BudgetPlan,type BudgetTransfer,type BudgetRevision,type BudgetException,
   type BudgetClass,type FundingAgreement,type FundingMethod,
 } from './corporateBudget';
@@ -29,8 +29,8 @@ const getObject=(raw:unknown):Record<string,unknown>=>{
  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new HttpError(400,'Provide an object.');
  return raw as Record<string,unknown>;
 };
-const amount=(raw:unknown)=>{try{return moneyMinor(raw);}catch(e){throw new HttpError(400,(e as Error).message);}};
-const moneyNumber=(minor:number)=>minor/100;
+const amount=(raw:unknown,currency:string)=>{try{return moneyMinor(raw,currency);}catch(e){throw new HttpError(400,(e as Error).message);}};
+const moneyNumber=(minor:number,currency:string)=>majorFromMinor(minor,currency);
 const integer=(raw:unknown)=>{
  const v=Number(raw);
  if(!Number.isSafeInteger(v)||v<1900||v>2500)throw new HttpError(400,'Invalid financial year.');
@@ -67,11 +67,11 @@ async function getPlan(ctx:OrgContext,le:string,fy:number):Promise<BudgetPlan|nu
  const d=await getDoc(planPath(ctx.orgId,le,fy));
  return d?d.data as unknown as BudgetPlan:null;
 }
-function verifyBudgetLines(raw:unknown,le:string,units:Map<string,Unit>):BudgetLine[]{
+function verifyBudgetLines(raw:unknown,le:string,currency:string,units:Map<string,Unit>):BudgetLine[]{
  if(!Array.isArray(raw)||!raw.length||raw.length>200)throw new HttpError(400,'Provide 1–200 budget lines.');
  const lines=raw.map(r=>{
    const b=getObject(r);const cc=clean(b.costCenterId,128);costCenterOf(cc,le,units);
-   return {costCenterId:cc,category:category(b.category),approvedMinor:amount(b.amount),
+   return {costCenterId:cc,category:category(b.category),approvedMinor:amount(b.amount,currency),
     adjustmentsMinor:0,committedMinor:0,actualMinor:0};
  });
  try{return validateNewPlan(lines);}catch(e){throw new HttpError(400,(e as Error).message);}
@@ -79,7 +79,7 @@ function verifyBudgetLines(raw:unknown,le:string,units:Map<string,Unit>):BudgetL
 function transferInput(body:Record<string,unknown>,le:string,fy:number,currency:string,units:Map<string,Unit>):BudgetTransfer{
  const fromCostCenterId=clean(body.fromCostCenterId,128),toCostCenterId=clean(body.toCostCenterId,128);
  costCenterOf(fromCostCenterId,le,units);costCenterOf(toCostCenterId,le,units);
- const value=amount(body.amount);
+ const value=amount(body.amount,currency);
  if(!value)throw new HttpError(400,'Transfer amount must exceed zero.');
  return {legalEntityId:le,fy,currency,fromCostCenterId,
   fromCategory:category(body.fromCategory),toCostCenterId,
@@ -114,7 +114,7 @@ registerHandler('corp.budget.activate',{
    approvedBy:ctx.uid,approvedAt:nowIso(),approvalRef:id};
   if(!await writeDoc(path,plan as unknown as Fields,{exists:false}))
    throw new HttpError(409,'Approved budget already exists.');
-  return {leId:le,fy,total:moneyNumber(total),currency,version:1};
+  return {leId:le,fy,total:moneyNumber(total,currency),currency,version:1};
  },
 });
 registerHandler('corp.budget.revise',{
@@ -144,7 +144,7 @@ registerHandler('corp.budget.revise',{
      priorVersion:plan.version,newVersion:next.version} as unknown as Obj},
   ]);
   return {fy:revision.fy,leId:revision.legalEntityId,version:next.version,currency,
-    netBudgetChange:moneyNumber(revision.changes.reduce((n,c)=>n+c.deltaMinor,0))};
+    netBudgetChange:moneyNumber(revision.changes.reduce((n,c)=>n+c.deltaMinor,0),currency)};
  },
 });
 registerHandler('corp.budget.transfer',{
@@ -164,7 +164,7 @@ registerHandler('corp.budget.transfer',{
    {path:movePath(ctx.orgId,id),exists:false,fields:{...transfer,id,approvedBy:ctx.uid,
      proposedBy:clean(req.makerUid),approvalRef:id,approvedAt:at,status:'approved'} as unknown as Obj},
   ]);
-  return {leId:transfer.legalEntityId,fy:transfer.fy,amount:moneyNumber(transfer.amountMinor),
+  return {leId:transfer.legalEntityId,fy:transfer.fy,amount:moneyNumber(transfer.amountMinor,transfer.currency),
     currency:transfer.currency,budgetVersion:next.version};
  },
 });
@@ -193,7 +193,7 @@ registerHandler('corp.budget.exception',{
    status:'approved',approvedBy:ctx.uid,approvedAt:nowIso(),approvalRef:id};
   if(!await writeDoc(exceptionPath(ctx.orgId,id),exception as unknown as Fields,{exists:false}))
    throw new HttpError(409,'Exception was already approved.');
-  return {id,limit:moneyNumber(maxExtraMinor),currency,sourceDocumentId,expiresOn:exception.expiresOn};
+  return {id,limit:moneyNumber(maxExtraMinor,currency),currency,sourceDocumentId,expiresOn:exception.expiresOn};
  },
 });
 registerHandler('corp.funding.agreement',{
@@ -270,11 +270,11 @@ export const corporateBudgetRoutes={
    const {units}=await setup(ctx,leId,'FIN.setup.manage');
    const {currency}=await yearCurrency(ctx,leId,fy);
    if(await getPlan(ctx,leId,fy))throw new HttpError(409,'Approved budget exists. Use controlled budget transfers.');
-   const lines=verifyBudgetLines(ctx.body.lines,leId,units);
+   const lines=verifyBudgetLines(ctx.body.lines,leId,currency,units);
    const totalMinor=lines.reduce((n,l)=>n+l.approvedMinor,0);
    if(!Number.isSafeInteger(totalMinor))throw new HttpError(400,'Budget total exceeds supported precision.');
    return createRequest(ctx,{leId,type:'corp.budget.activate',scopeKey:'corp.budget.'+leId+'.'+fy,
-    title:'Budget plan FY'+fy,summary:lines.length+' lines; '+currency+' '+moneyNumber(totalMinor),
+    title:'Budget plan FY'+fy,summary:lines.length+' lines; '+currency+' '+moneyNumber(totalMinor,currency),
     payload:{fy,currency,totalMinor,lines} as unknown as Obj,amount:moneyNumber(totalMinor),
     reason:safeReason(ctx)});
  })],
@@ -293,7 +293,7 @@ export const corporateBudgetRoutes={
     if(!Number.isFinite(value)||value===0)
      throw new HttpError(400,'Each revision delta must be nonzero.');
     return {costCenterId,category:category(x.category),
-      deltaMinor:Math.sign(value)*amount(Math.abs(value))};
+      deltaMinor:Math.sign(value)*amount(Math.abs(value),plan.currency)};
    });
    const reason=safeReason(ctx);
    const revision:BudgetRevision={legalEntityId:leId,fy,currency:plan.currency,changes,reason};
@@ -303,9 +303,9 @@ export const corporateBudgetRoutes={
    return createRequest(ctx,{leId,type:'corp.budget.revise',
     scopeKey:'corp.budget.revise.'+leId+'.'+fy,
     title:'Budget revision FY'+fy,summary:changes.length+' changes; '+plan.currency+
-      ' '+moneyNumber(changes.reduce((sum,c)=>sum+c.deltaMinor,0))+' net amendment',
+      ' '+moneyNumber(changes.reduce((sum,c)=>sum+c.deltaMinor,0),plan.currency)+' net amendment',
     payload:{revision,expectedPlanVersion:plan.version} as unknown as Obj,
-    amount:moneyNumber(requested),reason});
+    amount:moneyNumber(requested,plan.currency),reason});
  })],
  'POST /api/org/corporate/budget/transfer/propose':[route('org.corporate.budget.transfer.propose',async ctx=>{
    const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
@@ -319,7 +319,7 @@ export const corporateBudgetRoutes={
    return createRequest(ctx,{leId,type:'corp.budget.transfer',
     scopeKey:'corp.budget.transfer.'+leId+'.'+fy+'.'+transfer.fromCostCenterId+'.'+transfer.fromCategory,
     title:'Budget transfer FY'+fy,summary:transfer.fromCostCenterId+' '+transfer.fromCategory+
-      ' → '+transfer.toCostCenterId+' '+transfer.toCategory+' '+plan.currency+' '+moneyNumber(transfer.amountMinor),
+      ' → '+transfer.toCostCenterId+' '+transfer.toCategory+' '+plan.currency+' '+moneyNumber(transfer.amountMinor,transfer.currency),
     payload:{transfer,expectedPlanVersion:plan.version} as unknown as Obj,
     amount:moneyNumber(transfer.amountMinor),reason:safeReason(ctx)});
  })],
@@ -336,20 +336,22 @@ export const corporateBudgetRoutes={
    const expiresOn=clean(ctx.body.expiresOn,10);
    if(!sourceDocumentId||!validDate(expiresOn)||expiresOn<today())
     throw new HttpError(400,'Source document and current or future expiry are required.');
-   const maxExtraMinor=amount(ctx.body.amount);
+   const maxExtraMinor=amount(ctx.body.amount,plan.currency);
    if(!maxExtraMinor)throw new HttpError(400,'Exception amount must exceed zero.');
    return createRequest(ctx,{leId,type:'corp.budget.exception',
     scopeKey:'corp.budget.exception.'+leId+'.'+fy+'.'+sourceDocumentId,
     title:'Over-budget exception '+sourceDocumentId,
-    summary:cat+' '+cc+' '+plan.currency+' '+moneyNumber(maxExtraMinor)+' until '+expiresOn,
+    summary:cat+' '+cc+' '+plan.currency+' '+moneyNumber(maxExtraMinor,plan.currency)+' until '+expiresOn,
     payload:{fy,currency:plan.currency,costCenterId:cc,category:cat,
-      sourceDocumentId,expiresOn,maxExtraMinor},amount:moneyNumber(maxExtraMinor),reason:safeReason(ctx)});
+      sourceDocumentId,expiresOn,maxExtraMinor},amount:moneyNumber(maxExtraMinor,plan.currency),reason:safeReason(ctx)});
  })],
  'POST /api/org/corporate/budget/simulate':[route('org.corporate.budget.simulate',async ctx=>{
    const leId=clean(ctx.body.leId,128),fy=integer(ctx.body.fy);
    await setup(ctx,leId,'FIN.view');
    const cc=clean(ctx.body.costCenterId,128),cat=category(ctx.body.category);
-   const plan=await getPlan(ctx,leId,fy),requestedMinor=amount(ctx.body.amount);
+   const plan=await getPlan(ctx,leId,fy);
+   const calcCurrency=plan?.currency||(await entityOf(ctx.orgId,leId)).functionalCurrency;
+   const requestedMinor=amount(ctx.body.amount,calcCurrency);
    const exceptionId=clean(ctx.body.exceptionId,128);
    const exp=exceptionId&&safeId(exceptionId)?await getDoc(exceptionPath(ctx.orgId,exceptionId)):null;
    const availability=checkBudget(plan,cc,cat,requestedMinor,
@@ -375,7 +377,7 @@ export const corporateBudgetRoutes={
    const ag:FundingAgreement={
     id:hashKey('corp.funding|'+leId+'|'+beneficiaryLegalEntityId+'|'+clean(ctx.body.agreementReference,160)),providerLegalEntityId:leId,beneficiaryLegalEntityId,
     method:clean(ctx.body.method,15) as FundingMethod,
-    currency:clean(ctx.body.currency,3),limitMinor:amount(ctx.body.amount),
+    currency:clean(ctx.body.currency,3),limitMinor:amount(ctx.body.amount,clean(ctx.body.currency,3)),
     agreementReference:clean(ctx.body.agreementReference,160),
     purpose:clean(ctx.body.purpose,500),effectiveFrom:clean(ctx.body.effectiveFrom,10),
     effectiveTo:clean(ctx.body.effectiveTo,10),
@@ -390,8 +392,8 @@ export const corporateBudgetRoutes={
    return createRequest(ctx,{leId,type:'corp.funding.agreement',
     scopeKey:'corp.funding.agreement.'+leId+'.'+ag.agreementReference,
     title:'Funding agreement '+ag.agreementReference,summary:ag.method+' '+ag.currency+' '+
-      moneyNumber(ag.limitMinor)+' to '+beneficiary.code,
-    payload:ag as unknown as Obj,amount:moneyNumber(ag.limitMinor),reason:safeReason(ctx)});
+      moneyNumber(ag.limitMinor,ag.currency)+' to '+beneficiary.code,
+    payload:ag as unknown as Obj,amount:moneyNumber(ag.limitMinor,ag.currency),reason:safeReason(ctx)});
  })],
  'POST /api/org/corporate/funding/counterparty/propose':[route('org.corporate.funding.counterparty.propose',async ctx=>{
    const agreementId=clean(ctx.body.agreementId,128);
@@ -404,7 +406,7 @@ export const corporateBudgetRoutes={
    if(ag.status!=='awaiting_counterparty')throw new HttpError(409,'Agreement no longer awaits beneficiary approval.');
    return createRequest(ctx,{leId,type:'corp.funding.counterparty',
      scopeKey:'corp.funding.counterparty.'+agreementId,title:'Accept funding terms '+ag.agreementReference,
-     summary:ag.method+' '+ag.currency+' '+moneyNumber(ag.limitMinor)+' from '+ag.providerLegalEntityId,
+     summary:ag.method+' '+ag.currency+' '+moneyNumber(ag.limitMinor,ag.currency)+' from '+ag.providerLegalEntityId,
      payload:{agreementId},amount:moneyNumber(ag.limitMinor),reason:safeReason(ctx)});
  })],
 };
