@@ -3,6 +3,7 @@ import {Building2,Landmark,Network,Plus,Save,ShieldCheck,Trash2,Users} from 'luc
 import {callBackend} from '../lib/backend';
 import CorporateFinancialHomePage from './CorporateFinancialHomePage';
 import CorporateStructureMappingPage from './CorporateStructureMappingPage';
+import CorporateBudgetPage from './CorporateBudgetPage';
 import {SelectField} from '../components/ui';
 
 type FunctionUnit={code:string;name:string;description:string;enabled:boolean;headRoleCode:string;reportsToCode:string;oversightEntityIds:string[]};
@@ -32,7 +33,7 @@ function EntitySelection({entities,selected,onChange,label}:{entities:Entity[];s
 export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
  const [data,setData]=useState<Config|null>(null),[entities,setEntities]=useState<Entity[]>([]),
  [groups,setGroups]=useState<Unit[]>([]),[roles,setRoles]=useState<Position[]>([]);
- const [section,setSection]=useState<'office'|'functions'|'bodies'|'funding'|'mapping'>('office');
+ const [section,setSection]=useState<'office'|'functions'|'bodies'|'funding'|'mapping'|'budget'>('office');
  const [expanded,setExpanded]=useState(''),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [saved,setSaved]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const load=async()=>{
@@ -83,13 +84,14 @@ export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
      <p className="text-xs text-muted">{label}</p><p className="mt-1 break-words text-sm font-semibold">{value}</p>
     </div>)}
    </section>
-   <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-panel p-1 sm:grid-cols-5">
-    {([['office','Corporate Office'],['functions','Functions'],['bodies','Governance'],['funding','Financial Home'],['mapping','Operating Models & Homes']] as const).map(([key,title])=>
+   <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-panel p-1 sm:grid-cols-6">
+    {([['office','Corporate Office'],['functions','Functions'],['bodies','Governance'],['funding','Financial Home'],['mapping','Operating Models & Homes'],['budget','Budgets & Funding']] as const).map(([key,title])=>
      <button key={key} type="button" onClick={()=>{setSection(key);setExpanded('')}}
       className={`min-h-11 rounded-lg px-2 text-xs font-semibold ${section===key?'bg-brand/10 text-brand':'text-muted'}`}>{title}</button>)}
    </div>
    {section==='funding'&&<CorporateFinancialHomePage canEdit={canEdit}/>}
    {section==='mapping'&&<CorporateStructureMappingPage canEdit={canEdit}/>}
+   {section==='budget'&&<CorporateBudgetPage canEdit={canEdit}/>}
    {section==='office'&&<section className="space-y-3 rounded-2xl border border-line bg-panel p-4">
     <div className="flex items-center gap-2"><Building2 className="h-5 w-5 text-brand"/><h3 className="font-semibold">Corporate Office</h3></div>
     <p className="text-xs text-muted">The Corporate Office is a management branch. It is not itself a new company, employing legal entity, or financial cost centre.</p>
@@ -206,7 +208,7 @@ export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
      </div>}
     </section>)}
    </div>}
-   {section!=='funding'&&section!=='mapping'&&<section className="space-y-2 rounded-xl border border-line bg-panel p-3">
+   {section!=='funding'&&section!=='mapping'&&section!=='budget'&&<section className="space-y-2 rounded-xl border border-line bg-panel p-3">
     <div className="flex items-start gap-2"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand"/>
      <p className="text-xs text-muted">Governance scope is a policy reference only. It grants no new user permissions, workflow approvals, employment contracts or cost allocations. Those require their own governed configuration.</p></div>
     {canEdit&&<button type="button" disabled={busy||loading} onClick={()=>void save()}
