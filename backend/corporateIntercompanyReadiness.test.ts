@@ -49,6 +49,6 @@ test('P6 preflight blocks posted pairs, missing mapping and closed finance perio
 });
 test('P6 preflight recognizes source-bound approved allocation-generated provider voucher',()=>{
  const r=valid();r.voucher.allocationPolicyId='POOL1';r.voucher.allocationSourceJournalId='J01';
- r.providerApproval={type:'corp.allocation.execute',status:'approved',leId:'LEA',result:{voucherIds:['V001']}};
- assert.equal(assessP6Readiness(r).checks.find(c=>c.code==='provider-independent-approval')?.passed,true);
+ const allocation={...r,providerApproval:{type:'corp.allocation.execute',status:'approved',leId:'LEA',result:{voucherIds:['V001']}}};
+ assert.equal(assessP6Readiness(allocation).checks.find(c=>c.code==='provider-independent-approval')?.passed,true);
 });
