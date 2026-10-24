@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {
  BUDGET_CLASSES,FUNDING_METHODS,moneyMinor,validateNewPlan,remainingMinor,
- applyApprovedTransfer,checkBudget,validateFundingAgreement,type BudgetPlan,type BudgetTransfer,
+ applyApprovedRevision,applyApprovedTransfer,checkBudget,validateFundingAgreement,type BudgetPlan,type BudgetTransfer,
  type BudgetException,type FundingAgreement,
 } from './corporateBudget';
 
@@ -32,6 +32,8 @@ test('P2 publishes organization-independent codified budget and funding categori
 });
 test('P2 money conversion rejects negative/unsupported fractional minor units',()=>{
  assert.equal(moneyMinor(100.25),10025);
+ assert.equal(moneyMinor(0.29),29);
+ assert.equal(moneyMinor(0.57),57);
  assert.throws(()=>moneyMinor(-1));
  assert.throws(()=>moneyMinor(1.234));
 });
@@ -80,4 +82,27 @@ test('P2 funding requires valid dates, parties, method, ISO currency and an agre
  assert.throws(()=>validateFundingAgreement({...ag,method:'BAD' as FundingAgreement['method']}),/Unknown/);
  assert.throws(()=>validateFundingAgreement({...ag,effectiveFrom:'2026-02-30'}),/date/);
  assert.throws(()=>validateFundingAgreement({...ag,beneficiaryLegalEntityId:''}),/required/);
+});
+
+test('P2 revision increases/new lines and preserves original appropriations',()=>{
+ const p=plan();
+ const r={legalEntityId:'LE1',fy:2027,currency:'KES',
+  changes:[{costCenterId:'CC2',category:'OPEX' as const,deltaMinor:500000},
+   {costCenterId:'CC2',category:'CAPEX' as const,deltaMinor:900000}],
+  reason:'Approved supplementary appropriation by Finance committee'};
+ const next=applyApprovedRevision(p,r);
+ assert.equal(next.version,2);
+ assert.equal(next.lines.length,4);
+ assert.equal(next.lines.find(x=>x.costCenterId==='CC2'&&x.category==='OPEX')?.adjustmentsMinor,500000);
+ assert.equal(next.lines.find(x=>x.costCenterId==='CC2'&&x.category==='CAPEX')?.approvedMinor,0);
+ assert.equal(next.lines.find(x=>x.costCenterId==='CC2'&&x.category==='CAPEX')?.adjustmentsMinor,900000);
+ assert.equal(p.lines.length,3);
+});
+test('P2 revision prevents reducing budget below existing commitments/actual costs',()=>{
+ const r={legalEntityId:'LE1',fy:2027,currency:'KES',
+  changes:[{costCenterId:'CC1',category:'OPEX' as const,deltaMinor:-5000001}],
+  reason:'Proposed reduction'};
+ assert.throws(()=>applyApprovedRevision(plan(),r),/cannot cut into/);
+ assert.throws(()=>applyApprovedRevision(plan(),{...r,changes:[{costCenterId:'CC3',category:'OPEX' as const,deltaMinor:-1000}]}),/does not exist/);
+ assert.throws(()=>applyApprovedRevision(plan(),{...r,legalEntityId:'LE2'}),/must match/);
 });
