@@ -6,6 +6,7 @@ import {IC_TYPES,IC_ROLES,IC_SETTLEMENT,accountRequirements,
  type IcType,type IcAgreement,type IcVoucher,type IcAccounts,type IcSettlementPlan} from '../../backend/corporateIntercompany';
 import {majorFromMinor,currencyDigits} from '../../backend/corporateBudget';
 import type {PostedIcReport} from '../../backend/corporateIntercompanyPostedReport';
+import type {P6Readiness} from '../../backend/corporateIntercompanyReadiness';
 import type {IcStagingReport} from '../../backend/corporateIntercompanyReconciliation';
 
 type LE={id:string;code:string;name:string;canView:boolean;canEdit:boolean};
@@ -39,6 +40,7 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
  const [settlement,setSettlement]=useState(blankSettlement());
  const [reason,setReason]=useState('');
  const [preview,setPreview]=useState<Record<string,unknown>|null>(null);
+ const [readiness,setReadiness]=useState<P6Readiness|null>(null);
  const [report,setReport]=useState<IcStagingReport|null>(null);
  const [error,setError]=useState(''),[info,setInfo]=useState(''),[busy,setBusy]=useState(false);
  const err=(e:unknown)=>e instanceof Error?e.message:'Unable to complete action.';
@@ -236,6 +238,10 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
      {v.status==='posted'&&<p className="text-xs text-muted">Posted journals: {v.providerJournalId} / {v.beneficiaryJournalId}</p>}
      {v.status==='matched_ready'&&v.providerLegalEntityId===leId&&canEdit&&<button type="button" className={btn} disabled={!postingEnabled||busy||reason.trim().length<10}
        onClick={()=>void submit('/api/org/corporate/ic/post/propose',{voucherId:v.id,reason})}>Request atomic bilateral GL posting</button>}
+     <button type="button" className={btn} onClick={async()=>{
+       try{setReadiness(await callBackend<P6Readiness>('/api/org/corporate/ic/post/readiness',{voucherId:v.id}));setError('')}
+       catch(e){setError(err(e))}
+     }}>Review P6 release readiness</button>
      {v.providerLegalEntityId===leId&&<button type="button" className={btn} onClick={async()=>{
       try{
        const r=await callBackend<Record<string,unknown>>('/api/org/corporate/ic/vouchers/preview',{voucherId:v.id});
@@ -244,6 +250,14 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
      }}>Preview bilateral GL intent</button>}
     </div>
    </div>)}
+   {readiness&&<section className="rounded-lg border border-line p-3 space-y-2">
+    <strong className="text-sm">P6 preflight · Voucher {readiness.voucherId}</strong>
+    <p className="text-xs text-muted">{readiness.readyForApplicationTest?'Automated technical checks passed':'Technical checks need attention'} · Business authorization: not yet certified</p>
+    {readiness.checks.map(c=><p key={c.code} className={'text-xs '+(c.passed?'text-muted':'text-red-600')}>{c.passed?'✓':'!'} {c.detail}</p>)}
+    <strong className="text-xs">Mandatory Finance/Tax release steps</strong>
+    {readiness.manualReleaseGates.map(x=><p key={x} className="text-xs text-muted">• {x}</p>)}
+    <p className="text-xs text-muted">This check reads configuration only. It never posts, approves, invoices or transfers funds.</p>
+   </section>}
    {preview&&<section className="rounded-lg border border-line p-3 space-y-2">
     <strong className="text-sm">Unposted journal preview — no ledger entry created</strong>
     {(['provider','beneficiary'] as const).map(party=>{
