@@ -55,10 +55,24 @@ export type BudgetAvailability={
  totalMinor:number;committedMinor:number;actualMinor:number;availableMinor:number;
  shortfallMinor:number;exceptionUsable:boolean;
 };
-export const moneyMinor=(value:unknown)=>{
- if(typeof value!=='number'||!Number.isFinite(value)||value<0||value>1e13||Math.abs(value*100-Math.round(value*100))>1e-6)
-   throw Error('Enter a valid positive or zero amount with no more than two decimal places.');
- return Math.round(value*100);
+/** ISO 4217 currency minor-unit exponent from Node/browser ICU data. */
+export function currencyDigits(currency:string):number{
+ if(!/^[A-Z]{3}$/.test(currency))throw Error('Choose a valid ISO 4217 currency.');
+ try{
+  const d=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
+  if(!Number.isInteger(d)||d<0||d>4)throw Error('Unsupported currency exponent.');
+  return d;
+ }catch{throw Error('Currency code is unsupported by the active ISO 4217 runtime.');}
+}
+export const minorFactor=(currency:string)=>10**currencyDigits(currency);
+export const majorFromMinor=(minor:number,currency:string)=>minor/minorFactor(currency);
+export const moneyMinor=(value:unknown,currency:string)=>{
+ const factor=minorFactor(currency);
+ if(typeof value!=='number'||!Number.isFinite(value)||value<0||
+   !Number.isSafeInteger(Math.round(value*factor))||
+   Math.abs(value*factor-Math.round(value*factor))>1e-6)
+   throw Error('Amount must be nonnegative and respect '+currencyDigits(currency)+' minor-currency decimal places.');
+ return Math.round(value*factor);
 };
 export const isBudgetClass=(x:string):x is BudgetClass=>BUDGET_CLASSES.some(k=>k.code===x);
 export const isFundingMethod=(x:string):x is FundingMethod=>FUNDING_METHODS.some(k=>k.code===x);
