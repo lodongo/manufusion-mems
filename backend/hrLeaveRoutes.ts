@@ -1,16 +1,17 @@
 import {randomUUID} from 'node:crypto';
-import {HttpError,fieldEq,getDoc,isObj,listDocs,nowIso,runQuery,str,writeDoc} from './core';
+import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc} from './core';
 import {orgRoute,hasPerm,type OrgContext} from './guards';
 import {managerFor} from './hrEmployeeRoutes';
 import {withLock} from './finCore';
 import {hrSiteOf} from './hrHierarchy';
 import {currentHrRules} from './hrRulesRoutes';
 import {hrMayAccess,hrMayChangeRecord,type HrScope} from './hrPrivacyRules';
+import {leaveEligibility,leaveDays,requireLeaveType,type LeaveEligibility,type LeaveOption} from './hrLeaveEligibility';
 const coll=(org:string)=>`organizations/${org}/hr_leave_requests`;
 const s=(v:unknown,n=200)=>str(v).trim().slice(0,n);
 const assignments=(d:Record<string,unknown>)=>Array.isArray(d.assignments)?d.assignments.filter(isObj).filter(x=>s(x.type)==='primary'):[];
 const sites=(ctx:OrgContext,other:Record<string,unknown>,nodes:Map<string,Record<string,unknown>>)=>assignments(ctx.me.data).some(x=>assignments(other).some(y=>{
-  const a=hrSiteOf(s(x.nodeId),nodes);return !!a&&a===hrSiteOf(s(y.nodeId),nodes);
+ const a=hrSiteOf(s(x.nodeId),nodes);return !!a&&a===hrSiteOf(s(y.nodeId),nodes);
 }));
 const target=async(ctx:OrgContext,uid:string)=>{
  if(!/^[a-zA-Z0-9_-]{1,128}$/.test(uid))throw new HttpError(400,'Invalid employee.');
@@ -26,12 +27,12 @@ const scope=async(ctx:OrgContext,uid:string)=>{
  const manager=(await managerFor(ctx,person.data,nodes))===ctx.uid&&!isSelf;
  const hr=hasPerm(ctx.directPermissions,'HRM.employee.site.read')&&sites(ctx,person.data,nodes);
  const policy=await currentHrRules(ctx.orgId);
- // Super Administrators retain full access to other employees, but must use
- // the same self-service permissions as any employee for their own requests.
  const viewScope:HrScope=isSelf?'self':isAdmin?'superadmin':manager?'manager':'hr';
  const visible=hrMayAccess(viewScope,'leave',policy);
- return {person,isSelf,isAdmin,manager,hr,canRead:visible&&(isAdmin||isSelf||manager||hr),
-  canApply:visible,canApprove:visible&&!isSelf&&(isAdmin||manager)};
+ return {person,isSelf,isAdmin,manager,hr,
+   canRead:visible&&(isAdmin||isSelf||manager||hr),
+   canApply:visible&&(isSelf||hr||isAdmin||manager),
+   canApprove:visible&&manager&&!isSelf};
 };
 function record(doc:{id:string;data:Record<string,unknown>},includePrivate:boolean){
  const d=doc.data;
@@ -42,64 +43,126 @@ function record(doc:{id:string;data:Record<string,unknown>},includePrivate:boole
   planId:s(d.planId,50),reviewedBy:s(d.reviewedBy,128),reviewedAt:s(d.reviewedAt,40),
   note:includePrivate?s(d.note,280):'',decisionNote:s(d.decisionNote,280)};
 }
+const isDate=(v:string)=>/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(Date.parse(v+'T00:00:00Z'));
+const overlap=(a:string,b:string,c:string,d:string)=>a<=d&&c<=b;
+function daysFor(type:LeaveOption,start:string,end:string){
+ if(type.unit==='months'){
+  const begin=new Date(start+'T00:00:00Z');
+  const limit=new Date(Date.UTC(begin.getUTCFullYear(),begin.getUTCMonth()+type.daysPerYear,begin.getUTCDate()));
+  const last=new Date(limit.getTime()-86400000).toISOString().slice(0,10);
+  if(end>last)throw new HttpError(400,'Requested leave exceeds the configured entitlement in calendar months.');
+  return 1; // Capacity checks for month-based statutory leave use period dates, not an invented number of days.
+ }
+ return leaveDays(start,end,type.unit);
+}
+function earned(type:LeaveOption,start:string,person:Record<string,unknown>){
+ if(!type.accrueMonthly||type.unit==='months')return type.daysPerYear+type.carryForwardDays;
+ const year=Number(start.slice(0,4));
+ const employmentDate=s(person.employmentStartDate||person.hireDate||person.startDate,10);
+ if(employmentDate&&isDate(employmentDate)&&employmentDate>start)
+  throw new HttpError(409,'Employee employment start is after the requested leave.');
+ const fromMonth=employmentDate&&isDate(employmentDate)&&Number(employmentDate.slice(0,4))===year?
+  Number(employmentDate.slice(5,7)):1;
+ const endMonth=Number(start.slice(5,7));
+ return Math.max(0,(endMonth-fromMonth+1)*type.monthlyAccrual)+type.carryForwardDays;
+}
+function validateCapacity(type:LeaveOption,start:string,end:string,person:Record<string,unknown>,
+ records:Array<{id:string;data:Record<string,unknown>}>,uid:string,excludeId=''){
+ const requested=daysFor(type,start,end);
+ const ceiling=earned(type,start,person);
+ if(type.unit==='months')return;
+ if(requested>type.daysPerYear+type.carryForwardDays)
+  throw new HttpError(409,'Requested days exceed the configured annual leave entitlement.');
+ const year=start.slice(0,4);
+ const booked=records.filter(d=>d.id!==excludeId&&s(d.data.employeeUid)===uid&&
+   s(d.data.kind)==='application'&&['approved','pending'].includes(s(d.data.status))&&
+   s(d.data.leaveType)===type.code&&s(d.data.start,10).startsWith(year))
+  .reduce((sum,d)=>sum+leaveDays(s(d.data.start,10),s(d.data.end,10),type.unit),0);
+ if(requested+booked>ceiling+0.0001)
+  throw new HttpError(409,'Requested leave exceeds accrued/annual entitlement after existing applications. Verify balances and employment start date.');
+}
 export const hrLeaveRoutes={
  'POST /api/org/hr/leave/list':[orgRoute('org.hr.leave.list','HRM.shell.view',async ctx=>{
    const uid=s(ctx.body.uid,128)||ctx.uid;
    const access=await scope(ctx,uid);
    if(!access.canRead)throw new HttpError(403,'Leave records outside your authorized scope.');
    const docs=await listDocs(coll(ctx.orgId));
+   let eligibility:LeaveEligibility|null=null,configurationError='';
+   try{eligibility=await leaveEligibility(ctx.orgId,access.person.data)}
+   catch(e){configurationError=e instanceof Error?e.message:'Leave configuration unavailable.'}
    return {items:docs.filter(d=>s(d.data.employeeUid)===uid).map(d=>record(d,access.isSelf||access.isAdmin))
     .sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),
-    permissions:{canApply:access.canApply&&(access.isSelf||access.isAdmin||access.manager||access.hr),
-      canApprove:access.canApprove,scope:access.isSelf?'self':access.isAdmin?'superadmin':access.manager?'manager':'hr'}};
+    eligibility,configurationError,
+    permissions:{canApply:access.canApply,canApprove:access.canApprove,
+      scope:access.isSelf?'self':access.isAdmin?'superadmin':access.manager?'manager':'hr'}};
  })],
  'POST /api/org/hr/leave/create':[orgRoute('org.hr.leave.create','HRM.shell.view',async ctx=>{
    const uid=s(ctx.body.employeeUid,128)||ctx.uid;
    const a=await scope(ctx,uid);
-   if(!a.canRead||!a.canApply)throw new HttpError(403,'You cannot apply for this employee.');
-   if(!a.isSelf&&!a.isAdmin&&!a.hr&&!a.manager)throw new HttpError(403,'No on-behalf leave permission.');
-   const kind=s(ctx.body.kind,20),leaveType=s(ctx.body.leaveType,60);
-   if((kind==='plan'||kind==='application')&&!hrMayChangeRecord(ctx.uid,uid,kind==='plan'?'leavePlan':'leaveApplication'))
-      throw new HttpError(403,'Protected leave records cannot be modified by their owner.');
+   if(!a.canRead||!a.canApply)throw new HttpError(403,'You cannot request leave for this employee.');
+   const kind=s(ctx.body.kind,20),leaveType=s(ctx.body.leaveType,70);
+   if(kind!=='plan'&&kind!=='application')throw new HttpError(400,'Select leave planning or leave application.');
+   if(!hrMayChangeRecord(ctx.uid,uid,kind==='plan'?'leavePlan':'leaveApplication'))
+    throw new HttpError(403,'Protected leave records cannot be modified by their owner.');
+   if(kind==='plan'&&!a.isSelf)
+    throw new HttpError(403,'The employee must submit their own leave plan for independent manager approval.');
+   if(kind==='application'&&!a.isSelf&&!a.hr&&!a.isAdmin)
+    throw new HttpError(403,'Only an employee or authorized HR administrator may apply on behalf.');
    const start=s(ctx.body.start,10),end=s(ctx.body.end,10);
-   if(kind==='plan'&&a.hr&&!a.isSelf&&!a.manager&&!a.isAdmin)throw new HttpError(403,'HR may submit actual leave applications on behalf, but cannot manage leave plans.');
-   if(!['plan','application'].includes(kind)||!['annual','sick','compassionate','maternity','paternity','study','unpaid','other'].includes(leaveType))
-    throw new HttpError(400,'Select a supported leave request and category.');
-   if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||!/^\d{4}-\d{2}-\d{2}$/.test(end)||start>end||!Number.isFinite(Date.parse(start))||!Number.isFinite(Date.parse(end)))
-    throw new HttpError(400,'Select valid start and end dates.');
-   const days=Math.round((Date.parse(end)-Date.parse(start))/86400000)+1;
-   if(days>366)throw new HttpError(400,'Leave request exceeds one year.');
+   if(!isDate(start)||!isDate(end)||start>end)throw new HttpError(400,'Select valid start and end dates.');
+   if(leaveDays(start,end,'calendar_days')>366)throw new HttpError(400,'Leave request exceeds one year.');
+   if(start.slice(0,4)!==end.slice(0,4))throw new HttpError(400,'Split leave across calendar years for annual entitlement tracking.');
+   const eligibility=await leaveEligibility(ctx.orgId,a.person.data);
+   const type=requireLeaveType(eligibility,leaveType);
    const nodes=new Map((await listDocs(`organizations/${ctx.orgId}/structure`)).map(d=>[d.id,d.data]));
    const managerUid=await managerFor(ctx,a.person.data,nodes);
-   if(!managerUid&&(!a.isAdmin||a.isSelf))
-      throw new HttpError(409,'Immediate manager must be configured before requesting leave.');
+   if(!managerUid)throw new HttpError(409,'A unique active immediate manager is required for both leave stages.');
    const planId=s(ctx.body.planId,50);
-   if(planId){
-     const plan=await getDoc(coll(ctx.orgId)+'/'+planId);
+   if(kind==='application'&&!planId)
+    throw new HttpError(409,'Choose an approved leave plan before applying. Applications cannot bypass planning.');
+   if(kind==='plan'&&planId)throw new HttpError(400,'A new leave plan cannot reference a previous plan.');
+   return withLock(ctx.orgId,'hr_leave_employee_'+uid,async()=>{
+    const records=await listDocs(coll(ctx.orgId));
+    if(kind==='application'){
+     const plan=records.find(d=>d.id===planId);
      if(!plan||s(plan.data.employeeUid)!==uid||s(plan.data.kind)!=='plan'||s(plan.data.status)!=='approved')
-      throw new HttpError(409,'Reference an approved leave plan for this employee.');
-   }
-   const entry={employeeUid:uid,employeeName:[s(a.person.data.firstName,55),s(a.person.data.lastName,55)].filter(Boolean).join(' '),
-    kind,leaveType,start,end,status:'pending',createdAt:nowIso(),updatedAt:nowIso(),
-    proposedBy:ctx.uid,submittedFor:uid,managerUid,planId,note:s(ctx.body.note,280),
-    reviewedBy:'',reviewedAt:'',decisionNote:''};
-   const id=randomUUID().replace(/-/g,'');
-   await writeDoc(coll(ctx.orgId)+'/'+id,entry,{exists:false});
-   return {ok:true,id};
+      throw new HttpError(409,'Select an approved leave plan belonging to this employee.');
+     if(s(plan.data.leaveType)!==leaveType||start<s(plan.data.start,10)||end>s(plan.data.end,10))
+      throw new HttpError(409,'Leave application must match the approved plan type and fall within its approved dates.');
+     if(records.some(d=>s(d.data.kind)==='application'&&s(d.data.employeeUid)===uid&&
+       ['pending','approved'].includes(s(d.data.status))&&
+       overlap(start,end,s(d.data.start,10),s(d.data.end,10))))
+      throw new HttpError(409,'A pending or approved leave application already covers these dates.');
+    }else if(records.some(d=>s(d.data.kind)==='plan'&&s(d.data.employeeUid)===uid&&
+       ['pending','approved'].includes(s(d.data.status))&&s(d.data.leaveType)===leaveType&&
+       overlap(start,end,s(d.data.start,10),s(d.data.end,10)))){
+      throw new HttpError(409,'A pending or approved leave plan already covers these dates.');
+    }
+    validateCapacity(type,start,end,a.person.data,records,uid);
+    const entry={employeeUid:uid,employeeName:[s(a.person.data.firstName,55),s(a.person.data.lastName,55)].filter(Boolean).join(' '),
+     kind,leaveType,start,end,status:'pending',createdAt:nowIso(),updatedAt:nowIso(),
+     proposedBy:ctx.uid,submittedFor:uid,managerUid,planId,
+     legalEntityId:eligibility.legalEntityId,jobGradeCode:eligibility.gradeCode,
+     compensationVersion:eligibility.payConfigVersion,entitlementDays:type.daysPerYear,
+     accruesMonthly:type.accrueMonthly,unit:type.unit,note:s(ctx.body.note,280),
+     reviewedBy:'',reviewedAt:'',decisionNote:''};
+    const id=randomUUID().replace(/-/g,'');
+    await writeDoc(coll(ctx.orgId)+'/'+id,entry,{exists:false});
+    return {ok:true,id};
+   });
  })],
  'POST /api/org/hr/leave/inbox':[orgRoute('org.hr.leave.inbox','HRM.shell.view',async ctx=>{
    const rules=await currentHrRules(ctx.orgId);
-   if(ctx.role!=='org_super_admin'&&!hrMayAccess('manager','leave',rules))return {items:[]};
+   if(!hrMayAccess('manager','leave',rules))return {items:[]};
    const requests=(await listDocs(coll(ctx.orgId))).filter(d=>s(d.data.status)==='pending');
    const nodes=new Map((await listDocs(`organizations/${ctx.orgId}/structure`)).map(d=>[d.id,d.data]));
    const items=[];
    for(const d of requests){
-     if(s(d.data.employeeUid)===ctx.uid)continue;
+     if(s(d.data.employeeUid)===ctx.uid||s(d.data.proposedBy)===ctx.uid)continue;
      const person=await getDoc('users/'+s(d.data.employeeUid,128));
      if(!person||s(person.data.orgId)!==ctx.orgId||person.data.status==='disabled')continue;
      const managerUid=await managerFor(ctx,person.data,nodes);
-     if(ctx.role==='org_super_admin'||(managerUid===ctx.uid&&s(d.data.managerUid)===ctx.uid))
-       items.push(record(d,false));
+     if(managerUid===ctx.uid)items.push(record(d,false));
    }
    return {items};
  })],
@@ -111,12 +174,21 @@ export const hrLeaveRoutes={
      const path=coll(ctx.orgId)+'/'+id,doc=await getDoc(path);
      if(!doc||s(doc.data.status)!=='pending')throw new HttpError(409,'Leave request no longer pending.');
      const uid=s(doc.data.employeeUid,128),a=await scope(ctx,uid);
-     if(!a.canApprove)throw new HttpError(403,'Only the immediate manager or super administrator can approve, never their own record.');
+     if(!a.canApprove||!a.manager)throw new HttpError(403,'Only the verified immediate manager may approve leave.');
      if(ctx.uid===s(doc.data.proposedBy))throw new HttpError(403,'The request submitter cannot approve the same request.');
-     if(!a.isAdmin&&ctx.uid!==s(doc.data.managerUid))throw new HttpError(403,'Manager assignment has changed; reassign this request.');
+     if(ctx.uid!==s(doc.data.managerUid))throw new HttpError(403,'Manager assignment has changed; reassign this request.');
      const note=s(ctx.body.note,280);
      if(decision==='reject'&&note.length<5)throw new HttpError(400,'Enter a reason for declining leave.');
-     // Do not automatically post payroll or leave balances: those require separate integrations.
+     if(decision==='approve'){
+       const eligibility=await leaveEligibility(ctx.orgId,a.person.data);
+       const type=requireLeaveType(eligibility,s(doc.data.leaveType));
+       if(s(doc.data.kind)==='application'){
+         const plan=await getDoc(coll(ctx.orgId)+'/'+s(doc.data.planId,50));
+         if(!plan||s(plan.data.status)!=='approved'||s(plan.data.employeeUid)!==uid||
+            s(plan.data.leaveType)!==type.code||s(doc.data.start)<s(plan.data.start)||s(doc.data.end)>s(plan.data.end))
+          throw new HttpError(409,'The approved leave plan is no longer valid for this application.');
+       }
+     }
      await writeDoc(path,{...doc.data,status:decision==='approve'?'approved':'rejected',
        reviewedBy:ctx.uid,reviewedAt:nowIso(),decisionNote:note,updatedAt:nowIso()});
      return {ok:true};
