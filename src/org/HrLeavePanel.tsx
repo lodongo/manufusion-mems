@@ -34,6 +34,8 @@ function LeaveCard({item,names,manager=false,onReview}:{
 }
 export default function HrLeavePanel({employeeUid,showInbox=false}:{employeeUid:string;showInbox?:boolean}){
  const [items,setItems]=useState<Leave[]>([]),[inbox,setInbox]=useState<Leave[]>([]);
+ const [teamItems,setTeamItems]=useState<Leave[]>([]);
+ const [teamFilter,setTeamFilter]=useState<'all'|'plan'|'application'>('all');
  const [permissions,setPermissions]=useState<Allowed>({canApply:false,canPlan:false,canApprove:false,scope:''});
  const [eligibility,setEligibility]=useState<Eligibility|null>(null),[configurationError,setConfigurationError]=useState('');
  const [kind,setKind]=useState<'plan'|'application'>('plan'),[leaveType,setLeaveType]=useState('');
@@ -50,11 +52,12 @@ export default function HrLeavePanel({employeeUid,showInbox=false}:{employeeUid:
  const reload=async()=>{
   setLoading(true);setError('');
   try{
-   const [r,q]=await Promise.all([
+   const [r,q,team]=await Promise.all([
     callBackend<{items:Leave[];permissions:Allowed;eligibility:Eligibility|null;configurationError:string}>('/api/org/hr/leave/list',{uid:employeeUid}),
     showInbox?callBackend<{items:Leave[]}>('/api/org/hr/leave/inbox'):Promise.resolve({items:[]}),
+    showInbox?callBackend<{items:Leave[]}>('/api/org/hr/leave/team'):Promise.resolve({items:[]}),
    ]);
-   setItems(r.items);setPermissions(r.permissions);setInbox(q.items);
+   setItems(r.items);setPermissions(r.permissions);setInbox(q.items);setTeamItems(team.items);
    setEligibility(r.eligibility);setConfigurationError(r.configurationError);
   }catch(e){setError(e instanceof Error?e.message:'Leave records unavailable.')}finally{setLoading(false)}
  };
@@ -136,6 +139,29 @@ export default function HrLeavePanel({employeeUid,showInbox=false}:{employeeUid:
    <button type="button" onClick={()=>setOpen(false)} className="min-h-11 rounded-xl border border-line px-4">Cancel</button>
    <button type="button" disabled={!start||!end||!leaveType||busy||(kind==='application'&&!planId)}
     onClick={()=>void create()} className={button}>{kind==='plan'?'Submit plan':'Submit leave application'}</button>
+  </div>
+ </section>}
+ {showInbox&&<section className="rounded-2xl border border-line bg-panel p-4">
+  <h3 className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-5 w-5 text-brand"/>My Reportees — leave planning overview</h3>
+  <p className="mt-1 text-xs text-muted">Approved plans reserve leave capacity. Individual applications are tracked separately. Only verified direct reportees appear here; confidential leave notes are not included.</p>
+  <div className="mt-3 grid grid-cols-3 gap-2">
+   {([['Approved plans',teamItems.filter(x=>x.kind==='plan'&&x.status==='approved').length],
+      ['Approved applications',teamItems.filter(x=>x.kind==='application'&&x.status==='approved').length],
+      ['Awaiting approval',teamItems.filter(x=>x.status==='pending').length]] as const).map(([label,count])=>
+     <div key={label} className="min-w-0 rounded-xl border border-line bg-page p-2">
+      <p className="text-xs text-muted">{label}</p><p className="mt-1 text-lg font-bold text-brand">{count}</p>
+     </div>)}
+  </div>
+  <SelectField id="hr-manager-team-stage" label="Planning overview stage" value={teamFilter}
+   onChange={e=>setTeamFilter(e.target.value as 'all'|'plan'|'application')}>
+   <option value="all">All plans and applications</option>
+   <option value="plan">Plans only</option>
+   <option value="application">Applications only</option>
+  </SelectField>
+  <div className="mt-3 max-h-[55dvh] space-y-2 overflow-y-auto">
+   {teamItems.filter(x=>teamFilter==='all'||x.kind===teamFilter).map(x=>
+    <LeaveCard key={x.id} item={x} names={labels}/>)}
+   {!teamItems.some(x=>teamFilter==='all'||x.kind===teamFilter)&&<p className="text-sm text-muted">No direct-report leave records for this stage.</p>}
   </div>
  </section>}
  {showInbox&&<section className="rounded-2xl border border-line bg-panel p-4">
