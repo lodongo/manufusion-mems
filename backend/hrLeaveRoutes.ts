@@ -183,6 +183,35 @@ export const hrLeaveRoutes={
     return {ok:true,id};
    });
  })],
+ 'POST /api/org/hr/leave/team':[orgRoute('org.hr.leave.team','HRM.shell.view',async ctx=>{
+   const rules=await currentHrRules(ctx.orgId);
+   if(!hrMayAccess('manager','leave',rules))return {items:[],counts:{planned:0,applications:0,pending:0}};
+   const [requests,nodeDocs]=await Promise.all([
+     listDocs(coll(ctx.orgId)),listDocs(`organizations/${ctx.orgId}/structure`),
+   ]);
+   const nodes=new Map(nodeDocs.map(d=>[d.id,d.data]));
+   const cache=new Map<string,boolean>(),items=[];
+   for(const d of requests){
+     const uid=s(d.data.employeeUid,128);
+     if(!uid||uid===ctx.uid)continue;
+     if(!cache.has(uid)){
+       const person=await getDoc('users/'+uid);
+       const direct=!!person&&s(person.data.orgId)===ctx.orgId&&person.data.status!=='disabled'&&
+         (await managerFor(ctx,person.data,nodes))===ctx.uid;
+       cache.set(uid,direct);
+     }
+     if(cache.get(uid)){
+       // Exclude sensitive notes and reasons. Planning needs dates, type and stage only.
+       items.push(record(d,false));
+     }
+   }
+   items.sort((a,b)=>a.start.localeCompare(b.start)||a.employeeName.localeCompare(b.employeeName));
+   return {items,counts:{
+     planned:items.filter(x=>x.kind==='plan'&&x.status==='approved').length,
+     applications:items.filter(x=>x.kind==='application'&&x.status==='approved').length,
+     pending:items.filter(x=>x.status==='pending').length,
+   }};
+ })],
  'POST /api/org/hr/leave/inbox':[orgRoute('org.hr.leave.inbox','HRM.shell.view',async ctx=>{
    const rules=await currentHrRules(ctx.orgId);
    if(!hrMayAccess('manager','leave',rules))return {items:[]};
