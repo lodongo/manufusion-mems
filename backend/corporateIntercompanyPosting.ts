@@ -93,6 +93,30 @@ export async function postIntercompanyPair(ctx:OrgContext,voucherId:string,appro
   !['corp.ic.voucher','corp.allocation.execute'].includes(String(prov.data.type))||bene.data.type!=='corp.ic.voucher.accept'||
   prov.data.leId!==v.providerLegalEntityId||bene.data.leId!==v.beneficiaryLegalEntityId)
   throw new HttpError(409,'Voucher must have two valid approved Finance transaction requests.');
+ // Bind every independent Finance request to THIS immutable source, not merely to
+ // an approved request of the same type in the same legal entity.
+ const providerSource=prov.data.payload as Record<string,unknown>|undefined;
+ const beneficiarySource=bene.data.payload as Record<string,unknown>|undefined;
+ const beneficiaryResult=bene.data.result as Record<string,unknown>|undefined;
+ const providerResult=prov.data.result as Record<string,unknown>|undefined;
+ const providerVoucher=providerSource?.voucher as Record<string,unknown>|undefined;
+ if(beneficiarySource?.voucherId!==v.id||beneficiaryResult?.voucherId!==v.id)
+  throw new HttpError(409,'Beneficiary approval proof is not bound to this voucher.');
+ if(prov.data.type==='corp.ic.voucher'){
+  if(providerVoucher?.id!==v.id||providerResult?.voucherId!==v.id)
+   throw new HttpError(409,'Provider approval proof is not bound to this voucher.');
+ }else{
+  if(!v.allocationPolicyId||!v.allocationSourceJournalId||
+      providerResult?.voucherIds==null||
+      !Array.isArray(providerResult.voucherIds)||
+      !(providerResult.voucherIds as unknown[]).includes(v.id))
+   throw new HttpError(409,'Provider allocation approval is not bound to this generated voucher.');
+  const alloc=await getDoc(root(ctx.orgId)+'/corp_allocation_runs/'+String(providerResult.runId||''));
+  if(!alloc||alloc.data.approvalRef!==v.providerApprovalRef||
+     alloc.data.policyId!==v.allocationPolicyId||
+     (alloc.data.source as Record<string,unknown>|undefined)?.journalId!==v.allocationSourceJournalId)
+   throw new HttpError(409,'Generated voucher is not linked to an executed approved allocation source.');
+ }
  if([v.createdBy,v.beneficiaryApprovedBy,prov.data.decidedBy,bene.data.decidedBy].includes(ctx.uid))
   throw new HttpError(403,'Bilateral maker/checker signatories cannot approve final journal posting.');
  if(await getDoc(pairPath(ctx.orgId,v.id)))throw new HttpError(409,'Intercompany voucher has already been posted.');
