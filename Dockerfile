@@ -28,6 +28,9 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/backend ./backend
+# Server-side HR eligibility imports the shared leave schema at runtime.
+# The independent web build alone does not bundle files imported by backend/tsx.
+COPY --from=build /app/src/shared ./src/shared
 EXPOSE 8080
 USER node
 CMD ["node", "--import", "tsx", "backend/platform/server.ts"]
