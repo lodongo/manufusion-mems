@@ -6,7 +6,7 @@ import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc,type Fields} from
 import {orgRoute,type OrgContext} from './guards';
 import {
   chartOf,createRequest,entityOf,leOf,needEntity,permAt,reasonOf,registerHandler,
-  requireFinance,scopeOf,unitsOf,
+  scopeOf,unitsOf,
   type Unit,type Obj,
 } from './finCore';
 import {moneyMinor,majorFromMinor,minorFactor} from './corporateBudget';
@@ -143,11 +143,8 @@ registerHandler('corp.allocation.counterparty',{
   return {policyId,status:next.status,remaining:pendingCounterparties(next)};
  },
 });
-const route=(name:string,fn:(ctx:OrgContext)=>Promise<unknown>)=>orgRoute(name,null,async ctx=>{
- await requireFinance(ctx);return fn(ctx);
-});
 export const corporateAllocationRoutes={
- 'POST /api/org/corporate/allocation/options':[route('org.corporate.allocation.options',async ctx=>{
+ 'POST /api/org/corporate/allocation/options':[orgRoute('org.corporate.allocation.options','FIN.view',async ctx=>{
   const r=await refs(ctx),{units}=await scopedAll(ctx);
   const scope=await scopeOf(ctx);
   return {...r,allLegalEntities:r.legalEntities,legalEntities:r.legalEntities.filter(l=>
@@ -157,13 +154,13 @@ export const corporateAllocationRoutes={
    costCenters:r.costCenters,
    basis:ALLOCATION_BASIS,costNature:POOL_TYPES};
  })],
- 'POST /api/org/corporate/allocation/list':[route('org.corporate.allocation.list',async ctx=>{
+ 'POST /api/org/corporate/allocation/list':[orgRoute('org.corporate.allocation.list','FIN.view',async ctx=>{
   const leId=clean(ctx.body.legalEntityId,128);
   await scopedReader(ctx,leId);
   const policies=await listDocs(root(ctx.orgId));
   return {policies:policies.filter(d=>clean(d.data.providerLegalEntityId)===leId).map(d=>d.data)};
  })],
- 'POST /api/org/corporate/allocation/beneficiary/list':[route('org.corporate.allocation.beneficiary.list',async ctx=>{
+ 'POST /api/org/corporate/allocation/beneficiary/list':[orgRoute('org.corporate.allocation.beneficiary.list','FIN.setup.manage',async ctx=>{
   const leId=clean(ctx.body.legalEntityId,128);
   await scoped(ctx,leId,'FIN.setup.manage');
   const docs=await listDocs(root(ctx.orgId));
@@ -179,7 +176,7 @@ export const corporateAllocationRoutes={
    }));
   return {policies};
  })],
- 'POST /api/org/corporate/allocation/propose':[route('org.corporate.allocation.propose',async ctx=>{
+ 'POST /api/org/corporate/allocation/propose':[orgRoute('org.corporate.allocation.propose','FIN.setup.manage',async ctx=>{
   const leId=clean(ctx.body.providerLegalEntityId,128);
   await scoped(ctx,leId,'FIN.setup.manage');
   const finance=await entityOf(ctx.orgId,leId);
@@ -196,7 +193,7 @@ export const corporateAllocationRoutes={
    payload:{policy} as unknown as Obj,amount:majorFromMinor(policy.annualCeilingMinor,policy.currency),
    reason:reasonOf(ctx.body)});
  })],
- 'POST /api/org/corporate/allocation/beneficiary/propose':[route('org.corporate.allocation.beneficiary.propose',async ctx=>{
+ 'POST /api/org/corporate/allocation/beneficiary/propose':[orgRoute('org.corporate.allocation.beneficiary.propose','FIN.setup.manage',async ctx=>{
   const policyId=clean(ctx.body.policyId,128);
   if(!refOK(policyId))throw new HttpError(400,'Invalid allocation policy ID.');
   const doc=await getDoc(path(ctx.orgId,policyId));
@@ -217,7 +214,7 @@ export const corporateAllocationRoutes={
    payload:{policyId,approvalFxRate:rate,approvalCurrency:fin.functionalCurrency} as unknown as Obj,
    amount:approvalAmount,reason:reasonOf(ctx.body)});
  })],
- 'POST /api/org/corporate/allocation/preview':[route('org.corporate.allocation.preview',async ctx=>{
+ 'POST /api/org/corporate/allocation/preview':[orgRoute('org.corporate.allocation.preview','FIN.view',async ctx=>{
   const policyId=clean(ctx.body.policyId,128);
   if(!refOK(policyId))throw new HttpError(400,'Invalid allocation policy ID.');
   const doc=await getDoc(path(ctx.orgId,policyId));
