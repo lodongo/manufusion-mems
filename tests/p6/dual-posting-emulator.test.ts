@@ -31,7 +31,6 @@ test('P6 both IC journals, postkeys, balances and pair proof commit together',as
 });
 test('P6 stale beneficiary journal CAS prevents the provider posting and all pair proof',async()=>{
  const t=tenant(),id='V002',writes=pairWrites(t,id);
- const wrong=4;writes[wrong].exists=false;
  writes[1]={...writes[1],exists:undefined,updateTime:'2001-01-01T00:00:00.000000Z'};
  await assert.rejects(()=>commit(writes));
  for(const w of pairWrites(t,id))assert.equal(await getDoc(w.path),null,w.path);
