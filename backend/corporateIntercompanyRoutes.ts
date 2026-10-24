@@ -2,7 +2,7 @@
  * P4 governed intercompany register, bilateral acceptance and settlement planning.
  * CRITICAL: No journal is posted and no bank is touched by any P4 endpoint.
  */
-import {HttpError,getDoc,listDocs,nowIso,randomId,str,writeDoc,type Fields} from './core';
+import {HttpError,getDoc,listDocs,nowIso,str,writeDoc,type Fields} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {
   chartOf,createRequest,entityOf,fxRate,hashKey,leOf,needEntity,permAt,
@@ -242,7 +242,8 @@ registerHandler('corp.ic.voucher.accept',{
   if(v.status!=='awaiting_counterparty'||v.beneficiaryLegalEntityId!==clean(req.leId,128))
    throw new HttpError(409,'Not pending beneficiary matching.');
   await permit(ctx,v.beneficiaryLegalEntityId,'FIN.post.approve');
-  if([v.createdBy,v.providerApprovedAt&&v.providerApprovalRef?clean((await getDoc('organizations/'+ctx.orgId+'/fin_requests/'+v.providerApprovalRef))?.data.decidedBy,128):''].includes(ctx.uid))
+  const providerRequest=await getDoc(root(ctx.orgId)+'/fin_requests/'+v.providerApprovalRef);
+  if([v.createdBy,clean(providerRequest?.data.decidedBy,128)].includes(ctx.uid))
    throw new HttpError(403,'Provider maker/approver cannot independently match the beneficiary entry.');
   const aDoc=await getDoc(agreementPath(ctx.orgId,v.agreementId));
   if(!aDoc)throw new HttpError(409,'Agreement not found.');
@@ -262,26 +263,33 @@ registerHandler('corp.ic.settlement.plan',{
  apply:async(ctx,req,id)=>{
   const x=rec(req.payload),voucherId=clean(x.voucherId,128);
   if(!safeId(voucherId))throw new HttpError(400,'Invalid matched voucher.');
-  const doc=await getDoc(voucherPath(ctx.orgId,voucherId));
-  if(!doc)throw new HttpError(404,'Voucher not found.');
-  const v=doc.data as unknown as IcVoucher;
-  const aDoc=await getDoc(agreementPath(ctx.orgId,v.agreementId));
-  if(!aDoc)throw new HttpError(409,'Funding/service agreement not found.');
-  const a=aDoc.data as unknown as IcAgreement;
-  await permit(ctx,v.beneficiaryLegalEntityId,'FIN.post.approve');
-  const plan:IcSettlementPlan={
-   id:hashKey('IC_SETTLE|'+id),voucherId,agreementId:v.agreementId,
-   currency:v.currency,amountMinor:Number(x.amountMinor),
-   plannedDate:clean(x.plannedDate,10),
-   method:clean(x.method,30) as IcSettlementPlan['method'],
-   paymentReference:clean(x.paymentReference,128),
-   reason:clean(req.reason,500),status:'planned_only',approvedAt:nowIso(),approvalRef:id,
-  };
-  try{validateSettlementPlan(plan,v,a);}catch(e){throw new HttpError(409,(e as Error).message);}
-  if(!await writeDoc(schedulePath(ctx.orgId,plan.id),plan as unknown as Fields,{exists:false}))
-   throw new HttpError(409,'Settlement plan has already been recorded.');
-  return {settlementPlanId:plan.id,status:plan.status,
-   note:'Plan only; no payment, receivable/payable clearing or cash transfer executed.'};
+  return withLock(ctx.orgId,'corp_ic_settlement_'+voucherId,async()=>{
+   const doc=await getDoc(voucherPath(ctx.orgId,voucherId));
+   if(!doc)throw new HttpError(404,'Voucher not found.');
+   const v=doc.data as unknown as IcVoucher;
+   const aDoc=await getDoc(agreementPath(ctx.orgId,v.agreementId));
+   if(!aDoc)throw new HttpError(409,'Funding/service agreement not found.');
+   const a=aDoc.data as unknown as IcAgreement;
+   await permit(ctx,v.beneficiaryLegalEntityId,'FIN.post.approve');
+   const plan:IcSettlementPlan={
+    id:hashKey('IC_SETTLE|'+id),voucherId,agreementId:v.agreementId,
+    currency:v.currency,amountMinor:Number(x.amountMinor),
+    plannedDate:clean(x.plannedDate,10),
+    method:clean(x.method,30) as IcSettlementPlan['method'],
+    paymentReference:clean(x.paymentReference,128),
+    reason:clean(req.reason,500),status:'planned_only',approvedAt:nowIso(),approvalRef:id,
+   };
+   try{validateSettlementPlan(plan,v,a);}catch(e){throw new HttpError(409,(e as Error).message);}
+   const other=await listDocs(scheduleDir(ctx.orgId));
+   const scheduledMinor=other.filter(x=>clean(x.data.voucherId)===voucherId)
+    .reduce((sum,x)=>sum+Number(x.data.amountMinor||0),0);
+   if(scheduledMinor+plan.amountMinor>v.amountMinor)
+    throw new HttpError(409,'A subsequent settlement plan already uses part of the voucher ceiling. Resubmit a smaller plan.');
+   if(!await writeDoc(schedulePath(ctx.orgId,plan.id),plan as unknown as Fields,{exists:false}))
+    throw new HttpError(409,'Settlement plan has already been recorded.');
+   return {settlementPlanId:plan.id,status:plan.status,
+    note:'Plan only; no payment, receivable/payable clearing or cash transfer executed.'};
+  });
  },
 });
 const route=(name:string,run:(ctx:OrgContext)=>Promise<unknown>)=>
@@ -389,7 +397,10 @@ export const corporateIntercompanyRoutes={
   const id=clean(ctx.body.voucherId,128),doc=await getDoc(voucherPath(ctx.orgId,id));
   if(!safeId(id)||!doc)throw new HttpError(404,'Intercompany voucher not found.');
   const v=doc.data as unknown as IcVoucher;
-  await canRead(ctx,v.providerLegalEntityId);
+  const {units,scope}=await (async()=>({units:await unitsOf(ctx.orgId),scope:await scopeOf(ctx)}))();
+  if(![v.providerLegalEntityId,v.beneficiaryLegalEntityId].some(le=>
+   ['FIN.view','FIN.setup.manage','FIN.setup.approve','FIN.journal.view'].some(p=>permAt(ctx,p,le,units,scope))))
+   throw new HttpError(403,'Finance access to a voucher party is required.');
   const aDoc=await getDoc(agreementPath(ctx.orgId,v.agreementId));
   if(!aDoc)throw new HttpError(409,'Intercompany contract missing.');
   const a=aDoc.data as unknown as IcAgreement;
