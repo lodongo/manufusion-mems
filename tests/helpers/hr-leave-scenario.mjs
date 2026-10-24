@@ -68,11 +68,26 @@ await assert.rejects(()=>call(hrLeaveRoutes,'other','/api/org/hr/leave/list',{ui
 await call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{id:plan.id,decision:'approve'});
 const approved=(await call(hrLeaveRoutes,'employee','/api/org/hr/leave/list',{uid:'employee'})).items;
 assert.equal(approved[0].status,'approved');
+// Application cannot refer to an approved plan for a different leave type
+// or request dates outside the manager-approved plan.
+await assert.rejects(()=>call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'application',leaveType:'LEAVE_SICK_FULL',
+ start:'2026-11-09',end:'2026-11-13',planId:plan.id,
+}),/match the approved plan/);
+await assert.rejects(()=>call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'application',leaveType:'LEAVE_ANNUAL',
+ start:'2026-11-09',end:'2026-11-17',planId:plan.id,
+}),/approved dates/);
 const actual=await call(hrLeaveRoutes,'hr','/api/org/hr/leave/create',{
  employeeUid:'employee',kind:'application',leaveType:'LEAVE_ANNUAL',start:'2026-11-09',end:'2026-11-13',planId:plan.id});
 assert.equal((await call(hrLeaveRoutes,'hr','/api/org/hr/leave/list',{uid:'employee'})).items.length,2);
 await assert.rejects(()=>call(hrLeaveRoutes,'hr','/api/org/hr/leave/review',{id:actual.id,decision:'approve'}),/immediate manager/);
 await call(hrLeaveRoutes,'manager','/api/org/hr/leave/review',{id:actual.id,decision:'approve'});
+await assert.rejects(()=>call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'application',leaveType:'LEAVE_ANNUAL',
+ start:'2026-11-10',end:'2026-11-11',planId:plan.id,
+}),/already covers these dates/);
+
 assert.equal((await call(hrLeaveRoutes,'admin','/api/org/hr/leave/list',{uid:'employee'})).items.length,2);
 // A Super Administrator has ordinary self-service rights, but not the right
 // to approve their own leave; the configured immediate manager is required.
@@ -107,4 +122,12 @@ await assert.rejects(()=>call(hrLeaveRoutes,'manager','/api/org/hr/leave/create'
 await assert.rejects(()=>call(hrLeaveRoutes,'admin','/api/org/hr/leave/review',{
  id:plan.id,decision:'approve',
 }),/no longer pending/);
+// An employee with no job-grade mapping is never allowed to choose a leave type.
+seed(root+'/positions/P',{title:'Production Operator',jobGradeByLegalEntity:{}});
+const unable=await call(hrLeaveRoutes,'employee','/api/org/hr/leave/list',{uid:'employee'});
+assert.equal(unable.eligibility,null);
+assert.match(unable.configurationError,/Assign a job grade/);
+await assert.rejects(()=>call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'plan',leaveType:'LEAVE_ANNUAL',start:'2026-12-10',end:'2026-12-11',
+}),/Assign a job grade/);
 console.log('HR leave privacy and manager approval scenario passed');
