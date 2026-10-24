@@ -16,6 +16,7 @@ export default function CorporateBudgetPage({canEdit}:{canEdit:boolean}){
  const [currency,setCurrency]=useState(''),[plan,setPlan]=useState<BudgetPlan|null>(null);
  const [lines,setLines]=useState<InputLine[]>([{costCenterId:'',category:'OPEX',amount:0}]);
  const [reason,setReason]=useState('');
+ const [revision,setRevision]=useState({costCenterId:'',category:'OPEX',delta:0});
  const [transfer,setTransfer]=useState({fromCostCenterId:'',fromCategory:'OPEX',toCostCenterId:'',toCategory:'OPEX',amount:0});
  const [exception,setException]=useState({costCenterId:'',category:'OPEX',sourceDocumentId:'',expiresOn:'',amount:0});
  const [simulate,setSimulate]=useState({costCenterId:'',category:'OPEX',sourceDocumentId:'',exceptionId:'',amount:0});
@@ -105,6 +106,20 @@ export default function CorporateBudgetPage({canEdit}:{canEdit:boolean}){
        <p className="text-xs text-muted">Approved {currencyFormat(line.approvedMinor/100,currency)} · Adjusted {currencyFormat(line.adjustmentsMinor/100,currency)}</p>
        <p className="text-sm">Available {currencyFormat((line.approvedMinor+line.adjustmentsMinor-line.committedMinor-line.actualMinor)/100,currency)}</p>
      </div>)}
+     {canEdit&&<section className="rounded-lg border border-line bg-page p-3 space-y-3">
+       <h5 className="font-semibold">Governed budget revision</h5>
+       <p className="text-xs text-muted">Increase (+) or reduce (−) a budget line. A new cost-centre/category line can be added with a positive amount. Committed or spent budget cannot be removed. All amendments require a separate Finance approval and preserve the original budget.</p>
+       {centreSelect('rev-cc',revision.costCenterId,v=>setRevision(a=>({...a,costCenterId:v})),'Revised cost centre')}
+       {classSelect('rev-class',revision.category,v=>setRevision(a=>({...a,category:v})),'Revised budget class')}
+       <label className="block text-sm text-muted">Revision (+ increase / − decrease), {currency}
+        <input className={field} type="number" step="0.01" value={revision.delta}
+          disabled={!canEdit} onChange={e=>setRevision(a=>({...a,delta:Number(e.target.value)}))}/>
+       </label>
+       {reasonField}
+       <button type="button" className={btn+' w-full'} disabled={busy||!revision.costCenterId||revision.delta===0||reason.trim().length<10}
+         onClick={()=>void submit('/api/org/corporate/budget/revision/propose',{leId,fy,changes:[revision],reason})}>
+        Propose budget revision for approval</button>
+      </section>}
     </div>:<div className="space-y-3">
      <p className="text-xs text-muted">Prepare a budget by cost centre and class. Submitting creates a valued Finance request; approval activates one immutable opening plan per legal entity/year. Subsequent reallocations use governed transfers.</p>
      {lines.map((line,i)=><div className="space-y-2 rounded-lg border border-line p-3" key={i}>
