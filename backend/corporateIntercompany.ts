@@ -46,7 +46,10 @@ export type IcVoucher={
  providerLegalEntityId:string;beneficiaryLegalEntityId:string;
  taxReviewReference:string;transferPricingEvidence:string;
  supportingDocumentReferences:string[];
- description:string;status:'awaiting_counterparty'|'matched_ready';
+ description:string;status:'awaiting_counterparty'|'matched_ready'|'posted';
+ providerCostCenterId?:string;beneficiaryCostCenterId?:string;
+ allocationPolicyId?:string;allocationSourceJournalId?:string;
+ postingApprovalRef?:string;postedAt?:string;providerJournalId?:string;beneficiaryJournalId?:string;
  createdAt:string;createdBy:string;providerApprovedAt:string;providerApprovalRef:string;
  beneficiaryApprovedAt:string;beneficiaryApprovedBy:string;beneficiaryApprovalRef:string;
  providerFunctionalCurrency:string;beneficiaryFunctionalCurrency:string;
