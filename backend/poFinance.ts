@@ -5,6 +5,7 @@ import { record } from './org';
 import { can, requireProcurement } from './procurementSetup';
 import { catalogSummary } from './procurement';
 import { acceptService } from './finOps';
+import {periodAt,yearsOf} from './finCore';
 import {prepareServiceAcceptanceBudget} from './corporateServiceBudget';
 import { getAuthority } from './procurementPolicy';
 import {
@@ -282,9 +283,12 @@ export const poFinanceRoutes = {
                     },
                     ...(isBudgetPilot?{atomicJournal:async(next:Obj,fresh:Doc)=>{
                         if(!fresh.updateTime)throw new HttpError(409,'Purchase order is stale for atomic service acceptance.');
+                        const currentPeriod=periodAt(await yearsOf(ctx.orgId,str(d.budgetLegalEntityId)),at.slice(0,10));
+                        if(!currentPeriod||currentPeriod.year.fy!==Number(d.budgetFy)||currentPeriod.period.status!=='open')
+                            throw new HttpError(409,'Service posting must be in the same open financial year as its PO reservation. Finance carryforward is not configured.');
                         const booked=await acceptService(ctx,{
                             po:d,poId:doc.id,receiptId:rid,invoiceNo:str(r.invoiceNo),lines:acceptedLines,
-                            strictBudget:{extraForJournal:async(glJournalId,costs,leId,_rate,currency)=>{
+                            strictBudget:{postingDate:at.slice(0,10),extraForJournal:async(glJournalId,costs,leId,_rate,currency)=>{
                                 if(currency!==str(d.budgetCurrency)||leId!==str(d.budgetLegalEntityId))
                                     throw new HttpError(409,'Posting legal entity/currency differs from approved PO budget commitment.');
                                 const prepared=await prepareServiceAcceptanceBudget(
