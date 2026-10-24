@@ -93,7 +93,8 @@ export const hrLeaveRoutes={
    return {items:docs.filter(d=>s(d.data.employeeUid)===uid).map(d=>record(d,access.isSelf||access.isAdmin))
     .sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),
     eligibility,configurationError,
-    permissions:{canApply:access.canApply,canApprove:access.canApprove,
+    permissions:{canApply:access.canApply&&(access.isSelf||access.hr||access.isAdmin),
+      canPlan:access.canApply&&access.isSelf,canApprove:access.canApprove,
       scope:access.isSelf?'self':access.isAdmin?'superadmin':access.manager?'manager':'hr'}};
  })],
  'POST /api/org/hr/leave/create':[orgRoute('org.hr.leave.create','HRM.shell.view',async ctx=>{
