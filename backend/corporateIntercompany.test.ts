@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import {reconcileStaging} from './corporateIntercompanyReconciliation';
 import assert from 'node:assert/strict';
 import {
  IC_TYPES,accountRequirements,validateAgreement,validateVoucher,
@@ -111,4 +112,19 @@ test('P4 currency-specific netting is nonposting, and never nets a different cur
   {legalEntityId:'EA',counterpartyLegalEntityId:'EB',currency:'KES',receivableMinor:10,payableMinor:0},
   {legalEntityId:'EA',counterpartyLegalEntityId:'EB',currency:'KES',receivableMinor:10,payableMinor:0},
  ]),/Duplicate/);
+});
+
+test('P4 staging reconciliation clearly separates matched unposted, pending and planned only',()=>{
+ const a=contract(),ready=voucher(),pending={...voucher(),id:'icv002',sourceReference:'INV-2026-010',
+  status:'awaiting_counterparty' as const,beneficiaryApprovedBy:'',beneficiaryApprovalRef:''};
+ const settlement:IcSettlementPlan={id:'S001',agreementId:a.id,voucherId:ready.id,
+  currency:'KES',amountMinor:200000,plannedDate:'2026-11-01',
+  method:'MANUAL',paymentReference:'PLAN-001',reason:'Expected partial settlement',
+  status:'planned_only',approvedAt:'2026-10-24',approvalRef:'FCR00000033'};
+ const r=reconcileStaging([a],[ready,pending],[settlement]);
+ assert.equal(r.readyUnpostedCount,1);
+ assert.equal(r.unmatchedCount,1);
+ assert.equal(r.currencies[0].matchedUnpostedMinor,1000000);
+ assert.equal(r.currencies[0].plannedSettlementMinor,200000);
+ assert.match(r.warning,/not represent GL/);
 });
