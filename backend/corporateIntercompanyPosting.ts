@@ -88,6 +88,16 @@ export async function postIntercompanyPair(ctx:OrgContext,voucherId:string,appro
  if([v.createdBy,v.beneficiaryApprovedBy,prov.data.decidedBy,bene.data.decidedBy].includes(ctx.uid))
   throw new HttpError(403,'Bilateral maker/checker signatories cannot approve final journal posting.');
  if(await getDoc(pairPath(ctx.orgId,v.id)))throw new HttpError(409,'Intercompany voucher has already been posted.');
+ const finalFcr=await getDoc(P(ctx.orgId).request(approvalRef));
+ if(!finalFcr||!finalFcr.updateTime||finalFcr.data.type!=='corp.ic.post'||finalFcr.data.status!=='pending'||
+    finalFcr.data.leId!==v.providerLegalEntityId||
+    (finalFcr.data.payload as Record<string,unknown>|undefined)?.voucherId!==v.id||finalFcr.data.makerUid===ctx.uid)
+  throw new HttpError(409,'Final Finance approval request cannot be atomically completed with this source.');
+ const pendingSteps=Array.isArray(finalFcr.data.steps)?finalFcr.data.steps as Array<Record<string,unknown>>:[];
+ if(pendingSteps.filter(x=>x.status==='pending').length!==1)
+  throw new HttpError(409,'Final Finance authority step is not the last outstanding approval.');
+ const decidedAt=nowIso();
+ const updatedSteps=pendingSteps.map(x=>x.status==='pending'?{...x,status:'approved',by:ctx.uid,at:decidedAt}:x);
  const [p,b]=await Promise.all([
   preparePosting(ctx,postingInput(v,a,'provider',approvalRef)),
   preparePosting(ctx,postingInput(v,a,'beneficiary',approvalRef)),
@@ -102,6 +112,9 @@ export async function postIntercompanyPair(ctx:OrgContext,voucherId:string,appro
  const posted:IcVoucher={...v,status:'posted',postingApprovalRef:approvalRef,postedAt:pair.postedAt,
   providerJournalId:p.id,beneficiaryJournalId:b.id};
  await commit([...p.writes,...b.writes,
+  {path:P(ctx.orgId).request(approvalRef),updateTime:finalFcr.updateTime,
+   fields:{...finalFcr.data,status:'approved',steps:updatedSteps,decidedAt,decidedBy:ctx.uid,
+    result:{pairId:v.id,providerJournal:p.id,beneficiaryJournal:b.id}}},
   {path:vp,fields:posted as unknown as Record<string,unknown>,updateTime:doc.updateTime},
   {path:pairPath(ctx.orgId,v.id),fields:pair as unknown as Record<string,unknown>,exists:false},
  ]);
