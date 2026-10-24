@@ -32,6 +32,17 @@ async function scoped(ctx:OrgContext,leId:string,permission:string){
   throw new HttpError(403,permission+' required for '+le.code+'.');
  return {units,le};
 }
+async function scopedReader(ctx:OrgContext,leId:string){
+ const {units,le}=await scoped(ctx,leId,'FIN.view').catch(async e=>{
+  if(!(e instanceof HttpError)||e.status!==403)throw e;
+  const [nodes,scope]=await Promise.all([unitsOf(ctx.orgId),scopeOf(ctx)]);
+  const legal=needEntity(nodes,scope,leId);
+  if(!['FIN.setup.manage','FIN.cc.manage','FIN.setup.approve','FIN.post.approve'].some(p=>
+     permAt(ctx,p,legal.id,nodes,scope)))throw e;
+  return {units:nodes,le:legal};
+ });
+ return {units,le};
+}
 async function refs(ctx:OrgContext):Promise<AllocationReferences>{
  const [units,corporate]=await Promise.all([unitsOf(ctx.orgId),
    getDoc('organizations/'+ctx.orgId+'/corporate_governance/default')]);
@@ -140,7 +151,7 @@ export const corporateAllocationRoutes={
   const r=await refs(ctx),{units}=await scopedAll(ctx);
   const scope=await scopeOf(ctx);
   return {...r,allLegalEntities:r.legalEntities,legalEntities:r.legalEntities.filter(l=>
-   ['FIN.view','FIN.setup.manage','FIN.setup.approve'].some(perm=>permAt(ctx,perm,l.id,units,scope))),
+   ['FIN.view','FIN.setup.manage','FIN.cc.manage','FIN.setup.approve'].some(perm=>permAt(ctx,perm,l.id,units,scope))),
    // Only structural destinations, not financial amounts, are exposed here.
    // A corporate Finance policy owner needs to select beneficiary cost centres in other entities.
    costCenters:r.costCenters,
@@ -148,7 +159,7 @@ export const corporateAllocationRoutes={
  })],
  'POST /api/org/corporate/allocation/list':[route('org.corporate.allocation.list',async ctx=>{
   const leId=clean(ctx.body.legalEntityId,128);
-  await scoped(ctx,leId,'FIN.view');
+  await scopedReader(ctx,leId);
   const policies=await listDocs(root(ctx.orgId));
   return {policies:policies.filter(d=>clean(d.data.providerLegalEntityId)===leId).map(d=>d.data)};
  })],
@@ -212,7 +223,7 @@ export const corporateAllocationRoutes={
   const doc=await getDoc(path(ctx.orgId,policyId));
   if(!doc)throw new HttpError(404,'Allocation policy not found.');
   const policy=doc.data as unknown as AllocationPolicy;
-  await scoped(ctx,policy.providerLegalEntityId,'FIN.view');
+  await scopedReader(ctx,policy.providerLegalEntityId);
   const cost=Number(ctx.body.cost);
   let minor:number;
   try{minor=moneyMinor(cost,policy.currency)}
