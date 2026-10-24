@@ -50,3 +50,22 @@ The pilot is DEFAULT OFF and cannot be activated by merely setting a Boolean; ru
 Before enabling: authenticated Firestore transaction/concurrency tests across two tenants; reconciliation of existing service invoices and posted Finance expenses; source FX changes; accrued services spanning fiscal periods; service PO amendments/returns; partial cancellations, credit notes, reverse entries; tax-inclusive/nonrecoverable expense determination; accounts-payable invoice lifecycle and supplier duplicate invoice protection; broader material/asset/work-order/payroll commitments.
 
 Source-linked strict service acceptance is implemented only when the approved service PO contains `budgetControlled:true`. Existing unrelated accounting handlers and non-pilot orders are not changed to enforce this budget gate.
+
+## P5 Finance activation and controlled development rollout (2026-10-24)
+- Added `Finance → Corporate Budgets & Allocation → PO Budget Pilot` with current configuration status, selected legal entity, proposed ON/OFF mode, activation date, reason and independent Finance FCR request.
+- Two routes `/api/org/corporate/po-budget/status` (FIN.view) and `/api/org/corporate/po-budget/propose` (FIN.setup.manage). The only configuration writer is registered `corp.po.budget.gate` approval handler (FIN.setup.approve, valued CoA), not a direct activation endpoint. Existing Finance maker-checker enforces different submitter and reviewer, plus configured approval steps.
+- Settings use an optimistic configuration revision, an FCR audit reference and scope to a single legal entity. A new legal entity cannot take over a running pilot without an approved disable request first.
+- Every new pilot reservation verifies FCR status `approved`, type, approval ID, legal entity, scope, requested mode/category/date, actual signing approver, maker/checker separation and decision result. A stale or tampered policy cannot permit expenditure.
+- **Runtime activation is locked** to servers with `MEMS_PO_BUDGET_PILOT_ENABLED=true` and a clearly development/test-named `MEMS_FIREBASE_PROJECT_ID`. A production-named project always refuses activation even with the flag. Neither the code nor the development deployment workflow enables this environment flag by default. The current app remains OFF and cannot be activated via UI while the server flag is off.
+- After a governed OFF change, new approved POs no longer create budget reservations, but existing controlled PO acceptances still consume source reservations and cancellations must release them. The server flag may also be removed immediately as an emergency brake; existing reservation lifecycle must still be supported.
+- This remains a **single legal entity per tenant pilot**. Mixed-entity pilot POs and invoices without supported, complete cost-centre mappings fail closed. Other entities do not automatically receive budget enforcement.
+- Added activation FCR provenance, production-project rejection, invalid-date/invalid-mode, and route authorization boundary tests.
+- Strengthened normal CI with Finance governance regression and the static route inventory. The repository-wide strict inventory is not yet a passing release gate because it reports 72 pre-existing, unclassified route declarations. This is a separate governance remediation; a normal inventory report does not imply dynamic authorization verification.
+
+### Before enabling opt-in on development
+1. Test with two isolated authenticated tenant accounts, including access denial across tenants and entity permission boundaries.
+2. Test Firestore concurrent approval and service acceptance against the live development database or emulator, including one failed precondition and server restart/retry.
+3. Confirm maker/checker authority, repeated FCR approval prevention, configuration version rollback, and emergency disable.
+4. Validate service invoice/receipt value, FX valuation, two-decimal constraints, open-period posting, and partial receipt/reversal under a Finance-approved test ledger.
+5. Perform end-to-end AP and tax integration before enabling nonrecoverable taxes, amendments, credits, multi-year carry-forward and other source transactions.
+6. Only then explicitly opt the isolated development Cloud Run server into the pilot. Never use the production Firebase or Cloud Run project.
