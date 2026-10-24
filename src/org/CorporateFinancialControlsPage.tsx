@@ -8,7 +8,7 @@ import PoBudgetPilotPage from './PoBudgetPilotPage';
 /** Finance-facing entry point. Organization design stays under ADM.structure.
  * Each backend mutation still enforces scoped Finance maker/checker permissions.
  */
-export default function CorporateFinancialControlsPage({canEdit}:{canEdit:boolean}){
+export default function CorporateFinancialControlsPage({canEdit,canConfigurePilot}:{canEdit:boolean;canConfigurePilot:boolean}){
  const [section,setSection]=useState<'budget'|'allocation'|'intercompany'|'pilot'>('budget');
  return <div className="min-w-0 space-y-4">
   <header className="rounded-2xl border border-line bg-panel p-4">
@@ -25,6 +25,6 @@ export default function CorporateFinancialControlsPage({canEdit}:{canEdit:boolea
     <button type="button" className={'min-h-12 rounded-xl border border-line px-3 text-sm font-semibold '+(section==='pilot'?'bg-brand/10 text-brand':'bg-panel text-muted')}
       onClick={()=>setSection('pilot')}>PO Budget Pilot</button>
   </div>
-  {section==='budget'?<CorporateBudgetPage canEdit={canEdit}/>:section==='allocation'?<CorporateAllocationPage canEdit={canEdit}/>:section==='pilot'?<PoBudgetPilotPage canEdit={canEdit}/>:<CorporateIntercompanyPage canEdit={canEdit}/>}
+  {section==='budget'?<CorporateBudgetPage canEdit={canEdit}/>:section==='allocation'?<CorporateAllocationPage canEdit={canEdit}/>:section==='pilot'?<PoBudgetPilotPage canEdit={canConfigurePilot}/>:<CorporateIntercompanyPage canEdit={canEdit}/>}
  </div>;
 }
