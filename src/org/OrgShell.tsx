@@ -305,7 +305,7 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             content = <CorporateGovernancePage canEdit={canDesign}/>;
             break;
         case 'corporate_finance':
-            content = <CorporateFinancialControlsPage canEdit={hasPerm(data.permissions,'FIN.setup.manage') || hasPerm(data.permissions,'FIN.cc.manage')}/>;
+            content = <CorporateFinancialControlsPage canEdit={hasPerm(data.permissions,'FIN.setup.manage') || hasPerm(data.permissions,'FIN.cc.manage')} canConfigurePilot={hasPerm(data.permissions,'FIN.setup.manage')}/>;
             break;
         case 'structure':
             content = <StructurePage nodeId={id} sub={parts[3]} canEdit={canDesign} />;
