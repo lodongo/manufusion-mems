@@ -911,7 +911,12 @@ async function postOnce(ctx: OrgContext, input: PostInput, keyId: string): Promi
     for (const x of input.extra ?? []) writes.push(x);
     if(input.extraForJournal)writes.push(...await input.extraForJournal(id));
     await commit(writes);
-    await record(ctx, 'org.finance.journal.post', id, `${TXN_LABEL[input.type] ?? input.type}: ${entity.functionalCurrency} ${(dr / 100).toFixed(2)}; ${input.source.kind} ${input.source.id}${input.approvalRef ? `; approval ${input.approvalRef}` : ''}`.slice(0, 400));
+    try {
+        await record(ctx, 'org.finance.journal.post', id, `${TXN_LABEL[input.type] ?? input.type}: ${entity.functionalCurrency} ${(dr / 100).toFixed(2)}; ${input.source.kind} ${input.source.id}${input.approvalRef ? `; approval ${input.approvalRef}` : ''}`.slice(0, 400));
+    } catch(e) {
+        if(!input.extraForJournal)throw e;
+        console.error('Atomic GL+PO journal committed but secondary audit logging requires reconciliation',id,e instanceof Error?e.message:'unknown');
+    }
     return { id, reused: false, fy: year.fy, period: period.no };
 }
 
