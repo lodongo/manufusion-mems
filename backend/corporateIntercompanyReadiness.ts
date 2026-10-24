@@ -1,6 +1,6 @@
 /** Read-only P6 financial readiness: no posting, approval, policy mutation, or cash movement. */
 import {getDoc,nowIso,HttpError} from './core';
-import {chartOf,entityOf,periodAt,yearsOf,P} from './finCore';
+import {chartOf,entityOf,periodAt,yearsOf,P,unitsOf,leOf,ccFinOf} from './finCore';
 import {agreementPath,voucherPath,icPostingEnabled,validatePostablePair,pairPath} from './corporateIntercompanyPosting';
 import {IC_ROLES,type IcRole,type IcAgreement,type IcVoucher} from './corporateIntercompany';
 export type ReadinessCheck={code:string;passed:boolean;detail:string};
@@ -45,11 +45,17 @@ async function financeReady(orgId:string,v:IcVoucher,a:IcAgreement,side:'provide
   if(entity.status!=='active'||entity.functionalCurrency!==(side==='provider'?v.providerFunctionalCurrency:v.beneficiaryFunctionalCurrency))return false;
   const period=periodAt(years,v.valueDate);
   if(!period||period.period.status!=='open'||v.valueDate>nowIso().slice(0,10))return false;
+  const ccId=side==='provider'?v.providerCostCenterId:v.beneficiaryCostCenterId;
+  const units=await unitsOf(orgId),cc=units.get(ccId||'');
+  if(!cc||cc.level!=='cost_center'||cc.status==='inactive'||leOf(units,cc.id)?.id!==party.legalEntityId)return false;
+  const costCentreFinance=await ccFinOf(orgId,cc.id);
+  if(costCentreFinance.status!=='open')return false;
   for(const [role,code] of Object.entries(party.accounts)){
    const acc=chart.get(code);
    if(!acc||acc.status!=='active'||!acc.postable||acc.statement!==IC_ROLES[role as IcRole])return false;
    if(entity.doc?.data.glScopeConfigured===true&&
     !(Array.isArray(entity.doc.data.allowedGl)&&entity.doc.data.allowedGl.includes(code)))return false;
+   if(acc.statement==='PL'&&costCentreFinance.allowedGl.length&&!costCentreFinance.allowedGl.includes(code))return false;
   }
   return true;
  }catch{return false;}
