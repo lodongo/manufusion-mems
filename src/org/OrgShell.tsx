@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { HeartPulse, BookOpen, Boxes, Briefcase, Calculator, ClipboardList, CircleUser, ClipboardCheck, CreditCard, Eye, GitBranch, History, Home, Layers, LayoutDashboard, LogOut, Menu, Network, Package, PackageCheck, PackagePlus, Palette, Puzzle, ScrollText, Settings, ShieldCheck, Table2, Users, Workflow, Wrench, X } from 'lucide-react';
+import { HeartPulse, BookOpen, Boxes, Briefcase, Calculator, ClipboardList, CircleUser, ClipboardCheck, CreditCard, Eye, GitBranch, History, Home, Layers, LayoutDashboard, Landmark, LogOut, Menu, Network, Package, PackageCheck, PackagePlus, Palette, Puzzle, ScrollText, Settings, ShieldCheck, Table2, Users, Workflow, Wrench, X } from 'lucide-react';
 import AssetRegister from './AssetRegister';
 import MaterialWorkflow from './MaterialWorkflow';
 import TransactionGovernance from './TransactionGovernance';
@@ -16,6 +16,7 @@ import OrgSubscription from './OrgSubscription';
 import UserChip from '../components/UserChip';
 import SideNav, { type NavGroup, type NavItem } from '../components/SideNav';
 import StructurePage from './StructurePage';
+import CorporateGovernancePage from './CorporateGovernancePage';
 import PositionsPage from './PositionsPage';
 import OdChart from './OdChart';
 import OrgSettings from './OrgSettings';
@@ -52,6 +53,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
         title: 'Organization design',
         items: [
             { key: 'structure', label: 'Design', Icon: Layers, perm: 'ADM.structure' },
+            { key: 'corporate_governance', label: 'Corporate Office & Governance', Icon: Landmark, perm: 'ADM.structure' },
         ],
     },
     {
@@ -149,6 +151,7 @@ const TITLES: Record<string, string> = {
     my_tables: 'My Tables',
     keep_alive: 'Keep Alive',
     structure: 'Organization design',
+    corporate_governance: 'Corporate Office & Governance',
     structure_view: 'Organization structure',
     positions: 'Job roles',
     positions_view: 'Job role structure',
@@ -293,6 +296,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             break;
         case 'audit':
             content = <OrgAudit />;
+            break;
+        case 'corporate_governance':
+            content = <CorporateGovernancePage canEdit={canDesign}/>;
             break;
         case 'structure':
             content = <StructurePage nodeId={id} sub={parts[3]} canEdit={canDesign} />;
