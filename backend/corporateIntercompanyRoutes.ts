@@ -11,6 +11,7 @@ import {
 } from './finCore';
 import {moneyMinor,majorFromMinor,minorFactor} from './corporateBudget';
 import {icPostingEnabled,postIntercompanyPair,validatePostablePair,pairPath} from './corporateIntercompanyPosting';
+import {postedIcReport} from './corporateIntercompanyPostedReport';
 import {reconcileStaging} from './corporateIntercompanyReconciliation';
 import {
  IC_TYPES,IC_ROLES,IC_SETTLEMENT,validateAgreement,validateVoucher,
@@ -443,6 +444,11 @@ export const corporateIntercompanyRoutes={
    summary:'Paired legal entities: '+v.providerLegalEntityId+' and '+v.beneficiaryLegalEntityId+
     '; '+v.currency+' '+majorFromMinor(v.amountMinor,v.currency),
    payload:{voucherId:v.id,...authority},reason:reasonOf(ctx.body),amount:authority.approvalAmount});
+ })],
+ 'POST /api/org/corporate/ic/posted-reconciliation':[orgRoute('org.corporate.ic.posted-reconciliation','FIN.view',async ctx=>{
+  const legalEntityId=clean(ctx.body.legalEntityId,128);
+  await canRead(ctx,legalEntityId);
+  return postedIcReport(ctx.orgId,legalEntityId);
  })],
  'POST /api/org/corporate/ic/reconciliation':[orgRoute('org.corporate.ic.reconciliation','FIN.view',async ctx=>{
   const legalEntityId=clean(ctx.body.legalEntityId,128);await canRead(ctx,legalEntityId);
