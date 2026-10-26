@@ -17,10 +17,11 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
  const [editing,setEditing]=useState<number|null>(null);
  const [draft,setDraft]=useState<Education>(empty);
  const [error,setError]=useState('');
+ const [catalogueError,setCatalogueError]=useState(false);
  const [notice,setNotice]=useState('');
  useEffect(()=>{
   let live=true;
-  setRecords([]);setSelection(null);setEditing(null);setError('');setNotice('');setLoading(true);
+  setRecords([]);setSelection(null);setEditing(null);setError('');setCatalogueError(false);setNotice('');setLoading(true);
   Promise.allSettled([
    callBackend<{education:Education[]}>('/api/org/hr/private/get',{uid:employeeUid}),
    callBackend<Selection>('/api/org/hr/education/config',{uid:employeeUid}),
@@ -29,7 +30,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
    if(results.status==='fulfilled')setRecords(results.value.education||[]);
    else setError(results.reason instanceof Error?results.reason.message:'Education records could not be loaded.');
    if(config.status==='fulfilled')setSelection(config.value);
-   else setError(config.reason instanceof Error?config.reason.message:'Education configuration is unavailable.');
+   else {setCatalogueError(true);setError(config.reason instanceof Error?config.reason.message:'Education configuration is unavailable.');}
   }).finally(()=>{if(live)setLoading(false)});
   return()=>{live=false};
  },[employeeUid]);
@@ -60,7 +61,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
   void save(records.filter((_,i)=>i!==index));
  };
  const chosenLevel=selection?.config?.levels.find(level=>level.code===draft.levelCode);
- const scope=selection?.scope==='corporate'?'Corporate / Group Office':selection?.entity?.name||'Not assigned';
+ const scope=catalogueError?'Unable to load catalogue':selection?.scope==='corporate'?'Corporate / Group Office':selection?.entity?.name||'Not assigned';
  return <section className="hr-edu" aria-label="Education records">
   <header className="hr-edu__head">
    <div className="hr-edu__head-icon"><GraduationCap size={23} aria-hidden="true"/></div>
@@ -79,7 +80,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
    <span className="hr-edu__count">{records.length} {records.length===1?'record':'records'}</span>
   </div>
   {loading&&<div role="status" className="hr-edu__empty">Loading your qualifications…</div>}
-  {!loading&&!selection?.config&&<div role="status" className="hr-edu__unavailable">
+  {!loading&&!selection?.config&&!catalogueError&&<div role="status" className="hr-edu__unavailable">
    <LockKeyhole size={19} aria-hidden="true"/>
    <div><strong>Education setup needed</strong>
     <p>An HR administrator must assign an active legal entity or a corporate organizational unit. Education records remain private.</p></div>

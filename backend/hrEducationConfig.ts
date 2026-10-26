@@ -19,6 +19,9 @@ export type EducationConfig={
  gradingSystems:GradingSystem[];
 };
 const clean=(x:unknown,n=150)=>str(x).trim().slice(0,n);
+/** Firestore reserves document IDs matching __.*__; keep corporate scope ID ordinary.
+ * The corporate catalogue never inherits a legal entity's private master. */
+export const CORPORATE_EDUCATION_CONFIG_ID='corporate_default';
 const configPath=(org:string,entity:string)=>`organizations/${org}/hr_education_config/${entity}`;
 const idOk=(x:string)=>/^[A-Za-z0-9_-]{2,64}$/.test(x);
 export const DEFAULT_EDUCATION:EducationConfig={
@@ -106,7 +109,7 @@ export async function educationScopeForEmployee(org:string,employee:Record<strin
  const entity=await legalEntityForEmployee(org,employee);
  if(entity)return {entity,scope:'legal_entity' as const};
  if(await corporateEducationEligible(org,employee)||allowAdminSelf&&(!Array.isArray(employee.assignments)||!employee.assignments.length))
-  return {entity:{id:'__corporate__',name:'Corporate / Group Office'},scope:'corporate' as const};
+  return {entity:{id:CORPORATE_EDUCATION_CONFIG_ID,name:'Corporate / Group Office'},scope:'corporate' as const};
  return {entity:null,scope:'unassigned' as const};
 }
 export function resolveEducationConfig(data?:Record<string,unknown>):EducationConfig{

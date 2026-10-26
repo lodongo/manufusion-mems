@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {seed,snapshot} from './maintenance-fixture.ts';
-import {hrEducationConfigRoutes,DEFAULT_EDUCATION,checkEducationEntry,legalEntityForEmployee} from '../../backend/hrEducationConfig.ts';
+import {hrEducationConfigRoutes,DEFAULT_EDUCATION,checkEducationEntry,legalEntityForEmployee,CORPORATE_EDUCATION_CONFIG_ID} from '../../backend/hrEducationConfig.ts';
 const org='hr_education_fixture',root='organizations/'+org;
 seed(root,{status:'active',modules:{HRM:true}});
 seed(root+'/structure/LE1',{level:'legal_entity',parentId:'root',name:'Nairobi Operations',status:'active'});
@@ -26,10 +26,22 @@ seed('users/executive',{uid:'executive',orgId:org,status:'active',
  assignments:[{nodeId:'GRP',type:'primary',positionCode:'ROL_CEO'}]});
 const groupConfig=await call('executive','/api/org/hr/education/config');
 assert.equal(groupConfig.scope,'corporate');
-assert.equal(groupConfig.entity.id,'__corporate__');
+assert.equal(groupConfig.entity.id,CORPORATE_EDUCATION_CONFIG_ID);
+assert.doesNotMatch(CORPORATE_EDUCATION_CONFIG_ID,/^__.*__$/,
+ 'Firestore forbids document identifiers enclosed in double underscores.');
+// The CEO has no manager role or manager UID; personal education must still work.
+assert.equal(snapshot('users/executive').data.managerUid,undefined);
 assert.equal(groupConfig.config.levels.some(x=>x.code==='DOCTORATE'),true);
 await checkEducationEntry(org,'executive',{levelCode:'DOCTORATE',qualificationCode:'DOCTORATE_GENERAL'});
 await assert.rejects(()=>checkEducationEntry(org,'executive',{levelCode:'BACHELOR',qualificationCode:'NBI_ENGINEERING'}),/qualification belonging/);
+// A super administrator without a reporting manager or deployment may
+// maintain their own private education using the corporate default master.
+const adminOwnConfig=await call('administrator','/api/org/hr/education/config');
+assert.equal(adminOwnConfig.scope,'corporate');
+assert.equal(adminOwnConfig.entity.id,CORPORATE_EDUCATION_CONFIG_ID);
+await checkEducationEntry(org,'administrator',{
+ levelCode:'BACHELOR',qualificationCode:'BACHELOR_GENERAL',
+},true);
 const entity=await legalEntityForEmployee(org,snapshot('users/employee').data);
 assert.equal(entity.id,'LE1');
 const employeeConfig=await call('employee','/api/org/hr/education/config');
