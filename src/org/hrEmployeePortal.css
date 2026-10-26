@@ -191,3 +191,7 @@
 .hr-card__assignment-item b{font-weight:800;color:#253e5b;margin-right:5px}
 .hr-card__assignment-extra{color:#253e5b;overflow-wrap:anywhere}
 .hr-card__assignment-empty{padding:9px;font-size:11px;color:#64748b}
+
+/* Deployment is always expanded; the heading is not a toggle. */
+.hr-card__assignment-summary{cursor:default}
+.hr-card__assignment-summary strong{flex:1;min-width:0;font-size:11px;font-weight:800}

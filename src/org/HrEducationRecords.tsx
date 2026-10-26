@@ -220,21 +220,21 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
     <div className="hr-edu__attachments">
      <p className="hr-edu__attachments-title">Supporting documents</p>
      <p className="hr-edu__attachments-help">Attach certificates, transcripts, testimonials, theses or other academic evidence. Every upload remains pending until independent HR verification.</p>
-     <label className="hr-edu__field"><span>Document category</span>
-      <select value={documentType} onChange={e=>setDocumentType(e.target.value as EvidenceCategory)}>
-       {CATEGORIES.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}
-      </select>
-     </label>
      <div className="hr-edu__field">
-      <span>Choose document(s) · PDF / JPG / PNG</span>
-      <label className="hr-edu__file-picker" htmlFor="hr-edu-document-file">
-       <span className="hr-edu__file-picker-button">Choose files</span>
-       <span className="hr-edu__file-picker-caption">{pendingFiles.length?pendingFiles.length+' selected':'Tap to select documents from your device'}</span>
-       <input id="hr-edu-document-file" type="file" multiple accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
-        aria-label="Choose education supporting documents" disabled={busy}
-        onChange={e=>{stageFiles(e.currentTarget.files);e.currentTarget.value='';}}/>
-      </label>
-      <span className="hr-edu__attachments-help">If your installed Android app does not open the file browser, open MEMS in Chrome. Embedded WebViews must support Android file chooser requests.</span>
+      <SelectField id="hr-edu-document-category" label="Document category" value={documentType}
+       onChange={e=>setDocumentType(e.target.value as EvidenceCategory)}>
+       {CATEGORIES.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}
+      </SelectField>
+     </div>
+     <div className="hr-edu__field">
+      <label htmlFor="hr-edu-document-file">Choose document(s) · PDF / JPG / PNG</label>
+      <input id="hr-edu-document-file" className="hr-edu__native-file" type="file"
+       multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+       aria-label="Choose education supporting documents" disabled={busy}
+       onChange={e=>{stageFiles(e.currentTarget.files);e.currentTarget.value='';}}/>
+      <span className="hr-edu__attachments-help" aria-live="polite">{pendingFiles.length?
+       pendingFiles.length+' file(s) selected and ready to upload when the qualification is saved':
+       'Select one or more files using your device’s file browser.'}</span>
      </div>
      {pendingFiles.map((attachment,index)=><div key={index} className="hr-edu__queued-file">
       <span className="min-w-0 flex-1 break-words">{categoryLabel(attachment.type)} · {attachment.file.name}</span>

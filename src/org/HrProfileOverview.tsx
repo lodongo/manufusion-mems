@@ -65,10 +65,10 @@ export default function HrProfileOverview({
       <Detail label="Assigned location" value={profile.primaryLocation} Icon={MapPin} tone="amber"/>}
     <Detail label={workplace.label} value={workplace.name} Icon={MapPin} tone="teal"/>
    </div>
-   <details className="hr-card__assignment">
-    <summary className="hr-card__assignment-summary"><MapPin size={16} aria-hidden="true"/>
-     <span>Deployment details</span><span className="hr-card__assignment-hint">{deployments.length} assignment{deployments.length===1?'':'s'}</span>
-    </summary>
+   <section className="hr-card__assignment" aria-label="Deployment details">
+    <div className="hr-card__assignment-summary"><MapPin size={16} aria-hidden="true"/>
+     <strong>Deployment details</strong><span className="hr-card__assignment-hint">{deployments.length} assignment{deployments.length===1?'':'s'}</span>
+    </div>
     {deployments.length===0?<p className="hr-card__assignment-empty">No verified deployment is configured.</p>:
      <div className="hr-card__assignment-list">
       {deployments.map((dep,index)=><div key={dep.nodeId+dep.positionCode+index} className="hr-card__assignment-item">
@@ -78,7 +78,7 @@ export default function HrProfileOverview({
        <span><b>Effective</b> {dep.startDate||'Not recorded'}{dep.endDate?' – '+dep.endDate:' · Current'}</span>
       </div>)}
      </div>}
-   </details>
+   </section>
    <div className="hr-card__manager" aria-label="Direct manager">
     <span className="hr-card__manager-icon"><UserRoundCheck size={18} aria-hidden="true"/></span>
     <div className="hr-card__manager-info">

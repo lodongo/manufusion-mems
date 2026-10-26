@@ -58,3 +58,19 @@ test('Education cards link submitted supporting files to persisted qualification
  assert.doesNotMatch(edu,/setDocumentType\('degree_certificate'\)/);
  assert.match(edu,/await loadEvidence/);
 });
+
+test('deployment information is permanently displayed without a collapsible details control',()=>{
+ const profile=src('src/org/HrProfileOverview.tsx');
+ assert.match(profile,/<section className="hr-card__assignment" aria-label="Deployment details">/);
+ assert.doesNotMatch(profile,/<details className="hr-card__assignment">/);
+ assert.doesNotMatch(profile,/<summary className="hr-card__assignment-summary">/);
+});
+test('education category follows MEMS select-and-confirm template and upload uses a visible native file input',()=>{
+ const edu=src('src/org/HrEducationRecords.tsx');
+ const css=src('src/org/hrEducation.css');
+ assert.match(edu,/<SelectField id="hr-edu-document-category" label="Document category"/);
+ assert.match(edu,/<input id="hr-edu-document-file" className="hr-edu__native-file" type="file"/);
+ assert.doesNotMatch(edu,/<select value=\{documentType\}/);
+ assert.doesNotMatch(edu,/<label className="hr-edu__file-picker"/);
+ assert.match(css,/\.hr-edu__native-file::file-selector-button/);
+});
