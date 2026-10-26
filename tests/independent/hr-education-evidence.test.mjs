@@ -44,7 +44,8 @@ test('Education cards link submitted supporting files to persisted qualification
  const edu=src('src/org/HrEducationRecords.tsx');
  assert.match(edu,/educationId:stored\.id/);
  assert.match(edu,/readEvidenceFile/);
- assert.match(edu,/degree_certificate/);
- assert.match(edu,/transcript/);
+ const categories=src('src/org/HrEvidenceRecords.tsx');
+ assert.match(categories,/degree_certificate/);
+ assert.match(categories,/transcript/);
  assert.match(edu,/await loadEvidence/);
 });
