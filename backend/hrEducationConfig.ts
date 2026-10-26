@@ -72,6 +72,40 @@ export async function legalEntityForEmployee(org:string,employee:Record<string,u
  // Conflicting primary deployments require correction before education access.
  return found.size===1?[...found.values()][0]:null;
 }
+/** Company-level roles sit above legal entities and cannot be forced into a fictional
+ * legal entity solely to record personal qualifications. Do not permit ordinary
+ * unassigned/site users or conflicting cross-entity deployments through this path. */
+export async function corporateEducationEligible(org:string,employee:Record<string,unknown>):Promise<boolean>{
+ const all=await entityNodes(org);
+ const nodes=new Map(all.map(d=>[d.id,d.data]));
+ const assignments=Array.isArray(employee.assignments)
+  ?employee.assignments.filter(isObj).filter(a=>str(a.type)==='primary'): [];
+ if(!assignments.length)return false;
+ return assignments.every(assignment=>{
+  let id=str(assignment.nodeId);
+  const seen=new Set<string>();
+  let corporate=false;
+  while(id&&!seen.has(id)){
+   seen.add(id);
+   const node=nodes.get(id);
+   if(!node||str(node.status)==='inactive')return false;
+   const level=str(node.level);
+   if(level==='legal_entity'||level==='site'||level==='department'||level==='cost_center'||level==='work_center')return false;
+   if(level==='group'||level==='root')corporate=true;
+   id=str(node.parentId);
+  }
+  return corporate;
+ });
+}
+/** Select a single governed education catalogue. The corporate fallback never
+ * adopts any legal entity's restricted catalogue. */
+export async function educationScopeForEmployee(org:string,employee:Record<string,unknown>,allowAdminSelf=false){
+ const entity=await legalEntityForEmployee(org,employee);
+ if(entity)return {entity,scope:'legal_entity' as const};
+ if(await corporateEducationEligible(org,employee)||allowAdminSelf&&(!Array.isArray(employee.assignments)||!employee.assignments.length))
+  return {entity:{id:'__corporate__',name:'Corporate / Group Office'},scope:'corporate' as const};
+ return {entity:null,scope:'unassigned' as const};
+}
 export function resolveEducationConfig(data?:Record<string,unknown>):EducationConfig{
  const d=data||{};
  const levels=Array.isArray(d.levels)?d.levels.filter(isObj).map((level,i)=>({
@@ -93,12 +127,12 @@ export async function getEducationConfig(org:string,entity:string):Promise<Educa
  const doc=await getDoc(configPath(org,entity));
  return resolveEducationConfig(doc?.data);
 }
-export async function checkEducationEntry(org:string,uid:string,entry:Record<string,unknown>){
+export async function checkEducationEntry(org:string,uid:string,entry:Record<string,unknown>,allowAdminSelf=false){
  const employee=await getDoc('users/'+uid);
  if(!employee||str(employee.data.orgId)!==org)throw new HttpError(404,'Employee unavailable.');
- const entity=await legalEntityForEmployee(org,employee.data);
- if(!entity)throw new HttpError(409,'An active, unambiguous primary legal-entity assignment is required for education.');
- const config=await getEducationConfig(org,entity.id);
+ const selection=await educationScopeForEmployee(org,employee.data,allowAdminSelf);
+ if(!selection.entity)throw new HttpError(409,'Assign the employee to one active legal entity or a corporate Group Office unit before saving education.');
+ const config=await getEducationConfig(org,selection.entity.id);
  const level=clean(entry.levelCode,64),qual=clean(entry.qualificationCode,64);
  const gradeSystem=clean(entry.gradingSystemCode,64),grade=clean(entry.gradeCode,64);
  if(!config.levels.some(x=>x.enabled&&x.code===level))
@@ -166,8 +200,8 @@ export const hrEducationConfigRoutes={
   if(!employee||str(employee.data.orgId)!==ctx.orgId)throw new HttpError(404,'Employee unavailable.');
   if(uid!==ctx.uid&&ctx.role!=='org_super_admin')
    throw new HttpError(403,'Education options are restricted to the employee and authorized Super Administrator.');
-  const entity=await legalEntityForEmployee(ctx.orgId,employee.data);
-  return {entity,config:entity?await getEducationConfig(ctx.orgId,entity.id):null};
+  const selection=await educationScopeForEmployee(ctx.orgId,employee.data,ctx.role==='org_super_admin'&&uid===ctx.uid);
+  return {...selection,config:selection.entity?await getEducationConfig(ctx.orgId,selection.entity.id):null};
  })],
  'POST /api/org/hr/education/admin':[orgRoute('org.hr.education.admin','ADM.settings',async ctx=>{
   if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'ADM.settings'))
