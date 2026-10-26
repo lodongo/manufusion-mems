@@ -84,8 +84,8 @@ export default function HrRoleExplorer({roles}:{roles:HrRoleCardData[]}){
   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
    <SummaryTile label="Registered roles" value={roles.length}/>
    <SummaryTile label="Mapped employees" value={staffingVisible?roles.reduce((n,r)=>n+(r.staffing?.mappedEmployees||0),0):'Restricted'}/>
-   <SummaryTile label="Approved positions" value={staffingVisible?roles.some(r=>r.staffing?.approved!==null):false?roles.reduce((n,r)=>n+(r.staffing?.approved||0),0):'Not configured':'Restricted'}/>
-   <SummaryTile label="Open vacancies" value={staffingVisible?roles.some(r=>r.staffing?.vacant!==null):false?roles.reduce((n,r)=>n+(r.staffing?.vacant||0),0):'Not configured':'Restricted'}/>
+   <SummaryTile label="Approved positions" value={!staffingVisible?'Restricted':roles.some(r=>typeof r.staffing?.approved==='number')?roles.reduce((n,r)=>n+(r.staffing?.approved||0),0):'Not configured'}/>
+   <SummaryTile label="Open vacancies" value={!staffingVisible?'Restricted':roles.some(r=>typeof r.staffing?.vacant==='number')?roles.reduce((n,r)=>n+(r.staffing?.vacant||0),0):'Not configured'}/>
   </div>
   <div className="relative">
    <Search className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-muted" aria-hidden="true"/>
