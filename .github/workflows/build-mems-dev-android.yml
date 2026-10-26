@@ -20,10 +20,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Configure Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Install Android API 35
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Use Android SDK on GitHub runner
+        shell: bash
+        run: |
+          echo "SDK: ${ANDROID_HOME:-not set}"
+          command -v sdkmanager
+          sdkmanager --version
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Configure Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
