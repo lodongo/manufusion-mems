@@ -1,0 +1,64 @@
+/* Corporate education card - fixed high-contrast tokens, unaffected by MEMS tenant aliasing. */
+.hr-edu{color-scheme:light;color:#17283c;display:grid;gap:11px;min-width:0}
+.hr-edu__head{display:flex;align-items:center;gap:10px;min-width:0;border-radius:18px;padding:13px;background:linear-gradient(115deg,#fdf0f3 0%,#eef4ff 100%);border:1px solid #e8dce8}
+.hr-edu__head-icon{display:flex;align-items:center;justify-content:center;flex:0 0 43px;height:43px;border-radius:13px;background:#fff;color:#c21840;box-shadow:0 1px 7px #823a481a}
+.hr-edu__heading{flex:1;min-width:0}
+.hr-edu__eyebrow{font-size:10px!important;font-weight:800;color:#b6254c!important;letter-spacing:.065em;text-transform:uppercase;margin:0}
+.hr-edu__heading h2{font-size:16px!important;line-height:1.28;font-weight:800;color:#253248!important;margin:2px 0!important}
+.hr-edu__subheading{font-size:10px!important;line-height:1.35;color:#54617a!important;margin:0}
+.hr-edu__add{flex-shrink:0;display:inline-flex;align-items:center;gap:5px;min-height:41px;border-radius:12px;padding:8px 12px;background:#bd1b40!important;color:#fff!important;font-size:12px;font-weight:750}
+.hr-edu__add:disabled{background:#d7d9df!important;color:#636b79!important;cursor:not-allowed}
+.hr-edu__scope{display:flex;align-items:center;gap:6px;padding:0 3px;min-width:0;font-size:11px;color:#536177}
+.hr-edu__scope>svg{flex:none;color:#3b69a3}
+.hr-edu__scope>span:first-of-type{min-width:0;flex:1;overflow-wrap:anywhere}
+.hr-edu__scope strong{color:#23334a}
+.hr-edu__count{flex:none;font-size:10px;padding:5px 8px;border-radius:99px;background:#edf3fd;color:#355d89;font-weight:800}
+.hr-edu__empty{border:1px dashed #e5cbd3;border-radius:18px;background:#fff;display:grid;justify-items:center;text-align:center;gap:7px;padding:22px 18px;color:#566279;font-size:12px;line-height:1.5}
+.hr-edu__empty-icon{display:flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#fff1f4;color:#bd1b40}
+.hr-edu__empty h3{font-size:15px;font-weight:800;color:#263449}
+.hr-edu__empty p{max-width:330px;font-size:12px;color:#617089;line-height:1.5}
+.hr-edu__empty-action{display:inline-flex;align-items:center;gap:6px;min-height:38px;margin-top:5px;padding:8px 14px;border-radius:10px;background:#bd1b40!important;color:#fff!important;font-size:12px;font-weight:750}
+.hr-edu__unavailable{display:flex;align-items:flex-start;gap:9px;background:#fffbeb;border:1px solid #e7d7a1;border-radius:12px;padding:12px;color:#825819;font-size:12px}
+.hr-edu__unavailable svg{flex:none}
+.hr-edu__unavailable strong{font-size:12px;color:#7c5017}
+.hr-edu__unavailable p{margin-top:3px;line-height:1.45;color:#825819}
+.hr-edu__records{display:grid;gap:9px;min-width:0}
+.hr-edu__record{display:flex;align-items:flex-start;gap:9px;min-width:0;padding:12px;border:1px solid #dce4f0;border-radius:15px;background:#fff;box-shadow:0 2px 8px rgba(29,45,68,.055)}
+.hr-edu__record--highest{border-color:#e8c4cc;background:linear-gradient(110deg,#fff4f6,#fff)}
+.hr-edu__record-icon{display:flex;align-items:center;justify-content:center;flex:0 0 34px;height:34px;border-radius:10px;background:#eaf1fe;color:#356bad}
+.hr-edu__record--highest .hr-edu__record-icon{background:#fce3e8;color:#b91c42}
+.hr-edu__record-main{flex:1;min-width:0}
+.hr-edu__record-badges{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-bottom:3px}
+.hr-edu__highest,.hr-edu__level{display:inline-block;padding:2px 6px;border-radius:6px;font-size:9px;font-weight:750;line-height:1.5}
+.hr-edu__highest{background:#fde6e9;color:#ac1640}
+.hr-edu__level{background:#e8f0fc;color:#2c5d9b}
+.hr-edu__record h3{font-size:13px;font-weight:800;line-height:1.35;color:#1e293b;overflow-wrap:anywhere}
+.hr-edu__institution{font-size:11px;color:#475569;margin-top:4px;overflow-wrap:anywhere}
+.hr-edu__metadata{font-size:10px;color:#68758b;margin-top:3px;overflow-wrap:anywhere}
+.hr-edu__actions{display:flex;flex-shrink:0;align-items:center;gap:3px}
+.hr-edu__icon-btn{display:flex;align-items:center;justify-content:center;width:35px;height:35px;border-radius:10px;border:1px solid #d8e0eb;background:#fff!important;color:#365b86!important}
+.hr-edu__icon-btn--delete{color:#b72a4c!important;border-color:#f0d8df}
+.hr-edu__editor{border:1px solid #e6ccd5;border-radius:17px;padding:13px;background:#fff;box-shadow:0 4px 15px #5420330d;display:grid;gap:12px}
+.hr-edu__editor-head{display:flex;justify-content:space-between;align-items:center;gap:9px}
+.hr-edu__editor-head h3{font-size:15px;font-weight:800;color:#273349}
+.hr-edu__form{display:grid;gap:11px;min-width:0}
+.hr-edu__field{display:grid;gap:5px;min-width:0;font-size:12px;font-weight:700;color:#3c4a60}
+.hr-edu__field--full{grid-column:1/-1}
+.hr-edu__field em{color:#b72a4c;font-style:normal}
+.hr-edu__field input{width:100%;min-width:0;height:43px;border:1px solid #d4dce8;border-radius:10px;background:#fff!important;color:#17283c!important;padding:9px 11px;font-size:13px}
+.hr-edu__field input::placeholder{color:#8b97a8}
+.hr-edu__field select{background:#fff!important;color:#17283c!important}
+.hr-edu__rank-info{grid-column:1/-1;color:#64748b;font-size:10px}
+.hr-edu__editor-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.hr-edu__cancel,.hr-edu__save{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:41px;padding:8px 12px;border-radius:10px;font-size:12px;font-weight:800}
+.hr-edu__cancel{border:1px solid #d7e0ea;background:#fff!important;color:#334155!important}
+.hr-edu__save{background:#bb1c40!important;color:#fff!important}
+.hr-edu__save:disabled{opacity:.45;cursor:not-allowed}
+.hr-edu__error,.hr-edu__notice{border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5}
+.hr-edu__error{background:#fff0f2;color:#b91c40;border:1px solid #f6d4dc}
+.hr-edu__notice{display:flex;align-items:center;gap:7px;background:#edf9f1;color:#176c38}
+.hr-edu__privacy{display:flex;align-items:flex-start;gap:7px;padding:10px 4px;border-top:1px solid #e5e7eb;color:#637084;font-size:10px;line-height:1.5}
+.hr-edu__privacy svg{flex:none}
+.hr-edu button:focus-visible,.hr-edu input:focus-visible{outline:2px solid #b91c40;outline-offset:2px}
+@media(min-width:640px){.hr-edu__head{padding:17px}.hr-edu__heading h2{font-size:18px!important}.hr-edu__form{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:390px){.hr-edu__head{gap:7px;padding:10px}.hr-edu__head-icon{width:35px;height:35px;flex-basis:35px}.hr-edu__heading h2{font-size:14px!important}.hr-edu__add{padding:7px 9px}.hr-edu__record{padding:9px;gap:7px}.hr-edu__record-icon{width:28px;height:28px;flex-basis:28px}}
