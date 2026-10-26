@@ -15,8 +15,7 @@ export default function HrSelfRecords(props:{kind:Kind;employeeUid:string;readOn
   ?<HrEducationRecords employeeUid={props.employeeUid} readOnly={props.readOnly}/>
   :<HrFamilyRecords employeeUid={props.employeeUid} readOnly={props.readOnly}/>;
 }
-function HrFamilyRecords({employeeUid,readOnly=false}:{employeeUid:string;readOnly?:boolean}){
- const kind:Kind='family';
+function HrFamilyRecords({employeeUid,readOnly=false,kind='family'}:{employeeUid:string;readOnly?:boolean;kind?:Kind}){
  const [items,setItems]=useState<Array<Education|Family>>([]);
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
