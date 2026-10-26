@@ -30,14 +30,19 @@ export const hrReadRoutes = {
       const nodeMap=new Map(docs.map(d=>[d.id,d.data]));
       const permittedSites=new Set(assignedNodeIds(ctx).map(id=>hrSiteOf(id,nodeMap)).filter(Boolean));
       if(!permittedSites.size && ctx.role!=='org_super_admin') return {nodes:[],readOnly:true};
-      const nodes=docs.filter(d=>str(d.data.status)!=='inactive' && (ctx.role==='org_super_admin'||permittedSites.has(hrSiteOf(d.id,nodeMap)))).map(d=>({
+      const nodes=docs.filter(d=>str(d.data.status)!=='inactive' &&
+        (ctx.role==='org_super_admin'||permittedSites.has(hrSiteOf(d.id,nodeMap)))).map(d=>({
         id:d.id,name:str(d.data.name),code:str(d.data.code),level:str(d.data.level),
         parentId:str(d.data.parentId),status:str(d.data.status)||'active'
+      }));
+      return { nodes, readOnly:true };
+    }),
+  ],
   'POST /api/org/hr/roles': [
     orgRoute('org.hr.roles', 'HRM.shell.view', async ctx => {
       const docs=await listDocs(`organizations/${ctx.orgId}/positions`);
       // HRM.shell.view alone grants the role catalogue, not staffing analytics.
-      // Numbers are only computed for users authorized to administer establishment.
+      // Aggregate counts are available only with establishment administration rights.
       const staffingAllowed=ctx.role==='org_super_admin'||hasPerm(ctx.directPermissions,'ADM.structure');
       let people:Awaited<ReturnType<typeof runQuery>>=[];
       let names=new Map<string,string>();
@@ -61,10 +66,6 @@ export const hrReadRoutes = {
         staffing:staffingAllowed?
           computeRoleStaffing(d.id,d.data.staffingPlan,people,names,asOf):null,
       })),readOnly:true,staffingAllowed };
-    }),
-  ],
-d.data.operatingLevel)
-      })),readOnly:true };
     }),
   ],
   'POST /api/org/hr/employee/portal': [
