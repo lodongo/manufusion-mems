@@ -9,7 +9,7 @@ export type HrDeployment={nodeId:string;location:string;level:string;positionCod
 export type HrOverviewProfile={
  uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;
  department:string;site:string;operatingScope?:OperatingUnit;photoUrl?:string;
- directManager?:{name:string;role:string;status:'resolved'|'unassigned'|'ambiguous'};
+ directManager?:{name:string;role:string;status:'resolved'|'role_only'|'unconfigured'|'vacant'|'ambiguous'|'unassigned'};
 };
 type Tone='rose'|'blue'|'violet'|'amber'|'teal'|'green';
 function Detail({label,value,subtitle,Icon,tone}:{label:string;value?:string;subtitle?:string;Icon:LucideIcon;tone:Tone}){
@@ -84,10 +84,13 @@ export default function HrProfileOverview({
     <div className="hr-card__manager-info">
      <span className="hr-card__manager-label">Direct manager</span>
      <strong className="hr-card__manager-name">{profile.directManager?.status==='resolved'?
-       (profile.directManager.name||'Not recorded'):
-       profile.directManager?.status==='ambiguous'?'Needs manager review':'Not assigned'}</strong>
-     {profile.directManager?.status==='resolved'&&profile.directManager.role&&
-      <span className="hr-card__manager-role">{profile.directManager.role}</span>}
+       profile.directManager.name:
+       profile.directManager?.status==='role_only'?'Employee identity not recorded':
+       profile.directManager?.status==='vacant'?'No assigned reporting manager':
+       profile.directManager?.status==='ambiguous'?'Reporting assignment needs review':
+       'Reporting role not configured'}</strong>
+     {profile.directManager?.role&&<span className="hr-card__manager-role">Reports to role: {profile.directManager.role}</span>}
+     {profile.directManager?.status==='unconfigured'&&<span className="hr-card__manager-role">Configure the reporting role in HR05</span>}
     </div>
    </div>
    {canSeeSkills&&<div className="hr-card__skills hr-card__skills--compact">

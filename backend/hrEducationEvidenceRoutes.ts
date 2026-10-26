@@ -12,7 +12,7 @@ import {hrMayAccess,hrRules} from './hrPrivacyRules';
 const UID=/^[A-Za-z0-9_-]{1,128}$/;
 const ID=/^[a-f0-9]{24}$/;
 const QUAL_ID=/^[A-Za-z0-9_-]{1,80}$/;
-const TYPES=['degree_certificate','transcript','professional_certificate','diploma_certificate','other'];
+const TYPES=['certificate','transcript','testimonial','thesis','recommendation','other','degree_certificate','professional_certificate','diploma_certificate'];
 const FORMATS:Record<string,{ext:string;max:number}>={
  'application/pdf':{ext:'pdf',max:8_000_000},
  'image/png':{ext:'png',max:5_000_000},

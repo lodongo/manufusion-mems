@@ -53,3 +53,61 @@ export async function resolveHrManagerFor(ctx:OrgContext,employee:Record<string,
  const members=users||await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
  return resolveHrManager(str(employee.uid),employee,nodes,members);
 }
+
+/** Employee-profile reporting is defined by the job role's parentCode in HR05.
+ * Do not use the hierarchy managerRoleCode as a proxy for a line manager: that
+ * role may be responsible for approving an entire site but not for the employee.
+ * This resolver does not alter the separate workflow-approval manager resolver.
+ */
+export type ReportingResolution={
+ uid:string;
+ reason:'resolved'|'unconfigured'|'vacant'|'ambiguous';
+ roleCode:string;
+ nodeId:string;
+};
+export function resolveRoleReportingManager(
+ employeeUid:string,employee:Record<string,unknown>,
+ nodes:Map<string,Node>,positions:Map<string,Node>,users:readonly Rec[],
+):ReportingResolution{
+ const assignments=primary(employee);
+ const people=users.filter(u=>u.id!==employeeUid&&active(u.data));
+ const solutions:Array<{uid:string;roleCode:string;nodeId:string;distance:number}>=[];
+ const declared=new Set<string>();
+ let missing:{roleCode:string;nodeId:string}|null=null;
+ for(const assignment of assignments){
+  const code=str(assignment.positionCode);
+  const parentCode=str(positions.get(code)?.parentCode);
+  if(!parentCode)continue;
+  declared.add(parentCode);
+  const ancestors=new Map<string,number>();
+  const visited=new Set<string>();
+  let nodeId=str(assignment.nodeId),depth=0;
+  while(nodeId&&!visited.has(nodeId)){
+   visited.add(nodeId);
+   const node=nodes.get(nodeId);
+   if(node&&str(node.status)==='inactive')break;
+   ancestors.set(nodeId,depth++);
+   if(!node)break;
+   nodeId=str(node.parentId);
+  }
+  let matched=false;
+  for(const person of people){
+   for(const candidate of primary(person.data)){
+    if(str(candidate.positionCode)!==parentCode)continue;
+    const assignedNode=str(candidate.nodeId),distance=ancestors.get(assignedNode);
+    if(distance===undefined)continue;
+    matched=true;
+    solutions.push({uid:person.id,roleCode:parentCode,nodeId:assignedNode,distance});
+   }
+  }
+  if(!matched)missing={roleCode:parentCode,nodeId:str(assignment.nodeId)};
+ }
+ if(!declared.size)return {uid:'',reason:'unconfigured',roleCode:'',nodeId:''};
+ if(declared.size>1)return {uid:'',reason:'ambiguous',roleCode:'',nodeId:''};
+ if(!solutions.length)return {uid:'',reason:'vacant',roleCode:[...declared][0],nodeId:missing?.nodeId||''};
+ const closest=Math.min(...solutions.map(c=>c.distance));
+ const nearest=[...new Map(solutions.filter(c=>c.distance===closest).map(c=>[c.uid,c])).values()];
+ if(nearest.length!==1)return {uid:'',reason:'ambiguous',roleCode:[...declared][0],nodeId:''};
+ const holder=nearest[0];
+ return {uid:holder.uid,reason:'resolved',roleCode:holder.roleCode,nodeId:holder.nodeId};
+}

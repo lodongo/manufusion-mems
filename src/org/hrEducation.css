@@ -75,3 +75,12 @@
 .hr-edu__pending{background:#fff1d7;color:#795615;border-radius:6px;padding:3px 6px;font-weight:700}
 .hr-edu__verified{background:#e4f9ec;color:#11683b;border-radius:6px;padding:3px 6px;font-weight:700}
 .hr-edu__attach-link{color:#255e9b!important;text-decoration:underline;font-size:10px}
+
+/* Real native input occupies the tap target so Android receives a trusted
+   user-initiated file-selection event rather than a scripted .click(). */
+.hr-edu__file-picker{position:relative;display:flex;align-items:center;gap:9px;min-height:55px;min-width:0;border:1px solid #cad8e7;border-radius:11px;background:#fff;cursor:pointer;padding:9px;overflow:hidden}
+.hr-edu__file-picker-button{flex:none;display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:6px 10px;border-radius:8px;background:#b91c40;color:#fff;font-size:12px;font-weight:750}
+.hr-edu__file-picker-caption{flex:1;min-width:0;color:#54657b;font-size:11px;overflow-wrap:anywhere}
+.hr-edu__file-picker input[type=file]{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;min-height:0!important;margin:0!important;padding:0!important;border:0!important;opacity:0!important;cursor:pointer!important;z-index:2}
+.hr-edu__file-picker:focus-within{outline:2px solid #b91c40;outline-offset:2px}
+.hr-edu__file-picker:has(input:disabled){opacity:.5;cursor:not-allowed}

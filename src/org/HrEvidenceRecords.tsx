@@ -8,15 +8,25 @@ export type HrEvidenceFile={
  mime:string;size:number;sha256:string;status:string;uploadedAt:string;uploadedBy:string;
  reviewedAt:string;reviewedBy:string;reviewNote:string;employeeName?:string;
 };
-export type EvidenceCategory='degree_certificate'|'transcript'|'professional_certificate'|'diploma_certificate'|'other';
+export type EvidenceCategory=
+ 'certificate'|'transcript'|'testimonial'|'thesis'|'recommendation'|'other'|
+ 'degree_certificate'|'professional_certificate'|'diploma_certificate';
+/** Education evidence is classified by document type, not award level.
+ * Legacy codes remain readable and uploadable for previously saved records. */
 export const CATEGORIES:{value:EvidenceCategory;label:string}[]=[
- {value:'degree_certificate',label:'Degree certificate'},
- {value:'transcript',label:'Academic transcript'},
- {value:'professional_certificate',label:'Professional certificate'},
- {value:'diploma_certificate',label:'Diploma certificate'},
+ {value:'certificate',label:'Certificate'},
+ {value:'transcript',label:'Transcript'},
+ {value:'testimonial',label:'Testimonial'},
+ {value:'thesis',label:'Thesis / dissertation'},
+ {value:'recommendation',label:'Recommendation / reference letter'},
  {value:'other',label:'Other supporting document'}
 ];
-export const categoryLabel=(key:string)=>CATEGORIES.find(c=>c.value===key)?.label||'Supporting document';
+const LEGACY_CATEGORY_LABELS:Record<string,string>={
+ degree_certificate:'Certificate',
+ diploma_certificate:'Certificate',
+ professional_certificate:'Certificate',
+};
+export const categoryLabel=(key:string)=>CATEGORIES.find(c=>c.value===key)?.label||LEGACY_CATEGORY_LABELS[key]||'Supporting document';
 export const evidenceStatus=(status:string)=>{
  if(status==='verified')return {label:'HR verified',className:'hr-evidence__status--verified'};
  if(status==='rejected')return {label:'Rejected',className:'hr-evidence__status--rejected'};

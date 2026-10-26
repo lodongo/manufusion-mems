@@ -23,7 +23,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
  const [notice,setNotice]=useState('');
  const [evidence,setEvidence]=useState<HrEvidenceFile[]>([]);
  const [pendingFiles,setPendingFiles]=useState<Array<{file:File;type:EvidenceCategory;mime:string}>>([]);
- const [documentType,setDocumentType]=useState<EvidenceCategory>('degree_certificate');
+ const [documentType,setDocumentType]=useState<EvidenceCategory>('certificate');
  const [evidenceError,setEvidenceError]=useState('');
  const loadEvidence=async()=>{
   const data=await callBackend<{files:HrEvidenceFile[]}>('/api/org/hr/evidence/list',{uid:employeeUid});
@@ -50,7 +50,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
  const ordered=useMemo(()=>rankEducation(records,selection?.config?.levels||[]),[records,selection]);
  const canAdd=!readOnly&&Boolean(selection?.config)&&!busy;
  const start=(index:number)=>{
-  setEditing(index);setDraft(index===-1?{...empty}:{...records[index]});setPendingFiles([]);setDocumentType('degree_certificate');
+  setEditing(index);setDraft(index===-1?{...empty}:{...records[index]});setPendingFiles([]);setDocumentType('certificate');
   setError('');setNotice('');
  };
  const save=async(next:Education[])=>{
@@ -219,16 +219,23 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
     {chosenLevel&&<p className="hr-edu__rank-info">Education ranking: {chosenLevel.name} · rank {chosenLevel.rank}. Higher ranks are listed first.</p>}
     <div className="hr-edu__attachments">
      <p className="hr-edu__attachments-title">Supporting documents</p>
-     <p className="hr-edu__attachments-help">Attach your degree or diploma certificate, academic transcripts, professional certificates or other evidence. Documents remain pending until HR verifies them.</p>
+     <p className="hr-edu__attachments-help">Attach certificates, transcripts, testimonials, theses or other academic evidence. Every upload remains pending until independent HR verification.</p>
      <label className="hr-edu__field"><span>Document category</span>
       <select value={documentType} onChange={e=>setDocumentType(e.target.value as EvidenceCategory)}>
        {CATEGORIES.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}
       </select>
      </label>
-     <label className="hr-edu__field"><span>Choose document(s) · PDF / JPG / PNG</span>
-      <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-       onChange={e=>{stageFiles(e.target.files);e.target.value='';}}/>
-     </label>
+     <div className="hr-edu__field">
+      <span>Choose document(s) · PDF / JPG / PNG</span>
+      <label className="hr-edu__file-picker" htmlFor="hr-edu-document-file">
+       <span className="hr-edu__file-picker-button">Choose files</span>
+       <span className="hr-edu__file-picker-caption">{pendingFiles.length?pendingFiles.length+' selected':'Tap to select documents from your device'}</span>
+       <input id="hr-edu-document-file" type="file" multiple accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
+        aria-label="Choose education supporting documents" disabled={busy}
+        onChange={e=>{stageFiles(e.currentTarget.files);e.currentTarget.value='';}}/>
+      </label>
+      <span className="hr-edu__attachments-help">If your installed Android app does not open the file browser, open MEMS in Chrome. Embedded WebViews must support Android file chooser requests.</span>
+     </div>
      {pendingFiles.map((attachment,index)=><div key={index} className="hr-edu__queued-file">
       <span className="min-w-0 flex-1 break-words">{categoryLabel(attachment.type)} · {attachment.file.name}</span>
       <button type="button" onClick={()=>setPendingFiles(files=>files.filter((_,i)=>i!==index))} aria-label={'Remove '+attachment.file.name}>Remove</button>

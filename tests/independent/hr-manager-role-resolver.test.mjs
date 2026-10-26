@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {resolveHrManager} from '../../backend/hrManagerResolver.ts';
+import {resolveHrManager,resolveRoleReportingManager} from '../../backend/hrManagerResolver.ts';
 
 const nodes=new Map([
  ['LE',{level:'legal_entity',parentId:'root',status:'active',managerRoleCode:'ROL_001'}],
@@ -47,4 +47,39 @@ test('legacy managerUid remains supported for older tenant structures',()=>{
  old.set('CC',{...old.get('CC'),managerRoleCode:'',managerUid:'line-manager'});
  const r=resolveHrManager('employee',employee.data,old,[employee,planner,siteManager]);
  assert.equal(r.uid,'line-manager');
+});
+
+test('profile reporting follows HR05 parentCode, not the unrelated site approver role',()=>{
+ const positions=new Map([
+  ['ROL_100',{title:'Maintenance Clerk',parentCode:'ROL_030'}],
+  ['ROL_030',{title:'Maintenance Lead',parentCode:'ROL_010'}],
+  ['ROL_010',{title:'Country Managing Director',parentCode:'ROL_001'}],
+ ]);
+ const result=resolveRoleReportingManager('employee',employee.data,nodes,positions,[employee,planner,siteManager,legalManager]);
+ assert.equal(result.uid,'line-manager');
+ assert.equal(result.roleCode,'ROL_030');
+});
+test('no direct role parent must not infer Country Manager from site hierarchy',()=>{
+ const positions=new Map([['ROL_100',{title:'Maintenance Clerk',parentCode:''}]]);
+ const result=resolveRoleReportingManager('employee',employee.data,nodes,positions,[employee,siteManager]);
+ assert.equal(result.reason,'unconfigured');
+ assert.equal(result.uid,'');
+});
+test('an unfilled explicitly configured reporting position stays unfilled instead of elevating to site manager',()=>{
+ const positions=new Map([['ROL_100',{parentCode:'ROL_030'}]]);
+ const result=resolveRoleReportingManager('employee',employee.data,nodes,positions,[employee,siteManager]);
+ assert.equal(result.reason,'vacant');
+ assert.equal(result.roleCode,'ROL_030');
+});
+test('reporting holder must operate at employee unit or ancestor; unrelated branch is rejected',()=>{
+ const positions=new Map([['ROL_100',{parentCode:'ROL_030'}]]);
+ const wrong=user('unrelated-manager','OTHER_SITE','ROL_030');
+ const result=resolveRoleReportingManager('employee',employee.data,nodes,positions,[employee,wrong]);
+ assert.equal(result.uid,'');
+ assert.equal(result.reason,'vacant');
+});
+test('two matching role holders at same scope require review, no arbitrary name',()=>{
+ const positions=new Map([['ROL_100',{parentCode:'ROL_030'}]]);
+ const result=resolveRoleReportingManager('employee',employee.data,nodes,positions,[employee,planner,user('second','SITE','ROL_030')]);
+ assert.equal(result.reason,'ambiguous');
 });

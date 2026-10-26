@@ -3,7 +3,7 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canReadHrBasicProfile } from './hrAccessPolicy';
 import { hrSiteOf, managedRoots, underManagedRoot } from './hrHierarchy';
 import { managerFor } from './hrEmployeeRoutes';
-import { resolveHrManager } from './hrManagerResolver';
+import { resolveRoleReportingManager } from './hrManagerResolver';
 import { currentHrRules } from './hrRulesRoutes';
 import { hrVisibleTabs } from './hrPrivacyRules';
 import { buildFitIndex, makeSkillFit } from './hrSkillFit';
@@ -144,18 +144,21 @@ export const hrReadRoutes = {
       // by HR approval workflows, not inferred from the job title or reporting label.
       // Resolve only after the employee's HR profile read authorization succeeded.
       const managerUsers=await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
-      const managerMatch=resolveHrManager(uid,{...employee.data,uid},nodes,managerUsers);
-      const managerRecord=managerMatch.reason==='resolved'
-        ?managerUsers.find(person=>person.id===managerMatch.uid):undefined;
-      const managerAssignments=Array.isArray(managerRecord?.data.assignments)
-        ?managerRecord.data.assignments.filter(isObj):[];
-      const managerPrimary=managerAssignments.find(a=>str(a.type)==='primary');
+      const reporting=resolveRoleReportingManager(uid,employee.data,nodes,positions,managerUsers);
+      const managerRecord=reporting.reason==='resolved'
+        ?managerUsers.find(person=>person.id===reporting.uid):undefined;
+      const reportingRole=str(positions.get(reporting.roleCode)?.title);
       const managerName=managerRecord
         ?[str(managerRecord.data.firstName),str(managerRecord.data.lastName)].filter(Boolean).join(' '):'';
+      // Placeholder accounts sometimes store a position title as the user's
+      // display name. Never claim that the position title identifies a person.
+      const placeholderName=!!reportingRole&&managerName.toLowerCase()===reportingRole.toLowerCase();
       const directManager={
-        name:managerName,
-        role:str(positions.get(str(managerPrimary?.positionCode))?.title),
-        status:managerRecord?'resolved':managerMatch.reason==='ambiguous'?'ambiguous':'unassigned',
+        name:placeholderName?'':managerName,
+        role:reportingRole,
+        status:reporting.reason==='resolved'?
+          (managerName&&!placeholderName?'resolved':'role_only'):
+          reporting.reason,
       };
       const departmentId=ancestors.find(id=>str(nodes.get(id)?.level)==='department');
       const siteId=ancestors.find(id=>str(nodes.get(id)?.level)==='site');

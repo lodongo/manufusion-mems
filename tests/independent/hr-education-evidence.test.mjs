@@ -46,7 +46,15 @@ test('Education cards link submitted supporting files to persisted qualification
  assert.match(edu,/educationId:stored\.id/);
  assert.match(edu,/readEvidenceFile/);
  const categories=src('src/org/HrEvidenceRecords.tsx');
- assert.match(categories,/degree_certificate/);
- assert.match(categories,/transcript/);
+ assert.match(categories,/degree_certificate/); // legacy reads remain compatible
+ for(const category of ['certificate','transcript','testimonial','thesis','recommendation']){
+  assert.match(categories,new RegExp("value:'"+category+"'"));
+ }
+ const server=src('backend/hrEducationEvidenceRoutes.ts');
+ for(const category of ['certificate','transcript','testimonial','thesis'])
+  assert.match(server,new RegExp("'"+category+"'"));
+ assert.match(edu,/hr-edu__file-picker/);
+ assert.match(edu,/type="file"/);
+ assert.doesNotMatch(edu,/setDocumentType\('degree_certificate'\)/);
  assert.match(edu,/await loadEvidence/);
 });
