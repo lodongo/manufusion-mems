@@ -88,7 +88,10 @@ export async function corporateEducationEligible(org:string,employee:Record<stri
   while(id&&!seen.has(id)){
    seen.add(id);
    const node=nodes.get(id);
-   if(!node||str(node.status)==='inactive')return false;
+   // Some tenants omit the implicit root document; a verified group node is
+   // sufficient, but inactive recorded ancestors still deny access.
+   if(!node)return corporate;
+   if(str(node.status)==='inactive')return false;
    const level=str(node.level);
    if(level==='legal_entity'||level==='site'||level==='department'||level==='cost_center'||level==='work_center')return false;
    if(level==='group'||level==='root')corporate=true;
@@ -131,7 +134,7 @@ export async function checkEducationEntry(org:string,uid:string,entry:Record<str
  const employee=await getDoc('users/'+uid);
  if(!employee||str(employee.data.orgId)!==org)throw new HttpError(404,'Employee unavailable.');
  const selection=await educationScopeForEmployee(org,employee.data,allowAdminSelf);
- if(!selection.entity)throw new HttpError(409,'Assign the employee to one active legal entity or a corporate Group Office unit before saving education.');
+ if(!selection.entity)throw new HttpError(409,'An active, unambiguous primary legal-entity assignment or verified corporate Group Office assignment is required for education.');
  const config=await getEducationConfig(org,selection.entity.id);
  const level=clean(entry.levelCode,64),qual=clean(entry.qualificationCode,64);
  const gradeSystem=clean(entry.gradingSystemCode,64),grade=clean(entry.gradeCode,64);
