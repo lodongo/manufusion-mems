@@ -62,7 +62,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
    setRecords(result.items);
    const top=rankEducation(result.items,selection?.config?.levels||[])[0]?.record;
    onEducationChange?.({qualification:top?.qualification||'',field:top?.field||''});
-   const recordIndex=editing===-1?result.items.length-1:editing;
+   const recordIndex=editing===null||editing===-1?result.items.length-1:editing;
    const stored=result.items[recordIndex];
    const failed:Array<{file:File;type:EvidenceCategory}>=[];
    if(pendingFiles.length){
