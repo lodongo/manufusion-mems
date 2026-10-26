@@ -62,3 +62,16 @@
 .hr-edu button:focus-visible,.hr-edu input:focus-visible{outline:2px solid #b91c40;outline-offset:2px}
 @media(min-width:640px){.hr-edu__head{padding:17px}.hr-edu__heading h2{font-size:18px!important}.hr-edu__form{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:390px){.hr-edu__head{gap:7px;padding:10px}.hr-edu__head-icon{width:35px;height:35px;flex-basis:35px}.hr-edu__heading h2{font-size:14px!important}.hr-edu__add{padding:7px 9px}.hr-edu__record{padding:9px;gap:7px}.hr-edu__record-icon{width:28px;height:28px;flex-basis:28px}}
+
+/* Qualification-linked evidence controls */
+.hr-edu__attachments{grid-column:1/-1;display:grid;gap:8px;margin-top:6px;padding:11px;border:1px solid #dce5f2;border-radius:12px;background:#f8fbff}
+.hr-edu__attachments-title{font-size:12px;font-weight:800;color:#283a58}
+.hr-edu__attachments-help{font-size:11px;line-height:1.5;color:#54657b}
+.hr-edu__attachments select{width:100%;min-height:40px;border:1px solid #d2ddeb;border-radius:9px;background:#fff!important;color:#273449!important;padding:7px 9px}
+.hr-edu__attachments input[type=file]{height:auto;min-height:45px;padding:8px;background:#fff!important;font-size:11px}
+.hr-edu__queued-file{display:flex;align-items:center;gap:7px;padding:8px;border-radius:8px;border:1px solid #d9e6f3;background:#fff;font-size:11px;color:#43566e}
+.hr-edu__queued-file button{flex:none;font-size:11px;color:#a51f44;text-decoration:underline}
+.hr-edu__evidence-status{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:7px;color:#58677d;font-size:10px}
+.hr-edu__pending{background:#fff1d7;color:#795615;border-radius:6px;padding:3px 6px;font-weight:700}
+.hr-edu__verified{background:#e4f9ec;color:#11683b;border-radius:6px;padding:3px 6px;font-weight:700}
+.hr-edu__attach-link{color:#255e9b!important;text-decoration:underline;font-size:10px}

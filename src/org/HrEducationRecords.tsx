@@ -4,6 +4,7 @@ import {callBackend} from '../lib/backend';
 import {SelectField} from '../components/ui';
 import {rankEducation} from './hrEducationSort';
 import type {EducationHeadline} from './hrProfileSummary';
+import {categoryLabel,CATEGORIES,readEvidenceFile,type EvidenceCategory,type HrEvidenceFile} from './HrEvidenceRecords';
 import './hrEducation.css';
 
 type Education={id:string;institution:string;qualification:string;field:string;completionYear:string;levelCode:string;qualificationCode:string;gradingSystemCode:string;gradeCode:string};
@@ -20,16 +21,27 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
  const [error,setError]=useState('');
  const [catalogueError,setCatalogueError]=useState(false);
  const [notice,setNotice]=useState('');
+ const [evidence,setEvidence]=useState<HrEvidenceFile[]>([]);
+ const [pendingFiles,setPendingFiles]=useState<Array<{file:File;type:EvidenceCategory}>>([]);
+ const [documentType,setDocumentType]=useState<EvidenceCategory>('degree_certificate');
+ const [evidenceError,setEvidenceError]=useState('');
+ const loadEvidence=async()=>{
+  const data=await callBackend<{files:HrEvidenceFile[]}>('/api/org/hr/evidence/list',{uid:employeeUid});
+  setEvidence(data.files);
+ };
  useEffect(()=>{
   let live=true;
-  setRecords([]);setSelection(null);setEditing(null);setError('');setCatalogueError(false);setNotice('');setLoading(true);
+  setRecords([]);setSelection(null);setEditing(null);setPendingFiles([]);setEvidence([]);setError('');setCatalogueError(false);setEvidenceError('');setNotice('');setLoading(true);
   Promise.allSettled([
    callBackend<{education:Education[]}>('/api/org/hr/private/get',{uid:employeeUid}),
    callBackend<Selection>('/api/org/hr/education/config',{uid:employeeUid}),
-  ]).then(([results,config])=>{
+   callBackend<{files:HrEvidenceFile[]}>('/api/org/hr/evidence/list',{uid:employeeUid}),
+  ]).then(([results,config,attachments])=>{
    if(!live)return;
    if(results.status==='fulfilled')setRecords(results.value.education||[]);
    else setError(results.reason instanceof Error?results.reason.message:'Education records could not be loaded.');
+   if(attachments.status==='fulfilled')setEvidence(attachments.value.files);
+   else setEvidenceError(attachments.reason instanceof Error?attachments.reason.message:'Supporting documents could not be loaded.');
    if(config.status==='fulfilled')setSelection(config.value);
    else {setCatalogueError(true);setError(config.reason instanceof Error?config.reason.message:'Education configuration is unavailable.');}
   }).finally(()=>{if(live)setLoading(false)});
@@ -38,7 +50,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
  const ordered=useMemo(()=>rankEducation(records,selection?.config?.levels||[]),[records,selection]);
  const canAdd=!readOnly&&Boolean(selection?.config)&&!busy;
  const start=(index:number)=>{
-  setEditing(index);setDraft(index===-1?{...empty}:{...records[index]});
+  setEditing(index);setDraft(index===-1?{...empty}:{...records[index]});setPendingFiles([]);setDocumentType('degree_certificate');
   setError('');setNotice('');
  };
  const save=async(next:Education[])=>{
@@ -47,10 +59,35 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
    const result=await callBackend<{items:Education[]}>('/api/org/hr/private/save',{
     uid:employeeUid,kind:'education',items:next,
    });
-   setRecords(result.items);setEditing(null);
+   setRecords(result.items);
    const top=rankEducation(result.items,selection?.config?.levels||[])[0]?.record;
    onEducationChange?.({qualification:top?.qualification||'',field:top?.field||''});
-   setNotice('Education record saved successfully.');
+   const recordIndex=editing===-1?result.items.length-1:editing;
+   const stored=result.items[recordIndex];
+   const failed:Array<{file:File;type:EvidenceCategory}>=[];
+   if(pendingFiles.length){
+    for(const attachment of pendingFiles){
+     try{
+      const data=await readEvidenceFile(attachment.file);
+      await callBackend('/api/org/hr/evidence/upload',{
+       uid:employeeUid,educationId:stored.id,documentType:attachment.type,
+       name:attachment.file.name,mime:attachment.file.type,data,
+      });
+     }catch(e){
+      failed.push(attachment);
+      setEvidenceError(e instanceof Error?e.message:'A document could not be uploaded.');
+     }
+    }
+    try{await loadEvidence();}catch{setEvidenceError('Refresh Records to load uploaded documents.');}
+   }
+   setPendingFiles(failed);
+   if(failed.length){
+    setDraft(stored);setEditing(recordIndex);
+    setError(failed.length+' document(s) were not uploaded. Your qualification is saved. Retry the attachments.');
+   }else{
+    setEditing(null);
+    setNotice(pendingFiles.length?'Qualification saved. All documents await independent HR verification.':'Education record saved successfully.');
+   }
   }catch(e){setError(e instanceof Error?e.message:'Could not save education records.')}
   finally{setBusy(false)}
  };
@@ -61,6 +98,19 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
  const remove=(index:number)=>{
   if(!window.confirm('Delete this education record?'))return;
   void save(records.filter((_,i)=>i!==index));
+ };
+ const stageFiles=(input:FileList|null)=>{
+  if(!input)return;
+  const next:Array<{file:File;type:EvidenceCategory}>=[];
+  for(const file of Array.from(input)){
+   const limit=file.type==='application/pdf'?8_000_000:5_000_000;
+   if(!['application/pdf','image/png','image/jpeg'].includes(file.type)||!file.size||file.size>limit){
+    setEvidenceError('Choose PDF, JPG or PNG documents (maximum 8 MB for PDF, 5 MB per image).');
+    continue;
+   }
+   next.push({file,type:documentType});
+  }
+  setPendingFiles(previous=>[...previous,...next].slice(0,20));
  };
  const chosenLevel=selection?.config?.levels.find(level=>level.code===draft.levelCode);
  const scope=catalogueError?'Unable to load catalogue':selection?.scope==='corporate'?'Corporate / Group Office':selection?.entity?.name||'Not assigned';
@@ -109,6 +159,14 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
       {(record.field||record.completionYear)&&<p className="hr-edu__metadata">
        {[record.field,record.completionYear].filter(Boolean).join(' · ')}
       </p>}
+      <div className="hr-edu__evidence-status">
+       <span>{evidence.filter(f=>f.educationId===record.id).length} supporting document(s)</span>
+       {evidence.filter(f=>f.educationId===record.id&&f.status==='pending').length>0&&<span className="hr-edu__pending">
+        {evidence.filter(f=>f.educationId===record.id&&f.status==='pending').length} awaiting HR
+       </span>}
+       {evidence.filter(f=>f.educationId===record.id&&f.status==='verified').length>0&&<span className="hr-edu__verified">HR verified evidence</span>}
+       {!readOnly&&<button type="button" onClick={()=>start(originalIndex)} className="hr-edu__attach-link">Add documents</button>}
+      </div>
      </div>
      {!readOnly&&<div className="hr-edu__actions">
       <button type="button" onClick={()=>start(originalIndex)} aria-label={'Edit '+record.qualification} className="hr-edu__icon-btn"><Pencil size={16} aria-hidden="true"/></button>
@@ -155,6 +213,24 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
       onChange={event=>setDraft(d=>({...d,completionYear:event.target.value}))}/>
     </label>
     {chosenLevel&&<p className="hr-edu__rank-info">Education ranking: {chosenLevel.name} · rank {chosenLevel.rank}. Higher ranks are listed first.</p>}
+    <div className="hr-edu__attachments">
+     <p className="hr-edu__attachments-title">Supporting documents</p>
+     <p className="hr-edu__attachments-help">Attach your degree or diploma certificate, academic transcripts, professional certificates or other evidence. Documents remain pending until HR verifies them.</p>
+     <label className="hr-edu__field"><span>Document category</span>
+      <select value={documentType} onChange={e=>setDocumentType(e.target.value as EvidenceCategory)}>
+       {CATEGORIES.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}
+      </select>
+     </label>
+     <label className="hr-edu__field"><span>Choose document(s) · PDF / JPG / PNG</span>
+      <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+       onChange={e=>{stageFiles(e.target.files);e.target.value='';}}/>
+     </label>
+     {pendingFiles.map((attachment,index)=><div key={index} className="hr-edu__queued-file">
+      <span className="min-w-0 flex-1 break-words">{categoryLabel(attachment.type)} · {attachment.file.name}</span>
+      <button type="button" onClick={()=>setPendingFiles(files=>files.filter((_,i)=>i!==index))} aria-label={'Remove '+attachment.file.name}>Remove</button>
+     </div>)}
+     {editing===-1&&<p className="hr-edu__attachments-help">The qualification is saved first and the selected documents upload immediately afterward.</p>}
+    </div>
    </div>
    <div className="hr-edu__editor-actions">
     <button type="button" onClick={()=>setEditing(null)} className="hr-edu__cancel">Cancel</button>
@@ -163,6 +239,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
    </div>
   </div>}
   {error&&<div role="alert" className="hr-edu__error">{error}</div>}
+  {evidenceError&&<div role="alert" className="hr-edu__error">{evidenceError}</div>}
   {notice&&<div role="status" className="hr-edu__notice"><CheckCircle2 size={17} aria-hidden="true"/>{notice}</div>}
   <footer className="hr-edu__privacy"><LockKeyhole size={15} aria-hidden="true"/><span>Private employee education records. Visible to the employee and authorized HR super administrator.</span></footer>
  </section>;
