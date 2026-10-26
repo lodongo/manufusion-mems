@@ -14,21 +14,21 @@ import HrLeavePanel from './HrLeavePanel';
 import HrRoleSkillFit, {type SkillFit} from './HrRoleSkillFit';
 import HrRoleSkillRequirements from './HrRoleSkillRequirements';
 import HrProfileOverview from './HrProfileOverview';
+import HrEvidenceRecords from './HrEvidenceRecords';
 import {rankEducation} from './hrEducationSort';
 import type {EducationHeadline,OperatingUnit} from './hrProfileSummary';
 
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
 type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string;requiredSkillCodes:string[]};
 type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;department:string;site:string;operatingScope?:OperatingUnit;photoUrl?:string;directManager?:{name:string;role:string;status:"resolved"|"unassigned"|"ambiguous"};};
-type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];skillFit:SkillFit;access:{scope:string;readOnlyTabs:string[];allowedTabs:string[];selfServiceTabs:string[];isOwnRecord:boolean}};
-type TabKey = 'basic'|'education'|'family'|'skills'|'roleSkills'|'deployment'|'records'|'roles'|'payslips'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
+type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];skillFit:SkillFit;access:{scope:string;readOnlyTabs:string[];allowedTabs:string[];selfServiceTabs:string[];isOwnRecord:boolean;canVerifyEvidence?:boolean}};
+type TabKey = 'basic'|'education'|'family'|'skills'|'roleSkills'|'records'|'roles'|'payslips'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
 const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'basic',label:'Profile',Icon:IdCard},
   {key:'education',label:'Education',Icon:GraduationCap},
   {key:'family',label:'Family',Icon:Users},
   {key:'roleSkills',label:'Required Skills',Icon:Target},
   {key:'skills',label:'Other Skills',Icon:Award},
-  {key:'deployment',label:'Deployment',Icon:MapPin},
   {key:'records',label:'Records',Icon:FileText},
   {key:'roles',label:'Roles & Responsibilities',Icon:BriefcaseBusiness},
   {key:'payslips',label:'Payslips',Icon:Wallet},
@@ -39,10 +39,7 @@ const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
   {key:'learning',label:'Learning & Development',Icon:BookOpen},
   {key:'history',label:'Employment History',Icon:Layers},
 ];
-const RESTRICTED=new Set<TabKey>(['payslips','records','talent','leave','capability','performance','learning','history']);
-function Info({label,value}:{label:string;value?:string}) {
- return <div className="min-w-0 rounded-xl border border-line bg-page p-3"><div className="text-xs text-muted">{label}</div><div className="mt-1 break-words text-sm font-semibold text-ink">{value||'Not recorded'}</div></div>;
-}
+const RESTRICTED=new Set<TabKey>(['payslips','talent','leave','capability','performance','learning','history']);
 function Panel({title,children}:{title:string;children:ReactNode}) {
  return <section className="min-w-0 rounded-2xl border border-line bg-panel p-3 sm:p-5"><h2 className="mb-3 text-base font-bold text-ink">{title}</h2>{children}</section>;
 }
@@ -60,6 +57,7 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
  const [tab,setTab]=useState<TabKey>('basic');
  const [reportees,setReportees]=useState<number>(0);
  const [qualification,setQualification]=useState<EducationHeadline>({qualification:'',field:''});
+ const [educationRecords,setEducationRecords]=useState<Array<{id:string;qualification:string;field:string}>>([]);
  const back=()=>navigate(reporteeView?'organization_home/hr/HR01/reportees':'organization_home/hr/'+origin);
  const refreshFit=async()=>{
   const updated=await callBackend<PortalData>('/api/org/hr/employee/portal',{uid});
@@ -77,6 +75,7 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
   if(!selfView)return;
   let active=true;
   setQualification({qualification:'',field:''});
+  setEducationRecords([]);
   setReportees(0);
   callBackend<{employees:Array<{uid:string}>}>('/api/org/hr/reportees').then(r=>{if(active)setReportees(r.employees.length)}).catch(()=>{});
   Promise.all([
@@ -84,6 +83,7 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
    callBackend<{config:{levels:Array<{code:string;rank:number}>}|null}>('/api/org/hr/education/config',{uid}),
   ]).then(([records,settings])=>{
    if(!active)return;
+   setEducationRecords(records.education||[]);
    const highest=rankEducation(records.education||[],settings.config?.levels||[])[0]?.record;
    setQualification({qualification:highest?.qualification||'',field:highest?.field||''});
   }).catch(()=>{});
@@ -124,17 +124,11 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
      </nav>
      <div id="employee-hr-tab-content" role="tabpanel" aria-labelledby={'employee-hr-tab-'+tab} className="min-w-0 space-y-3">
       {tab==='basic'&&<HrProfileOverview
-       profile={data.profile} selfView={selfView} qualification={qualification} reportees={reportees}
+       profile={data.profile} selfView={selfView} qualification={qualification} reportees={reportees} deployments={data.deployments}
        fit={data.skillFit} canSeeSkills={canSeeSkills} canOpenRequiredSkills={canOpenRequiredSkills}
        onRequiredSkills={()=>openDetails('roleSkills')}
        onReportees={()=>navigate('organization_home/hr/HR01/reportees')}/>}
       {tab!=='basic'&&<div className="flex items-center gap-2"><ActiveIcon className="h-5 w-5 text-blue-500"/><h2 className="min-w-0 flex-1 text-lg font-bold">{active.label}</h2>{tab==='roles'&&<span className="rounded-full border border-line px-2 py-1 text-xs text-muted">Read only</span>}</div>}
-      {tab==='deployment'&&<Panel title="Organization deployments">
-       {data.deployments.length? <div className="space-y-3">{data.deployments.map((dep,i)=><div key={dep.nodeId+dep.positionCode+i} className="rounded-xl border border-line bg-page p-3">
-        <div className="flex items-start gap-2"><MapPin className="mt-0.5 h-5 w-5 shrink-0 text-blue-500"/><div className="min-w-0 flex-1"><h3 className="font-semibold">{dep.location}</h3><p className="text-xs text-muted">{dep.level.replaceAll('_',' ')} · {dep.siteId||'Site not recorded'}</p></div></div>
-        <div className="mt-3 grid grid-cols-2 gap-2"><Info label="Position" value={dep.positionTitle}/><Info label="Position code" value={dep.positionCode}/><Info label="Assigned from" value={dep.startDate}/><Info label="Assigned until" value={dep.endDate||'Current'}/></div>
-       </div>)}</div>:<p className="text-sm text-muted">No primary organizational deployment is recorded.</p>}
-      </Panel>}
       {tab==='roles'&&<Panel title="Job roles and responsibilities">
        {data.roles.length?<div className="space-y-3">{data.roles.map(role=><article key={role.code} className="rounded-xl border border-line bg-page p-4"><h3 className="font-semibold">{role.title}</h3><p className="mt-1 text-xs text-muted">{role.code} · {role.operatingLevel||'Level not recorded'} · Reports to: {role.reportsToCode||'Not recorded'}</p><p className="mt-3 whitespace-pre-wrap text-sm">{role.description||'No responsibilities description is recorded for this role.'}</p></article>)}</div>:<p className="text-sm text-muted">No assigned job role is recorded.</p>}
       </Panel>}
@@ -148,6 +142,7 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
 
       {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid||data.access.scope==='superadmin'?<HrSelfRecords kind={tab} employeeUid={data.profile.uid} readOnly={data.access.isOwnRecord&&!data.access.selfServiceTabs.includes(tab)} onEducationChange={setQualification}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
       {tab==='leave'&&<HrLeavePanel employeeUid={data.profile.uid} showInbox={selfView}/>}
+      {tab==='records'&&<HrEvidenceRecords employeeUid={data.profile.uid} qualifications={educationRecords} reviewer={Boolean(data.access.canVerifyEvidence)} viewerUid={firebaseAuth.currentUser?.uid||''}/>}
       {RESTRICTED.has(tab)&&tab!=='education'&&tab!=='family'&&tab!=='leave'&&<EmptyRecords label={active.label}/>}
      </div>
     </div>

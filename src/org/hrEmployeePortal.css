@@ -176,3 +176,18 @@
 .hr-card__detail-subtitle{display:block;margin-top:2px;font-size:10px;line-height:1.3;color:#5b4b3b;overflow-wrap:anywhere;font-weight:600}
 .hr-card--compact .hr-card__detail:has(.hr-card__detail-subtitle){min-height:66px}
 @media(max-width:355px){.hr-card__detail-subtitle{font-size:9px}}
+
+/* Optional deployment details live within Profile; the summary remains compact.
+   Already-displayed job title and primary location are not repeated. */
+.hr-card__assignment{border:1px solid #dbe3f2;border-radius:11px;background:#f9fbff;min-width:0;overflow:hidden}
+.hr-card__assignment-summary{display:flex;align-items:center;gap:8px;padding:9px 11px;cursor:pointer;color:#2e527f;font-size:11px;font-weight:800}
+.hr-card__assignment-summary span:nth-child(2){flex:1;min-width:0}
+.hr-card__assignment-summary::marker{color:#49658a}
+.hr-card__assignment-hint{font-size:10px;font-weight:600;color:#64748b}
+.hr-card__assignment-list{border-top:1px solid #dce6f2;padding:8px;display:grid;gap:8px}
+.hr-card__assignment-item{display:grid;gap:4px;font-size:11px;color:#435168;padding:5px 4px}
+.hr-card__assignment-item+.hr-card__assignment-item{border-top:1px solid #d7e0ed;padding-top:9px}
+.hr-card__assignment-item span{overflow-wrap:anywhere}
+.hr-card__assignment-item b{font-weight:800;color:#253e5b;margin-right:5px}
+.hr-card__assignment-extra{color:#253e5b;overflow-wrap:anywhere}
+.hr-card__assignment-empty{padding:9px;font-size:11px;color:#64748b}

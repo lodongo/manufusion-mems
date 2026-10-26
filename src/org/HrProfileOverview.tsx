@@ -5,6 +5,7 @@ import type {SkillFit} from './HrRoleSkillFit';
 import {profileQualification,profileWorkplace,showReporteesCard,type EducationHeadline,type OperatingUnit} from './hrProfileSummary';
 import './hrEmployeePortal.css';
 
+export type HrDeployment={nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
 export type HrOverviewProfile={
  uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;
  department:string;site:string;operatingScope?:OperatingUnit;photoUrl?:string;
@@ -23,9 +24,9 @@ function Detail({label,value,subtitle,Icon,tone}:{label:string;value?:string;sub
 }
 
 export default function HrProfileOverview({
- profile,selfView,qualification,reportees,fit,canSeeSkills,canOpenRequiredSkills,onRequiredSkills,onReportees,
+ profile,selfView,qualification,reportees,deployments,fit,canSeeSkills,canOpenRequiredSkills,onRequiredSkills,onReportees,
 }:{
- profile:HrOverviewProfile;selfView:boolean;qualification:EducationHeadline;reportees:number;fit?:SkillFit|null;
+ profile:HrOverviewProfile;selfView:boolean;qualification:EducationHeadline;reportees:number;deployments:HrDeployment[];fit?:SkillFit|null;
  canSeeSkills:boolean;canOpenRequiredSkills:boolean;onRequiredSkills:()=>void;onReportees:()=>void;
 }){
  const [photoError,setPhotoError]=useState(false);
@@ -64,6 +65,20 @@ export default function HrProfileOverview({
       <Detail label="Assigned location" value={profile.primaryLocation} Icon={MapPin} tone="amber"/>}
     <Detail label={workplace.label} value={workplace.name} Icon={MapPin} tone="teal"/>
    </div>
+   <details className="hr-card__assignment">
+    <summary className="hr-card__assignment-summary"><MapPin size={16} aria-hidden="true"/>
+     <span>Deployment details</span><span className="hr-card__assignment-hint">{deployments.length} assignment{deployments.length===1?'':'s'}</span>
+    </summary>
+    {deployments.length===0?<p className="hr-card__assignment-empty">No verified deployment is configured.</p>:
+     <div className="hr-card__assignment-list">
+      {deployments.map((dep,index)=><div key={dep.nodeId+dep.positionCode+index} className="hr-card__assignment-item">
+       {index>0&&<strong className="hr-card__assignment-extra">{dep.positionTitle||'Additional assignment'} · {dep.location}</strong>}
+       <span><b>Level</b> {dep.level?dep.level.replaceAll('_',' '):'Not recorded'}</span>
+       <span><b>Position code</b> {dep.positionCode||'Not recorded'}</span>
+       <span><b>Effective</b> {dep.startDate||'Not recorded'}{dep.endDate?' – '+dep.endDate:' · Current'}</span>
+      </div>)}
+     </div>}
+   </details>
    <div className="hr-card__manager" aria-label="Direct manager">
     <span className="hr-card__manager-icon"><UserRoundCheck size={18} aria-hidden="true"/></span>
     <div className="hr-card__manager-info">

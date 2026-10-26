@@ -181,7 +181,8 @@ export const hrReadRoutes = {
           scope,allowedTabs:hrVisibleTabs(scope,rules),
           selfServiceTabs:hrVisibleTabs('self',rules),
           isOwnRecord:isSelf,
-          readOnlyTabs:['roles','deployment','basic'],
+          readOnlyTabs:['roles','basic'],
+          canVerifyEvidence:isSuperAdmin||hasPerm(ctx.directPermissions,'HRM.records.verify'),
         },
       };
     }),
