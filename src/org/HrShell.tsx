@@ -6,10 +6,12 @@ import { firebaseAuth } from '../firebase';
 import RichTable from '../components/RichTable';
 import HrSkillsWorkspace from './HrSkillsWorkspace';
 import HrLeavePanel from './HrLeavePanel';
+import HrStructureExplorer from './HrStructureExplorer';
+import type {HrStructureNode} from './hrStructureTree';
 import {fitLabel,type SkillFit} from './HrRoleSkillFit';
 
 type Person={uid:string;name:string;employeeNumber:string;status:string;jobRole:string;skillFit?:SkillFit};
-type Node={id:string;name:string;code:string;level:string;parentId:string;status:string};
+type Node=HrStructureNode;
 type Role={code:string;title:string;description:string;parentCode:string;operatingLevel:string};
 const SECTIONS=[
  ['HR01','My HR Portal'],['HR02','Employee Records & Administration'],['HR03','HR Policies & Procedures'],
@@ -21,7 +23,6 @@ const SECTIONS=[
  ['HR15','Employee Engagement & Feedback'],['HR16','Employee Movements, Separation & Offboarding']
 ] as const;
 const personColumns=[{key:'employeeNumber',label:'Employee number',value:(p:Person)=>p.employeeNumber},{key:'name',label:'Employee',value:(p:Person)=>p.name},{key:'jobRole',label:'Job role',value:(p:Person)=>p.jobRole},{key:'status',label:'Status',value:(p:Person)=>p.status},{key:'skillFit',label:'Role skill fit',value:(p:Person)=>fitLabel(p.skillFit)}];
-const structureColumns=[{key:'code',label:'Code',value:(n:Node)=>n.code},{key:'name',label:'Name',value:(n:Node)=>n.name},{key:'level',label:'Type',value:(n:Node)=>n.level.replaceAll('_',' ')},{key:'parentId',label:'Parent',value:(n:Node)=>n.parentId},{key:'status',label:'Status',value:(n:Node)=>n.status}];
 const roleColumns=[{key:'code',label:'Role code',value:(r:Role)=>r.code},{key:'title',label:'Role title',value:(r:Role)=>r.title},{key:'operatingLevel',label:'Level',value:(r:Role)=>r.operatingLevel},{key:'parentCode',label:'Reports to',value:(r:Role)=>r.parentCode}];
 type SectionCode=typeof SECTIONS[number][0];
 const openSection=(code:SectionCode)=>navigate('organization_home/hr/'+code);
@@ -37,7 +38,6 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState('');
  const [query,setQuery]=useState('');
- const [nodeId,setNodeId]=useState('');
  const [roleCode,setRoleCode]=useState('');
  useEffect(()=>{
   let alive=true;setLoading(true);setError('');setSelf(null);setDirectory(null);setTeam(null);setNodes(null);setRoles(null);
@@ -52,7 +52,6 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
   return()=>{alive=false};
  },[sectionCode]);
  const visible=useMemo(()=>SECTIONS.filter(s=>(s[1]+' '+s[0]).toLowerCase().includes(query.toLowerCase())),[query]);
- const chosenNode=nodes?.find(n=>n.id===nodeId);
  const chosenRole=roles?.find(r=>r.code===roleCode);
  const show=(code:string)=>!sectionCode||sectionCode===code;
  const showData=Boolean((show('HR01')&&self)||(show('HR02')&&directory)||(show('HR04')&&nodes)||(show('HR05')&&roles)||(show('HR08')&&(team||directory||nodes||roles)));
@@ -75,7 +74,7 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
          return valid.length?Math.round(valid.reduce((total,x)=>total+(x.skillFit?.percentage||0),0)/valid.length)+'%':'Not configured';
        })()}</p></div>
      </div><RichTable id="hr-employees-v2" columns={personColumns} rows={directory} rowKey={r=>r.uid} onRowClick={employee=>navigate("organization_home/hr/HR02/employee/"+employee.uid)} allowExport={false} height="h-[48dvh]" empty="No employee records at your authorized site."/></Panel>}
-   {show('HR04')&&nodes&&<Panel title="Approved organization structure"><div className="mb-3 flex flex-wrap gap-2 text-xs text-muted"><Building2 className="h-4 w-4"/>{nodes.filter(n=>n.level==='site').length} sites · {nodes.filter(n=>n.level==='department').length} departments · {nodes.filter(n=>n.level==='cost_center').length} cost centres</div><RichTable id="hr-structure-v2" columns={structureColumns} rows={nodes} rowKey={r=>r.id} onRowClick={n=>setNodeId(n.id)} height="h-[43dvh]"/>{chosenNode&&<div className="mt-3 rounded-xl bg-page p-3 text-sm"><strong>{chosenNode.name}</strong><div className="mt-1 text-muted">{chosenNode.code} · {chosenNode.level.replaceAll('_',' ')} · Parent: {chosenNode.parentId||'Root'}</div><div className="mt-2 font-semibold">Child units</div><div className="mt-1 space-y-1">{nodes.filter(n=>n.parentId===chosenNode.id).map(n=><button key={n.id} className="block w-full rounded-lg border border-line p-2 text-left" onClick={()=>setNodeId(n.id)}>{n.name} ({n.code})</button>)}</div></div>}</Panel>}
+   {show('HR04')&&nodes&&<HrStructureExplorer nodes={nodes}/>}
    {show('HR05')&&roles&&<Panel title="Approved role catalogue"><div className="mb-3 flex items-center gap-2 text-xs text-muted"><BriefcaseBusiness className="h-4 w-4"/>{roles.length} registered job roles</div><RichTable id="hr-roles-v2" columns={roleColumns} rows={roles} rowKey={r=>r.code} onRowClick={r=>setRoleCode(r.code)} height="h-[45dvh]"/>{chosenRole&&<div className="mt-3 rounded-xl bg-page p-3 text-sm"><strong>{chosenRole.title}</strong><div className="mt-1 text-muted">{chosenRole.code} · {chosenRole.operatingLevel}</div><p className="mt-2">{chosenRole.description||'No description recorded.'}</p><p className="mt-2 text-muted">Reports to: {roles.find(r=>r.code===chosenRole.parentCode)?.title||chosenRole.parentCode||'Not recorded'}</p></div>}</Panel>}
    {show('HR08')&&<><div className="grid grid-cols-2 gap-3">{[['Registered roles',roles?.length],['Organization units',nodes?.length],['Authorized site employees',directory?.length],['Manager team',team?.length]].map(([k,v])=><div key={String(k)} className="rounded-xl border border-line bg-panel p-4"><div className="text-xs text-muted">{k}</div><div className="mt-2 text-2xl font-bold">{v??'—'}</div></div>)}</div>{team&&<Panel title="My management hierarchy"><RichTable id="hr-team-v2" columns={personColumns} rows={team} rowKey={r=>r.uid} onRowClick={employee=>navigate("organization_home/hr/HR08/employee/"+employee.uid)} allowExport={false} height="h-[40dvh]"/></Panel>}</>}
    {show('HR10')&&<HrLeavePanel employeeUid={firebaseAuth.currentUser?.uid||''} showInbox />}
