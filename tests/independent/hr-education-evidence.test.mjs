@@ -25,6 +25,7 @@ test('private qualification uploads are immutable, segregated by organization an
  const api=src('backend/hrEducationEvidenceRoutes.ts');
  assert.match(api,/storage\.writeImmutable/);
  assert.match(api,/ctx\.uid===uid\)throw new HttpError\(403/);
+ assert.match(api,/str\(existing\.data\.uploadedBy\)===ctx\.uid/);
  assert.match(api,/organizations\/.*hr_evidence/);
  assert.match(api,/commitChecked/);
  assert.match(api,/sha256/);
