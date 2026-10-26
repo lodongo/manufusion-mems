@@ -75,7 +75,7 @@ export function EvidenceRow({file,onChanged,allowReview=false,qualificationName}
    <button type="button" onClick={()=>void open()} disabled={busy} className="hr-evidence__open" aria-label={'Open '+file.name}><ExternalLink size={15}/> View</button>
    {allowReview&&file.status==='pending'&&<>
     <button type="button" onClick={()=>void review('verified')} disabled={busy} className="hr-evidence__verify"><BadgeCheck size={15}/> Verify</button>
-    <button type="button" onClick={()=>setDecision(decision?'': 'rejected' as 'rejected')} disabled={busy} className="hr-evidence__reject">Reject</button>
+    <button type="button" onClick={()=>setDecision(decision===null?'rejected':null)} disabled={busy} className="hr-evidence__reject">Reject</button>
    </>}
   </div>
   {decision==='rejected'&&<div className="hr-evidence__review">
