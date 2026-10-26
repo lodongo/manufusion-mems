@@ -7,6 +7,7 @@ import { currentHrRules } from './hrRulesRoutes';
 import { hrVisibleTabs } from './hrPrivacyRules';
 import { buildFitIndex, makeSkillFit } from './hrSkillFit';
 import { signedUrl } from './structure';
+import { computeRoleStaffing } from './hrRoleStaffingOutlook';
 
 // Read-only HR endpoints. No salaries, banking, medical, disciplinary,
 // contact details, identity documents or unrelated security information.
@@ -32,16 +33,37 @@ export const hrReadRoutes = {
       const nodes=docs.filter(d=>str(d.data.status)!=='inactive' && (ctx.role==='org_super_admin'||permittedSites.has(hrSiteOf(d.id,nodeMap)))).map(d=>({
         id:d.id,name:str(d.data.name),code:str(d.data.code),level:str(d.data.level),
         parentId:str(d.data.parentId),status:str(d.data.status)||'active'
-      }));
-      return { nodes, readOnly:true };
-    }),
-  ],
   'POST /api/org/hr/roles': [
     orgRoute('org.hr.roles', 'HRM.shell.view', async ctx => {
       const docs=await listDocs(`organizations/${ctx.orgId}/positions`);
+      // HRM.shell.view alone grants the role catalogue, not staffing analytics.
+      // Numbers are only computed for users authorized to administer establishment.
+      const staffingAllowed=ctx.role==='org_super_admin'||hasPerm(ctx.directPermissions,'ADM.structure');
+      let people:Awaited<ReturnType<typeof runQuery>>=[];
+      let names=new Map<string,string>();
+      if(staffingAllowed){
+        const [users,units]=await Promise.all([
+          runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)}),
+          listDocs(`organizations/${ctx.orgId}/structure`),
+        ]);
+        people=users;
+        names=new Map(units.map(u=>[u.id,str(u.data.name)||str(u.data.code)||u.id]));
+      }
+      const asOf=new Date().toISOString().slice(0,10);
       return { roles:docs.map(d=>({
         code:d.id,title:str(d.data.title),description:str(d.data.description),
-        parentCode:str(d.data.parentCode),operatingLevel:str(d.data.operatingLevel)
+        parentCode:str(d.data.parentCode),operatingLevel:str(d.data.operatingLevel),
+        defaultNodeId:str(d.data.defaultNodeId),
+        requiredSkillCount:Array.isArray(d.data.coreSkills)
+          ?new Set(d.data.coreSkills.filter((x):x is string=>typeof x==='string'&&!!x.trim()).map(x=>x.trim())).size:0,
+        gradeMappings:isObj(d.data.jobGradeByLegalEntity)
+          ?Object.values(d.data.jobGradeByLegalEntity).filter(v=>!!str(v)).length:0,
+        staffing:staffingAllowed?
+          computeRoleStaffing(d.id,d.data.staffingPlan,people,names,asOf):null,
+      })),readOnly:true,staffingAllowed };
+    }),
+  ],
+d.data.operatingLevel)
       })),readOnly:true };
     }),
   ],
