@@ -6,6 +6,7 @@ import { managerFor } from './hrEmployeeRoutes';
 import { currentHrRules } from './hrRulesRoutes';
 import { hrVisibleTabs } from './hrPrivacyRules';
 import { buildFitIndex, makeSkillFit } from './hrSkillFit';
+import { signedUrl } from './structure';
 
 // Read-only HR endpoints. No salaries, banking, medical, disciplinary,
 // contact details, identity documents or unrelated security information.
@@ -122,6 +123,10 @@ export const hrReadRoutes = {
           uid, name:[str(employee.data.firstName),str(employee.data.lastName)].filter(Boolean).join(' '),
           employeeNumber:str(employee.data.employeeNumber),status:str(employee.data.status),
           primaryRole:deployments[0]?.positionTitle||'', primaryLocation:deployments[0]?.location||'',
+          // Reuse the stored account photo displayed in the MEMS header. Only return a
+          // signed URL after this employee has passed the HR access checks above.
+          photoUrl:str(employee.data.photoPath).startsWith('users/'+uid+'/')
+            ? await signedUrl(str(employee.data.photoPath)) : '',
           department:str(nodes.get(departmentId||'')?.name),site:str(nodes.get(siteId||'')?.name),
         },
         deployments, roles, requiredSkills,
