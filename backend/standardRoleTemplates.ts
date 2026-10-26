@@ -32,6 +32,12 @@ export function standardRoleTemplates(groups: PermGroup[]): StandardRoleTemplate
         permissions:['HRM.shell.view','HRM.rules.approve']});
       assigned.add('HRM.rules.approve');
     }
+    if(enabled.get('HRM')?.has('HRM.records.verify')){
+      templates.push({id:'std_hrm_education_verifier',module:'HRM',name:'HR – Education Evidence Verifier',
+        description:'Review or reject employee qualification evidence within assigned organizational scope; never own uploads.',
+        permissions:['HRM.shell.view','HRM.records.verify']});
+      assigned.add('HRM.records.verify');
+    }
     if(enabled.get('HRM')?.has('HRM.skills.manage')){
       templates.push({
         id:'std_hrm_skills_administrator',module:'HRM',name:'HR – Skills Administrator',

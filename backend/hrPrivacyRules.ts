@@ -7,13 +7,13 @@ export type HrTab=typeof HR_TABS[number];
 export type HrScope='self'|'manager'|'hr'|'superadmin';
 export type HrRules={selfTabs:HrTab[];managerTabs:HrTab[];hrTabs:HrTab[];managerIndirectReports:boolean;schemaVersion:2};
 const immutable:Record<HrScope,readonly HrTab[]>={
- self:['basic','education','family','skills','roleSkills','deployment','roles','payslips','leave','capability','performance','learning'],
+ self:['basic','education','family','skills','roleSkills','records','deployment','roles','payslips','leave','capability','performance','learning'],
  manager:['basic','skills','roleSkills','deployment','roles','leave','capability','performance'],
  hr:['basic','education','skills','roleSkills','deployment','records','roles','talent','leave','capability','performance','learning','history'],
  superadmin:HR_TABS,
 };
 export const HR_RULE_DEFAULTS:HrRules={
- selfTabs:['basic','education','family','skills','roleSkills','deployment','roles','payslips','leave','capability','performance','learning'],
+ selfTabs:['basic','education','family','skills','roleSkills','records','deployment','roles','payslips','leave','capability','performance','learning'],
  managerTabs:['basic','skills','roleSkills','deployment','roles','leave','capability','performance'],
  hrTabs:['basic','education','skills','roleSkills','deployment','records','roles','talent','leave','capability','performance','learning','history'],
  managerIndirectReports:false,schemaVersion:2,
@@ -35,7 +35,7 @@ export function hrRules(data:unknown):HrRules{
 }
 export function hrVisibleTabs(scope:HrScope,rules:HrRules):HrTab[]{
  if(scope==='superadmin')return [...HR_TABS];
- if(scope==='self')return rules.selfTabs.filter(x=>immutable.self.includes(x));
+ if(scope==='self')return [...new Set([...rules.selfTabs.filter(x=>immutable.self.includes(x)),'records' as HrTab])];
  if(scope==='manager')return rules.managerTabs.filter(x=>immutable.manager.includes(x));
  return rules.hrTabs.filter(x=>immutable.hr.includes(x));
 }
