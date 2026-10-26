@@ -22,7 +22,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
  const [catalogueError,setCatalogueError]=useState(false);
  const [notice,setNotice]=useState('');
  const [evidence,setEvidence]=useState<HrEvidenceFile[]>([]);
- const [pendingFiles,setPendingFiles]=useState<Array<{file:File;type:EvidenceCategory}>>([]);
+ const [pendingFiles,setPendingFiles]=useState<Array<{file:File;type:EvidenceCategory;mime:string}>>([]);
  const [documentType,setDocumentType]=useState<EvidenceCategory>('degree_certificate');
  const [evidenceError,setEvidenceError]=useState('');
  const loadEvidence=async()=>{
@@ -64,14 +64,14 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
    onEducationChange?.({qualification:top?.qualification||'',field:top?.field||''});
    const recordIndex=editing===null||editing===-1?result.items.length-1:editing;
    const stored=result.items[recordIndex];
-   const failed:Array<{file:File;type:EvidenceCategory}>=[];
+   const failed:Array<{file:File;type:EvidenceCategory;mime:string}>=[];
    if(pendingFiles.length){
     for(const attachment of pendingFiles){
      try{
       const data=await readEvidenceFile(attachment.file);
       await callBackend('/api/org/hr/evidence/upload',{
        uid:employeeUid,educationId:stored.id,documentType:attachment.type,
-       name:attachment.file.name,mime:attachment.file.type,data,
+       name:attachment.file.name,mime:attachment.mime,data,
       });
      }catch(e){
       failed.push(attachment);
@@ -101,14 +101,18 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
  };
  const stageFiles=(input:FileList|null)=>{
   if(!input)return;
-  const next:Array<{file:File;type:EvidenceCategory}>=[];
+  const next:Array<{file:File;type:EvidenceCategory;mime:string}>=[];
   for(const file of Array.from(input)){
-   const limit=file.type==='application/pdf'?8_000_000:5_000_000;
-   if(!['application/pdf','image/png','image/jpeg'].includes(file.type)||!file.size||file.size>limit){
+   const extension=file.name.toLowerCase().split('.').pop();
+   const mime=['application/pdf','image/png','image/jpeg'].includes(file.type)?file.type:
+    extension==='pdf'?'application/pdf':extension==='png'?'image/png':
+    ['jpg','jpeg'].includes(extension||'')?'image/jpeg':'';
+   const limit=mime==='application/pdf'?8_000_000:5_000_000;
+   if(!mime||!file.size||file.size>limit){
     setEvidenceError('Choose PDF, JPG or PNG documents (maximum 8 MB for PDF, 5 MB per image).');
     continue;
    }
-   next.push({file,type:documentType});
+   next.push({file,type:documentType,mime});
   }
   setPendingFiles(previous=>[...previous,...next].slice(0,20));
  };
