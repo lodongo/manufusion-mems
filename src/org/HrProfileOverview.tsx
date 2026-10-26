@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {BriefcaseBusiness, Building2, CheckCircle2, ChevronRight, GraduationCap, HeartHandshake, IdCard, MapPin, ShieldCheck, Target, UserRound, Users} from 'lucide-react';
+import {BriefcaseBusiness, Building2, ChevronRight, GraduationCap, IdCard, MapPin, Target, UserRound, UserRoundCheck, Users} from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
 import type {SkillFit} from './HrRoleSkillFit';
 import './hrEmployeePortal.css';
@@ -7,6 +7,7 @@ import './hrEmployeePortal.css';
 export type HrOverviewProfile={
  uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;
  department:string;site:string;photoUrl?:string;
+ directManager?:{name:string;role:string;status:'resolved'|'unassigned'|'ambiguous'};
 };
 type Tone='rose'|'blue'|'violet'|'amber'|'teal'|'green';
 function Detail({label,value,Icon,tone}:{label:string;value?:string;Icon:LucideIcon;tone:Tone}){
@@ -28,12 +29,12 @@ export default function HrProfileOverview({
  const [photoError,setPhotoError]=useState(false);
  useEffect(()=>setPhotoError(false),[profile.photoUrl]);
  const rawFit=fit?.percentage;
- const percentage=typeof rawFit==='number'&&Number.isFinite(rawFit)?Math.max(0,Math.min(100,rawFit)):null;
+ const percentage=typeof rawFit==='number'&&Number.isFinite(rawFit)&&Number(fit?.required)>0?Math.max(0,Math.min(100,rawFit)):null;
  const status=profile.status?.trim()||'Not recorded';
  const isActive=status.toLowerCase()==='active';
  const department=profile.department||profile.primaryLocation;
  const role=profile.primaryRole||'Position not assigned';
- return <section aria-label="Employee overview" className="hr-card">
+ return <section aria-label="Employee overview" className="hr-card hr-card--compact">
   <div className="hr-card__hero">
    <div className="hr-card__identity">
     <div className="hr-card__photo">
@@ -55,44 +56,39 @@ export default function HrProfileOverview({
   </div>
   <div className="hr-card__content">
    <div className="hr-card__grid">
-    <Detail label="Role / title" value={role} Icon={BriefcaseBusiness} tone="rose"/>
-    <Detail label="Office / department" value={department} Icon={Building2} tone="blue"/>
-    <Detail label="Employee number" value={profile.employeeNumber} Icon={IdCard} tone="violet"/>
     {selfView?<Detail label="Highest qualification" value={qualification} Icon={GraduationCap} tone="amber"/>:
       <Detail label="Assigned location" value={profile.primaryLocation} Icon={MapPin} tone="amber"/>}
     <Detail label="Site" value={profile.site} Icon={MapPin} tone="teal"/>
-    <Detail label="Employment status" value={status} Icon={ShieldCheck} tone="green"/>
    </div>
-   {canSeeSkills&&<div className="hr-card__skills">
-    <div className="hr-card__skills-main">
-     <span className="hr-card__skills-icon"><Target size={21} aria-hidden="true"/></span>
-     <div className="hr-card__skills-body">
-      <h3 className="hr-card__skills-title">Required skills for my role</h3>
-      <strong className="hr-card__skills-result">{percentage===null?'Not configured':percentage+'% fit'}</strong>
-      <p className="hr-card__skills-copy">{percentage===null?
-       'No required skills have been configured for this role. Fit percentage unavailable.':
-       (fit?.confirmed||0)+' of '+(fit?.required||0)+' skills confirmed · '+(fit?.pending||0)+' pending'}</p>
-      <p className="hr-card__verified"><CheckCircle2 size={13} aria-hidden="true"/>Fit uses manager-confirmed skills only</p>
-     </div>
-     <div className="hr-card__fit-area">
-      <div role={percentage===null?undefined:'progressbar'} aria-label="Confirmed role skill fit"
-       aria-valuenow={percentage===null?undefined:percentage} aria-valuemin={percentage===null?undefined:0} aria-valuemax={percentage===null?undefined:100}
-       className="hr-card__fit-ring"
-       style={{background:percentage===null?'#d9dde5':'conic-gradient(#be123c '+percentage+'%, #d9dde5 0)'}}>
-       <div className="hr-card__fit-middle">{percentage===null?'N/A':percentage+'%'}</div>
-      </div>
-      <span className="hr-card__fit-caption">Skill fit</span>
-     </div>
+   <div className="hr-card__manager" aria-label="Direct manager">
+    <span className="hr-card__manager-icon"><UserRoundCheck size={18} aria-hidden="true"/></span>
+    <div className="hr-card__manager-info">
+     <span className="hr-card__manager-label">Direct manager</span>
+     <strong className="hr-card__manager-name">{profile.directManager?.status==='resolved'?
+       (profile.directManager.name||'Not recorded'):
+       profile.directManager?.status==='ambiguous'?'Needs manager review':'Not assigned'}</strong>
+     {profile.directManager?.status==='resolved'&&profile.directManager.role&&
+      <span className="hr-card__manager-role">{profile.directManager.role}</span>}
     </div>
-    {canOpenRequiredSkills&&<button type="button" onClick={onRequiredSkills} className="hr-card__skills-action">View required skills <ChevronRight size={17} aria-hidden="true"/></button>}
+   </div>
+   {canSeeSkills&&<div className="hr-card__skills hr-card__skills--compact">
+    <span className="hr-card__skills-icon"><Target size={19} aria-hidden="true"/></span>
+    <div className="hr-card__skills-body">
+     <h3 className="hr-card__skills-title">Required skills</h3>
+     <p className="hr-card__skills-copy"><strong className="hr-card__skills-result">{percentage===null?'Not configured':percentage+'% fit'}</strong>
+      <span className="hr-card__skills-note">{percentage===null?' · Role skills not set':
+       ' · '+(fit?.confirmed||0)+'/'+(fit?.required||0)+' manager verified'}</span>
+     </p>
+    </div>
+    {canOpenRequiredSkills&&<button type="button" onClick={onRequiredSkills}
+     aria-label="View required skills" className="hr-card__skills-open"><ChevronRight size={19} aria-hidden="true"/></button>}
    </div>}
    {selfView&&<button type="button" className="hr-card__team" onClick={onReportees}>
-    <span className="hr-card__team-icon"><Users size={21} aria-hidden="true"/></span>
+    <span className="hr-card__team-icon"><Users size={19} aria-hidden="true"/></span>
     <span className="hr-card__team-copy"><span>My team</span><strong>Manage My Reportees</strong></span>
     <span className="hr-card__team-count"><strong>{reportees}</strong><span>Reportees</span></span>
-    <ChevronRight size={19} className="hr-card__team-arrow" aria-hidden="true"/>
+    <ChevronRight size={18} className="hr-card__team-arrow" aria-hidden="true"/>
    </button>}
   </div>
-  <div className="hr-card__footer"><HeartHandshake size={21} aria-hidden="true"/><div><strong>Together for a better workplace</strong><span>People · Growth · Opportunity</span></div></div>
  </section>;
 }

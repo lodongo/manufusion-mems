@@ -17,7 +17,7 @@ import HrProfileOverview from './HrProfileOverview';
 
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
 type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string;requiredSkillCodes:string[]};
-type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;department:string;site:string;photoUrl?:string};
+type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;department:string;site:string;photoUrl?:string;directManager?:{name:string;role:string;status:"resolved"|"unassigned"|"ambiguous"};};
 type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];skillFit:SkillFit;access:{scope:string;readOnlyTabs:string[];allowedTabs:string[];selfServiceTabs:string[];isOwnRecord:boolean}};
 type TabKey = 'basic'|'education'|'family'|'skills'|'roleSkills'|'deployment'|'records'|'roles'|'payslips'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
 const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
@@ -121,7 +121,6 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
         <Icon size={15} aria-hidden="true"/><span>{label}</span>
        </button>)}
      </nav>
-     <p className="hr-portal-tabs__hint">Swipe tabs to see more HR sections</p>
      <div id="employee-hr-tab-content" role="tabpanel" aria-labelledby={'employee-hr-tab-'+tab} className="min-w-0 space-y-3">
       {tab==='basic'&&<HrProfileOverview
        profile={data.profile} selfView={selfView} qualification={qualification} reportees={reportees}

@@ -3,6 +3,7 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canReadHrBasicProfile } from './hrAccessPolicy';
 import { hrSiteOf, managedRoots, underManagedRoot } from './hrHierarchy';
 import { managerFor } from './hrEmployeeRoutes';
+import { resolveHrManager } from './hrManagerResolver';
 import { currentHrRules } from './hrRulesRoutes';
 import { hrVisibleTabs } from './hrPrivacyRules';
 import { buildFitIndex, makeSkillFit } from './hrSkillFit';
@@ -139,12 +140,30 @@ export const hrReadRoutes = {
           ancestors.push(id);id=str(node.parentId);
         }
       }
+      // A direct manager is resolved from the same hierarchy/manager role rules used
+      // by HR approval workflows, not inferred from the job title or reporting label.
+      // Resolve only after the employee's HR profile read authorization succeeded.
+      const managerUsers=await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
+      const managerMatch=resolveHrManager(uid,{...employee.data,uid},nodes,managerUsers);
+      const managerRecord=managerMatch.reason==='resolved'
+        ?managerUsers.find(person=>person.id===managerMatch.uid):undefined;
+      const managerAssignments=Array.isArray(managerRecord?.data.assignments)
+        ?managerRecord.data.assignments.filter(isObj):[];
+      const managerPrimary=managerAssignments.find(a=>str(a.type)==='primary');
+      const managerName=managerRecord
+        ?[str(managerRecord.data.firstName),str(managerRecord.data.lastName)].filter(Boolean).join(' '):'';
+      const directManager={
+        name:managerName,
+        role:str(positions.get(str(managerPrimary?.positionCode))?.title),
+        status:managerRecord?'resolved':managerMatch.reason==='ambiguous'?'ambiguous':'unassigned',
+      };
       const departmentId=ancestors.find(id=>str(nodes.get(id)?.level)==='department');
       const siteId=ancestors.find(id=>str(nodes.get(id)?.level)==='site');
       return {
         profile: {
           uid, name:[str(employee.data.firstName),str(employee.data.lastName)].filter(Boolean).join(' '),
           employeeNumber:str(employee.data.employeeNumber),status:str(employee.data.status),
+          directManager,
           primaryRole:deployments[0]?.positionTitle||'', primaryLocation:deployments[0]?.location||'',
           // Reuse the stored account photo displayed in the MEMS header. Only return a
           // signed URL after this employee has passed the HR access checks above.
