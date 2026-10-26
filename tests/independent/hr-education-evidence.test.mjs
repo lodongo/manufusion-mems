@@ -53,7 +53,7 @@ test('Education cards link submitted supporting files to persisted qualification
  const server=src('backend/hrEducationEvidenceRoutes.ts');
  for(const category of ['certificate','transcript','testimonial','thesis'])
   assert.match(server,new RegExp("'"+category+"'"));
- assert.match(edu,/hr-edu__file-picker/);
+ assert.match(edu,/hr-edu__native-file/);
  assert.match(edu,/type="file"/);
  assert.doesNotMatch(edu,/setDocumentType\('degree_certificate'\)/);
  assert.match(edu,/await loadEvidence/);
