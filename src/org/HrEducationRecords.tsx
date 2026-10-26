@@ -9,7 +9,7 @@ type Education={id:string;institution:string;qualification:string;field:string;c
 type Config={levels:Array<{code:string;name:string;enabled:boolean;rank:number}>;qualifications:Array<{code:string;levelCode:string;name:string;enabled:boolean}>};
 type Selection={entity:{id:string;name:string}|null;scope:'legal_entity'|'corporate'|'unassigned';config:Config|null};
 const empty:Education={id:'',institution:'',qualification:'',field:'',completionYear:'',levelCode:'',qualificationCode:'',gradingSystemCode:'',gradeCode:''};
-export default function HrEducationRecords({employeeUid,readOnly=false}:{employeeUid:string;readOnly?:boolean}){
+export default function HrEducationRecords({employeeUid,readOnly=false,onEducationChange}:{employeeUid:string;readOnly?:boolean;onEducationChange?:(qualification:string)=>void}){
  const [records,setRecords]=useState<Education[]>([]);
  const [selection,setSelection]=useState<Selection|null>(null);
  const [loading,setLoading]=useState(true);
@@ -46,6 +46,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false}:{employe
     uid:employeeUid,kind:'education',items:next,
    });
    setRecords(result.items);setEditing(null);
+   onEducationChange?.(rankEducation(result.items,selection?.config?.levels||[])[0]?.record.qualification||'');
    setNotice('Education record saved successfully.');
   }catch(e){setError(e instanceof Error?e.message:'Could not save education records.')}
   finally{setBusy(false)}

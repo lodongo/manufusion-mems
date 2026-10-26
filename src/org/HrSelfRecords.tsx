@@ -10,9 +10,9 @@ type Family={id:string;name:string;relationship:string;phone:string};
 type Kind='education'|'family';
 const input='h-11 w-full rounded-xl border border-line bg-page px-3 text-base text-ink';
 const btn='flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold';
-export default function HrSelfRecords(props:{kind:Kind;employeeUid:string;readOnly?:boolean}){
+export default function HrSelfRecords(props:{kind:Kind;employeeUid:string;readOnly?:boolean;onEducationChange?:(qualification:string)=>void}){
  return props.kind==='education'
-  ?<HrEducationRecords employeeUid={props.employeeUid} readOnly={props.readOnly}/>
+  ?<HrEducationRecords employeeUid={props.employeeUid} readOnly={props.readOnly} onEducationChange={props.onEducationChange}/>
   :<HrFamilyRecords employeeUid={props.employeeUid} readOnly={props.readOnly}/>;
 }
 function HrFamilyRecords({employeeUid,readOnly=false,kind='family'}:{employeeUid:string;readOnly?:boolean;kind?:Kind}){
