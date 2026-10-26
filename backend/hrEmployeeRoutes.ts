@@ -148,13 +148,6 @@ export const hrEmployeeRoutes={
   'POST /api/org/hr/private/save':[orgRoute('org.hr.private.save','HRM.shell.view',async ctx=>{
     const uid=clean(ctx.body.uid,128)||ctx.uid;
     if(uid!==ctx.uid&&ctx.role!=='org_super_admin')throw new HttpError(403,'Only the employee or organization super administrator may update private HR records.');
-    if(!hrMayChangeRecord(ctx.uid,uid,'skillProposal'))
-      throw new HttpError(403,'This protected employee record cannot be modified by its owner.');
-    if(uid===ctx.uid){
-      const configured=await getDoc(`organizations/${ctx.orgId}/hr_access_rules/default`);
-      if(!hrMayAccess('self','skills',hrRules(configured?.data)))
-        throw new HttpError(403,'Employee skills self-service is disabled by the approved HR privacy policy.');
-    }
     await personnel(ctx,uid);
     return withLock(ctx.orgId,'hr_self_'+uid,async()=>{
       const kind=clean(ctx.body.kind,20);
@@ -178,7 +171,7 @@ export const hrEmployeeRoutes={
             const unchanged=prior&&!str(prior.levelCode)&&
               ['institution','qualification','field','completionYear'].every(key=>str(prior[key])===str(value[key as keyof typeof value]));
             if(!unchanged)throw new HttpError(400,'Select an educational level and qualification from the legal-entity master.');
-          }else await checkEducationEntry(ctx.orgId,uid,value);
+          }else await checkEducationEntry(ctx.orgId,uid,value,ctx.role==='org_super_admin'&&uid===ctx.uid);
         }
       }
       await writeDoc(path,{...old?.data,[kind]:values,updatedAt:nowIso(),updatedBy:ctx.uid});
