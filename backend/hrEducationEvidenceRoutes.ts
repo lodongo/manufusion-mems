@@ -140,7 +140,7 @@ export const hrEducationEvidenceRoutes={
   if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'HRM.records.verify'))
    throw new HttpError(403,'HR records verifier permission required.');
   const entries=(await listDocs(queue(ctx.orgId)))
-   .filter(x=>str(x.data.status)==='pending'&&str(x.data.employeeUid)!==ctx.uid);
+   .filter(x=>str(x.data.status)==='pending'&&str(x.data.employeeUid)!==ctx.uid&&str(x.data.uploadedBy)!==ctx.uid);
   const uids=[...new Set(entries.map(x=>str(x.data.employeeUid)))];
   const docs=await Promise.all(uids.map(uid=>person(ctx,uid).catch(()=>null)));
   const people=new Map(docs.filter((x):x is NonNullable<typeof x>=>x!==null).map(x=>[x.id,x]));
@@ -169,6 +169,8 @@ export const hrEducationEvidenceRoutes={
   const existing=await getDoc(path),q=await getDoc(idx);
   if(!existing||!q||str(existing.data.status)!=='pending'||str(q.data.status)!=='pending')
    throw new HttpError(409,'Only pending evidence can be reviewed.');
+  if(str(existing.data.uploadedBy)===ctx.uid)
+   throw new HttpError(403,'The uploader cannot independently verify their own submission.');
   const record=await getDoc('organizations/'+ctx.orgId+'/hr_private/'+uid);
   const qualifications=Array.isArray(record?.data.education)?record.data.education.filter(isObj):[];
   if(!qualifications.some(x=>str(x.id)===str(existing.data.educationId)))
