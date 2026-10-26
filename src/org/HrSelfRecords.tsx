@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, X, Save, LockKeyhole } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { SelectField } from '../components/ui';
 import HrEducationRecords from './HrEducationRecords';
+import type {EducationHeadline} from './hrProfileSummary';
 
 type Education={id:string;institution:string;qualification:string;field:string;completionYear:string;levelCode:string;qualificationCode:string;gradingSystemCode:string;gradeCode:string};
 type EducationConfig={levels:Array<{code:string;name:string;enabled:boolean;rank:number}>;qualifications:Array<{code:string;levelCode:string;name:string;enabled:boolean}>};
@@ -10,7 +11,7 @@ type Family={id:string;name:string;relationship:string;phone:string};
 type Kind='education'|'family';
 const input='h-11 w-full rounded-xl border border-line bg-page px-3 text-base text-ink';
 const btn='flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold';
-export default function HrSelfRecords(props:{kind:Kind;employeeUid:string;readOnly?:boolean;onEducationChange?:(qualification:string)=>void}){
+export default function HrSelfRecords(props:{kind:Kind;employeeUid:string;readOnly?:boolean;onEducationChange?:(value:EducationHeadline)=>void}){
  return props.kind==='education'
   ?<HrEducationRecords employeeUid={props.employeeUid} readOnly={props.readOnly} onEducationChange={props.onEducationChange}/>
   :<HrFamilyRecords employeeUid={props.employeeUid} readOnly={props.readOnly}/>;

@@ -14,10 +14,12 @@ import HrLeavePanel from './HrLeavePanel';
 import HrRoleSkillFit, {type SkillFit} from './HrRoleSkillFit';
 import HrRoleSkillRequirements from './HrRoleSkillRequirements';
 import HrProfileOverview from './HrProfileOverview';
+import {rankEducation} from './hrEducationSort';
+import type {EducationHeadline,OperatingUnit} from './hrProfileSummary';
 
 type Deployment = {nodeId:string;location:string;level:string;positionCode:string;positionTitle:string;startDate:string;endDate:string;siteId:string};
 type EmployeeRole = {code:string;title:string;description:string;reportsToCode:string;operatingLevel:string;requiredSkillCodes:string[]};
-type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;department:string;site:string;photoUrl?:string;directManager?:{name:string;role:string;status:"resolved"|"unassigned"|"ambiguous"};};
+type Profile = {uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;department:string;site:string;operatingScope?:OperatingUnit;photoUrl?:string;directManager?:{name:string;role:string;status:"resolved"|"unassigned"|"ambiguous"};};
 type PortalData = {profile:Profile;deployments:Deployment[];roles:EmployeeRole[];requiredSkills:string[];skillFit:SkillFit;access:{scope:string;readOnlyTabs:string[];allowedTabs:string[];selfServiceTabs:string[];isOwnRecord:boolean}};
 type TabKey = 'basic'|'education'|'family'|'skills'|'roleSkills'|'deployment'|'records'|'roles'|'payslips'|'talent'|'leave'|'capability'|'performance'|'learning'|'history';
 const TABS:{key:TabKey;label:string;Icon:LucideIcon}[]=[
@@ -57,7 +59,7 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
  const [error,setError]=useState('');
  const [tab,setTab]=useState<TabKey>('basic');
  const [reportees,setReportees]=useState<number>(0);
- const [qualification,setQualification]=useState('');
+ const [qualification,setQualification]=useState<EducationHeadline>({qualification:'',field:''});
  const back=()=>navigate(reporteeView?'organization_home/hr/HR01/reportees':'organization_home/hr/'+origin);
  const refreshFit=async()=>{
   const updated=await callBackend<PortalData>('/api/org/hr/employee/portal',{uid});
@@ -74,17 +76,16 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
  useEffect(()=>{
   if(!selfView)return;
   let active=true;
+  setQualification({qualification:'',field:''});
+  setReportees(0);
   callBackend<{employees:Array<{uid:string}>}>('/api/org/hr/reportees').then(r=>{if(active)setReportees(r.employees.length)}).catch(()=>{});
   Promise.all([
-   callBackend<{education:Array<{qualification?:string;levelCode?:string;completionYear?:string}>}>('/api/org/hr/private/get',{uid}),
+   callBackend<{education:Array<{id:string;qualification:string;field:string;levelCode?:string;completionYear?:string}>}>('/api/org/hr/private/get',{uid}),
    callBackend<{config:{levels:Array<{code:string;rank:number}>}|null}>('/api/org/hr/education/config',{uid}),
   ]).then(([records,settings])=>{
    if(!active)return;
-   const ranks=new Map((settings.config?.levels||[]).map(level=>[level.code,level.rank]));
-   const highest=(records.education||[]).slice().sort((a,b)=>
-    (ranks.get(b.levelCode||'')||0)-(ranks.get(a.levelCode||'')||0)||
-    (b.completionYear||'').localeCompare(a.completionYear||''))[0];
-   setQualification(highest?.qualification||'');
+   const highest=rankEducation(records.education||[],settings.config?.levels||[])[0]?.record;
+   setQualification({qualification:highest?.qualification||'',field:highest?.field||''});
   }).catch(()=>{});
   return()=>{active=false};
  },[uid,selfView]);

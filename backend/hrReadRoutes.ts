@@ -159,6 +159,10 @@ export const hrReadRoutes = {
       };
       const departmentId=ancestors.find(id=>str(nodes.get(id)?.level)==='department');
       const siteId=ancestors.find(id=>str(nodes.get(id)?.level)==='site');
+      const operatingScope={
+        name:deployments[0]?.location||'',
+        level:deployments[0]?.level||'',
+      };
       return {
         profile: {
           uid, name:[str(employee.data.firstName),str(employee.data.lastName)].filter(Boolean).join(' '),
@@ -169,7 +173,7 @@ export const hrReadRoutes = {
           // signed URL after this employee has passed the HR access checks above.
           photoUrl:str(employee.data.photoPath).startsWith('users/'+uid+'/')
             ? await signedUrl(str(employee.data.photoPath)) : '',
-          department:str(nodes.get(departmentId||'')?.name),site:str(nodes.get(siteId||'')?.name),
+          department:str(nodes.get(departmentId||'')?.name),site:str(nodes.get(siteId||'')?.name),operatingScope,
         },
         deployments, roles, requiredSkills,
         skillFit:makeSkillFit(uid,employee.data,positions,skillDocs),

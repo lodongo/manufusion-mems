@@ -2,20 +2,22 @@ import {useEffect,useState} from 'react';
 import {BriefcaseBusiness, Building2, ChevronRight, GraduationCap, IdCard, MapPin, Target, UserRound, UserRoundCheck, Users} from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
 import type {SkillFit} from './HrRoleSkillFit';
+import {profileQualification,profileWorkplace,showReporteesCard,type EducationHeadline,type OperatingUnit} from './hrProfileSummary';
 import './hrEmployeePortal.css';
 
 export type HrOverviewProfile={
  uid:string;name:string;employeeNumber:string;status:string;primaryRole:string;primaryLocation:string;
- department:string;site:string;photoUrl?:string;
+ department:string;site:string;operatingScope?:OperatingUnit;photoUrl?:string;
  directManager?:{name:string;role:string;status:'resolved'|'unassigned'|'ambiguous'};
 };
 type Tone='rose'|'blue'|'violet'|'amber'|'teal'|'green';
-function Detail({label,value,Icon,tone}:{label:string;value?:string;Icon:LucideIcon;tone:Tone}){
+function Detail({label,value,subtitle,Icon,tone}:{label:string;value?:string;subtitle?:string;Icon:LucideIcon;tone:Tone}){
  return <div className={'hr-card__detail hr-card__detail--'+tone}>
   <span className="hr-card__detail-icon"><Icon size={17} aria-hidden="true"/></span>
   <div className="hr-card__detail-body">
    <span className="hr-card__detail-label">{label}</span>
    <strong className="hr-card__detail-value">{value?.trim()||'Not recorded'}</strong>
+   {subtitle?.trim()&&<span className="hr-card__detail-subtitle">{subtitle.trim()}</span>}
   </div>
  </div>;
 }
@@ -23,7 +25,7 @@ function Detail({label,value,Icon,tone}:{label:string;value?:string;Icon:LucideI
 export default function HrProfileOverview({
  profile,selfView,qualification,reportees,fit,canSeeSkills,canOpenRequiredSkills,onRequiredSkills,onReportees,
 }:{
- profile:HrOverviewProfile;selfView:boolean;qualification:string;reportees:number;fit?:SkillFit|null;
+ profile:HrOverviewProfile;selfView:boolean;qualification:EducationHeadline;reportees:number;fit?:SkillFit|null;
  canSeeSkills:boolean;canOpenRequiredSkills:boolean;onRequiredSkills:()=>void;onReportees:()=>void;
 }){
  const [photoError,setPhotoError]=useState(false);
@@ -34,6 +36,8 @@ export default function HrProfileOverview({
  const isActive=status.toLowerCase()==='active';
  const department=profile.department||profile.primaryLocation;
  const role=profile.primaryRole||'Position not assigned';
+ const highest=profileQualification(qualification);
+ const workplace=profileWorkplace(profile.site,profile.operatingScope);
  return <section aria-label="Employee overview" className="hr-card hr-card--compact">
   <div className="hr-card__hero">
    <div className="hr-card__identity">
@@ -56,9 +60,9 @@ export default function HrProfileOverview({
   </div>
   <div className="hr-card__content">
    <div className="hr-card__grid">
-    {selfView?<Detail label="Highest qualification" value={qualification} Icon={GraduationCap} tone="amber"/>:
+    {selfView?<Detail label="Highest qualification" value={highest.name} subtitle={highest.specialization} Icon={GraduationCap} tone="amber"/>:
       <Detail label="Assigned location" value={profile.primaryLocation} Icon={MapPin} tone="amber"/>}
-    <Detail label="Site" value={profile.site} Icon={MapPin} tone="teal"/>
+    <Detail label={workplace.label} value={workplace.name} Icon={MapPin} tone="teal"/>
    </div>
    <div className="hr-card__manager" aria-label="Direct manager">
     <span className="hr-card__manager-icon"><UserRoundCheck size={18} aria-hidden="true"/></span>
@@ -83,7 +87,7 @@ export default function HrProfileOverview({
     {canOpenRequiredSkills&&<button type="button" onClick={onRequiredSkills}
      aria-label="View required skills" className="hr-card__skills-open"><ChevronRight size={19} aria-hidden="true"/></button>}
    </div>}
-   {selfView&&<button type="button" className="hr-card__team" onClick={onReportees}>
+   {selfView&&showReporteesCard(reportees)&&<button type="button" className="hr-card__team" onClick={onReportees}>
     <span className="hr-card__team-icon"><Users size={19} aria-hidden="true"/></span>
     <span className="hr-card__team-copy"><span>My team</span><strong>Manage My Reportees</strong></span>
     <span className="hr-card__team-count"><strong>{reportees}</strong><span>Reportees</span></span>
