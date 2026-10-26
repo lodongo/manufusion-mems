@@ -95,10 +95,10 @@ export const hrReadRoutes = {
       const sitePermitted=hasPerm(ctx.directPermissions,'HRM.employee.site.read') &&
         assignments.some(a=>{const site=hrSiteOf(str(a.nodeId),nodes);return !!site && ownSiteIds.has(site);});
       const rules=await currentHrRules(ctx.orgId);
-      const directManager=!isSelf && (await managerFor(ctx,employee.data,nodes))===ctx.uid;
+      const isDirectManager=!isSelf && (await managerFor(ctx,employee.data,nodes))===ctx.uid;
       const indirectManager=rules.managerIndirectReports&&hasPerm(ctx.directPermissions,'HRM.manager.hierarchy.read') &&
         assignments.some(a=>underManagedRoot(str(a.nodeId),managed,nodes));
-      const managerPermitted=directManager||indirectManager;
+      const managerPermitted=isDirectManager||indirectManager;
       if(!isSelf && !isSuperAdmin && !sitePermitted && !managerPermitted)
         throw new HttpError(403,'Employee record outside your HR authorization scope.');
       // Use only the verified shared employee record, organization and job-role masters.
