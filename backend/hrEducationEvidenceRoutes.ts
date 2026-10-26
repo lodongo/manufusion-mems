@@ -23,7 +23,7 @@ const meta=(org:string,uid:string,id:string)=>dir(org,uid)+'/'+id;
 const queue=(org:string)=>'organizations/'+org+'/hr_evidence_queue';
 const mapOut=(doc:{id:string;data:Record<string,unknown>})=>({
  id:doc.id,employeeUid:str(doc.data.employeeUid),educationId:str(doc.data.educationId),
- documentType:str(doc.data.documentType),name:str(doc.data.name),mime:str(doc.data.mime),
+ documentType:str(doc.data.documentType),name:str(doc.data.name),qualificationName:str(doc.data.qualificationName),qualificationField:str(doc.data.qualificationField),mime:str(doc.data.mime),
  size:Number(doc.data.size)||0,sha256:str(doc.data.sha256),status:str(doc.data.status)||'pending',
  uploadedAt:str(doc.data.uploadedAt),uploadedBy:str(doc.data.uploadedBy),
  reviewedAt:str(doc.data.reviewedAt),reviewedBy:str(doc.data.reviewedBy),
@@ -99,7 +99,8 @@ export const hrEducationEvidenceRoutes={
    throw new HttpError(400,'File contents do not match the selected document type.');
   const record=await getDoc('organizations/'+ctx.orgId+'/hr_private/'+uid);
   const qualifications=Array.isArray(record?.data.education)?record.data.education.filter(isObj):[];
-  if(!qualifications.some(q=>str(q.id)===educationId))
+  const qualification=qualifications.find(q=>str(q.id)===educationId);
+  if(!qualification)
    throw new HttpError(409,'Save the qualification before attaching documents.');
   const existing=await listDocs(dir(ctx.orgId,uid));
   if(existing.length>=150||existing.filter(x=>str(x.data.educationId)===educationId).length>=20)
@@ -108,7 +109,7 @@ export const hrEducationEvidenceRoutes={
   const storagePath='organizations/'+ctx.orgId+'/hr_evidence/'+uid+'/'+id+'.'+format.ext;
   const [saved]=await storage.writeImmutable([{path:storagePath,content:raw,contentType:mime}]);
   if(!saved)throw new HttpError(502,'Could not store the document securely.');
-  const info={employeeUid:uid,educationId,documentType:type,name,mime,size:bytes.length,
+  const info={employeeUid:uid,educationId,documentType:type,name,qualificationName:str(qualification.qualification),qualificationField:str(qualification.field),mime,size:bytes.length,
    sha256:createHash('sha256').update(bytes).digest('hex'),status:'pending',
    uploadedBy:ctx.uid,uploadedAt:nowIso(),storagePath,reviewedBy:'',reviewedAt:'',reviewNote:''};
   const committed=await commitChecked([

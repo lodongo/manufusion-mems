@@ -4,7 +4,7 @@ import {callBackend} from '../lib/backend';
 import './hrEvidence.css';
 
 export type HrEvidenceFile={
- id:string;employeeUid:string;educationId:string;documentType:string;name:string;
+ id:string;employeeUid:string;educationId:string;documentType:string;name:string;qualificationName?:string;qualificationField?:string;
  mime:string;size:number;sha256:string;status:string;uploadedAt:string;uploadedBy:string;
  reviewedAt:string;reviewedBy:string;reviewNote:string;employeeName?:string;
 };
@@ -128,7 +128,7 @@ export default function HrEvidenceRecords({employeeUid,qualifications,reviewer=f
    allowReview={reviewer&&viewerUid!==file.employeeUid}
    qualificationName={education.get(file.educationId)?
     [education.get(file.educationId)?.qualification,education.get(file.educationId)?.field].filter(Boolean).join(' · '):
-    'Qualification not available — record retained'}/>)}
+    [file.qualificationName,file.qualificationField].filter(Boolean).join(' · ')||'Qualification not available — record retained'}/>)}
   {reviewer&&<div className="hr-evidence__queue">
    <button type="button" onClick={()=>setShowQueue(!showQueue)} className="hr-evidence__queue-toggle">
     <ClipboardCheck size={19}/> HR verification inbox ({queue.length}) <span>{showQueue?'Hide':'Show'}</span>
