@@ -67,7 +67,7 @@ function List() {
             // Each call rechecks current permissions, maker-checker, ledger account validity and version.
             for(const req of candidates){
                 try{
-                    await callBackend(`${FIN_API}/requests/decide`,{id:req.id,decision:'approve',acknowledge:true,reason:`Bulk GL configuration review: ${reason}`.slice(0,300)});
+                    await callBackend(`${FIN_API}/requests/decide`,{id:req.id,decision:'approve',acknowledge:true,bulkFinanceMapping:true,reason:`Bulk GL configuration review: ${reason}`.slice(0,300)});
                     successful++;
                 }catch(e){failed.push(`${req.id}: ${e instanceof Error?e.message:'Approval refused'}`);}
             }
