@@ -1395,7 +1395,7 @@ export const handler = router(recordWiredRoutes({
                     hasDefault: !!def,
                     loadedAt: str(list?.loadedAt) || str(doc?.data.loadedAt),
                     updatedAt: str(list?.updatedAt),
-                    items: list && Array.isArray(list.items) ? (list.items as Plain[]).filter(isObj) : [],
+                    items: mergeIndustryReferenceLists(list?[list]:[],METADATA_LISTS).find(x=>x.key===target.listKey)?.items ?? (list && Array.isArray(list.items) ? (list.items as Plain[]).filter(isObj) : []),
                 };
             }
             const doc = await getDoc(REF[target.key]);
@@ -1495,7 +1495,7 @@ export const handler = router(recordWiredRoutes({
             let detail: string;
             if (op === 'add') {
                 const label = text(ctx.body, 'label', 1, 80, 'Enter a label of 1 to 80 characters.');
-                if (entries.length >= 500) throw new HttpError(400, 'A list can hold up to 500 entries.');
+                if (entries.length >= (target.listKey === 'industries' ? 3000 : 500)) throw new HttpError(400, 'This reference list has reached its configured capacity.');
                 if (entries.some((e) => str(e.label).toLowerCase() === label.toLowerCase())) throw new HttpError(409, 'An entry with this label already exists.');
                 let code: string;
                 let entry: Obj;
@@ -1505,11 +1505,13 @@ export const handler = router(recordWiredRoutes({
                     const parent = (Array.isArray(categories?.items) ? (categories.items as Plain[]) : []).filter(isObj)
                         .find((i) => str(i.code) === categoryCode && i.active !== false);
                     if (!parent) throw new HttpError(400, 'Select a valid, enabled industry category first.');
-                    const largest = entries.filter((e) => str(e.categoryCode) === categoryCode)
-                        .map((e) => Number(/^IND-[A-Z0-9]+-(\d{3})$/.exec(str(e.code))?.[1] ?? 0))
-                        .reduce((max, n) => Math.max(max, n), 0);
-                    if (largest >= 999) throw new HttpError(400, 'This industry category has no available subcategory codes.');
-                    code = `${categoryCode}-${String(largest + 1).padStart(3, '0')}`;
+                    // Reserve 501-999 for published ISIC class choices; manual specialist codes
+                    // remain within the original 001-499 range to prevent collisions.
+                    const existingCodes=new Set(entries.map(e=>str(e.code)));
+                    let next=1;
+                    while(next<=499&&existingCodes.has(`${categoryCode}-${String(next).padStart(3, '0')}`))next++;
+                    if(next>499)throw new HttpError(400, 'This industry category has no remaining local specialist codes.');
+                    code=`${categoryCode}-${String(next).padStart(3, '0')}`;
                     entry = { code, label, categoryCode, isicSection: str(parent.isicSection), active: true };
                 } else if (target.listKey === 'industryCategories') {
                     code = str(ctx.body.code).trim().toUpperCase();
