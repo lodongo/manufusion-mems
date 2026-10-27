@@ -8,6 +8,8 @@ export function catalogueFinanceSummary(value:unknown){
  const classification=obj(accounting.catalogueClassification),determination=obj(item.accountDetermination);
  const routes=arr(resolution.transactionRoutes);
  return {
+  industryScope:item.industryScope==='INDUSTRY_SPECIFIC'?'INDUSTRY_SPECIFIC':'COMMON',
+  industryCodes:Array.isArray(item.industryCodes)?item.industryCodes.filter(v=>typeof v==='string'):[],
   mappingStatus:str(resolution.mappingStatus)||str(determination.mappingStatus)||'not_configured',
   glRouteCount:routes.length,
   primaryGlCode:str(routes[0]?.glCode),
@@ -44,6 +46,10 @@ export function catalogueFinanceErrors(kind:'materials'|'services'|'gl_accounts'
  const errors:string[]=[];
  for(const raw of entries){
   const x=obj(raw),code=str(x.code)||'(unknown)';
+  if(integrated){
+   if(x.industryScope!==undefined&&!['COMMON','INDUSTRY_SPECIFIC'].includes(str(x.industryScope)))errors.push(code+': invalid industry scope.');
+   if(x.industryScope==='INDUSTRY_SPECIFIC'&&(!Array.isArray(x.industryCodes)||!x.industryCodes.length||x.industryCodes.some(c=>typeof c!=='string'||!/^IND-[A-V](-[0-9]{3})?$/.test(c))))errors.push(code+': industry-specific record requires valid industry codes.');
+  }
   if(kind==='gl_accounts'){
    if(typeof x.usedInProcurement!=='boolean'||typeof x.usedInBudget!=='boolean'||typeof x.usedInProcurementPosting!=='boolean')
     errors.push(code+': procurement/budget/posting fields must be booleans.');

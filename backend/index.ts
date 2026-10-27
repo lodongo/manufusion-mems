@@ -1,6 +1,7 @@
 import { router, json, storage } from './platform/sdk';
 import { recordWiredRoutes } from './transactionRuntime';
 import { AFRICAN_COUNTRIES, CURRENCIES, METADATA_LISTS, PUBLIC_EMAIL_DOMAINS } from './defaults';
+import { mergeIndustryReferenceLists } from './industryCatalog';
 import { DEFAULT_MODULES, FEATURE_ICONS, MODULE_CATEGORIES, SITE_DEFAULTS } from './catalog';
 import { STOCK_META_BY_KEY } from './stockPolicyConfig';
 import {
@@ -615,7 +616,7 @@ export const handler = router(recordWiredRoutes({
                 loaded: !!countries && !!currencies && !!metadata,
                 countries: listItems(countries),
                 currencies: listItems(currencies),
-                metadataLists: listItems(metadata),
+                metadataLists: mergeIndustryReferenceLists(listItems(metadata),METADATA_LISTS),
                 ratesUpdatedAt: str(currencies?.data.ratesUpdatedAt),
                 ratesSource: str(currencies?.data.ratesSource),
             };

@@ -94,3 +94,27 @@ export function industryAdoptionRecommendation(entry:IndustryScopedEntry,industr
   availableForManualAdoption:true,explicitOverrideRequired:!matched,
   reason:scope==='COMMON'?'COMMON':matched?'INDUSTRY_MATCH':'INDUSTRY_NOT_MATCHED'};
 }
+
+/** Merge published MEMS industry reference additions into the existing registration
+ * metadata read model, retaining saved labels, active flags, and custom codes.
+ * This does not mutate Firestore or alter a registered tenant. */
+export function mergeIndustryReferenceLists(saved:unknown[], defaults:unknown[]):Record<string,unknown>[] {
+ const toRecord=(v:unknown):Record<string,unknown>=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:{};
+ const toList=(v:unknown)=>Array.isArray(v)?v.map(toRecord):[];
+ const kinds=new Set(['industryCategories','industries','industryDivisions','industryGroups','industryClasses']);
+ const result=saved.map(toRecord).map(list=>{
+  const key=String(list.key??'');
+  if(!kinds.has(key))return list;
+  const def=defaults.map(toRecord).find(x=>x.key===key);
+  if(!def)return list;
+  const items=toList(list.items);
+  const existing=new Set(items.map(x=>String(x.code??'')));
+  return {...list,items:[...items,...toList(def.items).filter(x=>!existing.has(String(x.code??'')))]};
+ });
+ const existingKeys=new Set(result.map(x=>String(x.key??'')));
+ for(const v of defaults){
+  const d=toRecord(v),key=String(d.key??'');
+  if(kinds.has(key)&&!existingKeys.has(key))result.push(d);
+ }
+ return result;
+}

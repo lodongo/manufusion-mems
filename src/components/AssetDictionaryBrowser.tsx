@@ -10,6 +10,7 @@ import { Badge, Button, Card, Spinner, useLoad } from '../admin/kit';
 
 export interface FinancialCatalogueInfo {
  mappingStatus:string; glRouteCount:number; primaryGlCode:string; majorBranch:string;
+ industryScope?:'COMMON'|'INDUSTRY_SPECIFIC'; industryCodes?:string[]; industryRecommended?:boolean;
  storesClassCode:string; storesClassName:string; determinationMode?:string;
  accountPurpose?:string; costObjectRequirement?:string; legalEntityApplicability?:string;
  corporateApplicability?:string; classificationEvidence?:string; materialNumberPattern?:string;
@@ -187,6 +188,8 @@ export default function AssetDictionaryBrowser({
             { key: 'financialBranch', label: 'MRO / Non-MRO', value: (r) => r.financial?.majorBranch||'' },
             { key: 'storesClass', label: 'Stores class', value: (r) => r.financial?.storesClassCode||'' },
             { key: 'gl', label: 'Primary reference GL', value: (r) => r.financial?.primaryGlCode||'' },
+            { key:'industry',label:'Industry scope',value:r=>r.financial?.industryScope||'COMMON' },
+            { key:'industryCodes',label:'Industry codes',value:r=>(r.financial?.industryCodes??[]).join(', ') },
             { key: 'mapping', label: 'GL mapping status', value: (r) => r.financial?.mappingStatus||'not_configured' },
             { key: 'procurement', label: 'In procurement', value: (r) => eligible(r.financial?.usedInProcurement), hidden: true },
             { key: 'budget', label: 'In budgets', value: (r) => eligible(r.financial?.usedInBudget), hidden: true },
@@ -301,6 +304,7 @@ export default function AssetDictionaryBrowser({
                                             {item.financial?.majorBranch && <Badge>{item.financial.majorBranch} · {item.financial.storesClassCode}</Badge>}
                                             {item.financial && <Badge tone={item.financial.mappingStatus==='finance_review_required'||item.financial.mappingStatus==='not_configured'?'warn':'muted'}>{financialStatus(item.financial.mappingStatus)}</Badge>}
                                             {item.financial?.primaryGlCode && <Badge>GL {item.financial.primaryGlCode}</Badge>}
+                                            {item.financial && <Badge>{item.financial.industryScope==='INDUSTRY_SPECIFIC' ? 'Industry-specific · '+(item.financial.industryCodes??[]).join(', ') : 'Common across industries'}</Badge>}
                                         </span>
                                     </span>
                                     <ChevronRight className='mt-1 h-4 w-4 shrink-0 text-slate-500' />
@@ -380,6 +384,8 @@ function ClassView({
                     <div className='grid grid-cols-2 gap-2 text-xs'>
                         {[
                             ['Mapping status',financialStatus(data.financial?.mappingStatus||'not_configured')],
+                            ['Industry scope',data.financial?.industryScope==='INDUSTRY_SPECIFIC'?'Industry-specific':'Common'],
+                            ['Industry codes',(data.financial?.industryCodes??[]).join(', ')||'All industries'],
                             ['MRO / Non-MRO',data.financial?.majorBranch||'Not applicable'],
                             ['Stores class',data.financial?.storesClassName||'Not configured'],
                             ['Account purpose',data.financial?.accountPurpose||'Not specified'],

@@ -36,3 +36,13 @@ test('Class explorer exposes the financial summary and full routing details',asy
  assert.match(view,/usedInProcurement/);
  assert.match(view,/majorBranch/);
 });
+
+test('industry classification fields survive the financial explorer contract',()=>{
+ const source={code:'X1',industryScope:'INDUSTRY_SPECIFIC',industryCodes:['IND-Q'],accounting:{glResolution:{mappingStatus:'reference_proposed',transactionRoutes:[{event:'purchase',glCode:'61901130'}]}}};
+ const result=catalogueFinanceSummary(source);
+ assert.equal(result.industryScope,'INDUSTRY_SPECIFIC');
+ assert.deepEqual(result.industryCodes,['IND-Q']);
+ assert.deepEqual(catalogueFinanceErrors('services',[source],true),[]);
+ const invalid={...source,industryCodes:[]};
+ assert.match(catalogueFinanceErrors('services',[invalid],true).join(' '),/industry codes/);
+});

@@ -33,6 +33,8 @@ import {
 import { audit } from './audit';
 import { allocateOrgCode, isTokenStale, publicRoute, releaseStaleDomainClaim, secure, staff, type SecureContext, type StaffContext } from './guards';
 import { seedOrgRoles } from './org';
+import { METADATA_LISTS } from './defaults';
+import { mergeIndustryReferenceLists, INDUSTRY_TAXONOMY_VERSION } from './industryCatalog';
 import { buildTheme, readBranding } from './branding';
 
 // Staged organization registration.
@@ -73,7 +75,7 @@ async function loadRefs(): Promise<Refs> {
     const items = (doc: Doc) => (Array.isArray(doc.data.items) ? (doc.data.items as Plain[]).filter(isObj) : []);
     const countries = items(c);
     const currencies = items(cur);
-    const lists = items(m);
+    const lists = mergeIndustryReferenceLists(items(m),METADATA_LISTS);
     const blocked = new Set((Array.isArray(d.data.items) ? (d.data.items as Plain[]) : []).map((x) => str(x).toLowerCase()));
     return {
         blocked,
@@ -183,12 +185,16 @@ function readOrganization(b: Record<string, unknown>, refs: Refs): Fields {
     if (str(refs.entry('industries', industry)?.categoryCode) !== industryCategory) {
         throw new HttpError(400, 'The industry subcategory must belong to the selected industry category.');
     }
+    const industryEntry=refs.entry('industries',industry);
     const companySize = pick(b, 'companySize', refs.codes('companySizes'), 'Choose a company size from the list.');
     const currencyCode = str(b.currencyCode);
     if (!refs.currency(currencyCode)) throw new HttpError(400, 'Choose a base currency from the list.');
     const website = str(b.website).trim();
     if (website && (website.length > 200 || !/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}(\/[^\s]*)?$/i.test(website))) throw new HttpError(400, 'The website must start with https://');
-    return { name, legalEntityType, industryCategory, industry, industrySubcategory: industry, companySize, currencyCode, website };
+    return { name, legalEntityType, industryCategory, industry, industrySubcategory: industry,
+      industryIsicDivision:String(industryEntry?.isicDivision??''),industryIsicGroup:String(industryEntry?.isicGroup??''),
+      industryIsicClass:String(industryEntry?.isicClass??''),industryTaxonomyVersion:INDUSTRY_TAXONOMY_VERSION,
+      companySize, currencyCode, website };
 }
 
 function readRegistration(b: Record<string, unknown>, refs: Refs): Fields {
@@ -567,6 +573,8 @@ export const applicationRoutes = {
                 industryCategory: org.industryCategory,
                 industry: org.industry,
                 industrySubcategory: org.industry,
+                industryIsicDivision:org.industryIsicDivision??'',industryIsicGroup:org.industryIsicGroup??'',
+                industryIsicClass:org.industryIsicClass??'',industryTaxonomyVersion:org.industryTaxonomyVersion??'',
                 companySize: org.companySize,
                 currencyCode: org.currencyCode,
                 website: org.website ?? '',
