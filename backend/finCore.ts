@@ -1,3 +1,4 @@
+import { industryAdoptionRecommendation } from './industryCatalog';
 import {resolveAccountRule,validateRuleDraft,type AccountRule,type DeterminationContext} from './finAccountRules';
 import { createHash } from 'crypto';
 import { POSTING_EVENTS } from './finPostingCatalogue';
@@ -1121,6 +1122,7 @@ export function chartEntry(leId: string, a: Obj): Obj {
         postingMode: str(a.postingMode),
         statement: statementOf(a),
         postable: postableOf(a),
+        industryScope:str(a.industryScope)||'COMMON',industryCodes:strs(a.industryCodes),
         params: objs(a.params) as unknown as Obj,
         status: 'active',
         hasPostings: false,
@@ -1129,9 +1131,9 @@ export function chartEntry(leId: string, a: Obj): Obj {
 }
 const chartSynced = new Map<string, string>();
 /**
- * Every legal entity's chart holds every active account of the MEMS GL master, active and approved by default (a
- * system approval, recorded on each account and in the audit trail). Accounts later removed through an approved
- * request stay out. Runs again when the master version changes; existing accounts are never overwritten.
+ * Legal entity default charts adopt common and registered-industry-matching GL accounts (a
+ * system approval, recorded on each account and in the audit trail). Other accounts remain available via
+ * Finance-approved adoption. Runs on master-version updates; existing accounts are never overwritten.
  */
 export async function syncDefaultChart(orgId: string, leId: string, ctx?: OrgContext): Promise<number> {
     let m: Awaited<ReturnType<typeof glMaster>> = null;
@@ -1143,14 +1145,18 @@ export async function syncDefaultChart(orgId: string, leId: string, ctx?: OrgCon
     if (!m || !leId) return 0;
     const key = `${orgId}|${leId}`;
     if (chartSynced.get(key) === m.version) return 0;
-    const [chart, ent] = await Promise.all([chartOf(orgId, leId), getDoc(P(orgId).entity(leId))]);
+    const [chart, ent, organization] = await Promise.all([chartOf(orgId, leId), getDoc(P(orgId).entity(leId)),getDoc('organizations/'+orgId)]);
+    const registeredIndustry=str(organization?.data.industry);
     const removed = new Set(strs(ent?.data.removedGl));
     const at = nowIso();
     const writes: Write[] = [];
     for (const a of m.accounts) {
         const code = str(a.code);
         if (!code || chart.has(code) || removed.has(code)) continue;
-        writes.push({ path: P(orgId).account(leId, code), exists: false, fields: { ...chartEntry(leId, a), adoptedBy: 'system', approvedBy: 'system', approvedBySystem: true, approvalNote: 'Approved by default: every MEMS GL account is active in each legal entity', adoptedAt: at, masterVersion: m.version } });
+        // Industry applicability is an adoption default, not permission to rewrite historical charts.
+        // Existing adopted entries and Finance-approved explicit requests remain untouched.
+        if (!industryAdoptionRecommendation({industryScope:str(a.industryScope),industryCodes:strs(a.industryCodes)},registeredIndustry).enabledByDefault) continue;
+        writes.push({ path: P(orgId).account(leId, code), exists: false, fields: { ...chartEntry(leId, a), adoptedBy: 'system', approvedBy: 'system', approvedBySystem: true, approvalNote: 'Default adoption: common or registered-industry-matching MEMS GL account', adoptedAt: at, masterVersion: m.version } });
     }
     let added = 0;
     for (let i = 0; i < writes.length; i += 400) {
@@ -1164,7 +1170,7 @@ export async function syncDefaultChart(orgId: string, leId: string, ctx?: OrgCon
         }
     }
     chartSynced.set(key, m.version);
-    if (added && ctx) await record(ctx, 'org.fin.chart.default', leId, `${added} MEMS GL account(s) added to the chart, active and approved by default (master version ${m.version}).`);
+    if (added && ctx) await record(ctx, 'org.fin.chart.default', leId, `${added} common/industry-matching MEMS GL account(s) added to chart by default (master version ${m.version}).`);
     return added;
 }
 
