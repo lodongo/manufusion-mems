@@ -30,7 +30,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
         a[c || 'UNCLASSIFIED'] = (a[c || 'UNCLASSIFIED'] || 0) + 1;
         return a;
     }, {} as Record<string, number>), [rows, kind]);
-    const industryCounts = useMemo(() => rows.reduce((acc,item) => {
+    const industryCounts = useMemo(() => rows.reduce<Record<string,number>>((acc,item) => {
         const key=item.industryScope==='INDUSTRY_SPECIFIC'?'INDUSTRY_SPECIFIC':'COMMON';
         acc[key]=(acc[key]||0)+1;
         return acc;
@@ -78,7 +78,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                             <Badge>{rows.length.toLocaleString()} entries</Badge>
                             <Badge tone={missingRoutes ? 'warn' : 'muted'}>{missingRoutes} entries missing financial contract</Badge>
                             {branchCounts && Object.entries(branchCounts).map(([branch, count]) => <Badge key={branch}>{branch}: {Number(count)}</Badge>)}
-                            {Object.entries(industryCounts).map(([scope,count])=><Badge key={scope}>{scope==='COMMON'?'Common':'Industry-specific'}: {count}</Badge>)}
+                            {Object.entries(industryCounts).map(([scope,count])=><Badge key={scope}>{scope==='COMMON'?'Common':'Industry-specific'}: {Number(count)}</Badge>)}
                         </div>
                         <label className='block text-sm text-slate-300'>
                             Search all draft entries
