@@ -151,6 +151,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                                         <p className='font-medium'>{display(r.event)} · {display(r.glCode)}</p>
                                         <p className='text-slate-300'>{display(r.glName)}</p>
                                         <p className='text-amber-300'>{display(r.status)} · {r.referenceOnlyNotDefaultExpense ? 'Maintenance context required' : 'Reference only until approved'}</p>
+                                        {Object.keys(obj(r.runtimeTransactionBinding)).length>0&&<p className='text-slate-300'>MEMS posting: {display(obj(r.runtimeTransactionBinding).memsPostingEvents)} · {display(obj(r.runtimeTransactionBinding).postingIntegrationState)} · {display(obj(r.runtimeTransactionBinding).registryAction)}</p>}
                                     </div>)}
                                 </div>}
                                 <details className='rounded-lg border border-slate-700 p-2'>
