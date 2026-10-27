@@ -409,8 +409,8 @@ registerHandler('coa.change', {
 async function maintenanceFinancialTypes():Promise<Array<{code:string;label:string}>>{
     const configured=await getDoc('module_workspaces/MNT/metadata/maintenanceTypes');
     const fallback=DEFAULT_MODULE_METADATA.MNT.find(x=>x.key==='maintenanceTypes')?.items??[];
-    const items=Array.isArray(configured?.data.items)?configured.data.items:fallback;
-    return items.filter(x=>x&&typeof x==='object'&&!Array.isArray(x))
+    const items:unknown[]=Array.isArray(configured?.data.items)?configured.data.items:fallback;
+    return items.filter((x):x is Record<string,unknown>=>!!x&&typeof x==='object'&&!Array.isArray(x))
         .map(x=>({code:str(x.code),label:str(x.label),enabled:x.active!==false&&x.selectable!==false}))
         .filter(x=>x.code&&x.enabled)
         .map(({code,label})=>({code,label}));
