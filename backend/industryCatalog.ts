@@ -1,5 +1,6 @@
+import { ISIC_REV5_ENTRIES } from './isicRev5Structure';
 /**
- * MEMS Industry Taxonomy v1 — ISIC Rev.5 section-aligned sector coverage.
+ * MEMS Industry Taxonomy v2 — ISIC Rev.5 section-aligned sector coverage.
  * Codes beginning IND- are MEMS identifiers, NOT official ISIC division/class codes.
  * Each subcategory has a permanent categoryCode for future interface/module templates.
  * Source baseline: https://unstats.un.org/unsd/classifications/Econ/isic
@@ -30,18 +31,66 @@ const SECTORS: ReadonlyArray<readonly [string, string, string]> = [
     ['V', "International and extraterritorial organizations", "United Nations and specialized agencies;Regional intergovernmental organizations;International financial and development institutions;International treaty and coordination bodies;Foreign diplomatic and consular missions;Other extraterritorial organizations and bodies"],
 ];
 
-export const INDUSTRY_CATEGORIES = SECTORS.map(([section, label]) => ({
-    code: `IND-${section}`, label, isicSection: section,
-    description: 'Broad economic activity category. MEMS code aligned by sector with ISIC Rev.5.',
-    active: true,
+
+/** Existing IND-X-NNN identifiers are retained. The UN's original four-digit class code
+ * is stored separately. The 500+ numeric suffix range is reserved for official class options. */
+const ISIC_SECTIONS=ISIC_REV5_ENTRIES.filter(x=>x.level==='Section');
+export const INDUSTRY_CATEGORIES=SECTORS.map(([section,legacyLabel])=>{
+ const official=ISIC_SECTIONS.find(x=>x.code===section);
+ return {code:'IND-'+section,label:official?.name??legacyLabel,isicSection:section,
+  legacyLabel,description:'UN ISIC Revision 5 section (MEMS industry registry code)',standard:'ISIC',revision:'5',active:true};
+});
+export const INDUSTRY_DIVISIONS=ISIC_REV5_ENTRIES.filter(x=>x.level==='Division').map(x=>({
+ code:'ISIC5-'+x.code,label:x.name,categoryCode:'IND-'+x.section,isicSection:x.section,
+ isicDivision:x.code,standard:'ISIC',revision:'5',active:true
 }));
+export const INDUSTRY_GROUPS=ISIC_REV5_ENTRIES.filter(x=>x.level==='Group').map(x=>({
+ code:'ISIC5-'+x.code,label:x.name,categoryCode:'IND-'+x.section,isicSection:x.section,
+ isicDivision:x.code.slice(0,2),isicGroup:x.code,standard:'ISIC',revision:'5',active:true
+}));
+export const INDUSTRY_CLASSES=ISIC_REV5_ENTRIES.filter(x=>x.level==='Class').map(x=>({
+ code:'ISIC5-'+x.code,label:x.name,categoryCode:'IND-'+x.section,isicSection:x.section,
+ isicDivision:x.code.slice(0,2),isicGroup:x.code.slice(0,3),isicClass:x.code,
+ standard:'ISIC',revision:'5',active:true
+}));
+const EXISTING_SUBCATEGORIES=SECTORS.flatMap(([section,,text])=>
+ text.split(';').map((label,index)=>({
+  code:'IND-'+section+'-'+String(index+1).padStart(3,'0'),label,categoryCode:'IND-'+section,
+  isicSection:section,source:'MEMS_LEGACY_SPECIALIST',active:true
+ })));
+/** Extend registration choices without changing any historical organization industry code. */
+const OFFICIAL_CLASS_CHOICES=ISIC_SECTIONS.flatMap(section=>
+ INDUSTRY_CLASSES.filter(c=>c.isicSection===section.code).map((c,index)=>({
+  ...c,code:'IND-'+section.code+'-'+String(index+501).padStart(3,'0'),
+  source:'UN_ISIC_REV5_CLASS',description:'ISIC Rev.5 class '+c.isicClass
+ })));
+export const INDUSTRY_SUBCATEGORIES=[...EXISTING_SUBCATEGORIES,...OFFICIAL_CLASS_CHOICES];
+export const INDUSTRY_TAXONOMY_VERSION='MEMS-IND-2.0';
+export const INDUSTRY_CLASSIFICATION_STANDARD={name:'ISIC',revision:'5',source:'https://unstats.un.org/unsd/classifications/Econ/isic',
+ sections:22,divisions:87,groups:258,classes:463,
+ kenyaNationalCrosswalk:'KeSIC derives from ISIC Rev.4; country-specific correspondence requires verified mapping'} as const;
 
-export const INDUSTRY_SUBCATEGORIES = SECTORS.flatMap(([section, , text]) =>
-    text.split(';').map((label, index) => ({
-        code: `IND-${section}-${String(index + 1).padStart(3, '0')}`,
-        label, categoryCode: `IND-${section}`, isicSection: section,
-        active: true,
-    }))
-);
-
-export const INDUSTRY_TAXONOMY_VERSION = 'MEMS-IND-1.0';
+/** Match a registered industry (legacy or official choice) to its immutable MEMS section. */
+export function industrySectionOf(code:string):string {
+ if(/^IND-[A-V]$/.test(code))return code;
+ const found=INDUSTRY_SUBCATEGORIES.find(x=>x.code===code);
+ if(found)return found.categoryCode;
+ if(/^ISIC5-[0-9]{2,4}$/.test(code)){
+  const record=ISIC_REV5_ENTRIES.find(x=>x.code===code.slice(6));
+  if(record)return 'IND-'+record.section;
+ }
+ return '';
+}
+export interface IndustryScopedEntry {industryScope?:string;industryCodes?:string[];}
+/** Nonmatching entries are *not recommended* for new adoption, never hidden or deleted.
+ * An administrator can explicitly adopt one under the existing approval permissions. */
+export function industryAdoptionRecommendation(entry:IndustryScopedEntry,industryCode:string){
+ const scope=entry.industryScope==='INDUSTRY_SPECIFIC'?'INDUSTRY_SPECIFIC':'COMMON';
+ const codes=Array.isArray(entry.industryCodes)?entry.industryCodes.filter(x=>typeof x==='string'):[];
+ const section=industrySectionOf(industryCode);
+ const matched=scope==='COMMON'||(!!section&&codes.some(code=>code===section||code===industryCode));
+ return {industryScope:scope,industryCodes:codes,registeredSectionCode:section,
+  recommended:matched,enabledByDefault:matched,
+  availableForManualAdoption:true,explicitOverrideRequired:!matched,
+  reason:scope==='COMMON'?'COMMON':matched?'INDUSTRY_MATCH':'INDUSTRY_NOT_MATCHED'};
+}

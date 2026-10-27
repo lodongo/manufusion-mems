@@ -1,4 +1,4 @@
-import { INDUSTRY_CATEGORIES, INDUSTRY_SUBCATEGORIES } from './industryCatalog';
+import { INDUSTRY_CATEGORIES, INDUSTRY_SUBCATEGORIES, INDUSTRY_DIVISIONS, INDUSTRY_GROUPS, INDUSTRY_CLASSES } from './industryCatalog';
 import { DOCUMENT_METADATA_LISTS } from './drkmsDefaults';
 // Default reference data for MEMS. Loaded into Firestore by the super admin.
 
@@ -206,6 +206,9 @@ export const METADATA_LISTS: MetaListDefault[] = [
         key: 'industries', title: 'Industry subcategories — MEMS global master',
         appliesTo: 'organization', items: INDUSTRY_SUBCATEGORIES,
     },
+    { key:'industryDivisions', title:'Industry divisions — UN ISIC Revision 5', appliesTo:'organization',items:INDUSTRY_DIVISIONS },
+    { key:'industryGroups', title:'Industry groups — UN ISIC Revision 5', appliesTo:'organization',items:INDUSTRY_GROUPS },
+    { key:'industryClasses', title:'Industry classes — UN ISIC Revision 5', appliesTo:'organization',items:INDUSTRY_CLASSES },
     metaList('companySizes', 'Company size', 'organization', [
         'Micro (1-9 employees)', 'Small (10-49 employees)', 'Medium (50-249 employees)',
         'Large (250-999 employees)', 'Enterprise (1000+ employees)',
