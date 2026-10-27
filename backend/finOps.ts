@@ -43,6 +43,8 @@ import {
 import { fin } from './finRoutes';
 import {commit, withLock} from './finCore';
 import {reservationForIssue,verifyMaintenanceStockLedger} from './maintenanceInventory';
+import { resolveAccountRule } from './finAccountRules';
+import { mroFinancialContext, originalMroIssueAccounts } from './mroGlDetermination';
 
 // ---------------------------------------------------------------------------
 // Operational events that post to the journal of a legal entity:
@@ -460,15 +462,24 @@ export const finOpsRoutes = {
                 const m = c.m;
                 const w = { materialId: m.id, qty: c.qty };
                 if(woId&&taskId) extra.push(...(await reservationForIssue(ctx.orgId,woId,taskId,m.id,wh,w.qty,gid)).writes);
-                const entry = mjEntry(m.id, wh, str(m.data.materialNumber), 'GOODS_ISSUE', -w.qty, gid, ctx.uid, { issueId: gid, costCenterId: ccId, workOrderId: woId, taskId, receivedBy, source: 'goods_issue' });
+                const mroContext=wo?mroFinancialContext(wo.data,taskId,m.data):null;
+                const entry = mjEntry(m.id, wh, str(m.data.materialNumber), 'GOODS_ISSUE', -w.qty, gid, ctx.uid, { issueId: gid, costCenterId: ccId, workOrderId: woId, taskId, receivedBy, source: 'goods_issue',
+                    ...(mroContext?{maintenanceTypeCode:mroContext.maintenanceTypeCode,storesCostNatureCode:mroContext.costNatureCode,maintenanceTypeSource:mroContext.source}:{}) });
                 const mjId = safeId(`GI_${gid}_${i + 1}`);
                 let value = 0;
+                let expenseGlCode='',inventoryGlCode='',mroRuleId='';
                 if (map) {
                     const v = await stockValOf(ctx.orgId, wh, m.id);
                     value = issueValue(v, w.qty);
                     const sdoc = await getDoc(P(ctx.orgId).stock(wh, m.id));
                     const inv = str(sdoc?.data.glCode) || roleAccount(map, 'INVENTORY', str(m.data.categoryCode),{event:woId?'GI_WO':'GI_CC',costCenterId:ccId});
-                    const exp = roleAccount(map, woId ? 'MAINT_CONSUMPTION' : 'CONSUMPTION', str(m.data.categoryCode),{event:woId?'GI_WO':'GI_CC',costCenterId:ccId});
+                    const context={event:woId?'GI_WO':'GI_CC',costCenterId:ccId,categoryCode:str(m.data.categoryCode),
+                        maintenanceTypeCode:mroContext?.maintenanceTypeCode||'',costNatureCode:mroContext?.costNatureCode||''};
+                    const exp = roleAccount(map, woId ? 'MAINT_CONSUMPTION' : 'CONSUMPTION', str(m.data.categoryCode),context);
+                    const matched=mroContext?resolveAccountRule(map.rules,'MAINT_CONSUMPTION',context):null;
+                    expenseGlCode=exp;inventoryGlCode=inv;mroRuleId=matched?.id||'';
+                    entry.expenseGlCode=exp;entry.inventoryGlCode=inv;
+                    if(mroContext)entry.accountDeterminationRuleId=mroRuleId;
                     const desc = `${str(m.data.materialNumber)} ${str(m.data.name)}: ${w.qty}`.slice(0, 200);
                     if (value > 0) {
                         lines.push({ side: 'D', glCode: exp, ccId, amount: value, description: desc, materialId: m.id, qty: w.qty });
@@ -477,14 +488,21 @@ export const finOpsRoutes = {
                     stock.push({ warehouseId: wh, materialId: m.id, materialNumber: str(m.data.materialNumber), qty: -w.qty, value: -value, expectedUpdateTime: v.updateTime, glCode: inv } as StockMove);
                     extra.push({ path: mjPath(ctx.orgId, mjId), exists: false, fields: entry });
                 } else extra.push({path:mjPath(ctx.orgId,mjId),fields:{...entry,financeNote:'Finance not live: not posted'},exists:false});
-                out.push({ no: i + 1, materialId: m.id, materialNumber: str(m.data.materialNumber), name: str(m.data.name), qty: w.qty, uom: str(m.data.baseUom) || str(m.data.uom), value, unitCost: w.qty ? round4(value / w.qty) : 0 });
+                out.push({ no: i + 1, materialId: m.id, materialNumber: str(m.data.materialNumber), name: str(m.data.name), qty: w.qty, uom: str(m.data.baseUom) || str(m.data.uom), value, unitCost: w.qty ? round4(value / w.qty) : 0,
+                    ...(map?{expenseGlCode,inventoryGlCode}:{}),
+                    ...(mroContext?{maintenanceTypeCode:mroContext.maintenanceTypeCode,maintenanceTypeLabel:mroContext.maintenanceTypeLabel,
+                       storesCostNatureCode:mroContext.costNatureCode,accountDeterminationRuleId:mroRuleId,maintenanceTypeSource:mroContext.source}:{}),
+                });
             }
             let journalId = '';
             const at = nowIso();
             const issueRecord: Obj = { id: gid, leId: info.le.id, warehouseId: wh, costCenterId: ccId, workOrderId: woId, taskId, ref, note, lines: out as unknown as Fields[keyof Fields], total: round2(out.reduce((s, x) => s + (Number(x.value) || 0), 0)), journalId:'', finance: info.state, issuedBy: ctx.uid, issuedByName: nameOf(ctx.me), receivedBy, receivedByName: nameOf(receiver), at };
             extra.push({path:`organizations/${ctx.orgId}/goods_issues/${gid}`,fields:issueRecord,exists:false});
             if (map && lines.length) {
-                const p = await post(ctx, { leId: info.le.id, type: woId ? 'GI_WO' : 'GI_CC', docCurrency: info.currency, fxRate: 1, lines, narrative: `Goods issue ${gid} from ${units.get(wh)?.code} to ${cc.code}${woId ? ` for ${woId}` : ''}`, source: { kind: 'goods_issue', id: gid, ref: ref, route: woId ? `organization_home/work_orders/${woId}` : '' }, trace: { issueId: gid, warehouseId: wh, costCenterId: ccId, workOrderId: woId, receivedBy: nameOf(receiver) }, sourceKey: `GI_${gid}`, stock, extra });
+                const p = await post(ctx, { leId: info.le.id, type: woId ? 'GI_WO' : 'GI_CC', docCurrency: info.currency, fxRate: 1, lines, narrative: `Goods issue ${gid} from ${units.get(wh)?.code} to ${cc.code}${woId ? ` for ${woId}` : ''}`, source: { kind: 'goods_issue', id: gid, ref: ref, route: woId ? `organization_home/work_orders/${woId}` : '' }, trace: { issueId: gid, warehouseId: wh, costCenterId: ccId, workOrderId: woId, taskId, receivedBy: nameOf(receiver),
+                    ...(wo?{maintenanceTypeCode:str(wo.data.maintenanceTypeCode),
+                      mroLines:out.map(x=>({materialId:str(x.materialId),expenseGlCode:str(x.expenseGlCode),inventoryGlCode:str(x.inventoryGlCode),
+                        maintenanceTypeCode:str(x.maintenanceTypeCode),storesCostNatureCode:str(x.storesCostNatureCode),accountDeterminationRuleId:str(x.accountDeterminationRuleId)}))}:{}) }, sourceKey: `GI_${gid}`, stock, extra });
                 journalId = p.id;
             } else {
                 const zeroStock:Write[]=[];
@@ -577,10 +595,17 @@ export async function postMaintenanceReturn(ctx:OrgContext,issue:Doc,line:Obj,qt
   if(info.state==='live'){
    const mapping=await mappingOf(ctx.orgId,info.le.id),material=await materialIn(ctx.orgId,materialId,wh);
    if(!material)throw new HttpError(409,'Returned material is not linked to the warehouse.');
-   const inv=roleAccount(mapping,'INVENTORY',str(material.data.categoryCode),{event:'GI_WO',costCenterId:str(issue.data.costCenterId)});
-   const exp=roleAccount(mapping,'MAINT_CONSUMPTION',str(material.data.categoryCode),{event:'GI_WO',costCenterId:str(issue.data.costCenterId)});
+   const context={event:'GI_WO',costCenterId:str(issue.data.costCenterId),categoryCode:str(material.data.categoryCode),
+      maintenanceTypeCode:str(line.maintenanceTypeCode),costNatureCode:str(line.storesCostNatureCode)};
+   const defaults={
+      inventoryGlCode:roleAccount(mapping,'INVENTORY',str(material.data.categoryCode),context),
+      expenseGlCode:roleAccount(mapping,'MAINT_CONSUMPTION',str(material.data.categoryCode),context)
+   };
+   const original=originalMroIssueAccounts(line,defaults.expenseGlCode,defaults.inventoryGlCode);
+   const inv=original.inventoryGlCode,exp=original.expenseGlCode;
    const v=await stockValOf(ctx.orgId,wh,materialId);
-   if(value>0)await post(ctx,{leId:info.le.id,type:'GI_WO',docCurrency:info.currency,fxRate:1,lines:[{side:'D',glCode:inv,ccId:wh,amount:value,description:'Unused maintenance material return',materialId,qty},{side:'C',glCode:exp,ccId:str(issue.data.costCenterId),amount:value,description:'Unused maintenance material return',materialId,qty:-qty}],narrative:'Return from '+str(issue.data.workOrderId),source:{kind:'goods_return',id:key,ref:issue.id,route:''},trace:{issueId:issue.id,taskId:str(issue.data.taskId)},sourceKey:'MRET_'+key,stock:[{warehouseId:wh,materialId,materialNumber:str(line.materialNumber),qty,value,expectedUpdateTime:v.updateTime,glCode:inv}],extra});
+   if(value>0)await post(ctx,{leId:info.le.id,type:'GI_WO',docCurrency:info.currency,fxRate:1,lines:[{side:'D',glCode:inv,ccId:wh,amount:value,description:'Unused maintenance material return',materialId,qty},{side:'C',glCode:exp,ccId:str(issue.data.costCenterId),amount:value,description:'Unused maintenance material return',materialId,qty:-qty}],narrative:'Return from '+str(issue.data.workOrderId),source:{kind:'goods_return',id:key,ref:issue.id,route:''},trace:{issueId:issue.id,taskId:str(issue.data.taskId),maintenanceTypeCode:str(line.maintenanceTypeCode),storesCostNatureCode:str(line.storesCostNatureCode),
+      originalExpenseGlCode:exp,originalInventoryGlCode:inv,usedOriginalIssueAccount:original.historicalExpenseAccount},sourceKey:'MRET_'+key,stock:[{warehouseId:wh,materialId,materialNumber:str(line.materialNumber),qty,value,expectedUpdateTime:v.updateTime,glCode:inv}],extra});
    else {const path=P(ctx.orgId).stock(wh,materialId),doc=await getDoc(path);await commit([...extra,{path,fields:{...(doc?.data||{}),warehouseId:wh,materialId,qtyM:(Number(doc?.data.qtyM)||0)+Math.round(qty*10000),valueC:Number(doc?.data.valueC)||0,glCode:inv,updatedAt:nowIso()},...(doc?{updateTime:doc.updateTime}:{exists:false})}]);}
   }else await commit(extra);
  });
