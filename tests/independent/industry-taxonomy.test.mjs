@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { INDUSTRY_CATEGORIES, INDUSTRY_SUBCATEGORIES, INDUSTRY_TAXONOMY_VERSION, INDUSTRY_DIVISIONS, INDUSTRY_GROUPS, INDUSTRY_CLASSES, industryAdoptionRecommendation, industrySectionOf } from '../../backend/industryCatalog.ts';
+import { INDUSTRY_CATEGORIES, INDUSTRY_SUBCATEGORIES, INDUSTRY_TAXONOMY_VERSION, INDUSTRY_DIVISIONS, INDUSTRY_GROUPS, INDUSTRY_CLASSES, industryAdoptionRecommendation, industrySectionOf, recommendProcurementCategories } from '../../backend/industryCatalog.ts';
 
 test('industry master covers every ISIC Revision 5 economic activity section', () => {
     assert.equal(INDUSTRY_TAXONOMY_VERSION, 'MEMS-IND-2.0');
@@ -43,4 +43,33 @@ test('Industry-specific catalogue entry is off by default for unmatched register
  assert.equal(unmatched.availableForManualAdoption,true);
  assert.equal(industryAdoptionRecommendation(entry,'IND-R-001').enabledByDefault,true);
  assert.equal(industryAdoptionRecommendation({industryScope:'COMMON',industryCodes:[]},'IND-C-001').enabledByDefault,true);
+});
+
+test('procurement category recommendation keeps unrelated sectors visible for manual adoption',()=>{
+ const categories=[{code:'SERV',name:'Professional services',subcategories:[
+  {code:'SERV-LAB',name:'Laboratory services'},
+  {code:'SERV-COM',name:'Common maintenance'}]}];
+ const items=[
+  {categoryCode:'SERV',subcategoryCode:'SERV-LAB',industryScope:'INDUSTRY_SPECIFIC',industryCodes:['IND-N']},
+  {categoryCode:'SERV',subcategoryCode:'SERV-COM',industryScope:'COMMON',industryCodes:[]}];
+ const result=recommendProcurementCategories(categories,items,'IND-C-001');
+ assert.equal(result.length,1);
+ assert.equal(result[0].recommended,true);
+ assert.equal(result[0].subcategories[0].recommended,false);
+ assert.equal(result[0].subcategories[1].recommended,true);
+ assert.equal(result[0].subcategories[0].totalItems,1);
+ assert.equal(result[0].subcategories[0].industryMatchedItems,0);
+ assert.equal(recommendProcurementCategories(categories,items,'IND-N-001')[0].subcategories[0].recommended,true);
+ assert.deepEqual(categories[0].subcategories,[{code:'SERV-LAB',name:'Laboratory services'},{code:'SERV-COM',name:'Common maintenance'}]);
+});
+
+test('existing procurement adoption controls never automatically erase a saved selection',async()=>{
+ const fs=await import('node:fs');
+ const view=fs.readFileSync('src/org/ProcurementSetup.tsx','utf8');
+ assert.match(view,/Add recommended/);
+ assert.match(view,/setSel\(cur =>/);
+ assert.match(view,/Show all available/);
+ const finance=fs.readFileSync('src/org/FinEntityAccounts.tsx','utf8');
+ assert.match(finance,/Add recommended/);
+ assert.match(finance,/Array\.from\(new Set\(\[\.\.\.current/);
 });
