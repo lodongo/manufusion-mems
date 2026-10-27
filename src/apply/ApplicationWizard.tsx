@@ -277,9 +277,9 @@ function OrganizationStep({ app, refData, onSaved, onBack }: StepProps) {
                 </SelectField>
                 <SelectField id='org-industry-subcategory' label='Industry subcategory' value={f.industry} disabled={!f.industryCategory} onChange={(e) => setF({ ...f, industry: e.target.value })}>
                     <option value=''>{f.industryCategory ? 'Select your primary activity...' : 'Choose a category first...'}</option>
-                    {subcategories.map((type) => <option key={type.code} value={type.code}>{type.code} — {type.label}</option>)}
+                    {subcategories.map((type) => <option key={type.code} value={type.code}>{type.code} — {type.label}{type.isicClass?` · ISIC Rev.5 ${type.isicClass}`:''}</option>)}
                 </SelectField>
-                <p className='-mt-1 text-xs text-slate-500'>Your primary industry determines which specialist MEMS interfaces and defaults may be offered in future.</p>
+                <p className='-mt-1 text-xs text-slate-500'>Your primary activity determines recommended GL, Materials, Services and Assets. Other classifications remain available for authorized manual adoption.</p>
                 {!categories.length && <Alert tone='error'>Industry categories are not loaded. Ask the MEMS administrator to load Industry categories and Industry subcategories under Default values.</Alert>}
                 {sel('companySize', 'Company size', 'companySizes')}
                 <SelectField id='org-currency' label='Base currency' value={f.currencyCode} onChange={(e) => setF({ ...f, currencyCode: e.target.value })}>

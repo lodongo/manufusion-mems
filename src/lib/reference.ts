@@ -27,7 +27,7 @@ export interface MetaList {
     key: string;
     title: string;
     appliesTo: string;
-    items: Array<{ code: string; label: string; categoryCode?: string; isicSection?: string; active?: boolean }>;
+    items: Array<{ code: string; label: string; categoryCode?: string; isicSection?: string; isicDivision?:string; isicGroup?:string; isicClass?:string;standard?:string;revision?:string; source?:string; active?: boolean }>;
 }
 
 export interface ReferenceData {
