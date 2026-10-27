@@ -40,7 +40,7 @@ Existing material numbers are not changed. No procurement, consignment, vendor, 
 ## What remains outside this milestone
 
 - Finance-review draft catalogues must still be approved and published under controlled release; proposed GLs must not be posted until approved.
-- Maintenance external services continue through existing Purchase Requirement, PO, Service Acceptance and approved GL line-account handling. Strategy-aware allocation of external service actuals is a separate guarded integration step; it is NOT represented as complete here.
+- External maintenance services continue through existing Purchase Requirement, PO and Service Acceptance. Where a PO line has an originating maintenance requirement linked to a WO/task, service acceptance now captures that WO/task's maintenance strategy, service cost nature and the **approved PO expense account** on the immutable journal trace. The service debit account is NOT reselected at acceptance. Automated pre-PO strategy-specific service GL determination and any reallocation remain unimplemented pending a separately reviewed Finance/Procurement contract.
 - Capitalization of an eligible overhaul is subject to a separate reviewed CAPEX/CIP posting policy, not automatically mapped to a maintenance expense account.
 - Historical (pre-release) material issues cannot reliably be attributed to a strategy if their journal lacks a strategy reference; no retrospective guesswork.
 - End-to-end Firestore emulator tests for posting and returns should be completed against a populated legal entity and approved chart before production consideration.
