@@ -18,7 +18,7 @@ export default function FinEntityAccounts({le,entities}:{le:Entity;entities:Enti
   const [msg,setMsg]=useState('');
   const [busy,setBusy]=useState(false);
   const confirm=useConfirm();
-  useEffect(()=>{if(data)setCodes(data.selected);},[data]);
+  useEffect(()=>{if(data)setCodes(data.configured?data.selected:data.eligible.filter(a=>a.recommended!==false).map(a=>a.code));},[data]);
   const selected=useMemo(()=>new Set(codes),[codes]);
   const eligible=data?.eligible||[];
   const classes=useMemo(()=>Array.from(new Map(eligible.map(a=>[a.classCode,a.className||a.classCode])).entries()),[data]);
