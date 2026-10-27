@@ -1,0 +1,29 @@
+name: One-off - generate reviewed npm lockfile
+# Temporary: generates package-lock.json on a GitHub runner (the authoring workspace has no
+# npm registry access) and commits it to this review branch. Removed in the next commit.
+on:
+  push:
+    branches: [review/hr-corporate-security-ui]
+    paths: ['.github/workflows/generate-lockfile.yml']
+permissions:
+  contents: write
+jobs:
+  lockfile:
+    if: github.repository == 'lodongo/manufusion-mems'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm audit --omit=dev --audit-level=high || true
+      - name: Commit lockfile
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json
+          git commit -m 'chore(deps): add npm lockfile generated on GitHub runner (Node 22)'
+          git push origin HEAD:review/hr-corporate-security-ui
