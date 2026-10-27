@@ -1,4 +1,5 @@
 import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
+import { allocateIntegratedMaterialNumber, classifiedMaterialPrefix } from './materialNumbering';
 import { createHash } from 'crypto';
 import {MATERIAL_STOCK_DIMENSIONS,UNIVERSAL_STOCK_METADATA,STOCK_META_BY_KEY,stockedPolicyToMrp} from './stockPolicyConfig';
 import {METHODS as REPLENISHMENT_METHODS,factorsOf,methodOf,routeFor} from './replenishmentPlan';
@@ -1219,6 +1220,13 @@ export const procurementRoutes = {
         if(action==='allocate'){
             if(str(d.materialNumber))return {ok:true,materialNumber:str(d.materialNumber)};
             if(status!=='approved')throw new HttpError(409,'Material must be approved and enabled before number allocation.');
+            const template = (await load('materials')).items.get(str(d.materialCode));
+            const classifiedPrefix = classifiedMaterialPrefix(template);
+            if (classifiedPrefix) {
+                const materialNumber = await allocateIntegratedMaterialNumber({orgId:ctx.orgId,materialId:id,prefix:classifiedPrefix,actorUid:ctx.uid});
+                await audit([{category:'data',action:'org.material.number.allocate',actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:id},details:materialNumber+' (integrated classified numbering)'}]);
+                return {ok:true,materialNumber};
+            }
             const prefix=str(d.categoryCode).trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
             if(!prefix)throw new HttpError(409,'Material category code is missing.');
             const existing=await listDocs(root+'/material_number_reservations');
