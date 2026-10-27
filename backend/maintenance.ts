@@ -143,6 +143,18 @@ function flat(items: Obj[]): ListItem[] {
     return items.filter((i) => i.active !== false && i.selectable !== false).map((i) => ({ code: str(i.code), label: str(i.label), color: str(i.color) }));
 }
 
+/** Only a registered active maintenance type may override the WO's primary strategy. */
+async function verifiedTaskMaintenanceTypes(tasks:AssessedTask[]):Promise<AssessedTask[]>{
+    const available=new Map(flat(await rawList('maintenanceTypes')).map(v=>[v.code,v.label]));
+    return tasks.map(task=>{
+        const code=str(task.maintenanceTypeCode);
+        if(!code)return task;
+        const label=available.get(code);
+        if(!label)throw new HttpError(400,'Maintenance type '+code+' is not enabled in the maintenance reference registry.');
+        return {...task,maintenanceTypeCode:code,maintenanceTypeLabel:label};
+    });
+}
+
 function grouped(items: Obj[]): ListGroup[] {
     const active = items.filter((i) => i.active !== false);
     const heads = active.filter((i) => i.selectable === false || !str(i.category));
@@ -958,7 +970,8 @@ export const maintenanceRoutes = {
                 if(ASSESSMENT_PHOTO_RE.test(path)&&path.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`))
                     photos[path]=await signedUrl(path);
             }
-            return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),photos,serviceHierarchy,vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
+            return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),photos,serviceHierarchy,
+                maintenanceTypes:flat(await rawList('maintenanceTypes')),vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
                 hazardousEnergy:safetyOptions(energyDoc,'hazardousEnergy'),
                 safetyPermits:safetyOptions(permitsDoc,'permitTypes'),
                 riskMatrix:riskDoc?.data?.configuration||defaultMaintenanceRiskMatrix};
@@ -1299,6 +1312,7 @@ export const maintenanceRoutes = {
                         const matrix=(matrixDoc?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix;
                         tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(ctx.body.tasks),matrix);
                     } catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid assessment tasks.');}
+                    tasks=await verifiedTaskMaintenanceTypes(tasks);
                     // Every task owns its parts/services/tools/risk. Legacy header-level
                     // spares/services are deliberately not written by this action.
                     const hierarchy=await serviceCatalogHierarchy();
@@ -1309,6 +1323,7 @@ export const maintenanceRoutes = {
                             if(!sub||!family)throw new HttpError(400,'Choose a valid service category, subcategory and family/class from the approved hierarchy.');
                         }
                     }
+                    tasks=await verifiedTaskMaintenanceTypes(tasks);
                     await verifyAssessedTaskChoices(ctx,doc,tasks);
                     tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(x=>x.proposedVendorIds));
