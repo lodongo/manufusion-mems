@@ -7,6 +7,7 @@ import { Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { Screen, useConfirm } from '../components/screen';
 import { Card, FIN_API, Facts, Frame, NextApprover, Pill, fmt, go } from './finKit';
+import {eligibleFinanceMappingApprovals} from './financeBulkApproval';
 
 // Finance approvals: every change to finance configuration and every posting that needs approval is a request
 // (FCR + 8 digits) made by one person and decided by another who holds the approving right for that legal entity.
@@ -46,18 +47,50 @@ const COLS: Array<Column<Row>> = [
 function List() {
     const { data, error, loading, reload } = useLoad(() => callBackend<{ requests: Row[] }>(`${FIN_API}/requests/list`));
     const [view, setView] = useState<'me' | 'mine' | 'all'>('me');
+    const confirm = useConfirm();
+    const [bulkBusy,setBulkBusy]=useState(false);
+    const [bulkResult,setBulkResult]=useState('');
     const rows = useMemo(() => (data?.requests ?? []).filter((r) => (view === 'me' ? r.canDecide : view === 'mine' ? r.mine : true)), [data, view]);
+    const candidates=useMemo(()=>eligibleFinanceMappingApprovals(data?.requests??[]),[data]);
+    const approveMappings=()=>{
+        if(!candidates.length||bulkBusy)return;
+        confirm.ask({
+            title:'Approve eligible GL configuration requests',
+            message:`Approve up to ${candidates.length} pending account-determination and GL-transaction mapping requests. Existing Finance authority, separate approver, account validation and activity audit apply independently to EVERY request. Financial postings, invoices, payments, chart changes and unapproved master imports are excluded.`,
+            confirmLabel:`Approve eligible (${candidates.length})`,
+            acknowledge:'I reviewed the GL mapping requests and authorize approval of the eligible configuration changes only.',
+            reason:{label:'Bulk approval note',minLength:10,placeholder:'Reviewed Finance mappings and transaction references'},
+        },async reason=>{
+            setBulkBusy(true);setBulkResult('');
+            let successful=0;const failed:string[]=[];
+            // Each call rechecks current permissions, maker-checker, ledger account validity and version.
+            for(const req of candidates){
+                try{
+                    await callBackend(`${FIN_API}/requests/decide`,{id:req.id,decision:'approve',acknowledge:true,reason:`Bulk GL configuration review: ${reason}`.slice(0,300)});
+                    successful++;
+                }catch(e){failed.push(`${req.id}: ${e instanceof Error?e.message:'Approval refused'}`);}
+            }
+            setBulkBusy(false);setBulkResult(`${successful} configuration request(s) approved; ${failed.length} refused or changed. ${failed.slice(0,4).join(' | ')}`);
+            reload();
+        });
+    };
     return (
         <Frame
             title='Finance approvals'
             subtitle='Changes and postings waiting for a second person'
             onBack={() => go('module/FIN')}
-            actions={<Button variant='secondary' onClick={reload}>Refresh</Button>}
+            actions={<div className='flex flex-wrap items-center gap-2'>
+                {candidates.length>0&&<Button disabled={bulkBusy} onClick={approveMappings}>{bulkBusy?'Approving…':`Approve eligible mappings (${candidates.length})`}</Button>}
+                <Button variant='secondary' disabled={bulkBusy} onClick={reload}>Refresh</Button>
+            </div>}
             nav={[{ value: 'me', label: 'Waiting for me', icon: Clock3, count: (data?.requests ?? []).filter((r) => r.canDecide).length }, { value: 'mine', label: 'Proposed by me', icon: Send }, { value: 'all', label: 'All', icon: ListChecks }]}
             navValue={view}
             onNav={setView}
         >
+            {bulkResult&&<Alert tone='info'>{bulkResult}</Alert>}
+            <p className='text-xs text-muted'>Bulk approval includes only eligible account-mapping and GL-transaction configuration requests. It never approves a financial posting, self-submitted request or an unverified four-master catalogue import.</p>
             {loading && !data ? <Spinner /> : error ? <Alert tone='error'>{error}</Alert> : <RichTable id='fin.requests' columns={COLS} rows={rows} rowKey={(r) => r.id} onRowClick={(r) => go(`fin_approvals/${r.id}`)} empty={view === 'me' ? 'Nothing is waiting for you.' : 'No requests.'} fileName='finance-requests' height='h-[calc(100dvh-12rem)]' />}
+            {confirm.sheet}
         </Frame>
     );
 }
