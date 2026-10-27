@@ -19,19 +19,22 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
     const [query, setQuery] = useState('');
     const [industryPreview, setIndustryPreview] = useState('');
     const [showUnmatched, setShowUnmatched] = useState(false);
+    const [onlyFinanceExceptions, setOnlyFinanceExceptions] = useState(false);
     const [selectedCode, setSelectedCode] = useState('');
     const [busy, setBusy] = useState(false);
     const rows = useMemo(() => array(fileData?.[ITEMS[kind]]), [fileData, kind]);
     const selected = useMemo(() => rows.find(x => text(x.code) === selectedCode), [rows, selectedCode]);
+    const statusOf = (x: Row) => text(kind === 'gl_accounts' ? obj(x.accountDetermination).mappingStatus : obj(obj(x.accounting).glResolution).mappingStatus);
+    const financeExceptions = useMemo(() => rows.filter(x => statusOf(x) === 'finance_review_required').length, [rows, kind]);
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         return rows.filter(x => {
             const searchMatch = !q || (text(x.code) + ' ' + text(x.name) + ' ' + text(x.description)).toLowerCase().includes(q);
             const industryMatch = !industryPreview || showUnmatched || x.industryScope !== 'INDUSTRY_SPECIFIC' ||
                 (Array.isArray(x.industryCodes) && x.industryCodes.some(code => typeof code === 'string' && (code === industryPreview || code.startsWith(industryPreview + '-'))));
-            return searchMatch && industryMatch;
+            return searchMatch && industryMatch && (!onlyFinanceExceptions || statusOf(x) === 'finance_review_required');
         });
-    }, [rows, query, industryPreview, showUnmatched]);
+    }, [rows, query, industryPreview, showUnmatched, onlyFinanceExceptions, kind]);
     const branchCounts = useMemo(() => kind !== 'materials' ? null : rows.reduce<Record<string, number>>((a, item) => {
         const c = text(obj(obj(item.accounting).catalogueClassification).majorBranch);
         a[c || 'UNCLASSIFIED'] = (a[c || 'UNCLASSIFIED'] || 0) + 1;
@@ -50,7 +53,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
         const file = e.target.files?.[0];
         e.target.value = '';
         if (!file) return;
-        setFileData(null); setError(''); setQuery(''); setSelectedCode(''); setFileName(''); setIndustryPreview(''); setShowUnmatched(false);
+        setFileData(null); setError(''); setQuery(''); setSelectedCode(''); setFileName(''); setIndustryPreview(''); setShowUnmatched(false); setOnlyFinanceExceptions(false);
         if (file.size > 48_000_000) return setError('File is larger than the 48 MB preview limit.');
         setBusy(true);
         try {
@@ -84,6 +87,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                         <div className='flex flex-wrap gap-2 text-xs'>
                             <Badge>{rows.length.toLocaleString()} entries</Badge>
                             <Badge tone={missingRoutes ? 'warn' : 'muted'}>{missingRoutes} entries missing financial contract</Badge>
+                            <Badge tone={financeExceptions ? 'warn' : 'muted'}>{financeExceptions} Finance mapping exceptions</Badge>
                             {branchCounts && Object.entries(branchCounts).map(([branch, count]) => <Badge key={branch}>{branch}: {Number(count)}</Badge>)}
                             {Object.entries(industryCounts).map(([scope,count])=><Badge key={scope}>{scope==='COMMON'?'Common':'Industry-specific'}: {Number(count)}</Badge>)}
                         </div>
@@ -105,6 +109,9 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                             Search all draft entries
                             <input className='mt-1 h-11 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 text-white' value={query} onChange={e => setQuery(e.target.value)} placeholder='Search name or code (no automatic focus)' />
                         </label>
+                        {financeExceptions > 0 && <button type='button' onClick={() => setOnlyFinanceExceptions(v => !v)} className='min-h-11 rounded-xl border border-amber-700/60 px-3 text-sm text-amber-200'>
+                            {onlyFinanceExceptions ? 'Show all draft entries' : 'Review Finance mapping exceptions (' + financeExceptions + ')'}
+                        </button>}
                         <p className='text-xs text-slate-400'>{filtered.length.toLocaleString()} matches · showing first 40</p>
                         <div className='max-h-64 space-y-1 overflow-y-auto'>
                             {filtered.slice(0, 40).map(item => <button type='button' key={text(item.code)} onClick={() => setSelectedCode(text(item.code))} className={'w-full rounded-lg border p-2 text-left text-xs '+(selectedCode === item.code ? 'border-emerald-500 bg-slate-800 text-white' : 'border-slate-700 text-slate-300')}>
