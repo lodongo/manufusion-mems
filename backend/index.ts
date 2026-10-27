@@ -73,6 +73,7 @@ import { hrLeaveRoutes } from './hrLeaveRoutes';
 import { hrEducationConfigRoutes } from './hrEducationConfig';
 import { hrEducationEvidenceRoutes } from './hrEducationEvidenceRoutes';
 import { hrCompensationRoutes } from './hrCompensationConfig';
+import { hrCompensationApprovalRoutes } from './hrCompensationApproval';
 import { drkmsRoutes } from './drkmsRegistry';
 import {drkmsFormRoutes} from './drkmsForms';
 import { drkmsFileRoutes } from './drkmsFiles';
@@ -1561,6 +1562,7 @@ export const handler = router(recordWiredRoutes({
     ...hrEducationConfigRoutes,
     ...hrEducationEvidenceRoutes,
     ...hrCompensationRoutes,
+    ...hrCompensationApprovalRoutes,
     ...drkmsRoutes,
     ...drkmsFormRoutes,
     ...drkmsFileRoutes,

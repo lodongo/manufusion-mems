@@ -2,6 +2,7 @@ import {useEffect,useMemo,useState} from 'react';
 import {Banknote,BookOpenText,CheckCircle2,ChevronDown,Copy,FileWarning,Plus,Save,Search,ShieldCheck,SlidersHorizontal} from 'lucide-react';
 import {callBackend} from '../lib/backend';
 import {SelectField} from '../components/ui';
+import HrCompensationApprovals from './HrCompensationApprovals';
 import {estimateKenyaMonthly} from './hrPayPreview';
 import {defaultLeaveEntitlement,type LeaveGradeEntitlement} from '../shared/hrLeaveDefaults';
 import type {PayBase,PayCategory,PayConfig,PayItem,PayMethod} from '../../backend/hrCompensationConfig';
@@ -29,15 +30,20 @@ export default function HrCompensationAdmin(){
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[saved,setSaved]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
  const [exampleGross,setExampleGross]=useState(100000),[resident,setResident]=useState(true);
+ type Activation={active:{version:number;sourceDraftVersion:number;approvalRef:string;activatedAt:string}|null;pendingRequestId:string};
+ const [activation,setActivation]=useState<Activation|null>(null),[baseline,setBaseline]=useState('');
+ const [cost,setCost]=useState(''),[submitReason,setSubmitReason]=useState(''),[ack,setAck]=useState(false),[refreshKey,setRefreshKey]=useState(0);
+ const dirty=!!config&&JSON.stringify(config)!==baseline;
  const load=async(id='')=>{
   setLoading(true);setError('');
   try{
    const [r,g]=await Promise.all([
-    callBackend<{entities:Entity[];current:Entity|null;countryCode:string;currency:string;config:PayConfig|null;saved:boolean}>('/api/org/hr/compensation/get',{legalEntityId:id}),
+    callBackend<{entities:Entity[];current:Entity|null;countryCode:string;currency:string;config:PayConfig|null;saved:boolean;activation:Activation|null}>('/api/org/hr/compensation/get',{legalEntityId:id}),
     callBackend<{config:{jobGrades:Grade[]}|null}>('/api/org/hr/education/admin',{legalEntityId:id}),
    ]);
    setEntities(r.entities);setEntity(r.current?.id||'');setCountry(r.countryCode);
-   setCurrency(r.currency);setConfig(r.config);setSaved(r.saved);setGrades(g.config?.jobGrades||[]);
+   setCurrency(r.currency);setConfig(r.config);setBaseline(JSON.stringify(r.config));setSaved(r.saved);setGrades(g.config?.jobGrades||[]);
+   setActivation(r.activation);setCost('');setSubmitReason('');setAck(false);setRefreshKey(k=>k+1);
    setOpenCode('');setQuery('');
   }catch(e){setError(e instanceof Error?e.message:'Could not load compensation settings.')}
   finally{setLoading(false)}
@@ -62,7 +68,7 @@ export default function HrCompensationAdmin(){
   try{
    const r=await callBackend<{version:number;status:string}>('/api/org/hr/compensation/save',
     {legalEntityId:entity,config,expectedVersion:Number(config.version||0)});
-   setConfig(c=>c?{...c,version:r.version}:c);
+   setConfig(c=>{const next=c?{...c,version:r.version}:c;setBaseline(JSON.stringify(next));return next;});
    setNotice('Saved draft revision '+r.version+'. No employee salary, payroll ledger or statutory remittance was changed.');
    setSaved(true);
   }catch(e){setError(e instanceof Error?e.message:'Could not save compensation draft.')}
@@ -90,7 +96,7 @@ export default function HrCompensationAdmin(){
    <p className="mt-2 text-sm text-muted">Legal-entity policies, job-grade eligibility and country statutory reference rules. All configuration changes save as drafts only; this does not activate or post payroll.</p>
   </section>
   {loading&&<p role="status" className="text-sm text-muted">Loading compensation rules…</p>}
-  {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
+  {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-danger">{error}</p>}
   {notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{notice}</p>}
   <SelectField id="comp-legal-entity" label="Legal entity" value={entity} onChange={e=>void load(e.target.value)}>
    <option value="">Select legal entity</option>
@@ -276,6 +282,39 @@ export default function HrCompensationAdmin(){
     className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 font-semibold text-onbrand disabled:opacity-40">
     <Save className="h-5 w-5"/>Save compensation configuration as draft
    </button>
+   <section className="space-y-3 rounded-2xl border border-line bg-panel p-3 sm:p-4">
+    <h3 className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-5 w-5 text-brand"/>Activation (Chart of Authority)</h3>
+    <p className="text-xs text-muted">Saving changes only the draft. Leave entitlements and later payroll use the <strong>active</strong> policy, which changes only after approval level by level under this legal entity's Chart of Authority, by someone other than you.</p>
+    <p className="rounded-xl bg-page p-3 text-sm">{activation?.active
+     ?<>Active policy v{activation.active.version} (from draft v{activation.active.sourceDraftVersion}) · approved under {activation.active.approvalRef} on {activation.active.activatedAt.slice(0,10)}</>
+     :<>No approved policy yet. Employees cannot plan leave in this legal entity until a policy is activated.</>}</p>
+    {activation?.pendingRequestId?<p className="text-sm text-muted">Request {activation.pendingRequestId} is awaiting approval. Withdraw it below to submit a different draft.</p>
+    :<div className="space-y-3">
+     {dirty&&<p className="text-xs text-muted">Save the draft before submitting it for activation.</p>}
+     <label className="block text-sm text-muted">Estimated annual cost impact ({currency||'legal entity currency'}) *
+      <input className={field} type="number" inputMode="decimal" min={0} step="any" value={cost} onChange={e=>setCost(e.target.value)}
+       placeholder="Additional yearly employer cost of this policy versus the active one"/></label>
+     <label className="block text-sm text-muted">Reason for approval *
+      <textarea className={field+' min-h-20 p-3'} maxLength={300} value={submitReason} onChange={e=>setSubmitReason(e.target.value)}/>
+      <span className="text-xs">{submitReason.trim().length}/10 characters minimum</span></label>
+     <label className="flex min-h-11 items-start gap-3 rounded-xl border border-line p-3 text-sm">
+      <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-brand" checked={ack} onChange={e=>setAck(e.target.checked)}/>
+      <span>I have reviewed this draft against the law, our policies and the cost estimate.</span></label>
+     <button type="button" disabled={busy||dirty||!saved||!(cost!==''&&Number(cost)>=0)||submitReason.trim().length<10||!ack}
+      onClick={async()=>{
+       setBusy(true);setError('');setNotice('');
+       try{
+        const r=await callBackend<{id:string}>('/api/org/hr/compensation/submit',{legalEntityId:entity,expectedVersion:Number(config.version||0),
+         annualCostImpact:Number(cost),reason:submitReason.trim(),acknowledge:true});
+        setNotice('Submitted '+r.id+' for approval under the Chart of Authority.');await load(entity);
+       }catch(e){setError(e instanceof Error?e.message:'Could not submit for activation.')}
+       finally{setBusy(false)}
+      }}
+      className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-brand px-4 font-semibold text-brand disabled:opacity-40">
+      <ShieldCheck className="h-5 w-5"/>Submit draft v{config.version} for activation</button>
+    </div>}
+   </section>
+   <HrCompensationApprovals legalEntityId={entity} refreshKey={refreshKey} onChanged={()=>void load(entity)}/>
   </>}
  </div>;
 }

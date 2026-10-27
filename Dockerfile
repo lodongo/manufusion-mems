@@ -1,7 +1,8 @@
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --no-audit --no-fund
+# Exact, integrity-checked dependencies from the reviewed package-lock.json.
+RUN npm ci --no-audit --no-fund
 COPY . .
 # Public Firebase web settings; set at container build time per environment.
 ARG VITE_FIREBASE_API_KEY

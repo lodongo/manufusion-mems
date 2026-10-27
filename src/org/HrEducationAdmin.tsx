@@ -124,7 +124,7 @@ export default function HrEducationAdmin(){
    <p className="mt-2 text-sm text-muted">Configure educational attainment ranks, qualifications and employment job grades separately for each legal entity. Higher Education Rank numbers represent higher typical attainment; job grades are not examination marks.</p>
   </header>
   {loading&&<p className="text-sm text-muted">Loading configuration…</p>}
-  {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
+  {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-danger">{error}</p>}
   {notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm">{notice}</p>}
   <SelectField id="admin-education-legal-entity" label="Legal entity" value={entity}
    onChange={e=>void load(e.target.value)}>

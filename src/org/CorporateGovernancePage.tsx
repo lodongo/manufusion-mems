@@ -147,7 +147,7 @@ export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
  return <Screen title="Corporate Structure & Governance" subtitle={status} actions={actions} toolbar={toolbar}>
   {sheet}
   {loading&&<p role="status" className="text-sm text-muted">Loading corporate defaults…</p>}
-  {error&&<p role="alert" className="rounded-xl border border-line bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
+  {error&&<p role="alert" className="rounded-xl border border-line bg-danger/10 p-3 text-sm text-danger">{error}</p>}
   {notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{notice}</p>}
   {data&&own&&dirty&&issues.length>0&&<section role="alert" className="rounded-xl border border-line bg-amber-500/10 p-3 text-sm">
    <p className="font-semibold text-ink">Fix {issues.length} item{issues.length===1?'':'s'} before saving</p>

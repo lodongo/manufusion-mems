@@ -1,46 +1,48 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { HeartPulse, BookOpen, Boxes, Briefcase, Calculator, ClipboardList, CircleUser, ClipboardCheck, CreditCard, Eye, GitBranch, History, Home, Layers, LayoutDashboard, Landmark, LogOut, Menu, Network, Package, PackageCheck, PackagePlus, Palette, Puzzle, ScrollText, Settings, ShieldCheck, Table2, Users, Workflow, Wrench, X } from 'lucide-react';
-import AssetRegister from './AssetRegister';
-import MaterialWorkflow from './MaterialWorkflow';
-import TransactionGovernance from './TransactionGovernance';
-import TransactionBlueprints from './TransactionBlueprints';
-import WorkflowInbox from './WorkflowInbox';
-import ProcurementCatalog from './ProcurementCatalog';
-import WorkRequests from './WorkRequests';
-import WorkOrders from './WorkOrders';
-import MntHome from './MntHome';
-import MntWindows from './MntWindows';
-import SafConfiguration from './SafConfiguration';
-import OrgModules from './OrgModules';
-import OrgSubscription from './OrgSubscription';
 import UserChip from '../components/UserChip';
 import SideNav, { type NavGroup, type NavItem } from '../components/SideNav';
-import StructurePage from './StructurePage';
-import CorporateGovernancePage from './CorporateGovernancePage';
-import CorporateFinancialControlsPage from './CorporateFinancialControlsPage';
-import PositionsPage from './PositionsPage';
-import OdChart from './OdChart';
-import OrgSettings from './OrgSettings';
-import HrEducationAdmin from './HrEducationAdmin';
-import MyActivity from './MyActivity';
 import OrgBrandMark from '../components/OrgBrandMark';
-import OrgBranding from './OrgBranding';
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import { ROLE_LABELS, hasPerm, type Session } from '../types';
 import { Alert } from '../components/ui';
 import { Spinner, useLoad } from '../admin/kit';
-import ProfilePage from '../admin/ProfilePage';
-import UserSetup from './UserSetup';
-import UserHealth from './UserHealth';
 import OrgOverview from './OrgOverview';
 import SetupGuide, { type SetupProgress } from './SetupGuide';
-import OrgUsers from './OrgUsers';
-import OrgRoles from './OrgRoles';
-import SecurityKnowledgeBase from './SecurityKnowledgeBase';
-import OrgAudit from './OrgAudit';
-import PlannedPage from './PlannedPage';
 import type { OrgContextData } from './types';
+
+// Module screens load on demand so the first page opens quickly on mobile networks.
+const AssetRegister = lazy(() => import('./AssetRegister'));
+const MaterialWorkflow = lazy(() => import('./MaterialWorkflow'));
+const TransactionGovernance = lazy(() => import('./TransactionGovernance'));
+const TransactionBlueprints = lazy(() => import('./TransactionBlueprints'));
+const WorkflowInbox = lazy(() => import('./WorkflowInbox'));
+const ProcurementCatalog = lazy(() => import('./ProcurementCatalog'));
+const WorkRequests = lazy(() => import('./WorkRequests'));
+const WorkOrders = lazy(() => import('./WorkOrders'));
+const MntHome = lazy(() => import('./MntHome'));
+const MntWindows = lazy(() => import('./MntWindows'));
+const SafConfiguration = lazy(() => import('./SafConfiguration'));
+const OrgModules = lazy(() => import('./OrgModules'));
+const OrgSubscription = lazy(() => import('./OrgSubscription'));
+const StructurePage = lazy(() => import('./StructurePage'));
+const CorporateGovernancePage = lazy(() => import('./CorporateGovernancePage'));
+const CorporateFinancialControlsPage = lazy(() => import('./CorporateFinancialControlsPage'));
+const PositionsPage = lazy(() => import('./PositionsPage'));
+const OdChart = lazy(() => import('./OdChart'));
+const OrgSettings = lazy(() => import('./OrgSettings'));
+const HrEducationAdmin = lazy(() => import('./HrEducationAdmin'));
+const MyActivity = lazy(() => import('./MyActivity'));
+const OrgBranding = lazy(() => import('./OrgBranding'));
+const ProfilePage = lazy(() => import('../admin/ProfilePage'));
+const UserSetup = lazy(() => import('./UserSetup'));
+const UserHealth = lazy(() => import('./UserHealth'));
+const OrgUsers = lazy(() => import('./OrgUsers'));
+const OrgRoles = lazy(() => import('./OrgRoles'));
+const SecurityKnowledgeBase = lazy(() => import('./SecurityKnowledgeBase'));
+const OrgAudit = lazy(() => import('./OrgAudit'));
+const PlannedPage = lazy(() => import('./PlannedPage'));
 
 type MenuItem = NavItem & { perm?: string; module?: string };
 
@@ -393,7 +395,7 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
                 </header>
                 <main className='w-full min-w-0 max-w-none px-4 py-6 lg:px-6 xl:px-8 lg:py-8'>
 
-                    {content}
+                    <Suspense fallback={<Spinner />}>{content}</Suspense>
                 </main>
             </div>
         </div>

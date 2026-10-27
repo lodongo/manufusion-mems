@@ -58,6 +58,8 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
  const [report,setReport]=useState<IcStagingReport|null>(null);
  const [error,setError]=useState(''),[info,setInfo]=useState('');
  const {ask,sheet}=useConfirm();
+ type GlAccount={code:string;name:string;statement:'BS'|'PL'};
+ const [charts,setCharts]=useState<Record<string,GlAccount[]|'error'>>({});
  const err=(e:unknown)=>e instanceof Error?e.message:'Unable to complete action.';
  const fmt=(minor:number,currency:string)=>{
   let decimals=2;try{decimals=currencyDigits(currency)}catch{}
@@ -89,6 +91,15 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
    }catch(e){setError(err(e))}
   })();
  },[]);
+ // Eligible GL accounts for the chosen provider and beneficiary, loaded once per entity.
+ useEffect(()=>{
+  for(const id of [agreement.providerId,agreement.beneficiaryId]){
+   if(!id||charts[id])continue;
+   callBackend<{accounts:GlAccount[]}>('/api/org/corporate/ic/accounts',{legalEntityId:id})
+    .then(r=>setCharts(c=>({...c,[id]:r.accounts})))
+    .catch(()=>setCharts(c=>({...c,[id]:'error'})));
+  }
+ },[agreement.providerId,agreement.beneficiaryId]);
  useEffect(()=>{setSelectedAgreementId('');setSelectedVoucherId('');setReport(null);setPostedReport(null);void refresh()},[leId]);
  // Edit rights are per legal entity, not just the Finance permission.
  const entityEdit=canEdit&&!!entities.find(e=>e.id===leId)?.canEdit;
@@ -112,14 +123,23 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
  const selectedAgreement=agreements.find(a=>a.id===voucher.agreementId);
  const rolesNeeded=Array.from(new Set(agreement.allowedTypes.flatMap(x=>accountRequirements(x)[0])));
  const rolesNeededBenef=Array.from(new Set(agreement.allowedTypes.flatMap(x=>accountRequirements(x)[1])));
- const acc=(role:keyof IcAccounts,party:'provider'|'beneficiary')=>
-  <label key={role} className="block text-sm text-muted">{role} <span className="text-xs">({IC_ROLES[role]})</span>
-   <input className={field+' font-mono'} disabled={!entityEdit} placeholder="Approved chart GL code" spellCheck={false}
-    value={(party==='provider'?agreement.providerAccounts:agreement.beneficiaryAccounts)[role]||''}
-    onChange={e=>{const v=e.target.value.trim();setAgreement(a=>party==='provider'?
-     {...a,providerAccounts:{...a.providerAccounts,[role]:v}}:
-     {...a,beneficiaryAccounts:{...a.beneficiaryAccounts,[role]:v}});}}/>
-  </label>;
+ const acc=(role:keyof IcAccounts,party:'provider'|'beneficiary')=>{
+  const entityId=party==='provider'?agreement.providerId:agreement.beneficiaryId;
+  const chart=charts[entityId];
+  const value=(party==='provider'?agreement.providerAccounts:agreement.beneficiaryAccounts)[role]||'';
+  const set=(v:string)=>setAgreement(a=>party==='provider'?
+   {...a,providerAccounts:{...a.providerAccounts,[role]:v}}:{...a,beneficiaryAccounts:{...a.beneficiaryAccounts,[role]:v}});
+  const label=role.replaceAll('_',' ').toLowerCase()+' ('+(IC_ROLES[role]==='BS'?'balance sheet':'profit & loss')+')';
+  if(!entityId)return <p key={role} className="text-xs text-muted">Select the {party} legal entity to choose its {label} account.</p>;
+  if(chart==='error'||!chart)return <label key={role} className="block text-sm text-muted">{label} *
+   <input className={field+' font-mono'} placeholder={chart==='error'?'Chart unavailable — enter approved GL code':'Loading chart…'} spellCheck={false}
+    disabled={!chart} value={value} onChange={e=>set(e.target.value.trim())}/></label>;
+  const options=chart.filter(x=>x.statement===IC_ROLES[role]);
+  return <SelectField key={role} id={'ic-gl-'+party+'-'+role} label={label+' *'} value={value} onChange={e=>set(e.target.value)}>
+   <option value="">{options.length?'Select an active posting account':'No eligible '+IC_ROLES[role]+' posting accounts'}</option>
+   {options.map(x=><option key={x.code} value={x.code}>{x.code} — {x.name}</option>)}
+  </SelectField>;
+ };
  const textField=(text:string,value:string,set:(value:string)=>void,required=false)=>
   <label className="block text-sm text-muted">{text}{required&&' *'}
    <input className={field} disabled={!entityEdit} value={value} maxLength={200} onChange={e=>set(e.target.value)}/></label>;
@@ -229,7 +249,7 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
    <Landmark className="mt-0.5 h-5 w-5 shrink-0 text-brand"/>
    <p className="text-xs text-muted"><strong className="text-sm text-ink">Intercompany & Treasury.</strong> Agreements, matching and planned settlements between legal entities. Bank transfers, invoices and netting are <strong>not executed</strong> here.</p>
   </header>
-  {error&&<p role="alert" className="rounded-xl border border-line bg-red-500/10 p-3 text-sm text-red-500">{error}</p>}
+  {error&&<p role="alert" className="rounded-xl border border-line bg-danger/10 p-3 text-sm text-danger">{error}</p>}
   {info&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{info}</p>}
   {select('ic-entity','Finance legal entity',leId,setLeId,options.filter(o=>entities.find(e=>e.id===o.value)?.canView),false)}
   {leId&&!entityEdit&&<p className="text-xs text-muted">Read-only: you do not hold Finance edit rights for this legal entity.</p>}
@@ -394,7 +414,7 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
    {readiness&&<section className="space-y-2 rounded-xl border border-line bg-panel p-3">
     <strong className="text-sm">Release preflight · {readiness.voucherId}</strong>
     <p className="text-xs text-muted">{readiness.readyForApplicationTest?'Automated technical checks passed':'Technical checks need attention'} · Business authorization: not yet certified</p>
-    {readiness.checks.map(c=><p key={c.code} className={'text-xs '+(c.passed?'text-muted':'font-semibold text-red-500')}>{c.passed?'✓':'!'} {c.detail}</p>)}
+    {readiness.checks.map(c=><p key={c.code} className={'text-xs '+(c.passed?'text-muted':'font-semibold text-danger')}>{c.passed?'✓':'!'} {c.detail}</p>)}
     <strong className="text-xs">Mandatory Finance/Tax release steps</strong>
     {readiness.manualReleaseGates.map(x=><p key={x} className="text-xs text-muted">• {x}</p>)}
     <p className="text-xs text-muted">This check reads configuration only. It never posts, approves, invoices or transfers funds.</p>
@@ -464,13 +484,13 @@ export default function CorporateIntercompanyPage({canEdit}:{canEdit:boolean}){
      <p className="text-xs text-muted">Without settlement plan: {fmt(r.unplannedMinor,r.currency)}</p>
     </div>)}</div>
     <RichTable id="corp-ic-reconciliation" title="Intercompany reconciliation" fileName="Intercompany_reconciliation" columns={reconColumns}
-     rows={report.rows} rowKey={r=>r.voucherId} height={TABLE_HEIGHT} rowClassName={r=>r.exception?'text-red-500':''}/>
+     rows={report.rows} rowKey={r=>r.voucherId} height={TABLE_HEIGHT} rowClassName={r=>r.exception?'text-danger':''}/>
     <p className="text-xs text-muted">{report.warning}</p>
    </>}
    {postedReport&&<>
     <p className="text-sm font-semibold">Posted pairs: {postedReport.postedCount} · Exceptions: {postedReport.exceptions}</p>
     <RichTable id="corp-ic-posted" title="Posted bilateral journals" fileName="Intercompany_posted_journals" columns={postedColumns}
-     rows={postedReport.rows} rowKey={r=>r.voucherId} height={TABLE_HEIGHT} rowClassName={r=>r.exception?'text-red-500':''}/>
+     rows={postedReport.rows} rowKey={r=>r.voucherId} height={TABLE_HEIGHT} rowClassName={r=>r.exception?'text-danger':''}/>
     <p className="text-xs text-muted">{postedReport.note}</p>
    </>}
   </section>}

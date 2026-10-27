@@ -125,6 +125,10 @@ export function applyTheme(theme: Theme) {
     style.setProperty('--c-brand', rgb(theme.brand));
     style.setProperty('--c-brandsoft', rgb(theme.brandSoft));
     style.setProperty('--c-onbrand', rgb(theme.onBrand));
+    // Error/danger text must stay readable on both light and dark tenant themes (WCAG AA on the page colour).
+    const [r, g, b] = rgb(theme.page).split(' ').map(Number);
+    const lightPage = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5;
+    style.setProperty('--c-danger', lightPage ? '185 28 28' : '248 113 113');
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme.page);
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 import {
     Activity, ArrowLeft, BookOpen, Boxes, Calculator, ChevronDown, ChevronRight,
     CircleUser, ClipboardCheck, ClipboardList, Home, Layers, LogOut, Menu,
@@ -10,60 +10,62 @@ import { hasPerm, type Session } from '../types';
 import { firebaseAuth } from '../firebase';
 import { Alert } from '../components/ui';
 import { Card, Empty, Spinner, useLoad } from '../admin/kit';
-import ProfilePage from '../admin/ProfilePage';
-import UserSetup from './UserSetup';
-import UserHealth from './UserHealth';
-import MyTables from './MyTables';
-import QuickWorkspace from './QuickWorkspace';
 import OrgBrandMark from '../components/OrgBrandMark';
 import UserChip from '../components/UserChip';
-import MyActivity from './MyActivity';
-import WorkRequests from './WorkRequests';
-import WorkOrders from './WorkOrders';
-import MntHome from './MntHome';
-import MntWindows from './MntWindows';
-import MntMaterialCandidates from './MntMaterialCandidates';
-import MntWorkflowSettings from './MntWorkflowSettings';
-import MntTaskValidation from './MntTaskValidation';
-import SafConfiguration from './SafConfiguration';
-import AssetRegister from './AssetRegister';
-import ProcurementCatalog from './ProcurementCatalog';
-import MaterialsMaster from './MaterialsMaster';
-import InventoryOnHand from './InventoryOnHand';
-import InventoryDashboard from './InventoryDashboard';
-import InventoryOperations from './InventoryOperations';
-import StockTake from './StockTake';
-import WorkflowInbox from './WorkflowInbox';
-import MyAccess from './MyAccess';
 import OrgUserHome from './OrgUserHome';
-import HrShell from './HrShell';
-import HrEmployeePortal from './HrEmployeePortal';
-import HrReportees from './HrReportees';
-import HrAccessRules from './HrAccessRules';
-import OrgMail from './OrgMail';
-import PurchaseRequirements from './PurchaseRequirements';
-import ProcurementSetup from './ProcurementSetup';
-import PurchaseOrders from './PurchaseOrders';
-import ProcurementDashboard from './ProcurementDashboard';
-import Journals from './Journals';
-import FinGl from './FinGl';
-import FinTransactionWorkspace from './FinTransactionWorkspace';
-import FinCostCenters from './FinCostCenters';
-import FinJournal from './FinJournal';
-import FinCalendar from './FinCalendar';
-import FinTaxes from './FinTaxes';
-import FinSetup from './FinSetup';
-import FinApprovals from './FinApprovals';
-import GoodsIssue from './GoodsIssue';
-import ReplenishmentRequests from './ReplenishmentRequests';
 import { FinEntityMenu, NotBuilt, OPEN_MENU_EVENT } from './finKit';
-import Vendors from './Vendors';
-import Quotations from './Quotations';
-import BuyerGroups from './BuyerGroups';
-import WarehouseOverview from './WarehouseOverview';
-import DocumentRegistryPage from './DocumentRegistryPage';
-import MyDocSignatures from './MyDocSignatures';
 import type { OrgContextData } from './types';
+
+// Module screens load on demand so the first page opens quickly on mobile networks.
+const ProfilePage = lazy(() => import('../admin/ProfilePage'));
+const UserSetup = lazy(() => import('./UserSetup'));
+const UserHealth = lazy(() => import('./UserHealth'));
+const MyTables = lazy(() => import('./MyTables'));
+const QuickWorkspace = lazy(() => import('./QuickWorkspace'));
+const MyActivity = lazy(() => import('./MyActivity'));
+const WorkRequests = lazy(() => import('./WorkRequests'));
+const WorkOrders = lazy(() => import('./WorkOrders'));
+const MntHome = lazy(() => import('./MntHome'));
+const MntWindows = lazy(() => import('./MntWindows'));
+const MntMaterialCandidates = lazy(() => import('./MntMaterialCandidates'));
+const MntWorkflowSettings = lazy(() => import('./MntWorkflowSettings'));
+const MntTaskValidation = lazy(() => import('./MntTaskValidation'));
+const SafConfiguration = lazy(() => import('./SafConfiguration'));
+const AssetRegister = lazy(() => import('./AssetRegister'));
+const ProcurementCatalog = lazy(() => import('./ProcurementCatalog'));
+const MaterialsMaster = lazy(() => import('./MaterialsMaster'));
+const InventoryOnHand = lazy(() => import('./InventoryOnHand'));
+const InventoryDashboard = lazy(() => import('./InventoryDashboard'));
+const InventoryOperations = lazy(() => import('./InventoryOperations'));
+const StockTake = lazy(() => import('./StockTake'));
+const WorkflowInbox = lazy(() => import('./WorkflowInbox'));
+const MyAccess = lazy(() => import('./MyAccess'));
+const HrShell = lazy(() => import('./HrShell'));
+const HrEmployeePortal = lazy(() => import('./HrEmployeePortal'));
+const HrReportees = lazy(() => import('./HrReportees'));
+const HrAccessRules = lazy(() => import('./HrAccessRules'));
+const OrgMail = lazy(() => import('./OrgMail'));
+const PurchaseRequirements = lazy(() => import('./PurchaseRequirements'));
+const ProcurementSetup = lazy(() => import('./ProcurementSetup'));
+const PurchaseOrders = lazy(() => import('./PurchaseOrders'));
+const ProcurementDashboard = lazy(() => import('./ProcurementDashboard'));
+const Journals = lazy(() => import('./Journals'));
+const FinGl = lazy(() => import('./FinGl'));
+const FinTransactionWorkspace = lazy(() => import('./FinTransactionWorkspace'));
+const FinCostCenters = lazy(() => import('./FinCostCenters'));
+const FinJournal = lazy(() => import('./FinJournal'));
+const FinCalendar = lazy(() => import('./FinCalendar'));
+const FinTaxes = lazy(() => import('./FinTaxes'));
+const FinSetup = lazy(() => import('./FinSetup'));
+const FinApprovals = lazy(() => import('./FinApprovals'));
+const GoodsIssue = lazy(() => import('./GoodsIssue'));
+const ReplenishmentRequests = lazy(() => import('./ReplenishmentRequests'));
+const Vendors = lazy(() => import('./Vendors'));
+const Quotations = lazy(() => import('./Quotations'));
+const BuyerGroups = lazy(() => import('./BuyerGroups'));
+const WarehouseOverview = lazy(() => import('./WarehouseOverview'));
+const DocumentRegistryPage = lazy(() => import('./DocumentRegistryPage'));
+const MyDocSignatures = lazy(() => import('./MyDocSignatures'));
 
 type Module = OrgContextData['modules'][number];
 type LinkItem = { label: string; path: string; permission?: string; prefix?: string; everyone?: boolean };
@@ -577,7 +579,7 @@ export default function OrgHomePage({
                     <UserChip session={session} compact onClick={() => toHome('profile')} />
                     <button type='button' onClick={onSignOut} aria-label='Log out' title='Log out' className='hidden lg:flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-slate-700 px-3 text-sm font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400'><LogOut className='h-4 w-4' aria-hidden='true'/> Log out</button>
                 </header>
-                <main className='mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8'>{content}</main>
+                <main className='mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8'><Suspense fallback={<Spinner />}>{content}</Suspense></main>
             </div>
         </div>
     );

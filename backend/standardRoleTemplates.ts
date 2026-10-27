@@ -38,6 +38,12 @@ export function standardRoleTemplates(groups: PermGroup[]): StandardRoleTemplate
         permissions:['HRM.shell.view','HRM.records.verify']});
       assigned.add('HRM.records.verify');
     }
+    if(enabled.get('HRM')?.has('HRM.compensation.approve')){
+      templates.push({id:'std_hrm_compensation_approver',module:'HRM',name:'HR – Compensation Approver',
+        description:'Approve activation of compensation, benefits and leave-entitlement policy for assigned legal entities, level by level under the Chart of Authority; never own submissions.',
+        permissions:['HRM.shell.view','HRM.compensation.approve']});
+      assigned.add('HRM.compensation.approve');
+    }
     if(enabled.get('HRM')?.has('HRM.skills.manage')){
       templates.push({
         id:'std_hrm_skills_administrator',module:'HRM',name:'HR – Skills Administrator',

@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import {FileCheck2,ShieldCheck,RefreshCcw,LockKeyhole} from 'lucide-react';
 import {callBackend} from '../lib/backend';
 import {SelectField} from '../components/ui';
+import {useConfirm} from '../components/screen';
 
 type Entity={id:string;code:string;name:string};
 type GateStatus={
@@ -18,8 +19,8 @@ export default function PoBudgetPilotPage({canEdit}:{canEdit:boolean}){
  const [policy,setPolicy]=useState<GateStatus|null>(null);
  const [mode,setMode]=useState<'off'|'service_pilot'>('off');
  const [date,setDate]=useState('');
- const [reason,setReason]=useState('');
- const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [error,setError]=useState(''),[notice,setNotice]=useState('');
+ const {ask,sheet}=useConfirm();
  const message=(e:unknown)=>e instanceof Error?e.message:'The Finance action failed.';
  useEffect(()=>{void (async()=>{try{
   const r=await callBackend<{entities:Entity[]}>('/api/org/corporate/budget/options');
@@ -36,28 +37,32 @@ export default function PoBudgetPilotPage({canEdit}:{canEdit:boolean}){
   }catch(e){setPolicy(null);setError(message(e))}
  };
  useEffect(()=>{void refresh()},[legalEntityId]);
- const submit=async()=>{
-  if(!policy||busy||!legalEntityId)return;
-  setBusy(true);setError('');setNotice('');
-  try{
-   const response=await callBackend<{id:string}>('/api/org/corporate/po-budget/propose',{
-    legalEntityId,mode,category:'OPEX',activationDate:date,
-    expectedVersion:policy.version,reason,
+ const submit=()=>{
+  if(!policy||!legalEntityId)return;
+  setError('');setNotice('');
+  ask({title:mode==='service_pilot'?'Enable the service PO budget pilot?':'Disable the service PO budget pilot?',confirmLabel:'Submit for approval',
+   message:'Effective '+date+'. The current policy stays in force until an independent Finance approver decides this request.',
+   reason:{label:'Finance justification',minLength:10}},
+   async reason=>{
+    const response=await callBackend<{id:string}>('/api/org/corporate/po-budget/propose',{
+     legalEntityId,mode,category:'OPEX',activationDate:date,expectedVersion:policy.version,reason,
+    });
+    setNotice('Finance request '+response.id+' submitted for independent approval. The existing policy has not changed.');
+    await refresh();
    });
-   setNotice('Finance request '+response.id+' submitted for independent approval in Finance → Requests. The existing policy has not changed.');
-   await refresh();
-  }catch(e){setError(message(e))}
-  finally{setBusy(false)}
  };
  const otherEntityPilot=policy?.mode==='service_pilot'&&!policy.affectsSelectedLegalEntity;
+ const blocked=!policy?'Loading the current policy…':otherEntityPilot?'Another legal entity owns the pilot.':!date?'Choose an effective date.':
+  mode===policy.mode?'Choose a mode different from the current policy.':mode==='service_pilot'&&!policy.developmentServerEnabled?'The server rollout flag is disabled, so the pilot cannot be enabled.':'';
  return <section className="min-w-0 rounded-2xl border border-line bg-panel p-4 space-y-3">
+  {sheet}
   <header className="space-y-2">
    <h3 className="flex items-center gap-2 text-lg font-bold">
     <LockKeyhole className="h-5 w-5 text-brand"/> Service PO budget pilot
    </h3>
    <p className="text-sm text-muted">Development-only pilot. Budget commitments apply only to approved OPEX service orders for the selected legal entity. Material, asset, payroll and maintenance flows are not covered.</p>
   </header>
-  {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
+  {error&&<p role="alert" className="rounded-xl border border-line bg-danger/10 p-3 text-sm text-danger">{error}</p>}
   {notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{notice}</p>}
   <SelectField id="p5-le" label="Legal entity" value={legalEntityId}
     onChange={e=>setLegalEntityId(e.target.value)}>
@@ -81,20 +86,14 @@ export default function PoBudgetPilotPage({canEdit}:{canEdit:boolean}){
    <input type="date" className={field} value={date}
     disabled={!canEdit} onChange={e=>setDate(e.target.value)}/>
   </label>
-  <label className="block text-sm text-muted">Finance justification (mandatory)
-   <textarea className={field+' min-h-24 p-3'} value={reason}
-    disabled={!canEdit} maxLength={500} onChange={e=>setReason(e.target.value)}/>
-  </label>
   <button type="button" className={button} onClick={()=>void refresh()} disabled={!legalEntityId}>
    <RefreshCcw className="mr-2 inline h-4 w-4"/>Refresh pilot status
   </button>
   {canEdit&&<button type="button" className={button}
-   disabled={busy||!policy||!legalEntityId||reason.trim().length<10||!date||
-    otherEntityPilot||mode===policy.mode||
-    (mode==='service_pilot'&&!policy.developmentServerEnabled)}
-   onClick={()=>void submit()}>
+   disabled={!legalEntityId||!!blocked} onClick={submit}>
     <FileCheck2 className="mr-2 inline h-4 w-4"/>Submit change for independent Finance approval
    </button>}
+  {canEdit&&blocked&&<p className="text-xs text-muted">{blocked}</p>}
   <p className="flex gap-2 text-xs text-muted">
    <ShieldCheck className="h-4 w-4 shrink-0 text-brand"/>
    Approval follows the existing Finance FCR maker-checker workflow. Turning the pilot off stops new reservations but does not release or bypass existing controlled POs.

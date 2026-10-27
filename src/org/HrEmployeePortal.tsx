@@ -111,7 +111,7 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
   </header>
   <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-5">
    {loading&&<div role="status" className="rounded-xl border border-line bg-panel p-4 text-sm text-muted">Loading the authorized employee record…</div>}
-   {error&&<div role="alert" className="rounded-xl border border-line bg-panel p-4 text-sm text-red-600">{error}<button type="button" className="mt-3 block text-sm font-semibold text-brand underline" onClick={back}>Return to employees</button></div>}
+   {error&&<div role="alert" className="rounded-xl border border-line bg-panel p-4 text-sm text-danger">{error}<button type="button" className="mt-3 block text-sm font-semibold text-brand underline" onClick={back}>Return to employees</button></div>}
    {data&&<>
     <div ref={detailsRef} className="min-w-0 space-y-3">
      <nav role="tablist" aria-label="Employee HR sections" className="hr-portal-tabs">

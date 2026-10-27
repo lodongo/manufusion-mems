@@ -89,7 +89,7 @@ export default function CorporateStructureMappingPage({canEdit}:{canEdit:boolean
     <p className="text-xs font-semibold text-brand">Phase P1 — configuration draft only</p>
   </section>
   {loading&&<p role="status">Loading corporate model configuration…</p>}
-  {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
+  {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-danger">{error}</p>}
   {notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{notice}</p>}
   {config&&<>
    <section className="rounded-xl border border-line bg-panel p-3 space-y-3">

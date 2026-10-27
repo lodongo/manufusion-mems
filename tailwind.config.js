@@ -19,6 +19,7 @@ export default {
         muted: v('muted'),
         brand: v('brand'),
         brandsoft: v('brandsoft'),
+        danger: v('danger'),
         slate: {
           200: v('soft'),
           300: v('soft'),

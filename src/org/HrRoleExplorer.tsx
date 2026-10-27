@@ -16,7 +16,7 @@ function RoleCard({role,childCount,onOpen}:{
  role:HrRoleCardData;childCount:number;onOpen:()=>void;
 }){
  const status=vacancyOutlook(role);
- const statusColor=status.tone==='good'?'text-green-700':status.tone==='alert'?'text-red-700':status.tone==='warn'?'text-amber-700':'text-muted';
+ const statusColor=status.tone==='good'?'text-green-700':status.tone==='alert'?'text-danger':status.tone==='warn'?'text-amber-700':'text-muted';
  return <button type="button" onClick={onOpen}
   aria-label={'Open role '+role.title}
   className="group flex min-w-0 flex-col gap-3 rounded-2xl border border-line bg-panel p-3 text-left shadow-sm hover:border-brand/50 hover:bg-brand/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:p-4">

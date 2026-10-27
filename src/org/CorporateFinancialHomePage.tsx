@@ -101,7 +101,7 @@ export default function CorporateFinancialHomePage({canEdit}:{canEdit:boolean}){
    <p className="mt-2 text-sm text-muted">Separate where corporate leadership governs from where it is employed, budgeted and costed. Link to real legal entities, HQ sites, departments and cost centres already defined in Organization Structure.</p>
   </section>
   {loading&&<p role="status" className="text-sm text-muted">Loading financial home…</p>}
-  {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-red-600">{error}</p>}
+  {error&&<p role="alert" className="rounded-xl border border-line p-3 text-sm text-danger">{error}</p>}
   {notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-brand">{notice}</p>}
   {config&&<>
    <section className="rounded-2xl border border-line bg-panel p-3 sm:p-4">

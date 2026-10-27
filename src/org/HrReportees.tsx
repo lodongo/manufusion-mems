@@ -29,7 +29,7 @@ export default function HrReportees(){
   <section className="rounded-2xl border border-line bg-panel p-3 sm:p-4">
    <p className="mb-3 flex items-center gap-2 text-sm text-muted"><Network className="h-4 w-4"/>Verified direct reporting relationship · {employees.length} employees</p>
    {loading&&<p className="text-sm text-muted">Loading reportees…</p>}
-   {error&&<p role="alert" className="text-sm text-red-500">{error}</p>}
+   {error&&<p role="alert" className="text-sm text-danger">{error}</p>}
    {!loading&&!error&&<div className="mt-3 grid grid-cols-2 gap-2">
      <div className="rounded-xl border border-line bg-page p-3"><p className="text-xs text-muted">Reportees with skills mapped</p>
        <p className="mt-1 text-xl font-bold">{employees.filter(e=>e.skillFit?.percentage!==null&&e.skillFit?.percentage!==undefined).length}/{employees.length}</p></div>

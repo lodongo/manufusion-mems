@@ -2,6 +2,7 @@ import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc} from './core';
 import {hasPerm,orgRoute,type OrgContext} from './guards';
 import {withLock} from './finCore';
 import {hrAudit} from './hrAudit';
+import {compensationStatus} from './hrCompensationApproval';
 import {getEducationConfig} from './hrEducationConfig';
 
 export type PayCategory='payModels'|'overtime'|'allowances'|'benefits'|'incentives'|
@@ -333,6 +334,8 @@ export const hrCompensationRoutes={
   return {entities:all,current:current||null,countryCode:country,currency,
    config:current?await readPayConfig(ctx.orgId,current.id,country,currency):null,
    saved:!!(current&&await getDoc(docPath(ctx.orgId,current.id))),
+   // Draft saves never change live entitlements; only an approved activation does.
+   activation:current?await compensationStatus(ctx.orgId,current.id):null,
   };
  })],
  'POST /api/org/hr/compensation/save':[orgRoute('org.hr.compensation.save','ADM.settings',async ctx=>{

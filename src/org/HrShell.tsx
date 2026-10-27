@@ -6,6 +6,7 @@ import { firebaseAuth } from '../firebase';
 import RichTable from '../components/RichTable';
 import HrSkillsWorkspace from './HrSkillsWorkspace';
 import HrLeavePanel from './HrLeavePanel';
+import HrCompensationApprovals from './HrCompensationApprovals';
 import HrStructureExplorer from './HrStructureExplorer';
 import HrRoleExplorer from './HrRoleExplorer';
 import type {HrRoleCardData} from './hrRoleHierarchy';
@@ -78,7 +79,8 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
    {show('HR08')&&<><div className="grid grid-cols-2 gap-3">{[['Registered roles',roles?.length],['Organization units',nodes?.length],['Authorized site employees',directory?.length],['Manager team',team?.length]].map(([k,v])=><div key={String(k)} className="rounded-xl border border-line bg-panel p-4"><div className="text-xs text-muted">{k}</div><div className="mt-2 text-2xl font-bold">{v??'—'}</div></div>)}</div>{team&&<Panel title="My management hierarchy"><RichTable id="hr-team-v2" columns={personColumns} rows={team} rowKey={r=>r.uid} onRowClick={employee=>navigate("organization_home/hr/HR08/employee/"+employee.uid)} allowExport={false} height="h-[40dvh]"/></Panel>}</>}
    {show('HR10')&&<HrLeavePanel employeeUid={firebaseAuth.currentUser?.uid||''} showInbox />}
    {show('HR13')&&<HrSkillsWorkspace ownUid={firebaseAuth.currentUser?.uid||''} />}
-   {sectionCode!=='HR13'&&sectionCode!=='HR10'&&sectionCode&&!loading&&!showData&&<Unavailable/>}
+   {sectionCode==='HR11'&&<HrCompensationApprovals/>}
+   {sectionCode!=='HR13'&&sectionCode!=='HR10'&&sectionCode!=='HR11'&&sectionCode&&!loading&&!showData&&<Unavailable/>}
   </main>
  </div>;
 }
