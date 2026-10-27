@@ -211,8 +211,7 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
                 lines: g.lines,
                 narrative: `Delivery ${a.ref} on ${a.poId} from ${str(a.po.vendorName)}`,
                 source: { kind: 'purchase_order', id: a.poId, ref: a.deliveryId, route: `organization_home/procurement_orders/${a.poId}` },
-                trace: { poId: a.poId, deliveryId: a.deliveryId, deliveryNote: a.ref, vendorName: str(a.po.vendorName), requisitionIds: Array.from(new Set(list.map((x) => str(x.l.requisitionId)).filter(Boolean))), requirementIds: Array.from(new Set(list.map((x) => str(x.l.requirementId)).filter(Boolean))), quotationIds: Array.from(new Set(list.map((x) => str(x.l.quotationId)).filter(Boolean))),
-               ...(maintenanceServiceLines.length?{maintenanceServiceLines}:{} ) },
+                trace: { poId: a.poId, deliveryId: a.deliveryId, deliveryNote: a.ref, vendorName: str(a.po.vendorName), requisitionIds: Array.from(new Set(list.map((x) => str(x.l.requisitionId)).filter(Boolean))), requirementIds: Array.from(new Set(list.map((x) => str(x.l.requirementId)).filter(Boolean))), quotationIds: Array.from(new Set(list.map((x) => str(x.l.quotationId)).filter(Boolean))) },
                 sourceKey: `GR_${a.deliveryId}_${leId}_${type}`,
                 stock: g.stock,
                 extra: g.extra,
@@ -232,7 +231,7 @@ async function maintenanceServiceProvenance(orgId:string,poLine:Obj,amount:numbe
     const prior=objs(requirement.data.lines).find(l=>Number(l.no)===lineNo);
     const reference=o(prior?.maintenanceSource || requirement.data.maintenanceSource);
     const woId=str(reference.woCode),taskId=str(reference.taskId);
-    if(!/^WO\\d{8}$/.test(woId)||!taskId)return null;
+    if(!/^WO\d{8}$/.test(woId)||!taskId)return null;
     const wo=await getDoc(`organizations/${orgId}/work_orders/${woId}`);
     const strategy=wo?mroFinancialContext(wo.data,taskId,{}):null;
     return {
@@ -290,7 +289,7 @@ export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string;
             lines,
             narrative: `Service ${a.receiptId} on ${a.poId} from ${str(a.po.vendorName)}, invoice ${a.invoiceNo}`,
             source: { kind: 'purchase_order', id: a.poId, ref: a.receiptId, route: `organization_home/procurement_orders/${a.poId}` },
-            trace: { poId: a.poId, receiptId: a.receiptId, invoiceNo: a.invoiceNo, vendorName: str(a.po.vendorName), requisitionIds: Array.from(new Set(list.map((x) => str(x.l.requisitionId)).filter(Boolean))), requirementIds: Array.from(new Set(list.map((x) => str(x.l.requirementId)).filter(Boolean))), quotationIds: Array.from(new Set(list.map((x) => str(x.l.quotationId)).filter(Boolean))) },
+            trace: { poId: a.poId, receiptId: a.receiptId, invoiceNo: a.invoiceNo, vendorName: str(a.po.vendorName), requisitionIds: Array.from(new Set(list.map((x) => str(x.l.requisitionId)).filter(Boolean))), requirementIds: Array.from(new Set(list.map((x) => str(x.l.requirementId)).filter(Boolean))), quotationIds: Array.from(new Set(list.map((x) => str(x.l.quotationId)).filter(Boolean))), ...(maintenanceServiceLines.length?{maintenanceServiceLines}:{}) },
             sourceKey: `SVC_${a.receiptId}_${leId}`,
             ...(a.strictBudget?{extraForJournal:(journalId:string)=>a.strictBudget!.extraForJournal(journalId,acceptedBudgetCosts,leId,rate,info.currency)}:{}),
         });
