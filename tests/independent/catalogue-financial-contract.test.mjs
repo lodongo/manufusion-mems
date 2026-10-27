@@ -46,3 +46,14 @@ test('industry classification fields survive the financial explorer contract',()
  const invalid={...source,industryCodes:[]};
  assert.match(catalogueFinanceErrors('services',[invalid],true).join(' '),/industry codes/);
 });
+
+test('new industry-integrated catalogue imports require classifications and reject unknown codes',()=>{
+ const valid={code:'S-1',industryScope:'COMMON',industryCodes:[],accounting:{glResolution:{mappingStatus:'reference_proposed',transactionRoutes:[{event:'SERVICE_ACCEPTANCE',glCode:'61901010'}]}}};
+ assert.deepEqual(catalogueFinanceErrors('services',[valid],true,true),[]);
+ const missing={...valid};delete missing.industryScope;
+ assert.match(catalogueFinanceErrors('services',[missing],true,true).join(' '),/scope required/);
+ const fake={...valid,industryScope:'INDUSTRY_SPECIFIC',industryCodes:['IND-R-999']};
+ assert.match(catalogueFinanceErrors('services',[fake],true,true).join(' '),/valid industry codes/);
+ const badCommon={...valid,industryCodes:['IND-R']};
+ assert.match(catalogueFinanceErrors('services',[badCommon],true,true).join(' '),/cannot restrict industries/);
+});
