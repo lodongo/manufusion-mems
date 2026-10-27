@@ -160,7 +160,7 @@ function validateDictionary(raw: unknown): { dict: Dict; errors: string[]; warni
         for (const a of strs(c.requiredAttributes)) if (!listSet.has(a)) err(`Asset class ${code}: required attribute ${a} is not in its attribute list.`);
         if (!list.length) warnings.push(`Asset class ${code} has no attributes.`);
     }
-    for(const message of catalogueFinanceErrors('assets',dict.assetClasses,isObj(raw.financialIntegration)))err(message);
+    for(const message of catalogueFinanceErrors('assets',dict.assetClasses,isObj(raw.financialIntegration),isObj(raw.industryIntegration)))err(message);
     if (!dict.assetClasses.length) err('No asset classes found.');
     const stats = {
         groups: dict.groups.length,
