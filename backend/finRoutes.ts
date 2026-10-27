@@ -1,3 +1,4 @@
+import { industryAdoptionRecommendation } from './industryCatalog';
 import {DETERMINATION_EVENTS,resolveAccountRule,validateRuleDraft,type AccountRule} from './finAccountRules';
 import {buildGlTransactionVariants} from './finTransactionVariants';
 import {registerGlContracts} from './finTransactionContracts';
@@ -311,6 +312,7 @@ function chartFields(leId: string, a: Obj, makerUid: string, ctx: OrgContext): O
         postingMode: str(a.postingMode),
         statement: statementOf(a),
         postable: postableOf(a),
+        industryScope:str(a.industryScope)||'COMMON',industryCodes:strs(a.industryCodes),
         params: objs(a.params) as unknown as Obj,
         status: 'active',
         hasPostings: false,
@@ -788,10 +790,12 @@ export const finRoutes = {
         fin('org.fin.chart.scope.get',async ctx=>{
             const e=await env(ctx,ctx.body.leId);
             needView(ctx,e);
-            const [entity,chart,pending]=await Promise.all([
+            const [entity,chart,pending,master,organization]=await Promise.all([
                 getDoc(P(ctx.orgId).entity(e.le.id)),chartOf(ctx.orgId,e.le.id),
-                pendingFor(ctx,e.le.id,['coa.scope'])
+                pendingFor(ctx,e.le.id,['coa.scope']),glMaster(),getDoc('organizations/'+ctx.orgId)
             ]);
+            const masterByCode=new Map((master?.accounts??[]).map(x=>[str(x.code),x]));
+            const registeredIndustry=str(organization?.data.industry);
             const eligible=Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable);
             const configured=entity?.data.glScopeConfigured===true;
             const selected=configured?new Set(strs(entity?.data.allowedGl)):new Set(eligible.map(a=>a.code));
@@ -799,7 +803,8 @@ export const finRoutes = {
                 configured,selected:[...selected],eligible:eligible.map(a=>({
                     code:a.code,name:a.name,classCode:a.classCode,className:a.className,
                     categoryCode:a.categoryCode,categoryName:a.categoryName,
-                    groupCode:a.groupCode,groupName:a.groupName
+                    groupCode:a.groupCode,groupName:a.groupName,
+                    ...industryAdoptionRecommendation((masterByCode.get(a.code)??a.doc.data) as {industryScope?:string;industryCodes?:string[]},registeredIndustry)
                 })),version:Number(entity?.data.glScopeVersion)||0,pending,can:flags(ctx,e)
             };
         }),
@@ -910,14 +915,14 @@ export const finRoutes = {
         fin('org.fin.chart.master', async (ctx) => {
             const e = await env(ctx, ctx.body.leId);
             needView(ctx, e);
-            const [m, chart] = await Promise.all([glMaster(), chartOf(ctx.orgId, e.le.id)]);
+            const [m, chart, organization] = await Promise.all([glMaster(), chartOf(ctx.orgId, e.le.id),getDoc('organizations/'+ctx.orgId)]);
             if (!m) throw new HttpError(409, 'MEMS has not loaded the GL account master yet.');
             return {
                 version: m.version,
                 classes: m.classes,
                 categories: m.categories,
                 groups: m.groups,
-                accounts: m.accounts.map((a) => ({ code: str(a.code), name: str(a.name), description: str(a.description), classCode: str(a.classCode), categoryCode: str(a.categoryCode), groupCode: str(a.groupCode), normalBalance: str(a.normalBalance), accountType: str(a.accountType), postingMode: str(a.postingMode), statement: statementOf(a as Obj), postable: postableOf(a as Obj), core: masterCore(a as Obj), adopted: chart.get(str(a.code))?.status ?? '' })),
+                accounts: m.accounts.map((a) => ({ code: str(a.code), name: str(a.name), description: str(a.description), classCode: str(a.classCode), categoryCode: str(a.categoryCode), groupCode: str(a.groupCode), normalBalance: str(a.normalBalance), accountType: str(a.accountType), postingMode: str(a.postingMode), statement: statementOf(a as Obj), postable: postableOf(a as Obj), core: masterCore(a as Obj), adopted: chart.get(str(a.code))?.status ?? '', ...industryAdoptionRecommendation(a as {industryScope?:string;industryCodes?:string[]},str(organization?.data.industry)) })),
             };
         }),
     ],

@@ -1,4 +1,6 @@
 import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
+import { industryAdoptionRecommendation } from './industryCatalog';
+
 import { createHash } from 'crypto';
 import {
     HttpError,
@@ -416,7 +418,7 @@ function needCatalogAccess(ctx: OrgContext) {
     if (!hasPerm(ctx.permissions, 'AST.view') && !hasPerm(ctx.permissions, 'ADM.structure')) throw new HttpError(403, 'You do not have permission to do this.');
 }
 
-function treeOut(d: Loaded) {
+function treeOut(d: Loaded,registeredIndustry='') {
     return {
         version: d.version,
         vid: d.vid,
@@ -437,12 +439,12 @@ function treeOut(d: Loaded) {
             attributeCount: strs(c.attributes).length,
             requiredCount: strs(c.requiredAttributes).length,
             usefulLifeYears: c.usefulLifeYears ?? null,
-            financial: catalogueFinanceSummary(c),
+            financial: {...catalogueFinanceSummary(c),...(registeredIndustry?{industryRecommended:industryAdoptionRecommendation({industryScope:str(c.industryScope),industryCodes:strs(c.industryCodes)},registeredIndustry).recommended}:{})},
         })),
     };
 }
 
-function classOut(d: Loaded, code: string) {
+function classOut(d: Loaded, code: string,registeredIndustry='') {
     const c = d.classes.get(code);
     if (!c) throw new HttpError(404, 'Asset class not found in the active dictionary.');
     const required = new Set(strs(c.requiredAttributes));
@@ -458,7 +460,7 @@ function classOut(d: Loaded, code: string) {
         profiles: strs(c.profiles).map((p) => ({ code: p, name: str(d.profiles.get(p)?.name) })),
         synonyms: strs(c.synonyms),
         usefulLifeYears: c.usefulLifeYears ?? null,
-        financial: catalogueFinanceDetail(c),
+        financial: {...catalogueFinanceDetail(c),...(registeredIndustry?{industryRecommended:industryAdoptionRecommendation({industryScope:str(c.industryScope),industryCodes:strs(c.industryCodes)},registeredIndustry).recommended}:{})},
         attributes: strs(c.attributes)
             .map((a) => d.attributes.get(a))
             .filter((a): a is Obj => !!a)
@@ -1274,7 +1276,7 @@ export const assetRoutes = {
         orgRoute('org.assets.dictionary.tree', null, async (ctx) => {
             requireAst(ctx);
             needCatalogAccess(ctx);
-            return treeOut(await orgDictionary(ctx));
+            const o=await getDoc('organizations/'+ctx.orgId);return treeOut(await orgDictionary(ctx),str(o?.data.industry));
         }),
     ],
 
@@ -1282,7 +1284,7 @@ export const assetRoutes = {
         orgRoute('org.assets.dictionary.class', null, async (ctx) => {
             requireAst(ctx);
             needCatalogAccess(ctx);
-            return classOut(await orgDictionary(ctx), str(ctx.body.code));
+            const o=await getDoc('organizations/'+ctx.orgId);return classOut(await orgDictionary(ctx),str(ctx.body.code),str(o?.data.industry));
         }),
     ],
 

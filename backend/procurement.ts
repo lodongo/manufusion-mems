@@ -1,4 +1,6 @@
 import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
+import { industryAdoptionRecommendation } from './industryCatalog';
+
 import { allocateIntegratedMaterialNumber, classifiedMaterialPrefix } from './materialNumbering';
 import { createHash } from 'crypto';
 import {MATERIAL_STOCK_DIMENSIONS,UNIVERSAL_STOCK_METADATA,STOCK_META_BY_KEY,stockedPolicyToMrp} from './stockPolicyConfig';
@@ -376,7 +378,7 @@ async function load(kind: Kind): Promise<Loaded> {
 }
 
 // Shape used by the catalog browser (four levels mapped to group > category > subcategory > class).
-function treeOut(d: Loaded) {
+function treeOut(d: Loaded,registeredIndustry='') {
     const def = KINDS[d.kind];
     return {
         version: d.version,
@@ -399,12 +401,12 @@ function treeOut(d: Loaded) {
             requiredCount: strs(c.requiredAttributes).length,
             usefulLifeYears: null,
             extra: Object.fromEntries(def.extra.map((k) => [k, str(c[k])])),
-            financial: catalogueFinanceSummary(c),
+            financial: {...catalogueFinanceSummary(c),...(registeredIndustry?{industryRecommended:industryAdoptionRecommendation({industryScope:str(c.industryScope),industryCodes:strs(c.industryCodes)},registeredIndustry).recommended}:{})},
         })),
     };
 }
 
-function itemOut(d: Loaded, code: string) {
+function itemOut(d: Loaded, code: string,registeredIndustry='') {
     const def = KINDS[d.kind];
     const c = d.items.get(code);
     if (!c) throw new HttpError(404, 'Not found in the catalog.');
@@ -424,7 +426,7 @@ function itemOut(d: Loaded, code: string) {
         usefulLifeYears: null,
         legacyCodes: strs(c.legacyCodes),
         properties: Object.entries(props).map(([label, value]) => ({ label: label.slice(0, 80), value: str(value).slice(0, 400) })),
-        financial: catalogueFinanceDetail(c),
+        financial: {...catalogueFinanceDetail(c),...(registeredIndustry?{industryRecommended:industryAdoptionRecommendation({industryScope:str(c.industryScope),industryCodes:strs(c.industryCodes)},registeredIndustry).recommended}:{})},
         attributes: strs(c.attributes)
             .map((a) => d.attributes.get(a))
             .filter((a): a is Obj => !!a)
@@ -654,7 +656,7 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
             orgRoute(`org.${area}.catalog.tree`, null, async (ctx) => {
                 const kind = pick(ctx.body.kind);
                 requireModule(ctx, kind);
-                return treeOut(await load(kind));
+                const o=await getDoc('organizations/'+ctx.orgId);return treeOut(await load(kind),str(o?.data.industry));
             }),
         ],
 
@@ -664,7 +666,7 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                 requireModule(ctx, kind);
                 const code = str(ctx.body.code);
                 if (!CODE_RE.test(code)) throw new HttpError(400, 'Invalid code.');
-                return itemOut(await load(kind), code);
+                const o=await getDoc('organizations/'+ctx.orgId);return itemOut(await load(kind),code,str(o?.data.industry));
             }),
         ],
     };
