@@ -26,7 +26,7 @@ const postingColumns:Column<PostingRow>[]=[
  {key:'state',label:'Registry / actual',value:r=>r.configuredState+' / '+r.handlerState,
   render:r=><div className='space-y-1 text-xs'><span>{r.configuredState} / {r.handlerState}</span><span className='block text-muted'>{r.installedRouteEvidence?'Installed route declared':'No active route evidence'}</span></div>},
  {key:'action',label:'Audit recommendation',value:r=>r.action,
-  render:r=><Badge tone={r.action==='RETAIN'?'success':r.action==='ADD_HANDLER'?'muted':'warn'}>{r.action.replace(/_/g,' ')}</Badge>},
+  render:r=><Badge tone={r.action==='RETAIN'?'brand':r.action==='ADD_HANDLER'?'muted':'warn'}>{r.action.replace(/_/g,' ')}</Badge>},
  {key:'codes',label:'Predefined codes',value:r=>r.codes.join(', '),render:r=><span className='font-mono text-xs'>{r.codes.join(', ')}</span>},
  {key:'finding',label:'Finding',value:r=>r.finding,render:r=><span className='block max-w-[24rem] whitespace-normal text-xs'>{r.finding}</span>},
 ];
@@ -34,7 +34,7 @@ const crosswalkColumns:Column<MasterRow>[]=[
  {key:'kind',label:'Master',value:r=>r.kind},
  {key:'event',label:'Original master event',value:r=>r.catalogueEvent,render:r=><span className='font-mono text-xs'>{r.catalogueEvent}</span>},
  {key:'posted',label:'MEMS posting events',value:r=>r.postingEvents.join(', '),render:r=><span className='font-mono text-xs'>{r.postingEvents.join(', ')||'Not implemented'}</span>},
- {key:'state',label:'Runtime readiness',value:r=>r.state,render:r=><Badge tone={r.state==='LIVE'?'success':r.state==='REVIEW_GAP'?'warn':'muted'}>{r.state.replace('_',' ')}</Badge>},
+ {key:'state',label:'Runtime readiness',value:r=>r.state,render:r=><Badge tone={r.state==='LIVE'?'brand':r.state==='REVIEW_GAP'?'warn':'muted'}>{r.state.replace('_',' ')}</Badge>},
  {key:'action',label:'Action',value:r=>r.action},
  {key:'note',label:'Accounting constraint',value:r=>r.note,render:r=><span className='block max-w-[24rem] whitespace-normal text-xs'>{r.note}</span>}
 ];
