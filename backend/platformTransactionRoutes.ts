@@ -15,6 +15,8 @@ import { POSTING_EVENTS, postingRoles, suggestRoleAccounts, type ChartAccount } 
 import { glMaster } from './procurement';
 import { postableOf, statementOf } from './finCore';
 import { transactionCatalogue, type CustomCode } from './transactionCatalogue';
+import {auditFinanceTransactions} from './financeTransactionAudit';
+import {DEFAULT_MODULE_METADATA} from './moduleDefaults';
 import { DEFAULT_MODULES } from './catalog';
 
 const CODES = 'transaction_codes';
@@ -92,6 +94,23 @@ export const platformTransactionRoutes = {
                 actions: Object.entries(ACTION_NAMES).map(([code, name]) => ({ code, name })),
                 gl: await glDefaults(),
             };
+        }),
+    ],
+
+    'POST /api/admin/transactions/audit': [
+        staff('admin.transactions.audit', 'read', async () => {
+            const [storedTypes, custom] = await Promise.all([
+                getDoc('module_workspaces/MNT/metadata/maintenanceTypes'),customCodes()
+            ]);
+            const fallback = DEFAULT_MODULE_METADATA.MNT.find(x=>x.key==='maintenanceTypes')?.items ?? [];
+            const types:unknown[] = Array.isArray(storedTypes?.data.items)?storedTypes.data.items:fallback;
+            const maintenanceTypes=types.filter((x):x is Record<string,unknown>=>!!x&&typeof x==='object'&&!Array.isArray(x))
+                .filter(x=>x.active!==false&&x.selectable!==false).map(x=>({code:str(x.code),label:str(x.label)}))
+                .filter(x=>!!x.code);
+            const rows=transactionCatalogue(custom);
+            return auditFinanceTransactions({
+                rows,installedRoutes:allSystemTransactions(),maintenanceTypes,
+            });
         }),
     ],
 
