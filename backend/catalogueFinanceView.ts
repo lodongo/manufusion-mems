@@ -1,3 +1,4 @@
+import {industrySectionOf} from './industryCatalog';
 /** Additive financial metadata: no legacy catalogue field is discarded. */
 type D=Record<string,unknown>;
 const obj=(v:unknown):D=>v&&typeof v==='object'&&!Array.isArray(v)?v as D:{};
@@ -41,14 +42,16 @@ export function catalogueFinanceDetail(value:unknown){
  };
 }
 /** Reject malformed new-model catalogues without changing legacy-import validity. */
-export function catalogueFinanceErrors(kind:'materials'|'services'|'gl_accounts'|'assets',entries:unknown[],integrated:boolean){
+export function catalogueFinanceErrors(kind:'materials'|'services'|'gl_accounts'|'assets',entries:unknown[],integrated:boolean,requireIndustry=false){
  if(!integrated)return [];
  const errors:string[]=[];
  for(const raw of entries){
   const x=obj(raw),code=str(x.code)||'(unknown)';
   if(integrated){
-   if(x.industryScope!==undefined&&!['COMMON','INDUSTRY_SPECIFIC'].includes(str(x.industryScope)))errors.push(code+': invalid industry scope.');
-   if(x.industryScope==='INDUSTRY_SPECIFIC'&&(!Array.isArray(x.industryCodes)||!x.industryCodes.length||x.industryCodes.some(c=>typeof c!=='string'||!/^IND-[A-V](-[0-9]{3})?$/.test(c))))errors.push(code+': industry-specific record requires valid industry codes.');
+   if(requireIndustry&&!['COMMON','INDUSTRY_SPECIFIC'].includes(str(x.industryScope)))errors.push(code+': common or industry-specific scope required.');
+   else if(x.industryScope!==undefined&&!['COMMON','INDUSTRY_SPECIFIC'].includes(str(x.industryScope)))errors.push(code+': invalid industry scope.');
+   if(x.industryScope==='COMMON'&&Array.isArray(x.industryCodes)&&x.industryCodes.length)errors.push(code+': common entry cannot restrict industries.');
+   if(x.industryScope==='INDUSTRY_SPECIFIC'&&(!Array.isArray(x.industryCodes)||!x.industryCodes.length||x.industryCodes.some(c=>typeof c!=='string'||!/^IND-[A-V](-[0-9]{3})?$/.test(c)||!industrySectionOf(c))))errors.push(code+': industry-specific record requires valid industry codes.');
   }
   if(kind==='gl_accounts'){
    if(typeof x.usedInProcurement!=='boolean'||typeof x.usedInBudget!=='boolean'||typeof x.usedInProcurementPosting!=='boolean')
