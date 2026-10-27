@@ -96,3 +96,22 @@ test('Tenant Materials Master inherits the Stores class from its controlled cata
  assert.match(source,/const storesClassCode=str\(catalogueClassification\.storesClassCode\)/);
  assert.match(source,/const majorMaterialBranch=str\(catalogueClassification\.majorBranch\)/);
 });
+
+test('Service acceptance retains WO/task strategy provenance without replacing the approved PO expense account', async()=>{
+ const fs=await import('node:fs');
+ const source=fs.readFileSync('backend/finOps.ts','utf8');
+ const begin=source.indexOf('async function maintenanceServiceProvenance(');
+ const end=source.indexOf('// ===== Service acceptance =====',begin);
+ assert.ok(begin>=0&&end>begin);
+ const provenance=source.slice(begin,end);
+ assert.match(provenance,/procurement_requirements/);
+ assert.match(provenance,/maintenanceSource/);
+ assert.match(provenance,/\/\^WO\\d\{8\}\$\//);
+ assert.match(provenance,/mroFinancialContext\(wo\.data,taskId,\{\}\)/);
+ const service=source.slice(end,source.indexOf('// ===== Stock take =====',end));
+ assert.match(service,/maintenanceServiceLines\.push\(maintenanceSource\)/);
+ assert.match(service,/maintenanceServiceLines\.length\?\{maintenanceServiceLines\}/);
+ assert.match(service,/side: 'D', glCode: str\(x\.l\.glCode\)/,'The expense GL is still the approved PO line account');
+ const receipt=source.slice(source.indexOf('export async function receiveGoods('),end);
+ assert.doesNotMatch(receipt,/maintenanceServiceLines/,'WO service trace must never leak into goods receipt');
+});
