@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent } from 'react';
+import CatalogueDraftPreview from '../components/CatalogueDraftPreview';
 import { CheckCircle2, Download, Eye, FileUp, ShieldCheck } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { downloadBlob } from '../lib/xlsx';
@@ -238,6 +239,7 @@ export default function ProcurementCatalogAdmin({ kind, canWrite }: { kind: Kind
                     </div>
                 )}
             </Card>
+            <CatalogueDraftPreview kind={kind} />
         </div>
     );
 }
