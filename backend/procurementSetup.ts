@@ -3,6 +3,7 @@ import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { record } from './org';
 import { catalogSummary } from './procurement';
 import { assetCatalogSummary } from './assets';
+import { recommendProcurementCategories } from './industryCatalog';
 import { PROCUREMENT_AUTHORITY, PLANNED_SUBMODULES } from './procurementAuthority';
 
 // ---------------------------------------------------------------------------
@@ -23,11 +24,12 @@ export const OPEN_STATUSES = ['draft', 'pending_approval', 'approved', 'acknowle
 export interface Category {
     code: string;
     name: string;
-    subcategories: Array<{ code: string; name: string }>;
+    recommended?: boolean;
+    subcategories: Array<{ code: string; name: string; recommended?: boolean; industryMatchedItems?: number; totalItems?: number }>;
 }
 interface Summary {
     categories: Category[];
-    items: Array<{ code: string; name: string; categoryCode: string; subcategoryCode: string }>;
+    items: Array<{ code: string; name: string; categoryCode: string; subcategoryCode: string; industryScope?: string; industryCodes?: string[] }>;
 }
 
 export const setupPath = (orgId: string, kind: LineKind) => `organizations/${orgId}/procurement_setup/${kind}`;
@@ -88,7 +90,7 @@ export const procurementSetupRoutes = {
             const kinds = await Promise.all(
                 LINE_KINDS.map(async (kind) => {
                     const [master, current] = await Promise.all([masterSummary(kind), adopted(ctx.orgId, kind)]);
-                    return { kind, label: KIND_LABEL[kind], masterLoaded: !!master, master: master ? master.categories : [], adopted: current.categories, version: current.version, updatedAt: current.updatedAt };
+                    return { kind, label: KIND_LABEL[kind], masterLoaded: !!master, master: master ? recommendProcurementCategories(master.categories,master.items,str(ctx.org.data.industry)) : [], adopted: current.categories, version: current.version, updatedAt: current.updatedAt };
                 })
             );
             return { kinds, canManage: can(ctx, 'PRC.setup.manage') };
