@@ -1,4 +1,5 @@
 import { industryAdoptionRecommendation } from './industryCatalog';
+import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
 import {DETERMINATION_EVENTS,resolveAccountRule,validateRuleDraft,type AccountRule} from './finAccountRules';
 import {buildGlTransactionVariants} from './finTransactionVariants';
 import {registerGlContracts} from './finTransactionContracts';
@@ -404,6 +405,17 @@ registerHandler('coa.change', {
     },
 });
 
+/** Finance reads the controlled maintenance-type metadata used during Work Assessment. */
+async function maintenanceFinancialTypes():Promise<Array<{code:string;label:string}>>{
+    const configured=await getDoc('module_workspaces/MNT/metadata/maintenanceTypes');
+    const fallback=DEFAULT_MODULE_METADATA.MNT.find(x=>x.key==='maintenanceTypes')?.items??[];
+    const items=Array.isArray(configured?.data.items)?configured.data.items:fallback;
+    return items.filter(x=>x&&typeof x==='object'&&!Array.isArray(x))
+        .map(x=>({code:str(x.code),label:str(x.label),enabled:x.active!==false&&x.selectable!==false}))
+        .filter(x=>x.code&&x.enabled)
+        .map(({code,label})=>({code,label}));
+}
+
 function readMapping(raw: Obj): { roles: Record<string, string>; byCategory: Record<string, Obj>; rules: AccountRule[] } {
     const roles: Record<string, string> = {};
     for (const r of ROLES) {
@@ -422,11 +434,13 @@ function readMapping(raw: Obj): { roles: Record<string, string>; byCategory: Rec
 }
 async function mappingProblems(orgId: string, leId: string, m: ReturnType<typeof readMapping>): Promise<string[]> {
     const chart = await chartOf(orgId, leId);
-    const [entity,units,categories]=await Promise.all([entityOf(orgId,leId),unitsOf(orgId),materialCategories()]);
+    const [entity,units,categories,mntTypes]=await Promise.all([entityOf(orgId,leId),unitsOf(orgId),materialCategories(),maintenanceFinancialTypes()]);
     const validCategories=new Set(categories.map(c=>c.code));
+    const validMaintenanceTypes=new Set(mntTypes.map(t=>t.code));
     const out: string[] = [];
     for(const rule of m.rules){
         if(rule.categoryCode&&!validCategories.has(rule.categoryCode))out.push(`Rule ${rule.id}: unknown material category ${rule.categoryCode}.`);
+        if(rule.maintenanceTypeCode&&!validMaintenanceTypes.has(rule.maintenanceTypeCode))out.push(`Rule ${rule.id}: unknown registered maintenance type ${rule.maintenanceTypeCode}.`);
         if(rule.costCenterId){const cc=units.get(rule.costCenterId);
             if(!cc || cc.level!=='cost_center' || leOf(units,cc.id)?.id!==leId)out.push(`Rule ${rule.id}: cost center is not part of this legal entity.`);
         }
@@ -978,11 +992,12 @@ export const finRoutes = {
         fin('org.fin.mapping.get', async (ctx) => {
             const e = await env(ctx, ctx.body.leId);
             needView(ctx, e);
-            const [map, chart, cats, taxes, pending] = await Promise.all([mappingOf(ctx.orgId, e.le.id), chartOf(ctx.orgId, e.le.id), materialCategories(), getDoc(P(ctx.orgId).taxes(e.le.id)), pendingFor(ctx, e.le.id, ['mapping.save'])]);
+            const [map, chart, cats, taxes, pending, maintenanceTypes] = await Promise.all([mappingOf(ctx.orgId, e.le.id), chartOf(ctx.orgId, e.le.id), materialCategories(), getDoc(P(ctx.orgId).taxes(e.le.id)), pendingFor(ctx, e.le.id, ['mapping.save']),maintenanceFinancialTypes()]);
             const regimes = objs(taxes?.data.regimes).filter((r) => r.active !== false);
             return {
                 roles: ROLES,
                 events: DETERMINATION_EVENTS,
+                maintenanceTypes,
                 variants: buildGlTransactionVariants(Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable).map(a=>({code:a.code,name:a.name,statement:a.statement,classCode:a.classCode,className:a.className,categoryCode:a.categoryCode,categoryName:a.categoryName,groupCode:a.groupCode,groupName:a.groupName,accountRole:a.accountRole,accountType:a.accountType}))),
                 contracts: registerGlContracts(buildGlTransactionVariants(Array.from(chart.values()).filter(a=>a.status==='active'&&a.postable).map(a=>({code:a.code,name:a.name,statement:a.statement,classCode:a.classCode,className:a.className,categoryCode:a.categoryCode,categoryName:a.categoryName,groupCode:a.groupCode,groupName:a.groupName,accountRole:a.accountRole,accountType:a.accountType})))),
                 mapping: map,
@@ -1029,7 +1044,7 @@ export const finRoutes = {
             const event=str(ctx.body.event);
             const def=DETERMINATION_EVENTS.find(x=>x.code===event);
             if(!def)throw new HttpError(400,'Unknown transaction event.');
-            const categoryCode=str(ctx.body.categoryCode),costCenterId=str(ctx.body.costCenterId);
+            const categoryCode=str(ctx.body.categoryCode),costCenterId=str(ctx.body.costCenterId),maintenanceTypeCode=str(ctx.body.maintenanceTypeCode),costNatureCode=str(ctx.body.costNatureCode);
             if(costCenterId){
                 const cc=e.units.get(costCenterId);
                 if(!cc || cc.level!=='cost_center'||leOf(e.units,cc.id)?.id!==e.le.id)
@@ -1038,7 +1053,7 @@ export const finRoutes = {
             const chart=await chartOf(ctx.orgId,e.le.id);
             const entity=await entityOf(ctx.orgId,e.le.id);
             const lines=def.roles.map(role=>{
-                const matched=resolveAccountRule(map.rules,role,{event,categoryCode,costCenterId});
+                const matched=resolveAccountRule(map.rules,role,{event,categoryCode,costCenterId,maintenanceTypeCode,costNatureCode});
                 const override=categoryCode?map.byCategory[categoryCode]:undefined;
                 const fallback=role==='INVENTORY'?override?.INVENTORY
                   :role==='CONSUMPTION'||role==='MAINT_CONSUMPTION'?override?.CONSUMPTION:undefined;
