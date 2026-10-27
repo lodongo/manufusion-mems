@@ -134,6 +134,8 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                                 {referenceAudit&&<div className='space-y-1 rounded-xl bg-slate-900 p-3'>
                                     <p className={referenceAudit.eligible?'text-emerald-300':'text-amber-300'}>{referenceAudit.eligible?'439 references structurally validated; five GL accounts still need Finance approval':'Validation blocked: Finance mapping issues require correction'}</p>
                                     {referenceAudit.byAccount.map(x=><p key={x.code} className='text-xs text-slate-300'><span className='font-mono'>{x.code}</span> · {x.name}: {x.actual}/{x.expected} mapped</p>)}
+                                    <p className='pt-2 text-xs text-amber-300'>{referenceAudit.purposeReviewCount} materials need purpose/MRO and capitalization checks before tenant adoption. This is not an error in the GL code crosswalk.</p>
+                                    {referenceAudit.purposeReviewExamples.slice(0,5).map(x=><p key={x} className='text-xs text-slate-400'>{x}</p>)}
                                     {referenceAudit.errors.map((m,i)=><p key={i} className='text-xs text-amber-300'>{m}</p>)}
                                 </div>}
                                 <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
