@@ -57,3 +57,21 @@ test('new industry-integrated catalogue imports require classifications and reje
  const badCommon={...valid,industryCodes:['IND-R']};
  assert.match(catalogueFinanceErrors('services',[badCommon],true,true).join(' '),/cannot restrict industries/);
 });
+
+test('Transaction-audited master imports reject bogus handlers and refuse posting activation',()=>{
+ const valid={code:'T',industryScope:'COMMON',industryCodes:[],accounting:{
+  glResolution:{mappingStatus:'reference_proposed',transactionRoutes:[{
+   event:'SERVICE_ACCEPTANCE',glCode:'61901010',runtimeTransactionBinding:{
+    memsPostingEvents:['SVC_ACCEPT'],postingIntegrationState:'LIVE',
+    postingPermission:'NO_NEW_POSTING_AUTHORITY',activatedByThisReferenceFile:false
+   }
+  }]}
+ }};
+ assert.deepEqual(catalogueFinanceErrors('services',[valid],true,true,true),[]);
+ const altered=structuredClone(valid);altered.accounting.glResolution.transactionRoutes[0].runtimeTransactionBinding.memsPostingEvents=['GI_WO'];
+ assert.match(catalogueFinanceErrors('services',[altered],true,true,true).join(' '),/crosswalk mismatch/);
+ const unauthorized=structuredClone(valid);unauthorized.accounting.glResolution.transactionRoutes[0].runtimeTransactionBinding.activatedByThisReferenceFile=true;
+ assert.match(catalogueFinanceErrors('services',[unauthorized],true,true,true).join(' '),/cannot authorise/);
+ const missing=structuredClone(valid);missing.accounting.glResolution.transactionRoutes[0].event='NEVER_DEFINED';
+ assert.match(catalogueFinanceErrors('services',[missing],true,true,true).join(' '),/unknown master-to-runtime/);
+});
