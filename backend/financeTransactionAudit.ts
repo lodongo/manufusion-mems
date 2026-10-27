@@ -42,7 +42,7 @@ export function auditFinanceTransactions(input:Inputs):AuditReport {
  const known=new Map(input.rows.map(r=>[r.code,r]));
  const installed=new Set(input.installedRoutes.map(r=>r.method+' '+r.path));
  const fromCore=new Map(TXNS.map(r=>[r.code,r]));
- const fromDetermination=new Set(DETERMINATION_EVENTS.map(r=>r.code));
+ const fromDetermination=new Set<string>(DETERMINATION_EVENTS.map(r=>r.code));
  const seen=new Set<string>();
  const postingRows:PostingAuditRow[]=POSTING_EVENTS.map(e=>{
   const core=fromCore.get(e.event);
