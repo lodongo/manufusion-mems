@@ -3,6 +3,7 @@ import type {GranularVariant} from './FinGranularTransactionCatalog';
 import {callBackend} from '../lib/backend';
 import {Button,useLoad} from '../admin/kit';
 import {Alert} from '../components/ui';
+import {seedMaintenanceStrategyRules} from './mroStrategyRuleSeeds';
 type Rule={id:string;event:string;role:string;account:string;categoryCode:string;costCenterId:string;priority:number;enabled:boolean;maintenanceTypeCode?:string;costNatureCode?:string};
 type Event={code:string;label:string;roles:readonly string[];implemented:boolean};
 type Acc={code:string;name:string;statement:string};
@@ -28,6 +29,13 @@ export default function FinAccountRuleManager(props:{
   const isMaintenanceConsumption=event==='GI_WO'&&effectiveRole==='MAINT_CONSUMPTION';
   const usable=accounts.filter(a=>a.statement===statement);
   const visibleRules=useMemo(()=>rules.filter(r=>r.event===event),[rules,event]);
+  const seedStrategies=()=>{
+    if(!canEdit)return;
+    const seeded=seedMaintenanceStrategyRules(rules,maintenanceTypes,accounts,mapping.roles);
+    setRules(seeded.rules);
+    setEvent('GI_WO');setRole('MAINT_CONSUMPTION');setPreview(null);
+    setMessage(`${seeded.added} maintenance strategy draft rules added${seeded.skipped.length?`; ${seeded.skipped.length} lack a valid approved expense GL or registry code`:''}. Breakdown (MAI-006) remains distinct from corrective (MAI-002). Submit and obtain independent Finance approval before the new rules take effect.`);
+  };
   const add=()=>{
     if(!account||!effectiveRole)return setMessage('Choose an account and accounting role.');
     if(rules.some(r=>r.event===event&&r.role===effectiveRole&&r.categoryCode===category&&r.costCenterId===costCenter&&
@@ -52,6 +60,10 @@ export default function FinAccountRuleManager(props:{
     <div><h3 className='font-semibold text-ink'>Transaction-specific account determination</h3>
       <p className='text-sm text-muted'>Approved strategy-specific and Stores-class GL rules refine the default maintenance postings. Organizations may use different accounts for the same transaction type or material category without creating duplicate transaction handlers. These rules apply only after approval.</p>
     </div>
+    {canEdit&&maintenanceTypes.length>0&&<div className='flex flex-wrap items-center gap-2 rounded-xl border border-line p-3'>
+      <Button variant='secondary' onClick={seedStrategies}>Create maintenance strategy defaults ({maintenanceTypes.length})</Button>
+      <p className='text-xs text-muted'>Drafts use only GL accounts already adopted by this legal entity. MAI-006 Breakdown is configured separately and can later have its own account. No rule takes effect until Finance approval.</p>
+    </div>}
     <label className='block text-sm'>Transaction event
       <select data-native-select='true' value={event} className='mt-1 w-full rounded-lg border border-line bg-panel p-3 text-ink' onChange={e=>{const v=e.target.value;setEvent(v);setRole(events.find(t=>t.code===v)?.roles[0]||'');setAccount('');setPreview(null);}}>
         {events.map(e=><option key={e.code} value={e.code}>{e.code} · {e.label} {e.implemented?'':'(planned)'}</option>)}
