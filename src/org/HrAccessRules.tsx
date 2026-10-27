@@ -56,7 +56,7 @@ export default function HrAccessRules(){
    <p className="mt-2 text-sm text-muted">No rule can expose family or payslip records to managers. Super Administrators retain full access to other employees and may update their own permitted self-service data (education, family, skill proposals and leave applications). They cannot change protected employment fields or approve their own transactions. Access is checked by the backend for each employee.</p>
   </section>
   {!rules&&!error&&<p className="text-sm text-muted">Loading rules…</p>}
-  {error&&<p role="alert" className="rounded-xl border border-red-500/40 p-3 text-sm text-red-600">{error}</p>}
+  {error&&<p role="alert" className="rounded-xl border border-danger/40 p-3 text-sm text-danger">{error}</p>}
   {message&&<p role="status" className="rounded-xl border border-line p-3 text-sm">{message}</p>}
   {rules&&<>
    {([['selfTabs','Employee: My HR Portal'],['managerTabs','Manager: My Reportees'],['hrTabs','Authorized HR practitioner']] as [RuleKey,string][]).map(([key,title])=>

@@ -2,6 +2,7 @@ import {useEffect,useMemo,useState} from 'react';
 import {Award,BookOpen,CheckCircle2,ChevronDown,GraduationCap,LockKeyhole,Pencil,Plus,Save,Trash2,X} from 'lucide-react';
 import {callBackend} from '../lib/backend';
 import {SelectField} from '../components/ui';
+import {useConfirm} from '../components/screen';
 import {rankEducation} from './hrEducationSort';
 import type {EducationHeadline} from './hrProfileSummary';
 import {categoryLabel,CATEGORIES,readEvidenceFile,type EvidenceCategory,type HrEvidenceFile} from './HrEvidenceRecords';
@@ -49,6 +50,9 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
  },[employeeUid]);
  const ordered=useMemo(()=>rankEducation(records,selection?.config?.levels||[]),[records,selection]);
  const canAdd=!readOnly&&Boolean(selection?.config)&&!busy;
+ // Evidence pending or verified by HR freezes the qualification (server-enforced); documents can still be added.
+ const isLocked=(id:string)=>!!id&&evidence.some(f=>f.educationId===id&&(f.status==='pending'||f.status==='verified'));
+ const lockedDraft=editing!==null&&editing!==-1&&isLocked(records[editing]?.id||'');
  const start=(index:number)=>{
   setEditing(index);setDraft(index===-1?{...empty}:{...records[index]});setPendingFiles([]);setDocumentType('certificate');
   setError('');setNotice('');
@@ -95,9 +99,12 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
   if(editing===null)return;
   void save(editing===-1?[...records,draft]:records.map((item,i)=>i===editing?draft:item));
  };
+ const {ask,sheet}=useConfirm();
  const remove=(index:number)=>{
-  if(!window.confirm('Delete this education record?'))return;
-  void save(records.filter((_,i)=>i!==index));
+  const record=records[index];
+  ask({title:'Delete '+(record?.qualification||'this qualification')+'?',tone:'danger',confirmLabel:'Delete',
+   message:'The qualification is removed from your record. Any documents already uploaded stay in the HR evidence register.'},
+   async()=>{await save(records.filter((_,i)=>i!==index));});
  };
  const stageFiles=(input:FileList|null)=>{
   if(!input)return;
@@ -119,6 +126,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
  const chosenLevel=selection?.config?.levels.find(level=>level.code===draft.levelCode);
  const scope=catalogueError?'Unable to load catalogue':selection?.scope==='corporate'?'Corporate / Group Office':selection?.entity?.name||'Not assigned';
  return <section className="hr-edu" aria-label="Education records">
+  {sheet}
   <header className="hr-edu__head">
    <div className="hr-edu__head-icon"><GraduationCap size={23} aria-hidden="true"/></div>
    <div className="hr-edu__heading">
@@ -173,7 +181,9 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
       </div>
      </div>
      {!readOnly&&<div className="hr-edu__actions">
-      <button type="button" onClick={()=>start(originalIndex)} aria-label={'Edit '+record.qualification} className="hr-edu__icon-btn"><Pencil size={16} aria-hidden="true"/></button>
+      {isLocked(record.id)
+       ?<span className="hr-edu__icon-btn" role="img" aria-label={record.qualification+' is locked while HR evidence is pending or verified'} title="Locked: evidence pending or verified by HR"><LockKeyhole size={16} aria-hidden="true"/></span>
+       :<button type="button" onClick={()=>start(originalIndex)} aria-label={'Edit '+record.qualification} className="hr-edu__icon-btn"><Pencil size={16} aria-hidden="true"/></button>}
       <button type="button" disabled={busy} onClick={()=>remove(originalIndex)} aria-label={'Delete '+record.qualification} className="hr-edu__icon-btn hr-edu__icon-btn--delete"><Trash2 size={16} aria-hidden="true"/></button>
      </div>}
     </article>;
@@ -181,16 +191,17 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
   </div>}
   {editing!==null&&<div className="hr-edu__editor">
    <div className="hr-edu__editor-head">
-    <div><p className="hr-edu__eyebrow">Qualification details</p><h3>{editing===-1?'Add education':'Edit education'}</h3></div>
+    <div><p className="hr-edu__eyebrow">Qualification details</p><h3>{editing===-1?'Add education':lockedDraft?'Add documents':'Edit education'}</h3></div>
     <button type="button" className="hr-edu__icon-btn" onClick={()=>setEditing(null)} aria-label="Close education editor"><X size={18}/></button>
    </div>
    <div className="hr-edu__form">
+    {lockedDraft&&<p className="hr-edu__rank-info hr-edu__field--full"><LockKeyhole size={14} aria-hidden="true"/> Details are locked because HR has evidence for this qualification pending or verified. You can still add documents. To record a different qualification, add a new one.</p>}
     <label className="hr-edu__field hr-edu__field--full"><span>Institution <em>*</em></span>
-     <input value={draft.institution} maxLength={160} placeholder="University, college or training institution"
+     <input value={draft.institution} maxLength={160} disabled={lockedDraft} placeholder="University, college or training institution"
       onChange={event=>setDraft(d=>({...d,institution:event.target.value}))}/>
     </label>
     <div className="hr-edu__field">
-     <SelectField id="hr-edu-level" label="Education level" required value={draft.levelCode}
+     <SelectField id="hr-edu-level" label="Education level" required value={draft.levelCode} disabled={lockedDraft}
       onChange={event=>setDraft(d=>({...d,levelCode:event.target.value,qualificationCode:'',qualification:'',gradingSystemCode:'',gradeCode:''}))}>
       <option value="">Choose level</option>
       {selection?.config?.levels.filter(x=>x.enabled||x.code===draft.levelCode)
@@ -199,7 +210,7 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
     </div>
     <div className="hr-edu__field">
      <SelectField id="hr-edu-qualification" label="Qualification" required value={draft.qualificationCode}
-      disabled={!draft.levelCode} onChange={event=>{
+      disabled={!draft.levelCode||lockedDraft} onChange={event=>{
        const q=selection?.config?.qualifications.find(x=>x.code===event.target.value);
        setDraft(d=>({...d,qualificationCode:event.target.value,qualification:q?.name||''}));
       }}>
@@ -209,11 +220,11 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
      </SelectField>
     </div>
     <label className="hr-edu__field"><span>Field of study</span>
-     <input value={draft.field} maxLength={140} placeholder="e.g. Mechanical engineering"
+     <input value={draft.field} maxLength={140} disabled={lockedDraft} placeholder="e.g. Mechanical engineering"
       onChange={event=>setDraft(d=>({...d,field:event.target.value}))}/>
     </label>
     <label className="hr-edu__field"><span>Completion year</span>
-     <input type="number" min={1900} max={2100} value={draft.completionYear} placeholder="YYYY"
+     <input type="number" min={1900} max={2100} value={draft.completionYear} disabled={lockedDraft} placeholder="YYYY"
       onChange={event=>setDraft(d=>({...d,completionYear:event.target.value}))}/>
     </label>
     {chosenLevel&&<p className="hr-edu__rank-info">Education ranking: {chosenLevel.name} · rank {chosenLevel.rank}. Higher ranks are listed first.</p>}
@@ -252,6 +263,6 @@ export default function HrEducationRecords({employeeUid,readOnly=false,onEducati
   {error&&<div role="alert" className="hr-edu__error">{error}</div>}
   {evidenceError&&<div role="alert" className="hr-edu__error">{evidenceError}</div>}
   {notice&&<div role="status" className="hr-edu__notice"><CheckCircle2 size={17} aria-hidden="true"/>{notice}</div>}
-  <footer className="hr-edu__privacy"><LockKeyhole size={15} aria-hidden="true"/><span>Private employee education records. Visible to the employee and authorized HR super administrator.</span></footer>
+  <footer className="hr-edu__privacy"><LockKeyhole size={15} aria-hidden="true"/><span>Private employee education records. Only the employee can change them. Authorized HR and super administrators have read-only, audited access.</span></footer>
  </section>;
 }

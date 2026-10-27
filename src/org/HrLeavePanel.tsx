@@ -88,7 +88,7 @@ export default function HrLeavePanel({employeeUid,showInbox=false}:{employeeUid:
   }catch(e){setError(e instanceof Error?e.message:'Approval failed.')}finally{setBusy(false)}
  };
  return <div className="space-y-4">
- {error&&<p role="alert" className="rounded-xl border border-red-500/50 p-3 text-sm text-red-600">{error}</p>}
+ {error&&<p role="alert" className="rounded-xl border border-danger/40 p-3 text-sm text-danger">{error}</p>}
  {message&&<p role="status" className="rounded-xl border border-line p-3 text-sm">{message}</p>}
  <section className="rounded-2xl border border-line bg-panel p-3 sm:p-4">
   <h3 className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-5 w-5 text-brand"/>My leave eligibility & plan</h3>

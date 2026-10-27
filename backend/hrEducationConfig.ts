@@ -1,6 +1,7 @@
 import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc} from './core';
 import {orgRoute,hasPerm,type OrgContext} from './guards';
 import {withLock} from './finCore';
+import {hrAudit} from './hrAudit';
 
 /** Larger Education Rank means higher typical academic attainment.
  * Professional credentials may span multiple ranks; tenant admins can adjust.
@@ -228,9 +229,12 @@ export const hrEducationConfigRoutes={
   const config=normalizeConfig(ctx.body.config);
   await withLock(ctx.orgId,'hr_education_config_'+id,async()=>{
    const prior=await getDoc(configPath(ctx.orgId,id));
-   await writeDoc(configPath(ctx.orgId,id),{...config,updatedAt:nowIso(),updatedBy:ctx.uid,
-    version:Number(prior?.data.version||0)+1,
-    adoptedFromEntityId:str(prior?.data.adoptedFromEntityId)||''});
+   const version=Number(prior?.data.version||0)+1;
+   if(!await writeDoc(configPath(ctx.orgId,id),{...config,updatedAt:nowIso(),updatedBy:ctx.uid,
+    version,adoptedFromEntityId:str(prior?.data.adoptedFromEntityId)||''},
+    prior?{updateTime:prior.updateTime}:{exists:false}))
+    throw new HttpError(409,'Education settings changed while saving. Reload and try again.');
+   await hrAudit(ctx,'education.config.save',{type:'legal_entity',id},'version='+version);
   });
   return {ok:true,config};
  })],
@@ -249,11 +253,13 @@ export const hrEducationConfigRoutes={
    if(!from)throw new HttpError(409,'Configure and save the source legal entity before adopting.');
    const previous=await getDoc(configPath(ctx.orgId,target));
    const data=normalizeConfig(resolveEducationConfig(from.data));
-   await writeDoc(configPath(ctx.orgId,target),{
+   if(!await writeDoc(configPath(ctx.orgId,target),{
     ...data,version:Number(previous?.data.version||0)+1,
     updatedBy:ctx.uid,updatedAt:nowIso(),
     adoptedFromEntityId:source,adoptedAt:nowIso(),
-   });
+   },previous?{updateTime:previous.updateTime}:{exists:false}))
+    throw new HttpError(409,'Target settings changed while adopting. Reload and try again.');
+   await hrAudit(ctx,'education.config.adopt',{type:'legal_entity',id:target},'source='+source);
    return {ok:true,config:data,sourceLegalEntityId:source,targetLegalEntityId:target};
   });
  })],

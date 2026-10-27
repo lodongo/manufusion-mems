@@ -1314,12 +1314,7 @@ export const finRoutes = {
             if (!['approve', 'reject'].includes(decision)) throw new HttpError(400, 'Approve or reject.');
             const note = decision === 'reject' ? reasonOf(ctx.body) : oneLine(ctx.body.reason, 300);
             if (decision === 'approve' && ctx.body.acknowledge !== true) throw new HttpError(400, 'Confirm that you have checked what this request changes.');
-            return withLock(ctx.orgId, `req_${id}`, async () => {
-                const d = await getDoc(P(ctx.orgId).request(id));
-                if (!d) throw new HttpError(404, 'Request not found.');
-                const e = await env(ctx, d.data.leId);
-                const why = cannotDecide(ctx, d.data, e.units, e.scope);
-                if (why) throw new HttpError(403, why);
+            return decideRequest(ctx, id, decision as 'approve' | 'reject', note, async (d) => {
                 if (ctx.body.bulkFinanceMapping === true) {
                     const reqType=str(d.data.type);
                     if(decision!=='approve'||!['mapping.save','gltxn.save'].includes(reqType)||
@@ -1330,42 +1325,6 @@ export const finRoutes = {
                     if(competing.length)throw new HttpError(409,
                         'Multiple pending '+reqType+' requests exist for this legal entity. Review competing mappings individually before approval.');
                 }
-                const at = nowIso();
-                const steps = objs(d.data.steps) as unknown as Step[];
-                const idx = steps.findIndex((s) => s.status === 'pending');
-                const history = [...objs(d.data.history), { at, by: ctx.uid, byName: nameOf(ctx.me), action: decision === 'approve' ? `approved ${steps[idx].level}` : 'rejected', note }];
-                if (decision === 'reject') {
-                    await writeDoc(P(ctx.orgId).request(id), { ...d.data, status: 'rejected', decidedAt: at, decidedBy: ctx.uid, history } as unknown as Fields);
-                    await record(ctx, 'org.fin.request.reject', id, `${str(d.data.typeLabel)}: ${note}`.slice(0, 400));
-                    return { ok: true, status: 'rejected' };
-                }
-                const nextSteps = steps.map((s, i) => (i === idx ? { ...s, status: 'approved', by: ctx.uid, byName: nameOf(ctx.me), at, note } : s));
-                if (nextSteps.some((s) => s.status === 'pending')) {
-                    await writeDoc(P(ctx.orgId).request(id), { ...d.data, steps: nextSteps as unknown as Fields[keyof Fields], history } as unknown as Fields);
-                    await record(ctx, 'org.fin.request.approve_level', id, `${steps[idx].level} approved`);
-                    return { ok: true, status: 'pending' };
-                }
-                const h = HANDLERS[str(d.data.type)];
-                if (!h) throw new HttpError(500, 'Unknown request type.');
-                const result = await h.apply(ctx, { ...d.data, id, ...(h.atomicFinalization ? { _finalApproval: { steps: nextSteps, history, at, note } } : {}) }, id);
-                if (h.atomicFinalization) {
-                    // The journal/ledger commit already contains final FCR status and history.
-                    // NEVER replay a stale request document after an immutable posting.
-                    const finalized = await getDoc(P(ctx.orgId).request(id));
-                    if (!finalized || finalized.data.status !== 'approved' || finalized.data.decidedBy !== ctx.uid
-                        || finalized.data.result == null) {
-                        throw new HttpError(409, 'Atomic financial posting approval could not be verified. Check the transaction before retrying.');
-                    }
-                    try {
-                        await record(ctx, 'org.fin.request.approve', id, `${str(d.data.typeLabel)}: ${str(d.data.title)}. ${JSON.stringify(result).slice(0, 200)}`.slice(0, 400));
-                    } catch (auditError) {
-                        console.error('Atomic Finance posting committed, secondary activity audit requires reconciliation', id, auditError instanceof Error ? auditError.message : 'unknown');
-                    }
-                    return { ok: true, status: 'approved', result };
-                }
-                await writeDoc(P(ctx.orgId).request(id), { ...d.data, steps: nextSteps as unknown as Fields[keyof Fields], status: 'approved', decidedAt: at, decidedBy: ctx.uid, result: result as unknown as Fields[keyof Fields], history } as unknown as Fields);
-                await record(ctx, 'org.fin.request.approve', id, `${str(d.data.typeLabel)}: ${str(d.data.title)}. ${JSON.stringify(result).slice(0, 200)}`.slice(0, 400));
-                return { ok: true, status: 'approved', result };
             });
         }),
     ],
@@ -1384,5 +1343,58 @@ export const finRoutes = {
         }),
     ],
 };
+
+/**
+ * Decide a pending request (approve one Chart-of-Authority level, or reject). Shared by Finance and by
+ * modules that route cost-bearing changes through the same engine (e.g. HR compensation activation),
+ * so maker-checker, level-by-level approval, audit and handler application are identical everywhere.
+ * `guard` may add module-specific checks once the request is loaded and the decider is authorized.
+ */
+export async function decideRequest(ctx: OrgContext, id: string, decision: 'approve' | 'reject', note: string, guard?: (d: { id: string; data: Obj }) => Promise<void> | void) {
+    return withLock(ctx.orgId, `req_${id}`, async () => {
+        const d = await getDoc(P(ctx.orgId).request(id));
+        if (!d) throw new HttpError(404, 'Request not found.');
+        const e = await env(ctx, d.data.leId);
+        const why = cannotDecide(ctx, d.data, e.units, e.scope);
+        if (why) throw new HttpError(403, why);
+        if (guard) await guard(d);
+        const at = nowIso();
+        const steps = objs(d.data.steps) as unknown as Step[];
+        const idx = steps.findIndex((s) => s.status === 'pending');
+        const history = [...objs(d.data.history), { at, by: ctx.uid, byName: nameOf(ctx.me), action: decision === 'approve' ? `approved ${steps[idx].level}` : 'rejected', note }];
+        if (decision === 'reject') {
+            await writeDoc(P(ctx.orgId).request(id), { ...d.data, status: 'rejected', decidedAt: at, decidedBy: ctx.uid, history } as unknown as Fields);
+            await record(ctx, 'org.fin.request.reject', id, `${str(d.data.typeLabel)}: ${note}`.slice(0, 400));
+            return { ok: true, status: 'rejected' };
+        }
+        const nextSteps = steps.map((s, i) => (i === idx ? { ...s, status: 'approved', by: ctx.uid, byName: nameOf(ctx.me), at, note } : s));
+        if (nextSteps.some((s) => s.status === 'pending')) {
+            await writeDoc(P(ctx.orgId).request(id), { ...d.data, steps: nextSteps as unknown as Fields[keyof Fields], history } as unknown as Fields);
+            await record(ctx, 'org.fin.request.approve_level', id, `${steps[idx].level} approved`);
+            return { ok: true, status: 'pending' };
+        }
+        const h = HANDLERS[str(d.data.type)];
+        if (!h) throw new HttpError(500, 'Unknown request type.');
+        const result = await h.apply(ctx, { ...d.data, id, ...(h.atomicFinalization ? { _finalApproval: { steps: nextSteps, history, at, note } } : {}) }, id);
+        if (h.atomicFinalization) {
+            // The journal/ledger commit already contains final FCR status and history.
+            // NEVER replay a stale request document after an immutable posting.
+            const finalized = await getDoc(P(ctx.orgId).request(id));
+            if (!finalized || finalized.data.status !== 'approved' || finalized.data.decidedBy !== ctx.uid
+                || finalized.data.result == null) {
+                throw new HttpError(409, 'Atomic financial posting approval could not be verified. Check the transaction before retrying.');
+            }
+            try {
+                await record(ctx, 'org.fin.request.approve', id, `${str(d.data.typeLabel)}: ${str(d.data.title)}. ${JSON.stringify(result).slice(0, 200)}`.slice(0, 400));
+            } catch (auditError) {
+                console.error('Atomic Finance posting committed, secondary activity audit requires reconciliation', id, auditError instanceof Error ? auditError.message : 'unknown');
+            }
+            return { ok: true, status: 'approved', result };
+        }
+        await writeDoc(P(ctx.orgId).request(id), { ...d.data, steps: nextSteps as unknown as Fields[keyof Fields], status: 'approved', decidedAt: at, decidedBy: ctx.uid, result: result as unknown as Fields[keyof Fields], history } as unknown as Fields);
+        await record(ctx, 'org.fin.request.approve', id, `${str(d.data.typeLabel)}: ${str(d.data.title)}. ${JSON.stringify(result).slice(0, 200)}`.slice(0, 400));
+        return { ok: true, status: 'approved', result };
+    });
+}
 
 export { isSuper };

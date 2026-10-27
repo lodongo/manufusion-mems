@@ -54,6 +54,11 @@ await call(hrRulesRoutes,'admin','/api/org/hr/access-rules/save',{rules:HR_RULE_
 await assert.rejects(()=>call(hrRulesRoutes,'admin','/api/org/hr/access-rules/review',{decision:'approve'}),/own privacy rule/);
 await call(hrRulesRoutes,'dpo','/api/org/hr/access-rules/review',{decision:'approve'});
 assert.equal((await call(hrRulesRoutes,'admin','/api/org/hr/access-rules/get')).rules.managerTabs.includes('leave'),true);
+// A saved draft alone never grants leave: only the approved (activated) policy does.
+await assert.rejects(()=>call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
+ employeeUid:'employee',kind:'plan',leaveType:'LEAVE_ANNUAL',start:'2026-11-02',end:'2026-11-06',
+}),/not been approved/);
+seed(root+'/hr_compensation_active/LE',{...leaveConfig,version:1,activeVersion:1,status:'active'});
 await assert.rejects(()=>call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
  employeeUid:'employee',kind:'application',leaveType:'LEAVE_ANNUAL',
  start:'2026-11-09',end:'2026-11-13',
@@ -139,12 +144,12 @@ assert.ok(teamView.counts.planned>=2);
 assert.equal(teamView.items.some(x=>x.note),false,'Leave planning overview must redact private notes');
 const changedConfig=structuredClone(leaveConfig);
 changedConfig.items.find(x=>x.code==='LEAVE_ANNUAL').leaveEntitlements.JG01.daysPerYear=22;
-seed(root+'/hr_compensation_config/LE',{...changedConfig,version:2});
+seed(root+'/hr_compensation_active/LE',{...changedConfig,version:2,activeVersion:2,status:'active'});
 await assert.rejects(()=>call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
  employeeUid:'employee',kind:'application',leaveType:'LEAVE_ANNUAL',
  start:'2026-12-01',end:'2026-12-02',planId:secondPlan.id,
 }),/entitlement changed/);
-seed(root+'/hr_compensation_config/LE',{...leaveConfig,version:1});
+seed(root+'/hr_compensation_active/LE',{...leaveConfig,version:1,activeVersion:1,status:'active'});
 const resumed=await call(hrLeaveRoutes,'employee','/api/org/hr/leave/create',{
  employeeUid:'employee',kind:'application',leaveType:'LEAVE_ANNUAL',
  start:'2026-12-01',end:'2026-12-02',planId:secondPlan.id,

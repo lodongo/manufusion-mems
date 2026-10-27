@@ -320,6 +320,24 @@ export const corporateIntercompanyRoutes={
    status:icPostingEnabled()?'atomic_posting_dev_optin':'nonposting_policy_and_matching',
    note:'Bilateral journal posting is opt-in on isolated development only; bank settlement and tax invoice execution remain disabled.'};
  })],
+ // Eligible GL posting accounts for IC mappings (same rules as validateChart), so the UI offers a picker
+ // instead of free text. Codes and names only: no balances. Makers need Finance setup rights somewhere.
+ 'POST /api/org/corporate/ic/accounts':[orgRoute('org.corporate.ic.accounts','FIN.view',async ctx=>{
+  const leId=clean(ctx.body.legalEntityId,128);
+  const [units,scope]=await Promise.all([unitsOf(ctx.orgId),scopeOf(ctx)]);
+  const le=units.get(leId);
+  if(!le||le.level!=='legal_entity'||le.status==='inactive')throw new HttpError(404,'Legal entity not found.');
+  const maker=[...units.values()].some(u=>u.level==='legal_entity'&&permAt(ctx,'FIN.setup.manage',u.id,units,scope));
+  if(!maker)await canRead(ctx,leId);
+  const [chart,entity]=await Promise.all([chartOf(ctx.orgId,leId),entityOf(ctx.orgId,leId)]);
+  const scoped=entity.doc?.data.glScopeConfigured===true;
+  const allowed=new Set(Array.isArray(entity.doc?.data.allowedGl)?(entity.doc!.data.allowedGl as string[]):[]);
+  const accounts=[...chart.values()]
+   .filter(a=>a.status==='active'&&a.postable&&(a.statement==='BS'||a.statement==='PL')&&(!scoped||allowed.has(a.code)))
+   .map(a=>({code:a.code,name:a.name,statement:a.statement}))
+   .sort((x,y)=>x.code.localeCompare(y.code));
+  return {legalEntityId:leId,accounts,functionalCurrency:entity.functionalCurrency};
+ })],
  'POST /api/org/corporate/ic/agreements':[orgRoute('org.corporate.ic.agreements','FIN.view',async ctx=>{
   const leId=clean(ctx.body.legalEntityId,128);await canRead(ctx,leId);
   const docs=await listDocs(agreementDir(ctx.orgId));

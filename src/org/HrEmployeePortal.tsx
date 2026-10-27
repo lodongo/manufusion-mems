@@ -106,12 +106,12 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
  return <div className="flex h-[calc(100dvh-9rem)] min-h-[420px] min-w-0 flex-col overflow-hidden bg-page text-ink">
   <header className="flex shrink-0 items-center gap-3 border-b border-line bg-page px-3 py-3 sm:px-5">
    {!selfView&&<button type="button" onClick={back} aria-label="Back to employee list" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-panel"><ArrowLeft className="h-5 w-5"/></button>}
-   <div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase tracking-wider text-blue-500">Human Resources · Employee portal</p><h1 className="truncate text-base font-bold sm:text-xl">{selfView?'My HR Portal':data?.profile.name||'Employee HR portal'}</h1></div>
+   <div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase tracking-wider text-brand">Human Resources · Employee portal</p><h1 className="truncate text-base font-bold sm:text-xl">{selfView?'My HR Portal':data?.profile.name||'Employee HR portal'}</h1></div>
 
   </header>
   <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-5">
    {loading&&<div role="status" className="rounded-xl border border-line bg-panel p-4 text-sm text-muted">Loading the authorized employee record…</div>}
-   {error&&<div role="alert" className="rounded-xl border border-line bg-panel p-4 text-sm text-red-600">{error}<button type="button" className="mt-3 block text-sm font-semibold text-brand underline" onClick={back}>Return to employees</button></div>}
+   {error&&<div role="alert" className="rounded-xl border border-line bg-panel p-4 text-sm text-danger">{error}<button type="button" className="mt-3 block text-sm font-semibold text-brand underline" onClick={back}>Return to employees</button></div>}
    {data&&<>
     <div ref={detailsRef} className="min-w-0 space-y-3">
      <nav role="tablist" aria-label="Employee HR sections" className="hr-portal-tabs">
@@ -128,7 +128,7 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
        fit={data.skillFit} canSeeSkills={canSeeSkills} canOpenRequiredSkills={canOpenRequiredSkills}
        onRequiredSkills={()=>openDetails('roleSkills')}
        onReportees={()=>navigate('organization_home/hr/HR01/reportees')}/>}
-      {tab!=='basic'&&<div className="flex items-center gap-2"><ActiveIcon className="h-5 w-5 text-blue-500"/><h2 className="min-w-0 flex-1 text-lg font-bold">{active.label}</h2>{tab==='roles'&&<span className="rounded-full border border-line px-2 py-1 text-xs text-muted">Read only</span>}</div>}
+      {tab!=='basic'&&<div className="flex items-center gap-2"><ActiveIcon className="h-5 w-5 text-brand"/><h2 className="min-w-0 flex-1 text-lg font-bold">{active.label}</h2>{tab==='roles'&&<span className="rounded-full border border-line px-2 py-1 text-xs text-muted">Read only</span>}</div>}
       {tab==='roles'&&<Panel title="Job roles and responsibilities">
        {data.roles.length?<div className="space-y-3">{data.roles.map(role=><article key={role.code} className="rounded-xl border border-line bg-page p-4"><h3 className="font-semibold">{role.title}</h3><p className="mt-1 text-xs text-muted">{role.code} · {role.operatingLevel||'Level not recorded'} · Reports to: {role.reportsToCode||'Not recorded'}</p><p className="mt-3 whitespace-pre-wrap text-sm">{role.description||'No responsibilities description is recorded for this role.'}</p></article>)}</div>:<p className="text-sm text-muted">No assigned job role is recorded.</p>}
       </Panel>}
@@ -140,7 +140,7 @@ export default function HrEmployeePortal({uid,origin='HR02',selfView=false,repor
         employeeUid={data.profile.uid} ownUid={firebaseAuth.currentUser?.uid||''}
         requiredCodes={data.requiredSkills}/>}
 
-      {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid||data.access.scope==='superadmin'?<HrSelfRecords kind={tab} employeeUid={data.profile.uid} readOnly={data.access.isOwnRecord&&!data.access.selfServiceTabs.includes(tab)} onEducationChange={setQualification}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
+      {(tab==='education'||tab==='family')&&(firebaseAuth.currentUser?.uid===data.profile.uid||data.access.scope==='superadmin'?<HrSelfRecords kind={tab} employeeUid={data.profile.uid} readOnly={!data.access.isOwnRecord||!data.access.selfServiceTabs.includes(tab)} onEducationChange={setQualification}/>:<div className="rounded-2xl border border-line bg-panel p-5 text-sm text-muted"><LockKeyhole className="mb-2 h-6 w-6"/>Private employee record · only the employee can access this section.</div>)}
       {tab==='leave'&&<HrLeavePanel employeeUid={data.profile.uid} showInbox={selfView}/>}
       {tab==='records'&&<HrEvidenceRecords employeeUid={data.profile.uid} qualifications={educationRecords} reviewer={Boolean(data.access.canVerifyEvidence)} viewerUid={firebaseAuth.currentUser?.uid||''}/>}
       {RESTRICTED.has(tab)&&tab!=='education'&&tab!=='family'&&tab!=='leave'&&<EmptyRecords label={active.label}/>}

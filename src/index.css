@@ -82,6 +82,7 @@ html[data-mems-appearance='dark'] .mems-organization-ui {
     --c-brand: 16 185 129;
     --c-brandsoft: 110 231 183;
     --c-onbrand: 2 6 23;
+    --c-danger: 248 113 113;
 }
 
 html,

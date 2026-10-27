@@ -11,7 +11,8 @@ export type LeaveEligibility={
  legalEntityId:string;jobRoleCode:string;jobRoleTitle:string;gradeCode:string;
  legalEntityName:string;options:LeaveOption[];payConfigVersion:number;
 };
-const collection=(org:string,entity:string)=>`organizations/${org}/hr_compensation_config/${entity}`;
+// Leave entitlement uses only the APPROVED compensation policy, never the editable draft.
+const collection=(org:string,entity:string)=>`organizations/${org}/hr_compensation_active/${entity}`;
 export const leaveDays=(start:string,end:string,unit:LeaveGradeEntitlement['unit'])=>{
  const from=Date.parse(start+'T00:00:00Z'),to=Date.parse(end+'T00:00:00Z');
  if(!Number.isFinite(from)||!Number.isFinite(to)||start>end)
@@ -43,7 +44,7 @@ export async function leaveEligibility(org:string,employee:Record<string,unknown
   throw new HttpError(409,'This job grade is disabled or missing in the employee’s legal entity. Update role grading in Organization Admin.');
 
  const cfg=await getDoc(collection(org,legal.id));
- if(!cfg)throw new HttpError(409,'Configure and save leave entitlements for the employee’s legal entity before planning leave.');
+ if(!cfg)throw new HttpError(409,'The leave and compensation policy for the employee’s legal entity has not been approved yet. HR must submit it for activation under HR Settings → Compensation & Benefits.');
  const payroll=cfg.data as unknown as PayConfig;
  const leaves=Array.isArray(payroll.items)?payroll.items.filter(x=>x.category==='leave'&&x.enabled):[];
  const options:LeaveOption[]=[];

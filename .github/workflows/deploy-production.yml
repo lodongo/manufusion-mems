@@ -39,10 +39,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
       - name: Verify production target and tests
         run: |
           node scripts/prod-preflight.mjs
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run check
           npm run test:governance
           npm run audit:routes

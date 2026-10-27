@@ -9,6 +9,7 @@ import { HR_SKILL_DEFAULTS } from './hrSkillsDefaults';
 import { HR_SKILL_EXPANDED } from './hrSkillsExpanded';
 import { requiredRoleSkills, makeSkillFit } from './hrSkillFit';
 import { hrMayAccess, hrRules, hrMayChangeRecord } from './hrPrivacyRules';
+import { hrAudit, hrAuditRead } from './hrAudit';
 
 const clean=(value:unknown,max=160)=>str(value).trim().slice(0,max);
 const privatePath=(org:string,uid:string)=>`organizations/${org}/hr_private/${uid}`;
@@ -132,6 +133,8 @@ async function submitSkills(ctx:OrgContext,roleRequirementsOnly=false){
         submitted.push(code);
       });
     }
+    if(submitted.length)await hrAudit(ctx,(roleRequirementsOnly?'skills.role.propose':'skills.propose'),{type:'employee',id:uid},
+      'submitted='+submitted.length+' skipped='+skipped.length);
     return {ok:true,submitted,skipped,submittedCount:submitted.length,skippedCount:skipped.length};
 
 }
@@ -142,12 +145,15 @@ export const hrEmployeeRoutes={
     if(uid!==ctx.uid&&ctx.role!=='org_super_admin')throw new HttpError(403,'Only the employee or organization super administrator may view private HR records.');
     await personnel(ctx,uid);
     const doc=await getDoc(privatePath(ctx.orgId,uid));
+    await hrAuditRead(ctx,'private',uid,'superadmin');
     return {education:Array.isArray(doc?.data.education)?doc.data.education:[],
       family:Array.isArray(doc?.data.family)?doc.data.family:[]};
   })],
   'POST /api/org/hr/private/save':[orgRoute('org.hr.private.save','HRM.shell.view',async ctx=>{
     const uid=clean(ctx.body.uid,128)||ctx.uid;
-    if(uid!==ctx.uid&&ctx.role!=='org_super_admin')throw new HttpError(403,'Only the employee or organization super administrator may update private HR records.');
+    // Private education and family records are employee-owned. Administrators may view them (audited) but never rewrite them.
+    if(uid!==ctx.uid)throw new HttpError(403,'Only the employee can change their private HR records. Administrators have read-only, audited access.');
+    // Education and family are checked against their own privacy-policy sections below (not the Skills section).
     await personnel(ctx,uid);
     return withLock(ctx.orgId,'hr_self_'+uid,async()=>{
       const kind=clean(ctx.body.kind,20);
@@ -164,6 +170,17 @@ export const hrEmployeeRoutes={
       const old=await getDoc(path);
       if(kind==='education'){
         const existing=Array.isArray(old?.data.education)?old.data.education.filter(isObj):[];
+        // A qualification with pending or HR-verified evidence cannot be rewritten: the verification
+        // would otherwise appear against a different claim. Add a new qualification instead.
+        const evidence=await listDocs(`organizations/${ctx.orgId}/hr_employee_evidence/${uid}/files`);
+        const locked=new Set(evidence.filter(f=>['pending','verified'].includes(str(f.data.status))).map(f=>str(f.data.educationId)));
+        const FIELDS=['institution','qualification','field','completionYear','levelCode','qualificationCode','gradingSystemCode','gradeCode'];
+        for(const prior of existing){
+          if(!locked.has(str(prior.id)))continue;
+          const next=values.find(v=>v.id===str(prior.id)) as Record<string,unknown>|undefined;
+          if(next&&FIELDS.some(key=>str(prior[key])!==str(next[key])))
+            throw new HttpError(409,'"'+str(prior.qualification)+'" has supporting evidence pending or verified by HR and cannot be changed. Add a new qualification instead.');
+        }
         for(const value of values){
           if(!('levelCode' in value))continue;
           if(!value.levelCode||!value.qualificationCode){
@@ -174,7 +191,10 @@ export const hrEmployeeRoutes={
           }else await checkEducationEntry(ctx.orgId,uid,value,ctx.role==='org_super_admin'&&uid===ctx.uid);
         }
       }
-      await writeDoc(path,{...old?.data,[kind]:values,updatedAt:nowIso(),updatedBy:ctx.uid});
+      const ok=await writeDoc(path,{...old?.data,[kind]:values,updatedAt:nowIso(),updatedBy:ctx.uid},
+        old?{updateTime:old.updateTime}:{exists:false});
+      if(!ok)throw new HttpError(409,'These records changed at the same time. Reload and try again.');
+      await hrAudit(ctx,'private.'+kind+'.save',{type:'employee',id:uid},'entries='+values.length);
       return {ok:true,items:values};
     });
   })],
@@ -187,16 +207,17 @@ export const hrEmployeeRoutes={
     const category=clean(ctx.body.category,100),subcategory=clean(ctx.body.subcategory,100);
     const description=clean(ctx.body.description,600),enabled=ctx.body.enabled!==false;
     if(!name||!category||!subcategory)throw new HttpError(400,'Name, category and subcategory are required.');
-    const master=await getDoc(`reference/skills_master/items/${code}`);
-    const old=code?await getDoc(`${catalogPath(ctx.orgId)}/${code}`):null;
     if(code && !/^(HR_SK_\d{3}_\d{3}|HR_SK_LOCAL_[A-Za-z0-9_-]{4,45})$/.test(code))
       throw new HttpError(400,'Invalid skill code.');
+    const [master,old]=code?await Promise.all([getDoc(`reference/skills_master/items/${code}`),getDoc(`${catalogPath(ctx.orgId)}/${code}`)]):[null,null];
     if(code && !old&&!master&&!code.startsWith('HR_SK_LOCAL_'))throw new HttpError(400,'New skill code must be local.');
     const resolved=code||('HR_SK_LOCAL_'+randomUUID().replace(/-/g,'').slice(0,20));
-    await writeDoc(`${catalogPath(ctx.orgId)}/${resolved}`,{
+    if(!await writeDoc(`${catalogPath(ctx.orgId)}/${resolved}`,{
       code:resolved,name,category,subcategory,description,enabled,
       createdAt:old?.data.createdAt||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid,
-    });
+    },old?{updateTime:old.updateTime}:{exists:false}))
+      throw new HttpError(409,'This skill changed at the same time. Reload and try again.');
+    await hrAudit(ctx,'skills.catalog.save',{type:'skill',id:resolved},(old?'updated':'created')+(enabled?'':' disabled'));
     return {ok:true,code:resolved};
   })],
   'POST /api/org/hr/skills/catalog/save/bulk':[orgRoute('org.hr.skills.catalog.save.bulk','HRM.skills.manage',async ctx=>{
@@ -228,6 +249,7 @@ export const hrEmployeeRoutes={
         },{exists:false});
         names.add(item.name.toLocaleLowerCase());created.push(code);
       }
+      await hrAudit(ctx,'skills.catalog.bulk',{type:'skill_catalog',id:'bulk'},'created='+created.length+' skipped='+skipped.length);
       return {ok:true,created,skipped,createdCount:created.length,skippedCount:skipped.length};
     });
   })],
@@ -248,7 +270,8 @@ export const hrEmployeeRoutes={
       sameSite(ctx.me.data,employee.data,nodes)||
       (hasPerm(ctx.directPermissions,'HRM.manager.hierarchy.read')&&manager===ctx.uid);
     if(!allowed)throw new HttpError(403,'Skill record outside your access scope.');
-    const proposals=(await listDocs(proposalsPath(ctx.orgId))).filter(d=>str(d.data.employeeUid)===target)
+    await hrAuditRead(ctx,'skills',target,manager===ctx.uid?'manager':'site');
+    const proposals=(await runQuery({from:[{collectionId:'hr_skill_proposals'}],where:fieldEq('employeeUid',target)},`organizations/${ctx.orgId}`))
       .map(d=>({id:d.id,skillCode:clean(d.data.skillCode,65),skillName:clean(d.data.skillName,160),
         status:clean(d.data.status,32),proposedBy:clean(d.data.proposedBy,128),
         proposerName:clean(d.data.proposerName,140),managerUid:clean(d.data.managerUid,128),
@@ -261,30 +284,15 @@ export const hrEmployeeRoutes={
       managerStatus:managerResolution.reason,
       managerRoleCode:managerResolution.roleCode};
   })],
+  // A single nomination uses the same governed writer as bulk nominations, so the HR privacy policy,
+  // protected-record and same-site rules apply identically.
   'POST /api/org/hr/skills/propose':[orgRoute('org.hr.skills.propose','HRM.shell.view',async ctx=>{
-    const uid=clean(ctx.body.employeeUid,128)||ctx.uid;
-
-    const employee=await personnel(ctx,uid),nodes=await nodeMap(ctx.orgId);
-    if(uid!==ctx.uid&&ctx.role!=='org_super_admin'&&!sameSite(ctx.me.data,employee.data,nodes))
-      throw new HttpError(403,'Only colleagues at the same site can propose another employee’s skills.');
     const code=clean(ctx.body.skillCode,65);
-    const skill=(await skillCatalog(ctx)).find(x=>x.code===code&&x.enabled);
-    if(!skill)throw new HttpError(400,'Choose an enabled skill in the HR catalogue.');
-    const manager=await managerFor(ctx,employee.data,nodes);
-    if(!manager)throw new HttpError(409,'The configured manager job role must be held by one active employee at the relevant level before a skill can be proposed.');
-    return withLock(ctx.orgId,'hr_skill_nomination_'+uid+'_'+code,async()=>{
-      const existing=(await listDocs(proposalsPath(ctx.orgId))).some(d=>
-        str(d.data.employeeUid)===uid&&str(d.data.skillCode)===code&&['pending','approved'].includes(str(d.data.status)));
-      if(existing)throw new HttpError(409,'This employee already has a pending or confirmed nomination for the selected skill. Second the existing skill instead.');
-      const path=`${proposalsPath(ctx.orgId)}/${randomUUID().replace(/-/g,'')}`;
-      await writeDoc(path,{
-        employeeUid:uid,skillCode:code,skillName:skill.name,
-        status:'pending',managerUid:manager,proposedBy:ctx.uid,
-        proposerName:[clean(ctx.me.data.firstName,50),clean(ctx.me.data.lastName,50)].join(' ').trim(),
-        endorsements:[],createdAt:nowIso(),updatedAt:nowIso(),reviewedAt:'',reviewedBy:'',decisionNote:'',
-      },{exists:false});
-      return {ok:true};
-    });
+    if(!code)throw new HttpError(400,'Choose an enabled skill in the HR catalogue.');
+    const result=await submitSkills({...ctx,body:{...ctx.body,skillCodes:[code]}});
+    if(!result.submittedCount)
+      throw new HttpError(409,'This employee already has a pending or confirmed nomination for the selected skill. Second the existing skill instead.');
+    return {ok:true};
   })],
   'POST /api/org/hr/skills/propose/bulk':[orgRoute('org.hr.skills.propose.bulk','HRM.shell.view',async ctx=>submitSkills(ctx))],
   'POST /api/org/hr/skills/role-requirements/propose':[orgRoute('org.hr.skills.role_requirements.propose','HRM.shell.view',async ctx=>submitSkills(ctx,true))],
@@ -303,22 +311,29 @@ export const hrEmployeeRoutes={
         throw new HttpError(403,'Skills may only be seconded by colleagues at the same site.');
       const endorsements=Array.isArray(doc.data.endorsements)?doc.data.endorsements.filter(isObj):[];
       if(endorsements.some(e=>str(e.uid)===ctx.uid))throw new HttpError(409,'You have already seconded this skill.');
-      await writeDoc(path,{...doc.data,endorsements:[...endorsements,{
+      const ok=await writeDoc(path,{...doc.data,endorsements:[...endorsements,{
         uid:ctx.uid,name:[clean(ctx.me.data.firstName,50),clean(ctx.me.data.lastName,50)].join(' ').trim(),at:nowIso(),
-      }],updatedAt:nowIso()});
+      }],updatedAt:nowIso()},{updateTime:doc.updateTime});
+      if(!ok)throw new HttpError(409,'This skill changed at the same time. Reload and try again.');
+      await hrAudit(ctx,'skills.endorse',{type:'employee',id:str(doc.data.employeeUid)},'proposal='+id+' skill='+clean(doc.data.skillCode,65));
       return {ok:true};
     });
   })],
   'POST /api/org/hr/skills/inbox':[orgRoute('org.hr.skills.inbox','HRM.shell.view',async ctx=>{
-    const records=(await listDocs(proposalsPath(ctx.orgId))).filter(d=>str(d.data.status)==='pending' && str(d.data.managerUid)===ctx.uid);
+    // One read of each collection; the manager is resolved against the same user list (no per-item scans).
+    const [all,nodes,roleDocs,users]=await Promise.all([
+      listDocs(proposalsPath(ctx.orgId)),nodeMap(ctx.orgId),listDocs(`organizations/${ctx.orgId}/positions`),
+      runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)}),
+    ]);
+    const records=all.filter(d=>str(d.data.status)==='pending' && str(d.data.managerUid)===ctx.uid);
     const results=[];
-    const nodes=await nodeMap(ctx.orgId);
-    const roles=new Map((await listDocs(`organizations/${ctx.orgId}/positions`)).map(r=>[r.id,r.data]));
-    const confirmed=await listDocs(proposalsPath(ctx.orgId));
+    const roles=new Map(roleDocs.map(r=>[r.id,r.data]));
+    const confirmed=all;
+    const people=new Map(users.map(u=>[u.id,u]));
     for(const doc of records){
-      const employee=await getDoc(`users/${str(doc.data.employeeUid)}`);
+      const employee=people.get(str(doc.data.employeeUid));
       if(!employee||str(employee.data.orgId)!==ctx.orgId||str(employee.data.status)==='disabled')continue;
-      if(await managerFor(ctx,employee.data,nodes)!==ctx.uid)continue;
+      if(await managerFor(ctx,employee.data,nodes,users)!==ctx.uid)continue;
       results.push({id:doc.id,employeeUid:employee.id,employeeName:employeeSafe(employee).name,
         skillCode:clean(doc.data.skillCode,65),skillName:clean(doc.data.skillName,160),
         proposedBy:clean(doc.data.proposedBy,128),proposerName:clean(doc.data.proposerName,140),
@@ -343,8 +358,10 @@ export const hrEmployeeRoutes={
         throw new HttpError(403,'Only the verified immediate manager may confirm this skill.');
       const note=clean(ctx.body.note,400);
       if(action==='reject'&&note.length<5)throw new HttpError(400,'State a reason for rejection.');
-      await writeDoc(path,{...doc.data,status:action==='approve'?'approved':'rejected',decisionNote:note,
-        reviewedAt:nowIso(),reviewedBy:ctx.uid,updatedAt:nowIso()});
+      const ok=await writeDoc(path,{...doc.data,status:action==='approve'?'approved':'rejected',decisionNote:note,
+        reviewedAt:nowIso(),reviewedBy:ctx.uid,updatedAt:nowIso()},{updateTime:doc.updateTime});
+      if(!ok)throw new HttpError(409,'This skill proposal changed at the same time. Reload and try again.');
+      await hrAudit(ctx,'skills.'+action,{type:'employee',id:str(doc.data.employeeUid)},'proposal='+id+' skill='+clean(doc.data.skillCode,65));
       return {ok:true};
     });
   })],

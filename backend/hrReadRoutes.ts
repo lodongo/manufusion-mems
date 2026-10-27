@@ -9,6 +9,7 @@ import { hrVisibleTabs } from './hrPrivacyRules';
 import { buildFitIndex, makeSkillFit } from './hrSkillFit';
 import { signedUrl } from './structure';
 import { computeRoleStaffing } from './hrRoleStaffingOutlook';
+import { hrAudit, hrAuditRead } from './hrAudit';
 
 // Read-only HR endpoints. No salaries, banking, medical, disciplinary,
 // contact details, identity documents or unrelated security information.
@@ -95,7 +96,10 @@ export const hrReadRoutes = {
       const sitePermitted=hasPerm(ctx.directPermissions,'HRM.employee.site.read') &&
         assignments.some(a=>{const site=hrSiteOf(str(a.nodeId),nodes);return !!site && ownSiteIds.has(site);});
       const rules=await currentHrRules(ctx.orgId);
-      const isDirectManager=!isSelf && (await managerFor(ctx,employee.data,nodes))===ctx.uid;
+      // One organization user lookup per portal read, shared by the access check and the manager card.
+      let orgUsers:Awaited<ReturnType<typeof runQuery>>|undefined;
+      const usersOnce=async()=>orgUsers??=await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
+      const isDirectManager=!isSelf && (await managerFor(ctx,employee.data,nodes,await usersOnce()))===ctx.uid;
       const indirectManager=rules.managerIndirectReports&&hasPerm(ctx.directPermissions,'HRM.manager.hierarchy.read') &&
         assignments.some(a=>underManagedRoot(str(a.nodeId),managed,nodes));
       const managerPermitted=isDirectManager||indirectManager;
@@ -129,6 +133,7 @@ export const hrReadRoutes = {
         return Array.isArray(skills)?skills.filter((x):x is string=>typeof x==='string').map(x=>x.trim()).filter(Boolean):[];
       }))];
       const scope=isSuperAdmin?'superadmin':isSelf?'self':managerPermitted?'manager':'hr';
+      await hrAuditRead(ctx,'portal',uid,scope);
       const initial=assignments[0];
       const ancestors:string[]=[];
       if(initial){
@@ -143,7 +148,7 @@ export const hrReadRoutes = {
       // A direct manager is resolved from the same hierarchy/manager role rules used
       // by HR approval workflows, not inferred from the job title or reporting label.
       // Resolve only after the employee's HR profile read authorization succeeded.
-      const managerUsers=await runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)});
+      const managerUsers=await usersOnce();
       const reporting=resolveRoleReportingManager(uid,employee.data,nodes,positions,managerUsers);
       const managerRecord=reporting.reason==='resolved'
         ?managerUsers.find(person=>person.id===reporting.uid):undefined;
@@ -220,6 +225,7 @@ export const hrReadRoutes = {
       }));
       const employees=resolved.filter(x=>x.allowed||ctx.role==='org_super_admin')
         .map(x=>({...publicEmployee(x.user),skillFit:fit.get(x.user.id)}));
+      await hrAudit(ctx,'read.manager_team',{type:'directory',id:ctx.uid},'rows='+employees.length);
       return { employees, readOnly:true };
     }),
   ],
@@ -243,6 +249,7 @@ export const hrReadRoutes = {
         const a=Array.isArray(u.data.assignments)?u.data.assignments.filter(isObj).filter(v=>str(v.type)==='primary'):[];
         return ctx.role==='org_super_admin'||a.some(v=>{const site=hrSiteOf(str(v.nodeId),nodes);return !!site && ownSites.has(site);});
       }).map(u=>({...publicEmployee(u),skillFit:fit.get(u.id)}));
+      await hrAudit(ctx,'read.site_directory',{type:'directory',id:[...ownSites].join(',').slice(0,120)||'all'},'rows='+records.length);
       return { employees:records, readOnly:true, sites:[...ownSites] };
     }),
   ],

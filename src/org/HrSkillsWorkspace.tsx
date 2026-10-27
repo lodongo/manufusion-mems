@@ -14,7 +14,7 @@ const panel='min-w-0 rounded-2xl border border-line bg-panel p-3 sm:p-4';
 const button='min-h-11 rounded-xl bg-brand px-4 text-sm font-semibold text-onbrand disabled:opacity-40';
 const field='min-h-11 w-full rounded-xl border border-line bg-page px-3 text-base text-ink';
 const status=(s:string)=>s==='approved'?'Confirmed':s==='rejected'?'Not confirmed':'Awaiting manager';
-function Message({error,notice}:{error:string;notice:string}){return <>{error&&<p role="alert" className="rounded-xl border border-red-500/40 p-3 text-sm text-red-600">{error}</p>}{notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-ink">{notice}</p>}</>}
+function Message({error,notice}:{error:string;notice:string}){return <>{error&&<p role="alert" className="rounded-xl border border-danger/40 p-3 text-sm text-danger">{error}</p>}{notice&&<p role="status" className="rounded-xl border border-line p-3 text-sm text-ink">{notice}</p>}</>}
 
 export function EmployeeSkillPanel({employeeUid,ownUid,requiredCodes=[]}:{employeeUid:string;ownUid:string;requiredCodes?:string[]}){
  const [catalog,setCatalog]=useState<Skill[]>([]);
@@ -216,7 +216,7 @@ export default function HrSkillsWorkspace({ownUid}:{ownUid:string}){
  return <div className="min-w-0 space-y-3">
    <div className="grid grid-cols-3 gap-1 rounded-xl border border-line bg-panel p-1">
     {[{key:'catalog',label:'Skills catalogue',icon:Award},{key:'peers',label:'Colleagues',icon:Users},{key:'approvals',label:'Manager approval',icon:ClipboardCheck}].map(({key,label,icon:Icon})=>
-      <button key={key} onClick={()=>setTab(key as typeof tab)} className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg px-1 text-center text-[11px] ${tab===key?'bg-blue-500/10 font-bold text-blue-600':'text-muted'}`}><Icon className="h-4 w-4"/>{label}{key==='approvals'&&inbox.length>0?' ('+inbox.length+')':''}</button>)}
+      <button key={key} onClick={()=>setTab(key as typeof tab)} className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg px-1 text-center text-[11px] ${tab===key?'bg-brand/10 font-bold text-brand':'text-muted'}`}><Icon className="h-4 w-4"/>{label}{key==='approvals'&&inbox.length>0?' ('+inbox.length+')':''}</button>)}
    </div>
    <Message error={error} notice={notice}/>
    {tab==='catalog'&&<>

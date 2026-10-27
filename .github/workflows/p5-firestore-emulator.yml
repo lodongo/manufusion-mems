@@ -29,11 +29,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - run: npm run check
       - name: Verify no Google Cloud project can be touched by these tests
         env:

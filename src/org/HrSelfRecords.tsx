@@ -61,13 +61,13 @@ function HrFamilyRecords({employeeUid,readOnly=false,kind='family'}:{employeeUid
  };
  const label=kind==='education'?'Education':'Family';
  return <section className="min-w-0 space-y-3">
-  <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{label} records</h3><p className="text-xs text-muted">Private · authorized employee or super administrator</p></div>{!readOnly&&<button type="button" disabled={kind==='education'&&!eduConfig} onClick={()=>begin(-1)} className={btn+' bg-brand text-onbrand disabled:opacity-40'}><Plus className="h-4 w-4"/>Add</button>}</div>
+  <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{label} records</h3><p className="text-xs text-muted">Private · only the employee can change · administrators read-only</p></div>{!readOnly&&<button type="button" disabled={kind==='education'&&!eduConfig} onClick={()=>begin(-1)} className={btn+' bg-brand text-onbrand disabled:opacity-40'}><Plus className="h-4 w-4"/>Add</button>}</div>
   {loading&&<p className="text-sm text-muted">Loading records…</p>}
   {!loading&&!items.length&&<div className="rounded-2xl border border-dashed border-line bg-panel p-5 text-center text-sm text-muted">No {label.toLowerCase()} records saved.</div>}
   <div className="space-y-2">{items.map((item,idx)=><article key={item.id||idx} className="flex items-start gap-2 rounded-2xl border border-line bg-panel p-3">
    <div className="min-w-0 flex-1"><h4 className="font-semibold">{kind==='education'?(item as Education).qualification:(item as Family).name}</h4><p className="mt-1 text-xs text-muted">{kind==='education'?[(item as Education).institution,(item as Education).field,(item as Education).completionYear].filter(Boolean).join(' · '):[(item as Family).relationship,(item as Family).phone].filter(Boolean).join(' · ')}</p></div>
    {!readOnly&&<><button type="button" aria-label="Edit record" onClick={()=>begin(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line"><Pencil className="h-4 w-4"/></button>
-   <button type="button" aria-label="Delete record" disabled={busy} onClick={()=>remove(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line text-red-500"><Trash2 className="h-4 w-4"/></button></>}
+   <button type="button" aria-label="Delete record" disabled={busy} onClick={()=>remove(idx)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line text-danger"><Trash2 className="h-4 w-4"/></button></>}
   </article>)}</div>
   {editing!==null&&<div className="rounded-2xl border border-line bg-panel p-4">
    <h3 className="mb-3 font-bold">{editing===-1?'Add':'Update'} {label.toLowerCase()} record</h3>
@@ -105,7 +105,7 @@ function HrFamilyRecords({employeeUid,readOnly=false,kind='family'}:{employeeUid
    </div>}
    <div className="mt-4 flex gap-2"><button type="button" onClick={()=>setEditing(null)} className={btn+' border border-line'}><X className="h-4 w-4"/>Cancel</button><button type="button" disabled={busy||(kind==='education'?(!eduConfig||!draft.institution?.trim()||!draft.levelCode||!draft.qualificationCode):(!draft.name?.trim()||!draft.relationship?.trim()))} onClick={submit} className={btn+' bg-brand text-onbrand disabled:opacity-40'}><Save className="h-4 w-4"/>Save</button></div>
   </div>}
-  {error&&<p role="alert" className="text-sm text-red-500">{error}</p>}
+  {error&&<p role="alert" className="text-sm text-danger">{error}</p>}
   {notice&&<p role="status" className="text-sm text-brand">{notice}</p>}
   <p className="flex items-center gap-2 text-xs text-muted"><LockKeyhole className="h-4 w-4"/>These private records are accessible to the employee and authorized Super Administrator. Both may update their own permitted self-service information.</p>
  </section>;

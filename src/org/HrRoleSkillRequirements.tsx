@@ -55,7 +55,7 @@ export default function HrRoleSkillRequirements({
  return <div className="min-w-0 space-y-3">
    <HrRoleSkillFit fit={fit}/>
    {loading&&<p role="status" className="rounded-xl border border-line bg-panel p-3 text-sm text-muted">Loading role skill requirements…</p>}
-   {catalogueError&&<p role="alert" className="rounded-xl border border-line bg-panel p-3 text-sm text-red-600">{catalogueError}</p>}
+   {catalogueError&&<p role="alert" className="rounded-xl border border-line bg-panel p-3 text-sm text-danger">{catalogueError}</p>}
    {!fit.requiredCodes.length&&<section className="rounded-2xl border border-dashed border-line bg-panel p-5 text-sm text-muted">
     <Target className="mb-2 h-6 w-6 text-brand"/>
     This employee's assigned role has no skills requirements configured. HR can configure them under Job Roles & Position Profiles.
@@ -103,7 +103,7 @@ export default function HrRoleSkillRequirements({
    {!canSubmit&&fit.requiredCodes.length>0&&<p className="flex items-center gap-2 rounded-xl border border-line bg-panel p-3 text-xs text-muted">
     <LockKeyhole className="h-4 w-4"/>This is an authorized read-only view. Only the employee may select and submit their own required skills.
    </p>}
-   {error&&<p role="alert" className="rounded-xl border border-line bg-panel p-3 text-sm text-red-600">{error}</p>}
+   {error&&<p role="alert" className="rounded-xl border border-line bg-panel p-3 text-sm text-danger">{error}</p>}
    {notice&&<p role="status" className="rounded-xl border border-line bg-panel p-3 text-sm">{notice}</p>}
    <p className="flex items-center gap-2 text-xs text-muted"><ShieldCheck className="h-4 w-4"/>Selections do not affect role fit until confirmed by the direct manager.</p>
  </div>;
