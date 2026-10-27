@@ -9,8 +9,8 @@ type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:str
 type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;energyCode?:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;exposedPersonnel?:string;responsiblePerson?:string;precautions?:string};
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
 type SafetyOption={code:string;label:string;category:string;subcategory:string};
-type Options={serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
-export type TaskAssessment={id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
+type Options={maintenanceTypes?:Array<{code:string;label:string}>;serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
+export type TaskAssessment={id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
 const id=()=>Math.random().toString(36).slice(2,10);
 const newRisk=():Risk=>({hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}});
 const seed=():TaskAssessment=>({id:'task_'+id(),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[newRisk()],templateStatus:'pending_validation',internalRoles:[],externalResource:undefined,lotoRequired:false,liveEquipment:false,energySourceCodes:[],permitCodes:[]});
@@ -61,6 +61,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
   {tasks.map((t,i)=><section key={t.id} className='space-y-2 rounded-xl border border-slate-700 p-3 text-sm'>
    <h4 className='font-semibold text-white'>Task {i+1}: {t.title||t.description}</h4>
    <p className='text-slate-300'>{t.description}</p>
+   <p className='text-xs text-emerald-300'>Maintenance strategy: {t.maintenanceTypeCode?((options?.maintenanceTypes||[]).find(m=>m.code===t.maintenanceTypeCode)?.label||t.maintenanceTypeLabel||t.maintenanceTypeCode):'Inherit Work Order type'}</p>
    <p>Internal: {(t.internalRoles||[]).map(c=>roles.find(x=>x[0]===c)?.[1]||c).join(', ')||'None'} · {t.persons} people · {t.hours} hours</p>
    {t.externalResource?.type&&<p>External: {externals.find(x=>x[0]===t.externalResource?.type)?.[1]||t.externalResource.type} · {t.externalResource.persons} people · {t.externalResource.notes}</p>}
    <p>Special tools: {t.tools||'None declared'}</p>
@@ -170,6 +171,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
       <span className='rounded-lg bg-slate-800 px-2 py-1'>{t.spares?.length||0} spares</span>
       <span className='rounded-lg bg-slate-800 px-2 py-1'>{t.services?.length||0} services</span>
       <span className='rounded-lg bg-slate-800 px-2 py-1'>{t.persons||0} people</span>
+      {t.maintenanceTypeCode&&<span className='rounded-lg bg-emerald-950 px-2 py-1 text-emerald-200'>Strategy {t.maintenanceTypeCode}</span>}
       {t.lotoRequired&&<span className='rounded-lg bg-amber-900/40 px-2 py-1 text-amber-300'>LOTO</span>}
      </span>
     </span>
@@ -196,6 +198,16 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    {step===0&&<div className='space-y-3'>
      <label className={label}>Task name<input className={input} value={task.title||''} onChange={e=>patch({title:e.target.value})}/></label>
      <label className={label}>Describe the work<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='What is required?'/></label>
+     <label className={label}>Maintenance strategy for this task (Finance reporting)
+       <select data-native-select='true' className={input} value={task.maintenanceTypeCode||''} onChange={e=>{
+         const type=options.data?.maintenanceTypes?.find(t=>t.code===e.target.value);
+         patch({maintenanceTypeCode:type?.code||'',maintenanceTypeLabel:type?.label||''});
+       }}>
+         <option value=''>Inherit the Work Order maintenance type</option>
+         {options.data?.maintenanceTypes?.map(t=><option key={t.code} value={t.code}>{t.code} · {t.label}</option>)}
+       </select>
+       <span className='mt-1 block text-xs text-slate-400'>Override only when this task follows a different maintenance strategy. Changes require the existing assessment review.</span>
+     </label>
      {context&&<dl className='grid gap-2 rounded-xl border border-slate-700 p-3 text-sm sm:grid-cols-3'>
       {([['Asset',context.asset],['Assembly',context.assembly],['Equipment',context.equipment]] as const).map(([k,v])=><div key={k} className='min-w-0'><dt className='text-xs text-slate-400'>{k}</dt><dd className='break-words text-white'>{v||'—'}</dd></div>)}
       <p className='text-xs text-slate-400 sm:col-span-3'>Adopted from the work assessment.</p>
