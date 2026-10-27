@@ -58,7 +58,7 @@ export default function FinEntityAccounts({le,entities}:{le:Entity;entities:Enti
         className='mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink'/>
     </label>
     <div className='flex flex-wrap items-center gap-2'>
-      <Button variant='secondary' disabled={!data.can.gl_manage} onClick={()=>setCodes(eligible.filter(a=>a.recommended!==false).map(a=>a.code))}>Select recommended</Button>
+      <Button variant='secondary' disabled={!data.can.gl_manage} onClick={()=>setCodes(current=>Array.from(new Set([...current,...eligible.filter(a=>a.recommended!==false).map(a=>a.code)])))}>Add recommended</Button>
        <Button variant='secondary' onClick={()=>setShowAllIndustries(v=>!v)}>{showAllIndustries?'Recommended only':'Show all available'}</Button>
        <Button variant='secondary' disabled={!data.can.gl_manage} onClick={()=>setCodes(eligible.map(a=>a.code))}>Select all eligible</Button>
       <Button variant='secondary' disabled={!data.can.gl_manage} onClick={()=>setCodes([])}>Clear draft</Button>
