@@ -30,7 +30,7 @@ export default function ProcurementCatalog({ kind }: { kind: 'materials' | 'serv
     return (
         <div className='space-y-3'>
             <PageTitle title={v.title} subtitle={v.subtitle} />
-            <AssetDictionaryBrowser key={kind} treePath={`${v.api}/tree`} classPath={`${v.api}/item`} body={{ kind }} labels={v.labels} />
+            <AssetDictionaryBrowser key={kind} treePath={`${v.api}/tree`} classPath={`${v.api}/item`} body={{ kind }} labels={v.labels} industryFilterEnabled />
         </div>
     );
 }
