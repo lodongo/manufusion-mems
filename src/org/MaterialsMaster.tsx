@@ -121,6 +121,21 @@ export default function MaterialsMaster() {
                 {select('Material',material,setMaterial,materials,!family)}
             </div></Card>)}
             {stage===1&&loadingDetail && <Spinner />}
+            {stage===1&&detail?.financial&&<Card>
+                <h2 className='text-sm font-semibold text-white'>Material accounting reference</h2>
+                <p className='mt-1 text-xs text-slate-400'>Reference classification. Actual GL will be selected from legal-entity policy and the receiving or consuming transaction.</p>
+                <div className='mt-2 grid grid-cols-2 gap-2 text-xs'>
+                    <div className='rounded-lg bg-slate-950 p-2'><span className='block text-slate-400'>Material branch</span><strong className='break-words'>{detail.financial.majorBranch||'Not configured'}</strong></div>
+                    <div className='rounded-lg bg-slate-950 p-2'><span className='block text-slate-400'>Stores category</span><strong className='break-words'>{detail.financial.storesClassCode||'Not configured'}</strong></div>
+                    <div className='rounded-lg bg-slate-950 p-2'><span className='block text-slate-400'>GL mapping</span><strong className='break-words'>{detail.financial.mappingStatus}</strong></div>
+                    <div className='rounded-lg bg-slate-950 p-2'><span className='block text-slate-400'>Account determination</span><strong className='break-words'>{detail.financial.determinationMode||'Not configured'}</strong></div>
+                </div>
+                {!!detail.financial.routes?.length&&<div className='mt-2 space-y-1'>
+                    {detail.financial.routes.map((r,i)=><p key={i} className='text-xs break-words text-slate-300'>
+                        <span className='text-slate-400'>{r.event}:</span> <strong className='font-mono'>{r.glCode}</strong> {r.glName} <span className='text-amber-300'>({r.status})</span>
+                    </p>)}
+                </div>}
+            </Card>}
             {stage===1&&detail && <><Card><h2 className='mb-4 font-semibold text-white'>2. Material details</h2><label className='block text-sm text-slate-300'>Material name *<input className={control} value={name} onChange={e => setName(e.target.value)} maxLength={160} /></label><div className='mt-4 rounded-xl bg-slate-900 p-3'><p className='text-xs text-slate-400'>Automatically generated short text (120 characters maximum)</p><p className='mt-1 text-sm text-white'>{shortText || 'Enter a material name'}</p></div></Card>
                 <Card><h2 className='mb-2 font-semibold text-white'>3. Material attributes</h2><p className='mb-4 text-xs text-slate-400'>Attributes are inherited from the selected material definition. Fields marked * are required.</p><div className='grid gap-4 sm:grid-cols-2'>{detail.attributes.map(field)}</div>{!detail.attributes.length && <p className='text-sm text-slate-400'>No attributes configured for this material.</p>}</Card>
                 {error && <Alert tone='error'>{error}</Alert>}<Button className='w-full' onClick={()=>{if(!name.trim())return setError('Material name required');for(const a of detail.attributes)if(a.required&&!values[a.code]?.trim())return setError('Required: '+a.name);setError('');setStage(2);}}>Next →</Button></>}
