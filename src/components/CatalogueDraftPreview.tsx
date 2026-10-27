@@ -30,6 +30,11 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
         a[c || 'UNCLASSIFIED'] = (a[c || 'UNCLASSIFIED'] || 0) + 1;
         return a;
     }, {} as Record<string, number>), [rows, kind]);
+    const industryCounts = useMemo(() => rows.reduce((acc,item) => {
+        const key=item.industryScope==='INDUSTRY_SPECIFIC'?'INDUSTRY_SPECIFIC':'COMMON';
+        acc[key]=(acc[key]||0)+1;
+        return acc;
+    },{} as Record<string,number>),[rows]);
     const missingRoutes = useMemo(() => kind === 'gl_accounts'
         ? rows.filter(r => typeof r.usedInProcurement !== 'boolean' || typeof r.usedInBudget !== 'boolean' || typeof r.usedInProcurementPosting !== 'boolean').length
         : rows.filter(r => !array(obj(obj(r.accounting).glResolution).transactionRoutes).length).length,
@@ -73,6 +78,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                             <Badge>{rows.length.toLocaleString()} entries</Badge>
                             <Badge tone={missingRoutes ? 'warn' : 'muted'}>{missingRoutes} entries missing financial contract</Badge>
                             {branchCounts && Object.entries(branchCounts).map(([branch, count]) => <Badge key={branch}>{branch}: {Number(count)}</Badge>)}
+                            {Object.entries(industryCounts).map(([scope,count])=><Badge key={scope}>{scope==='COMMON'?'Common':'Industry-specific'}: {count}</Badge>)}
                         </div>
                         <label className='block text-sm text-slate-300'>
                             Search all draft entries
@@ -81,7 +87,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                         <p className='text-xs text-slate-400'>{filtered.length.toLocaleString()} matches · showing first 40</p>
                         <div className='max-h-64 space-y-1 overflow-y-auto'>
                             {filtered.slice(0, 40).map(item => <button type='button' key={text(item.code)} onClick={() => setSelectedCode(text(item.code))} className={'w-full rounded-lg border p-2 text-left text-xs '+(selectedCode === item.code ? 'border-emerald-500 bg-slate-800 text-white' : 'border-slate-700 text-slate-300')}>
-                                <span className='font-mono'>{text(item.code)}</span> · {text(item.name)}
+                                <span className='font-mono'>{text(item.code)}</span> · {text(item.name)} · {item.industryScope==='INDUSTRY_SPECIFIC'?'Industry-specific':'Common'}
                             </button>)}
                         </div>
                         {selected && (
@@ -89,6 +95,9 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                                 <h3 className='font-semibold text-white'>{text(selected.name)} · {selectedCode}</h3>
                                 <div className='grid grid-cols-2 gap-2 text-xs'>
                                     {Object.entries({
+                                        'Industry applicability': selected.industryScope,
+                                        'Linked industry codes': selected.industryCodes,
+                                        'Industry classification review': obj(selected.industryApplicability).reviewStatus,
                                         'MRO / Non-MRO': classification.majorBranch,
                                         'Stores class': classification.storesClassCode,
                                         'Technical class': classification.technicalClassCode,
