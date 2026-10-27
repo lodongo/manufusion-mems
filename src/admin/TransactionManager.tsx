@@ -7,6 +7,7 @@ import { Segmented, messageOf, useConfirm } from '../components/screen';
 import { Badge, Button, PageTitle, Spinner } from './kit';
 import Sheet from '../components/Sheet';
 import GlAccountTransactions from './GlAccountTransactions';
+import FinanceTransactionAudit from './FinanceTransactionAudit';
 
 // MEMS admin › Transactions Manager
 // Every transaction code with its state:
@@ -53,7 +54,7 @@ const KIND_LABEL: Record<Row['kind'], string> = {
 };
 
 type Filter = 'all' | 'financial' | State;
-type View = 'transactions' | 'gl' | 'accounts';
+type View = 'transactions' | 'gl' | 'accounts' | 'audit';
 
 export default function TransactionManager() {
     const [data, setData] = useState<Catalogue | null>(null);
@@ -180,9 +181,10 @@ export default function TransactionManager() {
                 </div>
             )}
             {data && (
-                <Segmented label='View' value={view} onChange={setView} options={[{ value: 'transactions', label: 'Transactions' }, { value: 'accounts', label: 'GL account transactions' }, { value: 'gl', label: 'GL posting defaults' }]} />
+                <Segmented label='View' value={view} onChange={setView} options={[{ value: 'transactions', label: 'Transactions' }, { value: 'accounts', label: 'GL account transactions' }, { value: 'gl', label: 'GL posting defaults' }, {value:'audit',label:'Financial integration audit'}]} />
             )}
             {data && view === 'gl' && <GlDefaultsView gl={data.gl} />}
+            {data && view === 'audit' && <FinanceTransactionAudit />}
             {data && view === 'accounts' && <GlAccountTransactions />}
             {data && view === 'transactions' && (
                 <>
