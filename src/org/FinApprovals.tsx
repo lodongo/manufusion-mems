@@ -63,15 +63,15 @@ function List() {
             reason:{label:'Bulk approval note',minLength:10,placeholder:'Reviewed Finance mappings and transaction references'},
         },async reason=>{
             setBulkBusy(true);setBulkResult('');
-            let successful=0;const failed:string[]=[];
+            let finalApprovals=0,levelApprovals=0;const failed:string[]=[];
             // Each call rechecks current permissions, maker-checker, ledger account validity and version.
             for(const req of candidates){
                 try{
-                    await callBackend(`${FIN_API}/requests/decide`,{id:req.id,decision:'approve',acknowledge:true,bulkFinanceMapping:true,reason:`Bulk GL configuration review: ${reason}`.slice(0,300)});
-                    successful++;
+                    const outcome=await callBackend<{status:string}>(`${FIN_API}/requests/decide`,{id:req.id,decision:'approve',acknowledge:true,bulkFinanceMapping:true,reason:`Bulk GL configuration review: ${reason}`.slice(0,300)});
+                    if(outcome.status==='approved')finalApprovals++;else levelApprovals++;
                 }catch(e){failed.push(`${req.id}: ${e instanceof Error?e.message:'Approval refused'}`);}
             }
-            setBulkBusy(false);setBulkResult(`${successful} configuration request(s) approved; ${failed.length} refused or changed. ${failed.slice(0,4).join(' | ')}`);
+            setBulkBusy(false);setBulkResult(`${finalApprovals} configuration request(s) fully approved; ${levelApprovals} advanced to the next approval level; ${failed.length} refused or changed. ${failed.slice(0,4).join(' | ')}`);
             reload();
         });
     };
