@@ -87,6 +87,19 @@ test('Multiple pending mappings for the same legal entity require individual con
  assert.deepEqual(eligibleFinanceMappingApprovals(requests).map(x=>x.id),['FCR00000003']);
 });
 
+test('Server rechecks bulk approval type and rejects multiple pending mappings for one entity',async()=>{
+ const fs=await import('node:fs');
+ const source=fs.readFileSync('backend/finRoutes.ts','utf8');
+ assert.match(source,/ctx\.body\.bulkFinanceMapping === true/);
+ assert.match(source,/\['mapping\.save','gltxn\.save'\]/);
+ assert.match(source,/competing\.length/);
+ assert.match(source,/Multiple pending/);
+ const ui=fs.readFileSync('src/org/FinApprovals.tsx','utf8');
+ assert.match(ui,/bulkFinanceMapping:true/);
+ assert.match(ui,/finalApprovals/);
+ assert.match(ui,/levelApprovals/);
+});
+
 test('Bulk approval invokes existing safeguarded endpoint, not privileged automatic journal authorisation',async()=>{
  const {readFileSync}=await import('node:fs');
  const file=readFileSync('src/org/FinApprovals.tsx','utf8');
