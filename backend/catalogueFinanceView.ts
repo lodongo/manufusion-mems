@@ -1,4 +1,5 @@
 import {industrySectionOf} from './industryCatalog';
+import {postingLink,type MasterKind} from './cataloguePostingCrosswalk';
 /** Additive financial metadata: no legacy catalogue field is discarded. */
 type D=Record<string,unknown>;
 const obj=(v:unknown):D=>v&&typeof v==='object'&&!Array.isArray(v)?v as D:{};
@@ -42,7 +43,7 @@ export function catalogueFinanceDetail(value:unknown){
  };
 }
 /** Reject malformed new-model catalogues without changing legacy-import validity. */
-export function catalogueFinanceErrors(kind:'materials'|'services'|'gl_accounts'|'assets',entries:unknown[],integrated:boolean,requireIndustry=false){
+export function catalogueFinanceErrors(kind:'materials'|'services'|'gl_accounts'|'assets',entries:unknown[],integrated:boolean,requireIndustry=false,requirePostingCrosswalk=false){
  if(!integrated)return [];
  const errors:string[]=[];
  for(const raw of entries){
@@ -63,6 +64,17 @@ export function catalogueFinanceErrors(kind:'materials'|'services'|'gl_accounts'
    const a=obj(x.accounting),resolution=obj(a.glResolution),routes=arr(resolution.transactionRoutes);
    if(!str(resolution.mappingStatus)||!routes.length)errors.push(code+': GL routes/status missing.');
    if(routes.some(r=>!str(r.event)||!str(r.glCode)))errors.push(code+': route missing event or GL.');
+   if(requirePostingCrosswalk){
+    for(const route of routes){
+     const linked=postingLink(kind as MasterKind,str(route.event));
+     if(!linked){errors.push(code+': unknown master-to-runtime financial event '+str(route.event));continue;}
+     const runtime=obj(route.runtimeTransactionBinding),actual=Array.isArray(runtime.memsPostingEvents)?runtime.memsPostingEvents:[];
+     if(str(runtime.postingIntegrationState)!==linked.state||actual.join('|')!==linked.postingEvents.join('|'))
+      errors.push(code+': transaction crosswalk mismatch for '+str(route.event));
+     if(runtime.activatedByThisReferenceFile===true||runtime.postingPermission!=='NO_NEW_POSTING_AUTHORITY')
+      errors.push(code+': a reference file cannot authorise a posting transaction.');
+    }
+   }
    if(kind==='materials'&&!['MRO','NON_MRO'].includes(str(obj(a.catalogueClassification).majorBranch)))
     errors.push(code+': MRO / NON_MRO branch missing.');
   }
