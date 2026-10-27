@@ -317,7 +317,7 @@ export async function assetClassSpec(code: string): Promise<{
 /** Categories, subcategories and classes of the published asset catalog, for procurement. Null when not loaded. */
 export async function assetCatalogSummary(): Promise<{
     categories: Array<{ code: string; name: string; subcategories: Array<{ code: string; name: string }> }>;
-    items: Array<{ code: string; name: string; categoryCode: string; subcategoryCode: string }>;
+    items: Array<{ code: string; name: string; categoryCode: string; subcategoryCode: string; industryScope?: string; industryCodes?: string[] }>;
 } | null> {
     let d: Loaded;
     try {
@@ -337,7 +337,7 @@ export async function assetCatalogSummary(): Promise<{
             }))
             .filter((c) => c.code)
             .sort((a, b) => a.code.localeCompare(b.code)),
-        items: Array.from(d.classes.values()).map((i) => ({ code: str(i.code), name: str(i.name), categoryCode: str(i.categoryCode), subcategoryCode: str(i.subcategoryCode) })),
+        items: Array.from(d.classes.values()).map((i) => ({ code: str(i.code), name: str(i.name), categoryCode: str(i.categoryCode), subcategoryCode: str(i.subcategoryCode), industryScope: str(i.industryScope) || 'COMMON', industryCodes: strs(i.industryCodes) })),
     };
 }
 
