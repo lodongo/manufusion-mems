@@ -745,7 +745,12 @@ export async function glMaster(): Promise<{ version: string; classes: Obj[]; cat
                 const groupCode = str(i[def.parent.item]);
                 const props = isObj(i.properties) ? i.properties : {};
                 const params = [...Object.entries(i).filter(([, v]) => scalar(v)).map(([k, v]) => ({ key: k, value: String(v) })), ...Object.entries(props).filter(([, v]) => scalar(v)).map(([k, v]) => ({ key: k, value: String(v) }))].slice(0, 80);
-                return { code: str(i.code), name: str(i.name), description: str(i.description), classCode, className: cls.get(classCode) ?? '', categoryCode, categoryName: cat.get(categoryCode) ?? '', groupCode, groupName: grp.get(groupCode) ?? '', normalBalance: str(i.normalBalance), accountRole: str(i.accountRole), accountType: str(i.accountType), postingMode: str(i.postingMode), params };
+                return { code: str(i.code), name: str(i.name), description: str(i.description), classCode, className: cls.get(classCode) ?? '', categoryCode, categoryName: cat.get(categoryCode) ?? '', groupCode, groupName: grp.get(groupCode) ?? '', normalBalance: str(i.normalBalance), accountRole: str(i.accountRole), accountType: str(i.accountType), postingMode: str(i.postingMode),
+                    ...(typeof i.usedInProcurement === 'boolean' ? {usedInProcurement:i.usedInProcurement} : {}),
+                    ...(typeof i.usedInBudget === 'boolean' ? {usedInBudget:i.usedInBudget} : {}),
+                    ...(typeof i.usedInProcurementPosting === 'boolean' ? {usedInProcurementPosting:i.usedInProcurementPosting} : {}),
+                    pendingFinanceApproval:i.pendingFinanceApproval===true,
+                    params };
             }),
     };
 }
