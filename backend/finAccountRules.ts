@@ -22,8 +22,12 @@ export const DETERMINATION_EVENTS = [
 export type AccountRule = {
   id:string; event:string; role:string; account:string; categoryCode:string;
   costCenterId:string; priority:number; enabled:boolean;
+  /** Existing MNT registry code, never guessed from maintenance-type label. */
+  maintenanceTypeCode?:string;
+  /** Canonical stores cost-nature code (for example ESP, LUB, MCS). */
+  costNatureCode?:string;
 };
-export type DeterminationContext = { event?:string; categoryCode?:string; costCenterId?:string };
+export type DeterminationContext = { event?:string; categoryCode?:string; costCenterId?:string; maintenanceTypeCode?:string; costNatureCode?:string };
 const token=(s:unknown)=>typeof s==='string'?s.trim():'';
 const EVENT_ROLES=new Map<string,ReadonlyArray<string>>(DETERMINATION_EVENTS.map(e=>[e.code,e.roles]));
 export function validateRuleDraft(raw:unknown): AccountRule[] {
@@ -34,25 +38,33 @@ export function validateRuleDraft(raw:unknown): AccountRule[] {
     const r=value as Record<string,unknown>;
     const event=token(r.event),role=token(r.role),account=token(r.account);
     const categoryCode=token(r.categoryCode),costCenterId=token(r.costCenterId);
+    const maintenanceTypeCode=token(r.maintenanceTypeCode),costNatureCode=token(r.costNatureCode);
     const priority=Number(r.priority??100);
     const roles=EVENT_ROLES.get(event);
     if(!roles||!roles.includes(role))throw Error(`Rule ${i+1}: unsupported event/role combination.`);
     if(!account)throw Error(`Rule ${i+1}: an approved GL account is required.`);
     if(!Number.isInteger(priority)||priority<1||priority>999)throw Error(`Rule ${i+1}: priority must be 1–999.`);
     if([categoryCode,costCenterId].some(v=>v.length>100))throw Error(`Rule ${i+1}: context value is too long.`);
-    const key=[event,role,categoryCode,costCenterId,priority].join('|');
+    if((maintenanceTypeCode||costNatureCode)&&(event!=='GI_WO'||role!=='MAINT_CONSUMPTION'))
+      throw Error(`Rule ${i+1}: maintenance strategy and cost nature are only allowed for work-order consumption.`);
+    if(maintenanceTypeCode&&!/^[A-Z][A-Z0-9_-]{1,39}$/.test(maintenanceTypeCode))throw Error(`Rule ${i+1}: invalid maintenance type code.`);
+    if(costNatureCode&&!/^[A-Z][A-Z0-9_-]{1,19}$/.test(costNatureCode))throw Error(`Rule ${i+1}: invalid stores cost-nature code.`);
+    const key=[event,role,categoryCode,costCenterId,maintenanceTypeCode,costNatureCode,priority].join('|');
     if(seen.has(key))throw Error(`Rule ${i+1}: duplicated decision priority and scope.`);
     seen.add(key);
-    return {id:token(r.id)||`rule-${i+1}`,event,role,account,categoryCode,costCenterId,priority,enabled:r.enabled!==false};
+    return {id:token(r.id)||`rule-${i+1}`,event,role,account,categoryCode,costCenterId,priority,enabled:r.enabled!==false,
+      ...(maintenanceTypeCode?{maintenanceTypeCode}:{}),...(costNatureCode?{costNatureCode}:{})};
   });
 }
 export function resolveAccountRule(rules:ReadonlyArray<AccountRule>,role:string,ctx:DeterminationContext):AccountRule|null {
   if(!ctx.event)return null;
   const matches=rules.filter(r=>r.enabled&&r.event===ctx.event&&r.role===role
     &&(!r.categoryCode||r.categoryCode===ctx.categoryCode)
-    &&(!r.costCenterId||r.costCenterId===ctx.costCenterId));
+    &&(!r.costCenterId||r.costCenterId===ctx.costCenterId)
+    &&(!r.maintenanceTypeCode||r.maintenanceTypeCode===ctx.maintenanceTypeCode)
+    &&(!r.costNatureCode||r.costNatureCode===ctx.costNatureCode));
   matches.sort((a,b)=>{
-    const specificity=(r:AccountRule)=>Number(!!r.categoryCode)+Number(!!r.costCenterId);
+    const specificity=(r:AccountRule)=>Number(!!r.categoryCode)+Number(!!r.costCenterId)+Number(!!r.maintenanceTypeCode)+Number(!!r.costNatureCode);
     return specificity(b)-specificity(a)||a.priority-b.priority||a.id.localeCompare(b.id);
   });
   return matches[0]??null;
