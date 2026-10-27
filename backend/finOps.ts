@@ -597,9 +597,10 @@ export async function postMaintenanceReturn(ctx:OrgContext,issue:Doc,line:Obj,qt
    if(!material)throw new HttpError(409,'Returned material is not linked to the warehouse.');
    const context={event:'GI_WO',costCenterId:str(issue.data.costCenterId),categoryCode:str(material.data.categoryCode),
       maintenanceTypeCode:str(line.maintenanceTypeCode),costNatureCode:str(line.storesCostNatureCode)};
+   // A return must not re-resolve an originally posted account against a newer mapping.
    const defaults={
-      inventoryGlCode:roleAccount(mapping,'INVENTORY',str(material.data.categoryCode),context),
-      expenseGlCode:roleAccount(mapping,'MAINT_CONSUMPTION',str(material.data.categoryCode),context)
+      inventoryGlCode:str(line.inventoryGlCode)?'':roleAccount(mapping,'INVENTORY',str(material.data.categoryCode),context),
+      expenseGlCode:str(line.expenseGlCode)?'':roleAccount(mapping,'MAINT_CONSUMPTION',str(material.data.categoryCode),context)
    };
    const original=originalMroIssueAccounts(line,defaults.expenseGlCode,defaults.inventoryGlCode);
    const inv=original.inventoryGlCode,exp=original.expenseGlCode;
