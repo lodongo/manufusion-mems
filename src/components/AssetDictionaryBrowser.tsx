@@ -8,6 +8,20 @@ import { Badge, Button, Card, Spinner, useLoad } from '../admin/kit';
 // Read-only browser for the MEMS asset master dictionary:
 // Group > Category > Subcategory > Asset class > Attributes, with a searchable table of all classes.
 
+export interface FinancialCatalogueInfo {
+ mappingStatus:string; glRouteCount:number; primaryGlCode:string; majorBranch:string;
+ storesClassCode:string; storesClassName:string; determinationMode?:string;
+ accountPurpose?:string; costObjectRequirement?:string; legalEntityApplicability?:string;
+ corporateApplicability?:string; classificationEvidence?:string; materialNumberPattern?:string;
+ usedInProcurement:boolean|null; usedInBudget:boolean|null; usedInProcurementPosting:boolean|null;
+ pendingFinanceApproval?:boolean; sourceOfEligibility?:string;
+ routes?:Array<{event:string;glCode:string;glName:string;status:string;systemDerived:boolean}>;
+}
+const eligible=(value:boolean|null|undefined)=>value===true?'Yes':value===false?'No':'Not configured';
+const financialStatus=(value:string)=>value==='reference_proposed'?'Reference mapping · Finance approval pending':
+ value==='finance_review_required'?'Finance review required':
+ value==='not_configured'?'Accounting not configured':value.replace(/_/g,' ');
+
 export interface Life {
     min: number;
     max: number;
@@ -34,6 +48,7 @@ export interface DictTree {
         requiredCount: number;
         usefulLifeYears: Life | null;
         extra?: Record<string, string>;
+        financial?: FinancialCatalogueInfo;
     }>;
 }
 
@@ -65,6 +80,7 @@ export interface ClassDetail {
     attributes: AttrDef[];
     properties?: Array<{ label: string; value: string }>;
     legacyCodes?: string[];
+    financial?: FinancialCatalogueInfo;
 }
 
 export const lifeText = (l: Life | null) => (!l ? '' : !l.depreciable ? 'Not depreciated' : l.min === l.max ? `${l.min} years` : `${l.min}–${l.max} years`);
@@ -166,6 +182,12 @@ export default function AssetDictionaryBrowser({
             { key: 'subcategory', label: L.subcategory, value: (r) => `${r.subcategoryCode} ${names.get(r.subcategoryCode) ?? ''}` },
             { key: 'attributes', label: 'Attributes', type: 'number', value: (r) => r.attributeCount },
             { key: 'required', label: 'Required', type: 'number', value: (r) => r.requiredCount },
+            { key: 'financialBranch', label: 'MRO / Non-MRO', value: (r) => r.financial?.majorBranch||'' },
+            { key: 'storesClass', label: 'Stores class', value: (r) => r.financial?.storesClassCode||'' },
+            { key: 'gl', label: 'Primary reference GL', value: (r) => r.financial?.primaryGlCode||'' },
+            { key: 'mapping', label: 'GL mapping status', value: (r) => r.financial?.mappingStatus||'not_configured' },
+            { key: 'procurement', label: 'In procurement', value: (r) => eligible(r.financial?.usedInProcurement), hidden: true },
+            { key: 'budget', label: 'In budgets', value: (r) => eligible(r.financial?.usedInBudget), hidden: true },
             { key: 'life', label: 'Useful life', value: (r) => lifeText(r.usefulLifeYears), hidden: !L.showLife },
             { key: 'synonyms', label: 'Also known as', value: (r) => r.synonyms.join('; '), hidden: true },
             { key: 'description', label: 'Description', value: (r) => r.description, hidden: true },
@@ -182,7 +204,7 @@ export default function AssetDictionaryBrowser({
     if (path.category) crumbs.push({ label: `${seg(path.category, 1)} ${names.get(path.category) ?? ''}`, to: { group: path.group, category: path.category } });
     if (path.subcategory) crumbs.push({ label: `${seg(path.subcategory, 2)} ${names.get(path.subcategory) ?? ''}`, to: { group: path.group, category: path.category, subcategory: path.subcategory } });
 
-    const list: Array<{ code: string; name: string; description: string; count: number; unit: string; life?: string; to: Path }> = (() => {
+    const list: Array<{ code: string; name: string; description: string; count: number; unit: string; life?: string; financial?: FinancialCatalogueInfo; to: Path }> = (() => {
         if (!path.group) return data.groups.map((g) => ({ code: g.code, name: g.name, description: g.description, count: data.categories.filter((c) => c.groupCode === g.code).length, unit: L.categories, to: { group: g.code } }));
         if (!path.category)
             return data.categories
@@ -194,7 +216,7 @@ export default function AssetDictionaryBrowser({
                 .map((s) => ({ code: s.code, name: s.name, description: s.description, count: data.classes.filter((c) => c.subcategoryCode === s.code).length, unit: L.classes, to: { ...path, subcategory: s.code } }));
         return data.classes
             .filter((c) => c.subcategoryCode === path.subcategory)
-            .map((c) => ({ code: c.code, name: c.name, description: c.description, count: c.attributeCount, unit: 'attributes', life: lifeText(c.usefulLifeYears), to: { ...path, cls: c.code } }));
+            .map((c) => ({ code: c.code, name: c.name, description: c.description, count: c.attributeCount, unit: 'attributes', life: lifeText(c.usefulLifeYears), financial:c.financial, to: { ...path, cls: c.code } }));
     })();
 
     if (path.cls) {
@@ -274,6 +296,9 @@ export default function AssetDictionaryBrowser({
                                                 {item.count} {item.unit}
                                             </Badge>
                                             {item.life ? <Badge tone='warn'>{item.life}</Badge> : null}
+                                            {item.financial?.majorBranch && <Badge>{item.financial.majorBranch} · {item.financial.storesClassCode}</Badge>}
+                                            {item.financial && <Badge tone={item.financial.mappingStatus==='finance_review_required'||item.financial.mappingStatus==='not_configured'?'warn':'default'}>{financialStatus(item.financial.mappingStatus)}</Badge>}
+                                            {item.financial?.primaryGlCode && <Badge>GL {item.financial.primaryGlCode}</Badge>}
                                         </span>
                                     </span>
                                     <ChevronRight className='mt-1 h-4 w-4 shrink-0 text-slate-500' />
@@ -345,6 +370,46 @@ function ClassView({
                 {data.synonyms.length > 0 && <p className='mt-1 text-xs text-slate-400'>Also known as: {data.synonyms.join(', ')}</p>}
                 <p className='mt-1 text-xs text-slate-500'>Profiles: {data.profiles.map((p) => p.name || p.code).join(' · ')}</p>
                 {!!data.legacyCodes?.length && <p className='mt-1 text-xs text-slate-500'>Previous codes: {data.legacyCodes.join(', ')}</p>}
+                <section aria-label='Financial classification and GL account determination' className='mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3 space-y-3'>
+                    <div>
+                        <h3 className='text-sm font-semibold text-white'>Financial classification &amp; GL determination</h3>
+                        <p className='text-xs text-slate-400'>Reference mapping is not a posted GL entry. Finance and legal-entity policy govern activation.</p>
+                    </div>
+                    <div className='grid grid-cols-2 gap-2 text-xs'>
+                        {[
+                            ['Mapping status',financialStatus(data.financial?.mappingStatus||'not_configured')],
+                            ['MRO / Non-MRO',data.financial?.majorBranch||'Not applicable'],
+                            ['Stores class',data.financial?.storesClassName||'Not configured'],
+                            ['Account purpose',data.financial?.accountPurpose||'Not specified'],
+                            ['GL determination',data.financial?.determinationMode||'Not configured'],
+                            ['Direct procurement',eligible(data.financial?.usedInProcurement)],
+                            ['Budget eligible',eligible(data.financial?.usedInBudget)],
+                            ['Procurement posting',eligible(data.financial?.usedInProcurementPosting)],
+                            ['Cost object',data.financial?.costObjectRequirement||'Per tenant policy'],
+                            ['Legal-entity scope',data.financial?.legalEntityApplicability||'Per tenant policy'],
+                            ['Corporate scope',data.financial?.corporateApplicability||'Per tenant policy'],
+                            ['Numbering pattern',data.financial?.materialNumberPattern||'Not applicable'],
+                        ].map(([label,value])=><div key={label} className='min-w-0 rounded-lg bg-slate-900 p-2'>
+                            <p className='text-slate-400 text-[11px]'>{label}</p>
+                            <p className='mt-1 break-words font-medium text-slate-100'>{value}</p>
+                        </div>)}
+                    </div>
+                    {!!data.financial?.routes?.length && (
+                        <div className='space-y-2'>
+                            <h4 className='text-sm font-semibold text-white'>Applicable GL routes ({data.financial.routes.length})</h4>
+                            {data.financial.routes.map((route,index)=>(
+                                <div key={route.event+route.glCode+index} className='rounded-lg border border-slate-800 bg-slate-900 p-2'>
+                                    <p className='text-xs text-slate-200 font-semibold break-words'>{route.event}</p>
+                                    <p className='font-mono text-xs text-emerald-300 break-words'>{route.glCode}</p>
+                                    <p className='text-xs text-slate-300 break-words'>{route.glName||'GL description not provided'}</p>
+                                    <p className='text-[11px] text-amber-300'>{financialStatus(route.status)} · {route.systemDerived?'System-derived':'Purpose-selectable candidate'}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {data.financial?.pendingFinanceApproval && <p role='status' className='text-xs text-amber-300'>This proposed GL account is inactive and requires Finance sign-off.</p>}
+                    {!data.financial && <p className='text-xs text-amber-300'>No integrated accounting metadata in the active catalogue.</p>}
+                </section>
                 {!!data.properties?.length && (
                     <details className='mt-3 rounded-xl border border-slate-800 bg-slate-950'>
                         <summary className='cursor-pointer px-3 py-2 text-sm font-medium text-slate-200'>Properties ({data.properties.length})</summary>
