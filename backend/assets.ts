@@ -1,4 +1,5 @@
 import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
+import {integratedReleaseProblems} from './catalogueReleaseGuard';
 import { industryAdoptionRecommendation } from './industryCatalog';
 
 import { createHash } from 'crypto';
@@ -1129,8 +1130,8 @@ export const assetRoutes = {
             const integrated=isObj(parsed)&&isObj(parsed.financialIntegration);
             if(integrated){
                 const ref=(parsed as Obj).financialIntegration as Obj;
-                if(str(ref.catalogueRelease)!=='APPROVED')
-                    return reject(['Finance review draft cannot replace the live asset catalogue. Complete Finance sign-off first.']);
+                const releaseProblems=integratedReleaseProblems('assets',parsed);
+                if(releaseProblems.length)return reject(releaseProblems);
                 const gl=await getDoc('module_workspaces/FIN/catalogs/gl_accounts');
                 if(!gl||str(gl.data.status)!=='active'||str(gl.data.version)!==str(ref.referenceGLVersion))
                     return reject(['Matching approved GL master '+str(ref.referenceGLVersion)+' must be imported before the asset catalogue.']);
@@ -1157,7 +1158,7 @@ export const assetRoutes = {
                 const unresolved=dict.assetClasses.filter(item=>{
                     const a=isObj(item.accounting)?item.accounting:{};
                     const r=isObj(a.glResolution)?a.glResolution:{};
-                    return str(r.mappingStatus)==='finance_review_required';
+                    return str(r.mappingStatus)!=='approved';
                 });
                 if(unresolved.length)return reject([unresolved.length+' asset classes have unapproved GL mappings.']);
             }
