@@ -5,7 +5,7 @@ import {Button,Spinner,useLoad} from '../admin/kit';
 import {useConfirm} from '../components/screen';
 import {Card,FIN_API,type Entity} from './finKit';
 
-type Account={code:string;name:string;classCode:string;className:string;categoryCode:string;categoryName:string;groupCode:string;groupName:string};
+type Account={code:string;name:string;classCode:string;className:string;categoryCode:string;categoryName:string;groupCode:string;groupName:string;recommended?:boolean;industryScope?:string;industryCodes?:string[]};
 type Config={configured:boolean;selected:string[];eligible:Account[];version:number;pending:Array<{id:string;title:string}>;can:Record<string,boolean>};
 type Tri='all'|'none'|'some';
 
@@ -13,6 +13,7 @@ export default function FinEntityAccounts({le,entities}:{le:Entity;entities:Enti
   const {data,error,loading,reload}=useLoad(()=>callBackend<Config>(`${FIN_API}/chart/scope/get`,{leId:le.id}),[le.id]);
   const [codes,setCodes]=useState<string[]>([]);
   const [q,setQ]=useState('');
+  const [showAllIndustries,setShowAllIndustries]=useState(false);
   const [from,setFrom]=useState('');
   const [msg,setMsg]=useState('');
   const [busy,setBusy]=useState(false);
@@ -37,7 +38,7 @@ export default function FinEntityAccounts({le,entities}:{le:Entity;entities:Enti
       onClick={e=>e.stopPropagation()} onChange={()=>toggle(items)}
       className='h-4 w-4 shrink-0 accent-emerald-600'/>
   );
-  const choices=eligible.filter(a=>!q.trim()||`${a.code} ${a.name} ${a.className} ${a.categoryName} ${a.groupName}`.toLowerCase().includes(q.toLowerCase()));
+  const choices=eligible.filter(a=>(showAllIndustries||a.recommended!==false||selected.has(a.code))&&(!q.trim()||`${a.code} ${a.name} ${a.className} ${a.categoryName} ${a.groupName}`.toLowerCase().includes(q.toLowerCase())));
   const changed=data?JSON.stringify([...codes].sort())!==JSON.stringify([...data.selected].sort()):false;
   if(loading&&!data)return <Spinner/>;
   if(error||!data)return <Alert tone='error'>{error||'Cannot read legal entity account configuration.'}</Alert>;
@@ -48,6 +49,7 @@ export default function FinEntityAccounts({le,entities}:{le:Entity;entities:Enti
         <span className='text-sm text-ink'>{codes.length} / {eligible.length} accounts selected</span>
         <span className='text-xs text-muted'>{data.configured?'Approved selection exists':'Using legacy unrestricted approved chart until first scope approval'}</span>
       </div>
+      {!data.configured&&<Alert tone='info'>Common and matching industry GL accounts are recommended. The currently approved chart remains unchanged until a new account scope is approved. Unmatched accounts may be manually adopted.</Alert>}
       {!!data.pending?.length&&<Alert tone='info'>{data.pending.length} account selection proposal(s) awaiting approval.</Alert>}
     </Card>
     {msg&&<Alert tone='info'>{msg}</Alert>}
@@ -56,7 +58,9 @@ export default function FinEntityAccounts({le,entities}:{le:Entity;entities:Enti
         className='mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink'/>
     </label>
     <div className='flex flex-wrap items-center gap-2'>
-      <Button variant='secondary' disabled={!data.can.gl_manage} onClick={()=>setCodes(eligible.map(a=>a.code))}>Select all eligible</Button>
+      <Button variant='secondary' disabled={!data.can.gl_manage} onClick={()=>setCodes(eligible.filter(a=>a.recommended!==false).map(a=>a.code))}>Select recommended</Button>
+       <Button variant='secondary' onClick={()=>setShowAllIndustries(v=>!v)}>{showAllIndustries?'Recommended only':'Show all available'}</Button>
+       <Button variant='secondary' disabled={!data.can.gl_manage} onClick={()=>setCodes(eligible.map(a=>a.code))}>Select all eligible</Button>
       <Button variant='secondary' disabled={!data.can.gl_manage} onClick={()=>setCodes([])}>Clear draft</Button>
       <Button variant='secondary' disabled={!changed} onClick={()=>setCodes(data.selected)}>Discard edits</Button>
     </div>
@@ -88,7 +92,7 @@ export default function FinEntityAccounts({le,entities}:{le:Entity;entities:Enti
                   </summary>
                   {grpItems.map(a=><label key={a.code} className='ml-3 flex min-h-9 items-center gap-2 text-sm'>
                     <input type='checkbox' checked={selected.has(a.code)} disabled={!data.can.gl_manage} onChange={e=>setCodes(cur=>e.target.checked?Array.from(new Set([...cur,a.code])):cur.filter(c=>c!==a.code))}/>
-                    <span className='font-mono text-xs text-muted'>{a.code}</span><span className='text-ink'>{a.name}</span>
+                    <span className='font-mono text-xs text-muted'>{a.code}</span><span className='text-ink'>{a.name}</span>{a.recommended===false&&<span className='text-xs text-muted'>Industry not matched · manual adoption</span>}
                   </label>)}
                 </details>;
               })}
