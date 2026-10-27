@@ -1134,7 +1134,10 @@ export const assetRoutes = {
                     return reject(['Matching approved GL master '+str(ref.referenceGLVersion)+' must be imported before the asset catalogue.']);
                 const sections=isObj(gl.data.sections)?gl.data.sections:{};
                 const count=num(sections.items)??0;
-                const parts=await Promise.all(Array.from({length:count},(_,i)=>getDoc('module_workspaces/FIN/catalogs/gl_accounts/parts/items_'+i)));
+                const glPartsBase=str(gl.data.activeRelease)
+                    ?'module_workspaces/FIN/catalogs/gl_accounts/releases/'+str(gl.data.activeRelease)
+                    :'module_workspaces/FIN/catalogs/gl_accounts';
+                const parts=await Promise.all(Array.from({length:count},(_,i)=>getDoc(glPartsBase+'/parts/items_'+i)));
                 const codes=new Set<string>();
                 for(const part of parts){
                     try{for(const account of arr(JSON.parse(str(part?.data.json)||'[]')))codes.add(str(account.code));}catch{return reject(['GL master account reference records cannot be read.']);}
@@ -1158,8 +1161,15 @@ export const assetRoutes = {
             }
             const headerJson = JSON.stringify(dict.header);
             if (Buffer.byteLength(headerJson, 'utf8') > 200_000) return reject(['The catalog header is too large.']);
-            const base = `${VERSIONS}/${CATALOG_VID}`;
-            const before = await listDocs(`${base}/parts`);
+            // The legacy in-place "current" dictionary stays readable; each new
+            // integrated release is written to a separate, immutable version.
+            const label = isObj(parsed) ? str(parsed.version).slice(0, 40) : '';
+            const releaseVid = integrated ? vidOf(label) : CATALOG_VID;
+            const base = `${VERSIONS}/${releaseVid}`;
+            const existing = integrated ? await getDoc(base) : null;
+            if (existing && str(existing.data.sha256) !== str(s.data.sha256))
+                return reject(['Asset catalogue version '+label+' already exists with different contents. Increase the version number.']);
+            const before = integrated ? [] : await listDocs(`${base}/parts`);
             const written = new Set<string>();
             const sections: Record<string, number> = {};
             for (const section of SECTIONS) {
@@ -1172,7 +1182,6 @@ export const assetRoutes = {
             }
             for (const p of before) if (!written.has(p.id)) await deleteDoc(`${base}/parts/${p.id}`);
             const now = nowIso();
-            const label = isObj(parsed) ? str(parsed.version).slice(0, 40) : '';
             const pointer = await getDoc(POINTER);
             const previous = str(pointer?.data.activeVid);
             await writeDoc(base, {
@@ -1188,8 +1197,12 @@ export const assetRoutes = {
                 loadedAt: now,
                 loadedBy: ctx.actor.email,
             });
-            await writeDoc(POINTER, { activeVid: CATALOG_VID, activeVersion: label, activatedAt: now, activatedBy: ctx.actor.email, stats, previousLoadedAt: str(pointer?.data.activatedAt) });
-            if (previous && previous !== CATALOG_VID) await updateFields(`${VERSIONS}/${previous}`, { status: 'superseded', supersededAt: now });
+            await writeDoc(POINTER, {
+                activeVid: releaseVid, activeVersion: label, activatedAt: now,
+                activatedBy: ctx.actor.email, stats,
+                previousVid: previous, previousLoadedAt: str(pointer?.data.activatedAt)
+            });
+            if (previous && previous !== releaseVid) await updateFields(`${VERSIONS}/${previous}`, { status: 'superseded', supersededAt: now });
             cache.delete(base);
             await cleanup();
             await rec(

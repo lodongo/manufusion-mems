@@ -334,9 +334,14 @@ async function load(kind: Kind): Promise<Loaded> {
     const hit = cache.get(kind);
     if (hit && hit.stamp === stamp) return hit;
     const counts = isObj(doc.data.sections) ? doc.data.sections : {};
+    // Release-specific, immutable part sets: changing the pointer is atomic,
+    // and a failed upload cannot corrupt the previous active release.
+    const activePartsBase = str(doc.data.activeRelease)
+        ? `${base(kind)}/releases/${str(doc.data.activeRelease)}`
+        : base(kind);
     const read = async (section: Section): Promise<Obj[]> => {
         const n = num(counts[section]) ?? 0;
-        const docs = await Promise.all(Array.from({ length: n }, (_, i) => getDoc(`${base(kind)}/parts/${section}_${i}`)));
+        const docs = await Promise.all(Array.from({ length: n }, (_, i) => getDoc(`${activePartsBase}/parts/${section}_${i}`)));
         return docs.flatMap((d) => {
             try {
                 return arr(JSON.parse(str(d?.data.json) || '[]'));
@@ -577,7 +582,9 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                 }
                 const headerJson = JSON.stringify(cat.header);
                 if (Buffer.byteLength(headerJson, 'utf8') > 300_000) return reject(['The catalog header is too large.']);
-                const before = await listDocs(`${base(kind)}/parts`);
+                const release = integrated ? str(s.data.sha256).slice(0, 32) : '';
+                const destination = release ? `${base(kind)}/releases/${release}` : base(kind);
+                const before = release ? [] : await listDocs(`${base(kind)}/parts`);
                 const previous = await getDoc(base(kind));
                 const written = new Set<string>();
                 const sections: Record<string, number> = {};
@@ -585,13 +592,19 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                     const parts = splitParts(cat[section]);
                     sections[section] = parts.length;
                     for (let i = 0; i < parts.length; i++) {
-                        await writeDoc(`${base(kind)}/parts/${section}_${i}`, { section, index: i, json: parts[i] });
+                        await writeDoc(`${destination}/parts/${section}_${i}`, { section, index: i, json: parts[i] });
                         written.add(`${section}_${i}`);
                     }
                 }
                 for (const p of before) if (!written.has(p.id)) await deleteDoc(`${base(kind)}/parts/${p.id}`);
                 const now = nowIso();
+                if (release) await writeDoc(destination,{
+                    kind, status: 'validated', version: str(cat.header.version),
+                    fileName: str(s.data.fileName), size: num(s.data.size) ?? 0,
+                    sha256: str(s.data.sha256), sections, headerJson, stats, stagedAt: now
+                });
                 await writeDoc(base(kind), {
+                    activeRelease: release,
                     kind,
                     module: def.module,
                     status: 'active',
@@ -609,6 +622,7 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                     loadedBy: ctx.actor.email,
                     previousLoadedAt: str(previous?.data.loadedAt),
                     previousSha256: str(previous?.data.sha256),
+                    previousRelease: str(previous?.data.activeRelease),
                 });
                 cache.delete(kind);
                 await cleanup();
