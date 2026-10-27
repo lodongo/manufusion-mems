@@ -1124,6 +1124,38 @@ export const assetRoutes = {
             }
             const { dict, errors, warnings, stats } = validateDictionary(parsed);
             if (errors.length) return reject(errors, warnings);
+            const integrated=isObj(parsed)&&isObj(parsed.financialIntegration);
+            if(integrated){
+                const ref=parsed.financialIntegration as Obj;
+                if(str(ref.catalogueRelease)!=='APPROVED')
+                    return reject(['Finance review draft cannot replace the live asset catalogue. Complete Finance sign-off first.']);
+                const gl=await getDoc('module_workspaces/FIN/catalogs/gl_accounts');
+                if(!gl||str(gl.data.status)!=='active'||str(gl.data.version)!==str(ref.referenceGLVersion))
+                    return reject(['Matching approved GL master '+str(ref.referenceGLVersion)+' must be imported before the asset catalogue.']);
+                const sections=isObj(gl.data.sections)?gl.data.sections:{};
+                const count=num(sections.items)??0;
+                const parts=await Promise.all(Array.from({length:count},(_,i)=>getDoc('module_workspaces/FIN/catalogs/gl_accounts/parts/items_'+i)));
+                const codes=new Set<string>();
+                for(const part of parts){
+                    try{for(const account of arr(JSON.parse(str(part?.data.json)||'[]')))codes.add(str(account.code));}catch{return reject(['GL master account reference records cannot be read.']);}
+                }
+                const absent=new Set<string>();
+                for(const item of dict.assetClasses){
+                    const accounting=isObj(item.accounting)?item.accounting:{};
+                    const resolution=isObj(accounting.glResolution)?accounting.glResolution:{};
+                    for(const route of arr(resolution.transactionRoutes)){
+                        const code=str(route.glCode);
+                        if(code&&!codes.has(code))absent.add(code);
+                    }
+                }
+                if(absent.size)return reject(['GL master missing asset account references: '+[...absent].slice(0,15).join(', ')+'.']);
+                const unresolved=dict.assetClasses.filter(item=>{
+                    const a=isObj(item.accounting)?item.accounting:{};
+                    const r=isObj(a.glResolution)?a.glResolution:{};
+                    return str(r.mappingStatus)==='finance_review_required';
+                });
+                if(unresolved.length)return reject([unresolved.length+' asset classes have unapproved GL mappings.']);
+            }
             const headerJson = JSON.stringify(dict.header);
             if (Buffer.byteLength(headerJson, 'utf8') > 200_000) return reject(['The catalog header is too large.']);
             const base = `${VERSIONS}/${CATALOG_VID}`;

@@ -551,6 +551,30 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                 }
                 const { cat, errors, warnings, stats } = validate(kind, parsed);
                 if (errors.length) return reject(errors, warnings);
+                // Integrated catalogues are a coordinated accounting release, never
+                // an ordinary "upload to replace" operation while Finance review is open.
+                const integrated = isObj(parsed) && isObj(parsed.financialIntegration);
+                if (integrated && str((parsed as Obj).financialIntegration && ((parsed as Obj).financialIntegration as Obj).catalogueRelease)!=='APPROVED')
+                    return reject(['Finance review draft cannot replace the live catalogue. Approve and reconcile the full master bundle first.']);
+                if (integrated && kind !== 'gl_accounts') {
+                    const glDoc=await getDoc(base('gl_accounts'));
+                    const expected=str(((parsed as Obj).financialIntegration as Obj).referenceGLVersion);
+                    if (!glDoc || str(glDoc.data.status)!=='active' || str(glDoc.data.version)!==expected)
+                        return reject(['Integrated catalogue needs the matching approved GL master '+expected+' uploaded first.']);
+                    const registered=await load('gl_accounts');
+                    const unknown=new Set<string>();
+                    for(const item of cat.items){
+                        const accounting=isObj(item.accounting)?item.accounting:{};
+                        const resolution=isObj(accounting.glResolution)?accounting.glResolution:{};
+                        for(const route of arr(resolution.transactionRoutes)) {
+                            const code=str(route.glCode);
+                            if(code&&!registered.items.has(code)) unknown.add(code);
+                        }
+                    }
+                    if(unknown.size) return reject(['The active GL master is missing mapped account codes: '+[...unknown].slice(0,15).join(', ')+'.']);
+                    const notApproved=cat.items.filter(item=>isObj(item.accounting)&&isObj(item.accounting.glResolution)&&str(item.accounting.glResolution.mappingStatus)==='finance_review_required');
+                    if(notApproved.length)return reject([notApproved.length+' catalogue entries still have unresolved Finance-review GL routes.']);
+                }
                 const headerJson = JSON.stringify(cat.header);
                 if (Buffer.byteLength(headerJson, 'utf8') > 300_000) return reject(['The catalog header is too large.']);
                 const before = await listDocs(`${base(kind)}/parts`);
