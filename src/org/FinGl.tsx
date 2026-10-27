@@ -112,7 +112,7 @@ interface Master {
     classes: Array<{ code: string; name: string; description: string }>;
     categories: Array<{ code: string; name: string; description: string; classCode: string }>;
     groups: Array<{ code: string; name: string; description: string; categoryCode: string }>;
-    accounts: Array<{ code: string; name: string; description: string; classCode: string; categoryCode: string; groupCode: string; normalBalance: string; accountType: string; postingMode: string; statement: string; postable: boolean; core: boolean; adopted: string }>;
+    accounts: Array<{ code: string; name: string; description: string; classCode: string; categoryCode: string; groupCode: string; normalBalance: string; accountType: string; postingMode: string; statement: string; postable: boolean; core: boolean; adopted: string; industryScope?:string;industryCodes?:string[];recommended?:boolean;explicitOverrideRequired?:boolean }>;
 }
 
 type SelState = 'none' | 'some' | 'all' | 'done';
@@ -154,19 +154,21 @@ function Browse({ le }: { le: Entity }) {
     const [grp, setGrp] = useState('');
     const [q, setQ] = useState('');
     const [pick, setPick] = useState<string[]>([]);
+    const [showAllIndustries,setShowAllIndustries]=useState(false);
     const [msg, setMsg] = useState('');
     const confirm = useConfirm();
     const can = le.can.gl_manage;
+    const suggested=(a:Master['accounts'][number])=>showAllIndustries||a.recommended!==false||!!a.adopted;
     const found = useMemo(() => {
         const t = q.trim().toLowerCase();
         if (!data || t.length < 2) return [];
-        return data.accounts.filter((a) => `${a.code} ${a.name} ${a.description}`.toLowerCase().includes(t)).slice(0, 80);
-    }, [data, q]);
+        return data.accounts.filter((a) => suggested(a)&&`${a.code} ${a.name} ${a.description}`.toLowerCase().includes(t)).slice(0, 80);
+    }, [data, q,showAllIndustries]);
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load the MEMS GL master.'}</Alert>;
     const back = () => (grp ? setGrp('') : cat ? setCat('') : setCls(''));
     const crumbs = [data.classes.find((c) => c.code === cls)?.name, data.categories.find((c) => c.code === cat)?.name, data.groups.find((g) => g.code === grp)?.name].filter(Boolean);
-    const accountsHere = grp ? data.accounts.filter((a) => a.groupCode === grp) : found;
+    const accountsHere = grp ? data.accounts.filter((a) => suggested(a)&&a.groupCode === grp) : found;
     const picked = new Set(pick);
     const freeOf = (list: Master['accounts']) => list.filter((a) => !a.adopted).map((a) => a.code);
     const stateOf = (list: Master['accounts']): SelState => {
@@ -179,7 +181,7 @@ function Browse({ le }: { le: Entity }) {
         const free = freeOf(list);
         setPick(stateOf(list) === 'all' ? pick.filter((c) => !free.includes(c)) : Array.from(new Set([...pick, ...free])));
     };
-    const here = grp ? data.accounts.filter((a) => a.groupCode === grp) : cat ? data.accounts.filter((a) => a.categoryCode === cat) : cls ? data.accounts.filter((a) => a.classCode === cls) : data.accounts;
+    const here = (grp ? data.accounts.filter((a) => a.groupCode === grp) : cat ? data.accounts.filter((a) => a.categoryCode === cat) : cls ? data.accounts.filter((a) => a.classCode === cls) : data.accounts).filter(suggested);
     const hereLabel = crumbs.length ? String(crumbs[crumbs.length - 1]) : 'the MEMS GL master';
     const box = (list: Master['accounts'], label: string) => (can ? <SelBox state={stateOf(list)} label={label} onToggle={() => toggle(list)} /> : undefined);
     const AccTile = (a: Master['accounts'][number]) => {
@@ -201,6 +203,7 @@ function Browse({ le }: { le: Entity }) {
                         {!a.postable && <Pill status='closed' label='Heading' />}
                         {a.core && <Pill status='core' label='Core' />}
                         {a.adopted && <Pill status={a.adopted} label={`In chart: ${a.adopted}`} />}
+                        {a.recommended===false && <Pill status='future' label='Industry not matched · manual adoption available' />}
                     </span>
                 </button>
             </div>
@@ -213,6 +216,10 @@ function Browse({ le }: { le: Entity }) {
                 <Search className='h-4 w-4 text-muted' />
                 <input aria-label='Search the GL master' value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${data.accounts.length} accounts by code, name or description`} className='h-full min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-muted' />
             </label>
+            <div className='flex items-center justify-between gap-2 rounded-xl border border-line p-2 text-xs'>
+              <span>Common and matching industry accounts are recommended. Others stay available to adopt.</span>
+              <button type='button' className='shrink-0 rounded-lg border border-line px-2 py-2 text-brand' onClick={()=>setShowAllIndustries(v=>!v)}>{showAllIndustries?'Recommended only':'Show all accounts'}</button>
+            </div>
             {q.trim().length >= 2 ? (
                 <div className='space-y-2'>{found.length ? found.map(AccTile) : <p className='text-sm text-muted'>No account matches.</p>}</div>
             ) : (
@@ -234,9 +241,9 @@ function Browse({ le }: { le: Entity }) {
                         </div>
                     )}
                     <div className='grid gap-2 sm:grid-cols-2'>
-                        {!cls && data.classes.map((c) => <Tile key={c.code} code={c.code} title={c.name} sub={c.description} sel={box(data.accounts.filter((a) => a.classCode === c.code), c.name)} onClick={() => setCls(c.code)} right={<span className='text-xs text-muted'>{data.accounts.filter((a) => a.classCode === c.code).length}</span>} />)}
-                        {cls && !cat && data.categories.filter((c) => c.classCode === cls).map((c) => <Tile key={c.code} code={c.code} title={c.name} sub={c.description} sel={box(data.accounts.filter((a) => a.categoryCode === c.code), c.name)} onClick={() => setCat(c.code)} right={<span className='text-xs text-muted'>{data.accounts.filter((a) => a.categoryCode === c.code).length}</span>} />)}
-                        {cat && !grp && data.groups.filter((g) => g.categoryCode === cat).map((g) => <Tile key={g.code} code={g.code} title={g.name} sub={g.description} sel={box(data.accounts.filter((a) => a.groupCode === g.code), g.name)} onClick={() => setGrp(g.code)} right={<span className='text-xs text-muted'>{data.accounts.filter((a) => a.groupCode === g.code).length}</span>} />)}
+                        {!cls && data.classes.map((c) => <Tile key={c.code} code={c.code} title={c.name} sub={c.description} sel={box(data.accounts.filter((a) => suggested(a)&&a.classCode === c.code), c.name)} onClick={() => setCls(c.code)} right={<span className='text-xs text-muted'>{data.accounts.filter((a) => a.classCode === c.code).length}</span>} />)}
+                        {cls && !cat && data.categories.filter((c) => c.classCode === cls).map((c) => <Tile key={c.code} code={c.code} title={c.name} sub={c.description} sel={box(data.accounts.filter((a) => suggested(a)&&a.categoryCode === c.code), c.name)} onClick={() => setCat(c.code)} right={<span className='text-xs text-muted'>{data.accounts.filter((a) => a.categoryCode === c.code).length}</span>} />)}
+                        {cat && !grp && data.groups.filter((g) => g.categoryCode === cat).map((g) => <Tile key={g.code} code={g.code} title={g.name} sub={g.description} sel={box(data.accounts.filter((a) => suggested(a)&&a.groupCode === g.code), g.name)} onClick={() => setGrp(g.code)} right={<span className='text-xs text-muted'>{data.accounts.filter((a) => a.groupCode === g.code).length}</span>} />)}
                     </div>
                     {grp && (
                         <div className='space-y-2'>
