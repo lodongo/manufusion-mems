@@ -892,7 +892,14 @@ export async function createMaterialDraft(ctx: OrgContext) {
         const shortText = [name, ...specifics].join(' · ').slice(0, 120);
         const id = 'MAT-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
         const path = 'organizations/' + ctx.orgId + '/materials/' + id;
-        await writeDoc(path, { name, shortText, materialCode, categoryCode, subcategoryCode, familyCode, attributes: values, status: 'draft', approvalLevel: 0, createdAt: nowIso(), createdBy: ctx.uid }, { exists: false });
+        // Carry the approved reference material classification into the tenant record.
+        // Technical material identity is independent from the maintenance strategy used on a WO.
+        const catalogueClassification=isObj(cls.accounting)&&isObj(cls.accounting.catalogueClassification)?cls.accounting.catalogueClassification:{};
+        const storesClassCode=str(catalogueClassification.storesClassCode);
+        const majorMaterialBranch=str(catalogueClassification.majorBranch);
+        await writeDoc(path, { name, shortText, materialCode, categoryCode, subcategoryCode, familyCode, attributes: values,
+            ...(storesClassCode?{storesClassCode}:{}),...(majorMaterialBranch?{majorMaterialBranch}:{}),
+            status: 'draft', approvalLevel: 0, createdAt: nowIso(), createdBy: ctx.uid }, { exists: false });
         await audit([{ category: 'data', action: 'org.material.create', actor: ctx.actor, meta: ctx.meta, target: { label: id }, details: name, orgId: ctx.orgId }]);
         return { ok: true, id, shortText };
     }
