@@ -80,6 +80,8 @@ export interface ClassDetail {
     attributes: AttrDef[];
     properties?: Array<{ label: string; value: string }>;
     legacyCodes?: string[];
+    accounting?: Record<string, unknown>;
+    financialMapping?: Record<string, unknown>;
     financial?: FinancialCatalogueInfo;
 }
 
@@ -410,6 +412,19 @@ function ClassView({
                     {data.financial?.pendingFinanceApproval && <p role='status' className='text-xs text-amber-300'>This proposed GL account is inactive and requires Finance sign-off.</p>}
                     {!data.financial && <p className='text-xs text-amber-300'>No integrated accounting metadata in the active catalogue.</p>}
                 </section>
+                {(data.accounting || data.financialMapping) && (
+                    <section className='mt-3 rounded-xl border border-slate-700 bg-slate-950 p-3' aria-label='Financial configuration'>
+                        <h3 className='text-sm font-semibold text-white'>Financial configuration</h3>
+                        <dl className='mt-2 space-y-2'>
+                            {Object.entries(data.financialMapping ?? data.accounting ?? {}).map(([key, value]) => (
+                                <div key={key} className='grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-2 border-t border-slate-800 pt-2 text-xs'>
+                                    <dt className='break-words text-slate-400'>{key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ')}</dt>
+                                    <dd className='min-w-0 break-words text-slate-200'>{typeof value === 'object' ? JSON.stringify(value) : String(value ?? 'Not configured')}</dd>
+                                </div>
+                            ))}
+                        </dl>
+                    </section>
+                )}
                 {!!data.properties?.length && (
                     <details className='mt-3 rounded-xl border border-slate-800 bg-slate-950'>
                         <summary className='cursor-pointer px-3 py-2 text-sm font-medium text-slate-200'>Properties ({data.properties.length})</summary>
