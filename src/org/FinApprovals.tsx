@@ -16,6 +16,7 @@ import {eligibleFinanceMappingApprovals} from './financeBulkApproval';
 interface Row {
     id: string;
     leCode: string;
+    leId: string;
     type: string;
     typeLabel: string;
     title: string;
