@@ -277,7 +277,7 @@ function validate(kind: Kind, raw: unknown) {
         for (const a of strs(it.requiredAttributes)) if (!listSet.has(a)) err(`${def.item} ${code}: required attribute ${a} is not in its attribute list.`);
         if (!list.length && warnings.length < 30) warnings.push(`${def.item} ${code} has no attributes.`);
     }
-    for(const message of catalogueFinanceErrors(kind,cat.items,isObj(raw.financialIntegration),isObj(raw.industryIntegration)))err(message);
+    for(const message of catalogueFinanceErrors(kind,cat.items,isObj(raw.financialIntegration),isObj(raw.industryIntegration),isObj(raw.transactionIntegration)))err(message);
     if (!cat.items.length) err(`No ${def.keys.items} found in the file.`);
     if (!cat.attributes.length) err('No attributes found in the file.');
     const stats = {
