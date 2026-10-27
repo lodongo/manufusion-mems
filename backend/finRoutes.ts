@@ -1320,6 +1320,16 @@ export const finRoutes = {
                 const e = await env(ctx, d.data.leId);
                 const why = cannotDecide(ctx, d.data, e.units, e.scope);
                 if (why) throw new HttpError(403, why);
+                if (ctx.body.bulkFinanceMapping === true) {
+                    const reqType=str(d.data.type);
+                    if(decision!=='approve'||!['mapping.save','gltxn.save'].includes(reqType)||
+                        (d.data.amount!==null&&d.data.amount!==undefined))
+                        throw new HttpError(403,'Bulk approval is restricted to non-value-bearing account-mapping configuration changes.');
+                    const competing=(await runQuery({from:[{collectionId:'fin_requests'}],where:fieldEq('leId',str(d.data.leId))},
+                        `organizations/${ctx.orgId}`)).filter(other=>other.id!==id&&str(other.data.status)==='pending'&&str(other.data.type)===reqType);
+                    if(competing.length)throw new HttpError(409,
+                        'Multiple pending '+reqType+' requests exist for this legal entity. Review competing mappings individually before approval.');
+                }
                 const at = nowIso();
                 const steps = objs(d.data.steps) as unknown as Step[];
                 const idx = steps.findIndex((s) => s.status === 'pending');
