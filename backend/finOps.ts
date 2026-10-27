@@ -211,7 +211,8 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
                 lines: g.lines,
                 narrative: `Delivery ${a.ref} on ${a.poId} from ${str(a.po.vendorName)}`,
                 source: { kind: 'purchase_order', id: a.poId, ref: a.deliveryId, route: `organization_home/procurement_orders/${a.poId}` },
-                trace: { poId: a.poId, deliveryId: a.deliveryId, deliveryNote: a.ref, vendorName: str(a.po.vendorName), requisitionIds: Array.from(new Set(list.map((x) => str(x.l.requisitionId)).filter(Boolean))), requirementIds: Array.from(new Set(list.map((x) => str(x.l.requirementId)).filter(Boolean))), quotationIds: Array.from(new Set(list.map((x) => str(x.l.quotationId)).filter(Boolean))) },
+                trace: { poId: a.poId, deliveryId: a.deliveryId, deliveryNote: a.ref, vendorName: str(a.po.vendorName), requisitionIds: Array.from(new Set(list.map((x) => str(x.l.requisitionId)).filter(Boolean))), requirementIds: Array.from(new Set(list.map((x) => str(x.l.requirementId)).filter(Boolean))), quotationIds: Array.from(new Set(list.map((x) => str(x.l.quotationId)).filter(Boolean))),
+               ...(maintenanceServiceLines.length?{maintenanceServiceLines}:{} ) },
                 sourceKey: `GR_${a.deliveryId}_${leId}_${type}`,
                 stock: g.stock,
                 extra: g.extra,
@@ -220,6 +221,27 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
         }
     }
     return { journals, note: notLive.length ? `Finance is not live for ${notLive.join(', ')}: quantities were recorded, nothing was posted.` : '' };
+}
+
+/** Preserve maintenance provenance on external-service actuals. PO GL remains unchanged. */
+async function maintenanceServiceProvenance(orgId:string,poLine:Obj,amount:number):Promise<Obj|null>{
+    const reqId=str(poLine.requirementId),lineNo=Number(poLine.requirementLineNo);
+    if(!/^[A-Za-z0-9_-]{1,90}$/.test(reqId)||!Number.isInteger(lineNo)||lineNo<1)return null;
+    const requirement=await getDoc(`organizations/${orgId}/procurement_requirements/${reqId}`);
+    if(!requirement)return null;
+    const prior=objs(requirement.data.lines).find(l=>Number(l.no)===lineNo);
+    const reference=o(prior?.maintenanceSource || requirement.data.maintenanceSource);
+    const woId=str(reference.woCode),taskId=str(reference.taskId);
+    if(!/^WO\\d{8}$/.test(woId)||!taskId)return null;
+    const wo=await getDoc(`organizations/${orgId}/work_orders/${woId}`);
+    const strategy=wo?mroFinancialContext(wo.data,taskId,{}):null;
+    return {
+        purchaseOrderLineNo:Number(poLine.no),requirementId:reqId,requirementLineNo:lineNo,
+        workOrderId:woId,taskId,maintenanceTypeCode:strategy?.maintenanceTypeCode||'',
+        maintenanceTypeSource:strategy?.source||'UNCLASSIFIED',
+        costNatureCode:'EXTERNAL_SERVICE',expenseGlCode:str(poLine.glCode),
+        amount,classificationAsOf:'SERVICE_ACCEPTANCE'
+    };
 }
 
 // ===== Service acceptance =====
@@ -249,10 +271,13 @@ export async function acceptService(ctx: OrgContext, a: { po: Obj; poId: string;
         const grir = roleAccount(map, 'GRIR','',{event:'SVC_ACCEPT'});
         const lines: PostLine[] = [];
         const acceptedBudgetCosts:Array<{costCenterId:string;amountMinor:number}>=[];
+        const maintenanceServiceLines:Obj[]=[];
         for (const x of list) {
             const value = round2(x.amount * rate);
             const cc = ccOfLine(x.l);
             acceptedBudgetCosts.push({costCenterId:cc,amountMinor:cents(value)});
+            const maintenanceSource=await maintenanceServiceProvenance(ctx.orgId,x.l,value);
+            if(maintenanceSource)maintenanceServiceLines.push(maintenanceSource);
             lines.push({ side: 'D', glCode: str(x.l.glCode), ccId: cc, amount: value, docAmount: x.amount, description: `${a.poId} line ${Number(x.l.no)}: ${str(x.l.itemName) || str(x.l.requirement)}`.slice(0, 200) });
             lines.push({ side: 'C', glCode: grir, ccId: cc, amount: value, docAmount: x.amount, description: `GR/IR ${a.poId} service ${a.receiptId}, invoice ${a.invoiceNo}`.slice(0, 200) });
         }
