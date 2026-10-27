@@ -633,7 +633,16 @@ export async function choosableAccounts(orgId: string, ccId: string): Promise<{ 
     const [chart, map, fin, entity] = await Promise.all([chartOf(orgId, le.id), mappingOf(orgId, le.id), ccFinOf(orgId, ccId), entityOf(orgId, le.id)]);
     const sys = systemAccounts(map);
     const allowed = new Set(fin.allowedGl);
-    const accounts = Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && !sys.has(a.code) && (entity.doc?.data.glScopeConfigured !== true || strs(entity.doc.data.allowedGl).includes(a.code)) && (!allowed.size || a.statement === 'BS' || allowed.has(a.code)));
+    // New-model finance masters explicitly govern which adopted accounts can be
+    // selected on procurement requirements. Legacy masters without these fields
+    // retain the established legal-entity/cost-centre eligibility behaviour.
+    const master = await glMaster();
+    const integratedEligibility = !!master?.accounts.length && master.accounts.every(a => typeof a.usedInProcurement === 'boolean');
+    const selectableFromMaster = new Set((master?.accounts ?? []).filter(a => a.usedInProcurement === true && a.pendingFinanceApproval !== true).map(a => a.code));
+    const accounts = Array.from(chart.values()).filter((a) => a.status === 'active' && a.postable && !sys.has(a.code)
+        && (!integratedEligibility || selectableFromMaster.has(a.code))
+        && (entity.doc?.data.glScopeConfigured !== true || strs(entity.doc.data.allowedGl).includes(a.code))
+        && (!allowed.size || a.statement === 'BS' || allowed.has(a.code)));
     return { le, accounts: accounts.sort((a, b) => a.code.localeCompare(b.code)) };
 }
 /** Throws with a plain reason unless the GL account may be used on this cost center. */
