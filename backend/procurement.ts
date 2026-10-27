@@ -696,7 +696,7 @@ export async function materialCategories(): Promise<Array<{ code: string; name: 
 /** Categories, subcategories and item list of a published master, for procurement setup and purchase requirements. Null when not loaded. */
 export async function catalogSummary(kind: 'materials' | 'services' | 'gl_accounts'): Promise<{
     categories: Array<{ code: string; name: string; subcategories: Array<{ code: string; name: string }> }>;
-    items: Array<{ code: string; name: string; categoryCode: string; subcategoryCode: string }>;
+    items: Array<{ code: string; name: string; categoryCode: string; subcategoryCode: string; industryScope?: string; industryCodes?: string[] }>;
 } | null> {
     let d: Loaded;
     try {
@@ -717,7 +717,7 @@ export async function catalogSummary(kind: 'materials' | 'services' | 'gl_accoun
             }))
             .filter((c) => c.code)
             .sort((a, b) => a.code.localeCompare(b.code)),
-        items: Array.from(d.items.values()).map((i) => ({ code: str(i.code), name: str(i.name), categoryCode: str(i[def.itemL1]), subcategoryCode: str(i[def.itemL2]) })),
+        items: Array.from(d.items.values()).map((i) => ({ code: str(i.code), name: str(i.name), categoryCode: str(i[def.itemL1]), subcategoryCode: str(i[def.itemL2]), industryScope: str(i.industryScope) || 'COMMON', industryCodes: strs(i.industryCodes) })),
     };
 }
 
