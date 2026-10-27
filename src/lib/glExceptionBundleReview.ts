@@ -18,6 +18,7 @@ export interface ReferenceReview{
   eligible:boolean;recordCount:number;affectedMaterialCount:number;
   byAccount:Array<{code:string;name:string;category:string;expected:number;actual:number;valid:boolean}>;
   errors:string[];warnings:string[];
+  purposeReviewCount:number;purposeReviewExamples:string[];
   bundleId:string;referenceGlVersion:string;
   note:string;
 }
@@ -52,7 +53,8 @@ export function auditFiveGlExtensions(glDocument:unknown,materialsDocument:unkno
     return {...group,actual:0,valid:!!a};
   });
   const counts=new Map<string,number>(),seen=new Set<string>();
-  let exceptions=0;
+  let exceptions=0,purposeReviewCount=0;
+  const purposeReviewExamples:string[]=[];
   for(const item of materialRows){
     const code=str(item.code);
     if(!code||seen.has(code))fail(errors,'Blank or duplicate material code: '+code);
@@ -78,6 +80,12 @@ export function auditFiveGlExtensions(glDocument:unknown,materialsDocument:unkno
     }
     if(resolution.postingEnabled===true||routes.some(r=>r.postingActive===true))
       fail(errors,code+': an unapproved material route was enabled for posting.');
+    // Sector-wide stock classes are only reference suggestions. Some may be capital goods
+    // or engineering spares when adopted; do not infer a fixed consumption GL.
+    if(str(item.categoryCode)==='MAT-020' || /\\b(hydraulic|hose|crusher|drill|liner|implant|motor|device|charger|scanner|printer)\\b/i.test(str(item.name))){
+      purposeReviewCount++;
+      if(purposeReviewExamples.length<8)purposeReviewExamples.push(code+' · '+str(item.name));
+    }
     if(!['MRO','NON_MRO'].includes(str(obj(accounting.catalogueClassification).majorBranch)))
       fail(errors,code+': MRO/Non-MRO classification is missing.');
     if(str(obj(accounting.catalogueClassification).majorBranch)==='MRO' &&
@@ -93,8 +101,9 @@ export function auditFiveGlExtensions(glDocument:unknown,materialsDocument:unkno
   if(exceptions!==439)fail(errors,'The expected 439 Finance-reference exceptions were not all present ('+exceptions+' found).');
   if(glFin.mappingReviewRequired!==true||matFin.mappingReviewRequired!==true)
     warnings.push('This is only reference validation; the full master-bundle mapping review must remain required.');
+  if(purposeReviewCount)warnings.push(purposeReviewCount+' technical material entries require purpose/valuation/MRO classification review during tenant adoption.');
   return {eligible:errors.length===0,recordCount:materialRows.length,affectedMaterialCount:exceptions,
-    byAccount,errors,warnings,bundleId,referenceGlVersion:glVersion,
+    byAccount,errors,warnings,purposeReviewCount,purposeReviewExamples,bundleId,referenceGlVersion:glVersion,
     note:'Reference integrity only. Five GL additions remain unapproved and tenant adoption/posting remain disabled.'};
 }
 
