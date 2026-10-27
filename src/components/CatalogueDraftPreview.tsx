@@ -25,7 +25,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
         const q = query.trim().toLowerCase();
         return q ? rows.filter(x => (text(x.code) + ' ' + text(x.name) + ' ' + text(x.description)).toLowerCase().includes(q)) : rows;
     }, [rows, query]);
-    const branchCounts = useMemo(() => kind !== 'materials' ? null : rows.reduce((a, item) => {
+    const branchCounts = useMemo(() => kind !== 'materials' ? null : rows.reduce<Record<string, number>>((a, item) => {
         const c = text(obj(obj(item.accounting).catalogueClassification).majorBranch);
         a[c || 'UNCLASSIFIED'] = (a[c || 'UNCLASSIFIED'] || 0) + 1;
         return a;
@@ -72,7 +72,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                         <div className='flex flex-wrap gap-2 text-xs'>
                             <Badge>{rows.length.toLocaleString()} entries</Badge>
                             <Badge tone={missingRoutes ? 'warn' : 'muted'}>{missingRoutes} entries missing financial contract</Badge>
-                            {branchCounts && Object.entries(branchCounts).map(([branch, count]) => <Badge key={branch}>{branch}: {count}</Badge>)}
+                            {branchCounts && Object.entries(branchCounts).map(([branch, count]) => <Badge key={branch}>{branch}: {Number(count)}</Badge>)}
                         </div>
                         <label className='block text-sm text-slate-300'>
                             Search all draft entries
