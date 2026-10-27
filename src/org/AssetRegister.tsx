@@ -206,7 +206,7 @@ function OrgDictionary() {
                     </div>
                 )}
             </Card>
-            {data.imported && <AssetDictionaryBrowser key={data.version} treePath='/api/org/assets/dictionary/tree' classPath='/api/org/assets/dictionary/class' />}
+            {data.imported && <AssetDictionaryBrowser key={data.version} treePath='/api/org/assets/dictionary/tree' classPath='/api/org/assets/dictionary/class' industryFilterEnabled />}
         </div>
     );
 }
@@ -647,6 +647,7 @@ export function AssetForm({
                 </p>}
                 {error && <Alert tone='error'>{error}</Alert>}
                 <AssetDictionaryBrowser
+                    industryFilterEnabled
                     treePath='/api/org/assets/dictionary/tree'
                     classPath='/api/org/assets/dictionary/class'
                     onPick={(c) => {
