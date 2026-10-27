@@ -2,7 +2,7 @@
 /** Private HR qualification evidence: immutable files, independent reviewer decisions. */
 import {createHash} from 'node:crypto';
 import {storage} from './platform/sdk';
-import {HttpError,commitChecked,getDoc,isObj,listDocs,nowIso,randomId,rateLimit,str} from './core';
+import {HttpError,commitChecked,fieldEq,getDoc,isObj,listDocs,nowIso,randomId,rateLimit,runQuery,str} from './core';
 import {orgRoute,hasPerm,type OrgContext} from './guards';
 import {hrSiteOf} from './hrHierarchy';
 import {audit} from './audit';
@@ -38,11 +38,12 @@ async function person(ctx:OrgContext,uid:string){
   throw new HttpError(404,'Employee unavailable.');
  return doc;
 }
-async function mayVerify(ctx:OrgContext,employee:Record<string,unknown>){
+type Nodes=Map<string,Record<string,unknown>>;
+const structureOf=async(org:string):Promise<Nodes>=>new Map((await listDocs('organizations/'+org+'/structure')).map(x=>[x.id,x.data]));
+async function mayVerify(ctx:OrgContext,employee:Record<string,unknown>,known?:Nodes){
  if(ctx.role==='org_super_admin')return true;
  if(!hasPerm(ctx.directPermissions,'HRM.records.verify'))return false;
- const docs=await listDocs('organizations/'+ctx.orgId+'/structure');
- const nodes=new Map(docs.map(x=>[x.id,x.data]));
+ const nodes=known||await structureOf(ctx.orgId);
  const reviewer=primary(ctx.me.data),targets=primary(employee);
  if(!reviewer.length||!targets.length)return false;
  const sites=new Set(reviewer.map(x=>hrSiteOf(x,nodes)).filter(Boolean));
@@ -139,15 +140,17 @@ export const hrEducationEvidenceRoutes={
  'POST /api/org/hr/evidence/inbox':[orgRoute('hr.evidence.inbox','HRM.shell.view',async ctx=>{
   if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'HRM.records.verify'))
    throw new HttpError(403,'HR records verifier permission required.');
-  const entries=(await listDocs(queue(ctx.orgId)))
-   .filter(x=>str(x.data.status)==='pending'&&str(x.data.employeeUid)!==ctx.uid&&str(x.data.uploadedBy)!==ctx.uid);
+  const [pending,nodes]=await Promise.all([
+   runQuery({from:[{collectionId:'hr_evidence_queue'}],where:fieldEq('status','pending')},'organizations/'+ctx.orgId),
+   structureOf(ctx.orgId)]);
+  const entries=pending.filter(x=>str(x.data.employeeUid)!==ctx.uid&&str(x.data.uploadedBy)!==ctx.uid);
   const uids=[...new Set(entries.map(x=>str(x.data.employeeUid)))];
   const docs=await Promise.all(uids.map(uid=>person(ctx,uid).catch(()=>null)));
   const people=new Map(docs.filter((x):x is NonNullable<typeof x>=>x!==null).map(x=>[x.id,x]));
   const result=[];
   for(const item of entries){
    const uid=str(item.data.employeeUid),user=people.get(uid);
-   if(!user||!(await mayVerify(ctx,user.data)))continue;
+   if(!user||!(await mayVerify(ctx,user.data,nodes)))continue;
    result.push({...mapOut(item),employeeName:
     [str(user.data.firstName),str(user.data.lastName)].filter(Boolean).join(' ')||'Employee'});
    if(result.length>=100)break;

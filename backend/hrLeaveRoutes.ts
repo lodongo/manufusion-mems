@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc} from './core';
+import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc,fieldEq,runQuery} from './core';
 import {orgRoute,hasPerm,type OrgContext} from './guards';
 import {managerFor} from './hrEmployeeRoutes';
 import {withLock} from './finCore';
@@ -7,7 +7,10 @@ import {hrSiteOf} from './hrHierarchy';
 import {currentHrRules} from './hrRulesRoutes';
 import {hrMayAccess,hrMayChangeRecord,type HrScope} from './hrPrivacyRules';
 import {leaveEligibility,leaveDays,requireLeaveType,type LeaveEligibility,type LeaveOption} from './hrLeaveEligibility';
+import {hrAudit,hrAuditRead} from './hrAudit';
 const coll=(org:string)=>`organizations/${org}/hr_leave_requests`;
+/** One employee's leave records (all stages), read by query instead of scanning the whole collection. */
+const employeeLeave=(org:string,uid:string)=>runQuery({from:[{collectionId:'hr_leave_requests'}],where:fieldEq('employeeUid',uid)},`organizations/${org}`);
 const s=(v:unknown,n=200)=>str(v).trim().slice(0,n);
 const assignments=(d:Record<string,unknown>)=>Array.isArray(d.assignments)?d.assignments.filter(isObj).filter(x=>s(x.type)==='primary'):[];
 const sites=(ctx:OrgContext,other:Record<string,unknown>,nodes:Map<string,Record<string,unknown>>)=>assignments(ctx.me.data).some(x=>assignments(other).some(y=>{
@@ -116,7 +119,8 @@ export const hrLeaveRoutes={
    const uid=s(ctx.body.uid,128)||ctx.uid;
    const access=await scope(ctx,uid);
    if(!access.canRead)throw new HttpError(403,'Leave records outside your authorized scope.');
-   const docs=await listDocs(coll(ctx.orgId));
+   const docs=await employeeLeave(ctx.orgId,uid);
+   await hrAuditRead(ctx,'leave',uid,access.isAdmin?'superadmin':access.manager?'manager':'hr');
    let eligibility:LeaveEligibility|null=null,configurationError='';
    try{eligibility=await leaveEligibility(ctx.orgId,access.person.data)}
    catch(e){configurationError=e instanceof Error?e.message:'Leave configuration unavailable.'}
@@ -153,7 +157,7 @@ export const hrLeaveRoutes={
     throw new HttpError(409,'Choose an approved leave plan before applying. Applications cannot bypass planning.');
    if(kind==='plan'&&planId)throw new HttpError(400,'A new leave plan cannot reference a previous plan.');
    return withLock(ctx.orgId,'hr_leave_employee_'+uid,async()=>{
-    const records=await listDocs(coll(ctx.orgId));
+    const records=await employeeLeave(ctx.orgId,uid);
     if(kind==='application'){
      const plan=records.find(d=>d.id===planId);
      if(!plan||s(plan.data.employeeUid)!==uid||s(plan.data.kind)!=='plan'||s(plan.data.status)!=='approved')
@@ -180,24 +184,27 @@ export const hrLeaveRoutes={
      reviewedBy:'',reviewedAt:'',decisionNote:''};
     const id=randomUUID().replace(/-/g,'');
     await writeDoc(coll(ctx.orgId)+'/'+id,entry,{exists:false});
+    await hrAudit(ctx,'leave.'+kind+'.submit',{type:'employee',id:uid},'request='+id+' type='+leaveType+' '+start+'/'+end);
     return {ok:true,id};
    });
  })],
  'POST /api/org/hr/leave/team':[orgRoute('org.hr.leave.team','HRM.shell.view',async ctx=>{
    const rules=await currentHrRules(ctx.orgId);
    if(!hrMayAccess('manager','leave',rules))return {items:[],counts:{planned:0,applications:0,pending:0}};
-   const [requests,nodeDocs]=await Promise.all([
+   const [requests,nodeDocs,users]=await Promise.all([
      listDocs(coll(ctx.orgId)),listDocs(`organizations/${ctx.orgId}/structure`),
+     runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)}),
    ]);
    const nodes=new Map(nodeDocs.map(d=>[d.id,d.data]));
+   const people=new Map(users.map(u=>[u.id,u]));
    const cache=new Map<string,boolean>(),items=[];
    for(const d of requests){
      const uid=s(d.data.employeeUid,128);
      if(!uid||uid===ctx.uid)continue;
      if(!cache.has(uid)){
-       const person=await getDoc('users/'+uid);
+       const person=people.get(uid);
        const direct=!!person&&s(person.data.orgId)===ctx.orgId&&person.data.status!=='disabled'&&
-         (await managerFor(ctx,person.data,nodes))===ctx.uid;
+         (await managerFor(ctx,person.data,nodes,users))===ctx.uid;
        cache.set(uid,direct);
      }
      if(cache.get(uid)){
@@ -215,14 +222,20 @@ export const hrLeaveRoutes={
  'POST /api/org/hr/leave/inbox':[orgRoute('org.hr.leave.inbox','HRM.shell.view',async ctx=>{
    const rules=await currentHrRules(ctx.orgId);
    if(!hrMayAccess('manager','leave',rules))return {items:[]};
-   const requests=(await listDocs(coll(ctx.orgId))).filter(d=>s(d.data.status)==='pending');
-   const nodes=new Map((await listDocs(`organizations/${ctx.orgId}/structure`)).map(d=>[d.id,d.data]));
+   const [all,nodeDocs,users]=await Promise.all([
+     runQuery({from:[{collectionId:'hr_leave_requests'}],where:fieldEq('status','pending')},`organizations/${ctx.orgId}`),
+     listDocs(`organizations/${ctx.orgId}/structure`),
+     runQuery({from:[{collectionId:'users'}],where:fieldEq('orgId',ctx.orgId)}),
+   ]);
+   const requests=all;
+   const nodes=new Map(nodeDocs.map(d=>[d.id,d.data]));
+   const people=new Map(users.map(u=>[u.id,u]));
    const items=[];
    for(const d of requests){
      if(s(d.data.employeeUid)===ctx.uid||s(d.data.proposedBy)===ctx.uid)continue;
-     const person=await getDoc('users/'+s(d.data.employeeUid,128));
+     const person=people.get(s(d.data.employeeUid,128));
      if(!person||s(person.data.orgId)!==ctx.orgId||person.data.status==='disabled')continue;
-     const managerUid=await managerFor(ctx,person.data,nodes);
+     const managerUid=await managerFor(ctx,person.data,nodes,users);
      if(managerUid===ctx.uid)items.push(record(d,false));
    }
    return {items};
@@ -244,7 +257,7 @@ export const hrLeaveRoutes={
        const eligibility=await leaveEligibility(ctx.orgId,a.person.data);
        const type=requireLeaveType(eligibility,s(doc.data.leaveType));
        confirmPlanTerms(doc.data,eligibility,type);
-       const otherRecords=await listDocs(coll(ctx.orgId));
+       const otherRecords=await employeeLeave(ctx.orgId,uid);
        validateCapacity(type,s(doc.data.start,10),s(doc.data.end,10),a.person.data,
         otherRecords,uid,s(doc.data.kind)==='plan'?'plan':'application',id);
        if(s(doc.data.kind)==='application'){
@@ -255,8 +268,10 @@ export const hrLeaveRoutes={
          confirmPlanTerms(plan.data,eligibility,type);
        }
      }
-     await writeDoc(path,{...doc.data,status:decision==='approve'?'approved':'rejected',
-       reviewedBy:ctx.uid,reviewedAt:nowIso(),decisionNote:note,updatedAt:nowIso()});
+     const ok=await writeDoc(path,{...doc.data,status:decision==='approve'?'approved':'rejected',
+       reviewedBy:ctx.uid,reviewedAt:nowIso(),decisionNote:note,updatedAt:nowIso()},{updateTime:doc.updateTime});
+     if(!ok)throw new HttpError(409,'This leave request changed at the same time. Reload and try again.');
+     await hrAudit(ctx,'leave.'+decision,{type:'employee',id:uid},'request='+id+' kind='+s(doc.data.kind,20));
      return {ok:true};
    });
  })],

@@ -1,6 +1,7 @@
 import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc} from './core';
 import {hasPerm,orgRoute,type OrgContext} from './guards';
 import {withLock} from './finCore';
+import {hrAudit} from './hrAudit';
 import {getEducationConfig} from './hrEducationConfig';
 
 export type PayCategory='payModels'|'overtime'|'allowances'|'benefits'|'incentives'|
@@ -347,9 +348,14 @@ export const hrCompensationRoutes={
   const valid=validatePayConfig(ctx.body.config,new Set(gradeConfig.jobGrades.filter(g=>g.enabled).map(g=>g.code)),country,currency);
   return withLock(ctx.orgId,'hr_compensation_'+id,async()=>{
    const prev=await getDoc(docPath(ctx.orgId,id));
-   const version=Number(prev?.data.version||0)+1;
-   await writeDoc(docPath(ctx.orgId,id),{...valid,version,status:'draft',
-    updatedAt:nowIso(),updatedBy:ctx.uid});
+   const current=Number(prev?.data.version||0);
+   if(ctx.body.expectedVersion!==undefined&&Number(ctx.body.expectedVersion)!==current)
+    throw new HttpError(409,'Compensation settings changed since you opened them. Reload before saving.');
+   const version=current+1;
+   if(!await writeDoc(docPath(ctx.orgId,id),{...valid,version,status:'draft',
+    updatedAt:nowIso(),updatedBy:ctx.uid},prev?{updateTime:prev.updateTime}:{exists:false}))
+    throw new HttpError(409,'Compensation settings changed while saving. Reload and try again.');
+   await hrAudit(ctx,'compensation.config.save',{type:'legal_entity',id},'version='+version+' items='+valid.items.length);
    return {ok:true,version,status:'draft',config:{...valid,version}};
   });
  })],

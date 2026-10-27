@@ -1,5 +1,7 @@
 import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc} from './core';
 import {orgRoute,type OrgContext} from './guards';
+import {withLock} from './finCore';
+import {corporateAudit} from './corporateAudit';
 
 export type CorporateFunction={
  code:string;name:string;description:string;enabled:boolean;
@@ -136,14 +138,18 @@ export const corporateGovernanceRoutes={
   const config=validateCorporateDesign(ctx.body.config,
    new Set(refs.entities.map(x=>x.id)),new Set(refs.groups.map(x=>x.id)),
    new Set(refs.roles.map(x=>x.code)));
-  const prior=await getDoc(key(ctx.orgId));
-  if(prior&&Number(ctx.body.expectedVersion)!==Number(prior.data.version||0))
-   throw new HttpError(409,'Corporate governance was updated elsewhere. Reload before saving changes.');
-  if(!prior&&Number(ctx.body.expectedVersion)!==0)
-   throw new HttpError(409,'Corporate governance version changed. Reload before saving.');
-  const version=Number(prior?.data.version||0)+1;
-  const saved:CorporateDesign={...config,version,updatedAt:nowIso(),updatedBy:ctx.uid};
-  await writeDoc(key(ctx.orgId),saved);
-  return {ok:true,version,config:saved};
+  return withLock(ctx.orgId,'corporate_governance',async()=>{
+   const prior=await getDoc(key(ctx.orgId));
+   if(prior&&Number(ctx.body.expectedVersion)!==Number(prior.data.version||0))
+    throw new HttpError(409,'Corporate governance was updated elsewhere. Reload before saving changes.');
+   if(!prior&&Number(ctx.body.expectedVersion)!==0)
+    throw new HttpError(409,'Corporate governance version changed. Reload before saving.');
+   const version=Number(prior?.data.version||0)+1;
+   const saved:CorporateDesign={...config,version,updatedAt:nowIso(),updatedBy:ctx.uid};
+   if(!await writeDoc(key(ctx.orgId),saved,prior?{updateTime:prior.updateTime}:{exists:false}))
+    throw new HttpError(409,'Corporate governance changed while saving. Reload and try again.');
+   await corporateAudit(ctx,'governance.save',version);
+   return {ok:true,version,config:saved};
+  });
  })],
 };

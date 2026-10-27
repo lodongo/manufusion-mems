@@ -1,6 +1,7 @@
 import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {withLock} from './finCore';
+import {corporateAudit} from './corporateAudit';
 
 export type CorporateFundingMethod='corporate_budget'|'shareholder_funding'|'service_recharge'|'hybrid';
 export type CorporateCostClass='shareholder'|'shared_service'|'direct_service'|'mixed';
@@ -152,7 +153,9 @@ export const corporateFinanceRoutes={
     throw new HttpError(409,'Corporate financial home was updated elsewhere. Reload before saving.');
    const version=oldVersion+1;
    const saved:CorporateFinancialHome={...config,version,updatedAt:nowIso(),updatedBy:ctx.uid};
-   await writeDoc(key(ctx.orgId),saved);
+   if(!await writeDoc(key(ctx.orgId),saved,prior?{updateTime:prior.updateTime}:{exists:false}))
+    throw new HttpError(409,'Corporate financial home changed while saving. Reload and try again.');
+   await corporateAudit(ctx,'finance_home.save',version);
    return {ok:true,config:saved,status:'draft',
     warning:'This is a governed planning configuration, not payroll allocation, an approved budget or an intercompany invoice.'};
   });

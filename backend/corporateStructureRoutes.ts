@@ -1,6 +1,7 @@
 import {HttpError,getDoc,listDocs,nowIso,str,writeDoc} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {withLock} from './finCore';
+import {corporateAudit} from './corporateAudit';
 import {
   defaultCorporateStructure,validateCorporateStructure,
   type CorporateStructureConfig,type StructureReferences,
@@ -50,7 +51,9 @@ export const corporateStructureRoutes={
         const saved:CorporateStructureConfig={
           ...validated,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid,
         };
-        await writeDoc(key(ctx.orgId),saved);
+        if(!await writeDoc(key(ctx.orgId),saved,previous?{updateTime:previous.updateTime}:{exists:false}))
+          throw new HttpError(409,'Corporate structure changed while saving. Reload and try again.');
+        await corporateAudit(ctx,'structure.save',version+1);
         return {ok:true,config:saved,saved:true,
           note:'Draft planning policy saved. No financial posting, security or HR employment changes have occurred.'};
       });

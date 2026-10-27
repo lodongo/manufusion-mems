@@ -6,6 +6,7 @@ import { managerFor } from './hrEmployeeRoutes';
 import { HR_RULE_DEFAULTS, hrRules, hrVisibleTabs, type HrRules } from './hrPrivacyRules';
 import { hrSiteOf } from './hrHierarchy';
 import { buildFitIndex } from './hrSkillFit';
+import { hrAudit } from './hrAudit';
 
 const path=(org:string)=>`organizations/${org}/hr_access_rules/default`;
 export const currentHrRules=async(org:string):Promise<HrRules>=>hrRules((await getDoc(path(org)))?.data);
@@ -51,6 +52,7 @@ export const hrRulesRoutes={
       throw new HttpError(409,'Privacy rules already have a pending independent approval.');
     await writeDoc(path,{rules:proposed,proposedBy:ctx.uid,proposedAt:nowIso(),
       status:'pending',simulationDigest:expected,reviewedBy:'',reviewedAt:'',reviewNote:''});
+    await hrAudit(ctx,'access_rules.submit',{type:'hr_policy',id:'access_rules'},'digest='+expected.slice(0,16));
     return {ok:true,status:'pending',message:'Submitted for independent HR privacy approval.'};
   });
  })],
@@ -73,6 +75,7 @@ export const hrRulesRoutes={
     }
     await writeDoc(p,{...pending.data,status:decision==='approve'?'approved':'rejected',
       reviewedBy:ctx.uid,reviewedAt:nowIso(),reviewNote:note});
+    await hrAudit(ctx,'access_rules.'+decision,{type:'hr_policy',id:'access_rules'},'proposedBy='+str(pending.data.proposedBy).slice(0,64));
     return {ok:true,status:decision==='approve'?'approved':'rejected'};
   });
  })],

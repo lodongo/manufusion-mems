@@ -60,7 +60,9 @@ export default function HrCompensationAdmin(){
   if(!entity||!config||busy)return;
   setBusy(true);setError('');setNotice('');
   try{
-   const r=await callBackend<{version:number;status:string}>('/api/org/hr/compensation/save',{legalEntityId:entity,config});
+   const r=await callBackend<{version:number;status:string}>('/api/org/hr/compensation/save',
+    {legalEntityId:entity,config,expectedVersion:Number(config.version||0)});
+   setConfig(c=>c?{...c,version:r.version}:c);
    setNotice('Saved draft revision '+r.version+'. No employee salary, payroll ledger or statutory remittance was changed.');
    setSaved(true);
   }catch(e){setError(e instanceof Error?e.message:'Could not save compensation draft.')}
