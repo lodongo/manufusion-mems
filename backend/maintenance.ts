@@ -1323,7 +1323,6 @@ export const maintenanceRoutes = {
                             if(!sub||!family)throw new HttpError(400,'Choose a valid service category, subcategory and family/class from the approved hierarchy.');
                         }
                     }
-                    tasks=await verifiedTaskMaintenanceTypes(tasks);
                     await verifyAssessedTaskChoices(ctx,doc,tasks);
                     tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(x=>x.proposedVendorIds));
@@ -1569,6 +1568,7 @@ export const maintenanceRoutes = {
                         tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(b.tasks),
                             (m?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix);
                     }catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid task work assessment.');}
+                    tasks=await verifiedTaskMaintenanceTypes(tasks);
                     await verifyAssessedTaskChoices(ctx,doc,tasks);
                     tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(v=>v.proposedVendorIds));
