@@ -18,7 +18,8 @@ import { BuyerGroupsPanel } from './BuyerGroups';
 interface Cat {
     code: string;
     name: string;
-    subcategories: Array<{ code: string; name: string }>;
+    recommended?: boolean;
+    subcategories: Array<{ code: string; name: string; recommended?: boolean; industryMatchedItems?: number; totalItems?: number }>;
 }
 interface Kind {
     kind: 'material' | 'service' | 'asset';
@@ -69,6 +70,7 @@ function KindEditor({ kind, canManage, onSaved }: { kind: Kind; canManage: boole
     const [sel, setSel] = useState<Selection>(initial);
     const [open, setOpen] = useState<Record<string, boolean>>({});
     const [q, setQ] = useState('');
+    const [showAllIndustries, setShowAllIndustries] = useState(false);
     const [notice, setNotice] = useState('');
     const confirm = useConfirm();
     useEffect(() => setSel(toSelection(kind.adopted)), [kind]);
@@ -76,13 +78,17 @@ function KindEditor({ kind, canManage, onSaved }: { kind: Kind; canManage: boole
     const shape = (s: Selection) => JSON.stringify(Object.keys(s).sort().map((c) => [c, Array.from(s[c]).sort()]));
     const dirty = shape(sel) !== shape(initial);
     const term = q.trim().toLowerCase();
-    const list = kind.master.filter((c) => !term || `${c.code} ${c.name}`.toLowerCase().includes(term) || c.subcategories.some((s) => `${s.code} ${s.name}`.toLowerCase().includes(term)));
+    const list = kind.master.filter((c) => (showAllIndustries || c.recommended !== false || !!sel[c.code]?.size) &&
+        (!term || `${c.code} ${c.name}`.toLowerCase().includes(term) || c.subcategories.some((s) => `${s.code} ${s.name}`.toLowerCase().includes(term))));
 
     const toggleCat = (c: Cat, on: boolean) =>
         setSel((cur) => {
             const next = { ...cur };
-            if (on) next[c.code] = new Set(c.subcategories.map((s) => s.code));
-            else delete next[c.code];
+            if (on) {
+                const selected = new Set(next[c.code] ?? []);
+                for (const sub of c.subcategories) if (showAllIndustries || sub.recommended !== false || selected.has(sub.code)) selected.add(sub.code);
+                next[c.code] = selected;
+            } else delete next[c.code];
             return next;
         });
     const toggleSub = (c: Cat, code: string, on: boolean) =>
@@ -95,6 +101,17 @@ function KindEditor({ kind, canManage, onSaved }: { kind: Kind; canManage: boole
             else delete next[c.code];
             return next;
         });
+
+    const addRecommended = () => setSel(cur => {
+        const next: Selection = Object.fromEntries(Object.entries(cur).map(([code, selected]) => [code, new Set(selected)]));
+        for (const category of kind.master) for (const sub of category.subcategories) {
+            if (sub.recommended === false) continue;
+            const selected = next[category.code] ?? new Set<string>();
+            selected.add(sub.code);
+            next[category.code] = selected;
+        }
+        return next;
+    });
 
     const save = () =>
         confirm.ask(
@@ -129,9 +146,15 @@ function KindEditor({ kind, canManage, onSaved }: { kind: Kind; canManage: boole
                 <Badge tone='muted'>{Object.keys(sel).length} categories · {countOf(sel)} subcategories</Badge>
                 {kind.updatedAt && <span className='text-xs text-muted'>Version {kind.version}, {fmtDate(kind.updatedAt)}</span>}
             </div>
+            <div className='flex flex-wrap items-center gap-2'>
+                <Button variant='secondary' onClick={() => setShowAllIndustries(v => !v)}>{showAllIndustries ? 'Recommended only' : 'Show all available'}</Button>
+                {canManage && <Button variant='secondary' onClick={addRecommended}>Add recommended</Button>}
+                <span className='text-xs text-muted'>Unmatched categories are off by default, remain available for explicit adoption, and existing selections are preserved.</span>
+            </div>
             <ul className='divide-y divide-line overflow-hidden rounded-2xl border border-line bg-panel'>
                 {list.map((c) => {
-                    const chosen = sel[c.code]?.size ?? 0;
+                    const visibleSubs = c.subcategories.filter(sub => showAllIndustries || sub.recommended !== false || !!sel[c.code]?.has(sub.code));
+                    const chosen = visibleSubs.filter(sub => !!sel[c.code]?.has(sub.code)).length;
                     const expanded = term ? true : open[c.code];
                     return (
                         <li key={c.code}>
@@ -140,9 +163,9 @@ function KindEditor({ kind, canManage, onSaved }: { kind: Kind; canManage: boole
                                     type='checkbox'
                                     aria-label={`Accept ${c.name}`}
                                     disabled={!canManage}
-                                    checked={chosen === c.subcategories.length && chosen > 0}
+                                    checked={chosen === visibleSubs.length && chosen > 0}
                                     ref={(el) => {
-                                        if (el) el.indeterminate = chosen > 0 && chosen < c.subcategories.length;
+                                        if (el) el.indeterminate = chosen > 0 && chosen < visibleSubs.length;
                                     }}
                                     onChange={(e) => toggleCat(c, e.target.checked)}
                                     className='h-5 w-5 shrink-0 accent-emerald-500'
@@ -150,14 +173,15 @@ function KindEditor({ kind, canManage, onSaved }: { kind: Kind; canManage: boole
                                 <button type='button' aria-expanded={!!expanded} onClick={() => setOpen((o) => ({ ...o, [c.code]: !o[c.code] }))} className='flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left'>
                                     <span className='min-w-0 flex-1'>
                                         <span className='block truncate text-sm font-medium text-ink'>{c.name}</span>
-                                        <span className='font-mono text-xs text-muted'>{c.code} · {chosen}/{c.subcategories.length} accepted</span>
+                                        <span className='font-mono text-xs text-muted'>{c.code} · {sel[c.code]?.size ?? 0}/{c.subcategories.length} accepted</span>
+                                        {c.recommended === false && <span className='text-xs text-amber-400'>Outside registered industry · manual adoption</span>}
                                     </span>
                                     {expanded ? <ChevronDown className='h-4 w-4 text-muted' /> : <ChevronRight className='h-4 w-4 text-muted' />}
                                 </button>
                             </div>
                             {expanded && (
                                 <ul className='space-y-0 border-t border-line bg-page px-3 py-1 pl-10'>
-                                    {c.subcategories
+                                    {visibleSubs
                                         .filter((s) => !term || `${c.code} ${c.name} ${s.code} ${s.name}`.toLowerCase().includes(term))
                                         .map((s) => (
                                             <li key={s.code}>
@@ -165,6 +189,7 @@ function KindEditor({ kind, canManage, onSaved }: { kind: Kind; canManage: boole
                                                     <input type='checkbox' disabled={!canManage} checked={sel[c.code]?.has(s.code) ?? false} onChange={(e) => toggleSub(c, s.code, e.target.checked)} className='h-5 w-5 shrink-0 accent-emerald-500' />
                                                     <span className='min-w-0 flex-1 truncate'>{s.name}</span>
                                                     <span className='font-mono text-xs text-muted'>{s.code}</span>
+                                                    {s.recommended === false && <span className='text-xs text-amber-400'>Manual</span>}
                                                 </label>
                                             </li>
                                         ))}
