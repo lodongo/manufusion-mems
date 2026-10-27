@@ -370,8 +370,9 @@ function AccountView({ le, code }: { le: Entity; code: string }) {
 
 interface MapData {
     roles: Array<{ code: string; label: string; statement: 'BS' | 'PL'; required: boolean; note: string }>;
-    mapping: { roles: Record<string, string>; byCategory: Record<string, { INVENTORY?: string; CONSUMPTION?: string }>; rules: Array<{id:string;event:string;role:string;account:string;categoryCode:string;costCenterId:string;priority:number;enabled:boolean}>;version: number };
+    mapping: { roles: Record<string, string>; byCategory: Record<string, { INVENTORY?: string; CONSUMPTION?: string }>; rules: Array<{id:string;event:string;role:string;account:string;categoryCode:string;costCenterId:string;priority:number;enabled:boolean;maintenanceTypeCode?:string;costNatureCode?:string}>;version: number };
     events: Array<{code:string;label:string;roles:string[];implemented:boolean}>;
+    maintenanceTypes: Array<{code:string;label:string}>;
     variants:GranularVariant[];
     contracts:Array<{id:string;module:string;submodule:string;state:string;handlerId:string}>;
     txns: Array<{ code: string; label: string; debit: string; credit: string; live: boolean; source: string; taxes: string[] }>;
@@ -487,7 +488,7 @@ function Mapping({ le }: { le: Entity }) {
             </Card>
 
             </details>
-            <FinAccountRuleManager leId={le.id} rules={activeRules} setRules={setDeterminationRules} events={data.events??[]} roles={data.roles} accounts={data.accounts} categories={data.categories} canEdit={can} mapping={{roles:r,byCategory:bc}} prefill={prefill} />
+            <FinAccountRuleManager leId={le.id} rules={activeRules} setRules={setDeterminationRules} events={data.events??[]} roles={data.roles} accounts={data.accounts} categories={data.categories} maintenanceTypes={data.maintenanceTypes??[]} canEdit={can} mapping={{roles:r,byCategory:bc}} prefill={prefill} />
             {can && (
                 <Button disabled={!changed} onClick={() => confirm.ask({ title: 'Propose the mapping', message: 'Every posting from approval on uses the new accounts. A person with FIN.mapping.approve must approve it.', confirmLabel: 'Propose', reason: { label: 'Reason', minLength: 10 } }, async (reason) => { await callBackend(`${FIN_API}/mapping/propose`, { leId: le.id, mapping: { roles: r, byCategory: bc,rules:activeRules }, reason }); setRoles(null); setCats(null); setDeterminationRules(null); setMsg('Proposed for approval.'); reload(); })}>
                     Propose mapping
