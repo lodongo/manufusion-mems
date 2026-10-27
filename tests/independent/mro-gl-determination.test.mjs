@@ -67,3 +67,32 @@ test('Actual finance issue and return handlers preserve source GL selection and 
  assert.match(src,/originalMroIssueAccounts\(line,defaults\.expenseGlCode,defaults\.inventoryGlCode\)/);
  assert.match(src,/usedOriginalIssueAccount/);
 });
+
+test('Work Assessment persists task strategy from the controlled registry, without bypassing review',async()=>{
+ const fs=await import('node:fs');
+ const ui=fs.readFileSync('src/org/MntTaskAssessment.tsx','utf8');
+ const assessment=fs.readFileSync('backend/maintenanceTaskAssessment.ts','utf8');
+ const routes=fs.readFileSync('backend/maintenance.ts','utf8');
+ assert.match(ui,/Maintenance strategy for this task/);
+ assert.match(ui,/Inherit the Work Order maintenance type/);
+ assert.match(ui,/options\.data\?\.maintenanceTypes/);
+ assert.match(assessment,/maintenanceTypeCode\?:string/);
+ assert.match(routes,/verifiedTaskMaintenanceTypes/);
+ assert.match(routes,/not enabled in the maintenance reference registry/);
+});
+test('Finance rules share an approval workflow rather than writing directly into the GL',async()=>{
+ const fs=await import('node:fs');
+ const finance=fs.readFileSync('backend/finRoutes.ts','utf8');
+ assert.match(finance,/maintenanceFinancialTypes/);
+ assert.match(finance,/FIN\.mapping\.approve/);
+ assert.match(finance,/type: 'mapping\.save'/);
+ const ui=fs.readFileSync('src/org/FinAccountRuleManager.tsx','utf8');
+ assert.match(ui,/Stores cost-nature code/);
+ assert.match(ui,/Maintenance strategy \(optional\)/);
+});
+test('Tenant Materials Master inherits the Stores class from its controlled catalogue template',async()=>{
+ const fs=await import('node:fs');
+ const source=fs.readFileSync('backend/procurement.ts','utf8');
+ assert.match(source,/const storesClassCode=str\(catalogueClassification\.storesClassCode\)/);
+ assert.match(source,/const majorMaterialBranch=str\(catalogueClassification\.majorBranch\)/);
+});
