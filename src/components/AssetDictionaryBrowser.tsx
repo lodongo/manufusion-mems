@@ -153,6 +153,7 @@ export default function AssetDictionaryBrowser({
     onPick,
     pickLabel = 'Use this class',
     showAttributes = true,
+    industryFilterEnabled = false,
     labels: L = ASSET_LABELS,
 }: {
     treePath: string;
@@ -161,12 +162,15 @@ export default function AssetDictionaryBrowser({
     onPick?: (cls: ClassDetail) => void;
     pickLabel?: string;
     showAttributes?: boolean;
+    industryFilterEnabled?: boolean;
     labels?: BrowserLabels;
 }) {
     const bodyKey = JSON.stringify(body);
     const { data, error, loading } = useLoad(() => callBackend<DictTree>(treePath, body), [treePath, bodyKey]);
     const [path, setPath] = useState<Path>({});
     const [mode, setMode] = useState<'browse' | 'table'>('browse');
+    const [showAllIndustries, setShowAllIndustries] = useState(false);
+    const suggested = (item: DictTree['classes'][number]) => !industryFilterEnabled || showAllIndustries || item.financial?.industryRecommended !== false;
 
     const names = useMemo(() => {
         const m = new Map<string, string>();
@@ -190,6 +194,7 @@ export default function AssetDictionaryBrowser({
             { key: 'gl', label: 'Primary reference GL', value: (r) => r.financial?.primaryGlCode||'' },
             { key:'industry',label:'Industry scope',value:r=>r.financial?.industryScope||'COMMON' },
             { key:'industryCodes',label:'Industry codes',value:r=>(r.financial?.industryCodes??[]).join(', ') },
+            { key:'industryRecommendation',label:'Default recommendation',value:r=>r.financial?.industryRecommended===false?'Off by default · manually adoptable':'Recommended' },
             { key: 'mapping', label: 'GL mapping status', value: (r) => r.financial?.mappingStatus||'not_configured' },
             { key: 'procurement', label: 'In procurement', value: (r) => eligible(r.financial?.usedInProcurement), hidden: true },
             { key: 'budget', label: 'In budgets', value: (r) => eligible(r.financial?.usedInBudget), hidden: true },
@@ -220,7 +225,7 @@ export default function AssetDictionaryBrowser({
                 .filter((s) => s.categoryCode === path.category)
                 .map((s) => ({ code: s.code, name: s.name, description: s.description, count: data.classes.filter((c) => c.subcategoryCode === s.code).length, unit: L.classes, to: { ...path, subcategory: s.code } }));
         return data.classes
-            .filter((c) => c.subcategoryCode === path.subcategory)
+            .filter((c) => c.subcategoryCode === path.subcategory && suggested(c))
             .map((c) => ({ code: c.code, name: c.name, description: c.description, count: c.attributeCount, unit: 'attributes', life: lifeText(c.usefulLifeYears), financial:c.financial, to: { ...path, cls: c.code } }));
     })();
 
@@ -258,13 +263,17 @@ export default function AssetDictionaryBrowser({
                 </div>
             </div>
 
+            {industryFilterEnabled && <div className='flex items-center justify-between gap-2 rounded-xl border border-slate-700 px-3 py-2 text-xs'>
+                <span className='text-slate-300'>Recommended by registered industry; unmatched entries remain available to adopt.</span>
+                <button type='button' onClick={() => setShowAllIndustries(v => !v)} className='shrink-0 rounded-lg border border-slate-600 px-2 py-2 text-emerald-300'>{showAllIndustries ? 'Recommended only' : 'Show all'}</button>
+            </div>}
             {mode === 'table' ? (
                 <RichTable
                     id={`${L.tableId}.classes`}
                     title={`${L.cls} list`}
                     fileName={`${L.filePrefix}_list_${data.version}`}
                     columns={classColumns}
-                    rows={data.classes}
+                    rows={data.classes.filter(suggested)}
                     rowKey={(r) => r.code}
                     onRowClick={(r) => setPath({ group: r.groupCode, category: r.categoryCode, subcategory: r.subcategoryCode, cls: r.code })}
                     height='h-[calc(100dvh-14rem)]'
@@ -305,6 +314,7 @@ export default function AssetDictionaryBrowser({
                                             {item.financial && <Badge tone={item.financial.mappingStatus==='finance_review_required'||item.financial.mappingStatus==='not_configured'?'warn':'muted'}>{financialStatus(item.financial.mappingStatus)}</Badge>}
                                             {item.financial?.primaryGlCode && <Badge>GL {item.financial.primaryGlCode}</Badge>}
                                             {item.financial && <Badge>{item.financial.industryScope==='INDUSTRY_SPECIFIC' ? 'Industry-specific · '+(item.financial.industryCodes??[]).join(', ') : 'Common across industries'}</Badge>}
+                                            {item.financial?.industryRecommended===false && <Badge tone='warn'>Off by default · manually adoptable</Badge>}
                                         </span>
                                     </span>
                                     <ChevronRight className='mt-1 h-4 w-4 shrink-0 text-slate-500' />
@@ -386,6 +396,7 @@ function ClassView({
                             ['Mapping status',financialStatus(data.financial?.mappingStatus||'not_configured')],
                             ['Industry scope',data.financial?.industryScope==='INDUSTRY_SPECIFIC'?'Industry-specific':'Common'],
                             ['Industry codes',(data.financial?.industryCodes??[]).join(', ')||'All industries'],
+                            ['Adoption recommendation',data.financial?.industryRecommended===false?'Off by default · manually adoptable':'Recommended'],
                             ['MRO / Non-MRO',data.financial?.majorBranch||'Not applicable'],
                             ['Stores class',data.financial?.storesClassName||'Not configured'],
                             ['Account purpose',data.financial?.accountPurpose||'Not specified'],
