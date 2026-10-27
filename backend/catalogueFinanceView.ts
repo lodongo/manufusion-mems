@@ -15,6 +15,9 @@ export function catalogueFinanceSummary(value:unknown){
   mappingStatus:str(resolution.mappingStatus)||str(determination.mappingStatus)||'not_configured',
   glRouteCount:routes.length,
   primaryGlCode:str(routes[0]?.glCode),
+  primaryRuntimePostingEvent:str(obj(routes[0]?.runtimeTransactionBinding).memsPostingEvent)||
+    (Array.isArray(obj(routes[0]?.runtimeTransactionBinding).memsPostingEvents)?str((obj(routes[0]?.runtimeTransactionBinding).memsPostingEvents as unknown[])[0]):''),
+  postingIntegrationState:str(obj(routes[0]?.runtimeTransactionBinding).postingIntegrationState)||'not_audited',
   majorBranch:str(classification.majorBranch),
   storesClassCode:str(classification.storesClassCode),
   storesClassName:str(classification.storesClassName),
@@ -36,7 +39,10 @@ export function catalogueFinanceDetail(value:unknown){
   classificationEvidence:str(cls.classificationEvidence),
   materialNumberPattern:str(cls.numberingPattern),
   routes:arr(gl.transactionRoutes).map(r=>({
-   event:str(r.event),glCode:str(r.glCode),glName:str(r.glName),status:str(r.status),systemDerived:r.systemDerived===true
+   event:str(r.event),glCode:str(r.glCode),glName:str(r.glName),status:str(r.status),systemDerived:r.systemDerived===true,
+   postingIntegrationState:str(obj(r.runtimeTransactionBinding).postingIntegrationState),
+   runtimePostingEvents:Array.isArray(obj(r.runtimeTransactionBinding).memsPostingEvents)?obj(r.runtimeTransactionBinding).memsPostingEvents:[],
+   crosswalkAction:str(obj(r.runtimeTransactionBinding).registryAction)
   })),
   pendingFinanceApproval:item.pendingFinanceApproval===true,
   sourceOfEligibility:str(rules.sourceOfEligibility),
