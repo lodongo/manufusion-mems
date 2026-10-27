@@ -1,6 +1,7 @@
 import { useMemo, useState, type ChangeEvent } from 'react';
 import { Alert } from './ui';
 import { Badge, Card } from '../admin/kit';
+import {auditFiveGlExtensions,prepareFiveGlReferenceReview,type PreparedFiveGlReview} from '../lib/glExceptionBundleReview';
 
 type Row = Record<string, unknown>;
 type Kind = 'materials' | 'services' | 'gl_accounts' | 'assets';
@@ -22,6 +23,12 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
     const [onlyFinanceExceptions, setOnlyFinanceExceptions] = useState(false);
     const [selectedCode, setSelectedCode] = useState('');
     const [busy, setBusy] = useState(false);
+    const [companionGlMaster,setCompanionGlMaster]=useState<Row|null>(null);
+    const [reviewerReference,setReviewerReference]=useState('');
+    const [reviewReason,setReviewReason]=useState('');
+    const [referenceReviewPack,setReferenceReviewPack]=useState<PreparedFiveGlReview|null>(null);
+    const referenceAudit=useMemo(()=>kind==='materials'&&fileData&&companionGlMaster
+      ?auditFiveGlExtensions(companionGlMaster,fileData):null,[kind,fileData,companionGlMaster]);
     const rows = useMemo(() => array(fileData?.[ITEMS[kind]]), [fileData, kind]);
     const selected = useMemo(() => rows.find(x => text(x.code) === selectedCode), [rows, selectedCode]);
     const statusOf = (x: Row) => text(kind === 'gl_accounts' ? obj(x.accountDetermination).mappingStatus : obj(obj(x.accounting).glResolution).mappingStatus);
@@ -54,6 +61,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
         e.target.value = '';
         if (!file) return;
         setFileData(null); setError(''); setQuery(''); setSelectedCode(''); setFileName(''); setIndustryPreview(''); setShowUnmatched(false); setOnlyFinanceExceptions(false);
+        setCompanionGlMaster(null);setReferenceReviewPack(null);
         if (file.size > 48_000_000) return setError('File is larger than the 48 MB preview limit.');
         setBusy(true);
         try {
@@ -65,6 +73,31 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
         } catch (ex) {
             setError(ex instanceof Error ? ex.message : 'Unable to open the selected JSON file.');
         } finally { setBusy(false); }
+    };
+    const onCompanionGl = async (e: ChangeEvent<HTMLInputElement>) => {
+        const file=e.target.files?.[0]; e.target.value='';
+        if(!file)return;
+        setReferenceReviewPack(null);
+        setCompanionGlMaster(null);
+        if(file.size>12_000_000){setError('GL Master reference file exceeds 12 MB.');return;}
+        try{
+            const doc=obj(JSON.parse(await file.text()) as unknown);
+            if(!Array.isArray(doc.accounts))throw new Error('Choose the full companion Finance-review GL Master JSON.');
+            setError('');setCompanionGlMaster(doc);
+        }catch(x){setError(x instanceof Error?x.message:'Cannot read the GL master file.');}
+    };
+    const downloadPrepared=(value:Row,label:string)=>{
+        const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));
+        const link=document.createElement('a');
+        link.href=url;link.download=label;document.body.appendChild(link);link.click();link.remove();
+        window.setTimeout(()=>URL.revokeObjectURL(url),20_000);
+    };
+    const recordReferenceReview=()=>{
+        if(!fileData||!companionGlMaster)return;
+        try{
+            setError('');
+            setReferenceReviewPack(prepareFiveGlReferenceReview(companionGlMaster,fileData,reviewerReference,reviewReason));
+        }catch(e){setReferenceReviewPack(null);setError(e instanceof Error?e.message:'Cannot record reference review.');}
     };
     const acc = obj(selected?.accounting), resolution = obj(acc.glResolution), classification = obj(acc.catalogueClassification);
     const determination = obj(selected?.accountDetermination);
@@ -91,6 +124,34 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                             {branchCounts && Object.entries(branchCounts).map(([branch, count]) => <Badge key={branch}>{branch}: {Number(count)}</Badge>)}
                             {Object.entries(industryCounts).map(([scope,count])=><Badge key={scope}>{scope==='COMMON'?'Common':'Industry-specific'}: {Number(count)}</Badge>)}
                         </div>
+                        {kind==='materials'&&financeExceptions>0&&<details className='rounded-xl border border-slate-600 p-3 text-sm'>
+                            <summary className='cursor-pointer font-semibold text-slate-100'>Bulk review: 439 Materials mappings / five proposed inventory GL accounts</summary>
+                            <div className='mt-3 space-y-3'>
+                                <p className='text-xs text-slate-300'>Select the companion GL Master from the SAME Finance-review bundle. This checks all five proposed inventory accounts and every dependent Materials mapping. Reference review is not tenant approval, account adoption, or permission to post.</p>
+                                <label className='block text-sm text-slate-200'>Finance-review GL Master (.json)
+                                    <input type='file' accept='.json,application/json' onChange={onCompanionGl} className='mt-1 block w-full rounded-lg border border-slate-600 p-2 text-xs text-slate-200'/>
+                                </label>
+                                {referenceAudit&&<div className='space-y-1 rounded-xl bg-slate-900 p-3'>
+                                    <p className={referenceAudit.eligible?'text-emerald-300':'text-amber-300'}>{referenceAudit.eligible?'439 references structurally validated; five GL accounts still need Finance approval':'Validation blocked: Finance mapping issues require correction'}</p>
+                                    {referenceAudit.byAccount.map(x=><p key={x.code} className='text-xs text-slate-300'><span className='font-mono'>{x.code}</span> · {x.name}: {x.actual}/{x.expected} mapped</p>)}
+                                    {referenceAudit.errors.map((m,i)=><p key={i} className='text-xs text-amber-300'>{m}</p>)}
+                                </div>}
+                                <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+                                    <label className='text-xs text-slate-300'>Reviewer reference
+                                        <input value={reviewerReference} onChange={e=>setReviewerReference(e.target.value)} placeholder='Reviewer name or authorised reference' className='mt-1 h-11 w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-sm text-white'/>
+                                    </label>
+                                    <label className='text-xs text-slate-300'>Review reason (min. 12 characters)
+                                        <input value={reviewReason} onChange={e=>setReviewReason(e.target.value)} placeholder='Why the five account references are suitable' className='mt-1 h-11 w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-sm text-white'/>
+                                    </label>
+                                </div>
+                                <button type='button' disabled={!referenceAudit?.eligible||reviewerReference.trim().length<3||reviewReason.trim().length<12} onClick={recordReferenceReview} className='min-h-11 w-full rounded-xl border border-emerald-600 px-3 py-2 text-sm font-semibold text-emerald-200 disabled:opacity-40'>Validate all 439 and record draft reference review</button>
+                                {referenceReviewPack&&<div className='space-y-2 rounded-xl border border-emerald-800 p-3'>
+                                    <p className='text-xs text-emerald-300'>Reference review recorded locally. The five GL additions and 439 dependent mappings remain non-posting and must undergo authorised Finance release.</p>
+                                    <button type='button' className='min-h-11 w-full rounded-lg border border-slate-600 px-3 text-sm' onClick={()=>downloadPrepared(referenceReviewPack.gl,'MEMS_GL_5_Extensions_Reference_Reviewed_NOT_APPROVED.json')}>Download reviewed GL Master draft</button>
+                                    <button type='button' className='min-h-11 w-full rounded-lg border border-slate-600 px-3 text-sm' onClick={()=>downloadPrepared(referenceReviewPack.materials,'MEMS_439_Materials_Reference_Reviewed_NOT_APPROVED.json')}>Download reviewed Materials Master draft</button>
+                                </div>}
+                            </div>
+                        </details>}
                         <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
                             <label className='block text-sm text-slate-300'>Preview defaults for a registered industry
                                 <select value={industryPreview} onChange={e => {setIndustryPreview(e.target.value);setShowUnmatched(false);}} className='mt-1 h-11 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 text-white'>
