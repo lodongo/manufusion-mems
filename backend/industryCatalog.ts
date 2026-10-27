@@ -95,6 +95,34 @@ export function industryAdoptionRecommendation(entry:IndustryScopedEntry,industr
   reason:scope==='COMMON'?'COMMON':matched?'INDUSTRY_MATCH':'INDUSTRY_NOT_MATCHED'};
 }
 
+/** A procurement category is recommended when at least one of its catalogue entries
+ * is common or matches the registered activity. Entries that don't match remain
+ * selectable through explicit manual adoption. Nothing here mutates existing adoption. */
+export function recommendProcurementCategories<T extends {code:string;name:string;subcategories:Array<{code:string;name:string}>}>(
+ categories:T[],
+ items:Array<{categoryCode:string;subcategoryCode:string;industryScope?:string;industryCodes?:string[]}>,
+ registeredIndustry:string,
+) {
+ const bySub=new Map<string,typeof items>();
+ for(const item of items){
+  const key=item.categoryCode+'|'+item.subcategoryCode;
+  const group=bySub.get(key)??[];
+  group.push(item);
+  bySub.set(key,group);
+ }
+ return categories.map(cat=>{
+  const subcategories=cat.subcategories.map(sub=>{
+   const matching=bySub.get(cat.code+'|'+sub.code)??[];
+   // The previous, non-industry catalogue did not carry item applicability.
+   // Preserve it as a common reference until the integrated model is adopted.
+   const recommended=matching.length===0||matching.some(item=>industryAdoptionRecommendation(item,registeredIndustry).recommended);
+   return {...sub,recommended,industryMatchedItems:matching.filter(item=>industryAdoptionRecommendation(item,registeredIndustry).recommended).length,
+    totalItems:matching.length};
+  });
+  return {...cat,subcategories,recommended:subcategories.some(s=>s.recommended)};
+ });
+}
+
 /** Merge published MEMS industry reference additions into the existing registration
  * metadata read model, retaining saved labels, active flags, and custom codes.
  * This does not mutate Firestore or alter a registered tenant. */
