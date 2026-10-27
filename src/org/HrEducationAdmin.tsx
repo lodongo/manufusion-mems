@@ -1,8 +1,9 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useMemo,useState} from 'react';
 import {ArrowRightLeft,BriefcaseBusiness,GraduationCap,Plus,Save,ShieldCheck,Trash2} from 'lucide-react';
 import {callBackend} from '../lib/backend';
 import {SelectField} from '../components/ui';
 import HrCompensationAdmin from './HrCompensationAdmin';
+import {Screen,Segmented,useConfirm} from '../components/screen';
 
 type Level={code:string;name:string;description:string;enabled:boolean;rank:number};
 type Qualification={code:string;levelCode:string;name:string;description:string;enabled:boolean};
@@ -23,11 +24,44 @@ export default function HrEducationAdmin(){
  const [confirmAdoption,setConfirmAdoption]=useState(false);
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
+ // Codes already saved are referenced by employee records and qualifications, so they are read-only.
+ const [baseline,setBaseline]=useState('');
+ const savedConfig=useMemo(()=>{try{return JSON.parse(baseline||'null') as Config|null}catch{return null}},[baseline]);
+ // Rows are only ever appended, so an index below the saved length is a saved row.
+ const savedRow=(kind:'levels'|'qualifications'|'jobGrades',index:number)=>index<(savedConfig?.[kind]?.length||0);
+ const {ask,sheet}=useConfirm();
+ const dirty=!!config&&JSON.stringify(config)!==baseline;
+ const issues=useMemo(()=>{
+  if(!config)return [] as string[];
+  const out:string[]=[];
+  const check=(rows:Array<{code:string}>,kind:string,named:(x:never)=>string)=>{
+   const seen=new Set<string>();
+   rows.forEach((x,i)=>{
+    if(!/^[A-Za-z0-9_-]{2,64}$/.test(x.code))out.push(kind+' '+(i+1)+': code must be 2–64 letters, digits, _ or -.');
+    if(seen.has(x.code))out.push(kind+' code '+x.code+' is used twice.');
+    if(!named(x as never).trim())out.push(kind+' '+x.code+': name is required.');
+    seen.add(x.code);
+   });
+  };
+  check(config.levels,'Education level',(x:Level)=>x.name);
+  check(config.qualifications,'Qualification',(x:Qualification)=>x.name);
+  check(config.jobGrades,'Job grade',(x:JobGrade)=>x.title);
+  config.levels.forEach(x=>{if(!(x.rank>=1))out.push('Education level '+x.code+': rank must be 1 or more.');});
+  config.jobGrades.forEach(x=>{if(!(x.rank>=1))out.push('Job grade '+x.code+': grade number must be 1 or more.');});
+  const levels=new Set(config.levels.map(x=>x.code));
+  config.qualifications.forEach(x=>{if(!levels.has(x.levelCode))out.push('Qualification '+x.code+': choose an educational level.');});
+  return [...new Set(out)];
+ },[config]);
+ useEffect(()=>{
+  if(!dirty)return;
+  const warn=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue='';};
+  window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);
+ },[dirty]);
  const load=async(id='')=>{
   setLoading(true);setError('');
   try{
    const r=await callBackend<{entities:Entity[];entity:Entity|null;config:Config|null}>('/api/org/hr/education/admin',{legalEntityId:id});
-   setEntities(r.entities);setEntity(r.entity?.id||'');setConfig(r.config);
+   setEntities(r.entities);setEntity(r.entity?.id||'');setConfig(r.config);setBaseline(JSON.stringify(r.config));
    setSourceEntity('');setSourcePreview(null);setSourceConfigured(false);setConfirmAdoption(false);
   }catch(e){setError(e instanceof Error?e.message:'Unable to load education and job grade configuration.')}
   finally{setLoading(false)}
@@ -38,7 +72,7 @@ export default function HrEducationAdmin(){
  const qChange=(idx:number,field:keyof Qualification,value:string|boolean)=>update(c=>({...c,qualifications:c.qualifications.map((x,i)=>i===idx?{...x,[field]:value}:x)}));
  const gradeChange=(idx:number,field:keyof JobGrade,value:string|number|boolean)=>update(c=>({...c,jobGrades:c.jobGrades.map((x,i)=>i===idx?{...x,[field]:value}:x)}));
  const save=async()=>{
-  if(!config||!entity)return;setBusy(true);setError('');setNotice('');
+  if(!config||!entity||issues.length||!dirty)return;setBusy(true);setError('');setNotice('');
   try{
    await callBackend('/api/org/hr/education/admin/save',{legalEntityId:entity,config});
    await load(entity);setNotice('Education hierarchy, qualifications and job grades saved for this legal entity.');
@@ -65,18 +99,26 @@ export default function HrEducationAdmin(){
   }catch(e){setError(e instanceof Error?e.message:'Unable to adopt legal-entity settings.')}
   finally{setBusy(false)}
  };
- if(workspace==='compensation')return <div className="min-w-0 space-y-4">
-  <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-panel p-1">
-   <button className="min-h-11 rounded-lg px-2 text-sm text-muted" onClick={()=>setWorkspace('education')} type="button">Education & Job Grades</button>
-   <button className="min-h-11 rounded-lg bg-brand/10 px-2 text-sm font-semibold text-brand" type="button">Compensation & Benefits</button>
-  </div>
-  <HrCompensationAdmin/>
- </div>;
- return <div className="min-w-0 space-y-4">
-  <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-panel p-1">
-   <button className="min-h-11 rounded-lg bg-brand/10 px-2 text-sm font-semibold text-brand" type="button">Education & Job Grades</button>
-   <button className="min-h-11 rounded-lg px-2 text-sm text-muted" onClick={()=>setWorkspace('compensation')} type="button">Compensation & Benefits</button>
-  </div>
+ const switcher=<Segmented label="HR settings workspace" value={workspace} onChange={v=>{
+   if(v===workspace)return;
+   if(!dirty){setWorkspace(v);return;}
+   ask({title:'Discard unsaved changes?',tone:'danger',confirmLabel:'Discard and switch',
+    message:'Your unsaved education and job-grade changes will be lost.'},
+    async()=>{setConfig(savedConfig);setWorkspace(v);});
+  }} options={[{value:'education',label:'Education & Job Grades'},{value:'compensation',label:'Compensation & Benefits'}]}/>;
+ if(workspace==='compensation')return <Screen title="HR Settings" subtitle="Compensation & benefits · draft policy" toolbar={switcher}>
+  {sheet}<HrCompensationAdmin/>
+ </Screen>;
+ const actions=config&&entity?<button type="button" disabled={busy||loading||!dirty||issues.length>0} onClick={()=>void save()}
+  aria-label="Save this legal entity's HR settings"
+  className="flex min-h-11 items-center gap-2 rounded-xl bg-brand px-3 text-sm font-semibold text-onbrand disabled:opacity-40">
+  <Save className="h-4 w-4"/><span className="hidden sm:inline">Save</span></button>:undefined;
+ return <Screen title="HR Settings" subtitle={!config?'':dirty?'Unsaved changes':'Saved'} actions={actions} toolbar={switcher}>
+  {sheet}
+  {dirty&&issues.length>0&&<section role="alert" className="rounded-xl border border-line bg-amber-500/10 p-3 text-sm">
+   <p className="font-semibold text-ink">Fix {issues.length} item{issues.length===1?'':'s'} before saving</p>
+   <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-soft">{issues.slice(0,8).map(x=><li key={x}>{x}</li>)}</ul>
+  </section>}
   <header className="rounded-2xl border border-line bg-panel p-4">
    <h2 className="flex items-center gap-2 text-lg font-bold"><GraduationCap className="h-5 w-5 text-brand"/>Education hierarchy & job grading</h2>
    <p className="mt-2 text-sm text-muted">Configure educational attainment ranks, qualifications and employment job grades separately for each legal entity. Higher Education Rank numbers represent higher typical attainment; job grades are not examination marks.</p>
@@ -119,8 +161,8 @@ export default function HrEducationAdmin(){
     <p className="text-xs text-muted">Rank 1 is the lowest typical attainment. Higher numbers represent higher qualifications. Rankings may be shared by equivalent levels; adjust professional qualifications as appropriate.</p>
     {config.levels.slice().sort((a,b)=>a.rank-b.rank).map(row=>{
      const i=config.levels.indexOf(row);
-     return <div key={row.code+i} className="grid min-w-0 gap-3 rounded-2xl border border-line bg-panel p-3 sm:grid-cols-2">
-      <label className="min-w-0 text-sm text-muted">Code<input className={input} value={row.code} onChange={e=>levelChange(i,'code',e.target.value)} maxLength={64}/></label>
+     return <div key={i} className="grid min-w-0 gap-3 rounded-2xl border border-line bg-panel p-3 sm:grid-cols-2">
+      <label className="min-w-0 text-sm text-muted">Code<input className={input+' font-mono disabled:opacity-60'} value={row.code} disabled={savedRow('levels',i)} onChange={e=>levelChange(i,'code',e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g,''))} maxLength={64}/></label>
       <label className="min-w-0 text-sm text-muted">Education Rank<input className={input} type="number" min={1} max={9999} value={row.rank} onChange={e=>levelChange(i,'rank',Number(e.target.value))}/></label>
       <label className="min-w-0 text-sm text-muted">Educational level<input className={input} value={row.name} onChange={e=>levelChange(i,'name',e.target.value)} maxLength={150}/></label>
       <label className="min-w-0 text-sm text-muted">Description<input className={input} value={row.description} onChange={e=>levelChange(i,'description',e.target.value)} maxLength={350}/></label>
@@ -133,7 +175,7 @@ export default function HrEducationAdmin(){
      <button type="button" className={button} onClick={()=>update(c=>({...c,qualifications:[...c.qualifications,{code:'QUAL_'+token(),name:'',levelCode:c.levels[0]?.code||'',description:'',enabled:true}]}))}><Plus className="mr-1 inline h-4 w-4"/>Add</button>
     </div>
     {config.qualifications.map((row,i)=><div key={i} className="space-y-2 rounded-2xl border border-line bg-panel p-3">
-     <label className="block text-sm text-muted">Qualification code<input className={input} value={row.code} onChange={e=>qChange(i,'code',e.target.value)} maxLength={64}/></label>
+     <label className="block text-sm text-muted">Qualification code<input className={input+' font-mono disabled:opacity-60'} value={row.code} disabled={savedRow('qualifications',i)} onChange={e=>qChange(i,'code',e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g,''))} maxLength={64}/></label>
      <label className="block text-sm text-muted">Qualification name<input className={input} value={row.name} onChange={e=>qChange(i,'name',e.target.value)} maxLength={150}/></label>
      <SelectField id={'admin-education-q-level-'+i} label="Educational level" value={row.levelCode} onChange={e=>qChange(i,'levelCode',e.target.value)}>
       <option value="">Select level</option>{config.levels.filter(x=>x.enabled||x.code===row.levelCode).sort((a,b)=>a.rank-b.rank).map(x=><option key={x.code} value={x.code}>{x.name} · Rank {x.rank}</option>)}
@@ -151,8 +193,8 @@ export default function HrEducationAdmin(){
     <p className="text-xs text-muted">Example: Grade 1 — Unskilled / Casual. These are configurable occupational grades; they are not educational grades, pay rates or automatic entitlements.</p>
     {config.jobGrades.slice().sort((a,b)=>a.rank-b.rank).map(row=>{
      const i=config.jobGrades.indexOf(row);
-     return <div key={row.code+i} className="grid min-w-0 gap-3 rounded-2xl border border-line bg-panel p-3 sm:grid-cols-2">
-      <label className="min-w-0 text-sm text-muted">Grade code<input className={input} value={row.code} onChange={e=>gradeChange(i,'code',e.target.value)} maxLength={64}/></label>
+     return <div key={i} className="grid min-w-0 gap-3 rounded-2xl border border-line bg-panel p-3 sm:grid-cols-2">
+      <label className="min-w-0 text-sm text-muted">Grade code<input className={input+' font-mono disabled:opacity-60'} value={row.code} disabled={savedRow('jobGrades',i)} onChange={e=>gradeChange(i,'code',e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g,''))} maxLength={64}/></label>
       <label className="min-w-0 text-sm text-muted">Grade number<input className={input} type="number" min={1} max={9999} value={row.rank} onChange={e=>gradeChange(i,'rank',Number(e.target.value))}/></label>
       <label className="min-w-0 text-sm text-muted">Job grade title<input className={input} value={row.title} onChange={e=>gradeChange(i,'title',e.target.value)} maxLength={150}/></label>
       <label className="min-w-0 text-sm text-muted">Description<input className={input} value={row.description} onChange={e=>gradeChange(i,'description',e.target.value)} maxLength={350}/></label>
@@ -160,9 +202,7 @@ export default function HrEducationAdmin(){
      </div>;
     })}
    </section>}
-   <button type="button" disabled={busy||loading} onClick={()=>void save()}
-    className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 font-semibold text-onbrand disabled:opacity-40"><Save className="h-5 w-5"/>Save this legal entity's HR settings</button>
   </>}
-  <p className="flex items-center gap-2 text-xs text-muted"><ShieldCheck className="h-4 w-4"/>Adoption copies configuration only; it does not copy employee records or change another entity's master.</p>
- </div>;
+  <p className="flex items-center gap-2 text-xs text-muted"><ShieldCheck className="h-4 w-4"/>Saved codes are locked because employee records refer to them; disable an item instead. Adoption copies configuration only and never copies employee records. Every save is versioned and audited.</p>
+ </Screen>;
 }

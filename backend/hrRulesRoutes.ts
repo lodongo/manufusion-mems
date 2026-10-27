@@ -93,6 +93,7 @@ export const hrRulesRoutes={
     if(u.id===ctx.uid||str(u.data.status)==='disabled')continue;
     if(await managerFor(ctx,u.data,nodes,users)===ctx.uid)reports.push({...basic(u),skillFit:fit.get(u.id)});
   }
+  await hrAudit(ctx,'read.reportees',{type:'directory',id:ctx.uid},'rows='+reports.length);
   return {employees:reports.sort((a,b)=>a.name.localeCompare(b.name)),scope:'direct'};
  })],
 };

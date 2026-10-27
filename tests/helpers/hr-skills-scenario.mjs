@@ -45,6 +45,12 @@ assert.equal(mine.education.length,1);assert.equal(mine.family.length,1);
 await assert.rejects(()=>call('peer','/api/org/hr/private/get',{uid:'employee'}),/Only the employee/);
 await assert.rejects(()=>call('peer','/api/org/hr/private/save',{uid:'employee',kind:'family',items:[]}),/Only the employee/);
 assert.equal((await call('admin','/api/org/hr/private/get',{uid:'employee'})).family.length,1,'Organization super administrator can inspect audited employee records');
+await assert.rejects(()=>call('admin','/api/org/hr/private/save',{uid:'employee',kind:'family',items:[]}),/Only the employee/,'Administrators have read-only access to private records');
+// A qualification with HR-verified evidence cannot be rewritten into a different claim.
+const verifiedId=mine.education[0].id;
+seed(root+'/hr_employee_evidence/employee/files/aaaaaaaaaaaaaaaaaaaaaaaa',{employeeUid:'employee',educationId:verifiedId,status:'verified'});
+await assert.rejects(()=>call('employee','/api/org/hr/private/save',{kind:'education',items:[{...mine.education[0],qualification:'Doctorate',levelCode:'DOCTORATE'}]}),/cannot be changed/);
+assert.equal((await call('employee','/api/org/hr/private/save',{kind:'education',items:mine.education})).items[0].qualification,'Diploma','Unchanged verified qualification can be re-saved');
 const catalog=await call('employee','/api/org/hr/skills/catalog');
 assert.ok(catalog.skills.some(s=>s.code==='HR_SK_001_001'),'Existing standard skills must remain available');
 await assert.rejects(()=>call('peer','/api/org/hr/skills/catalog/save',{name:'Unsafe',category:'A',subcategory:'B'}),/permission|manage/i);

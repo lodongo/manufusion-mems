@@ -82,6 +82,7 @@ jobs:
           exit 1
 
       - name: Build, push and deploy MEMS development service
+        id: deploy
         shell: bash
         run: |
           set -euo pipefail
@@ -165,7 +166,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Diagnose failed Cloud Run revision
-        if: failure()
+        # Only when the Cloud Run deploy itself failed; a refused pre-deploy validation has nothing to diagnose.
+        if: failure() && steps.deploy.outcome == 'failure'
         shell: bash
         run: |
           set +e

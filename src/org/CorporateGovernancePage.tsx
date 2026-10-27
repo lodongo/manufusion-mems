@@ -3,8 +3,6 @@ import {Building2,Landmark,Network,Plus,Save,ShieldCheck,Trash2,Users} from 'luc
 import {callBackend} from '../lib/backend';
 import CorporateFinancialHomePage from './CorporateFinancialHomePage';
 import CorporateStructureMappingPage from './CorporateStructureMappingPage';
-import CorporateBudgetPage from './CorporateBudgetPage';
-import CorporateAllocationPage from './CorporateAllocationPage';
 import {SelectField} from '../components/ui';
 import {Screen,Segmented,useConfirm} from '../components/screen';
 
@@ -20,11 +18,10 @@ const freshCode=(prefix:string,taken:Set<string>)=>{
  for(let n=1;;n++){const code=prefix+'_'+String(n).padStart(2,'0');if(!taken.has(code))return code;}
 };
 const CODE=/^[A-Z][A-Z0-9_]{1,19}$/;
-type Section='office'|'functions'|'bodies'|'funding'|'mapping'|'budget'|'allocation';
+type Section='office'|'functions'|'bodies'|'funding'|'mapping';
 const SECTIONS:Array<{value:Section;label:string}>=[
  {value:'office',label:'Corporate Office'},{value:'functions',label:'Functions'},{value:'bodies',label:'Governance'},
- {value:'funding',label:'Financial Home'},{value:'mapping',label:'Operating Models'},{value:'budget',label:'Budgets'},
- {value:'allocation',label:'Cost Allocation'},
+ {value:'funding',label:'Financial Home'},{value:'mapping',label:'Operating Models'},
 ];
 const OWN=new Set<Section>(['office','functions','bodies']);
 /** Client verification mirrors the server rules so problems are fixed before Save, not after a 400. */
@@ -159,8 +156,6 @@ export default function CorporateGovernancePage({canEdit}:{canEdit:boolean}){
   {data&&<>
    {section==='funding'&&<CorporateFinancialHomePage canEdit={canEdit}/>}
    {section==='mapping'&&<CorporateStructureMappingPage canEdit={canEdit}/>}
-   {section==='budget'&&<CorporateBudgetPage canEdit={canEdit}/>}
-   {section==='allocation'&&<CorporateAllocationPage canEdit={canEdit}/>}
    {own&&<section className="grid grid-cols-3 gap-2">
     {[
      ['Office',data.office.enabled?'Enabled':'Disabled'],

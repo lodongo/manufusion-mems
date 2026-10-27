@@ -81,6 +81,7 @@ export const hrEducationEvidenceRoutes={
  'POST /api/org/hr/evidence/list':[orgRoute('hr.evidence.list','HRM.shell.view',async ctx=>{
   const uid=str(ctx.body.uid)||ctx.uid;await allowed(ctx,uid);
   const docs=await listDocs(dir(ctx.orgId,uid));
+  if(uid!==ctx.uid)await auditEvidence(ctx,'hr.evidence.listed',uid,uid+' · '+docs.length+' documents');
   return {files:docs.map(mapOut).sort((a,b)=>b.uploadedAt.localeCompare(a.uploadedAt))};
  })],
  'POST /api/org/hr/evidence/upload':[orgRoute('hr.evidence.upload','HRM.shell.view',async ctx=>{

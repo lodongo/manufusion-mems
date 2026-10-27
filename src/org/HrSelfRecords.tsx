@@ -61,7 +61,7 @@ function HrFamilyRecords({employeeUid,readOnly=false,kind='family'}:{employeeUid
  };
  const label=kind==='education'?'Education':'Family';
  return <section className="min-w-0 space-y-3">
-  <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{label} records</h3><p className="text-xs text-muted">Private · authorized employee or super administrator</p></div>{!readOnly&&<button type="button" disabled={kind==='education'&&!eduConfig} onClick={()=>begin(-1)} className={btn+' bg-brand text-onbrand disabled:opacity-40'}><Plus className="h-4 w-4"/>Add</button>}</div>
+  <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{label} records</h3><p className="text-xs text-muted">Private · only the employee can change · administrators read-only</p></div>{!readOnly&&<button type="button" disabled={kind==='education'&&!eduConfig} onClick={()=>begin(-1)} className={btn+' bg-brand text-onbrand disabled:opacity-40'}><Plus className="h-4 w-4"/>Add</button>}</div>
   {loading&&<p className="text-sm text-muted">Loading records…</p>}
   {!loading&&!items.length&&<div className="rounded-2xl border border-dashed border-line bg-panel p-5 text-center text-sm text-muted">No {label.toLowerCase()} records saved.</div>}
   <div className="space-y-2">{items.map((item,idx)=><article key={item.id||idx} className="flex items-start gap-2 rounded-2xl border border-line bg-panel p-3">

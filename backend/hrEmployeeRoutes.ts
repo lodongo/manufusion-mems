@@ -151,7 +151,8 @@ export const hrEmployeeRoutes={
   })],
   'POST /api/org/hr/private/save':[orgRoute('org.hr.private.save','HRM.shell.view',async ctx=>{
     const uid=clean(ctx.body.uid,128)||ctx.uid;
-    if(uid!==ctx.uid&&ctx.role!=='org_super_admin')throw new HttpError(403,'Only the employee or organization super administrator may update private HR records.');
+    // Private education and family records are employee-owned. Administrators may view them (audited) but never rewrite them.
+    if(uid!==ctx.uid)throw new HttpError(403,'Only the employee can change their private HR records. Administrators have read-only, audited access.');
     // Education and family are checked against their own privacy-policy sections below (not the Skills section).
     await personnel(ctx,uid);
     return withLock(ctx.orgId,'hr_self_'+uid,async()=>{
@@ -169,6 +170,17 @@ export const hrEmployeeRoutes={
       const old=await getDoc(path);
       if(kind==='education'){
         const existing=Array.isArray(old?.data.education)?old.data.education.filter(isObj):[];
+        // A qualification with pending or HR-verified evidence cannot be rewritten: the verification
+        // would otherwise appear against a different claim. Add a new qualification instead.
+        const evidence=await listDocs(`organizations/${ctx.orgId}/hr_employee_evidence/${uid}/files`);
+        const locked=new Set(evidence.filter(f=>['pending','verified'].includes(str(f.data.status))).map(f=>str(f.data.educationId)));
+        const FIELDS=['institution','qualification','field','completionYear','levelCode','qualificationCode','gradingSystemCode','gradeCode'];
+        for(const prior of existing){
+          if(!locked.has(str(prior.id)))continue;
+          const next=values.find(v=>v.id===str(prior.id)) as Record<string,unknown>|undefined;
+          if(next&&FIELDS.some(key=>str(prior[key])!==str(next[key])))
+            throw new HttpError(409,'"'+str(prior.qualification)+'" has supporting evidence pending or verified by HR and cannot be changed. Add a new qualification instead.');
+        }
         for(const value of values){
           if(!('levelCode' in value))continue;
           if(!value.levelCode||!value.qualificationCode){
@@ -195,16 +207,16 @@ export const hrEmployeeRoutes={
     const category=clean(ctx.body.category,100),subcategory=clean(ctx.body.subcategory,100);
     const description=clean(ctx.body.description,600),enabled=ctx.body.enabled!==false;
     if(!name||!category||!subcategory)throw new HttpError(400,'Name, category and subcategory are required.');
-    const master=await getDoc(`reference/skills_master/items/${code}`);
-    const old=code?await getDoc(`${catalogPath(ctx.orgId)}/${code}`):null;
     if(code && !/^(HR_SK_\d{3}_\d{3}|HR_SK_LOCAL_[A-Za-z0-9_-]{4,45})$/.test(code))
       throw new HttpError(400,'Invalid skill code.');
+    const [master,old]=code?await Promise.all([getDoc(`reference/skills_master/items/${code}`),getDoc(`${catalogPath(ctx.orgId)}/${code}`)]):[null,null];
     if(code && !old&&!master&&!code.startsWith('HR_SK_LOCAL_'))throw new HttpError(400,'New skill code must be local.');
     const resolved=code||('HR_SK_LOCAL_'+randomUUID().replace(/-/g,'').slice(0,20));
-    await writeDoc(`${catalogPath(ctx.orgId)}/${resolved}`,{
+    if(!await writeDoc(`${catalogPath(ctx.orgId)}/${resolved}`,{
       code:resolved,name,category,subcategory,description,enabled,
       createdAt:old?.data.createdAt||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid,
-    });
+    },old?{updateTime:old.updateTime}:{exists:false}))
+      throw new HttpError(409,'This skill changed at the same time. Reload and try again.');
     await hrAudit(ctx,'skills.catalog.save',{type:'skill',id:resolved},(old?'updated':'created')+(enabled?'':' disabled'));
     return {ok:true,code:resolved};
   })],

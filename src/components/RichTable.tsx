@@ -6,6 +6,7 @@ import { MAX_GROUP_LEVELS, aggregate, allPaths, buildGroups, detectValueColumns,
 import { buildXlsx, downloadBlob, type Cell } from '../lib/xlsx';
 import { firebaseAuth } from '../firebase';
 import { callBackend } from '../lib/backend';
+import { flush, track } from '../lib/audit';
 
 // Rich data table used everywhere MEMS shows records:
 // global search, criteria filters, sortable columns, show/hide/reorder columns, group by up to four levels with sum,
@@ -385,6 +386,9 @@ export default function RichTable<T>({
         if (visibleValues.length) data.push(aggRow(`Total (${totals.rows} rows)`, totals.values));
         const stamp = new Date().toISOString().slice(0, 10);
         downloadBlob(buildXlsx(title || 'Data', header, data), `${(fileName || title || id).replace(/[^A-Za-z0-9_-]+/g, '_')}_${stamp}.xlsx`);
+        // Every data export leaves an audit record (table, row count, filters applied), sent immediately.
+        track('export', 'table.export', id, title || fileName || id, `rows=${filtered.length} columns=${visible.length} filters=${view.criteria.length}${search ? ' search' : ''}`);
+        void flush();
     };
 
     const saveCloud = async (template: Template) => {

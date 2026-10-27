@@ -679,7 +679,7 @@ export const handler = router(recordWiredRoutes({
                 }
             }
             const client = clientInfo({ ...(isObj(body.client) ? body.client : {}), sessionId: str(body.sessionId) });
-            const allowed = new Set(['navigation', 'interaction', 'form', 'error']);
+            const allowed = new Set(['navigation', 'interaction', 'form', 'error', 'export']);
             await audit(
                 events.map((e) => ({
                     category: allowed.has(str(e.category)) ? str(e.category) : 'interaction',

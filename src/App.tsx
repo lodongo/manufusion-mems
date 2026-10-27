@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { Loader2 } from 'lucide-react';
 import { firebaseAuth } from './firebase';
@@ -16,9 +16,6 @@ import ChangePassword from './components/ChangePassword';
 import PhotoRequired from './components/PhotoRequired';
 import PendingApproval from './components/PendingApproval';
 import RegisterStart from './apply/RegisterStart';
-import ApplicationWizard from './apply/ApplicationWizard';
-import AdminShell from './admin/AdminShell';
-import OrgShell from './org/OrgShell';
 import OrgHomePage from './org/OrgHomePage';
 import DocumentSignatureVerification from './org/DocumentSignatureVerification';
 import QuickWorkspace from './org/QuickWorkspace';
@@ -27,6 +24,12 @@ import HealthTracker from './components/HealthTracker';
 import { Alert } from './components/ui';
 import GlobalSelectEnhancer from './components/GlobalSelectEnhancer';
 import { DialogHost } from './components/dialogs';
+
+// Loaded on demand: most people only ever use the organization home, so the platform console,
+// organization administration and the applicant wizard are fetched only by those who open them.
+const AdminShell = lazy(() => import('./admin/AdminShell'));
+const OrgShell = lazy(() => import('./org/OrgShell'));
+const ApplicationWizard = lazy(() => import('./apply/ApplicationWizard'));
 
 type SetupState = 'checking' | 'needed' | 'done' | 'error';
 type SessionState = 'idle' | 'loading' | 'ready' | 'error';
@@ -300,7 +303,7 @@ function App() {
         <SiteContext.Provider value={siteState}>
             <GlobalSelectEnhancer />
             <DialogHost />
-            <div className={organizationReady ? 'mems-organization-ui' + (quickFullScreen ? '' : ' pb-12') : ''}>{render()}</div>
+            <div className={organizationReady ? 'mems-organization-ui' + (quickFullScreen ? '' : ' pb-12') : ''}><Suspense fallback={<Loading />}>{render()}</Suspense></div>
             {organizationReady && session && <HealthTracker session={session} />}
             {organizationReady && !quickFullScreen && <OrganizationFooter />}
         </SiteContext.Provider>
