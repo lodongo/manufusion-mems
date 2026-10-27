@@ -1126,7 +1126,7 @@ export const assetRoutes = {
             if (errors.length) return reject(errors, warnings);
             const integrated=isObj(parsed)&&isObj(parsed.financialIntegration);
             if(integrated){
-                const ref=parsed.financialIntegration as Obj;
+                const ref=(parsed as Obj).financialIntegration as Obj;
                 if(str(ref.catalogueRelease)!=='APPROVED')
                     return reject(['Finance review draft cannot replace the live asset catalogue. Complete Finance sign-off first.']);
                 const gl=await getDoc('module_workspaces/FIN/catalogs/gl_accounts');
