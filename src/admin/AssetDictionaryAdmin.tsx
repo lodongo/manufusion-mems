@@ -46,17 +46,19 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
         if (!file) return;
         setUploadError('');
         setResult(null);
-        if (file.size > 12_000_000) return setUploadError('The file is larger than 12 MB.');
+        if (file.size > 48_000_000) return setUploadError('The file is larger than 48 MB.');
         try {
             setProgress('Reading the file…');
             const textAll = await file.text();
-            let parsed: { assetClasses?: unknown[]; attributes?: unknown[] };
+            let parsed: { assetClasses?: unknown[]; attributes?: unknown[]; financialIntegration?: {catalogueRelease?:string} };
             try {
                 parsed = JSON.parse(textAll);
             } catch {
                 throw new Error('The file is not valid JSON.');
             }
             if (!Array.isArray(parsed.assetClasses) || !Array.isArray(parsed.attributes)) throw new Error('The file has no asset classes or attributes.');
+            if (parsed.financialIntegration && parsed.financialIntegration.catalogueRelease !== 'APPROVED')
+                throw new Error('This financial asset master is a Finance-review draft. It cannot replace the active catalogue until approved.');
             if (data?.loaded && !(await appConfirm('This replaces the asset catalog in the database. Continue?'))) {
                 setProgress('');
                 return;

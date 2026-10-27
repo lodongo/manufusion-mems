@@ -1,3 +1,4 @@
+import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
 import { createHash } from 'crypto';
 import {MATERIAL_STOCK_DIMENSIONS,UNIVERSAL_STOCK_METADATA,STOCK_META_BY_KEY,stockedPolicyToMrp} from './stockPolicyConfig';
 import {METHODS as REPLENISHMENT_METHODS,factorsOf,methodOf,routeFor} from './replenishmentPlan';
@@ -163,8 +164,8 @@ const SECTIONS = ['attributeDomains', 'attributes', 'profiles', 'categories', 's
 type Section = (typeof SECTIONS)[number];
 const DATA_TYPES = ['text', 'integer', 'decimal', 'boolean', 'date', 'enum', 'multi_select', 'country', 'currency', 'file'];
 const CODE_RE = /^[A-Za-z0-9][A-Za-z0-9._ /-]{0,59}$/;
-const MAX_UPLOAD_BYTES = 12_000_000;
-const MAX_CHUNKS = 60;
+const MAX_UPLOAD_BYTES = 48_000_000;
+const MAX_CHUNKS = 140;
 const PART_BYTES = 700_000;
 
 const base = (kind: Kind) => `module_workspaces/${KINDS[kind].module}/catalogs/${kind}`;
@@ -273,6 +274,7 @@ function validate(kind: Kind, raw: unknown) {
         for (const a of strs(it.requiredAttributes)) if (!listSet.has(a)) err(`${def.item} ${code}: required attribute ${a} is not in its attribute list.`);
         if (!list.length && warnings.length < 30) warnings.push(`${def.item} ${code} has no attributes.`);
     }
+    for(const message of catalogueFinanceErrors(kind,cat.items,isObj(raw.financialIntegration)))err(message);
     if (!cat.items.length) err(`No ${def.keys.items} found in the file.`);
     if (!cat.attributes.length) err('No attributes found in the file.');
     const stats = {
@@ -391,6 +393,7 @@ function treeOut(d: Loaded) {
             requiredCount: strs(c.requiredAttributes).length,
             usefulLifeYears: null,
             extra: Object.fromEntries(def.extra.map((k) => [k, str(c[k])])),
+            financial: catalogueFinanceSummary(c),
         })),
     };
 }
@@ -415,6 +418,7 @@ function itemOut(d: Loaded, code: string) {
         usefulLifeYears: null,
         legacyCodes: strs(c.legacyCodes),
         properties: Object.entries(props).map(([label, value]) => ({ label: label.slice(0, 80), value: str(value).slice(0, 400) })),
+        financial: catalogueFinanceDetail(c),
         attributes: strs(c.attributes)
             .map((a) => d.attributes.get(a))
             .filter((a): a is Obj => !!a)
@@ -492,7 +496,7 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                 const totalChunks = Number(ctx.body.totalChunks);
                 const sha256 = str(ctx.body.sha256);
                 const fileName = str(ctx.body.fileName).replace(/[^\w .()-]/g, '').slice(0, 120);
-                if (!Number.isInteger(size) || size < 100 || size > MAX_UPLOAD_BYTES) throw new HttpError(400, 'The file must be between 100 bytes and 12 MB.');
+                if (!Number.isInteger(size) || size < 100 || size > MAX_UPLOAD_BYTES) throw new HttpError(400, 'The file must be between 100 bytes and 48 MB.');
                 if (!Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > MAX_CHUNKS) throw new HttpError(400, 'Invalid number of parts.');
                 if (!/^[a-f0-9]{64}$/.test(sha256)) throw new HttpError(400, 'Invalid checksum.');
                 for (const d of await listDocs(`${staging(kind)}/upload`)) await deleteDoc(`${staging(kind)}/upload/${d.id}`);

@@ -95,7 +95,7 @@ export default function ProcurementCatalogAdmin({ kind, canWrite }: { kind: Kind
         if (!file) return;
         setUploadError('');
         setResult(null);
-        if (file.size > 12_000_000) return setUploadError('The file is larger than 12 MB.');
+        if (file.size > 48_000_000) return setUploadError('The file is larger than 48 MB.');
         try {
             setProgress('Reading the file…');
             const textAll = await file.text();
@@ -110,6 +110,8 @@ export default function ProcurementCatalogAdmin({ kind, canWrite }: { kind: Kind
                 throw new Error(`This is a ${other} file. Open the ${other} to upload it.`);
             }
             if (!Array.isArray(parsed.attributes) || !(Array.isArray(parsed[t.items === 'accounts' ? 'accounts' : kind]) || Array.isArray(parsed.items))) throw new Error(`The file has no ${t.items} or attributes.`);
+            if (parsed.financialIntegration && (parsed.financialIntegration as Record<string,unknown>).catalogueRelease !== 'APPROVED')
+                throw new Error('This financial master is a Finance-review draft. Complete Finance sign-off and publish an APPROVED release before activating it.');
             if (data?.loaded && !(await appConfirm(`This replaces the ${t.title.toLowerCase()} in the database. Continue?`))) {
                 setProgress('');
                 return;

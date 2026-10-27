@@ -1,3 +1,4 @@
+import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
 import { createHash } from 'crypto';
 import {
     HttpError,
@@ -47,8 +48,8 @@ const AST_ROOT = 'module_workspaces/AST';
 // collection, so Firestore rejected the write with 400 INVALID_ARGUMENT and the catalog never showed as loaded.
 const POINTER = `${AST_ROOT}/settings/dictionary`;
 const VERSIONS = `${AST_ROOT}/dictionary_versions`;
-const MAX_UPLOAD_BYTES = 12_000_000;
-const MAX_CHUNKS = 60;
+const MAX_UPLOAD_BYTES = 48_000_000;
+const MAX_CHUNKS = 140;
 const PART_BYTES = 700_000;
 const SECTIONS = ['attributeDomains', 'attributes', 'profiles', 'groups', 'categories', 'subcategories', 'assetClasses'] as const;
 type Section = (typeof SECTIONS)[number];
@@ -157,6 +158,7 @@ function validateDictionary(raw: unknown): { dict: Dict; errors: string[]; warni
         for (const a of strs(c.requiredAttributes)) if (!listSet.has(a)) err(`Asset class ${code}: required attribute ${a} is not in its attribute list.`);
         if (!list.length) warnings.push(`Asset class ${code} has no attributes.`);
     }
+    for(const message of catalogueFinanceErrors('assets',dict.assetClasses,isObj(raw.financialIntegration)))err(message);
     if (!dict.assetClasses.length) err('No asset classes found.');
     const stats = {
         groups: dict.groups.length,
@@ -435,6 +437,7 @@ function treeOut(d: Loaded) {
             attributeCount: strs(c.attributes).length,
             requiredCount: strs(c.requiredAttributes).length,
             usefulLifeYears: c.usefulLifeYears ?? null,
+            financial: catalogueFinanceSummary(c),
         })),
     };
 }
@@ -455,6 +458,7 @@ function classOut(d: Loaded, code: string) {
         profiles: strs(c.profiles).map((p) => ({ code: p, name: str(d.profiles.get(p)?.name) })),
         synonyms: strs(c.synonyms),
         usefulLifeYears: c.usefulLifeYears ?? null,
+        financial: catalogueFinanceDetail(c),
         attributes: strs(c.attributes)
             .map((a) => d.attributes.get(a))
             .filter((a): a is Obj => !!a)
@@ -926,7 +930,7 @@ export const assetRoutes = {
             const size = Number(ctx.body.size);
             const totalChunks = Number(ctx.body.totalChunks);
             const sha256 = str(ctx.body.sha256);
-            if (!Number.isInteger(size) || size < 100 || size > MAX_UPLOAD_BYTES) throw new HttpError(400, 'The file must be between 100 bytes and 12 MB.');
+            if (!Number.isInteger(size) || size < 100 || size > MAX_UPLOAD_BYTES) throw new HttpError(400, 'The file must be between 100 bytes and 48 MB.');
             if (!Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > MAX_CHUNKS) throw new HttpError(400, 'Invalid chunk count.');
             if (!/^[a-f0-9]{64}$/.test(sha256)) throw new HttpError(400, 'Invalid checksum.');
             const vid = vidOf(version);
