@@ -297,7 +297,7 @@ export default function AssetDictionaryBrowser({
                                             </Badge>
                                             {item.life ? <Badge tone='warn'>{item.life}</Badge> : null}
                                             {item.financial?.majorBranch && <Badge>{item.financial.majorBranch} · {item.financial.storesClassCode}</Badge>}
-                                            {item.financial && <Badge tone={item.financial.mappingStatus==='finance_review_required'||item.financial.mappingStatus==='not_configured'?'warn':'default'}>{financialStatus(item.financial.mappingStatus)}</Badge>}
+                                            {item.financial && <Badge tone={item.financial.mappingStatus==='finance_review_required'||item.financial.mappingStatus==='not_configured'?'warn':'muted'}>{financialStatus(item.financial.mappingStatus)}</Badge>}
                                             {item.financial?.primaryGlCode && <Badge>GL {item.financial.primaryGlCode}</Badge>}
                                         </span>
                                     </span>
