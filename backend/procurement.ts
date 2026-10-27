@@ -1,4 +1,5 @@
 import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
+import {integratedReleaseProblems} from './catalogueReleaseGuard';
 import { industryAdoptionRecommendation } from './industryCatalog';
 
 import { allocateIntegratedMaterialNumber, classifiedMaterialPrefix } from './materialNumbering';
@@ -562,8 +563,10 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                 // Integrated catalogues are a coordinated accounting release, never
                 // an ordinary "upload to replace" operation while Finance review is open.
                 const integrated = isObj(parsed) && isObj(parsed.financialIntegration);
-                if (integrated && str((parsed as Obj).financialIntegration && ((parsed as Obj).financialIntegration as Obj).catalogueRelease)!=='APPROVED')
-                    return reject(['Finance review draft cannot replace the live catalogue. Approve and reconcile the full master bundle first.']);
+                if(integrated){
+                    const releaseProblems=integratedReleaseProblems(kind,parsed);
+                    if(releaseProblems.length)return reject(releaseProblems);
+                }
                 if (integrated && kind !== 'gl_accounts') {
                     const glDoc=await getDoc(base('gl_accounts'));
                     const expected=str(((parsed as Obj).financialIntegration as Obj).referenceGLVersion);
@@ -580,7 +583,7 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                         }
                     }
                     if(unknown.size) return reject(['The active GL master is missing mapped account codes: '+[...unknown].slice(0,15).join(', ')+'.']);
-                    const notApproved=cat.items.filter(item=>isObj(item.accounting)&&isObj(item.accounting.glResolution)&&str(item.accounting.glResolution.mappingStatus)==='finance_review_required');
+                    const notApproved=cat.items.filter(item=>isObj(item.accounting)&&isObj(item.accounting.glResolution)&&str(item.accounting.glResolution.mappingStatus)!=='approved');
                     if(notApproved.length)return reject([notApproved.length+' catalogue entries still have unresolved Finance-review GL routes.']);
                 }
                 const headerJson = JSON.stringify(cat.header);
