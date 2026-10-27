@@ -67,7 +67,7 @@ test('Every descriptive master event has one registered crosswalk, and gaps neve
  assert.equal(postingLink('assets','ASSET_IMPAIRMENT')?.state,'REVIEW_GAP');
 });
 test('One-click finance approval admits only separate-checker GL mapping configuration requests',()=>{
- const req=(id,type,extras={})=>({id,type,status:'pending',canDecide:true,mine:false,amount:null,...extras});
+ const req=(id,type,extras={})=>({id,leId:'LE-'+id,type,status:'pending',canDecide:true,mine:false,amount:null,...extras});
  const fixture=[
   req('FCR00000001','mapping.save'),req('FCR00000002','gltxn.save'),
   req('FCR00000003','journal.post'),req('FCR00000004','chart.save'),
@@ -78,6 +78,15 @@ test('One-click finance approval admits only separate-checker GL mapping configu
  assert.deepEqual(eligibleFinanceMappingApprovals(fixture).map(x=>x.id),['FCR00000001','FCR00000002']);
  assert.equal(eligibleFinanceMappingApprovals(Array.from({length:75},(_,i)=>req('FCR'+String(i).padStart(8,'0'),'mapping.save'))).length,MAX_BULK_FINANCE_APPROVALS);
 });
+test('Multiple pending mappings for the same legal entity require individual conflict review',()=>{
+ const requests=[
+  {id:'FCR00000001',leId:'LE01',type:'mapping.save',status:'pending',canDecide:true,mine:false,amount:null},
+  {id:'FCR00000002',leId:'LE01',type:'mapping.save',status:'pending',canDecide:true,mine:false,amount:null},
+  {id:'FCR00000003',leId:'LE01',type:'gltxn.save',status:'pending',canDecide:true,mine:false,amount:null}
+ ];
+ assert.deepEqual(eligibleFinanceMappingApprovals(requests).map(x=>x.id),['FCR00000003']);
+});
+
 test('Bulk approval invokes existing safeguarded endpoint, not privileged automatic journal authorisation',async()=>{
  const {readFileSync}=await import('node:fs');
  const file=readFileSync('src/org/FinApprovals.tsx','utf8');
