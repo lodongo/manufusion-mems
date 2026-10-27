@@ -17,14 +17,21 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
     const [fileData, setFileData] = useState<Row | null>(null);
     const [error, setError] = useState('');
     const [query, setQuery] = useState('');
+    const [industryPreview, setIndustryPreview] = useState('');
+    const [showUnmatched, setShowUnmatched] = useState(false);
     const [selectedCode, setSelectedCode] = useState('');
     const [busy, setBusy] = useState(false);
     const rows = useMemo(() => array(fileData?.[ITEMS[kind]]), [fileData, kind]);
     const selected = useMemo(() => rows.find(x => text(x.code) === selectedCode), [rows, selectedCode]);
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
-        return q ? rows.filter(x => (text(x.code) + ' ' + text(x.name) + ' ' + text(x.description)).toLowerCase().includes(q)) : rows;
-    }, [rows, query]);
+        return rows.filter(x => {
+            const searchMatch = !q || (text(x.code) + ' ' + text(x.name) + ' ' + text(x.description)).toLowerCase().includes(q);
+            const industryMatch = !industryPreview || showUnmatched || x.industryScope !== 'INDUSTRY_SPECIFIC' ||
+                (Array.isArray(x.industryCodes) && x.industryCodes.some(code => typeof code === 'string' && (code === industryPreview || code.startsWith(industryPreview + '-'))));
+            return searchMatch && industryMatch;
+        });
+    }, [rows, query, industryPreview, showUnmatched]);
     const branchCounts = useMemo(() => kind !== 'materials' ? null : rows.reduce<Record<string, number>>((a, item) => {
         const c = text(obj(obj(item.accounting).catalogueClassification).majorBranch);
         a[c || 'UNCLASSIFIED'] = (a[c || 'UNCLASSIFIED'] || 0) + 1;
@@ -43,7 +50,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
         const file = e.target.files?.[0];
         e.target.value = '';
         if (!file) return;
-        setFileData(null); setError(''); setQuery(''); setSelectedCode(''); setFileName('');
+        setFileData(null); setError(''); setQuery(''); setSelectedCode(''); setFileName(''); setIndustryPreview(''); setShowUnmatched(false);
         if (file.size > 48_000_000) return setError('File is larger than the 48 MB preview limit.');
         setBusy(true);
         try {
@@ -80,6 +87,20 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                             {branchCounts && Object.entries(branchCounts).map(([branch, count]) => <Badge key={branch}>{branch}: {Number(count)}</Badge>)}
                             {Object.entries(industryCounts).map(([scope,count])=><Badge key={scope}>{scope==='COMMON'?'Common':'Industry-specific'}: {Number(count)}</Badge>)}
                         </div>
+                        <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+                            <label className='block text-sm text-slate-300'>Preview defaults for a registered industry
+                                <select value={industryPreview} onChange={e => {setIndustryPreview(e.target.value);setShowUnmatched(false);}} className='mt-1 h-11 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 text-white'>
+                                    <option value=''>Every industry</option>
+                                    {'ABCDEFGHIJKLMNOPQRSTUV'.split('').map(code => <option key={code} value={'IND-'+code}>IND-{code} · ISIC section {code}</option>)}
+                                </select>
+                            </label>
+                            <div className='flex items-end'>
+                                <button type='button' disabled={!industryPreview} onClick={() => setShowUnmatched(v => !v)} className='h-11 w-full rounded-xl border border-slate-600 px-3 text-sm text-emerald-300 disabled:opacity-50'>
+                                    {showUnmatched ? 'Show recommended only' : 'Include unmatched entries'}
+                                </button>
+                            </div>
+                        </div>
+                        {industryPreview && <p className='text-xs text-slate-400'>Showing common and matching industry entries by default. Unmatched entries remain available for explicit adoption.</p>}
                         <label className='block text-sm text-slate-300'>
                             Search all draft entries
                             <input className='mt-1 h-11 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 text-white' value={query} onChange={e => setQuery(e.target.value)} placeholder='Search name or code (no automatic focus)' />
