@@ -10,6 +10,7 @@ import { physicalOf } from '../../backend/finCore.ts';
 import { MAINTENANCE_GATES } from '../../backend/maintenanceWorkflowConfig.ts';
 import { PROCUREMENT_UNITS } from '../../backend/procurementUnits.ts';
 import { maintenanceSourcingRoutes } from '../../backend/maintenanceSourcing.ts';
+import { storesIssueVoucherRoutes } from '../../backend/storesIssueVouchers.ts';
 
 const org = 'maintenance_fixture',
     r = 'organizations/' + org;
@@ -515,7 +516,53 @@ for (const [index, t] of tasks.entries()) {
                 }),
             /Complete active maintenance/,
         );
-    const s = t.spares[0],
+    const s = t.spares[0];
+    let issue;
+    if (index === 0) {
+        // Stores Issue Voucher: the planner raises it from the task reservation, stores issues against it.
+        const before = await route(storesIssueVoucherRoutes, '/api/org/mnt/siv/for-wo', 'planner', { code: wo });
+        assert.equal(before.canRaise, true);
+        const line = before.available.find((l) => l.taskId === t.id && l.materialId === s.materialId);
+        assert.ok(line, 'reserved line is offered on a stores issue voucher');
+        await assert.rejects(
+            () => route(storesIssueVoucherRoutes, '/api/org/mnt/siv/create', 'planner', { code: wo, requiredDate: date, receivedBy: people.tech[0], lines: [{ reservationId: line.reservationId, qty: line.qty + 1 }], confirm: true }),
+            /request between/,
+        );
+        const made = await route(storesIssueVoucherRoutes, '/api/org/mnt/siv/create', 'planner', {
+            code: wo, requiredDate: date, receivedBy: people.tech[0], note: 'Bearing task spares', confirm: true,
+            lines: [{ reservationId: line.reservationId, qty: line.qty }],
+        });
+        assert.equal(made.ids.length, 1);
+        assert.match(made.ids[0], /^SIV\d{8}$/);
+        const offered = await route(storesIssueVoucherRoutes, '/api/org/mnt/siv/for-wo', 'planner', { code: wo });
+        assert.ok(!offered.available.some((l) => l.reservationId === line.reservationId), 'a line on an open voucher is not offered again');
+        const queue = await route(storesIssueVoucherRoutes, '/api/org/mnt/siv/list', 'stores', { view: 'open' });
+        assert.ok(queue.rows.some((v) => v.id === made.ids[0] && v.canIssue));
+        const voucher = await route(storesIssueVoucherRoutes, '/api/org/mnt/siv/get', 'stores', { id: made.ids[0] });
+        assert.equal(voucher.can.issue, true);
+        // Maker-checker: the person collecting cannot issue to themselves.
+        await assert.rejects(
+            () => route(storesIssueVoucherRoutes, '/api/org/mnt/siv/issue', 'tech', { id: voucher.id, expectedVersion: voucher.version, acknowledge: true, lines: [{ no: voucher.lines[0].no, qty: voucher.lines[0].qty }] }),
+            /cannot be you/i,
+        );
+        await assert.rejects(
+            () => route(storesIssueVoucherRoutes, '/api/org/mnt/siv/issue', 'stores', { id: voucher.id, expectedVersion: voucher.version, acknowledge: true, lines: [{ no: voucher.lines[0].no, qty: voucher.lines[0].qty + 1 }] }),
+            /still to be issued/,
+        );
+        const issued = await route(storesIssueVoucherRoutes, '/api/org/mnt/siv/issue', 'stores', {
+            id: voucher.id, expectedVersion: voucher.version, acknowledge: true, lines: [{ no: voucher.lines[0].no, qty: voucher.lines[0].qty }],
+        });
+        assert.equal(issued.status, 'issued');
+        assert.match(issued.goodsIssues[0], /^GI\d{8}$/);
+        await assert.rejects(
+            () => route(storesIssueVoucherRoutes, '/api/org/mnt/siv/issue', 'stores', { id: voucher.id, expectedVersion: voucher.version, acknowledge: true, lines: [{ no: voucher.lines[0].no, qty: 1 }] }),
+            /changed/,
+        );
+        issue = { id: issued.goodsIssues[0] };
+        const gi = snapshot(r + '/goods_issues/' + issue.id);
+        assert.equal(gi.data.ref, voucher.id + '-1');
+        assert.equal(gi.data.receivedBy, people.tech[0]);
+    } else {
         issue = await route(finOpsRoutes, '/api/org/inv/issue/post', 'stores', {
             warehouseId: 'WAREHOUSE',
             workOrderId: wo,
@@ -525,16 +572,17 @@ for (const [index, t] of tasks.entries()) {
             lines: [{ materialId: s.materialId, qty: s.qty }],
             acknowledge: true,
         });
-    const again = await route(finOpsRoutes, '/api/org/inv/issue/post', 'stores', {
-        warehouseId: 'WAREHOUSE',
-        workOrderId: wo,
-        taskId: t.id,
-        receivedBy: people.tech[0],
-        ref: 'TASK_ISSUE_' + t.id,
-        lines: [{ materialId: s.materialId, qty: s.qty }],
-        acknowledge: true,
-    });
-    assert.equal(again.id, issue.id);
+        const again = await route(finOpsRoutes, '/api/org/inv/issue/post', 'stores', {
+            warehouseId: 'WAREHOUSE',
+            workOrderId: wo,
+            taskId: t.id,
+            receivedBy: people.tech[0],
+            ref: 'TASK_ISSUE_' + t.id,
+            lines: [{ materialId: s.materialId, qty: s.qty }],
+            acknowledge: true,
+        });
+        assert.equal(again.id, issue.id);
+    }
     const additional =
         t.id === 'gearbox'
             ? await route(finOpsRoutes, '/api/org/inv/issue/post', 'stores', {

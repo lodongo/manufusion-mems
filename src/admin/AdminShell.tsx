@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, Ban, Boxes, Building2, Calculator, CircleUser, ClipboardCheck, Coins, CreditCard, FolderTree, Globe, Hash, Landmark, LayoutDashboard, ListChecks, LogOut, Menu, Package, Palette, Puzzle, ScrollText, Users, Wrench, X } from 'lucide-react';
+import { Activity, Ban, ShieldCheck, Boxes, Building2, Calculator, CircleUser, ClipboardCheck, Coins, CreditCard, FolderTree, Globe, Hash, Landmark, LayoutDashboard, ListChecks, LogOut, Menu, Package, Palette, Puzzle, ScrollText, Users, Wrench, X } from 'lucide-react';
 import AssetDictionaryAdmin from './AssetDictionaryAdmin';
 import ProcurementCatalogAdmin from './ProcurementCatalogAdmin';
 import { callBackend } from '../lib/backend';
@@ -26,6 +26,7 @@ import FxMonitor from './FxMonitor';
 import AutomationCenter from './AutomationCenter';
 import TransactionManager from './TransactionManager';
 import SecurityDocumentationAdmin from './SecurityDocumentationAdmin';
+import SecuritySetupPage from './SecuritySetupPage';
 
 const DEFAULT_META_LISTS = [
     { key: 'meta.industryCategories', label: 'Industry categories' },
@@ -123,6 +124,7 @@ export default function AdminShell({
             title: 'People and security',
             items: [
                 { key: 'users', label: 'MEMS users', Icon: Users },
+                { key: 'security', label: 'Security setup', Icon: ShieldCheck },
                 { key: 'logs', label: 'Audit trail', Icon: ScrollText },
                 { key: 'health', label: 'System health', Icon: Activity },
             ],
@@ -183,6 +185,9 @@ export default function AdminShell({
             break;
         case 'transactions':
             content = <TransactionManager />;
+            break;
+        case 'security':
+            content = <SecuritySetupPage isSuper={isSuper} />;
             break;
         case 'security_docs':
             content = <SecurityDocumentationAdmin />;

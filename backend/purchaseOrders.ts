@@ -1,6 +1,7 @@
 import { secrets } from './platform/sdk';
 import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, str, writeDoc, type Doc } from './core';
 import { effectiveAccess, hasPerm, normalizeOrgRole, orgRoute, type OrgContext } from './guards';
+import { bypass } from './testModeCore';
 import { orgUsers, record } from './org';
 import { allowedNodeIds, nextOrgCounter } from './positions';
 import { col as structureCol } from './structure';
@@ -198,7 +199,10 @@ export interface Step {
 }
 
 /** Who must approve an amount: each level of the chart of authority resolved to the job role that holds it. */
-async function approvalRoute(orgId: string, creator: Doc | null, amount: number, authority: Authority) {
+async function approvalRoute(orgId: string, creator: Doc | null, amount: number, authority: Authority, testMode = false) {
+    // Platform testing override: an unresolved level becomes a test-mode step the organization super admin approves.
+    // The problem is still reported so validation shows it as a warning and the bypass is audited.
+    const testStep = (lv: string, title: string): Step => ({ level: lv, title, positionCode: 'TEST_MODE', positionTitle: 'Test mode: organization super admin', viaReportingLine: false, status: 'pending', by: '', byName: '', at: '', note: '' });
     const resolved = resolveAuthority(authority, amount);
     const [pos, users] = await Promise.all([positionsMap(orgId), orgUsers(orgId)]);
     const problems: string[] = [];
@@ -213,11 +217,13 @@ async function approvalRoute(orgId: string, creator: Doc | null, amount: number,
             viaLine = true;
             if (!position) {
                 problems.push(`Level ${lv} (${title}) follows the reporting line, but the preparer has no job role with a manager. Assign the job role or map ${lv} in the chart of authority.`);
+                if (testMode) steps.push(testStep(lv, title));
                 continue;
             }
         }
         if (!position) {
             problems.push(`Level ${lv} (${title}) is not mapped to a job role. Ask the chart of authority administrator to map it.`);
+            if (testMode) steps.push(testStep(lv, title));
             continue;
         }
         const holders = users.filter((u) => str(u.data.status) !== 'disabled' && u.id !== (creator?.id ?? '') && myPositions(u).includes(position)).length;
@@ -316,8 +322,10 @@ export function accessFlags(ctx: OrgContext, d: Obj, scope: DeskScope, owned: Se
     const a = {
         owner: ownerOf(d) === ctx.uid,
         creator: str(d.createdBy) === ctx.uid,
-        ccOwner: lines.some((l) => owned.has(ccOf(l))),
-        requester: requesterIds(d).includes(ctx.uid),
+        // Platform testing override: the organization super admin also acts as requester and cost center owner
+        // (the mutations record the bypass).
+        ccOwner: lines.some((l) => owned.has(ccOf(l))) || ctx.testMode === true,
+        requester: requesterIds(d).includes(ctx.uid) || ctx.testMode === true,
         approver: steps(d).some((s) => mine.has(s.positionCode)) && can(ctx, 'PRC.po.approve'),
         viewer: canViewPo(ctx) && covers(scope, lines),
     };
@@ -458,11 +466,17 @@ export const editable = (d: Obj) => ['draft', 'validated'].includes(str(d.status
 export const outstanding = (l: Obj) => Math.max(0, round((Number(l.quantity) || 0) - (Number(l.receivedQty) || 0), 4));
 
 /** May this person approve the current level of this order now, and if not, why not. */
-export function approverCheck(ctx: OrgContext, d: Obj): { ok: boolean; why: string } {
+export function approverCheck(ctx: OrgContext, d: Obj): { ok: boolean; why: string; testMode?: boolean } {
     if (str(d.status) !== 'pending_approval') return { ok: false, why: '' };
     const step = currentStep(d);
     if (!step) return { ok: false, why: '' };
     if (!can(ctx, 'PRC.po.approve')) return { ok: false, why: '' };
+    const strict = approverIdentity(ctx, d, step);
+    // Platform testing override: the organization super admin may act at every level; callers record the bypass.
+    if (!strict.ok && ctx.testMode === true) return { ok: true, why: '', testMode: true };
+    return strict;
+}
+function approverIdentity(ctx: OrgContext, d: Obj, step: Step): { ok: boolean; why: string } {
     if (!myPositions(ctx.me).includes(step.positionCode)) return { ok: false, why: `Level ${step.level} is approved by ${step.positionTitle}.` };
     if (ctx.uid === str(d.createdBy) || ctx.uid === str(d.confirmedBy) || ctx.uid === ownerOf(d)) return { ok: false, why: 'You prepared or confirmed this order, so someone else must approve it.' };
     const requesters = Array.isArray(d.requesterUids) ? (d.requesterUids as unknown[]).map(str) : [];
@@ -716,8 +730,8 @@ async function runChecks(ctx: OrgContext, po: Obj, id: string) {
 
     // ----- Approval -----
     const creator = users.find((u) => u.id === str(po.createdBy)) ?? null;
-    const route = baseTotal > 0 ? await approvalRoute(ctx.orgId, creator, baseTotal, authority) : null;
-    if (route) add('Approval', 'approval.route', 'Approval route exists', route.problems.length ? 'fail' : 'pass', route.problems.length ? route.problems.join(' ') : `${route.steps.map((s) => `${s.level} ${s.positionTitle}`).join(' then ')} will approve ${orgCurrency} ${fmt(baseTotal)}.`);
+    const route = baseTotal > 0 ? await approvalRoute(ctx.orgId, creator, baseTotal, authority, ctx.testMode === true) : null;
+    if (route) add('Approval', 'approval.route', 'Approval route exists', route.problems.length ? (ctx.testMode === true ? 'warn' : 'fail') : 'pass', route.problems.length ? `${ctx.testMode === true ? 'Test mode: the organization super admin approves the unresolved levels. ' : ''}${route.problems.join(' ')}` : `${route.steps.map((s) => `${s.level} ${s.positionTitle}`).join(' then ')} will approve ${orgCurrency} ${fmt(baseTotal)}.`);
     const unconfirmed = Array.from(new Set(lines.map((l) => str(l.requisitionId)))).length;
     add('Approval', 'approval.requisitions', 'Requisitions confirmed by their requesters', 'pass', `${unconfirmed} requisition(s), each confirmed by the person who raised the requirement.`);
 
@@ -889,7 +903,7 @@ export const purchaseOrderRoutes = {
             const view = canViewReq(ctx);
             const docs = (await listDocs(reqsPath(ctx.orgId))).filter((r) => str(r.data.requesterUid) === ctx.uid || objs(r.data.lines).some((l) => owned.has(ccOf(l))) || (view && covers(scope, objs(r.data.lines))));
             const views: Record<string, Doc[]> = {
-                confirm: docs.filter((r) => str(r.data.status) === 'draft' && str(r.data.requesterUid) === ctx.uid),
+                confirm: docs.filter((r) => str(r.data.status) === 'draft' && (str(r.data.requesterUid) === ctx.uid || ctx.testMode === true)),
                 draft: docs.filter((r) => ['draft', 'returned', 'suspended'].includes(str(r.data.status))),
                 ready: docs.filter((r) => str(r.data.status) === 'confirmed'),
                 all: docs,
@@ -923,7 +937,7 @@ export const purchaseOrderRoutes = {
             const doc = await loadReq(ctx, str(ctx.body.id));
             const d = doc.data;
             const status = str(d.status);
-            const mine = str(d.requesterUid) === ctx.uid;
+            const mine = str(d.requesterUid) === ctx.uid || ctx.testMode === true;
             const rates = await ratesOf(str(ctx.org.data.currencyCode));
             const latest = rates.rate(str(d.currency));
             const row = reqRow(d, doc.id);
@@ -1060,7 +1074,7 @@ export const purchaseOrderRoutes = {
     'POST /api/org/procurement/requisitions/confirm': [
         orgRoute('org.procurement.requisitions.confirm', null, async (ctx) => {
             const doc = await loadReq(ctx, str(ctx.body.id));
-            if (str(doc.data.requesterUid) !== ctx.uid) throw new HttpError(403, 'Only the person who raised the purchase requirement can confirm this requisition.');
+            if (str(doc.data.requesterUid) !== ctx.uid && !bypass(ctx, 'prc.requisition.requester_confirmation')) throw new HttpError(403, 'Only the person who raised the purchase requirement can confirm this requisition.');
             if (ctx.body.acknowledge !== true) throw new HttpError(400, 'Confirm that the items, quantities, prices and vendor are what you asked for.');
             return mutate(ctx, 'req', doc.id, 'confirm', async (d) => {
                 if (str(d.status) !== 'draft') throw new HttpError(409, 'This requisition is no longer waiting for confirmation.');
@@ -1074,7 +1088,7 @@ export const purchaseOrderRoutes = {
     'POST /api/org/procurement/requisitions/return': [
         orgRoute('org.procurement.requisitions.return', null, async (ctx) => {
             const doc = await loadReq(ctx, str(ctx.body.id));
-            if (str(doc.data.requesterUid) !== ctx.uid) throw new HttpError(403, 'Only the person who raised the purchase requirement can return this requisition.');
+            if (str(doc.data.requesterUid) !== ctx.uid && !bypass(ctx, 'prc.requisition.requester_confirmation')) throw new HttpError(403, 'Only the person who raised the purchase requirement can return this requisition.');
             const reason = reasonOf(ctx.body);
             return mutate(ctx, 'req', doc.id, 'return', async (d) => {
                 if (str(d.status) !== 'draft') throw new HttpError(409, 'This requisition is no longer waiting for confirmation.');
@@ -1677,8 +1691,8 @@ export const purchaseOrderRoutes = {
                 const users = await orgUsers(ctx.orgId);
                 const creator = users.find((u) => u.id === ownerOf(d)) ?? null;
                 const base = Number(d.baseTotal) || 0;
-                const route = await approvalRoute(ctx.orgId, creator, base, authority);
-                if (route.problems.length) throw new HttpError(409, route.problems.join(' '));
+                const route = await approvalRoute(ctx.orgId, creator, base, authority, ctx.testMode === true);
+                if (route.problems.length && !bypass(ctx, 'prc.po.authority_route')) throw new HttpError(409, route.problems.join(' '));
                 const at = nowIso();
                 return {
                     patch: {
@@ -1706,6 +1720,7 @@ export const purchaseOrderRoutes = {
             const result = await mutate(ctx, 'po', doc.id, 'approve', async (d) => {
                 const chk = approverCheck(ctx, d);
                 if (!chk.ok) throw new HttpError(403, chk.why || 'You cannot approve this order now.');
+                if (chk.testMode) bypass(ctx, 'prc.po.approver_authority');
                 const cur = currentStep(d)!;
                 const at = nowIso();
                 const list = steps(d).map((s) => (s.level === cur.level ? { ...s, status: 'approved' as const, by: ctx.uid, byName: nameOfUser(ctx.me), at, note } : s));
@@ -1762,6 +1777,7 @@ export const purchaseOrderRoutes = {
             const out = await mutate(ctx, 'po', doc.id, 'return', async (d) => {
                 const chk = approverCheck(ctx, d);
                 if (!chk.ok) throw new HttpError(403, chk.why || 'You cannot return this order now.');
+                if (chk.testMode) bypass(ctx, 'prc.po.approver_authority');
                 newId = await forkVersion(ctx, d, doc.id, 'return', reason);
                 return { patch: { status: 'returned', returnReason: reason, returnedBy: ctx.uid, returnedByName: nameOfUser(ctx.me), nextVersion: newId }, event: 'returned for correction', note: `${reason} (new version ${newId})`, label: 'Returned to the owner' };
             });
@@ -1776,6 +1792,7 @@ export const purchaseOrderRoutes = {
             const out = await mutate(ctx, 'po', doc.id, 'reject', async (d) => {
                 const chk = approverCheck(ctx, d);
                 if (!chk.ok) throw new HttpError(403, chk.why || 'You cannot reject this order now.');
+                if (chk.testMode) bypass(ctx, 'prc.po.approver_authority');
                 return { patch: { status: 'rejected', rejectReason: reason, rejectedBy: ctx.uid, rejectedByName: nameOfUser(ctx.me) }, event: 'rejected', note: reason, label: 'Rejected' };
             });
             await releaseRequisitions(ctx, doc.data, doc.id, 'order rejected');

@@ -1,5 +1,6 @@
 import { HttpError, getDoc, listDocs, nowIso, str, writeDoc, type Doc } from './core';
 import { orgRoute, type OrgContext } from './guards';
+import { bypass } from './testModeCore';
 import { nextOrgCounter } from './positions';
 import { record } from './org';
 import { can, requireProcurement } from './procurementSetup';
@@ -199,7 +200,7 @@ export const poFinanceRoutes = {
                 const lines = given.map((g) => {
                     const l = objs(d.lines).find((x) => Number(x.no) === g.no);
                     if (!l) throw new HttpError(400, 'A line does not exist on this order.');
-                    if (str(rqs.get(str(l.requisitionId))?.data.requesterUid) !== ctx.uid) throw new HttpError(403, `Line ${g.no} was asked for by someone else.`);
+                    if (str(rqs.get(str(l.requisitionId))?.data.requesterUid) !== ctx.uid && !bypass(ctx, 'prc.service.requester_records')) throw new HttpError(403, `Line ${g.no} was asked for by someone else.`);
                     const pending = receipts.filter((r) => str(r.status) === 'submitted').reduce((s, r) => s + (objs(r.lines).find((x) => Number(x.no) === g.no) ? Number(objs(r.lines).find((x) => Number(x.no) === g.no)!.qty) || 0 : 0), 0);
                     const left = round(outstanding(l) - pending, 4);
                     if (g.qty > left + 1e-9) throw new HttpError(400, `Line ${g.no}: only ${left} ${str(l.unit)} is still to be rendered (some may be waiting for acceptance).`);
@@ -244,9 +245,9 @@ export const poFinanceRoutes = {
                 const rlines = objs(r.lines);
                 const pl = (no: number) => objs(d.lines).find((x) => Number(x.no) === no);
                 const foreign = rlines.filter((x) => !owned.has(ccOf(pl(Number(x.no)) ?? {})));
-                if (foreign.length) throw new HttpError(403, `Only the owner of the cost center can accept. Line ${foreign.map((x) => x.no).join(', ')} is charged to a cost center you do not own.`);
-                if (str(r.renderedBy) === ctx.uid) throw new HttpError(403, 'You recorded this service, so the cost center owner must be someone else.');
-                if (ownerOf(d) === ctx.uid || str(d.createdBy) === ctx.uid) throw new HttpError(403, 'You prepared this order, so someone else must accept the service.');
+                if (foreign.length && !bypass(ctx, 'prc.service.cost_center_owner')) throw new HttpError(403, `Only the owner of the cost center can accept. Line ${foreign.map((x) => x.no).join(', ')} is charged to a cost center you do not own.`);
+                if (str(r.renderedBy) === ctx.uid && !bypass(ctx, 'prc.service.acceptor_independence')) throw new HttpError(403, 'You recorded this service, so the cost center owner must be someone else.');
+                if ((ownerOf(d) === ctx.uid || str(d.createdBy) === ctx.uid) && !bypass(ctx, 'prc.service.acceptor_independence')) throw new HttpError(403, 'You prepared this order, so someone else must accept the service.');
                 if (!objs(r.files).length || (['timesheet', 'report', 'invoice'] as const).some((k) => !objs(r.files).some((f) => str(f.kind) === k)) || r.signedStamped !== true) throw new HttpError(409, 'The signed timesheet, report and invoice are not all attached.');
                 const tol = authority.controls.matchTolerancePct;
                 const amount = Number(r.amount) || 0;
@@ -332,7 +333,7 @@ export const poFinanceRoutes = {
                 const r = receipts.find((x) => str(x.id) === rid);
                 if (!r || str(r.status) !== 'submitted') throw new HttpError(409, 'This service receipt is not waiting for acceptance.');
                 const foreign = objs(r.lines).filter((x) => !owned.has(ccOf(objs(d.lines).find((l) => Number(l.no) === Number(x.no)) ?? {})));
-                if (foreign.length) throw new HttpError(403, 'Only the owner of the cost center can reject.');
+                if (foreign.length && !bypass(ctx, 'prc.service.cost_center_owner')) throw new HttpError(403, 'Only the owner of the cost center can reject.');
                 const at = nowIso();
                 return {
                     patch: { receipts: receipts.map((x) => (str(x.id) === rid ? { ...x, status: 'rejected', decidedBy: ctx.uid, decidedByName: nameOfUser(ctx.me), decidedAt: at, decisionNote: reason } : x)) },

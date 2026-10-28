@@ -1,5 +1,6 @@
 import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, str, writeDoc, type Doc } from './core';
 import { orgRoute, type OrgContext } from './guards';
+import { bypass } from './testModeCore';
 import { orgUsers, record } from './org';
 import { allowedNodeIds, nextOrgCounter } from './positions';
 import { catalogItemSpec, catalogSummary, catalogTree, searchCatalog, type ItemSpec, type TreeOut } from './procurement';
@@ -100,7 +101,16 @@ function primaryPosition(user: Doc | null | undefined): string {
 }
 
 /** The approver for a requester: the job role this person reports to, and how many people hold it. */
-async function approverFor(ctx: OrgContext, user: Doc | null | undefined): Promise<{ position: string; title: string; holders: number; managerPosition: string; managerTitle: string; problem: string }> {
+type ApproverRoute = { position: string; title: string; holders: number; managerPosition: string; managerTitle: string; problem: string };
+async function approverFor(ctx: OrgContext, user: Doc | null | undefined): Promise<ApproverRoute> {
+    const route = await approverRoute(ctx, user);
+    // Platform testing override: the organization super admin stands in for a missing manager.
+    if (route.problem && bypass(ctx, 'prc.requirement.manager_route')) {
+        return { ...route, managerPosition: route.managerPosition || 'TEST_MODE', managerTitle: `${route.managerTitle || 'Manager'} (test mode: organization super admin)`, holders: Math.max(route.holders, 1), problem: '' };
+    }
+    return route;
+}
+async function approverRoute(ctx: OrgContext, user: Doc | null | undefined): Promise<ApproverRoute> {
     const pos = await positions(ctx.orgId);
     const position = primaryPosition(user);
     const base = { position, title: pos.get(position)?.title ?? '', holders: 0, managerPosition: '', managerTitle: '' };
@@ -117,7 +127,9 @@ async function approverFor(ctx: OrgContext, user: Doc | null | undefined): Promi
 // ----- Access -----
 
 /** May this person approve, reject or return this requirement as the immediate manager? */
-const isManager = (ctx: OrgContext, d: Obj) => str(d.requesterUid) !== ctx.uid && can(ctx, 'PRC.req.approve') && myPositions(ctx.me).includes(str(d.approverPosition));
+const isManagerStrict = (ctx: OrgContext, d: Obj) => str(d.requesterUid) !== ctx.uid && can(ctx, 'PRC.req.approve') && myPositions(ctx.me).includes(str(d.approverPosition));
+/** Includes the platform testing override (organization super admin acts as manager); mutations record the bypass. */
+const isManager = (ctx: OrgContext, d: Obj) => isManagerStrict(ctx, d) || ctx.testMode === true;
 const history = (d: Obj) => objs(d.history);
 const approvedByMe = (ctx: OrgContext, d: Obj) => history(d).some((h) => str(h.by) === ctx.uid && str(h.action) === 'approved');
 
@@ -137,7 +149,7 @@ function visible(ctx: OrgContext, d: Obj): boolean {
 function flags(ctx: OrgContext, d: Obj) {
     const status = str(d.status);
     const mine = str(d.requesterUid) === ctx.uid;
-    const desk = can(ctx, 'PRC.req.acknowledge') && !mine && !approvedByMe(ctx, d);
+    const desk = can(ctx, 'PRC.req.acknowledge') && ((!mine && !approvedByMe(ctx, d)) || ctx.testMode === true);
     return {
         edit: mine && EDITABLE.includes(status),
         submit: mine && EDITABLE.includes(status),
@@ -514,6 +526,34 @@ async function load(ctx: OrgContext, body: Obj): Promise<{ id: string; doc: Doc 
     const entitled = str(d.requesterUid) === ctx.uid || can(ctx, 'PRC.req.viewall') || approvedByMe(ctx, d) || (str(d.status) === 'pending_approval' && isManager(ctx, d));
     if (!entitled && !covers(await deskScope(ctx), objs(d.lines))) throw new HttpError(404, 'Purchase requirement not found.');
     return { id, doc };
+}
+
+/**
+ * Where the requirement went next (numbers and status only, never prices): quotation, requisition, purchase order,
+ * and whether goods were received or services accepted. Shown to people who may already open the requirement.
+ */
+async function trailOf(orgId: string, id: string) {
+    const root = `organizations/${orgId}`;
+    const [cases, rqs, orders] = await Promise.all([
+        listDocs(`${root}/procurement_quotations`),
+        listDocs(`${root}/procurement_requisitions`),
+        listDocs(`${root}/procurement_orders`),
+    ]);
+    const pick = (d: Doc) => ({ id: d.id, number: str(d.data.number) || d.id, status: str(d.data.status) });
+    return {
+        quotations: cases.filter((c) => str(c.data.requirementId) === id).map(pick),
+        requisitions: rqs.filter((r) => str(r.data.requirementId) === id).map(pick),
+        orders: orders
+            .filter((p) => objs(p.data.lines).some((l) => str(l.requirementId) === id))
+            .map((p) => ({
+                ...pick(p),
+                poType: str(p.data.poType),
+                received: objs(p.data.deliveries).length > 0,
+                servicesAccepted: objs(p.data.receipts).filter((r) => str(r.status) === 'accepted').length,
+                servicesWaiting: objs(p.data.receipts).filter((r) => str(r.status) === 'submitted').length,
+            }))
+            .sort((a, b) => a.id.localeCompare(b.id)),
+    };
 }
 
 function reasonOf(body: Obj): string {
@@ -1129,6 +1169,7 @@ export const purchaseRequirementRoutes = {
                 approverTitle: str(d.approverTitle),
                 returnReason: str(d.status) === 'returned_user' ? str(d.returnReason) : '',
                 maintenance: await maintenanceSourceOut(ctx.orgId, d),
+                trail: await trailOf(ctx.orgId, id),
                 currency: str(ctx.org.data.currencyCode),
                 version: Number(d.version) || 1,
                 can: f,
@@ -1154,7 +1195,7 @@ export const purchaseRequirementRoutes = {
         orgRoute('org.procurement.req.approve', 'PRC.req.approve', async (ctx) =>
             transition(ctx, ctx.body, 'approved', (d) => {
                 if (str(d.status) !== 'pending_approval') throw new HttpError(409, 'This requirement is not waiting for approval.');
-                if (!isManager(ctx, d)) throw new HttpError(403, 'Only the immediate manager of the requester can approve this requirement.');
+                if (!isManagerStrict(ctx, d) && !bypass(ctx, 'prc.requirement.manager_approval')) throw new HttpError(403, 'Only the immediate manager of the requester can approve this requirement.');
                 return { patch: { status: 'approved', approvedBy: ctx.uid, approvedAt: nowIso() }, note: '', label: 'Approved by the immediate manager' };
             })
         ),
@@ -1165,7 +1206,7 @@ export const purchaseRequirementRoutes = {
             const reason = reasonOf(ctx.body);
             return transition(ctx, ctx.body, 'rejected', (d) => {
                 if (str(d.status) !== 'pending_approval') throw new HttpError(409, 'This requirement is not waiting for approval.');
-                if (!isManager(ctx, d)) throw new HttpError(403, 'Only the immediate manager of the requester can reject this requirement.');
+                if (!isManagerStrict(ctx, d) && !bypass(ctx, 'prc.requirement.manager_approval')) throw new HttpError(403, 'Only the immediate manager of the requester can reject this requirement.');
                 return { patch: { status: 'rejected', rejectedBy: ctx.uid, rejectedAt: nowIso(), rejectReason: reason }, note: reason, label: 'Rejected by the immediate manager' };
             });
         }),
@@ -1183,10 +1224,12 @@ export const purchaseRequirementRoutes = {
                 const f = flags(ctx, d);
                 if (status === 'pending_approval') {
                     if (!f.returnManager) throw new HttpError(403, 'Only the immediate manager can return a requirement that is waiting for approval.');
+                    if (!isManagerStrict(ctx, d)) bypass(ctx, 'prc.requirement.manager_approval');
                     if (to !== 'user') throw new HttpError(400, 'A manager returns a requirement to the requester.');
                     return { patch: { status: 'returned_user', returnedBy: 'manager', returnReason: reason }, note: `To requester: ${reason}`, label: 'Returned by the manager' };
                 }
                 if (!f.returnDesk) throw new HttpError(403, 'Only procurement personnel (who did not approve it) can return this requirement.');
+                if (str(d.requesterUid) === ctx.uid || approvedByMe(ctx, d)) bypass(ctx, 'prc.requirement.desk_independence');
                 if (to === 'manager') return { patch: { status: 'pending_approval', approvedBy: '', approvedAt: '', returnedBy: 'procurement', returnReason: reason }, note: `To manager: ${reason}`, label: 'Returned by procurement to the manager' };
                 return { patch: { status: 'returned_user', approvedBy: '', approvedAt: '', returnedBy: 'procurement', returnReason: reason }, note: `To requester: ${reason}`, label: 'Returned by procurement to the requester' };
             });
@@ -1199,8 +1242,8 @@ export const purchaseRequirementRoutes = {
             return transition(ctx, ctx.body, 'acknowledged', (d) => {
                 if (str(d.status) !== 'approved') throw new HttpError(409, 'Only an approved requirement can be acknowledged.');
                 if (!covers(scope, objs(d.lines))) throw new HttpError(403, 'This requirement belongs to another buyer group.');
-                if (str(d.requesterUid) === ctx.uid) throw new HttpError(403, 'You cannot acknowledge your own requirement.');
-                if (approvedByMe(ctx, d)) throw new HttpError(403, 'You approved this requirement, so you cannot also acknowledge it.');
+                if (str(d.requesterUid) === ctx.uid && !bypass(ctx, 'prc.requirement.desk_independence')) throw new HttpError(403, 'You cannot acknowledge your own requirement.');
+                if (approvedByMe(ctx, d) && !bypass(ctx, 'prc.requirement.desk_independence')) throw new HttpError(403, 'You approved this requirement, so you cannot also acknowledge it.');
                 return { patch: { status: 'acknowledged', acknowledgedBy: ctx.uid, acknowledgedAt: nowIso() }, note: '', label: 'Acknowledged: offline quotation started' };
             });
         }),

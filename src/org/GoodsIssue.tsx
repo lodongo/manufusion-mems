@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { ClipboardList, PackageOpen, Plus, Trash2 } from 'lucide-react';
+import { ClipboardList, FileCheck, PackageOpen, Plus, Trash2 } from 'lucide-react';
+import { VoucherQueue } from './StoresIssueVouchers';
 import { callBackend } from '../lib/backend';
 import { Alert, Field, SelectField } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
@@ -171,20 +172,22 @@ function NewIssue({ onDone }: { onDone: (m: string) => void }) {
 }
 
 export default function GoodsIssue() {
-    const [tab, setTab] = useState<'new' | 'history'>(() => {
+    const [tab, setTab] = useState<'vouchers' | 'new' | 'history'>(() => {
         try {
             const key = 'mems.table.tab.' + window.location.hash.replace(/^#\/?/, '');
             const value = sessionStorage.getItem(key);
             sessionStorage.removeItem(key);
-            return value === 'history' ? 'history' : 'new';
-        } catch { return 'new'; }
+            return value === 'history' ? 'history' : value === 'new' ? 'new' : 'vouchers';
+        } catch { return 'vouchers'; }
     });
     const [msg, setMsg] = useState('');
     const hist = useLoad(() => callBackend<{ issues: Issue[] }>('/api/org/inv/issue/list'), [tab, msg]);
     return (
-        <Frame title='Goods issue' subtitle='Stock out of a warehouse to a cost center or work order' onBack={() => go('module/INV')} nav={[{ value: 'new', label: 'Issue stock', icon: PackageOpen }, { value: 'history', label: 'Issues', icon: ClipboardList }]} navValue={tab} onNav={setTab}>
+        <Frame title='Goods issue' subtitle='Issue against stores issue vouchers (SIV), or stock out to a cost center or work order' onBack={() => go('module/INV')} nav={[{ value: 'vouchers', label: 'Issue vouchers', icon: FileCheck }, { value: 'new', label: 'Issue stock', icon: PackageOpen }, { value: 'history', label: 'Issues', icon: ClipboardList }]} navValue={tab} onNav={setTab}>
             {msg && <Alert tone='success'>{msg}</Alert>}
-            {tab === 'new' ? (
+            {tab === 'vouchers' ? (
+                <VoucherQueue />
+            ) : tab === 'new' ? (
                 <NewIssue onDone={(m) => { setMsg(m); setTab('history'); }} />
             ) : hist.loading && !hist.data ? (
                 <Spinner />

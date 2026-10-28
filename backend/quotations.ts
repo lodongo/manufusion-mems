@@ -1,5 +1,6 @@
 import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, str, writeDoc, type Doc } from './core';
 import { orgRoute, type OrgContext } from './guards';
+import { bypass } from './testModeCore';
 import { record } from './org';
 import { nextOrgCounter } from './positions';
 import { KIND_LABEL, LINE_KINDS, can, requireProcurement, requirementsPath, type LineKind } from './procurementSetup';
@@ -958,7 +959,8 @@ export const quotationRoutes = {
                 const top = ranked.find((r) => r.rank === 1);
                 if (top && top.quoteId !== chosen.quoteId && reason.length < 20) throw new HttpError(400, `${top.vendorName} ranks first. Recommending another vendor needs a written reason of at least 20 characters.`);
                 if (objs(d.quotes).length < minQuotes && shortfall.length < 20) throw new HttpError(400, `The chart of authority asks for ${minQuotes} quote(s) and ${objs(d.quotes).length} were received. Explain the shortfall in at least 20 characters.`);
-                if (validSigns(d).length < minSigns) throw new HttpError(409, `${minSigns} evaluator sign-off(s) are needed on the current quotes and ${validSigns(d).length} are valid. A sign-off lapses when a quote changes.`);
+                // Platform testing override: one valid sign-off (the super admin's own) stands in for the evaluation panel.
+                if (validSigns(d).length < minSigns && !(validSigns(d).length >= 1 && bypass(ctx, 'prc.quotes.min_evaluators'))) throw new HttpError(409, `${minSigns} evaluator sign-off(s) are needed on the current quotes and ${validSigns(d).length} are valid. A sign-off lapses when a quote changes.`);
                 const rec = { quoteId: chosen.quoteId, vendorId: chosen.vendorId, vendorName: chosen.vendorName, total: chosen.total, base: chosen.base, score: chosen.score, rank: chosen.rank, reason, shortfallReason: shortfall, by: ctx.uid, byName: nameOfUser(ctx.me), at: nowIso(), evaluationVersion: cfg.version, authorityVersion: authority.version, ranking: ranked.map((r) => ({ vendorName: r.vendorName, total: r.total, base: r.base, score: r.score, rank: r.rank, flags: r.flags })) };
                 return { patch: { status: 'recommended', recommendation: rec }, event: 'recommended', note: `${chosen.vendorName}, ${chosen.total.toLocaleString()}, score ${chosen.score}${reason ? `. ${reason}` : ''}`.slice(0, 380), label: `Recommended: ${chosen.vendorName}` };
             })
