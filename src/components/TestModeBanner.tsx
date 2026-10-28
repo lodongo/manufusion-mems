@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { FlaskConical, X } from 'lucide-react';
-import { callBackend } from '../lib/backend';
 
 interface Status { active: boolean; appliesToYou: boolean; expiresAt: string; reason: string }
 
@@ -8,17 +7,15 @@ interface Status { active: boolean; appliesToYou: boolean; expiresAt: string; re
  * Tells everyone in a tenant that the development-only platform testing override is on, so nobody mistakes
  * single-person approvals for real ones. Sits just above the platform footer; it never covers the action bar.
  */
-export default function TestModeBanner() {
-    const [status, setStatus] = useState<Status | null>(null);
+export default function TestModeBanner({ status }: { status?: Status }) {
     const [open, setOpen] = useState(false);
+    const [now, setNow] = useState(() => Date.now());
+    // The server decides; the banner only hides itself once the override has expired.
     useEffect(() => {
-        let live = true;
-        const load = () => callBackend<Status>('/api/org/testing-mode/status').then((s) => live && setStatus(s)).catch(() => live && setStatus(null));
-        load();
-        const timer = window.setInterval(load, 5 * 60_000);
-        return () => { live = false; window.clearInterval(timer); };
+        const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+        return () => window.clearInterval(timer);
     }, []);
-    if (!status?.active) return null;
+    if (!status?.active || !(Date.parse(status.expiresAt) > now)) return null;
     const until = status.expiresAt ? new Date(status.expiresAt).toLocaleString() : '';
     return (
         <div className='fixed bottom-11 left-3 z-40 max-w-[calc(100vw-1.5rem)]' role='status' aria-live='polite'>

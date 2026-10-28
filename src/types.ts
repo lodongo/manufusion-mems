@@ -49,6 +49,8 @@ export interface Session {
     lastRoute?: string;
     preferences?: UserPreferences;
     photoRequired?: boolean;
+    /** Development-only platform testing override for this organization (banner). */
+    testMode?: { active: boolean; appliesToYou: boolean; expiresAt: string; reason: string };
 }
 
 export const STAFF_ROLES = ['super_admin', 'mems_admin', 'mems_support'];

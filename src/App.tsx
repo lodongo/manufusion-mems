@@ -307,7 +307,7 @@ function App() {
             <div className={organizationReady ? 'mems-organization-ui' + (quickFullScreen ? '' : ' pb-12') : ''}><Suspense fallback={<Loading />}>{render()}</Suspense></div>
             {organizationReady && session && <HealthTracker session={session} />}
             {organizationReady && !quickFullScreen && <OrganizationFooter />}
-            {organizationReady && !quickFullScreen && <TestModeBanner />}
+            {organizationReady && !quickFullScreen && <TestModeBanner status={session?.testMode} />}
         </SiteContext.Provider>
     );
 }

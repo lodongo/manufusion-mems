@@ -1,6 +1,6 @@
 import { audit } from './audit';
 import { HttpError, getDoc, nowIso, str, writeDoc } from './core';
-import { orgRoute, staff } from './guards';
+import { staff } from './guards';
 import {
     TEST_MODE_DOC, TEST_MODE_MAX_HOURS, TEST_MODE_PHRASE,
     clearTestModeCache, overrideActiveFor, readTestMode, testModeEnvironmentAllowed,
@@ -89,16 +89,11 @@ export const testModeRoutes = {
             return view();
         }),
     ],
-    'POST /api/org/testing-mode/status': [
-        orgRoute('org.testmode.status', null, async (ctx) => {
-            const state = await readTestMode();
-            const active = overrideActiveFor(state, ctx.orgId);
-            return {
-                active,
-                appliesToYou: active && ctx.role === 'org_super_admin',
-                expiresAt: active ? state.expiresAt : '',
-                reason: active ? state.reason : '',
-            };
-        }),
-    ],
 };
+
+/** Test-mode banner data, carried on the session so every tenant user sees it without a separate route. */
+export async function testModeSession(orgId: string, role: string) {
+    const state = await readTestMode();
+    const active = overrideActiveFor(state, orgId);
+    return active ? { active, appliesToYou: role === 'org_super_admin', expiresAt: state.expiresAt, reason: state.reason } : { active: false, appliesToYou: false, expiresAt: '', reason: '' };
+}
