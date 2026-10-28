@@ -102,7 +102,16 @@ export default function LevelRoles() {
                                                     <span className='mt-1 block text-[11px] text-muted'>{l.permissions.length} permissions{l.installed ? ` · ${l.users} user(s) · ${l.jobRoles.length} job role(s)` : ''}</span>
                                                 </span>
                                             </label>
-                                            {l.installed && <button type='button' onClick={() => navigate(`${BASE}/${l.id}`)} className='mt-2 min-h-9 text-xs font-medium text-brand'>Open role</button>}
+                                            <details className='group mt-2 pl-9'>
+                                                <summary className='flex min-h-9 cursor-pointer list-none items-center text-xs font-medium text-brand'>Default rights ({l.permissions.length})</summary>
+                                                <ul className='mt-1 flex flex-wrap gap-1'>{l.permissions.map((p) => <li key={p} className='rounded bg-panel px-1.5 py-0.5 font-mono text-[10px] text-soft'>{p}</li>)}</ul>
+                                            </details>
+                                            {l.installed && (
+                                                <div className='mt-2 flex flex-wrap gap-2 pl-9'>
+                                                    <Button variant='secondary' onClick={() => navigate(`${BASE}/${l.id}`)}>Configure rights</Button>
+                                                    <Button variant='secondary' onClick={() => navigate(`${BASE}/docs-${l.id}`)}>Rules</Button>
+                                                </div>
+                                            )}
                                         </li>
                                     );
                                 })}

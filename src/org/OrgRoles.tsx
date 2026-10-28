@@ -104,16 +104,23 @@ function RolesHome({ id }: { id?: string }) {
             title='Security roles'
             subtitle='Permissions only. Job roles (ROL_ codes) describe your organization chart.'
             actions={
-                <>
-                    <Button variant='secondary' onClick={() => navigate(`${BASE}/review`)} aria-label='Review access'>
-                        <ClipboardCheck className='h-4 w-4' />
-                        <span className='hidden sm:inline'>Review access</span>
-                    </Button>
-                    <Button onClick={() => navigate(`${BASE}/new`)}>
-                        <Plus className='h-4 w-4' />
-                        <span>New</span>
-                    </Button>
-                </>
+                <Button onClick={() => navigate(`${BASE}/new`)}>
+                    <Plus className='h-4 w-4' />
+                    <span>New</span>
+                </Button>
+            }
+            toolbar={
+                <nav aria-label='Security role sections' className='grid grid-cols-3 gap-1 rounded-xl border border-line p-1'>
+                    <button type='button' aria-current='page' className='flex min-h-11 items-center justify-center gap-1.5 rounded-lg bg-brand px-2 text-sm font-medium text-onbrand'>
+                        <ShieldAlert className='h-4 w-4 shrink-0' /><span className='truncate'>All roles</span>
+                    </button>
+                    <button type='button' onClick={() => navigate(`${BASE}/levels`)} className='flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium text-soft active:bg-panel'>
+                        <Sparkles className='h-4 w-4 shrink-0' /><span className='truncate'>Level roles</span>
+                    </button>
+                    <button type='button' onClick={() => navigate(`${BASE}/review`)} className='flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium text-soft active:bg-panel'>
+                        <ClipboardCheck className='h-4 w-4 shrink-0' /><span className='truncate'>Review</span>
+                    </button>
+                </nav>
             }
         >
             {attention > 0 && (
@@ -139,14 +146,8 @@ function RolesHome({ id }: { id?: string }) {
                 rows={data.roles}
                 rowKey={(r) => r.id}
                 onRowClick={(r) => navigate(`${BASE}/${r.id}`)}
-                actions={
-                    <Button variant='secondary' onClick={() => navigate(`${BASE}/levels`)} aria-label='Standard level roles'>
-                        <Sparkles className='h-4 w-4' />
-                        <span className='hidden sm:inline'>Level roles</span>
-                    </Button>
-                }
                 empty='No security roles yet.'
-                height='h-[calc(100dvh-16rem)]'
+                height='h-[calc(100dvh-19rem)]'
             />
         </Screen>
     );
