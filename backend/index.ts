@@ -114,7 +114,7 @@ import { healthOverview } from './healthPolicy';
 import { roleCodeRoutes } from './roleCodes';
 import { roleDocRoutes } from './roleDocs';
 import { documentationRoutes } from './securityDocumentation';
-import { testModeRoutes } from './testMode';
+import { testModeRoutes, testModeSession } from './testMode';
 import { storesIssueVoucherRoutes } from './storesIssueVouchers';
 import { workflowTraceRoutes } from './workflowTrace';
 import { governanceDocumentRoutes } from './governanceDocumentRoutes';
@@ -779,6 +779,7 @@ export const handler = router(recordWiredRoutes({
                     startPage: str(isObj(data.personalPreferences) ? data.personalPreferences.startPage : '') === 'last' ? 'last' : 'home',
                 },
                 photoRequired: !!orgId && role !== 'applicant' && !STAFF_ROLES.includes(role) && !str(data.photoPath),
+                testMode: organization ? await testModeSession(orgId, role) : undefined,
             };
         }),
     ],

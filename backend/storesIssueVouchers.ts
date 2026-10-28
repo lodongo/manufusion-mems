@@ -149,6 +149,44 @@ const historyOf = (d: Obj | undefined, ctx: OrgContext, action: string, note = '
     { at: nowIso(), by: ctx.uid, byName: nameOf(ctx.me), action, note: note.slice(0, 300) },
 ].slice(-100);
 
+
+async function getVoucher(ctx: OrgContext) {
+    const id = str(ctx.body.id);
+    if (!ID.test(id)) throw new HttpError(404, 'Voucher not found.');
+    const doc = await getDoc(`${col(ctx.orgId)}/${id}`);
+    if (!doc) throw new HttpError(404, 'Voucher not found.');
+    const { warehouses } = await issueRights(ctx);
+    const wo = await getDoc(`organizations/${ctx.orgId}/work_orders/${str(doc.data.workOrderId)}`);
+    const mine = [str(doc.data.requestedBy), str(doc.data.receivedBy)].includes(ctx.uid);
+    const scope = await scopeOf(ctx);
+    const viewer = wo ? canAt(ctx, 'MNT.view', maintenancePath(wo.data), scope) : false;
+    if (!mine && !viewer && !warehouses.has(str(doc.data.warehouseId))) throw new HttpError(404, 'Voucher not found.');
+    return out(doc.data, doc.id, await flagsOf(ctx, doc.data, warehouses, wo));
+}
+
+async function cancelVoucher(ctx: OrgContext) {
+    const id = str(ctx.body.id);
+    if (!ID.test(id)) throw new HttpError(404, 'Voucher not found.');
+    const doc = await getDoc(`${col(ctx.orgId)}/${id}`);
+    if (!doc) throw new HttpError(404, 'Voucher not found.');
+    const reason = oneLine(ctx.body.reason, 300);
+    if (reason.length < 10) throw new HttpError(400, 'Give a reason of at least 10 characters.');
+    const { warehouses } = await issueRights(ctx);
+    const wo = await getDoc(`organizations/${ctx.orgId}/work_orders/${str(doc.data.workOrderId)}`);
+    const f = await flagsOf(ctx, doc.data, warehouses, wo);
+    const close = str(ctx.body.mode) === 'close';
+    if (close ? !f.close : !f.cancel) throw new HttpError(403, close ? 'Only a partly issued voucher can be short-closed, by its requester or stores.' : 'Only a voucher with nothing issued can be cancelled, by its requester or stores.');
+    const at = nowIso();
+    const ok = await writeDoc(`${col(ctx.orgId)}/${id}`, {
+        ...doc.data, status: close ? 'closed' : 'cancelled', closeReason: reason, closedBy: ctx.uid, closedAt: at,
+        updatedAt: at, version: (Number(doc.data.version) || 0) + 1,
+        history: historyOf(doc.data, ctx, close ? 'Short-closed' : 'Cancelled', reason),
+    }, { updateTime: doc.updateTime });
+    if (!ok) throw new HttpError(409, 'This voucher changed. Reload and try again.');
+    await record(ctx, close ? 'org.mnt.siv.close' : 'org.mnt.siv.cancel', id, reason);
+    return { ok: true };
+}
+
 export const storesIssueVoucherRoutes = {
     /** Lines that can still go on a voucher for a work order, and the vouchers already raised. */
     'POST /api/org/mnt/siv/for-wo': [
@@ -227,7 +265,7 @@ export const storesIssueVoucherRoutes = {
 
     /** Stores queue: open vouchers of the warehouses this person may issue from (and their own). */
     'POST /api/org/mnt/siv/list': [
-        orgRoute('org.mnt.siv.list', null, async (ctx) => {
+        orgRoute('org.mnt.siv.list', 'INV.issue', async (ctx) => {
             const { warehouses } = await issueRights(ctx);
             const view = str(ctx.body.view) || 'open';
             if (!['open', 'all'].includes(view)) throw new HttpError(400, 'Choose a view.');
@@ -242,21 +280,9 @@ export const storesIssueVoucherRoutes = {
         }),
     ],
 
-    'POST /api/org/mnt/siv/get': [
-        orgRoute('org.mnt.siv.get', null, async (ctx) => {
-            const id = str(ctx.body.id);
-            if (!ID.test(id)) throw new HttpError(404, 'Voucher not found.');
-            const doc = await getDoc(`${col(ctx.orgId)}/${id}`);
-            if (!doc) throw new HttpError(404, 'Voucher not found.');
-            const { warehouses } = await issueRights(ctx);
-            const wo = await getDoc(`organizations/${ctx.orgId}/work_orders/${str(doc.data.workOrderId)}`);
-            const mine = [str(doc.data.requestedBy), str(doc.data.receivedBy)].includes(ctx.uid);
-            const scope = await scopeOf(ctx);
-            const viewer = wo ? canAt(ctx, 'MNT.view', maintenancePath(wo.data), scope) : false;
-            if (!mine && !viewer && !warehouses.has(str(doc.data.warehouseId))) throw new HttpError(404, 'Voucher not found.');
-            return out(doc.data, doc.id, await flagsOf(ctx, doc.data, warehouses, wo));
-        }),
-    ],
+    /** Open a voucher from the work order (maintenance) or from the stores queue (INV.issue). */
+    'POST /api/org/mnt/siv/get': [orgRoute('org.mnt.siv.get', 'MNT.view', (ctx) => getVoucher(ctx))],
+    'POST /api/org/mnt/siv/stores/get': [orgRoute('org.mnt.siv.stores.get', 'INV.issue', (ctx) => getVoucher(ctx))],
 
     /** Stores issues the voucher (all or part). Each task group posts a goods issue against its reservation. */
     'POST /api/org/mnt/siv/issue': [
@@ -320,29 +346,7 @@ export const storesIssueVoucherRoutes = {
         }))),
     ],
 
-    /** Cancel (nothing issued yet) or short-close (the rest is no longer needed). */
-    'POST /api/org/mnt/siv/cancel': [
-        orgRoute('org.mnt.siv.cancel', null, async (ctx) => withLock(ctx.orgId, 'maintenance_operations', async () => {
-            const id = str(ctx.body.id);
-            if (!ID.test(id)) throw new HttpError(404, 'Voucher not found.');
-            const doc = await getDoc(`${col(ctx.orgId)}/${id}`);
-            if (!doc) throw new HttpError(404, 'Voucher not found.');
-            const reason = oneLine(ctx.body.reason, 300);
-            if (reason.length < 10) throw new HttpError(400, 'Give a reason of at least 10 characters.');
-            const { warehouses } = await issueRights(ctx);
-            const wo = await getDoc(`organizations/${ctx.orgId}/work_orders/${str(doc.data.workOrderId)}`);
-            const f = await flagsOf(ctx, doc.data, warehouses, wo);
-            const close = str(ctx.body.mode) === 'close';
-            if (close ? !f.close : !f.cancel) throw new HttpError(403, close ? 'Only a partly issued voucher can be short-closed, by its requester or stores.' : 'Only a voucher with nothing issued can be cancelled, by its requester or stores.');
-            const at = nowIso();
-            const ok = await writeDoc(`${col(ctx.orgId)}/${id}`, {
-                ...doc.data, status: close ? 'closed' : 'cancelled', closeReason: reason, closedBy: ctx.uid, closedAt: at,
-                updatedAt: at, version: (Number(doc.data.version) || 0) + 1,
-                history: historyOf(doc.data, ctx, close ? 'Short-closed' : 'Cancelled', reason),
-            }, { updateTime: doc.updateTime });
-            if (!ok) throw new HttpError(409, 'This voucher changed. Reload and try again.');
-            await record(ctx, close ? 'org.mnt.siv.close' : 'org.mnt.siv.cancel', id, reason);
-            return { ok: true };
-        })),
-    ],
+    /** Cancel (nothing issued yet) or short-close (the rest is no longer needed): requester side or stores side. */
+    'POST /api/org/mnt/siv/cancel': [orgRoute('org.mnt.siv.cancel', 'MNT.view', (ctx) => withLock(ctx.orgId, 'maintenance_operations', () => cancelVoucher(ctx)))],
+    'POST /api/org/mnt/siv/stores/cancel': [orgRoute('org.mnt.siv.stores.cancel', 'INV.issue', (ctx) => withLock(ctx.orgId, 'maintenance_operations', () => cancelVoucher(ctx)))],
 };

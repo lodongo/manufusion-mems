@@ -162,8 +162,10 @@ export function WorkOrderVouchers({ code }: { code: string }) {
 
 // ----- One voucher: issue (stores), cancel or short-close, print -----
 
-export function VoucherDetail({ id, onBack }: { id: string; onBack: () => void }) {
-    const { data, error, loading, reload } = useLoad(() => callBackend<Voucher>(`${API}/get`, { id }), [id]);
+export function VoucherDetail({ id, onBack, stores = false }: { id: string; onBack: () => void; stores?: boolean }) {
+    // Stores open vouchers under INV.issue; maintenance users under MNT.view. The server re-checks either way.
+    const side = stores ? `${API}/stores` : API;
+    const { data, error, loading, reload } = useLoad(() => callBackend<Voucher>(`${side}/get`, { id }), [id]);
     const [qty, setQty] = useState<Record<number, string>>({});
     const [ack, setAck] = useState(false);
     const [note, setNote] = useState('');
@@ -201,7 +203,7 @@ export function VoucherDetail({ id, onBack }: { id: string; onBack: () => void }
         if (reason.trim().length < 10) return setFailure('Give a reason of at least 10 characters.');
         setBusy(true);
         try {
-            await callBackend(`${API}/cancel`, { id, reason: reason.trim(), mode });
+            await callBackend(`${side}/cancel`, { id, reason: reason.trim(), mode });
             setDone(mode === 'close' ? 'Voucher short-closed.' : 'Voucher cancelled.');
             setReason('');
             reload();
@@ -299,7 +301,7 @@ export function VoucherQueue() {
     const { data, error, loading } = useLoad(() => callBackend<{ rows: Voucher[]; counts: { open: number; all: number } }>(`${API}/list`, { view }), [view]);
     const [openId, setOpenId] = useState('');
     const rows = useMemo(() => data?.rows ?? [], [data]);
-    if (openId) return <VoucherDetail id={openId} onBack={() => setOpenId('')} />;
+    if (openId) return <VoucherDetail id={openId} stores onBack={() => setOpenId('')} />;
     if (loading && !data) return <Spinner />;
     if (error) return <Alert tone='error'>{error}</Alert>;
     return (
