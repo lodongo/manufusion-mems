@@ -8,6 +8,8 @@ type Props = SelectHTMLAttributes<HTMLSelectElement> & {
     hint?: string;
     error?: string;
     children: ReactNode;
+    /** Keep the label for screen readers only, when the caller renders its own visible label. */
+    hideLabel?: boolean;
 };
 type Option = { value: string; label: string; disabled: boolean; group?: string };
 
@@ -34,7 +36,7 @@ function extractOptions(children: ReactNode, group = ''): Option[] {
 }
 
 /** Theme-aware, searchable, touch-first dropdown. The fixed sheet avoids scrolling/clipping in nested forms. */
-export default function SearchableSelect({ label, id, hint, error, children, value, defaultValue, name, onChange, disabled, required, ...rest }: Props) {
+export default function SearchableSelect({ label, id, hint, error, children, value, defaultValue, name, onChange, disabled, required, hideLabel, ...rest }: Props) {
     const options = useMemo(() => extractOptions(children), [children]);
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
@@ -69,7 +71,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
 
     return (
         <div className='block min-w-0'>
-            <label htmlFor={id} className='mb-1 block text-sm text-soft'>{label}{required ? ' *' : ''}</label>
+            <label htmlFor={id} className={hideLabel ? 'sr-only' : 'mb-1 block text-sm text-soft'}>{label}{required ? ' *' : ''}</label>
             <input type='hidden' name={name} value={selectedValue} />
             <button type='button' id={id} disabled={disabled} aria-required={required} aria-invalid={!!error}
                 aria-haspopup='listbox' aria-expanded={open} aria-describedby={error || hint ? `${id}-note` : undefined}
