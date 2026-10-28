@@ -257,7 +257,8 @@ function readAttrs(spec: ItemSpec, raw: unknown): { values: Obj; view: Array<{ c
                 break;
             }
             case 'multi_select': {
-                const list = Array.isArray(v) ? v.map(str) : [];
+                // A list, or the comma-separated form used by maintenance records and the shared catalogue form.
+                const list = Array.isArray(v) ? v.map(str) : typeof v === 'string' ? v.split(',').map((x) => x.trim()).filter(Boolean) : [];
                 if (!list.length || new Set(list).size !== list.length || list.some((s) => !a.options.some((o) => o.code === s))) throw new HttpError(400, `Choose valid options for ${a.name}.`);
                 stored = list;
                 shown = list.map((s) => a.options.find((o) => o.code === s)?.label ?? s).join(', ');

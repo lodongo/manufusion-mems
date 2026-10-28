@@ -127,6 +127,8 @@ interface Attr {
     options: Array<{ code: string; label: string }>;
     validation: Record<string, unknown>;
     required: boolean;
+    description?: string;
+    example?: string;
 }
 interface Spec {
     code: string;
@@ -136,6 +138,7 @@ interface Spec {
     familyCode: string;
     attributes: Attr[];
     adopted: boolean;
+    library?: { id: string; label: string; guidance: string } | null;
 }
 interface Tree {
     families: Array<{ code: string; name: string }>;
@@ -437,13 +440,16 @@ function GlPicker({ costCenterId, code, name, onChange }: { costCenterId: string
 
 function AttrInput({ a, value, onChange }: { a: Attr; value: unknown; onChange: (v: unknown) => void }) {
     const id = `attr-${a.code}`;
-    const label = `${a.name}${a.required ? ' *' : ''}${a.unit ? ` (${a.unit})` : ''}`;
+    const label = `${a.name}${a.required ? ' * (required)' : ''}${a.unit ? ` (${a.unit})` : ''}`;
+    // Plain guidance from the catalogue (where to find the value), so nobody has to guess.
+    const hint = [a.description, a.example ? `Example: ${a.example}.` : ''].filter(Boolean).join(' ') || undefined;
+    const placeholder = a.example ? `e.g. ${a.example}` : undefined;
     const min = typeof a.validation.minimum === 'number' ? a.validation.minimum : undefined;
     const max = typeof a.validation.maximum === 'number' ? a.validation.maximum : undefined;
     const maxLength = typeof a.validation.maxLength === 'number' ? Math.min(a.validation.maxLength, 2000) : 500;
     if (a.dataType === 'enum') {
         return (
-            <SelectField id={id} label={label} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)}>
+            <SelectField id={id} label={label} hint={hint} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)}>
                 <option value=''>Choose</option>
                 {a.options.map((o) => (
                     <option key={o.code} value={o.code}>{o.label}</option>
@@ -456,6 +462,7 @@ function AttrInput({ a, value, onChange }: { a: Attr; value: unknown; onChange: 
         return (
             <fieldset className='space-y-0'>
                 <legend className='mb-1 text-sm text-soft'>{label}</legend>
+                {hint && <p className='mb-1 text-xs text-muted'>{hint}</p>}
                 {a.options.map((o) => (
                     <label key={o.code} className='flex min-h-11 items-center gap-3 text-sm text-ink'>
                         <input type='checkbox' checked={chosen.includes(o.code)} onChange={(e) => onChange(e.target.checked ? [...chosen, o.code] : chosen.filter((c) => c !== o.code))} className='h-5 w-5 shrink-0 accent-emerald-500' />
@@ -467,7 +474,7 @@ function AttrInput({ a, value, onChange }: { a: Attr; value: unknown; onChange: 
     }
     if (a.dataType === 'boolean') {
         return (
-            <SelectField id={id} label={label} value={value === true ? 'true' : value === false ? 'false' : ''} onChange={(e) => onChange(e.target.value === '' ? '' : e.target.value === 'true')}>
+            <SelectField id={id} label={label} hint={hint} value={value === true ? 'true' : value === false ? 'false' : ''} onChange={(e) => onChange(e.target.value === '' ? '' : e.target.value === 'true')}>
                 <option value=''>Choose</option>
                 <option value='true'>Yes</option>
                 <option value='false'>No</option>
@@ -475,13 +482,13 @@ function AttrInput({ a, value, onChange }: { a: Attr; value: unknown; onChange: 
         );
     }
     if (a.dataType === 'integer' || a.dataType === 'decimal') {
-        return <Field id={id} label={label} type='number' inputMode='decimal' step={a.dataType === 'integer' ? '1' : 'any'} min={min} max={max} value={value === undefined || value === null ? '' : String(value)} onChange={(e) => onChange(e.target.value)} />;
+        return <Field id={id} label={label} hint={hint} placeholder={placeholder} type='number' inputMode='decimal' step={a.dataType === 'integer' ? '1' : 'any'} min={min} max={max} value={value === undefined || value === null ? '' : String(value)} onChange={(e) => onChange(e.target.value)} />;
     }
-    if (a.dataType === 'date') return <Field id={id} label={label} type='date' value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />;
+    if (a.dataType === 'date') return <Field id={id} label={label} hint={hint} type='date' value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />;
     if (a.dataType === 'country' || a.dataType === 'currency') {
-        return <Field id={id} label={label} maxLength={a.dataType === 'country' ? 2 : 3} value={typeof value === 'string' ? value : ''} placeholder={a.dataType === 'country' ? 'Two-letter code, for example KE' : 'Three-letter code, for example KES'} onChange={(e) => onChange(e.target.value.toUpperCase())} />;
+        return <Field id={id} label={label} hint={hint} maxLength={a.dataType === 'country' ? 2 : 3} value={typeof value === 'string' ? value : ''} placeholder={a.dataType === 'country' ? 'Two-letter code, for example KE' : 'Three-letter code, for example KES'} onChange={(e) => onChange(e.target.value.toUpperCase())} />;
     }
-    return <Field id={id} label={label} maxLength={maxLength} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />;
+    return <Field id={id} label={label} hint={hint} placeholder={placeholder} maxLength={maxLength} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />;
 }
 
 // ----- Item editor: core details first, then technical details. Each save stores this one item. -----
@@ -1002,6 +1009,7 @@ function ItemEditor({ id, no }: { id: string; no: string }) {
                     {f.itemCode && !spec && !specError && <Spinner />}
                     {spec && (
                         <>
+                            {spec.library?.guidance && <Alert tone='info'><strong>{spec.library.label}.</strong> {spec.library.guidance}</Alert>}
                             {mandatory.length === 0 && attrList.length > 0 && <Alert tone='info'>This entry has no mandatory attributes. Optional ones are below.</Alert>}
                             {mandatory.map((a) => (
                                 <AttrInput key={a.code} a={a} value={attrs[a.code]} onChange={(v) => setAttr(a.code, v)} />

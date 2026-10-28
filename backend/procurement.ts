@@ -1,3 +1,4 @@
+import { enrichCatalogue, stripLibrary, LIB_SOURCE } from './catalogueAttributeLibrary';
 import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
 import {integratedReleaseProblems} from './catalogueReleaseGuard';
 import { industryAdoptionRecommendation } from './industryCatalog';
@@ -374,6 +375,19 @@ async function load(kind: Kind): Promise<Loaded> {
         families,
         items: new Map(items.map((c) => [str(c.code), c])),
     };
+    // Add the MEMS attribute library (item-specific attributes, mandatory flags, plain guidance) to materials
+    // and services. The uploaded catalogue is never changed; exports strip these additions again.
+    if (kind === 'materials' || kind === 'services') {
+        const familyName = new Map(families.map((f) => [str(f.code), str(f.name)]));
+        const subName = new Map(subcategories.map((f) => [str(f.code), str(f.name)]));
+        const catName = new Map(categories.map((f) => [str(f.code), str(f.name)]));
+        const def = KINDS[kind];
+        enrichCatalogue(kind, loaded.attributes, loaded.domains, loaded.items.values(), (e) => ({
+            family: familyName.get(str(e[def.parent.item])),
+            subcategory: subName.get(str(e[def.itemL2])),
+            category: catName.get(str(e[def.itemL1])),
+        }));
+    }
     cache.set(kind, loaded);
     return loaded;
 }
@@ -444,21 +458,25 @@ function itemOut(d: Loaded, code: string,registeredIndustry='') {
                 validation: isObj(a.validation) ? a.validation : {},
                 required: required.has(str(a.code)),
                 specific: specific.has(str(a.code)),
+                example: str(a.example),
+                source: str(a.source),
             })),
+        library: isObj(c.libraryArchetype) ? c.libraryArchetype : null,
     };
 }
 
 function exportOut(d: Loaded) {
     const def = KINDS[d.kind];
+    // Export exactly what was uploaded: library additions are presentation, not catalogue content.
     return {
         ...d.header,
-        attributeDomains: d.domains,
-        attributes: Array.from(d.attributes.values()),
+        attributeDomains: d.domains.filter((x) => str(x.source) !== LIB_SOURCE),
+        attributes: Array.from(d.attributes.values()).filter((x) => str(x.source) !== LIB_SOURCE),
         profiles: Array.from(d.profiles.values()),
         [def.keys.l1]: d.categories,
         [def.keys.l2]: d.subcategories,
         [def.keys.l3]: d.families,
-        [def.keys.items]: Array.from(d.items.values()),
+        [def.keys.items]: Array.from(d.items.values()).map(stripLibrary),
     };
 }
 
@@ -773,6 +791,9 @@ export interface AttrSpec {
     options: Array<{ code: string; label: string }>;
     validation: Record<string, unknown>;
     required: boolean;
+    description?: string;
+    example?: string;
+    domainName?: string;
 }
 export interface ItemSpec {
     code: string;
@@ -781,6 +802,8 @@ export interface ItemSpec {
     subcategoryCode: string;
     familyCode: string;
     attributes: AttrSpec[];
+    /** Equipment type recognised by the MEMS attribute library, with plain setup guidance. */
+    library?: Record<string, unknown> | null;
 }
 export interface TreeOut {
     families: Array<{ code: string; name: string }>;
@@ -826,7 +849,8 @@ export async function catalogItemSpec(kind: 'materials' | 'services', code: stri
         familyCode: o.subcategoryCode,
         attributes: o.attributes
             .filter((a) => a.dataType !== 'file')
-            .map((a) => ({ code: a.code, name: a.name, dataType: a.dataType, unit: a.unit, options: a.options, validation: a.validation as Record<string, unknown>, required: a.required })),
+            .map((a) => ({ code: a.code, name: a.name, dataType: a.dataType, unit: a.unit, options: a.options, validation: a.validation as Record<string, unknown>, required: a.required, description: a.description, example: a.example, domainName: a.domainName })),
+        library: o.library as Record<string, unknown> | null,
     };
 }
 

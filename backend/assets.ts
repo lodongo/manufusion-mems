@@ -3,6 +3,7 @@ import {integratedReleaseProblems} from './catalogueReleaseGuard';
 import { industryAdoptionRecommendation } from './industryCatalog';
 
 import { createHash } from 'crypto';
+import { enrichCatalogue, stripLibrary, LIB_SOURCE } from './catalogueAttributeLibrary';
 import {
     HttpError,
     DOCUMENT_NAME_ROOT,
@@ -249,6 +250,16 @@ async function loadVersion(vid: string, base: string = VERSIONS): Promise<Loaded
         subcategories,
         classes: new Map(classes.map((c) => [str(c.code), c])),
     };
+    // Add the MEMS attribute library (class-specific technical attributes, maker/model/serial identity,
+    // mandatory flags and plain guidance). The uploaded dictionary itself is not changed.
+    {
+        const subName = new Map(subcategories.map((x) => [str(x.code), str(x.name)]));
+        const catName = new Map(categories.map((x) => [str(x.code), str(x.name)]));
+        enrichCatalogue('assets', loaded.attributes, loaded.domains, loaded.classes.values(), (e) => ({
+            family: subName.get(str(e.subcategoryCode)),
+            subcategory: catName.get(str(e.categoryCode)),
+        }));
+    }
     if (cache.size > 6) cache.clear();
     cache.set(cacheKey, loaded);
     return loaded;
@@ -478,7 +489,10 @@ function classOut(d: Loaded, code: string,registeredIndustry='') {
                 validation: isObj(a.validation) ? a.validation : {},
                 required: required.has(str(a.code)),
                 specific: specific.has(str(a.code)),
+                example: str(a.example),
+                source: str(a.source),
             })),
+        library: isObj(c.libraryArchetype) ? c.libraryArchetype : null,
     };
 }
 
@@ -1225,13 +1239,13 @@ export const assetRoutes = {
             await rec(ctx, 'admin', 'assets.catalog.exported', 'Asset catalog', 'Downloaded');
             return {
                 ...d.header,
-                attributeDomains: d.domains,
-                attributes: Array.from(d.attributes.values()),
+                attributeDomains: d.domains.filter((x) => str(x.source) !== LIB_SOURCE),
+                attributes: Array.from(d.attributes.values()).filter((x) => str(x.source) !== LIB_SOURCE),
                 profiles: Array.from(d.profiles.values()),
                 groups: d.groups,
                 categories: d.categories,
                 subcategories: d.subcategories,
-                assetClasses: Array.from(d.classes.values()),
+                assetClasses: Array.from(d.classes.values()).map(stripLibrary),
             };
         }),
     ],

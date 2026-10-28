@@ -287,14 +287,15 @@ export async function enforceSourcingRules(ctx: OrgContext, record: Doc, tasks: 
                 const spec = await catalogItemSpec('materials', str(s.catalogCode));
                 if (!spec) throw new HttpError(400, `${at}choose a valid catalogue entry.`);
                 const attrs = object(s.attributes);
-                const missing = spec.attributes.filter((a) => a.required && !str(attrs[a.code]).trim()).map((a) => a.name);
-                if (missing.length) throw new HttpError(400, `${at}fill in the mandatory attributes: ${missing.join(', ')}.`);
                 const unknown = Object.keys(attrs).filter((k) => !spec.attributes.some((a) => a.code === k));
                 if (unknown.length) throw new HttpError(400, `${at}unknown attribute ${unknown[0]}.`);
+                // An identical registered material is pointed out first, so nobody fills in details for a duplicate.
                 materialsCache ??= await listDocs(`${root(ctx.orgId)}/materials`);
                 const twin = materialsCache.find((m) => APPROVED_MATERIAL.includes(str(m.data.status)) && str(m.data.materialNumber) && sameSpecification(m.data, spec, attrs));
                 if (twin)
                     throw new HttpError(400, `${at}${str(twin.data.materialNumber)} is already registered with this classification and these attributes. Select it instead.`);
+                const missing = spec.attributes.filter((a) => a.required && !str(attrs[a.code]).trim()).map((a) => a.name);
+                if (missing.length) throw new HttpError(400, `${at}fill in the mandatory attributes: ${missing.join(', ')}.`);
                 s.categoryCode = spec.categoryCode;
                 s.subcategoryCode = spec.subcategoryCode;
                 s.familyCode = spec.familyCode;

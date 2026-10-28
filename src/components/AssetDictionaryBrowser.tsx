@@ -66,6 +66,18 @@ export interface AttrDef {
     validation: { minimum?: number; maximum?: number; maxLength?: number; pattern?: string };
     required: boolean;
     specific: boolean;
+    /** Example value shown as a hint (MEMS attribute library). */
+    example?: string;
+    /** "MEMS_LIBRARY" when the attribute was added by the MEMS attribute library. */
+    source?: string;
+}
+
+/** Equipment type recognised by the MEMS attribute library, with plain setup guidance. */
+export interface CatalogueLibraryInfo {
+    id: string;
+    label: string;
+    guidance: string;
+    supply?: { usual: Array<'OEM' | 'OCM' | 'GENERAL'>; note: string };
 }
 
 export interface ClassDetail {
@@ -84,6 +96,7 @@ export interface ClassDetail {
     accounting?: Record<string, unknown>;
     financialMapping?: Record<string, unknown>;
     financial?: FinancialCatalogueInfo;
+    library?: CatalogueLibraryInfo | null;
 }
 
 export const lifeText = (l: Life | null) => (!l ? '' : !l.depreciable ? 'Not depreciated' : l.min === l.max ? `${l.min} years` : `${l.min}–${l.max} years`);
@@ -361,6 +374,9 @@ function ClassView({
             { key: 'specific', label: `${L.cls} specific`, value: (r) => (r.specific ? 'Yes' : 'No'), hidden: true },
             { key: 'options', label: 'Options', value: (r) => r.options.map((o) => o.label).join(', '), hidden: true },
             { key: 'description', label: 'Description', value: (r) => r.description },
+            { key: 'example', label: 'Example', value: (r) => r.example ?? '', hidden: true },
+            { key: 'source', label: 'Source', value: (r) => (r.source === 'MEMS_LIBRARY' ? 'MEMS attribute library' : 'Uploaded catalogue'),
+                render: (r) => (r.source === 'MEMS_LIBRARY' ? <Badge tone='warn'>MEMS library</Badge> : <span className='text-slate-500'>Catalogue</span>) },
         ],
         [L]
     );
@@ -384,6 +400,10 @@ function ClassView({
                     {data.groupCode} {names.get(data.groupCode)} › {data.categoryCode} {names.get(data.categoryCode)}
                 </p>
                 {data.synonyms.length > 0 && <p className='mt-1 text-xs text-slate-400'>Also known as: {data.synonyms.join(', ')}</p>}
+                {showAttributes && data.library && <p className='mt-2 rounded-lg border border-slate-700 bg-slate-950/70 p-2 text-xs text-slate-300'>
+                    <strong className='text-white'>Recognised as: {data.library.label}.</strong> {data.library.guidance} {data.attributes.filter((a) => a.source === 'MEMS_LIBRARY').length} attributes were added by the MEMS attribute library; the uploaded catalogue is unchanged.
+                    {data.library.supply && <span className='mt-1 block'>Usual supply: {data.library.supply.usual.join(' / ')} — {data.library.supply.note}</span>}
+                </p>}
                 <p className='mt-1 text-xs text-slate-500'>Profiles: {data.profiles.map((p) => p.name || p.code).join(' · ')}</p>
                 {!!data.legacyCodes?.length && <p className='mt-1 text-xs text-slate-500'>Previous codes: {data.legacyCodes.join(', ')}</p>}
                 <section aria-label='Financial classification and GL account determination' className='mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3 space-y-3'>

@@ -779,6 +779,7 @@ export function AssetForm({
                     maxLength={numeric ? 24 : Math.min(x.validation?.maxLength ?? 500, 2000)}
                     value={sv}
                     onChange={(e) => set(e.target.value)}
+                    placeholder={x.example ? `e.g. ${x.example}` : undefined}
                     className={`${input} ${border}`}
                 />
                 {x.unit && <span className='shrink-0 text-xs text-slate-400'>{x.unit}</span>}
@@ -869,8 +870,16 @@ export function AssetForm({
                 </label>
             </div>
 
+            {cls.library?.guidance && (
+                <Card>
+                    <p className='text-sm font-semibold text-white'>Recognised as: {cls.library.label}</p>
+                    <p className='mt-1 text-xs text-slate-300'>{cls.library.guidance}</p>
+                    {cls.library.supply && <p className='mt-1 text-xs text-slate-400'>Spares: usually {cls.library.supply.usual.join(' or ')} — {cls.library.supply.note}</p>}
+                </Card>
+            )}
             {Array.from(groups.entries()).map(([domain, items]) => {
-                const isOpen = open[domain] ?? false;
+                // Sections with mandatory fields start open so nothing required is hidden.
+                const isOpen = open[domain] ?? items.some((x) => x.required && isBlank(values[x.code]));
                 const missing = items.filter((x) => x.required && isBlank(values[x.code])).length;
                 const errors = items.filter((x) => fieldErrors[x.code]).length;
                 return (
