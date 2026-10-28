@@ -119,6 +119,10 @@ const PATH_RULES: Rule[] = [
     [/^org\/mnt\/material-candidates\/adopt/, 'MNT', 'MCD', 'CR'],
     [/^org\/mnt\/material-candidates\//, 'MNT', 'MCD'],
     [/^org\/mnt\/workflow\//, 'MNT', 'WFL'],
+    // Stores issue vouchers: issuing posts the goods issue to the work order; raising and cancelling change it.
+    [/^org\/mnt\/siv\/issue$/, 'MNT', 'WOR', 'PS'],
+    [/^org\/mnt\/siv\/(create|cancel|stores\/cancel)$/, 'MNT', 'WOR', 'ED'],
+    [/^org\/mnt\/siv\//, 'MNT', 'WOR', 'VW'],
     [/^org\/mnt\/sourcing\//, 'MNT', 'SRC', 'VW'],
     [/^org\/mnt\//, 'MNT', 'SET'],
     [/^org\/bom\//, 'MNT', 'BOM'],
@@ -155,6 +159,32 @@ const PATH_RULES: Rule[] = [
     [/^org\/drkms\/forms\//, 'DOC', 'FRM'],
     [/^org\/drkms\/(troubleshoot|ai)\//, 'DOC', 'KNW'],
     // ----- Organization administration -----
+    // ----- Human resources -----
+    [/^org\/hr\/employees\/create$/, 'HRM', 'EMP', 'CR'],
+    [/^org\/hr\/employees\/numbers\/assign$/, 'HRM', 'EMP', 'ED'],
+    [/^org\/hr\/employees\//, 'HRM', 'EMP', 'VW'],
+    [/^org\/hr\/private\/save$/, 'HRM', 'EMP', 'ED'],
+    [/^org\/hr\/(self|site-directory|manager-team|reportees|structure|roles|employee|private)(\/|$)/, 'HRM', 'EMP', 'VW'],
+    [/^org\/hr\/leave\/review$/, 'HRM', 'LEA', 'AP'],
+    [/^org\/hr\/leave\//, 'HRM', 'LEA'],
+    [/^org\/hr\/skills\/(decide|endorse)$/, 'HRM', 'SKL', 'AP'],
+    [/^org\/hr\/skills\//, 'HRM', 'SKL'],
+    [/^org\/hr\/evidence\/review$/, 'HRM', 'TRN', 'AP'],
+    [/^org\/hr\/(education|evidence)\//, 'HRM', 'TRN'],
+    [/^org\/hr\/compensation\/decide$/, 'HRM', 'CMP', 'AP'],
+    [/^org\/hr\/compensation\//, 'HRM', 'CMP'],
+    [/^org\/hr\/access-rules\/review$/, 'HRM', 'RUL', 'AP'],
+    [/^org\/hr\/access-rules\/simulate$/, 'HRM', 'RUL', 'VW'],
+    [/^org\/hr\/access-rules\//, 'HRM', 'RUL'],
+    // ----- Corporate finance and structure -----
+    [/^org\/corporate\/(budget|po-budget)\//, 'FIN', 'BUD'],
+    [/^org\/corporate\/allocation\/execute\//, 'FIN', 'CCA', 'AL'],
+    [/^org\/corporate\/allocation\//, 'FIN', 'CCA'],
+    [/^org\/corporate\/ic\/(post|settlements|vouchers)\/propose$/, 'FIN', 'ICO', 'PS'],
+    [/^org\/corporate\/ic\/(agreements|vouchers)\/accept$/, 'FIN', 'ICO', 'AP'],
+    [/^org\/corporate\/ic\//, 'FIN', 'ICO'],
+    [/^org\/corporate\/funding\//, 'FIN', 'TRS'],
+    [/^org\/corporate\/(read|save|finance|structure)(\/|$)/, 'ADM', 'ORG'],
     [/^org\/users\//, 'ADM', 'USR'],
     [/^org\/(roles|security)\//, 'ADM', 'SEC'],
     [/^org\/positions\//, 'ADM', 'JBR'],
@@ -227,7 +257,7 @@ const PATH_RULES: Rule[] = [
     [/^(site|reference)$/, 'SYS', 'SIT', 'VW'],
 ];
 
-const VIEW_VERBS = new Set(['list', 'get', 'options', 'overview', 'detail', 'tree', 'masters', 'targets', 'trace', 'positions', 'tiers', 'resolve', 'records', 'summary', 'dashboard', 'on-hand', 'read', 'active', 'available', 'inbox', 'registry', 'similar', 'extensions', 'candidates', 'metadata', 'quotes', 'vendors', 'owners', 'visibility', 'orders', 'warehouses', 'materials', 'spec', 'gl', 'contract', 'entities', 'roles', 'tb', 'preview', 'configuration', 'file', 'validate', 'locations', 'status', 'operations', 'audit', 'subscription', 'staffing', 'review', 'inspect', 'passed', 'describe', 'progress', 'reports', 'blueprints', 'my', 'library', 'search', 'account', 'master', 'class', 'item', 'domains', 'rates', 'collections', 'documents', 'document', 'orphans', 'logs', 'standard-preview', 'people', 'invitations', 'calendar', 'sent', 'assemblies', 'pending', 'proposals', 'templates', 'expand', 'manager-roles', 'node', 'site-roles', 'legacy-read', 'eligible-equipment', 'eligible-for-equipment', 'work-center', 'banks', 'core-skills', 'cost-center-types', 'skills', 'catalog-search', 'references', 'setup', 'assembly', 'room', 'reporting', 'preferences', 'activity', 'document-url', 'me', 'workspace', 'ownership-review', 'admin', 'context', 'health', 'session']);
+const VIEW_VERBS = new Set(['list', 'get', 'options', 'overview', 'detail', 'tree', 'masters', 'targets', 'trace', 'positions', 'tiers', 'resolve', 'records', 'summary', 'dashboard', 'on-hand', 'read', 'active', 'available', 'inbox', 'registry', 'similar', 'extensions', 'candidates', 'metadata', 'quotes', 'vendors', 'owners', 'visibility', 'orders', 'warehouses', 'materials', 'spec', 'gl', 'contract', 'entities', 'roles', 'tb', 'preview', 'configuration', 'file', 'validate', 'locations', 'status', 'operations', 'audit', 'subscription', 'staffing', 'review', 'inspect', 'passed', 'describe', 'progress', 'reports', 'blueprints', 'my', 'library', 'search', 'account', 'master', 'class', 'item', 'domains', 'rates', 'collections', 'documents', 'document', 'orphans', 'logs', 'standard-preview', 'people', 'access-check', 'numbers', 'inbox', 'team', 'peers', 'proposals', 'requests', 'catalog', 'invitations', 'calendar', 'sent', 'assemblies', 'pending', 'proposals', 'templates', 'expand', 'manager-roles', 'node', 'site-roles', 'legacy-read', 'eligible-equipment', 'eligible-for-equipment', 'work-center', 'banks', 'core-skills', 'cost-center-types', 'skills', 'catalog-search', 'references', 'setup', 'assembly', 'room', 'reporting', 'preferences', 'activity', 'document-url', 'me', 'workspace', 'ownership-review', 'admin', 'context', 'health', 'session']);
 
 const VERB_ACTION: Record<string, string> = {
     create: 'CR', draft: 'CR', start: 'CR', add: 'CR', init: 'CR', 'opening-stock': 'CR', new: 'CR', observe: 'CR', adopt: 'CR', register: 'CR',
@@ -269,6 +299,29 @@ export function linkRouteToBlueprint(route: Pick<WiredTransaction, 'path'>, defs
     return { module, area, action };
 }
 
+/** Business steps run through shared action routes, with the permission each step's handler enforces. */
+const WR = 'POST /api/org/mnt/wr/action', WO = 'POST /api/org/mnt/wo/action', OPS = 'POST /api/org/mnt/operations';
+export const ACTION_LINKS: Record<string, Array<{ route: string; permission: string }>> = {
+    'MNT-WRQ-CR': [{ route: 'POST /api/org/mnt/wr/create', permission: 'MNT.WR.create' }],
+    'MNT-WRQ-SB': [{ route: 'POST /api/org/mnt/wr/create', permission: 'MNT.WR.create' }],
+    'MNT-WRQ-ED': [{ route: WR, permission: 'MNT.WR.edit' }, { route: WR, permission: 'MNT.WR.review' }],
+    'MNT-WRQ-AP': [{ route: WR, permission: 'MNT.WR.convert' }],
+    'MNT-WRQ-RJ': [{ route: WR, permission: 'MNT.WR.decline' }],
+    'MNT-WRQ-RT': [{ route: WR, permission: 'MNT.WR.return' }],
+    'MNT-WRQ-CN': [{ route: WR, permission: 'MNT.WR.cancel' }],
+    'MNT-ASS-ED': [{ route: WR, permission: 'MNT.assessment.edit' }, { route: WO, permission: 'MNT.assessment.edit' }],
+    'MNT-ASS-SB': [{ route: WR, permission: 'MNT.assessment.edit' }],
+    'MNT-ASS-AP': [{ route: WR, permission: 'MNT.assessment.review' }, { route: WO, permission: 'MNT.assessment.review' }],
+    'MNT-WOR-CR': [{ route: 'POST /api/org/mnt/wo/create', permission: 'MNT.WR.convert' }],
+    'MNT-WOR-ED': [{ route: WO, permission: 'MNT.WO.plan' }, { route: OPS, permission: 'MNT.WO.execute' }, { route: WO, permission: 'MNT.WO.schedule' }],
+    'MNT-WOR-SB': [{ route: WO, permission: 'MNT.WO.plan' }],
+    'MNT-WOR-AP': [{ route: WO, permission: 'MNT.WO.release' }, { route: WO, permission: 'MNT.WO.safety' }, { route: OPS, permission: 'MNT.WO.verify' }],
+    'MNT-WOR-CL': [{ route: OPS, permission: 'MNT.WO.close' }],
+    'MNT-WOR-CN': [{ route: WO, permission: 'MNT.WO.cancel' }],
+    'MNT-WOR-RV': [{ route: WO, permission: 'MNT.WO.reopen' }],
+    'MNT-WOR-PS': [{ route: 'POST /api/org/mnt/siv/issue', permission: 'INV.issue' }, { route: 'POST /api/org/inv/issue/post', permission: 'INV.issue' }],
+};
+
 /** Every transaction: reserved placeholders (with their linked installed routes), unlinked routes, and admin-added codes. */
 export function transactionCatalogue(custom: CustomCode[] = [], routes: WiredTransaction[] = allSystemTransactions()): CatalogueRow[] {
     const defs = areaDefinitions();
@@ -291,6 +344,19 @@ export function transactionCatalogue(custom: CustomCode[] = [], routes: WiredTra
             postings: [],
         };
     });
+    // Transactions carried out through shared action routes (the action is in the request body): the route alone
+    // cannot say which business step runs, so each step is linked here with the permission its handler enforces.
+    const present = new Set(routes.map((r) => `${r.method} ${r.path}`));
+    for (const [code, links] of Object.entries(ACTION_LINKS)) {
+        const row = rows.find((r) => r.code === code);
+        if (!row) continue;
+        const live = links.filter((l) => present.has(l.route));
+        if (!live.length) continue;
+        row.state = 'live';
+        row.routes = [...new Set([...row.routes, ...live.map((l) => l.route)])].sort();
+        // The shared route's own permission (MNT.view) only opens the endpoint; the step's permission is what grants it.
+        row.permissions = [...new Set([...row.permissions.filter((p) => p !== 'MNT.view'), ...live.map((l) => l.permission)])].sort();
+    }
     // Financial movements: attach postings; a live posting performed through a shared route makes its code live.
     const installed = new Set(routes.map((r) => `${r.method} ${r.path}`));
     const byCode = new Map(rows.map((r) => [r.code, r]));

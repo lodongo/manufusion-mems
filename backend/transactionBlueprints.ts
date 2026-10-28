@@ -171,7 +171,7 @@ const AREAS: Record<string, string> = {
   SAL: 'QUO:Sales quotations|ORD:Sales orders|DEL:Deliveries|INV:Sales invoicing|CRD:Credit management|RET:Returns|COL:Collections',
   CRM: 'CUS:Customers|LEA:Leads|OPP:Opportunities|ACT:Customer activities|CAS:Service cases|CMP:Campaigns',
   POS: 'REG:Register sales|TIL:Tills|PAY:Payments|REF:Refunds|SHF:Cashier shifts|REC:Reconciliation',
-  HRM: 'EMP:Employees|POS:Positions|REC:Recruitment|ONB:Onboarding|LEA:Leave|ATT:Attendance|PER:Performance|TRN:Training|SKL:Skills|DSC:Discipline',
+  HRM: 'EMP:Employees|POS:Positions|REC:Recruitment|ONB:Onboarding|LEA:Leave|ATT:Attendance|PER:Performance|TRN:Training|SKL:Skills|DSC:Discipline|CMP:Compensation and benefits policy|RUL:HR privacy and access rules',
   PAY: 'RUN:Payroll runs|ERN:Earnings|DED:Deductions|TAX:Payroll taxes|BEN:Benefits|PAY:Disbursement|REC:Payroll reconciliation',
   DOC: [
     'REC:Records', 'TMP:Templates', 'VER:Version control', 'APR:Document approvals', 'RET:Retention', 'PUB:Publication',

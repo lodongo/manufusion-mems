@@ -8,6 +8,7 @@ import { WorkOrderVouchers } from './StoresIssueVouchers';
 import MntTaskAssessment, { WarehouseSparePicker, CatalogPicker } from './MntTaskAssessment';
 import { FulfilmentTrack, ResourceStatus, SOURCE_LABEL, useVendors } from './mntSourcing';
 import { useFullScreen } from './mntShared';
+import MntGateHint from './MntGateHint';
 
 export type MntData = Record<string, any>;
 export const mntInput = 'mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink';
@@ -759,7 +760,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     Maintenance windows
                 </Button>
             </div>
-            {failure && <Alert tone="error">{failure}</Alert>}
+            {failure && <MntGateHint message={failure} />}
             {message && <Alert tone="info">{message}</Alert>}
             <div className="flex flex-wrap gap-2">
                 {can.cancel && (
@@ -1307,7 +1308,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     )}
                     {failure && (
                         <div className="mt-3">
-                            <Alert tone="error">{failure}</Alert>
+                            <MntGateHint message={failure} />
                         </div>
                     )}
                 </MntDialog>

@@ -5,6 +5,7 @@ import RichTable, { type Column } from '../components/RichTable';
 import { Button, Card, Spinner, useLoad } from '../admin/kit';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { MntCheck, MntDialog, MntField, MntRiskTable, mntApi, mntInput, type MntData } from './MntWorkOrder';
+import MntGateHint from './MntGateHint';
 
 const windowColumns: Array<Column<MntData>> = [
     {
@@ -317,7 +318,7 @@ function ProductionLineMapping({ onSaved }: { onSaved: () => void }) {
                     Maintenance administration or Organization design authority is required to change these associations.
                 </Alert>
             )}
-            {failure && <Alert tone="error">{failure}</Alert>}
+            {failure && <MntGateHint message={failure} />}
             <Button busy={busy} disabled={!data.canEdit || !equipmentId || !lineId || note.trim().length < 10} onClick={save}>
                 Save line association
             </Button>
@@ -460,7 +461,7 @@ export default function MntWindows() {
                     </Button>
                 </div>
             </div>
-            {failure && <Alert tone="error">{failure}</Alert>}
+            {failure && <MntGateHint message={failure} />}
             {draft ? (
                 <Card className="space-y-5">
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -814,7 +815,7 @@ export default function MntWindows() {
                         >
                             Confirm
                         </Button>
-                        {failure && <Alert tone="error">{failure}</Alert>}
+                        {failure && <MntGateHint message={failure} />}
                     </div>
                 </MntDialog>
             )}
