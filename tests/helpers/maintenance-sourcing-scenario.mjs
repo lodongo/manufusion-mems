@@ -384,12 +384,13 @@ const freeText = (extra = {}) => ({
     searchReceiptId: nothing.receiptId, noMatchConfirmed: true, ...extra,
 });
 const oemService = (extra = {}) => ({
-    id: 'overhaul', description: 'OEM gearbox overhaul', categoryCode: 'MAT', subcategoryCode: 'SPARES', classCode: 'COMP', catalogCode: 'GEARBOX-SVC', attributes: {},
+    id: 'overhaul', description: 'OEM gearbox overhaul', categoryCode: 'MAT', subcategoryCode: 'SPARES', classCode: 'COMP', catalogCode: 'GEARBOX-SVC',
+    attributes: { 'MEMS.PROVIDER_TYPE': 'OEM', 'MEMS.EQUIPMENT_SERVICED': 'Conveyor drive gearbox', 'MEMS.WORK_SCOPE': 'FULL_OVERHAUL,TESTING', 'MEMS.WORK_LOCATION': 'PROVIDER_WORKSHOP' },
     proposedVendorIds: ['VND000001'], supplierCategory: 'VCL-001', executionDate: date, scope: 'Strip, inspect and rebuild the gearbox.',
     instructions: 'OEM overhaul manual rev C', deliverables: 'Overhaul report and test certificate', qualifications: 'OEM certified technician',
     certifications: 'OEM gearbox certification', personnel: 2, durationHours: 16, acceptanceCriteria: 'Vibration and temperature within OEM limits', quantity: 1, ...extra,
 });
-const calibration = { ...oemService(), id: 'calibration', description: 'Torque tool calibration', catalogCode: '', proposedVendorIds: [], supplierCategory: 'VCL-008', scope: 'Calibrate the torque tools used.' };
+const calibration = { ...oemService(), id: 'calibration', description: 'Torque tool calibration', catalogCode: '', attributes: {}, proposedVendorIds: [], supplierCategory: 'VCL-008', scope: 'Calibrate the torque tools used.' };
 const tasks = (spares, services) => [
     task('drive', 'Replace drive components', 'BEARINGS', spares),
     task('gearbox', 'Overhaul gearbox', 'GEARBOX', [], services),
@@ -478,8 +479,10 @@ assert.equal((await requirements()).length, 2);
 
 // 8. Free-text spare → material creation → approval → requirement pushed automatically and verified by the planner.
 await assert.rejects(() => op('planner', 'secure_spare', { code: wo, taskId: 'drive', resourceId: 'bracket', glCode: '610000' }), /approval must complete/);
+// The MEMS attribute library makes the coupling type, size and bores mandatory for a coupling material.
+const COUPLING_ATTRS = { 'MEMS.COUPLING_TYPE': 'JAW_SPIDER_ROTEX_TYPE', 'MEMS.COUPLING_SIZE': 'R38', 'MEMS.BORE_SIZES': '28 / 38 mm' };
 const queued = await op('planner', 'candidate', { code: wo, taskId: 'drive', resourceId: 'bracket', catalogCode: 'SPECIAL-CAT', attributes: {}, note: 'Free-text bracket sent for Materials Master creation.' });
-const draft = await route(maintenanceMaterialCandidateRoutes, '/api/org/mnt/material-candidates/adopt', 'planner', { candidateId: queued.candidateId, catalogCode: 'SPECIAL-CAT', attributes: {} });
+const draft = await route(maintenanceMaterialCandidateRoutes, '/api/org/mnt/material-candidates/adopt', 'planner', { candidateId: queued.candidateId, catalogCode: 'SPECIAL-CAT', attributes: COUPLING_ATTRS });
 await route(procurementRoutes, '/api/org/procurement/materials/update', 'planner', {
     id: draft.materialDraftId,
     data: { warehouseId: 'WAREHOUSE', uom: unit.code, materialClassification: 'SPARE', warehouseRestriction: 'RS15', supplyType: 'GENERAL', generalPartNumber: 'BRACKET-001', partyEntryMode: 'manual', partyName: 'Approved supplier' },

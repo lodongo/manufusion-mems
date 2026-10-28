@@ -1,3 +1,5 @@
+import CatalogueAttributeForm from '../components/CatalogueAttributeForm';
+import type { AttrDef, CatalogueLibraryInfo } from '../components/AssetDictionaryBrowser';
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
 import { CheckCircle2, ClipboardList, FileText, Paperclip, Search, ShieldCheck, Truck, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
@@ -34,8 +36,10 @@ const SOURCES: Array<[Kind, string, string]> = [
 type Kind = 'warehouse' | 'catalog' | 'description';
 interface WarehouseItem { materialId: string; materialNumber: string; name: string; uom: string; available: number | null; stockVerified: boolean; warehouseName: string }
 interface CatSummary { code: string; name: string; subcategories: Array<{ code: string; name: string }> }
-interface AttrSpec { code: string; name: string; dataType: string; unit: string; options: Array<{ code: string; label: string }>; required: boolean }
-interface Spec { code: string; name: string; categoryCode: string; subcategoryCode: string; familyCode: string; attributes: AttrSpec[] }
+interface AttrSpec { code: string; name: string; dataType: string; unit: string; options: Array<{ code: string; label: string }>; required: boolean; description?: string; example?: string; domainName?: string; validation?: Record<string, unknown> }
+interface Spec { code: string; name: string; categoryCode: string; subcategoryCode: string; familyCode: string; attributes: AttrSpec[]; library?: CatalogueLibraryInfo | null }
+/** Catalogue spec attributes in the shape used by the shared attribute form. */
+const asAttrDefs = (list: AttrSpec[]): AttrDef[] => list.map((a) => ({ key: a.code, domain: '', domainName: a.domainName ?? '', description: a.description ?? '', specific: false, ...a, validation: (a.validation ?? {}) as AttrDef['validation'] }));
 interface Similar { materialId: string; materialNumber: string; name: string; uom: string; exact: boolean; score: number; matched: number; compared: number; linked: boolean; available: number | null; differences: Array<{ name: string; theirs: string; yours: string }> }
 
 function Qty({ qty, uom, onQty, onUom, lockUom }: { qty: string; uom: string; onQty: (v: string) => void; onUom: (v: string) => void; lockUom?: boolean }) {
@@ -173,28 +177,6 @@ function FromWarehouse({ warehouseId, onAdd }: { warehouseId: string; onAdd: (sp
     );
 }
 
-function AttributeInput({ a, value, onChange }: { a: AttrSpec; value: string; onChange: (v: string) => void }) {
-    const label = `${a.name}${a.unit ? ` (${a.unit})` : ''}${a.required ? ' *' : ''}`;
-    if (a.options?.length || a.dataType === 'boolean')
-        return (
-            <label className={fieldLabel}>
-                {label}
-                <select data-native-select='true' className={field} value={value} onChange={(e) => onChange(e.target.value)}>
-                    <option value=''>{a.required ? 'Choose' : 'Not specified'}</option>
-                    {(a.options?.length ? a.options : [{ code: 'true', label: 'Yes' }, { code: 'false', label: 'No' }]).map((o) => (
-                        <option key={o.code} value={o.code}>{o.label}</option>
-                    ))}
-                </select>
-            </label>
-        );
-    return (
-        <label className={fieldLabel}>
-            {label}
-            <input className={field} inputMode={a.dataType === 'integer' || a.dataType === 'decimal' ? 'decimal' : undefined} value={value} onChange={(e) => onChange(e.target.value)} />
-        </label>
-    );
-}
-
 function FromCatalogue({ code, warehouseId, onAdd }: { code: string; warehouseId: string; onAdd: (spare: Any) => void }) {
     const [cats, setCats] = useState<CatSummary[]>([]),
         [cat, setCat] = useState(''),
@@ -273,12 +255,7 @@ function FromCatalogue({ code, warehouseId, onAdd }: { code: string; warehouseId
             {spec && (
                 <>
                     <p className='text-sm font-semibold text-ink'>{spec.name}</p>
-                    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-                        {spec.attributes.map((a) => (
-                            <AttributeInput key={a.code} a={a} value={attrs[a.code] || ''} onChange={(v) => attrPatch(a.code, v)} />
-                        ))}
-                    </div>
-                    {!spec.attributes.length && <p className='text-xs text-muted'>This entry has no technical attributes.</p>}
+                    <CatalogueAttributeForm attributes={asAttrDefs(spec.attributes)} values={attrs as Record<string, string>} onChange={(code, v) => attrPatch(code, v)} library={spec.library} />
                     <Qty qty={qty} uom={uom} onQty={setQty} onUom={setUom} />
                     {missing.length > 0 && <p className='text-xs text-amber-500'>Mandatory: {missing.join(', ')}.</p>}
                     {similar === null ? (
@@ -617,20 +594,20 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls }
                     </select>
                 </label>
             </div>
-            {text('description', 'Service name')}
-            {text('scope', 'Detailed technical scope', 3)}
-            {text('instructions', 'Work instructions and specifications', 2)}
+            {text('description', 'Service name', 0, 'e.g. Rewind 37 kW 4-pole motor')}
+            {text('scope', 'Detailed technical scope', 3, 'What the provider must do, step by step, e.g. strip, rewind with class F wire, varnish, replace both bearings, test')}
+            {text('instructions', 'Work instructions and specifications', 2, 'Standards, drawings or manuals to follow, e.g. IEC 60034, OEM manual section 7')}
             <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-                {text('qualifications', 'Required competencies', 2)}
-                {text('certifications', 'Certifications required', 2)}
+                {text('qualifications', 'Required competencies', 2, 'e.g. Certified motor rewinder, electrician grade A')}
+                {text('certifications', 'Certifications required', 2, 'e.g. EPRA licence, ISO 9001, OEM authorisation letter')}
             </div>
             <div className='grid grid-cols-3 gap-2'>
                 {num('personnel', 'People')}
                 {num('durationHours', 'Hours', 0.25)}
                 {num('quantity', 'Quantity')}
             </div>
-            {text('deliverables', 'Deliverables', 2)}
-            {text('acceptanceCriteria', 'Acceptance criteria', 2)}
+            {text('deliverables', 'Deliverables', 2, 'e.g. Repaired motor, test report with insulation resistance, warranty certificate')}
+            {text('acceptanceCriteria', 'Acceptance criteria', 2, 'How you will check the work, e.g. no-load current within 5% of nameplate, IR above 100 MΩ')}
             <div className='grid grid-cols-2 gap-2'>
                 <label className={fieldLabel}>
                     Execution date
