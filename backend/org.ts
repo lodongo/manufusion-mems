@@ -28,6 +28,7 @@ import { SOD_RULES, buildCatalogue, docStatus, requireCombinedSodAcknowledgement
 import { adminTotals, guardedAdminChange, isOrgAdmin, MAX_ORG_ADMINS, MIN_ACTIVE_ORG_ADMINS } from './adminRoster';
 import { signedUrl } from './structure';
 import { standardRoleTemplates } from './standardRoleTemplates';
+import { LEVEL_ROLE_IDS } from './levelRoles';
 import { fillMissingStandardRoleDocs } from './roleDocs';
 
 // ---------------------------------------------------------------------------
@@ -133,6 +134,7 @@ function userOut(doc: Doc) {
     return {
         uid: doc.id,
         email: str(d.email),
+        employeeNumber: str(d.employeeNumber),
         title: str(d.title),
         firstName: str(d.firstName),
         lastName: str(d.lastName),
@@ -167,6 +169,53 @@ async function getOrgUser(ctx: OrgContext, uid: string): Promise<Doc> {
     const target = /^[A-Za-z0-9]{6,128}$/.test(uid) ? await getDoc(`users/${uid}`) : null;
     if (!target || str(target.data.orgId) !== ctx.orgId) throw new HttpError(404, 'User not found.');
     return target;
+}
+
+/**
+ * Adds an employee (user account) to the organization. Called only from HR > Employee Records & Administration.
+ * `assignNumber` gives the employee number once the sign-in account exists; on any failure the account is removed.
+ * Employee skills are selections from the active HRM Skills Master, independent of access permissions.
+ */
+export async function createOrgUser(ctx: OrgContext, body: Record<string, unknown>, assignNumber: (uid: string) => Promise<string>): Promise<{ uid: string; email: string; employeeNumber: string; role: string }> {
+    if (!ctx.domain) throw new HttpError(400, 'Your organization has no email extension on record.');
+    const local = str(body.emailLocal).trim().toLowerCase();
+    if (!EMAIL_LOCAL_RE.test(local)) throw new HttpError(400, 'Enter a valid email ID using letters, numbers, dots, dashes or underscores.');
+    const email = `${local}@${ctx.domain}`;
+    const firstName = text(body, 'firstName', 1, 40, 'Enter the first name.');
+    const lastName = text(body, 'lastName', 1, 40, 'Enter the last name.');
+    const phone = phoneE164(body.phone);
+    const role = str(body.role) || 'org_user';
+    await assignableRole(ctx, role);
+    const skillsDoc = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
+    const activeSkills = new Set((Array.isArray(skillsDoc?.data.items) ? skillsDoc.data.items : [])
+        .filter(isObj).filter(item => item.active !== false).map(item => str(item.code)));
+    const submittedSkills = Array.isArray(body.skillCodes) ? body.skillCodes.map(str) : [];
+    const skillCodes = [...new Set(submittedSkills)];
+    if (skillCodes.length > 250 || skillCodes.some(code => !activeSkills.has(code))) throw new HttpError(400, 'Choose employee skills from the active HRM Skills Master.');
+    const password = str(body.password);
+    checkPassword(password);
+    const uid = await createAuthUser({ email, password, displayName: `${firstName} ${lastName}`, phoneNumber: phone });
+    let employeeNumber = '';
+    try {
+        employeeNumber = await assignNumber(uid);
+        const createdAt = nowIso();
+        const record = {
+            uid, email, firstName, lastName, phone, role, skillCodes, status: 'active', orgId: ctx.orgId,
+            employeeNumber, employeeNumberAssignedAt: createdAt,
+            createdAt, createdBy: ctx.uid, lastLoginAt: '', mustChangePassword: true,
+            passwordChangeRequiredAt: createdAt,
+        };
+        if (isOrgAdmin(role)) {
+            await guardedAdminChange(ctx, { action: 'create', uid, fields: record });
+        } else {
+            await writeDoc(`users/${uid}`, record);
+        }
+    } catch (err) {
+        await deleteAuthUser(uid);
+        throw err;
+    }
+    await record(ctx, isOrgAdmin(role) ? 'org.admin.grant.create' : 'org.user.create', email, `Role: ${role}. Employee number: ${employeeNumber}. Added through HR.`);
+    return { uid, email, employeeNumber, role };
 }
 
 export const orgRoutes = {
@@ -232,48 +281,7 @@ export const orgRoutes = {
         }),
     ],
 
-    // Employee skills are selections from the active HRM Skills Master, independent of access permissions.
-    'POST /api/org/users/create': [
-        orgRoute('org.users.create', 'ADM.users', async (ctx) => {
-            const { body } = ctx;
-            if (!ctx.domain) throw new HttpError(400, 'Your organization has no email extension on record.');
-            const local = str(body.emailLocal).trim().toLowerCase();
-            if (!EMAIL_LOCAL_RE.test(local)) throw new HttpError(400, 'Enter a valid email ID using letters, numbers, dots, dashes or underscores.');
-            const email = `${local}@${ctx.domain}`;
-            const firstName = text(body, 'firstName', 1, 40, 'Enter the first name.');
-            const lastName = text(body, 'lastName', 1, 40, 'Enter the last name.');
-            const phone = phoneE164(body.phone);
-            const role = str(body.role) || 'org_user';
-            await assignableRole(ctx, role);
-            const skillsDoc = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
-            const activeSkills = new Set((Array.isArray(skillsDoc?.data.items) ? skillsDoc.data.items : [])
-                .filter(isObj).filter(item => item.active !== false).map(item => str(item.code)));
-            const submittedSkills = Array.isArray(body.skillCodes) ? body.skillCodes.map(str) : [];
-            const skillCodes = [...new Set(submittedSkills)];
-            if (skillCodes.length > 250 || skillCodes.some(code => !activeSkills.has(code))) throw new HttpError(400, 'Choose employee skills from the active HRM Skills Master.');
-            const password = str(body.password);
-            checkPassword(password);
-            const uid = await createAuthUser({ email, password, displayName: `${firstName} ${lastName}`, phoneNumber: phone });
-            try {
-                const createdAt = nowIso();
-                const record = {
-                    uid, email, firstName, lastName, phone, role, skillCodes, status: 'active', orgId: ctx.orgId,
-                    createdAt, createdBy: ctx.uid, lastLoginAt: '', mustChangePassword: true,
-                    passwordChangeRequiredAt: createdAt,
-                };
-                if (isOrgAdmin(role)) {
-                    await guardedAdminChange(ctx, { action: 'create', uid, fields: record });
-                } else {
-                    await writeDoc(`users/${uid}`, record);
-                }
-            } catch (err) {
-                await deleteAuthUser(uid);
-                throw err;
-            }
-            await record(ctx, isOrgAdmin(role) ? 'org.admin.grant.create' : 'org.user.create', email, `Role: ${role}`);
-            return { uid };
-        }),
-    ],
+    // Users are added in HR (Employee Records & Administration) with an employee number: see hrEmployeeAdmin.ts.
 
     'POST /api/org/users/update': [
         orgRoute('org.users.update', 'ADM.users', async (ctx) => {
@@ -402,6 +410,7 @@ export const orgRoutes = {
                             description: str(r.data.description),
                             permissions,
                             system: r.data.system === true,
+                            level: isObj(r.data.level) ? { module: str(r.data.level.module), rank: Number(r.data.level.rank) || 0, level: str(r.data.level.level) } : null,
                             users: counts.get(r.id) ?? 0,
                             jobRoles: mapped.get(r.id) ?? [],
                             updatedAt: str(r.data.updatedAt),
@@ -462,7 +471,8 @@ export const orgRoutes = {
             const name = text(raw, 'name', 2, 60, 'Enter a role name (2 to 60 characters).');
             const description = text(raw, 'description', 0, 300, 'Description can be up to 300 characters.');
             if (roles.some((r) => str(r.data.name).toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'Another role already has this name.');
-            if (roles.length >= 100) throw new HttpError(400, 'An organization can have up to 100 roles.');
+            // Standard level roles are a fixed set and do not count against the limit of custom roles.
+            if (roles.filter((r) => !LEVEL_ROLE_IDS.has(r.id)).length >= 100) throw new HttpError(400, 'An organization can have up to 100 custom roles. Consolidate older roles into standard level roles first.');
             // Baseline self-service belongs to every authenticated user, NOT each role.
             const combined = permissions;
             const note = requireSodAcknowledgement(raw, combined) + requireSensitiveAcknowledgement(raw, combined);

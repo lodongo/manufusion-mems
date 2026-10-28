@@ -9,6 +9,7 @@ import { Screen, messageOf, useConfirm } from '../components/screen';
 import type { OrgRole } from './types';
 import RoleDocs, { DocStatusBadge, type RoleDoc } from './RoleDocs';
 import SecurityInspector from './SecurityInspector';
+import LevelRoles from './LevelRoles';
 
 // Security roles: what each person can do in MEMS (permissions only). Job roles (ROL_ + 6 digits) describe the
 // organization chart and are managed under Organization design.
@@ -44,6 +45,7 @@ export default function OrgRoles({ id }: { id?: string }) {
     if (id === 'inspector') return <SecurityInspector />;
     if (id === 'review') return <AccessReview />;
     if (id === 'recommended') return <RecommendedRoles />;
+    if (id === 'levels') return <LevelRoles />;
     if (id?.startsWith('docs-')) return <RoleDocs roleId={id.slice(5)} back={BASE} />;
     return <RolesHome id={id} />;
 }
@@ -71,7 +73,7 @@ function RolesHome({ id }: { id?: string }) {
 
     const columns: Array<Column<RoleItem>> = [
         { key: 'name', label: 'Security role', value: (r) => r.name, render: (r) => <span className='font-medium text-ink'>{r.name}</span> },
-        { key: 'type', label: 'Type', value: (r) => (r.system ? 'System' : 'Custom') },
+        { key: 'type', label: 'Type', value: (r) => (r.system ? 'System' : r.level ? 'Level' : 'Custom'), render: (r) => (r.system ? 'System' : r.level ? <Badge tone='brand'>{r.level.module} L{r.level.rank}</Badge> : <span className='text-muted'>Custom</span>) },
         { key: 'perms', label: 'Permissions', type: 'number', value: (r) => (r.permissions.includes('*') ? 9999 : r.permissions.length), render: (r) => (r.permissions.includes('*') ? 'All' : String(r.permissions.length)) },
         { key: 'users', label: 'Users', type: 'number', value: (r) => r.users },
         { key: 'jobs', label: 'Job roles', type: 'number', value: (r) => r.jobRoles.length },
@@ -122,7 +124,13 @@ function RolesHome({ id }: { id?: string }) {
                     </button>
                 </Alert>
             )}
-            {undocumented > 0 && <Alert tone='info'>{undocumented} role{undocumented === 1 ? ' has' : 's have'} missing or outdated documentation. Standard template rules can be initialized without overwriting existing documentation. <StandardRuleDocsButton onDone={reload} /></Alert>}
+            {data.roles.filter((r) => !r.system && !r.level).length > 0 && (
+                <Alert tone='info'>
+                    {data.roles.filter((r) => !r.system && !r.level).length} custom role(s). Use one ladder per module instead.{' '}
+                    <button type='button' className='font-semibold underline' onClick={() => navigate(`${BASE}/levels`)}>Set up level roles</button>
+                </Alert>
+            )}
+                        {undocumented > 0 && <Alert tone='info'>{undocumented} role{undocumented === 1 ? ' has' : 's have'} missing or outdated documentation. Standard template rules can be initialized without overwriting existing documentation. <StandardRuleDocsButton onDone={reload} /></Alert>}
             <RichTable<RoleItem>
                 id='org.roles'
                 title='Security roles'
@@ -132,9 +140,9 @@ function RolesHome({ id }: { id?: string }) {
                 rowKey={(r) => r.id}
                 onRowClick={(r) => navigate(`${BASE}/${r.id}`)}
                 actions={
-                    <Button variant='secondary' onClick={() => navigate(`${BASE}/recommended`)} aria-label='Standard role templates'>
+                    <Button variant='secondary' onClick={() => navigate(`${BASE}/levels`)} aria-label='Standard level roles'>
                         <Sparkles className='h-4 w-4' />
-                        <span className='hidden sm:inline'>Standard templates</span>
+                        <span className='hidden sm:inline'>Level roles</span>
                     </Button>
                 }
                 empty='No security roles yet.'

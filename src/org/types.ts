@@ -27,6 +27,8 @@ export interface OrgRole {
     description: string;
     permissions: string[];
     system: boolean;
+    /** Standard level role (one ladder per module), when this role is one. */
+    level?: { module: string; rank: number; level: string } | null;
     users: number;
     updatedAt: string;
 }

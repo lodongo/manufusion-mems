@@ -1,6 +1,7 @@
 import { HttpError, deleteDoc, listDocs, nowIso, randomId, str, writeDoc } from './core';
 import { clearAccessCache, orgRoute, type OrgContext } from './guards';
 import { canGrant, catalogue, enabledModules, orgUsers, record } from './org';
+import { LEVEL_ROLE_IDS } from './levelRoles';
 import { BUILT_MODULE_CODES, BUILT_PERMISSIONS, ROLE_TEMPLATES, reviewPermissions, sodConflicts, type StaleKey } from './permissionPolicy';
 
 // ---------------------------------------------------------------------------
@@ -162,7 +163,7 @@ export const accessReviewRoutes = {
             const inherited = asList(baseline?.data.permissions).filter((k) => offered.has(k));
             const created: string[] = [];
             const skipped: Array<{ id: string; reason: string }> = [];
-            let count = roles.length;
+            let count = roles.filter((r) => !LEVEL_ROLE_IDS.has(r.id)).length;
             for (const id of ids) {
                 const t = ROLE_TEMPLATES.find((x) => x.id === id);
                 if (!t) {

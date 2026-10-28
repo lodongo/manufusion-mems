@@ -12,6 +12,7 @@ import HrRoleExplorer from './HrRoleExplorer';
 import type {HrRoleCardData} from './hrRoleHierarchy';
 import type {HrStructureNode} from './hrStructureTree';
 import {fitLabel,type SkillFit} from './HrRoleSkillFit';
+import {HrEmployeeActions} from './HrEmployeeAdmin';
 
 type Person={uid:string;name:string;employeeNumber:string;status:string;jobRole:string;skillFit?:SkillFit};
 type Node=HrStructureNode;
@@ -66,6 +67,7 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
    {loading&&<div className="rounded-xl bg-panel p-3 text-sm text-muted">Loading authorized records…</div>}
    {error&&<div role="alert" className="rounded-xl border border-line bg-panel p-3 text-sm text-muted">{error}</div>}
    {show('HR01')&&self&&<Panel title="My employee record"><button type="button" onClick={()=>navigate('organization_home/hr/HR01/employee/'+self.uid)} className="mb-3 flex min-h-11 w-full items-center justify-between rounded-xl border border-line bg-page px-3 text-sm font-semibold text-brand">Open full employee portal <ChevronRight className="h-4 w-4"/></button><div className="grid grid-cols-2 gap-3 text-sm"><div className="col-span-2 flex items-center gap-3 rounded-xl bg-page p-4"><UserRound className="h-8 w-8 text-brand"/><strong>{self.name}</strong></div>{[['Employee number',self.employeeNumber],['Assigned position',self.jobRole],['Status',self.status]].map(([k,v])=><div className="rounded-xl bg-page p-3" key={k}><div className="text-xs text-muted">{k}</div><div className="mt-1 font-semibold">{v||'Not recorded'}</div></div>)}</div></Panel>}
+   {sectionCode==='HR02'&&<HrEmployeeActions/>}
    {show('HR02')&&directory&&<Panel title="Site employee records">
      <div className="mb-3 grid grid-cols-2 gap-2">
        <div className="rounded-xl bg-page p-3"><p className="text-xs text-muted">Employees with role skills</p><p className="mt-1 text-xl font-bold">{directory.filter(x=>x.skillFit?.percentage!==null&&x.skillFit?.percentage!==undefined).length}/{directory.length}</p></div>

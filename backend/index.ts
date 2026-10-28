@@ -116,6 +116,8 @@ import { roleDocRoutes } from './roleDocs';
 import { documentationRoutes } from './securityDocumentation';
 import { testModeRoutes, testModeSession } from './testMode';
 import { storesIssueVoucherRoutes } from './storesIssueVouchers';
+import { levelRoleRoutes } from './levelRoleRoutes';
+import { hrEmployeeAdminRoutes } from './hrEmployeeAdmin';
 import { workflowTraceRoutes } from './workflowTrace';
 import { governanceDocumentRoutes } from './governanceDocumentRoutes';
 import { governanceAuditRoutes } from './governanceAuditRoutes';
@@ -1608,6 +1610,8 @@ export const handler = router(recordWiredRoutes({
     ...documentationRoutes,
     ...testModeRoutes,
     ...storesIssueVoucherRoutes,
+    ...levelRoleRoutes,
+    ...hrEmployeeAdminRoutes,
     ...workflowTraceRoutes,
     ...governanceDocumentRoutes,
     ...governanceAuditRoutes,

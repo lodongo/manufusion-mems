@@ -18,6 +18,7 @@ interface OrgUser {
     email: string;
     firstName: string;
     lastName: string;
+    employeeNumber?: string;
     phone: string;
     role: string;
     status: string;
@@ -69,10 +70,17 @@ export default function OrgUsers({ id, myUid, myRole, canRoles }: { id?: string;
     if (users.error || !users.data) return <Alert tone='error'>{users.error || 'Could not load users.'}</Alert>;
 
     const policy = users.data.adminPolicy;
+    if (id === 'new' || id === 'new-admin') {
+        return (
+            <div className='space-y-3'>
+                <Alert tone='info'>Employees are now added in HR → Employee Records &amp; Administration, where they also get their employee number.</Alert>
+                <Button onClick={() => navigate('organization_home/hr/HR02/new')}>Add employee in HR</Button>
+            </div>
+        );
+    }
     if (id) {
-        const isNew = id === 'new' || id === 'new-admin';
-        const user = isNew ? undefined : users.data.users.find((u) => u.uid === id);
-        if (!isNew && !user) return <Alert tone='error'>User not found.</Alert>;
+        const user = users.data.users.find((u) => u.uid === id);
+        if (!user) return <Alert tone='error'>User not found.</Alert>;
         const roleOptions = roles.data?.roles.length
             ? roles.data.roles
             : [
@@ -86,7 +94,7 @@ export default function OrgUsers({ id, myUid, myRole, canRoles }: { id?: string;
                 domain={users.data.domain}
                 roles={[...roleOptions, ...(user && !roleOptions.some((r) => r.id === user.role) ? [{ id: user.role, name: roleName(user.role) }] : [])]
                     .filter((r) => r.id !== 'org_super_admin' || (policy.canManage && (policy.designated < policy.maximum || user?.role === 'org_super_admin')))}
-                initialRole={id === 'new-admin' ? 'org_super_admin' : 'org_user'}
+                initialRole='org_user'
                 adminPolicy={policy}
                 isSelf={user?.uid === myUid}
                 onDone={() => {
@@ -103,12 +111,13 @@ export default function OrgUsers({ id, myUid, myRole, canRoles }: { id?: string;
                 title='Users'
                 subtitle={`Everyone uses @${users.data.domain}`}
                 action={
-                    <Button onClick={() => navigate('organization_admin/users/new')}>
+                    <Button variant='secondary' onClick={() => navigate('organization_home/hr/HR02')}>
                         <Plus className='h-4 w-4' />
-                        Add user
+                        Add in HR
                     </Button>
                 }
             />
+            <Alert tone='info'>Employees are added in HR → Employee Records &amp; Administration, where they also get their employee number (EMP_ + 5 digits). Here you manage access, status and passwords of existing users.</Alert>
             <Card className='mb-3'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <div>
@@ -136,6 +145,7 @@ export default function OrgUsers({ id, myUid, myRole, canRoles }: { id?: string;
                                             {u.uid === myUid && <span className='text-slate-500'> (you)</span>}
                                         </p>
                                         <p className='truncate text-sm text-slate-400'>{u.email}</p>
+                                        <p className='font-mono text-xs text-slate-500'>{u.employeeNumber || 'No employee number yet'}</p>
                                         <p className='text-xs text-slate-500'>Last login: {fmtDate(u.lastLoginAt)}</p>
                                     </div>
                                     <div className='flex max-w-[46%] shrink-0 flex-col items-end gap-1'>
@@ -216,11 +226,8 @@ function UserForm({
         }
         setBusy('save');
         try {
-            if (isNew) {
-                await callBackend('/api/org/users/create', { emailLocal: emailLocal.trim().toLowerCase(), firstName, lastName, phone, role, password, skillCodes });
-            } else {
-                await withSodAcknowledgement((extra) => callBackend('/api/org/users/update', { uid: user.uid, firstName, lastName, phone, role, status, skillCodes, roleExpiresAt: role === 'org_super_admin' ? '' : roleExpiresAt, ...extra }));
-            }
+            if (isNew || !user) throw new Error('Employees are added in HR → Employee Records & Administration.');
+            await withSodAcknowledgement((extra) => callBackend('/api/org/users/update', { uid: user.uid, firstName, lastName, phone, role, status, skillCodes, roleExpiresAt: role === 'org_super_admin' ? '' : roleExpiresAt, ...extra }));
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save.');
