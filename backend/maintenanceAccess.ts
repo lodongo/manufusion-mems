@@ -2,10 +2,12 @@ import { HttpError, getDoc, isObj, nowIso, str } from './core';
 import { canAt, scopeOf } from './access';
 import type { OrgContext } from './guards';
 import { object, rows, texts } from './maintenanceDomain';
+import { bypass } from './testModeCore';
 
 export async function requireMaintenanceRole(ctx: OrgContext, gate: string, path: string[]) {
     const settings = await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
     const role = str(object(settings?.data.approverRoles)[gate]);
+    // Configuration is never relaxed. The platform testing override only relaxes HOLDING the configured job role.
     if (!role) throw new HttpError(409, `Configure ${gate} in Maintenance Workflows before proceeding.`);
     const today = nowIso().slice(0, 10);
     if (
@@ -15,7 +17,8 @@ export async function requireMaintenanceRole(ctx: OrgContext, gate: string, path
                 path.includes(str(a.nodeId)) &&
                 (!str(a.startsOn) || str(a.startsOn) <= today) &&
                 (!str(a.endsOn) || str(a.endsOn) >= today),
-        )
+        ) &&
+        !bypass(ctx, `mnt.gate.${gate}`)
     )
         throw new HttpError(403, `The configured ${gate} organizational job role is required at this location.`);
     return { role, version: Number(settings?.data.version) || 0 };

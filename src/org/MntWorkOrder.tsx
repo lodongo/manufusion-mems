@@ -4,6 +4,7 @@ import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert } from '../components/ui';
 import { Button, Card, Spinner, useLoad } from '../admin/kit';
+import { WorkOrderVouchers } from './StoresIssueVouchers';
 import MntTaskAssessment, { WarehouseSparePicker, CatalogPicker } from './MntTaskAssessment';
 import { FulfilmentTrack, ResourceStatus, SOURCE_LABEL, useVendors } from './mntSourcing';
 import { useFullScreen } from './mntShared';
@@ -1051,9 +1052,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                         )}
                                     </div>
                                 )}
-                                <button className="text-sm underline" onClick={() => navigate('organization_admin/goods_issue')}>
-                                    Open Stores goods issue for task materials
-                                </button>
+                                <WorkOrderVouchers code={code} />
                                 {execution.feedback && (
                                     <div className="space-y-2 rounded-xl border border-line p-3">
                                         {Object.entries(execution.feedback)

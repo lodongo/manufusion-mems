@@ -9,6 +9,7 @@ import { fmtDate } from '../admin/format';
 import { Screen, Segmented, messageOf, useConfirm } from '../components/screen';
 import { downloadDataUrl } from '../lib/xlsx';
 import { downloadReportPdf } from '../lib/report';
+import { OpenItems, OptionCard, ReviewSection, StepProgress, StepSection, type WizardStep } from './materialCreateUi';
 
 // Purchase requirements (REQ + 9 digits). Anyone in the organization raises one. The requirement starts as a private
 // draft; items are added one at a time and numbered 10, 20, 30 so they can become purchase order lines later. Each item
@@ -25,7 +26,6 @@ const MAX_BYTES = 450 * 1024;
 const REQ_ID = /^REQ\d{9}$/;
 
 type Kind = 'material' | 'service' | 'asset';
-type Stage = 'core' | 'technical';
 
 interface Cat {
     code: string;
@@ -117,7 +117,14 @@ interface DetailFull extends Omit<Row, 'attachments'> {
     currency: string;
     version: number;
     mine: boolean;
+    trail?: Trail;
     can: { edit: boolean; submit: boolean; discard: boolean; cancel: boolean; approve: boolean; reject: boolean; returnManager: boolean; acknowledge: boolean; returnDesk: boolean };
+}
+interface TrailDoc { id: string; number: string; status: string }
+interface Trail {
+    quotations: TrailDoc[];
+    requisitions: TrailDoc[];
+    orders: Array<TrailDoc & { poType: string; received: boolean; servicesAccepted: number; servicesWaiting: number }>;
 }
 interface Attr {
     code: string;
@@ -493,25 +500,23 @@ function AttrInput({ a, value, onChange }: { a: Attr; value: unknown; onChange: 
 
 // ----- Item editor: core details first, then technical details. Each save stores this one item. -----
 
-const STAGES: Array<{ value: Stage; label: string }> = [
-    { value: 'core', label: '1. Core details' },
-    { value: 'technical', label: '2. Technical details' },
-];
-
-function coreProblems(f: Core, o: Options): string[] {
-    const out: string[] = [];
+/** Verification of the core details, by wizard step (1 what, 2 how many and when, 3 charge to). The server checks again. */
+function stepProblems(f: Core, o: Options): Record<1 | 2 | 3, string[]> {
     const cats = o.kinds.find((k) => k.kind === f.type)?.categories ?? [];
-    if (!cats.find((c) => c.code === f.categoryCode)?.subcategories.some((s) => s.code === f.subcategoryCode)) out.push('Choose a category and subcategory.');
-    if (f.requirement.trim().length < 3) out.push('Say what is required.');
-    if (f.type !== 'service' && !f.uomCode) out.push('Choose the unit of measure.');
-    if (f.type !== 'service' && !(Number(f.quantity) > 0)) out.push('Enter a quantity.');
-    if (!f.dateRequired) out.push('Enter the date required.');
-    else if (f.dateRequired < today()) out.push('The date required cannot be in the past.');
-    if (f.budget.trim() !== '' && !(Number(f.budget) >= 0)) out.push('Enter a budget of zero or more, or leave it empty.');
-    if (!f.costCenterId) out.push('Choose a cost center.');
-    if (!f.glCode) out.push('Choose a GL account.');
-    if (f.source === 'warehouse' && !f.materialId) out.push('Pick the material from a warehouse, or switch to Description.');
-    return out;
+    const one: string[] = [];
+    const two: string[] = [];
+    const three: string[] = [];
+    if (!cats.find((c) => c.code === f.categoryCode)?.subcategories.some((s) => s.code === f.subcategoryCode)) one.push('Choose a category and subcategory.');
+    if (f.source === 'warehouse' && !f.materialId) one.push('Pick the material from a warehouse, or choose another way to identify it.');
+    if (f.requirement.trim().length < 3) one.push('Say what is required (at least 3 characters).');
+    if (f.type !== 'service' && !f.uomCode) two.push('Choose the unit of measure.');
+    if (f.type !== 'service' && !(Number(f.quantity) > 0)) two.push('Enter a quantity above zero.');
+    if (!f.dateRequired) two.push('Enter the date required.');
+    else if (f.dateRequired < today()) two.push('The date required cannot be in the past.');
+    if (f.budget.trim() !== '' && !(Number(f.budget) >= 0)) two.push('Enter a budget of zero or more, or leave it empty.');
+    if (!f.costCenterId) three.push('Choose a cost center.');
+    if (!f.glCode) three.push('Choose a GL account.');
+    return { 1: one, 2: two, 3: three };
 }
 
 interface Wh {
@@ -600,7 +605,8 @@ function ItemEditor({ id, no }: { id: string; no: string }) {
     const [technical, setTechnical] = useState('');
     const [attrs, setAttrs] = useState<Record<string, unknown>>({});
     const [savedNo, setSavedNo] = useState(0);
-    const [stage, setStage] = useState<Stage>('core');
+    const [step, setStep] = useState(1);
+    const [tried, setTried] = useState<Record<number, boolean>>({});
     const [tree, setTree] = useState<Tree | null>(null);
     const [treeError, setTreeError] = useState('');
     const [spec, setSpec] = useState<Spec | null>(null);
@@ -734,12 +740,22 @@ function ItemEditor({ id, no }: { id: string; no: string }) {
     const subs = cats.find((c) => c.code === f.categoryCode)?.subcategories ?? [];
     const items = (tree?.items ?? []).filter((i) => !f.familyCode || i.familyCode === f.familyCode);
     const isService = f.type === 'service';
-    const problems = coreProblems(f, o);
+    const problems = stepProblems(f, o);
     const attrList = spec?.attributes ?? [];
     const mandatory = attrList.filter((a) => a.required);
     const optional = attrList.filter((a) => !a.required);
     const missingAttrs = mandatory.filter((a) => isBlank(attrs[a.code]));
     const itemFiles = d.attachments.filter((a) => a.lineNo === savedNo && savedNo > 0);
+    const techOpen = (technical.trim().length < 10 ? 1 : 0) + missingAttrs.length;
+    const steps: WizardStep[] = [
+        { label: 'What', open: problems[1].length },
+        { label: 'How many, when', open: problems[2].length },
+        { label: 'Charge to', open: problems[3].length },
+        { label: 'Technical', open: techOpen },
+        { label: 'Review', open: 0 },
+    ];
+    const shown = (n: number) => (tried[n] ? problems[n as 1 | 2 | 3] ?? [] : []);
+    const fieldError = (n: 1 | 2 | 3, match: string) => (tried[n] ? problems[n].find((p) => p.includes(match)) ?? '' : '');
 
     const setAttr = (code: string, v: unknown) =>
         setAttrs((cur) => {
@@ -796,8 +812,8 @@ function ItemEditor({ id, no }: { id: string; no: string }) {
             setSavedNo(r.no);
             req.reload();
             if (next === 'technical') {
-                setStage('technical');
-                setNotice(`Item ${r.no} is saved as a draft. Now add its technical details.`);
+                setStep(4);
+                setNotice(`Item ${r.no} is saved as a draft. Add its technical details next.`);
             } else back();
         } catch (e) {
             setError(messageOf(e));
@@ -824,234 +840,257 @@ function ItemEditor({ id, no }: { id: string; no: string }) {
             setError(messageOf(e));
         }
     };
+    // Each step is checked before moving on; core details are stored as a draft when leaving step 3.
+    const next = () => {
+        setError('');
+        setNotice('');
+        if (step <= 3) {
+            const n = step as 1 | 2 | 3;
+            setTried((t) => ({ ...t, [n]: true }));
+            if (problems[n].length) return setError(problems[n][0]);
+            if (n === 3) {
+                const all = [...problems[1], ...problems[2]];
+                if (all.length) return setError(`Complete the earlier steps first: ${all[0]}`);
+                return void save('technical');
+            }
+        }
+        setStep((s) => Math.min(5, s + 1));
+    };
+    const goTo = (n: number) => {
+        setError('');
+        if (n >= 4 && !savedNo) return setError('Save the core details first (step 3). The item is stored as a draft, then you can add its technical details.');
+        setStep(n);
+    };
+
+    const actions = (
+        <>
+            {step > 1 && <Button variant='secondary' disabled={busy} onClick={() => goTo(step - 1)}>Back</Button>}
+            {step < 3 && <Button disabled={busy} onClick={next}>Next</Button>}
+            {step === 3 && <Button busy={busy} onClick={next}>{savedNo ? 'Save and continue' : 'Save item'}</Button>}
+            {step === 4 && <Button disabled={busy} onClick={next}>Review</Button>}
+            {step === 5 && <Button busy={busy} onClick={() => void save('back')}>Save item</Button>}
+        </>
+    );
+    const unitLabel = (o.units.find((g) => g.code === f.uomCategoryCode)?.units ?? []).find((u) => u.code === f.uomCode);
+    const ccName = (() => { const n = o.costCenterTree.find((x) => x.id === f.costCenterId); return n ? `${n.code} ${n.name}` : f.costCenterId; })();
 
     return (
         <Screen
             title={savedNo ? `Item ${savedNo}` : 'New item'}
             eyebrow={d.id}
-            subtitle={d.title}
+            subtitle={`Step ${step} of 5 · ${steps[step - 1].label} · ${d.title}`}
             onBack={back}
-            actions={
-                stage === 'core' ? (
-                    <Button disabled={busy || problems.length > 0} onClick={() => void save('technical')}>Save item</Button>
-                ) : (
-                    <Button disabled={busy} onClick={() => void save('back')}>Save details</Button>
-                )
+            actions={actions}
+            toolbar={
+                <div className='space-y-2'>
+                    <StepProgress steps={steps} stage={step} onStep={goTo} />
+                    {error && <p role='alert' className='rounded-lg border border-red-500/50 bg-red-500/10 p-2 text-xs text-red-400'>{error}</p>}
+                </div>
             }
-            toolbar={<Segmented label='Item steps' value={stage} options={STAGES} onChange={(v) => (v === 'technical' && !savedNo ? setError('Save the core details first. The item is stored as a draft, then you can add its technical details.') : (setError(''), setStage(v)))} />}
         >
-            {error && <Alert tone='error'>{error}</Alert>}
             {notice && <Alert tone='success'>{notice}</Alert>}
 
-            {stage === 'core' ? (
+            {step === 1 && (
                 <>
-                    <SelectField
-                        id='item-type'
-                        label='Type'
-                        value={f.type}
-                        onChange={(e) => {
-                            const next = e.target.value as Kind;
-                            patch({ type: next, source: next !== 'material' && f.source === 'warehouse' ? 'catalogue' : f.source, warehouseId: '', warehouseName: '', materialId: '', categoryCode: '', subcategoryCode: '', familyCode: '', itemCode: '', itemName: '', uomCategoryCode: '', uomCode: '', quantity: next === 'service' ? '1' : f.type === 'service' ? '' : f.quantity });
-                            setAttrs({});
-                        }}
-                    >
-                        <option value='material'>Material</option>
-                        <option value='service'>Service</option>
-                        <option value='asset'>Asset</option>
-                    </SelectField>
-                    <div className='grid gap-3 sm:grid-cols-2'>
-                        <SelectField id='item-cat' label='Category' value={f.categoryCode} onChange={(e) => { patch({ categoryCode: e.target.value, subcategoryCode: '', familyCode: '', itemCode: '', itemName: '' }); setAttrs({}); }}>
-                            <option value=''>{cats.length ? 'Choose' : 'None adopted'}</option>
-                            {cats.map((c) => (
-                                <option key={c.code} value={c.code}>{c.name}</option>
+                    <StepSection title='What do you need?' hint='The type decides which catalogue and rules apply.'>
+                        <div role='radiogroup' aria-label='Type' className='grid gap-2 sm:grid-cols-3'>
+                            {(['material', 'service', 'asset'] as Kind[]).map((k) => (
+                                <OptionCard key={k} selected={f.type === k} title={KIND_NAME[k]} text={k === 'material' ? 'Spares, consumables and stock items' : k === 'service' ? 'Work done by a supplier' : 'Equipment you will capitalise'}
+                                    onSelect={() => {
+                                        if (k === f.type) return;
+                                        patch({ type: k, source: k !== 'material' && f.source === 'warehouse' ? 'catalogue' : f.source, warehouseId: '', warehouseName: '', materialId: '', categoryCode: '', subcategoryCode: '', familyCode: '', itemCode: '', itemName: '', uomCategoryCode: '', uomCode: '', quantity: k === 'service' ? '1' : f.type === 'service' ? '' : f.quantity });
+                                        setAttrs({});
+                                    }} />
                             ))}
-                        </SelectField>
-                        <SelectField id='item-sub' label='Subcategory' value={f.subcategoryCode} disabled={!f.categoryCode} onChange={(e) => { patch({ subcategoryCode: e.target.value, familyCode: '', itemCode: '', itemName: '' }); setAttrs({}); }}>
-                            <option value=''>Choose</option>
-                            {subs.map((s) => (
-                                <option key={s.code} value={s.code}>{s.name}</option>
-                            ))}
-                        </SelectField>
-                    </div>
-                    {!cats.length && <Alert tone='warn'>No {KIND_NAME[f.type].toLowerCase()} categories have been adopted yet. Ask the procurement setup administrator.</Alert>}
-
-                    <SelectField
-                        id='item-source'
-                        label='How do you identify the item?'
-                        value={f.source}
-                        onChange={(e) => {
-                            patch({ source: e.target.value as Core['source'], itemCode: '', itemName: '', familyCode: '', warehouseId: '', warehouseName: '', materialId: '' });
-                            setAttrs({});
-                        }}
-                        hint={f.source === 'description' ? 'Describe the need in your own words. Use this when nothing in the warehouses or catalogue fits.' : f.source === 'warehouse' ? 'Choose a material that is already stocked in a warehouse.' : 'Choose a catalogue entry, then fill in its technical attributes.'}
-                    >
-                        <option value='description'>Description only</option>
-                        {f.type === 'material' && <option value='warehouse'>Pick from a warehouse</option>}
-                        <option value='catalogue'>Pick from the catalogue and add attributes</option>
-                    </SelectField>
-                    {f.source === 'warehouse' && f.type === 'material' && (
-                        <WarehousePick
-                            subcategoryCode={f.subcategoryCode}
-                            warehouseId={f.warehouseId}
-                            materialId={f.materialId}
-                            materialName={f.itemName}
-                            onWarehouse={(wid, wname) => patch({ warehouseId: wid, warehouseName: wname, materialId: '', itemName: '' })}
-                            onMaterial={(i) => patch({ materialId: i.code, itemName: i.name, requirement: f.requirement || i.name })}
-                        />
-                    )}
-                    {f.source === 'catalogue' && f.subcategoryCode && (
-                        <div className='space-y-3 rounded-2xl border border-line bg-panel p-3'>
-                            <p className='text-sm font-semibold text-ink'>Catalogue entry</p>
-                            {treeError && <Alert tone='error'>{treeError}</Alert>}
-                            {!tree && !treeError && <Spinner />}
-                            {tree && (
+                        </div>
+                    </StepSection>
+                    <StepSection title='Category' hint={cats.length ? undefined : `No ${KIND_NAME[f.type].toLowerCase()} categories have been adopted yet. Ask the procurement setup administrator.`}>
+                        <div className='grid gap-3 sm:grid-cols-2'>
+                            <SelectField id='item-cat' label='Category' required value={f.categoryCode} error={fieldError(1, 'category')} onChange={(e) => { patch({ categoryCode: e.target.value, subcategoryCode: '', familyCode: '', itemCode: '', itemName: '' }); setAttrs({}); }}>
+                                <option value=''>{cats.length ? 'Choose' : 'None adopted'}</option>
+                                {cats.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+                            </SelectField>
+                            <SelectField id='item-sub' label='Subcategory' required value={f.subcategoryCode} disabled={!f.categoryCode} onChange={(e) => { patch({ subcategoryCode: e.target.value, familyCode: '', itemCode: '', itemName: '' }); setAttrs({}); }}>
+                                <option value=''>Choose</option>
+                                {subs.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
+                            </SelectField>
+                        </div>
+                    </StepSection>
+                    <StepSection title='How do you identify it?'>
+                        <div role='radiogroup' aria-label='Identify the item' className='grid gap-2 sm:grid-cols-3'>
+                            <OptionCard selected={f.source === 'catalogue'} title='From the catalogue' text='Choose an entry, then fill in its attributes' badge='Best'
+                                onSelect={() => { patch({ source: 'catalogue', itemCode: '', itemName: '', familyCode: '', warehouseId: '', warehouseName: '', materialId: '' }); setAttrs({}); }} />
+                            {f.type === 'material' && (
+                                <OptionCard selected={f.source === 'warehouse'} title='Already stocked' text='Pick a material held in a warehouse'
+                                    onSelect={() => { patch({ source: 'warehouse', itemCode: '', itemName: '', familyCode: '', warehouseId: '', warehouseName: '', materialId: '' }); setAttrs({}); }} />
+                            )}
+                            <OptionCard selected={f.source === 'description'} title='Describe it' text='Nothing in the warehouses or catalogue fits'
+                                onSelect={() => { patch({ source: 'description', itemCode: '', itemName: '', familyCode: '', warehouseId: '', warehouseName: '', materialId: '' }); setAttrs({}); }} />
+                        </div>
+                        <div className='mt-3 space-y-3'>
+                            {f.source === 'warehouse' && f.type === 'material' && (
+                                <WarehousePick subcategoryCode={f.subcategoryCode} warehouseId={f.warehouseId} materialId={f.materialId} materialName={f.itemName}
+                                    onWarehouse={(wid, wname) => patch({ warehouseId: wid, warehouseName: wname, materialId: '', itemName: '' })}
+                                    onMaterial={(i) => patch({ materialId: i.code, itemName: i.name, requirement: f.requirement || i.name })} />
+                            )}
+                            {f.source === 'catalogue' && f.subcategoryCode && (
                                 <>
-                                    {tree.families.length > 0 && (
-                                        <SelectField id='item-family' label='Family' value={f.familyCode} onChange={(e) => { patch({ familyCode: e.target.value, itemCode: '', itemName: '' }); setAttrs({}); }}>
-                                            <option value=''>All families</option>
-                                            {tree.families.map((x) => (
-                                                <option key={x.code} value={x.code}>{x.name}</option>
-                                            ))}
-                                        </SelectField>
+                                    {treeError && <Alert tone='error'>{treeError}</Alert>}
+                                    {!tree && !treeError && <Spinner />}
+                                    {tree && (
+                                        <div className='grid gap-3 sm:grid-cols-2'>
+                                            {tree.families.length > 0 && (
+                                                <SelectField id='item-family' label='Family' value={f.familyCode} onChange={(e) => { patch({ familyCode: e.target.value, itemCode: '', itemName: '' }); setAttrs({}); }}>
+                                                    <option value=''>All families</option>
+                                                    {tree.families.map((x) => <option key={x.code} value={x.code}>{x.name}</option>)}
+                                                </SelectField>
+                                            )}
+                                            <SelectField id='item-entry' label={`${KIND_NAME[f.type]} entry`} value={f.itemCode} onChange={(e) => chooseItem(e.target.value)} hint={items.length ? `${items.length} entries. The entry decides the technical attributes.` : 'Nothing in the catalogue here. Describe the need instead.'}>
+                                                <option value=''>Not in the catalogue yet</option>
+                                                {f.itemCode && !items.some((i) => i.code === f.itemCode) && <option value={f.itemCode}>{f.itemName || f.itemCode}</option>}
+                                                {items.map((i) => <option key={i.code} value={i.code}>{i.name} ({i.code})</option>)}
+                                            </SelectField>
+                                        </div>
                                     )}
-                                    <SelectField id='item-entry' label={`${KIND_NAME[f.type]} entry`} value={f.itemCode} onChange={(e) => chooseItem(e.target.value)} hint={items.length ? `${items.length} entries. The entry decides which technical attributes you fill in.` : 'Nothing in the catalogue for this selection. Describe the need below instead.'}>
-                                        <option value=''>Not in the catalogue yet</option>
-                                        {f.itemCode && !items.some((i) => i.code === f.itemCode) && <option value={f.itemCode}>{f.itemName || f.itemCode}</option>}
-                                        {items.map((i) => (
-                                            <option key={i.code} value={i.code}>{i.name} ({i.code})</option>
-                                        ))}
-                                    </SelectField>
                                 </>
                             )}
-                            <Lookup label='Or find an entry by code or name' path={`${API}/masters`} body={{ kind: f.type }} placeholder='Search the catalogue' onPick={(i) => void pickFound(i)} />
+                            {f.source === 'catalogue' && (
+                                <Lookup label={f.subcategoryCode ? 'Or find an entry by code or name' : 'Know the entry? Find it by code or name'} path={`${API}/masters`} body={{ kind: f.type }} placeholder='Search the catalogue' onPick={(i) => void pickFound(i)} />
+                            )}
+                            {tried[1] && problems[1].some((p) => p.includes('warehouse')) && <p className='text-xs text-red-400'>{problems[1].find((p) => p.includes('warehouse'))}</p>}
                         </div>
-                    )}
-                    {f.source === 'catalogue' && !f.subcategoryCode && (
-                        <div className='rounded-2xl border border-line bg-panel p-3'>
-                            <Lookup label='Know the entry? Find it by code or name' path={`${API}/masters`} body={{ kind: f.type }} placeholder='Search the catalogue' onPick={(i) => void pickFound(i)} />
-                        </div>
-                    )}
-
-                    <Field id='item-req' label='Requirement' value={f.requirement} maxLength={300} onChange={(e) => patch({ requirement: e.target.value })} placeholder='What is needed' />
-
-                    {!isService && (
-                        <div className='grid grid-cols-2 gap-3'>
-                            <SelectField id='item-uomcat' label='Unit category' value={f.uomCategoryCode} onChange={(e) => patch({ uomCategoryCode: e.target.value, uomCode: '' })}>
-                                <option value=''>Choose</option>
-                                {o.units.map((g) => (
-                                    <option key={g.code} value={g.code}>{g.name}</option>
-                                ))}
-                            </SelectField>
-                            <SelectField id='item-uom' label='Unit of measure' value={f.uomCode} disabled={!f.uomCategoryCode} onChange={(e) => patch({ uomCode: e.target.value })}>
-                                <option value=''>Choose</option>
-                                {(o.units.find((g) => g.code === f.uomCategoryCode)?.units ?? []).map((u) => (
-                                    <option key={u.code} value={u.code}>{u.label} ({u.symbol})</option>
-                                ))}
-                            </SelectField>
-                        </div>
-                    )}
-                    <div className='grid grid-cols-2 gap-3'>
-                        {isService ? (
-                            <div>
-                                <span className='mb-1 block text-sm text-soft'>Quantity</span>
-                                <span className='flex h-12 items-center rounded-xl border border-line bg-page px-3 text-sm text-muted'>1 (one per service item)</span>
-                            </div>
-                        ) : (
-                            <Field id='item-qty' label='Quantity' type='number' inputMode='decimal' min='0' step='any' value={f.quantity} onChange={(e) => patch({ quantity: e.target.value })} />
-                        )}
-                        <Field id='item-date' label='Date required' type='date' min={today()} value={f.dateRequired} onChange={(e) => patch({ dateRequired: e.target.value })} />
-                    </div>
-
-                    <div className='space-y-2'>
-                        <SelectField id='item-urgency' label='Urgency' value={f.urgency} onChange={(e) => patch({ urgency: e.target.value })}>
-                            {o.urgencies.map((u) => (
-                                <option key={u} value={u}>{URGENCY_LABEL[u] ?? u}</option>
-                            ))}
-                        </SelectField>
-                        <p className='text-xs text-muted'>Please do not misuse High. Keep it for work that cannot wait, such as a safety risk, a production stop or a legal deadline. Your manager and procurement can see the urgency and may question it.</p>
-                        {f.urgency === 'high' && <Alert tone='warn'>You marked this item High. Be ready to explain why it cannot wait.</Alert>}
-                    </div>
-
-                    <Field
-                        id='item-budget'
-                        label={`Budget${o.currency ? ` (${o.currency})` : ''}, optional`}
-                        type='number'
-                        inputMode='decimal'
-                        min='0'
-                        step='any'
-                        value={f.budget}
-                        onChange={(e) => patch({ budget: e.target.value })}
-                        hint='Your own estimate for this whole item. It is not a quotation and does not approve any spend.'
-                    />
-
-                    {f.type === 'material' && !o.policy.directToCostCenters ? (
-                        <DeliverTo categoryCode={f.categoryCode} value={f.costCenterId} onChange={(v) => patch({ costCenterId: v })} />
-                    ) : (
-                        <CostCenterPicker tree={o.costCenterTree} value={f.costCenterId} onChange={(v) => patch({ costCenterId: v })} />
-                    )}
-                    <GlPicker costCenterId={f.costCenterId} code={f.glCode} name={f.glName} onChange={(c, n) => patch({ glCode: c, glName: n })} />
-
-                    {problems.length > 0 && (
-                        <section className='rounded-2xl border border-line bg-panel p-3'>
-                            <p className='text-sm font-semibold text-ink'>Still needed to save this item</p>
-                            <ul className='mt-1 list-disc space-y-0.5 pl-5 text-xs text-muted'>
-                                {problems.map((p) => (
-                                    <li key={p}>{p}</li>
-                                ))}
-                            </ul>
-                        </section>
-                    )}
+                    </StepSection>
+                    <StepSection title='Requirement' hint='One line your manager and the buyer will read first.'>
+                        <Field id='item-req' label='What is required' required value={f.requirement} maxLength={300} error={fieldError(1, 'required')} onChange={(e) => patch({ requirement: e.target.value })} placeholder='e.g. Drive-end bearing for conveyor C-12' />
+                    </StepSection>
+                    <OpenItems issues={shown(1)} />
                 </>
-            ) : (
+            )}
+
+            {step === 2 && (
+                <>
+                    <StepSection title='Quantity'>
+                        {isService ? (
+                            <p className='rounded-xl border border-line bg-page p-3 text-sm text-muted'>A service item is always 1. Describe the scope in the technical step.</p>
+                        ) : (
+                            <div className='grid gap-3 sm:grid-cols-3'>
+                                <SelectField id='item-uomcat' label='Unit category' required value={f.uomCategoryCode} onChange={(e) => patch({ uomCategoryCode: e.target.value, uomCode: '' })}>
+                                    <option value=''>Choose</option>
+                                    {o.units.map((g) => <option key={g.code} value={g.code}>{g.name}</option>)}
+                                </SelectField>
+                                <SelectField id='item-uom' label='Unit of measure' required value={f.uomCode} disabled={!f.uomCategoryCode} error={fieldError(2, 'unit')} onChange={(e) => patch({ uomCode: e.target.value })}>
+                                    <option value=''>Choose</option>
+                                    {(o.units.find((g) => g.code === f.uomCategoryCode)?.units ?? []).map((u) => <option key={u.code} value={u.code}>{u.label} ({u.symbol})</option>)}
+                                </SelectField>
+                                <Field id='item-qty' label='Quantity' required type='number' inputMode='decimal' min='0' step='any' value={f.quantity} error={fieldError(2, 'quantity')} onChange={(e) => patch({ quantity: e.target.value })} />
+                            </div>
+                        )}
+                    </StepSection>
+                    <StepSection title='When'>
+                        <Field id='item-date' label='Date required' required type='date' min={today()} value={f.dateRequired} error={fieldError(2, 'date')} onChange={(e) => patch({ dateRequired: e.target.value })} />
+                        <p className='mb-2 mt-4 text-sm text-soft'>Urgency</p>
+                        <div role='radiogroup' aria-label='Urgency' className='grid grid-cols-3 gap-2'>
+                            {o.urgencies.map((u) => (
+                                <OptionCard key={u} selected={f.urgency === u} title={URGENCY_LABEL[u] ?? u} text={u === 'high' ? 'Safety, stoppage or legal deadline' : u === 'low' ? 'Can wait' : 'Normal lead time'} onSelect={() => patch({ urgency: u })} />
+                            ))}
+                        </div>
+                        {f.urgency === 'high' && <p className='mt-2 text-xs text-amber-400'>Keep High for work that cannot wait. Your manager and procurement see it and may question it.</p>}
+                    </StepSection>
+                    <StepSection title='Budget' hint='Optional. Your own estimate for the whole item. It is not a quotation and approves no spend.'>
+                        <Field id='item-budget' label={`Budget${o.currency ? ` (${o.currency})` : ''}`} type='number' inputMode='decimal' min='0' step='any' value={f.budget} error={fieldError(2, 'budget')} onChange={(e) => patch({ budget: e.target.value })} />
+                    </StepSection>
+                    <OpenItems issues={shown(2)} />
+                </>
+            )}
+
+            {step === 3 && (
+                <>
+                    <StepSection title={f.type === 'material' && !o.policy.directToCostCenters ? 'Deliver to' : 'Cost center'} hint='Who receives it and carries the cost.'>
+                        {f.type === 'material' && !o.policy.directToCostCenters ? (
+                            <DeliverTo categoryCode={f.categoryCode} value={f.costCenterId} onChange={(v) => patch({ costCenterId: v })} />
+                        ) : (
+                            <CostCenterPicker tree={o.costCenterTree} value={f.costCenterId} onChange={(v) => patch({ costCenterId: v })} />
+                        )}
+                        {fieldError(3, 'cost center') && <p className='mt-2 text-xs text-red-400'>{fieldError(3, 'cost center')}</p>}
+                    </StepSection>
+                    <StepSection title='GL account' hint='The account this spend is booked to. Only accounts allowed for the cost center are listed.'>
+                        <GlPicker costCenterId={f.costCenterId} code={f.glCode} name={f.glName} onChange={(c, n) => patch({ glCode: c, glName: n })} />
+                        {fieldError(3, 'GL') && <p className='mt-2 text-xs text-red-400'>{fieldError(3, 'GL')}</p>}
+                    </StepSection>
+                    <OpenItems issues={shown(3)} />
+                    <p className='text-xs text-muted'>Saving stores this item as a draft on {d.id}. Nothing is sent until you submit the requirement.</p>
+                </>
+            )}
+
+            {step === 4 && (
                 <>
                     <p className='text-xs text-muted'>{f.requirement}{f.itemCode ? ` · ${f.itemName || f.itemCode}` : ' · not in the catalogue'}</p>
                     {specError && <Alert tone='error'>{specError}</Alert>}
                     {f.itemCode && !spec && !specError && <Spinner />}
-                    {spec && (
-                        <>
-                            {spec.guidance?.guidance && <Alert tone='info'><strong>{spec.guidance.label}.</strong> {spec.guidance.guidance}{spec.guidance.providers ? ` Usually done by: ${(spec.guidance.providers.usualLabels?.length ? spec.guidance.providers.usualLabels : spec.guidance.providers.usual).join(' · ')}.` : ''}</Alert>}
-                            {mandatory.length === 0 && attrList.length > 0 && <Alert tone='info'>This entry has no mandatory attributes. Optional ones are below.</Alert>}
-                            {mandatory.map((a) => (
-                                <AttrInput key={a.code} a={a} value={attrs[a.code]} onChange={(v) => setAttr(a.code, v)} />
-                            ))}
+                    {spec?.guidance?.guidance && <Alert tone='info'><strong>{spec.guidance.label}.</strong> {spec.guidance.guidance}{spec.guidance.providers ? ` Usually done by: ${(spec.guidance.providers.usualLabels?.length ? spec.guidance.providers.usualLabels : spec.guidance.providers.usual).join(' · ')}.` : ''}</Alert>}
+                    {spec && attrList.length > 0 && (
+                        <StepSection title='Technical attributes' hint={mandatory.length ? `${mandatory.length} mandatory, ${missingAttrs.length} still empty.` : 'No mandatory attributes for this entry.'}>
+                            <div className='grid gap-3 sm:grid-cols-2'>
+                                {mandatory.map((a) => <AttrInput key={a.code} a={a} value={attrs[a.code]} onChange={(v) => setAttr(a.code, v)} />)}
+                            </div>
                             {optional.length > 0 && (
                                 <>
-                                    <button type='button' aria-expanded={showOptional} onClick={() => setShowOptional((s) => !s)} className='flex min-h-11 items-center gap-2 text-sm text-brand'>
+                                    <button type='button' aria-expanded={showOptional} onClick={() => setShowOptional((s) => !s)} className='mt-2 flex min-h-11 items-center gap-2 text-sm text-brand'>
                                         {showOptional ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
                                         {showOptional ? 'Hide' : 'Show'} {optional.length} optional attribute{optional.length === 1 ? '' : 's'}
                                     </button>
-                                    {showOptional && optional.map((a) => <AttrInput key={a.code} a={a} value={attrs[a.code]} onChange={(v) => setAttr(a.code, v)} />)}
+                                    {showOptional && <div className='grid gap-3 sm:grid-cols-2'>{optional.map((a) => <AttrInput key={a.code} a={a} value={attrs[a.code]} onChange={(v) => setAttr(a.code, v)} />)}</div>}
                                 </>
                             )}
-                            {missingAttrs.length > 0 && <p className='text-xs text-muted'>Mandatory and still empty: {missingAttrs.map((a) => a.name).join(', ')}. You can save now and finish before you submit.</p>}
-                        </>
+                        </StepSection>
                     )}
                     {!f.itemCode && <Alert tone='info'>This item is not tied to a catalogue entry, so there are no attributes. Describe it in the technical notes.</Alert>}
-                    <label className='block'>
-                        <span className='mb-1 block text-sm text-soft'>Technical notes *</span>
-                        <textarea
-                            value={technical}
-                            maxLength={2000}
-                            rows={5}
-                            onChange={(e) => setTechnical(e.target.value)}
-                            placeholder='Specifications, standard, size, grade, scope of work, performance'
-                            className='w-full rounded-xl border border-line bg-panel p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none'
-                        />
-                        <span className='text-xs text-muted'>{technical.trim().length < 10 ? 'At least 10 characters are needed before you submit. ' : ''}{technical.length}/2000</span>
-                    </label>
-                    <section className='space-y-2 rounded-2xl border border-line bg-panel p-3'>
-                        <h2 className='text-sm font-semibold text-ink'>Files for this item</h2>
-                        <label className='flex min-h-11 cursor-pointer items-center gap-2 text-sm text-soft'>
-                            <Paperclip className='h-4 w-4' /> Add files (PDF, JPEG, PNG, up to {o.limits.fileKb} KB each)
+                    <StepSection title='Technical notes' hint='Specification, standard, size, grade, scope of work or performance. At least 10 characters before you submit.'>
+                        <label className='block'>
+                            <span className='sr-only'>Technical notes</span>
+                            <textarea value={technical} maxLength={2000} rows={5} onChange={(e) => setTechnical(e.target.value)}
+                                placeholder='Specifications, standard, size, grade, scope of work, performance'
+                                className='w-full rounded-xl border border-line bg-page p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none' />
+                            <span className={`text-xs ${technical.trim().length < 10 ? 'text-amber-400' : 'text-muted'}`}>{technical.length}/2000</span>
+                        </label>
+                    </StepSection>
+                    <StepSection title='Files for this item' hint={`PDF, JPEG or PNG, up to ${o.limits.fileKb} KB each.`}>
+                        <label className='flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm text-soft active:bg-page'>
+                            <Paperclip className='h-4 w-4' /> Add files
                             <input type='file' multiple accept='application/pdf,image/jpeg,image/png' className='sr-only' onChange={(e) => { void addFiles(e.target.files); e.target.value = ''; }} />
                         </label>
                         {itemFiles.map((a) => (
-                            <p key={a.id} className='flex items-center gap-2 text-xs text-ink'>
+                            <p key={a.id} className='mt-1 flex items-center gap-2 text-xs text-ink'>
                                 <FileText className='h-4 w-4 text-muted' /> <span className='min-w-0 flex-1 truncate'>{a.name}</span>
                                 <button type='button' aria-label={`Remove ${a.name}`} onClick={() => void dropFile(a.id)} className='flex h-11 w-11 items-center justify-center text-red-400'><X className='h-4 w-4' /></button>
                             </p>
                         ))}
-                    </section>
+                    </StepSection>
+                    <OpenItems issues={[...(technical.trim().length < 10 ? ['Technical notes of at least 10 characters'] : []), ...missingAttrs.map((a) => `${a.name} (mandatory attribute)`)]} />
+                </>
+            )}
+
+            {step === 5 && (
+                <>
+                    <ReviewSection title='What' onEdit={() => goTo(1)} items={[
+                        ['Type', KIND_NAME[f.type]],
+                        ['Category', [cats.find((c) => c.code === f.categoryCode)?.name, subs.find((s) => s.code === f.subcategoryCode)?.name].filter(Boolean).join(' / ')],
+                        ['Identified by', f.source === 'catalogue' ? (f.itemCode ? `${f.itemName || f.itemCode} (${f.itemCode})` : 'Catalogue (no entry chosen)') : f.source === 'warehouse' ? `${f.itemName || f.materialId} from ${f.warehouseName}` : 'Description only'],
+                        ['Requirement', f.requirement],
+                    ]} />
+                    <ReviewSection title='How many, when' onEdit={() => goTo(2)} items={[
+                        ['Quantity', isService ? '1 service' : `${f.quantity} ${unitLabel?.symbol ?? f.uomCode}`],
+                        ['Date required', f.dateRequired ? fmtDate(f.dateRequired) : ''],
+                        ['Urgency', URGENCY_LABEL[f.urgency] ?? f.urgency],
+                        ['Budget', f.budget.trim() ? money(Number(f.budget), o.currency) : 'Not given'],
+                    ]} />
+                    <ReviewSection title='Charge to' onEdit={() => goTo(3)} items={[['Cost center', ccName], ['GL account', f.glCode ? `${f.glCode} ${f.glName}` : '']]} />
+                    <ReviewSection title='Technical' onEdit={() => goTo(4)} items={[
+                        ...attrList.filter((a) => !isBlank(attrs[a.code])).map((a) => [a.name, `${Array.isArray(attrs[a.code]) ? (attrs[a.code] as unknown[]).join(', ') : String(attrs[a.code])}${a.unit ? ` ${a.unit}` : ''}`] as [string, string]),
+                        ['Technical notes', technical.trim()],
+                        ['Files', itemFiles.length ? itemFiles.map((x) => x.name).join(', ') : ''],
+                    ]} />
+                    {techOpen > 0 && <Alert tone='warn'>{techOpen} technical item(s) are still open. You can save now, but the requirement cannot be submitted until every item is complete.</Alert>}
                 </>
             )}
         </Screen>
@@ -1138,6 +1177,57 @@ function ItemCard({ l, currency, files, onDownload, onEdit, onRemove }: { l: Ite
                 </div>
             )}
         </section>
+    );
+}
+
+// ----- End-to-end trail: requirement -> approval -> quotation -> requisition -> order -> receipt / acceptance -----
+
+const label = (s: string) => s.replaceAll('_', ' ');
+function ProcessTrail({ status, trail }: { status: string; trail?: Trail }) {
+    const t = trail ?? { quotations: [], requisitions: [], orders: [] };
+    const approved = ['approved', 'acknowledged', 'converted'].includes(status);
+    const stopped = ['rejected', 'cancelled'].includes(status);
+    const placed = t.orders.filter((o) => ['open', 'sent', 'partial', 'full'].includes(o.status));
+    const delivered = t.orders.some((o) => o.received || o.servicesAccepted > 0);
+    const stages: Array<{ name: string; done: boolean; hint: string; docs?: Array<TrailDoc & { path: string; extra?: string }> }> = [
+        { name: 'Submitted', done: !['draft'].includes(status), hint: status === 'draft' ? 'Add items and submit' : '' },
+        { name: 'Manager approval', done: approved, hint: stopped ? label(status) : status === 'returned_user' ? 'Returned to the requester' : '' },
+        { name: 'Procurement acknowledged', done: ['acknowledged', 'converted'].includes(status) || t.quotations.length > 0, hint: '' },
+        { name: 'Quotation', done: t.quotations.some((q) => ['recommended', 'converted', 'closed'].includes(q.status)), hint: '', docs: t.quotations.map((q) => ({ ...q, path: `organization_home/procurement_quotations/${q.id}` })) },
+        { name: 'Requisition confirmed', done: t.requisitions.some((r) => ['confirmed', 'converted'].includes(r.status)), hint: '', docs: t.requisitions.map((r) => ({ ...r, path: `organization_home/procurement_requisitions/${r.id}` })) },
+        { name: 'Purchase order approved', done: placed.length > 0, hint: '', docs: t.orders.map((o) => ({ ...o, path: `organization_home/procurement_orders/${o.id}` })) },
+        { name: 'Goods received or service accepted', done: delivered, hint: t.orders.some((o) => o.servicesWaiting > 0) ? 'A service receipt is waiting for the cost center owner' : '', docs: t.orders.filter((o) => o.received || o.servicesAccepted > 0).map((o) => ({ ...o, path: `organization_home/procurement_orders/${o.id}`, extra: o.received ? 'received' : `${o.servicesAccepted} accepted` })) },
+    ];
+    const current = stopped ? -1 : stages.findIndex((x) => !x.done);
+    return (
+        <StepSection title='Progress' hint='From this requirement to the purchase order and delivery. Tap a number to open it.'>
+            <ol className='space-y-0'>
+                {stages.map((x, i) => {
+                    const now = i === current;
+                    return (
+                        <li key={x.name} className='relative flex gap-3 pb-3 last:pb-0'>
+                            {i < stages.length - 1 && <span aria-hidden className={`absolute left-[11px] top-6 h-[calc(100%-1rem)] w-0.5 ${x.done ? 'bg-brand/60' : 'bg-line'}`} />}
+                            <span className={`relative z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${x.done ? 'bg-brand text-onbrand' : now ? 'bg-amber-400 text-black' : 'border border-line bg-page text-muted'}`}>
+                                {x.done ? <Check className='h-3.5 w-3.5' /> : i + 1}
+                            </span>
+                            <div className='min-w-0 flex-1'>
+                                <p className={`text-sm ${x.done ? 'text-ink' : now ? 'font-semibold text-ink' : 'text-muted'}`}>{x.name}{now ? ' · next' : ''}</p>
+                                {x.hint && <p className='text-xs text-muted'>{x.hint}</p>}
+                                {!!x.docs?.length && (
+                                    <div className='mt-1 flex flex-wrap gap-1.5'>
+                                        {x.docs.map((doc) => (
+                                            <button key={doc.id + (doc.extra ?? '')} type='button' onClick={() => navigate(doc.path)} className='flex min-h-9 items-center gap-1 rounded-lg border border-line bg-page px-2 text-xs text-ink active:bg-panel'>
+                                                <span className='font-mono'>{doc.number}</span><span className='text-muted'>{doc.extra ?? label(doc.status)}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </li>
+                    );
+                })}
+            </ol>
+        </StepSection>
     );
 }
 
@@ -1304,6 +1394,8 @@ function Detail({ id }: { id: string }) {
                         </Button>
                         <Button disabled={blocked || !!o?.approver.problem} onClick={submit}>Submit</Button>
                     </>
+                    ) : buttons[0] && !buttons[0].variant ? (
+                        <Button onClick={buttons[0].run}>{buttons[0].label}</Button>
                     ) : null}
                 </>
             }
@@ -1368,6 +1460,7 @@ function Detail({ id }: { id: string }) {
                     </div>
                 )}
             </section>
+            {data.status !== 'draft' && <ProcessTrail status={data.status} trail={data.trail} />}
             {data.lines.map((l) => (
                 <ItemCard
                     key={l.no}

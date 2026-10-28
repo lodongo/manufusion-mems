@@ -28,6 +28,7 @@ import type { GovernanceHandlerMetadata } from './transactionRuntime';
 import { moduleDisableReason } from './transactionModuleGate';
 import { enforceOrgTransactionGovernance } from './unifiedGovernanceRuntime';
 import {docAreaForTransaction,enabledDocAreas} from './docSubmodules';
+import { testModeActiveFor } from './testModeCore';
 
 export const STAFF_ROLES = ['super_admin', 'mems_admin', 'mems_support'];
 
@@ -430,6 +431,13 @@ export interface OrgContext extends SecureContext {
     /** Location-bound permissions from job roles. Records are checked with access.canAt(). */
     grants: Grant[];
     domain: string;
+    /**
+     * Development-only platform testing override is in force for this organization super admin: maker-checker,
+     * job-role gates and position checks may be relaxed through testModeCore.bypass(). Never set otherwise.
+     */
+    testMode?: boolean;
+    /** Controls relaxed in this request (audited after success). */
+    bypassed?: string[];
 }
 
 /**
@@ -488,12 +496,16 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
             if(!enabledDocAreas(settings?.data.enabledSubmodules).includes(docArea))
                 throw new HttpError(403,'This DOC submodule is disabled for your organization.');
         }
+        // Platform testing override: only the organization super admin, only for tenants a MEMS super admin named,
+        // only until it expires and only on a development server (see testModeCore).
+        const testMode = role === 'org_super_admin' && await testModeActiveFor(orgId);
+        const bypassed: string[] = [];
         const finishApproval = await enforceOrgTransactionGovernance({ orgId, name, permission, effectivePermissionGranted: granted, org, uid: ctx.uid, body:ctx.body });
         let result: unknown;
         let tracked: Awaited<ReturnType<typeof withChangeTracking>> | null = null;
         try {
             // Material changes made by this request are collected and handed to MRP once it has succeeded.
-            tracked = await withChangeTracking(() => fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain }));
+            tracked = await withChangeTracking(() => fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain, testMode, bypassed }));
             result = tracked.result;
         } catch (err) {
             try { await finishApproval?.(false); }
@@ -508,6 +520,11 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
             await audit([{category:'governance',action:'governance.approval.reconciliation_required',actor:ctx.actor,meta:ctx.meta,
                 target:{type:'transaction',label:name},outcome:'blocked',
                 details:'Business handler succeeded but approval completion write failed'}]);
+        }
+        if (bypassed.length) {
+            await audit([{ category: 'security', action: 'testmode.controls_bypassed', actor: ctx.actor, meta: ctx.meta,
+                target: { type: 'transaction', label: name }, route: name,
+                details: `Platform testing override relaxed: ${bypassed.join(', ')}` }]);
         }
         if (tracked && (tracked.changes.length || tracked.unresolved.length)) {
             await notifyMaterialChanges({ orgId, uid: ctx.uid, actorName: str(me.data.email), route: name, changes: tracked.changes.filter((c) => c.orgId === orgId), unresolved: tracked.unresolved });

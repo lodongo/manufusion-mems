@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { bypass } from './testModeCore';
 import { stableJson } from './scopeGuard';
 import { defaultMaintenanceRiskMatrix, scoreMaintenanceRisk, finalizeAssessedTaskRisks, type RiskMatrix } from './maintenanceTaskRisk';
 import { HttpError, getDoc, listDocs, nowIso, str, writeDoc, runQuery, fieldEq, type Doc, type Obj } from './core';
@@ -936,9 +937,9 @@ async function windowAction(ctx: OrgContext, action: string) {
         const engineering = action === 'approve_engineering' || b.gate === 'engineering';
         await maintenancePermission(ctx, engineering ? 'MNT.WO.release' : 'MNT.WO.safety', path);
         const role = await requireMaintenanceRole(ctx, engineering ? 'MNT.WINDOW.ENGINEERING' : 'MNT.WINDOW.SAFETY', path);
-        if (w.data.plannedBy === ctx.uid) throw new HttpError(403, 'The window planner cannot approve their own window.');
+        if (w.data.plannedBy === ctx.uid && !bypass(ctx, 'mnt.window.planner_independence')) throw new HttpError(403, 'The window planner cannot approve their own window.');
         const other = object(w.data[engineering ? 'safety' : 'engineering']);
-        if (other.by === ctx.uid) throw new HttpError(403, 'Engineering and Safety approvals require different people.');
+        if (other.by === ctx.uid && !bypass(ctx, 'mnt.window.dual_approval')) throw new HttpError(403, 'Engineering and Safety approvals require different people.');
         if (action === 'reject_window') {
             const reason = requiredText(b.note, 'Rejection reason', 10);
             await commit([
@@ -1314,7 +1315,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         const w = await requireApprovedWindow(ctx, wo, str(task.id));
         if (action === 'reconcile_task') return reconcileTask(ctx, wo, task, e);
         if (action === 'confirm_consumption') {
-            if (!texts(e.performers).includes(ctx.uid)) throw new HttpError(403, 'The task execution team must confirm actual usage.');
+            if (!texts(e.performers).includes(ctx.uid) && !bypass(ctx, 'mnt.task.execution_team')) throw new HttpError(403, 'The task execution team must confirm actual usage.');
             return reconcileTask(ctx, wo, task, e, true);
         }
         if (e.status === 'completed') throw new HttpError(409, 'Completed task history is immutable.');
@@ -1342,7 +1343,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
                             'An assigned person or exclusive tool is already occupied by another active maintenance task.',
                         );
                 }
-            if (!texts(allocation.personnel).includes(ctx.uid))
+            if (!texts(allocation.personnel).includes(ctx.uid) && !bypass(ctx, 'mnt.task.execution_team'))
                 throw new HttpError(403, 'Only personnel allocated to this task may start it.');
             await saveWo(
                 ctx,
@@ -1378,7 +1379,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         }
         if (!['in_progress', 'blocked'].includes(str(e.status)))
             throw new HttpError(409, 'Start the task before recording execution results.');
-        if (!texts(e.performers).includes(ctx.uid)) throw new HttpError(403, 'Only this task execution team may record feedback.');
+        if (!texts(e.performers).includes(ctx.uid) && !bypass(ctx, 'mnt.task.execution_team')) throw new HttpError(403, 'Only this task execution team may record feedback.');
         if (action === 'block_task') {
             await saveWo(
                 ctx,
@@ -1523,7 +1524,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             incident = await getDoc(`${root(ctx)}/safety_incidents/${id}`);
         if (!incident || incident.data.woCode !== wo.id || incident.data.status !== 'open')
             throw new HttpError(409, 'Choose an open incident for this work order.');
-        if (incident.data.createdBy === ctx.uid)
+        if (incident.data.createdBy === ctx.uid && !bypass(ctx, 'mnt.incident.independent_clearance'))
             throw new HttpError(403, 'An independent safety representative must clear the reported incident.');
         await commit([
             {
@@ -1548,7 +1549,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         if (b.accepted !== true || b.ready !== true) throw new HttpError(400, 'Explicitly accept handover and equipment readiness.');
         const receivingParty = identifier(b.receivingParty),
             person = await getDoc(`users/${receivingParty}`);
-        if (!person || person.data.orgId !== ctx.orgId || person.data.status === 'disabled' || receivingParty !== ctx.uid)
+        if (!person || person.data.orgId !== ctx.orgId || person.data.status === 'disabled' || (receivingParty !== ctx.uid && !bypass(ctx, 'mnt.handover.receiver_self_acceptance')))
             throw new HttpError(403, 'The authorized receiving employee must record their own acceptance.');
         await saveWo(
             ctx,
@@ -1776,7 +1777,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 // execution, approvals and closure remain role-gated.
                 if (key === 'assess') await maintenancePermission(ctx, 'MNT.assessment.edit', recordPath(wo));
                 else if (key === 'reviewAssessment') {
-                    if(str(wo.data.status)!=='planning'||[str(wo.data.createdBy),str(wo.data.assessmentTasksBy)].includes(ctx.uid))throw new Error('Not independently reviewable');
+                    if(str(wo.data.status)!=='planning'||([str(wo.data.createdBy),str(wo.data.assessmentTasksBy)].includes(ctx.uid)&&!bypass(ctx,'mnt.assessment.review_independence')))throw new Error('Not independently reviewable');
                     await maintenancePermission(ctx, 'MNT.assessment.review', recordPath(wo));
                     await requireMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo));
                 }

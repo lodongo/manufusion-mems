@@ -114,6 +114,8 @@ import { healthOverview } from './healthPolicy';
 import { roleCodeRoutes } from './roleCodes';
 import { roleDocRoutes } from './roleDocs';
 import { documentationRoutes } from './securityDocumentation';
+import { testModeRoutes } from './testMode';
+import { storesIssueVoucherRoutes } from './storesIssueVouchers';
 import { workflowTraceRoutes } from './workflowTrace';
 import { governanceDocumentRoutes } from './governanceDocumentRoutes';
 import { governanceAuditRoutes } from './governanceAuditRoutes';
@@ -1603,6 +1605,8 @@ export const handler = router(recordWiredRoutes({
     ...roleCodeRoutes,
     ...roleDocRoutes,
     ...documentationRoutes,
+    ...testModeRoutes,
+    ...storesIssueVoucherRoutes,
     ...workflowTraceRoutes,
     ...governanceDocumentRoutes,
     ...governanceAuditRoutes,

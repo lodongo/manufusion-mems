@@ -8,6 +8,7 @@ import { assessmentReviewCurrent, approvedAssessmentSnapshot, reviewAssessmentPr
 import { HttpError, getDoc, isObj, listDocs, nowIso, randomId, rateLimit, runQuery, fieldEq, str, updateFields, writeDoc, type Doc, type Obj, type Plain } from './core';
 import { audit } from './audit';
 import { orgRoute, type OrgContext } from './guards';
+import { bypass } from './testModeCore';
 import { nextOrgCounter } from './positions';
 import { detectImage } from './branding';
 import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
@@ -106,6 +107,17 @@ function rec(ctx: OrgContext, action: string, target: string, details = '') {
 }
 
 const requireConfiguredMaintenanceRole = requireMaintenanceRole;
+
+/** Independence (maker-checker) holds, or the platform testing override relaxes it for this request (audited). */
+const independent = (ctx: OrgContext, holds: boolean, rule: string) => holds || bypass(ctx, rule);
+/** Assessment review prerequisites; the testing override relaxes only the reviewer-independence part. */
+function reviewIssue(ctx: OrgContext, record: Obj): string {
+    const issue = reviewAssessmentPrerequisites(record as never, ctx.uid);
+    if (!issue || ctx.testMode !== true) return issue;
+    const relaxed = reviewAssessmentPrerequisites(record as never, `test-mode-${ctx.uid}`);
+    if (relaxed !== issue) bypass(ctx, 'mnt.assessment.review_independence');
+    return relaxed;
+}
 
 function displayName(ctx: OrgContext) {
     return `${str(ctx.me.data.firstName)} ${str(ctx.me.data.lastName)}`.trim() || ctx.actor.email;
@@ -423,12 +435,12 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         edit: mine && ['submitted', 'returned'].includes(status) && at(P.WR_edit),
         resubmit: mine && status === 'returned' && at(P.WR_edit),
         cancel: mine && ['submitted', 'returned'].includes(status) && at(P.WR_cancel),
-        startReview: !mine && status === 'submitted' && at(P.WR_review),
+        startReview: status === 'submitted' && at(P.WR_review) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         assess: ['submitted','under_review'].includes(status) && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
-        return: !mine && status === 'under_review' && at(P.WR_return),
-        decline: !mine && status === 'under_review' && at(P.WR_decline),
-        reviewAssessment: !mine && status === 'under_review' && at(P.assessment_review) && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid),
-        convert: !mine && status === 'under_review' && at(P.WR_convert) && assessmentReviewCurrent(doc.data),
+        return: status === 'under_review' && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+        decline: status === 'under_review' && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+        reviewAssessment: status === 'under_review' && at(P.assessment_review) && independent(ctx, !mine && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid), 'mnt.assessment.review_independence'),
+        convert: status === 'under_review' && at(P.WR_convert) && assessmentReviewCurrent(doc.data) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         ownRequest: mine,
     };
 }
@@ -555,13 +567,13 @@ function woCan(ctx: OrgContext, doc: Doc, scope: Scope, l: Lists) {
     return {
         view: at(P.view),
         plan: ['planning', 'plan_ready'].includes(s) && at(P.WO_plan),
-        safety: ['planning', 'plan_ready'].includes(s) && at(P.WO_safety) && !(high && planner === ctx.uid),
+        safety: ['planning', 'plan_ready'].includes(s) && at(P.WO_safety) && independent(ctx, !(high && planner === ctx.uid), 'mnt.wo.safety_independence'),
         submitPlan: s === 'planning' && at(P.WO_plan),
-        release: s === 'plan_ready' && at(P.WO_release) && planner !== ctx.uid,
+        release: s === 'plan_ready' && at(P.WO_release) && independent(ctx, planner !== ctx.uid, 'mnt.wo.release_independence'),
         schedule: ['released', 'scheduled'].includes(s) && at(P.WO_schedule),
         start: ['released', 'scheduled'].includes(s) && at(P.WO_execute),
         execute: s === 'in_progress' && at(P.WO_execute),
-        verify: s === 'completed' && at(P.WO_verify) && !workers.has(ctx.uid),
+        verify: s === 'completed' && at(P.WO_verify) && independent(ctx, !workers.has(ctx.uid), 'mnt.wo.verify_independence'),
         close: s === 'verified' && at(P.WO_close),
         cancel: ['planning', 'plan_ready', 'released', 'scheduled'].includes(s) && at(P.WO_cancel),
         reopen: ['verified', 'closed'].includes(s) && at(P.WO_reopen),
@@ -813,7 +825,7 @@ export const maintenanceRoutes = {
             const today=new Date().toISOString().slice(0,10);
             const authorized=objs(ctx.me.data.assignments).some(a=>
                 str(a.positionCode)===positionCode&&(!str(a.startsOn)||str(a.startsOn)<=today)&&(!str(a.endsOn)||str(a.endsOn)>=today));
-            if(!authorized)throw new HttpError(403,'Only the assigned asset-task validation role can view the pending task queue.');
+            if(!authorized&&!bypass(ctx,'mnt.gate.MNT.TASK.VALIDATE'))throw new HttpError(403,'Only the assigned asset-task validation role can view the pending task queue.');
             const scope=await scopeOf(ctx);
             const docs=await listDocs(`organizations/${ctx.orgId}/asset_task_proposals`);
             const pending=[];
@@ -834,7 +846,7 @@ export const maintenanceRoutes = {
             const path=`organizations/${ctx.orgId}/asset_task_proposals/${id}`;
             const proposal=await getDoc(path);
             if(!proposal||str(proposal.data.status)!=='pending_validation')throw new HttpError(409,'Task proposal not awaiting validation.');
-            if(str(proposal.data.createdBy)===ctx.uid)throw new HttpError(403,'A task creator cannot validate their own task.');
+            if(str(proposal.data.createdBy)===ctx.uid&&!bypass(ctx,'mnt.task.validator_independence'))throw new HttpError(403,'A task creator cannot validate their own task.');
             const srcWo=str(proposal.data.woCode);
             const request=srcWo?await getWo(ctx,srcWo):await getWr(ctx,str(proposal.data.wrCode));
             if(Number(request.data.assessmentTasksVersion)!==Number(proposal.data.assessmentVersion))
@@ -849,7 +861,7 @@ export const maintenanceRoutes = {
             if(!requiredRole)throw new HttpError(409,'Configure an asset task validator in Maintenance Workflows first.');
             const assignments=objs(ctx.me.data.assignments);
             const today=new Date().toISOString().slice(0,10);
-            if(!assignments.some(a=>str(a.positionCode)===requiredRole&&(!str(a.startsOn)||str(a.startsOn)<=today)&&(!str(a.endsOn)||str(a.endsOn)>=today)))
+            if(!assignments.some(a=>str(a.positionCode)===requiredRole&&(!str(a.startsOn)||str(a.startsOn)<=today)&&(!str(a.endsOn)||str(a.endsOn)>=today))&&!bypass(ctx,'mnt.gate.MNT.TASK.VALIDATE'))
                 throw new HttpError(403,'Only the configured asset-task validator may approve.');
             const scope=await scopeOf(ctx);
             const assemblyId=str(proposal.data.assemblyId);
@@ -1129,7 +1141,7 @@ export const maintenanceRoutes = {
                     const s = wrStatus(d);
                     const mine = str(d.data.requestedBy) === ctx.uid;
                     if (view === 'mine') return mine;
-                    if (view === 'review') return !mine && (['submitted', 'under_review'].includes(s) && canAt(ctx, P.WR_review, pathOf(d), scope) || s==='under_review' && !assessmentReviewCurrent(d.data) && canAt(ctx, P.assessment_review, pathOf(d), scope));
+                    if (view === 'review') return (!mine || ctx.testMode === true) && (['submitted', 'under_review'].includes(s) && canAt(ctx, P.WR_review, pathOf(d), scope) || s==='under_review' && !assessmentReviewCurrent(d.data) && canAt(ctx, P.assessment_review, pathOf(d), scope));
                     if (view === 'open') return ['submitted', 'under_review', 'returned'].includes(s);
                     return true;
                 })
@@ -1149,7 +1161,7 @@ export const maintenanceRoutes = {
             const assignedReviewerRole=str(isObj(workflowConfig?.data.approverRoles)?workflowConfig.data.approverRoles['MNT.ASSESS.REVIEW']:'');
             // The configured assessment approver reviews only; technical assessors edit.
             // Never offer editing to the same assigned Maintenance Lead.
-            if (assignedReviewerRole) {
+            if (assignedReviewerRole && ctx.testMode !== true) {
                 try {
                     await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
                     can.assess = false;
@@ -1166,7 +1178,7 @@ export const maintenanceRoutes = {
                 try { await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc)); }
                 catch { reviewBlockers.push('Assign your employee to the configured Maintenance Lead organizational position at this asset/location.'); }
             }
-            if ([doc.data.requestedBy,doc.data.createdBy,doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid))
+            if ([doc.data.requestedBy,doc.data.createdBy,doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid) && !bypass(ctx,'mnt.assessment.review_independence'))
                 reviewBlockers.push('A requester or technical assessor cannot approve their own assessment.');
             if (!str(doc.data.maintenanceTypeCode)||!str(doc.data.workTypeCode)||!str(doc.data.priorityCode)||!str(doc.data.disciplineCode))
                 reviewBlockers.push('The technical assessor must complete maintenance type, work type, priority and discipline.');
@@ -1226,7 +1238,7 @@ export const maintenanceRoutes = {
             // Enforce assessor/approver separation on the server as well as in the UI.
             const workflowSettings = await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
             const assessmentLeadRole = str(isObj(workflowSettings?.data.approverRoles) ? workflowSettings.data.approverRoles['MNT.ASSESS.REVIEW'] : '');
-            if (assessmentLeadRole) {
+            if (assessmentLeadRole && ctx.testMode !== true) {
                 try {
                     await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
                     can.assess = false;
@@ -1361,7 +1373,7 @@ export const maintenanceRoutes = {
                     if(str(doc.data.status)!=='under_review')throw new HttpError(409,'Start the work request review before assessment approval.');
                     need(ctx,P.assessment_review,pathOf(doc),scope);
                     const role=await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
-                    const issue=reviewAssessmentPrerequisites(doc.data,ctx.uid);
+                    const issue=reviewIssue(ctx,doc.data);
                     if(issue)throw new HttpError(409,issue);
                     if(!str(doc.data.maintenanceTypeCode)||!str(doc.data.workTypeCode)||!str(doc.data.priorityCode)||!str(doc.data.disciplineCode))
                         throw new HttpError(409,'Complete maintenance type, work type, priority and discipline before approval.');
@@ -1611,7 +1623,7 @@ export const maintenanceRoutes = {
                     if(str(d.status)!=='planning')throw new HttpError(409,'Assessment review must occur before planning submission.');
                     need(ctx,P.assessment_review,pathOf(doc),scope);
                     const role=await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
-                    const issue=reviewAssessmentPrerequisites(d,ctx.uid);
+                    const issue=reviewIssue(ctx,d);
                     if(issue)throw new HttpError(409,issue);
                     if(note.length<10)throw new HttpError(400,'Write technical review notes (at least 10 characters).');
                     const approval=action==='return_assessment'
@@ -1666,7 +1678,7 @@ export const maintenanceRoutes = {
                     if (controls.length < 10) throw new HttpError(400, 'Describe the control measures (at least 10 characters).');
                     if (!ppe.length) throw new HttpError(400, 'Choose the PPE required.');
                     const top = l.criticality.slice(0, 2).map((c) => c.code);
-                    if ((permits.length || top.includes(risk.code)) && str(d.plannedBy) === ctx.uid) throw new HttpError(403, 'High-risk work must be safety-assessed by someone other than the planner.');
+                    if ((permits.length || top.includes(risk.code)) && str(d.plannedBy) === ctx.uid && !bypass(ctx, 'mnt.wo.safety_independence')) throw new HttpError(403, 'High-risk work must be safety-assessed by someone other than the planner.');
                     await done(
                         { safety: { riskCode: risk.code, riskLabel: risk.label, hazards, permits, ppe, isolation: b.isolation === true, controls, assessedBy: ctx.uid, assessedByName: displayName(ctx), assessedAt: now } },
                         'Safety assessed',

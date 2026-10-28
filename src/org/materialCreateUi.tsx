@@ -47,24 +47,7 @@ export function WizardBar({ title, steps, stage, onStep, onClose, status, action
                     </span>
                 )}
             </div>
-            <ol className='mt-2 grid gap-1' style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }} aria-label='Progress'>
-                {steps.map((s, i) => {
-                    const n = i + 1;
-                    const done = n < stage && s.open === 0;
-                    const active = n === stage;
-                    const reachable = n < stage;
-                    return (
-                        <li key={s.label} className='min-w-0'>
-                            <button type='button' disabled={!reachable} onClick={() => onStep(n)} aria-current={active ? 'step' : undefined}
-                                aria-label={`Step ${n}: ${s.label}${done ? ' (complete)' : s.open ? ` (${s.open} open)` : ''}`}
-                                className='group block w-full text-left disabled:cursor-default'>
-                                <span className={`block h-1.5 rounded-full ${active ? 'bg-brand' : done ? 'bg-brand/60' : n < stage ? 'bg-amber-400/70' : 'bg-line'}`} />
-                                <span className={`mt-1 hidden truncate text-[11px] sm:block ${active ? 'font-semibold text-ink' : 'text-muted group-enabled:group-hover:text-soft'}`}>{s.label}</span>
-                            </button>
-                        </li>
-                    );
-                })}
-            </ol>
+            <div className='mt-2'><StepProgress steps={steps} stage={stage} onStep={onStep} /></div>
             {blocked && (
                 <p role='alert' className='mt-2 flex items-start gap-2 rounded-lg border border-red-500/60 bg-red-500/10 p-2 text-xs font-semibold text-red-400'>
                     <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0' />{blocked}
@@ -75,6 +58,30 @@ export function WizardBar({ title, steps, stage, onStep, onClose, status, action
             )}
             <div className='mt-2 flex items-center gap-2'>{actions}</div>
         </div>
+    );
+}
+
+/** Step progress: segments per step; earlier steps are tappable to go back. Usable in any screen's toolbar. */
+export function StepProgress({ steps, stage, onStep }: { steps: WizardStep[]; stage: number; onStep: (stage: number) => void }) {
+    return (
+        <ol className='grid gap-1' style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }} aria-label='Progress'>
+            {steps.map((s, i) => {
+                const n = i + 1;
+                const done = n < stage && s.open === 0;
+                const active = n === stage;
+                const reachable = n < stage;
+                return (
+                    <li key={s.label} className='min-w-0'>
+                        <button type='button' disabled={!reachable} onClick={() => onStep(n)} aria-current={active ? 'step' : undefined}
+                            aria-label={`Step ${n}: ${s.label}${done ? ' (complete)' : s.open ? ` (${s.open} open)` : ''}`}
+                            className='group block w-full text-left disabled:cursor-default'>
+                            <span className={`block h-1.5 rounded-full ${active ? 'bg-brand' : done ? 'bg-brand/60' : n < stage ? 'bg-amber-400/70' : 'bg-line'}`} />
+                            <span className={`mt-1 hidden truncate text-[11px] sm:block ${active ? 'font-semibold text-ink' : 'text-muted group-enabled:group-hover:text-soft'}`}>{s.label}</span>
+                        </button>
+                    </li>
+                );
+            })}
+        </ol>
     );
 }
 

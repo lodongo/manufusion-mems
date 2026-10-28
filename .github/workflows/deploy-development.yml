@@ -142,7 +142,7 @@ jobs:
             --memory=1Gi \
             --concurrency=20 \
             --timeout=120 \
-            --update-env-vars="MEMS_FIREBASE_PROJECT_ID=${MEMS_FIREBASE_PROJECT_ID},MEMS_STORAGE_BUCKET=${MEMS_STORAGE_BUCKET},MEMS_DEPLOY_SHA=${GITHUB_SHA}" \
+            --update-env-vars="MEMS_FIREBASE_PROJECT_ID=${MEMS_FIREBASE_PROJECT_ID},MEMS_STORAGE_BUCKET=${MEMS_STORAGE_BUCKET},MEMS_DEPLOY_SHA=${GITHUB_SHA},MEMS_ENVIRONMENT=development" \
             --quiet
           URL="$(gcloud run services describe mems-dev --project="${GCP_DEV_PROJECT_ID}" --region="${GCP_DEV_REGION}" --format='value(status.url)')"
           test -n "$URL"

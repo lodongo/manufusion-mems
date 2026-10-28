@@ -1,5 +1,6 @@
 import { HttpError, fieldEq, getDoc, listDocs, nowIso, runQuery, str, writeDoc, updateFields, type Doc, type Fields } from './core';
 import { orgRoute, type OrgContext } from './guards';
+import { bypass } from './testModeCore';
 import { record, orgUsers } from './org';
 import {
     P,
@@ -394,10 +395,132 @@ const ISSUE_STATUSES = ['released', 'scheduled', 'in_progress'];
 /** Goods issue belongs to inventory: it works whether or not the Finance module is enabled (then it only moves quantities). */
 const inv = (name: string, fn: (ctx: OrgContext) => Promise<unknown>) => orgRoute(name, null, fn);
 
-async function issueWarehouses(ctx: OrgContext, units: Map<string, Unit>) {
+export async function issueWarehouses(ctx: OrgContext, units: Map<string, Unit>) {
     const scope = await scopeOf(ctx);
     const whs = await listDocs(`organizations/${ctx.orgId}/warehouses`);
     return whs.filter((w) => units.get(w.id) && permAt(ctx, 'INV.issue', w.id, units, scope)).map((w) => ({ id: w.id, code: units.get(w.id)!.code, name: units.get(w.id)!.name || str(w.data.name) }));
+}
+
+/**
+ * Posts one goods issue (GI + 8 digits). Callers MUST hold the 'maintenance_operations' and 'inventory_movements'
+ * locks. Used by the goods issue screen and by Stores Issue Vouchers (one issue per voucher task group).
+ */
+export async function postGoodsIssue(ctx: OrgContext, body: Record<string, unknown>): Promise<{ ok: true; id: string; journalId: string; finance?: string; reused?: boolean }> {
+        const units = await unitsOf(ctx.orgId);
+        const wh = str(body.warehouseId);
+        const warehouses = await issueWarehouses(ctx, units);
+        if (!warehouses.some((w) => w.id === wh)) throw new HttpError(403, 'You cannot issue from this warehouse (INV.issue).');
+        if (body.acknowledge !== true) throw new HttpError(400, 'Confirm that the quantities were physically handed over.');
+        const woId = str(body.workOrderId);
+        let ccId = str(body.ccId);
+        let wo: Doc | null = null;
+        if (woId) {
+            if (!/^WO\d{8}$/.test(woId)) throw new HttpError(400, 'Choose the work order.');
+            wo = await getDoc(`organizations/${ctx.orgId}/work_orders/${woId}`);
+            if (!wo || !ISSUE_STATUSES.includes(str(wo.data.status))) throw new HttpError(409, 'The work order is not released, scheduled or in progress.');
+            ccId = str(wo.data.costCenterId);
+        }
+        const taskId = str(body.taskId);
+        if (wo && objs(wo.data.assessmentTasks).length && !objs(wo.data.assessmentTasks).some(t=>t.id===taskId)) throw new HttpError(400,'Select the assessed task receiving these materials.');
+        if (wo && (isClosedTask(wo,taskId))) throw new HttpError(409,'This task is already completed.');
+        const cc = units.get(ccId);
+        const whLe = leOf(units, wh);
+        if (!cc || cc.level !== 'cost_center' || cc.status === 'inactive') throw new HttpError(400, 'Choose the cost center the stock is issued to.');
+        if (!whLe || leOf(units, ccId)?.id !== whLe.id) throw new HttpError(400, 'Stock can only be issued to a cost center of the same legal entity as the warehouse.');
+        if ((await ccFinOf(ctx.orgId, ccId)).status !== 'open') throw new HttpError(409, `Cost center ${cc.code} is not open for posting.`);
+        const receivedBy = str(body.receivedBy);
+        if (!receivedBy || (receivedBy === ctx.uid && !bypass(ctx, 'inv.issue.receiver_independence'))) throw new HttpError(400, 'Choose the person who received the stock. It cannot be you.');
+        const receiver = await getDoc(`users/${receivedBy}`);
+        if (!receiver || str(receiver.data.orgId) !== ctx.orgId || str(receiver.data.status) === 'disabled') throw new HttpError(400, 'Choose an active person of your organization as the receiver.');
+        const ref = oneLine(body.ref, 60);
+        const note = oneLine(body.note, 300);
+        if (ref.length < 3) throw new HttpError(400, 'Enter the issue slip or reference (at least 3 characters).');
+        if(wo&&taskId){const old=(await listDocs(`organizations/${ctx.orgId}/goods_issues`)).find(d=>d.data.workOrderId===woId&&d.data.taskId===taskId&&d.data.ref===ref);if(old)return {ok:true,id:old.id,journalId:str(old.data.journalId),reused:true};}
+        const want = objs(body.lines).slice(0, 31).map((l) => ({ materialId: str(l.materialId), qty: Number(l.qty) }));
+        if (!want.length || want.length > 30) throw new HttpError(400, 'Issue 1 to 30 materials at a time.');
+        if (new Set(want.map((w) => w.materialId)).size !== want.length) throw new HttpError(400, 'A material is listed twice.');
+        const info = await leInfo(ctx.orgId, units, wh, new Map());
+        const map = info.state === 'live' ? await mappingOf(ctx.orgId, info.le.id) : null;
+        // Every line is checked before a number is taken, so issue numbers have no gaps from refused issues.
+        const checked: Array<{ m: Doc; qty: number }> = [];
+        for (const [i, w] of want.entries()) {
+            if (!(w.qty > 0) || w.qty > 1e9) throw new HttpError(400, `Line ${i + 1}: enter a quantity above zero.`);
+            const m = await materialIn(ctx.orgId, w.materialId, wh);
+            if (!m) throw new HttpError(400, `Line ${i + 1}: the material is not held in this warehouse.`);
+            if(wo&&taskId){if(!['active','approved'].includes(str(m.data.status)))throw new HttpError(409,'Maintenance stock issues require approved, active materials.');await verifyMaintenanceStockLedger(ctx.orgId,wh,w.materialId);}
+            const { available } = await physicalOf(ctx.orgId, wh, w.materialId);
+            const reservation=woId&&taskId?await reservationForIssue(ctx.orgId,woId,taskId,w.materialId,wh,w.qty,''): {reserved:0,writes:[]};
+            if (w.qty > available + reservation.reserved + 1e-9) throw new HttpError(409, `${str(m.data.materialNumber)}: only ${available} is available to issue.`);
+            if (map) issueValue(await stockValOf(ctx.orgId, wh, m.id), w.qty);
+            checked.push({ m, qty: w.qty });
+        }
+        const n = await nextCounter(ctx.orgId, 'issues', 'seq');
+        const gid = `GI${String(n).padStart(8, '0')}`;
+        const lines: PostLine[] = [];
+        const stock: StockMove[] = [];
+        const extra: Write[] = [];
+        const out: Obj[] = [];
+        for (const [i, c] of checked.entries()) {
+            const m = c.m;
+            const w = { materialId: m.id, qty: c.qty };
+            if(woId&&taskId) extra.push(...(await reservationForIssue(ctx.orgId,woId,taskId,m.id,wh,w.qty,gid)).writes);
+            const mroContext=wo?mroFinancialContext(wo.data,taskId,m.data):null;
+            const entry = mjEntry(m.id, wh, str(m.data.materialNumber), 'GOODS_ISSUE', -w.qty, gid, ctx.uid, { issueId: gid, costCenterId: ccId, workOrderId: woId, taskId, receivedBy, source: 'goods_issue',
+                ...(mroContext?{maintenanceTypeCode:mroContext.maintenanceTypeCode,storesCostNatureCode:mroContext.costNatureCode,maintenanceTypeSource:mroContext.source}:{}) });
+            const mjId = safeId(`GI_${gid}_${i + 1}`);
+            let value = 0;
+            let expenseGlCode='',inventoryGlCode='',mroRuleId='';
+            if (map) {
+                const v = await stockValOf(ctx.orgId, wh, m.id);
+                value = issueValue(v, w.qty);
+                const sdoc = await getDoc(P(ctx.orgId).stock(wh, m.id));
+                const inv = str(sdoc?.data.glCode) || roleAccount(map, 'INVENTORY', str(m.data.categoryCode),{event:woId?'GI_WO':'GI_CC',costCenterId:ccId});
+                const context={event:woId?'GI_WO':'GI_CC',costCenterId:ccId,categoryCode:str(m.data.categoryCode),
+                    maintenanceTypeCode:mroContext?.maintenanceTypeCode||'',costNatureCode:mroContext?.costNatureCode||''};
+                const exp = roleAccount(map, woId ? 'MAINT_CONSUMPTION' : 'CONSUMPTION', str(m.data.categoryCode),context);
+                const matched=mroContext?resolveAccountRule(map.rules,'MAINT_CONSUMPTION',context):null;
+                expenseGlCode=exp;inventoryGlCode=inv;mroRuleId=matched?.id||'';
+                entry.expenseGlCode=exp;entry.inventoryGlCode=inv;
+                if(mroContext)entry.accountDeterminationRuleId=mroRuleId;
+                const desc = `${str(m.data.materialNumber)} ${str(m.data.name)}: ${w.qty}`.slice(0, 200);
+                if (value > 0) {
+                    lines.push({ side: 'D', glCode: exp, ccId, amount: value, description: desc, materialId: m.id, qty: w.qty });
+                    lines.push({ side: 'C', glCode: inv, ccId: wh, amount: value, description: desc, materialId: m.id, qty: -w.qty });
+                }
+                stock.push({ warehouseId: wh, materialId: m.id, materialNumber: str(m.data.materialNumber), qty: -w.qty, value: -value, expectedUpdateTime: v.updateTime, glCode: inv } as StockMove);
+                extra.push({ path: mjPath(ctx.orgId, mjId), exists: false, fields: entry });
+            } else extra.push({path:mjPath(ctx.orgId,mjId),fields:{...entry,financeNote:'Finance not live: not posted'},exists:false});
+            out.push({ no: i + 1, materialId: m.id, materialNumber: str(m.data.materialNumber), name: str(m.data.name), qty: w.qty, uom: str(m.data.baseUom) || str(m.data.uom), value, unitCost: w.qty ? round4(value / w.qty) : 0,
+                ...(map?{expenseGlCode,inventoryGlCode}:{}),
+                ...(mroContext?{maintenanceTypeCode:mroContext.maintenanceTypeCode,maintenanceTypeLabel:mroContext.maintenanceTypeLabel,
+                   storesCostNatureCode:mroContext.costNatureCode,accountDeterminationRuleId:mroRuleId,maintenanceTypeSource:mroContext.source}:{}),
+            });
+        }
+        let journalId = '';
+        const at = nowIso();
+        const issueRecord: Obj = { id: gid, leId: info.le.id, warehouseId: wh, costCenterId: ccId, workOrderId: woId, taskId, ref, note, lines: out as unknown as Fields[keyof Fields], total: round2(out.reduce((s, x) => s + (Number(x.value) || 0), 0)), journalId:'', finance: info.state, issuedBy: ctx.uid, issuedByName: nameOf(ctx.me), receivedBy, receivedByName: nameOf(receiver), at };
+        extra.push({path:`organizations/${ctx.orgId}/goods_issues/${gid}`,fields:issueRecord,exists:false});
+        if (map && lines.length) {
+            const p = await post(ctx, { leId: info.le.id, type: woId ? 'GI_WO' : 'GI_CC', docCurrency: info.currency, fxRate: 1, lines, narrative: `Goods issue ${gid} from ${units.get(wh)?.code} to ${cc.code}${woId ? ` for ${woId}` : ''}`, source: { kind: 'goods_issue', id: gid, ref: ref, route: woId ? `organization_home/work_orders/${woId}` : '' }, trace: { issueId: gid, warehouseId: wh, costCenterId: ccId, workOrderId: woId, taskId, receivedBy: nameOf(receiver),
+                ...(wo?{maintenanceTypeCode:str(wo.data.maintenanceTypeCode),
+                  mroLines:out.map(x=>({materialId:str(x.materialId),expenseGlCode:str(x.expenseGlCode),inventoryGlCode:str(x.inventoryGlCode),
+                    maintenanceTypeCode:str(x.maintenanceTypeCode),storesCostNatureCode:str(x.storesCostNatureCode),accountDeterminationRuleId:str(x.accountDeterminationRuleId)}))}:{}) }, sourceKey: `GI_${gid}`, stock, extra });
+            journalId = p.id;
+        } else {
+            const zeroStock:Write[]=[];
+            if(map)for(const move of stock){const path=P(ctx.orgId).stock(move.warehouseId,move.materialId),doc=await getDoc(path);zeroStock.push({path,fields:{...(doc?.data||{}),warehouseId:move.warehouseId,materialId:move.materialId,materialNumber:move.materialNumber,qtyM:(Number(doc?.data.qtyM)||0)+Math.round(move.qty*10000),valueC:Number(doc?.data.valueC)||0,glCode:move.glCode||'',updatedAt:at},...(doc?{updateTime:doc.updateTime}:{exists:false})});}
+            await commit([...extra,...zeroStock]);
+        }
+        if(journalId) await updateFields(`organizations/${ctx.orgId}/goods_issues/${gid}`,{journalId});
+        if (wo && !objs(wo.data.assessmentTasks).length) {
+            const fresh = await getDoc(`organizations/${ctx.orgId}/work_orders/${woId}`);
+            if (fresh) {
+                const used = [...objs(fresh.data.sparesUsed), ...out.map((x) => ({ id: `${gid}_${x.no}`, description: `${str(x.materialNumber)} ${str(x.name)}`.trim(), qty: Number(x.qty), uom: str(x.uom) || 'EA', unitCost: Number(x.unitCost) || 0, uid: ctx.uid, name: nameOf(ctx.me), at, source: 'goods_issue', issueId: gid, journalId }))];
+                await writeDoc(`organizations/${ctx.orgId}/work_orders/${woId}`, { ...fresh.data, sparesUsed: used as unknown as Fields[keyof Fields], updatedAt: at } as unknown as Fields);
+            }
+        }
+        await record(ctx, 'org.inv.issue.post', gid, `${out.length} material(s) from ${units.get(wh)?.code} to ${cc.code}${woId ? ` (${woId})` : ''}, received by ${nameOf(receiver)}${journalId ? `, journal ${journalId}` : ', not posted (finance not live)'}`.slice(0, 400));
+        return { ok: true, id: gid, journalId, finance: info.state };
 }
 
 export const finOpsRoutes = {
@@ -422,128 +545,12 @@ export const finOpsRoutes = {
                 materials: stock.filter((s) => (avail.get(s.materialId) ?? 0)>0||taskReservations.some(r=>r.data.materialId===s.materialId)).map((s) => ({ ...s, available: avail.get(s.materialId) ?? 0,reservations:taskReservations.filter(r=>r.data.materialId===s.materialId).map(r=>({workOrderId:r.data.workOrderId,taskId:r.data.taskId,qty:r.data.qty})) })),
                 costCenters: ccs.map((u) => ({ id: u.id, code: u.code, name: u.name })),
                 workOrders: wos.filter((w) => ISSUE_STATUSES.includes(str(w.data.status)) && ccs.some((c) => c.id === str(w.data.costCenterId))).map((w) => ({ id: w.id, title: str(w.data.title), costCenterId: str(w.data.costCenterId), status: str(w.data.status),tasks:objs(w.data.assessmentTasks).map(t=>({id:str(t.id),description:str(t.description)})) })),
-                people: users.filter((u) => u.id !== ctx.uid && str(u.data.status) !== 'disabled').map((u) => ({ uid: u.id, name: nameOf(u) })).sort((a, b) => a.name.localeCompare(b.name)),
+                people: users.filter((u) => (u.id !== ctx.uid || ctx.testMode === true) && str(u.data.status) !== 'disabled').map((u) => ({ uid: u.id, name: nameOf(u) })).sort((a, b) => a.name.localeCompare(b.name)),
             };
         }),
     ],
     'POST /api/org/inv/issue/post': [
-        inv('org.inv.issue.post', async (ctx) => withLock(ctx.orgId,'maintenance_operations',()=>withLock(ctx.orgId,'inventory_movements', async () => {
-            const units = await unitsOf(ctx.orgId);
-            const wh = str(ctx.body.warehouseId);
-            const warehouses = await issueWarehouses(ctx, units);
-            if (!warehouses.some((w) => w.id === wh)) throw new HttpError(403, 'You cannot issue from this warehouse (INV.issue).');
-            if (ctx.body.acknowledge !== true) throw new HttpError(400, 'Confirm that the quantities were physically handed over.');
-            const woId = str(ctx.body.workOrderId);
-            let ccId = str(ctx.body.ccId);
-            let wo: Doc | null = null;
-            if (woId) {
-                if (!/^WO\d{8}$/.test(woId)) throw new HttpError(400, 'Choose the work order.');
-                wo = await getDoc(`organizations/${ctx.orgId}/work_orders/${woId}`);
-                if (!wo || !ISSUE_STATUSES.includes(str(wo.data.status))) throw new HttpError(409, 'The work order is not released, scheduled or in progress.');
-                ccId = str(wo.data.costCenterId);
-            }
-            const taskId = str(ctx.body.taskId);
-            if (wo && objs(wo.data.assessmentTasks).length && !objs(wo.data.assessmentTasks).some(t=>t.id===taskId)) throw new HttpError(400,'Select the assessed task receiving these materials.');
-            if (wo && (isClosedTask(wo,taskId))) throw new HttpError(409,'This task is already completed.');
-            const cc = units.get(ccId);
-            const whLe = leOf(units, wh);
-            if (!cc || cc.level !== 'cost_center' || cc.status === 'inactive') throw new HttpError(400, 'Choose the cost center the stock is issued to.');
-            if (!whLe || leOf(units, ccId)?.id !== whLe.id) throw new HttpError(400, 'Stock can only be issued to a cost center of the same legal entity as the warehouse.');
-            if ((await ccFinOf(ctx.orgId, ccId)).status !== 'open') throw new HttpError(409, `Cost center ${cc.code} is not open for posting.`);
-            const receivedBy = str(ctx.body.receivedBy);
-            if (!receivedBy || receivedBy === ctx.uid) throw new HttpError(400, 'Choose the person who received the stock. It cannot be you.');
-            const receiver = await getDoc(`users/${receivedBy}`);
-            if (!receiver || str(receiver.data.orgId) !== ctx.orgId || str(receiver.data.status) === 'disabled') throw new HttpError(400, 'Choose an active person of your organization as the receiver.');
-            const ref = oneLine(ctx.body.ref, 60);
-            const note = oneLine(ctx.body.note, 300);
-            if (ref.length < 3) throw new HttpError(400, 'Enter the issue slip or reference (at least 3 characters).');
-            if(wo&&taskId){const old=(await listDocs(`organizations/${ctx.orgId}/goods_issues`)).find(d=>d.data.workOrderId===woId&&d.data.taskId===taskId&&d.data.ref===ref);if(old)return {ok:true,id:old.id,journalId:str(old.data.journalId),reused:true};}
-            const want = objs(ctx.body.lines).slice(0, 31).map((l) => ({ materialId: str(l.materialId), qty: Number(l.qty) }));
-            if (!want.length || want.length > 30) throw new HttpError(400, 'Issue 1 to 30 materials at a time.');
-            if (new Set(want.map((w) => w.materialId)).size !== want.length) throw new HttpError(400, 'A material is listed twice.');
-            const info = await leInfo(ctx.orgId, units, wh, new Map());
-            const map = info.state === 'live' ? await mappingOf(ctx.orgId, info.le.id) : null;
-            // Every line is checked before a number is taken, so issue numbers have no gaps from refused issues.
-            const checked: Array<{ m: Doc; qty: number }> = [];
-            for (const [i, w] of want.entries()) {
-                if (!(w.qty > 0) || w.qty > 1e9) throw new HttpError(400, `Line ${i + 1}: enter a quantity above zero.`);
-                const m = await materialIn(ctx.orgId, w.materialId, wh);
-                if (!m) throw new HttpError(400, `Line ${i + 1}: the material is not held in this warehouse.`);
-                if(wo&&taskId){if(!['active','approved'].includes(str(m.data.status)))throw new HttpError(409,'Maintenance stock issues require approved, active materials.');await verifyMaintenanceStockLedger(ctx.orgId,wh,w.materialId);}
-                const { available } = await physicalOf(ctx.orgId, wh, w.materialId);
-                const reservation=woId&&taskId?await reservationForIssue(ctx.orgId,woId,taskId,w.materialId,wh,w.qty,''): {reserved:0,writes:[]};
-                if (w.qty > available + reservation.reserved + 1e-9) throw new HttpError(409, `${str(m.data.materialNumber)}: only ${available} is available to issue.`);
-                if (map) issueValue(await stockValOf(ctx.orgId, wh, m.id), w.qty);
-                checked.push({ m, qty: w.qty });
-            }
-            const n = await nextCounter(ctx.orgId, 'issues', 'seq');
-            const gid = `GI${String(n).padStart(8, '0')}`;
-            const lines: PostLine[] = [];
-            const stock: StockMove[] = [];
-            const extra: Write[] = [];
-            const out: Obj[] = [];
-            for (const [i, c] of checked.entries()) {
-                const m = c.m;
-                const w = { materialId: m.id, qty: c.qty };
-                if(woId&&taskId) extra.push(...(await reservationForIssue(ctx.orgId,woId,taskId,m.id,wh,w.qty,gid)).writes);
-                const mroContext=wo?mroFinancialContext(wo.data,taskId,m.data):null;
-                const entry = mjEntry(m.id, wh, str(m.data.materialNumber), 'GOODS_ISSUE', -w.qty, gid, ctx.uid, { issueId: gid, costCenterId: ccId, workOrderId: woId, taskId, receivedBy, source: 'goods_issue',
-                    ...(mroContext?{maintenanceTypeCode:mroContext.maintenanceTypeCode,storesCostNatureCode:mroContext.costNatureCode,maintenanceTypeSource:mroContext.source}:{}) });
-                const mjId = safeId(`GI_${gid}_${i + 1}`);
-                let value = 0;
-                let expenseGlCode='',inventoryGlCode='',mroRuleId='';
-                if (map) {
-                    const v = await stockValOf(ctx.orgId, wh, m.id);
-                    value = issueValue(v, w.qty);
-                    const sdoc = await getDoc(P(ctx.orgId).stock(wh, m.id));
-                    const inv = str(sdoc?.data.glCode) || roleAccount(map, 'INVENTORY', str(m.data.categoryCode),{event:woId?'GI_WO':'GI_CC',costCenterId:ccId});
-                    const context={event:woId?'GI_WO':'GI_CC',costCenterId:ccId,categoryCode:str(m.data.categoryCode),
-                        maintenanceTypeCode:mroContext?.maintenanceTypeCode||'',costNatureCode:mroContext?.costNatureCode||''};
-                    const exp = roleAccount(map, woId ? 'MAINT_CONSUMPTION' : 'CONSUMPTION', str(m.data.categoryCode),context);
-                    const matched=mroContext?resolveAccountRule(map.rules,'MAINT_CONSUMPTION',context):null;
-                    expenseGlCode=exp;inventoryGlCode=inv;mroRuleId=matched?.id||'';
-                    entry.expenseGlCode=exp;entry.inventoryGlCode=inv;
-                    if(mroContext)entry.accountDeterminationRuleId=mroRuleId;
-                    const desc = `${str(m.data.materialNumber)} ${str(m.data.name)}: ${w.qty}`.slice(0, 200);
-                    if (value > 0) {
-                        lines.push({ side: 'D', glCode: exp, ccId, amount: value, description: desc, materialId: m.id, qty: w.qty });
-                        lines.push({ side: 'C', glCode: inv, ccId: wh, amount: value, description: desc, materialId: m.id, qty: -w.qty });
-                    }
-                    stock.push({ warehouseId: wh, materialId: m.id, materialNumber: str(m.data.materialNumber), qty: -w.qty, value: -value, expectedUpdateTime: v.updateTime, glCode: inv } as StockMove);
-                    extra.push({ path: mjPath(ctx.orgId, mjId), exists: false, fields: entry });
-                } else extra.push({path:mjPath(ctx.orgId,mjId),fields:{...entry,financeNote:'Finance not live: not posted'},exists:false});
-                out.push({ no: i + 1, materialId: m.id, materialNumber: str(m.data.materialNumber), name: str(m.data.name), qty: w.qty, uom: str(m.data.baseUom) || str(m.data.uom), value, unitCost: w.qty ? round4(value / w.qty) : 0,
-                    ...(map?{expenseGlCode,inventoryGlCode}:{}),
-                    ...(mroContext?{maintenanceTypeCode:mroContext.maintenanceTypeCode,maintenanceTypeLabel:mroContext.maintenanceTypeLabel,
-                       storesCostNatureCode:mroContext.costNatureCode,accountDeterminationRuleId:mroRuleId,maintenanceTypeSource:mroContext.source}:{}),
-                });
-            }
-            let journalId = '';
-            const at = nowIso();
-            const issueRecord: Obj = { id: gid, leId: info.le.id, warehouseId: wh, costCenterId: ccId, workOrderId: woId, taskId, ref, note, lines: out as unknown as Fields[keyof Fields], total: round2(out.reduce((s, x) => s + (Number(x.value) || 0), 0)), journalId:'', finance: info.state, issuedBy: ctx.uid, issuedByName: nameOf(ctx.me), receivedBy, receivedByName: nameOf(receiver), at };
-            extra.push({path:`organizations/${ctx.orgId}/goods_issues/${gid}`,fields:issueRecord,exists:false});
-            if (map && lines.length) {
-                const p = await post(ctx, { leId: info.le.id, type: woId ? 'GI_WO' : 'GI_CC', docCurrency: info.currency, fxRate: 1, lines, narrative: `Goods issue ${gid} from ${units.get(wh)?.code} to ${cc.code}${woId ? ` for ${woId}` : ''}`, source: { kind: 'goods_issue', id: gid, ref: ref, route: woId ? `organization_home/work_orders/${woId}` : '' }, trace: { issueId: gid, warehouseId: wh, costCenterId: ccId, workOrderId: woId, taskId, receivedBy: nameOf(receiver),
-                    ...(wo?{maintenanceTypeCode:str(wo.data.maintenanceTypeCode),
-                      mroLines:out.map(x=>({materialId:str(x.materialId),expenseGlCode:str(x.expenseGlCode),inventoryGlCode:str(x.inventoryGlCode),
-                        maintenanceTypeCode:str(x.maintenanceTypeCode),storesCostNatureCode:str(x.storesCostNatureCode),accountDeterminationRuleId:str(x.accountDeterminationRuleId)}))}:{}) }, sourceKey: `GI_${gid}`, stock, extra });
-                journalId = p.id;
-            } else {
-                const zeroStock:Write[]=[];
-                if(map)for(const move of stock){const path=P(ctx.orgId).stock(move.warehouseId,move.materialId),doc=await getDoc(path);zeroStock.push({path,fields:{...(doc?.data||{}),warehouseId:move.warehouseId,materialId:move.materialId,materialNumber:move.materialNumber,qtyM:(Number(doc?.data.qtyM)||0)+Math.round(move.qty*10000),valueC:Number(doc?.data.valueC)||0,glCode:move.glCode||'',updatedAt:at},...(doc?{updateTime:doc.updateTime}:{exists:false})});}
-                await commit([...extra,...zeroStock]);
-            }
-            if(journalId) await updateFields(`organizations/${ctx.orgId}/goods_issues/${gid}`,{journalId});
-            if (wo && !objs(wo.data.assessmentTasks).length) {
-                const fresh = await getDoc(`organizations/${ctx.orgId}/work_orders/${woId}`);
-                if (fresh) {
-                    const used = [...objs(fresh.data.sparesUsed), ...out.map((x) => ({ id: `${gid}_${x.no}`, description: `${str(x.materialNumber)} ${str(x.name)}`.trim(), qty: Number(x.qty), uom: str(x.uom) || 'EA', unitCost: Number(x.unitCost) || 0, uid: ctx.uid, name: nameOf(ctx.me), at, source: 'goods_issue', issueId: gid, journalId }))];
-                    await writeDoc(`organizations/${ctx.orgId}/work_orders/${woId}`, { ...fresh.data, sparesUsed: used as unknown as Fields[keyof Fields], updatedAt: at } as unknown as Fields);
-                }
-            }
-            await record(ctx, 'org.inv.issue.post', gid, `${out.length} material(s) from ${units.get(wh)?.code} to ${cc.code}${woId ? ` (${woId})` : ''}, received by ${nameOf(receiver)}${journalId ? `, journal ${journalId}` : ', not posted (finance not live)'}`.slice(0, 400));
-            return { ok: true, id: gid, journalId, finance: info.state };
-        }))),
+        inv('org.inv.issue.post', async (ctx) => withLock(ctx.orgId,'maintenance_operations',()=>withLock(ctx.orgId,'inventory_movements', () => postGoodsIssue(ctx, ctx.body)))),
     ],
     'POST /api/org/inv/issue/list': [
         inv('org.inv.issue.list', async (ctx) => {

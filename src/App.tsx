@@ -19,6 +19,7 @@ import RegisterStart from './apply/RegisterStart';
 import OrgHomePage from './org/OrgHomePage';
 import DocumentSignatureVerification from './org/DocumentSignatureVerification';
 import QuickWorkspace from './org/QuickWorkspace';
+import TestModeBanner from './components/TestModeBanner';
 import OrganizationFooter from './components/OrganizationFooter';
 import HealthTracker from './components/HealthTracker';
 import { Alert } from './components/ui';
@@ -306,6 +307,7 @@ function App() {
             <div className={organizationReady ? 'mems-organization-ui' + (quickFullScreen ? '' : ' pb-12') : ''}><Suspense fallback={<Loading />}>{render()}</Suspense></div>
             {organizationReady && session && <HealthTracker session={session} />}
             {organizationReady && !quickFullScreen && <OrganizationFooter />}
+            {organizationReady && !quickFullScreen && <TestModeBanner />}
         </SiteContext.Provider>
     );
 }
