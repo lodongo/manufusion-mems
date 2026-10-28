@@ -66,19 +66,27 @@ export interface AttrDef {
     validation: { minimum?: number; maximum?: number; maxLength?: number; pattern?: string };
     required: boolean;
     specific: boolean;
-    /** Example value shown as a hint (MEMS attribute library). */
+    /** Example value shown as a hint (from the catalogue file). */
     example?: string;
-    /** "MEMS_LIBRARY" when the attribute was added by the MEMS attribute library. */
-    source?: string;
 }
 
-/** Equipment type recognised by the MEMS attribute library, with plain setup guidance. */
-export interface CatalogueLibraryInfo {
+/** Usual supply or service route stored in the catalogue file. */
+export interface CatalogueRoute {
+    usual: string[];
+    usualLabels?: string[];
+    note: string;
+}
+/** Set-up guidance for one entry, stored in the catalogue file (setupGuidance). */
+export interface CatalogueGuidance {
     id: string;
     label: string;
     guidance: string;
-    supply?: { usual: Array<'OEM' | 'OCM' | 'GENERAL'>; note: string };
+    /** Materials: OEM / OCM / general supplier. */
+    supply?: CatalogueRoute;
+    /** Services and assets: who normally does the work or services the asset. */
+    providers?: CatalogueRoute;
 }
+export const routeText = (r: CatalogueRoute) => (r.usualLabels?.length ? r.usualLabels : r.usual).join(' · ');
 
 export interface ClassDetail {
     code: string;
@@ -96,7 +104,7 @@ export interface ClassDetail {
     accounting?: Record<string, unknown>;
     financialMapping?: Record<string, unknown>;
     financial?: FinancialCatalogueInfo;
-    library?: CatalogueLibraryInfo | null;
+    guidance?: CatalogueGuidance | null;
 }
 
 export const lifeText = (l: Life | null) => (!l ? '' : !l.depreciable ? 'Not depreciated' : l.min === l.max ? `${l.min} years` : `${l.min}–${l.max} years`);
@@ -375,8 +383,6 @@ function ClassView({
             { key: 'options', label: 'Options', value: (r) => r.options.map((o) => o.label).join(', '), hidden: true },
             { key: 'description', label: 'Description', value: (r) => r.description },
             { key: 'example', label: 'Example', value: (r) => r.example ?? '', hidden: true },
-            { key: 'source', label: 'Source', value: (r) => (r.source === 'MEMS_LIBRARY' ? 'MEMS attribute library' : 'Uploaded catalogue'),
-                render: (r) => (r.source === 'MEMS_LIBRARY' ? <Badge tone='warn'>MEMS library</Badge> : <span className='text-slate-500'>Catalogue</span>) },
         ],
         [L]
     );
@@ -400,9 +406,10 @@ function ClassView({
                     {data.groupCode} {names.get(data.groupCode)} › {data.categoryCode} {names.get(data.categoryCode)}
                 </p>
                 {data.synonyms.length > 0 && <p className='mt-1 text-xs text-slate-400'>Also known as: {data.synonyms.join(', ')}</p>}
-                {showAttributes && data.library && <p className='mt-2 rounded-lg border border-slate-700 bg-slate-950/70 p-2 text-xs text-slate-300'>
-                    <strong className='text-white'>Recognised as: {data.library.label}.</strong> {data.library.guidance} {data.attributes.filter((a) => a.source === 'MEMS_LIBRARY').length} attributes were added by the MEMS attribute library; the uploaded catalogue is unchanged.
-                    {data.library.supply && <span className='mt-1 block'>Usual supply: {data.library.supply.usual.join(' / ')} — {data.library.supply.note}</span>}
+                {showAttributes && data.guidance && <p className='mt-2 rounded-lg border border-slate-700 bg-slate-950/70 p-2 text-xs text-slate-300'>
+                    <strong className='text-white'>{data.guidance.label}.</strong> {data.guidance.guidance}
+                    {data.guidance.supply && <span className='mt-1 block'>Usual supply: {routeText(data.guidance.supply)} — {data.guidance.supply.note}</span>}
+                    {data.guidance.providers && <span className='mt-1 block'>Usually serviced by: {routeText(data.guidance.providers)} — {data.guidance.providers.note}</span>}
                 </p>}
                 <p className='mt-1 text-xs text-slate-500'>Profiles: {data.profiles.map((p) => p.name || p.code).join(' · ')}</p>
                 {!!data.legacyCodes?.length && <p className='mt-1 text-xs text-slate-500'>Previous codes: {data.legacyCodes.join(', ')}</p>}

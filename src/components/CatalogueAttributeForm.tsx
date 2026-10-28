@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Lightbulb } from 'lucide-react';
-import type { AttrDef, CatalogueLibraryInfo } from './AssetDictionaryBrowser';
+import { routeText, type AttrDef, type CatalogueGuidance } from './AssetDictionaryBrowser';
 
 // ---------------------------------------------------------------------------
 // Catalogue attribute form (materials, maintenance spares, services).
@@ -97,11 +97,11 @@ export function AttributeField({ a, value, onChange, showError }: { a: AttrDef; 
     );
 }
 
-export default function CatalogueAttributeForm({ attributes, values, onChange, library, showErrors = false, title = 'Technical attributes' }: {
+export default function CatalogueAttributeForm({ attributes, values, onChange, guidance, showErrors = false, title = 'Technical attributes' }: {
     attributes: AttrDef[];
     values: Record<string, string>;
     onChange: (code: string, value: string) => void;
-    library?: CatalogueLibraryInfo | null;
+    guidance?: CatalogueGuidance | null;
     showErrors?: boolean;
     title?: string;
 }) {
@@ -112,10 +112,13 @@ export default function CatalogueAttributeForm({ attributes, values, onChange, l
     const filledOptional = optional.filter((a) => String(values[a.code] ?? '').trim()).length;
     return (
         <section className='space-y-3' aria-label={title}>
-            {library?.guidance && (
+            {guidance?.guidance && (
                 <div className='flex gap-2 rounded-xl border border-brand/30 bg-brand/5 p-3'>
                     <Lightbulb className='mt-0.5 h-4 w-4 shrink-0 text-brand' />
-                    <p className='text-xs text-soft'><strong className='text-ink'>{library.label}.</strong> {library.guidance}</p>
+                    <div className='text-xs text-soft'>
+                        <p><strong className='text-ink'>{guidance.label}.</strong> {guidance.guidance}</p>
+                        {guidance.providers && <p className='mt-1'>Usually done by: <strong className='text-ink'>{routeText(guidance.providers)}</strong> — {guidance.providers.note}</p>}
+                    </div>
                 </div>
             )}
             {required.length > 0 && (

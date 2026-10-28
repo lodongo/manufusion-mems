@@ -7,7 +7,7 @@ import { workspaceNavigate as navigate } from '../lib/route';
 import { fetchReference } from '../lib/reference';
 import { Alert, Field, SelectField } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
-import AssetDictionaryBrowser, { lifeText, typeLabel, type AttrDef, type ClassDetail } from '../components/AssetDictionaryBrowser';
+import AssetDictionaryBrowser, { lifeText, routeText, typeLabel, type AttrDef, type ClassDetail } from '../components/AssetDictionaryBrowser';
 import { Badge, Button, Card, PageTitle, Spinner, TextArea, useLoad } from '../admin/kit';
 
 // Organization asset register (AST). Every asset belongs to one class of the organization's own copy of the
@@ -870,11 +870,11 @@ export function AssetForm({
                 </label>
             </div>
 
-            {cls.library?.guidance && (
+            {cls.guidance?.guidance && (
                 <Card>
-                    <p className='text-sm font-semibold text-white'>Recognised as: {cls.library.label}</p>
-                    <p className='mt-1 text-xs text-slate-300'>{cls.library.guidance}</p>
-                    {cls.library.supply && <p className='mt-1 text-xs text-slate-400'>Spares: usually {cls.library.supply.usual.join(' or ')} — {cls.library.supply.note}</p>}
+                    <p className='text-sm font-semibold text-white'>{cls.guidance.label}</p>
+                    <p className='mt-1 text-xs text-slate-300'>{cls.guidance.guidance}</p>
+                    {cls.guidance.providers && <p className='mt-1 text-xs text-slate-400'>Usually serviced by {routeText(cls.guidance.providers)} — {cls.guidance.providers.note}</p>}
                 </Card>
             )}
             {Array.from(groups.entries()).map(([domain, items]) => {

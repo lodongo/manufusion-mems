@@ -372,8 +372,7 @@ const tasks = [
                 subcategoryCode: 'SPARES',
                 classCode: 'COMP',
                 catalogCode: 'GEARBOX-SVC',
-                // Mandatory service details from the MEMS attribute library (who may do it, on what, what is included, where).
-                attributes: { 'MEMS.PROVIDER_TYPE': 'SPECIALIST', 'MEMS.EQUIPMENT_SERVICED': 'Conveyor drive gearbox', 'MEMS.WORK_SCOPE': 'INSPECTION_AND_REPORT,REPAIR', 'MEMS.WORK_LOCATION': 'ON_OUR_SITE' },
+                attributes: {},
                 proposedVendorIds: [],
                 supplierCategory: 'VCL-007',
                 executionDate: date,
@@ -710,8 +709,6 @@ async function createAssessedWorkOrder(title,description,assemblyId,assessedTask
     assert.ok(result.woCode);
     return result.woCode;
 }
-// The MEMS attribute library makes the coupling type, size and bores mandatory for a coupling.
-const COUPLING_ATTRS = { 'MEMS.COUPLING_TYPE': 'JAW_SPIDER_ROTEX_TYPE', 'MEMS.COUPLING_SIZE': 'R38', 'MEMS.BORE_SIZES': '28 / 38 mm' };
 const candidateTask = task('coupling', 'Replace coupling', 'GEARBOX', [
     {
         id: 'coupling_part',
@@ -720,7 +717,7 @@ const candidateTask = task('coupling', 'Replace coupling', 'GEARBOX', [
         description: 'Special coupling with approved specifications',
         qty: 1,
         uom: unit.code,
-        attributes: COUPLING_ATTRS,
+        attributes: {},
     },
     { id: 'bracket_part', source: 'description', description: 'Drive bearing to approved equipment specification', qty: 1, uom: unit.code },
 ]);
@@ -756,7 +753,7 @@ await op('planner', 'candidate', {
 });
 assert.equal(snapshot(r + '/material_creation_candidates/' + queued.candidateId).data.status, 'ready_for_material_creation');
 const candidate = await route(maintenanceMaterialCandidateRoutes, '/api/org/mnt/material-candidates/adopt', 'planner', {
-    candidateId: queued.candidateId, catalogCode: 'SPECIAL-CAT', attributes: COUPLING_ATTRS,
+    candidateId: queued.candidateId, catalogCode: 'SPECIAL-CAT', attributes: {},
 });
 assert.equal(snapshot(r + '/materials/' + candidate.materialDraftId).data.status, 'draft');
 assert.equal(snapshot(r + '/material_creation_candidates/' + queued.candidateId).data.status, 'awaiting_material_approval');
