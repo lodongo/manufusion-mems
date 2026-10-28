@@ -23,7 +23,7 @@ import {
     type Doc,
 } from './core';
 import { audit, queryAudit } from './audit';
-import { clearAccessCache, ensureOrgCode, expandPermissions, hasPerm, jobGrants, loadRole, normalizeOrgRole, orgRoute, type OrgContext } from './guards';
+import { MAX_ADDITIONAL_ROLES, additionalRoleIds, clearAccessCache, directRoleIds, ensureOrgCode, expandPermissions, hasPerm, jobGrants, loadRole, normalizeOrgRole, orgRoute, type OrgContext } from './guards';
 import { SOD_RULES, buildCatalogue, docStatus, requireCombinedSodAcknowledgement, reviewPermissions, sensitiveKeys, sodConflicts } from './permissionPolicy';
 import { adminTotals, guardedAdminChange, isOrgAdmin, MAX_ORG_ADMINS, MIN_ACTIVE_ORG_ADMINS } from './adminRoster';
 import { signedUrl } from './structure';
@@ -140,6 +140,7 @@ function userOut(doc: Doc) {
         lastName: str(d.lastName),
         phone: str(d.phone),
         role: str(d.role) === 'org_admin' ? 'org_super_admin' : str(d.role),
+        additionalRoles: additionalRoleIds(doc),
         status: str(d.status) || 'active',
         roleExpiresAt: str(d.roleExpiresAt),
         secondaryAssignment: Array.isArray(d.assignments) && d.assignments.length > 1 ? d.assignments[1] : null,
@@ -171,6 +172,57 @@ async function getOrgUser(ctx: OrgContext, uid: string): Promise<Doc> {
     return target;
 }
 
+const SYSTEM_ROLE_IDS = new Set(['org_super_admin', 'org_admin', 'org_user', 'default_security']);
+const idList = (v: unknown): string[] => (Array.isArray(v) ? (v as unknown[]).map(str).filter(Boolean) : []);
+
+async function rolePermissionMap(orgId: string): Promise<Map<string, { name: string; permissions: string[] }>> {
+    const docs = await listDocs(`organizations/${orgId}/roles`);
+    return new Map(docs.map((d) => [d.id, { name: str(d.data.name) || d.id, permissions: d.id === 'org_super_admin' ? ['*'] : expandPermissions(idList(d.data.permissions)) }]));
+}
+
+/**
+ * Additional security roles a person holds directly besides their primary role (e.g. Asset Clerk and Document
+ * Author). Never system roles, at most MAX_ADDITIONAL_ROLES, and you can only add or remove roles whose rights you
+ * hold yourself. A super admin needs none: they already hold everything.
+ */
+export async function cleanAdditionalRoles(ctx: OrgContext, primary: string, raw: unknown, previous: string[]): Promise<{ list: string[]; added: string[]; removed: string[] }> {
+    if (primary === 'org_super_admin') return { list: [], added: [], removed: previous };
+    const wanted = Array.from(new Set(idList(raw))).filter((id) => id !== primary);
+    if (wanted.length > MAX_ADDITIONAL_ROLES) throw new HttpError(400, `A person can hold up to ${MAX_ADDITIONAL_ROLES} additional security roles.`);
+    const roles = await rolePermissionMap(ctx.orgId);
+    for (const id of wanted) if (!/^[a-z0-9_]{2,60}$/.test(id) || SYSTEM_ROLE_IDS.has(id) || !roles.has(id)) throw new HttpError(400, 'Choose additional security roles from the list.');
+    const added = wanted.filter((id) => !previous.includes(id));
+    const removed = previous.filter((id) => !wanted.includes(id));
+    for (const id of added) if (!canGrant(ctx, roles.get(id)!.permissions)) throw new HttpError(403, `You cannot assign ${roles.get(id)!.name}: it carries rights you do not hold yourself.`);
+    for (const id of removed) if (roles.has(id) && !canGrant(ctx, roles.get(id)!.permissions)) throw new HttpError(403, `You cannot remove ${roles.get(id)!.name}: it carries rights you do not hold yourself.`);
+    return { list: wanted, added, removed };
+}
+
+/**
+ * What a person would hold with these direct roles (and, for an existing person, their job roles): the number of
+ * rights, every segregation-of-duties conflict with the roles that cause it, and roles you may not hand out.
+ * Read-only; used to show conflicts live while roles are being chosen. The save re-checks everything.
+ */
+export async function accessPreview(ctx: OrgContext, primary: string, extras: string[], target: Doc | null) {
+    const roles = await rolePermissionMap(ctx.orgId);
+    const direct = Array.from(new Set([primary, ...extras])).filter((id) => roles.has(id) || id === 'org_user');
+    if (direct.includes('org_super_admin')) return { superAdmin: true, permissions: 0, conflicts: [], notGrantable: [], max: MAX_ADDITIONAL_ROLES };
+    const grants = target ? await jobGrants(ctx.orgId, target) : [];
+    const sources = [
+        ...direct.map((id) => ({ label: roles.get(id)?.name ?? (id === 'org_user' ? 'MEMS Standard User' : id), permissions: roles.get(id)?.permissions ?? [] })),
+        ...grants.map((g) => ({ label: `${g.roleName} (job role ${g.positionCode})`, permissions: g.permissions })),
+    ];
+    const all = Array.from(new Set(sources.flatMap((x) => x.permissions)));
+    const holders = (key: string) => sources.filter((x) => hasPerm(x.permissions, key)).map((x) => x.label);
+    return {
+        superAdmin: false,
+        permissions: all.length,
+        conflicts: sodConflicts(all).map((c) => ({ id: c.id, why: c.why, a: c.a, b: c.b, fromA: holders(c.a), fromB: holders(c.b) })),
+        notGrantable: extras.filter((id) => roles.has(id) && !canGrant(ctx, roles.get(id)!.permissions)).map((id) => roles.get(id)!.name),
+        max: MAX_ADDITIONAL_ROLES,
+    };
+}
+
 /**
  * Adds an employee (user account) to the organization. Called only from HR > Employee Records & Administration.
  * `assignNumber` gives the employee number once the sign-in account exists; on any failure the account is removed.
@@ -186,6 +238,9 @@ export async function createOrgUser(ctx: OrgContext, body: Record<string, unknow
     const phone = phoneE164(body.phone);
     const role = str(body.role) || 'org_user';
     await assignableRole(ctx, role);
+    const extra = await cleanAdditionalRoles(ctx, role, body.additionalRoles, []);
+    const roleMap = await rolePermissionMap(ctx.orgId);
+    const sodNote = role === 'org_super_admin' ? '' : requireCombinedSodAcknowledgement(body, [role, ...extra.list].flatMap((id) => roleMap.get(id)?.permissions ?? []), 'This person');
     const skillsDoc = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
     const activeSkills = new Set((Array.isArray(skillsDoc?.data.items) ? skillsDoc.data.items : [])
         .filter(isObj).filter(item => item.active !== false).map(item => str(item.code)));
@@ -200,7 +255,7 @@ export async function createOrgUser(ctx: OrgContext, body: Record<string, unknow
         employeeNumber = await assignNumber(uid);
         const createdAt = nowIso();
         const record = {
-            uid, email, firstName, lastName, phone, role, skillCodes, status: 'active', orgId: ctx.orgId,
+            uid, email, firstName, lastName, phone, role, additionalRoles: extra.list, skillCodes, status: 'active', orgId: ctx.orgId,
             employeeNumber, employeeNumberAssignedAt: createdAt,
             createdAt, createdBy: ctx.uid, lastLoginAt: '', mustChangePassword: true,
             passwordChangeRequiredAt: createdAt,
@@ -214,7 +269,7 @@ export async function createOrgUser(ctx: OrgContext, body: Record<string, unknow
         await deleteAuthUser(uid);
         throw err;
     }
-    await record(ctx, isOrgAdmin(role) ? 'org.admin.grant.create' : 'org.user.create', email, `Role: ${role}. Employee number: ${employeeNumber}. Added through HR.`);
+    await record(ctx, isOrgAdmin(role) ? 'org.admin.grant.create' : 'org.user.create', email, `Role: ${role}${extra.list.length ? ` + ${extra.list.join(', ')}` : ''}. Employee number: ${employeeNumber}. Added through HR.${sodNote ? ` ${sodNote}` : ''}`);
     return { uid, email, employeeNumber, role };
 }
 
@@ -308,19 +363,24 @@ export const orgRoutes = {
             if (uid === str(ctx.org.data.createdBy) && (role !== 'org_super_admin' || status === 'disabled')) {
                 throw new HttpError(403, 'The original organization creator must remain an active organization super administrator.');
             }
-            if (uid === ctx.uid && (role !== currentRole || status === 'disabled')) throw new HttpError(400, 'You cannot change your own role or disable your own account.');
-            if (role !== currentRole || status !== currentStatus || roleExpiresAt !== currentExpiry) await assertCanManagePerson(ctx, target);
+            const previousExtra = additionalRoleIds(target);
+            const extra = await cleanAdditionalRoles(ctx, role, body.additionalRoles === undefined ? previousExtra : body.additionalRoles, previousExtra);
+            const extraChanged = extra.added.length > 0 || extra.removed.length > 0;
+            if (uid === ctx.uid && (role !== currentRole || extraChanged || status === 'disabled')) throw new HttpError(400, 'You cannot change your own roles or disable your own account.');
+            if (role !== currentRole || extraChanged || status !== currentStatus || roleExpiresAt !== currentExpiry) await assertCanManagePerson(ctx, target);
             if (currentRole === 'org_super_admin' && ctx.role !== 'org_super_admin') throw new HttpError(403, 'Only a super admin can change super admin accounts.');
             if (role !== currentRole) await assignableRole(ctx, role);
-            const personSodNote = role !== currentRole && role !== 'org_super_admin'
-                ? requireCombinedSodAcknowledgement(body, [...(await loadRole(ctx.orgId, role)).permissions, ...(await jobGrants(ctx.orgId, target)).flatMap((g) => g.permissions)], 'This person')
+            const roleMap = await rolePermissionMap(ctx.orgId);
+            // Duties that must stay apart are checked across every direct role and the person's job roles together.
+            const personSodNote = (role !== currentRole || extra.added.length > 0) && role !== 'org_super_admin'
+                ? requireCombinedSodAcknowledgement(body, [...[role, ...extra.list].flatMap((id) => roleMap.get(id)?.permissions ?? []), ...(await jobGrants(ctx.orgId, target)).flatMap((g) => g.permissions)], 'This person')
                 : '';
             if (isOrgAdmin(role) && roleExpiresAt) throw new HttpError(400, 'The organization super administrator role cannot expire.');
             if (roleExpiresAt !== currentExpiry) {
                 if (role === 'org_super_admin' && roleExpiresAt) throw new HttpError(400, 'The super admin role cannot expire.');
                 if (uid === ctx.uid) throw new HttpError(400, 'You cannot change the expiry of your own role.');
                 if (roleExpiresAt && roleExpiresAt < new Date().toISOString().slice(0, 10)) throw new HttpError(400, 'The expiry date cannot be in the past.');
-                if (!canGrant(ctx, (await loadRole(ctx.orgId, role)).permissions)) throw new HttpError(403, 'You cannot extend a role with more rights than your own.');
+                if (!canGrant(ctx, [role, ...extra.list].flatMap((id) => id === role ? [] : roleMap.get(id)?.permissions ?? []).concat((await loadRole(ctx.orgId, role)).permissions))) throw new HttpError(403, 'You cannot extend roles with more rights than your own.');
             }
             const revoke = role !== currentRole || status !== currentStatus;
             const now = nowIso();
@@ -329,6 +389,7 @@ export const orgRoutes = {
                 lastName,
                 phone,
                 role,
+                additionalRoles: extra.list,
                 skillCodes,
                 status,
                 roleExpiresAt: role === 'org_super_admin' ? '' : roleExpiresAt,
@@ -355,10 +416,21 @@ export const orgRoutes = {
                 if (revoke) await revokeTokens(uid);
                 await writeDoc(`users/${uid}`, { ...target.data, ...patch });
             }
-            await record(ctx, role !== currentRole ? 'org.admin.role_change' : 'org.user.update', str(target.data.email),
-                `Role: ${currentRole} to ${role}; status: ${currentStatus} to ${status}${roleExpiresAt ? `, role expires ${roleExpiresAt}` : ''}${personSodNote ? `. ${personSodNote}` : ''}`);
+            await record(ctx, role !== currentRole || extraChanged ? 'org.admin.role_change' : 'org.user.update', str(target.data.email),
+                `Role: ${currentRole} to ${role}; additional roles added: ${extra.added.join(', ') || 'none'}, removed: ${extra.removed.join(', ') || 'none'}; status: ${currentStatus} to ${status}${roleExpiresAt ? `, roles expire ${roleExpiresAt}` : ''}${personSodNote ? `. ${personSodNote}` : ''}`.slice(0, 1800));
             clearAccessCache(ctx.orgId);
             return { ok: true };
+        }),
+    ],
+
+    /** Live preview while choosing roles: rights and segregation-of-duties conflicts (read-only). */
+    'POST /api/org/users/access-check': [
+        orgRoute('org.users.access_check', 'ADM.users', async (ctx) => {
+            const uid = str(ctx.body.uid);
+            const target = uid ? await getOrgUser(ctx, uid) : null;
+            const role = str(ctx.body.role) || 'org_user';
+            const extras = Array.from(new Set(idList(ctx.body.additionalRoles))).slice(0, MAX_ADDITIONAL_ROLES + 1);
+            return accessPreview(ctx, role, extras, target);
         }),
     ],
 
@@ -395,10 +467,7 @@ export const orgRoutes = {
             const mapped = new Map<string, string[]>();
             for (const p of positions) for (const r of Array.isArray(p.data.securityRoles) ? (p.data.securityRoles as unknown[]).map(str) : []) mapped.set(r, [...(mapped.get(r) ?? []), `${p.id} ${str(p.data.title)}`]);
             const counts = new Map<string, number>();
-            for (const u of users) {
-                const r = str(u.data.role) === 'org_admin' ? 'org_super_admin' : str(u.data.role);
-                counts.set(r, (counts.get(r) ?? 0) + 1);
-            }
+            for (const u of users) for (const r of directRoleIds(u)) counts.set(r, (counts.get(r) ?? 0) + 1);
             // Retain the legacy default_security record for history only; it is no longer copied into roles.
             return {
                 roles: roles.filter((r) => r.id !== 'default_security')
@@ -489,7 +558,7 @@ export const orgRoutes = {
             const role = /^[a-z0-9_]{2,60}$/.test(id) ? await getDoc(`organizations/${ctx.orgId}/roles/${id}`) : null;
             if (!role) throw new HttpError(404, 'Role not found.');
             if (id === 'default_security' || role.data.system === true) throw new HttpError(400, 'System roles cannot be deleted.');
-            const inUse = (await orgUsers(ctx.orgId)).filter((u) => str(u.data.role) === id).length;
+            const inUse = (await orgUsers(ctx.orgId)).filter((u) => directRoleIds(u).includes(id)).length;
             if (inUse) throw new HttpError(400, `This role is assigned to ${inUse} user(s). Reassign them first.`);
             const mappedTo = (await listDocs(`organizations/${ctx.orgId}/positions`)).filter((p) => Array.isArray(p.data.securityRoles) && (p.data.securityRoles as unknown[]).map(str).includes(id));
             if (mappedTo.length) throw new HttpError(400, `This role is mapped to job roles ${mappedTo.map((p) => p.id).join(', ')}. Remove the mapping first.`);

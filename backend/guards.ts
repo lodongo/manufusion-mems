@@ -247,12 +247,33 @@ export function roleExpired(user: Doc): boolean {
     return !Number.isNaN(t) && t < Date.now();
 }
 
-/** Everything a member may do: direct security role (unless expired) plus job-role grants. */
+/** Most additional security roles one person can hold directly (besides the primary role). */
+export const MAX_ADDITIONAL_ROLES = 12;
+const SYSTEM_ROLE_IDS = new Set(['org_super_admin', 'org_admin', 'org_user', 'default_security']);
+
+/** Additional security roles held directly by a person (never system roles; the primary role is not repeated). */
+export function additionalRoleIds(user: Doc | { data: Record<string, unknown> }): string[] {
+    const primary = normalizeOrgRole(str(user.data.role));
+    if (primary === 'org_super_admin') return [];
+    const raw = Array.isArray(user.data.additionalRoles) ? (user.data.additionalRoles as unknown[]).map(str) : [];
+    return Array.from(new Set(raw.filter((r) => /^[a-z0-9_]{2,60}$/.test(r) && !SYSTEM_ROLE_IDS.has(r) && r !== primary))).slice(0, MAX_ADDITIONAL_ROLES);
+}
+
+/** Every security role a person holds directly: the primary role and their additional roles. */
+export function directRoleIds(user: Doc | { data: Record<string, unknown> }): string[] {
+    const primary = normalizeOrgRole(str(user.data.role));
+    return [primary, ...additionalRoleIds(user)].filter(Boolean);
+}
+
+/** Everything a member may do: direct security roles (unless expired) plus job-role grants. */
 export async function effectiveAccess(orgId: string, role: string, user: Doc, adoptedModules?: unknown) {
     const loaded = await loadRole(orgId, role);
-    if (role === 'org_super_admin') return { roleName: loaded.name, directPermissions: loaded.permissions, grants: [] as Grant[], permissions: loaded.permissions, expired: false };
+    if (role === 'org_super_admin') return { roleName: loaded.name, directPermissions: loaded.permissions, grants: [] as Grant[], permissions: loaded.permissions, expired: false, roleIds: [role] };
     const expired = roleExpired(user);
-    const directPermissions = expired ? [] : loaded.permissions.filter((p) => p !== '*');
+    // A person may hold several security roles directly (e.g. Asset Clerk and Document Author): their rights add up.
+    const extraIds = additionalRoleIds(user);
+    const extras = await Promise.all(extraIds.map((id) => loadRole(orgId, id)));
+    const directPermissions = expired ? [] : Array.from(new Set([...loaded.permissions, ...extras.flatMap((x) => x.permissions)])).filter((p) => p !== '*');
     const grants = await jobGrants(orgId, user);
     // HR workspace access is a baseline employee self-service entitlement when HRM is adopted.
     // It grants no site-wide directory, HR administration, or payroll permissions.
@@ -263,7 +284,8 @@ export async function effectiveAccess(orgId: string, role: string, user: Doc, ad
         ...directPermissions, ...grants.flatMap((g) => g.permissions),
         ...(hrSelfService ? ['HRM.shell.view'] : []),
     ]));
-    return { roleName: expired ? `${loaded.name} (expired)` : loaded.name, directPermissions, grants, permissions, expired };
+    const name = extras.length ? `${loaded.name} + ${extras.map((x) => x.name).join(', ')}` : loaded.name;
+    return { roleName: expired ? `${name} (expired)` : name, directPermissions, grants, permissions, expired, roleIds: [role, ...extraIds] };
 }
 
 export async function loadRole(orgId: string, role: string): Promise<{ name: string; permissions: string[] }> {

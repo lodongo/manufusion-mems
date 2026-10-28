@@ -1,5 +1,5 @@
 import { HttpError, getDoc, isObj, listDocs, nowIso, str, writeDoc, type Doc } from './core';
-import { hasPerm, orgRoute, type OrgContext } from './guards';
+import { additionalRoleIds, hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, record } from './org';
 import { col as structureCol } from './structure';
 import { docStatus, groupLabels, permissionsDigest } from './permissionPolicy';
@@ -54,7 +54,7 @@ async function loadRole(ctx: OrgContext, id: string): Promise<{ id: string; name
 
 /** Security roles this person holds, directly or through the job roles they are assigned. */
 function heldRoleIds(ctx: OrgContext): string[] {
-    return Array.from(new Set([ctx.role, ...ctx.grants.map((g) => g.roleId)])).filter(Boolean);
+    return Array.from(new Set([ctx.role, ...additionalRoleIds(ctx.me), ...ctx.grants.map((g) => g.roleId)])).filter(Boolean);
 }
 
 function docOut(doc: Doc | null, perms: string[], names: Map<string, string>) {

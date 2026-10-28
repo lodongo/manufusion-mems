@@ -7,6 +7,8 @@ import { Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { PASSWORD_RULE, passwordProblem } from '../lib/password';
 import { ConfirmBox, ReviewSection, StepProgress, StepSection, type WizardStep } from './materialCreateUi';
+import RoleSetPicker from './RoleSetPicker';
+import { withSodAcknowledgement } from '../lib/sod';
 
 // HR > Employee Records & Administration: add employees (the only place user accounts are created) and give
 // every employee a system employee number (EMP_ + 5 digits, from the database counter). The server enforces who may
@@ -18,6 +20,7 @@ interface Setup {
     adminPolicy: { designated: number; active: number; maximum: number; minimumActive: number; canManage: boolean };
     missingNumbers: number;
     format: string;
+    maxAdditionalRoles?: number;
 }
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const EMAIL_LOCAL = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/i;
@@ -102,6 +105,7 @@ export default function HrAddEmployee() {
     const [lastName, setLastName] = useState('');
     const [phone, setPhone] = useState('');
     const [role, setRole] = useState('org_user');
+    const [additionalRoles, setAdditionalRoles] = useState<string[]>([]);
     const [password, setPassword] = useState('');
     const [confirm, setConfirm] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -148,7 +152,7 @@ export default function HrAddEmployee() {
         if (!confirm) return setFailure('Confirm the details before adding the employee.');
         setBusy(true);
         try {
-            const r = await callBackend<{ uid: string; employeeNumber: string }>('/api/org/hr/employees/create', { emailLocal: emailLocal.trim().toLowerCase(), firstName: firstName.trim(), lastName: lastName.trim(), phone: cleanPhone, role, password, skillCodes: [], confirm: true });
+            const r = await withSodAcknowledgement((extra) => callBackend<{ uid: string; employeeNumber: string }>('/api/org/hr/employees/create', { emailLocal: emailLocal.trim().toLowerCase(), firstName: firstName.trim(), lastName: lastName.trim(), phone: cleanPhone, role, additionalRoles: role === 'org_super_admin' ? [] : additionalRoles, password, skillCodes: [], confirm: true, ...extra }));
             setCreated({ employeeNumber: r.employeeNumber, email: `${emailLocal.trim().toLowerCase()}@${data.domain}` });
         } catch (e) {
             setFailure(msg(e));
@@ -163,7 +167,7 @@ export default function HrAddEmployee() {
             <div className='mx-auto max-w-xl space-y-3 p-1'>
                 <Alert tone='success'>Employee added. Employee number <strong>{created.employeeNumber}</strong>. {created.email} must change the initial password at first sign-in.</Alert>
                 <div className='flex flex-wrap gap-2'>
-                    <Button onClick={() => { setCreated(null); setStep(1); setTried({}); setEmailLocal(''); setFirstName(''); setLastName(''); setPhone(''); setPassword(''); setConfirm(false); setRole('org_user'); }}>Add another</Button>
+                    <Button onClick={() => { setCreated(null); setStep(1); setTried({}); setEmailLocal(''); setFirstName(''); setLastName(''); setPhone(''); setPassword(''); setConfirm(false); setRole('org_user'); setAdditionalRoles([]); }}>Add another</Button>
                     <Button variant='secondary' onClick={back}>Back to employee records</Button>
                 </div>
             </div>
@@ -213,6 +217,7 @@ export default function HrAddEmployee() {
                             <SelectField id='emp-role' label='Security role' required value={role} error={err(2, 'Choose') || err(2, 'The organization')} onChange={(e) => setRole(e.target.value)}>
                                 {data.roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                             </SelectField>
+                            <RoleSetPicker roles={data.roles} primary={role} value={additionalRoles} onChange={setAdditionalRoles} endpoint='/api/org/hr/employees/access-check' max={data.maxAdditionalRoles ?? 12} />
                             {role === 'org_super_admin' && <Alert tone='warn'>Organization super admin has every right. {data.adminPolicy.designated} of {data.adminPolicy.maximum} administrator places are used.</Alert>}
                             <p className='text-xs text-muted'>Assign the job role afterwards under Organization design, so location-bound rights follow the position.</p>
                         </div>
@@ -226,7 +231,7 @@ export default function HrAddEmployee() {
                 {step === 4 && (
                     <>
                         <ReviewSection title='Identity' onEdit={() => setStep(1)} items={[['Email', `${emailLocal.trim().toLowerCase()}@${data.domain}`], ['Name', `${firstName.trim()} ${lastName.trim()}`], ['Telephone', cleanPhone]]} />
-                        <ReviewSection title='Access' onEdit={() => setStep(2)} items={[['Security role', roleName], ['Employee number', `Assigned automatically (${data.format.replace(/0/g, 'n')})`]]} />
+                        <ReviewSection title='Access' onEdit={() => setStep(2)} items={[['Security role', roleName], ['Additional roles', role === 'org_super_admin' ? '' : additionalRoles.map((id) => data.roles.find((r) => r.id === id)?.name ?? id).join(', ')], ['Employee number', `Assigned automatically (${data.format.replace(/0/g, 'n')})`]]} />
                         <ConfirmBox checked={confirm} onChange={setConfirm}>The details are correct and this person is an employee of the organization. Adding is recorded in the audit trail.</ConfirmBox>
                     </>
                 )}

@@ -6,7 +6,7 @@ import {registerGlContracts} from './finTransactionContracts';
 import { postingRoles, suggestRoleAccounts } from './finPostingCatalogue';
 import { ccTransactionChoices } from './glTransactionService';
 import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, updateFields, writeDoc, type Fields } from './core';
-import { hasPerm, orgRoute, type OrgContext } from './guards';
+import { directRoleIds, hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, orgUsers, record } from './org';
 import { ROLE_TEMPLATES } from './permissionPolicy';
 import { glMaster, glMasterItem, materialCategories } from './procurement';
@@ -1246,7 +1246,7 @@ export const finRoutes = {
                 }
                 const jobs = positions.filter((p) => strs(p.data.securityRoles).includes(r.id));
                 const jobCodes = new Set(jobs.map((p) => p.id));
-                const holders = users.filter((u) => str(u.data.status) !== 'disabled' && (str(u.data.role) === r.id || objs(u.data.assignments).some((a) => jobCodes.has(str(a.positionCode))))).length;
+                const holders = users.filter((u) => str(u.data.status) !== 'disabled' && (directRoleIds(u).includes(r.id) || objs(u.data.assignments).some((a) => jobCodes.has(str(a.positionCode))))).length;
                 const d = docOf.get(r.id);
                 return {
                     id: r.id,
