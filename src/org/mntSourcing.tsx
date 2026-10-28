@@ -1,5 +1,5 @@
 import CatalogueAttributeForm from '../components/CatalogueAttributeForm';
-import type { AttrDef, CatalogueLibraryInfo } from '../components/AssetDictionaryBrowser';
+import type { AttrDef, CatalogueGuidance } from '../components/AssetDictionaryBrowser';
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
 import { CheckCircle2, ClipboardList, FileText, Paperclip, Search, ShieldCheck, Truck, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
@@ -37,7 +37,7 @@ type Kind = 'warehouse' | 'catalog' | 'description';
 interface WarehouseItem { materialId: string; materialNumber: string; name: string; uom: string; available: number | null; stockVerified: boolean; warehouseName: string }
 interface CatSummary { code: string; name: string; subcategories: Array<{ code: string; name: string }> }
 interface AttrSpec { code: string; name: string; dataType: string; unit: string; options: Array<{ code: string; label: string }>; required: boolean; description?: string; example?: string; domainName?: string; validation?: Record<string, unknown> }
-interface Spec { code: string; name: string; categoryCode: string; subcategoryCode: string; familyCode: string; attributes: AttrSpec[]; library?: CatalogueLibraryInfo | null }
+interface Spec { code: string; name: string; categoryCode: string; subcategoryCode: string; familyCode: string; attributes: AttrSpec[]; guidance?: CatalogueGuidance | null }
 /** Catalogue spec attributes in the shape used by the shared attribute form. */
 const asAttrDefs = (list: AttrSpec[]): AttrDef[] => list.map((a) => ({ key: a.code, domain: '', domainName: a.domainName ?? '', description: a.description ?? '', specific: false, ...a, validation: (a.validation ?? {}) as AttrDef['validation'] }));
 interface Similar { materialId: string; materialNumber: string; name: string; uom: string; exact: boolean; score: number; matched: number; compared: number; linked: boolean; available: number | null; differences: Array<{ name: string; theirs: string; yours: string }> }
@@ -255,7 +255,7 @@ function FromCatalogue({ code, warehouseId, onAdd }: { code: string; warehouseId
             {spec && (
                 <>
                     <p className='text-sm font-semibold text-ink'>{spec.name}</p>
-                    <CatalogueAttributeForm attributes={asAttrDefs(spec.attributes)} values={attrs as Record<string, string>} onChange={(code, v) => attrPatch(code, v)} library={spec.library} />
+                    <CatalogueAttributeForm attributes={asAttrDefs(spec.attributes)} values={attrs as Record<string, string>} onChange={(code, v) => attrPatch(code, v)} guidance={spec.guidance} />
                     <Qty qty={qty} uom={uom} onQty={setQty} onUom={setUom} />
                     {missing.length > 0 && <p className='text-xs text-amber-500'>Mandatory: {missing.join(', ')}.</p>}
                     {similar === null ? (

@@ -3,7 +3,7 @@ import {integratedReleaseProblems} from './catalogueReleaseGuard';
 import { industryAdoptionRecommendation } from './industryCatalog';
 
 import { createHash } from 'crypto';
-import { enrichCatalogue, stripLibrary, LIB_SOURCE } from './catalogueAttributeLibrary';
+import { catalogueGuidance } from './catalogueGuidance';
 import {
     HttpError,
     DOCUMENT_NAME_ROOT,
@@ -176,6 +176,12 @@ function validateDictionary(raw: unknown): { dict: Dict; errors: string[]; warni
     return { dict, errors, warnings: warnings.slice(0, 30), stats };
 }
 
+/** Upload checks for an asset dictionary file without saving anything (used to verify generated dictionary files). */
+export function checkAssetDictionaryFile(raw: unknown) {
+    const { errors, warnings, stats } = validateDictionary(raw);
+    return { errors, warnings, stats, releaseProblems: integratedReleaseProblems('assets', raw) };
+}
+
 function splitParts(items: Obj[]): string[] {
     const parts: string[] = [];
     let current: string[] = [];
@@ -250,16 +256,6 @@ async function loadVersion(vid: string, base: string = VERSIONS): Promise<Loaded
         subcategories,
         classes: new Map(classes.map((c) => [str(c.code), c])),
     };
-    // Add the MEMS attribute library (class-specific technical attributes, maker/model/serial identity,
-    // mandatory flags and plain guidance). The uploaded dictionary itself is not changed.
-    {
-        const subName = new Map(subcategories.map((x) => [str(x.code), str(x.name)]));
-        const catName = new Map(categories.map((x) => [str(x.code), str(x.name)]));
-        enrichCatalogue('assets', loaded.attributes, loaded.domains, loaded.classes.values(), (e) => ({
-            family: subName.get(str(e.subcategoryCode)),
-            subcategory: catName.get(str(e.categoryCode)),
-        }));
-    }
     if (cache.size > 6) cache.clear();
     cache.set(cacheKey, loaded);
     return loaded;
@@ -490,9 +486,9 @@ function classOut(d: Loaded, code: string,registeredIndustry='') {
                 required: required.has(str(a.code)),
                 specific: specific.has(str(a.code)),
                 example: str(a.example),
-                source: str(a.source),
             })),
-        library: isObj(c.libraryArchetype) ? c.libraryArchetype : null,
+        // Set-up guidance and usual service route come from the dictionary file itself (setupGuidance).
+        guidance: catalogueGuidance(c),
     };
 }
 
@@ -1239,13 +1235,13 @@ export const assetRoutes = {
             await rec(ctx, 'admin', 'assets.catalog.exported', 'Asset catalog', 'Downloaded');
             return {
                 ...d.header,
-                attributeDomains: d.domains.filter((x) => str(x.source) !== LIB_SOURCE),
-                attributes: Array.from(d.attributes.values()).filter((x) => str(x.source) !== LIB_SOURCE),
+                attributeDomains: d.domains,
+                attributes: Array.from(d.attributes.values()),
                 profiles: Array.from(d.profiles.values()),
                 groups: d.groups,
                 categories: d.categories,
                 subcategories: d.subcategories,
-                assetClasses: Array.from(d.classes.values()).map(stripLibrary),
+                assetClasses: Array.from(d.classes.values()),
             };
         }),
     ],

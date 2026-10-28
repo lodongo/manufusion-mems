@@ -138,7 +138,7 @@ interface Spec {
     familyCode: string;
     attributes: Attr[];
     adopted: boolean;
-    library?: { id: string; label: string; guidance: string } | null;
+    guidance?: { id: string; label: string; guidance: string; providers?: { usual: string[]; usualLabels?: string[]; note: string } } | null;
 }
 interface Tree {
     families: Array<{ code: string; name: string }>;
@@ -1009,7 +1009,7 @@ function ItemEditor({ id, no }: { id: string; no: string }) {
                     {f.itemCode && !spec && !specError && <Spinner />}
                     {spec && (
                         <>
-                            {spec.library?.guidance && <Alert tone='info'><strong>{spec.library.label}.</strong> {spec.library.guidance}</Alert>}
+                            {spec.guidance?.guidance && <Alert tone='info'><strong>{spec.guidance.label}.</strong> {spec.guidance.guidance}{spec.guidance.providers ? ` Usually done by: ${(spec.guidance.providers.usualLabels?.length ? spec.guidance.providers.usualLabels : spec.guidance.providers.usual).join(' · ')}.` : ''}</Alert>}
                             {mandatory.length === 0 && attrList.length > 0 && <Alert tone='info'>This entry has no mandatory attributes. Optional ones are below.</Alert>}
                             {mandatory.map((a) => (
                                 <AttrInput key={a.code} a={a} value={attrs[a.code]} onChange={(v) => setAttr(a.code, v)} />
