@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Lightbulb } from 'lucide-react';
 import { routeText, type AttrDef, type CatalogueGuidance } from './AssetDictionaryBrowser';
+import SelectField from './SearchableSelect';
 
 // ---------------------------------------------------------------------------
 // Catalogue attribute form (materials, maintenance spares, services).
 // Mandatory fields first; optional details folded below. Every field explains where to find the value and
-// shows an example, so a person who is not a specialist does not have to guess. Mobile-first: native
-// selects, Yes/No buttons, tick chips instead of multi-select lists, and numeric keyboards for numbers.
+// shows an example, so a person who is not a specialist does not have to guess. Mobile-first: searchable
+// pick-list sheets (SelectField), Yes/No buttons, tick chips instead of multi-select lists, and numeric keyboards for numbers.
 // ---------------------------------------------------------------------------
 
 /** Verification shared by every catalogue attribute form (mirrors the server rules). */
@@ -67,10 +68,12 @@ export function AttributeField({ a, value, onChange, showError }: { a: AttrDef; 
         );
     } else if (a.dataType === 'enum' || a.options.length) {
         input = (
-            <select id={id} data-native-select='true' className={`${control} ${border}`} value={value} onChange={(e) => onChange(e.target.value)}>
-                <option value=''>{a.required ? 'Choose…' : 'Not specified'}</option>
-                {a.options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
-            </select>
+            <div className={`mt-1 rounded-xl ${issue ? 'ring-1 ring-danger' : a.required && !value.trim() ? 'ring-1 ring-amber-500/60' : ''}`}>
+                <SelectField id={id} label={a.name} hideLabel required={a.required} value={value} onChange={(e) => onChange(e.target.value)}>
+                    <option value=''>{a.required ? 'Choose…' : 'Not specified'}</option>
+                    {a.options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+                </SelectField>
+            </div>
         );
     } else {
         input = (
