@@ -9,6 +9,7 @@ import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { AssemblyPicker, ChoicePicker, GroupPicker, Info, useFullScreen, LEVEL_LABEL, compressPhoto, critColor, findIn, type ListGroup, type MntLists, type MntSetup, type Place } from './mntShared';
 import { appConfirm } from '../components/dialogs';
+import MntGateHint from './MntGateHint';
 
 // Maintenance (MNT): work requests. A finding raised against an assembly, numbered WR + 8 digits by the server.
 // Requests are not approved: they are reviewed and assessed, then returned for information, declined, or
@@ -696,7 +697,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                   {icon}<span>{title}</span></button>)}
               </nav>
               <div className='min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-1 py-3 sm:px-4'>
-                {actionError && !mode && <Alert tone='error'>{actionError}</Alert>}
+                {actionError && !mode && <MntGateHint message={actionError} />}
                 {section==='summary' && !r.assessmentReviewCurrent && !can.reviewAssessment && (r.assessmentReviewBlockers?.length||0)>0 && (
                   <Card className='space-y-2'>
                     <p className='font-semibold text-amber-200'>Why assessment approval is unavailable</p>
@@ -731,7 +732,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                             />
                         )}
                         {typedNeeded && <Field id='wr-confirm' label={`Type ${r.code} to confirm`} autoComplete='off' value={typed} onChange={(e) => setTyped(e.target.value)} />}
-                        {actionError && <Alert tone='error'>{actionError}</Alert>}
+                        {actionError && <MntGateHint message={actionError} />}
                         <div className='flex gap-2'>
                             <Button
                                 className='flex-1'

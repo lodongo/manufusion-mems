@@ -533,7 +533,9 @@ export const orgRoutes = {
                 if (!canGrant(ctx, removed.filter((k) => valid.has(k) || expandPermissions([k]).length > 1))) throw new HttpError(403, 'You cannot remove rights you do not hold yourself.');
                 const sensitiveNote = requireSensitiveAcknowledgement(raw, added);
                 await writeDoc(`organizations/${ctx.orgId}/roles/${id}`, { ...existing.data, name, description, permissions, updatedAt: now, updatedBy: ctx.uid });
-                await record(ctx, 'org.role.update', name, `${permissions.length} permissions. Added: ${added.join(', ') || 'none'}. Removed: ${removed.join(', ') || 'none'}.${note}${sensitiveNote}`.slice(0, 1800));
+                // Optional change reason (e.g. granting a transaction from Transaction access), kept in the audit trail.
+                const why = str(ctx.body.reason).trim().slice(0, 300);
+                await record(ctx, 'org.role.update', name, `${permissions.length} permissions. Added: ${added.join(', ') || 'none'}. Removed: ${removed.join(', ') || 'none'}.${note}${sensitiveNote}${why ? ` Reason: ${why}` : ''}`.slice(0, 1800));
                 clearAccessCache(ctx.orgId);
                 return { id };
             }
