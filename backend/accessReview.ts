@@ -1,5 +1,5 @@
 import { HttpError, deleteDoc, listDocs, nowIso, randomId, str, writeDoc } from './core';
-import { clearAccessCache, orgRoute, type OrgContext } from './guards';
+import { clearAccessCache, directRoleIds, orgRoute, type OrgContext } from './guards';
 import { canGrant, catalogue, enabledModules, orgUsers, record } from './org';
 import { LEVEL_ROLE_IDS } from './levelRoles';
 import { BUILT_MODULE_CODES, BUILT_PERMISSIONS, ROLE_TEMPLATES, reviewPermissions, sodConflicts, type StaleKey } from './permissionPolicy';
@@ -39,10 +39,8 @@ async function buildPlan(ctx: OrgContext) {
     ]);
     const offered = new Set(groups.flatMap((g) => g.permissions.map((p) => p.key)));
     const userCount = new Map<string, number>();
-    for (const u of users) {
-        const r = str(u.data.role) === 'org_admin' ? 'org_super_admin' : str(u.data.role);
-        userCount.set(r, (userCount.get(r) ?? 0) + 1);
-    }
+    // A role is in use if anyone holds it directly, as primary or additional role.
+    for (const u of users) for (const r of directRoleIds(u)) userCount.set(r, (userCount.get(r) ?? 0) + 1);
     const mapped = new Map<string, string[]>();
     for (const p of positions) for (const r of asList(p.data.securityRoles)) mapped.set(r, [...(mapped.get(r) ?? []), p.id]);
 

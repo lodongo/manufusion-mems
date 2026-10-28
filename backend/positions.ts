@@ -20,7 +20,7 @@ import {
     type Doc,
     type Plain,
 } from './core';
-import { clearAccessCache, hasPerm, orgRoute, type OrgContext } from './guards';
+import { clearAccessCache, directRoleIds, hasPerm, orgRoute, type OrgContext } from './guards';
 import { requireCombinedSodAcknowledgement } from './permissionPolicy';
 import { detectImage } from './branding';
 import { ID_RE, childrenOf, col, designOf, getNode, managerContext, nodeOut, record } from './structure';
@@ -556,8 +556,8 @@ export const positionRoutes = {
                 .flatMap((a) => posMap.get(a.positionCode)?.securityRoles ?? [])
                 .flatMap((r) => rolesMap.get(r)?.permissions ?? []);
             if (!canGrantPerms(ctx, addedPerms)) throw new HttpError(403, 'These job roles carry security rights you do not hold yourself. Ask a super admin.');
-            const directRole = str(user.data.role);
-            const directPerms = directRole && directRole !== 'org_super_admin' ? (rolesMap.get(directRole)?.permissions ?? []) : [];
+            const directRoles = directRoleIds(user).filter((r) => r !== 'org_super_admin');
+            const directPerms = directRoles.flatMap((r) => rolesMap.get(r)?.permissions ?? []);
             const jobPerms = assignments
                 .flatMap((a) => posMap.get(a.positionCode)?.securityRoles ?? [])
                 .flatMap((r) => (rolesMap.get(r)?.permissions ?? []).filter((x) => x !== '*' && !x.startsWith('ADM.')));

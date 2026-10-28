@@ -1,6 +1,6 @@
 import { isObj, listDocs, str } from './core';
 import { queryAudit } from './audit';
-import { hasPerm, orgRoute } from './guards';
+import { directRoleIds, hasPerm, orgRoute } from './guards';
 import { enabledModules, orgUsers } from './org';
 import { docStatus, reviewPermissions, sodConflicts } from './permissionPolicy';
 import { col } from './structure';
@@ -57,7 +57,7 @@ export const orgHomeRoutes = {
 
             if (can('ADM.roles')) {
                 const mapped = new Set(positions.flatMap((p) => asList(p.data.securityRoles)));
-                const held = new Set(users.map((u) => str(u.data.role)));
+                const held = new Set(users.flatMap((u) => directRoleIds(u)));
                 const docById = new Map(docs.map((d) => [d.id, d.data]));
                 const custom = roleDocs.filter((r) => r.id !== 'org_super_admin' && r.id !== 'default_security');
                 const state = custom.map((r) => {

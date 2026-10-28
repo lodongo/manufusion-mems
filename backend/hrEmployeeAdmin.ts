@@ -1,10 +1,9 @@
 import { HttpError, getDoc, listDocs, nowIso, str, writeDoc, type Doc } from './core';
-import { orgRoute, type OrgContext } from './guards';
-import { canGrant, createOrgUser, orgUsers, record } from './org';
+import { MAX_ADDITIONAL_ROLES, orgRoute, type OrgContext } from './guards';
+import { ORG_SYSTEM_ROLES, accessPreview, canGrant, createOrgUser, orgUsers, record } from './org';
 import { nextOrgCounter } from './positions';
 import { withLock } from './finCore';
 import { adminTotals, MAX_ORG_ADMINS, MIN_ACTIVE_ORG_ADMINS } from './adminRoster';
-import { ORG_SYSTEM_ROLES } from './org';
 
 // ---------------------------------------------------------------------------
 // HR > Employee Records & Administration: adding employees (user accounts) and employee numbers.
@@ -70,7 +69,17 @@ export const hrEmployeeAdminRoutes = {
                 adminPolicy: { ...totals, minimumActive: MIN_ACTIVE_ORG_ADMINS, maximum: MAX_ORG_ADMINS, canManage: ctx.role === 'org_super_admin' },
                 missingNumbers: missingOf(users).length,
                 format: 'EMP_00000',
+                maxAdditionalRoles: MAX_ADDITIONAL_ROLES,
             };
+        }),
+    ],
+
+    /** Live preview while choosing a new employee's roles: rights and segregation-of-duties conflicts (read-only). */
+    'POST /api/org/hr/employees/access-check': [
+        orgRoute('hr.employees.access_check', 'HRM.employees.manage', async (ctx) => {
+            const role = str(ctx.body.role) || 'org_user';
+            const extras = Array.isArray(ctx.body.additionalRoles) ? Array.from(new Set((ctx.body.additionalRoles as unknown[]).map(str).filter(Boolean))).slice(0, MAX_ADDITIONAL_ROLES + 1) : [];
+            return accessPreview(ctx, role, extras, null);
         }),
     ],
 

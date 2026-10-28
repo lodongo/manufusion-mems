@@ -12,6 +12,7 @@ import RoleCoreSkills from './RoleCoreSkills';
 import type { OrgRole } from './types';
 import { appConfirm } from '../components/dialogs';
 import { withSodAcknowledgement } from '../lib/sod';
+import RoleSetPicker from './RoleSetPicker';
 
 interface OrgUser {
     uid: string;
@@ -21,6 +22,7 @@ interface OrgUser {
     employeeNumber?: string;
     phone: string;
     role: string;
+    additionalRoles?: string[];
     status: string;
     roleExpiresAt?: string;
     jobRoles?: string[];
@@ -152,6 +154,7 @@ export default function OrgUsers({ id, myUid, myRole, canRoles }: { id?: string;
                                         <span className={u.role === 'org_super_admin' || u.role === 'org_admin' ? 'inline-flex max-w-full rounded-full border-2 border-red-500 p-0.5' : ''}>
                                             <Badge tone='brand'>{roleName(u.role)}</Badge>
                                         </span>
+                                        {(u.additionalRoles ?? []).length > 0 && <Badge tone='muted'>+{(u.additionalRoles ?? []).length} more role{(u.additionalRoles ?? []).length === 1 ? '' : 's'}</Badge>}
                                         {u.isCreator && <Badge tone='muted'>Original creator · Protected</Badge>}
                                         {u.status === 'disabled' && <Badge tone='danger'>Disabled</Badge>}
                                         {u.roleExpiresAt && <Badge tone={u.roleExpiresAt < new Date().toISOString().slice(0, 10) ? 'danger' : 'warn'}>{u.roleExpiresAt < new Date().toISOString().slice(0, 10) ? 'Role expired' : `Role until ${u.roleExpiresAt}`}</Badge>}
@@ -190,6 +193,7 @@ function UserForm({
     const [lastName, setLastName] = useState(user?.lastName ?? '');
     const [phone, setPhone] = useState(user?.phone ?? '');
     const [role, setRole] = useState(user?.role ?? initialRole);
+    const [additionalRoles, setAdditionalRoles] = useState<string[]>(user?.additionalRoles ?? []);
     const [status, setStatus] = useState(user?.status ?? 'active');
     const roleExpiresAt = user?.roleExpiresAt ?? '';
     const [password, setPassword] = useState('');
@@ -220,14 +224,14 @@ function UserForm({
         if (!isNew && user?.isCreator && (role !== 'org_super_admin' || status === 'disabled')) {
             return setError('The original organization creator must remain an active super administrator.');
         }
-        if (!isNew && user && (role !== user.role || status !== user.status)) {
+        if (!isNew && user && (role !== user.role || status !== user.status || additionalRoles.join('|') !== (user.additionalRoles ?? []).join('|'))) {
             const proceeding = (await appConfirm('Change access for ' + user.email + '? The user may need to sign in again. This change is recorded in the audit trail.'));
             if (!proceeding) return;
         }
         setBusy('save');
         try {
             if (isNew || !user) throw new Error('Employees are added in HR → Employee Records & Administration.');
-            await withSodAcknowledgement((extra) => callBackend('/api/org/users/update', { uid: user.uid, firstName, lastName, phone, role, status, skillCodes, roleExpiresAt: role === 'org_super_admin' ? '' : roleExpiresAt, ...extra }));
+            await withSodAcknowledgement((extra) => callBackend('/api/org/users/update', { uid: user.uid, firstName, lastName, phone, role, additionalRoles: role === 'org_super_admin' ? [] : additionalRoles, status, skillCodes, roleExpiresAt: role === 'org_super_admin' ? '' : roleExpiresAt, ...extra }));
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save.');
@@ -291,6 +295,9 @@ function UserForm({
                     <SelectField id='org-role' label='Security role' value={role} disabled={isSelf || user?.isCreator === true} onChange={(e) => setRole(e.target.value)}>
                         {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </SelectField>
+                    {!isNew && user && (
+                        <RoleSetPicker roles={roles} primary={role} value={additionalRoles} onChange={setAdditionalRoles} endpoint='/api/org/users/access-check' uid={user.uid} disabled={isSelf || user.isCreator === true} />
+                    )}
                     {user?.isCreator && <Alert tone='info'>Original organization creator: super administrator rights cannot be removed, disabled, or deleted.</Alert>}
                     <p className='text-xs text-slate-500'>
                         An organization may have {adminPolicy.minimumActive}–{adminPolicy.maximum} super administrators. Only a super administrator may grant or remove this role.

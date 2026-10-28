@@ -58,3 +58,9 @@ test('users are added only in HR, with an employee number', () => {
     assert.match(hr, /EMP_\$\{String\(n\)\.padStart\(5, '0'\)\}/);
     assert.match(hr, /exists: false/);
 });
+
+test('a person can hold several security roles; conflicts are checked live and on save', () => {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', '--import', './tests/helpers/maintenance-register.mjs', './tests/helpers/multi-role-scenario.mjs'], { cwd: process.cwd(), encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + '\n' + result.stderr);
+    assert.match(result.stdout, /multi role scenario passed/);
+});

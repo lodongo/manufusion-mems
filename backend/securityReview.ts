@@ -1,5 +1,5 @@
 import { HttpError, fieldEq, getDoc, isObj, listDocs, runQuery, str } from './core';
-import { effectiveAccess, orgRoute } from './guards';
+import { additionalRoleIds, effectiveAccess, orgRoute } from './guards';
 import { queryAudit } from './audit';
 import { allowedNodeIds } from './positions';
 import { reviewPermissions, sensitiveKeys, sodConflicts } from './permissionPolicy';
@@ -129,6 +129,7 @@ export const securityReviewRoutes = {
             }))];
             const rawPermissions = [
                 ...directRaw,
+                ...additionalRoleIds(user).flatMap((id) => values(roleMap.get(id)?.data.permissions)),
                 ...access.grants.flatMap((g) => values(roleMap.get(g.roleId)?.data.permissions)),
             ];
             const review = reviewPermissions(rawPermissions);

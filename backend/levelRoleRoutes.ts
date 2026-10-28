@@ -1,5 +1,5 @@
 import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, str, writeDoc, type Doc } from './core';
-import { clearAccessCache, orgRoute, type OrgContext } from './guards';
+import { additionalRoleIds, clearAccessCache, directRoleIds, orgRoute, type OrgContext } from './guards';
 import { canGrant, catalogue, orgUsers, record } from './org';
 import { groupLabels, permissionsDigest, sodConflicts } from './permissionPolicy';
 import { LEVEL_ROLES, LEVEL_ROLE_IDS, suggestLevel, type LevelRole } from './levelRoles';
@@ -57,7 +57,7 @@ export const levelRoleRoutes = {
             const [levels, roles, users, positions] = await Promise.all([offeredLevels(ctx), listDocs(`organizations/${ctx.orgId}/roles`), orgUsers(ctx.orgId), listDocs(`organizations/${ctx.orgId}/positions`)]);
             const installed = new Set(roles.map((r) => r.id));
             const usedBy = (id: string) => ({
-                users: users.filter((u) => str(u.data.role) === id).length,
+                users: users.filter((u) => directRoleIds(u).includes(id)).length,
                 jobRoles: positions.filter((p) => asList(p.data.securityRoles).includes(id)).map((p) => p.id),
             });
             const ready = levels.filter((l) => installed.has(l.id) && l.available);
@@ -167,11 +167,12 @@ export const levelRoleRoutes = {
             const jobRolesOf = (u: Doc) => (Array.isArray(u.data.assignments) ? (u.data.assignments as unknown[]) : []).filter(isObj).map((a) => str(a.positionCode));
             const securityOfJob = new Map(positions.map((p) => [p.id, asList(p.data.securityRoles)]));
             for (const u of users) {
-                const direct = str(u.data.role);
-                if (!mapOf.has(direct)) continue;
-                const held = [direct, ...jobRolesOf(u).flatMap((j) => securityOfJob.get(j) ?? [])];
+                const direct = directRoleIds(u);
+                const moving = direct.filter((id) => mapOf.has(id));
+                if (!moving.length) continue;
+                const held = [...direct, ...jobRolesOf(u).flatMap((j) => securityOfJob.get(j) ?? [])];
                 const conflicts = sodConflicts(union(remap(held)));
-                if (conflicts.length) { blocked.add(direct); skipped.push({ id: direct, reason: `${str(u.data.email)} would combine duties that must stay apart (${conflicts.map((c) => c.id).join(', ')}).` }); }
+                if (conflicts.length) for (const id of moving) { blocked.add(id); skipped.push({ id, reason: `${str(u.data.email)} would combine duties that must stay apart (${conflicts.map((c) => c.id).join(', ')}).` }); }
             }
             const go = moves.filter((m) => !blocked.has(m.from.id));
             for (const m of go) if (!canGrant(ctx, [...permsOf(m.from.id), ...m.to.permissions])) throw new HttpError(403, 'You cannot move rights you do not hold yourself.');
@@ -183,9 +184,17 @@ export const levelRoleRoutes = {
                 const next = Array.from(new Set(now.map((id) => goMap.get(id) ?? id)));
                 await writeDoc(`${root}/positions/${p.id}`, { ...p.data, securityRoles: next, updatedAt: nowIso(), updatedBy: ctx.uid }, { updateTime: p.updateTime });
             }
+            // Each person is rewritten once: primary and additional roles move to their levels (no duplicates).
+            for (const u of users) {
+                const direct = directRoleIds(u);
+                if (!direct.some((id) => goMap.has(id))) continue;
+                const primary = str(u.data.role);
+                const nextPrimary = goMap.get(primary) ?? primary;
+                const nextExtra = Array.from(new Set(additionalRoleIds(u).map((id) => goMap.get(id) ?? id))).filter((id) => id !== nextPrimary);
+                await writeDoc(`users/${u.id}`, { ...u.data, role: nextPrimary, additionalRoles: nextExtra }, { updateTime: u.updateTime });
+            }
             for (const m of go) {
-                const affectedUsers = users.filter((u) => str(u.data.role) === m.from.id);
-                for (const u of affectedUsers) await writeDoc(`users/${u.id}`, { ...u.data, role: m.to.id }, { updateTime: u.updateTime });
+                const affectedUsers = users.filter((u) => directRoleIds(u).includes(m.from.id));
                 const jobs = positions.filter((p) => asList(p.data.securityRoles).includes(m.from.id)).length;
                 await deleteDoc(`${root}/roles/${m.from.id}`);
                 await record(ctx, 'org.role.consolidate', str(m.from.data.name), `Into ${m.to.name}: ${jobs} job role(s), ${affectedUsers.length} user(s). Lost: ${m.lost.join(', ') || 'none'}. Gained: ${m.gained.join(', ') || 'none'}. Reason: ${reason}`.slice(0, 1800));
