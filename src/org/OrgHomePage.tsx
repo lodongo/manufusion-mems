@@ -41,6 +41,7 @@ const StockTake = lazy(() => import('./StockTake'));
 const WorkflowInbox = lazy(() => import('./WorkflowInbox'));
 const MyAccess = lazy(() => import('./MyAccess'));
 const HrShell = lazy(() => import('./HrShell'));
+const HrAddEmployee = lazy(() => import('./HrEmployeeAdmin'));
 const HrEmployeePortal = lazy(() => import('./HrEmployeePortal'));
 const HrReportees = lazy(() => import('./HrReportees'));
 const HrAccessRules = lazy(() => import('./HrAccessRules'));
@@ -409,6 +410,8 @@ export default function OrgHomePage({
     else if (section === 'mail') content = <OrgMail myEmail={session.user.email} initialId={id==='read'?sub:''} />;
     else if (showActivity) content = <MyActivity />;
     else if (section === 'module' && activeModule && activeModule.module.code==='HRM') content = <HrEmployeePortal uid={session.user.uid} origin='HR01' selfView />;
+    // Adding employees lives in HR; reachable from Administration > Users even before the HR menu is adopted.
+    else if (section === 'hr' && id === 'HR02' && sub === 'new' && hasPerm(data.permissions,'HRM.employees.manage')) content = <HrAddEmployee />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR01' && sub === 'reportees' && hasPerm(data.permissions,'HRM.shell.view')) content = <HrReportees />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR01' && sub === 'reportee' && /^[A-Za-z0-9_-]{1,128}$/.test(route.split('/')[4]||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrEmployeePortal uid={route.split('/')[4]} origin='HR01' reporteeView />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR17' && (hasPerm(data.permissions,'HRM.rules.manage')||hasPerm(data.permissions,'HRM.rules.approve'))) content = <HrAccessRules />;
