@@ -125,6 +125,7 @@ function displayName(ctx: OrgContext) {
 
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.map(str).filter(Boolean) : []);
 const objs = (v: unknown): Obj[] => (Array.isArray(v) ? (v as Plain[]).filter(isObj) : []);
+const object = (v: unknown): Obj => (isObj(v) ? v : {});
 const numIn = (v: unknown, min: number, max: number, label: string): number => {
     const n = Number(v);
     if (!Number.isFinite(n) || n < min || n > max) throw new HttpError(400, `${label} must be between ${min} and ${max}.`);
@@ -248,13 +249,22 @@ async function lineage(orgId: string, id: string): Promise<Doc[]> {
     return out;
 }
 
-async function assemblyContext(ctx: OrgContext, assemblyId: string, perm: string) {
-    if (!ID_RE.test(assemblyId)) throw new HttpError(400, 'Choose an assembly.');
+/** Equipment-level nodes a defect can be reported against when the assembly is not known yet. */
+const UNIT_LEVELS = ['work_center', 'equipment'];
+/**
+ * The place a work request is raised against: an assembly (preferred) or, at the least, its equipment. The person
+ * must hold the permission at that place. Returns assembly = null when only the equipment is known.
+ */
+async function assemblyContext(ctx: OrgContext, assemblyId: string, perm: string, allowEquipment = false) {
+    if (!ID_RE.test(assemblyId)) throw new HttpError(400, allowEquipment ? 'Choose the equipment or the assembly.' : 'Choose an assembly.');
     const scope = await scopeOf(ctx);
     const docs = await lineage(ctx.orgId, assemblyId);
-    const assembly = docs[docs.length - 1];
-    if (!assembly || assembly.id !== assemblyId || str(assembly.data.level) !== 'assembly') throw new HttpError(400, 'Choose an assembly.');
-    if (str(assembly.data.status) === 'inactive') throw new HttpError(400, 'This assembly is inactive.');
+    const node = docs[docs.length - 1];
+    const level = str(node?.data.level);
+    const atEquipment = allowEquipment && UNIT_LEVELS.includes(level);
+    if (!node || node.id !== assemblyId || (level !== 'assembly' && !atEquipment)) throw new HttpError(400, allowEquipment ? 'Choose the equipment or the assembly.' : 'Choose an assembly.');
+    if (str(node.data.status) === 'inactive') throw new HttpError(400, atEquipment ? 'This equipment is inactive.' : 'This assembly is inactive.');
+    const assembly = atEquipment ? null : node;
     const pathIds = docs.map((d) => d.id);
     need(ctx, perm, pathIds, scope);
     const unit = docs.find((d) => ['work_center', 'equipment'].includes(str(d.data.level))) ?? null;
@@ -278,7 +288,7 @@ async function assemblyContext(ctx: OrgContext, assemblyId: string, perm: string
     const asset=(d:Doc)=>({tag:d.id,name:str(d.data.name),className:str(d.data.className),
         classCode:str(d.data.classCode),status:str(d.data.status),linked:true});
     return {
-        assembly: { id: assembly.id, code: str(assembly.data.code), name: str(assembly.data.name) },
+        assembly: assembly ? { id: assembly.id, code: str(assembly.data.code), name: str(assembly.data.name) } : null,
         unit: unit ? { id: unit.id, code: str(unit.data.code), name: str(unit.data.name), equipmentClass: str(unitAttrs.equipmentClass), equipmentClassName: str(unitAttrs.equipmentClassName) } : null,
         costCenter: costCenter ? { id: costCenter.id, code: str(costCenter.data.code), name: str(costCenter.data.name) } : null,
         site: site ? { id: site.id, code: str(site.data.code), name: str(site.data.name) } : null,
@@ -297,9 +307,9 @@ function placeFields(place: Place, assetTag: string) {
     const asset=place.assets.find(a=>a.tag===mappedTag&&a.linked);
     if(!asset)throw new HttpError(409,'The equipment has no valid linked asset. Fix the mapping in Asset Management.');
     return {
-        assemblyId: place.assembly.id,
-        assemblyCode: place.assembly.code,
-        assemblyName: place.assembly.name,
+        assemblyId: place.assembly?.id ?? '',
+        assemblyCode: place.assembly?.code ?? '',
+        assemblyName: place.assembly?.name ?? '',
         unitId: place.unit?.id ?? '',
         unitCode: place.unit?.code ?? '',
         unitName: place.unit?.name ?? '',
@@ -327,6 +337,8 @@ const WR_STATUS: Record<string, string> = {
     declined: 'Declined',
     cancelled: 'Cancelled',
     converted: 'Converted to work order',
+    closure_pending: 'Closed at review – to confirm',
+    closed: 'Closed at review',
 };
 const wrStatus = (doc: Doc) => {
     const s = str(doc.data.status);
@@ -379,33 +391,52 @@ function wrOut(doc: Doc) {
 }
 
 /**
- * What the requester reports. Criticality is set by the assessor during assessment, and the failure mode is optional;
- * either is kept only when supplied, so a requester edit never clears what is already recorded.
+ * What the requester reports. Only the place is required to raise a request; title, description, source, impacts,
+ * criticality and failure mode are optional and are completed at review or assessment. A value the requester gave is
+ * never overwritten afterwards (see the enrich action).
  */
 const MAX_IMPACTS = 5;
 async function readFinding(l: Lists, b: Record<string, unknown>) {
     const title = clean(b.title, 120);
     const description = str(b.description).trim().slice(0, 2000);
-    if (title.length < 5) throw new HttpError(400, 'Give the request a short title (5 to 120 characters).');
-    if (description.length < 10) throw new HttpError(400, 'Describe what you found (10 to 2000 characters).');
-    const source = pickGrouped(l.sources, str(b.sourceCode), 'source of the finding')!;
+    if (title && title.length < 3) throw new HttpError(400, 'A title needs at least 3 characters (or leave it empty).');
+    const source = str(b.sourceCode) ? pickGrouped(l.sources, str(b.sourceCode), 'source of the finding')! : null;
     const crit = str(b.criticalityCode) ? pick(l.criticality, str(b.criticalityCode), 'criticality') : null;
     const impactCodes = [...new Set(strs(b.impactCodes))];
-    if (!impactCodes.length || impactCodes.length > MAX_IMPACTS) throw new HttpError(400, `Choose between 1 and ${MAX_IMPACTS} impacts.`);
+    if (impactCodes.length > MAX_IMPACTS) throw new HttpError(400, `Choose up to ${MAX_IMPACTS} impacts.`);
     const impacts = impactCodes.map((c) => findIn(l.impacts, c));
     if (impacts.some((i) => !i)) throw new HttpError(400, 'Choose impacts from the list.');
     const failure = str(b.failureModeCode) ? pickGrouped(l.failureModes, str(b.failureModeCode), 'failure mode', false) : null;
     return {
         title,
         description,
-        sourceCode: source.code,
-        sourceLabel: source.label,
-        sourceGroup: source.group,
+        sourceCode: source?.code ?? '',
+        sourceLabel: source?.label ?? '',
+        sourceGroup: source?.group ?? '',
         ...(crit ? { criticalityCode: crit.code, criticalityLabel: crit.label, criticalityColor: crit.color } : {}),
         impacts: impacts.map((i) => ({ code: i!.code, label: i!.label, group: i!.group })),
         ...(failure ? { failureModeCode: failure.code, failureModeLabel: `${failure.group} · ${failure.label}` } : {}),
     };
 }
+/**
+ * The assessment header: technical evaluation, nature (failure mode), severity (risk level / criticality), solution
+ * categories and maintenance type (the list Finance's GL account rules use). Requests assessed under the earlier
+ * header (maintenance type, work type, priority, discipline) stay valid.
+ */
+export function assessmentHeaderIssue(d: Obj): string {
+    const legacy = !!(str(d.maintenanceTypeCode) && str(d.workTypeCode) && str(d.priorityCode) && str(d.disciplineCode));
+    if (legacy) return '';
+    const missing = [
+        str(d.technicalEvaluation).length >= 20 ? '' : 'technical evaluation',
+        str(d.natureCode) ? '' : 'nature',
+        str(d.criticalityCode) && str(d.severitySetBy) ? '' : 'severity',
+        objs(d.solutions).length ? '' : 'solution categories',
+        str(d.maintenanceTypeCode) ? '' : 'maintenance type',
+    ].filter(Boolean);
+    return missing.length ? `Complete the assessment: ${missing.join(', ')}.` : '';
+}
+/** Title shown in lists when the requester gave none; review or assessment may replace it. */
+const autoTitle = (loc: { assemblyName: string; unitName: string }) => `Defect on ${loc.assemblyName || loc.unitName || 'equipment'}`.slice(0, 120);
 
 function readPhotos(ctx: OrgContext, raw: unknown, existing: string[] = []) {
     const photos = [...new Set(strs(raw))];
@@ -439,6 +470,11 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         assess: ['submitted','under_review'].includes(status) && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
         return: status === 'under_review' && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         decline: status === 'under_review' && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+        // Review and assessment build on the request: fill what is empty, add photos, add or change the assembly.
+        enrich: ['submitted', 'under_review'].includes(status) && (at(P.WR_review) || at(P.assessment_edit)) && !assessmentReviewCurrent(doc.data),
+        // Fixed on the spot, no planning needed: the reviewer closes; another person confirms.
+        close: ['submitted', 'under_review'].includes(status) && at(P.WR_close) && independent(ctx, !mine, 'mnt.wr.reviewer_independence') && !assessmentReviewCurrent(doc.data),
+        confirmClosure: status === 'closure_pending' && at(P.WR_closeConfirm) && independent(ctx, str(object(doc.data.closure).by) !== ctx.uid, 'mnt.wr.closure_independence'),
         reviewAssessment: status === 'under_review' && at(P.assessment_review) && independent(ctx, !mine && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid), 'mnt.assessment.review_independence'),
         convert: status === 'under_review' && at(P.WR_convert) && assessmentReviewCurrent(doc.data) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         ownRequest: mine,
@@ -450,7 +486,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
 const WO_STATUS: Record<string, string> = {
     planning: 'In planning',
     plan_ready: 'Plan ready for release',
-    released: 'Released',
+    released: 'Ready – awaiting a window',
     scheduled: 'Scheduled',
     in_progress: 'In progress',
     completed: 'Completed - to verify',
@@ -1022,7 +1058,7 @@ export const maintenanceRoutes = {
                 code: str(d.data.code),
                 name: str(d.data.name),
                 assetTag: isObj(d.data.attributes) ? str(d.data.attributes.assetTag) : '',
-                inScope: str(d.data.level) === 'assembly' && canAt(ctx, perm, pathTo(d.id), scope),
+                inScope: (str(d.data.level) === 'assembly' || (perm === P.WR_create && UNIT_LEVELS.includes(str(d.data.level)))) && canAt(ctx, perm, pathTo(d.id), scope),
             }));
             const keep = new Set<string>();
             for (const n of nodes) if (n.inScope) for (const id of pathTo(n.id)) keep.add(id);
@@ -1047,14 +1083,15 @@ export const maintenanceRoutes = {
     'POST /api/org/mnt/assembly': [
         orgRoute('org.mnt.assembly', null, async (ctx) => {
             requireMnt(ctx);
-            return assemblyContext(ctx, str(ctx.body.assemblyId), str(ctx.body.purpose) === 'wo' ? P.WO_create : P.WR_create);
+            const forWr = str(ctx.body.purpose) !== 'wo';
+            return assemblyContext(ctx, str(ctx.body.assemblyId), forWr ? P.WR_create : P.WO_create, forWr);
         }),
     ],
 
     'POST /api/org/mnt/wr/photo': [
         orgRoute('org.mnt.wr.photo', null, async (ctx) => {
             requireMnt(ctx);
-            if (!canAnywhere(ctx, P.WR_create) && !canAnywhere(ctx, P.WR_edit)) throw new HttpError(403, 'You do not have permission to do this.');
+            if (![P.WR_create, P.WR_edit, P.WR_review, P.assessment_edit].some((x) => canAnywhere(ctx, x))) throw new HttpError(403, 'You do not have permission to do this.');
             await rateLimit('wr-photo', ctx.uid, 60, 3600);
             const data = str(ctx.body.data);
             if (!data || data.length > 2_000_000 || !/^[A-Za-z0-9+/=]+$/.test(data)) throw new HttpError(400, 'The photo must be a JPEG or PNG image under 1.5 MB.');
@@ -1076,9 +1113,12 @@ export const maintenanceRoutes = {
             requireMnt(ctx);
             const b = ctx.body;
             if (b.confirm !== true) throw new HttpError(400, 'Review the request and confirm that the details are correct.');
-            const place = await assemblyContext(ctx, str(b.assemblyId), P.WR_create);
+            // The defect must be placed at least at equipment level (assembly preferred), within the person's scope.
+            const place = await assemblyContext(ctx, str(b.assemblyId) || str(b.equipmentId), P.WR_create, true);
             const loc = placeFields(place, str(b.assetTag));
             const finding = await readFinding(await lists(), b);
+            const titleAuto = !finding.title;
+            if (titleAuto) finding.title = autoTitle(loc);
             const gembaId = str(b.gembaId), observationId = str(b.gembaObservationId);
             let gembaTypeCode = '', gembaTypeName = '', inheritedPhoto = '';
             if (gembaId || observationId) {
@@ -1109,6 +1149,7 @@ export const maintenanceRoutes = {
                         code,
                         ...loc,
                         ...finding,
+                        titleAuto,
                         status: 'submitted',
                         photos: photos.map((p) => ({ path: p, addedAt: now })),
                         gembaId, gembaObservationId: observationId, gembaTypeCode, gembaTypeName,
@@ -1122,7 +1163,7 @@ export const maintenanceRoutes = {
                     { exists: false }
                 );
                 if (created) {
-                    await rec(ctx, 'mnt.wr.submitted', code, `${finding.title} · ${loc.assemblyCode} · ${loc.assetTag}`);
+                    await rec(ctx, 'mnt.wr.submitted', code, `${finding.title} · ${loc.assemblyCode || loc.unitCode} · ${loc.assetTag}`);
                     return { code };
                 }
             }
@@ -1141,8 +1182,9 @@ export const maintenanceRoutes = {
                     const s = wrStatus(d);
                     const mine = str(d.data.requestedBy) === ctx.uid;
                     if (view === 'mine') return mine;
-                    if (view === 'review') return (!mine || ctx.testMode === true) && (['submitted', 'under_review'].includes(s) && canAt(ctx, P.WR_review, pathOf(d), scope) || s==='under_review' && !assessmentReviewCurrent(d.data) && canAt(ctx, P.assessment_review, pathOf(d), scope));
-                    if (view === 'open') return ['submitted', 'under_review', 'returned'].includes(s);
+                    if (view === 'review') return (s === 'closure_pending' && canAt(ctx, P.WR_closeConfirm, pathOf(d), scope) && str(object(d.data.closure).by) !== ctx.uid)
+                        || ((!mine || ctx.testMode === true) && (['submitted', 'under_review'].includes(s) && (canAt(ctx, P.WR_review, pathOf(d), scope) || canAt(ctx, P.WR_close, pathOf(d), scope)) || s==='under_review' && !assessmentReviewCurrent(d.data) && canAt(ctx, P.assessment_review, pathOf(d), scope)));
+                    if (view === 'open') return ['submitted', 'under_review', 'returned', 'closure_pending'].includes(s);
                     return true;
                 })
                 .sort((a, b) => b.id.localeCompare(a.id))
@@ -1180,8 +1222,7 @@ export const maintenanceRoutes = {
             }
             if ([doc.data.requestedBy,doc.data.createdBy,doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid) && !bypass(ctx,'mnt.assessment.review_independence'))
                 reviewBlockers.push('A requester or technical assessor cannot approve their own assessment.');
-            if (!str(doc.data.maintenanceTypeCode)||!str(doc.data.workTypeCode)||!str(doc.data.priorityCode)||!str(doc.data.disciplineCode))
-                reviewBlockers.push('The technical assessor must complete maintenance type, work type, priority and discipline.');
+            {const header=assessmentHeaderIssue(doc.data);if(header)reviewBlockers.push('The technical assessor must '+header.charAt(0).toLowerCase()+header.slice(1));}
             if (!Array.isArray(doc.data.assessmentTasks)||doc.data.assessmentTasks.length===0)
                 reviewBlockers.push('The technical assessor must save at least one fully assessed task.');
             else if (!Number(doc.data.assessmentTasksVersion)||!str(doc.data.assessmentTasksAt))
@@ -1190,6 +1231,16 @@ export const maintenanceRoutes = {
             if (currentReview) can.reviewAssessment = false;
             if (!can.view) throw new HttpError(403, 'This work request is outside your access.');
             const d = doc.data;
+            // Assemblies of the request's equipment, for the reviewer or assessor who adds or changes it.
+            let assemblyOptions: Array<{ id: string; code: string; name: string }> = [];
+            if (can.enrich && str(d.unitId)) {
+                const nodes = (await listDocs(col(ctx.orgId))).filter((n) => str(n.data.status) !== 'inactive');
+                const parent = new Map(nodes.map((n) => [n.id, str(n.data.parentId)]));
+                const under = (id: string) => { for (let cur = parent.get(id), i = 0; cur && i < 14; cur = parent.get(cur), i++) if (cur === str(d.unitId)) return true; return false; };
+                assemblyOptions = nodes.filter((n) => str(n.data.level) === 'assembly' && under(n.id))
+                    .map((n) => ({ id: n.id, code: str(n.data.code), name: str(n.data.name) }))
+                    .sort((a, b) => a.code.localeCompare(b.code));
+            }
             const photoPaths = objs(d.photos).map((p) => str(p.path));
             const urls = await Promise.all(photoPaths.map((p) => signedUrl(p)));
             return {
@@ -1214,7 +1265,18 @@ export const maintenanceRoutes = {
                     disciplineLabel: str(d.disciplineLabel),
                     duplicateOf: str(d.duplicateOf),
                     note: str(d.assessmentNote),
+                    technicalEvaluation: str(d.technicalEvaluation),
+                    natureCode: str(d.natureCode),
+                    natureLabel: str(d.natureLabel),
+                    severityCode: str(d.severitySetBy) ? str(d.criticalityCode) : '',
+                    solutions: objs(d.solutions).map((x) => ({ code: str(x.code), label: str(x.label), group: str(x.group) })),
+                    headerIssue: assessmentHeaderIssue(d),
                 },
+                titleAuto: d.titleAuto === true,
+                unitId: str(d.unitId),
+                assemblyOptions,
+                closure: isObj(d.closure) ? d.closure : null,
+                closureRejections: objs(d.closureRejections),
                 assessmentTasks: objs(d.assessmentTasks),
                 assessmentReview: isObj(d.assessmentReview)?d.assessmentReview:{status:'pending'},
                 assessmentReviewCurrent: currentReview,
@@ -1258,10 +1320,12 @@ export const maintenanceRoutes = {
                 case 'edit': {
                     deny(can.edit, 'Only the requester can edit, and only before review starts.');
                     const finding = await readFinding(l, ctx.body);
+                    const titleAuto = !finding.title;
+                    if (titleAuto) finding.title = autoTitle({ assemblyName: str(doc.data.assemblyName), unitName: str(doc.data.unitName) });
                     const existing = objs(doc.data.photos).map((p) => str(p.path));
                     const photos = readPhotos(ctx, ctx.body.photos, existing);
                     // A work request can be edited and submitted without any photo.
-                    await done({ ...finding, photos: photos.map((p) => ({ path: p, addedAt: now })) }, 'Edited by requester', 'mnt.wr.edited', finding.title);
+                    await done({ ...finding, titleAuto, photos: photos.map((p) => ({ path: p, addedAt: now })) }, 'Edited by requester', 'mnt.wr.edited', finding.title);
                     return { ok: true };
                 }
                 case 'resubmit':
@@ -1274,34 +1338,137 @@ export const maintenanceRoutes = {
                     confirmCode(ctx, doc);
                     await done({ status: 'cancelled', cancelReason: note, closedAt: now }, 'Cancelled', 'mnt.wr.cancelled');
                     return { ok: true };
+                case 'enrich': {
+                    // Review and assessment complete the request; what the requester recorded is kept as written.
+                    deny(can.enrich, 'You cannot add details to this request.');
+                    const d = doc.data;
+                    const fields: Record<string, Plain> = {};
+                    const changes: string[] = [];
+                    const asmId = str(ctx.body.assemblyId);
+                    if (asmId && asmId !== str(d.assemblyId)) {
+                        const perm = canAt(ctx, P.WR_review, pathOf(doc), scope) ? P.WR_review : P.assessment_edit;
+                        const place = await assemblyContext(ctx, asmId, perm);
+                        if (!place.unit || place.unit.id !== str(d.unitId))
+                            throw new HttpError(409, `Choose an assembly of ${str(d.unitCode)} ${str(d.unitName)}. The equipment of a request does not change.`);
+                        if (objs(d.assessmentTasks).length)
+                            throw new HttpError(409, 'Tasks are already assessed against the current assembly. Change the assembly before assessing tasks.');
+                        Object.assign(fields, {
+                            assemblyId: place.assembly!.id, assemblyCode: place.assembly!.code, assemblyName: place.assembly!.name,
+                            path: place.path.map((x) => x.id),
+                        });
+                        changes.push(`Assembly ${str(d.assemblyCode) || 'not set'} → ${place.assembly!.code} ${place.assembly!.name}`);
+                    }
+                    const f = await readFinding(l, ctx.body);
+                    const keep = (label: string) => { throw new HttpError(409, `${label} was recorded by the requester and is kept as written.`); };
+                    if (f.title && f.title !== str(d.title)) {
+                        if (d.titleAuto === true || !str(d.title)) { fields.title = f.title; fields.titleAuto = false; changes.push(`Title: ${f.title}`); }
+                        else keep('The title');
+                    }
+                    if (f.description && f.description !== str(d.description)) {
+                        if (!str(d.description)) { fields.description = f.description; changes.push('Description added'); }
+                        else keep('The description');
+                    }
+                    if (f.sourceCode && f.sourceCode !== str(d.sourceCode)) {
+                        if (!str(d.sourceCode)) { Object.assign(fields, { sourceCode: f.sourceCode, sourceLabel: f.sourceLabel, sourceGroup: f.sourceGroup }); changes.push(`Source: ${f.sourceGroup} · ${f.sourceLabel}`); }
+                        else keep('The source');
+                    }
+                    if (f.impacts.length) {
+                        const had = objs(d.impacts).map((i) => str(i.code));
+                        const added = f.impacts.filter((i) => !had.includes(i.code));
+                        if (had.length + added.length > MAX_IMPACTS) throw new HttpError(400, `A request holds up to ${MAX_IMPACTS} impacts.`);
+                        if (added.length) { fields.impacts = [...objs(d.impacts), ...added] as unknown as Plain; changes.push(`Impacts added: ${added.map((i) => i.label).join(', ')}`); }
+                    }
+                    if (f.criticalityCode && f.criticalityCode !== str(d.criticalityCode)) {
+                        if (!str(d.criticalityCode)) { Object.assign(fields, { criticalityCode: f.criticalityCode, criticalityLabel: f.criticalityLabel, criticalityColor: f.criticalityColor }); changes.push(`Criticality: ${f.criticalityLabel}`); }
+                        else keep('The criticality');
+                    }
+                    if (f.failureModeCode && f.failureModeCode !== str(d.failureModeCode)) {
+                        if (!str(d.failureModeCode)) { Object.assign(fields, { failureModeCode: f.failureModeCode, failureModeLabel: f.failureModeLabel }); changes.push(`Failure mode: ${f.failureModeLabel}`); }
+                        else keep('The failure mode');
+                    }
+                    const existing = objs(d.photos).map((x) => str(x.path));
+                    const newPhotos = [...new Set(strs(ctx.body.addPhotos))].filter((x) => !existing.includes(x));
+                    if (newPhotos.length) {
+                        if (existing.length + newPhotos.length > MAX_PHOTOS * 2) throw new HttpError(400, `A request holds up to ${MAX_PHOTOS * 2} photos.`);
+                        readPhotos(ctx, newPhotos);
+                        fields.photos = [...objs(d.photos), ...newPhotos.map((x) => ({ path: x, addedAt: now, addedBy: ctx.uid }))] as unknown as Plain;
+                        changes.push(`${newPhotos.length} photo(s) added`);
+                    }
+                    if (!changes.length) throw new HttpError(400, 'Nothing new to add.');
+                    await done(fields, 'Details added', 'mnt.wr.enriched', changes.join(' · '));
+                    return { ok: true };
+                }
+                case 'close_review': {
+                    // Fixed on the spot: no planning needed. Recorded with cause, solution and maintenance type (the
+                    // same maintenance type list Finance uses for GL account rules); another person confirms.
+                    deny(can.close, can.ownRequest ? 'You cannot close your own request.' : 'You cannot close this request.');
+                    const cause = pickGrouped(l.rootCauses, str(ctx.body.causeCode), 'cause')!;
+                    const solution = pickGrouped(l.solutions, str(ctx.body.solutionCode), 'solution')!;
+                    const mtype = pick(l.maintenanceTypes, str(ctx.body.maintenanceTypeCode), 'maintenance type')!;
+                    const description = str(ctx.body.description).trim().slice(0, 2000);
+                    if (description.length < 10) throw new HttpError(400, 'Describe what was done (at least 10 characters).');
+                    confirmCode(ctx, doc);
+                    const closure = {
+                        causeCode: cause.code, causeLabel: cause.label, causeGroup: cause.group,
+                        solutionCode: solution.code, solutionLabel: solution.label, solutionGroup: solution.group,
+                        maintenanceTypeCode: mtype.code, maintenanceTypeLabel: mtype.label,
+                        description, by: ctx.uid, name: displayName(ctx), at: now,
+                    };
+                    await done(
+                        { status: 'closure_pending', closure, maintenanceTypeCode: mtype.code, maintenanceTypeLabel: mtype.label,
+                          ...(str(doc.data.reviewer) ? {} : { reviewer: ctx.uid, reviewerName: displayName(ctx), reviewStartedAt: now }) },
+                        'Closed at review – awaiting confirmation', 'mnt.wr.closed_at_review',
+                        `${cause.group} · ${cause.label} / ${solution.group} · ${solution.label} / ${mtype.label} · ${description}`);
+                    return { ok: true };
+                }
+                case 'confirm_closure':
+                case 'reject_closure': {
+                    deny(can.confirmClosure, str(object(doc.data.closure).by) === ctx.uid ? 'You closed this request, so another person must confirm it.' : 'You cannot confirm this closure.');
+                    const closure = object(doc.data.closure);
+                    if (action === 'confirm_closure') {
+                        await done({ status: 'closed', closedAt: now, closure: { ...closure, confirmedBy: ctx.uid, confirmedName: displayName(ctx), confirmedAt: now, confirmNote: note } as Plain },
+                            'Closure confirmed', 'mnt.wr.closure_confirmed', note);
+                        return { ok: true };
+                    }
+                    if (note.length < 10) throw new HttpError(400, 'Say why the closure is not accepted (at least 10 characters).');
+                    const rejected = [...objs(doc.data.closureRejections), { ...closure, rejectedBy: ctx.uid, rejectedName: displayName(ctx), rejectedAt: now, reason: note }];
+                    await done({ status: 'under_review', closure: null, closureRejections: rejected as unknown as Plain }, 'Closure not accepted – back to review', 'mnt.wr.closure_rejected', note);
+                    return { ok: true };
+                }
                 case 'start_review':
                     deny(can.startReview, can.ownRequest ? 'You cannot review your own request.' : 'You cannot review this request.');
                     await done({ status: 'under_review', reviewer: ctx.uid, reviewerName: displayName(ctx), reviewStartedAt: now }, 'Review started', 'mnt.wr.review_started', '');
                     return { ok: true };
                 case 'assess': {
+                    // The technical verification of the need and the proposed solution.
                     deny(can.assess, 'You cannot assess this request.');
                     const b = ctx.body;
+                    const evaluation = str(b.technicalEvaluation).trim().slice(0, 3000);
+                    if (evaluation.length < 20) throw new HttpError(400, 'Write the technical evaluation of the request (at least 20 characters).');
+                    const nature = pickGrouped(l.failureModes, str(b.natureCode), 'nature (failure mode)')!;
+                    const crit = pick(l.criticality, str(b.severityCode), 'severity')!;
+                    const solutionCodes = [...new Set(strs(b.solutionCodes))];
+                    if (!solutionCodes.length || solutionCodes.length > 5) throw new HttpError(400, 'Choose between 1 and 5 solution categories.');
+                    const solutions = solutionCodes.map((c) => findIn(l.solutions, c));
+                    if (solutions.some((x) => !x)) throw new HttpError(400, 'Choose solution categories from the list.');
                     const mtype = pick(l.maintenanceTypes, str(b.maintenanceTypeCode), 'maintenance type')!;
-                    const wtype = pick(l.workTypes, str(b.workTypeCode), 'work type')!;
-                    const prio = pick(l.priorities, str(b.priorityCode), 'priority')!;
-                    const disc = pick(l.disciplines, str(b.disciplineCode), 'discipline')!;
-                    const crit = pick(l.criticality, str(b.criticalityCode) || str(doc.data.criticalityCode), 'criticality')!;
+                    const prio = pick(l.priorities, str(b.priorityCode), 'priority', false);
                     const duplicateOf = str(b.duplicateOf);
                     if (duplicateOf && (!WR_RE.test(duplicateOf) || duplicateOf === doc.id)) throw new HttpError(400, 'Enter a valid related work request number.');
                     const changedCrit = crit.code !== str(doc.data.criticalityCode);
                     await done(
                         {
+                            technicalEvaluation: evaluation,
+                            natureCode: nature.code,
+                            natureLabel: `${nature.group} · ${nature.label}`,
+                            solutions: solutions.map((x) => ({ code: x!.code, label: x!.label, group: x!.group })) as unknown as Plain,
                             maintenanceTypeCode: mtype.code,
                             maintenanceTypeLabel: mtype.label,
-                            workTypeCode: wtype.code,
-                            workTypeLabel: wtype.label,
-                            priorityCode: prio.code,
-                            priorityLabel: prio.label,
-                            disciplineCode: disc.code,
-                            disciplineLabel: disc.label,
+                            ...(prio ? { priorityCode: prio.code, priorityLabel: prio.label } : {}),
                             criticalityCode: crit.code,
                             criticalityLabel: crit.label,
                             criticalityColor: crit.color,
+                            severitySetBy: ctx.uid,
                             ...(changedCrit && str(doc.data.criticalityCode) && !str(doc.data.criticalityOriginalLabel) ? { criticalityOriginalLabel: str(doc.data.criticalityLabel) } : {}),
                             duplicateOf,
                             assessmentNote: note,
@@ -1312,12 +1479,13 @@ export const maintenanceRoutes = {
                         },
                         'Assessed',
                         'mnt.wr.assessed',
-                        `${mtype.label} · ${wtype.label} · ${prio.label} · ${disc.label}${changedCrit ? ` · criticality ${str(doc.data.criticalityLabel) || 'not set'} → ${crit.label}` : ''}${note ? ` · ${note}` : ''}`
+                        `${nature.group} · ${nature.label} · severity ${crit.label} · ${solutions.map((x) => x!.label).join(', ')} · ${mtype.label}${changedCrit ? ` · criticality ${str(doc.data.criticalityLabel) || 'not set'} → ${crit.label}` : ''}${note ? ` · ${note}` : ''}`
                     );
                     return { ok: true };
                 }
                 case 'save_task_assessment': {
                     deny(can.assess, 'You cannot assess this request.');
+                    if (!str(doc.data.assemblyId)) throw new HttpError(409, 'Add the assembly to the request (Add details) before assessing tasks.');
                     let tasks;
                     try{
                         const matrixDoc=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
@@ -1375,8 +1543,7 @@ export const maintenanceRoutes = {
                     const role=await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
                     const issue=reviewIssue(ctx,doc.data);
                     if(issue)throw new HttpError(409,issue);
-                    if(!str(doc.data.maintenanceTypeCode)||!str(doc.data.workTypeCode)||!str(doc.data.priorityCode)||!str(doc.data.disciplineCode))
-                        throw new HttpError(409,'Complete maintenance type, work type, priority and discipline before approval.');
+                    {const header=assessmentHeaderIssue(doc.data);if(header)throw new HttpError(409,header);}
                     if(note.length<10)throw new HttpError(400,'Provide technical review notes (at least 10 characters).');
                     if(action==='return_assessment'){
                         await done({assessmentReview:{status:'changes_requested',version:Number(doc.data.assessmentTasksVersion)||0,
@@ -1402,12 +1569,19 @@ export const maintenanceRoutes = {
                 case 'convert': {
                     deny(can.convert, can.ownRequest ? 'You cannot convert your own request.' : 'You cannot convert this request.');
                     const d = doc.data;
-                    if (!str(d.maintenanceTypeCode) || !str(d.workTypeCode) || !str(d.priorityCode) || !str(d.disciplineCode)) throw new HttpError(400, 'Complete the assessment (maintenance type, work type, priority and discipline) before converting.');
+                    {const header=assessmentHeaderIssue(d);if(header)throw new HttpError(400,header.replace(/\.$/,' before converting.'));}
+                    // The planner sets the scheduled start and end dates of the work order.
+                    const scheduledStart = readDate(ctx.body.scheduledStart, 'scheduled start date');
+                    const scheduledEnd = readDate(ctx.body.scheduledEnd, 'scheduled end date');
+                    if (scheduledStart.length !== 10 || scheduledEnd.length !== 10) throw new HttpError(400, 'Enter the scheduled dates as dates (YYYY-MM-DD).');
+                    if (scheduledEnd < scheduledStart) throw new HttpError(400, 'The scheduled end date cannot be before the start date.');
+                    if (scheduledStart < now.slice(0, 10)) throw new HttpError(400, 'The scheduled start date cannot be in the past.');
+                    if (Date.parse(scheduledEnd) - Date.parse(scheduledStart) > 366 * 86400_000) throw new HttpError(400, 'A work order can be scheduled over at most one year.');
                     if(!objs(d.assessmentTasks).length) throw new HttpError(409,'Complete the task-by-task work assessment, including spares, services and each task risk assessment, before conversion.');
                     await ensureCurrentAssessmentApproval(ctx,d);
                     await requireConfiguredMaintenanceRole(ctx,'MNT.WR.CONVERT',pathOf(doc));
                     confirmCode(ctx, doc);
-                    const keys = ['assemblyId', 'assemblyCode', 'assemblyName', 'unitId', 'unitCode', 'unitName', 'costCenterId', 'costCenterCode', 'costCenterName', 'siteId', 'siteCode', 'siteName', 'assetTag', 'assetName', 'assetClass', 'title', 'description', 'criticalityCode', 'criticalityLabel', 'criticalityColor', 'maintenanceTypeCode', 'maintenanceTypeLabel', 'workTypeCode', 'workTypeLabel', 'priorityCode', 'priorityLabel', 'disciplineCode', 'disciplineLabel', 'failureModeCode', 'failureModeLabel'];
+                    const keys = ['assemblyId', 'assemblyCode', 'assemblyName', 'unitId', 'unitCode', 'unitName', 'costCenterId', 'costCenterCode', 'costCenterName', 'siteId', 'siteCode', 'siteName', 'assetTag', 'assetName', 'assetClass', 'title', 'description', 'criticalityCode', 'criticalityLabel', 'criticalityColor', 'maintenanceTypeCode', 'maintenanceTypeLabel', 'workTypeCode', 'workTypeLabel', 'priorityCode', 'priorityLabel', 'disciplineCode', 'disciplineLabel', 'technicalEvaluation', 'natureCode', 'natureLabel', 'failureModeCode', 'failureModeLabel'];
                     const base: Record<string, Plain> = Object.fromEntries(keys.map((k) => [k, str(d[k])]));
                     base.path = strs(d.path);
                     base.assessmentTasks = objs(d.assessmentTasks) as unknown as Plain;
@@ -1418,6 +1592,10 @@ export const maintenanceRoutes = {
                     base.assessedBy = str(d.assessedBy);
                     base.assessmentTasksBy = str(d.assessmentTasksBy);
                     base.assessmentReview = d.assessmentReview as Plain;
+                    base.solutions = objs(d.solutions) as unknown as Plain;
+                    base.scheduledStart = scheduledStart;
+                    base.scheduledEnd = scheduledEnd;
+                    base.convertedBy = ctx.uid;
                     const woCode = await createWo(ctx, base, doc.id);
                     await done({ status: 'converted', woCode, convertedBy: ctx.uid, convertedByName: displayName(ctx), convertedAt: now, closedAt: now }, `Converted to ${woCode}`, 'mnt.wr.converted', woCode);
                     await rec(ctx, 'mnt.wo.created', woCode, `From ${doc.id}`);
@@ -1688,17 +1866,10 @@ export const maintenanceRoutes = {
                     return { ok: true };
                 }
                 case 'submit_plan':
-                    deny(can.submitPlan, 'You cannot submit this plan.');
-                    if (!objs(d.assessmentTasks).length) throw new HttpError(409, 'Complete the task-by-task assessment first.');
-                    await ensureCurrentAssessmentApproval(ctx,d);
-                    await requireMaintenanceRole(ctx,'MNT.WO.PLAN',pathOf(doc));
-                    await done({ status: 'plan_ready' }, 'Plan ready for release', 'mnt.wo.plan_ready', `Estimate ${estimate(d).total}`);
-                    return { ok: true };
                 case 'release':
-                    deny(can.release, can.isPlanner ? 'You planned this work order, so another person must release it.' : 'You cannot release this work order.');
-                    confirmCode(ctx, doc);
-                    await done({ status: 'released', releasedBy: ctx.uid, releasedByName: displayName(ctx), releasedAt: now, releaseEstimate: estimate(d).total }, 'Released', 'mnt.wo.released', `Estimate ${estimate(d).total}${note ? ` · ${note}` : ''}`);
-                    return { ok: true };
+                    // Readiness is now confirmed by the planner on the checklist once spares, services, people, the
+                    // schedule, the risk review and the Chart of Authority cost approval are all in place.
+                    throw new HttpError(409, 'Use the readiness checklist on the work order (Plan) and confirm readiness there.');
                 case 'schedule': {
                     deny(can.schedule, 'You cannot schedule this work order.');
                     const start = readDate(b.scheduledStart, 'start');

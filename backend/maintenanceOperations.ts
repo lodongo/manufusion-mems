@@ -25,6 +25,7 @@ import {
     supplierCategories,
 } from './maintenanceSourcing';
 import { planningGroup } from './maintenanceMaterialHook';
+import { budgetStatus, costApprovalOf, estimateOf, periodOf, submitCost } from './maintenancePlanning';
 import {
     closurePrerequisites,
     criticalPath,
@@ -138,7 +139,10 @@ async function windowContext(ctx: OrgContext, window: Doc, internal = false) {
     const wos: Doc[] = [];
     for (const id of texts(window.data.workOrderIds)) wos.push(await (internal ? internalOrder(ctx, id) : order(ctx, id)));
     for (const wo of wos) {
-        if (wo.data.status !== 'closed' && (await productionLine(ctx, wo)).id !== window.data.lineId)
+        if (wo.data.status === 'closed') continue;
+        if (window.data.model === EQUIPMENT_WINDOW) {
+            if (str(wo.data.unitId) !== str(window.data.equipmentId)) throw new HttpError(409, 'Every work order must belong to the window equipment.');
+        } else if ((await productionLine(ctx, wo)).id !== window.data.lineId)
             throw new HttpError(409, 'Every work order must belong to this production line.');
     }
     const equipment = await equipmentSafety(ctx, wos);
@@ -174,14 +178,22 @@ export async function requireApprovedWindow(ctx: OrgContext, wo: Doc, taskId?: s
     const w = await getDoc(`${root(ctx)}/maintenance_windows/${identifier(id)}`);
     if (!w) throw new HttpError(409, 'The task maintenance window no longer exists.');
     const context = await windowContext(ctx, w, true);
-    if (!['authorized', 'in_progress', 'completed'].includes(str(w.data.status)))
-        throw new HttpError(409, 'The maintenance window is not authorized.');
-    for (const gate of ['engineering', 'safety'])
-        if (object(w.data[gate]).fingerprint !== context.fingerprint)
-            throw new HttpError(
-                409,
-                'Scope, resources, equipment safety or approval configuration changed. Reapprove the maintenance window.',
-            );
+    if (w.data.model === EQUIPMENT_WINDOW) {
+        // Planner-scheduled window: valid while the work, resources and safety setup match what was scheduled.
+        if (!['scheduled', 'in_progress', 'completed'].includes(str(w.data.status)))
+            throw new HttpError(409, 'The maintenance window is not scheduled.');
+        if (w.data.fingerprint !== context.fingerprint)
+            throw new HttpError(409, 'The work, resources or safety setup changed after the window was scheduled. The planner must save the window again.');
+    } else {
+        if (!['authorized', 'in_progress', 'completed'].includes(str(w.data.status)))
+            throw new HttpError(409, 'The maintenance window is not authorized.');
+        for (const gate of ['engineering', 'safety'])
+            if (object(w.data[gate]).fingerprint !== context.fingerprint)
+                throw new HttpError(
+                    409,
+                    'Scope, resources, equipment safety or approval configuration changed. Reapprove the maintenance window.',
+                );
+    }
     const selected = rows(w.data.tasks).filter((t) => t.woCode === wo.id && (!taskId || t.taskId === taskId));
     if (!selected.length) throw new HttpError(409, 'This task is not selected in the approved maintenance window.');
     if (rows(w.data.safetySteps).some((s) => !s.completedAt))
@@ -344,6 +356,94 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
         }
     }
     return { items, problems, ready: problems.length === 0 };
+}
+/**
+ * The planner's readiness checklist: spares secured (reserved or issued, shortages sourced), services secured,
+ * people and tools allocated, the schedule locked, the assessment risks reviewed and the estimated cost approved under
+ * the Chart of Authority. Recomputed from live records on every read and again when readiness is confirmed.
+ */
+async function planChecklist(ctx: OrgContext, wo: Doc, ready?: Awaited<ReturnType<typeof readiness>>) {
+    const r = ready ?? (await readiness(ctx, wo));
+    const est = estimateOf(wo, r.items);
+    const cost = await costApprovalOf(ctx.orgId, wo, est);
+    const period = periodOf(str(wo.data.scheduledStart));
+    const budget = await budgetStatus(ctx.orgId, str(wo.data.costCenterId), period, wo.id);
+    const lock = object(wo.data.scheduleLock);
+    const riskReview = object(wo.data.riskReview);
+    const version = Number(wo.data.assessmentTasksVersion) || 0;
+    const spares = r.items.filter((i) => i.spareId);
+    const services = r.items.filter((i) => i.kind === 'service');
+    const items = [
+        { key: 'spares', label: 'Spares available and reserved', done: spares.every((i) => i.status === 'reserved'), detail: `${spares.filter((i) => i.status === 'reserved').length} of ${spares.length} reserved` },
+        { key: 'services', label: 'Services engaged with procurement and secured', done: services.every((i) => i.status === 'secured'), detail: `${services.filter((i) => i.status === 'secured').length} of ${services.length} secured` },
+        { key: 'people', label: 'People and tools allocated', done: !r.problems.some((p) => p.includes('allocate qualified personnel')), detail: '' },
+        { key: 'schedule', label: 'Schedule dates reviewed and locked', done: !!lock.at && lock.start === wo.data.scheduledStart && lock.end === wo.data.scheduledEnd, detail: `${str(wo.data.scheduledStart) || 'no start'} to ${str(wo.data.scheduledEnd) || 'no end'}` },
+        { key: 'risk', label: 'Risk assessment reviewed from the assessment', done: !!riskReview.at && Number(riskReview.version) === version, detail: str(riskReview.note) },
+        { key: 'cost', label: 'Estimated cost approved (Chart of Authority)', done: cost.current, detail: est.total === 0 ? 'Nothing to approve' : `${cost.status}` },
+    ];
+    return { items, estimate: est, cost, budget, problems: r.problems, ready: items.every((i) => i.done) && r.ready };
+}
+
+/** Planner actions on the readiness checklist. */
+async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
+    if (!['planning', 'plan_ready'].includes(str(wo.data.status))) throw new HttpError(409, 'The work order is no longer in planning.');
+    await authority(ctx, wo, 'MNT.WO.plan', 'MNT.WO.PLAN');
+    const settings = await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
+    const jobRole = str(object(settings?.data.approverRoles)['MNT.ASSESS.REVIEW']);
+    if (!jobRole || !assessmentReviewCurrent(wo.data, jobRole))
+        throw new HttpError(409, 'Approve the latest work assessment through the configured reviewer before planning.');
+    const b = ctx.body;
+    if (action === 'lock_schedule') {
+        const start = requiredText(b.scheduledStart, 'Scheduled start', 10, 10),
+            end = requiredText(b.scheduledEnd, 'Scheduled end', 10, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end)))
+            throw new HttpError(400, 'Enter the scheduled dates as YYYY-MM-DD.');
+        if (end < start) throw new HttpError(400, 'The scheduled end cannot be before the start.');
+        if (start < nowIso().slice(0, 10)) throw new HttpError(400, 'The scheduled start cannot be in the past.');
+        const changed = start !== wo.data.scheduledStart || end !== wo.data.scheduledEnd;
+        const reason = str(b.note).trim().slice(0, 300);
+        if (changed && reason.length < 10) throw new HttpError(400, 'Explain why the dates change (at least 10 characters).');
+        const ca = object(wo.data.costApproval);
+        // A move to another budget period needs a new cost approval against that period's budget.
+        const periodMoved = periodOf(start) !== periodOf(str(wo.data.scheduledStart));
+        await saveWo(ctx, wo, {
+            scheduledStart: start, scheduledEnd: end,
+            scheduleLock: { start, end, at: nowIso(), by: ctx.uid, name: name(ctx) },
+            ...(periodMoved && str(ca.status) ? { costApproval: { ...ca, status: 'superseded' } } : {}),
+        }, 'plan.schedule_locked', `${start} to ${end}${changed ? ' · ' + reason : ''}${periodMoved && str(ca.status) ? ' · cost approval superseded (period changed)' : ''}`);
+        return { ok: true };
+    }
+    if (action === 'review_risk') {
+        const note = requiredText(b.note, 'Risk review notes', 10, 1000);
+        const tasks = tasksOf(wo);
+        if (!tasks.every((t) => rows(t.risk).length)) throw new HttpError(409, 'Every task needs its preliminary risk assessment before review.');
+        await saveWo(ctx, wo, { riskReview: { version: Number(wo.data.assessmentTasksVersion) || 0, at: nowIso(), by: ctx.uid, name: name(ctx), note,
+            hazards: tasks.reduce((n, t) => n + rows(t.risk).length, 0), permits: [...new Set(tasks.flatMap((t) => texts(t.permitCodes)))] } }, 'plan.risk_reviewed', note);
+        return { ok: true };
+    }
+    if (action === 'submit_cost') {
+        const ready = await readiness(ctx, wo);
+        const allowance = b.allowance === undefined || b.allowance === '' ? Number(object(wo.data.costPlan).allowance) || 0 : Number(b.allowance);
+        if (!Number.isFinite(allowance) || allowance < 0 || allowance > 1e12) throw new HttpError(400, 'Enter a valid allowance (0 or more).');
+        const est = estimateOf(wo, ready.items, allowance);
+        const current = await costApprovalOf(ctx.orgId, wo, est);
+        if (current.status === 'pending') throw new HttpError(409, `${current.requestId} is already waiting for approval.`);
+        if (current.current && current.status === 'approved') throw new HttpError(409, 'The current estimate is already approved.');
+        const out = await submitCost(ctx, wo, est, b);
+        await saveWo(ctx, wo, { costApproval: out.costApproval, costPlan: out.costPlan, plannedBy: ctx.uid, plannedByName: name(ctx) }, 'plan.cost_submitted', `${out.requestId} · ${est.total}`);
+        return { ok: true, requestId: out.requestId };
+    }
+    if (action === 'confirm_readiness') {
+        const check = await planChecklist(ctx, wo);
+        if (!check.ready) {
+            const open = check.items.filter((i) => !i.done).map((i) => i.label);
+            throw new HttpError(409, `Not ready yet: ${[...open, ...check.problems].slice(0, 6).join('; ')}.`);
+        }
+        await saveWo(ctx, wo, { status: 'released', readiness: { at: nowIso(), by: ctx.uid, name: name(ctx), estimate: check.estimate.total }, releasedBy: ctx.uid, releasedByName: name(ctx), releasedAt: nowIso(), releaseEstimate: check.estimate.total },
+            'plan.readiness_confirmed', `Estimate ${check.estimate.total}`);
+        return { ok: true };
+    }
+    throw new HttpError(400, 'Unknown planning action.');
 }
 async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
      const settings=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
@@ -706,196 +806,204 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
     return { ok: true, ...result };
 }
 
+export const EQUIPMENT_WINDOW = 'equipment_v2';
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** Offset (ms) of a time zone from UTC at an instant. */
+function zoneOffset(ms: number, timeZone: string) {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(ms));
+    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+    return Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second')) - ms;
+}
+/** The UTC instant of a local date and time in a time zone. */
+export function zonedInstant(date: string, time: string, timeZone: string) {
+    const guess = Date.parse(`${date}T${time}:00Z`);
+    let t = guess - zoneOffset(guess, timeZone);
+    const second = zoneOffset(t, timeZone);
+    if (guess - second !== t) t = guess - second;
+    return new Date(t).toISOString();
+}
+
+/**
+ * A maintenance window is one piece of equipment on one date: start date, start time and duration (the end follows).
+ * The planner fills it with as many ready work orders of that equipment as fit; no separate approval. Every task of
+ * the chosen work orders is scheduled; people allocated to several tasks do them one after another. Isolation and
+ * permit prerequisites are listed for verification before physical work starts.
+ */
 async function windowSave(ctx: OrgContext) {
     const b = ctx.body,
         existing = b.windowId ? await currentWindow(ctx, b.windowId) : null;
     if (existing && str(b.reason).trim().length < 10 && b.action !== 'preview_window')
-        throw new HttpError(400, 'Explain the reason for the window revision (at least 10 characters).');
-    if (existing && ['in_progress', 'completed'].includes(str(existing.data.status)))
-        throw new HttpError(409, 'An executed window is immutable.');
-    const ids = [...new Set(texts(b.workOrderIds))];
-    if (!ids.length || ids.length > 30) throw new HttpError(400, 'Choose 1 to 30 work orders.');
-    const wos: Doc[] = [];
-    for (const id of ids) {
-        const wo = await order(ctx, id);
-        await authority(ctx, wo, 'MNT.WO.schedule', 'MNT.WO.PLAN');
-        if (!['plan_ready', 'released', 'scheduled', 'in_progress'].includes(str(wo.data.status)))
-            throw new HttpError(409, `${id}: submit the assessed resource plan before scheduling.`);
-        wos.push(wo);
-    }
-    const line = await productionLine(ctx, wos[0]);
-    for (const wo of wos)
-        if ((await productionLine(ctx, wo)).id !== line.id)
-            throw new HttpError(400, 'A maintenance window can contain work orders from only one production line.');
+        throw new HttpError(400, 'Explain the reason for changing the window (at least 10 characters).');
+    if (existing && ['in_progress', 'completed', 'superseded'].includes(str(existing.data.status)))
+        throw new HttpError(409, 'A started, completed or replaced window cannot change.');
+    if (existing && existing.data.model !== EQUIPMENT_WINDOW)
+        throw new HttpError(409, 'This is an older production-line window. Create a new equipment window for its work orders; the old one is replaced.');
+    const equipmentId = identifier(b.equipmentId);
+    const equipment = await getDoc(`${root(ctx)}/structure/${equipmentId}`);
+    if (!equipment || !['work_center', 'equipment'].includes(str(equipment.data.level))) throw new HttpError(400, 'Choose the equipment.');
+    const date = str(b.date), startTime = str(b.startTime);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) throw new HttpError(400, 'Choose the window date.');
+    if (!TIME_RE.test(startTime)) throw new HttpError(400, 'Choose the start time (HH:MM).');
+    const durationHours = Number(b.durationHours);
+    if (!Number.isFinite(durationHours) || durationHours < 0.25 || durationHours > 72 || Math.round(durationHours * 4) !== durationHours * 4)
+        throw new HttpError(400, 'Enter a duration from 0.25 to 72 hours, in quarter hours.');
     const timeZone = str(b.timeZone) || 'UTC';
     try {
         new Intl.DateTimeFormat('en', { timeZone });
     } catch {
         throw new HttpError(400, 'Choose a valid planning timezone.');
     }
-    const start = requiredText(b.start, 'Window start'),
-        end = requiredText(b.end, 'Window end'),
-        hours = (Date.parse(end) - Date.parse(start)) / 3600000;
-    if (!Number.isFinite(hours) || hours <= 0 || hours > 24 * 90)
-        throw new HttpError(400, 'Enter a valid maintenance window of up to 90 days.');
-    const raw = rows(b.tasks),
-        selected: ScheduleTask[] = [];
-    for (const r of raw) {
-        const wo = wos.find((w) => w.id === r.woCode),
-            t = wo && tasksOf(wo).find((t) => t.id === r.taskId);
-        if (!wo || !t) throw new HttpError(400, 'Schedule tasks from the selected assessed work orders.');
-        if (object(object(wo.data.taskExecution)[str(t.id)]).startedAt)
-            throw new HttpError(409, 'Only tasks that have not started can be scheduled in a new or revised window.');
-        const key = `${wo.id}_${str(t.id)}`,
-            assigned = str(object(wo.data.taskWindows)[str(t.id)]);
-        if (assigned && assigned !== existing?.id) throw new HttpError(409, 'This task already belongs to another window.');
-        const allocation = object(object(object(wo.data.taskPlanning)[str(t.id)]).allocation);
-        const executionPriority = Number(r.executionPriority ?? 50);
-        if (!Number.isInteger(executionPriority) || executionPriority < 1 || executionPriority > 999)
-            throw new HttpError(400, 'Execution priority must be between 1 and 999.');
-        selected.push({
-            executionPriority,
-            id: key,
-            woCode: wo.id,
-            taskId: str(t.id),
-            description: str(t.title) || str(t.description),
-            hours: r.hours === undefined ? Number(t.hours) : Number(r.hours),
-            offset: r.offset === undefined ? 0 : Number(r.offset),
-            dependencies: [...new Set([...texts(r.dependencies), ...texts(t.dependencies).map((dep) => `${wo.id}_${dep}`)])],
-            personnel: texts(allocation.personnel),
-            tools: texts(r.exclusiveTools).map((s) => s.toLowerCase().trim()),
-            safety: false,
-        });
+    const start = zonedInstant(date, startTime, timeZone),
+        end = new Date(Date.parse(start) + durationHours * 3600000).toISOString();
+    if (Date.parse(start) < Date.now() - 15 * 60000 && (!existing || existing.data.start !== start))
+        throw new HttpError(400, 'The window cannot start in the past.');
+    const ids = [...new Set(texts(b.workOrderIds))];
+    if (!ids.length || ids.length > 30) throw new HttpError(400, 'Choose 1 to 30 work orders.');
+    const wos: Doc[] = [];
+    for (const id of ids) {
+        const wo = await order(ctx, id);
+        await authority(ctx, wo, 'MNT.WO.schedule', 'MNT.WO.PLAN');
+        if (str(wo.data.unitId) !== equipmentId) throw new HttpError(400, `${id} is on other equipment (${str(wo.data.unitCode)}).`);
+        const inThis = !!existing && texts(existing.data.workOrderIds).includes(id);
+        if (!(str(wo.data.status) === 'released' || (inThis && str(wo.data.status) === 'scheduled')))
+            throw new HttpError(409, `${id}: the planner must confirm readiness on the work order first.`);
+        const ready = await readiness(ctx, wo);
+        if (!ready.ready) throw new HttpError(409, `${id} is no longer ready: ${ready.problems.slice(0, 3).join(' ')}`);
+        wos.push(wo);
     }
-    selected.sort((a, b) => (a.executionPriority || 50) - (b.executionPriority || 50));
-    criticalPath(selected, hours); // Validate technical dependencies before deriving safety prerequisites.
-    const equipment = await equipmentSafety(ctx, wos),
-        steps: Obj[] = [],
+    // Tasks: every not-started task of the chosen work orders. People allocated to several tasks do them in turn.
+    const selected: ScheduleTask[] = [];
+    const busyUntil = new Map<string, number>();
+    const superseded = new Map<string, Doc>();
+    // Optionally only some tasks of a work order (the rest go to a later window); by default all of them.
+    const chosen = new Set(rows(b.tasks).map((x) => `${str(x.woCode)}_${str(x.taskId)}`));
+    for (const key of chosen)
+        if (!wos.some((wo) => tasksOf(wo).some((t) => `${wo.id}_${str(t.id)}` === key))) throw new HttpError(400, 'Choose tasks of the selected work orders.');
+    for (const wo of wos)
+        for (const t of tasksOf(wo)) {
+            if (object(object(wo.data.taskExecution)[str(t.id)]).startedAt) continue;
+            // A work order with chosen tasks contributes only those; one without contributes all its tasks.
+            const picksHere = [...chosen].some((k) => k.startsWith(wo.id + '_'));
+            if (picksHere && !chosen.has(`${wo.id}_${str(t.id)}`)) continue;
+            const assigned = str(object(wo.data.taskWindows)[str(t.id)]);
+            if (assigned && assigned !== existing?.id && !superseded.has(assigned)) {
+                const other = await getDoc(`${root(ctx)}/maintenance_windows/${identifier(assigned)}`);
+                if (other && other.data.model !== EQUIPMENT_WINDOW && ['draft', 'awaiting_approval'].includes(str(other.data.status))) superseded.set(other.id, other);
+                else if (other && !['superseded'].includes(str(other.data.status)))
+                    throw new HttpError(409, `${wo.id}: a task is already in window ${other.id}. Remove the work order from that window first.`);
+            }
+            const personnel = texts(object(object(object(wo.data.taskPlanning)[str(t.id)]).allocation).personnel);
+            const hours = Number(t.hours) || 0.25;
+            const offset = Math.max(0, ...personnel.map((p) => busyUntil.get(p) ?? 0));
+            for (const p of personnel) busyUntil.set(p, offset + hours);
+            selected.push({
+                id: `${wo.id}_${str(t.id)}`, woCode: wo.id, taskId: str(t.id), description: str(t.title) || str(t.description),
+                hours, offset, dependencies: [], personnel, tools: [], safety: false, executionPriority: 50,
+            });
+            (selected[selected.length - 1] as ScheduleTask & { _deps: string[] })._deps = texts(t.dependencies).map((dep) => `${wo.id}_${dep}`);
+        }
+    // Technical dependencies on tasks scheduled here; dependencies outside this window must already be complete.
+    for (const sTask of selected as Array<ScheduleTask & { _deps?: string[] }>) {
+        const wo = wos.find((w) => w.id === sTask.woCode)!;
+        for (const dep of sTask._deps ?? []) {
+            if (selected.some((x) => x.id === dep)) sTask.dependencies.push(dep);
+            else if (object(object(wo.data.taskExecution)[dep.slice(wo.id.length + 1)]).status !== 'completed')
+                throw new HttpError(409, `${sTask.description} depends on a task that is neither in this window nor completed.`);
+        }
+        delete sTask._deps;
+    }
+    if (!selected.length) throw new HttpError(409, 'Every task of these work orders has already started.');
+    const schedule = criticalPath(selected);
+    const needed = Math.max(...schedule.tasks.map((t) => t.finish));
+    if (b.action === 'preview_window') return { schedule, neededHours: needed, start, end };
+    if (schedule.conflicts.length) throw new HttpError(409, schedule.conflicts.join(' '));
+    if (needed > durationHours + 1e-6)
+        throw new HttpError(409, `The work needs ${Math.round(needed * 100) / 100} h but the window is ${durationHours} h. Lengthen the window or remove a work order.`);
+    // Safety prerequisites to verify before physical work starts (isolation and permits).
+    const steps: Obj[] = [],
         catalogue = await safetyCatalogue();
     const label = (kind: string, code: string) => str(rows(catalogue[kind]).find((x) => x.code === code)?.label) || code;
-    for (const e of equipment) {
+    const needsIsolation = wos.some((wo) => tasksOf(wo).some((t) => t.lotoRequired === true));
+    for (const e of await equipmentSafety(ctx, wos)) {
         const energy = object(e.storedEnergy);
-        if (energy.initialized !== true)
-            throw new HttpError(409, `Complete the equipment safety assessment for ${str(e.name)} before scheduling.`);
+        if (energy.initialized !== true) {
+            if (needsIsolation) throw new HttpError(409, `Complete the stored energy assessment for ${str(e.name)} before scheduling isolation work.`);
+            continue;
+        }
         for (const source of rows(energy.items))
-            steps.push({
-                id: maintenanceKey(str(e.equipmentId), str(source.id)),
-                equipmentId: e.equipmentId,
-                instruction: `Verify isolation of ${label('hazardousEnergy', str(source.energyCode))}. ${rows(source.hazards)
-                    .map(
-                        (h) =>
-                            label('hazards', str(h.code)) +
-                            ': ' +
-                            rows(h.impacts)
-                                .flatMap((i) => texts(i.controls).map((c) => label('controlMeasures', c)))
-                                .join('; '),
-                    )
-                    .join('. ')} ${str(source.notes)}`,
-                completedAt: '',
-                completedBy: '',
-            });
+            steps.push({ id: maintenanceKey(str(e.equipmentId), str(source.id)), equipmentId: e.equipmentId, instruction: `Verify isolation of ${label('hazardousEnergy', str(source.energyCode))}. ${str(source.notes)}`.trim(), completedAt: '', completedBy: '' });
     }
-    for (const s of selected) {
-        const t = tasksOf(wos.find((w) => w.id === s.woCode)!).find((t) => t.id === s.taskId)!;
+    for (const sTask of selected) {
+        const t = tasksOf(wos.find((w) => w.id === sTask.woCode)!).find((x) => x.id === sTask.taskId)!;
         const instructions = [
+            ...(t.lotoRequired === true ? texts(t.energySourceCodes).map((c) => `LOTO: isolate, lock, tag and prove zero ${label('hazardousEnergy', c)}`) : []),
+            ...(t.liveEquipment === true ? ['Live work: authorized procedure, guarding, exclusion zone and emergency stop ready'] : []),
             str(t.isolation),
-            ...rows(t.risk)
-                .filter((r) => str(r.permit))
-                .map((r) => `${str(r.permit)}: ${str(r.controls)}`),
+            ...rows(t.risk).filter((r) => str(r.permit)).map((r) => `${str(r.permit)}: ${str(r.controls)}`),
         ].filter(Boolean);
-        for (const instruction of instructions)
-            steps.push({ id: maintenanceKey(s.id, instruction), taskId: s.id, instruction, completedAt: '', completedBy: '' });
+        for (const instruction of instructions) steps.push({ id: maintenanceKey(sTask.id, instruction), taskId: sTask.id, instruction, completedAt: '', completedBy: '' });
     }
-    const safetyDurations = object(b.safetyDurations),
-        safetyOffsets = object(b.safetyOffsets);
-    const safetyTasks: ScheduleTask[] = steps.map((step) => ({
-        id: 'SAFE_' + str(step.id),
-        woCode: 'Safety prerequisites',
-        taskId: str(step.id),
-        description: str(step.instruction).slice(0, 100),
-        hours: safetyDurations[str(step.id)] !== undefined ? quantity(safetyDurations[str(step.id)]) : 0.25,
-        offset: safetyOffsets[str(step.id)] !== undefined ? quantity(safetyOffsets[str(step.id)], true) : 0,
-        dependencies: [],
-        personnel: [],
-        tools: [],
-        safety: true,
-    }));
-    const schedule = criticalPath(
-        [...safetyTasks, ...selected.map((t) => ({ ...t, dependencies: [...t.dependencies, ...safetyTasks.map((s) => s.id)] }))],
-        hours,
-    );
-    if (b.action === 'preview_window') return { schedule };
-    if (schedule.conflicts.length) throw new HttpError(409, schedule.conflicts.join(' '));
+    // Keep verifications already done for unchanged prerequisites.
+    const previous = new Map(rows(existing?.data.safetySteps).map((x) => [str(x.id), x]));
+    const safetySteps = steps.map((x) => { const p = previous.get(str(x.id)); return p && p.completedAt ? { ...x, completedAt: p.completedAt, completedBy: p.completedBy, evidence: p.evidence } : x; });
     const id = existing?.id || 'MW_' + maintenanceKey(ctx.orgId, nowIso(), ctx.uid).slice(0, 16),
         revision = (Number(existing?.data.revision) || 0) + 1;
-    const localDay = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(
-            new Date(start),
-        ),
-        weekDate = new Date(localDay + 'T00:00:00Z');
+    const weekDate = new Date(date + 'T00:00:00Z');
     weekDate.setUTCDate(weekDate.getUTCDate() + 4 - (weekDate.getUTCDay() || 7));
     const isoWeekYear = weekDate.getUTCFullYear(),
         isoWeek = Math.ceil(((weekDate.getTime() - Date.UTC(isoWeekYear, 0, 1)) / 86400000 + 1) / 7);
     const data: Obj = {
         id,
-        title: requiredText(b.title, 'Window title', 3, 120),
-        lineId: line.id,
-        lineName: line.name,
+        model: EQUIPMENT_WINDOW,
+        title: str(b.title).trim().slice(0, 120) || `${str(equipment.data.code)} ${date} ${startTime}`,
+        equipmentId, equipmentCode: str(equipment.data.code), equipmentName: str(equipment.data.name),
+        lineId: equipmentId, lineName: str(equipment.data.name),
         siteId: wos[0].data.siteId,
-        path: line.path,
-        start,
-        end,
-        timeZone,
-        isoWeek,
-        isoWeekYear,
-        rangeType: str(b.rangeType) || 'custom',
+        path: await nodePath(ctx.orgId, equipmentId),
+        date, startTime, durationHours, start, end, timeZone, isoWeek, isoWeekYear, rangeType: 'equipment',
         workOrderIds: ids,
         tasks: selected as unknown as Obj[],
         schedule: schedule as unknown as Obj,
-        safetySteps: steps,
-        safetyDurations,
-        safetyOffsets,
+        safetySteps,
         revision,
-        status: 'draft',
+        status: 'scheduled',
         engineering: null,
         safety: null,
         plannedBy: ctx.uid,
         plannedByName: name(ctx),
+        scheduledAt: nowIso(),
         updatedAt: nowIso(),
-        history: history(ctx, existing?.data || {}, 'Window plan revision ' + revision, str(b.reason)),
+        history: history(ctx, existing?.data || {}, revision === 1 ? 'Window scheduled' : 'Window revised (revision ' + revision + ')', str(b.reason)),
     };
+    data.fingerprint = (await windowContext(ctx, { id, data, updateTime: '' } as unknown as Doc)).fingerprint;
     const writes: Write[] = [
-        {
-            path: `${root(ctx)}/maintenance_windows/${id}`,
-            fields: data,
-            ...(existing ? { updateTime: existing.updateTime } : { exists: false }),
-        },
+        { path: `${root(ctx)}/maintenance_windows/${id}`, fields: data, ...(existing ? { updateTime: existing.updateTime } : { exists: false }) },
     ];
+    const touched = new Map<string, Doc>(wos.map((w) => [w.id, w]));
+    const patches = new Map<string, Obj>();
     for (const wo of wos) {
         const assignments = { ...object(wo.data.taskWindows) };
-        for (const s of selected.filter((s) => s.woCode === wo.id)) assignments[s.taskId] = id;
-        for (const [key, value] of Object.entries(assignments))
-            if (value === id && !selected.some((s) => s.woCode === wo.id && s.taskId === key)) delete assignments[key];
-        writes.push({
-            path: `${root(ctx)}/work_orders/${wo.id}`,
-            fields: { taskWindows: assignments, windowId: id, windowIds: [...new Set([...texts(wo.data.windowIds), id])] },
-            mask: ['taskWindows', 'windowId', 'windowIds'],
-            updateTime: wo.updateTime,
-        });
+        for (const [key, value] of Object.entries(assignments)) if (value === id || superseded.has(str(value))) delete assignments[key];
+        for (const sTask of selected.filter((x) => x.woCode === wo.id)) assignments[sTask.taskId] = id;
+        patches.set(wo.id, { status: str(wo.data.status) === 'in_progress' ? 'in_progress' : 'scheduled', taskWindows: assignments, windowId: id, windowIds: [...new Set([...texts(wo.data.windowIds), id])], windowStart: start, windowEnd: end });
     }
-    if (existing)
-        for (const oldId of texts(existing.data.workOrderIds).filter((id) => !ids.includes(id))) {
-            const wo = await order(ctx, oldId),
-                assignments = object(wo.data.taskWindows);
-            for (const [key, value] of Object.entries(assignments)) if (value === id) delete assignments[key];
-            writes.push({
-                path: `${root(ctx)}/work_orders/${wo.id}`,
-                fields: { taskWindows: assignments },
-                mask: ['taskWindows'],
-                updateTime: wo.updateTime,
-            });
-        }
+    // Work orders taken out of this window, or left in a replaced older window, go back to ready.
+    const released = [...(existing ? texts(existing.data.workOrderIds).filter((x) => !ids.includes(x)) : []), ...[...superseded.values()].flatMap((w) => texts(w.data.workOrderIds).filter((x) => !ids.includes(x)))];
+    for (const woId of [...new Set(released)]) {
+        const wo = await internalOrder(ctx, woId);
+        touched.set(wo.id, wo);
+        const assignments = { ...object(wo.data.taskWindows) };
+        for (const [key, value] of Object.entries(assignments)) if (value === id || superseded.has(str(value))) delete assignments[key];
+        patches.set(wo.id, { taskWindows: assignments, ...(str(wo.data.status) === 'scheduled' ? { status: 'released', windowId: '', windowStart: '', windowEnd: '' } : {}) });
+    }
+    for (const [woId, patch] of patches) {
+        const wo = touched.get(woId)!;
+        writes.push({ path: `${root(ctx)}/work_orders/${woId}`, fields: { ...patch, updatedAt: nowIso(), history: history(ctx, wo.data, patch.status === 'released' ? 'Removed from window ' + id : 'Scheduled in window ' + id, `${date} ${startTime} for ${durationHours} h`) }, mask: [...Object.keys(patch), 'updatedAt', 'history'], updateTime: wo.updateTime });
+    }
+    for (const old of superseded.values())
+        writes.push({ path: `${root(ctx)}/maintenance_windows/${old.id}`, fields: { status: 'superseded', supersededBy: id, history: history(ctx, old.data, 'Replaced by equipment window ' + id) }, mask: ['status', 'supersededBy', 'history'], updateTime: old.updateTime });
     await commit(writes);
-    await event(ctx, 'window.saved', id);
+    await event(ctx, 'window.scheduled', id, `${str(equipment.data.code)} ${date} ${startTime} ${durationHours} h · ${ids.join(', ')}${existing ? ' · ' + str(b.reason) : ''}`);
     return { ok: true, windowId: id };
 }
 
@@ -931,139 +1039,17 @@ async function windowAction(ctx: OrgContext, action: string) {
             safetyCatalogue: await safetyCatalogue(),
             approvedSnapshot: w.data.approvedReport || null,
         };
-    if (['approve_engineering', 'approve_safety', 'reject_window'].includes(action)) {
-        if (!['draft', 'awaiting_approval'].includes(str(w.data.status)))
-            throw new HttpError(409, 'Revise the window before submitting another approval.');
-        const engineering = action === 'approve_engineering' || b.gate === 'engineering';
-        await maintenancePermission(ctx, engineering ? 'MNT.WO.release' : 'MNT.WO.safety', path);
-        const role = await requireMaintenanceRole(ctx, engineering ? 'MNT.WINDOW.ENGINEERING' : 'MNT.WINDOW.SAFETY', path);
-        if (w.data.plannedBy === ctx.uid && !bypass(ctx, 'mnt.window.planner_independence')) throw new HttpError(403, 'The window planner cannot approve their own window.');
-        const other = object(w.data[engineering ? 'safety' : 'engineering']);
-        if (other.by === ctx.uid && !bypass(ctx, 'mnt.window.dual_approval')) throw new HttpError(403, 'Engineering and Safety approvals require different people.');
-        if (action === 'reject_window') {
-            const reason = requiredText(b.note, 'Rejection reason', 10);
-            await commit([
-                {
-                    path: `${root(ctx)}/maintenance_windows/${w.id}`,
-                    fields: {
-                        ...w.data,
-                        status: 'draft',
-                        engineering: null,
-                        safety: null,
-                        history: history(ctx, w.data, 'Window approval rejected', reason),
-                    },
-                    updateTime: w.updateTime,
-                },
-            ]);
-            await event(ctx, 'window.rejected', w.id, reason);
-            return { ok: true };
-        }
-        const matrix = ((await getDoc(`${root(ctx)}/saf/risk_matrix`))?.data.configuration ||
-            defaultMaintenanceRiskMatrix) as unknown as RiskMatrix;
-        for (const wo of c.wos) {
-            if (['planning', 'cancelled', 'closed'].includes(str(wo.data.status)))
-                throw new HttpError(409, 'Submit current work-order plans before window approval.');
-            try {
-                finalizeAssessedTaskRisks(
-                    tasksOf(wo).filter((t) => rows(w.data.tasks).some((s) => s.woCode === wo.id && s.taskId === t.id)) as any,
-                    matrix,
-                );
-            } catch (e) {
-                throw new HttpError(409, e instanceof Error ? e.message : 'Task risk revalidation required.');
-            }
-        }
-        for (const equipment of c.equipment)
-            for (const energy of rows(object(equipment.storedEnergy).items))
-                for (const h of rows(energy.hazards))
-                    for (const impact of rows(h.impacts)) {
-                        const residual = object(impact.residualRisk);
-                        if (typeof residual.score !== 'number' || Number(residual.score) > matrix.tolerableMax)
-                            throw new HttpError(409, 'Equipment residual risks must be assessed and tolerable before window approval.');
-                    }
-        for (const wo of c.wos) {
-            const ready = await readiness(
-                ctx,
-                wo,
-                new Set(
-                    rows(w.data.tasks)
-                        .filter((t) => t.woCode === wo.id)
-                        .map((t) => str(t.taskId)),
-                ),
-            );
-            if (!ready.ready) throw new HttpError(409, ready.problems.join(' '));
-        }
-        const patch: Obj = {
-            ...w.data,
-            [engineering ? 'engineering' : 'safety']: {
-                by: ctx.uid,
-                name: name(ctx),
-                at: nowIso(),
-                role: role.role,
-                fingerprint: c.fingerprint,
-                note: requiredText(b.note, 'Approval review notes', 5),
-            },
-            status: 'awaiting_approval',
-            history: history(ctx, w.data, engineering ? 'Engineering approved' : 'Safety approved', str(b.note)),
-        };
-        await commit([{ path: `${root(ctx)}/maintenance_windows/${w.id}`, fields: patch, updateTime: w.updateTime }]);
-        await event(ctx, action, w.id);
-        return { ok: true };
-    }
-    if (action === 'authorize_window') {
-        await maintenancePermission(ctx, 'MNT.WO.schedule', path);
-        await requireMaintenanceRole(ctx, 'MNT.WO.PLAN', path);
-        for (const gate of ['engineering', 'safety'])
-            if (object(w.data[gate]).fingerprint !== c.fingerprint)
-                throw new HttpError(409, 'Current Engineering and Safety approvals are both required.');
-        const writes: Write[] = [
-            {
-                path: `${root(ctx)}/maintenance_windows/${w.id}`,
-                fields: {
-                    ...w.data,
-                    status: 'authorized',
-                    approvedReport: {
-                        revision: w.data.revision,
-                        fingerprint: c.fingerprint,
-                        equipment: c.equipment,
-                        workOrders: c.wos.map((wo) => ({
-                            code: wo.id,
-                            title: wo.data.title,
-                            tasks: tasksOf(wo).filter((t) => rows(w.data.tasks).some((s) => s.woCode === wo.id && s.taskId === t.id)),
-                        })),
-                        engineering: w.data.engineering,
-                        safety: w.data.safety,
-                    },
-                    authorizedAt: nowIso(),
-                    history: history(ctx, w.data, 'Window authorized'),
-                },
-                updateTime: w.updateTime,
-            },
-        ];
-        for (const wo of c.wos)
-            writes.push({
-                path: `${root(ctx)}/work_orders/${wo.id}`,
-                fields: {
-                    status: wo.data.status === 'in_progress' ? 'in_progress' : 'scheduled',
-                    scheduledStart: w.data.start,
-                    scheduledEnd: w.data.end,
-                },
-                mask: ['status', 'scheduledStart', 'scheduledEnd'],
-                updateTime: wo.updateTime,
-            });
-        writes.push({
-            path: `${root(ctx)}/maintenance_window_revisions/${w.id}_${w.data.revision}`,
-            fields: { ...w.data, equipment: c.equipment, fingerprint: c.fingerprint, authorizedAt: nowIso() },
-            exists: false,
-        });
-        await commit(writes);
-        await event(ctx, 'window.authorized', w.id);
-        return { ok: true };
-    }
+    if (['approve_engineering', 'approve_safety', 'reject_window', 'authorize_window'].includes(action))
+        throw new HttpError(409, 'Maintenance windows no longer need engineering or safety approval: the planner schedules them. Create an equipment window for these work orders.');
     if (action === 'safety_prerequisite') {
-        if (!['authorized', 'in_progress'].includes(str(w.data.status)))
-            throw new HttpError(409, 'Authorize the window before verifying safety prerequisites.');
-        await maintenancePermission(ctx, 'MNT.WO.safety', path);
-        await requireMaintenanceRole(ctx, 'MNT.WINDOW.SAFETY', path);
+        if (!['authorized', 'scheduled', 'in_progress'].includes(str(w.data.status)))
+            throw new HttpError(409, 'Schedule the window before verifying safety prerequisites.');
+        // The people who apply isolation and do the work verify it: safety officers or allocated executors.
+        try {
+            await maintenancePermission(ctx, 'MNT.WO.safety', path);
+        } catch {
+            await maintenancePermission(ctx, 'MNT.WO.execute', path);
+        }
         const id = str(b.stepId);
         if (!rows(w.data.safetySteps).some((s) => s.id === id)) throw new HttpError(400, 'Choose a safety prerequisite.');
         const steps = rows(w.data.safetySteps).map((s) =>
@@ -1730,6 +1716,12 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 code: w.id,
                 title: w.data.title,
                 status: w.data.status,
+                unitId: str(w.data.unitId),
+                unitCode: str(w.data.unitCode),
+                unitName: str(w.data.unitName),
+                scheduledStart: str(w.data.scheduledStart),
+                scheduledEnd: str(w.data.scheduledEnd),
+                windowId: str(w.data.windowId),
                 line,
                 siteId: w.data.siteId,
                 tasks: tasksOf(w),
@@ -1796,6 +1788,8 @@ export async function maintenanceOperations(ctx: OrgContext) {
         return {
             wo: { code: wo.id, ...wo.data, assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             readiness: readinessData,
+            checklist: await planChecklist(ctx, wo, readinessData),
+            currency: str(ctx.org.data.currencyCode),
             permissions,
             currentUserId: ctx.uid,
             people: users
@@ -1901,6 +1895,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const wo = await order(ctx, b.code);
         if (['match_spare', 'candidate', 'reserve', 'procure', 'secure_spare', 'service_sourcing', 'secure_service', 'allocate'].includes(action))
             return resourceAction(ctx, wo, action);
+        if (['lock_schedule', 'review_risk', 'submit_cost', 'confirm_readiness'].includes(action)) return planningAction(ctx, wo, action);
         return executeMaintenanceAction(ctx, wo, action);
     });
 }

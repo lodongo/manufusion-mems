@@ -66,6 +66,8 @@ export const levelRoleRoutes = {
                 levels: levels.map((l) => ({
                     id: l.id, module: l.module, moduleName: l.moduleName, rank: l.rank, level: l.level, name: l.name, description: l.description,
                     never: l.never, permissions: l.permissions, available: l.available, installed: installed.has(l.id),
+                    // Default rights added to the level since it was installed (new features), not yet on the role.
+                    missing: installed.has(l.id) ? l.permissions.filter((k) => !asList(roles.find((r) => r.id === l.id)?.data.permissions).includes(k)) : [],
                     grantable: canGrant(ctx, l.permissions), ...usedBy(l.id),
                 })),
                 existing: others.map((r) => {
@@ -121,6 +123,42 @@ export const levelRoleRoutes = {
             }
             clearAccessCache(ctx.orgId);
             return { created, skipped };
+        }),
+    ],
+
+    /**
+     * Bring installed level roles up to date: add the default rights introduced since they were installed. Rights an
+     * administrator added are kept; nothing is removed. Refused for rights the person cannot grant or that would
+     * combine duties that must stay apart. Written reason; audited role by role.
+     */
+    'POST /api/org/roles/levels/refresh': [
+        orgRoute('org.roles.levels.refresh', 'ADM.roles', async (ctx) => {
+            const ids = Array.from(new Set(asList(ctx.body.ids))).slice(0, LEVEL_ROLES.length);
+            if (!ids.length) throw new HttpError(400, 'Choose at least one level role.');
+            const reason = str(ctx.body.reason).trim().slice(0, 300);
+            if (reason.length < 10) throw new HttpError(400, 'Give the reason for updating the roles (at least 10 characters).');
+            const [levels, roles] = await Promise.all([offeredLevels(ctx), listDocs(`organizations/${ctx.orgId}/roles`)]);
+            const updated: Array<{ name: string; added: string[] }> = [];
+            const skipped: Array<{ id: string; reason: string }> = [];
+            for (const id of ids) {
+                const l = levels.find((x) => x.id === id);
+                const role = roles.find((r) => r.id === id);
+                if (!l || !role) { skipped.push({ id, reason: 'Not an installed level role.' }); continue; }
+                if (id === ctx.role || additionalRoleIds(ctx.me).includes(id)) { skipped.push({ id, reason: 'You cannot change a role you hold.' }); continue; }
+                const have = asList(role.data.permissions);
+                const added = l.permissions.filter((k) => !have.includes(k));
+                if (!added.length) { skipped.push({ id, reason: 'Already up to date.' }); continue; }
+                if (!canGrant(ctx, added)) { skipped.push({ id, reason: 'It would add rights you do not hold yourself.' }); continue; }
+                const next = [...have, ...added];
+                const conflicts = sodConflicts(next).filter((c) => !sodConflicts(have).some((x) => x.id === c.id));
+                if (conflicts.length) { skipped.push({ id, reason: `It would combine duties that must stay apart: ${conflicts.map((c) => c.why).join(' ')}` }); continue; }
+                const ok = await writeDoc(`organizations/${ctx.orgId}/roles/${id}`, { ...role.data, permissions: next, updatedAt: nowIso(), updatedBy: ctx.uid }, { updateTime: role.updateTime });
+                if (!ok) { skipped.push({ id, reason: 'The role changed meanwhile. Reload and try again.' }); continue; }
+                await record(ctx, 'org.role.level.refresh', l.name, `Added default rights: ${added.join(', ')}. Reason: ${reason}`.slice(0, 1800));
+                updated.push({ name: l.name, added });
+            }
+            clearAccessCache(ctx.orgId);
+            return { updated, skipped };
         }),
     ],
 

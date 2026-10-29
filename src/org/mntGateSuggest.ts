@@ -7,8 +7,6 @@ export const GATE_KEYWORDS: Record<string, string[]> = {
     'MNT.TASK.VALIDATE': ['reliability', 'maintenance engineer', 'engineer', 'maintenance supervisor'],
     'MNT.TASK.FEEDBACK': ['artisan', 'technician', 'fitter', 'electrician', 'mechanic'],
     'MNT.SPARES.RECONCILE': ['stores', 'storekeeper', 'store', 'warehouse'],
-    'MNT.WINDOW.ENGINEERING': ['maintenance engineer', 'engineering manager', 'engineer', 'engineering'],
-    'MNT.WINDOW.SAFETY': ['safety', 'sheq', 'hse'],
     'MNT.SAFETY.SIGNOFF': ['safety', 'sheq', 'hse'],
     'MNT.HANDOVER': ['production', 'operations', 'operator', 'shift'],
     'MNT.WO.TECHNICAL_CLOSE': ['technical manager', 'maintenance manager', 'engineering manager', 'manager'],
@@ -40,10 +38,10 @@ export function suggestGateRoles(
 }
 
 /** The maintenance gate a server message refers to, when the fix is in Maintenance Workflows. */
-export function gateFromMessage(message: string): { gate: string; kind: 'unconfigured' | 'not_held' } | null {
+export function gateFromMessage(message: string): { gate: string; kind: 'unconfigured' | 'not_held'; jobRole?: string } | null {
     const a = /Configure (MNT\.[A-Z_.]+) in Maintenance Workflows/.exec(message);
     if (a) return { gate: a[1], kind: 'unconfigured' };
-    const b = /configured (MNT\.[A-Z_.]+) organizational job role is required/.exec(message);
-    if (b) return { gate: b[1], kind: 'not_held' };
+    const b = /configured (MNT\.[A-Z_.]+) organizational job role (?:(.+?) )?is required/.exec(message);
+    if (b) return { gate: b[1], kind: 'not_held', jobRole: b[2] ?? '' };
     return null;
 }

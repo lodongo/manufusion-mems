@@ -122,7 +122,7 @@ const AREAS: Record<string, string> = {
   PLN: 'MPS:Master schedule|MRP:Material requirements planning|CAP:Capacity planning|DEM:Demand forecast|SHT:Shortage management',
   CST: 'STD:Standard costing|ACT:Actual costing|OVH:Overheads|VAR:Variances|MRG:Margins',
   QLT: 'INS:Inspections|SPC:Specifications|NCR:Nonconformance|CAP:Corrective actions|COA:Certificates|REL:Quality release',
-  MNT: 'WRQ:Work requests|WOR:Work orders|PMS:Preventive schedules|AMS:Autonomous maintenance|RCA:Root cause analysis|RISK:Risk and permits|BOM:Maintenance BOM|REL:Reliability'
+  MNT: 'WRQ:Work requests|WOR:Work orders|WIN:Maintenance windows|BUD:Maintenance budgets and cost approval|PMS:Preventive schedules|AMS:Autonomous maintenance|RCA:Root cause analysis|RISK:Risk and permits|BOM:Maintenance BOM|REL:Reliability'
     + '|ASS:Work assessments:VW,ED,SB,AP,UP|TSK:Task library:VW,CR,ED,AP|MCD:Material candidates:VW,CR,SB,AP|SET:Maintenance setup and references:VW,ED,CG|WFL:Maintenance workflow configuration:VW,ED,AP|SRC:Maintenance sourcing (warehouse, catalogue, vendors):VW',
   AST: 'REG:Asset register|EQP:Equipment|ASM:Assemblies|DEP:Depreciation|TRF:Transfers|DSP:Disposals|CAP:Capitalisation|TAG:Tagging'
     + '|DIC:Asset dictionary:VW,IM,ED|ACT:Assembly activities:VW,ED',

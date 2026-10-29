@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowLeft, ClipboardCheck, Package, ShieldCheck, Wrench, CalendarClock, CheckCircle2, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Package, ShieldCheck, Wrench, CalendarClock, CheckCircle2, ChevronDown } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert } from '../components/ui';
@@ -9,6 +9,7 @@ import MntTaskAssessment, { WarehouseSparePicker, CatalogPicker } from './MntTas
 import { FulfilmentTrack, ResourceStatus, SOURCE_LABEL, useVendors } from './mntSourcing';
 import { useFullScreen } from './mntShared';
 import MntGateHint from './MntGateHint';
+import MntReadiness from './MntReadiness';
 
 export type MntData = Record<string, any>;
 export const mntInput = 'mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink';
@@ -774,12 +775,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         {tasks.length ? 'Edit task assessment' : 'Assess tasks and requirements'}
                     </Button>
                 )}
-                {wo.status === 'planning' && can.plan && tasks.length > 0 && (
-                    <Button busy={busy} onClick={() => legacy('submit_plan')}>
-                        <ClipboardCheck size={16} />
-                        Submit assessed plan for scheduling
-                    </Button>
-                )}
+
                 {can.plan &&
                     tasks.length > 0 &&
                     !['closed', 'cancelled'].includes(wo.status) &&
@@ -789,6 +785,9 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         </Button>
                     )}
             </div>
+            {tasks.length > 0 && wo.assessmentReviewCurrent && data.checklist && (
+                <MntReadiness code={code} wo={wo} checklist={data.checklist} canPlan={!!can.plan} currency={data.currency || ''} onDone={reload} />
+            )}
             {tasks.length>0&&<Card className="space-y-3">
                 <p className="font-semibold">Independent work assessment review</p>
                 <p className="text-sm">{wo.assessmentReviewCurrent?'Approved by '+(wo.assessmentReview.name||'reviewer'):'Awaiting approval of current task assessment'}</p>

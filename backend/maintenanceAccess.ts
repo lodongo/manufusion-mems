@@ -20,7 +20,16 @@ export async function requireMaintenanceRole(ctx: OrgContext, gate: string, path
         ) &&
         !bypass(ctx, `mnt.gate.${gate}`)
     )
-        throw new HttpError(403, `The configured ${gate} organizational job role is required at this location.`);
+    {
+        // Name the job role so the person knows what to ask for. Super admins are not exempt (maker-checker).
+        const position = await getDoc(`organizations/${ctx.orgId}/positions/${role}`);
+        const title = str(position?.data.title) || str(position?.data.name);
+        const label = title ? `${title} (${role})` : role;
+        const admin = ctx.role === 'org_super_admin'
+            ? ' Organization super admins are not exempt: assign yourself this job role at the equipment\'s location (Users › Job roles and scope), or use the platform testing override in development.'
+            : '';
+        throw new HttpError(403, `The configured ${gate} organizational job role ${label} is required at this location.${admin}`);
+    }
     return { role, version: Number(settings?.data.version) || 0 };
 }
 export async function maintenancePermission(ctx: OrgContext, permission: string, path: string[]) {

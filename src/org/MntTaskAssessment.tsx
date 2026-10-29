@@ -12,10 +12,19 @@ type Risk={hazard:string;impact:string;controls:string;before:string;after:strin
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
 type SafetyOption={code:string;label:string;category:string;subcategory:string};
 type Options={maintenanceTypes?:Array<{code:string;label:string}>;serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
-export type TaskAssessment={id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
+export type TaskAssessment={id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
+export type MachineStatus='total_shutdown'|'live'|'full_loto'|'partial_isolation';
+export const MACHINE_STATUS:Array<[MachineStatus,string,string]>=[
+ ['total_shutdown','Total shutdown','The equipment is stopped and shut down for the work.'],
+ ['full_loto','Full LOTO','Every hazardous energy source is isolated, locked, tagged and proven at zero.'],
+ ['partial_isolation','Partial isolation','Only the listed energy sources are isolated; the rest stays energised.'],
+ ['live','Work on live equipment','The equipment stays running or energised during the work.'],
+];
+export const machineOf=(t:{machineStatus?:MachineStatus;liveEquipment?:boolean;lotoRequired?:boolean}):MachineStatus=>t.machineStatus||(t.liveEquipment?'live':t.lotoRequired?'full_loto':'total_shutdown');
+export const machineLabel=(t:{machineStatus?:MachineStatus;liveEquipment?:boolean;lotoRequired?:boolean})=>MACHINE_STATUS.find(x=>x[0]===machineOf(t))?.[1]||'';
 const id=()=>Math.random().toString(36).slice(2,10);
 const newRisk=():Risk=>({hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}});
-const seed=():TaskAssessment=>({id:'task_'+id(),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[newRisk()],templateStatus:'pending_validation',internalRoles:[],externalResource:undefined,lotoRequired:false,liveEquipment:false,energySourceCodes:[],permitCodes:[]});
+const seed=():TaskAssessment=>({id:'task_'+id(),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[newRisk()],templateStatus:'pending_validation',internalRoles:[],externalResource:undefined,machineStatus:'total_shutdown',lotoRequired:false,liveEquipment:false,energySourceCodes:[],permitCodes:[]});
 const input='mt-1 w-full rounded-xl border border-line bg-page p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none read-only:opacity-70';
 const label='block text-sm text-soft';
 const roles=[['operator','Operator'],['technician','Technician'],['specialist','Specialist'],['engineer','Engineer']] as const;
@@ -78,7 +87,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
     {sv.description} · {sv.supplierCategory||'No supplier category'} · execute {sv.executionDate||'—'}
     <span className='block text-xs text-muted'>Scope: {sv.scope} · Acceptance: {sv.acceptanceCriteria}</span>
    </div>)}
-   <p>LOTO required: {t.lotoRequired?'Yes':'No'} · Working live: {t.liveEquipment?'Yes':'No'}</p>
+   <p>Machine status: {machineLabel(t)}{t.lotoRequired?' · LOTO: '+(t.energySourceCodes||[]).length+' energy source(s)':''}</p>
    {!!t.energySourceCodes?.length&&<p>Hazardous energy: {t.energySourceCodes.map(code=>options?.hazardousEnergy.find(x=>x.code===code)?.label||code).join(', ')}</p>}
    {!!t.permitCodes?.length&&<p>Permits: {t.permitCodes.map(code=>options?.safetyPermits.find(x=>x.code===code)?.label||code).join(', ')}</p>}
    <p className='font-medium text-ink'>Safety and risk assessment</p>
@@ -119,12 +128,17 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    const risk=checked?[...task.risk.filter(x=>x.hazard||x.impact||x.controls),newEnergyRisk(code)]:task.risk.filter(x=>x.energyCode!==code);
    patch({energySourceCodes:codes,risk:risk.length?risk:[newRisk()]});
  };
- const toggleSafety=(key:'lotoRequired'|'liveEquipment',yes:boolean)=>{
-   const permit=key==='lotoRequired'?permitFor(/loto|lock.?out|isolation/i):permitFor(/live/i);
-   const previous=task.permitCodes||[];
-   const permitCodes=yes&&permit?[...new Set([...previous,permit])]:!yes&&permit?previous.filter(x=>x!==permit):previous;
-   const risk=key==='liveEquipment'?(yes?[...task.risk.filter(x=>x.hazard||x.impact||x.controls),newEnergyRisk('LIVE_EQUIPMENT')]:task.risk.filter(x=>x.energyCode!=='LIVE_EQUIPMENT')):yes?task.risk:task.risk.filter(x=>!(task.energySourceCodes||[]).includes(x.energyCode||''));
-   patch({[key]:yes,permitCodes,risk:risk.length?risk:[newRisk()],...(key==='lotoRequired'&&!yes?{energySourceCodes:[]}: {})});
+ /** Machine status during execution decides isolation (LOTO with energy sources) or live work, with their permits and hazards. */
+ const setMachine=(ms:MachineStatus)=>{
+   const loto=ms==='full_loto'||ms==='partial_isolation',live=ms==='live';
+   const lotoPermit=permitFor(/loto|lock.?out|isolation/i),livePermit=permitFor(/live/i);
+   const permitCodes=(task.permitCodes||[]).filter(x=>x!==lotoPermit&&x!==livePermit);
+   if(loto&&lotoPermit)permitCodes.push(lotoPermit);
+   if(live&&livePermit)permitCodes.push(livePermit);
+   let risk=task.risk.filter(x=>x.energyCode!=='LIVE_EQUIPMENT');
+   if(!loto)risk=risk.filter(x=>!(task.energySourceCodes||[]).includes(x.energyCode||''));
+   if(live)risk=[...risk.filter(x=>x.hazard||x.impact||x.controls),newEnergyRisk('LIVE_EQUIPMENT')];
+   patch({machineStatus:ms,lotoRequired:loto,liveEquipment:live,permitCodes,risk:risk.length?risk:[newRisk()],...(loto?{}:{energySourceCodes:[]})});
  };
  const save=async()=>{
   const problems=tasks.flatMap((t,i)=>taskProblems(t).map(x=>'Task '+(i+1)+' — '+x));
@@ -309,11 +323,15 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     </StepSection>
    </>}
    {step===4&&<>
-    <StepSection title='Isolation and live work' hint='Selecting these adds the required permits and hazards automatically.'>
-     <div className='space-y-2'>
-      <ConfirmBox checked={!!task.lotoRequired} onChange={v=>toggleSafety('lotoRequired',v)}>Lock-out/tag-out (LOTO) required</ConfirmBox>
+    <StepSection title='Machine status during execution' hint='Sets isolation or live work, and adds the required permits and hazards automatically.'>
+     <div role='radiogroup' aria-label='Machine status during execution' className='grid gap-2 sm:grid-cols-2'>
+      {MACHINE_STATUS.map(([value,title,detail])=>{const on=machineOf(task)===value;return <button key={value} type='button' role='radio' aria-checked={on} onClick={()=>setMachine(value)}
+        className={'min-h-16 rounded-xl border p-3 text-left '+(on?'border-brand bg-brand/10':'border-line bg-page')}>
+        <span className='block text-sm font-semibold text-ink'>{title}</span><span className='mt-0.5 block text-xs text-soft'>{detail}</span></button>;})}
+     </div>
+     <div className='mt-2 space-y-2'>
       {task.lotoRequired&&<div className='space-y-2 rounded-xl border border-amber-400/40 bg-amber-400/5 p-3'>
-        <p className='text-sm font-semibold text-ink'>Hazardous energy sources to isolate (SAF master)</p>
+        <p className='text-sm font-semibold text-ink'>LOTO: hazardous energy sources to isolate (SAF master)</p>
         <input type='search' className={input} placeholder='Filter SAF energy sources (optional)' value={energySearch} onChange={e=>setEnergySearch(e.target.value)}/>
         {categories(options.data?.hazardousEnergy||[]).map(cat=><div key={cat}>
          <p className='mt-3 text-xs font-semibold uppercase tracking-wide text-brand'>{cat}</p>
@@ -321,7 +339,6 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
         </div>)}
         {options.data?.hazardousEnergy.length===0&&<Alert tone='error'>No hazardous energy sources configured in the SAF master. Contact MEMS Admin.</Alert>}
        </div>}
-      <ConfirmBox checked={!!task.liveEquipment} onChange={v=>toggleSafety('liveEquipment',v)}>Work on live/running equipment required</ConfirmBox>
       {task.liveEquipment&&<p className='rounded-xl border border-amber-400/40 bg-amber-400/5 p-3 text-sm text-amber-400'>Live work requires an independent hazard assessment and SAF-authorized live-work permit. Confirm controls before execution.</p>}
      </div>
     </StepSection>

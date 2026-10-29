@@ -61,7 +61,8 @@ export interface LocNode {
     inScope: boolean;
 }
 export interface Place {
-    assembly: { id: string; code: string; name: string };
+    /** Null when the request is placed on the equipment and the assembly is added at review. */
+    assembly: { id: string; code: string; name: string } | null;
     unit: { id: string; code: string; name: string; equipmentClass: string; equipmentClassName: string } | null;
     costCenter: { id: string; code: string; name: string } | null;
     site: { id: string; code: string; name: string } | null;
@@ -299,7 +300,7 @@ export function GroupPicker({ title, groups, selected, onToggle, multi = false, 
 }
 
 /** Drill down the organization design to an assembly, or search assemblies directly. */
-export function AssemblyPicker({ selected, onPick, purpose = 'wr' }: { selected?: string; onPick: (id: string) => void; purpose?: 'wr' | 'wo' }) {
+export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipment = false }: { selected?: string; onPick: (id: string) => void; purpose?: 'wr' | 'wo'; allowEquipment?: boolean }) {
     const { data, error, loading } = useLoad(() => callBackend<{ nodes: LocNode[]; homeId?: string }>('/api/org/mnt/locations', { purpose }), [purpose]);
     const [at, setAt] = useState('root');
     const [q, setQ] = useState('');
@@ -319,15 +320,19 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr' }: { selected?
     const trail: LocNode[] = [];
     for (let cur = byId.get(at); cur; cur = byId.get(cur.parentId)) trail.unshift(cur);
     const assemblies = nodes.filter((n) => n.level === 'assembly' && n.inScope);
+    const isUnit = (n?: LocNode) => !!n && (n.level === 'work_center' || n.level === 'equipment');
+    // Reporting is allowed against the equipment itself when the assembly is not known (it is added at review).
+    const equipment = allowEquipment ? nodes.filter((n) => isUnit(n) && n.inScope) : [];
+    const here = byId.get(at);
     const label = (n: LocNode) => {
         const parent = byId.get(n.parentId);
         return parent ? `${parent.code} ${parent.name}` : '';
     };
     const term = q.trim().toLowerCase();
-    const hits = term ? assemblies.filter((a) => `${a.code} ${a.name} ${label(a)}`.toLowerCase().includes(term)).slice(0, 40) : [];
+    const hits = term ? [...equipment, ...assemblies].filter((a) => `${a.code} ${a.name} ${label(a)}`.toLowerCase().includes(term)).slice(0, 40) : [];
     const countAssemblies = (id: string): number => nodes.filter((n) => n.parentId === id).reduce((s, n) => s + (n.level === 'assembly' ? 1 : countAssemblies(n.id)), 0);
 
-    if (!assemblies.length)
+    if (!assemblies.length && !equipment.length)
         return (
             <Card>
                 <p className='text-sm text-amber-300'>There are no assemblies where your job roles allow this. Assemblies are added under equipment units in Organization design, and rights come from your job roles.</p>
@@ -336,17 +341,17 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr' }: { selected?
 
     return (
         <div className='space-y-3'>
-            <p className='text-sm text-slate-400'>Open the assembly. Go through your sites and equipment units, or search.</p>
+            <p className='text-sm text-slate-400'>{allowEquipment ? 'Open the equipment, then the assembly if you know it. Go through your sites, or search.' : 'Open the assembly. Go through your sites and equipment units, or search.'}</p>
             <div className='relative'>
                 <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${assemblies.length} assemblies…`} className='h-12 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-sm text-white' />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={allowEquipment ? `Search ${equipment.length} equipment and ${assemblies.length} assemblies…` : `Search ${assemblies.length} assemblies…`} className='h-12 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-sm text-white' />
             </div>
             {term ? (
                 <ul className='space-y-2'>
                     {hits.length ? (
                         hits.map((a) => (
                             <li key={a.id}>
-                                <AssemblyButton node={a} sub={label(a)} selected={selected === a.id} onPick={onPick} />
+                                <AssemblyButton node={a} sub={isUnit(a) ? `Equipment · ${label(a)}` : label(a)} selected={selected === a.id} onPick={onPick} />
                             </li>
                         ))
                     ) : (
@@ -369,6 +374,12 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr' }: { selected?
                             </span>
                         ))}
                     </nav>
+                    {isUnit(here) && here!.inScope && allowEquipment && (
+                        <div className='space-y-1'>
+                            <AssemblyButton node={here!} sub='This equipment · assembly not known' selected={selected === here!.id} onPick={onPick} />
+                            <p className='text-xs text-slate-500'>Or choose the assembly below if you know it.</p>
+                        </div>
+                    )}
                     <ul className='space-y-2'>
                         {children.map((n) =>
                             n.level === 'assembly' ? (

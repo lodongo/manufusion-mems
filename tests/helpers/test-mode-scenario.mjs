@@ -43,7 +43,7 @@ assert.deepEqual(tm.bypassed, ['x.rule']);
 seed(`organizations/${org}/maintenance_workflow_settings/default`, { version: 3, approverRoles: { 'MNT.WO.TECHNICAL_CLOSE': 'TM' } });
 seed('users/ADMIN_01', { orgId: org, status: 'active', assignments: [] });
 const admin = (testMode) => ({ uid: 'ADMIN_01', orgId: org, role: 'org_super_admin', me: snapshot('users/ADMIN_01'), permissions: ['*'], directPermissions: ['*'], grants: [], testMode, bypassed: [] });
-await assert.rejects(() => requireMaintenanceRole(admin(false), 'MNT.WO.TECHNICAL_CLOSE', ['SITE']), /job role is required/);
+await assert.rejects(() => requireMaintenanceRole(admin(false), 'MNT.WO.TECHNICAL_CLOSE', ['SITE']), /job role TM is required at this location\. Organization super admins are not exempt/);
 const relaxed = admin(true);
 const gate = await requireMaintenanceRole(relaxed, 'MNT.WO.TECHNICAL_CLOSE', ['SITE']);
 assert.equal(gate.role, 'TM');
