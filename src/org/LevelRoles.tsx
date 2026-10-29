@@ -14,6 +14,8 @@ import { ConfirmBox, StepSection } from './materialCreateUi';
 interface Level {
     id: string; module: string; moduleName: string; rank: number; level: string; name: string; description: string; never: string;
     permissions: string[]; available: boolean; installed: boolean; grantable: boolean; users: number; jobRoles: string[];
+    /** Default rights added since the level was installed. */
+    missing?: string[];
 }
 interface Existing {
     id: string; name: string; permissions: number; users: number; jobRoles: string[];
@@ -37,6 +39,16 @@ export default function LevelRoles() {
     }, [data]);
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load level roles.'}</Alert>;
+    const outdated = data.levels.filter((l) => l.installed && (l.missing?.length ?? 0) > 0);
+    const refresh = (ids: string[]) =>
+        ask(
+            { title: `Update ${ids.length} level role${ids.length === 1 ? '' : 's'}?`, message: 'Adds the default rights introduced since installation (new features). Rights you added are kept; nothing is removed. Duty conflicts are refused.', confirmLabel: 'Update', reason: { label: 'Reason', minLength: 10 } },
+            async (reason) => {
+                const r = await callBackend<{ updated: Array<{ name: string; added: string[] }>; skipped: Array<{ id: string; reason: string }> }>('/api/org/roles/levels/refresh', { ids, reason });
+                setInfo(`Updated ${r.updated.length} level role(s).${r.skipped.length ? ` Skipped ${r.skipped.length}: ${r.skipped.map((x) => x.reason).join(' ')}` : ''}`);
+                reload();
+            },
+        );
 
     const installable = (l: Level) => !l.installed && l.available && l.grantable;
     const install = () =>
@@ -71,6 +83,13 @@ export default function LevelRoles() {
             {problem && <Alert tone='error'>{problem}</Alert>}
             {tab === 'levels' ? (
                 <>
+                    {outdated.length > 0 && (
+                        <div className='space-y-2 rounded-xl border border-amber-500/50 bg-amber-500/10 p-3'>
+                            <p className='text-sm font-semibold text-ink'>{outdated.length} installed level role{outdated.length === 1 ? ' has' : 's have'} new default rights</p>
+                            <p className='text-xs text-soft'>{outdated.map((l) => `${l.name}: ${l.missing!.join(', ')}`).join(' · ')}</p>
+                            <Button onClick={() => refresh(outdated.map((l) => l.id))}>Update {outdated.length} role{outdated.length === 1 ? '' : 's'}</Button>
+                        </div>
+                    )}
                     <div className='flex gap-2'>
                         <Button variant='secondary' className='flex-1' onClick={() => setPicked(data.levels.filter(installable).map((l) => l.id))}>Select all available</Button>
                         <Button variant='secondary' className='flex-1' onClick={() => setPicked([])}>Clear</Button>
@@ -95,6 +114,7 @@ export default function LevelRoles() {
                                                         <span className='rounded bg-panel px-1.5 py-0.5 font-mono text-[10px] text-brand'>L{l.rank}</span>
                                                         <span className='text-sm font-semibold text-ink'>{l.name}</span>
                                                         {l.installed && <Badge tone='brand'>Installed</Badge>}
+                                                        {(l.missing?.length ?? 0) > 0 && <Badge tone='warn'>{l.missing!.length} new right{l.missing!.length === 1 ? '' : 's'}</Badge>}
                                                         {why && <Badge tone='muted'>{why}</Badge>}
                                                     </span>
                                                     <span className='mt-1 block text-xs text-soft'>{l.description}</span>

@@ -20,10 +20,12 @@ test('missing, disagreeing and duplicate mappings fail instead of offering unrel
  assert.throws(()=>resolveMaintenanceEquipmentAsset('FILLER','AST-000001',[...assets,{id:'AST-000006',status:'active',workCenterId:'FILLER'}]),/Multiple assets/);
  assert.throws(()=>resolveMaintenanceEquipmentAsset('FILLER','AST-000001',[{id:'AST-000001',status:'disposed',workCenterId:'FILLER'}]),/not active/);
 });
-test('Work Request wizard has five steps, no asset selection page, and backend is authoritative',()=>{
+test('Work Request wizard has four steps, only the place is required, and backend is authoritative',()=>{
  const ui=readFileSync(new URL('../../src/org/WorkRequests.tsx',import.meta.url),'utf8');
  const backend=readFileSync(new URL('../../backend/maintenance.ts',import.meta.url),'utf8');
- assert.match(ui,/STEPS = \['Where', 'Finding', 'Impact', 'Photos', 'Review'\]/);
+ assert.match(ui,/STEPS = \['Where', 'Details', 'Photos', 'Review'\]/);
+ assert.match(ui,/AssemblyPicker allowEquipment/,'A request can be placed on the equipment when the assembly is not known');
+ assert.match(backend,/assemblyContext\(ctx, str\(b.assemblyId\) \|\| str\(b.equipmentId\), P.WR_create, true\)/);
  assert.doesNotMatch(ui,/Failure mode \(optional\)/,'The requester no longer chooses a failure mode');
  assert.match(ui,/MAX_IMPACTS = 5/);
  assert.match(ui,/useFullScreen\(!created\)/,'Raising a request runs full screen on phones');

@@ -29,6 +29,7 @@ const MntHome = lazy(() => import('./MntHome'));
 const MntWindows = lazy(() => import('./MntWindows'));
 const MntMaterialCandidates = lazy(() => import('./MntMaterialCandidates'));
 const MntWorkflowSettings = lazy(() => import('./MntWorkflowSettings'));
+const MntBudgets = lazy(() => import('./MntBudgets'));
 const MntTaskValidation = lazy(() => import('./MntTaskValidation'));
 const SafConfiguration = lazy(() => import('./SafConfiguration'));
 const AssetRegister = lazy(() => import('./AssetRegister'));
@@ -112,6 +113,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Work requests', path: 'work_requests', prefix: 'MNT.WR.' },
         { label: 'Work orders', path: 'work_orders', prefix: 'MNT.WO.' },
         { label: 'Maintenance windows', path: 'maintenance_windows', prefix: 'MNT.' },
+        { label: 'Budgets & cost approvals', path: 'mnt_budgets', prefix: 'MNT.' },
         { label: 'Workflows and approval roles', path: 'mnt_workflows', permission: 'ADM.workflows' },
         { label: 'Validate new asset tasks', path: 'mnt_task_validation', permission: 'MNT.activities.edit' },
     ],
@@ -443,6 +445,7 @@ export default function OrgHomePage({
     else if (activeMenu && section === 'mnt_material_candidates') content = <MntMaterialCandidates />;
     else if (activeMenu && section === 'mnt') content = <MntHome />;
     else if (activeMenu && section === 'mnt_workflows') content = <MntWorkflowSettings />;
+    else if (activeMenu && section === 'mnt_budgets') content = <MntBudgets />;
     else if (activeMenu && section === 'mnt_task_validation') content = <MntTaskValidation />;
     else if (activeMenu && section === 'work_requests') content = <WorkRequests id={id} sub={sub} />;
     else if (activeMenu && section === 'work_orders') content = <WorkOrders id={id} sub={sub} />;

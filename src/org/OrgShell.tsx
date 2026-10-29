@@ -23,6 +23,7 @@ const WorkRequests = lazy(() => import('./WorkRequests'));
 const WorkOrders = lazy(() => import('./WorkOrders'));
 const MntHome = lazy(() => import('./MntHome'));
 const MntWindows = lazy(() => import('./MntWindows'));
+const MntBudgets = lazy(() => import('./MntBudgets'));
 const SafConfiguration = lazy(() => import('./SafConfiguration'));
 const OrgModules = lazy(() => import('./OrgModules'));
 const OrgSubscription = lazy(() => import('./OrgSubscription'));
@@ -84,6 +85,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
             { key: 'work_requests', label: 'Work requests', Icon: Wrench, perm: 'MNT.', module: 'MNT' },
             { key: 'work_orders', label: 'Work orders', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
             { key: 'maintenance_windows', label: 'Maintenance windows', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
+            { key: 'mnt_budgets', label: 'Budgets & cost approvals', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
         ],
     },
     {
@@ -264,6 +266,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             break;
         case 'maintenance_windows':
             content = <MntWindows />;
+            break;
+        case 'mnt_budgets':
+            content = <MntBudgets />;
             break;
         case 'mnt':
             content = <MntHome />;

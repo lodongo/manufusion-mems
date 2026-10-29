@@ -7,13 +7,16 @@
  *   description  free text, only after a recorded warehouse + catalogue search found nothing suitable
  */
 export type SpareSource='warehouse'|'material'|'catalog'|'description';
+export const MACHINE_STATUSES=['total_shutdown','live','full_loto','partial_isolation'] as const;
+export type MachineStatus=typeof MACHINE_STATUSES[number];
+export const MACHINE_STATUS_LABEL:Record<MachineStatus,string>={total_shutdown:'Total shutdown',live:'Work on live equipment',full_loto:'Full LOTO',partial_isolation:'Partial isolation'};
 export interface AssessedSpare {id:string;source:SpareSource;materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;specifications?:string;attributes?:Record<string,string>;photoPath?:string;
  function?:string;categoryCode?:string;subcategoryCode?:string;familyCode?:string;requiredDate?:string;attachments?:string[];searchReceiptId?:string;noMatchConfirmed?:boolean;noMatchReason?:string;}
 export interface AssessedService {id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;
  instructions?:string;certifications?:string;personnel?:number;durationHours?:number;executionDate?:string;supplierCategory?:string;attachments?:string[];}
 const DATE=/^\d{4}-\d{2}-\d{2}$/;
 export interface AssessedRisk {hazard:string;impact:string;controls:string;before:string;after:string;permit:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;exposedPersonnel?:string;responsiblePerson?:string;precautions?:string;energyCode?:string;}
-export interface AssessedTask {id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:AssessedSpare[];services:AssessedService[];risk:AssessedRisk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[];}
+export interface AssessedTask {machineStatus?:MachineStatus;id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:AssessedSpare[];services:AssessedService[];risk:AssessedRisk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[];}
 export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
  if(!Array.isArray(raw)||raw.length<1||raw.length>40)throw Error('Add between 1 and 40 assessed tasks.');
  const text=(v:unknown,max=200)=>typeof v==='string'?v.trim().slice(0,max):'';
@@ -77,13 +80,20 @@ export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
   const externalResource=externalType?{type:externalType,persons:number(externalRaw.persons??1,1,50),notes:text(externalRaw.notes,1200)}:undefined;
   if(externalType==='other'&&!externalResource?.notes)throw Error('Describe the other external resource.');
   if(!internalRoles.length&&!externalResource)throw Error('Choose an internal role or an external resource for this task.');
-  const lotoRequired=t.lotoRequired===true,liveEquipment=t.liveEquipment===true;
+  // Machine status during execution: total shutdown, live equipment, full LOTO or partial isolation. Isolation
+  // statuses require LOTO with the energy sources; live work adds the live-work hazard. Older tasks derive it.
+  const declared=MACHINE_STATUSES.includes(t.machineStatus as MachineStatus)?t.machineStatus as MachineStatus:null;
+  const machineStatus:MachineStatus=declared??(t.liveEquipment===true?'live':t.lotoRequired===true?'full_loto':'total_shutdown');
+  const lotoRequired=machineStatus==='full_loto'||machineStatus==='partial_isolation'||(machineStatus!=='live'&&t.lotoRequired===true);
+  const liveEquipment=machineStatus==='live';
+  if((machineStatus==='full_loto'||machineStatus==='partial_isolation')&&!(Array.isArray(t.energySourceCodes)&&t.energySourceCodes.length))
+   throw Error('Task '+(i+1)+': '+(machineStatus==='full_loto'?'full LOTO':'partial isolation')+' needs the hazardous energy sources to isolate.');
   const energySourceCodes=Array.isArray(t.energySourceCodes)?[...new Set(t.energySourceCodes.map(v=>text(v,80)).filter(Boolean))]:[];
   const permitCodes=Array.isArray(t.permitCodes)?[...new Set(t.permitCodes.map(v=>text(v,80)).filter(Boolean))]:[];
   if(lotoRequired&&!energySourceCodes.length)throw Error('Identify at least one hazardous energy source when LOTO is required.');
   if(!lotoRequired&&energySourceCodes.length)throw Error('Hazardous energy selections require the LOTO flag.');
   if(energySourceCodes.length>120||permitCodes.length>80)throw Error('Too many safety source or permit selections.');
-  return {id,code:/^ASSMTASK_\d{1,4}$/.test(text(t.code,20))?text(t.code,20):'',internalRoles,externalResource,lotoRequired,liveEquipment,energySourceCodes,permitCodes,skillCodes:Array.isArray(t.skillCodes)?[...new Set(t.skillCodes.map(v=>text(v,80)).filter(Boolean))].slice(0,40):[],title:text(t.title,120)||desc,equipmentId:text(t.equipmentId,120),assemblyId:text(t.assemblyId,120),instructions:text(t.instructions,3000),skills:text(t.skills,1000),priority:text(t.priority,40)||'normal',dependencies:Array.isArray(t.dependencies)?[...new Set(t.dependencies.map(v=>text(v,50)).filter(Boolean))]:[],isolation:text(t.isolation,2000),completionCriteria:text(t.completionCriteria,2000),documentation:text(t.documentation,2000),safetyEquipment:text(t.safetyEquipment,1000),description:desc,disciplineCode:text(t.disciplineCode,80),resourceTypeCode:text(t.resourceTypeCode,80),
+  return {id,code:/^ASSMTASK_\d{1,4}$/.test(text(t.code,20))?text(t.code,20):'',internalRoles,externalResource,machineStatus,lotoRequired,liveEquipment,energySourceCodes,permitCodes,skillCodes:Array.isArray(t.skillCodes)?[...new Set(t.skillCodes.map(v=>text(v,80)).filter(Boolean))].slice(0,40):[],title:text(t.title,120)||desc,equipmentId:text(t.equipmentId,120),assemblyId:text(t.assemblyId,120),instructions:text(t.instructions,3000),skills:text(t.skills,1000),priority:text(t.priority,40)||'normal',dependencies:Array.isArray(t.dependencies)?[...new Set(t.dependencies.map(v=>text(v,50)).filter(Boolean))]:[],isolation:text(t.isolation,2000),completionCriteria:text(t.completionCriteria,2000),documentation:text(t.documentation,2000),safetyEquipment:text(t.safetyEquipment,1000),description:desc,disciplineCode:text(t.disciplineCode,80),resourceTypeCode:text(t.resourceTypeCode,80),
    persons:internalRoles.length?number(t.persons??1,1,50):0,hours:number(t.hours??1,0.25,2000),rate:number(t.rate??0,0,1000000),
    tools:text(t.tools,1000),spares,services,risk:normalizedRisk,templateStatus:t.templateStatus==='existing'?'existing':'pending_validation',
    ...(text(t.maintenanceTypeCode,40)?{maintenanceTypeCode:text(t.maintenanceTypeCode,40)}:{})};

@@ -40,11 +40,17 @@ test('safety near-miss gate requires explicit declaration and incident record wh
  assert.ok(gate.requires.includes('incident_declaration_explicit'));
  assert.ok(gate.requires.includes('incident_record_if_reported'));
 });
-test('maintenance window approval requires both independent engineering and safety roles',()=>{
+test('maintenance windows are scheduled by the planner after readiness and Chart of Authority cost approval',()=>{
  const keys=MAINTENANCE_GATES.filter(g=>g.stage==='scheduling').map(g=>g.code);
- assert.ok(keys.includes('MNT.WINDOW.ENGINEERING'));
- assert.ok(keys.includes('MNT.WINDOW.SAFETY'));
+ assert.ok(!keys.includes('MNT.WINDOW.ENGINEERING'));
+ assert.ok(!keys.includes('MNT.WINDOW.SAFETY'));
  const lock=MAINTENANCE_GATES.find(g=>g.code==='MNT.WINDOW.LOCK');
- assert.deepEqual(lock?.requires,['engineering_approved','safety_approved']);
+ assert.deepEqual(lock?.requires,['readiness_confirmed','same_equipment','work_fits_duration']);
+ const release=MAINTENANCE_GATES.find(g=>g.code==='MNT.WO.RELEASE');
+ assert.ok(release?.requires.includes('cost_approved_chart_of_authority'));
+ const cost=MAINTENANCE_GATES.find(g=>g.code==='MNT.WO.COST');
+ assert.equal(cost?.permission,'MNT.WO.costApprove');
+ const close=MAINTENANCE_GATES.find(g=>g.code==='MNT.WR.CLOSE');
+ assert.equal(close?.permission,'MNT.WR.close');
 });
 

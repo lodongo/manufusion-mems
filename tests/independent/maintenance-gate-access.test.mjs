@@ -10,7 +10,7 @@ const route = (path, permission = 'MNT.view') => ({ method: 'POST', path, name: 
 test('maintenance steps run through shared action routes are live with the permission each step enforces', () => {
   const rows = transactionCatalogue([], [route('/api/org/mnt/wr/action'), route('/api/org/mnt/wo/action'), route('/api/org/mnt/operations'), route('/api/org/mnt/siv/issue', 'INV.issue')]);
   const by = new Map(rows.map((r) => [r.code, r]));
-  for (const [code, perm] of [['MNT-WRQ-AP', 'MNT.WR.convert'], ['MNT-WRQ-RJ', 'MNT.WR.decline'], ['MNT-WRQ-RT', 'MNT.WR.return'], ['MNT-ASS-AP', 'MNT.assessment.review'], ['MNT-WOR-CL', 'MNT.WO.close'], ['MNT-WOR-CN', 'MNT.WO.cancel'], ['MNT-WOR-RV', 'MNT.WO.reopen'], ['MNT-WOR-PS', 'INV.issue']]) {
+  for (const [code, perm] of [['MNT-WRQ-CL', 'MNT.WR.close'], ['MNT-WRQ-AP', 'MNT.WR.closeConfirm'], ['MNT-WOR-SB', 'MNT.WO.plan'], ['MNT-WIN-CR', 'MNT.WO.schedule'], ['MNT-WRQ-AP', 'MNT.WR.convert'], ['MNT-WRQ-RJ', 'MNT.WR.decline'], ['MNT-WRQ-RT', 'MNT.WR.return'], ['MNT-ASS-AP', 'MNT.assessment.review'], ['MNT-WOR-CL', 'MNT.WO.close'], ['MNT-WOR-CN', 'MNT.WO.cancel'], ['MNT-WOR-RV', 'MNT.WO.reopen'], ['MNT-WOR-PS', 'INV.issue']]) {
     assert.equal(by.get(code).state, 'live', code);
     assert.ok(by.get(code).permissions.includes(perm), `${code} carries ${perm}`);
     assert.ok(!by.get(code).permissions.includes('MNT.view'), `${code}: opening the shared route is not the step's right`);
@@ -25,6 +25,7 @@ test('stores issue vouchers, HR and corporate routes link to their transactions'
     ['/api/org/mnt/siv/issue', 'MNT-WOR-PS'], ['/api/org/mnt/siv/create', 'MNT-WOR-ED'], ['/api/org/mnt/siv/stores/cancel', 'MNT-WOR-ED'], ['/api/org/mnt/siv/list', 'MNT-WOR-VW'],
     ['/api/org/hr/employees/create', 'HRM-EMP-CR'], ['/api/org/hr/employees/access-check', 'HRM-EMP-VW'], ['/api/org/hr/leave/review', 'HRM-LEA-AP'],
     ['/api/org/hr/compensation/decide', 'HRM-CMP-AP'], ['/api/org/hr/access-rules/review', 'HRM-RUL-AP'], ['/api/org/hr/skills/decide', 'HRM-SKL-AP'],
+    ['/api/org/mnt/budget/propose', 'MNT-BUD-SB'], ['/api/org/mnt/cost/decide', 'MNT-BUD-AP'], ['/api/org/mnt/budget/list', 'MNT-BUD-VW'],
     ['/api/org/corporate/budget/get', 'FIN-BUD-VW'], ['/api/org/corporate/ic/agreements/accept', 'FIN-ICO-AP'],
   ];
   for (const [path, code] of cases) {
@@ -51,6 +52,7 @@ test('gate suggestions fill only unconfigured, role-required gates, from job rol
 
 test('gate errors are recognised so the screen can point to Maintenance Workflows', () => {
   assert.deepEqual(gateFromMessage('Configure MNT.WR.CONVERT in Maintenance Workflows before proceeding.'), { gate: 'MNT.WR.CONVERT', kind: 'unconfigured' });
-  assert.deepEqual(gateFromMessage('The configured MNT.WO.TECHNICAL_CLOSE organizational job role is required at this location.'), { gate: 'MNT.WO.TECHNICAL_CLOSE', kind: 'not_held' });
+  assert.deepEqual(gateFromMessage('The configured MNT.WO.TECHNICAL_CLOSE organizational job role is required at this location.'), { gate: 'MNT.WO.TECHNICAL_CLOSE', kind: 'not_held', jobRole: '' });
+  assert.deepEqual(gateFromMessage('The configured MNT.WR.CONVERT organizational job role Maintenance Planner (ROL_000007) is required at this location. Organization super admins are not exempt.'), { gate: 'MNT.WR.CONVERT', kind: 'not_held', jobRole: 'Maintenance Planner (ROL_000007)' });
   assert.equal(gateFromMessage('Something else failed.'), null);
 });

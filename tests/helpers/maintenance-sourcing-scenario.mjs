@@ -94,8 +94,6 @@ const roles = {
     'MNT.WO.PLAN': 'PLAN',
     'MNT.TASK.FEEDBACK': 'EXEC',
     'MNT.SPARES.RECONCILE': 'STORES',
-    'MNT.WINDOW.ENGINEERING': 'ENG',
-    'MNT.WINDOW.SAFETY': 'SAFETY',
     'MNT.SAFETY.SIGNOFF': 'SAFETY',
     'MNT.HANDOVER': 'OPS',
     'MNT.WO.TECHNICAL_CLOSE': 'TM',
@@ -345,17 +343,20 @@ const search = (who, code, q) => route(maintenanceSourcingRoutes, '/api/org/mnt/
 
 // The location picker opens at the legal entity of the person raising the request.
 assert.equal((await route(maintenanceRoutes, '/api/org/mnt/locations', 'assessor', { purpose: 'wr' })).homeId, 'LE');
-// Raising a request: no criticality or failure mode from the requester; 1 to 5 impacts.
+// Raising a request: only the place is required; up to 5 impacts; no criticality from the requester here.
 const { criticalityCode: _crit, ...raised } = finding;
 const sixImpacts = l.impacts.flatMap((g) => g.items.map((i) => i.code)).slice(0, 6);
 assert.equal(sixImpacts.length, 6);
-await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', { ...raised, impactCodes: sixImpacts }), /between 1 and 5 impacts/);
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', { ...raised, impactCodes: sixImpacts }), /up to 5 impacts/);
 const wr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', { ...raised, impactCodes: sixImpacts.slice(0, 5) });
 assert.equal(snapshot(r + '/work_requests/' + wr.code).data.criticalityCode, undefined, 'Criticality is left to the assessor');
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'start_review' });
-const header = { maintenanceTypeCode: l.maintenanceTypes[0].code, workTypeCode: l.workTypes[0].code, priorityCode: l.priorities[0].code, disciplineCode: l.disciplines[0].code };
-await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'assess', ...header }), /criticality/i);
-await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'assess', ...header, criticalityCode: l.criticality.at(-1).code });
+const firstCode = (groups) => groups.flatMap((g) => g.items)[0].code;
+const header = { technicalEvaluation: 'Defect verified on site; replacement of the worn parts is needed.', natureCode: firstCode(l.failureModes), severityCode: l.criticality[0].code, solutionCodes: [firstCode(l.solutions)], maintenanceTypeCode: l.maintenanceTypes[0].code };
+const { severityCode: _sev, ...noSeverity } = header;
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'assess', ...noSeverity }), /severity/i);
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'assess', ...header, technicalEvaluation: 'too short' }), /technical evaluation/i);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'assess', ...header, severityCode: l.criticality.at(-1).code });
 assert.equal(snapshot(r + '/work_requests/' + wr.code).data.criticalityOriginalLabel, undefined);
 
 // 1. Warehouse first: stocked materials show usable quantity; registered-without-stock and catalogue come next.
@@ -445,7 +446,7 @@ await save(goodSpares());
 const savedTasks = snapshot(r + '/work_requests/' + wr.code).data.assessmentTasks;
 assert.deepEqual(savedTasks.map((t) => t.code), ['ASSMTASK_1', 'ASSMTASK_2'], 'Tasks are referenced ASSMTASK_1, ASSMTASK_2 …');
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: wr.code, action: 'review_assessment', note: 'Independent review of spares, services and risks.' });
-const wo = (await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'convert', confirm: wr.code })).woCode;
+const wo = (await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'convert', confirm: wr.code, scheduledStart: new Date(Date.now() + 86400000).toISOString().slice(0, 10), scheduledEnd: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10) })).woCode;
 assert.equal((await requirements()).length, 0, 'Conversion from assessment creates no procurement requirement');
 
 // 5. Warehouse reservation: full, and partial with a shortage requirement (never over-reserving).

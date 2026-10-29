@@ -11,6 +11,8 @@ import { MAINTENANCE_GATES } from '../../backend/maintenanceWorkflowConfig.ts';
 import { PROCUREMENT_UNITS } from '../../backend/procurementUnits.ts';
 import { maintenanceSourcingRoutes } from '../../backend/maintenanceSourcing.ts';
 import { storesIssueVoucherRoutes } from '../../backend/storesIssueVouchers.ts';
+import { maintenancePlanningRoutes } from '../../backend/maintenancePlanning.ts';
+import { decideRequest } from '../../backend/finRoutes.ts';
 
 const org = 'maintenance_fixture',
     r = 'organizations/' + org;
@@ -95,8 +97,6 @@ const roles = {
     'MNT.WO.PLAN': 'PLAN',
     'MNT.TASK.FEEDBACK': 'EXEC',
     'MNT.SPARES.RECONCILE': 'STORES',
-    'MNT.WINDOW.ENGINEERING': 'ENG',
-    'MNT.WINDOW.SAFETY': 'SAFETY',
     'MNT.SAFETY.SIGNOFF': 'SAFETY',
     'MNT.HANDOVER': 'OPS',
     'MNT.WO.TECHNICAL_CLOSE': 'TM',
@@ -311,10 +311,11 @@ await assert.rejects(
 const wr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', finding);
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'start_review' });
 const header = {
+    technicalEvaluation: 'Bearings run hot, two sensors are damaged and the gearbox leaks: all verified on site.',
+    natureCode: first(l.failureModes),
+    severityCode: l.criticality[0].code,
+    solutionCodes: [first(l.solutions)],
     maintenanceTypeCode: l.maintenanceTypes[0].code,
-    workTypeCode: l.workTypes[0].code,
-    priorityCode: l.priorities[0].code,
-    disciplineCode: l.disciplines[0].code,
 };
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'assess', ...header });
 const risk = [
@@ -396,14 +397,20 @@ await assert.rejects(
 );
 await assert.rejects(
     () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:wr.code,action:'review_assessment',note:'Attempt to self approve completed task assessment'}),
-    /cannot approve|configured MNT\.ASSESS\.REVIEW organizational job role is required/,
+    /cannot approve|configured MNT\.ASSESS\.REVIEW organizational job role .*is required/,
 );
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', {
     code: wr.code, action: 'review_assessment', note: 'Independent check confirms all tasks, scope, risks and required resources.',
 });
 assert.equal(snapshot(r + '/work_requests/' + wr.code).data.assessmentReview.status, 'approved');
-const wo = (await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'convert', confirm: wr.code }))
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'convert', confirm: wr.code }),
+    /scheduled start date/,
+    'The planner must set the scheduled dates',
+);
+const wo = (await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'convert', confirm: wr.code, scheduledStart: date, scheduledEnd: date }))
     .woCode;
+assert.equal(snapshot(r + '/work_orders/' + wo).data.scheduledStart, date);
 assert.ok(wo);
 assert.equal(snapshot(r + '/work_orders/' + wo).data.assessmentTasks[1].spares[0].qty, 4);
 await assert.rejects(() => op('planner', 'technical_close', { code: wo, note: 'Attempt premature closure' }), /configured|task|handover/i);
@@ -459,39 +466,48 @@ await op('planner', 'secure_service', {
     readyAt: date,
     note: 'Assessed service scope secured without technical changes.',
 });
-await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'planner', { code: wo, action: 'submit_plan' });
-const scheduled = tasks.map((t, i) => ({
-    id: wo + '_' + t.id,
-    woCode: wo,
-    taskId: t.id,
-    hours: 1,
-    offset: 0,
-    dependencies: i ? [wo + '_' + tasks[i - 1].id] : [],
-    exclusiveTools: [],
-}));
-const windowBody = {
-    title: 'Conveyor planned maintenance',
-    start: date + 'T08:00',
-    end: date + 'T16:00',
-    workOrderIds: [wo],
-    tasks: scheduled,
-};
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wo/action', 'planner', { code: wo, action: 'release', confirm: wo }),
+    /readiness checklist/,
+    'Release by a second person is replaced by readiness confirmation and Chart of Authority cost approval',
+);
+await assert.rejects(() => op('planner', 'save_window', { equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8, workOrderIds: [wo] }), /confirm readiness/);
+await assert.rejects(() => op('planner', 'confirm_readiness', { code: wo }), /Not ready yet/);
+await op('planner', 'lock_schedule', { code: wo, scheduledStart: date, scheduledEnd: date });
+await assert.rejects(() => op('planner', 'review_risk', { code: wo, note: 'short' }), /Risk review notes/);
+await op('planner', 'review_risk', { code: wo, note: 'Assessment hazards, LOTO and permits reviewed for every task.' });
+await assert.rejects(() => op('planner', 'submit_cost', { code: wo, reason: 'Estimated cost for planned conveyor work.' }), /allowance/);
+await assert.rejects(
+    () => op('planner', 'submit_cost', { code: wo, allowance: 1000, reason: 'Estimated cost for planned conveyor work.' }),
+    /No maintenance budget/,
+);
+const costReq = await op('planner', 'submit_cost', {
+    code: wo, allowance: 1000, reason: 'Estimated cost for planned conveyor work.',
+    justification: 'Production-critical conveyor work; the period budget is being set by finance.',
+});
+assert.match(costReq.requestId, /^FCR\d{8}$/);
+await assert.rejects(() => op('planner', 'confirm_readiness', { code: wo }), /cost approved/i);
+await assert.rejects(
+    () => route(maintenancePlanningRoutes, '/api/org/mnt/cost/decide', 'planner', { id: costReq.requestId, decision: 'approve', acknowledge: true }),
+    /submitted this request|planned this work order/,
+    'The planner never approves their own estimate',
+);
+await route(maintenancePlanningRoutes, '/api/org/mnt/cost/decide', 'manager', { id: costReq.requestId, decision: 'approve', acknowledge: true, reason: 'Within the plan.' });
+assert.equal(snapshot(r + '/work_orders/' + wo).data.costApproval.status, 'approved');
+await op('planner', 'confirm_readiness', { code: wo });
+assert.equal(snapshot(r + '/work_orders/' + wo).data.status, 'released');
+await assert.rejects(() => op('planner', 'save_window', { equipmentId: 'OTHER_LINE', date, startTime: '08:00', durationHours: 8, workOrderIds: [wo] }), /other equipment/);
+await assert.rejects(() => op('planner', 'save_window', { equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 1, workOrderIds: [wo] }), /needs 3 h/);
+const windowBody = { title: 'Conveyor planned maintenance', equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8, timeZone: 'UTC', workOrderIds: [wo] };
 const win = await op('planner', 'save_window', windowBody),
     windowId = win.windowId;
-await assert.rejects(() => op('tech', 'start_task', { code: wo, taskId: 'bearings' }), /authorized/);
-await op('engineer', 'approve_engineering', { windowId, note: 'Technical scope, resources and schedule reviewed.' });
-await assert.rejects(() => op('planner', 'authorize_window', { windowId }), /both required/);
-await op('safety', 'approve_safety', { windowId, note: 'Equipment isolation, task risks and controls reviewed.' });
-await op('planner', 'save_window', {
-    ...windowBody,
-    windowId,
-    reason: 'Adjust maintenance window end time after production review.',
-    end: date + 'T17:00',
-});
-await assert.rejects(() => op('planner', 'authorize_window', { windowId }), /both required/);
-await op('engineer', 'approve_engineering', { windowId, note: 'Revised technical schedule reviewed.' });
-await op('safety', 'approve_safety', { windowId, note: 'Revised maintenance execution safety reviewed.' });
-await op('planner', 'authorize_window', { windowId });
+assert.equal(snapshot(r + '/maintenance_windows/' + windowId).data.status, 'scheduled');
+assert.equal(snapshot(r + '/maintenance_windows/' + windowId).data.end, date + 'T16:00:00.000Z');
+assert.equal(snapshot(r + '/work_orders/' + wo).data.status, 'scheduled');
+await assert.rejects(() => op('engineer', 'approve_engineering', { windowId, note: 'Old approval path.' }), /no longer need/);
+await assert.rejects(() => op('planner', 'save_window', { ...windowBody, windowId, durationHours: 9 }), /reason/);
+await op('planner', 'save_window', { ...windowBody, windowId, reason: 'Extend the window by one hour after production review.', durationHours: 9 });
+assert.equal(snapshot(r + '/maintenance_windows/' + windowId).data.end, date + 'T17:00:00.000Z');
 await assert.rejects(() => op('tech', 'start_task', { code: wo, taskId: 'bearings' }), /prerequisites/);
 for (const step of snapshot(r + '/maintenance_windows/' + windowId).data.safetySteps)
     await op('safety', 'safety_prerequisite', {
@@ -753,9 +769,16 @@ async function createAssessedWorkOrder(title,description,assemblyId,assessedTask
     await route(maintenanceRoutes,'/api/org/mnt/wr/action','reviewer',{
         code:wrNew.code,action:'review_assessment',note:'Independent technical review verified scope, controls and resources.'
     });
-    const result=await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'convert',confirm:wrNew.code});
+    const result=await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:wrNew.code,action:'convert',confirm:wrNew.code,scheduledStart:date,scheduledEnd:date});
     assert.ok(result.woCode);
     return result.woCode;
+}
+async function makeReady(code, approver = 'manager') {
+    await op('planner', 'lock_schedule', { code, scheduledStart: date, scheduledEnd: date });
+    await op('planner', 'review_risk', { code, note: 'Assessment hazards and controls reviewed for every task.' });
+    const c = await op('planner', 'submit_cost', { code, allowance: 100, reason: 'Estimated cost of the planned work.', justification: 'Needed now; the period budget is being set by finance.' });
+    await route(maintenancePlanningRoutes, '/api/org/mnt/cost/decide', approver, { id: c.requestId, decision: 'approve', acknowledge: true });
+    await op('planner', 'confirm_readiness', { code });
 }
 const candidateTask = task('coupling', 'Replace coupling', 'GEARBOX', [
     {
@@ -897,13 +920,13 @@ await op('planner', 'allocate', {
     competenciesConfirmed: true,
     note: 'All qualified people and task tools checked.',
 });
-await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'planner', { code: direct, action: 'submit_plan' });
+await op('planner', 'allocate', { code: direct, taskId: 'hidden_task', personnel: [people.tech[0]], toolsReady: true, competenciesConfirmed: true, note: 'Qualified technician and tools checked.' });
+await makeReady(direct);
 const subset = await op('planner', 'save_window', {
     title: 'Selected coupling task only',
-    start: date + 'T08:00',
-    end: date + 'T16:00',
+    equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8,
     workOrderIds: [direct],
-    tasks: [{ woCode: direct, taskId: 'coupling', hours: 1, offset: 0, dependencies: [] }],
+    tasks: [{ woCode: direct, taskId: 'coupling' }],
 });
 const subsetReport = await op('planner', 'window_report', { windowId: subset.windowId });
 assert.equal(subsetReport.workOrders[0].tasks.length, 1);
@@ -912,39 +935,21 @@ const otherTask = { ...task('other', 'Other line task', 'OTHER_ASSEMBLY'), equip
 const other = await createAssessedWorkOrder(
     'Other production line work','Assess work on another production line equipment.','OTHER_ASSEMBLY',[otherTask]
 );
-await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'planner', { code: other, action: 'submit_plan' });
+await op('planner', 'allocate', { code: other, taskId: 'other', personnel: [people.tech[0]], toolsReady: true, competenciesConfirmed: true, note: 'Qualified technician and tools checked.' });
+await makeReady(other);
 await assert.rejects(
-    () =>
-        op('planner', 'save_window', {
-            title: 'Forbidden mixed lines',
-            start: date + 'T08:00',
-            end: date + 'T16:00',
-            workOrderIds: [direct, other],
-            tasks: [
-                { woCode: direct, taskId: 'coupling', hours: 1 },
-                { woCode: other, taskId: 'other', hours: 1 },
-            ],
-        }),
-    /only one production line/,
+    () => op('planner', 'save_window', { title: 'Forbidden mixed equipment', equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8, workOrderIds: [other] }),
+    /other equipment/,
 );
-await op('planner', 'map_line', {
-    equipmentId: 'OTHER_LINE',
-    lineId: 'CONVEYOR',
-    note: 'The existing conveyor unit is the designated parent production line for these equipment units.',
-});
+const otherWindow = await op('planner', 'save_window', { title: 'Other line equipment', equipmentId: 'OTHER_LINE', date, startTime: '09:00', durationHours: 2, workOrderIds: [other] });
 const sameLine = await op('planner', 'save_window', {
     windowId: subset.windowId,
-    title: 'Two work orders on one designated line',
-    reason: 'Include the second work order after the production-line association was configured.',
-    start: date + 'T08:00',
-    end: date + 'T16:00',
-    workOrderIds: [direct, other],
-    tasks: [
-        { woCode: direct, taskId: 'coupling', hours: 1, offset: 0, dependencies: [] },
-        { woCode: other, taskId: 'other', hours: 1, offset: 2, dependencies: [direct + '_coupling'] },
-    ],
+    reason: 'Schedule every remaining task of the follow-up work order together.',
+    equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8,
+    workOrderIds: [direct],
 });
-assert.equal(snapshot(r + '/maintenance_windows/' + sameLine.windowId).data.workOrderIds.length, 2);
+assert.equal(snapshot(r + '/maintenance_windows/' + otherWindow.windowId).data.workOrderIds.length, 1);
+assert.equal(snapshot(r + '/maintenance_windows/' + sameLine.windowId).data.tasks.length, 2);
 const noPermission = context('planner', { action: 'read', code: direct });
 noPermission.role = 'org_user';
 noPermission.permissions = [];
@@ -961,9 +966,58 @@ assert.equal(
     1,
     'Cancellation releases material reservations without consuming stock',
 );
+// ----- Raising on the equipment only; review builds on the request; closure at review needs a second person -----
+const eqWr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', { confirm: true, equipmentId: 'CONVEYOR', assetTag: 'AST000001', description: 'Loud knocking noise from the drive end.' });
+let eq = snapshot(r + '/work_requests/' + eqWr.code).data;
+assert.equal(eq.assemblyId, '', 'Only the equipment is required to raise a request');
+assert.equal(eq.titleAuto, true);
+assert.match(eq.title, /^Defect on /);
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'save_task_assessment', tasks: [task('x', 'Inspect', 'GEARBOX')] }), /Add the assembly/);
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'enrich', description: 'A different description from the reviewer.' }), /kept as written/);
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'enrich', assemblyId: 'OTHER_ASSEMBLY' }), /assembly of CONVEYOR/);
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'enrich' }), /Nothing new/);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'enrich', assemblyId: 'GEARBOX', title: 'Gearbox knocking', sourceCode: first(l.sources) });
+eq = snapshot(r + '/work_requests/' + eqWr.code).data;
+assert.equal(eq.assemblyId, 'GEARBOX');
+assert.equal(eq.title, 'Gearbox knocking');
+assert.equal(eq.description, 'Loud knocking noise from the drive end.', 'The requester description is kept');
+assert.ok(eq.path.includes('GEARBOX'));
+assert.ok(eq.history.some((h) => h.action === 'Details added' && /Assembly/.test(h.note)), 'Every change is logged');
+const closeBody = { code: eqWr.code, action: 'close_review', causeCode: first(l.rootCauses), solutionCode: first(l.solutions), maintenanceTypeCode: l.maintenanceTypes[0].code, description: 'Retightened the loose gearbox mounting bolts.', confirm: eqWr.code };
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'requester', closeBody), /own request/);
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { ...closeBody, description: 'short' }), /at least 10/);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', closeBody);
+assert.equal(snapshot(r + '/work_requests/' + eqWr.code).data.status, 'closure_pending');
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'confirm_closure' }), /another person/);
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: eqWr.code, action: 'reject_closure', note: 'short' }), /10 characters/);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: eqWr.code, action: 'reject_closure', note: 'The knocking persists after the bolts were tightened.' });
+eq = snapshot(r + '/work_requests/' + eqWr.code).data;
+assert.equal(eq.status, 'under_review');
+assert.equal(eq.closureRejections.length, 1);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', closeBody);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: eqWr.code, action: 'confirm_closure', note: 'Verified quiet running.' });
+eq = snapshot(r + '/work_requests/' + eqWr.code).data;
+assert.equal(eq.status, 'closed');
+assert.equal(eq.closure.confirmedBy, people.reviewer[0]);
+assert.equal(eq.maintenanceTypeCode, l.maintenanceTypes[0].code, 'The closure records the GL maintenance type');
+
+// ----- Period maintenance budget: proposed, approved under the Chart of Authority, committed by approved estimates -----
+const month = date.slice(0, 7);
+await assert.rejects(() => route(maintenancePlanningRoutes, '/api/org/mnt/budget/propose', 'planner', { ccId: 'LINE_CC', period: month, amount: -1, reason: 'Monthly maintenance budget for the line.' }), /amount/);
+const proposal2 = await route(maintenancePlanningRoutes, '/api/org/mnt/budget/propose', 'planner', { ccId: 'LINE_CC', period: month, amount: 50000, reason: 'Monthly maintenance budget for the line.' });
+await assert.rejects(() => route(maintenancePlanningRoutes, '/api/org/mnt/budget/propose', 'planner', { ccId: 'LINE_CC', period: month, amount: 60000, reason: 'A second budget proposal at once.' }), /already waiting/);
+await assert.rejects(() => decideRequest(context('planner'), proposal2.id, 'approve', 'Self approval attempt'), /submitted this request/);
+await decideRequest(context('manager'), proposal2.id, 'approve', 'Budget agreed.');
+const budgets = await route(maintenancePlanningRoutes, '/api/org/mnt/budget/list', 'planner', { period: month });
+const lineBudget = budgets.rows.find((x) => x.ccId === 'LINE_CC');
+assert.equal(lineBudget.budget, 50000);
+assert.ok(lineBudget.committed > 0, 'Approved work order estimates commit the period budget');
+assert.equal(lineBudget.available, 50000 - lineBudget.committed);
+await assert.rejects(() => route(maintenancePlanningRoutes, '/api/org/mnt/budget/propose', 'planner', { ccId: 'LINE_CC', period: month, amount: 1, reason: 'Cut the budget below what is committed.' }), /cannot be lower/);
+
 // The no-incident confirmation also has a separate successful, explicit path.
 import { safetyDeclaration } from '../../backend/maintenanceDomain.ts';
 safetyDeclaration({ declaration: 'none', noIncidentsConfirmed: true });
 console.log(
-    'maintenance scenario passed: request, task assessment, conversion, shortages, reservation, material creation/approval, procurement, window revisions and approvals, feedback, partial consumption, returns, BOM, incident, handover, Technical Manager closure and denial paths',
+    'maintenance scenario passed: request, task assessment, conversion, shortages, reservation, material creation/approval, procurement, planner readiness, Chart of Authority cost approval, equipment windows and revisions, feedback, partial consumption, returns, BOM, incident, handover, Technical Manager closure and denial paths',
 );

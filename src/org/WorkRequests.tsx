@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, Clip
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
-import MntTaskAssessment,{type TaskAssessment} from './MntTaskAssessment';
+import MntTaskAssessment,{MACHINE_STATUS,machineLabel,machineOf,type TaskAssessment} from './MntTaskAssessment';
 import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
@@ -11,9 +11,11 @@ import { AssemblyPicker, ChoicePicker, GroupPicker, Info, useFullScreen, LEVEL_L
 import { appConfirm } from '../components/dialogs';
 import MntGateHint from './MntGateHint';
 
-// Maintenance (MNT): work requests. A finding raised against an assembly, numbered WR + 8 digits by the server.
-// Requests are not approved: they are reviewed and assessed, then returned for information, declined, or
-// converted to a work order (after which they are locked). The requester can never review their own request.
+// Maintenance (MNT): work requests, numbered WR + 8 digits by the server. Raising one only needs the place (the
+// equipment at least, the assembly when known); everything else is optional and is completed at review or assessment,
+// which build on the request without overwriting what the requester wrote. A reviewer (Artisan) either closes it when
+// no planning is needed (cause, solution, maintenance type; a supervisor confirms) or it is assessed, approved by a
+// technical supervisor and converted to a work order by a planner. The requester can never review their own request.
 // Mobile first: one decision per screen, big touch targets, action bar on top, content scrolls underneath.
 
 interface Row {
@@ -21,6 +23,7 @@ interface Row {
     title: string;
     status: string;
     statusLabel: string;
+    assemblyId: string;
     assemblyCode: string;
     assemblyName: string;
     unitCode: string;
@@ -59,7 +62,17 @@ interface WrCan {
     return: boolean;
     decline: boolean;
     convert: boolean;
+    enrich: boolean;
+    close: boolean;
+    confirmClosure: boolean;
     ownRequest: boolean;
+}
+interface Closure {
+    causeCode: string; causeLabel: string; causeGroup: string;
+    solutionCode: string; solutionLabel: string; solutionGroup: string;
+    maintenanceTypeCode: string; maintenanceTypeLabel: string;
+    description: string; name: string; at: string;
+    confirmedName?: string; confirmedAt?: string; confirmNote?: string;
 }
 interface Detail extends Row {
     description: string;
@@ -81,7 +94,18 @@ interface Detail extends Row {
         disciplineLabel: string;
         duplicateOf: string;
         note: string;
+        technicalEvaluation: string;
+        natureCode: string;
+        natureLabel: string;
+        severityCode: string;
+        solutions: Array<{ code: string; label: string; group: string }>;
+        headerIssue: string;
     };
+    titleAuto: boolean;
+    unitId: string;
+    assemblyOptions: Array<{ id: string; code: string; name: string }>;
+    closure: Closure | null;
+    closureRejections: Array<Closure & { rejectedName: string; rejectedAt: string; reason: string }>;
     assessmentReview: {status:string;version?:number;name?:string;at?:string;note?:string};
     assessmentReviewCurrent: boolean;
     assessmentReviewBlockers?: string[];
@@ -91,7 +115,7 @@ interface Detail extends Row {
     can: WrCan;
 }
 
-export const WR_TONE: Record<string, 'brand' | 'muted' | 'danger' | 'warn'> = { submitted: 'warn', under_review: 'warn', returned: 'danger', declined: 'muted', cancelled: 'muted', converted: 'brand' };
+export const WR_TONE: Record<string, 'brand' | 'muted' | 'danger' | 'warn'> = { submitted: 'warn', under_review: 'warn', returned: 'danger', declined: 'muted', cancelled: 'muted', converted: 'brand', closure_pending: 'warn', closed: 'brand' };
 
 export function useMntSetup() {
     return useLoad(() => callBackend<MntSetup>('/api/org/mnt/setup'));
@@ -218,7 +242,7 @@ function RequestList({ setup }: { setup: MntSetup }) {
 // New request wizard
 // ---------------------------------------------------------------------------
 
-const STEPS = ['Where', 'Finding', 'Impact', 'Photos', 'Review'] as const;
+const STEPS = ['Where', 'Details', 'Photos', 'Review'] as const;
 const MAX_IMPACTS = 5;
 const toggleImpact = (c: string) => (cur: string[]) => (cur.includes(c) ? cur.filter((x) => x !== c) : cur.length >= MAX_IMPACTS ? cur : [...cur, c]);
 interface GembaWrHandoff { id: string; observationId: string; assemblyId: string; assetTag: string; title: string; description: string; gembaTypeCode?: string; gembaTypeName?: string; photoPath?: string; photoUrl?: string }
@@ -312,12 +336,12 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     const source = findIn(lists.sources, sourceCode);
     const asset = place?.assets.find((a) => a.tag === place.defaultAssetTag && a.linked);
 
+    // Only the place is required; everything else is optional and completed at review or assessment.
     const problems: string[][] = [
-        place && asset && assetTag===place.defaultAssetTag ? [] : ['Choose an assembly with a valid linked equipment asset.'],
-        [...(title.trim().length < 5 ? ['Give a short title (at least 5 characters).'] : []), ...(description.trim().length < 10 ? ['Describe what you found (at least 10 characters).'] : []), ...(source ? [] : ['Choose the source of the finding.'])],
-        [...(impactCodes.length ? [] : ['Choose at least one impact.'])],
+        place && asset && assetTag===place.defaultAssetTag ? [] : ['Choose the equipment (or its assembly) with a valid linked asset.'],
+        [...(title.trim() && title.trim().length < 3 ? ['A title needs at least 3 characters, or leave it empty.'] : [])],
         [...(uploading ? ['Wait for the photos to finish uploading.'] : [])],
-        confirmed ? [] : ['Confirm that the details are correct.'],
+        [...(uploading ? ['Wait for the photos to finish uploading.'] : []), ...(confirmed ? [] : ['Confirm that the details are correct.'])],
     ];
     const canNext = problems[step].length === 0;
     const screen = useFullScreen(!created);
@@ -366,7 +390,8 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         setError('');
         try {
             const res = await callBackend<{ code: string }>('/api/org/mnt/wr/create', {
-                assemblyId: place?.assembly.id,
+                assemblyId: place?.assembly?.id || '',
+                equipmentId: place?.assembly ? '' : place?.unit?.id || '',
                 assetTag,
                 title: title.trim(),
                 description: description.trim(),
@@ -376,7 +401,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                 gembaId: pendingLink?.id || '', gembaObservationId: pendingLink?.observationId || '',
                 confirm: confirmed,
             });
-            if (pendingLink && pendingLink.assetTag === assetTag && pendingLink.assemblyId === place?.assembly.id) {
+            if (pendingLink && pendingLink.assetTag === assetTag && pendingLink.assemblyId === place?.assembly?.id) {
                 try { await linkToGemba(res.code, pendingLink); }
                 catch (linkErr) { setLinkError(linkErr instanceof Error ? linkErr.message : 'Could not link this request to Gemba.'); }
             }
@@ -469,34 +494,31 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                 {step === 0 && (
                     <>
                         {placeError && <Alert tone='error'>{placeError}</Alert>}
-                        {loadingPlace ? <Spinner /> : <AssemblyPicker selected={place?.assembly.id} onPick={choose} />}
+                        {loadingPlace ? <Spinner /> : <AssemblyPicker allowEquipment selected={place?.assembly?.id ?? place?.unit?.id} onPick={choose} />}
                     </>
                 )}
 
                 {step === 1 && (
                     <>
-                        <Field id='wr-title' label='Short title *' maxLength={120} placeholder='e.g. Oil leak at gearbox output seal' value={title} onChange={(e) => setTitle(e.target.value)} />
-                        <TextArea id='wr-desc' label='What did you find? *' rows={3} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
+                        <p className='rounded-xl border border-line bg-panel p-3 text-sm text-soft'>Everything on this step is optional. Add what you know; the reviewer completes the rest. You can go straight to <strong className='text-ink'>Photos</strong> or <strong className='text-ink'>Review</strong>.</p>
+                        <Field id='wr-title' label='Short title (optional)' maxLength={120} placeholder='e.g. Oil leak at gearbox output seal' value={title} onChange={(e) => setTitle(e.target.value)} />
+                        <TextArea id='wr-desc' label='What did you find? (optional)' rows={3} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
                         <p className='text-right text-xs text-slate-500'>{description.length}/2000</p>
                         {pendingLink?.gembaTypeName && <p className='rounded-lg bg-brand/10 px-3 py-2 text-xs text-brand'>From {pendingLink.gembaTypeName} · linked Gemba observation</p>}
-                        <GroupPicker title='Source of the finding *' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
+                        <GroupPicker title='Source of the finding (optional)' collapsed groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
+                        <ChoicePicker
+                            title='Impact (optional)'
+                            multi
+                            max={MAX_IMPACTS}
+                            hint='Up to 5 impacts: choose a category, tick the impacts, then change category to add more.'
+                            groups={lists.impacts}
+                            selected={impactCodes}
+                            onToggle={(c) => setImpactCodes(toggleImpact(c))}
+                        />
                     </>
                 )}
 
                 {step === 2 && (
-                    <ChoicePicker
-                        title='Impact'
-                        required
-                        multi
-                        max={MAX_IMPACTS}
-                        hint='Select one or more impacts (up to 5): choose a category, tick the impacts, then change category to add more. The assessor sets the criticality.'
-                        groups={lists.impacts}
-                        selected={impactCodes}
-                        onToggle={(c) => setImpactCodes(toggleImpact(c))}
-                    />
-                )}
-
-                {step === 3 && (
                     <>
                         <p className='text-sm text-slate-400'>Photos are optional. Add up to 4 if available; Gemba photos transfer without needing another upload.</p>
                         <div className='grid grid-cols-2 gap-2'>
@@ -530,12 +552,13 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                     </>
                 )}
 
-                {step === 4 && place && (
+                {step === 3 && place && (
                     <>
                         <ReviewBlock label='Where' onEdit={() => setStep(0)}>
                             <p className='text-white'>
-                                {place.assembly.code} · {place.assembly.name}
+                                {place.assembly ? `${place.assembly.code} · ${place.assembly.name}` : `${place.unit?.code} · ${place.unit?.name}`}
                             </p>
+                            {!place.assembly && <p className='text-xs text-amber-300'>Equipment only: the reviewer adds the assembly.</p>}
                             <p className='text-xs text-slate-400'>{place.path.map((p) => `${LEVEL_LABEL[p.level] ?? p.level} ${p.code}`).join(' › ')}</p>
                         </ReviewBlock>
                         <ReviewBlock label='Equipment-linked asset'>
@@ -544,14 +567,15 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                             </p>
                             <p className='text-xs text-slate-400'>{asset?.className}</p>
                         </ReviewBlock>
-                        <ReviewBlock label='Finding' onEdit={() => setStep(1)}>
-                            <p className='font-medium text-white'>{title}</p>
-                            <p className='whitespace-pre-wrap text-sm text-slate-300'>{description}</p>
+                        <ReviewBlock label='Details' onEdit={() => setStep(1)}>
+                            <p className='font-medium text-white'>{title.trim() || 'No title: one is made from the place'}</p>
+                            <p className='whitespace-pre-wrap text-sm text-slate-300'>{description.trim() || 'No description given.'}</p>
                             <p className='mt-1 text-xs text-slate-400'>
-                                Source: {source?.group} · {source?.label}
+                                Source: {source ? `${source.group} · ${source.label}` : 'not given'}
                             </p>
                         </ReviewBlock>
-                        <ReviewBlock label={`Impact (${impactCodes.length}/${MAX_IMPACTS})`} onEdit={() => setStep(2)}>
+                        <ReviewBlock label={`Impact (${impactCodes.length}/${MAX_IMPACTS})`} onEdit={() => setStep(1)}>
+                            {!impactCodes.length && <p className='text-sm text-slate-400'>None given.</p>}
                             <div className='flex flex-wrap gap-1'>
                                 {impactCodes.map((c) => {
                                     const i = findIn(lists.impacts, c);
@@ -560,7 +584,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                             </div>
                             <p className='mt-1 text-xs text-slate-400'>Criticality is set by the assessor.</p>
                         </ReviewBlock>
-                        <ReviewBlock label={`Photos (${photos.length})`} onEdit={() => setStep(3)}>
+                        <ReviewBlock label={`Photos (${photos.length})`} onEdit={() => setStep(2)}>
                             <div className='flex gap-2 overflow-x-auto'>
                                 {photos.map((p, i) => (
                                     <img key={p.token} src={p.url} alt={`Photo ${i + 1}`} className='h-20 w-20 shrink-0 rounded-xl object-cover' />
@@ -605,7 +629,7 @@ function ReviewBlock({ label, onEdit, children }: { label: string; onEdit?: () =
 // Detail: review, assess, return, decline, convert; requester edit, resubmit, cancel
 // ---------------------------------------------------------------------------
 
-type Mode = '' | 'edit' | 'assess' | 'review_assessment' | 'return_assessment' | 'return' | 'decline' | 'convert' | 'cancel';
+type Mode = '' | 'edit' | 'enrich' | 'close' | 'confirm_closure' | 'reject_closure' | 'assess' | 'review_assessment' | 'return_assessment' | 'return' | 'decline' | 'convert' | 'cancel';
 
 function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const lists = setup.lists!;
@@ -616,6 +640,8 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const [busy, setBusy] = useState(false);
     const [actionError, setActionError] = useState('');
     const [zoom, setZoom] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
     const [section,setSection]=useState<'request'|'tasks'|'summary'>('request');
     const [tasksDirty,setTasksDirty]=useState(false);
     const goSection=async (next:'request'|'tasks'|'summary')=>{
@@ -648,10 +674,20 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     };
 
     if (mode === 'edit') return <EditRequest detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
+    if (mode === 'enrich') return <EnrichRequest detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
+    if (mode === 'close') return <CloseAtReview detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
 
-    const assessed = !!(r.assessment.maintenanceTypeCode && r.assessment.workTypeCode && r.assessment.priorityCode && r.assessment.disciplineCode);
+    const assessed = !!r.assessment.maintenanceTypeCode && !r.assessment.headerIssue;
+    const today = new Date().toISOString().slice(0, 10);
+    const datesOk = !!startDate && !!endDate && startDate >= today && endDate >= startDate;
     const buttons: Array<{ key: string; label: string; icon: ReactNode; variant?: 'primary' | 'secondary' | 'danger'; onClick: () => void }> = [];
+    if (can.confirmClosure) {
+        buttons.push({ key: 'confirmClosure', label: 'Confirm closure', icon: <CheckCircle2 className='h-4 w-4' />, onClick: () => setMode('confirm_closure') });
+        buttons.push({ key: 'rejectClosure', label: 'Not fixed – reopen', icon: <Undo2 className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('reject_closure') });
+    }
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
+    if (can.close) buttons.push({ key: 'close', label: 'Close – no planning needed', icon: <Check className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('close') });
+    if (can.enrich) buttons.push({ key: 'enrich', label: r.assemblyId ? 'Add details' : 'Add assembly & details', icon: <Pencil className='h-4 w-4' />, variant: r.assemblyId ? 'secondary' : 'primary', onClick: () => setMode('enrich') });
     if (can.assess && !can.reviewAssessment) buttons.push({ key: 'assess', label: assessed ? 'Update assessment' : 'Assess', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => setMode('assess') });
     if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Approve assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => {setSection('summary');setMode('review_assessment');} });
     if (can.convert) buttons.push({ key: 'convert', label: 'Convert to work order', icon: <Wrench className='h-4 w-4' />, variant: assessed ? 'primary' : 'secondary', onClick: () => setMode('convert') });
@@ -662,7 +698,8 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     if (can.cancel) buttons.push({ key: 'cancel', label: 'Cancel request', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('cancel') });
 
     const typedNeeded = mode === 'decline' || mode === 'convert' || mode === 'cancel';
-    const noteNeeded = mode === 'return' || mode === 'decline' || mode === 'cancel' || mode === 'review_assessment' || mode === 'return_assessment';
+    const noteNeeded = mode === 'return' || mode === 'decline' || mode === 'cancel' || mode === 'review_assessment' || mode === 'return_assessment' || mode === 'reject_closure';
+    const minNote = mode === 'review_assessment' || mode === 'return_assessment' || mode === 'reject_closure' ? 10 : 5;
 
     return (
         <div className={screen.className} onFocusCapture={screen.keepInView}>
@@ -709,22 +746,30 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
 
                 {mode === 'assess' && <AssessPanel detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />}
 
-                {(mode === 'return' || mode === 'decline' || mode === 'convert' || mode === 'cancel' || mode === 'review_assessment' || mode === 'return_assessment') && (
+                {(mode === 'return' || mode === 'decline' || mode === 'convert' || mode === 'cancel' || mode === 'review_assessment' || mode === 'return_assessment' || mode === 'confirm_closure' || mode === 'reject_closure') && (
                     <Card className='space-y-3'>
                         <p className='font-medium text-white'>
-                            {mode === 'review_assessment' ? 'Approve the independently reviewed work assessment' : mode === 'return_assessment' ? 'Return assessment to the assessor for correction' : mode === 'return' ? 'Return to the requester for more information' : mode === 'decline' ? 'Decline this request' : mode === 'convert' ? 'Convert to a work order' : 'Cancel this request'}
+                            {mode === 'confirm_closure' ? 'Confirm the closure made at review' : mode === 'reject_closure' ? 'Not fixed: send back to review' : mode === 'review_assessment' ? 'Approve the independently reviewed work assessment' : mode === 'return_assessment' ? 'Return assessment to the assessor for correction' : mode === 'return' ? 'Return to the requester for more information' : mode === 'decline' ? 'Decline this request' : mode === 'convert' ? 'Convert to a work order' : 'Cancel this request'}
                         </p>
+                        {(mode === 'confirm_closure' || mode === 'reject_closure') && r.closure && <ClosureCard closure={r.closure} />}
                         {mode === 'convert' && (
                             <p className='text-sm text-slate-300'>
                                 {r.assessmentReviewCurrent
-                                    ? `A work order is created with the location, asset and your assessment (${r.assessment.maintenanceTypeLabel}, ${r.assessment.priorityLabel}). The request is then locked.`
+                                    ? `A work order is created with the location, asset and the approved assessment (${r.assessment.maintenanceTypeLabel}). The request is then locked. Set when the work is scheduled to start and end.`
                                     : 'An independent authorized reviewer must approve the current task assessment before conversion.'}
                             </p>
                         )}
-                        {(noteNeeded || mode === 'convert') && (
+                        {mode === 'convert' && (
+                            <div className='grid grid-cols-2 gap-2'>
+                                <Field id='wr-start' type='date' label='Scheduled start *' min={today} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                                <Field id='wr-end' type='date' label='Scheduled end *' min={startDate || today} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                                {startDate && endDate && !datesOk && <p className='col-span-2 text-xs text-amber-300'>The start cannot be in the past and the end cannot be before the start.</p>}
+                            </div>
+                        )}
+                        {(noteNeeded || mode === 'convert' || mode === 'confirm_closure') && (
                             <TextArea
                                 id='wr-note'
-                                label={mode === 'review_assessment' ? 'Technical verification and approval notes *' : mode === 'return_assessment' ? 'Required corrections *' : mode === 'return' ? 'What information is needed? *' : mode === 'convert' ? 'Note (optional)' : 'Reason *'}
+                                label={mode === 'review_assessment' ? 'Technical verification and approval notes *' : mode === 'return_assessment' ? 'Required corrections *' : mode === 'reject_closure' ? 'What is still wrong? *' : mode === 'return' ? 'What information is needed? *' : mode === 'convert' || mode === 'confirm_closure' ? 'Note (optional)' : 'Reason *'}
                                 rows={3}
                                 maxLength={500}
                                 value={note}
@@ -738,8 +783,8 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                                 className='flex-1'
                                 variant={mode === 'decline' || mode === 'cancel' ? 'danger' : 'primary'}
                                 busy={busy}
-                                disabled={(typedNeeded && typed.trim() !== r.code) || (noteNeeded && note.trim().length < (mode === 'review_assessment'||mode === 'return_assessment'?10:5)) || (mode === 'convert' && !r.assessmentReviewCurrent)}
-                                onClick={() => run(mode)}
+                                disabled={(typedNeeded && typed.trim() !== r.code) || (noteNeeded && note.trim().length < minNote) || (mode === 'convert' && (!r.assessmentReviewCurrent || !datesOk))}
+                                onClick={() => run(mode, mode === 'convert' ? { scheduledStart: startDate, scheduledEnd: endDate } : {})}
                             >
                                 Confirm
                             </Button>
@@ -767,6 +812,14 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                         <p className='mt-1 text-sm text-slate-200'>{r.returnNote}</p>
                     </Card>
                 )}
+                {r.closure && <ClosureCard closure={r.closure} />}
+                {r.closureRejections.length > 0 && r.status === 'under_review' && (
+                    <Card>
+                        <p className='text-xs font-semibold uppercase tracking-wider text-red-300'>Closure not accepted</p>
+                        <p className='mt-1 text-sm text-slate-200'>{r.closureRejections[r.closureRejections.length - 1].reason}</p>
+                        <p className='text-xs text-slate-500'>{r.closureRejections[r.closureRejections.length - 1].rejectedName} · {fmtDate(r.closureRejections[r.closureRejections.length - 1].rejectedAt)}</p>
+                    </Card>
+                )}
                 {r.status === 'declined' && r.declineReason && (
                     <Card>
                         <p className='text-xs font-semibold uppercase tracking-wider text-slate-400'>Declined</p>
@@ -792,7 +845,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                             </div>
                         </div>
                     </div>
-                    <p className='mt-3 whitespace-pre-wrap text-sm text-slate-300'>{r.description}</p>
+                    <p className='mt-3 whitespace-pre-wrap text-sm text-slate-300'>{r.description || 'No description yet: added at review.'}</p>
                 </Card>
 
                 {r.photos.length > 0 && (
@@ -807,9 +860,13 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
 
 
 
-                 {(r.assessment.maintenanceTypeLabel || r.assessment.note) && (
+                 {(r.assessment.maintenanceTypeLabel || r.assessment.note || r.assessment.technicalEvaluation) && (
                     <Card className='space-y-2 text-sm'>
                         <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Assessment</p>
+                        {r.assessment.technicalEvaluation && <Info label='Technical evaluation' value={r.assessment.technicalEvaluation} />}
+                        {r.assessment.natureLabel && <Info label='Nature' value={r.assessment.natureLabel} />}
+                        {r.assessment.severityCode && <Info label='Severity' value={r.criticalityLabel} />}
+                        {r.assessment.solutions.length > 0 && <Info label='Solution categories' value={r.assessment.solutions.map((x) => `${x.group} · ${x.label}`).join('; ')} />}
                         {r.assessment.maintenanceTypeLabel && <Info label='Maintenance type' value={r.assessment.maintenanceTypeLabel} />}
                         {r.assessment.workTypeLabel && <Info label='Work type' value={r.assessment.workTypeLabel} />}
                         {r.assessment.priorityLabel && <Info label='Priority' value={r.assessment.priorityLabel} />}
@@ -821,13 +878,14 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
 
                 <Card className='space-y-2 text-sm'>
                     <Info label='Asset' value={`${r.assetTag} · ${r.assetName}`} sub={r.assetClass} />
-                    <Info label='Assembly' value={`${r.assemblyCode} · ${r.assemblyName}`} />
+                    <Info label='Assembly' value={r.assemblyCode ? `${r.assemblyCode} · ${r.assemblyName}` : 'Not given: added at review'} />
                     <Info label='Equipment unit' value={`${r.unitCode} · ${r.unitName}`} />
                     <Info label='Cost center' value={`${r.costCenterCode} · ${r.costCenterName}`} />
-                    <Info label='Source of finding' value={`${r.sourceGroup} · ${r.sourceLabel}`} />
+                    <Info label='Source of finding' value={r.sourceLabel ? `${r.sourceGroup} · ${r.sourceLabel}` : 'Not given'} />
                     {r.failureModeLabel && <Info label='Failure mode' value={r.failureModeLabel} />}
                     <div className='border-t border-slate-800 pt-2'>
                         <p className='text-xs text-slate-500'>Impacts</p>
+                        {!r.impacts.length && <p className='text-xs text-slate-400'>None given.</p>}
                         <div className='mt-1 flex flex-wrap gap-1'>
                             {r.impacts.map((i) => (
                                 <Badge key={i.code}>
@@ -898,18 +956,21 @@ function AssessmentSummary({detail,canReview,busy,onApprove,onReturn}:{detail:De
         </div>}
       </Card>
       <Card className='space-y-2 text-sm'>
-        <p className='font-semibold text-white'>Work classification</p>
+        <p className='font-semibold text-white'>Technical verification</p>
+        <Info label='Technical evaluation' value={detail.assessment.technicalEvaluation||'Not yet written'}/>
+        <Info label='Nature' value={detail.assessment.natureLabel||'Not yet classified'}/>
+        <Info label='Severity' value={detail.assessment.severityCode?detail.criticalityLabel:'Not yet classified'}/>
+        <Info label='Solution categories' value={detail.assessment.solutions.map(x=>x.group+' · '+x.label).join('; ')||'Not yet chosen'}/>
         <Info label='Maintenance type' value={detail.assessment.maintenanceTypeLabel||'Not yet classified'}/>
-        <Info label='Work type' value={detail.assessment.workTypeLabel||'Not yet classified'}/>
-        <Info label='Priority' value={detail.assessment.priorityLabel||'Not yet classified'}/>
-        <Info label='Discipline' value={detail.assessment.disciplineLabel||'Not yet classified'}/>
+        {detail.assessment.workTypeLabel&&<Info label='Work type' value={detail.assessment.workTypeLabel}/>}
+        {detail.assessment.priorityLabel&&<Info label='Priority' value={detail.assessment.priorityLabel}/>}
+        {detail.assessment.disciplineLabel&&<Info label='Discipline' value={detail.assessment.disciplineLabel}/>}
         <Info label='Linked asset' value={detail.assetTag+' · '+detail.assetName}/>
         <Info label='Equipment' value={detail.unitCode+' · '+detail.unitName}/>
       </Card>
       <Card className='space-y-2 text-sm'>
         <p className='font-semibold text-white'>Safety overview</p>
-        <Info label='Tasks requiring LOTO' value={String(tasks.filter(t=>t.lotoRequired).length)}/>
-        <Info label='Tasks requiring live work' value={String(tasks.filter(t=>t.liveEquipment).length)}/>
+        {MACHINE_STATUS.map(([value,title])=><Info key={value} label={title} value={String(tasks.filter(t=>machineOf(t)===value).length)+' task(s)'}/>)}
         <Info label='Identified hazards' value={String(hazards)}/>
         <Info label='Permit selections' value={String(tasks.reduce((sum,t)=>sum+(t.permitCodes?.length||0),0))}/>
       </Card>
@@ -925,7 +986,9 @@ function AssessmentSummary({detail,canReview,busy,onApprove,onReturn}:{detail:De
             <p><strong>External:</strong> {task.externalResource?.type?task.externalResource.type+' ('+task.externalResource.persons+' people)':'None'}</p>
             <p><strong>Special tools:</strong> {task.tools||'None'}</p>
             <p><strong>Spares:</strong> {task.spares?.map(sp=>sp.qty+' × '+sp.description).join('; ')||'None'}</p>
-            <p><strong>LOTO:</strong> {task.lotoRequired?'Yes':'No'} · <strong>Live equipment:</strong> {task.liveEquipment?'Yes':'No'}</p>
+            <p><strong>Machine status:</strong> {machineLabel(task)}</p>
+            <p><strong>Skills:</strong> {task.skillCodes?.join(', ')||task.skills||'None'}</p>
+            <p><strong>Services:</strong> {task.services?.map(sv=>sv.description).join('; ')||'None'}</p>
             <p><strong>Hazardous energy:</strong> {task.energySourceCodes?.join(', ')||'None selected'}</p>
             <p><strong>Permits:</strong> {task.permitCodes?.join(', ')||'None selected'}</p>
             {task.risk?.filter(x=>x.hazard).map((risk,j)=><div key={j} className='rounded-lg border border-slate-700 p-2'>
@@ -957,22 +1020,30 @@ export function HistoryCard({ history }: { history: Array<{ at: string; name: st
     );
 }
 
+/** The technical verification of the need and the proposed solution (the assessment header). */
 function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; lists: MntLists; onDone: () => void; onCancel: () => void }) {
     const a = detail.assessment;
+    const [evaluation, setEvaluation] = useState(a.technicalEvaluation);
+    const [nature, setNature] = useState(a.natureCode);
+    const [severity, setSeverity] = useState(a.severityCode || detail.criticalityCode);
+    const [solutions, setSolutions] = useState<string[]>(a.solutions.map((x) => x.code));
     const [mtype, setMtype] = useState(a.maintenanceTypeCode);
-    const [wtype, setWtype] = useState(a.workTypeCode);
     const [prio, setPrio] = useState(a.priorityCode);
-    const [disc, setDisc] = useState(a.disciplineCode);
-    const [crit, setCrit] = useState(detail.criticalityCode);
     const [note, setNote] = useState(a.note);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const ok = mtype && wtype && prio && disc && crit;
+    const missing = [
+        evaluation.trim().length >= 20 ? '' : 'technical evaluation (20+ characters)',
+        nature ? '' : 'nature',
+        severity ? '' : 'severity',
+        solutions.length ? '' : 'solution categories',
+        mtype ? '' : 'maintenance type',
+    ].filter(Boolean);
     const save = async () => {
         setBusy(true);
         setError('');
         try {
-            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'assess', maintenanceTypeCode: mtype, workTypeCode: wtype, priorityCode: prio, disciplineCode: disc, criticalityCode: crit, note: note.trim() });
+            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'assess', technicalEvaluation: evaluation.trim(), natureCode: nature, severityCode: severity, solutionCodes: solutions, maintenanceTypeCode: mtype, priorityCode: prio, note: note.trim() });
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save the assessment.');
@@ -980,42 +1051,40 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
             setBusy(false);
         }
     };
-    const select = (id: string, label: string, value: string, set: (v: string) => void, items: Array<{ code: string; label: string }>) => (
-        <SelectField id={id} label={label} value={value} onChange={(e) => set(e.target.value)}>
-            <option value=''>Select…</option>
-            {items.map((i) => (
-                <option key={i.code} value={i.code}>
-                    {i.label}
-                </option>
-            ))}
-        </SelectField>
-    );
     return (
         <Card className='space-y-3'>
-            <p className='font-medium text-white'>Assess the request</p>
-            <p className='text-xs text-slate-400'>Check it is valid, confirm the criticality and classify the work.</p>
+            <p className='font-medium text-white'>Work assessment</p>
+            <p className='text-xs text-slate-400'>Verify the need technically and choose the solution. Add the tasks (spares, skills, people, tools, services, machine status, LOTO and permits) on the Tasks tab. A technical supervisor approves it.</p>
+            <TextArea id='as-eval' label='1. Technical evaluation of the request *' rows={4} maxLength={3000} placeholder='What was verified, the condition found and why work is needed.' value={evaluation} onChange={(e) => setEvaluation(e.target.value)} />
+            <ChoicePicker title='2. Nature (failure mode)' required groups={lists.failureModes} selected={nature ? [nature] : []} onToggle={(c) => setNature(c === nature ? '' : c)} />
             <div>
-                <p className='mb-1 text-sm text-slate-300'>Criticality (confirm or adjust)</p>
+                <p className='mb-1 text-sm text-slate-300'>2. Severity *</p>
                 <div className='grid grid-cols-2 gap-2 sm:grid-cols-5'>
                     {lists.criticality.map((c) => {
                         const color = critColor(c.code, c.color, lists.criticality);
-                        const on = crit === c.code;
+                        const on = severity === c.code;
                         return (
-                            <button key={c.code} type='button' onClick={() => setCrit(c.code)} className={`h-12 rounded-xl border-2 text-sm font-semibold ${on ? 'text-white' : 'text-slate-200'}`} style={{ borderColor: color, background: on ? color : `${color}22` }}>
+                            <button key={c.code} type='button' aria-pressed={on} onClick={() => setSeverity(c.code)} className={`min-h-12 rounded-xl border-2 text-sm font-semibold ${on ? 'text-white' : 'text-slate-200'}`} style={{ borderColor: color, background: on ? color : `${color}22` }}>
                                 {c.label}
                             </button>
                         );
                     })}
                 </div>
             </div>
-            {select('as-mtype', 'Maintenance type *', mtype, setMtype, lists.maintenanceTypes)}
-            {select('as-wtype', 'Work type *', wtype, setWtype, lists.workTypes)}
-            {select('as-prio', 'Priority *', prio, setPrio, lists.priorities)}
-            {select('as-disc', 'Discipline *', disc, setDisc, lists.disciplines)}
-            <TextArea id='as-note' label='Assessment note (optional)' rows={3} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+            <ChoicePicker title='3. Solution categories' required multi max={5} hint='Choose a category, then tick up to 5 solutions.' groups={lists.solutions} selected={solutions} onToggle={(c) => setSolutions((cur) => (cur.includes(c) ? cur.filter((x) => x !== c) : cur.length >= 5 ? cur : [...cur, c]))} />
+            <SelectField id='as-mtype' label='Maintenance type * (decides the GL account)' value={mtype} onChange={(e) => setMtype(e.target.value)}>
+                <option value=''>Select…</option>
+                {lists.maintenanceTypes.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}
+            </SelectField>
+            <SelectField id='as-prio' label='Priority (optional)' value={prio} onChange={(e) => setPrio(e.target.value)}>
+                <option value=''>Not set</option>
+                {lists.priorities.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}
+            </SelectField>
+            <TextArea id='as-note' label='Assessment note (optional)' rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+            {missing.length > 0 && <p className='text-xs text-amber-300'>Still needed: {missing.join(', ')}.</p>}
             {error && <Alert tone='error'>{error}</Alert>}
             <div className='flex gap-2'>
-                <Button className='flex-1' busy={busy} disabled={!ok} onClick={save}>
+                <Button className='flex-1' busy={busy} disabled={missing.length > 0} onClick={save}>
                     <Check className='h-4 w-4' />
                     Save assessment
                 </Button>
@@ -1027,8 +1096,170 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
     );
 }
 
+export function ClosureCard({ closure }: { closure: Closure }) {
+    return (
+        <Card className='space-y-2 text-sm'>
+            <div className='flex flex-wrap items-center justify-between gap-2'>
+                <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Closed at review</p>
+                <Badge tone={closure.confirmedAt ? 'brand' : 'warn'}>{closure.confirmedAt ? 'Confirmed' : 'Awaiting confirmation'}</Badge>
+            </div>
+            <Info label='Cause' value={`${closure.causeGroup} · ${closure.causeLabel}`} />
+            <Info label='Solution' value={`${closure.solutionGroup} · ${closure.solutionLabel}`} />
+            <Info label='Maintenance type' value={closure.maintenanceTypeLabel} />
+            <Info label='What was done' value={closure.description} />
+            <Info label='Closed by' value={`${closure.name} · ${fmtDate(closure.at)}`} />
+            {closure.confirmedAt && <Info label='Confirmed by' value={`${closure.confirmedName} · ${fmtDate(closure.confirmedAt)}`} sub={closure.confirmNote} />}
+        </Card>
+    );
+}
+
+/** Fixed on the spot: close at review with cause, solution and maintenance type. A supervisor confirms. */
+function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; lists: MntLists; onDone: () => void; onCancel: () => void }) {
+    const [cause, setCause] = useState('');
+    const [solution, setSolution] = useState('');
+    const [mtype, setMtype] = useState('');
+    const [description, setDescription] = useState('');
+    const [typed, setTyped] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const screen = useFullScreen(true);
+    const missing = [cause ? '' : 'cause', solution ? '' : 'solution', mtype ? '' : 'maintenance type', description.trim().length >= 10 ? '' : 'what was done (10+ characters)', typed.trim() === detail.code ? '' : `type ${detail.code}`].filter(Boolean);
+    const save = async () => {
+        setBusy(true);
+        setError('');
+        try {
+            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'close_review', causeCode: cause, solutionCode: solution, maintenanceTypeCode: mtype, description: description.trim(), confirm: typed.trim() });
+            onDone();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Could not close the request.');
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <div className={screen.className} onFocusCapture={screen.keepInView}>
+            <div className='flex shrink-0 items-center gap-2 border-b border-line bg-page pb-3'>
+                <Button variant='secondary' aria-label='Back' onClick={onCancel}><ArrowLeft className='h-4 w-4' /></Button>
+                <div className='min-w-0 flex-1'><p className='truncate font-semibold text-white'>Close {detail.code}</p><p className='truncate text-xs text-slate-400'>No planning needed · a supervisor confirms</p></div>
+                <Button busy={busy} disabled={missing.length > 0} onClick={save}><Check className='h-4 w-4' />Close</Button>
+            </div>
+            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
+                <ChoicePicker title='Cause' required groups={lists.rootCauses} selected={cause ? [cause] : []} onToggle={(c) => setCause(c === cause ? '' : c)} />
+                <ChoicePicker title='Solution' required groups={lists.solutions} selected={solution ? [solution] : []} onToggle={(c) => setSolution(c === solution ? '' : c)} />
+                <TextArea id='cl-desc' label='What was done? *' rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
+                <SelectField id='cl-mtype' label='Type of maintenance * (decides the GL account)' value={mtype} onChange={(e) => setMtype(e.target.value)}>
+                    <option value=''>Select…</option>
+                    {lists.maintenanceTypes.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}
+                </SelectField>
+                <Field id='cl-confirm' label={`Type ${detail.code} to confirm`} autoComplete='off' value={typed} onChange={(e) => setTyped(e.target.value)} />
+                {missing.length > 0 && <p className='text-xs text-amber-300'>Still needed: {missing.join(', ')}.</p>}
+                {error && <MntGateHint message={error} />}
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Review and assessment build on the request: fill what the requester left empty, add photos and add or change the
+ * assembly (of the same equipment). What the requester wrote stays as written; every change is logged.
+ */
+function EnrichRequest({ detail, lists, onDone, onCancel }: { detail: Detail; lists: MntLists; onDone: () => void; onCancel: () => void }) {
+    const [assemblyId, setAssemblyId] = useState(detail.assemblyId);
+    const [title, setTitle] = useState(detail.titleAuto ? '' : detail.title);
+    const [description, setDescription] = useState(detail.description);
+    const [sourceCode, setSourceCode] = useState(detail.sourceCode);
+    const [impactCodes, setImpactCodes] = useState(detail.impacts.map((i) => i.code));
+    const [failureMode, setFailureMode] = useState(detail.failureModeCode);
+    const [photos, setPhotos] = useState<Array<{ token: string; url: string }>>([]);
+    const [uploading, setUploading] = useState(0);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const screen = useFullScreen(true);
+    const fixed = { title: !detail.titleAuto && !!detail.title, description: !!detail.description, source: !!detail.sourceCode, failure: !!detail.failureModeCode };
+    const had = detail.impacts.map((i) => i.code);
+    const tasksSaved = detail.assessmentTasks.length > 0;
+    const changed = assemblyId !== detail.assemblyId || (!fixed.title && !!title.trim()) || (!fixed.description && !!description.trim()) || (!fixed.source && !!sourceCode) || impactCodes.some((c) => !had.includes(c)) || (!fixed.failure && !!failureMode) || photos.length > 0;
+    const addPhotos = async (e: ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files ?? []);
+        e.target.value = '';
+        for (const file of files.slice(0, Math.max(0, 8 - detail.photos.length - photos.length - uploading))) {
+            setUploading((n) => n + 1);
+            try {
+                const res = await callBackend<{ token: string; url: string }>('/api/org/mnt/wr/photo', { data: await compressPhoto(file) });
+                setPhotos((p) => [...p, res]);
+            } catch (err) {
+                setError(err instanceof Error ? err.message : 'The photo could not be uploaded.');
+            } finally {
+                setUploading((n) => n - 1);
+            }
+        }
+    };
+    const save = async () => {
+        setBusy(true);
+        setError('');
+        try {
+            await callBackend('/api/org/mnt/wr/action', {
+                code: detail.code, action: 'enrich',
+                assemblyId: assemblyId !== detail.assemblyId ? assemblyId : '',
+                title: fixed.title ? '' : title.trim(), description: fixed.description ? '' : description.trim(),
+                sourceCode: fixed.source ? '' : sourceCode, impactCodes: impactCodes.filter((c) => !had.includes(c)),
+                failureModeCode: fixed.failure ? '' : failureMode, addPhotos: photos.map((p) => p.token),
+            });
+            onDone();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Could not save.');
+        } finally {
+            setBusy(false);
+        }
+    };
+    const kept = (label: string, value: string) => (
+        <div className='rounded-xl border border-line bg-panel p-3'>
+            <p className='text-xs text-slate-500'>{label} · from the requester (kept)</p>
+            <p className='mt-1 whitespace-pre-wrap text-sm text-slate-200'>{value}</p>
+        </div>
+    );
+    return (
+        <div className={screen.className} onFocusCapture={screen.keepInView}>
+            <div className='flex shrink-0 items-center gap-2 border-b border-line bg-page pb-3'>
+                <Button variant='secondary' aria-label='Back' onClick={onCancel}><ArrowLeft className='h-4 w-4' /></Button>
+                <div className='min-w-0 flex-1'><p className='truncate font-semibold text-white'>Add details · {detail.code}</p><p className='truncate text-xs text-slate-400'>Empty fields only · every change is logged</p></div>
+                <Button busy={busy} disabled={!changed || !!uploading} onClick={save}><Check className='h-4 w-4' />Save</Button>
+            </div>
+            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
+                <SelectField id='en-asm' label={`Assembly of ${detail.unitCode} ${detail.unitName}`} value={assemblyId} disabled={tasksSaved} onChange={(e) => setAssemblyId(e.target.value)}>
+                    <option value='' disabled={!!detail.assemblyId}>Not known yet</option>
+                    {detail.assemblyOptions.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
+                </SelectField>
+                {tasksSaved && <p className='text-xs text-slate-400'>Tasks are already assessed against this assembly, so it can no longer change.</p>}
+                {!detail.assemblyId && !tasksSaved && <p className='text-xs text-amber-300'>Add the assembly before assessing tasks.</p>}
+                {fixed.title ? kept('Title', detail.title) : <Field id='en-title' label='Title' maxLength={120} placeholder={detail.title} value={title} onChange={(e) => setTitle(e.target.value)} />}
+                {fixed.description ? kept('Description', detail.description) : <TextArea id='en-desc' label='Description' rows={3} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />}
+                {fixed.source ? kept('Source of the finding', `${detail.sourceGroup} · ${detail.sourceLabel}`) : <GroupPicker title='Source of the finding' collapsed groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />}
+                <ChoicePicker title={`Impacts (add up to ${MAX_IMPACTS} in total)`} multi max={MAX_IMPACTS} groups={lists.impacts} selected={impactCodes} onToggle={(c) => { if (!had.includes(c)) setImpactCodes(toggleImpact(c)); }} />
+                {fixed.failure ? kept('Failure mode', detail.failureModeLabel) : <ChoicePicker title='Failure mode' groups={lists.failureModes} selected={failureMode ? [failureMode] : []} onToggle={(c) => setFailureMode(c === failureMode ? '' : c)} />}
+                <div className='grid grid-cols-3 gap-2'>
+                    {photos.map((p) => (
+                        <div key={p.token} className='relative overflow-hidden rounded-xl border border-slate-800'>
+                            <img src={p.url} alt='New photo' className='aspect-square w-full object-cover' />
+                            <button type='button' aria-label='Remove photo' onClick={() => setPhotos((cur) => cur.filter((x) => x.token !== p.token))} className='absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-full bg-slate-950/80 text-red-300'><Trash2 className='h-4 w-4' /></button>
+                        </div>
+                    ))}
+                    {detail.photos.length + photos.length + uploading < 8 && (
+                        <label className='flex aspect-square cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-emerald-500/50 text-xs text-emerald-300'>
+                            <Camera className='h-6 w-6' />
+                            Add photo
+                            <input type='file' accept='image/*' capture='environment' className='sr-only' onChange={addPhotos} />
+                        </label>
+                    )}
+                </div>
+                {error && <Alert tone='error'>{error}</Alert>}
+            </div>
+        </div>
+    );
+}
+
 function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; lists: MntLists; onDone: () => void; onCancel: () => void }) {
-    const [title, setTitle] = useState(detail.title);
+    const [title, setTitle] = useState(detail.titleAuto ? '' : detail.title);
     const [description, setDescription] = useState(detail.description);
     const [sourceCode, setSourceCode] = useState(detail.sourceCode);
     const [impactCodes, setImpactCodes] = useState(detail.impacts.map((i) => i.code));
@@ -1036,7 +1267,7 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
     const [uploading, setUploading] = useState(0);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const ok = title.trim().length >= 5 && description.trim().length >= 10 && sourceCode && impactCodes.length > 0 && impactCodes.length <= MAX_IMPACTS && !uploading;
+    const ok = (!title.trim() || title.trim().length >= 3) && impactCodes.length <= MAX_IMPACTS && !uploading;
     const screen = useFullScreen(true);
 
     const addPhotos = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -1080,10 +1311,10 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
             </div>
             <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
                 {detail.returnNote && <Alert tone='info'>Requested: {detail.returnNote}</Alert>}
-                <Field id='ed-title' label='Short title *' maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} />
-                <TextArea id='ed-desc' label='What did you find? *' rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
-                <GroupPicker title='Source of the finding *' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
-                <ChoicePicker title='Impact' required multi max={MAX_IMPACTS} groups={lists.impacts} selected={impactCodes} onToggle={(c) => setImpactCodes(toggleImpact(c))} />
+                <Field id='ed-title' label='Short title (optional)' maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} />
+                <TextArea id='ed-desc' label='What did you find? (optional)' rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
+                <GroupPicker title='Source of the finding (optional)' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
+                <ChoicePicker title='Impact (optional)' multi max={MAX_IMPACTS} groups={lists.impacts} selected={impactCodes} onToggle={(c) => setImpactCodes(toggleImpact(c))} />
                 <div className='grid grid-cols-3 gap-2'>
                     {photos.map((p) => (
                         <div key={p.token} className='relative overflow-hidden rounded-xl border border-slate-800'>

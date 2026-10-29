@@ -4,9 +4,10 @@ import { Alert } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import { Button, Card, Spinner, useLoad } from '../admin/kit';
 import { workspaceNavigate as navigate } from '../lib/route';
-import { MntCheck, MntDialog, MntField, MntRiskTable, mntApi, mntInput, type MntData } from './MntWorkOrder';
+import { MntDialog, MntField, MntRiskTable, mntApi, mntInput, type MntData } from './MntWorkOrder';
 import MntGateHint from './MntGateHint';
 
+const statusLabel = (w: MntData) => (w.model === 'equipment_v2' ? '' : 'older line window · ') + String(w.status || '').replaceAll('_', ' ');
 const windowColumns: Array<Column<MntData>> = [
     {
         key: 'title',
@@ -19,21 +20,14 @@ const windowColumns: Array<Column<MntData>> = [
             </span>
         ),
     },
-    { key: 'line', label: 'Production line', value: (w) => w.lineName },
-    { key: 'start', label: 'Planned start', type: 'date', value: (w) => w.start, render: (w) => new Date(w.start).toLocaleString() },
-    { key: 'status', label: 'Status', value: (w) => String(w.status || '').replaceAll('_', ' ') },
-    {
-        key: 'approvals',
-        label: 'Approvals',
-        value: (w) => `${w.engineering ? 'Engineering approved' : 'Engineering pending'} · ${w.safety ? 'Safety approved' : 'Safety pending'}`,
-        render: (w) => (
-            <span className="block whitespace-nowrap">
-                {w.engineering ? 'Engineering ✓' : 'Engineering pending'}
-                <br />
-                {w.safety ? 'Safety ✓' : 'Safety pending'}
-            </span>
-        ),
-    },
+    { key: 'equipment', label: 'Equipment', value: (w) => (w.equipmentCode ? `${w.equipmentCode} ${w.equipmentName}` : w.lineName) },
+    { key: 'start', label: 'Start', type: 'date', value: (w) => w.start, render: (w) => new Date(w.start).toLocaleString() },
+    { key: 'duration', label: 'Duration (h)', type: 'number', value: (w) => w.durationHours ?? (Date.parse(w.end) - Date.parse(w.start)) / 3600000 },
+    { key: 'end', label: 'End', type: 'date', value: (w) => w.end, render: (w) => new Date(w.end).toLocaleString(), hidden: true },
+    { key: 'orders', label: 'Work orders', value: (w) => (w.workOrderIds || []).join(', ') },
+    { key: 'status', label: 'Status', value: (w) => statusLabel(w) },
+    { key: 'progress', label: 'Progress %', type: 'number', value: (w) => w.progress || 0 },
+    { key: 'planner', label: 'Planner', value: (w) => w.plannedByName, hidden: true },
 ];
 
 function RiskReport({ report, onClose }: { report: MntData; onClose: () => void }) {
@@ -165,10 +159,6 @@ function RiskReport({ report, onClose }: { report: MntData; onClose: () => void 
     );
 }
 
-const localInput = (value: string) => {
-    const d = new Date(value);
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-};
 function Gantt({ schedule, start, onMove }: { schedule: MntData; start: string; onMove: (id: string, offset: number) => void }) {
     const scale = Math.max(1, Number(schedule.duration) || 1),
         groups = [...new Set((schedule.tasks || []).map((t: MntData) => t.woCode))] as string[];
@@ -241,96 +231,28 @@ function Gantt({ schedule, start, onMove }: { schedule: MntData; start: string; 
     );
 }
 
-function ProductionLineMapping({ onSaved }: { onSaved: () => void }) {
-    const { data, error, loading } = useLoad(() => mntApi({ action: 'line_options' }));
-    const [equipmentId, setEquipmentId] = useState(''),
-        [lineId, setLineId] = useState(''),
-        [note, setNote] = useState(''),
-        [failure, setFailure] = useState(''),
-        [busy, setBusy] = useState(false);
-    if (loading && !data) return <Spinner />;
-    if (error || !data) return <Alert tone="error">{error || 'Line mapping unavailable.'}</Alert>;
-    const equipment = data.nodes.find((n: MntData) => n.id === equipmentId),
-        current = data.mappings.find((m: MntData) => m.equipmentId === equipmentId);
-    const save = async () => {
-        setBusy(true);
-        setFailure('');
-        try {
-            await mntApi({ action: 'map_line', equipmentId, lineId, note });
-            onSaved();
-        } catch (e) {
-            setFailure(e instanceof Error ? e.message : 'Unable to save line association.');
-        } finally {
-            setBusy(false);
-        }
-    };
-    return (
-        <div className="space-y-4">
-            <p className="text-sm text-soft">
-                Associate equipment with its production line using the existing organization hierarchy. Select the line equipment unit or
-                the cost center designated for that line. All equipment in one maintenance window must have the same association.
-            </p>
-            <label className="block text-sm">
-                Equipment
-                <select
-                    className={mntInput}
-                    data-native-select="true"
-                    value={equipmentId}
-                    onChange={(e) => {
-                        setEquipmentId(e.target.value);
-                        setLineId('');
-                    }}
-                >
-                    <option value="">Choose equipment</option>
-                    {data.nodes
-                        .filter((n: MntData) => ['work_center', 'equipment'].includes(n.level))
-                        .map((n: MntData) => (
-                            <option key={n.id} value={n.id}>
-                                {n.code} · {n.name}
-                            </option>
-                        ))}
-                </select>
-            </label>
-            {equipment && (
-                <>
-                    <p className="text-sm text-soft">
-                        Current production line:{' '}
-                        {data.nodes.find((n: MntData) => n.id === (current?.lineId || equipmentId))?.name || 'Not configured'}
-                    </p>
-                    <label className="block text-sm">
-                        Production line in the same site
-                        <select className={mntInput} data-native-select="true" value={lineId} onChange={(e) => setLineId(e.target.value)}>
-                            <option value="">Choose production line</option>
-                            {data.nodes
-                                .filter((n: MntData) => n.siteId === equipment.siteId)
-                                .map((n: MntData) => (
-                                    <option key={n.id} value={n.id}>
-                                        {n.code} · {n.name}
-                                    </option>
-                                ))}
-                        </select>
-                    </label>
-                </>
-            )}
-            <MntField label="Reason for the production-line association" value={note} multiline onChange={setNote} />
-            {!data.canEdit && (
-                <Alert tone="info">
-                    Maintenance administration or Organization design authority is required to change these associations.
-                </Alert>
-            )}
-            {failure && <MntGateHint message={failure} />}
-            <Button busy={busy} disabled={!data.canEdit || !equipmentId || !lineId || note.trim().length < 10} onClick={save}>
-                Save line association
-            </Button>
-        </div>
-    );
+interface Draft {
+    windowId?: string;
+    title: string;
+    equipmentId: string;
+    date: string;
+    startTime: string;
+    durationHours: number;
+    workOrderIds: string[];
+    reason: string;
+    timeZone: string;
 }
+const ZONE = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; } })();
+const today = () => new Date().toISOString().slice(0, 10);
 
+// Maintenance windows: one piece of equipment on one date (start date, start time, duration; the end follows). The
+// planner fills a window with ready work orders of that equipment (readiness confirmed, cost approved). No separate
+// approval. Before physical work starts, the isolation and permit prerequisites are verified by the people doing it.
 export default function MntWindows() {
     const { data, error, loading, reload } = useLoad(() => mntApi({ action: 'workspace' }));
-    const [draft, setDraft] = useState<MntData | null>(null),
+    const [draft, setDraft] = useState<Draft | null>(null),
         [selected, setSelected] = useState<MntData | null>(null),
-        [schedule, setSchedule] = useState<MntData | null>(null),
+        [preview, setPreview] = useState<MntData | null>(null),
         [previewError, setPreviewError] = useState(''),
         [failure, setFailure] = useState(''),
         [busy, setBusy] = useState(false),
@@ -338,46 +260,48 @@ export default function MntWindows() {
         [note, setNote] = useState(''),
         [report, setReport] = useState<MntData | null>(null);
     const request = useRef(0);
+    const valid = !!draft && !!draft.equipmentId && !!draft.date && /^\d{2}:\d{2}$/.test(draft.startTime) && draft.durationHours >= 0.25 && draft.workOrderIds.length > 0;
     useEffect(() => {
         const seq = ++request.current;
-        if (!draft?.tasks?.length) {
-            setSchedule(null);
+        if (!draft || !valid) {
+            setPreview(null);
+            setPreviewError('');
             return;
         }
         const timer = setTimeout(async () => {
             try {
                 const r = await mntApi({ action: 'preview_window', ...draft });
                 if (seq === request.current) {
-                    setSchedule(r.schedule);
+                    setPreview(r);
                     setPreviewError('');
                 }
             } catch (e) {
                 if (seq === request.current) {
-                    setPreviewError(e instanceof Error ? e.message : 'Schedule is invalid.');
-                    setSchedule(null);
+                    setPreview(null);
+                    setPreviewError(e instanceof Error ? e.message : 'The window is not valid.');
                 }
             }
-        }, 250);
+        }, 300);
         return () => clearTimeout(timer);
-    }, [draft]);
+    }, [draft, valid]);
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone="error">{error || 'Maintenance windows unavailable.'}</Alert>;
     const orders: MntData[] = data.orders,
         windows: MntData[] = data.windows;
-    const patch = (k: string, v: any) => setDraft((old) => ({ ...old, [k]: v }));
-    const updateTask = (id: string, key: string, value: any) =>
-        patch(
-            'tasks',
-            draft!.tasks.map((t: MntData) => (t.id === id ? { ...t, [key]: value } : t)),
-        );
+    const patch = (next: Partial<Draft>) => setDraft((old) => (old ? { ...old, ...next } : old));
+    const available = (d: Draft) => orders.filter((o) => o.status === 'released' || (d.windowId && o.windowId === d.windowId && ['scheduled'].includes(o.status)));
+    const equipmentOptions = (d: Draft) => {
+        const seen = new Map<string, string>();
+        for (const o of available(d)) if (o.unitId) seen.set(o.unitId, `${o.unitCode} · ${o.unitName}`);
+        return [...seen.entries()];
+    };
     const action = async (kind: string, body: MntData = {}) => {
         setBusy(true);
         setFailure('');
         try {
             const r = await mntApi({ action: kind, windowId: selected?.id, ...body });
-            if (kind === 'window_report') {
-                setReport(r);
-            } else {
+            if (kind === 'window_report') setReport(r);
+            else {
                 reload();
                 if (r.windowId) {
                     setDraft(null);
@@ -399,46 +323,20 @@ export default function MntWindows() {
     };
     const edit = (w?: MntData) => {
         setSelected(null);
+        setFailure('');
         setPreviewError('');
         setDraft(
             w
-                ? {
-                      windowId: w.id,
-                      title: w.title,
-                      start: localInput(w.start),
-                      end: localInput(w.end),
-                      rangeType: w.rangeType,
-                      workOrderIds: w.workOrderIds,
-                      tasks: w.tasks,
-                      safetyDurations: w.safetyDurations || {},
-                      safetyOffsets: w.safetyOffsets || {},
-                      reason: '',
-                  }
-                : { title: '', start: '', end: '', rangeType: 'custom', workOrderIds: [], tasks: [] },
+                ? { windowId: w.id, title: w.title, equipmentId: w.equipmentId, date: w.date, startTime: w.startTime, durationHours: Number(w.durationHours) || 1, workOrderIds: w.workOrderIds || [], reason: '', timeZone: w.timeZone || ZONE }
+                : { title: '', equipmentId: '', date: today(), startTime: '07:00', durationHours: 8, workOrderIds: [], reason: '', timeZone: ZONE },
         );
     };
-    const chosen = orders.filter((w) => draft?.workOrderIds.includes(w.code));
-    const chooseOrder = (wo: MntData, checked: boolean) => {
-        const ids = checked ? [...draft!.workOrderIds, wo.code] : draft!.workOrderIds.filter((id: string) => id !== wo.code);
-        const additions = checked
-            ? (wo.tasks || []).map((t: MntData) => ({
-                  id: wo.code + '_' + t.id,
-                  woCode: wo.code,
-                  taskId: t.id,
-                  description: t.title || t.description,
-                  hours: t.hours,
-                  offset: 0,
-                  dependencies: (t.dependencies || []).map((id: string) => wo.code + '_' + id),
-                  exclusiveTools: [],
-              }))
-            : [];
-        setDraft({ ...draft, workOrderIds: ids, tasks: [...draft!.tasks.filter((t: MntData) => t.woCode !== wo.code), ...additions] });
-    };
+    const needed = Number(preview?.neededHours || 0);
     return (
-        <div className="space-y-5 text-ink">
+        <div className="space-y-4 text-ink">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <button className="mb-2 flex gap-2 text-sm text-soft" onClick={() => navigate('organization_admin/mnt')}>
+                    <button className="mb-2 flex min-h-11 items-center gap-2 text-sm text-soft" onClick={() => navigate('organization_admin/mnt')}>
                         <ArrowLeft size={16} />
                         Maintenance workspace
                     </button>
@@ -446,239 +344,78 @@ export default function MntWindows() {
                         <CalendarClock />
                         Maintenance windows
                     </h1>
-                    <p className="mt-1 text-sm text-soft">Plan one production line, secure resources, approve and execute.</p>
+                    <p className="mt-1 text-sm text-soft">One piece of equipment, one date: start time and duration. Fill it with ready work orders.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary" onClick={() => setDialog('line_mapping')}>
-                        Production line mapping
-                    </Button>
                     <Button variant="secondary" aria-label="Refresh windows" onClick={reload}>
                         <RefreshCw size={16} />
                     </Button>
                     <Button onClick={() => edit()}>
                         <Plus size={16} />
-                        New maintenance window
+                        New window
                     </Button>
                 </div>
             </div>
             {failure && <MntGateHint message={failure} />}
             {draft ? (
-                <Card className="space-y-5">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                        <MntField label="Maintenance window name" value={draft.title} onChange={(v) => patch('title', v)} />
-                        <label className="text-sm text-soft">
-                            Planning range
-                            <select
-                                data-native-select="true"
-                                className={mntInput}
-                                value={draft.rangeType}
-                                onChange={(e) => {
-                                    const type = e.target.value,
-                                        hours = ({ hours: 4, shift: 8, day: 24, week: 168 } as Record<string, number>)[type];
-                                    setDraft({
-                                        ...draft,
-                                        rangeType: type,
-                                        ...(hours && draft.start
-                                            ? { end: localInput(new Date(Date.parse(draft.start) + hours * 3600000).toISOString()) }
-                                            : {}),
-                                    });
-                                }}
-                            >
-                                {['hours', 'shift', 'day', 'week', 'custom'].map((v) => (
-                                    <option key={v} value={v}>
-                                        {v}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                        <MntField label="Planned start" type="datetime-local" value={draft.start} onChange={(v) => patch('start', v)} />
-                        <MntField label="Planned completion" type="datetime-local" value={draft.end} onChange={(v) => patch('end', v)} />
+                <Card className="space-y-4">
+                    <h2 className="font-semibold">{draft.windowId ? 'Change maintenance window' : 'New maintenance window'}</h2>
+                    <label className="block text-sm text-soft">
+                        Equipment *
+                        <select data-native-select="true" className={mntInput} value={draft.equipmentId} disabled={!!draft.windowId} onChange={(e) => patch({ equipmentId: e.target.value, workOrderIds: [] })}>
+                            <option value="">Choose the equipment…</option>
+                            {equipmentOptions(draft).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                            {draft.windowId && !equipmentOptions(draft).some(([id]) => id === draft.equipmentId) && <option value={draft.equipmentId}>{draft.equipmentId}</option>}
+                        </select>
+                    </label>
+                    {!equipmentOptions(draft).length && <Alert tone="info">No work order is ready yet. Confirm readiness on a work order (Plan: spares, services, people, dates, risk review and cost approval) first.</Alert>}
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        <MntField label="Date *" type="date" value={draft.date} onChange={(v) => patch({ date: v })} />
+                        <MntField label="Start time *" type="time" value={draft.startTime} onChange={(v) => patch({ startTime: v })} />
+                        <MntField label="Duration (hours) *" type="number" value={draft.durationHours} onChange={(v) => patch({ durationHours: Number(v) })} />
                     </div>
-                    <fieldset className="space-y-2">
-                        <legend className="mb-2 font-semibold">Select work orders from one production line</legend>
-                        {orders
-                            .filter((w) => ['plan_ready', 'released', 'scheduled', 'in_progress'].includes(w.status))
-                            .map((wo) => (
-                                <MntCheck
-                                    key={wo.code}
-                                    label={`${wo.code} · ${wo.title} · ${wo.line.name || 'Line mapping required'}`}
-                                    value={draft.workOrderIds.includes(wo.code)}
-                                    onChange={(v) => chooseOrder(wo, v)}
-                                />
-                            ))}
-                        {!orders.some((w) => ['plan_ready', 'released', 'scheduled', 'in_progress'].includes(w.status)) && (
-                            <p className="text-sm text-soft">Submit a task-assessed work order plan to make it available here.</p>
-                        )}
-                    </fieldset>
-                    <section className="space-y-3">
-                        <h2 className="font-semibold">Individual task schedule</h2>
-                        {chosen.map((wo) => (
-                            <section key={wo.code} className="space-y-3">
-                                <h3 className="text-sm font-semibold text-muted">
-                                    {wo.code} · {wo.title}
-                                </h3>
-                                {(wo.tasks || []).map((t: MntData) => {
-                                    const id = wo.code + '_' + t.id,
-                                        s = draft.tasks.find((s: MntData) => s.id === id);
-                                    return (
-                                        <div key={id} className="space-y-3 rounded-xl border border-line p-3">
-                                            <MntCheck
-                                                label={t.title || t.description}
-                                                value={!!s}
-                                                onChange={(v) =>
-                                                    patch(
-                                                        'tasks',
-                                                        v
-                                                            ? [
-                                                                  ...draft.tasks,
-                                                                  {
-                                                                      id,
-                                                                      woCode: wo.code,
-                                                                      taskId: t.id,
-                                                                      description: t.title || t.description,
-                                                                      hours: t.hours,
-                                                                      offset: 0,
-                                                                      dependencies: (t.dependencies || []).map(
-                                                                          (d: string) => wo.code + '_' + d,
-                                                                      ),
-                                                                      exclusiveTools: [],
-                                                                  },
-                                                              ]
-                                                            : draft.tasks.filter((s: MntData) => s.id !== id),
-                                                    )
-                                                }
-                                            />
-                                            {s && (
-                                                <>
-                                                    <div className="grid gap-3 sm:grid-cols-3">
-                                                        <MntField
-                                                            label="Execution priority (1 highest)"
-                                                            type="number"
-                                                            value={s.executionPriority ?? 50}
-                                                            onChange={(v) => updateTask(id, 'executionPriority', Number(v))}
-                                                        />
-                                                        <MntField
-                                                            label="Duration (hours)"
-                                                            type="number"
-                                                            value={s.hours}
-                                                            onChange={(v) => updateTask(id, 'hours', Number(v))}
-                                                        />
-                                                        <MntField
-                                                            label="Earliest start offset (hours)"
-                                                            type="number"
-                                                            value={s.offset}
-                                                            onChange={(v) => updateTask(id, 'offset', Number(v))}
-                                                        />
-                                                        <MntField
-                                                            label="Exclusive tools / equipment (comma separated)"
-                                                            value={(s.exclusiveTools || []).join(', ')}
-                                                            onChange={(v) =>
-                                                                updateTask(
-                                                                    id,
-                                                                    'exclusiveTools',
-                                                                    v
-                                                                        .split(',')
-                                                                        .map((x) => x.trim())
-                                                                        .filter(Boolean),
-                                                                )
-                                                            }
-                                                        />
-                                                    </div>
-                                                    <details>
-                                                        <summary className="cursor-pointer text-sm font-semibold">
-                                                            Predecessor tasks
-                                                        </summary>
-                                                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                                                            {draft.tasks
-                                                                .filter((p: MntData) => p.id !== id)
-                                                                .map((p: MntData) => (
-                                                                    <MntCheck
-                                                                        key={p.id}
-                                                                        label={p.woCode + ' · ' + p.description}
-                                                                        value={s.dependencies?.includes(p.id) || false}
-                                                                        onChange={(v) =>
-                                                                            updateTask(
-                                                                                id,
-                                                                                'dependencies',
-                                                                                v
-                                                                                    ? [...(s.dependencies || []), p.id]
-                                                                                    : (s.dependencies || []).filter(
-                                                                                          (d: string) => d !== p.id,
-                                                                                      ),
-                                                                            )
-                                                                        }
-                                                                    />
-                                                                ))}
-                                                        </div>
-                                                    </details>
-                                                </>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </section>
-                        ))}
-                    </section>
-                    {previewError && <Alert tone="error">{previewError}</Alert>}
-                    {schedule && (
-                        <>
-                            <h2 className="font-semibold">Gantt schedule and critical path</h2>
-                            <p className="text-xs text-soft">
-                                Drag a bar to change its earliest start. Duration and offset fields provide keyboard and mobile controls.
-                                Dependencies recalculate automatically.
+                    <p className="text-xs text-soft">
+                        {preview?.end ? `Ends ${new Date(preview.end).toLocaleString()}` : 'The end time follows from the start and the duration.'} · Time zone {draft.timeZone}
+                    </p>
+                    <MntField label="Name (optional)" value={draft.title} onChange={(v) => patch({ title: v })} />
+                    {draft.equipmentId && (
+                        <section className="space-y-2">
+                            <p className="text-sm font-semibold">Ready work orders on this equipment</p>
+                            {available(draft).filter((o) => o.unitId === draft.equipmentId).map((o) => {
+                                const on = draft.workOrderIds.includes(o.code);
+                                const hours = (o.tasks || []).reduce((n: number, t: MntData) => n + (Number(t.hours) || 0), 0);
+                                return (
+                                    <label key={o.code} className={`flex min-h-14 items-center gap-3 rounded-xl border p-3 ${on ? 'border-brand bg-brand/5' : 'border-line'}`}>
+                                        <input type="checkbox" className="h-5 w-5" checked={on} onChange={(e) => patch({ workOrderIds: e.target.checked ? [...draft.workOrderIds, o.code] : draft.workOrderIds.filter((x) => x !== o.code) })} />
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block truncate text-sm font-medium">{o.code} · {o.title}</span>
+                                            <span className="block text-xs text-soft">{(o.tasks || []).length} task(s) · {hours} h of work · planned {o.scheduledStart || '—'} to {o.scheduledEnd || '—'}</span>
+                                        </span>
+                                    </label>
+                                );
+                            })}
+                        </section>
+                    )}
+                    {valid && preview && (
+                        <div className="space-y-1">
+                            <div className="h-3 overflow-hidden rounded-full bg-panel" aria-label="Window filled">
+                                <div className={`h-full ${needed > draft.durationHours ? 'bg-red-600' : 'bg-emerald-600'}`} style={{ width: Math.min(100, (100 * needed) / Math.max(draft.durationHours, 0.25)) + '%' }} />
+                            </div>
+                            <p className={`text-xs ${needed > draft.durationHours ? 'text-danger' : 'text-soft'}`}>
+                                The work needs {needed.toFixed(2)} h of the {draft.durationHours} h window{needed > draft.durationHours ? ': lengthen the window or remove a work order.' : '.'}
                             </p>
-                            <Gantt
-                                schedule={schedule}
-                                start={draft.start}
-                                onMove={(id, offset) =>
-                                    id.startsWith('SAFE_')
-                                        ? patch('safetyOffsets', { ...draft.safetyOffsets, [id.slice(5)]: offset })
-                                        : updateTask(id, 'offset', offset)
-                                }
-                            />
-                            <details>
-                                <summary className="cursor-pointer text-sm font-semibold">Safety prerequisite durations</summary>
-                                <div className="mt-3 space-y-3">
-                                    {schedule.tasks
-                                        .filter((t: MntData) => t.safety)
-                                        .map((t: MntData) => (
-                                            <MntField
-                                                key={t.id}
-                                                label={t.description + ' (hours)'}
-                                                type="number"
-                                                value={draft.safetyDurations?.[t.taskId] ?? 0.25}
-                                                onChange={(v) =>
-                                                    patch('safetyDurations', { ...draft.safetyDurations, [t.taskId]: Number(v) })
-                                                }
-                                            />
-                                        ))}
-                                </div>
-                            </details>
-                            {schedule.conflicts?.length > 0 && <Alert tone="error">{schedule.conflicts.join(' ')}</Alert>}
-                        </>
+                            <Gantt schedule={preview.schedule} start={preview.start} onMove={() => {}} />
+                        </div>
                     )}
-                    {draft.windowId && (
-                        <MntField
-                            label="Reason for schedule or scope revision (existing approvals will be invalidated)"
-                            value={draft.reason}
-                            multiline
-                            onChange={(v) => patch('reason', v)}
-                        />
-                    )}
+                    {previewError && <Alert tone="error">{previewError}</Alert>}
+                    {draft.windowId && <MntField label="Reason for the change *" value={draft.reason} multiline onChange={(v) => patch({ reason: v })} />}
                     <div className="flex gap-2">
                         <Button
                             busy={busy}
-                            disabled={
-                                !schedule ||
-                                !!previewError ||
-                                schedule.conflicts?.length > 0 ||
-                                (draft.title || '').trim().length < 3 ||
-                                !draft.start ||
-                                !draft.end
-                            }
+                            disabled={!valid || !preview || needed > draft.durationHours || (preview.schedule?.conflicts?.length ?? 0) > 0 || (!!draft.windowId && draft.reason.trim().length < 10)}
                             onClick={() => action('save_window', draft)}
                         >
-                            Save maintenance window
+                            {draft.windowId ? 'Save changes' : 'Schedule window'}
                         </Button>
                         <Button variant="secondary" onClick={() => setDraft(null)}>
                             Cancel
@@ -687,93 +424,62 @@ export default function MntWindows() {
                 </Card>
             ) : selected ? (
                 <div className="space-y-4">
-                    <button className="text-sm underline" onClick={() => setSelected(null)}>
+                    <button className="min-h-11 text-sm underline" onClick={() => setSelected(null)}>
                         ← All maintenance windows
                     </button>
-                    <Card className="space-y-4">
+                    <Card className="space-y-3">
                         <div>
                             <p className="font-mono text-xs text-muted">
                                 {selected.id} · Revision {selected.revision}
                             </p>
                             <h2 className="text-xl font-semibold">{selected.title}</h2>
                             <p className="mt-1 text-sm text-soft">
-                                {selected.lineName} · Week {selected.isoWeek}/{selected.isoWeekYear} · {selected.timeZone} ·{' '}
-                                {new Date(selected.start).toLocaleString()} → {new Date(selected.end).toLocaleString()}
+                                {selected.equipmentCode ? `${selected.equipmentCode} · ${selected.equipmentName}` : selected.lineName} · {new Date(selected.start).toLocaleString()} → {new Date(selected.end).toLocaleString()}
+                                {selected.durationHours ? ` · ${selected.durationHours} h` : ''} · {selected.timeZone}
                             </p>
                             <p className="mt-1 text-sm capitalize">
-                                {selected.status.replaceAll('_', ' ')} · {selected.progress || 0}% of selected tasks completed
+                                {statusLabel(selected)} · {selected.progress || 0}% of tasks completed · planned by {selected.plannedByName}
                             </p>
                         </div>
+                        {selected.model !== 'equipment_v2' && ['draft', 'awaiting_approval'].includes(selected.status) && (
+                            <Alert tone="info">This older production-line window was never authorized. Create an equipment window for its work orders; this one is then replaced.</Alert>
+                        )}
                         <Gantt schedule={selected.liveSchedule || selected.schedule} start={selected.start} onMove={() => {}} />
-                        <div className="grid gap-3 sm:grid-cols-2">
-                            {['engineering', 'safety'].map((g) => (
-                                <div className="rounded-xl border border-line p-3" key={g}>
-                                    <p className="font-semibold capitalize">{g} approval</p>
-                                    <p className="mt-1 text-sm text-soft">
-                                        {selected[g] ? selected[g].name + ' · ' + new Date(selected[g].at).toLocaleString() : 'Pending'}
-                                    </p>
-                                </div>
-                            ))}
-                        </div>
                         <div className="flex flex-wrap gap-2">
-                            {!['in_progress', 'completed'].includes(selected.status) && (
+                            {selected.model === 'equipment_v2' && ['scheduled', 'draft'].includes(selected.status) && (
                                 <Button variant="secondary" onClick={() => edit(selected)}>
-                                    Revise scope / schedule
+                                    Change window
                                 </Button>
-                            )}
-                            {['draft', 'awaiting_approval'].includes(selected.status) && (
-                                <>
-                                    <Button variant="secondary" onClick={() => setDialog('approve_engineering')}>
-                                        Engineering approval
-                                    </Button>
-                                    <Button variant="secondary" onClick={() => setDialog('approve_safety')}>
-                                        Safety approval
-                                    </Button>
-                                    <Button variant="secondary" onClick={() => setDialog('reject_window')}>
-                                        Return for revision
-                                    </Button>
-                                    <Button onClick={() => action('authorize_window')}>Authorize maintenance execution</Button>
-                                </>
                             )}
                             <Button variant="secondary" onClick={() => action('window_report')}>
                                 <Printer size={16} />
-                                Print Consolidated Risk Assessment
+                                Print consolidated risk assessment
                             </Button>
                         </div>
                     </Card>
                     <Card className="space-y-3">
                         <h2 className="flex items-center gap-2 font-semibold">
                             <ShieldCheck size={18} />
-                            Mandatory safety prerequisites
+                            Safety prerequisites before work starts
                         </h2>
                         {(selected.safetySteps || []).map((s: MntData) => (
                             <div key={s.id} className="space-y-2 rounded-xl border border-line p-3">
                                 <p className="whitespace-pre-wrap text-sm">{s.instruction}</p>
-                                <p className="text-xs text-soft">
-                                    {s.completedAt ? 'Verified ' + new Date(s.completedAt).toLocaleString() : 'Pending safety verification'}
-                                </p>
-                                {!s.completedAt && ['authorized', 'in_progress'].includes(selected.status) && (
+                                <p className="text-xs text-soft">{s.completedAt ? 'Verified ' + new Date(s.completedAt).toLocaleString() : 'To verify'}</p>
+                                {!s.completedAt && ['authorized', 'scheduled', 'in_progress'].includes(selected.status) && (
                                     <Button variant="secondary" onClick={() => setDialog('safety_prerequisite:' + s.id)}>
-                                        Record safety verification
+                                        Record verification
                                     </Button>
                                 )}
                             </div>
                         ))}
-                        {!selected.safetySteps?.length && (
-                            <p className="text-sm text-soft">
-                                No additional isolation prerequisites were identified by the equipment and selected-task assessments.
-                            </p>
-                        )}
+                        {!selected.safetySteps?.length && <p className="text-sm text-soft">No isolation or permit prerequisites were identified for this window.</p>}
                     </Card>
                     <Card>
                         <h2 className="mb-3 font-semibold">Work orders</h2>
                         <div className="flex flex-wrap gap-2">
                             {selected.workOrderIds.map((id: string) => (
-                                <button
-                                    key={id}
-                                    className="rounded-xl border border-line px-4 py-3 text-sm underline"
-                                    onClick={() => navigate('organization_admin/work_orders/' + id)}
-                                >
+                                <button key={id} className="min-h-11 rounded-xl border border-line px-4 text-sm underline" onClick={() => navigate('organization_admin/work_orders/' + id)}>
                                     {id}
                                 </button>
                             ))}
@@ -789,30 +495,14 @@ export default function MntWindows() {
                     rows={windows}
                     rowKey={(w) => w.id}
                     onRowClick={(w) => setSelected(w)}
-                    empty="No maintenance windows yet. Start with an assessed work-order plan."
+                    empty="No maintenance windows yet. Confirm readiness on a work order, then schedule a window."
                 />
             )}
-            {dialog === 'line_mapping' && (
-                <MntDialog title="Production line mapping" onClose={() => setDialog('')}>
-                    <ProductionLineMapping
-                        onSaved={() => {
-                            setDialog('');
-                            reload();
-                        }}
-                    />
-                </MntDialog>
-            )}
-            {dialog && dialog !== 'line_mapping' && (
-                <MntDialog title={dialog.split(':')[0].replaceAll('_', ' ')} onClose={() => setDialog('')}>
+            {dialog && (
+                <MntDialog title="Record safety verification" onClose={() => setDialog('')}>
                     <div className="space-y-4">
-                        {dialog === 'reject_window' && (
-                            <p className="text-sm text-soft">This returns the window for revision and clears its approvals.</p>
-                        )}
-                        <MntField label="Review notes / evidence" value={note} multiline onChange={setNote} />
-                        <Button
-                            busy={busy}
-                            onClick={() => action(dialog.split(':')[0], { note, stepId: dialog.split(':')[1], gate: 'engineering' })}
-                        >
+                        <MntField label="Evidence (what was checked, by whom)" value={note} multiline onChange={setNote} />
+                        <Button busy={busy} disabled={note.trim().length < 5} onClick={() => action('safety_prerequisite', { note, stepId: dialog.split(':')[1] })}>
                             Confirm
                         </Button>
                         {failure && <MntGateHint message={failure} />}
