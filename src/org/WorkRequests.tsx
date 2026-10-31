@@ -336,10 +336,10 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     const source = findIn(lists.sources, sourceCode);
     const asset = place?.assets.find((a) => a.tag === place.defaultAssetTag && a.linked);
 
-    // Only the place is required; everything else is optional and completed at review or assessment.
+    // Title, finding description and source are mandatory; impact is deferred to assessment.
     const problems: string[][] = [
         place && asset && assetTag===place.defaultAssetTag ? [] : ['Choose the equipment (or its assembly) with a valid linked asset.'],
-        [...(title.trim() && title.trim().length < 3 ? ['A title needs at least 3 characters, or leave it empty.'] : [])],
+        [...(title.trim().length < 3 ? ['Short title is required (at least 3 characters).'] : []), ...(description.trim().length < 10 ? ['What did you find? is required (at least 10 characters).'] : []), ...(!sourceCode ? ['Source of the finding is required.'] : [])],
         [...(uploading ? ['Wait for the photos to finish uploading.'] : [])],
         [...(uploading ? ['Wait for the photos to finish uploading.'] : []), ...(confirmed ? [] : ['Confirm that the details are correct.'])],
     ];
@@ -500,14 +500,14 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
 
                 {step === 1 && (
                     <>
-                        <p className='rounded-xl border border-line bg-panel p-3 text-sm text-soft'>Everything on this step is optional. Add what you know; the reviewer completes the rest. You can go straight to <strong className='text-ink'>Photos</strong> or <strong className='text-ink'>Review</strong>.</p>
-                        <Field id='wr-title' label='Short title (optional)' maxLength={120} placeholder='e.g. Oil leak at gearbox output seal' value={title} onChange={(e) => setTitle(e.target.value)} />
-                        <TextArea id='wr-desc' label='What did you find? (optional)' rows={3} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
+                        <p className='rounded-xl border border-line bg-panel p-3 text-sm text-soft'>Complete the three required fields below. Other information can be added now or completed in Work Assessment. Continue to <strong className='text-ink'>Photos</strong> or <strong className='text-ink'>Review</strong>.</p>
+                        <Field id='wr-title' label='Short title *' maxLength={120} placeholder='e.g. Oil leak at gearbox output seal' value={title} onChange={(e) => setTitle(e.target.value)} />
+                        <TextArea id='wr-desc' label='What did you find? *' rows={3} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
                         <p className='text-right text-xs text-slate-500'>{description.length}/2000</p>
                         {pendingLink?.gembaTypeName && <p className='rounded-lg bg-brand/10 px-3 py-2 text-xs text-brand'>From {pendingLink.gembaTypeName} · linked Gemba observation</p>}
-                        <GroupPicker title='Source of the finding (optional)' collapsed groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
+                        <GroupPicker title='Source of the finding *' collapsed groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
                         <ChoicePicker
-                            title='Impact (optional)'
+                            title='Impact (optional at request; required in Work Assessment)'
                             multi
                             max={MAX_IMPACTS}
                             hint='Up to 5 impacts: choose a category, tick the impacts, then change category to add more.'
@@ -642,14 +642,14 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const [zoom, setZoom] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [section,setSection]=useState<'request'|'tasks'|'summary'>('request');
+    const [section,setSection]=useState<'request'|'assessment'|'tasks'|'summary'>('request');
     const [tasksDirty,setTasksDirty]=useState(false);
-    const goSection=async (next:'request'|'tasks'|'summary')=>{
+    const goSection=async (next:'request'|'assessment'|'tasks'|'summary')=>{
         if(next!==section&&tasksDirty&&!(await appConfirm('You have unsaved task changes. Leave without saving them?')))return;
         setMode('');setActionError('');setSection(next);
     };
     // Phones: assessing (classification or tasks) runs full screen, above the app header and footer.
-    const screen = useFullScreen(section === 'tasks' || mode === 'assess');
+    const screen = useFullScreen(section === 'tasks' || section === 'assessment' || mode === 'assess');
 
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load the work request.'}</Alert>;
@@ -688,7 +688,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
     if (can.close) buttons.push({ key: 'close', label: 'Close – no planning needed', icon: <Check className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('close') });
     if (can.enrich) buttons.push({ key: 'enrich', label: r.assemblyId ? 'Add details' : 'Add assembly & details', icon: <Pencil className='h-4 w-4' />, variant: r.assemblyId ? 'secondary' : 'primary', onClick: () => setMode('enrich') });
-    if (can.assess && !can.reviewAssessment) buttons.push({ key: 'assess', label: assessed ? 'Update assessment' : 'Assess', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => setMode('assess') });
+    if (can.assess && !can.reviewAssessment) buttons.push({ key: 'assess', label: assessed ? 'Update work assessment' : 'Start work assessment', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => {setSection('assessment');setMode('assess');} });
     if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Approve assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => {setSection('summary');setMode('review_assessment');} });
     if (can.convert) buttons.push({ key: 'convert', label: 'Convert to work order', icon: <Wrench className='h-4 w-4' />, variant: assessed ? 'primary' : 'secondary', onClick: () => setMode('convert') });
     if (can.return) buttons.push({ key: 'return', label: 'Return for information', icon: <Undo2 className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('return') });
@@ -725,8 +725,9 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
             <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
               <nav aria-label='Work request menu' className='flex shrink-0 gap-1 overflow-x-auto border-b border-slate-800 py-2'>
                 {([
-                   ['request','Request',<ClipboardList key='r' className='h-4 w-4'/>],
-                   ['tasks','Tasks'+(r.assessmentTasks?.length?' ('+r.assessmentTasks.length+')':''),<Wrench key='t' className='h-4 w-4'/>],
+                   ['request','Work Request',<ClipboardList key='r' className='h-4 w-4'/>],
+                   ['assessment','Work Assessment',<ClipboardList key='a' className='h-4 w-4'/>],
+                   ['tasks','Assessment Tasks'+(r.assessmentTasks?.length?' ('+r.assessmentTasks.length+')':''),<Wrench key='t' className='h-4 w-4'/>],
                    ['summary','Summary',<CheckCircle2 key='s' className='h-4 w-4'/>],
                 ] as const).map(([key,title,icon])=><button type='button' key={key} aria-current={section===key?'page':undefined}
                   onClick={()=>goSection(key)}
@@ -735,7 +736,21 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
               </nav>
               <div className='min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-1 py-3 sm:px-4'>
                 {actionError && !mode && <MntGateHint message={actionError} />}
-                {section==='summary' && !r.assessmentReviewCurrent && !can.reviewAssessment && (r.assessmentReviewBlockers?.length||0)>0 && (
+                {{section==='assessment' && !mode && <Card className='space-y-3'>
+                   <p className='text-xs font-semibold uppercase tracking-wider text-emerald-300'>Separate stage · Work Assessment</p>
+                   <h2 className='text-lg font-semibold text-white'>Technical assessment and outstanding request information</h2>
+                   <p className='text-sm text-slate-300'>Review the original finding, complete missing details, assess the technical need, and add task-by-task resources and safety. The Maintenance Lead approves only a complete assessment.</p>
+                   <Info label='Short title' value={r.titleAuto?'Not provided':r.title}/>
+                   <Info label='Finding description' value={r.description||'Not provided'}/>
+                   <Info label='Source of finding' value={r.sourceLabel||'Not provided'}/>
+                   <Info label='Impacts' value={r.impacts.length?r.impacts.map(i=>i.label).join('; '):'REQUIRED: add at least one impact'}/>
+                   <Info label='Assembly' value={r.assemblyCode||'REQUIRED: select assembly before tasks'}/>
+                   {r.assessment.headerIssue&&<p className='rounded-xl border border-amber-700/50 p-3 text-sm text-amber-200'>{r.assessment.headerIssue}</p>}
+                   {can.enrich&&<Button variant='secondary' onClick={()=>setMode('enrich')}>Complete missing request details and impacts</Button>}
+                   {can.assess&&<Button onClick={()=>setMode('assess')}>{assessed?'Update technical assessment':'Start technical assessment'}</Button>}
+                   <Button variant='secondary' onClick={()=>void goSection('tasks')}>Open assessment tasks, spares, services and safety</Button>
+                 </Card>}
+                 section==='summary' && !r.assessmentReviewCurrent && !can.reviewAssessment && (r.assessmentReviewBlockers?.length||0)>0 && (
                   <Card className='space-y-2'>
                     <p className='font-semibold text-amber-200'>Why assessment approval is unavailable</p>
                     <ul className='list-disc space-y-1 pl-5 text-sm text-slate-200'>
