@@ -112,7 +112,8 @@ const requireConfiguredMaintenanceRole = requireMaintenanceRole;
 const independent = (ctx: OrgContext, holds: boolean, rule: string) => holds || bypass(ctx, rule);
 /** Assessment review prerequisites; the testing override relaxes only the reviewer-independence part. */
 function reviewIssue(ctx: OrgContext, record: Obj): string {
-    const header=assessmentHeaderIssue(record);
+    // Apply request-field completeness to WR approval; direct WO re-assessments retain their own gates.
+    const header=WR_RE.test(str(record.code))?assessmentHeaderIssue(record):'';
     if(header)return header;
     const issue = reviewAssessmentPrerequisites(record as never, ctx.uid);
     if (!issue || ctx.testMode !== true) return issue;
