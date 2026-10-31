@@ -112,6 +112,8 @@ const requireConfiguredMaintenanceRole = requireMaintenanceRole;
 const independent = (ctx: OrgContext, holds: boolean, rule: string) => holds || bypass(ctx, rule);
 /** Assessment review prerequisites; the testing override relaxes only the reviewer-independence part. */
 function reviewIssue(ctx: OrgContext, record: Obj): string {
+    const header=assessmentHeaderIssue(record);
+    if(header)return header;
     const issue = reviewAssessmentPrerequisites(record as never, ctx.uid);
     if (!issue || ctx.testMode !== true) return issue;
     const relaxed = reviewAssessmentPrerequisites(record as never, `test-mode-${ctx.uid}`);
