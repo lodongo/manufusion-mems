@@ -736,7 +736,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
               </nav>
               <div className='min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-1 py-3 sm:px-4'>
                 {actionError && !mode && <MntGateHint message={actionError} />}
-                {{section==='assessment' && !mode && <Card className='space-y-3'>
+                {section==='assessment' && !mode && <Card className='space-y-3'>
                    <p className='text-xs font-semibold uppercase tracking-wider text-emerald-300'>Separate stage · Work Assessment</p>
                    <h2 className='text-lg font-semibold text-white'>Technical assessment and outstanding request information</h2>
                    <p className='text-sm text-slate-300'>Review the original finding, complete missing details, assess the technical need, and add task-by-task resources and safety. The Maintenance Lead approves only a complete assessment.</p>
@@ -750,7 +750,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                    {can.assess&&<Button onClick={()=>setMode('assess')}>{assessed?'Update technical assessment':'Start technical assessment'}</Button>}
                    <Button variant='secondary' onClick={()=>void goSection('tasks')}>Open assessment tasks, spares, services and safety</Button>
                  </Card>}
-                 section==='summary' && !r.assessmentReviewCurrent && !can.reviewAssessment && (r.assessmentReviewBlockers?.length||0)>0 && (
+                 {section==='summary' && !r.assessmentReviewCurrent && !can.reviewAssessment && (r.assessmentReviewBlockers?.length||0)>0 && (
                   <Card className='space-y-2'>
                     <p className='font-semibold text-amber-200'>Why assessment approval is unavailable</p>
                     <ul className='list-disc space-y-1 pl-5 text-sm text-slate-200'>
