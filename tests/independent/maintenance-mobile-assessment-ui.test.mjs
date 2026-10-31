@@ -2,14 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const src=(name)=>readFileSync(new URL('../../src/org/'+name,import.meta.url),'utf8');
-test('work request uses a top menu (no side column) for request, tasks, and summary',()=>{
+test('work request separates Request, Work Assessment, Assessment Tasks and Summary in the top menu',()=>{
  const ui=src('WorkRequests.tsx');
  assert.match(ui,/aria-label='Work request menu'/);
  assert.doesNotMatch(ui,/grid-cols-\[64px_minmax\(0,1fr\)\]/);
  assert.doesNotMatch(ui,/Related or duplicate request/);
  assert.doesNotMatch(src('MntWorkOrder.tsx'),/lg:grid-cols-\[260px/);
- assert.match(ui,/\['request','Request'/);
- assert.match(ui,/\['tasks','Tasks'/);
+ assert.match(ui,/\['request','Work Request'/);
+ assert.match(ui,/\['assessment','Work Assessment'/);
+ assert.match(ui,/\['tasks','Assessment Tasks'/);
  assert.match(ui,/\['summary','Summary'/);
  assert.match(ui,/overflow-x-hidden/);
  assert.doesNotMatch(ui,/flex gap-2 overflow-x-auto pb-1'>\s*\{buttons.map/);
