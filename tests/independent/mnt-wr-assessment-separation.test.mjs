@@ -28,7 +28,7 @@ test('Legacy assessments are not allowed to bypass newly required finding comple
 test('Work Request mandatory fields are enforced on server and assessment review cannot bypass them',()=>{
  const src=readFileSync('backend/maintenance.ts','utf8');
  assert.match(src,/finding\.title\.length<3\|\|finding\.description\.length<10\|\|!finding\.sourceCode/);
- assert.match(src,/const header=assessmentHeaderIssue\(record\)/);
+ assert.match(src,/const header=WR_RE\.test\(str\(record\.code\)\)\?assessmentHeaderIssue\(record\)/);
  assert.match(src,/if\(header\)return header/);
 });
 test('Separate Work Assessment stage and three required finding fields are visible in the UI',()=>{
