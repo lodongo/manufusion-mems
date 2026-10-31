@@ -399,7 +399,7 @@ const MAX_IMPACTS = 5;
 async function readFinding(l: Lists, b: Record<string, unknown>) {
     const title = clean(b.title, 120);
     const description = str(b.description).trim().slice(0, 2000);
-    if (title && title.length < 3) throw new HttpError(400, 'A title needs at least 3 characters (or leave it empty).');
+    if (title && title.length < 3) throw new HttpError(400, 'A title needs at least 3 characters.');
     const source = str(b.sourceCode) ? pickGrouped(l.sources, str(b.sourceCode), 'source of the finding')! : null;
     const crit = str(b.criticalityCode) ? pick(l.criticality, str(b.criticalityCode), 'criticality') : null;
     const impactCodes = [...new Set(strs(b.impactCodes))];
@@ -425,13 +425,18 @@ async function readFinding(l: Lists, b: Record<string, unknown>) {
  */
 export function assessmentHeaderIssue(d: Obj): string {
     const legacy = !!(str(d.maintenanceTypeCode) && str(d.workTypeCode) && str(d.priorityCode) && str(d.disciplineCode));
-    if (legacy) return '';
     const missing = [
+        str(d.title) && d.titleAuto !== true ? '' : 'short title',
+        str(d.description).length >= 10 ? '' : 'finding description (10+ characters)',
+        str(d.sourceCode) ? '' : 'source of finding',
+        objs(d.impacts).length ? '' : 'impact (at least one)',
+        ...(legacy ? [] : [
         str(d.technicalEvaluation).length >= 20 ? '' : 'technical evaluation',
         str(d.natureCode) ? '' : 'nature',
         str(d.criticalityCode) && str(d.severitySetBy) ? '' : 'severity',
         objs(d.solutions).length ? '' : 'solution categories',
         str(d.maintenanceTypeCode) ? '' : 'maintenance type',
+        ]),
     ].filter(Boolean);
     return missing.length ? `Complete the assessment: ${missing.join(', ')}.` : '';
 }
@@ -1117,6 +1122,8 @@ export const maintenanceRoutes = {
             const place = await assemblyContext(ctx, str(b.assemblyId) || str(b.equipmentId), P.WR_create, true);
             const loc = placeFields(place, str(b.assetTag));
             const finding = await readFinding(await lists(), b);
+            if(finding.title.length<3||finding.description.length<10||!finding.sourceCode)
+                throw new HttpError(400,'Short title (3+ characters), finding description (10+ characters), and source of finding are required to submit a Work Request.');
             const titleAuto = !finding.title;
             if (titleAuto) finding.title = autoTitle(loc);
             const gembaId = str(b.gembaId), observationId = str(b.gembaObservationId);
@@ -1320,6 +1327,8 @@ export const maintenanceRoutes = {
                 case 'edit': {
                     deny(can.edit, 'Only the requester can edit, and only before review starts.');
                     const finding = await readFinding(l, ctx.body);
+                    if(finding.title.length<3||finding.description.length<10||!finding.sourceCode)
+                        throw new HttpError(400,'Short title, finding description and source of finding are required.');
                     const titleAuto = !finding.title;
                     if (titleAuto) finding.title = autoTitle({ assemblyName: str(doc.data.assemblyName), unitName: str(doc.data.unitName) });
                     const existing = objs(doc.data.photos).map((p) => str(p.path));
@@ -1330,6 +1339,8 @@ export const maintenanceRoutes = {
                 }
                 case 'resubmit':
                     deny(can.resubmit, 'Only the requester can resubmit a returned request.');
+                    if(str(doc.data.title).length<3||doc.data.titleAuto===true||str(doc.data.description).length<10||!str(doc.data.sourceCode))
+                        throw new HttpError(409,'Complete the mandatory title, finding description and source before resubmitting.');
                     await done({ status: 'submitted', returnNote: '', assessmentReview: null }, 'Resubmitted', 'mnt.wr.resubmitted');
                     return { ok: true };
                 case 'cancel':
