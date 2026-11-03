@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ChevronRight, Building2, BriefcaseBusiness, Users, UserRound, Network, ShieldCheck, Search } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Building2, BriefcaseBusiness, Users, UserRound, Network, ShieldCheck, Search, MoreVertical, UserPlus, Hash, Gauge } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import { firebaseAuth } from '../firebase';
@@ -12,9 +12,10 @@ import HrRoleExplorer from './HrRoleExplorer';
 import type {HrRoleCardData} from './hrRoleHierarchy';
 import type {HrStructureNode} from './hrStructureTree';
 import {fitLabel,type SkillFit} from './HrRoleSkillFit';
-import {HrEmployeeActions} from './HrEmployeeAdmin';
+import {HrAssignNumbersSheet,useEmployeeAdmin} from './HrEmployeeAdmin';
+import Sheet from '../components/Sheet';
 
-type Person={uid:string;name:string;employeeNumber:string;status:string;jobRole:string;skillFit?:SkillFit};
+type Person={uid:string;name:string;employeeNumber:string;status:string;jobRole:string;jobRoleTitle?:string;photoUrl?:string;skillFit?:SkillFit};
 type Node=HrStructureNode;
 type Role=HrRoleCardData;
 const SECTIONS=[
@@ -26,7 +27,23 @@ const SECTIONS=[
  ['HR13','Learning, Skills & Career Development'],['HR14','Employee Relations & Disciplinary Management'],
  ['HR15','Employee Engagement & Feedback'],['HR16','Employee Movements, Separation & Offboarding']
 ] as const;
-const personColumns=[{key:'employeeNumber',label:'Employee number',value:(p:Person)=>p.employeeNumber},{key:'name',label:'Employee',value:(p:Person)=>p.name},{key:'jobRole',label:'Job role',value:(p:Person)=>p.jobRole},{key:'status',label:'Status',value:(p:Person)=>p.status},{key:'skillFit',label:'Role skill fit',value:(p:Person)=>fitLabel(p.skillFit)}];
+const initials=(name:string)=>name.split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]?.toUpperCase()).join('')||'?';
+function Avatar({person,size=48}:{person:Person;size?:number}){
+ const [bad,setBad]=useState(false);
+ useEffect(()=>setBad(false),[person.photoUrl]);
+ const box={width:size,height:size} as const;
+ return person.photoUrl&&!bad
+  ?<img src={person.photoUrl} alt={'Photo of '+person.name} style={box} className="shrink-0 rounded-full border border-line object-cover" referrerPolicy="no-referrer" loading="lazy" onError={()=>setBad(true)}/>
+  :<span style={box} aria-hidden="true" className="flex shrink-0 items-center justify-center rounded-full bg-brand/15 text-sm font-bold text-brand">{initials(person.name)}</span>;
+}
+const STATUS_TONE:Record<string,string>={active:'bg-emerald-500/15 text-emerald-500',suspended:'bg-amber-500/15 text-amber-500',invited:'bg-sky-500/15 text-sky-500'};
+const fitPct=(p:Person)=>p.skillFit?.percentage;
+const personColumns=[
+ {key:'employee',label:'Employee',value:(p:Person)=>p.name+' '+p.employeeNumber,className:'min-w-[15rem]',render:(p:Person)=><span className="flex items-center gap-3 py-1"><Avatar person={p}/><span className="min-w-0"><span className="block truncate text-base font-semibold text-ink">{p.name||'Unnamed'}</span><span className="block font-mono text-xs text-muted">{p.employeeNumber||'No number yet'}</span></span></span>},
+ {key:'jobRole',label:'Job role',value:(p:Person)=>p.jobRoleTitle||p.jobRole,className:'min-w-[11rem]',render:(p:Person)=><span className="block text-sm text-ink">{p.jobRoleTitle||p.jobRole||'—'}{p.jobRoleTitle&&p.jobRole?<span className="block font-mono text-xs text-muted">{p.jobRole}</span>:null}</span>},
+ {key:'status',label:'Status',value:(p:Person)=>p.status,render:(p:Person)=><span className={'inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize '+(STATUS_TONE[p.status]||'bg-page text-muted')}>{p.status||'—'}</span>},
+ {key:'skillFit',label:'Role skill fit',type:'number' as const,value:(p:Person)=>fitPct(p)??null,className:'min-w-[8rem]',render:(p:Person)=>{const v=fitPct(p);return v===null||v===undefined?<span className="text-xs text-muted">{fitLabel(p.skillFit)}</span>:<span className="block"><span className="text-sm font-semibold text-ink">{v}%</span><span className="mt-1 block h-1.5 w-24 overflow-hidden rounded-full bg-page"><span className="block h-full rounded-full bg-brand" style={{width:Math.min(100,v)+'%'}}/></span></span>}},
+];
 type SectionCode=typeof SECTIONS[number][0];
 const openSection=(code:SectionCode)=>navigate('organization_home/hr/'+code);
 function Panel({title,children}:{title:string;children:React.ReactNode}){return <section className="min-w-0 rounded-2xl border border-line bg-panel p-3 sm:p-4"><h2 className="mb-3 font-semibold text-ink">{title}</h2>{children}</section>}
@@ -41,6 +58,9 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState('');
  const [query,setQuery]=useState('');
+ const [menu,setMenu]=useState(false);
+ const [numbers,setNumbers]=useState(false);
+ const admin=useEmployeeAdmin();
  useEffect(()=>{
   let alive=true;setLoading(true);setError('');setSelf(null);setDirectory(null);setTeam(null);setNodes(null);setRoles(null);
   const promises:Promise<unknown>[]=[];
@@ -67,15 +87,33 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
    {loading&&<div className="rounded-xl bg-panel p-3 text-sm text-muted">Loading authorized records…</div>}
    {error&&<div role="alert" className="rounded-xl border border-line bg-panel p-3 text-sm text-muted">{error}</div>}
    {show('HR01')&&self&&<Panel title="My employee record"><button type="button" onClick={()=>navigate('organization_home/hr/HR01/employee/'+self.uid)} className="mb-3 flex min-h-11 w-full items-center justify-between rounded-xl border border-line bg-page px-3 text-sm font-semibold text-brand">Open full employee portal <ChevronRight className="h-4 w-4"/></button><div className="grid grid-cols-2 gap-3 text-sm"><div className="col-span-2 flex items-center gap-3 rounded-xl bg-page p-4"><UserRound className="h-8 w-8 text-brand"/><strong>{self.name}</strong></div>{[['Employee number',self.employeeNumber],['Assigned position',self.jobRole],['Status',self.status]].map(([k,v])=><div className="rounded-xl bg-page p-3" key={k}><div className="text-xs text-muted">{k}</div><div className="mt-1 font-semibold">{v||'Not recorded'}</div></div>)}</div></Panel>}
-   {sectionCode==='HR02'&&<HrEmployeeActions/>}
-   {show('HR02')&&directory&&<Panel title="Site employee records">
-     <div className="mb-3 grid grid-cols-2 gap-2">
-       <div className="rounded-xl bg-page p-3"><p className="text-xs text-muted">Employees with role skills</p><p className="mt-1 text-xl font-bold">{directory.filter(x=>x.skillFit?.percentage!==null&&x.skillFit?.percentage!==undefined).length}/{directory.length}</p></div>
-       <div className="rounded-xl bg-page p-3"><p className="text-xs text-muted">Average confirmed fit</p><p className="mt-1 text-xl font-bold text-brand">{(()=>{
-         const valid=directory.filter(x=>x.skillFit?.percentage!==null&&x.skillFit?.percentage!==undefined);
-         return valid.length?Math.round(valid.reduce((total,x)=>total+(x.skillFit?.percentage||0),0)/valid.length)+'%':'Not configured';
-       })()}</p></div>
-     </div><RichTable id="hr-employees-v2" columns={personColumns} rows={directory} rowKey={r=>r.uid} onRowClick={employee=>navigate("organization_home/hr/HR02/employee/"+employee.uid)} allowExport={false} height="h-[48dvh]" empty="No employee records at your authorized site."/></Panel>}
+   {show('HR02')&&directory&&(()=>{
+     const withFit=directory.filter(x=>fitPct(x)!==null&&fitPct(x)!==undefined);
+     const avg=withFit.length?Math.round(withFit.reduce((t,x)=>t+(fitPct(x)||0),0)/withFit.length)+'%':'Not configured';
+     const missing=admin.setup?.missingNumbers||0;
+     const maximised=sectionCode==='HR02';
+     return <section className="min-w-0 rounded-2xl border border-line bg-panel p-3 sm:p-4">
+       <div className="mb-3 flex items-center gap-2">
+         <div className="min-w-0 flex-1"><h2 className="font-semibold text-ink">Employees</h2><p className="text-xs text-muted">{directory.length} at your authorized site{missing>0?' · '+missing+' without a number':''}</p></div>
+         {admin.setup&&<button type="button" onClick={()=>navigate('organization_home/hr/HR02/new')} className="flex min-h-11 items-center gap-2 rounded-xl bg-brand px-3 text-sm font-semibold text-onbrand"><UserPlus className="h-4 w-4"/><span className="hidden sm:inline">Add employee</span><span className="sm:hidden">Add</span></button>}
+         <button type="button" aria-label="Employee menu" aria-haspopup="dialog" onClick={()=>setMenu(true)} className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-line text-ink"><MoreVertical className="h-5 w-5"/>{missing>0&&<span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-amber-500"/>}</button>
+       </div>
+       <RichTable id="hr-employees-v3" title="Employees" columns={personColumns} rows={directory} rowKey={r=>r.uid} onRowClick={employee=>navigate("organization_home/hr/HR02/employee/"+employee.uid)} allowExport={false} height={maximised?"h-[calc(100dvh-15rem)]":"h-[48dvh]"} empty="No employee records at your authorized site." rowClassName={()=>'min-h-[4.5rem]'}/>
+       {menu&&<Sheet title="Employees" onClose={()=>setMenu(false)}>
+         <div className="grid grid-cols-2 gap-2">
+           <div className="rounded-xl bg-page p-3"><p className="text-xs text-muted">Employees with role skills</p><p className="mt-1 text-xl font-bold">{withFit.length}/{directory.length}</p></div>
+           <div className="rounded-xl bg-page p-3"><p className="text-xs text-muted">Average confirmed fit</p><p className="mt-1 text-xl font-bold text-brand">{avg}</p></div>
+         </div>
+         {admin.setup?<>
+           <p className="text-xs text-muted">Employees get a sign-in account and an employee number ({admin.setup.format.replace(/0/g,'n')}).</p>
+           <button type="button" onClick={()=>{setMenu(false);navigate('organization_home/hr/HR02/new');}} className="flex min-h-12 w-full items-center gap-3 rounded-xl border border-line px-3 text-left text-sm font-semibold text-ink"><UserPlus className="h-5 w-5 text-brand"/>Add employee</button>
+           {missing>0&&<button type="button" onClick={()=>{setMenu(false);setNumbers(true);}} className="flex min-h-12 w-full items-center gap-3 rounded-xl border border-line px-3 text-left text-sm font-semibold text-ink"><Hash className="h-5 w-5 text-amber-500"/>Update employee numbers ({missing})</button>}
+         </>:<p className="text-xs text-muted">Adding employees needs the employee administration right.</p>}
+         <button type="button" onClick={()=>{setMenu(false);openSection('HR13');}} className="flex min-h-12 w-full items-center gap-3 rounded-xl border border-line px-3 text-left text-sm font-semibold text-ink"><Gauge className="h-5 w-5 text-brand"/>Skills and role fit</button>
+       </Sheet>}
+       {numbers&&<HrAssignNumbersSheet onClose={()=>setNumbers(false)} onDone={()=>{setNumbers(false);admin.reload();}}/>}
+     </section>;
+   })()}
    {show('HR04')&&nodes&&<HrStructureExplorer nodes={nodes}/>}
    {show('HR05')&&roles&&<HrRoleExplorer roles={roles}/>}
    {show('HR08')&&<><div className="grid grid-cols-2 gap-3">{[['Registered roles',roles?.length],['Organization units',nodes?.length],['Authorized site employees',directory?.length],['Manager team',team?.length]].map(([k,v])=><div key={String(k)} className="rounded-xl border border-line bg-panel p-4"><div className="text-xs text-muted">{k}</div><div className="mt-2 text-2xl font-bold">{v??'—'}</div></div>)}</div>{team&&<Panel title="My management hierarchy"><RichTable id="hr-team-v2" columns={personColumns} rows={team} rowKey={r=>r.uid} onRowClick={employee=>navigate("organization_home/hr/HR08/employee/"+employee.uid)} allowExport={false} height="h-[40dvh]"/></Panel>}</>}
