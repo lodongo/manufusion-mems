@@ -9,6 +9,7 @@ import { PASSWORD_RULE, passwordProblem } from '../lib/password';
 import { ConfirmBox, ReviewSection, StepProgress, StepSection, type WizardStep } from './materialCreateUi';
 import RoleSetPicker from './RoleSetPicker';
 import { withSodAcknowledgement } from '../lib/sod';
+import Sheet from '../components/Sheet';
 
 // HR > Employee Records & Administration: add employees (the only place user accounts are created) and give
 // every employee a system employee number (EMP_ + 5 digits, from the database counter). The server enforces who may
@@ -26,12 +27,27 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const EMAIL_LOCAL = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/i;
 const PHONE = /^\+[1-9]\d{7,14}$/;
 
-/** Actions shown above the employee directory to people who may manage employees (renders nothing otherwise). */
-export function HrEmployeeActions({ onChanged }: { onChanged?: () => void }) {
+/** What the employee menu needs: whether the person may manage employees, and how many lack a number. */
+export function useEmployeeAdmin() {
     const [setup, setSetup] = useState<Setup | null>(null);
-    const [open, setOpen] = useState(false);
     const load = () => callBackend<Setup>('/api/org/hr/employees/setup').then(setSetup).catch(() => setSetup(null));
     useEffect(() => { void load(); }, []);
+    return { setup, reload: load };
+}
+
+/** Employee numbers: assign to people who have none (opened from the employee menu). */
+export function HrAssignNumbersSheet({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+    return (
+        <Sheet title='Update employee numbers' onClose={onClose}>
+            <AssignNumbers onDone={onDone} />
+        </Sheet>
+    );
+}
+
+/** Kept for other screens: the full-width card (renders nothing unless the person may manage employees). */
+export function HrEmployeeActions({ onChanged }: { onChanged?: () => void }) {
+    const { setup, reload } = useEmployeeAdmin();
+    const [open, setOpen] = useState(false);
     if (!setup) return null;
     return (
         <section className='rounded-2xl border border-line bg-panel p-3 sm:p-4'>
@@ -43,7 +59,7 @@ export function HrEmployeeActions({ onChanged }: { onChanged?: () => void }) {
                 <Button onClick={() => navigate('organization_home/hr/HR02/new')}><UserPlus className='h-4 w-4' />Add employee</Button>
                 {setup.missingNumbers > 0 && <Button variant='secondary' onClick={() => setOpen((o) => !o)}><Hash className='h-4 w-4' />Update employee numbers ({setup.missingNumbers})</Button>}
             </div>
-            {open && <AssignNumbers onDone={() => { setOpen(false); void load(); onChanged?.(); }} />}
+            {open && <AssignNumbers onDone={() => { setOpen(false); void reload(); onChanged?.(); }} />}
         </section>
     );
 }

@@ -21,6 +21,14 @@ function publicEmployee(user: { id: string; data: Record<string, unknown> }) {
     employeeNumber: str(d.employeeNumber), status: str(d.status),
     jobRole: str(primary?.positionCode) };
 }
+/** Directory row: adds the job role title and the employee's stored account photo (signed, only for the user's own path). */
+async function directoryRow(user: { id: string; data: Record<string, unknown> }, positions: Array<{ id: string; data: Record<string, unknown> }>) {
+  const row = publicEmployee(user);
+  const title = str(positions.find(p => p.id === row.jobRole)?.data.title);
+  const path = str(user.data.photoPath);
+  const photoUrl = path.startsWith('users/' + user.id + '/') ? await signedUrl(path).catch(() => '') : '';
+  return { ...row, jobRoleTitle: title, photoUrl };
+}
 function assignedNodeIds(ctx: OrgContext): string[] {
   const direct = Array.isArray(ctx.me.data.assignments) ? ctx.me.data.assignments.filter(isObj) : [];
   return direct.filter(a=>str(a.type)==='primary').map(a=>str(a.nodeId)).filter(Boolean);
@@ -224,9 +232,10 @@ export const hrReadRoutes = {
         return {user:u,allowed:direct||inherited};
       }));
       const employees=resolved.filter(x=>x.allowed||ctx.role==='org_super_admin')
-        .map(x=>({...publicEmployee(x.user),skillFit:fit.get(x.user.id)}));
-      await hrAudit(ctx,'read.manager_team',{type:'directory',id:ctx.uid},'rows='+employees.length);
-      return { employees, readOnly:true };
+        .map(x=>x.user);
+      const rows=await Promise.all(employees.map(async u=>({...(await directoryRow(u,roleDocs)),skillFit:fit.get(u.id)})));
+      await hrAudit(ctx,'read.manager_team',{type:'directory',id:ctx.uid},'rows='+rows.length);
+      return { employees:rows, readOnly:true };
     }),
   ],
   'POST /api/org/hr/site-directory': [
@@ -248,9 +257,10 @@ export const hrReadRoutes = {
         if(str(u.data.status)==='disabled')return false;
         const a=Array.isArray(u.data.assignments)?u.data.assignments.filter(isObj).filter(v=>str(v.type)==='primary'):[];
         return ctx.role==='org_super_admin'||a.some(v=>{const site=hrSiteOf(str(v.nodeId),nodes);return !!site && ownSites.has(site);});
-      }).map(u=>({...publicEmployee(u),skillFit:fit.get(u.id)}));
-      await hrAudit(ctx,'read.site_directory',{type:'directory',id:[...ownSites].join(',').slice(0,120)||'all'},'rows='+records.length);
-      return { employees:records, readOnly:true, sites:[...ownSites] };
+      });
+      const rows=await Promise.all(records.map(async u=>({...(await directoryRow(u,roleDocs)),skillFit:fit.get(u.id)})));
+      await hrAudit(ctx,'read.site_directory',{type:'directory',id:[...ownSites].join(',').slice(0,120)||'all'},'rows='+rows.length);
+      return { employees:rows, readOnly:true, sites:[...ownSites] };
     }),
   ],
 };
