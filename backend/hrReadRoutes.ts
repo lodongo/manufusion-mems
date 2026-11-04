@@ -9,6 +9,7 @@ import { hrVisibleTabs } from './hrPrivacyRules';
 import { buildFitIndex, makeSkillFit } from './hrSkillFit';
 import { signedUrl } from './structure';
 import { computeRoleStaffing } from './hrRoleStaffingOutlook';
+import { universalMinEducation } from './roleMinEducation';
 import { hrAudit, hrAuditRead } from './hrAudit';
 
 // Read-only HR endpoints. No salaries, banking, medical, disciplinary,
@@ -73,8 +74,7 @@ export const hrReadRoutes = {
           ?new Set(d.data.coreSkills.filter((x):x is string=>typeof x==='string'&&!!x.trim()).map(x=>x.trim())).size:0,
         gradeMappings:isObj(d.data.jobGradeByLegalEntity)
           ?Object.values(d.data.jobGradeByLegalEntity).filter(v=>!!str(v)).length:0,
-        educationMappings:isObj(d.data.minEducationByLegalEntity)
-          ?Object.values(d.data.minEducationByLegalEntity).filter(v=>!!str(v)).length:0,
+        hasMinEducation:!!universalMinEducation(d.data),
         staffing:staffingAllowed?
           computeRoleStaffing(d.id,d.data.staffingPlan,people,names,asOf):null,
       })),readOnly:true,staffingAllowed };

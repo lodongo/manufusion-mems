@@ -2,7 +2,7 @@ import type {RoleStaffingOutlook} from '../../backend/hrRoleStaffingOutlook';
 
 export type HrRoleCardData={
  code:string;title:string;description:string;parentCode:string;operatingLevel:string;
- defaultNodeId:string;requiredSkillCount:number;gradeMappings:number;educationMappings?:number;
+ defaultNodeId:string;requiredSkillCount:number;gradeMappings:number;hasMinEducation?:boolean;
  staffing:RoleStaffingOutlook|null;
 };
 const compareRoles=(a:HrRoleCardData,b:HrRoleCardData)=>

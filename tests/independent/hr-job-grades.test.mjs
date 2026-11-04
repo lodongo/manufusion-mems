@@ -5,12 +5,12 @@ import {readFileSync} from 'node:fs';
 import {BUILT_PERMISSIONS,SOD_RULES,sodConflicts} from '../../backend/permissionPolicy.ts';
 import {LEVEL_ROLES} from '../../backend/levelRoles.ts';
 
-test('job grades: draft rules, maker-checker activation under the Chart of Authority and role minimum education',()=>{
+test('job grades: draft rules, maker-checker activation under the Chart of Authority and universal role minimum education',()=>{
  const result=spawnSync(process.execPath,
  ['--import','tsx','--import','./tests/helpers/maintenance-register.mjs','./tests/helpers/hr-job-grades-scenario.mjs'],
  {cwd:process.cwd(),encoding:'utf8',timeout:90000});
  assert.equal(result.status,0,result.stdout+'\n'+result.stderr);
- assert.match(result.stdout,/HR job grades governance, pay rules and role minimum education scenario passed/);
+ assert.match(result.stdout,/HR job grades governance, pay rules and universal role minimum education scenario passed/);
 });
 
 test('job grade rights exist, are sensitive, and the preparer can never approve',()=>{
@@ -49,7 +49,9 @@ test('job grades are no longer edited in education settings and roles require a 
  assert.doesNotMatch(edu,/Job grade numbers must be unique/);
  const positions=readFileSync('backend/positions.ts','utf8');
  assert.match(positions,/resolveMinEducation\(/);
- assert.match(positions,/minEducationByLegalEntity, staffingPlan/);
+ assert.match(positions,/minEducation, staffingPlan/);
+ assert.doesNotMatch(positions,/minEducationByLegalEntity, staffingPlan/,'education is no longer stored per legal entity');
+ assert.match(positions,/commonEducationLevels\(/);
 });
 
 test('the Job Grades screen is wired in, keeps its action bar fixed and verifies before submitting',()=>{
@@ -71,6 +73,8 @@ test('the Job Grades screen is wired in, keeps its action bar fixed and verifies
  assert.doesNotMatch(edu,/gradeChange/);
  assert.match(edu,/organization_home\/hr\/HR07/);
  const positions=readFileSync('src/org/PositionsPage.tsx','utf8');
- assert.match(positions,/jobGradeByLegalEntity,minEducationByLegalEntity/);
- assert.match(positions,/Choose the minimum level of education for this role/);
+ assert.match(positions,/jobGradeByLegalEntity,minEducation,/);
+ assert.doesNotMatch(positions,/minEducationByLegalEntity/,'the role form has one universal education field');
+ assert.match(positions,/id='pos-min-education'/);
+ assert.match(positions,/Choose the minimum level of education for this role\. It is required when the role has a job grade/);
 });
