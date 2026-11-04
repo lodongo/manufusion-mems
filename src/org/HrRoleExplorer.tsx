@@ -141,7 +141,7 @@ export default function HrRoleExplorer({roles}:{roles:HrRoleCardData[]}){
     <div className="mt-3 flex flex-wrap gap-2 text-xs">
      <span className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-2 text-ink"><Target className="h-4 w-4 text-brand"/>{current.requiredSkillCount} required skills</span>
      <span className="rounded-lg border border-line bg-panel px-2.5 py-2 text-ink">{current.gradeMappings} legal-entity grade mappings</span>
-     <span className="rounded-lg border border-line bg-panel px-2.5 py-2 text-ink">{current.educationMappings??0} minimum education levels set</span>
+     <span className="rounded-lg border border-line bg-panel px-2.5 py-2 text-ink">{current.hasMinEducation?'Minimum education set':'No minimum education'}</span>
      {current.staffing&&<span className="rounded-lg border border-line bg-panel px-2.5 py-2 text-ink">{current.staffing.temporaryAssignments} temporary assignments</span>}
     </div>
     {current.staffing===null?<p className="mt-3 text-xs text-muted">Detailed staffing requires organization establishment access.</p>:

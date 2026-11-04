@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {seed,snapshot} from './maintenance-fixture.ts';
 import {hrJobGradeRoutes} from '../../backend/hrJobGrades.ts';
 import {getEducationConfig} from '../../backend/hrEducationConfig.ts';
-import {resolveMinEducation} from '../../backend/roleMinEducation.ts';
+import {commonEducationLevels,resolveMinEducation,universalMinEducation} from '../../backend/roleMinEducation.ts';
 
 const org='hr_job_grades_fixture',root='organizations/'+org;
 seed(root,{status:'active',countryCode:'KE',currencyCode:'KES',modules:{HRM:true}});
@@ -148,16 +148,38 @@ await call('maker','withdraw',{id:third.id,reason:'Needs another review first'})
 // Higher cost needs a higher Chart of Authority level; an unmapped level blocks submission.
 await assert.rejects(()=>call('maker','submit',body({expectedVersion:7,annualCostImpact:500000000})),/Approval level L|Nobody other than you/);
 
-// ---- Job role minimum education: required wherever the role has a grade ----
-const levels=async()=>[{code:'SECONDARY',enabled:true},{code:'BACHELOR',enabled:true},{code:'OLD',enabled:false}];
+// ---- Job role minimum education: one universal level, required when the role has a grade ----
+const everywhere=async()=>[{code:'SECONDARY',enabled:true},{code:'BACHELOR',enabled:true},{code:'OLD',enabled:false}];
 const entities=[{id:'LE_KE',name:'Kenya Manufacturing'},{id:'LE_UG',name:'Uganda Trading'}];
-assert.deepEqual(await resolveMinEducation({LE_KE:'BACHELOR'},{LE_KE:'JG05'},entities,levels),{LE_KE:'BACHELOR'});
-await assert.rejects(()=>resolveMinEducation({},{LE_KE:'JG05'},entities,levels),/minimum level of education.*Kenya Manufacturing/);
-await assert.rejects(()=>resolveMinEducation({LE_KE:'DOCTORATE'},{LE_KE:'JG05'},entities,levels),/enabled education level/);
-await assert.rejects(()=>resolveMinEducation({LE_KE:'OLD'},{LE_KE:'JG05'},entities,levels),/enabled education level/);
-await assert.rejects(()=>resolveMinEducation({LE_XX:'BACHELOR'},{},entities,levels),/Unknown legal entity/);
-await assert.rejects(()=>resolveMinEducation('BACHELOR',{},entities,levels),/mapped by legal entity/);
-assert.deepEqual(await resolveMinEducation({LE_UG:'SECONDARY'},{},entities,levels),{LE_UG:'SECONDARY'},'A requirement may be set without a grade');
-assert.deepEqual(await resolveMinEducation({},{},entities,levels),{},'A role with no grade needs no requirement');
+assert.equal(await resolveMinEducation('BACHELOR','',true,entities,everywhere),'BACHELOR');
+await assert.rejects(()=>resolveMinEducation('','',true,entities,everywhere),/minimum level of education.*required when the role has a job grade/);
+await assert.rejects(()=>resolveMinEducation(undefined,'',true,entities,everywhere),/required when the role has a job grade/);
+assert.equal(await resolveMinEducation(undefined,'SECONDARY',true,entities,everywhere),'SECONDARY','Older clients that omit the field keep the saved level');
+await assert.rejects(()=>resolveMinEducation('DOCTORATE','',true,entities,everywhere),/not enabled in Kenya Manufacturing/);
+await assert.rejects(()=>resolveMinEducation('OLD','',true,entities,everywhere),/not enabled in Kenya Manufacturing/);
+// A level missing from just one legal entity is refused, naming that entity.
+const ugLacks=async id=>id==='LE_UG'?[{code:'SECONDARY',enabled:true}]:[{code:'SECONDARY',enabled:true},{code:'BACHELOR',enabled:true}];
+await assert.rejects(()=>resolveMinEducation('BACHELOR','',false,entities,ugLacks),/not enabled in Uganda Trading/);
+assert.equal(await resolveMinEducation('SECONDARY','',false,entities,ugLacks),'SECONDARY');
+await assert.rejects(()=>resolveMinEducation({LE_KE:'BACHELOR'},'',false,entities,everywhere),/one minimum level of education/);
+assert.equal(await resolveMinEducation('','',false,entities,everywhere),'','A role with no grade needs no requirement');
+assert.equal(await resolveMinEducation('SECONDARY','',false,entities,everywhere),'SECONDARY','A requirement may be set without a grade');
 
-console.log('HR job grades governance, pay rules and role minimum education scenario passed');
+// Roles saved while education was per legal entity keep working: same level everywhere carries over, a mix does not.
+assert.equal(universalMinEducation({minEducationByLegalEntity:{LE_KE:'SECONDARY',LE_UG:'SECONDARY'}}),'SECONDARY');
+assert.equal(universalMinEducation({minEducationByLegalEntity:{LE_KE:'SECONDARY',LE_UG:'BACHELOR'}}),'');
+assert.equal(universalMinEducation({minEducation:'BACHELOR',minEducationByLegalEntity:{LE_KE:'SECONDARY'}}),'BACHELOR','The universal field wins');
+assert.equal(universalMinEducation({minEducation:'',minEducationByLegalEntity:{LE_KE:'SECONDARY'}}),'','Clearing the level is not undone by the old map');
+assert.equal(universalMinEducation({}),'');
+assert.equal(universalMinEducation(snapshot(root+'/positions/ROL_000003').data),'SECONDARY','The seeded role saved per entity reads as its single level');
+
+// The picker offers only levels enabled in every legal entity, ordered by rank, and shows a rank only when entities agree.
+const lv=(code,name,rank,enabled=true)=>({code,name,rank,enabled});
+const common=commonEducationLevels([
+ [lv('SECONDARY','Secondary',2),lv('BACHELOR','Bachelor degree',5),lv('MASTER','Master',6),lv('OLD','Old',1,false)],
+ [lv('BACHELOR','Bachelor degree',5),lv('SECONDARY','Secondary',2),lv('MASTER','Master',7),lv('OLD','Old',1)],
+]);
+assert.deepEqual(common,[{code:'SECONDARY',name:'Secondary',rank:2},{code:'BACHELOR',name:'Bachelor degree',rank:5},{code:'MASTER',name:'Master',rank:null}]);
+assert.deepEqual(commonEducationLevels([]),[]);
+
+console.log('HR job grades governance, pay rules and universal role minimum education scenario passed');
