@@ -1,5 +1,6 @@
 import {HttpError,getDoc,isObj,str} from './core';
 import {legalEntityForEmployee,getEducationConfig} from './hrEducationConfig';
+import {activeJobGrades} from './hrJobGradeStore';
 import {defaultLeaveEntitlement, type LeaveGradeEntitlement, type PayConfig, type PayItem} from './hrCompensationConfig';
 
 export type LeaveOption={
@@ -48,8 +49,15 @@ export async function leaveEligibility(org:string,employee:Record<string,unknown
  const payroll=cfg.data as unknown as PayConfig;
  const leaves=Array.isArray(payroll.items)?payroll.items.filter(x=>x.category==='leave'&&x.enabled):[];
  const options:LeaveOption[]=[];
+ // The APPROVED job grade carries the leave package (HR → Job Grades). Grades approved before leave moved
+ // there have no package yet and keep using the per-grade entitlements of the approved compensation policy.
+ const gradePackage=(await activeJobGrades(org,legal.id))?.find(g=>g.enabled&&g.code===gradeCode)?.leave||[];
+ const packaged=new Map(gradePackage.map(l=>[l.code,l]));
  for(const item of leaves){
-  const record=item.leaveEntitlements?.[gradeCode];
+  const record:LeaveGradeEntitlement|undefined=gradePackage.length
+   ?(packaged.has(item.code)?{eligible:true,daysPerYear:packaged.get(item.code)!.daysPerYear,accrueMonthly:packaged.get(item.code)!.accrueMonthly,
+     unit:packaged.get(item.code)!.unit,carryForwardDays:packaged.get(item.code)!.carryForwardDays,requiresApprovedPlan:true}:undefined)
+   :item.leaveEntitlements?.[gradeCode];
   if(!record?.eligible)continue; // No grade entitlement means no leave eligibility.
   if(!record.requiresApprovedPlan)continue; // Never allow an override of the plan prerequisite.
   options.push({code:item.code,name:item.name,gradeCode,daysPerYear:record.daysPerYear,

@@ -33,7 +33,6 @@ const CorporateFinancialControlsPage = lazy(() => import('./CorporateFinancialCo
 const PositionsPage = lazy(() => import('./PositionsPage'));
 const OdChart = lazy(() => import('./OdChart'));
 const OrgSettings = lazy(() => import('./OrgSettings'));
-const HrEducationAdmin = lazy(() => import('./HrEducationAdmin'));
 const MyActivity = lazy(() => import('./MyActivity'));
 const OrgBranding = lazy(() => import('./OrgBranding'));
 const ProfilePage = lazy(() => import('../admin/ProfilePage'));
@@ -103,10 +102,6 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
         ],
     },
     {
-        title: 'HR administration',
-        items: [{ key: 'hr_education_config', label: 'Education hierarchy', Icon: BookOpen, perm: 'ADM.settings' }],
-    },
-    {
         title: 'People and access',
         items: [
             { key: 'users', label: 'Users', Icon: Users, perm: 'ADM.users' },
@@ -164,7 +159,7 @@ const TITLES: Record<string, string> = {
     positions: 'Job roles',
     positions_view: 'Job role structure',
     roles: 'Security roles',
-    hr_education_config: 'Education hierarchy',
+    hr_education_config: 'Education and benefits have moved',
     transaction_governance: 'Transaction governance',
     transaction_catalogue: 'Transaction access',
     modules: 'All modules',
@@ -321,7 +316,17 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             content = <OdChart show='structure' />;
             break;
         case 'hr_education_config':
-            content = <HrEducationAdmin />;
+            // Old bookmarks: the settings now live under HR for the people who maintain them.
+            content = (
+                <div className='space-y-3 rounded-2xl border border-line bg-panel p-4'>
+                    <h2 className='font-semibold text-ink'>Education and benefits have moved</h2>
+                    <p className='text-sm text-muted'>They are now in the HR module, under Education and Benefits, for the people who maintain them.</p>
+                    <div className='flex flex-wrap gap-2'>
+                        <button type='button' className='min-h-11 rounded-xl border border-line px-4 text-sm font-semibold text-brand' onClick={() => navigate('organization_home/hr/HR18')}>Open Education</button>
+                        <button type='button' className='min-h-11 rounded-xl border border-line px-4 text-sm font-semibold text-brand' onClick={() => navigate('organization_home/hr/HR19')}>Open Benefits</button>
+                    </div>
+                </div>
+            );
             break;
         case 'settings':
             content = <OrgSettings />;

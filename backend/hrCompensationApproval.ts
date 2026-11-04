@@ -34,7 +34,9 @@ export function policyDigest(config: Record<string, unknown>): string {
     const content = { countryCode: str(config.countryCode), currency: str(config.currency), items: Array.isArray(config.items) ? config.items : [] };
     return createHash('sha256').update(JSON.stringify(content)).digest('hex');
 }
-const isSettingsAdmin = (ctx: OrgContext) => ctx.role === 'org_super_admin' || hasPerm(ctx.directPermissions, 'ADM.settings');
+/** Benefits maintainers prepare and submit the compensation policy (moved from organization settings to HR). */
+export const BENEFITS_MANAGE = 'HRM.benefits.manage';
+const isBenefitsManager = (ctx: OrgContext) => ctx.role === 'org_super_admin' || hasPerm(ctx.permissions, BENEFITS_MANAGE);
 const mayApproveSomewhere = (ctx: OrgContext) => ctx.role === 'org_super_admin' || hasPerm(ctx.permissions, COMPENSATION_APPROVE);
 
 function summary(config: PayConfig) {
@@ -138,8 +140,8 @@ async function loadRequest(ctx: OrgContext, id: string) {
 
 export const hrCompensationApprovalRoutes = {
     'POST /api/org/hr/compensation/submit': [
-        orgRoute('org.hr.compensation.submit', 'ADM.settings', async (ctx) => {
-            if (!isSettingsAdmin(ctx)) throw new HttpError(403, 'Organization settings administrator required.');
+        orgRoute('org.hr.compensation.submit', 'HRM.benefits.manage', async (ctx) => {
+            if (!isBenefitsManager(ctx)) throw new HttpError(403, 'Permission required: benefits maintainer.');
             const entity = str(ctx.body.legalEntityId);
             if (!ENTITY.test(entity)) throw new HttpError(400, 'Select a legal entity.');
             const reason = reasonOf(ctx.body);
@@ -170,7 +172,7 @@ export const hrCompensationApprovalRoutes = {
     ],
     'POST /api/org/hr/compensation/requests': [
         orgRoute('org.hr.compensation.requests', 'HRM.shell.view', async (ctx) => {
-            const admin = isSettingsAdmin(ctx);
+            const admin = isBenefitsManager(ctx);
             const approver = mayApproveSomewhere(ctx);
             const [docs, units, scope] = await Promise.all([
                 runQuery({ from: [{ collectionId: 'fin_requests' }], where: fieldEq('type', COMPENSATION_REQUEST) }, `organizations/${ctx.orgId}`),

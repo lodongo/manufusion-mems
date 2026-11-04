@@ -56,6 +56,18 @@ export function standardRoleTemplates(groups: PermGroup[]): StandardRoleTemplate
         permissions:['HRM.shell.view','HRM.grades.approve']});
       assigned.add('HRM.grades.approve');
     }
+    if(enabled.get('HRM')?.has('HRM.benefits.manage')){
+      templates.push({id:'std_hrm_benefits_maintainer',module:'HRM',name:'HR – Benefits Maintainer',
+        description:'Prepare pay, benefits, leave types and statutory exceptions as a draft for a legal entity and submit them for approval; never approves them.',
+        permissions:['HRM.shell.view','HRM.benefits.manage']});
+      assigned.add('HRM.benefits.manage');
+    }
+    if(enabled.get('HRM')?.has('HRM.education.manage')){
+      templates.push({id:'std_hrm_education_maintainer',module:'HRM',name:'HR – Education Maintainer',
+        description:'Maintain education levels and qualifications for assigned legal entities.',
+        permissions:['HRM.shell.view','HRM.education.manage']});
+      assigned.add('HRM.education.manage');
+    }
     if(enabled.get('HRM')?.has('HRM.skills.manage')){
       templates.push({
         id:'std_hrm_skills_administrator',module:'HRM',name:'HR – Skills Administrator',

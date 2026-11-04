@@ -8,6 +8,8 @@ import HrSkillsWorkspace from './HrSkillsWorkspace';
 import HrLeavePanel from './HrLeavePanel';
 import HrCompensationApprovals from './HrCompensationApprovals';
 import HrJobGrades from './HrJobGrades';
+import HrEducationAdmin from './HrEducationAdmin';
+import HrBenefits from './HrBenefits';
 import HrStructureExplorer from './HrStructureExplorer';
 import HrRoleExplorer from './HrRoleExplorer';
 import type {HrRoleCardData} from './hrRoleHierarchy';
@@ -26,8 +28,13 @@ const SECTIONS=[
  ['HR09','Recruitment, Onboarding & Confirmation'],['HR10','Leave & Absence Management'],
  ['HR11','Compensation, Benefits & Payroll Interface'],['HR12','Performance Management'],
  ['HR13','Learning, Skills & Career Development'],['HR14','Employee Relations & Disciplinary Management'],
- ['HR15','Employee Engagement & Feedback'],['HR16','Employee Movements, Separation & Offboarding']
+ ['HR15','Employee Engagement & Feedback'],['HR16','Employee Movements, Separation & Offboarding'],
+ ['HR18','Education'],['HR19','Benefits']
 ] as const;
+/** Screens that keep their own fixed action bar: the page frame does not scroll, only their content does. */
+const FIXED_FRAME:readonly string[]=['HR07','HR18','HR19'];
+/** Opened from the HR menu by permission, not from the landing list. */
+const NOT_LISTED:readonly string[]=['HR18','HR19'];
 const initials=(name:string)=>name.split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]?.toUpperCase()).join('')||'?';
 function Avatar({person,size=48}:{person:Person;size?:number}){
  const [bad,setBad]=useState(false);
@@ -49,7 +56,7 @@ type SectionCode=typeof SECTIONS[number][0];
 const openSection=(code:SectionCode)=>navigate('organization_home/hr/'+code);
 function Panel({title,children}:{title:string;children:React.ReactNode}){return <section className="min-w-0 rounded-2xl border border-line bg-panel p-3 sm:p-4"><h2 className="mb-3 font-semibold text-ink">{title}</h2>{children}</section>}
 function Unavailable(){return <Panel title="No accessible records"><div className="flex items-center gap-3 rounded-xl bg-page p-4"><ShieldCheck className="h-6 w-6 shrink-0 text-muted"/><p className="text-sm text-muted">No verified read-only data source is connected to this module yet. Existing MEMS records will be displayed here once an authorized endpoint is available.</p></div></Panel>}
-export default function HrShell({sectionCode}:{sectionCode?:string}){
+export default function HrShell({sectionCode,setup=[]}:{sectionCode?:string;setup?:Array<{label:string;hint:string;path:string}>}){
  const selected=SECTIONS.find(s=>s[0]===sectionCode);
  const [self,setSelf]=useState<Person|null>(null);
  const [directory,setDirectory]=useState<Person[]|null>(null);
@@ -74,7 +81,8 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
   Promise.all(promises).finally(()=>{if(alive)setLoading(false)});
   return()=>{alive=false};
  },[sectionCode]);
- const visible=useMemo(()=>SECTIONS.filter(s=>(s[1]+' '+s[0]).toLowerCase().includes(query.toLowerCase())),[query]);
+ const visible=useMemo(()=>SECTIONS.filter(s=>!NOT_LISTED.includes(s[0])&&(s[1]+' '+s[0]).toLowerCase().includes(query.toLowerCase())),[query]);
+ const fixedFrame=FIXED_FRAME.includes(sectionCode||'');
  const show=(code:string)=>!sectionCode||sectionCode===code;
  const showData=Boolean((show('HR01')&&self)||(show('HR02')&&directory)||(show('HR04')&&nodes)||(show('HR05')&&roles)||(show('HR08')&&(team||directory||nodes||roles)));
  return <div className="flex h-[calc(100dvh-9rem)] min-h-[420px] min-w-0 flex-col overflow-hidden bg-page text-ink">
@@ -83,9 +91,9 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
    <div className="min-w-0 flex-1"><div className="text-xs font-semibold text-brand">HUMAN RESOURCES {sectionCode?'· '+sectionCode:''}</div><h1 className="truncate text-lg font-bold">{selected?.[1]||'HR Workspace'}</h1></div>
    {(sectionCode==='HR04'||sectionCode==='HR05')&&<span className="shrink-0 rounded-full border border-line px-2 py-1 text-xs text-muted">Read only</span>}
   </header>
-  <main className={sectionCode==='HR07'?"min-h-0 min-w-0 flex-1 overflow-hidden p-3 sm:p-5":"min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-3 sm:p-5"}>
+  <main className={fixedFrame?"min-h-0 min-w-0 flex-1 overflow-hidden p-3 sm:p-5":"min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-3 sm:p-5"}>
    {!sectionCode&&<><div className="relative"><Search className="absolute left-3 top-3 h-5 w-5 text-muted"/><input aria-label="Search HR modules" className="w-full rounded-xl border border-line bg-panel py-3 pl-10 pr-3 text-sm" placeholder="Search HR modules" value={query} onChange={e=>setQuery(e.target.value)}/></div><div className="grid gap-2 md:grid-cols-2">{visible.map(([code,title])=><button key={code} onClick={()=>openSection(code)} className="flex min-h-16 items-center gap-3 rounded-xl border border-line bg-panel p-4 text-left"><span className="rounded-lg bg-brand/10 px-2 py-2 text-xs font-bold text-brand">{code}</span><span className="min-w-0 flex-1 text-sm font-semibold">{title}</span><ChevronRight className="h-5 w-5 shrink-0 text-muted"/></button>)}</div></>}
-   {loading&&sectionCode!=='HR07'&&<div className="rounded-xl bg-panel p-3 text-sm text-muted">Loading authorized records…</div>}
+   {loading&&!fixedFrame&&<div className="rounded-xl bg-panel p-3 text-sm text-muted">Loading authorized records…</div>}
    {error&&<div role="alert" className="rounded-xl border border-line bg-panel p-3 text-sm text-muted">{error}</div>}
    {show('HR01')&&self&&<Panel title="My employee record"><button type="button" onClick={()=>navigate('organization_home/hr/HR01/employee/'+self.uid)} className="mb-3 flex min-h-11 w-full items-center justify-between rounded-xl border border-line bg-page px-3 text-sm font-semibold text-brand">Open full employee portal <ChevronRight className="h-4 w-4"/></button><div className="grid grid-cols-2 gap-3 text-sm"><div className="col-span-2 flex items-center gap-3 rounded-xl bg-page p-4"><UserRound className="h-8 w-8 text-brand"/><strong>{self.name}</strong></div>{[['Employee number',self.employeeNumber],['Assigned position',self.jobRole],['Status',self.status]].map(([k,v])=><div className="rounded-xl bg-page p-3" key={k}><div className="text-xs text-muted">{k}</div><div className="mt-1 font-semibold">{v||'Not recorded'}</div></div>)}</div></Panel>}
    {show('HR02')&&directory&&(()=>{
@@ -121,8 +129,14 @@ export default function HrShell({sectionCode}:{sectionCode?:string}){
    {show('HR10')&&<HrLeavePanel employeeUid={firebaseAuth.currentUser?.uid||''} showInbox />}
    {show('HR13')&&<HrSkillsWorkspace ownUid={firebaseAuth.currentUser?.uid||''} />}
    {sectionCode==='HR07'&&<HrJobGrades/>}
+   {sectionCode==='HR18'&&<HrEducationAdmin/>}
+   {sectionCode==='HR19'&&<HrBenefits/>}
+   {sectionCode==='HR11'&&setup.length>0&&<Panel title="Set up">
+    <p className="mb-2 text-xs text-muted">Pay, benefits and grades are configured in these screens. Changes are drafted there and come back here for approval.</p>
+    <div className="grid gap-2 md:grid-cols-2">{setup.map(x=><button key={x.path} type="button" onClick={()=>navigate('organization_home/'+x.path)} className="flex min-h-14 items-center gap-3 rounded-xl border border-line bg-page p-3 text-left"><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-ink">{x.label}</span><span className="block text-xs text-muted">{x.hint}</span></span><ChevronRight className="h-5 w-5 shrink-0 text-muted"/></button>)}</div>
+   </Panel>}
    {sectionCode==='HR11'&&<HrCompensationApprovals/>}
-   {sectionCode!=='HR13'&&sectionCode!=='HR10'&&sectionCode!=='HR11'&&sectionCode!=='HR07'&&sectionCode&&!loading&&!showData&&<Unavailable/>}
+   {sectionCode!=='HR13'&&sectionCode!=='HR10'&&sectionCode!=='HR11'&&!fixedFrame&&sectionCode&&!loading&&!showData&&<Unavailable/>}
   </main>
  </div>;
 }

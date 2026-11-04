@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import {seed,snapshot} from './maintenance-fixture.ts';
-import {hrJobGradeRoutes} from '../../backend/hrJobGrades.ts';
+import {hrJobGradeRoutes,catalogueOf,catalogueProblems} from '../../backend/hrJobGrades.ts';
 import {getEducationConfig} from '../../backend/hrEducationConfig.ts';
+import {hrCompensationRoutes,kenyaCompensationTemplate} from '../../backend/hrCompensationConfig.ts';
+import {leaveEligibility} from '../../backend/hrLeaveEligibility.ts';
 import {commonEducationLevels,resolveMinEducation,universalMinEducation} from '../../backend/roleMinEducation.ts';
 
 const org='hr_job_grades_fixture',root='organizations/'+org;
@@ -50,12 +52,30 @@ for(const code of ['KE_NSSF','KE_SHIF','KE_AHL'])assert.ok(grade1.deductionCodes
 assert.ok(seeded.catalogue.deductions.some(x=>x.code==='DED_SACCO'),'Optional deductions come from Compensation & Benefits');
 assert.equal(seeded.roles.JG02.length,1,'Roles allocated to a grade are listed');
 assert.equal(seeded.roles.JG02[0].title,'Production Operator');
-assert.ok(seeded.payConfig,'Kenya rates are provided for the take-home preview');
+assert.ok(seeded.payConfig,'The pay catalogue (rates, bands, exceptions) is provided for the payslip simulator');
+assert.ok(seeded.payConfig.items.find(x=>x.code==='KE_PAYE').exceptions.some(e=>e.code==='PAYE_PWD'),'Exceptions reach the simulator');
+assert.equal(grade1.payModelCode,'MONTHLY','A single enabled pay model is preselected');
+const mandatoryLeave=['LEAVE_ANNUAL','LEAVE_SICK_FULL','LEAVE_SICK_HALF','LEAVE_MATERNITY','LEAVE_PATERNITY'];
+for(const code of mandatoryLeave)assert.ok(grade1.leave.some(l=>l.code===code),code+' is in every grade leave package');
+assert.deepEqual(grade1.leave.find(l=>l.code==='LEAVE_ANNUAL'),{code:'LEAVE_ANNUAL',daysPerYear:21,accrueMonthly:true,unit:'working_days',carryForwardDays:0});
+assert.equal(grade1.leave.find(l=>l.code==='LEAVE_MATERNITY').unit,'months');
+assert.ok(seeded.catalogue.leave.every(l=>l.legacy===undefined),'Legacy per-grade history is not sent to the screen');
+assert.ok(plain.draft.grades.every(g=>g.leave.length===0&&g.benefitCodes.length===0&&g.payModelCode===''),'The benefit package is pay information too');
+
+// ---- Benefits catalogue: enable a housing allowance and a compassionate leave type for the grade packages ----
+const comp=(name,body)=>hrCompensationRoutes['POST /api/org/hr/compensation/'+name][0](ctx('admin',body));
+const payDraft=(await comp('get',{legalEntityId:'LE_KE'})).config;
+const housing=payDraft.items.find(x=>x.code==='AL_HOUSING');Object.assign(housing,{enabled:true,method:'percent',rate:0.15,taxable:true});
+const compassion=payDraft.items.find(x=>x.code==='LEAVE_COMPASSION');Object.assign(compassion,{enabled:true,amount:3});
+Object.assign(payDraft.items.find(x=>x.code==='DED_SACCO'),{enabled:true});
+await comp('save',{legalEntityId:'LE_KE',config:payDraft});
 
 // ---- Draft rules ----
 await assert.rejects(()=>call('member','save',{legalEntityId:'LE_KE',grades:seeded.draft.grades}),/permission/i);
-const priced=seeded.draft.grades.map(g=>({...g,minSalary:20000+g.rank*10000,taxCodes:[],deductionCodes:g.rank===3?['DED_SACCO']:[]}));
-const withNew=[...priced,{code:'',rank:10,title:'Director',description:'Board-reporting leader',enabled:true,minSalary:300000,taxCodes:[],deductionCodes:[]}];
+const compassionLeave={code:'LEAVE_COMPASSION',daysPerYear:4,accrueMonthly:false,unit:'working_days',carryForwardDays:0};
+const package3={benefitCodes:['AL_HOUSING','OT_WEEKDAY'],benefitValues:{AL_HOUSING:{rate:0.2}},leave:[...seeded.draft.grades.find(g=>g.code==='JG03').leave,compassionLeave]};
+const priced=seeded.draft.grades.map(g=>({...g,minSalary:20000+g.rank*10000,taxCodes:[],deductionCodes:g.rank===3?['DED_SACCO']:[],...(g.code==='JG03'?package3:{})}));
+const withNew=[...priced,{code:'',rank:10,title:'Director',description:'Board-reporting leader',enabled:true,minSalary:300000,taxCodes:[],deductionCodes:[],payModelCode:'MONTHLY'}];
 const saved=await call('maker','save',{legalEntityId:'LE_KE',grades:withNew,expectedVersion:0});
 assert.equal(saved.version,1);
 const director=saved.grades.find(g=>g.title==='Director');
@@ -65,6 +85,12 @@ for(const g of saved.grades){
  for(const code of ['KE_NSSF','KE_SHIF','KE_AHL'])assert.ok(g.deductionCodes.includes(code),'Mandatory deductions are always included');
 }
 assert.ok(saved.grades.find(g=>g.code==='JG03').deductionCodes.includes('DED_SACCO'),'A chosen optional deduction is kept');
+const g3=saved.grades.find(g=>g.code==='JG03');
+assert.deepEqual(g3.benefitCodes.slice().sort(),['AL_HOUSING','OT_WEEKDAY']);
+assert.deepEqual(g3.benefitValues,{AL_HOUSING:{rate:0.2}});
+assert.equal(g3.leave.find(l=>l.code==='LEAVE_COMPASSION').daysPerYear,4);
+assert.equal(director.leave.length,5,'A grade submitted without leave still receives every mandatory leave type');
+assert.equal(director.payModelCode,'MONTHLY');
 assert.equal(snapshot(root+'/hr_job_grades_active/LE_KE'),null,'Saving a draft never activates it');
 assert.equal((await getEducationConfig(org,'LE_KE')).jobGrades.length,9,'Live readers still use the older list until approval');
 const reject=(patch,pattern,expectedVersion=1)=>assert.rejects(()=>call('maker','save',{legalEntityId:'LE_KE',expectedVersion,grades:patch(structuredClone(saved.grades))}),pattern);
@@ -75,6 +101,16 @@ await reject(g=>g.slice(1),/cannot be removed/);
 await reject(g=>{g[0].minSalary=1000.123;return g;},/2 decimal/);
 await reject(g=>{g[0].minSalary=-5;return g;},/minimum salary/);
 await reject(g=>{g[0].title='';return g;},/title/);
+await reject(g=>{g[0].benefitCodes=['NOT_A_BENEFIT'];return g;},/allowances, benefits or overtime/);
+await reject(g=>{g[0].payModelCode='NOT_A_MODEL';return g;},/pay model/);
+await reject(g=>{g[0].benefitCodes=['OT_WEEKDAY'];g[0].benefitValues={OT_WEEKDAY:{amount:-1}};return g;},/out of range/);
+await reject(g=>{g[0].benefitCodes=['AL_HOUSING'];g[0].benefitValues={AL_HOUSING:{rate:5}};return g;},/fraction/);
+await reject(g=>{g[0].leave.find(l=>l.code==='LEAVE_ANNUAL').daysPerYear=20;return g;},/legal minimum of 21/);
+await reject(g=>{g[0].leave.find(l=>l.code==='LEAVE_ANNUAL').unit='calendar_days';return g;},/by law/);
+await reject(g=>{g[0].leave.find(l=>l.code==='LEAVE_MATERNITY').daysPerYear=2;return g;},/legal minimum of 3 months/);
+await reject(g=>{g[0].leave.push({code:'LEAVE_NOT_REAL',daysPerYear:1,unit:'working_days'});return g;},/Benefits catalogue/);
+await reject(g=>{g[0].leave.push({...g[0].leave[0]});return g;},/listed twice/);
+await reject(g=>{g[0].leave[0].carryForwardDays=500;return g;},/carry forward/);
 await reject(g=>{g[1].title=g[0].title;return g;},/used twice/);
 await assert.rejects(()=>call('maker','save',{legalEntityId:'LE_KE',expectedVersion:0,grades:saved.grades}),/changed since/);
 
@@ -129,6 +165,21 @@ const after=await get('maker');
 assert.equal(after.active.version,1);assert.equal(after.changedSinceActive,false);
 await assert.rejects(()=>call('maker','submit',body({expectedVersion:4})),/already the active policy/);
 
+// ---- Leave eligibility reads the APPROVED grade package, falling back to older per-grade entitlements ----
+seed(root+'/hr_compensation_active/LE_KE',{...snapshot(root+'/hr_compensation_config/LE_KE').data,status:'active',activeVersion:1,version:1});
+seed(root+'/positions/ROL_000004',{title:'Shift Supervisor',jobGradeByLegalEntity:{LE_KE:'JG03'}});
+const eligibility=await leaveEligibility(org,{assignments:[{type:'primary',nodeId:'LE_KE',positionCode:'ROL_000004'}]});
+const optionOf=code=>eligibility.options.find(o=>o.code===code);
+assert.equal(optionOf('LEAVE_ANNUAL').daysPerYear,21);assert.equal(optionOf('LEAVE_ANNUAL').accrueMonthly,true);
+assert.equal(optionOf('LEAVE_COMPASSION').daysPerYear,4,'A leave type chosen for the grade is offered with the grade allowance');
+assert.equal(optionOf('LEAVE_STUDY'),undefined,'A leave type not selected for the grade is not offered');
+seed(root+'/structure/LE_ZM',{level:'legal_entity',name:'Zambia Ltd',status:'active',attributes:{countryCode:'ZM',currencyCode:'ZMW'}});
+seed(root+'/hr_job_grades_active/LE_ZM',{status:'active',activeVersion:1,currency:'ZMW',countryCode:'ZM',grades:[{code:'JG01',rank:1,title:'Only',description:'',enabled:true,minSalary:1,taxCodes:['T'],deductionCodes:['D']}]});
+seed(root+'/hr_compensation_active/LE_ZM',{status:'active',version:1,items:[{code:'LEAVE_ANNUAL',name:'Annual leave',category:'leave',enabled:true,mandatory:true,description:'',leaveEntitlements:{JG01:{eligible:true,daysPerYear:25,accrueMonthly:true,unit:'working_days',carryForwardDays:0,requiresApprovedPlan:true}}}]});
+seed(root+'/positions/ROL_000005',{title:'Clerk',jobGradeByLegalEntity:{LE_ZM:'JG01'}});
+const older=await leaveEligibility(org,{assignments:[{type:'primary',nodeId:'LE_ZM',positionCode:'ROL_000005'}]});
+assert.equal(older.options[0].daysPerYear,25,'Grades approved before leave moved to the grade keep their per-grade entitlements');
+
 // ---- A grade in use by a role cannot be disabled; a draft that changes after submission cannot be approved ----
 const disabled=structuredClone(saved.grades);disabled.find(g=>g.code==='JG02').enabled=false;
 assert.equal((await call('maker','save',{legalEntityId:'LE_KE',expectedVersion:4,grades:disabled})).version,5);
@@ -181,5 +232,21 @@ const common=commonEducationLevels([
 ]);
 assert.deepEqual(common,[{code:'SECONDARY',name:'Secondary',rank:2},{code:'BACHELOR',name:'Bachelor degree',rank:5},{code:'MASTER',name:'Master',rank:null}]);
 assert.deepEqual(commonEducationLevels([]),[]);
+
+// ---- A grade cannot be approved while it uses a Benefits item that was switched off or removed ----
+{
+ const policy=kenyaCompensationTemplate();
+ policy.items.find(x=>x.code==='AL_HOUSING').enabled=false;
+ const cat=catalogueOf(policy);
+ const grade={rank:4,title:'Supervisor',enabled:true,taxCodes:[],deductionCodes:[],benefitCodes:['AL_HOUSING'],leave:[],payModelCode:''};
+ const off=catalogueProblems([grade],cat);
+ assert.equal(off.length,1);
+ assert.match(off[0],/AL_HOUSING.*switched off in Benefits/);
+ const gone=catalogueProblems([{...grade,benefitCodes:['AL_REMOVED']}],cat);
+ assert.match(gone[0],/AL_REMOVED.*no longer in the Benefits catalogue/);
+ assert.deepEqual(catalogueProblems([{...grade,enabled:false}],cat),[],'a disabled grade is not held to the catalogue');
+ policy.items.find(x=>x.code==='AL_HOUSING').enabled=true;
+ assert.deepEqual(catalogueProblems([grade],catalogueOf(policy)),[]);
+}
 
 console.log('HR job grades governance, pay rules and universal role minimum education scenario passed');

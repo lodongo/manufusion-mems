@@ -198,9 +198,9 @@ export const hrEducationConfigRoutes={
   const selection=await educationScopeForEmployee(ctx.orgId,employee.data,ctx.role==='org_super_admin'&&uid===ctx.uid);
   return {...selection,config:selection.entity?await getEducationConfig(ctx.orgId,selection.entity.id):null};
  })],
- 'POST /api/org/hr/education/admin':[orgRoute('org.hr.education.admin','ADM.settings',async ctx=>{
-  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'ADM.settings'))
-   throw new HttpError(403,'Organization settings administrator required.');
+ 'POST /api/org/hr/education/admin':[orgRoute('org.hr.education.admin','HRM.education.manage',async ctx=>{
+  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'HRM.education.manage'))
+   throw new HttpError(403,'Permission required: education maintainer.');
   const entities=await activeEntities(ctx.orgId);
   const requested=clean(ctx.body.legalEntityId,128);
   const entity=entities.find(e=>e.id===requested)||(!requested?entities[0]:undefined);
@@ -209,9 +209,9 @@ export const hrEducationConfigRoutes={
    // Job grades shown here are the effective ones (active policy when approved, otherwise the older list).
    config:entity?await getEducationConfig(ctx.orgId,entity.id):null};
  })],
- 'POST /api/org/hr/education/admin/save':[orgRoute('org.hr.education.admin.save','ADM.settings',async ctx=>{
-  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'ADM.settings'))
-   throw new HttpError(403,'Organization settings administrator required.');
+ 'POST /api/org/hr/education/admin/save':[orgRoute('org.hr.education.admin.save','HRM.education.manage',async ctx=>{
+  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'HRM.education.manage'))
+   throw new HttpError(403,'Permission required: education maintainer.');
   const id=clean(ctx.body.legalEntityId,128);
   const entity=(await activeEntities(ctx.orgId)).find(e=>e.id===id);
   if(!entity)throw new HttpError(404,'Select an active legal entity.');
@@ -231,9 +231,9 @@ export const hrEducationConfigRoutes={
   });
   return {ok:true,config:{...config,jobGrades:(await getEducationConfig(ctx.orgId,id)).jobGrades}};
  })],
- 'POST /api/org/hr/education/admin/adopt':[orgRoute('org.hr.education.admin.adopt','ADM.settings',async ctx=>{
-  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'ADM.settings'))
-   throw new HttpError(403,'Organization settings administrator required.');
+ 'POST /api/org/hr/education/admin/adopt':[orgRoute('org.hr.education.admin.adopt','HRM.education.manage',async ctx=>{
+  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'HRM.education.manage'))
+   throw new HttpError(403,'Permission required: education maintainer.');
   const source=clean(ctx.body.sourceLegalEntityId,128);
   const target=clean(ctx.body.targetLegalEntityId,128);
   const entities=await activeEntities(ctx.orgId);
