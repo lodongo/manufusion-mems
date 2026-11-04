@@ -232,7 +232,7 @@ export default function HrCompensationAdmin(){
           'Entitlement made available annually (subject to employment and statutory eligibility)'} · Approved plan required</p>
         </section>;
        })}
-       {!grades.some(g=>g.enabled)&&<p className="text-xs text-amber-700">Configure enabled job grades first under Education & Job Grades.</p>}
+       {!grades.some(g=>g.enabled)&&<p className="text-xs text-amber-700">Configure and approve job grades first under HR → Job Grades.</p>}
       </div>:<div className="rounded-xl border border-line bg-page p-3">
        <h4 className="text-sm font-semibold">Job grade applicability</h4>
        {locked?<p className="mt-2 text-xs text-amber-700">Legally mandatory reference applies regardless of grade; employee-specific statutory exemptions require verified evidence.</p>

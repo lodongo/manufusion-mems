@@ -84,7 +84,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Organization Structure & Design', path: 'hr/HR04', permission: 'HRM.shell.view' },
         { label: 'Job Roles & Position Profiles', path: 'hr/HR05', permission: 'HRM.shell.view' },
         { label: 'Employment Types & Categories', path: 'hr/HR06', permission: 'HRM.shell.view' },
-        { label: 'Job Grading & Classification', path: 'hr/HR07', permission: 'HRM.shell.view' },
+        { label: 'Job Grades', path: 'hr/HR07', permission: 'HRM.shell.view' },
         { label: 'Workforce Establishment, Deployment & Vacancies', path: 'hr/HR08', permission: 'HRM.shell.view' },
         { label: 'Recruitment, Onboarding & Confirmation', path: 'hr/HR09', permission: 'HRM.shell.view' },
         { label: 'Leave & Absence Management', path: 'hr/HR10', permission: 'HRM.shell.view' },

@@ -233,7 +233,7 @@ export async function readPayConfig(org:string,entity:string,countryCode:string,
  const d=await getDoc(docPath(org,entity));
  return d?d.data as unknown as PayConfig:defaultPayConfig(countryCode,currency);
 }
-const entities=async(org:string)=>(await listDocs(`organizations/${org}/structure`))
+export const entities=async(org:string)=>(await listDocs(`organizations/${org}/structure`))
  .filter(d=>str(d.data.level)==='legal_entity'&&str(d.data.status)!=='inactive')
  .map(d=>({id:d.id,name:str(d.data.name),
   countryCode:sc((isObj(d.data.attributes)?d.data.attributes.countryCode:'')||d.data.countryCode||d.data.country,2).toUpperCase(),
@@ -318,7 +318,7 @@ export function validatePayConfig(raw:unknown,grades:Set<string>,countryCode:str
  }
  return {countryCode,currency,items,version:0,status:'draft',lastReviewed:sc(raw.lastReviewed,10)};
 }
-function countryOf(entity:{countryCode:string;currency:string},orgCountry:string){
+export function countryOf(entity:{countryCode:string;currency:string},orgCountry:string){
  return entity.countryCode||orgCountry||'';
 }
 export const hrCompensationRoutes={

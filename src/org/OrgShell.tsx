@@ -104,7 +104,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
     },
     {
         title: 'HR administration',
-        items: [{ key: 'hr_education_config', label: 'Education hierarchy & job grades', Icon: BookOpen, perm: 'ADM.settings' }],
+        items: [{ key: 'hr_education_config', label: 'Education hierarchy', Icon: BookOpen, perm: 'ADM.settings' }],
     },
     {
         title: 'People and access',
@@ -164,7 +164,7 @@ const TITLES: Record<string, string> = {
     positions: 'Job roles',
     positions_view: 'Job role structure',
     roles: 'Security roles',
-    hr_education_config: 'Education hierarchy & job grades',
+    hr_education_config: 'Education hierarchy',
     transaction_governance: 'Transaction governance',
     transaction_catalogue: 'Transaction access',
     modules: 'All modules',
