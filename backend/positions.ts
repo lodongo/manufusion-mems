@@ -26,6 +26,7 @@ import { detectImage } from './branding';
 import { ID_RE, childrenOf, col, designOf, getNode, managerContext, nodeOut, record } from './structure';
 import { matchingRoleNodes, employmentCoverage, type RoleStaffingRow, type StaffingUnit } from './positionStaffing';
 import {getEducationConfig} from './hrEducationConfig';
+import { resolveMinEducation } from './roleMinEducation';
 
 // Organization roles (job positions such as CEO or Manufacturing Manager).
 // These are NOT system access roles: they describe the org chart, not what a user can do in MEMS.
@@ -76,6 +77,7 @@ function positionOut(doc: Doc) {
         securityRoles: ['org_user', ...(Array.isArray(d.securityRoles) ? (d.securityRoles as Plain[]).map(str).filter(Boolean) : []).filter(id => id !== 'org_user')],
         coreSkills: Array.isArray(d.coreSkills) ? (d.coreSkills as Plain[]).map(str).filter(Boolean) : [],
         jobGradeByLegalEntity: isObj(d.jobGradeByLegalEntity) ? Object.fromEntries(Object.entries(d.jobGradeByLegalEntity).map(([id,code])=>[id,str(code)]).filter(([,code])=>!!code)) : {},
+        minEducationByLegalEntity: isObj(d.minEducationByLegalEntity) ? Object.fromEntries(Object.entries(d.minEducationByLegalEntity).map(([id,code])=>[id,str(code)]).filter(([,code])=>!!code)) : {},
         staffingPlan: (Array.isArray(d.staffingPlan) ? d.staffingPlan : []).filter(isObj).map((item) => ({
             nodeId: str(item.nodeId), enabled: item.enabled === true, required: Number(item.required) || 0,
         })),
@@ -239,8 +241,14 @@ export const positionRoutes = {
         orgRoute('org.positions.job_grades','ADM.structure',async(ctx)=>{
           const entityDocs=(await listDocs(col(ctx.orgId))).filter(d=>str(d.data.level)==='legal_entity'&&str(d.data.status)!=='inactive');
           const entities=await Promise.all(entityDocs.map(async d=>({
-            id:d.id,name:str(d.data.name),grades:(await getEducationConfig(ctx.orgId,d.id)).jobGrades
-              .filter(x=>x.enabled).map(x=>({code:x.code,rank:x.rank,title:x.title})),
+            id:d.id,name:str(d.data.name),
+            ...await(async()=>{
+              const conf=await getEducationConfig(ctx.orgId,d.id);
+              return {
+                grades:conf.jobGrades.filter(x=>x.enabled).map(x=>({code:x.code,rank:x.rank,title:x.title})),
+                levels:conf.levels.filter(x=>x.enabled).map(x=>({code:x.code,name:x.name,rank:x.rank})),
+              };
+            })(),
           })));
           return {entities};
         }),
@@ -291,6 +299,14 @@ export const positionRoutes = {
                     throw new HttpError(400,'Choose an enabled job grade configured for the selected legal entity.');
                 jobGradeByLegalEntity[legalEntityId]=grade;
             }
+            // Minimum level of education for the role, per legal entity. Required wherever the role has a job grade.
+            const rawEdu=ctx.body.minEducationByLegalEntity;
+            if(rawEdu!==undefined&&!isObj(rawEdu))throw new HttpError(400,'Minimum education must be mapped by legal entity.');
+            const previousEdu=isObj(oldGradeDoc?.data.minEducationByLegalEntity)?oldGradeDoc!.data.minEducationByLegalEntity:{};
+            const minEducationByLegalEntity=await resolveMinEducation(isObj(rawEdu)?rawEdu:previousEdu,jobGradeByLegalEntity,
+                entityNodes.map(d=>({id:d.id,name:str(d.data.name)})),
+                async(id)=>(await getEducationConfig(ctx.orgId,id)).levels);
+            const gradeAudit=Object.entries(jobGradeByLegalEntity).map(([e,g])=>`${e}:${g}/${minEducationByLegalEntity[e]}`).join(', ');
             const staffingPlan = validateStaffingPlan(ctx.body.staffingPlan, operatingLevel, nodes);
             const matchedNodes = matchingRoleNodes(operatingLevel, nodes);
             if (staffingPlan.length && staffingPlan.length !== matchedNodes.length) {
@@ -346,9 +362,9 @@ export const positionRoutes = {
                     const mine = (Array.isArray(ctx.me.data.assignments) ? (ctx.me.data.assignments as Plain[]) : []).filter(isObj).some((a) => str(a.positionCode) === code);
                     if (mine && ctx.role !== 'org_super_admin') throw new HttpError(403, 'You cannot change the security roles of a job role you hold.');
                 }
-                await updateFields(`${posCol(ctx.orgId)}/${code}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, jobGradeByLegalEntity, staffingPlan, updatedAt: now, updatedBy: ctx.uid });
+                await updateFields(`${posCol(ctx.orgId)}/${code}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, jobGradeByLegalEntity, minEducationByLegalEntity, staffingPlan, updatedAt: now, updatedBy: ctx.uid });
                 await syncRoleAtSites(ctx.orgId, code, operatingLevel, staffingPlan, nodeDocs.map(nodeOut), ctx.uid);
-                await record(ctx, 'org.position.update', `${code} ${title}`, `${added.length || removed.length ? `Security roles added: ${added.join(', ') || 'none'}; removed: ${removed.join(', ') || 'none'}` : ''} ${positionSodNote}`.trim());
+                await record(ctx, 'org.position.update', `${code} ${title}`, `${added.length || removed.length ? `Security roles added: ${added.join(', ') || 'none'}; removed: ${removed.join(', ') || 'none'}` : ''} ${gradeAudit ? `Grade/min education: ${gradeAudit}.` : ''} ${positionSodNote}`.trim());
                 if (added.length || removed.length) clearAccessCache(ctx.orgId);
                 return { code };
             }
@@ -357,10 +373,10 @@ export const positionRoutes = {
                 const n = await nextOrgCounter(ctx.orgId, 'positionSeq');
                 if (n > 999999) throw new HttpError(400, 'Your organization has reached 999999 job roles.');
                 const newCode = `ROL_${String(n).padStart(6, '0')}`;
-                if (await writeDoc(`${posCol(ctx.orgId)}/${newCode}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, jobGradeByLegalEntity, staffingPlan, createdAt: now, createdBy: ctx.uid, updatedAt: now }, { exists: false })) {
+                if (await writeDoc(`${posCol(ctx.orgId)}/${newCode}`, { title, description, parentCode, operatingLevel, securityRoles, coreSkills, jobGradeByLegalEntity, minEducationByLegalEntity, staffingPlan, createdAt: now, createdBy: ctx.uid, updatedAt: now }, { exists: false })) {
                     await syncRoleAtSites(ctx.orgId, newCode, operatingLevel, staffingPlan, nodeDocs.map(nodeOut), ctx.uid);
                     if (securityRoles.length) clearAccessCache(ctx.orgId);
-                    await record(ctx, 'org.position.create', `${newCode} ${title}`, `${parentCode ? `Reports to ${parentCode}` : 'Top role'} ${positionSodNote}`.trim());
+                    await record(ctx, 'org.position.create', `${newCode} ${title}`, `${parentCode ? `Reports to ${parentCode}` : 'Top role'} ${gradeAudit ? `Grade/min education: ${gradeAudit}.` : ''} ${positionSodNote}`.trim());
                     return { code: newCode };
                 }
             }

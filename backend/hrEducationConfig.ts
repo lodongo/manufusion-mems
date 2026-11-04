@@ -2,10 +2,11 @@ import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc} from './core';
 import {orgRoute,hasPerm,type OrgContext} from './guards';
 import {withLock} from './finCore';
 import {hrAudit} from './hrAudit';
+import {DEFAULT_JOB_GRADES,activeJobGrades,toLegacy} from './hrJobGradeStore';
 
 /** Larger Education Rank means higher typical academic attainment.
  * Professional credentials may span multiple ranks; tenant admins can adjust.
- * Job Grades describe employment, not academic examination marks.
+ * Job Grades describe employment, not academic examination marks, and are governed in HR → Job Grades.
  */
 export type EducationLevel={code:string;name:string;description:string;enabled:boolean;rank:number};
 export type Qualification={code:string;levelCode:string;name:string;description:string;enabled:boolean};
@@ -42,17 +43,7 @@ export const DEFAULT_EDUCATION:EducationConfig={
  ['DOCTORATE_GENERAL','DOCTORATE','Doctorate / PhD'],
  ['PROFESSIONAL_GENERAL','PROFESSIONAL','Professional certification'],
  ].map(([code,levelCode,name])=>({code,levelCode,name,description:'',enabled:true})),
- jobGrades:[
- [1,'Unskilled / casual','Entry-grade manual or casual work (illustrative; contractual classification is configured separately)'],
- [2,'Semi-skilled','Work requiring initial practical training'],
- [3,'Skilled / operator','Qualified operators and skilled trades'],
- [4,'Technician / associate','Technical and professional associate roles'],
- [5,'Specialist / professional','Experienced specialists and professionals'],
- [6,'Supervisor / team leader','Frontline responsibility for teams'],
- [7,'Manager','Departmental or functional management'],
- [8,'Senior manager / head','Senior organizational leadership'],
- [9,'Executive','Executive accountability'],
- ].map(([rank,title,description])=>({code:'JG'+String(rank).padStart(2,'0'),rank:Number(rank),title:String(title),description:String(description),enabled:true})),
+ jobGrades:DEFAULT_JOB_GRADES,
  gradingSystems:[],
 };
 const entityNodes=async(org:string)=>listDocs(`organizations/${org}/structure`);
@@ -130,9 +121,13 @@ export function resolveEducationConfig(data?:Record<string,unknown>):EducationCo
   gradingSystems:Array.isArray(d.gradingSystems)?d.gradingSystems as GradingSystem[]:[],
  };
 }
+/** Job grades are governed in HR → Job Grades (draft → approval → active). Once a legal entity has an
+ * active policy, that policy is the only grade list every reader sees (leave eligibility, role mapping,
+ * compensation applicability). Before that, the older list below keeps working unchanged. */
 export async function getEducationConfig(org:string,entity:string):Promise<EducationConfig>{
- const doc=await getDoc(configPath(org,entity));
- return resolveEducationConfig(doc?.data);
+ const [doc,governed]=await Promise.all([getDoc(configPath(org,entity)),activeJobGrades(org,entity)]);
+ const config=resolveEducationConfig(doc?.data);
+ return governed?{...config,jobGrades:governed.map(toLegacy)}:config;
 }
 export async function checkEducationEntry(org:string,uid:string,entry:Record<string,unknown>,allowAdminSelf=false){
  const employee=await getDoc('users/'+uid);
@@ -153,13 +148,14 @@ export async function checkEducationEntry(org:string,uid:string,entry:Record<str
    throw new HttpError(400,'The legacy academic grade is invalid for the employee’s legal entity.');
  }
 }
-function normalizeConfig(raw:unknown):EducationConfig{
- if(!isObj(raw))throw new HttpError(400,'Submit an education and job-grade configuration.');
- const levelRows=raw.levels,qualRows=raw.qualifications,jobRows=raw.jobGrades;
+/** Education levels and qualifications only. Job grades are governed in HR → Job Grades, so whatever a
+ * client sends for them is ignored and the grades already stored for the entity are kept untouched. */
+function normalizeConfig(raw:unknown,keepJobGrades:JobGrade[]):EducationConfig{
+ if(!isObj(raw))throw new HttpError(400,'Submit an education configuration.');
+ const levelRows=raw.levels,qualRows=raw.qualifications;
  if(!Array.isArray(levelRows)||!levelRows.length||levelRows.length>100||
-    !Array.isArray(qualRows)||qualRows.length>500||
-    !Array.isArray(jobRows)||!jobRows.length||jobRows.length>100)
-   throw new HttpError(400,'Configure up to 100 levels, 500 qualifications and 100 job grades.');
+    !Array.isArray(qualRows)||qualRows.length>500)
+   throw new HttpError(400,'Configure up to 100 levels and 500 qualifications.');
  const codes=(items:unknown[],kind:string)=>{
   const mapped=items.map(item=>{
    if(!isObj(item))throw new HttpError(400,'Invalid '+kind+' entry.');
@@ -183,19 +179,11 @@ function normalizeConfig(raw:unknown):EducationConfig{
    throw new HttpError(400,'Each qualification requires a name and existing education level.');
   return {code,levelCode,name,description:clean(entry.description,350),enabled:entry.enabled!==false};
  });
- const jobGrades=codes(jobRows,'job grade').map(({code,entry})=>{
-  const rank=Number(entry.rank),title=clean(entry.title);
-  if(!title||!Number.isInteger(rank)||rank<1||rank>9999)
-   throw new HttpError(400,'Job grades require a title and numeric grade level.');
-  return {code,rank,title,description:clean(entry.description,350),enabled:entry.enabled!==false};
- });
- if(new Set(jobGrades.map(g=>g.rank)).size!==jobGrades.length)
-  throw new HttpError(400,'Job grade numbers must be unique within a legal entity.');
  // Older academic grading settings are read-only compatibility data.
  const gradingSystems=Array.isArray(raw.gradingSystems)
   ?(raw.gradingSystems as GradingSystem[]).filter(x=>isObj(x)).slice(0,50):[];
  return {levels:levels.sort((a,b)=>a.rank-b.rank),qualifications,
-         jobGrades:jobGrades.sort((a,b)=>a.rank-b.rank),gradingSystems};
+         jobGrades:keepJobGrades,gradingSystems};
 }
 const activeEntities=async(org:string)=>(await entityNodes(org))
  .filter(d=>str(d.data.level)==='legal_entity'&&str(d.data.status)!=='inactive')
@@ -218,7 +206,8 @@ export const hrEducationConfigRoutes={
   const entity=entities.find(e=>e.id===requested)||(!requested?entities[0]:undefined);
   const saved=entity?await getDoc(configPath(ctx.orgId,entity.id)):null;
   return {entities,entity:entity||null,configured:!!saved,
-   config:entity?resolveEducationConfig(saved?.data):null};
+   // Job grades shown here are the effective ones (active policy when approved, otherwise the older list).
+   config:entity?await getEducationConfig(ctx.orgId,entity.id):null};
  })],
  'POST /api/org/hr/education/admin/save':[orgRoute('org.hr.education.admin.save','ADM.settings',async ctx=>{
   if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'ADM.settings'))
@@ -226,17 +215,21 @@ export const hrEducationConfigRoutes={
   const id=clean(ctx.body.legalEntityId,128);
   const entity=(await activeEntities(ctx.orgId)).find(e=>e.id===id);
   if(!entity)throw new HttpError(404,'Select an active legal entity.');
-  const config=normalizeConfig(ctx.body.config);
-  await withLock(ctx.orgId,'hr_education_config_'+id,async()=>{
+  // Validate the shape first so a malformed request never takes the lock.
+  normalizeConfig(ctx.body.config,[]);
+  const config=await withLock(ctx.orgId,'hr_education_config_'+id,async()=>{
    const prior=await getDoc(configPath(ctx.orgId,id));
+   // Job grades are governed in HR → Job Grades; keep exactly what is stored for this entity.
+   const data=normalizeConfig(ctx.body.config,resolveEducationConfig(prior?.data).jobGrades);
    const version=Number(prior?.data.version||0)+1;
-   if(!await writeDoc(configPath(ctx.orgId,id),{...config,updatedAt:nowIso(),updatedBy:ctx.uid,
+   if(!await writeDoc(configPath(ctx.orgId,id),{...data,updatedAt:nowIso(),updatedBy:ctx.uid,
     version,adoptedFromEntityId:str(prior?.data.adoptedFromEntityId)||''},
     prior?{updateTime:prior.updateTime}:{exists:false}))
     throw new HttpError(409,'Education settings changed while saving. Reload and try again.');
    await hrAudit(ctx,'education.config.save',{type:'legal_entity',id},'version='+version);
+   return data;
   });
-  return {ok:true,config};
+  return {ok:true,config:{...config,jobGrades:(await getEducationConfig(ctx.orgId,id)).jobGrades}};
  })],
  'POST /api/org/hr/education/admin/adopt':[orgRoute('org.hr.education.admin.adopt','ADM.settings',async ctx=>{
   if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'ADM.settings'))
@@ -247,12 +240,13 @@ export const hrEducationConfigRoutes={
   if(!source||!target||source===target||!entities.some(e=>e.id===source)||!entities.some(e=>e.id===target))
    throw new HttpError(400,'Select two different active legal entities in your organization.');
   if(ctx.body.confirmAdoption!==true)
-   throw new HttpError(400,'Confirm copying source education and job-grade configuration to the target legal entity.');
+   throw new HttpError(400,'Confirm copying the source education levels and qualifications to the target legal entity. Job grades are never copied.');
   return withLock(ctx.orgId,'hr_education_config_'+target,async()=>{
    const from=await getDoc(configPath(ctx.orgId,source));
    if(!from)throw new HttpError(409,'Configure and save the source legal entity before adopting.');
    const previous=await getDoc(configPath(ctx.orgId,target));
-   const data=normalizeConfig(resolveEducationConfig(from.data));
+   // Education levels and qualifications only: the target keeps its own job grades.
+   const data=normalizeConfig(resolveEducationConfig(from.data),resolveEducationConfig(previous?.data).jobGrades);
    if(!await writeDoc(configPath(ctx.orgId,target),{
     ...data,version:Number(previous?.data.version||0)+1,
     updatedBy:ctx.uid,updatedAt:nowIso(),
@@ -260,7 +254,7 @@ export const hrEducationConfigRoutes={
    },previous?{updateTime:previous.updateTime}:{exists:false}))
     throw new HttpError(409,'Target settings changed while adopting. Reload and try again.');
    await hrAudit(ctx,'education.config.adopt',{type:'legal_entity',id:target},'source='+source);
-   return {ok:true,config:data,sourceLegalEntityId:source,targetLegalEntityId:target};
+   return {ok:true,config:{...data,jobGrades:(await getEducationConfig(ctx.orgId,target)).jobGrades},sourceLegalEntityId:source,targetLegalEntityId:target};
   });
  })],
 };

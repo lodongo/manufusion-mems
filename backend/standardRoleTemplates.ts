@@ -44,6 +44,18 @@ export function standardRoleTemplates(groups: PermGroup[]): StandardRoleTemplate
         permissions:['HRM.shell.view','HRM.compensation.approve']});
       assigned.add('HRM.compensation.approve');
     }
+    if(enabled.get('HRM')?.has('HRM.grades.manage')){
+      templates.push({id:'std_hrm_grades_maintainer',module:'HRM',name:'HR – Job Grade Maintainer',
+        description:'Prepare job grades with minimum salary, taxes and deductions as a draft and submit them for approval; never approves them.',
+        permissions:['HRM.shell.view','HRM.grades.manage']});
+      assigned.add('HRM.grades.manage');
+    }
+    if(enabled.get('HRM')?.has('HRM.grades.approve')){
+      templates.push({id:'std_hrm_grades_approver',module:'HRM',name:'HR – Job Grade Approver',
+        description:'Approve activation of job grades and minimum salaries for assigned legal entities, level by level under the Chart of Authority; never own submissions.',
+        permissions:['HRM.shell.view','HRM.grades.approve']});
+      assigned.add('HRM.grades.approve');
+    }
     if(enabled.get('HRM')?.has('HRM.skills.manage')){
       templates.push({
         id:'std_hrm_skills_administrator',module:'HRM',name:'HR – Skills Administrator',

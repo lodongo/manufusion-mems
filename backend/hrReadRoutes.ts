@@ -73,6 +73,8 @@ export const hrReadRoutes = {
           ?new Set(d.data.coreSkills.filter((x):x is string=>typeof x==='string'&&!!x.trim()).map(x=>x.trim())).size:0,
         gradeMappings:isObj(d.data.jobGradeByLegalEntity)
           ?Object.values(d.data.jobGradeByLegalEntity).filter(v=>!!str(v)).length:0,
+        educationMappings:isObj(d.data.minEducationByLegalEntity)
+          ?Object.values(d.data.minEducationByLegalEntity).filter(v=>!!str(v)).length:0,
         staffing:staffingAllowed?
           computeRoleStaffing(d.id,d.data.staffingPlan,people,names,asOf):null,
       })),readOnly:true,staffingAllowed };
