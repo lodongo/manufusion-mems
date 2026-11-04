@@ -92,6 +92,8 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Performance Management', path: 'hr/HR12', permission: 'HRM.shell.view' },
         { label: 'Learning, Skills & Career Development', path: 'hr/HR13', permission: 'HRM.shell.view' },
         { label: 'Privacy & Access Rules', path: 'hr/HR17', prefix: 'HRM.rules.' },
+        { label: 'Education', path: 'hr/HR18', permission: 'HRM.education.manage' },
+        { label: 'Benefits', path: 'hr/HR19', permission: 'HRM.benefits.manage' },
         { label: 'Employee Relations & Disciplinary Management', path: 'hr/HR14', permission: 'HRM.shell.view' },
         { label: 'Employee Engagement & Feedback', path: 'hr/HR15', permission: 'HRM.shell.view' },
         { label: 'Employee Movements, Separation & Offboarding', path: 'hr/HR16', permission: 'HRM.shell.view' },
@@ -417,9 +419,15 @@ export default function OrgHomePage({
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR01' && sub === 'reportees' && hasPerm(data.permissions,'HRM.shell.view')) content = <HrReportees />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR01' && sub === 'reportee' && /^[A-Za-z0-9_-]{1,128}$/.test(route.split('/')[4]||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrEmployeePortal uid={route.split('/')[4]} origin='HR01' reporteeView />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR17' && (hasPerm(data.permissions,'HRM.rules.manage')||hasPerm(data.permissions,'HRM.rules.approve'))) content = <HrAccessRules />;
+    else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR18' && hasPerm(data.permissions,'HRM.education.manage')) content = <HrShell sectionCode='HR18' />;
+    else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR19' && (hasPerm(data.permissions,'HRM.benefits.manage')||hasPerm(data.permissions,'HRM.compensation.approve'))) content = <HrShell sectionCode='HR19' />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && id === 'HR01' && !sub && hasPerm(data.permissions,'HRM.shell.view')) content = <HrEmployeePortal uid={session.user.uid} origin='HR01' selfView />;
     else if (activeMenu?.module.code === 'HRM' && section === 'hr' && ['HR01','HR02','HR08'].includes(id||'') && sub === 'employee' && /^[A-Za-z0-9_-]{1,128}$/.test(route.split('/')[4]||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrEmployeePortal uid={route.split('/')[4]} origin={id as 'HR01'|'HR02'|'HR08'} />;
-    else if (activeMenu?.module.code === 'HRM' && section === 'hr' && /^HR(0[1-9]|1[0-6])$/.test(id||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrShell sectionCode={id} />;
+    else if (activeMenu?.module.code === 'HRM' && section === 'hr' && /^HR(0[1-9]|1[0-6])$/.test(id||'') && hasPerm(data.permissions,'HRM.shell.view')) content = <HrShell sectionCode={id} setup={[
+        ...(hasPerm(data.permissions,'HRM.benefits.manage') ? [{label:'Benefits',hint:'Pay models, allowances, leave types, statutory rules and exceptions',path:'hr/HR19'}] : []),
+        ...(hasPerm(data.permissions,'HRM.grades.manage') || hasPerm(data.permissions,'HRM.grades.approve') ? [{label:'Job Grades',hint:'Minimum salary, benefit package and payslip preview per grade',path:'hr/HR07'}] : []),
+        ...(hasPerm(data.permissions,'HRM.education.manage') ? [{label:'Education',hint:'Education ranks and qualifications',path:'hr/HR18'}] : []),
+      ]} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='DOC') content = <DocumentRegistryPage mode='register' canConfigure={hasPerm(data.permissions,'ADM.document_config')} canReview={hasPerm(data.permissions,'ADM.document_review')} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='0') content = <InventoryDashboard />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='3') content = <StockTake />;

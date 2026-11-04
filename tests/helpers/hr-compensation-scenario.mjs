@@ -15,7 +15,7 @@ seed('users/approver',{uid:'approver',orgId:org,status:'active',role:'member',fi
 seed(root+'/positions/ROL_000001',{title:'Group Finance Director'});
 seed(root+'/positions/ROL_000002',{title:'HR Manager',parentCode:'ROL_000001'});
 seed('users/member',{uid:'member',orgId:org,status:'active',role:'member',assignments:[]});
-const permsOf=uid=>uid==='admin'?['ADM.settings','HRM.shell.view']:uid==='approver'?['HRM.shell.view','HRM.compensation.approve']:['HRM.shell.view'];
+const permsOf=uid=>uid==='admin'?['HRM.benefits.manage','HRM.shell.view']:uid==='approver'?['HRM.shell.view','HRM.compensation.approve']:['HRM.shell.view'];
 const ctx=(uid,body={})=>({
  uid,orgId:org,role:uid==='admin'?'org_super_admin':'member',
  me:snapshot('users/'+uid),org:snapshot(root),body,actor:{uid,orgId:org},
@@ -43,6 +43,19 @@ const ug=await call('admin','/api/org/hr/compensation/get',{legalEntityId:'LE_UG
 assert.equal(ug.currency,'UGX');
 assert.equal(ug.countryCode,'UG');
 assert.equal(ug.config.items.some(x=>x.code.startsWith('KE_')),false);
+// ---- Statutory exceptions: Kenya defaults are applied ONCE, other countries start empty ----
+const exOf=(cfg,code)=>cfg.items.find(x=>x.code===code).exceptions||[];
+assert.equal(read.config.exceptionsSeeded,true);
+const pwd=exOf(read.config,'KE_PAYE').find(e=>e.code==='PAYE_PWD');
+assert.ok(pwd&&pwd.enabled&&pwd.effect==='exempt_first'&&pwd.value===150000&&/KRA/.test(pwd.evidence));
+assert.ok(exOf(read.config,'KE_PERSONAL_RELIEF').some(e=>e.code==='RELIEF_NON_RESIDENT'&&e.effect==='not_entitled'));
+assert.ok(exOf(read.config,'KE_NSSF').some(e=>e.code==='NSSF_TIER2_CONTRACTED_OUT'&&e.effect==='reroute'&&e.enabled));
+for(const code of ['KE_NSSF','KE_SHIF','KE_AHL','KE_PAYE'])assert.ok(exOf(read.config,code).length>0,code+' has exceptions');
+assert.ok(exOf(read.config,'KE_AHL').every(e=>e.enabled===false),'unverified Housing Levy exemptions stay switched off');
+assert.ok(exOf(read.config,'KE_SHIF').every(e=>e.enabled===false),'unverified SHIF exemptions stay switched off');
+assert.equal(read.config.items.find(x=>x.code==='KE_NSSF').options.preTax,true);
+assert.equal(ug.config.items.some(x=>(x.exceptions||[]).length>0),false,'No Kenyan defaults outside Kenya');
+assert.equal(read.canEdit,true);
 const policy=structuredClone(read.config);
 const incentive=policy.items.find(x=>x.code==='INC_KPI');
 incentive.enabled=true;
@@ -106,4 +119,30 @@ await approval('approver','/api/org/hr/compensation/decide',{id:second.id,decisi
 await assert.rejects(()=>approval('admin','/api/org/hr/compensation/submit',submitBody({expectedVersion:3,annualCostImpact:500000})),/Approval level L2/);
 await assert.rejects(()=>call('admin','/api/org/hr/compensation/save',{legalEntityId:'LE_KE',config:next,expectedVersion:1}),/changed since/);
 console.log('HR compensation activation maker-checker and Chart of Authority scenario passed');
+// Removing a default exception and saving must stick: the Kenya defaults are never re-applied.
+const base0=await call('admin','/api/org/hr/compensation/get',{legalEntityId:'LE_KE'});
+let ver=base0.config.version;
+const trimmed=structuredClone(base0.config);
+trimmed.items.find(x=>x.code==='KE_NSSF').exceptions=trimmed.items.find(x=>x.code==='KE_NSSF').exceptions.filter(e=>e.code!=='NSSF_DOCUMENTED_EXEMPTION');
+saved=await call('admin','/api/org/hr/compensation/save',{legalEntityId:'LE_KE',config:trimmed,expectedVersion:ver});
+ver=saved.version;
+const reread=await call('admin','/api/org/hr/compensation/get',{legalEntityId:'LE_KE'});
+assert.equal(exOf(reread.config,'KE_NSSF').some(e=>e.code==='NSSF_DOCUMENTED_EXEMPTION'),false,'defaults are one-time');
+const noneLeft=structuredClone(reread.config);
+noneLeft.items.find(x=>x.code==='KE_AHL').exceptions=[];
+saved=await call('admin','/api/org/hr/compensation/save',{legalEntityId:'LE_KE',config:noneLeft,expectedVersion:ver});
+ver=saved.version;
+assert.deepEqual(exOf((await call('admin','/api/org/hr/compensation/get',{legalEntityId:'LE_KE'})).config,'KE_AHL'),[],'an emptied list stays empty');
+const badEx=(mutate)=>{const c=structuredClone(noneLeft);mutate(c.items.find(x=>x.code==='KE_PAYE'),c);return c;};
+const save=(config)=>call('admin','/api/org/hr/compensation/save',{legalEntityId:'LE_KE',config,expectedVersion:ver});
+await assert.rejects(()=>save(badEx(i=>{i.exceptions[0].evidence='';})),/evidence/);
+await assert.rejects(()=>save(badEx(i=>{i.exceptions[0].reference='javascript:alert(1)';})),/web address/);
+await assert.rejects(()=>save(badEx(i=>{i.exceptions[0].value=0;})),/amount or rate/);
+await assert.rejects(()=>save(badEx(i=>{i.exceptions[0].effect='reroute';})),/tiers/);
+await assert.rejects(()=>save(badEx(i=>{i.exceptions[0].effect='not_entitled';})),/reliefs only/);
+await assert.rejects(()=>save(badEx(i=>{i.exceptions.push({...i.exceptions[0]});})),/listed twice/);
+await assert.rejects(()=>save(badEx((i,c)=>{c.items.find(x=>x.code==='KE_SHIF').exceptions=[{...i.exceptions[0]}];})),/one item only/);
+// A switched-off exception needs no evidence (it is a placeholder for legal review).
+const placeholder=badEx(i=>{i.exceptions.push({code:'PAYE_PLACEHOLDER',name:'Placeholder',effect:'exempt',value:0,evidence:'',reference:'',description:'',enabled:false});});
+assert.equal((await save(placeholder)).version,ver+1);
 console.log('HR compensation legal-entity policy and Kenya mandatory scenario passed');

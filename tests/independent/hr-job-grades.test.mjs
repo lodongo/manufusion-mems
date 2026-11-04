@@ -58,7 +58,8 @@ test('the Job Grades screen is wired in, keeps its action bar fixed and verifies
  const shell=readFileSync('src/org/HrShell.tsx','utf8');
  assert.match(shell,/\['HR07','Job Grades'\]/);
  assert.match(shell,/sectionCode==='HR07'&&<HrJobGrades\/>/);
- assert.match(shell,/sectionCode==='HR07'\?"min-h-0 min-w-0 flex-1 overflow-hidden/,'the page itself does not scroll for HR07');
+ assert.match(shell,/const FIXED_FRAME[^=]*=\[[^\]]*'HR07'/,'HR07 keeps a fixed frame');
+ assert.match(shell,/fixedFrame\?"min-h-0 min-w-0 flex-1 overflow-hidden/,'the page itself does not scroll for fixed-frame sections');
  const home=readFileSync('src/org/OrgHomePage.tsx','utf8');
  assert.match(home,/label: 'Job Grades', path: 'hr\/HR07'/);
  assert.doesNotMatch(home,/Job Grading/);

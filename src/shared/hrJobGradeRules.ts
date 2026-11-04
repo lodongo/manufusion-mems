@@ -10,7 +10,14 @@ export type GradeLike = {
     minSalary: number | null;
     taxCodes: string[];
     deductionCodes: string[];
+    /** Benefit package (optional so older callers keep working). */
+    payModelCode?: string;
+    benefitCodes?: string[];
+    leave?: Array<{ code: string; daysPerYear: number; carryForwardDays?: number }>;
 };
+
+/** What the legal entity's Benefits catalogue offers, so the rules only ask for what can actually be chosen. */
+export type CatalogueNeeds = { payModel: boolean; leave: boolean };
 
 const money = (n: number) => n.toLocaleString('en');
 
@@ -29,6 +36,10 @@ export function draftIssues(grades: GradeLike[]): string[] {
             if (!Number.isFinite(s) || s < 0 || s > 1e9) out.push(`${label}: the minimum salary must be between 0 and ${money(1e9)}.`);
             else if (Math.abs(s * 100 - Math.round(s * 100)) > 1e-6) out.push(`${label}: the minimum salary can have at most 2 decimal places.`);
         }
+        for (const l of g.leave || []) {
+            if (!Number.isFinite(l.daysPerYear) || l.daysPerYear < 0 || l.daysPerYear > 366) out.push(`${label}: leave allowance ${l.code} must be between 0 and 366.`);
+            if (l.carryForwardDays !== undefined && (!Number.isFinite(l.carryForwardDays) || l.carryForwardDays < 0 || l.carryForwardDays > 366)) out.push(`${label}: carry forward for ${l.code} must be between 0 and 366.`);
+        }
         ranks.set(g.rank, (ranks.get(g.rank) || 0) + 1);
         const key = g.title.trim().toLowerCase();
         if (key) titles.set(key, (titles.get(key) || 0) + 1);
@@ -39,14 +50,16 @@ export function draftIssues(grades: GradeLike[]): string[] {
 }
 
 /** What must be true before a draft may go for approval. */
-export function activationProblems(grades: GradeLike[], currency: string, rolesUsing: Map<string, number>): string[] {
+export function activationProblems(grades: GradeLike[], currency: string, rolesUsing: Map<string, number>, needs: CatalogueNeeds = { payModel: false, leave: false }): string[] {
     const problems: string[] = [];
     const enabled = grades.filter((g) => g.enabled).sort((a, b) => a.rank - b.rank);
     if (!enabled.length) problems.push('Enable at least one job grade.');
     for (const g of enabled) {
         if (!((g.minSalary ?? 0) > 0)) problems.push(`Grade ${g.rank} · ${g.title}: enter the minimum monthly salary (${currency}).`);
-        if (!g.taxCodes.length) problems.push(`Grade ${g.rank} · ${g.title}: select the taxes that apply. Configure them first in HR Settings → Compensation & Benefits if none are listed.`);
-        if (!g.deductionCodes.length) problems.push(`Grade ${g.rank} · ${g.title}: select the deductions that apply. Configure them first in HR Settings → Compensation & Benefits if none are listed.`);
+        if (!g.taxCodes.length) problems.push(`Grade ${g.rank} · ${g.title}: select the taxes that apply. Configure them first in Benefits if none are listed.`);
+        if (!g.deductionCodes.length) problems.push(`Grade ${g.rank} · ${g.title}: select the deductions that apply. Configure them first in Benefits if none are listed.`);
+        if (needs.payModel && !g.payModelCode) problems.push(`Grade ${g.rank} · ${g.title}: select the pay model.`);
+        if (needs.leave && !(g.leave || []).length) problems.push(`Grade ${g.rank} · ${g.title}: select the leave types that apply (open and save the grade to add the mandatory ones).`);
     }
     for (let i = 1; i < enabled.length; i++) {
         const a = enabled[i - 1].minSalary ?? 0;

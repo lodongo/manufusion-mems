@@ -4,6 +4,8 @@ import {withLock} from './finCore';
 import {hrAudit} from './hrAudit';
 import {compensationStatus} from './hrCompensationApproval';
 import {getEducationConfig} from './hrEducationConfig';
+import {EXCEPTION_EFFECTS,type ExceptionEffect,type PayException} from '../src/shared/hrPayslip';
+export type {PayException} from '../src/shared/hrPayslip';
 
 export type PayCategory='payModels'|'overtime'|'allowances'|'benefits'|'incentives'|
  'leave'|'statutory'|'taxes'|'taxReliefs'|'otherDeductions'|'employerCosts'|'controls';
@@ -27,8 +29,12 @@ export type PayItem={
  payrollTreatment:'earning'|'employee_deduction'|'employer_cost'|'noncash'|'informational';
  taxable:boolean;bands:Array<{upTo:number|null;rate:number}>;
  options:Record<string,string|number|boolean>;
+ /** Circumstances that change this line for a person (statutory, tax, relief and employer-cost items). */
+ exceptions?:PayException[];
 };
-export type PayConfig={countryCode:string;currency:string;version:number;status:'draft';lastReviewed:string;items:PayItem[]};
+export type PayConfig={countryCode:string;currency:string;version:number;status:'draft';lastReviewed:string;items:PayItem[];
+ /** True once the Kenya default exceptions were applied. They are a ONE-TIME default: later edits are never overwritten. */
+ exceptionsSeeded?:boolean};
 const sc=(x:unknown,n=180)=>str(x).trim().slice(0,n);
 const collection=(org:string,entity:string)=>`organizations/${org}/hr_compensation_config/${entity}`;
 const codeOk=(s:string)=>/^[A-Z0-9_]{2,72}$/.test(s);
@@ -41,6 +47,8 @@ const sources={
  wages:'https://new.kenyalaw.org/akn/ke/act/ln/1982/120/eng@2022-12-31/source',
  employment:'https://www.labour.go.ke/sites/default/files/2022-10/The_Employment_Act_2007.pdf',
  nita:'https://www.nita.go.ke/our-services/levy-inspectorate.html',
+ kraPWD:'https://www.kra.go.ke/individual/special-needs/learn-about-tax-exemption/people-with-disability',
+ nssfRates:'https://www.pwc.com/ke/en/assets/pdf/tax-alert-year-4nssf-rates-2026.pdf',
 };
 function item(category:PayCategory,code:string,name:string,over:Partial<PayItem>={}):PayItem{
  return {code,name,description:'',category,mandatory:false,enabled:true,gradeCodes:[],
@@ -54,6 +62,62 @@ const policy=(category:PayCategory,code:string,name:string,description:string,ex
  item(category,code,name,{description,enabled:false,...extra});
 const legal=(category:PayCategory,code:string,name:string,description:string,extra:Partial<PayItem>={})=>
  item(category,code,name,{description,mandatory:true,enabled:true,gradeCodes:[],...extra});
+const exc=(code:string,name:string,effect:ExceptionEffect,value:number,evidence:string,reference:string,description:string,enabled=true):PayException=>
+ ({code,name,description,effect,value,evidence,reference,enabled});
+/**
+ * Kenya exceptions applied ONCE when a Kenyan legal entity's compensation is first set up (or first opened
+ * after this feature shipped). Only exceptions verified against KRA, NSSF and the Acts are switched on;
+ * anything not yet confirmed in force is listed switched OFF with the reason, for legal review.
+ */
+export const KENYA_EXCEPTION_DEFAULTS:Record<string,PayException[]>={
+ KE_PAYE:[
+  exc('PAYE_PWD','Person with disability (KRA exemption certificate)','exempt_first',150000,
+   'Valid KRA income tax exemption certificate (normally valid 5 years) presented to the employer',sources.kraPWD,
+   'The first KES 150,000 of monthly income is exempt from PAYE; income above it is taxed at normal rates.'),
+ ],
+ KE_PERSONAL_RELIEF:[
+  exc('RELIEF_NON_RESIDENT','Non-resident individual','not_entitled',0,
+   'Residency determination on file (183-day and permanent-home tests)',sources.kraPAYE,
+   'Personal relief is granted to resident individuals only.'),
+  exc('RELIEF_SECONDARY_JOB','Secondary employment','not_entitled',0,
+   'Signed declaration that personal relief is claimed through the primary employer',sources.kraPAYE,
+   'Personal relief is claimed through one employer only.'),
+ ],
+ KE_NSSF:[
+  exc('NSSF_TIER2_CONTRACTED_OUT','Tier II contracted out to an approved scheme','reroute',0,
+   'NSSF reference-scheme certificate and RBA approval of the contracted-out scheme',sources.nssfRates,
+   'Tier I always stays with NSSF. The Tier II contribution is paid to the approved scheme; the amount deducted from pay does not change.'),
+  exc('NSSF_DOCUMENTED_EXEMPTION','Other documented NSSF exemption','exempt',0,
+   'Written legal basis from NSSF or the Act',sources.nssf,
+   'No further exemption has been confirmed. Leave switched off unless legal review documents one.',false),
+ ],
+ KE_SHIF:[
+  exc('SHIF_DOCUMENTED_EXEMPTION','Documented SHIF exemption','exempt',0,
+   'Written confirmation from the Social Health Authority',sources.sha,
+   'No exemption for salaried employees has been confirmed. Leave switched off unless the Authority confirms one in writing.',false),
+ ],
+ KE_AHL:[
+  exc('AHL_GAZETTE_EXEMPTION','Exempt by Gazette notice','exempt',0,
+   'Gazette notice reference naming the income or the person',sources.kraAHL,
+   'Section 6 of the Affordable Housing Act lets the Cabinet Secretary exempt income or persons by Gazette notice. None were in force when this default was written; enable only with the notice.',false),
+  exc('AHL_HOST_COUNTRY_AGREEMENT','Covered by an international or host-country agreement','exempt',0,
+   'Copy of the agreement clause and the person\u2019s status letter',sources.kraAHL,
+   'The draft Affordable Housing regulations exempt such persons. Confirm the final regulations before enabling.',false),
+ ],
+};
+const PRE_TAX_KENYA=['KE_NSSF','KE_SHIF','KE_AHL'];
+/** Apply the one-time Kenya defaults to a config that has not had them. Never touches an item that already has an exceptions list. */
+export function seedKenyaDefaults(config:PayConfig):PayConfig{
+ if(config.countryCode!=='KE'||config.exceptionsSeeded)return config;
+ const items=config.items.map(i=>{
+  let next=i;
+  const defaults=KENYA_EXCEPTION_DEFAULTS[i.code];
+  if(defaults&&i.exceptions===undefined)next={...next,exceptions:defaults.map(e=>({...e}))};
+  if(PRE_TAX_KENYA.includes(i.code)&&next.options.preTax===undefined)next={...next,options:{...next.options,preTax:true}};
+  return next;
+ });
+ return {...config,items,exceptionsSeeded:true};
+}
 export function kenyaCompensationTemplate():PayConfig{
  const items:PayItem[]=[
   ...[
@@ -213,7 +277,7 @@ export function kenyaCompensationTemplate():PayConfig{
   policy('controls','EXIT_SETTLEMENT','Final pay / termination','Unused leave, notice, gratuity, severance, recoveries and certificate of service review.',{
    options:{financeApproval:true,hrApproval:true}}),
  ];
- return {countryCode:'KE',currency:'KES',version:0,status:'draft',lastReviewed:'2026-10-23',items};
+ return seedKenyaDefaults({countryCode:'KE',currency:'KES',version:0,status:'draft',lastReviewed:'2026-11-04',items});
 }
 export const blankCompensationTemplate=(countryCode:string,currency:string):PayConfig=>{
  const reference=kenyaCompensationTemplate();
@@ -231,7 +295,7 @@ export function defaultPayConfig(countryCode:string,currency:string){
 const docPath=(org:string,entity:string)=>collection(org,entity);
 export async function readPayConfig(org:string,entity:string,countryCode:string,currency:string){
  const d=await getDoc(docPath(org,entity));
- return d?d.data as unknown as PayConfig:defaultPayConfig(countryCode,currency);
+ return d?seedKenyaDefaults(d.data as unknown as PayConfig):defaultPayConfig(countryCode,currency);
 }
 export const entities=async(org:string)=>(await listDocs(`organizations/${org}/structure`))
  .filter(d=>str(d.data.level)==='legal_entity'&&str(d.data.status)!=='inactive')
@@ -239,6 +303,39 @@ export const entities=async(org:string)=>(await listDocs(`organizations/${org}/s
   countryCode:sc((isObj(d.data.attributes)?d.data.attributes.countryCode:'')||d.data.countryCode||d.data.country,2).toUpperCase(),
   currency:sc((isObj(d.data.attributes)?d.data.attributes.currencyCode:'')||d.data.currencyCode||d.data.currency,3).toUpperCase()}))
  .sort((a,b)=>a.name.localeCompare(b.name));
+const EXCEPTION_CATEGORIES:PayCategory[]=['statutory','taxes','taxReliefs','employerCosts','otherDeductions'];
+const EXCEPTION_CODE=/^[A-Z0-9_]{3,48}$/;
+/** Validate the exceptions of one item. Every enabled exception must name the evidence a person has to hold. */
+export function normalizeExceptions(raw:unknown,item:{code:string;category:PayCategory;options:Record<string,string|number|boolean>}):PayException[]|undefined{
+ if(raw===undefined||raw===null)return undefined;
+ if(!Array.isArray(raw))throw new HttpError(400,'Exceptions must be a list.');
+ if(!raw.length)return [];
+ if(!EXCEPTION_CATEGORIES.includes(item.category))throw new HttpError(400,`${item.code}: exceptions apply to statutory items, taxes, reliefs, employer costs and deductions only.`);
+ if(raw.length>12)throw new HttpError(400,`${item.code}: at most 12 exceptions per item.`);
+ const seen=new Set<string>();
+ return raw.map(v=>{
+  if(!isObj(v))throw new HttpError(400,`${item.code}: invalid exception.`);
+  const code=sc(v.code,48).toUpperCase().replace(/[^A-Z0-9_]/g,'_');
+  const name=sc(v.name,120),effect=sc(v.effect) as ExceptionEffect;
+  const evidence=sc(v.evidence,300),reference=sc(v.reference,600),description=sc(v.description,400);
+  const enabled=v.enabled!==false;
+  const value=Number(v.value??0);
+  if(!EXCEPTION_CODE.test(code))throw new HttpError(400,`${item.code}: an exception code uses capital letters, numbers and underscore (3 to 48 characters).`);
+  if(seen.has(code))throw new HttpError(400,`${item.code}: exception ${code} is listed twice.`);
+  seen.add(code);
+  if(name.length<2)throw new HttpError(400,`${item.code}/${code}: enter a name for the exception.`);
+  if(!EXCEPTION_EFFECTS.includes(effect))throw new HttpError(400,`${item.code}/${code}: choose what the exception does.`);
+  if(!Number.isFinite(value)||value<0||value>1e12)throw new HttpError(400,`${item.code}/${code}: invalid value.`);
+  if(effect==='rate'&&value>2)throw new HttpError(400,`${item.code}/${code}: a rate is a fraction such as 0.05 for 5%.`);
+  if((effect==='exempt_first'||effect==='cap'||effect==='rate')&&!(value>0))throw new HttpError(400,`${item.code}/${code}: enter the amount or rate this exception uses.`);
+  if(effect==='not_entitled'&&item.category!=='taxReliefs')throw new HttpError(400,`${item.code}/${code}: "not entitled" applies to reliefs only.`);
+  if((effect==='rate'||effect==='cap')&&item.category!=='statutory')throw new HttpError(400,`${item.code}/${code}: a replacement rate or cap applies to statutory contributions only.`);
+  if(effect==='reroute'&&item.options.tiers!==true)throw new HttpError(400,`${item.code}/${code}: rerouting needs a contribution with tiers (such as NSSF).`);
+  if(reference&&!/^https:\/\//i.test(reference))throw new HttpError(400,`${item.code}/${code}: a reference must be a web address starting with https://.`);
+  if(enabled&&evidence.length<3)throw new HttpError(400,`${item.code}/${code}: state the evidence a person must hold before this exception can be applied.`);
+  return {code,name,description,effect,value:effect==='exempt_first'||effect==='cap'||effect==='rate'?value:0,evidence,reference,enabled};
+ });
+}
 function normalizeItem(x:unknown,grades:Set<string>,countryCode:string,currency:string):PayItem{
  if(!isObj(x))throw new HttpError(400,'Invalid compensation component.');
  const code=sc(x.code,72),name=sc(x.name,160);
@@ -301,6 +398,8 @@ function normalizeItem(x:unknown,grades:Set<string>,countryCode:string,currency:
   effectiveFrom:sc(x.effectiveFrom,10),effectiveTo:sc(x.effectiveTo,10),
   applicability:sc(x.applicability,400),exemption:sc(x.exemption,400),
   reference:sc(x.reference,600),dueRule:sc(x.dueRule,200),bands,options};
+ const exceptions=normalizeExceptions(x.exceptions,item);
+ if(exceptions!==undefined)item.exceptions=exceptions;
  if(item.rate>2||item.employerRate>2)throw new HttpError(400,'Unreasonable rate; percentages must be decimal fractions.');
  return item;
 }
@@ -311,20 +410,23 @@ export function validatePayConfig(raw:unknown,grades:Set<string>,countryCode:str
   throw new HttpError(400,'Country and currency must match the target legal entity configuration.');
  const items=raw.items.map(x=>normalizeItem(x,grades,countryCode,currency));
  if(new Set(items.map(x=>x.code)).size!==items.length)throw new HttpError(400,'Duplicate compensation codes.');
+ const exceptionCodes=items.flatMap(x=>(x.exceptions||[]).map(e=>e.code));
+ if(new Set(exceptionCodes).size!==exceptionCodes.length)throw new HttpError(400,'An exception code can be used on one item only.');
  if(countryCode==='KE'){
   const mandatory=kenyaCompensationTemplate().items.filter(x=>x.mandatory);
   if(mandatory.some(x=>!items.some(a=>a.code===x.code&&a.category===x.category&&a.mandatory)))
    throw new HttpError(400,'Kenya mandatory reference rows must remain present and mandatory.');
  }
- return {countryCode,currency,items,version:0,status:'draft',lastReviewed:sc(raw.lastReviewed,10)};
+ return {countryCode,currency,items,version:0,status:'draft',lastReviewed:sc(raw.lastReviewed,10),exceptionsSeeded:raw.exceptionsSeeded===true||countryCode==='KE'};
 }
 export function countryOf(entity:{countryCode:string;currency:string},orgCountry:string){
  return entity.countryCode||orgCountry||'';
 }
 export const hrCompensationRoutes={
- 'POST /api/org/hr/compensation/get':[orgRoute('org.hr.compensation.get','ADM.settings',async ctx=>{
-  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'ADM.settings'))
-   throw new HttpError(403,'Organization settings administrator required.');
+ 'POST /api/org/hr/compensation/get':[orgRoute('org.hr.compensation.get','HRM.shell.view',async ctx=>{
+  // Pay catalogue: maintainers (HRM.benefits.manage) and approvers (HRM.compensation.approve) only.
+  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'HRM.benefits.manage')&&!hasPerm(ctx.permissions,'HRM.compensation.approve'))
+   throw new HttpError(403,'Permission required: benefits maintainer or approver.');
   const all=await entities(ctx.orgId);
   const id=sc(ctx.body.legalEntityId,128);
   const current=all.find(e=>e.id===id)||(!id?all[0]:undefined);
@@ -334,13 +436,14 @@ export const hrCompensationRoutes={
   return {entities:all,current:current||null,countryCode:country,currency,
    config:current?await readPayConfig(ctx.orgId,current.id,country,currency):null,
    saved:!!(current&&await getDoc(docPath(ctx.orgId,current.id))),
+   canEdit:ctx.role==='org_super_admin'||hasPerm(ctx.permissions,'HRM.benefits.manage'),
    // Draft saves never change live entitlements; only an approved activation does.
    activation:current?await compensationStatus(ctx.orgId,current.id):null,
   };
  })],
- 'POST /api/org/hr/compensation/save':[orgRoute('org.hr.compensation.save','ADM.settings',async ctx=>{
-  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'ADM.settings'))
-   throw new HttpError(403,'Organization settings administrator required.');
+ 'POST /api/org/hr/compensation/save':[orgRoute('org.hr.compensation.save','HRM.benefits.manage',async ctx=>{
+  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'HRM.benefits.manage'))
+   throw new HttpError(403,'Permission required: benefits maintainer.');
   const id=sc(ctx.body.legalEntityId,128),all=await entities(ctx.orgId);
   const current=all.find(e=>e.id===id);
   if(!current)throw new HttpError(404,'Select an active legal entity.');

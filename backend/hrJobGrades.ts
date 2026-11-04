@@ -26,9 +26,9 @@ import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { cannotDecide, createRequest, nameOf, objs, P, reasonOf, registerHandler, scopeOf, unitsOf, withLock, type Obj, type Step } from './finCore';
 import { decideRequest } from './finRoutes';
 import { hrAudit } from './hrAudit';
-import { countryOf, entities as payEntities, readPayConfig, type PayConfig } from './hrCompensationConfig';
-import { activationProblems } from '../src/shared/hrJobGradeRules';
-import { activeJobGrades, gradeActivePath, gradeDraftPath, gradeHistoryPath, legacyJobGrades, readGrades, type JobGradeDef } from './hrJobGradeStore';
+import { countryOf, defaultLeaveEntitlement, entities as payEntities, readPayConfig, type PayConfig, type PayItem } from './hrCompensationConfig';
+import { activationProblems, type CatalogueNeeds } from '../src/shared/hrJobGradeRules';
+import { activeJobGrades, gradeActivePath, gradeDraftPath, gradeHistoryPath, legacyJobGrades, readGrades, type GradeLeave, type GradeValue, type JobGradeDef } from './hrJobGradeStore';
 
 export const JOB_GRADE_REQUEST = 'hr.jobgrades.activate';
 export const JOB_GRADE_MANAGE = 'HRM.grades.manage';
@@ -41,6 +41,16 @@ const MAX_GRADES = 100;
 /** Compensation categories a grade draws its taxes and its deductions from. */
 const TAX_CATEGORIES = ['taxes', 'taxReliefs'];
 const DEDUCTION_CATEGORIES = ['statutory', 'otherDeductions'];
+/** Overtime, allowances, benefits and incentives a grade may select (any number of them). */
+const BENEFIT_CATEGORIES = ['overtime', 'allowances', 'benefits', 'incentives'];
+/** Kenya Employment Act 2007 minimum leave. The unit is fixed so a minimum can never be met by switching units. */
+export const KENYA_LEAVE_FLOORS: Record<string, { days: number; unit: GradeLeave['unit'] }> = {
+    LEAVE_ANNUAL: { days: 21, unit: 'working_days' },
+    LEAVE_SICK_FULL: { days: 7, unit: 'calendar_days' },
+    LEAVE_SICK_HALF: { days: 7, unit: 'calendar_days' },
+    LEAVE_MATERNITY: { days: 3, unit: 'months' },
+    LEAVE_PATERNITY: { days: 14, unit: 'calendar_days' },
+};
 const scopeKey = (entity: string) => 'hr.jobgrades.' + entity;
 const clean = (x: unknown, n: number) => str(x).replace(/\s+/g, ' ').trim().slice(0, n);
 
@@ -52,30 +62,120 @@ const isSuper = (ctx: OrgContext) => ctx.role === 'org_super_admin';
 const canManage = (ctx: OrgContext) => isSuper(ctx) || hasPerm(ctx.permissions, JOB_GRADE_MANAGE);
 const canApprove = (ctx: OrgContext) => isSuper(ctx) || hasPerm(ctx.permissions, JOB_GRADE_APPROVE);
 /** Pay information (minimum salary, taxes, deductions) is only shown to people who maintain or approve it. */
-const seesPay = (ctx: OrgContext) => canManage(ctx) || canApprove(ctx) || hasPerm(ctx.directPermissions, 'ADM.settings');
+const seesPay = (ctx: OrgContext) => canManage(ctx) || canApprove(ctx) || hasPerm(ctx.permissions, 'HRM.benefits.manage') || hasPerm(ctx.permissions, 'HRM.compensation.approve') || hasPerm(ctx.directPermissions, 'ADM.settings');
 
 // ---------------------------------------------------------------------------
 // Compensation catalogue (taxes and deductions a grade may select)
 // ---------------------------------------------------------------------------
 
-export type CatalogueItem = { code: string; name: string; category: string; mandatory: boolean; enabled: boolean; description: string };
-export type GradeCatalogue = { taxes: CatalogueItem[]; deductions: CatalogueItem[]; forcedTaxes: string[]; forcedDeductions: string[] };
+export type CatalogueItem = { code: string; name: string; category: string; mandatory: boolean; enabled: boolean; description: string; method: string; amount: number; rate: number; taxable: boolean };
+export type CatalogueLeave = CatalogueItem & { defaults: Omit<GradeLeave, 'code'>; legacy: Record<string, Omit<GradeLeave, 'code'>> };
+export type GradeCatalogue = {
+    countryCode: string;
+    taxes: CatalogueItem[];
+    deductions: CatalogueItem[];
+    forcedTaxes: string[];
+    forcedDeductions: string[];
+    payModels: CatalogueItem[];
+    benefits: CatalogueItem[];
+    leave: CatalogueLeave[];
+    forcedLeave: string[];
+};
+
+const light = (i: PayItem): CatalogueItem => ({
+    code: i.code,
+    name: i.name,
+    category: i.category,
+    mandatory: i.mandatory === true,
+    enabled: i.enabled !== false,
+    description: str(i.description).slice(0, 200),
+    method: str(i.method),
+    amount: Number(i.amount) || 0,
+    rate: Number(i.rate) || 0,
+    taxable: i.taxable === true,
+});
 
 export function catalogueOf(config: PayConfig): GradeCatalogue {
     const items = Array.isArray(config.items) ? config.items : [];
-    const pick = (categories: string[]) =>
-        items
-            .filter((i) => categories.includes(i.category))
-            .map((i) => ({ code: i.code, name: i.name, category: i.category, mandatory: i.mandatory === true, enabled: i.enabled !== false, description: str(i.description).slice(0, 200) }));
+    const pick = (categories: string[]) => items.filter((i) => categories.includes(i.category)).map(light);
     const taxes = pick(TAX_CATEGORIES);
     const deductions = pick(DEDUCTION_CATEGORIES);
     const forced = (list: CatalogueItem[]) => list.filter((i) => i.mandatory && i.enabled).map((i) => i.code);
-    return { taxes, deductions, forcedTaxes: forced(taxes), forcedDeductions: forced(deductions) };
+    const leave: CatalogueLeave[] = items
+        .filter((i) => i.category === 'leave')
+        .map((i) => {
+            const d = defaultLeaveEntitlement(i.mandatory === true, Number(i.amount) || 0, i.code);
+            const legacy: CatalogueLeave['legacy'] = {};
+            for (const [grade, v] of Object.entries(i.leaveEntitlements || {})) if (v && v.eligible) legacy[grade] = { daysPerYear: v.daysPerYear, accrueMonthly: v.accrueMonthly, unit: v.unit, carryForwardDays: v.carryForwardDays };
+            return { ...light(i), defaults: { daysPerYear: d.daysPerYear, accrueMonthly: d.accrueMonthly, unit: d.unit, carryForwardDays: 0 }, legacy };
+        });
+    return {
+        countryCode: str(config.countryCode),
+        taxes,
+        deductions,
+        forcedTaxes: forced(taxes),
+        forcedDeductions: forced(deductions),
+        payModels: pick(['payModels']),
+        benefits: pick(BENEFIT_CATEGORIES),
+        leave,
+        forcedLeave: forced(leave),
+    };
 }
+
+/** What the screen needs: the same catalogue without the per-grade history used only to seed leave. */
+export const publicCatalogue = (c: GradeCatalogue) => ({
+    ...c,
+    leave: c.leave.map(({ legacy: _legacy, ...rest }) => rest),
+    /** Legal minimum leave the grade form shows and enforces (the server enforces it again on save). */
+    leaveFloors: c.countryCode === 'KE' ? Object.fromEntries(Object.entries(KENYA_LEAVE_FLOORS).filter(([code]) => c.leave.some((l) => l.code === code && l.mandatory))) : {},
+});
+
+
+/** What the catalogue lets a grade choose, so activation only asks for what exists. */
+export const needsOf = (c: GradeCatalogue): CatalogueNeeds => ({ payModel: c.payModels.some((p) => p.enabled), leave: c.leave.some((l) => l.enabled) });
+
+/** Codes an enabled grade refers to that the Benefits catalogue no longer contains, or has since switched off. */
+export function catalogueProblems(grades: JobGradeDef[], c: GradeCatalogue): string[] {
+    const all = [...c.taxes, ...c.deductions, ...c.payModels, ...c.benefits, ...c.leave];
+    const known = new Map(all.map((i) => [i.code, i]));
+    const out: string[] = [];
+    for (const g of grades.filter((x) => x.enabled)) {
+        const used = [...g.taxCodes, ...g.deductionCodes, ...g.benefitCodes, ...g.leave.map((l) => l.code), ...(g.payModelCode ? [g.payModelCode] : [])];
+        const missing = used.filter((code) => !known.has(code));
+        const off = used.filter((code) => known.has(code) && !known.get(code)!.enabled);
+        if (missing.length) out.push(`Grade ${g.rank} · ${g.title} uses ${[...new Set(missing)].slice(0, 3).join(', ')}, which is no longer in the Benefits catalogue.`);
+        if (off.length) out.push(`Grade ${g.rank} · ${g.title} uses ${[...new Set(off)].slice(0, 3).join(', ')}, which is switched off in Benefits. Remove it from the grade or switch it back on.`);
+    }
+    return out;
+}
+
+/** Leave package a grade starts with: every mandatory leave type, using earlier per-grade values when HR had set them. */
+export function defaultLeavePackage(catalogue: GradeCatalogue, gradeCode: string): GradeLeave[] {
+    return catalogue.leave
+        .filter((l) => catalogue.forcedLeave.includes(l.code))
+        .map((l) => ({ code: l.code, ...(l.legacy[gradeCode] || l.defaults) }));
+}
+
+/** The one enabled pay model, if there is exactly one (so a new grade needs no choice). */
+const soleModel = (catalogue: GradeCatalogue) => {
+    const on = catalogue.payModels.filter((p) => p.enabled);
+    return on.length === 1 ? on[0].code : '';
+};
 
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
+
+/** The benefit package of a grade in a stable order (digest and change detection). */
+export function packageOf(g: JobGradeDef) {
+    const sorted = (o: Record<string, GradeValue>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
+    return {
+        payModelCode: g.payModelCode || '',
+        benefitCodes: (g.benefitCodes || []).slice().sort(),
+        benefitValues: sorted(g.benefitValues || {}),
+        leave: (g.leave || []).slice().sort((a, b) => a.code.localeCompare(b.code)),
+    };
+}
 
 /** Stable fingerprint of the grade content (excludes version and audit metadata). */
 export function gradesDigest(grades: JobGradeDef[], currency: string, countryCode: string): string {
@@ -85,9 +185,75 @@ export function gradesDigest(grades: JobGradeDef[], currency: string, countryCod
         grades: grades
             .slice()
             .sort((a, b) => a.rank - b.rank)
-            .map((g) => ({ code: g.code, rank: g.rank, title: g.title, description: g.description, enabled: g.enabled, minSalary: g.minSalary, taxCodes: g.taxCodes.slice().sort(), deductionCodes: g.deductionCodes.slice().sort() })),
+            .map((g) => ({
+                code: g.code,
+                rank: g.rank,
+                title: g.title,
+                description: g.description,
+                enabled: g.enabled,
+                minSalary: g.minSalary,
+                taxCodes: g.taxCodes.slice().sort(),
+                deductionCodes: g.deductionCodes.slice().sort(),
+                ...packageOf(g),
+            })),
     };
     return createHash('sha256').update(JSON.stringify(content)).digest('hex');
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Amounts or rates a grade sets for its selected allowances, benefits and incentives. */
+function normalizeValues(raw: unknown, selected: string[], gradeCode: string): Record<string, GradeValue> {
+    const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+    const out: Record<string, GradeValue> = {};
+    for (const code of selected) {
+        const v = src[code];
+        if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+        const entry: GradeValue = {};
+        for (const key of ['amount', 'rate'] as const) {
+            const raw2 = (v as Record<string, unknown>)[key];
+            if (raw2 === undefined || raw2 === null || raw2 === '') continue;
+            const n = Number(raw2);
+            if (!Number.isFinite(n) || n < 0 || (key === 'amount' && n > MAX_SALARY) || (key === 'rate' && n > 2)) throw new HttpError(400, `Grade ${gradeCode}: ${code} ${key === 'rate' ? 'rate must be a fraction such as 0.05 for 5%' : 'amount is out of range'}.`);
+            entry[key] = key === 'rate' ? Math.round(n * 1e6) / 1e6 : round2(n);
+        }
+        if (entry.amount !== undefined || entry.rate !== undefined) out[code] = entry;
+    }
+    return out;
+}
+
+/**
+ * Leave types of a grade. Mandatory leave (the Employment Act in Kenya) is always present and can be raised
+ * but never lowered below the legal minimum or switched to another unit.
+ */
+function normalizeLeave(raw: unknown, catalogue: GradeCatalogue, gradeCode: string): GradeLeave[] {
+    const list = Array.isArray(raw) ? raw : [];
+    const byCode = new Map(catalogue.leave.map((l) => [l.code, l]));
+    const out = new Map<string, GradeLeave>();
+    for (const entry of list) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new HttpError(400, `Grade ${gradeCode}: invalid leave entry.`);
+        const v = entry as Record<string, unknown>;
+        const code = clean(v.code, 72);
+        if (!byCode.has(code)) throw new HttpError(400, `Grade ${gradeCode}: choose leave types from the Benefits catalogue of this legal entity only.`);
+        if (out.has(code)) throw new HttpError(400, `Grade ${gradeCode}: ${code} is listed twice.`);
+        const days = Number(v.daysPerYear ?? 0);
+        const carry = Number(v.carryForwardDays ?? 0);
+        const unit: GradeLeave['unit'] = v.unit === 'months' || v.unit === 'calendar_days' ? v.unit : 'working_days';
+        if (!Number.isFinite(days) || days < 0 || days > (unit === 'months' ? 24 : 366)) throw new HttpError(400, `Grade ${gradeCode}: ${byCode.get(code)!.name} allowance must be between 0 and ${unit === 'months' ? 24 : 366}.`);
+        if (!Number.isFinite(carry) || carry < 0 || carry > 366) throw new HttpError(400, `Grade ${gradeCode}: carry forward for ${byCode.get(code)!.name} must be between 0 and 366 days.`);
+        out.set(code, { code, daysPerYear: round2(days), accrueMonthly: v.accrueMonthly === true, unit, carryForwardDays: round2(carry) });
+    }
+    for (const code of catalogue.forcedLeave) if (!out.has(code)) out.set(code, defaultLeavePackage(catalogue, gradeCode).find((l) => l.code === code)!);
+    if (catalogue.countryCode === 'KE') {
+        for (const [code, floor] of Object.entries(KENYA_LEAVE_FLOORS)) {
+            const l = out.get(code);
+            if (!l || !byCode.get(code)?.mandatory) continue;
+            if (l.unit !== floor.unit) throw new HttpError(400, `Grade ${gradeCode}: ${byCode.get(code)!.name} is measured in ${floor.unit.replace('_', ' ')} by law.`);
+            if (l.daysPerYear < floor.days) throw new HttpError(400, `Grade ${gradeCode}: ${byCode.get(code)!.name} cannot be below the legal minimum of ${floor.days} ${floor.unit === 'months' ? 'months' : floor.unit.replace('_', ' ')}.`);
+        }
+    }
+    const order = new Map(catalogue.leave.map((l, i) => [l.code, i]));
+    return [...out.values()].sort((a, b) => (order.get(a.code) ?? 0) - (order.get(b.code) ?? 0));
 }
 
 /**
@@ -105,6 +271,7 @@ export function normalizeGrades(raw: unknown, catalogue: GradeCatalogue, known: 
     let next = (numbers.length ? Math.max(...numbers) : 0) + 1;
     const taxSet = new Set(catalogue.taxes.map((i) => i.code));
     const dedSet = new Set(catalogue.deductions.map((i) => i.code));
+    const benefitSet = new Set(catalogue.benefits.map((i) => i.code));
     const codes = new Set<string>();
     const ranks = new Set<number>();
     const titles = new Set<string>();
@@ -129,6 +296,9 @@ export function normalizeGrades(raw: unknown, catalogue: GradeCatalogue, known: 
             if (list.some((c) => !allowed.has(c))) throw new HttpError(400, `Grade ${code}: choose only ${what} from the Compensation & Benefits catalogue of this legal entity.`);
             return [...new Set([...forced, ...list])];
         };
+        const payModelCode = clean(r.payModelCode, 72);
+        if (payModelCode && !catalogue.payModels.some((p) => p.code === payModelCode)) throw new HttpError(400, `Grade ${code}: choose a pay model from the Benefits catalogue of this legal entity.`);
+        const benefitCodes = choose(r.benefitCodes, benefitSet, [], 'allowances, benefits or overtime');
         return {
             code,
             rank,
@@ -138,6 +308,10 @@ export function normalizeGrades(raw: unknown, catalogue: GradeCatalogue, known: 
             minSalary: Math.round(salary * 100) / 100,
             taxCodes: choose(r.taxCodes, taxSet, catalogue.forcedTaxes, 'taxes'),
             deductionCodes: choose(r.deductionCodes, dedSet, catalogue.forcedDeductions, 'deductions'),
+            payModelCode,
+            benefitCodes,
+            benefitValues: normalizeValues(r.benefitValues, benefitCodes, code),
+            leave: normalizeLeave(r.leave, catalogue, code),
         };
     });
     for (const code of known) if (!codes.has(code)) throw new HttpError(409, `Grade ${code} was saved before and cannot be removed because roles and employee records refer to it. Disable it instead.`);
@@ -179,7 +353,16 @@ async function draftOrSeed(org: string, entity: string, catalogue: GradeCatalogu
     const doc = await getDoc(gradeDraftPath(org, entity));
     if (doc) return { saved: true, version: Number(doc.data.version || 0), grades: readGrades(doc.data.grades), updatedAt: str(doc.data.updatedAt), updatedBy: str(doc.data.updatedBy) };
     const legacy = await legacyJobGrades(org, entity);
-    const grades: JobGradeDef[] = legacy.map((g) => ({ ...g, minSalary: 0, taxCodes: [...catalogue.forcedTaxes], deductionCodes: [...catalogue.forcedDeductions] }));
+    const grades: JobGradeDef[] = legacy.map((g) => ({
+        ...g,
+        minSalary: 0,
+        taxCodes: [...catalogue.forcedTaxes],
+        deductionCodes: [...catalogue.forcedDeductions],
+        payModelCode: soleModel(catalogue),
+        benefitCodes: [],
+        benefitValues: {},
+        leave: defaultLeavePackage(catalogue, g.code),
+    }));
     return { saved: false, version: 0, grades, updatedAt: '', updatedBy: '' };
 }
 
@@ -208,13 +391,13 @@ async function changesOf(org: string, entity: string, draft: JobGradeDef[]) {
     const active = await activeJobGrades(org, entity);
     const base = new Map<string, JobGradeDef | null>();
     if (active) for (const g of active) base.set(g.code, g);
-    else for (const g of await legacyJobGrades(org, entity)) base.set(g.code, { ...g, minSalary: 0, taxCodes: [], deductionCodes: [] });
+    else for (const g of await legacyJobGrades(org, entity)) base.set(g.code, { ...g, minSalary: 0, taxCodes: [], deductionCodes: [], payModelCode: '', benefitCodes: [], benefitValues: {}, leave: [] });
     const out: Array<{ code: string; title: string; rank: number; kind: string; from: number | null; to: number; enabled: boolean }> = [];
     for (const g of draft) {
         const was = base.get(g.code);
         if (!was) out.push({ code: g.code, title: g.title, rank: g.rank, kind: 'new', from: null, to: g.minSalary, enabled: g.enabled });
         else {
-            const same = was.title === g.title && was.rank === g.rank && was.enabled === g.enabled && was.minSalary === g.minSalary && was.taxCodes.slice().sort().join() === g.taxCodes.slice().sort().join() && was.deductionCodes.slice().sort().join() === g.deductionCodes.slice().sort().join();
+            const same = was.title === g.title && was.rank === g.rank && was.enabled === g.enabled && was.minSalary === g.minSalary && was.taxCodes.slice().sort().join() === g.taxCodes.slice().sort().join() && was.deductionCodes.slice().sort().join() === g.deductionCodes.slice().sort().join() && JSON.stringify(packageOf(was)) === JSON.stringify(packageOf(g));
             if (!same) out.push({ code: g.code, title: g.title, rank: g.rank, kind: was.enabled && !g.enabled ? 'disabled' : 'changed', from: was.minSalary, to: g.minSalary, enabled: g.enabled });
         }
     }
@@ -244,7 +427,8 @@ registerHandler(JOB_GRADE_REQUEST, {
                 throw new HttpError(409, 'The job grade draft changed after this request was submitted. Reject it and submit the current draft.');
             // Roles and the compensation catalogue may have changed while the request waited.
             const used = new Map([...(await rolesByGrade(ctx.orgId, entity))].map(([k, v]) => [k, v.length]));
-            const problems = activationProblems(grades, currency, used);
+            const catalogue = catalogueOf(await readPayConfig(ctx.orgId, entity, country, currency));
+            const problems = [...activationProblems(grades, currency, used, needsOf(catalogue)), ...catalogueProblems(grades, catalogue)];
             if (problems.length) throw new HttpError(409, 'The draft no longer meets the activation rules: ' + problems.slice(0, 3).join(' '));
             const prior = await getDoc(gradeActivePath(ctx.orgId, entity));
             const activeVersion = Number(prior?.data.activeVersion || 0) + 1;
@@ -330,7 +514,12 @@ export const hrJobGradeRoutes = {
             const catalogue = catalogueOf(pay);
             const [draft, status, roles] = await Promise.all([draftOrSeed(ctx.orgId, current.id, catalogue), gradeStatus(ctx.orgId, current.id), rolesByGrade(ctx.orgId, current.id)]);
             const digest = gradesDigest(draft.grades, currency, country);
-            const grades = draft.grades.map((g) => (financial ? g : { ...g, minSalary: null, taxCodes: [] as string[], deductionCodes: [] as string[] }));
+            // Grades saved before leave moved here show the mandatory leave they will receive on the next save.
+            const grades = draft.grades.map((g) =>
+                financial
+                    ? { ...g, leave: g.leave.length ? g.leave : defaultLeavePackage(catalogue, g.code) }
+                    : { ...g, minSalary: null, taxCodes: [] as string[], deductionCodes: [] as string[], payModelCode: '', benefitCodes: [] as string[], benefitValues: {}, leave: [] as GradeLeave[] },
+            );
             return {
                 entities,
                 entity: { id: current.id, name: current.name, countryCode: country, currency },
@@ -341,9 +530,10 @@ export const hrJobGradeRoutes = {
                 active: status.active,
                 changedSinceActive: status.active ? status.active.digest !== digest : true,
                 pendingRequestId: status.pendingRequestId,
-                catalogue: financial ? catalogue : null,
-                // Rates are reference data for the indicative take-home preview (Kenya reference calculation).
-                payConfig: financial && country === 'KE' ? pay : null,
+                catalogue: financial ? publicCatalogue(catalogue) : null,
+                // The legal entity's pay catalogue feeds the payslip simulator (rates, bands, exceptions).
+                payConfig: financial ? pay : null,
+                payConfigVersion: financial ? Number(pay.version || 0) : 0,
                 roles: Object.fromEntries([...roles].map(([k, v]) => [k, v.slice(0, 50)])),
             };
         }),
@@ -388,7 +578,8 @@ export const hrJobGradeRoutes = {
             if (Number(ctx.body.expectedVersion) !== Number(draft.data.version || 0)) throw new HttpError(409, 'The draft changed since you opened it. Reload before submitting.');
             const grades = readGrades(draft.data.grades);
             const used = new Map([...(await rolesByGrade(ctx.orgId, entity))].map(([k, v]) => [k, v.length]));
-            const problems = activationProblems(grades, currency, used);
+            const catalogue = catalogueOf(await readPayConfig(ctx.orgId, entity, country, currency));
+            const problems = [...activationProblems(grades, currency, used, needsOf(catalogue)), ...catalogueProblems(grades, catalogue)];
             if (problems.length) throw new HttpError(409, `Fix ${problems.length} thing${problems.length === 1 ? '' : 's'} before submitting: ` + problems.slice(0, 4).join(' '));
             const digest = gradesDigest(grades, currency, country);
             const status = await gradeStatus(ctx.orgId, entity);
