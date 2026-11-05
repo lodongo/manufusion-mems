@@ -70,9 +70,15 @@ export function standardRoleTemplates(groups: PermGroup[]): StandardRoleTemplate
     }
     if(enabled.get('HRM')?.has('HRM.payroll.manage')&&enabled.get('HRM')?.has('HRM.payroll.view')){
       templates.push({id:'std_hrm_payroll_officer',module:'HRM',name:'HR – Payroll Officer',
-        description:'See every employee of assigned legal entities with the role, job grade and payslip preview, and enter draft basic salaries. Cannot add employees (ghost-employee control) and never approves pay policy.',
+        description:'See every employee of assigned legal entities with the role, job grade and payslip, and enter draft basic salaries, bank details and personal earnings and deductions. Cannot add employees (ghost-employee control) and never approves pay policy.',
         permissions:['HRM.shell.view','HRM.payroll.view','HRM.payroll.manage']});
       assigned.add('HRM.payroll.view');assigned.add('HRM.payroll.manage');
+    }
+    if(enabled.get('HRM')?.has('HRM.payroll.verify')&&enabled.get('HRM')?.has('HRM.payroll.view')){
+      templates.push({id:'std_hrm_payroll_verifier',module:'HRM',name:'HR – Payroll Verifier',
+        description:'Verify bank details and personal pay items (check-offs, loans, bonuses) that a payroll officer entered, and see a full account number when verifying (audited). Cannot enter them and never verifies their own entries.',
+        permissions:['HRM.shell.view','HRM.payroll.view','HRM.payroll.verify']});
+      assigned.add('HRM.payroll.verify');
     }
     if(enabled.get('HRM')?.has('HRM.payroll.view')){
       templates.push({id:'std_hrm_payroll_viewer',module:'HRM',name:'HR – Payroll Viewer',

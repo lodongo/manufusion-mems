@@ -79,7 +79,13 @@ export type PayslipInput = {
     /** Monthly amounts for optional deductions (SACCO, loans...) keyed by item code. */
     otherDeductions?: Record<string, number>;
     hoursPerMonth?: number;
+    /** Earnings that belong to this person alone (acting allowance, bonus, commission...). Taxable ones are taxed and count for contributions; a non-taxable one (a reimbursement) is neither. */
+    personalEarnings?: PersonalEarning[];
+    /** Deductions that belong to this person alone (check-off, staff loan, court order...). Taken after tax. */
+    personalDeductions?: PersonalDeduction[];
 };
+export type PersonalEarning = { code: string; label: string; amount: number; taxable?: boolean; note?: string };
+export type PersonalDeduction = { code: string; label: string; amount: number; note?: string };
 
 export type PayslipSection = 'earnings' | 'noncash' | 'preTax' | 'tax' | 'relief' | 'deductions' | 'employer';
 export type PayslipLine = { code: string; label: string; section: PayslipSection; amount: number; note?: string };
@@ -95,6 +101,8 @@ export type Payslip = {
     tax: number;
     employeeStatutory: number;
     otherDeductionsTotal: number;
+    personalEarningsTotal: number;
+    personalDeductionsTotal: number;
     net: number;
     employerCost: number;
     totalCostToEmployer: number;
@@ -247,8 +255,25 @@ export function computePayslip(grade: PayslipGrade, catalogue: PayslipItem[], in
             if (!item.taxable) taxableAdjust -= value;
         }
     }
+    // Earnings that belong to this person alone are paid in cash like an allowance.
+    let personalEarningsTotal = 0;
+    /** Personal earnings marked not taxable (reimbursements) are outside pay for contributions as well as for tax. */
+    let outsideContributions = 0;
+    for (const e of input.personalEarnings || []) {
+        const value = r2(pos(e.amount));
+        if (!value) continue;
+        lines.push({ code: e.code, label: e.label, section: 'earnings', amount: value, note: e.note || (e.taxable === false ? 'Not taxed' : undefined) });
+        cashExtras += value;
+        personalEarningsTotal += value;
+        if (e.taxable === false) {
+            taxableAdjust -= value;
+            outsideContributions += value;
+        }
+    }
+    personalEarningsTotal = r2(personalEarningsTotal);
     const grossCash = r2(basic + cashExtras);
     const taxableGross = r2(Math.max(0, grossCash + taxableAdjust));
+    const contributionGross = r2(grossCash - outsideContributions);
 
     // ---- Statutory contributions and other deductions chosen for the grade -----------------------
     const codes = [...new Set([...(grade.taxCodes || []), ...(grade.deductionCodes || [])])];
@@ -260,9 +285,9 @@ export function computePayslip(grade: PayslipGrade, catalogue: PayslipItem[], in
             case 'taxable':
                 return taxableGross;
             case 'net':
-                return grossCash;
+                return contributionGross;
             default:
-                return grossCash; // gross, pensionable and anything else contributions are charged on
+                return contributionGross; // gross, pensionable and anything else contributions are charged on
         }
     };
 
@@ -362,7 +387,17 @@ export function computePayslip(grade: PayslipGrade, catalogue: PayslipItem[], in
     }
     otherTotal = r2(otherTotal);
 
-    const net = r2(grossCash - employeeStatutory - tax - voluntaryPension - otherTotal);
+    // ---- Deductions that belong to this person alone (check-offs, loans, court orders...), taken after tax ----
+    let personalTotal = 0;
+    for (const d of input.personalDeductions || []) {
+        const value = r2(pos(d.amount));
+        if (!value) continue;
+        lines.push({ code: d.code, label: d.label, section: 'deductions', amount: value, note: d.note || undefined });
+        personalTotal += value;
+    }
+    personalTotal = r2(personalTotal);
+
+    const net = r2(grossCash - employeeStatutory - tax - voluntaryPension - otherTotal - personalTotal);
     if (grossCash > 0 && net < grossCash * MIN_TAKE_HOME_SHARE) warnings.push('Take-home pay is below one third of gross pay. Deductions must leave at least one third (Employment Act 2007, s.19).');
     if (net < 0) warnings.push('Deductions exceed pay; net pay would be negative.');
 
@@ -390,6 +425,8 @@ export function computePayslip(grade: PayslipGrade, catalogue: PayslipItem[], in
         tax,
         employeeStatutory: r2(employeeStatutory),
         otherDeductionsTotal: otherTotal,
+        personalEarningsTotal,
+        personalDeductionsTotal: personalTotal,
         net,
         employerCost,
         totalCostToEmployer,

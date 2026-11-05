@@ -23,6 +23,8 @@ export type PayrollRow = {
     name: string;
     employeeNumber: string;
     status: string;
+    /** Name of the site or unit the employee's primary deployment sits in (printed on the payslip). */
+    unitName: string;
     roleCode: string;
     roleTitle: string;
     gradeCode: string;
@@ -91,6 +93,7 @@ export function buildPayrollRows(input: {
         rows.push({
             ...who,
             status: str(u.data.status) || 'active',
+            unitName: str(input.nodes.get(str(primaries[0]?.nodeId))?.name),
             roleCode,
             roleTitle,
             gradeCode: grade ? gradeCode : '',
