@@ -1,19 +1,19 @@
 import {useCallback,useEffect,useMemo,useState} from 'react';
-import {BadgeCheck,BriefcaseBusiness,Lock,Plus,Save,ShieldCheck,Trash2} from 'lucide-react';
+import {Download,Lock,MoreVertical,Plus,RotateCcw,Save,ShieldCheck,Trash2,Users} from 'lucide-react';
 import {callBackend} from '../lib/backend';
 import {navigate} from '../lib/route';
 import {SelectField} from '../components/ui';
 import {Segmented,messageOf,useConfirm} from '../components/screen';
 import Sheet from '../components/Sheet';
-import RichTable,{type Column} from '../components/RichTable';
 import {activationProblems,draftIssues} from '../shared/hrJobGradeRules';
 import {LeaveTab,PayTab,packageIssues} from './HrGradePackage';
 import PayslipSimulator from './HrPayslipSimulator';
 import {clonePackage,defaultLeave,soleModel,withPackage,type Catalogue,type CatalogueItem,type Grade} from './hrGradeTypes';
 import HrJobGradeApprovals from './HrJobGradeApprovals';
+import {GradeCards,GradeMenu,exportGrades,menuRow} from './HrGradeCards';
+import type {RoleRef} from './hrGradeFacts';
 import type {PayConfig} from '../../backend/hrCompensationConfig';
 
-type RoleRef={code:string;title:string};
 type Loaded={
  entities:Array<{id:string;name:string}>;entity:{id:string;name:string;countryCode:string;currency:string}|null;
  financial:boolean;canManage:boolean;canApprove:boolean;
@@ -25,8 +25,6 @@ type Loaded={
 const field='min-h-12 w-full min-w-0 rounded-xl border border-line bg-page px-3 text-base text-ink';
 const btn='flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-panel px-3 text-sm font-semibold text-ink disabled:opacity-40';
 const primary='flex min-h-11 items-center justify-center gap-2 rounded-xl bg-brand px-3 text-sm font-semibold text-onbrand disabled:opacity-40';
-const money=(n:number|null|undefined,c='')=>n===null||n===undefined?'—':(c?c+' ':'')+new Intl.NumberFormat('en',{maximumFractionDigits:2}).format(n);
-const key=(g:Grade)=>g.code||'new-'+g.rank;
 
 /** Checklist of catalogue items. Items the law makes mandatory are ticked and locked. */
 function CodePicker({title,hint,items,forced,value,onChange,disabled}:{title:string;hint:string;items:CatalogueItem[];forced:string[];value:string[];onChange:(v:string[])=>void;disabled:boolean}){
@@ -49,7 +47,8 @@ function CodePicker({title,hint,items,forced,value,onChange,disabled}:{title:str
  </fieldset>;
 }
 
-type EditState={index:number;grade:Grade};
+type SheetTab='basics'|'pay'|'leave'|'tax'|'payslip';
+type EditState={index:number;grade:Grade;tab?:SheetTab};
 export default function HrJobGrades(){
  const [entityId,setEntityId]=useState('');
  const [data,setData]=useState<Loaded|null>(null);
@@ -60,6 +59,8 @@ export default function HrJobGrades(){
  const [tab,setTab]=useState<'grades'|'approvals'>('grades');
  const [edit,setEdit]=useState<EditState|null>(null);
  const [submitOpen,setSubmitOpen]=useState(false);
+ const [menuOpen,setMenuOpen]=useState(false);
+ const [cardMenu,setCardMenu]=useState<Grade|null>(null);
  const [refresh,setRefresh]=useState(0);
  const {ask,sheet}=useConfirm();
 
@@ -104,29 +105,6 @@ export default function HrJobGrades(){
    taxCodes:[...data.catalogue.forcedTaxes],deductionCodes:[...data.catalogue.forcedDeductions],
    payModelCode:soleModel(data.catalogue),benefitCodes:[],benefitValues:{},leave:defaultLeave(data.catalogue)}});
  };
- const columns:Column<Grade>[]=useMemo(()=>{
-  const name=(items:CatalogueItem[]|undefined,codes:string[])=>codes.map(c=>items?.find(i=>i.code===c)?.name||c).join(', ');
-  const cols:Column<Grade>[]=[
-   {key:'rank',label:'Grade',type:'number',value:g=>g.rank,className:'min-w-[5rem]',render:g=><span className="text-base font-bold text-ink">{g.rank}</span>},
-   {key:'title',label:'Job grade',value:g=>g.title,className:'min-w-[13rem]',render:g=><span className="block py-1"><span className="block text-sm font-semibold text-ink">{g.title||'Untitled'}</span><span className="block font-mono text-[11px] text-muted">{g.code||'Code assigned on save'}</span></span>},
-   {key:'status',label:'Status',value:g=>g.enabled?'Enabled':'Disabled',render:g=><span className={'inline-flex rounded-full px-2.5 py-1 text-xs font-semibold '+(g.enabled?'bg-emerald-500/15 text-emerald-500':'bg-amber-500/15 text-amber-500')}>{g.enabled?'Enabled':'Disabled'}</span>},
-  ];
-  if(financial)cols.push(
-   {key:'minSalary',label:'Minimum monthly salary',type:'number',value:g=>g.minSalary,className:'min-w-[10rem]',render:g=><span className={'tabular-nums '+((g.minSalary??0)>0?'font-semibold text-ink':'text-amber-500')}>{(g.minSalary??0)>0?money(g.minSalary):'Not set'}</span>},
-   {key:'currency',label:'Currency',value:()=>currency,hidden:true},
-   {key:'taxes',label:'Taxes',value:g=>name(data?.catalogue?.taxes,g.taxCodes),className:'min-w-[12rem]'},
-   {key:'deductions',label:'Deductions',value:g=>name(data?.catalogue?.deductions,g.deductionCodes),className:'min-w-[12rem]'},
-   {key:'payModel',label:'Pay model',value:g=>name(data?.catalogue?.payModels,g.payModelCode?[g.payModelCode]:[]),className:'min-w-[10rem]',render:g=>g.payModelCode?<span className="text-sm text-ink">{name(data?.catalogue?.payModels,[g.payModelCode])}</span>:<span className="text-xs text-amber-500">Not chosen</span>},
-   {key:'benefits',label:'Pay & benefits',value:g=>name(data?.catalogue?.benefits,g.benefitCodes),className:'min-w-[14rem]'},
-   {key:'benefitCount',label:'Benefit count',type:'number',value:g=>g.benefitCodes.length,hidden:true},
-   {key:'leave',label:'Leave',value:g=>g.leave.map(l=>(data?.catalogue?.leave.find(x=>x.code===l.code)?.name||l.code)+' '+l.daysPerYear+(l.unit==='months'?' mo':'d')+(l.accrueMonthly?' (earned monthly)':'')).join(', '),className:'min-w-[16rem]'},
-   {key:'leaveTypes',label:'Leave types',type:'number',value:g=>g.leave.length,hidden:true},
-  );
-  cols.push({key:'roles',label:'Job roles',type:'number',value:g=>rolesUsing.get(g.code)||0},
-   {key:'description',label:'Description',value:g=>g.description,hidden:true});
-  return cols;
- },[financial,currency,data?.catalogue,rolesUsing]);
-
  const apply=(g:Grade)=>{
   if(!edit)return;
   setGrades(list=>edit.index<0?[...list,g]:list.map((x,i)=>i===edit.index?g:x));
@@ -138,29 +116,41 @@ export default function HrJobGrades(){
  };
 
  const entityPicker=data&&data.entities.length>1?<SelectField id="grade-entity" label="Legal entity" hideLabel value={entityId} disabled={busy||loading||dirty}
-  hint={dirty?'Save or discard your changes before switching legal entity.':undefined}
+  hint={dirty?'Save or discard your changes to switch.':undefined}
   onChange={e=>void load(e.target.value)}>
   {data.entities.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</SelectField>:null;
  const discard=()=>ask({title:'Discard unsaved changes?',tone:'danger',confirmLabel:'Discard changes',
   message:'Your edits since the last saved draft are lost. The saved draft and the active grades are not affected.'},
   async()=>{setGrades(JSON.parse(baseline) as Grade[]);setNotice('Unsaved changes discarded.')});
+ const openGrade=(g:Grade,tab?:SheetTab)=>{const index=grades.indexOf(g);if(index>=0)setEdit({index,grade:clonePackage(g),tab})};
+ const unfinished=financial&&canManage&&!dirty&&!!data?.draft?.saved&&!pending&&submitProblems.length>0;
+ const subtitle=dirty?'Unsaved changes':pending?'Awaiting approval':data?.entity?.name||'';
+ const status:Array<[string,string]>=data?.entity?[
+  ['Legal entity',data.entity.name],
+  ['Your draft',dirty?'Unsaved changes':data.draft?.saved?'Version '+data.draft.version+' saved':'Not saved yet. This is the current grade list.'],
+  ['Approved version',data.active?'Version '+data.active.version+', approved under '+data.active.approvalRef+' on '+data.active.activatedAt.slice(0,10):'Nothing approved yet'],
+  ...(pending?[['Awaiting approval',pending] as [string,string]]:[]),
+ ]:[];
 
  return <div className="flex h-full min-h-0 flex-col">
   {sheet}
   <div className="shrink-0 space-y-2 border-b border-line bg-page pb-3">
    <div className="flex items-center gap-2">
     <div className="min-w-0 flex-1">
-     <h2 className="flex items-center gap-2 truncate text-base font-semibold text-ink"><BriefcaseBusiness className="h-5 w-5 shrink-0 text-brand"/>Job grades{data?.entity?' · '+data.entity.name:''}</h2>
-     <p className="truncate text-xs text-muted">{!data?.draft?'':dirty?'Unsaved changes':data.draft.saved?'Draft v'+data.draft.version+' saved':'Starting from the current grade list'}{data?.active?' · Active v'+data.active.version:' · Nothing approved yet'}{pending?' · Awaiting approval '+pending:''}</p>
+     <h2 className="truncate text-base font-semibold text-ink">Job grades</h2>
+     <p className={'truncate text-xs '+(dirty||pending?'font-semibold text-amber-600':'text-muted')}>{subtitle}</p>
     </div>
-    {canManage&&data?.draft&&<div className="flex shrink-0 items-center gap-2">
-     <button type="button" className={btn} onClick={addGrade} disabled={busy||loading} aria-label="Add a job grade"><Plus className="h-4 w-4"/><span className="hidden sm:inline">Add grade</span></button>
-     <button type="button" className={btn} onClick={()=>void save()} disabled={busy||loading||(!dirty&&data.draft.saved)||draftProblems.length>0} aria-label="Save draft"><Save className="h-4 w-4"/><span className="hidden sm:inline">Save draft</span></button>
-     <button type="button" className={primary} onClick={()=>setSubmitOpen(true)} disabled={busy||loading||dirty||!data.draft.saved||!!pending||submitProblems.length>0||!data.changedSinceActive} aria-label="Submit for approval"><ShieldCheck className="h-4 w-4"/><span className="hidden sm:inline">Submit</span></button>
-    </div>}
+    <div className="flex shrink-0 items-center gap-2">
+     {canManage&&data?.draft&&<>
+      <button type="button" className={btn} onClick={addGrade} disabled={busy||loading} aria-label="Add a job grade"><Plus className="h-4 w-4"/><span className="hidden sm:inline">Add grade</span></button>
+      <button type="button" className={btn} onClick={()=>void save()} disabled={busy||loading||(!dirty&&data.draft.saved)||draftProblems.length>0} aria-label="Save draft"><Save className="h-4 w-4"/><span className="hidden sm:inline">Save draft</span></button>
+      <button type="button" className={primary} onClick={()=>setSubmitOpen(true)} disabled={busy||loading||dirty||!data.draft.saved||!!pending||submitProblems.length>0||!data.changedSinceActive} aria-label="Submit for approval"><ShieldCheck className="h-4 w-4"/><span className="hidden sm:inline">Submit</span></button>
+     </>}
+     {data?.entity&&<button type="button" aria-label="Job grades menu" aria-haspopup="dialog" onClick={()=>setMenuOpen(true)} className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-line text-ink">
+      <MoreVertical className="h-5 w-5"/>{unfinished&&<span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-amber-500"/>}</button>}
+    </div>
    </div>
    {entityPicker}
-   {dirty&&canManage&&<button type="button" className="text-xs font-semibold text-danger underline" onClick={discard}>Discard unsaved changes</button>}
    {data?.entity&&(financial||data.canApprove)&&<Segmented label="Job grades view" value={tab} onChange={setTab} options={[{value:'grades',label:'Grades',count:grades.length},{value:'approvals',label:'Approvals'}]}/>}
   </div>
 
@@ -170,21 +160,36 @@ export default function HrJobGrades(){
    {loading&&<p className="rounded-xl bg-panel p-3 text-sm text-muted">Loading job grades…</p>}
    {!loading&&data&&!data.entity&&<p className="rounded-xl bg-panel p-3 text-sm text-muted">Create a legal entity under Organization design before configuring job grades.</p>}
    {!loading&&data?.entity&&tab==='grades'&&<>
-    <section className="rounded-2xl border border-line bg-panel p-3 text-xs text-muted">
-     A job grade is an employment band for {data.entity.name}. Grades are allocated to job roles in Organization → Job roles, where each role also gets its minimum level of education.
-     {financial?' Pay model, benefits, leave, taxes and deductions come from Benefits; those required by law apply to every grade. Changes are drafted here and only take effect once approved under the Chart of Authority.':' Pay details are visible to job grade maintainers, benefits maintainers and approvers only.'}
-    </section>
-    {!canManage&&financial&&<p className="rounded-xl bg-panel p-3 text-xs text-muted">You can review grades. Preparing changes needs the HR – Job Grade Maintainer role.</p>}
     {draftProblems.length>0&&canManage&&<section role="alert" className="rounded-xl border border-line bg-amber-500/10 p-3 text-sm"><p className="font-semibold text-ink">Fix {draftProblems.length} item{draftProblems.length===1?'':'s'} before saving</p><ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-soft">{draftProblems.slice(0,6).map(x=><li key={x}>{x}</li>)}</ul></section>}
-    {financial&&canManage&&!dirty&&data.draft&&!data.draft.saved&&<p className="rounded-xl bg-panel p-3 text-xs text-muted">This is the current grade list, not yet saved as a draft. Review it, then save the draft to prepare it for approval.</p>}
-    {financial&&canManage&&!dirty&&data.draft?.saved&&!pending&&submitProblems.length>0&&<details className="rounded-xl border border-line bg-panel p-3 text-sm"><summary className="cursor-pointer font-semibold text-ink">{submitProblems.length} thing{submitProblems.length===1?'':'s'} to finish before this can be submitted for approval</summary><ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-soft">{submitProblems.slice(0,10).map(x=><li key={x}>{x}</li>)}</ul></details>}
-    <RichTable id="hr-job-grades-v1" title="Job grades" fileName={'Job_grades_'+(data.entity.name||'').replace(/\W+/g,'_')} columns={columns} rows={grades.slice().sort((a,b)=>a.rank-b.rank)} rowKey={key}
-     onRowClick={g=>setEdit({index:grades.indexOf(g),grade:clonePackage(g)})}
-     allowExport={financial} height="h-[calc(100dvh-24rem)] min-h-[320px]" empty="No job grades yet."/>
+    <GradeCards grades={grades} financial={financial} currency={currency} canManage={canManage} onOpen={g=>openGrade(g)} onMore={setCardMenu}/>
    </>}
    {!loading&&data?.entity&&tab==='approvals'&&<HrJobGradeApprovals legalEntityId={data.entity.id} refreshKey={refresh} onChanged={()=>{setRefresh(k=>k+1);void load(data.entity!.id)}}/>}
-   {!loading&&data?.active&&tab==='grades'&&<p className="flex items-center gap-2 text-xs text-muted"><BadgeCheck className="h-4 w-4 shrink-0 text-brand"/>Active version {data.active.version} was approved under {data.active.approvalRef} on {data.active.activatedAt.slice(0,10)}.</p>}
   </div>
+
+  {menuOpen&&data?.entity&&<Sheet title="Job grades" onClose={()=>setMenuOpen(false)}>
+   <dl className="divide-y divide-line rounded-xl border border-line">
+    {status.map(([label,value])=><div key={label} className="px-3 py-2">
+     <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</dt>
+     <dd className="break-words text-sm text-ink">{value}</dd></div>)}
+   </dl>
+   {unfinished&&<section className="rounded-xl border border-line bg-amber-500/10 p-3 text-sm">
+    <p className="font-semibold text-ink">{submitProblems.length} thing{submitProblems.length===1?'':'s'} to finish before this can be submitted for approval</p>
+    <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-soft">{submitProblems.slice(0,10).map(x=><li key={x}>{x}</li>)}</ul></section>}
+   <div className="space-y-2">
+    {financial&&grades.length>0&&<button type="button" className={menuRow} onClick={()=>{setMenuOpen(false);exportGrades(grades,cat,currency,data.entity!.name,data.roles||{})}}><Download className="h-5 w-5 text-brand"/>Download Excel</button>}
+    <button type="button" className={menuRow} onClick={()=>{setMenuOpen(false);navigate('organization_admin/positions')}}><Users className="h-5 w-5 text-brand"/>Allocate roles to grades</button>
+    {dirty&&canManage&&<button type="button" className={menuRow+' text-danger'} onClick={()=>{setMenuOpen(false);discard()}}><RotateCcw className="h-5 w-5"/>Discard unsaved changes</button>}
+   </div>
+   <section className="space-y-2 rounded-xl border border-line p-3 text-xs text-muted">
+    <p className="text-sm font-semibold text-ink">About job grades</p>
+    <p>A job grade is an employment band for {data.entity.name}. Grades are allocated to job roles in Organization → Job roles, where each role also gets its minimum level of education.</p>
+    <p>{financial?'Pay model, benefits, leave, taxes and deductions come from Benefits; those required by law apply to every grade. Changes are drafted here and only take effect once approved under the Chart of Authority.':'Pay details are visible to job grade maintainers, benefits maintainers and approvers only.'}</p>
+    {!canManage&&financial&&<p>You can review grades. Preparing changes needs the HR – Job Grade Maintainer role.</p>}
+    {financial&&canManage&&!dirty&&data.draft&&!data.draft.saved&&<p>This is the current grade list, not yet saved as a draft. Review it, then save the draft to prepare it for approval.</p>}
+   </section>
+  </Sheet>}
+  {cardMenu&&data?.entity&&<GradeMenu grade={cardMenu} cat={cat} financial={financial} currency={currency} canManage={canManage} roles={data.roles?.[cardMenu.code]||[]}
+   onClose={()=>setCardMenu(null)} onOpen={()=>{const g=cardMenu;setCardMenu(null);openGrade(g)}} onPayslip={()=>{const g=cardMenu;setCardMenu(null);openGrade(g,'payslip')}}/>}
 
   {edit&&data?.entity&&data.catalogue&&<GradeSheet edit={edit} others={grades.filter((_,i)=>i!==edit.index)} data={data} currency={currency} canManage={canManage}
    roles={data.roles?.[edit.grade.code]||[]} onClose={()=>setEdit(null)} onApply={apply} onRemove={edit.index>=0&&!edit.grade.code?removeNew:edit.index<0?()=>setEdit(null):undefined}/>}
@@ -196,13 +201,12 @@ export default function HrJobGrades(){
  </div>;
 }
 
-type SheetTab='basics'|'pay'|'leave'|'tax'|'payslip';
 function GradeSheet({edit,others,data,currency,canManage,roles,onClose,onApply,onRemove}:{edit:EditState;others:Grade[];data:Loaded;currency:string;canManage:boolean;roles:RoleRef[];onClose:()=>void;onApply:(g:Grade)=>void;onRemove?:()=>void}){
  const [g,setG]=useState<Grade>(edit.grade);
  const [salary,setSalary]=useState(edit.grade.minSalary===null?'':String(edit.grade.minSalary));
  const [touched,setTouched]=useState(false);
- const [tab,setTab]=useState<SheetTab>('basics');
- const [seenPayslip,setSeenPayslip]=useState(false);
+ const [tab,setTab]=useState<SheetTab>(edit.tab||'basics');
+ const [seenPayslip,setSeenPayslip]=useState(edit.tab==='payslip');
  const cat=data.catalogue!;
  const current:Grade={...g,minSalary:salary.trim()===''?null:Number(salary)};
  const dupRank=others.some(o=>o.rank===current.rank);
