@@ -88,3 +88,22 @@ test('the cards screen is mobile-first: tap to open, a menu button per card, laz
  assert.doesNotMatch(screen,/was approved under/,'the old footer line above the cards is gone');
  assert.ok(screen.indexOf('to finish before this can be submitted')>menuAt,'the submit checklist sits inside the menu');
 });
+
+test('the header is one row; legal entity and view live in the menu; there is no search box',()=>{
+ const cards=readFileSync('src/org/HrGradeCards.tsx','utf8');
+ assert.doesNotMatch(cards,/Search|query|type="search"/,'the card list has no search box');
+ const screen=readFileSync('src/org/HrJobGrades.tsx','utf8');
+ assert.doesNotMatch(screen,/SelectField|<Segmented label="Job grades view"|grade-entity/,'no entity dropdown or tab strip above the cards');
+ const menuAt=screen.indexOf('menuOpen&&data?.entity&&<Sheet');
+ assert.ok(menuAt>0);
+ const entityAt=screen.indexOf('aria-label="Legal entity"');
+ const viewAt=screen.indexOf('aria-label="View"');
+ assert.ok(entityAt>menuAt&&viewAt>menuAt,'both choices are inside the menu');
+ assert.match(screen,/data\.entities\.length>1&&<section/,'the entity choice appears only when there is more than one entity');
+ assert.match(screen,/disabled=\{!on&&\(busy\|\|loading\|\|dirty\)\}/,'the entity cannot be switched with unsaved changes');
+ assert.match(screen,/Save or discard your changes to switch legal entity\./);
+ assert.match(screen,/\(financial\|\|data\.canApprove\)&&<section/,'the view choice follows the same rule as the old tabs');
+ assert.match(screen,/setTab\(value\)/);
+ assert.match(screen,/setTab\('approvals'\)/,'submitting still lands on Approvals');
+ assert.match(screen,/\{\(dirty\|\|pending\)&&<p/,'unsaved or awaiting-approval status stays visible in the header');
+});

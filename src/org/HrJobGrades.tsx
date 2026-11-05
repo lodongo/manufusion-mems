@@ -1,8 +1,7 @@
 import {useCallback,useEffect,useMemo,useState} from 'react';
-import {Download,Lock,MoreVertical,Plus,RotateCcw,Save,ShieldCheck,Trash2,Users} from 'lucide-react';
+import {Check,Download,Lock,MoreVertical,Plus,RotateCcw,Save,ShieldCheck,Trash2,Users} from 'lucide-react';
 import {callBackend} from '../lib/backend';
 import {navigate} from '../lib/route';
-import {SelectField} from '../components/ui';
 import {Segmented,messageOf,useConfirm} from '../components/screen';
 import Sheet from '../components/Sheet';
 import {activationProblems,draftIssues} from '../shared/hrJobGradeRules';
@@ -115,16 +114,11 @@ export default function HrJobGrades(){
   setGrades(list=>list.filter((_,i)=>i!==edit.index));setEdit(null);
  };
 
- const entityPicker=data&&data.entities.length>1?<SelectField id="grade-entity" label="Legal entity" hideLabel value={entityId} disabled={busy||loading||dirty}
-  hint={dirty?'Save or discard your changes to switch.':undefined}
-  onChange={e=>void load(e.target.value)}>
-  {data.entities.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</SelectField>:null;
  const discard=()=>ask({title:'Discard unsaved changes?',tone:'danger',confirmLabel:'Discard changes',
   message:'Your edits since the last saved draft are lost. The saved draft and the active grades are not affected.'},
   async()=>{setGrades(JSON.parse(baseline) as Grade[]);setNotice('Unsaved changes discarded.')});
  const openGrade=(g:Grade,tab?:SheetTab)=>{const index=grades.indexOf(g);if(index>=0)setEdit({index,grade:clonePackage(g),tab})};
  const unfinished=financial&&canManage&&!dirty&&!!data?.draft?.saved&&!pending&&submitProblems.length>0;
- const subtitle=dirty?'Unsaved changes':pending?'Awaiting approval':data?.entity?.name||'';
  const status:Array<[string,string]>=data?.entity?[
   ['Legal entity',data.entity.name],
   ['Your draft',dirty?'Unsaved changes':data.draft?.saved?'Version '+data.draft.version+' saved':'Not saved yet. This is the current grade list.'],
@@ -137,8 +131,9 @@ export default function HrJobGrades(){
   <div className="shrink-0 space-y-2 border-b border-line bg-page pb-3">
    <div className="flex items-center gap-2">
     <div className="min-w-0 flex-1">
-     <h2 className="truncate text-base font-semibold text-ink">Job grades</h2>
-     <p className={'truncate text-xs '+(dirty||pending?'font-semibold text-amber-600':'text-muted')}>{subtitle}</p>
+     <h2 className="truncate text-base font-semibold text-ink">{tab==='approvals'?'Job grade approvals':'Job grades'}</h2>
+     <p className="truncate text-xs text-muted">{data?.entity?.name||''}</p>
+     {(dirty||pending)&&<p className="truncate text-xs font-semibold text-amber-600">{dirty?'Unsaved changes':'Awaiting approval'}</p>}
     </div>
     <div className="flex shrink-0 items-center gap-2">
      {canManage&&data?.draft&&<>
@@ -150,8 +145,6 @@ export default function HrJobGrades(){
       <MoreVertical className="h-5 w-5"/>{unfinished&&<span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-amber-500"/>}</button>}
     </div>
    </div>
-   {entityPicker}
-   {data?.entity&&(financial||data.canApprove)&&<Segmented label="Job grades view" value={tab} onChange={setTab} options={[{value:'grades',label:'Grades',count:grades.length},{value:'approvals',label:'Approvals'}]}/>}
   </div>
 
   <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3">
@@ -167,6 +160,19 @@ export default function HrJobGrades(){
   </div>
 
   {menuOpen&&data?.entity&&<Sheet title="Job grades" onClose={()=>setMenuOpen(false)}>
+   {data.entities.length>1&&<section className="space-y-2" role="radiogroup" aria-label="Legal entity">
+    <p className="text-sm font-semibold text-ink">Legal entity</p>
+    {dirty&&<p className="text-xs text-amber-600">Save or discard your changes to switch legal entity.</p>}
+    {data.entities.map(e=>{const on=e.id===entityId;
+     return <button key={e.id} type="button" role="radio" aria-checked={on} disabled={!on&&(busy||loading||dirty)} className={menuRow+(on?' bg-brand/5':'')}
+      onClick={()=>{setMenuOpen(false);if(!on)void load(e.id)}}><span className="min-w-0 flex-1 truncate">{e.name}</span>{on&&<Check className="h-5 w-5 shrink-0 text-brand"/>}</button>;})}
+   </section>}
+   {(financial||data.canApprove)&&<section className="space-y-2" role="radiogroup" aria-label="View">
+    <p className="text-sm font-semibold text-ink">View</p>
+    {([['grades','Grades ('+grades.length+')'],['approvals','Approvals']] as const).map(([value,label])=>
+     <button key={value} type="button" role="radio" aria-checked={tab===value} className={menuRow+(tab===value?' bg-brand/5':'')}
+      onClick={()=>{setMenuOpen(false);setTab(value)}}><span className="min-w-0 flex-1 truncate">{label}</span>{tab===value&&<Check className="h-5 w-5 shrink-0 text-brand"/>}</button>)}
+   </section>}
    <dl className="divide-y divide-line rounded-xl border border-line">
     {status.map(([label,value])=><div key={label} className="px-3 py-2">
      <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</dt>
