@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
-import {Banknote,MoreVertical,Pencil,Search} from 'lucide-react';
+import {Banknote,MoreVertical,Pencil} from 'lucide-react';
 import Sheet from '../components/Sheet';
 import {buildXlsx,downloadBlob} from '../lib/xlsx';
 import {flush,track} from '../lib/audit';
@@ -19,18 +19,11 @@ export function exportGrades(grades:Grade[],cat:Catalogue|null|undefined,currenc
 }
 
 const PAGE=20;
-const SEARCH_FROM=6;
 /** Cards sorted by grade number. Rendered in pages as the list is scrolled, so a long list stays light. */
 export function GradeCards({grades,financial,currency,canManage,onOpen,onMore}:{grades:Grade[];financial:boolean;currency:string;canManage:boolean;onOpen:(g:Grade)=>void;onMore:(g:Grade)=>void}){
- const [query,setQuery]=useState('');
  const [limit,setLimit]=useState(PAGE);
  const end=useRef<HTMLLIElement>(null);
- const rows=useMemo(()=>{
-  const q=query.trim().toLowerCase();
-  const sorted=grades.slice().sort((a,b)=>a.rank-b.rank);
-  return q?sorted.filter(g=>[String(g.rank),g.title,g.code,g.description].some(v=>v.toLowerCase().includes(q))):sorted;
- },[grades,query]);
- useEffect(()=>setLimit(PAGE),[query]);
+ const rows=useMemo(()=>grades.slice().sort((a,b)=>a.rank-b.rank),[grades]);
  useEffect(()=>{
   const el=end.current;
   if(!el||limit>=rows.length)return;
@@ -41,12 +34,7 @@ export function GradeCards({grades,financial,currency,canManage,onOpen,onMore}:{
  },[limit,rows.length]);
  const shown=rows.slice(0,limit);
  return <div className="space-y-3">
-  {grades.length>SEARCH_FROM&&<label className="relative block">
-   <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted"/>
-   <input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search grades" aria-label="Search job grades"
-    className="min-h-12 w-full min-w-0 rounded-xl border border-line bg-page pl-10 pr-3 text-base text-ink"/>
-  </label>}
-  {!rows.length&&<p className="rounded-xl bg-panel p-3 text-sm text-muted">{query.trim()?'No grade matches "'+query.trim()+'".':canManage?'No job grades yet. Tap + to add one.':'No job grades yet.'}</p>}
+  {!rows.length&&<p className="rounded-xl bg-panel p-3 text-sm text-muted">{canManage?'No job grades yet. Tap + to add one.':'No job grades yet.'}</p>}
   <ul className="space-y-2">
    {shown.map(g=>{
     const salaryOk=(g.minSalary??0)>0;
