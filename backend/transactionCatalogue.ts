@@ -176,6 +176,7 @@ const PATH_RULES: Rule[] = [
     [/^org\/hr\/(education|evidence)\//, 'HRM', 'TRN'],
     [/^org\/hr\/job-grades\/decide$/, 'HRM', 'GRD', 'AP'],
     [/^org\/hr\/job-grades\//, 'HRM', 'GRD'],
+    [/^org\/hr\/payroll\//, 'HRM', 'PRL'],
     [/^org\/hr\/compensation\/decide$/, 'HRM', 'CMP', 'AP'],
     [/^org\/hr\/compensation\//, 'HRM', 'CMP'],
     [/^org\/hr\/access-rules\/review$/, 'HRM', 'RUL', 'AP'],

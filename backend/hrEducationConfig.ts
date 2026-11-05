@@ -47,8 +47,9 @@ export const DEFAULT_EDUCATION:EducationConfig={
  gradingSystems:[],
 };
 const entityNodes=async(org:string)=>listDocs(`organizations/${org}/structure`);
-export async function legalEntityForEmployee(org:string,employee:Record<string,unknown>){
- const nodes=new Map((await entityNodes(org)).map(d=>[d.id,d.data]));
+/** Legal entities an employee's primary deployments sit under (walks up the structure; ignores inactive nodes). Pure, so
+ * payroll can resolve every employee from one structure read. */
+export function legalEntitiesOf(nodes:Map<string,Record<string,unknown>>,employee:Record<string,unknown>){
  const assignments=Array.isArray(employee.assignments)
   ?employee.assignments.filter(isObj).filter(a=>str(a.type)==='primary'):[];
  const found=new Map<string,{id:string;name:string}>();
@@ -63,6 +64,11 @@ export async function legalEntityForEmployee(org:string,employee:Record<string,u
    id=str(node.parentId);
   }
  }
+ return found;
+}
+export async function legalEntityForEmployee(org:string,employee:Record<string,unknown>){
+ const nodes=new Map((await entityNodes(org)).map(d=>[d.id,d.data]));
+ const found=legalEntitiesOf(nodes,employee);
  // No single-legal-entity fallback, no guessing, no implicit cross-entity access.
  // Conflicting primary deployments require correction before education access.
  return found.size===1?[...found.values()][0]:null;

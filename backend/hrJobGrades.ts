@@ -326,7 +326,7 @@ export { activationProblems };
 // ---------------------------------------------------------------------------
 
 /** Legal entity with the country and currency its pay settings use. */
-async function entityContext(ctx: OrgContext, requested: string) {
+export async function entityContext(ctx: OrgContext, requested: string) {
     const all = await payEntities(ctx.orgId);
     const current = all.find((e) => e.id === requested) || (!requested ? all[0] : undefined);
     const orgCountry = str(ctx.org.data.countryCode || ctx.org.data.country).trim().slice(0, 2).toUpperCase();
@@ -349,7 +349,7 @@ async function rolesByGrade(org: string, entity: string) {
 }
 
 /** The stored draft, or the older grade list (with no pay information yet) when nothing was saved. */
-async function draftOrSeed(org: string, entity: string, catalogue: GradeCatalogue) {
+export async function draftOrSeed(org: string, entity: string, catalogue: GradeCatalogue) {
     const doc = await getDoc(gradeDraftPath(org, entity));
     if (doc) return { saved: true, version: Number(doc.data.version || 0), grades: readGrades(doc.data.grades), updatedAt: str(doc.data.updatedAt), updatedBy: str(doc.data.updatedBy) };
     const legacy = await legacyJobGrades(org, entity);
