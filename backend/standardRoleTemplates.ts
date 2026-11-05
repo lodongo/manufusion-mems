@@ -68,6 +68,17 @@ export function standardRoleTemplates(groups: PermGroup[]): StandardRoleTemplate
         permissions:['HRM.shell.view','HRM.education.manage']});
       assigned.add('HRM.education.manage');
     }
+    if(enabled.get('HRM')?.has('HRM.payroll.manage')&&enabled.get('HRM')?.has('HRM.payroll.view')){
+      templates.push({id:'std_hrm_payroll_officer',module:'HRM',name:'HR – Payroll Officer',
+        description:'See every employee of assigned legal entities with the role, job grade and payslip preview, and enter draft basic salaries. Cannot add employees (ghost-employee control) and never approves pay policy.',
+        permissions:['HRM.shell.view','HRM.payroll.view','HRM.payroll.manage']});
+      assigned.add('HRM.payroll.view');assigned.add('HRM.payroll.manage');
+    }
+    if(enabled.get('HRM')?.has('HRM.payroll.view')){
+      templates.push({id:'std_hrm_payroll_viewer',module:'HRM',name:'HR – Payroll Viewer',
+        description:'Read-only view of every employee of assigned legal entities with the role, job grade, draft basic salary and payslip preview. Cannot change salaries.',
+        permissions:['HRM.shell.view','HRM.payroll.view']});
+    }
     if(enabled.get('HRM')?.has('HRM.skills.manage')){
       templates.push({
         id:'std_hrm_skills_administrator',module:'HRM',name:'HR – Skills Administrator',

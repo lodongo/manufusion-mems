@@ -8,6 +8,7 @@ import HrSkillsWorkspace from './HrSkillsWorkspace';
 import HrLeavePanel from './HrLeavePanel';
 import HrCompensationApprovals from './HrCompensationApprovals';
 import HrJobGrades from './HrJobGrades';
+import HrPayroll from './HrPayroll';
 import HrEducationAdmin from './HrEducationAdmin';
 import HrBenefits from './HrBenefits';
 import HrStructureExplorer from './HrStructureExplorer';
@@ -29,12 +30,12 @@ const SECTIONS=[
  ['HR11','Compensation, Benefits & Payroll Interface'],['HR12','Performance Management'],
  ['HR13','Learning, Skills & Career Development'],['HR14','Employee Relations & Disciplinary Management'],
  ['HR15','Employee Engagement & Feedback'],['HR16','Employee Movements, Separation & Offboarding'],
- ['HR18','Education'],['HR19','Benefits']
+ ['HR18','Education'],['HR19','Benefits'],['HR20','Payroll']
 ] as const;
 /** Screens that keep their own fixed action bar: the page frame does not scroll, only their content does. */
-const FIXED_FRAME:readonly string[]=['HR07','HR18','HR19'];
+const FIXED_FRAME:readonly string[]=['HR07','HR18','HR19','HR20'];
 /** Opened from the HR menu by permission, not from the landing list. */
-const NOT_LISTED:readonly string[]=['HR18','HR19'];
+const NOT_LISTED:readonly string[]=['HR18','HR19','HR20'];
 const initials=(name:string)=>name.split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]?.toUpperCase()).join('')||'?';
 function Avatar({person,size=48}:{person:Person;size?:number}){
  const [bad,setBad]=useState(false);
@@ -131,6 +132,7 @@ export default function HrShell({sectionCode,setup=[]}:{sectionCode?:string;setu
    {sectionCode==='HR07'&&<HrJobGrades/>}
    {sectionCode==='HR18'&&<HrEducationAdmin/>}
    {sectionCode==='HR19'&&<HrBenefits/>}
+   {sectionCode==='HR20'&&<HrPayroll/>}
    {sectionCode==='HR11'&&setup.length>0&&<Panel title="Set up">
     <p className="mb-2 text-xs text-muted">Pay, benefits and grades are configured in these screens. Changes are drafted there and come back here for approval.</p>
     <div className="grid gap-2 md:grid-cols-2">{setup.map(x=><button key={x.path} type="button" onClick={()=>navigate('organization_home/'+x.path)} className="flex min-h-14 items-center gap-3 rounded-xl border border-line bg-page p-3 text-left"><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-ink">{x.label}</span><span className="block text-xs text-muted">{x.hint}</span></span><ChevronRight className="h-5 w-5 shrink-0 text-muted"/></button>)}</div>

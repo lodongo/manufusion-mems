@@ -15,8 +15,15 @@ const SECTIONS:Array<[PayslipSection,string]>=[
  * Payslip preview for one grade, computed from the grade's pay package and the Benefits policy.
  * It is a review aid, not a payroll run: nothing is posted, filed or paid.
  */
-export default function PayslipSimulator({grade,items,currency,policyVersion}:{grade:Grade;items:PayslipItem[];currency:string;policyVersion:number}){
- const [basic,setBasic]=useState<number>(grade.minSalary&&grade.minSalary>0?grade.minSalary:NaN);
+export default function PayslipSimulator({grade,items,currency,policyVersion,basic:basicProp,onBasicChange,note}:{grade:Grade;items:PayslipItem[];currency:string;policyVersion:number;
+ /** Payroll passes the employee's salary box in, so the box on the card and the one on the payslip are the same one. */
+ basic?:number;onBasicChange?:(n:number)=>void;note?:string}){
+ const controlled=onBasicChange!==undefined;
+ const [localBasic,setLocalBasic]=useState<number>(grade.minSalary&&grade.minSalary>0?grade.minSalary:NaN);
+ const basic=controlled?(basicProp??NaN):localBasic;
+ const setBasic=controlled?onBasicChange:setLocalBasic;
+ const minimum=Number(grade.minSalary)||0;
+ const below=Number.isFinite(basic)&&minimum>0&&basic<minimum;
  const [weekday,setWeekday]=useState(0),[rest,setRest]=useState(0);
  const [picked,setPicked]=useState<string[]>([]);
  const [declared,setDeclared]=useState<Record<string,number>>({});
@@ -46,10 +53,11 @@ export default function PayslipSimulator({grade,items,currency,policyVersion}:{g
  return <div className="space-y-4">
   <div className="rounded-xl border border-line bg-page p-3">
    <p className="flex items-center gap-2 text-sm font-semibold text-ink"><Banknote className="h-4 w-4 text-brand"/>Payslip preview</p>
-   <p className="mt-1 text-xs text-muted">Built from this grade's taxes, deductions, benefits and the draft Benefits policy (v{policyVersion}). Change the figures to test cases. It is a review aid, not a payroll run: nothing is posted, filed or paid.</p>
+   <p className="mt-1 text-xs text-muted">{note??'Built from this grade\'s taxes, deductions, benefits and the draft Benefits policy (v'+policyVersion+'). Change the figures to test cases. It is a review aid, not a payroll run: nothing is posted, filed or paid.'}</p>
   </div>
 
-  <NumField label={'Basic monthly salary ('+currency+')'} value={basic} onChange={setBasic} hint={grade.minSalary&&grade.minSalary>0?'Starts at the grade minimum. Try higher pay to see the tax bands.':'Enter a salary to test, or set the grade minimum first.'}/>
+  <NumField label={'Basic monthly salary ('+currency+')'} value={basic} onChange={setBasic} optional={controlled} invalid={below} hintTone={below?'danger':'normal'}
+   hint={below?'Below the grade minimum of '+money(minimum,currency):controlled?(minimum>0?'Grade minimum: '+money(minimum,currency):'This grade has no minimum salary set yet.'):minimum>0?'Starts at the grade minimum. Try higher pay to see the tax bands.':'Enter a salary to test, or set the grade minimum first.'}/>
   {(overtime.weekday||overtime.rest)&&<div className="grid grid-cols-2 gap-3">
    {overtime.weekday&&<NumField label="Overtime hours (weekdays)" value={weekday} max={200} onChange={setWeekday}/>}
    {overtime.rest&&<NumField label="Overtime hours (rest days, holidays)" value={rest} max={200} onChange={setRest}/>}

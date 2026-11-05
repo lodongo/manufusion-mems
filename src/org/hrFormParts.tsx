@@ -7,21 +7,21 @@ export const fmt=(n:number)=>new Intl.NumberFormat('en',{maximumFractionDigits:2
 export const pct=(x:number)=>Number((x*100).toFixed(5));
 
 /** A number box that keeps what the person typed. An empty or invalid box reports NaN so the form can refuse it. */
-export function NumField({label,value,onChange,disabled,hint,percent,max,placeholder,optional}:{label:string;value:number;onChange:(n:number)=>void;disabled?:boolean;hint?:string;percent?:boolean;max?:number;placeholder?:string;optional?:boolean}){
+export function NumField({label,value,onChange,disabled,hint,percent,max,placeholder,optional,invalid,hintTone}:{label:string;value:number;onChange:(n:number)=>void;disabled?:boolean;hint?:string;percent?:boolean;max?:number;placeholder?:string;optional?:boolean;invalid?:boolean;hintTone?:'normal'|'danger'}){
  const show=(v:number)=>Number.isNaN(v)?'':String(percent?pct(v):v);
  const [text,setText]=useState(show(value));
  const last=useRef(value);
  useEffect(()=>{if(!Object.is(value,last.current)){last.current=value;setText(show(value))}},[value]);// eslint-disable-line react-hooks/exhaustive-deps
- const bad=optional&&Number.isNaN(value)?false:!Number.isFinite(value)||value<0||(max!==undefined&&value>max);
+ const bad=(optional&&Number.isNaN(value)?false:!Number.isFinite(value)||value<0||(max!==undefined&&value>max))||!!invalid;
  return <label className="block min-w-0 text-sm text-muted">{label}
-  <input className={field+' mt-1'} type="number" inputMode="decimal" min={0} step="any" value={text} disabled={disabled} placeholder={placeholder} aria-invalid={bad}
+  <input className={field+' mt-1'+(invalid?' !border-red-500 !bg-red-500/10 font-semibold !text-red-600':'')} type="number" inputMode="decimal" min={0} step="any" value={text} disabled={disabled} placeholder={placeholder} aria-invalid={bad}
    onChange={e=>{
     const t=e.target.value;setText(t);
     const n=t.trim()===''?NaN:Number(t);
     const v=Number.isFinite(n)&&percent?Number((n/100).toFixed(8)):n;
     last.current=v;onChange(v);
    }}/>
-  {hint&&<span className="mt-0.5 block text-xs font-normal">{hint}</span>}
+  {hint&&<span className={'mt-0.5 block text-xs '+(hintTone==='danger'?'font-semibold text-red-600':'font-normal')}>{hint}</span>}
  </label>;
 }
 
