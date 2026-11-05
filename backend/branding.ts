@@ -112,6 +112,27 @@ export function ownedLogoPath(org: Doc, path: string): string {
     return '';
 }
 
+/** A stored logo (path already authorized by the caller) as a data link for a document, or '' (PNG or JPEG under 1.2 MB only). */
+export async function logoDataFromPath(path: string): Promise<string> {
+    if (!path) return '';
+    try {
+        const bytes = await storage.read(path);
+        if (!bytes.length || bytes.length > 1_200_000) return '';
+        const png = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e;
+        const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+        if (!png && !jpeg) return '';
+        return `data:image/${png ? 'png' : 'jpeg'};base64,${bytes.toString('base64')}`;
+    } catch {
+        return '';
+    }
+}
+
+/** The organization's own uploaded logo (same ownership check as the signed link) as a data link for a document. */
+export async function logoDataUrl(org: Doc): Promise<string> {
+    const branding = org.data.branding;
+    return logoDataFromPath(ownedLogoPath(org, isObj(branding) ? str(branding.logoPath) : ''));
+}
+
 /** Branding as sent to an organization user, with an ownership-checked private logo link. */
 export async function brandingOut(org: Doc, replacement?: Fields) {
     const branding = replacement ?? org.data.branding;

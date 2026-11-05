@@ -6,9 +6,8 @@ import Sheet from '../components/Sheet';
 import {buildXlsx,downloadBlob} from '../lib/xlsx';
 import {flush,track} from '../lib/audit';
 import type {PayslipItem} from '../shared/hrPayslip';
-import PayslipSimulator from './HrPayslipSimulator';
+import HrPayrollPerson,{type PaySummary} from './HrPayrollPerson';
 import {NumField} from './hrFormParts';
-import {withPackage} from './hrGradeTypes';
 import {menuRow} from './HrGradeCards';
 import {money} from './hrGradeFacts';
 import {EXPORT_HEADER,belowMin,changesOf,countsOf,effective,exportTable,initials,matches,payslipOf,salaryIssue,
@@ -24,7 +23,8 @@ type Loaded={
 const btn='flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-panel px-3 text-sm font-semibold text-ink disabled:opacity-40';
 const primary='flex min-h-11 items-center justify-center gap-2 rounded-xl bg-brand px-3 text-sm font-semibold text-onbrand disabled:opacity-40';
 const PAGE=20;
-const SHOW:Array<[FilterMode,string]>=[['all','All employees'],['below','Salary below the grade minimum'],['none','No salary entered yet'],['attention','Role or grade needs attention']];
+const SHOW:Array<[FilterMode,string]>=[['all','All employees'],['below','Salary below the grade minimum'],['none','No salary entered yet'],['attention','Role or grade needs attention'],['details','Bank details or pay items need attention']];
+const BANK={none:'No bank details',pending:'Bank details awaiting verification',verified:'Bank details verified'} as const;
 const REASON={no_entity:'No primary legal entity',several_entities:'Primary deployments in several legal entities'};
 
 /** One employee: who they are, their role and grade, the salary slot (red under the grade minimum) and the take-home. */
@@ -46,6 +46,7 @@ function PayrollCard({emp,grade,items,currency,value,editable,onChange,onOpen}:{
    <NumField label={'Basic monthly salary ('+currency+')'} value={value} optional onChange={onChange} disabled={!editable} invalid={below||!!issue} hintTone={below||issue?'danger':'normal'}
     hint={issue||(below?'Below the grade minimum of '+money(emp.minSalary,currency):emp.minSalary>0?'Grade minimum '+money(emp.minSalary,currency):emp.gradeCode?'This grade has no minimum salary set yet.':'No grade, so there is no minimum to check.')}/>
    {slip&&<p className="flex items-baseline justify-between gap-3 text-sm"><span className="text-muted">Net pay</span><span className="font-semibold tabular-nums text-ink">{money(slip.net,currency)}</span></p>}
+   <p className={'text-xs '+((emp.payBank||'none')==='verified'&&!(emp.payPending||0)?'text-muted':'font-semibold text-amber-700')}>{BANK[emp.payBank||'none']}{emp.payItems?' · '+emp.payItems+' personal item'+(emp.payItems===1?'':'s'):''}{emp.payPending?' · '+emp.payPending+' awaiting verification':''}</p>
   </div>
  </li>;
 }
@@ -100,6 +101,7 @@ export default function HrPayroll(){
  },[dirty]);
 
  const setSalary=(uid:string,n:number)=>setEdits(m=>({...m,[uid]:n}));
+ const setSummary=useCallback((uid:string,pay:PaySummary)=>setData(d=>d?{...d,employees:(d.employees||[]).map(e=>e.uid===uid?{...e,...pay}:e)}:d),[]);
  const editable=(e:Emp)=>canManage&&e.uid!==data?.selfUid;
  const save=async()=>{
   if(!data?.entity||!dirty||invalid.length)return;
@@ -199,18 +201,16 @@ export default function HrPayroll(){
    <section className="space-y-2 rounded-xl border border-line p-3 text-xs text-muted">
     <p className="text-sm font-semibold text-ink">About payroll</p>
     <p>Each employee is shown with the job role they hold and the grade that role has in {data.entity.name}. The payslip comes from that grade's pay model, allowances, benefits, taxes and deductions. Tap an employee to see it.</p>
-    <p>The basic salary box turns red when it is below the grade minimum. These are draft salaries for review: nothing is paid, posted or filed from here, and a payroll run is not built yet.</p>
+    <p>The basic salary box turns red when it is below the grade minimum. The payslip also shows the employee's bank details and their own earnings and deductions, such as check-offs and loans, entered under Pay details and verified by a second person.</p>
+    <p>These are draft salaries for review: nothing is paid, posted or filed from here, and a payroll run is not built yet.</p>
     <p>{canManage?'You cannot set your own salary.':'You can review payroll. Entering salaries needs the HR – Payroll Officer role.'}</p>
    </section>
   </Sheet>}
 
-  {slipEmp&&data?.entity&&<Sheet title={slipEmp.name} onClose={()=>setSlip(null)} footer={<button type="button" className={btn+' flex-1'} onClick={()=>setSlip(null)}>Close</button>}>
-   <p className="font-mono text-xs text-muted">{slipEmp.employeeNumber||'No employee number'}</p>
-   {slipEmp.problem&&<p className="rounded-xl bg-amber-500/10 p-3 text-xs font-semibold text-amber-700">{slipEmp.problemText}. A payslip needs a job role with a grade in this legal entity.</p>}
-   {!slipEmp.problem&&<p className="text-sm text-ink">{slipEmp.roleTitle} · {slipEmp.gradeCode} {slipEmp.gradeTitle}</p>}
-   {slipGrade&&data.source&&<PayslipSimulator key={slipEmp.uid} grade={withPackage({...slipGrade,description:''})} items={items} currency={currency} policyVersion={data.source.policyVersion}
-    basic={effective(slipEmp,edits)} onBasicChange={editable(slipEmp)?(n=>setSalary(slipEmp.uid,n)):()=>undefined}
-    note={'Built from the '+data.source.grades+' job grade and the '+data.source.policy+' Benefits policy (v'+data.source.policyVersion+'). A preview only: nothing is paid, posted or filed.'}/>}
+  {slipEmp&&data?.entity&&data.source&&<Sheet title={slipEmp.name} onClose={()=>setSlip(null)} footer={<button type="button" className={btn+' flex-1'} onClick={()=>setSlip(null)}>Close</button>}>
+   <p className="font-mono text-xs text-muted">{slipEmp.employeeNumber||'No employee number'} · {slipEmp.problem?slipEmp.problemText:slipEmp.roleTitle+' · '+slipEmp.gradeCode+' '+slipEmp.gradeTitle}</p>
+   <HrPayrollPerson key={slipEmp.uid} emp={slipEmp} grade={slipGrade} items={items} entity={data.entity} currency={currency} source={data.source}
+    basic={effective(slipEmp,edits)} onBasicChange={n=>setSalary(slipEmp.uid,n)} editableSalary={editable(slipEmp)} onSummary={setSummary}/>
   </Sheet>}
  </div>;
 }

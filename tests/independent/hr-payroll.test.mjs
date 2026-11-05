@@ -134,8 +134,8 @@ test('only real changes are sent, clearing sends null and invalid boxes block th
 
 test('the four views count and filter the same way',()=>{
  const list=[emp({uid:'a',basic:20000}),emp({uid:'b',basic:45000}),emp({uid:'c'}),emp({uid:'d',problem:'no_grade',problemText:'x',gradeCode:'',minSalary:0})];
- assert.deepEqual(countsOf(list,{}),{all:4,below:1,none:2,attention:1});
- assert.deepEqual(countsOf(list,{c:10000,b:5}),{all:4,below:3,none:1,attention:1});
+ assert.deepEqual(countsOf(list,{}),{all:4,below:1,none:2,attention:1,details:4});
+ assert.deepEqual(countsOf(list,{c:10000,b:5}),{all:4,below:3,none:1,attention:1,details:4});
  assert.deepEqual(list.filter(e=>matches(e,{},'below')).map(e=>e.uid),['a']);
  assert.equal(initials('Amina Okello'),'AO');
  assert.equal(initials('  '),'?');

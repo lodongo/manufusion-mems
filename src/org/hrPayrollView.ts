@@ -2,9 +2,9 @@ import {computePayslip,type PayslipGrade,type PayslipItem} from '../shared/hrPay
 
 /** What the Payroll screen decides, with no screen code so it can be tested on its own. */
 export type PayGrade={code:string;rank:number;title:string;enabled:boolean;minSalary:number;taxCodes:string[];deductionCodes:string[];payModelCode:string;benefitCodes:string[];benefitValues:Record<string,{amount?:number;rate?:number}>};
-export type Emp={uid:string;name:string;employeeNumber:string;status:string;roleCode:string;roleTitle:string;gradeCode:string;gradeTitle:string;minSalary:number;basic:number|null;problem:string;problemText:string};
+export type Emp={uid:string;name:string;employeeNumber:string;status:string;unitName?:string;payBank?:'none'|'pending'|'verified';payItems?:number;payPending?:number;roleCode:string;roleTitle:string;gradeCode:string;gradeTitle:string;minSalary:number;basic:number|null;problem:string;problemText:string};
 export type Edits=Record<string,number>;
-export type FilterMode='all'|'below'|'none'|'attention';
+export type FilterMode='all'|'below'|'none'|'attention'|'details';
 
 export const BASIC_MAX=1e9;
 export const initials=(name:string)=>name.split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]?.toUpperCase()).join('')||'?';
@@ -29,18 +29,21 @@ export function changesOf(emps:Array<Pick<Emp,'uid'|'basic'>>,edits:Edits){
  return {changes,invalid};
 }
 
+/** No bank details yet, bank details or personal pay items waiting for a second person. */
+export const detailsNeedAttention=(e:Pick<Emp,'payBank'|'payPending'>)=>(e.payBank||'none')!=='verified'||(e.payPending||0)>0;
 export function matches(e:Emp,edits:Edits,mode:FilterMode){
  const v=effective(e,edits);
- return mode==='all'?true:mode==='below'?belowMin(v,e.minSalary):mode==='none'?!Number.isFinite(v):e.problem!=='';
+ return mode==='all'?true:mode==='below'?belowMin(v,e.minSalary):mode==='none'?!Number.isFinite(v):mode==='details'?detailsNeedAttention(e):e.problem!=='';
 }
 export const countsOf=(emps:Emp[],edits:Edits)=>({
  all:emps.length,
  below:emps.filter(e=>matches(e,edits,'below')).length,
  none:emps.filter(e=>matches(e,edits,'none')).length,
  attention:emps.filter(e=>matches(e,edits,'attention')).length,
+ details:emps.filter(e=>matches(e,edits,'details')).length,
 });
 
-const toGrade=(g:PayGrade):PayslipGrade=>({code:g.code,title:g.title,minSalary:Number(g.minSalary)||0,payModelCode:g.payModelCode||undefined,
+export const toGrade=(g:PayGrade):PayslipGrade=>({code:g.code,title:g.title,minSalary:Number(g.minSalary)||0,payModelCode:g.payModelCode||undefined,
  taxCodes:g.taxCodes,deductionCodes:g.deductionCodes,benefitCodes:g.benefitCodes,benefitValues:g.benefitValues});
 /** The payslip headline figures for one employee, or null when there is no grade or no salary to compute from. */
 export function payslipOf(grade:PayGrade|undefined,items:PayslipItem[],basic:number){
@@ -51,7 +54,7 @@ export function payslipOf(grade:PayGrade|undefined,items:PayslipItem[],basic:num
  }catch{return null}
 }
 
-export const EXPORT_HEADER=['Employee number','Name','Status','Job role','Grade code','Grade','Grade minimum','Basic salary (draft)','Below grade minimum','Gross pay','Tax after reliefs','Net pay','Total cost to employer','Currency','Needs attention'];
+export const EXPORT_HEADER=['Employee number','Name','Status','Job role','Grade code','Grade','Grade minimum','Basic salary (draft)','Below grade minimum','Gross pay','Tax after reliefs','Net pay','Total cost to employer','Currency','Needs attention','Bank details','Personal pay items','Pay items awaiting verification'];
 /** Excel copy of the list as it is on screen. Text and numbers only. */
 export function exportTable(emps:Emp[],edits:Edits,grades:PayGrade[],items:PayslipItem[],currency:string):Array<Array<string|number|null>>{
  const byCode=new Map(grades.map(g=>[g.code,g]));
@@ -59,6 +62,7 @@ export function exportTable(emps:Emp[],edits:Edits,grades:PayGrade[],items:Paysl
   const v=effective(e,edits);
   const slip=payslipOf(byCode.get(e.gradeCode),items,v);
   return [e.employeeNumber,e.name,e.status,e.roleTitle,e.gradeCode,e.gradeTitle,e.minSalary>0?e.minSalary:null,Number.isFinite(v)?v:null,
-   belowMin(v,e.minSalary)?'Yes':'No',slip?slip.gross:null,slip?slip.tax:null,slip?slip.net:null,slip?slip.cost:null,currency,e.problemText];
+   belowMin(v,e.minSalary)?'Yes':'No',slip?slip.gross:null,slip?slip.tax:null,slip?slip.net:null,slip?slip.cost:null,currency,e.problemText,
+   e.payBank==='verified'?'Verified':e.payBank==='pending'?'Awaiting verification':'None',e.payItems||0,e.payPending||0];
  });
 }

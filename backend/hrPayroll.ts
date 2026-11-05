@@ -27,6 +27,7 @@ import { readPayConfig, type PayConfig } from './hrCompensationConfig';
 import { gradeActivePath, readGrades, type JobGradeDef } from './hrJobGradeStore';
 import { catalogueOf, draftOrSeed, entityContext } from './hrJobGrades';
 import { PROBLEM_TEXT, belowMinimum, buildPayrollRows } from './hrPayrollRows';
+import { paySummaries } from './hrPayrollPeople';
 
 export const PAYROLL_VIEW = 'HRM.payroll.view';
 export const PAYROLL_MANAGE = 'HRM.payroll.manage';
@@ -43,14 +44,14 @@ export const inputHistoryPath = (org: string, entity: string, version: number) =
 const policyActivePath = (org: string, entity: string) => `organizations/${org}/hr_compensation_active/${entity}`;
 
 /** The pay policy a payslip is computed from: the approved one, else the draft (or shipped defaults), and which it was. */
-async function policyFor(org: string, entity: string, country: string, currency: string) {
+export async function policyFor(org: string, entity: string, country: string, currency: string) {
     const active = await getDoc(policyActivePath(org, entity));
     if (active) return { config: active.data as unknown as PayConfig, source: 'approved' as const };
     return { config: await readPayConfig(org, entity, country, currency), source: 'draft' as const };
 }
 
 /** The job grades payroll uses: approved when there are any, else the draft list. */
-async function gradesFor(org: string, entity: string, config: PayConfig) {
+export async function gradesFor(org: string, entity: string, config: PayConfig) {
     const active = await getDoc(gradeActivePath(org, entity));
     const approved = active ? readGrades(active.data.grades) : [];
     if (approved.length) return { grades: approved, source: 'approved' as const, version: Number(active!.data.version || 0) };
@@ -85,7 +86,7 @@ export const hrPayrollRoutes = {
             if (!current) return { entities, entity: null, canManage: canManage(ctx) };
             const [policy, input] = await Promise.all([policyFor(ctx.orgId, current.id, country, currency), getDoc(inputPath(ctx.orgId, current.id))]);
             const gradeSet = await gradesFor(ctx.orgId, current.id, policy.config);
-            const { rows, unplaced } = await loadPeople(ctx.orgId, current.id, savedSalaries(input), gradeSet.grades);
+            const [{ rows, unplaced }, summaries] = await Promise.all([loadPeople(ctx.orgId, current.id, savedSalaries(input), gradeSet.grades), paySummaries(ctx.orgId)]);
             await hrAudit(ctx, 'read.payroll', { type: 'legal_entity', id: current.id }, `employees=${rows.length} unplaced=${unplaced.length}`);
             return {
                 entities,
@@ -113,7 +114,10 @@ export const hrPayrollRoutes = {
                     benefitCodes: g.benefitCodes,
                     benefitValues: g.benefitValues,
                 })),
-                employees: rows.map((r) => ({ ...r, problemText: r.problem ? PROBLEM_TEXT[r.problem] : '' })),
+                employees: rows.map((r) => {
+                    const pay = summaries.get(r.uid);
+                    return { ...r, problemText: r.problem ? PROBLEM_TEXT[r.problem] : '', payBank: pay?.bank || 'none', payItems: pay?.items || 0, payPending: pay?.pending || 0 };
+                }),
                 unplaced: unplaced.slice(0, 100),
                 unplacedCount: unplaced.length,
             };
