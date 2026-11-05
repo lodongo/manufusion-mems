@@ -64,8 +64,9 @@ test('the Job Grades screen is wired in, keeps its action bar fixed and verifies
  assert.match(home,/label: 'Job Grades', path: 'hr\/HR07'/);
  assert.doesNotMatch(home,/Job Grading/);
  const screen=readFileSync('src/org/HrJobGrades.tsx','utf8');
- assert.match(screen,/<RichTable id="hr-job-grades-v1"/);
- assert.match(screen,/allowExport=\{financial\}/,'Excel download only when the viewer may see pay');
+ assert.match(screen,/<GradeCards /,'grades are cards, not a table');
+ assert.doesNotMatch(screen,/RichTable/);
+ assert.match(screen,/financial&&grades\.length>0&&<button[\s\S]*?exportGrades\(/,'Excel download only when the viewer may see pay');
  assert.match(screen,/activationProblems\(/);
  assert.match(screen,/draftIssues\(/);
  assert.match(screen,/acknowledge:true/,'submitting needs the acknowledgement');
