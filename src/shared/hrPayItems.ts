@@ -8,9 +8,16 @@
 
 export type PayItemKind = 'earning' | 'deduction';
 export type PayItemStatus = 'pending' | 'verified';
-export type PayItemType = { code: string; label: string; taxable: boolean; schedule: boolean };
+/** Which kind of general ledger account a deduction is posted against: money owed to someone else, or money the company is owed. */
+export type AccountKind = 'payable' | 'receivable';
+export type PayItemType = { code: string; label: string; taxable: boolean; schedule: boolean; account?: AccountKind };
 
-/** `schedule` types may carry a principal: the payslip then shows the instalment and what is still owed. */
+/**
+ * `schedule` types may carry a total (the "principal"): the deduction then reduces it instalment by instalment, the payslip shows
+ * the instalment and what is still owed, and it stops by itself when the total is repaid.
+ * `account` is the kind of ledger account the deduction is posted against. Money withheld for a bank, a SACCO, a union, a court or
+ * an insurer is owed to them (a payable). A staff loan or a salary advance is owed BY the employee to the company (a receivable).
+ */
 export const EARNING_TYPES: PayItemType[] = [
     { code: 'acting', label: 'Acting allowance', taxable: true, schedule: false },
     { code: 'bonus', label: 'Bonus', taxable: true, schedule: false },
@@ -20,15 +27,27 @@ export const EARNING_TYPES: PayItemType[] = [
     { code: 'other', label: 'Other earning', taxable: true, schedule: false },
 ];
 export const DEDUCTION_TYPES: PayItemType[] = [
-    { code: 'checkoff', label: 'Check-off', taxable: false, schedule: false },
-    { code: 'sacco', label: 'SACCO', taxable: false, schedule: false },
-    { code: 'loan', label: 'Staff loan', taxable: false, schedule: true },
-    { code: 'advance', label: 'Salary advance', taxable: false, schedule: true },
-    { code: 'court', label: 'Court order', taxable: false, schedule: false },
-    { code: 'welfare', label: 'Welfare', taxable: false, schedule: false },
-    { code: 'insurance', label: 'Insurance premium', taxable: false, schedule: false },
-    { code: 'other', label: 'Other deduction', taxable: false, schedule: false },
+    { code: 'checkoff', label: 'Check-off', taxable: false, schedule: true, account: 'payable' },
+    { code: 'sacco', label: 'SACCO', taxable: false, schedule: true, account: 'payable' },
+    { code: 'loan', label: 'Staff loan', taxable: false, schedule: true, account: 'receivable' },
+    { code: 'advance', label: 'Salary advance', taxable: false, schedule: true, account: 'receivable' },
+    { code: 'court', label: 'Court order', taxable: false, schedule: true, account: 'payable' },
+    { code: 'welfare', label: 'Welfare', taxable: false, schedule: false, account: 'payable' },
+    { code: 'insurance', label: 'Insurance premium', taxable: false, schedule: false, account: 'payable' },
+    { code: 'other', label: 'Other deduction', taxable: false, schedule: true, account: 'payable' },
 ];
+/** The account suggested for each deduction type, taken from the MEMS chart of accounts. Only a suggestion: it is used when the legal entity has adopted it. */
+export const SUGGESTED_ACCOUNT: Record<string, string> = {
+    checkoff: '20303050', // Employee Loan Repayments Payable to Lenders (a bank check-off)
+    sacco: '20303040', // SACCO and Cooperative Deductions Payable
+    court: '20303070', // Court Orders and Garnishments Payable
+    insurance: '20303060', // Insurance Premium Deductions Payable
+    welfare: '20303080', // Other Employee Benefit Deductions Payable
+    other: '20303080',
+    loan: '10206030', // Staff Loans - Current
+    advance: '10206010', // Staff Salary Advances
+};
+export const accountKindOf = (kind: PayItemKind, type: string): AccountKind | '' => (kind === 'deduction' ? typeOf(kind, type)?.account || '' : '');
 export const typesFor = (kind: PayItemKind) => (kind === 'earning' ? EARNING_TYPES : DEDUCTION_TYPES);
 export const typeOf = (kind: PayItemKind, code: string) => typesFor(kind).find((t) => t.code === code);
 
@@ -43,11 +62,13 @@ export type PersonalItem = {
     amount: number;
     /** Earnings only. A taxable earning is taxed and counts for the statutory contributions. */
     taxable: boolean;
-    /** Loans and advances only: what was lent. 0 when there is no schedule. */
+    /** Deductions that reduce a total (a bank check-off, a loan, a court order...): the total still to deduct. 0 when there is no total. */
     principal: number;
+    /** Deductions only: the general ledger account the amount is posted against (a payable, or for loans and advances a receivable). */
+    glAccount: string;
     /** First month the item applies, YYYY-MM. */
     startMonth: string;
-    /** Last month it applies, YYYY-MM, or empty when it runs until removed (or until the principal is repaid). */
+    /** Last month it applies, YYYY-MM, or empty when it runs until removed. Always empty when there is a total: it ends when the total is repaid. */
     endMonth: string;
     status: PayItemStatus;
     /** Who last changed it and when. A different person has to verify it. */
@@ -72,6 +93,9 @@ export type BankDetails = {
 
 export const MAX_ITEMS = 30;
 export const MAX_AMOUNT = 1e9;
+/** The longest a total may take to repay, in months. */
+export const MAX_TERM = 120;
+export const GL_ACCOUNT = /^[A-Za-z0-9_-]{1,20}$/;
 export const MONTH = /^(20\d\d)-(0[1-9]|1[0-2])$/;
 export const LABEL = /^[\p{L}\p{N} _.,;:/()#&+'’-]{2,60}$/u;
 export const REFERENCE = /^[A-Za-z0-9 _./#-]{0,40}$/;
@@ -93,12 +117,34 @@ export const shiftMonth = (m: string, by: number) => {
     return Number.isNaN(i) ? m : `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
 };
 
+/** Monthly deduction that repays `principal` over `months` months (rounded up to the cent; the last instalment is what is left). */
+export const instalmentFor = (principal: number, months: number) =>
+    Number.isFinite(principal) && principal > 0 && Number.isInteger(months) && months >= 1 ? Math.ceil((principal / months) * 100 - 1e-9) / 100 : NaN;
+/** How many instalments repay `principal` at `amount` a month. */
+export const termMonths = (principal: number, amount: number) => (principal > 0 && amount > 0 ? Math.ceil(principal / amount - 1e-9) : 0);
+/** What the last instalment is when the monthly amount does not divide the total. */
+export const lastInstalment = (principal: number, amount: number) => {
+    const n = termMonths(principal, amount);
+    return n ? r2(principal - amount * (n - 1)) : 0;
+};
+/** The month the last instalment is taken, or '' when there is no total. */
+export const finishMonth = (startMonth: string, principal: number, amount: number) => {
+    const n = termMonths(principal, amount);
+    return n && MONTH.test(startMonth) ? shiftMonth(startMonth, n - 1) : '';
+};
+
 /** Account numbers are stored without spaces or dashes, in capitals. */
 export const normalAccountNumber = (v: unknown) => String(v ?? '').replace(/[\s-]+/g, '').toUpperCase();
 export const maskAccount = (n: string) => (n.length > 4 ? '••••' + n.slice(-4) : n ? '••••' : '');
 
-/** The problem with an item as typed, or '' when it can be saved. */
-export function itemProblem(i: Pick<PersonalItem, 'kind' | 'type' | 'label' | 'reference' | 'amount' | 'taxable' | 'principal' | 'startMonth' | 'endMonth'>): string {
+/**
+ * The problem with an item as typed, or '' when it can be saved.
+ * A deduction needs its ledger account unless `needAccount` is false (an item saved before accounts existed and left untouched).
+ */
+export function itemProblem(
+    i: Pick<PersonalItem, 'kind' | 'type' | 'label' | 'reference' | 'amount' | 'taxable' | 'principal' | 'startMonth' | 'endMonth'> & { glAccount?: string },
+    opts: { needAccount?: boolean } = {},
+): string {
     if (i.kind !== 'earning' && i.kind !== 'deduction') return 'Choose whether this is an earning or a deduction.';
     const t = typeOf(i.kind, i.type);
     if (!t) return 'Choose the type.';
@@ -110,11 +156,19 @@ export function itemProblem(i: Pick<PersonalItem, 'kind' | 'type' | 'label' | 'r
     if (!twoDecimals(amount)) return 'Use at most 2 decimals.';
     const principal = Number(i.principal) || 0;
     if (principal !== 0) {
-        if (!t.schedule || i.kind !== 'deduction') return 'Only a loan or an advance has an amount lent.';
-        if (!Number.isFinite(principal) || principal < 0) return 'The amount lent must be above 0.';
-        if (principal > MAX_AMOUNT) return 'The amount lent is too large.';
-        if (!twoDecimals(principal)) return 'The amount lent can have at most 2 decimals.';
-        if (principal < amount) return 'The amount lent cannot be less than one monthly instalment.';
+        if (!t.schedule || i.kind !== 'deduction') return 'This type cannot have a total to repay.';
+        if (!Number.isFinite(principal) || principal < 0) return 'The total to repay must be above 0.';
+        if (principal > MAX_AMOUNT) return 'The total to repay is too large.';
+        if (!twoDecimals(principal)) return 'The total to repay can have at most 2 decimals.';
+        if (principal < amount) return 'The total to repay cannot be less than one monthly deduction.';
+        if (termMonths(principal, amount) > MAX_TERM) return `That takes more than ${MAX_TERM} months to repay. Raise the monthly deduction.`;
+        if (i.endMonth) return 'A deduction with a total ends when the total is repaid. Leave the last month empty.';
+    }
+    const account = String(i.glAccount ?? '').trim();
+    if (i.kind === 'earning' && account) return 'An earning has no ledger account here.';
+    if (i.kind === 'deduction') {
+        if (account && !GL_ACCOUNT.test(account)) return 'That ledger account is not valid.';
+        if (!account && opts.needAccount !== false) return t.account === 'receivable' ? 'Choose the receivable account for this loan or advance.' : 'Choose the payable account this deduction is paid into.';
     }
     if (i.kind === 'deduction' && i.taxable) return 'A deduction is not taxable.';
     if (!MONTH.test(String(i.startMonth ?? ''))) return 'Choose the month it starts.';
@@ -173,6 +227,6 @@ export function linesForMonth(items: PersonalItem[], month: string) {
 }
 
 export const emptyItem = (kind: PayItemKind, month: string): PersonalItem => ({
-    id: '', kind, type: typesFor(kind)[0].code, label: '', reference: '', amount: NaN, taxable: typesFor(kind)[0].taxable, principal: 0,
+    id: '', kind, type: typesFor(kind)[0].code, label: '', reference: '', amount: NaN, taxable: typesFor(kind)[0].taxable, principal: 0, glAccount: '',
     startMonth: month, endMonth: '', status: 'pending', changedBy: '', changedAt: '', verifiedBy: '', verifiedAt: '',
 });

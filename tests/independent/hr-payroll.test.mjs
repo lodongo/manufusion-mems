@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {buildPayrollRows,belowMinimum,onPayroll,PROBLEM_TEXT} from '../../backend/hrPayrollRows.ts';
+import {buildPayrollRows,belowMinimum,onPayroll,listRow,salaryState,PROBLEM_TEXT} from '../../backend/hrPayrollRows.ts';
 import {BUILT_PERMISSIONS,SOD_RULES,sodConflicts} from '../../backend/permissionPolicy.ts';
 import {kenyaCompensationTemplate} from '../../backend/hrCompensationConfig.ts';
 import {
- BASIC_MAX,EXPORT_HEADER,belowMin,changesOf,countsOf,effective,exportTable,initials,matches,payslipOf,salaryIssue,
+ BASIC_MAX,EXPORT_HEADER,belowMin,countsOf,exportTable,initials,matches,salaryIssue,toGrade,
 } from '../../src/org/hrPayrollView.ts';
+import {computePayslip} from '../../src/shared/hrPayslip.ts';
 
 const read=f=>readFileSync(f,'utf8');
 
@@ -104,17 +105,29 @@ test('below the minimum is flagged only when there is a minimum to compare with'
 
 // ---- what the screen does with the rows -----------------------------------------------------------------------
 const emp=(over={})=>({uid:'u1',name:'Amina Okello',employeeNumber:'E1',status:'active',roleCode:'ROL_000001',roleTitle:'Machine operator',
- gradeCode:'JG03',gradeTitle:'Skilled / operator',minSalary:30000,basic:null,problem:'',problemText:'',...over});
+ gradeCode:'JG03',gradeTitle:'Skilled / operator',minSalary:30000,salary:'none',problem:'',problemText:'',...over});
 
-test('red appears under the minimum, in the box being typed in, and not before anything is entered',()=>{
+test('the list carries where a salary stands and never the amount',()=>{
+ assert.equal(salaryState(null,30000),'none');
+ assert.equal(salaryState(20000,30000),'below');
+ assert.equal(salaryState(30000,30000),'ok');
+ assert.equal(salaryState(10,0),'ok');
+ const {rows}=build([user('u1','Amina','Okello',[prim('S1','ROL_000001')]),user('u2','Peter','P',[prim('S1','ROL_000001')])],{u1:45000,u2:12345.67});
+ const sent=rows.map(listRow);
+ for(const r of sent){
+  assert.equal('basic' in r,false,'the amount must not be on a list row');
+  assert.deepEqual(Object.keys(r).filter(k=>/salary|basic|net|gross|pay$/i.test(k)&&k!=='minSalary'),['salary']);
+ }
+ assert.deepEqual(sent.map(r=>r.salary).sort(),['below','ok'].sort());
+ const wire=JSON.stringify(sent);
+ assert.doesNotMatch(wire,/45000|12345/,'no salary figure anywhere in what the list sends');
+});
+
+test('red appears under the minimum and not before anything is entered',()=>{
  assert.equal(belowMin(29999.99,30000),true);
  assert.equal(belowMin(30000,30000),false);
  assert.equal(belowMin(NaN,30000),false);
  assert.equal(belowMin(100,0),false);
- const e=emp({basic:45000});
- assert.equal(belowMin(effective(e,{}),e.minSalary),false);
- assert.equal(belowMin(effective(e,{u1:20000}),e.minSalary),true);
- assert.equal(Number.isNaN(effective(emp(),{})),true);
 });
 
 test('a salary box accepts positive amounts with at most 2 decimals and refuses the rest',()=>{
@@ -123,20 +136,11 @@ test('a salary box accepts positive amounts with at most 2 decimals and refuses 
  for(const bad of [0,-1,Infinity,BASIC_MAX+1,10.123])assert.notEqual(salaryIssue(bad),'',String(bad));
 });
 
-test('only real changes are sent, clearing sends null and invalid boxes block the save',()=>{
- const a=emp({uid:'a',basic:40000}),b=emp({uid:'b',basic:null}),c=emp({uid:'c',basic:50000});
- const {changes,invalid}=changesOf([a,b,c],{a:40000,b:35000.5,c:NaN,zz:100});
- assert.deepEqual(changes,{b:35000.5,c:null});
- assert.deepEqual(invalid,[]);
- assert.deepEqual(changesOf([a],{a:-3}).invalid,['a']);
- assert.deepEqual(changesOf([b],{b:NaN}).changes,{});
-});
-
-test('the four views count and filter the same way',()=>{
- const list=[emp({uid:'a',basic:20000}),emp({uid:'b',basic:45000}),emp({uid:'c'}),emp({uid:'d',problem:'no_grade',problemText:'x',gradeCode:'',minSalary:0})];
- assert.deepEqual(countsOf(list,{}),{all:4,below:1,none:2,attention:1,details:4});
- assert.deepEqual(countsOf(list,{c:10000,b:5}),{all:4,below:3,none:1,attention:1,details:4});
- assert.deepEqual(list.filter(e=>matches(e,{},'below')).map(e=>e.uid),['a']);
+test('the four views count and filter the same way, from the salary state alone',()=>{
+ const list=[emp({uid:'a',salary:'below'}),emp({uid:'b',salary:'ok'}),emp({uid:'c'}),emp({uid:'d',problem:'no_grade',problemText:'x',gradeCode:'',minSalary:0})];
+ assert.deepEqual(countsOf(list),{all:4,below:1,none:2,attention:1,details:4});
+ assert.deepEqual(list.filter(e=>matches(e,'below')).map(e=>e.uid),['a']);
+ assert.deepEqual(list.filter(e=>matches(e,'none')).map(e=>e.uid),['c','d']);
  assert.equal(initials('Amina Okello'),'AO');
  assert.equal(initials('  '),'?');
 });
@@ -146,29 +150,27 @@ const cfg=kenyaCompensationTemplate();
 const payGrade=(over={})=>({code:'JG03',rank:3,title:'Skilled / operator',enabled:true,minSalary:30000,payModelCode:'MONTHLY',
  taxCodes:['KE_PAYE','KE_PERSONAL_RELIEF'],deductionCodes:['KE_NSSF','KE_SHIF','KE_AHL'],benefitCodes:[],benefitValues:{},...over});
 
-test('the payslip comes from the grade and the salary, and is empty without either',()=>{
- const slip=payslipOf(payGrade(),cfg.items,50000);
- assert.ok(slip&&slip.gross>=50000&&slip.net>0&&slip.net<slip.gross&&slip.cost>=slip.gross);
- assert.equal(payslipOf(undefined,cfg.items,50000),null);
- assert.equal(payslipOf(payGrade(),cfg.items,NaN),null);
- assert.equal(payslipOf(payGrade(),cfg.items,0),null);
- // a bigger salary never pays less
- assert.ok(payslipOf(payGrade(),cfg.items,80000).net>slip.net);
+test('the payslip inside the opened employee comes from the grade and the typed salary',()=>{
+ const slip=basicSalary=>computePayslip(toGrade(payGrade()),cfg.items,{basicSalary,circumstances:[],declared:{},otherDeductions:{},personalEarnings:[],personalDeductions:[]});
+ const a=slip(50000);
+ assert.ok(a.grossCash>=50000&&a.net>0&&a.net<a.grossCash&&a.totalCostToEmployer>=a.grossCash);
+ assert.ok(slip(80000).net>a.net);
 });
 
-test('the Excel copy has one cell per heading, flags red rows, and holds only text and numbers',()=>{
- const list=[emp({uid:'a',basic:20000}),emp({uid:'b',name:'=HYPERLINK("x")',basic:null})];
- const rows=exportTable(list,{},[payGrade()],cfg.items,'KES');
+test('the Excel copy has one cell per heading, holds only text and numbers, and has no salary or pay figures',()=>{
+ const list=[emp({uid:'a',salary:'below',payBank:'verified',payItems:2,payPending:1}),emp({uid:'b',name:'=HYPERLINK("x")'})];
+ const rows=exportTable(list);
  assert.equal(rows.length,2);
  for(const r of rows){
   assert.equal(r.length,EXPORT_HEADER.length);
   for(const cell of r)assert.ok(cell===null||['string','number'].includes(typeof cell));
  }
+ for(const h of EXPORT_HEADER)assert.doesNotMatch(h,/salary|basic|gross|net pay|currency|cost|minimum/i,h);
  const col=n=>EXPORT_HEADER.indexOf(n);
- assert.equal(rows[0][col('Below grade minimum')],'Yes');
- assert.equal(rows[1][col('Below grade minimum')],'No');
- assert.equal(rows[1][col('Net pay')],null);
- assert.equal(rows[0][col('Currency')],'KES');
+ assert.equal(rows[0][col('Bank details')],'Verified');
+ assert.equal(rows[0][col('Personal pay items')],2);
+ assert.equal(rows[0][col('Pay items awaiting verification')],1);
+ assert.equal(rows[1][col('Bank details')],'None');
 });
 
 // ---- rights, separation of duties, templates, catalogue --------------------------------------------------------
@@ -229,20 +231,30 @@ test('Payroll opens from the HR menu by permission and keeps the action bar fixe
  assert.match(ui,/<Sheet title="Payroll"/);
 });
 
-test('the salary slot turns red under the minimum, cannot be used for your own pay, and saving stops on bad boxes',()=>{
- const ui=read('src/org/HrPayroll.tsx');
+test('the list never holds a salary: the server strips it and the amount is read and saved one employee at a time',()=>{
+ const route=read('backend/hrPayroll.ts');
+ assert.match(route,/\.\.\.listRow\(r\)/);
+ assert.doesNotMatch(route.slice(route.indexOf("'org.hr.payroll.get'"),route.indexOf("'org.hr.payroll.save'")),/basic\s*[:,]/);
+ assert.match(route,/This salary was changed by someone else since you opened it/);
+ const people=read('backend/hrPayrollPeople.ts');
+ assert.match(people,/const entered = isObj\(input\?\.data\.salaries\)[^\n]*\[uid\]/);
+ assert.match(people,/\n\s+salary,\n/);
+ assert.match(people,/bank=\$\{[^}]+\} items=\$\{[^}]+\} salary=\$\{/);
+ const list=read('src/org/HrPayroll.tsx');
+ assert.doesNotMatch(list,/NumField|computePayslip|\.basic\b|Save salaries|beforeunload/);
+ assert.match(list,/exportTable\(employees\)/);
+ assert.match(list,/e\.uid!==data\?\.selfUid/);
+ assert.match(list,/track\('export','table\.export','hr-payroll'/);
+ assert.match(list,/shrink-0[^\n]*border-b[\s\S]*?overflow-y-auto overscroll-contain/);
+});
+
+test('the salary slot sits inside the opened employee: red under the minimum, never your own, saved with the value it opened with',()=>{
+ const ui=read('src/org/HrPayrollPerson.tsx');
  assert.match(ui,/invalid=\{below\|\|!!issue\}/);
- assert.match(ui,/border-red-500/);
- assert.match(ui,/editable=\{editable\(e\)\}/);
- assert.match(ui,/e\.uid!==data\?\.selfUid/);
- assert.match(ui,/disabled=\{busy\|\|loading\|\|!dirty\|\|invalid\.length>0\}/);
- assert.match(ui,/beforeunload/);
- assert.match(ui,/Discard unsaved salaries\?/);
- assert.match(ui,/track\('export','table\.export','hr-payroll'/);
- assert.match(ui,/expectedVersion:data\.version\|\|0/);
- const form=read('src/org/hrFormParts.tsx');
- assert.match(form,/invalid/);
- assert.match(form,/hintTone/);
+ assert.match(ui,/disabled=\{!canEditSalary\|\|!salaryReady\|\|savingSalary\}/);
+ assert.match(ui,/callBackend\('\/api\/org\/hr\/payroll\/save',\{legalEntityId:entity\.id,salaries:\{\[emp\.uid\]:value\},expected:\{\[emp\.uid\]:base\}\}\)/);
+ assert.match(ui,/You cannot set your own salary/);
+ assert.match(read('src/org/hrFormParts.tsx'),/hintTone/);
  const sim=read('src/org/HrPayslipSimulator.tsx');
  assert.match(sim,/onBasicChange/);
  assert.match(sim,/invalid=\{below\}/);

@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {
- DEDUCTION_TYPES,EARNING_TYPES,emptyItem,itemNote,itemProblem,linesForMonth,maskAccount,monthLabel,normalAccountNumber,scheduledFor,shiftMonth,typesFor,
+ DEDUCTION_TYPES,EARNING_TYPES,MAX_TERM,SUGGESTED_ACCOUNT,accountKindOf,emptyItem,finishMonth,instalmentFor,itemNote,itemProblem,lastInstalment,linesForMonth,maskAccount,monthLabel,
+ normalAccountNumber,scheduledFor,shiftMonth,termMonths,typesFor,
 } from '../../src/shared/hrPayItems.ts';
+import {payrollAccountKind,splitPayrollAccounts} from '../../src/shared/hrPayAccounts.ts';
 import {computePayslip} from '../../src/shared/hrPayslip.ts';
 import {fmtMoney,payslipModel,payslipTables} from '../../src/org/hrPayDocument.ts';
 import {buildPayslipPdf} from '../../src/lib/payslipPdf.ts';
@@ -16,7 +18,7 @@ const read=f=>readFileSync(f,'utf8');
 const cfg=kenyaCompensationTemplate();
 const grade=toGrade({code:'JG03',rank:3,title:'Skilled / operator',enabled:true,minSalary:30000,payModelCode:'MONTHLY',
  taxCodes:['KE_PAYE','KE_PERSONAL_RELIEF'],deductionCodes:['KE_NSSF','KE_SHIF','KE_AHL'],benefitCodes:[],benefitValues:{}});
-const item=(over={})=>({...emptyItem('deduction','2026-11'),label:'Teachers check-off',amount:500,...over});
+const item=(over={})=>({...emptyItem('deduction','2026-11'),label:'Teachers check-off',amount:500,glAccount:'20303050',...over});
 
 // ---- the rules for one personal item ---------------------------------------------------------------------------
 test('an item needs a type, a name, a monthly amount and a start month, and nothing odd',()=>{
@@ -34,13 +36,97 @@ test('an item needs a type, a name, a monthly amount and a start month, and noth
  assert.notEqual(itemProblem(item({taxable:true})),'','a deduction is not taxable');
 });
 
-test('only a loan or an advance can carry an amount lent, and it covers at least one instalment',()=>{
- assert.equal(itemProblem(item({type:'loan',amount:3000,principal:10000})),'');
+test('a deduction can carry a total to repay, which covers at least one instalment and ends the deduction by itself',()=>{
+ for(const type of ['loan','advance','checkoff','sacco','court','other'])assert.equal(itemProblem(item({type,amount:3000,principal:10000,glAccount:'10206030'})),'',type);
  assert.equal(itemProblem(item({type:'advance',amount:3000,principal:3000})),'');
- assert.notEqual(itemProblem(item({type:'loan',amount:3000,principal:2000})),'');
- assert.notEqual(itemProblem(item({type:'checkoff',amount:500,principal:10000})),'');
+ assert.notEqual(itemProblem(item({type:'loan',amount:3000,principal:2000})),'','less than one instalment');
  assert.notEqual(itemProblem(item({type:'loan',amount:3000,principal:-1})),'');
+ assert.notEqual(itemProblem(item({type:'loan',amount:3000,principal:100.123})),'','at most 2 decimals');
+ // welfare and insurance repeat for as long as they last: they have no total
+ for(const type of ['welfare','insurance'])assert.notEqual(itemProblem(item({type,amount:100,principal:1000})),'',type);
  assert.notEqual(itemProblem({...emptyItem('earning','2026-11'),label:'Bonus',amount:100,principal:500}),'');
+ // the total decides the end, so a last month beside it would contradict it
+ assert.match(itemProblem(item({amount:500,principal:5000,endMonth:'2027-12'})),/Leave the last month empty/);
+ // no more than MAX_TERM months
+ assert.equal(itemProblem(item({amount:100,principal:100*MAX_TERM})),'');
+ assert.match(itemProblem(item({amount:100,principal:100*MAX_TERM+1})),/more than 120 months/);
+});
+
+test('repaying by a number of months or by a monthly amount gives the same schedule',()=>{
+ assert.equal(instalmentFor(120000,12),10000);
+ assert.equal(instalmentFor(100,3),33.34,'rounded up to the cent so the total is always covered');
+ assert.ok(Number.isNaN(instalmentFor(100,0)));
+ assert.ok(Number.isNaN(instalmentFor(100,2.5)));
+ assert.ok(Number.isNaN(instalmentFor(0,6)));
+ assert.equal(termMonths(120000,10000),12);
+ assert.equal(termMonths(100,33.34),3);
+ assert.equal(termMonths(100,0),0);
+ assert.equal(lastInstalment(100,33.34),33.32,'the last instalment is only what is left');
+ assert.equal(lastInstalment(120000,10000),10000);
+ assert.equal(finishMonth('2026-11',120000,10000),'2027-10');
+ assert.equal(finishMonth('2026-11',5000,5000),'2026-11');
+ assert.equal(finishMonth('bad',5000,5000),'');
+ // paying by months: every instalment is taken, the total is exactly repaid and nothing is taken after
+ for(const [total,months] of [[120000,12],[100,3],[10,7],[999.99,24],[5000,1]]){
+  const amount=instalmentFor(total,months);
+  const d=item({type:'checkoff',amount,principal:total,startMonth:'2026-11'});
+  assert.equal(itemProblem(d),'',total+' over '+months);
+  let paid=0,month='2026-11',last;
+  for(let n=0;n<=MAX_TERM+1;n++,month=shiftMonth(month,1)){
+   const s=scheduledFor(d,month);
+   if(!s){last=n;break;}
+   paid=Math.round((paid+s.amount)*100)/100;
+  }
+  assert.equal(paid,total,'the instalments add up to the total');
+  assert.equal(last,termMonths(total,amount),'it stops by itself after the last instalment');
+  assert.equal(finishMonth('2026-11',total,amount),shiftMonth('2026-11',last-1));
+ }
+});
+
+test('every deduction names the ledger account it is posted against, of the right kind',()=>{
+ assert.match(itemProblem(item({glAccount:''})),/payable account/);
+ assert.match(itemProblem(item({type:'loan',glAccount:''})),/receivable account/);
+ assert.equal(itemProblem(item({glAccount:''}),{needAccount:false}),'','an item saved before accounts existed stays valid while untouched');
+ for(const bad of ['2030 3050','a;b','x'.repeat(21),'<b>'])assert.notEqual(itemProblem(item({glAccount:bad})),'',bad);
+ assert.notEqual(itemProblem({...emptyItem('earning','2026-11'),label:'Bonus',amount:100,glAccount:'20303050'}),'','an earning has no ledger account');
+ // payables for money owed to others, receivables where the company is the lender
+ for(const code of ['checkoff','sacco','court','welfare','insurance','other'])assert.equal(accountKindOf('deduction',code),'payable',code);
+ for(const code of ['loan','advance'])assert.equal(accountKindOf('deduction',code),'receivable',code);
+ assert.equal(accountKindOf('earning','bonus'),'');
+ // the usual account for each deduction type is one the chart of accounts has
+ for(const t of DEDUCTION_TYPES)assert.match(SUGGESTED_ACCOUNT[t.code]||'',/^\d{8}$/,t.code);
+});
+
+test('only payable and employee loan accounts the legal entity adopted can be chosen',()=>{
+ const acc=(code,name,classCode,categoryCode,over={})=>({code,name,classCode,categoryCode,groupName:'G',accountRole:'standard',status:'active',postable:true,...over});
+ const chart=[
+  acc('20303050','Employee Loan Repayments Payable to Lenders','2','203'),
+  acc('20303040','SACCO and Cooperative Deductions Payable','2','203'),
+  acc('20101010','Trade Payables','2','201'),
+  acc('20301010','Payroll Control','2','203',{accountRole:'control'}),
+  acc('20404010','Statutory Tax Payable','2','204'),
+  acc('20303099','Closed payable','2','203',{status:'inactive'}),
+  acc('20303098','Header payable','2','203',{postable:false}),
+  acc('10206030','Staff Loans - Current','1','102'),
+  acc('10206010','Staff Salary Advances','1','102'),
+  acc('10101010','Cash at Bank','1','101'),
+  acc('10201010','Trade Receivables','1','102'),
+  acc('30101010','Share Capital','3','301'),
+  acc('40101010','Sales','4','401'),
+ ];
+ const kinds=Object.fromEntries(chart.map(a=>[a.code,payrollAccountKind(a)]));
+ assert.deepEqual(kinds,{'20303050':'payable','20303040':'payable','20101010':'payable','20301010':'','20404010':'payable','20303099':'','20303098':'',
+  '10206030':'receivable','10206010':'receivable','10101010':'','10201010':'','30101010':'','40101010':''});
+ const all=splitPayrollAccounts(chart);
+ assert.deepEqual(all.payable.map(a=>a.code),['20101010','20303040','20303050','20404010'],'sorted by code');
+ assert.deepEqual(all.receivable.map(a=>a.code),['10206010','10206030']);
+ // accounts a system posting is mapped to cannot be picked
+ assert.deepEqual(splitPayrollAccounts(chart,new Set(['20101010'])).payable.map(a=>a.code),['20303040','20303050','20404010']);
+ // an entity that approved a selection only offers what is in it
+ const picked=splitPayrollAccounts(chart,new Set(),new Set(['20303050','10206030']));
+ assert.deepEqual(picked.payable.map(a=>a.code),['20303050']);
+ assert.deepEqual(picked.receivable.map(a=>a.code),['10206030']);
+ assert.deepEqual(splitPayrollAccounts(chart,new Set(),new Set()),{payable:[],receivable:[]});
 });
 
 test('the type lists keep earnings and deductions apart and a reimbursement is not taxed',()=>{
@@ -268,6 +354,7 @@ test('the pay-detail routes are guarded, locked, versioned and audited with coun
  assert.match(src,/orgRoute\('org\.hr\.payroll\.person\.verify', 'HRM\.payroll\.verify'/);
  assert.match(src,/orgRoute\('org\.hr\.payroll\.person\.reveal', 'HRM\.payroll\.verify'/);
  assert.match(src,/orgRoute\('org\.hr\.payroll\.logo', 'HRM\.payroll\.view'/);
+ assert.match(src,/orgRoute\('org\.hr\.payroll\.accounts', 'HRM\.payroll\.view'/);
  assert.equal((src.match(/withLock\(ctx\.orgId, 'hr_payroll_person_' \+ uid/g)||[]).length,2);
  // nobody changes, verifies or reveals their own details
  assert.match(src,/uid === ctx\.uid\) throw new HttpError\(403, 'You cannot change your own bank or pay details/);
@@ -285,10 +372,10 @@ test('the pay-detail routes are guarded, locked, versioned and audited with coun
  assert.match(src,/'payroll\.bank\.reveal'/);
  // audit text carries counts only
  const audits=[...src.matchAll(/hrAudit\([^\n]*\)/g)].map(m=>m[0]);
- assert.equal(audits.length,5,'get, save, verify, reveal and the logo read are all audited');
+ assert.equal(audits.length,6,'get, save, verify, reveal, the accounts read and the logo read are all audited');
  for(const a of audits){
   const holes=[...a.matchAll(/\$\{([^}]+)\}/g)].map(m=>m[1]);
-  for(const h of holes)assert.match(h,/^(version|bank \? 1 : 0|items\.length|bankChanged \? 1 : 0|added\.length|changed\.length|removed\.length|verifyBank \? 1 : 0|ids\.length|logo \? 1 : 0)$/,'audit text may carry counts only, found '+h);
+  for(const h of holes)assert.match(h,/^(version|bank \? 1 : 0|items\.length|bankChanged \? 1 : 0|added\.length|changed\.length|removed\.length|verifyBank \? 1 : 0|ids\.length|logo \? 1 : 0|salary === null \? 0 : 1|found\.payable\.length|found\.receivable\.length)$/,'audit text may carry counts only, found '+h);
  }
  assert.match(read('backend/index.ts'),/hrPayrollPeopleRoutes/);
 });
@@ -347,4 +434,33 @@ test('the PDF library is only loaded when a payslip is downloaded',()=>{
  assert.doesNotMatch(pdf,/^import [^\n]*from 'pdf-lib'/m);
  for(const f of ['src/org/HrPayroll.tsx','src/org/HrPayrollPerson.tsx','src/org/HrPayDetails.tsx','src/org/HrPayslipDocument.tsx'])
   assert.doesNotMatch(read(f),/from 'pdf-lib'|from '\.\.\/lib\/payslipPdf'/,f+' must not load the PDF code up front');
+});
+
+test('a new or changed deduction must use an account Finance adopted; an untouched older one keeps working',()=>{
+ const src=read('backend/hrPayrollPeople.ts');
+ assert.match(src,/const untouched = !!old && sameItem\(old, next\)/);
+ assert.match(src,/const problem = untouched \? '' : itemProblem\(next\)/);
+ assert.match(src,/accountAllowed\(ctx\.orgId, entityId, need, next\.glAccount, accounts\)/);
+ assert.match(src,/glAccount: kind === 'deduction' \? str\(raw\.glAccount\)\.trim\(\) : ''/);
+ assert.match(src,/a\.glAccount === b\.glAccount|glAccount === /);
+ const acc=read('backend/hrPayrollAccounts.ts');
+ assert.match(acc,/chartOf\(org, entityId\)/);
+ assert.match(acc,/systemAccounts\(mapping\)/);
+ assert.match(acc,/glScopeConfigured === true/);
+ // nothing is posted from payroll here: the account is only recorded on the item
+ assert.doesNotMatch(acc,/writeDoc|postJournal|fin_journals/);
+});
+
+test('the deduction form offers repay by months or monthly amount and a ledger account, and hides the last month when there is a total',()=>{
+ const ui=read('src/org/HrPayDetails.tsx');
+ assert.match(ui,/label="Repay by"/);
+ assert.match(ui,/Number of months/);
+ assert.match(ui,/instalmentFor\(item\.principal,count\)/);
+ assert.match(ui,/\{!hasTotal&&<Text label="Last month \(optional\)"/);
+ assert.match(ui,/api\/org\/hr\/payroll\/accounts/);
+ assert.match(ui,/id="pay-gl"/);
+ assert.match(ui,/SENT=\[[^\]]*'principal','glAccount'/);
+ assert.match(ui,/SUGGESTED_ACCOUNT\[/);
+ // the accounts are only fetched when a form is open or an item shows its account
+ assert.match(ui,/wantAccounts/);
 });
