@@ -263,6 +263,11 @@ export function kenyaCompensationTemplate():PayConfig{
   ].map(([code,name,desc])=>policy('otherDeductions','DED_'+code,name,desc,{
    base:'net',method:'fixed',payrollTreatment:'employee_deduction',
    options:{requiresAuthorization:true,protectNetPay:true}})),
+  policy('otherDeductions','DED_PROVIDENT_FUND','Provident fund','Employee contribution to the company\u2019s registered pension or provident fund scheme, set once for the grades that join it. Taken before tax and deductible up to KES 30,000 a month together with NSSF; the employer rate is the employer\u2019s matching contribution.',{
+   base:'basic',method:'percent',payrollTreatment:'employee_deduction',reference:sources.kraTax,
+   applicability:'Employees of the job grades that join the registered scheme.',
+   exemption:'Scheme rules, registration of the scheme and the employee\u2019s consent.',
+   options:{pension:true,requiresAuthorization:true}}),
   policy('controls','MINIMUM_WAGE','Minimum wage compliance','Compare occupation, locality, wage order, housing and contract before pay approval.',{
    reference:'https://labour.go.ke/sites/default/files/2025-01/Regulation%20of%20Wages%20%28General%29%20%28Amendment%29%20Order%202024%20full.pdf',
    options:{occupationRequired:true,localityRequired:true,wageOrderRequired:true}}),
@@ -363,6 +368,12 @@ function normalizeItem(x:unknown,grades:Set<string>,countryCode:string,currency:
  const options=isObj(x.options)?Object.fromEntries(Object.entries(x.options)
   .slice(0,30).filter(([k,v])=>k.length<=75&&['string','number','boolean'].includes(typeof v))
   .map(([k,v])=>[k,v as string|number|boolean])):{};
+ // A registered pension or provident fund scheme is a percentage or a fixed amount, taken before tax.
+ if(options.pension===true){
+  if(category!=='otherDeductions'&&category!=='statutory')throw new HttpError(400,`${code}: the pension scheme option applies to deductions and contributions only.`);
+  if(method!=='percent'&&method!=='fixed')throw new HttpError(400,`${code}: a pension or provident fund scheme is a percentage or a fixed amount.`);
+  if(method==='percent'&&!['basic','gross','pensionable'].includes(base))throw new HttpError(400,`${code}: a percentage scheme is calculated on basic, gross or pensionable pay.`);
+ }
  const bands=Array.isArray(x.bands)?x.bands.map(v=>{
   if(!isObj(v))throw new HttpError(400,'Invalid tax band.');
   return {upTo:v.upTo===null?null:n(v.upTo,'band ceiling'),rate:n(v.rate,'band rate')};

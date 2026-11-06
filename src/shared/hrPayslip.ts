@@ -100,6 +100,8 @@ export type Payslip = {
     reliefTotal: number;
     tax: number;
     employeeStatutory: number;
+    /** Employee contributions to a registered pension or provident fund scheme the grade carries (not statutory). */
+    employeeSchemes: number;
     otherDeductionsTotal: number;
     personalEarningsTotal: number;
     personalDeductionsTotal: number;
@@ -123,7 +125,9 @@ const pos = (n: unknown) => {
     return Number.isFinite(v) && v > 0 ? v : 0;
 };
 
-export const isPreTax = (item: PayslipItem) => item.options.preTax === true || PRE_TAX_CODES.has(item.code);
+/** A registered pension or provident fund scheme is taken before tax, within the monthly limit it shares with NSSF. */
+export const isScheme = (item: PayslipItem) => item.category === 'otherDeductions' && item.options.pension === true;
+export const isPreTax = (item: PayslipItem) => item.options.preTax === true || PRE_TAX_CODES.has(item.code) || item.options.pension === true;
 const isPension = (item: PayslipItem) => item.code === 'KE_NSSF' || item.options.pension === true;
 
 /** Exceptions that are both switched on in the configuration and in force for this person. */
@@ -295,15 +299,23 @@ export function computePayslip(grade: PayslipGrade, catalogue: PayslipItem[], in
     let pensionPreTax = 0;
     let employeeStatutory = 0;
     let employerStatutory = 0;
-    for (const item of items.filter((i) => i.category === 'statutory')) {
+    let employeeSchemes = 0;
+    let employerSchemes = 0;
+    // Statutory contributions and the company's registered pension / provident fund scheme are worked out the same way.
+    for (const item of items.filter((i) => i.category === 'statutory' || isScheme(i))) {
         const force = inForce(item, circumstances);
         note(item, force);
         const money = contribution(item, baseOf(item), force, lines, notes);
         if (!money.employee && !money.employer && force.some((e) => e.effect === 'exempt')) {
             lines.push({ code: item.code, label: item.name, section: isPreTax(item) ? 'preTax' : 'deductions', amount: 0, note: 'Exempt: ' + force.map((e) => e.name).join(', ') });
         }
-        employeeStatutory += money.employee;
-        employerStatutory += money.employer;
+        if (isScheme(item)) {
+            employeeSchemes += money.employee;
+            employerSchemes += money.employer;
+        } else {
+            employeeStatutory += money.employee;
+            employerStatutory += money.employer;
+        }
         if (isPreTax(item)) {
             preTaxTotal += money.employee;
             if (isPension(item)) pensionPreTax += money.employee;
@@ -334,7 +346,13 @@ export function computePayslip(grade: PayslipGrade, catalogue: PayslipItem[], in
             if (claim > cap) warnings.push(`${item.name} is limited to ${cap.toLocaleString('en')} a month.`);
         }
     }
-    const taxablePay = r2(Math.max(0, taxableGross - preTaxTotal - declaredDeductions));
+    // Pension and provident fund contributions (NSSF included) are deductible together up to one monthly limit; anything above it is taxed.
+    const limitItem = byCode.get('KE_PENSION_DEDUCTION');
+    const pensionLimit = limitItem && limitItem.enabled && limitItem.maximum > 0 ? limitItem.maximum : Infinity;
+    const pensionPool = r2(pensionPreTax);
+    const pensionDeductible = Math.min(pensionPool, pensionLimit);
+    if (pensionPool > pensionLimit) warnings.push(`Pension and provident fund contributions are tax-deductible up to ${pensionLimit.toLocaleString('en')} a month together with NSSF. ${r2(pensionPool - pensionLimit).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} of this month's contributions is taxed.`);
+    const taxablePay = r2(Math.max(0, taxableGross - (preTaxTotal - pensionPool) - pensionDeductible - declaredDeductions));
 
     // ---- Tax and reliefs --------------------------------------------------------------------------
     let taxBeforeRelief = 0;
@@ -377,7 +395,7 @@ export function computePayslip(grade: PayslipGrade, catalogue: PayslipItem[], in
 
     // ---- Other deductions the person has agreed (SACCO, loans...) ---------------------------------
     let otherTotal = 0;
-    for (const item of items.filter((i) => i.category === 'otherDeductions')) {
+    for (const item of items.filter((i) => i.category === 'otherDeductions' && !isScheme(i))) {
         const given = input.otherDeductions ? input.otherDeductions[item.code] : undefined;
         let value = given !== undefined ? pos(given) : item.method === 'percent' ? pos(item.rate) * grossCash : pos(item.amount);
         value = r2(value);
@@ -397,7 +415,7 @@ export function computePayslip(grade: PayslipGrade, catalogue: PayslipItem[], in
     }
     personalTotal = r2(personalTotal);
 
-    const net = r2(grossCash - employeeStatutory - tax - voluntaryPension - otherTotal - personalTotal);
+    const net = r2(grossCash - employeeStatutory - employeeSchemes - tax - voluntaryPension - otherTotal - personalTotal);
     if (grossCash > 0 && net < grossCash * MIN_TAKE_HOME_SHARE) warnings.push('Take-home pay is below one third of gross pay. Deductions must leave at least one third (Employment Act 2007, s.19).');
     if (net < 0) warnings.push('Deductions exceed pay; net pay would be negative.');
 
@@ -409,7 +427,7 @@ export function computePayslip(grade: PayslipGrade, catalogue: PayslipItem[], in
         lines.push({ code: item.code, label: item.name, section: 'employer', amount: value });
         employerLevies += value;
     }
-    const employerCost = r2(employerStatutory + employerLevies);
+    const employerCost = r2(employerStatutory + employerSchemes + employerLevies);
     const totalCostToEmployer = r2(grossCash + noncashValue + employerCost);
 
     lines.push({ code: 'GROSS', label: 'Gross pay', section: 'earnings', amount: grossCash });
@@ -424,6 +442,7 @@ export function computePayslip(grade: PayslipGrade, catalogue: PayslipItem[], in
         reliefTotal: r2(reliefTotal),
         tax,
         employeeStatutory: r2(employeeStatutory),
+        employeeSchemes: r2(employeeSchemes),
         otherDeductionsTotal: otherTotal,
         personalEarningsTotal,
         personalDeductionsTotal: personalTotal,
