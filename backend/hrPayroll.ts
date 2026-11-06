@@ -26,7 +26,7 @@ import { hrAudit } from './hrAudit';
 import { readPayConfig, type PayConfig } from './hrCompensationConfig';
 import { gradeActivePath, readGrades, type JobGradeDef } from './hrJobGradeStore';
 import { catalogueOf, draftOrSeed, entityContext } from './hrJobGrades';
-import { PROBLEM_TEXT, belowMinimum, buildPayrollRows } from './hrPayrollRows';
+import { PROBLEM_TEXT, belowMinimum, buildPayrollRows, listRow } from './hrPayrollRows';
 import { paySummaries } from './hrPayrollPeople';
 
 export const PAYROLL_VIEW = 'HRM.payroll.view';
@@ -116,7 +116,8 @@ export const hrPayrollRoutes = {
                 })),
                 employees: rows.map((r) => {
                     const pay = summaries.get(r.uid);
-                    return { ...r, problemText: r.problem ? PROBLEM_TEXT[r.problem] : '', payBank: pay?.bank || 'none', payItems: pay?.items || 0, payPending: pay?.pending || 0 };
+                    // listRow() removes the salary amount: the list carries only where each salary stands.
+                    return { ...listRow(r), problemText: r.problem ? PROBLEM_TEXT[r.problem] : '', payBank: pay?.bank || 'none', payItems: pay?.items || 0, payPending: pay?.pending || 0 };
                 }),
                 unplaced: unplaced.slice(0, 100),
                 unplacedCount: unplaced.length,
@@ -149,8 +150,16 @@ export const hrPayrollRoutes = {
                 const changes: Record<string, number | null> = {};
                 const next: Record<string, number> = {};
                 for (const [uid, v] of Object.entries(existing)) if (typeof v === 'number' && Number.isFinite(v)) next[uid] = v;
+                // The screen no longer holds the salaries of the list, so each employee is saved from their own sheet. The salary the sheet
+                // opened with is sent back (expected) so two people editing the same employee cannot overwrite each other silently.
+                const expected = isObj(ctx.body.expected) ? (ctx.body.expected as Record<string, unknown>) : null;
                 for (const [uid, v] of sent) {
                     if (!ENTITY.test(uid) || !people.has(uid)) throw new HttpError(400, 'A salary was sent for someone who is not on this legal entity’s payroll.');
+                    if (expected && uid in expected) {
+                        const was = typeof existing[uid] === 'number' ? (existing[uid] as number) : null;
+                        const saw = typeof expected[uid] === 'number' ? (expected[uid] as number) : null;
+                        if (was !== saw) throw new HttpError(409, 'This salary was changed by someone else since you opened it. Close and open the employee again.');
+                    }
                     if (uid === ctx.uid) throw new HttpError(403, 'You cannot set your own salary. Ask another payroll officer.');
                     if (v === null) {
                         delete next[uid];

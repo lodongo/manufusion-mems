@@ -4,8 +4,9 @@ import {callBackend} from '../lib/backend';
 import {messageOf,useConfirm} from '../components/screen';
 import Sheet from '../components/Sheet';
 import SearchableSelect from '../components/SearchableSelect';
-import {NumField,btn,field,primary} from './hrFormParts';
-import {ACCOUNT_NUMBER,emptyItem,itemProblem,monthLabel,normalAccountNumber,scheduledFor,typeOf,typesFor,type PayItemKind,type PersonalItem} from '../shared/hrPayItems';
+import {Choice,NumField,btn,field,primary} from './hrFormParts';
+import {ACCOUNT_NUMBER,MAX_TERM,SUGGESTED_ACCOUNT,accountKindOf,emptyItem,finishMonth,instalmentFor,itemProblem,lastInstalment,monthLabel,normalAccountNumber,scheduledFor,termMonths,typeOf,typesFor,type PayItemKind,type PayItemType,type PersonalItem} from '../shared/hrPayItems';
+import type {PayAccount} from '../shared/hrPayAccounts';
 import {fmtMoney} from './hrPayDocument';
 
 export type PersonBank={bankId:string;bankName:string;branch:string;accountName:string;accountMasked:string;status:'pending'|'verified';changedByName:string;changedAt:string;verifiedByName:string;verifiedAt:string;canVerify:boolean;nameMatch:boolean};
@@ -13,10 +14,13 @@ export type PersonItem=PersonalItem&{changedByName:string;verifiedByName:string;
 export type PersonPay={
  employer:{name:string;displayName:string;tradingName:string;registrationNumber:string;taxNumber:string;address:string;phone:string;email:string;logoUrl:string};
  bank:PersonBank|null;items:PersonItem[];version:number;isSelf:boolean;canManage:boolean;canVerify:boolean;
+ /** The draft basic monthly salary of this one employee (null when none), read only when the employee is opened. */
+ salary:number|null;
 };
 
 const day=(iso:string)=>iso?iso.slice(0,10):'';
-const SENT=['id','kind','type','label','reference','amount','taxable','principal','startMonth','endMonth'] as const;
+const SENT=['id','kind','type','label','reference','amount','taxable','principal','glAccount','startMonth','endMonth'] as const;
+export type Accounts={payable:PayAccount[];receivable:PayAccount[]};
 const sendable=(i:PersonalItem)=>Object.fromEntries(SENT.map(k=>[k,i[k]]));
 
 function Status({status,by,at,waiting}:{status:'pending'|'verified';by:string;at:string;waiting?:string}){
@@ -76,33 +80,93 @@ function BankSheet({entity,uid,version,current,onClose,onSaved}:{entity:{id:stri
  </Sheet>;
 }
 
-/** One personal earning or deduction, with a live line showing what it comes to on the chosen payslip month. */
-function ItemSheet({start,month,currency,saving,error,onClose,onSave}:{start:PersonalItem;month:string;currency:string;saving:boolean;error:string;onClose:()=>void;onSave:(i:PersonalItem)=>void}){
+/**
+ * One personal earning or deduction, with a live line showing what it comes to on the chosen payslip month.
+ * A deduction that repays a total (a bank check-off, a SACCO or staff loan, a salary advance, a court order) is set either by
+ * the monthly amount or by the number of months, and it stops by itself when the total is repaid. Every deduction names the
+ * ledger account it is posted against: a payable for money owed to a bank or other receiver, a receivable for a staff loan or advance.
+ */
+function ItemSheet({start,month,currency,accounts,accountsError,saving,error,onClose,onSave}:{start:PersonalItem;month:string;currency:string;accounts:Accounts|null;accountsError:string;saving:boolean;error:string;onClose:()=>void;onSave:(i:PersonalItem)=>void}){
  const [item,setItem]=useState<PersonalItem>(start);
+ const [by,setBy]=useState<'amount'|'months'>('amount');
+ const [months,setMonths]=useState('');
  const set=(patch:Partial<PersonalItem>)=>setItem(x=>({...x,...patch}));
  const t=typeOf(item.kind,item.type);
- const problem=itemProblem(item);
- const shown=!problem?scheduledFor(item,month):null;
+ const isDeduction=item.kind==='deduction';
+ const need=accountKindOf(item.kind,item.type);
+ const list=need&&accounts?accounts[need]:[];
+ const hasTotal=isDeduction&&!!t?.schedule&&item.principal>0;
+ const count=Number(months);
+ const monthsProblem=hasTotal&&by==='months'?(!months?'Enter the number of months.':!Number.isInteger(count)||count<1||count>MAX_TERM?`The number of months is a whole number from 1 to ${MAX_TERM}.`:''):'';
+ const eff:PersonalItem=hasTotal&&by==='months'&&!monthsProblem?{...item,amount:instalmentFor(item.principal,count)}:item;
+ const gone=isDeduction&&!!item.glAccount&&!!accounts&&!list.some(a=>a.code===item.glAccount);
+ const problem=monthsProblem||itemProblem(eff)||(gone?'That ledger account is no longer available for this legal entity. Choose another.':'');
+ const shown=!problem?scheduledFor(eff,month):null;
+ const term=hasTotal&&Number.isFinite(eff.amount)?termMonths(eff.principal,eff.amount):0;
+
+ // When the accounts arrive, pre-select the usual account for the type if the legal entity has adopted it.
+ useEffect(()=>{
+  if(!accounts||!isDeduction||item.glAccount||!need)return;
+  const sug=SUGGESTED_ACCOUNT[item.type];
+  if(sug&&accounts[need].some(a=>a.code===sug))set({glAccount:sug});
+ },[accounts]);// eslint-disable-line react-hooks/exhaustive-deps
+
+ const pick=(x:PayItemType)=>{
+  const wanted=item.kind==='deduction'?x.account:undefined;
+  const next=wanted&&accounts?accounts[wanted]:[];
+  const custom=!!item.glAccount&&item.glAccount!==SUGGESTED_ACCOUNT[item.type]&&next.some(a=>a.code===item.glAccount);
+  const sug=SUGGESTED_ACCOUNT[x.code];
+  set({type:x.code,taxable:item.kind==='earning'?x.taxable:false,principal:x.schedule?item.principal:0,label:item.label||x.label,
+   glAccount:item.kind!=='deduction'?'':custom?item.glAccount:sug&&next.some(a=>a.code===sug)?sug:''});
+ };
+ const repayBy=(v:'amount'|'months')=>{
+  if(v==='amount'&&Number.isFinite(eff.amount))set({amount:eff.amount});
+  if(v==='months'&&Number.isFinite(item.amount)){const n=termMonths(item.principal,item.amount);if(n>=1&&n<=MAX_TERM)setMonths(String(n));}
+  setBy(v);
+ };
+ const groups=[...new Set(list.map(a=>a.group||''))];
+
  return <Sheet title={(start.id?'Change ':'Add ')+(item.kind==='earning'?'earning':'deduction')} onClose={onClose} footer={<>
   <button type="button" className={btn+' flex-1'} onClick={onClose} disabled={saving}>Cancel</button>
-  <button type="button" className={primary+' flex-1'} onClick={()=>onSave({...item,label:item.label.trim(),reference:item.reference.trim()})} disabled={saving||!!problem}>Save</button></>}>
+  <button type="button" className={primary+' flex-1'} onClick={()=>onSave({...eff,label:eff.label.trim(),reference:eff.reference.trim()})} disabled={saving||!!problem}>Save</button></>}>
   {error&&<p role="alert" className="rounded-xl bg-danger/10 p-3 text-sm text-danger">{error}</p>}
   <div role="radiogroup" aria-label="Type" className="flex flex-wrap gap-2">
-   {typesFor(item.kind).map(x=><button key={x.code} type="button" role="radio" aria-checked={item.type===x.code}
-    onClick={()=>set({type:x.code,taxable:item.kind==='earning'?x.taxable:false,principal:x.schedule?item.principal:0,label:item.label||x.label})}
+   {typesFor(item.kind).map(x=><button key={x.code} type="button" role="radio" aria-checked={item.type===x.code} onClick={()=>pick(x)}
     className={'min-h-11 rounded-xl border px-3 text-sm font-semibold '+(item.type===x.code?'border-brand bg-brand/10 text-brand':'border-line text-ink')}>{x.label}</button>)}
   </div>
   <Text label="Name on the payslip" value={item.label} onChange={v=>set({label:v})} max={60} error={item.label&&!/^[\p{L}\p{N} _.,;:/()#&+'’-]{2,60}$/u.test(item.label.trim())?'2 to 60 letters, numbers or . , ; : / ( ) # & + -':''}/>
   <Text label={item.type==='loan'||item.type==='advance'?'Loan or advance number (optional)':item.type==='court'?'Case number (optional)':item.type==='sacco'||item.type==='checkoff'?'Member number (optional)':'Reference (optional)'} value={item.reference} onChange={v=>set({reference:v})} max={40}/>
-  <NumField label={'Amount per month ('+currency+')'} value={item.amount} optional onChange={n=>set({amount:n})} invalid={Number.isFinite(item.amount)&&!!problem&&/amount|decimals/i.test(problem)} hintTone="normal"/>
-  {t?.schedule&&<NumField label={'Amount lent ('+currency+', optional)'} value={item.principal>0?item.principal:NaN} optional onChange={n=>set({principal:Number.isNaN(n)?0:n})}
-   hint="With the amount lent, the payslip shows the instalment number and what is still owed, and stops by itself when it is repaid."/>}
+
+  {isDeduction&&t?.schedule&&<NumField label={(item.type==='loan'||item.type==='advance'?'Amount lent, the total to repay':'Total to deduct')+' ('+currency+', optional)'} value={item.principal>0?item.principal:NaN} optional onChange={n=>set({principal:Number.isNaN(n)?0:n,endMonth:Number.isNaN(n)?item.endMonth:''})}
+   hint="Leave empty for a deduction with no end. With a total, the deduction reduces it every month, the payslip shows the instalment and the balance, and it stops by itself when the total is repaid."/>}
+  {hasTotal&&<Choice<'amount'|'months'> label="Repay by" value={by} onChange={repayBy} options={[{value:'amount',label:'Monthly amount'},{value:'months',label:'Number of months'}]}/>}
+  {hasTotal&&by==='months'
+   ?<Text label="Number of months" value={months} mode="numeric" max={3} onChange={v=>setMonths(v.replace(/\D/g,''))} error={months?monthsProblem:''} hint={`1 to ${MAX_TERM} months.`}/>
+   :<NumField label={'Amount per month ('+currency+')'} value={item.amount} optional onChange={n=>set({amount:n})} invalid={Number.isFinite(item.amount)&&!!problem&&/amount|decimals|months to repay/i.test(problem)} hintTone="normal"/>}
+  {hasTotal&&!monthsProblem&&Number.isFinite(eff.amount)&&eff.amount>0&&term>0&&<p className="rounded-xl bg-page p-3 text-xs text-muted">
+   {by==='months'&&<>Monthly deduction <b className="text-ink">{currency} {fmtMoney(eff.amount)}</b>. </>}
+   Repaid in <b className="text-ink">{term} month{term===1?'':'s'}</b>{term>1&&lastInstalment(eff.principal,eff.amount)!==eff.amount?<>, the last instalment being {currency} {fmtMoney(lastInstalment(eff.principal,eff.amount))}</>:''}
+   {finishMonth(eff.startMonth,eff.principal,eff.amount)?<>, finishing in <b className="text-ink">{monthLabel(finishMonth(eff.startMonth,eff.principal,eff.amount))}</b></>:''}.</p>}
+
+  {isDeduction&&need&&<div className="space-y-1">
+   <SearchableSelect id="pay-gl" label={need==='receivable'?'Receivable account (what the employee owes the company)':'Payable account (where the money is owed until paid out)'} value={item.glAccount} onChange={e=>set({glAccount:e.target.value})}
+    error={gone?'No longer available. Choose another.':''} hint={need==='receivable'?'Repaying reduces this account.':'The amount taken from the pay is owed from this account to the bank, SACCO, court or other receiver.'}>
+    <option value="">{accounts?'Choose the account':'Loading the accounts…'}</option>
+    {groups.map(g=>g?<optgroup key={g} label={g}>{list.filter(a=>a.group===g).map(a=><option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}</optgroup>
+     :list.filter(a=>!a.group).map(a=><option key={a.code} value={a.code}>{a.code} · {a.name}</option>))}
+   </SearchableSelect>
+   {accountsError&&<p role="alert" className="text-xs text-red-600">{accountsError}</p>}
+   {accounts&&!list.length&&<p role="alert" className="rounded-xl bg-amber-500/10 p-3 text-xs text-amber-800">{need==='receivable'
+    ?'Finance has not adopted an employee loan or salary advance receivable account for this legal entity yet.'
+    :'Finance has not adopted a payable account for payroll deductions for this legal entity yet.'} Ask Finance to adopt one, then add this deduction.</p>}
+  </div>}
+
   {item.kind==='earning'&&<label className="flex min-h-12 items-center gap-3 rounded-xl border border-line px-3">
    <input type="checkbox" className="h-5 w-5 accent-emerald-500" checked={item.taxable} onChange={e=>set({taxable:e.target.checked})}/>
    <span className="text-sm text-ink">Taxable<span className="block text-xs text-muted">A taxable earning is taxed and counts for the statutory contributions.</span></span></label>}
-  <div className="grid grid-cols-2 gap-3">
+  <div className={hasTotal?'':'grid grid-cols-2 gap-3'}>
    <Text label="First month" type="month" value={item.startMonth} onChange={v=>set({startMonth:v})} max={7}/>
-   <Text label="Last month (optional)" type="month" value={item.endMonth} onChange={v=>set({endMonth:v})} max={7} hint="Empty: until removed."/>
+   {!hasTotal&&<Text label="Last month (optional)" type="month" value={item.endMonth} onChange={v=>set({endMonth:v})} max={7} hint="Empty: until removed."/>}
   </div>
   {problem&&<p role="alert" className="rounded-xl bg-amber-500/10 p-3 text-xs text-amber-800">{problem}</p>}
   {!problem&&<p className="rounded-xl bg-page p-3 text-xs text-muted">{shown
@@ -117,10 +181,25 @@ export default function HrPayDetails({entity,uid,person,month,currency,onChanged
  const [bankOpen,setBankOpen]=useState(false);
  const [editing,setEditing]=useState<PersonalItem|null>(null);
  const [itemError,setItemError]=useState('');
+ const [accounts,setAccounts]=useState<Accounts|null>(null),[accountsError,setAccountsError]=useState('');
  const [revealed,setRevealed]=useState('');
  const timer=useRef(0);
  const {ask,sheet}=useConfirm();
  useEffect(()=>()=>window.clearTimeout(timer.current||undefined),[]);
+ // The ledger accounts are fetched only when they are needed: the deduction form is open, or a deduction shows its account.
+ const wantAccounts=!!editing||person.items.some(i=>i.kind==='deduction'&&!!i.glAccount);
+ useEffect(()=>{
+  if(!wantAccounts||accounts)return;
+  let live=true;
+  setAccountsError('');
+  callBackend<Accounts>('/api/org/hr/payroll/accounts',{legalEntityId:entity.id}).then(r=>{if(live)setAccounts(r);}).catch(e=>{if(live)setAccountsError(messageOf(e,'The ledger accounts could not be loaded.'));});
+  return ()=>{live=false;};
+ },[wantAccounts,accounts,entity.id]);
+ const accountName=(i:PersonalItem)=>{
+  if(!i.glAccount)return '';
+  const found=[...(accounts?.payable||[]),...(accounts?.receivable||[])].find(a=>a.code===i.glAccount);
+  return found?found.code+' · '+found.name:i.glAccount;
+ };
 
  const waiting=useMemo(()=>({bank:!!person.bank?.canVerify&&person.canVerify,items:person.items.filter(i=>i.canVerify&&person.canVerify)}),[person]);
  const run=async(path:string,body:Record<string,unknown>,done:string)=>{
@@ -189,8 +268,11 @@ export default function HrPayDetails({entity,uid,person,month,currency,onChanged
     return <li key={i.id} className="space-y-1 rounded-xl border border-line bg-page p-3">
      <div className="flex items-start justify-between gap-3"><p className="min-w-0 break-words text-sm font-semibold text-ink">{i.label}<span className="block text-xs font-normal text-muted">{typeOf(i.kind,i.type)?.label}{i.reference?' · '+i.reference:''}{i.kind==='earning'?(i.taxable?' · taxable':' · not taxed'):''}</span></p>
       <p className="shrink-0 text-sm font-semibold tabular-nums text-ink">{currency} {fmtMoney(i.amount)}<span className="block text-right text-[11px] font-normal text-muted">a month</span></p></div>
-     <p className="text-xs text-muted">From {monthLabel(i.startMonth)}{i.endMonth?' to '+monthLabel(i.endMonth):''}{i.principal>0?' · lent '+fmtMoney(i.principal):''}
+     <p className="text-xs text-muted">From {monthLabel(i.startMonth)}{i.endMonth?' to '+monthLabel(i.endMonth):''}{i.principal>0?` · total ${fmtMoney(i.principal)} over ${termMonths(i.principal,i.amount)} month${termMonths(i.principal,i.amount)===1?'':'s'}, ends ${monthLabel(finishMonth(i.startMonth,i.principal,i.amount))}`:''}
       {s?.installment?` · this month: instalment ${s.installment} of ${s.installments}, ${fmtMoney(s.balance||0)} owed afterwards`:s?'':' · not on the '+monthLabel(month)+' payslip'}</p>
+     {i.kind==='deduction'&&(i.glAccount
+      ?<p className="break-words text-xs text-muted">{accountKindOf(i.kind,i.type)==='receivable'?'Repays':'Owed to the receiver in'} {accountName(i)}</p>
+      :<p className="text-xs font-semibold text-amber-700">No ledger account yet. Change this deduction to choose one.</p>)}
      <Status status={i.status} by={i.verifiedByName} at={i.verifiedAt} waiting={i.changedByName}/>
      {(person.canManage||(person.canVerify&&i.canVerify))&&<div className="flex gap-2 pt-1">
       {person.canManage&&<button type="button" className={btn+' flex-1'} disabled={busy} onClick={()=>{setItemError('');setEditing(i);}}><Pencil className="h-4 w-4"/>Change</button>}
@@ -205,6 +287,6 @@ export default function HrPayDetails({entity,uid,person,month,currency,onChanged
   {!person.canManage&&!person.canVerify&&!person.isSelf&&<p className="rounded-xl bg-page p-3 text-xs text-muted">You can view pay details. Entering them needs the HR – Payroll Officer role and verifying them needs the HR – Payroll Verifier role.</p>}
 
   {bankOpen&&<BankSheet entity={entity} uid={uid} version={person.version} current={b} onClose={()=>setBankOpen(false)} onSaved={n=>{setBankOpen(false);setNotice(n);setRevealed('');onChanged(n);}}/>}
-  {editing&&<ItemSheet start={editing} month={month} currency={currency} saving={busy} error={itemError} onClose={()=>setEditing(null)} onSave={i=>void upsert(i)}/>}
+  {editing&&<ItemSheet start={editing} month={month} currency={currency} accounts={accounts} accountsError={accountsError} saving={busy} error={itemError} onClose={()=>setEditing(null)} onSave={i=>void upsert(i)}/>}
  </div>;
 }

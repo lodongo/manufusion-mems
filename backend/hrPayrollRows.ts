@@ -110,3 +110,16 @@ export function buildPayrollRows(input: {
 
 /** A salary below the grade minimum. Not flagged when the grade has no minimum set (nothing to compare with). */
 export const belowMinimum = (basic: number | null, minimum: number) => basic !== null && minimum > 0 && basic < minimum;
+
+/** Where an employee's salary stands, without the amount: not entered, below the grade minimum, or entered. */
+export type SalaryState = 'none' | 'below' | 'ok';
+export const salaryState = (basic: number | null, minimum: number): SalaryState => (basic === null ? 'none' : belowMinimum(basic, minimum) ? 'below' : 'ok');
+
+/**
+ * A row as the payroll LIST sends it: the salary amount is removed and only its state stays. The amount is read for one employee
+ * at a time, when that employee is opened (hr/payroll/person/get), so it is never on the list or in an export of the list.
+ */
+export function listRow(row: PayrollRow) {
+    const { basic, ...rest } = row;
+    return { ...rest, salary: salaryState(basic, row.minSalary) };
+}

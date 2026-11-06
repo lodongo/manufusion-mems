@@ -24,8 +24,9 @@ import { brandingOut, logoDataFromPath, logoDataUrl } from './branding';
 import { signedUrl } from './structure';
 import { entityContext } from './hrJobGrades';
 import { buildPayrollRows } from './hrPayrollRows';
+import { accountAllowed, payrollAccounts } from './hrPayrollAccounts';
 import {
-    ACCOUNT_NUMBER, MAX_ITEMS, itemProblem, maskAccount, normalAccountNumber, typeOf,
+    ACCOUNT_NUMBER, MAX_ITEMS, accountKindOf, itemProblem, maskAccount, normalAccountNumber, typeOf,
     type BankDetails, type PayItemKind, type PersonalItem,
 } from '../src/shared/hrPayItems';
 
@@ -37,6 +38,8 @@ const isSuper = (ctx: OrgContext) => ctx.role === 'org_super_admin';
 const can = (ctx: OrgContext, key: string) => isSuper(ctx) || hasPerm(ctx.permissions, key);
 
 export const peoplePath = (org: string, uid: string) => `organizations/${org}/hr_payroll_people/${uid}`;
+/** The draft salaries of a legal entity (written by hr/payroll/save). Read here only for the one employee who is open. */
+const salariesPath = (org: string, entity: string) => `organizations/${org}/hr_payroll_inputs/${entity}`;
 export const peopleHistoryPath = (org: string, uid: string, version: number) => `${peoplePath(org, uid)}/history/v${String(version).padStart(6, '0')}`;
 
 type StoredBank = BankDetails;
@@ -57,7 +60,7 @@ const itemsFrom = (raw: unknown): PersonalItem[] =>
     (Array.isArray(raw) ? raw.filter(isObj) : [])
         .map((x) => ({
             id: str(x.id), kind: (str(x.kind) === 'deduction' ? 'deduction' : 'earning') as PayItemKind, type: str(x.type), label: str(x.label), reference: str(x.reference),
-            amount: num(x.amount), taxable: x.taxable === true, principal: num(x.principal), startMonth: str(x.startMonth), endMonth: str(x.endMonth),
+            amount: num(x.amount), taxable: x.taxable === true, principal: num(x.principal), glAccount: str(x.glAccount), startMonth: str(x.startMonth), endMonth: str(x.endMonth),
             status: (str(x.status) === 'verified' ? 'verified' : 'pending') as PersonalItem['status'],
             changedBy: str(x.changedBy), changedAt: str(x.changedAt), verifiedBy: str(x.verifiedBy), verifiedAt: str(x.verifiedAt),
         }))
@@ -65,7 +68,7 @@ const itemsFrom = (raw: unknown): PersonalItem[] =>
 
 const sameItem = (a: PersonalItem, b: PersonalItem) =>
     a.kind === b.kind && a.type === b.type && a.label === b.label && a.reference === b.reference && a.amount === b.amount && a.taxable === b.taxable &&
-    a.principal === b.principal && a.startMonth === b.startMonth && a.endMonth === b.endMonth;
+    a.principal === b.principal && a.glAccount === b.glAccount && a.startMonth === b.startMonth && a.endMonth === b.endMonth;
 
 const nameOf = (d: Record<string, unknown>) => [str(d.firstName), str(d.lastName)].filter(Boolean).join(' ').trim();
 const tokens = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 2);
@@ -122,8 +125,11 @@ export const hrPayrollPeopleRoutes = {
             const entityId = str(ctx.body.legalEntityId).trim().slice(0, 128);
             const uid = str(ctx.body.uid).trim().slice(0, 128);
             const { user, current } = await onePerson(ctx, entityId, uid);
-            const [doc, node] = await Promise.all([getDoc(peoplePath(ctx.orgId, uid)), getDoc(`organizations/${ctx.orgId}/structure/${entityId}`)]);
+            const [doc, node, input] = await Promise.all([getDoc(peoplePath(ctx.orgId, uid)), getDoc(`organizations/${ctx.orgId}/structure/${entityId}`), getDoc(salariesPath(ctx.orgId, entityId))]);
             const bank = bankFrom(doc?.data.bank);
+            // The salary is only ever sent for the one employee who is open, never in a list.
+            const entered = isObj(input?.data.salaries) ? (input!.data.salaries as Record<string, unknown>)[uid] : null;
+            const salary = typeof entered === 'number' && Number.isFinite(entered) && entered > 0 ? entered : null;
             const items = itemsFrom(doc?.data.items);
             const attributes = node && isObj(node.data.attributes) ? node.data.attributes : {};
             const entityLogo = node ? entityLogoPath(ctx.orgId, { id: node.id, data: node.data }) : '';
@@ -132,7 +138,7 @@ export const hrPayrollPeopleRoutes = {
                 signedUrl(entityLogo),
                 userNames([bank?.changedBy || '', bank?.verifiedBy || '', ...items.flatMap((i) => [i.changedBy, i.verifiedBy])]),
             ]);
-            await hrAudit(ctx, 'read.payroll.person', { type: 'employee', id: uid }, `bank=${bank ? 1 : 0} items=${items.length}`);
+            await hrAudit(ctx, 'read.payroll.person', { type: 'employee', id: uid }, `bank=${bank ? 1 : 0} items=${items.length} salary=${salary === null ? 0 : 1}`);
             const who = (id: string) => names[id] || '';
             return {
                 employer: {
@@ -147,6 +153,7 @@ export const hrPayrollPeopleRoutes = {
                     canVerify: bank.status === 'pending' && bank.changedBy !== ctx.uid, nameMatch: accountNameMatches(nameOf(user.data), bank.accountName),
                 },
                 items: items.map((i) => ({ ...i, changedByName: who(i.changedBy), verifiedByName: who(i.verifiedBy), canVerify: i.status === 'pending' && i.changedBy !== ctx.uid })),
+                salary,
                 version: Number(doc?.data.version || 0),
                 isSelf: uid === ctx.uid,
                 canManage: can(ctx, 'HRM.payroll.manage') && uid !== ctx.uid,
@@ -203,32 +210,47 @@ export const hrPayrollPeopleRoutes = {
                 if (sendsItems) {
                     const byId = new Map(prevItems.map((i) => [i.id, i]));
                     const seen = new Set<string>();
-                    items = (ctx.body.items as unknown[]).map((raw, index) => {
+                    const accounts: { value?: Awaited<ReturnType<typeof payrollAccounts>> } = {};
+                    items = [];
+                    for (const [index, raw] of (ctx.body.items as unknown[]).entries()) {
                         if (!isObj(raw)) throw new HttpError(400, `Pay item ${index + 1} is not valid.`);
                         const kind: PayItemKind = str(raw.kind) === 'deduction' ? 'deduction' : 'earning';
                         const t = typeOf(kind, str(raw.type));
                         const next: PersonalItem = {
                             id: str(raw.id), kind, type: str(raw.type), label: str(raw.label).trim(), reference: str(raw.reference).trim(),
                             amount: typeof raw.amount === 'number' ? raw.amount : NaN, taxable: kind === 'earning' ? raw.taxable === true : false,
-                            principal: typeof raw.principal === 'number' ? raw.principal : 0, startMonth: str(raw.startMonth), endMonth: str(raw.endMonth),
+                            principal: typeof raw.principal === 'number' ? raw.principal : 0, glAccount: kind === 'deduction' ? str(raw.glAccount).trim() : '',
+                            startMonth: str(raw.startMonth), endMonth: str(raw.endMonth),
                             status: 'pending', changedBy: ctx.uid, changedAt: at, verifiedBy: '', verifiedAt: '',
                         };
-                        const problem = itemProblem(next);
+                        const old = next.id ? byId.get(next.id) : undefined;
+                        const untouched = !!old && sameItem(old, next);
+                        // An item saved before the account and total rules existed and left exactly as it is keeps working; any change is checked in full.
+                        const problem = untouched ? '' : itemProblem(next);
                         if (problem) throw new HttpError(400, `${next.label || 'Pay item ' + (index + 1)}: ${problem}`);
                         if (!t) throw new HttpError(400, `Pay item ${index + 1}: choose the type.`);
-                        const old = next.id ? byId.get(next.id) : undefined;
                         if (next.id && !old) throw new HttpError(400, `${next.label}: this item no longer exists. Reload before saving.`);
                         if (old) {
                             if (seen.has(old.id)) throw new HttpError(400, 'An item was sent twice.');
                             seen.add(old.id);
-                            if (sameItem(old, next)) return old; // untouched: keeps its status
+                            if (untouched) {
+                                items.push(old); // untouched: keeps its status
+                                continue;
+                            }
+                        }
+                        // The account must be one Finance has adopted for this legal entity, of the kind the deduction needs.
+                        const need = accountKindOf(kind, next.type);
+                        if (need && next.glAccount && !(await accountAllowed(ctx.orgId, entityId, need, next.glAccount, accounts)))
+                            throw new HttpError(400, `${next.label}: choose ${need === 'receivable' ? 'an employee loan or advance receivable' : 'a payable'} account that Finance has adopted for this legal entity.`);
+                        if (old) {
                             changed.push(old.id);
-                            return { ...next, id: old.id };
+                            items.push({ ...next, id: old.id });
+                            continue;
                         }
                         const id = randomId(6);
                         added.push(id);
-                        return { ...next, id };
-                    });
+                        items.push({ ...next, id });
+                    }
                     for (const old of prevItems) if (!seen.has(old.id)) removed.push(old.id);
                 }
                 if (!bankChanged && !added.length && !changed.length && !removed.length) throw new HttpError(400, 'Nothing changed. Change a detail before saving.');
@@ -304,6 +326,19 @@ export const hrPayrollPeopleRoutes = {
             if (!bank) throw new HttpError(404, 'No bank details are saved for this employee.');
             await hrAudit(ctx, 'payroll.bank.reveal', { type: 'employee', id: uid }, 'bank=1');
             return { accountNumber: bank.accountNumber };
+        }),
+    ],
+
+    /** The ledger accounts a deduction can be posted against in this legal entity (the picker on the deduction form). */
+    'POST /api/org/hr/payroll/accounts': [
+        orgRoute('org.hr.payroll.accounts', 'HRM.payroll.view', async (ctx) => {
+            const entityId = str(ctx.body.legalEntityId).trim().slice(0, 128);
+            if (!ID.test(entityId)) throw new HttpError(400, 'Select a legal entity.');
+            const { current } = await entityContext(ctx, entityId);
+            if (!current) throw new HttpError(404, 'Select an active legal entity.');
+            const found = await payrollAccounts(ctx.orgId, entityId);
+            await hrAudit(ctx, 'read.payroll.accounts', { type: 'legal_entity', id: entityId }, `payable=${found.payable.length} receivable=${found.receivable.length}`);
+            return found;
         }),
     ],
 
