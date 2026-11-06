@@ -81,6 +81,11 @@ function itemIssues(item:PayItem,taken:Set<string>):string[]{
  if(item.bands.some(b=>!Number.isFinite(b.rate)||b.rate<0||b.rate>1||(b.upTo!==null&&!(b.upTo>=0))))out.push('Fix the tax bands: a rate between 0% and 100%, and an upper limit of zero or more.');
  if(item.effectiveFrom&&item.effectiveTo&&item.effectiveTo<item.effectiveFrom)out.push('"Effective until" cannot be before "Effective from".');
  if(item.reference.trim()&&!isHttps(item.reference))out.push('The reference must be a web address starting with https://.');
+ if(item.options.pension===true){
+  if(item.method!=='percent'&&item.method!=='fixed')out.push('A pension or provident fund scheme is a percentage or a fixed amount.');
+  else if(item.method==='percent'&&!['basic','gross','pensionable'].includes(item.base))out.push('A percentage scheme is calculated on basic, gross or pensionable pay.');
+  if(item.enabled&&!(item.rate>0||item.amount>0))out.push('Enter the employee rate or amount for the scheme, or switch the component off.');
+ }
  return [...new Set([...out,...exceptionIssues(item,taken)])];
 }
 
@@ -178,6 +183,12 @@ function ItemSheet({start,isNew,others,locked,ro,currency,onClose,onApply,onRemo
     </div>)}
    </section>}
   </>}
+  {x.category==='otherDeductions'&&<label className="flex items-start gap-3 rounded-xl border border-line px-3 py-2.5 text-sm">
+   <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-500" checked={x.options.pension===true} disabled={ro}
+    onChange={e=>set(e.target.checked
+     ?{options:{...x.options,pension:true},method:x.method==='fixed'||x.method==='percent'?x.method:'percent',base:x.base==='basic'||x.base==='gross'||x.base==='pensionable'?x.base:'basic',payrollTreatment:'employee_deduction'}
+     :{options:Object.fromEntries(Object.entries(x.options).filter(([k])=>k!=='pension'))})}/>
+   <span className="font-medium text-ink">Registered pension or provident fund scheme<span className="block text-xs font-normal text-muted">Taken from pay before tax. Tax-deductible up to the monthly limit it shares with NSSF; anything above is taxed. Set the employee rate above (for example a percentage of basic pay) and the employer’s matching contribution under Employer rate.</span></span></label>}
   <div className="grid grid-cols-2 gap-3">
    <label className="block text-sm text-muted">Effective from<input type="date" className={field+' mt-1'} value={x.effectiveFrom} disabled={ro} onChange={e=>set({effectiveFrom:e.target.value})}/></label>
    <label className="block text-sm text-muted">Effective until<input type="date" className={field+' mt-1'} value={x.effectiveTo} disabled={ro} onChange={e=>set({effectiveTo:e.target.value})}/></label>
