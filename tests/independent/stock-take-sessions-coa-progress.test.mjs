@@ -1,56 +1,69 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { sessionProgress } from '../../backend/stockTakeProgress.ts';
+import { accuracyCounts, metricsOf, overallStatistics, plannedPis, sessionProgress } from '../../backend/stockTakeProgress.ts';
 
 const read = (p) => readFileSync(new URL('../../' + p, import.meta.url), 'utf8');
 
-const line = (expected, counted, posted = false) => ({ expected, counted, posted, verified: counted !== null, recount: false });
+const line = (expected, counted, posted = false, binId = 'B1', materialId = 'M1') => ({ expected, counted, posted, binId, materialId, verified: counted !== null, recount: false });
 
-test('Progress: stages, completion, accuracy and targets are worked out from the PI documents', () => {
-    const session = { status: 'open', startAt: '2026-11-01T00:00:00.000Z', endAt: '2026-11-11T00:00:00.000Z', metrics: { targetPiDocuments: 4, targetLocations: 8, targetAccuracyPct: 75, varianceToleranceValue: 100 } };
+test('Progress: PI documents are planned from materials to count and materials per PI', () => {
+    assert.equal(plannedPis(100, 30), 4);
+    assert.equal(plannedPis(90, 30), 3);
+    const session = { status: 'open', startAt: '2026-11-01T00:00:00.000Z', endAt: '2026-11-11T00:00:00.000Z', metrics: { targetMaterials: 10, materialsPerPi: 4, targetCountAccuracyPct: 95, targetStockAccuracyPct: 80, varianceToleranceValue: 100 } };
     const pis = [
-        { status: 'awaiting_print', lines: [line(5, null), line(2, null)] },
-        { status: 'verification', lines: [line(5, 5), line(3, 2)] },
-        { status: 'reconciled', lines: [line(1, 1, true), line(4, 4, true)], varianceValue: 0 },
-        { status: 'pending_post_approval', lines: [line(10, 12)], varianceValue: 150 },
-        { status: 'disregarded', lines: [line(1, null)] },
+        { piNumber: 'PI_00000001', status: 'reconciled', lines: [line(1, 1, true, 'B1', 'M1'), line(4, 3, true, 'B2', 'M2')], varianceValue: 20 },
+        { piNumber: 'PI_00000002', status: 'awaiting_print', lines: [line(5, null, false, 'B3', 'M3')] },
+        { piNumber: 'PI_00000003', status: 'disregarded', lines: [line(1, null, false, 'B4', 'M4')] },
     ];
     const p = sessionProgress(session, pis, '2026-11-06T00:00:00.000Z');
     assert.equal(p.phase, 'in_progress');
-    assert.equal(p.piDocuments.total, 5);
-    assert.equal(p.piDocuments.live, 4);
-    assert.equal(p.piDocuments.disregarded, 1);
-    assert.equal(p.completionPct, 25);
-    const stage = Object.fromEntries(p.stages.map((x) => [x.key, x.pct]));
-    assert.equal(stage.printing, 75);
-    assert.equal(stage.counting, 75);
-    assert.equal(stage.submitted, 50);
-    assert.equal(stage.posting, 25);
-    assert.equal(p.locations.planned, 7);
-    assert.equal(p.locations.counted, 5);
-    assert.equal(p.locations.posted, 2);
-    assert.equal(p.accuracy.matched, 3);
-    assert.equal(p.accuracy.pct, 60);
-    assert.equal(p.targets.accuracyMet, false);
-    assert.equal(p.varianceValue, 150);
-    assert.equal(p.targets.withinTolerance, false);
+    assert.equal(p.piDocuments.planned, 3);
+    assert.equal(p.piDocuments.originals, 2);
+    assert.equal(p.materials.onPis, 3);
+    assert.equal(p.materials.counted, 2);
+    assert.equal(p.completionPct, 50);
+    assert.equal(p.stockAccuracy.errors, 1, 'one posted line differed from the system quantity');
+    assert.equal(p.stockAccuracy.pct, 50);
     assert.equal(p.timeUsedPct, 50);
 });
 
-test('Progress: a session past its end is overdue; recount PIs do not add planned locations', () => {
-    const session = { status: 'open', startAt: '2026-11-01T00:00:00.000Z', endAt: '2026-11-02T00:00:00.000Z', metrics: {} };
-    const pis = [
-        { status: 'recount_pending', lines: [line(1, 1, true), line(2, 3)] },
-        { status: 'counting', parentPi: 'PI000000001', lines: [line(2, null)] },
-    ];
-    const p = sessionProgress(session, pis, '2026-11-05T00:00:00.000Z');
-    assert.equal(p.phase, 'overdue');
-    assert.equal(p.locations.planned, 2);
-    assert.equal(p.piDocuments.recounts, 1);
-    assert.equal(p.timeUsedPct, 100);
-    assert.equal(sessionProgress({ ...session, status: 'closed' }, [], '2026-11-05T00:00:00.000Z').phase, 'closed');
-    assert.equal(sessionProgress({ ...session, startAt: '2026-12-01T00:00:00.000Z', endAt: '' }, [], '2026-11-05T00:00:00.000Z').phase, 'scheduled');
+test('Count accuracy comes from recounts; stock accuracy from errors posted (100 counted, 10 recount errors -> 90 %)', () => {
+    const original = { piNumber: 'PI_00000001', status: 'recount_pending', recountNumber: 0, lines: [] };
+    const recount = { piNumber: 'PI_00000001_1', parentPi: 'PI_00000001', status: 'reconciled', recountNumber: 1, lines: [] };
+    for (let i = 0; i < 100; i++) {
+        const bin = `B${i}`;
+        const mat = `M${i}`;
+        if (i < 10) {
+            original.lines.push({ ...line(5, 7, false, bin, mat), recount: true });
+            recount.lines.push(line(5, 5, true, bin, mat)); // the recount found the first count wrong; stock was right
+        } else if (i < 20) {
+            original.lines.push({ ...line(5, 4, false, bin, mat), recount: true });
+            recount.lines.push(line(5, 4, true, bin, mat)); // the recount confirmed the first count; a real stock error
+        } else original.lines.push(line(5, 5, true, bin, mat));
+    }
+    const a = accuracyCounts([original, recount]);
+    assert.deepEqual([a.counted, a.countErrors, a.stockErrors], [100, 10, 10]);
+    const p = sessionProgress({ status: 'open', startAt: '2026-01-01T00:00:00.000Z', metrics: { targetMaterials: 100, materialsPerPi: 100 } }, [original, recount], '2026-02-01T00:00:00.000Z');
+    assert.equal(p.countAccuracy.pct, 90);
+    assert.equal(p.countAccuracy.errorPct, 10);
+    assert.equal(p.stockAccuracy.pct, 90);
+    assert.equal(p.materials.counted, 100, 'recounts do not add counted materials');
+});
+
+test('Older sessions (target PI documents, one accuracy target) still read', () => {
+    const m = metricsOf({ documentSize: 4, metrics: { targetPiDocuments: 5, targetLocations: 20, targetAccuracyPct: 98 } });
+    assert.deepEqual([m.targetMaterials, m.materialsPerPi, m.targetCountAccuracyPct, m.targetStockAccuracyPct], [20, 4, 98, 98]);
+});
+
+test('Statistics: sessions in the period by start date, KPIs from summed counts, by month', () => {
+    const mk = (id, startAt, counted, wrong) => ({ id, session: { name: id, status: 'closed', startAt, metrics: { targetMaterials: counted, materialsPerPi: counted } }, pis: [{ piNumber: `PI_${id}`, status: 'reconciled', lines: Array.from({ length: counted }, (_, i) => line(1, i < wrong ? 2 : 1, true, `B${i}`, `M${i}`)) }] });
+    const st = overallStatistics([mk('A', '2026-01-10T08:00:00.000Z', 10, 1), mk('B', '2026-02-03T08:00:00.000Z', 30, 3), mk('C', '2025-12-20T08:00:00.000Z', 10, 10)], '2026-01-01', '2026-11-07', '2026-11-07T00:00:00.000Z');
+    assert.equal(st.totals.sessions, 2);
+    assert.equal(st.totals.counted, 40);
+    assert.equal(st.totals.stockErrors, 4);
+    assert.equal(st.totals.stockAccuracyPct, 90);
+    assert.deepEqual(st.months.map((m) => m.month), ['2026-01', '2026-02']);
 });
 
 test('Sessions come first: a PI is created only inside an open, started session that fixes config and warehouse', () => {
@@ -62,6 +75,13 @@ test('Sessions come first: a PI is created only inside an open, started session 
     assert.match(server, /const configId = str\(campaign\.data\.configId\);/);
     assert.match(server, /const closedWhy = campaignClosedReason\(campaign\.data, nowIso\(\)\);/);
     assert.match(server, /The start cannot be in the past/);
+    assert.match(server, /const id = `CNT_SES_\$\{String\(n\)\.padStart\(8, '0'\)\}`;/);
+    assert.match(server, /const id = `PI_\$\{String\(n\)\.padStart\(8, '0'\)\}`;/);
+    assert.match(server, /nextOrgCounter\(ctx\.orgId, 'stockTakeSessionSeq'\)/);
+    assert.match(server, /nextOrgCounter\(ctx\.orgId, 'stockTakePiSeq'\)/);
+    assert.match(server, /planned PI documents of this session are created/);
+    assert.match(server, /'POST \/api\/org\/inventory\/stocktake\/statistics'/);
+    assert.match(server, /audited\(ctx, 'inventory\.stocktake\.statistics\.view'/);
     assert.match(server, /campaignId: str\(d\.campaignId\)/, 'recount PIs stay in the session');
     assert.match(server, /audited\(ctx, 'inventory\.stocktake\.count_session\.create'/);
     assert.match(server, /audited\(ctx, `inventory\.stocktake\.count_session\.\$\{action\}`/);
@@ -84,15 +104,20 @@ test('Variances follow the Chart of Authority level by level; no posting without
     assert.match(policy, /id: 'st-plan-approve', a: 'INV_ST_030', b: 'INV_ST_027'/);
 });
 
-test('Screen: Active sessions tab first, session panel with PI documents and progress report, verified plan form', () => {
+test('Screen: no PI documents tab; sessions, statistics and configuration; PI PDF on print', () => {
     const screen = read('src/org/StockTake.tsx');
-    assert.match(screen, /useState<'sessions' \| 'process' \| 'config'>\('sessions'\)/);
+    assert.match(screen, /useState<'sessions' \| 'stats' \| 'config'>\('sessions'\)/);
     assert.match(screen, /\{ value: 'sessions', label: 'Active sessions'/);
-    assert.doesNotMatch(screen, /<Plus className='h-4 w-4' \/> New PI\n/, 'no top-level New PI button');
+    assert.match(screen, /\{ value: 'stats', label: 'Statistics' \}/);
+    assert.doesNotMatch(screen, /value: 'process'/, 'the PI documents tab is gone');
     assert.match(screen, /function CountSessionPanel\(/);
     assert.match(screen, /function ProgressReport\(/);
+    assert.match(screen, /function Statistics\(/);
+    assert.match(screen, /function LegacyPanel\(/);
     assert.match(screen, /function planErrors\(/);
-    assert.match(screen, /acknowledge: 'The configuration, warehouse, dates and targets are correct\./);
+    assert.match(screen, /label='Materials per PI \*'/);
+    assert.doesNotMatch(screen, /Target PI documents/);
+    assert.match(screen, /await downloadPiPdf\(s, warehouse\);/);
     assert.match(screen, /callBackend<\{ ok: boolean; id\?: string \}>\(API \+ 'start', \{ sessionId: c\.id/);
     assert.match(screen, /const approveBarred = \(!!you\?\.approveConflict && !testMode\) \|\| coaBarred;/);
 });

@@ -8,14 +8,14 @@ import { postStockTake } from './finOps';
 import { stockValOf } from './finCore';
 import { getAuthority } from './procurementPolicy';
 import { approvalRoute, myPositions } from './purchaseOrders';
-import { sessionProgress } from './stockTakeProgress';
+import { metricsOf, overallStatistics, plannedPis, sessionProgress } from './stockTakeProgress';
 
 // ---------------------------------------------------------------------------
 // Stock take (physical inventory, PI documents).
 //   organizations/{org}/stock_take_configs/{COUNT_CONFIGnnnnnnnn}   reusable count configurations
-//   organizations/{org}/stock_take_count_sessions/{STSnnnnnnnnn}     a planned stock take session (configuration,
+//   organizations/{org}/stock_take_count_sessions/{CNT_SES_nnnnnnnn} a planned stock take session (configuration,
 //                                                                    warehouse, start/end, metrics) holding PI documents
-//   organizations/{org}/stock_take_sessions/{PInnnnnnnnn[_n]}       a PI document and its recounts
+//   organizations/{org}/stock_take_sessions/{PI_nnnnnnnn[_n]}       a PI document and its recounts
 //   organizations/{org}/stock_take_attachments/{sessionId}          the signed PI scan (kept out of the session)
 //
 // A session is created first (Active sessions); PI documents are only created inside an open session that has started
@@ -37,9 +37,11 @@ const TYPES = ['Cycle Count', 'Full Stock Take', 'Cluster Stock Take', 'Random S
 const PERIODS = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annually'];
 const CLOSED = ['reconciled', 'disregarded', 'closed_posted'];
 const CLUSTER_RE = /^CL-\d{4}$/;
-const SESSION_RE = /^PI\d{9}(_\d{1,3})?$/;
+// PI documents: PI_ + 8 digits (organization counter); older ones PI + 9 digits. Recounts add _n.
+const SESSION_RE = /^(PI_\d{8}|PI\d{9})(_\d{1,3})?$/;
 const CONFIG_RE = /^COUNT_CONFIG\d{8}$/;
-const CAMPAIGN_RE = /^STS\d{9}$/;
+// Stock take sessions: CNT_SES_ + 8 digits (organization counter); the first few were STS + 9 digits.
+const CAMPAIGN_RE = /^(CNT_SES_\d{8}|STS\d{9})$/;
 const CAMPAIGNS = 'stock_take_count_sessions';
 const MAX_SESSION_DAYS = 366;
 const MAX_ATTACHMENT_CHARS = 650_000; // about 450 KB of file as base64
@@ -206,16 +208,21 @@ function readCampaign(b: Obj, now: string) {
         if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${label} must be a whole number from ${min} to ${max}`);
         return n;
     };
-    const accuracy = Number(m.targetAccuracyPct);
-    if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100) throw new HttpError(400, 'Target count accuracy must be 0 to 100 %');
+    const share = (v: unknown, label: string) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0 || n > 100) throw new HttpError(400, `${label} must be 0 to 100 %`);
+        return Math.round(n * 10) / 10;
+    };
     const tolerance = Number(m.varianceToleranceValue ?? 0);
     if (!Number.isFinite(tolerance) || tolerance < 0 || tolerance > 1e12) throw new HttpError(400, 'Variance value tolerance must be 0 or more');
     const metrics = {
-        targetPiDocuments: whole(m.targetPiDocuments, 'Target PI documents', 1, 1000),
-        targetLocations: whole(m.targetLocations, 'Target locations', 1, 1_000_000),
-        targetAccuracyPct: Math.round(accuracy * 10) / 10,
+        targetMaterials: whole(m.targetMaterials, 'Materials to count', 1, 1_000_000),
+        materialsPerPi: whole(m.materialsPerPi, 'Materials per PI document', 1, 1000),
+        targetCountAccuracyPct: share(m.targetCountAccuracyPct, 'Target count accuracy'),
+        targetStockAccuracyPct: share(m.targetStockAccuracyPct, 'Target stock accuracy'),
         varianceToleranceValue: Math.round(tolerance * 100) / 100,
     };
+    if (plannedPis(metrics.targetMaterials, metrics.materialsPerPi) > 1000) throw new HttpError(400, 'A session can have at most 1000 PI documents; count fewer materials or put more on each PI.');
     return { name, startAt: new Date(startMs).toISOString(), endAt: end, metrics };
 }
 
@@ -322,7 +329,9 @@ export const stockTakeRoutes = {
                     .filter((c) => visible.has(str(c.data.warehouseId)))
                     .map((c) => {
                         const pis = sessions.filter((x) => str(x.data.campaignId) === c.id).map((x) => x.data);
-                        return { id: c.id, ...c.data, piIds: sessions.filter((x) => str(x.data.campaignId) === c.id).map((x) => x.id), progress: sessionProgress(c.data, pis, now), canCreatePi: !campaignClosedReason(c.data, now), whyNoPi: campaignClosedReason(c.data, now) };
+                        const progress = sessionProgress(c.data, pis, now);
+                        const whyNoPi = campaignClosedReason(c.data, now) || (progress.piDocuments.originals >= progress.piDocuments.planned ? `All ${progress.piDocuments.planned} planned PI documents are created.` : '');
+                        return { id: c.id, ...c.data, metrics: metricsOf(c.data), progress, canCreatePi: !whyNoPi, whyNoPi };
                     })
                     .sort((a, b) => str((b as Obj).createdAt).localeCompare(str((a as Obj).createdAt))),
                 warehouses: warehouses.map((w) => ({ id: w.id, name: str(w.data.name) || str(w.data.costCenterCode) || str(w.data.code) || w.id })),
@@ -332,6 +341,34 @@ export const stockTakeRoutes = {
                     .map((x) => publicSession(x, ctx))
                     .sort((a, b) => str((b as Record<string, unknown>).createdAt).localeCompare(str((a as Record<string, unknown>).createdAt))),
             };
+        }),
+    ],
+
+    'POST /api/org/inventory/stocktake/statistics': [
+        orgRoute('org.inventory.stocktake.statistics', null, async (ctx) => {
+            canView(ctx);
+            const root = rootOf(ctx);
+            const now = nowIso();
+            const today = now.slice(0, 10);
+            const DAY = /^\d{4}-\d{2}-\d{2}$/;
+            // Year to date runs from the start of the current financial year (Finance > calendar); 1 January if none.
+            const years = await listDocs(`${root}/fin_years`);
+            const current = years.map((y) => ({ start: str(y.data.start).slice(0, 10), end: str(y.data.end).slice(0, 10) })).filter((y) => DAY.test(y.start) && y.start <= today && (!y.end || y.end >= today));
+            const yearStart = current.length ? current.map((y) => y.start).sort()[0] : `${today.slice(0, 4)}-01-01`;
+            const from = str(ctx.body.from) || yearStart;
+            const to = str(ctx.body.to) || today;
+            if (!DAY.test(from) || !DAY.test(to) || !Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to))) throw new HttpError(400, 'Enter valid from and to dates');
+            if (from > to) throw new HttpError(400, 'The from date must be on or before the to date');
+            if (Date.parse(to) - Date.parse(from) > 5 * 366 * 86_400_000) throw new HttpError(400, 'Choose a period of at most five years');
+            const warehouses = await warehousesFor(ctx, 'read');
+            const visible = new Set(warehouses.map((w) => w.id));
+            const [campaigns, pis] = await Promise.all([listDocs(`${root}/${CAMPAIGNS}`), listDocs(`${root}/stock_take_sessions`)]);
+            const items = campaigns
+                .filter((c) => visible.has(str(c.data.warehouseId)))
+                .map((c) => ({ id: c.id, session: c.data, pis: pis.filter((x) => str(x.data.campaignId) === c.id).map((x) => x.data) }));
+            const stats = overallStatistics(items, from, to, now);
+            await audited(ctx, 'inventory.stocktake.statistics.view', 'Stock take statistics', { from, to, sessions: stats.totals.sessions });
+            return { ...stats, yearStart, yearStartSource: current.length ? 'finance' : 'calendar' };
         }),
     ],
 
@@ -350,9 +387,9 @@ export const stockTakeRoutes = {
             const now = nowIso();
             const plan = readCampaign(b, now);
             for (let attempt = 0; attempt < 3; attempt++) {
-                const n = await nextOrgCounter(ctx.orgId, 'stockCountSessionSeq');
-                if (n > 999_999_999) throw new HttpError(409, 'Stock take session sequence exhausted');
-                const id = `STS${String(n).padStart(9, '0')}`;
+                const n = await nextOrgCounter(ctx.orgId, 'stockTakeSessionSeq');
+                if (n > 99_999_999) throw new HttpError(409, 'Stock take session sequence exhausted');
+                const id = `CNT_SES_${String(n).padStart(8, '0')}`;
                 const ok = await writeDoc(
                     `${root}/${CAMPAIGNS}/${id}`,
                     {
@@ -362,7 +399,8 @@ export const stockTakeRoutes = {
                         configName: str(config.data.name),
                         type: str(config.data.type),
                         selection: str(config.data.selection),
-                        documentSize: Number(config.data.documentSize) || 1,
+                        documentSize: plan.metrics.materialsPerPi,
+                        plannedPiDocuments: plannedPis(plan.metrics.targetMaterials, plan.metrics.materialsPerPi),
                         warehouseId,
                         status: 'open',
                         createdAt: now,
@@ -487,11 +525,23 @@ export const stockTakeRoutes = {
                 eligible = eligible.filter((x) => x.binId.startsWith(`${cluster}__`));
             }
             if (!eligible.length) throw new HttpError(409, 'No mapped physical locations found for this selection');
-            const size = Number(config.data.documentSize) || 1;
+            // The session plans the work: materials to count and materials per PI give the number of PI documents.
+            // Locations already on this session's PI documents (not disregarded) are not picked again.
+            const allPis = await listDocs(`${root}/stock_take_sessions`);
+            const sessionPis = allPis.filter((x) => str(x.data.campaignId) === campaignId && !str(x.data.parentPi) && str(x.data.status) !== 'disregarded');
+            const metrics = metricsOf(campaign.data);
+            const planned = plannedPis(metrics.targetMaterials, metrics.materialsPerPi);
+            if (sessionPis.length >= planned) throw new HttpError(409, `All ${planned} planned PI documents of this session are created.`);
+            const taken = new Set(sessionPis.flatMap((x) => (Array.isArray(x.data.lines) ? x.data.lines : [])).filter(isObj).map((l) => `${str(l.materialId)}|${str(l.binId)}`));
+            const onPis = taken.size;
+            eligible = eligible.filter((x) => !taken.has(`${x.materialId}|${x.binId}`));
+            if (!eligible.length) throw new HttpError(409, 'Every mapped location in this selection is already on a PI document of this session.');
+            const size = Math.max(1, Math.min(metrics.materialsPerPi, metrics.targetMaterials - onPis));
             if (str(config.data.selection) === 'Sequence') {
+                // Without a starting location the PI continues from the first location not yet on this session's PIs.
                 const start = str(b.startBin) || eligible[0].binId;
                 const index = eligible.findIndex((x) => x.binId === start);
-                if (index < 0) throw new HttpError(400, 'Starting physical location not found');
+                if (index < 0) throw new HttpError(400, 'Starting physical location not found, or it is already on a PI document of this session');
                 eligible = eligible.slice(index, index + size);
             } else {
                 eligible = randomSample(eligible, size);
@@ -507,10 +557,10 @@ export const stockTakeRoutes = {
                 throw new HttpError(409, 'Multiple mapped locations for one material require location-level stock ledger; select a smaller PI document to avoid unsafe reconciliation.');
             }
 
-            const sessions = await listDocs(`${root}/stock_take_sessions`);
-            const top = sessions.reduce((n, x) => Math.max(n, Number(/^PI([0-9]{9})$/.exec(x.id)?.[1] || 0)), 0);
-            for (let n = top + 1; n < top + 50; n++) {
-                const id = `PI${String(n).padStart(9, '0')}`;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const n = await nextOrgCounter(ctx.orgId, 'stockTakePiSeq');
+                if (n > 99_999_999) throw new HttpError(409, 'PI document sequence exhausted');
+                const id = `PI_${String(n).padStart(8, '0')}`;
                 const now = nowIso();
                 const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(now));
                 const part = (key: string) => parts.find((p) => p.type === key)?.value || '';
@@ -522,6 +572,7 @@ export const stockTakeRoutes = {
                         sessionName,
                         campaignId,
                         campaignName: str(campaign.data.name),
+                        piSequenceInSession: sessionPis.length + 1,
                         configId,
                         configName: str(config.data.name),
                         warehouseId,
