@@ -7,12 +7,16 @@ import RichTable, { type Column } from '../components/RichTable';
 import { InfoTip, Screen, Segmented, messageOf, useConfirm, type ConfirmOptions } from '../components/screen';
 import { Badge, Button, Card, Spinner, Toggle, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
+import { downloadReportPdf } from '../lib/report';
 
 // Stock take (physical inventory, INV).
-//   Active sessions     a stock take session is planned first (configuration, warehouse, start, optional end and the
-//                       metrics it is measured against). Opening a session lists its PI documents, creates new ones
-//                       (only while it is open and between its start and end) and shows its progress report.
-//   PI documents        every PI document per warehouse; tap one to work it through its states:
+//   Active sessions     a stock take session (CNT_SES_ + 8 digits) is planned first: configuration, warehouse, start,
+//                       optional end, materials to count and materials per PI (which give the number of PI documents)
+//                       and the targets. Every PI document (PI_ + 8 digits) lives inside its session: opening a session
+//                       lists its PI documents, creates the next one (only while it is open, between its start and end
+//                       and until the planned number is reached) and shows its progress report.
+//   Statistics          all sessions over a period, year to date by default (from the financial year start).
+//   PI document         tap one inside a session to work it through its states:
 //                       Created → Printed → Awaiting verification → Verified → Awaiting posting approval
 //                       → Approved for posting → Reconciled (or Partially posted while a recount PI is open).
 //                       Disregarded / Closed end a session.
@@ -103,16 +107,24 @@ interface Stage {
     total: number;
     pct: number;
 }
+interface Kpi {
+    counted: number;
+    errors: number;
+    pct: number;
+    errorPct: number;
+    target: number;
+    met: boolean | null;
+}
 interface Progress {
     phase: string;
-    piDocuments: { total: number; live: number; disregarded: number; recounts: number; closed: number; byStatus: Record<string, number> };
+    piDocuments: { total: number; live: number; originals: number; planned: number; disregarded: number; recounts: number; closed: number; byStatus: Record<string, number> };
     completionPct: number;
     stages: Stage[];
-    locations: { planned: number; counted: number; posted: number; noBaseline: number; countedPct: number; postedPct: number };
-    accuracy: { comparable: number; matched: number; variances: number; pct: number };
-    varianceValue: number;
+    materials: { target: number; perPi: number; onPis: number; counted: number; posted: number; noBaseline: number; onPisPct: number; countedPct: number; postedPct: number };
+    countAccuracy: Kpi;
+    stockAccuracy: Kpi;
+    variance: { value: number; tolerance: number; within: boolean | null };
     timeUsedPct: number | null;
-    targets: { piDocuments: number; locations: number; accuracyPct: number; varianceToleranceValue: number; piDocumentsPct: number; locationsPct: number; accuracyMet: boolean | null; withinTolerance: boolean | null };
 }
 interface CountSession {
     id: string;
@@ -126,12 +138,11 @@ interface CountSession {
     warehouseId: string;
     startAt: string;
     endAt: string;
-    metrics: { targetPiDocuments: number; targetLocations: number; targetAccuracyPct: number; varianceToleranceValue: number };
+    metrics: { targetMaterials: number; materialsPerPi: number; targetCountAccuracyPct: number; targetStockAccuracyPct: number; varianceToleranceValue: number };
     status: 'open' | 'closed' | 'cancelled';
     createdAt: string;
     closedAt?: string;
     closureReason?: string;
-    piIds: string[];
     progress: Progress;
     canCreatePi: boolean;
     whyNoPi: string;
@@ -237,10 +248,41 @@ async function downloadAttachment(id: string) {
     window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+/** A PDF copy of the PI count sheet. Counting is blind: no system quantities are printed. */
+function downloadPiPdf(s: Session, warehouse: string) {
+    const blind = s.status === 'awaiting_print' || s.status === 'counting';
+    return downloadReportPdf({
+        title: `PI document ${s.piNumber}`,
+        subtitle: [s.campaignId ? `Session ${s.campaignId}${s.campaignName ? ` - ${s.campaignName}` : ''}` : '', s.sessionName || s.configName].filter(Boolean).join(' · '),
+        fileName: `${s.piNumber}`,
+        sections: [
+            {
+                heading: 'Document',
+                facts: [
+                    ['PI document', s.piNumber],
+                    ['Warehouse', warehouse],
+                    ['Configuration', s.configName],
+                    ['Type', s.type || ''],
+                    ['Created', fmtDate(s.createdAt)],
+                    ['Locations', String(s.lines.length)],
+                ],
+            },
+            {
+                heading: 'Count sheet',
+                table: {
+                    head: blind ? ['#', 'Physical location', 'Material', 'Description', 'Counted'] : ['#', 'Physical location', 'Material', 'Description', 'System qty', 'Counted'],
+                    body: s.lines.map((l, i) => [String(i + 1), l.binId, l.materialNumber, l.description, ...(blind ? [] : [l.expected === null ? '' : String(l.expected)]), l.counted === null ? '' : String(l.counted)]),
+                },
+            },
+            { heading: 'Signatures', text: 'Counted by: ______________________  Date: __________\n\nVerified by: _____________________  Date: __________' },
+        ],
+    });
+}
+
 export default function StockTake() {
     const { data, error, loading, reload } = useLoad(() => callBackend<Data>(API + 'list'));
-    const [view, setView] = useState<'sessions' | 'process' | 'config'>('sessions');
-    const [showClosed, setShowClosed] = useState(false);
+    const [view, setView] = useState<'sessions' | 'stats' | 'config'>('sessions');
+    const [legacyOpen, setLegacyOpen] = useState(false);
     const [showClosedSessions, setShowClosedSessions] = useState(false);
     const [openId, setOpenId] = useState('');
     const [openSessionId, setOpenSessionId] = useState('');
@@ -252,8 +294,8 @@ export default function StockTake() {
 
     const warehouseName = useMemo(() => new Map((data?.warehouses ?? []).map((w) => [w.id, w.name])), [data]);
     const allSessions = data?.sessions ?? [];
-    const closedCount = allSessions.filter((s) => CLOSED.includes(s.status)).length;
-    const sessions = useMemo(() => (data?.sessions ?? []).filter((s) => showClosed || !CLOSED.includes(s.status)), [data, showClosed]);
+    // PI documents made before sessions existed: shown together under one entry so none is left unreachable.
+    const legacyPis = useMemo(() => (data?.sessions ?? []).filter((s) => !s.campaignId), [data]);
     const configs = useMemo(() => data?.configs ?? [], [data]);
     const opened = allSessions.find((s) => s.id === openId) ?? null;
     const allCountSessions = data?.countSessions ?? [];
@@ -266,23 +308,6 @@ export default function StockTake() {
         reload();
     };
 
-    const sessionColumns = useMemo<Array<Column<Session>>>(
-        () => [
-            { key: 'pi', label: 'PI document', value: (s) => s.piNumber, render: (s) => <span className='font-mono text-xs font-semibold text-brandsoft'>{s.piNumber}</span> },
-            { key: 'name', label: 'PI name', value: (s) => s.sessionName || s.configName },
-            { key: 'session', label: 'Stock take session', value: (s) => s.campaignName || '' },
-            { key: 'config', label: 'Configuration', value: (s) => s.configName, hidden: true },
-            { key: 'warehouse', label: 'Warehouse', value: (s) => warehouseName.get(s.warehouseId) || s.warehouseId },
-            { key: 'status', label: 'Status', value: (s) => statusOf(s.status).label, render: (s) => <Badge tone={statusOf(s.status).tone}>{statusOf(s.status).label}</Badge> },
-            { key: 'lines', label: 'Locations', type: 'number', value: (s) => s.lines.length },
-            { key: 'variances', label: 'Variances', type: 'number', value: (s) => s.lines.filter((l) => l.counted !== null && hasVariance(l)).length },
-            { key: 'parent', label: 'Parent PI', value: (s) => s.parentPi || '', hidden: true },
-            { key: 'recount', label: 'Recount PI', value: (s) => s.recountPi || '', hidden: true },
-            { key: 'created', label: 'Created', type: 'date', value: (s) => s.createdAt, render: (s) => fmtDate(s.createdAt) },
-        ],
-        [warehouseName]
-    );
-
     const countSessionColumns = useMemo<Array<Column<CountSession>>>(
         () => [
             { key: 'number', label: 'Session', value: (c) => c.sessionNumber, render: (c) => <span className='font-mono text-xs font-semibold text-brandsoft'>{c.sessionNumber}</span> },
@@ -293,13 +318,16 @@ export default function StockTake() {
             { key: 'type', label: 'Type', value: (c) => c.type, hidden: true },
             { key: 'start', label: 'Start', type: 'date', value: (c) => c.startAt, render: (c) => fmtWhen(c.startAt) },
             { key: 'end', label: 'End', type: 'date', value: (c) => c.endAt || null, render: (c) => (c.endAt ? fmtWhen(c.endAt) : 'Open-ended') },
-            { key: 'pis', label: 'PI documents', type: 'number', value: (c) => c.progress.piDocuments.total },
+            { key: 'pis', label: 'PI documents', type: 'number', value: (c) => c.progress.piDocuments.originals, render: (c) => `${c.progress.piDocuments.originals}/${c.progress.piDocuments.planned}` },
+            { key: 'materials', label: 'Materials to count', type: 'number', value: (c) => c.progress.materials.target, hidden: true },
+            { key: 'perPi', label: 'Materials per PI', type: 'number', value: (c) => c.progress.materials.perPi, hidden: true },
             { key: 'completion', label: 'Completion %', type: 'number', value: (c) => c.progress.completionPct },
             { key: 'printed', label: 'Printed %', type: 'number', value: (c) => c.progress.stages.find((x) => x.key === 'printing')?.pct ?? 0, hidden: true },
             { key: 'counted', label: 'Counted %', type: 'number', value: (c) => c.progress.stages.find((x) => x.key === 'counting')?.pct ?? 0 },
             { key: 'posted', label: 'Posted %', type: 'number', value: (c) => c.progress.stages.find((x) => x.key === 'posting')?.pct ?? 0 },
-            { key: 'accuracy', label: 'Accuracy %', type: 'number', value: (c) => c.progress.accuracy.pct, hidden: true },
-            { key: 'variance', label: 'Variance value', type: 'number', value: (c) => c.progress.varianceValue, hidden: true },
+            { key: 'countAcc', label: 'Count accuracy %', type: 'number', value: (c) => c.progress.countAccuracy.pct, hidden: true },
+            { key: 'stockAcc', label: 'Stock accuracy %', type: 'number', value: (c) => c.progress.stockAccuracy.pct, hidden: true },
+            { key: 'variance', label: 'Variance value', type: 'number', value: (c) => c.progress.variance.value, hidden: true },
             { key: 'created', label: 'Created', type: 'date', value: (c) => c.createdAt, render: (c) => fmtDate(c.createdAt), hidden: true },
         ],
         [warehouseName]
@@ -347,7 +375,7 @@ export default function StockTake() {
                         }}
                         options={[
                             { value: 'sessions', label: 'Active sessions', count: allCountSessions.length - closedSessionCount },
-                            { value: 'process', label: 'PI documents', count: allSessions.length - closedCount },
+                            { value: 'stats', label: 'Statistics' },
                             { value: 'config', label: 'Configuration', count: configs.length },
                         ]}
                     />
@@ -378,33 +406,17 @@ export default function StockTake() {
                                 setOpenSessionId(c.id);
                             }}
                             empty={showClosedSessions ? 'No stock take sessions yet. Tap New session to plan one.' : 'No active stock take sessions. Tap New session to plan one.'}
-                            height='h-[calc(100dvh-20rem)]'
+                            height={legacyPis.length ? 'h-[calc(100dvh-24rem)]' : 'h-[calc(100dvh-20rem)]'}
                         />
+                        {legacyPis.length > 0 && (
+                            <button type='button' onClick={() => setLegacyOpen(true)} className='flex min-h-[44px] w-full items-center justify-between gap-2 rounded-xl border border-line bg-panel px-3 text-left text-sm text-soft active:bg-page'>
+                                <span>{count(legacyPis.length, 'PI document')} created before sessions</span>
+                                <span className='text-brandsoft'>Open</span>
+                            </button>
+                        )}
                     </>
-                ) : view === 'process' ? (
-                    <>
-                        <div className='flex items-center gap-1'>
-                            <label className='flex min-h-[44px] items-center gap-3'>
-                                <Toggle checked={showClosed} onChange={setShowClosed} label='Show closed PI documents' />
-                                <span className='text-sm text-soft'>Show closed PI documents ({closedCount})</span>
-                            </label>
-                            <InfoTip label='PI documents'>Every PI document you can see. New PI documents are created inside a stock take session (Active sessions). Reconciled, disregarded and closed PI documents are hidden unless this is on.</InfoTip>
-                        </div>
-                        <RichTable
-                            id='inv.stocktake.sessions'
-                            title='PI documents'
-                            fileName='Stock_take_PI_documents'
-                            columns={sessionColumns}
-                            rows={sessions}
-                            rowKey={(s) => s.id}
-                            onRowClick={(s) => {
-                                setNotice('');
-                                setOpenId(s.id);
-                            }}
-                            empty={showClosed ? 'No PI documents yet.' : 'No open PI documents. Create them inside a stock take session.'}
-                            height='h-[calc(100dvh-20rem)]'
-                        />
-                    </>
+                ) : view === 'stats' ? (
+                    <Statistics warehouseName={warehouseName} />
                 ) : (
                     <RichTable
                         id='inv.stocktake.configs'
@@ -441,6 +453,17 @@ export default function StockTake() {
                         setOpenSessionId('');
                         setNotice('');
                     }}
+                />
+            )}
+            {legacyOpen && (
+                <LegacyPanel
+                    pis={legacyPis}
+                    warehouseName={warehouseName}
+                    onOpenPi={(id) => {
+                        setNotice('');
+                        setOpenId(id);
+                    }}
+                    onClose={() => setLegacyOpen(false)}
                 />
             )}
             {planning && data && (
@@ -837,12 +860,22 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
             <Button
                 key='print'
                 variant='secondary'
-                onClick={() => {
+                busy={downloading}
+                onClick={async () => {
                     setPrinted(true);
+                    setPanelError('');
+                    setDownloading(true);
+                    try {
+                        await downloadPiPdf(s, warehouse);
+                    } catch (err) {
+                        setPanelError(`The PDF copy could not be saved: ${messageOf(err)}`);
+                    } finally {
+                        setDownloading(false);
+                    }
                     window.print();
                 }}
             >
-                <Printer className='h-4 w-4' /> Print / save PI as PDF
+                <Printer className='h-4 w-4' /> Print and download PDF
             </Button>
         );
     }
@@ -973,7 +1006,7 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
             {notice && <Alert tone='success'>{notice}</Alert>}
             {panelError && <Alert tone='error'>{panelError}</Alert>}
             {entering && <Problems items={countProblems} />}
-            {st === 'awaiting_print' && !printed && <Alert tone='info'>Print the PI (or save it as PDF) first; then confirm it was printed.</Alert>}
+            {st === 'awaiting_print' && !printed && <Alert tone='info'>Print the PI first (a PDF copy is downloaded at the same time); then confirm it was printed.</Alert>}
             {st === 'verification' && !editingCounts && verifyBarred && (
                 <Alert tone='warn'>You counted or corrected the counts of this PI, so you cannot verify it. Another person with the Stock Take verification permission at this warehouse must verify it.</Alert>
             )}
@@ -1135,12 +1168,13 @@ function CreatePanel({ session: c, warehouse, onClose, onCreated }: { session: C
                     <Detail label='Configuration'>{c.configName}</Detail>
                     <Detail label='Type'>{c.type}</Detail>
                     <Detail label='Selection'>{c.selection}</Detail>
-                    <Detail label='PI size'>{count(c.documentSize, 'location')}</Detail>
+                    <Detail label='This PI'>{`${c.progress.piDocuments.originals + 1} of ${c.progress.piDocuments.planned}`}</Detail>
+                    <Detail label='Materials on it'>{Math.max(1, Math.min(c.progress.materials.perPi, c.progress.materials.target - c.progress.materials.onPis))}</Detail>
                 </dl>
             </Card>
             {sequence ? (
                 <Card className='space-y-3'>
-                    <Field id='st-new-start' label='Starting physical location' maxLength={80} autoComplete='off' value={startBin} onChange={(e) => setStartBin(e.target.value)} placeholder='First mapped location by default' hint='Leave blank to start at the first mapped location.' error={startBin.trim().length > 80 ? 'Too long' : undefined} />
+                    <Field id='st-new-start' label='Starting physical location' maxLength={80} autoComplete='off' value={startBin} onChange={(e) => setStartBin(e.target.value)} placeholder='First mapped location by default' hint='Leave blank to continue from the first location not yet on a PI of this session.' error={startBin.trim().length > 80 ? 'Too long' : undefined} />
                 </Card>
             ) : (
                 <Alert tone='info'>Locations are picked at random from the warehouse, so nobody can predict which ones will be counted.</Alert>
@@ -1245,6 +1279,8 @@ function CountSessionPanel({
                             <Detail label='Configuration'>{c.configName}</Detail>
                             <Detail label='Start'>{fmtWhen(c.startAt)}</Detail>
                             <Detail label='End'>{c.endAt ? fmtWhen(c.endAt) : 'Open-ended'}</Detail>
+                            <Detail label='Materials to count'>{c.progress.materials.target}</Detail>
+                            <Detail label='PI documents'>{`${c.progress.piDocuments.originals} of ${c.progress.piDocuments.planned} (${c.progress.materials.perPi} per PI)`}</Detail>
                         </dl>
                     </Card>
                     <RichTable
@@ -1271,14 +1307,13 @@ function Stat({ label, value, note, tone }: { label: string; value: ReactNode; n
         <div className='min-w-0 rounded-xl border border-line bg-panel p-3'>
             <p className='truncate text-xs text-muted'>{label}</p>
             <p className={`mt-0.5 truncate text-lg font-semibold ${tone === 'good' ? 'text-emerald-300' : tone === 'bad' ? 'text-amber-300' : 'text-ink'}`}>{value}</p>
-            {note && <p className='truncate text-xs text-soft'>{note}</p>}
+            {note && <p className='text-xs leading-snug text-soft'>{note}</p>}
         </div>
     );
 }
 
 function ProgressReport({ session: c, warehouse }: { session: CountSession; warehouse: string }) {
     const p = c.progress;
-    const t = p.targets;
     const stageRows = useMemo(() => p.stages, [p]);
     const stageColumns: Array<Column<Stage>> = [
         { key: 'stage', label: 'Stage', value: (r) => r.label },
@@ -1287,20 +1322,22 @@ function ProgressReport({ session: c, warehouse }: { session: CountSession; ware
         { key: 'pct', label: '% complete', type: 'number', value: (r) => r.pct, render: (r) => `${r.pct}%` },
     ];
     const statuses = Object.entries(p.piDocuments.byStatus).sort((a, b) => b[1] - a[1]);
+    const kpiTone = (k: Kpi) => (k.met === null ? undefined : k.met ? 'good' : 'bad');
     return (
         <div className='space-y-3'>
             <div className='grid grid-cols-2 gap-2'>
                 <Stat label='Completion' value={pctText(p.completionPct)} note={`${p.piDocuments.closed} of ${p.piDocuments.live} complete`} />
-                <Stat label='PI documents' value={p.piDocuments.total} note={`Target ${t.piDocuments} · ${pctText(t.piDocumentsPct)}${p.piDocuments.recounts ? ` · ${count(p.piDocuments.recounts, 'recount')}` : ''}`} />
-                <Stat label='Locations planned' value={p.locations.planned} note={`Target ${t.locations} · ${pctText(t.locationsPct)}`} />
-                <Stat label='Locations counted' value={p.locations.counted} note={`${pctText(p.locations.countedPct)} of planned`} />
-                <Stat label='Locations posted' value={p.locations.posted} note={`${pctText(p.locations.postedPct)} of planned`} />
-                <Stat label='Count accuracy' value={pctText(p.accuracy.pct)} note={`Target ${t.accuracyPct}% · ${count(p.accuracy.variances, 'variance')}`} tone={t.accuracyMet === null ? undefined : t.accuracyMet ? 'good' : 'bad'} />
-                <Stat label='Variance value' value={money(p.varianceValue)} note={t.varianceToleranceValue > 0 ? `Tolerance ${money(t.varianceToleranceValue)}` : 'No tolerance set'} tone={t.withinTolerance === null ? undefined : t.withinTolerance ? 'good' : 'bad'} />
+                <Stat label='PI documents' value={`${p.piDocuments.originals}/${p.piDocuments.planned}`} note={`${p.materials.perPi} per PI${p.piDocuments.recounts ? ` · ${count(p.piDocuments.recounts, 'recount')}` : ''}`} />
+                <Stat label='Count accuracy' value={pctText(p.countAccuracy.pct)} note={`${count(p.countAccuracy.errors, 'recount error')} · target ${p.countAccuracy.target}%`} tone={kpiTone(p.countAccuracy)} />
+                <Stat label='Stock accuracy' value={pctText(p.stockAccuracy.pct)} note={`${count(p.stockAccuracy.errors, 'error')} posted · target ${p.stockAccuracy.target}%`} tone={kpiTone(p.stockAccuracy)} />
+                <Stat label='Materials on PIs' value={p.materials.onPis} note={`Of ${p.materials.target} to count · ${pctText(p.materials.onPisPct)}`} />
+                <Stat label='Materials counted' value={p.materials.counted} note={`${pctText(p.materials.countedPct)} of ${p.materials.target}`} />
+                <Stat label='Materials posted' value={p.materials.posted} note={`${pctText(p.materials.postedPct)} of ${p.materials.target}`} />
+                <Stat label='Variance value' value={money(p.variance.value)} note={p.variance.tolerance > 0 ? `Tolerance ${money(p.variance.tolerance)}` : 'No tolerance set'} tone={p.variance.within === null ? undefined : p.variance.within ? 'good' : 'bad'} />
                 <Stat label='Time used' value={p.timeUsedPct === null ? 'Open-ended' : pctText(p.timeUsedPct)} note={c.endAt ? `Ends ${fmtWhen(c.endAt)}` : `Started ${fmtWhen(c.startAt)}`} tone={p.phase === 'overdue' ? 'bad' : undefined} />
                 <Stat label='Disregarded PIs' value={p.piDocuments.disregarded} note='Not counted in completion' />
-                <Stat label='No baseline' value={p.locations.noBaseline} note='Counted lines without system stock' tone={p.locations.noBaseline ? 'bad' : undefined} />
             </div>
+            <p className='text-xs text-muted'>Count accuracy: counted materials whose count was not changed by a recount. Stock accuracy: counted materials posted with no difference from the system quantity.</p>
 
             <Card className='space-y-3'>
                 <p className='text-sm font-medium text-ink'>Progress by stage</p>
@@ -1362,9 +1399,10 @@ interface PlanForm {
     warehouseId: string;
     startAt: string;
     endAt: string;
-    targetPiDocuments: string;
-    targetLocations: string;
-    targetAccuracyPct: string;
+    targetMaterials: string;
+    materialsPerPi: string;
+    targetCountAccuracyPct: string;
+    targetStockAccuracyPct: string;
     varianceToleranceValue: string;
 }
 type PlanKey = keyof PlanForm;
@@ -1394,9 +1432,11 @@ function planErrors(f: PlanForm, cfg: Config | undefined, now: number): Partial<
         else if (Number.isFinite(start) && end <= start) e.endAt = 'Must be after the start';
         else if (Number.isFinite(start) && end - start > 366 * 86_400_000) e.endAt = 'At most 366 days after the start';
     }
-    if (!isWhole(f.targetPiDocuments, 1, 1000)) e.targetPiDocuments = 'Whole number, 1 to 1000';
-    if (!isWhole(f.targetLocations, 1, 1_000_000)) e.targetLocations = 'Whole number, 1 or more';
-    if (!isNumber(f.targetAccuracyPct, 0, 100)) e.targetAccuracyPct = '0 to 100';
+    if (!isWhole(f.targetMaterials, 1, 1_000_000)) e.targetMaterials = 'Whole number, 1 or more';
+    if (!isWhole(f.materialsPerPi, 1, 1000)) e.materialsPerPi = 'Whole number, 1 to 1000';
+    else if (!e.targetMaterials && Math.ceil(Number(f.targetMaterials) / Number(f.materialsPerPi)) > 1000) e.materialsPerPi = 'More than 1000 PI documents; put more on each PI';
+    if (!isNumber(f.targetCountAccuracyPct, 0, 100)) e.targetCountAccuracyPct = '0 to 100';
+    if (!isNumber(f.targetStockAccuracyPct, 0, 100)) e.targetStockAccuracyPct = '0 to 100';
     if (!isNumber(f.varianceToleranceValue, 0, 1e12)) e.varianceToleranceValue = '0 or more, up to 2 decimals';
     return e;
 }
@@ -1407,14 +1447,15 @@ const PLAN_LABELS: Record<PlanKey, string> = {
     warehouseId: 'Warehouse',
     startAt: 'Start',
     endAt: 'End',
-    targetPiDocuments: 'Target PI documents',
-    targetLocations: 'Target locations',
-    targetAccuracyPct: 'Target count accuracy',
+    targetMaterials: 'Materials to count',
+    materialsPerPi: 'Materials per PI',
+    targetCountAccuracyPct: 'Target count accuracy',
+    targetStockAccuracyPct: 'Target stock accuracy',
     varianceToleranceValue: 'Variance value tolerance',
 };
 
 function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: Ask; onClose: () => void; onCreated: (id: string) => void }) {
-    const [form, setForm] = useState<PlanForm>(() => ({ name: '', configId: '', warehouseId: '', startAt: localInput(new Date()), endAt: '', targetPiDocuments: '1', targetLocations: '', targetAccuracyPct: '98', varianceToleranceValue: '0' }));
+    const [form, setForm] = useState<PlanForm>(() => ({ name: '', configId: '', warehouseId: '', startAt: localInput(new Date()), endAt: '', targetMaterials: '', materialsPerPi: '', targetCountAccuracyPct: '98', targetStockAccuracyPct: '95', varianceToleranceValue: '0' }));
     const [touched, setTouched] = useState<Partial<Record<PlanKey, boolean>>>({});
     const [tried, setTried] = useState(false);
     const cfg = data.configs.find((c) => c.id === form.configId);
@@ -1424,6 +1465,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
     const set = (k: PlanKey, v: string) => setForm((f) => ({ ...f, [k]: v }));
     const touch = (k: PlanKey) => setTouched((t) => ({ ...t, [k]: true }));
     const enabledConfigs = data.configs.filter((c) => c.active !== false);
+    const piCount = isWhole(form.targetMaterials, 1, 1_000_000) && isWhole(form.materialsPerPi, 1, 1000) ? Math.ceil(Number(form.targetMaterials) / Number(form.materialsPerPi)) : 0;
 
     const pickConfig = (id: string) => {
         const c = data.configs.find((x) => x.id === id);
@@ -1432,7 +1474,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
             configId: id,
             warehouseId: c?.warehouseId || f.warehouseId,
             name: f.name || (c ? c.name : ''),
-            targetLocations: touched.targetLocations ? f.targetLocations : c ? String(c.documentSize * (Number(f.targetPiDocuments) || 1)) : f.targetLocations,
+            materialsPerPi: touched.materialsPerPi ? f.materialsPerPi : c ? String(c.documentSize) : f.materialsPerPi,
         }));
         touch('configId');
     };
@@ -1451,7 +1493,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                             {form.endAt ? ` to ${fmtWhen(new Date(form.endAt).toISOString())}` : ' with no end date'}.
                         </span>
                         <span className='block'>
-                            Targets: {count(Number(form.targetPiDocuments), 'PI document')}, {count(Number(form.targetLocations), 'location')}, {form.targetAccuracyPct}% accuracy, variance tolerance {money(Number(form.varianceToleranceValue))}.
+                            {count(Number(form.targetMaterials), 'material')} to count, {form.materialsPerPi} per PI: {count(piCount, 'PI document')}. Targets: count accuracy {form.targetCountAccuracyPct}%, stock accuracy {form.targetStockAccuracyPct}%, variance tolerance {money(Number(form.varianceToleranceValue))}.
                         </span>
                     </span>
                 ),
@@ -1466,9 +1508,10 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                     startAt: new Date(form.startAt).toISOString(),
                     endAt: form.endAt ? new Date(form.endAt).toISOString() : '',
                     metrics: {
-                        targetPiDocuments: Number(form.targetPiDocuments),
-                        targetLocations: Number(form.targetLocations),
-                        targetAccuracyPct: Number(form.targetAccuracyPct),
+                        targetMaterials: Number(form.targetMaterials),
+                        materialsPerPi: Number(form.materialsPerPi),
+                        targetCountAccuracyPct: Number(form.targetCountAccuracyPct),
+                        targetStockAccuracyPct: Number(form.targetStockAccuracyPct),
                         varianceToleranceValue: Number(form.varianceToleranceValue),
                     },
                 });
@@ -1519,14 +1562,194 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
             <Card className='space-y-3'>
                 <p className='text-sm font-medium text-ink'>Metrics</p>
                 <div className='grid grid-cols-2 gap-2'>
-                    <Field id='sts-pis' label='Target PI documents *' inputMode='numeric' maxLength={4} value={form.targetPiDocuments} onChange={(e) => set('targetPiDocuments', e.target.value)} onBlur={() => touch('targetPiDocuments')} error={shown('targetPiDocuments')} />
-                    <Field id='sts-locations' label='Target locations *' inputMode='numeric' maxLength={7} value={form.targetLocations} onChange={(e) => (set('targetLocations', e.target.value), touch('targetLocations'))} error={shown('targetLocations')} />
-                    <Field id='sts-accuracy' label='Target accuracy % *' inputMode='decimal' maxLength={6} value={form.targetAccuracyPct} onChange={(e) => set('targetAccuracyPct', e.target.value)} onBlur={() => touch('targetAccuracyPct')} error={shown('targetAccuracyPct')} />
+                    <Field id='sts-materials' label='Materials to count *' inputMode='numeric' maxLength={7} value={form.targetMaterials} onChange={(e) => set('targetMaterials', e.target.value)} onBlur={() => touch('targetMaterials')} error={shown('targetMaterials')} />
+                    <Field id='sts-per-pi' label='Materials per PI *' inputMode='numeric' maxLength={4} value={form.materialsPerPi} onChange={(e) => (set('materialsPerPi', e.target.value), touch('materialsPerPi'))} error={shown('materialsPerPi')} />
+                    <Field id='sts-count-acc' label='Count accuracy % *' inputMode='decimal' maxLength={6} value={form.targetCountAccuracyPct} onChange={(e) => set('targetCountAccuracyPct', e.target.value)} onBlur={() => touch('targetCountAccuracyPct')} error={shown('targetCountAccuracyPct')} />
+                    <Field id='sts-stock-acc' label='Stock accuracy % *' inputMode='decimal' maxLength={6} value={form.targetStockAccuracyPct} onChange={(e) => set('targetStockAccuracyPct', e.target.value)} onBlur={() => touch('targetStockAccuracyPct')} error={shown('targetStockAccuracyPct')} />
                     <Field id='sts-tolerance' label='Variance tolerance *' inputMode='decimal' maxLength={16} value={form.varianceToleranceValue} onChange={(e) => set('varianceToleranceValue', e.target.value)} onBlur={() => touch('varianceToleranceValue')} error={shown('varianceToleranceValue')} />
+                    <div className='flex flex-col justify-center rounded-xl border border-line px-3'>
+                        <span className='text-xs text-muted'>PI documents</span>
+                        <span className='text-lg font-semibold text-ink'>{piCount || '—'}</span>
+                    </div>
                 </div>
-                <p className='text-xs text-muted'>Accuracy is the share of counted locations that match the system quantity. The tolerance is the total value of differences (organization currency) the session should stay within; 0 means none set. The progress report measures the session against these.</p>
+                <p className='text-xs text-muted'>The number of PI documents is the materials to count divided by the materials per PI, rounded up. Count accuracy: share of counted materials whose count a recount did not change. Stock accuracy: share of counted materials posted with no difference from the system quantity. The tolerance is the total value of differences (organization currency) the session should stay within; 0 means none.</p>
             </Card>
         </Panel>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PI documents created before stock take sessions existed (read and work through; no new ones).
+// ---------------------------------------------------------------------------
+
+function LegacyPanel({ pis, warehouseName, onOpenPi, onClose }: { pis: Session[]; warehouseName: Map<string, string>; onOpenPi: (id: string) => void; onClose: () => void }) {
+    const columns: Array<Column<Session>> = [
+        { key: 'pi', label: 'PI document', value: (p) => p.piNumber, render: (p) => <span className='font-mono text-xs font-semibold text-brandsoft'>{p.piNumber}</span> },
+        { key: 'status', label: 'Status', value: (p) => statusOf(p.status).label, render: (p) => <Badge tone={statusOf(p.status).tone}>{statusOf(p.status).label}</Badge> },
+        { key: 'warehouse', label: 'Warehouse', value: (p) => warehouseName.get(p.warehouseId) || p.warehouseId },
+        { key: 'lines', label: 'Locations', type: 'number', value: (p) => p.lines.length },
+        { key: 'created', label: 'Created', type: 'date', value: (p) => p.createdAt, render: (p) => fmtDate(p.createdAt) },
+    ];
+    return (
+        <Panel title='PI documents without a session' subtitle='Created before stock take sessions' onClose={onClose}>
+            <Alert tone='info'>These PI documents can still be worked through or disregarded. New PI documents are created only inside a stock take session.</Alert>
+            <RichTable id='inv.stocktake.legacy' title='PI documents without a session' fileName='Stock_take_PI_without_session' columns={columns} rows={pis} rowKey={(p) => p.id} onRowClick={(p) => onOpenPi(p.id)} empty='None.' height='h-[calc(100dvh-14rem)]' />
+        </Panel>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Statistics over all sessions in a period (year to date from the financial year start by default).
+// ---------------------------------------------------------------------------
+
+interface StatSessionRow {
+    id: string;
+    name: string;
+    warehouseId: string;
+    startAt: string;
+    phase: string;
+    piDocuments: number;
+    plannedPis: number;
+    counted: number;
+    countErrors: number;
+    stockErrors: number;
+    countAccuracyPct: number;
+    stockAccuracyPct: number;
+    completionPct: number;
+    varianceValue: number;
+}
+interface StatMonthRow {
+    month: string;
+    sessions: number;
+    counted: number;
+    countErrors: number;
+    stockErrors: number;
+    varianceValue: number;
+    countAccuracyPct: number;
+    stockAccuracyPct: number;
+}
+interface StatsData {
+    from: string;
+    to: string;
+    yearStart: string;
+    yearStartSource: 'finance' | 'calendar';
+    totals: {
+        sessions: number;
+        open: number;
+        closed: number;
+        cancelled: number;
+        overdue: number;
+        piDocuments: number;
+        plannedPis: number;
+        recounts: number;
+        targetMaterials: number;
+        counted: number;
+        posted: number;
+        countErrors: number;
+        stockErrors: number;
+        countAccuracyPct: number;
+        stockAccuracyPct: number;
+        completionPct: number;
+        varianceValue: number;
+    };
+    sessions: StatSessionRow[];
+    months: StatMonthRow[];
+}
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function Statistics({ warehouseName }: { warehouseName: Map<string, string> }) {
+    const [range, setRange] = useState<{ from: string; to: string }>({ from: '', to: '' });
+    const [draft, setDraft] = useState<{ from: string; to: string }>({ from: '', to: '' });
+    const [part, setPart] = useState<'sessions' | 'months'>('sessions');
+    const { data, error, loading } = useLoad(() => callBackend<StatsData>(API + 'statistics', range.from ? range : {}), [range.from, range.to]);
+    const shownFrom = draft.from || data?.from || '';
+    const shownTo = draft.to || data?.to || '';
+    const rangeError = !DAY_RE.test(shownFrom) || !DAY_RE.test(shownTo) ? 'Enter both dates' : shownFrom > shownTo ? 'From must be on or before To' : '';
+    const t = data?.totals;
+
+    const sessionColumns: Array<Column<StatSessionRow>> = [
+        { key: 'id', label: 'Session', value: (r) => r.id, render: (r) => <span className='font-mono text-xs font-semibold text-brandsoft'>{r.id}</span> },
+        { key: 'name', label: 'Name', value: (r) => r.name },
+        { key: 'phase', label: 'Status', value: (r) => phaseOf(r.phase).label },
+        { key: 'warehouse', label: 'Warehouse', value: (r) => warehouseName.get(r.warehouseId) || r.warehouseId, hidden: true },
+        { key: 'start', label: 'Start', type: 'date', value: (r) => r.startAt, render: (r) => fmtWhen(r.startAt) },
+        { key: 'pis', label: 'PI documents', type: 'number', value: (r) => r.piDocuments },
+        { key: 'planned', label: 'Planned PIs', type: 'number', value: (r) => r.plannedPis, hidden: true },
+        { key: 'counted', label: 'Counted', type: 'number', value: (r) => r.counted },
+        { key: 'countAcc', label: 'Count accuracy %', type: 'number', value: (r) => r.countAccuracyPct },
+        { key: 'stockAcc', label: 'Stock accuracy %', type: 'number', value: (r) => r.stockAccuracyPct },
+        { key: 'countErr', label: 'Recount errors', type: 'number', value: (r) => r.countErrors, hidden: true },
+        { key: 'stockErr', label: 'Stock errors posted', type: 'number', value: (r) => r.stockErrors, hidden: true },
+        { key: 'completion', label: 'Completion %', type: 'number', value: (r) => r.completionPct },
+        { key: 'variance', label: 'Variance value', type: 'number', value: (r) => r.varianceValue },
+    ];
+    const monthColumns: Array<Column<StatMonthRow>> = [
+        { key: 'month', label: 'Month', value: (r) => r.month },
+        { key: 'sessions', label: 'Sessions', type: 'number', value: (r) => r.sessions },
+        { key: 'counted', label: 'Counted', type: 'number', value: (r) => r.counted },
+        { key: 'countAcc', label: 'Count accuracy %', type: 'number', value: (r) => r.countAccuracyPct },
+        { key: 'stockAcc', label: 'Stock accuracy %', type: 'number', value: (r) => r.stockAccuracyPct },
+        { key: 'countErr', label: 'Recount errors', type: 'number', value: (r) => r.countErrors },
+        { key: 'stockErr', label: 'Stock errors posted', type: 'number', value: (r) => r.stockErrors },
+        { key: 'variance', label: 'Variance value', type: 'number', value: (r) => r.varianceValue },
+    ];
+
+    return (
+        <div className='space-y-3'>
+            <Card className='space-y-2'>
+                <div className='grid grid-cols-2 gap-2'>
+                    <Field id='st-stats-from' type='date' label='From' value={shownFrom} onChange={(e) => setDraft({ from: e.target.value, to: shownTo })} />
+                    <Field id='st-stats-to' type='date' label='To' value={shownTo} onChange={(e) => setDraft({ from: shownFrom, to: e.target.value })} />
+                </div>
+                {(draft.from || draft.to) && rangeError && <p className='text-xs text-red-300'>{rangeError}</p>}
+                <div className='flex flex-wrap gap-2'>
+                    <Button disabled={!!rangeError || loading} onClick={() => setRange({ from: shownFrom, to: shownTo })}>
+                        <BarChart3 className='h-4 w-4' /> Show
+                    </Button>
+                    <Button
+                        variant='secondary'
+                        onClick={() => {
+                            setDraft({ from: '', to: '' });
+                            setRange({ from: '', to: '' });
+                        }}
+                    >
+                        Year to date
+                    </Button>
+                </div>
+                {data && <p className='text-xs text-muted'>Year to date starts {data.yearStart} ({data.yearStartSource === 'finance' ? 'financial year in Finance' : 'no financial year set up, so 1 January'}). Sessions are included by their start date.</p>}
+            </Card>
+            {error && <Alert tone='error'>{error}</Alert>}
+            {!data && loading ? (
+                <Spinner />
+            ) : t ? (
+                <>
+                    <div className='grid grid-cols-2 gap-2'>
+                        <Stat label='Sessions' value={t.sessions} note={`${t.open} open · ${t.closed} closed${t.cancelled ? ` · ${t.cancelled} cancelled` : ''}`} />
+                        <Stat label='Completion' value={pctText(t.completionPct)} note={t.overdue ? `${t.overdue} past end date` : 'Of PI documents'} tone={t.overdue ? 'bad' : undefined} />
+                        <Stat label='Count accuracy' value={pctText(t.countAccuracyPct)} note={`${count(t.countErrors, 'recount error')} in ${t.counted}`} />
+                        <Stat label='Stock accuracy' value={pctText(t.stockAccuracyPct)} note={`${count(t.stockErrors, 'error')} posted in ${t.counted}`} />
+                        <Stat label='PI documents' value={`${t.piDocuments}`} note={`${t.plannedPis} planned · ${count(t.recounts, 'recount')}`} />
+                        <Stat label='Materials counted' value={t.counted} note={`Of ${t.targetMaterials} planned · ${t.posted} posted`} />
+                        <Stat label='Variance value' value={money(t.varianceValue)} note='Sent for approval' />
+                        <Stat label='Period' value={`${data!.from.slice(5)} → ${data!.to.slice(5)}`} note={`${data!.from.slice(0, 4)}${data!.to.slice(0, 4) !== data!.from.slice(0, 4) ? `–${data!.to.slice(0, 4)}` : ''}`} />
+                    </div>
+                    <Segmented
+                        label='Statistics views'
+                        value={part}
+                        onChange={setPart}
+                        options={[
+                            { value: 'sessions', label: 'By session', count: data!.sessions.length },
+                            { value: 'months', label: 'By month', count: data!.months.length },
+                        ]}
+                    />
+                    {part === 'sessions' ? (
+                        <RichTable id='inv.stocktake.stats.sessions' title={`Sessions ${data!.from} to ${data!.to}`} fileName={`Stock_take_statistics_${data!.from}_${data!.to}`} columns={sessionColumns} rows={data!.sessions} rowKey={(r) => r.id} empty='No sessions started in this period.' height='h-[calc(100dvh-16rem)]' />
+                    ) : (
+                        <RichTable id='inv.stocktake.stats.months' title={`Months ${data!.from} to ${data!.to}`} fileName={`Stock_take_statistics_by_month_${data!.from}_${data!.to}`} columns={monthColumns} rows={data!.months} rowKey={(r) => r.month} empty='No sessions started in this period.' height='h-[calc(100dvh-16rem)]' />
+                    )}
+                </>
+            ) : null}
+        </div>
     );
 }
 

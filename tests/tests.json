@@ -981,5 +981,28 @@
       "Try Close session while a PI is open: confirm it is disabled; finish or disregard the PIs, then close with a reason and confirm the session drops off the active list"
     ],
     "expected": "No PI document exists outside a session, no variance posts without every Chart of Authority level approving, and the progress report shows the session's state against its metrics."
+  },
+  {
+    "name": "Stock take v2: PIs only inside sessions, CNT_SES_/PI_ codes, planned PIs, PDF, two accuracy KPIs, statistics",
+    "description": "There is no PI documents tab: every PI sits in its session. Sessions are CNT_SES_ + 8 digits and PIs PI_ + 8 digits from database counters. The number of PIs comes from materials to count and materials per PI. Printing also downloads a PDF. Count and stock accuracy are separate, and Statistics covers a period or year to date.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "stock take session codes",
+      "stock take planned PI documents",
+      "stock take PI PDF",
+      "stock take count accuracy",
+      "stock take stock accuracy",
+      "stock take statistics"
+    ],
+    "steps": [
+      "Open Inventory > Stock take: confirm the tabs are Active sessions, Statistics and Configuration (no PI documents tab); older PIs without a session are under the 'created before sessions' entry",
+      "Create a session with 18 materials to count and 4 per PI: confirm the form shows 5 PI documents and the new session code starts with CNT_SES_ followed by 8 digits",
+      "Create PIs in the session: confirm each is PI_ followed by 8 digits, shows 'This PI: n of 5', never repeats a location already on the session's PIs, and the sixth is refused",
+      "On a PI tap Print and download PDF: confirm a PDF named after the PI is saved with the count sheet (no system quantities) and the print dialog opens",
+      "Recount a PI where some recounts differ from the first count: confirm the Progress report shows count accuracy reduced by those recount errors and stock accuracy by the differences posted",
+      "Open Statistics: confirm it opens year to date from the financial year start, change the dates and tap Show, and download the by-session and by-month tables to Excel"
+    ],
+    "expected": "No PI exists outside a session, codes are sequential from the database, PI numbers follow the plan, and both KPIs and the statistics read correctly."
   }
 ]
