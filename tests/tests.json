@@ -1026,5 +1026,23 @@
       "Post every PI document of a session: confirm there is no Close session button and the session closes on its own with the reason 'Closed automatically: 100% of the PI documents are posted.'"
     ],
     "expected": "Configurations carry criticality and duration, automatic sessions appear at midnight and must be completed before PIs, and sessions close only by themselves once fully posted."
+  },
+  {
+    "name": "Stock take session plan: All materials, no target fields, per-warehouse automation notice",
+    "description": "Session plan and setup ask only materials to count (or All) and materials per PI; accuracy and variance are KPIs in reports. Automatic configurations warn that each warehouse needs its own, identifiably named configuration.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "stock take all materials",
+      "stock take session plan",
+      "stock take automation per warehouse"
+    ],
+    "steps": [
+      "New session: pick a configuration and warehouse, turn on All materials: confirm Materials to count fills with the warehouse's mapped materials (criticality and cluster applied) and is read-only, and the PI documents count updates",
+      "Confirm there are no count accuracy, stock accuracy or variance tolerance fields; the progress report still shows both accuracies and the variance value",
+      "Complete setup of an automatic session with All materials: confirm the same behaviour",
+      "New config, Periodic, Automatically, pick a warehouse: confirm the notice to create one configuration per warehouse and that the name becomes 'type – warehouse' until edited"
+    ],
+    "expected": "Sessions are planned from materials only, All counts on the server, and automatic configurations are named per warehouse."
   }
 ]

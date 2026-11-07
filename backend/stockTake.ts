@@ -192,32 +192,39 @@ async function varianceValueOf(ctx: OrgContext, warehouseId: string, pending: Ar
 // ----- Stock take sessions (planned first; PI documents are created inside them) -----
 
 /** Metrics of a session: materials to count, materials per PI document and the targets. */
-function readMetrics(m: Obj) {
+/**
+ * Plan of a session: materials to count and materials per PI document. Accuracy and variance are KPIs measured by the
+ * progress report and statistics, not set up here. With countAll the number of materials is not taken from the caller:
+ * the server counts every mapped location in the warehouse that the configuration selects.
+ */
+function readMetrics(m: Obj, allCount: number | null = null) {
     const whole = (v: unknown, label: string, min: number, max: number) => {
         const n = Number(v);
         if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${label} must be a whole number from ${min} to ${max}`);
         return n;
     };
-    const share = (v: unknown, label: string) => {
-        const n = Number(v);
-        if (!Number.isFinite(n) || n < 0 || n > 100) throw new HttpError(400, `${label} must be 0 to 100 %`);
-        return Math.round(n * 10) / 10;
-    };
-    const tolerance = Number(m.varianceToleranceValue ?? 0);
-    if (!Number.isFinite(tolerance) || tolerance < 0 || tolerance > 1e12) throw new HttpError(400, 'Variance value tolerance must be 0 or more');
+    const countAll = m.countAll === true;
+    if (countAll && !allCount) throw new HttpError(409, 'No mapped materials match this configuration in the warehouse, so there is nothing to count.');
     const metrics = {
-        targetMaterials: whole(m.targetMaterials, 'Materials to count', 1, 1_000_000),
+        countAll,
+        targetMaterials: countAll ? (allCount as number) : whole(m.targetMaterials, 'Materials to count', 1, 1_000_000),
         materialsPerPi: whole(m.materialsPerPi, 'Materials per PI document', 1, 1000),
-        targetCountAccuracyPct: share(m.targetCountAccuracyPct, 'Target count accuracy'),
-        targetStockAccuracyPct: share(m.targetStockAccuracyPct, 'Target stock accuracy'),
-        varianceToleranceValue: Math.round(tolerance * 100) / 100,
     };
     if (plannedPis(metrics.targetMaterials, metrics.materialsPerPi) > 1000) throw new HttpError(400, 'A session can have at most 1000 PI documents; count fewer materials or put more on each PI.');
     return metrics;
 }
 
+/** Mapped locations of a warehouse that a configuration would put on PI documents (cluster and criticality applied). */
+async function selectableLocations(root: string, warehouseId: string, config: Obj) {
+    let rows = await snapshot(root, warehouseId);
+    if (str(config.type) === 'Cluster Stock Take') rows = rows.filter((x) => x.binId.startsWith(`${str(config.clusterId)}__`));
+    const classes = config.byCriticality === true && Array.isArray(config.criticalityClasses) ? (config.criticalityClasses as unknown[]).map(str) : [];
+    if (classes.length) rows = rows.filter((x) => classes.includes(str(x.info?.criticalityClass)));
+    return rows;
+}
+
 /** A session runs from its start for the configuration's duration; nothing may be backdated. */
-function readCampaign(b: Obj, now: string, durationDays: number) {
+function readCampaign(b: Obj, now: string, durationDays: number, allCount: number | null) {
     const name = str(b.name).trim();
     if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a session name of 3 to 80 characters');
     const startAt = str(b.startAt);
@@ -228,7 +235,7 @@ function readCampaign(b: Obj, now: string, durationDays: number) {
     if (startMs > Date.parse(now) + MAX_SESSION_DAYS * 86_400_000) throw new HttpError(400, `The start must be within ${MAX_SESSION_DAYS} days`);
     if (!Number.isInteger(durationDays) || durationDays < 1) throw new HttpError(400, 'Set the duration (days) on the configuration first; the session end date is worked out from it.');
     const end = new Date(startMs + durationDays * 86_400_000).toISOString();
-    return { name, startAt: new Date(startMs).toISOString(), endAt: end, metrics: readMetrics(isObj(b.metrics) ? b.metrics : {}) };
+    return { name, startAt: new Date(startMs).toISOString(), endAt: end, metrics: readMetrics(isObj(b.metrics) ? b.metrics : {}, allCount) };
 }
 
 /** Why a PI cannot be created in this session now, or '' when it can. */
@@ -430,6 +437,20 @@ export const stockTakeRoutes = {
         }),
     ],
 
+    'POST /api/org/inventory/stocktake/material-count': [
+        orgRoute('org.inventory.stocktake.material_count', null, async (ctx) => {
+            // How many materials "All" means: the mapped locations of the warehouse this configuration would count.
+            canView(ctx);
+            const root = rootOf(ctx);
+            const warehouseId = str(ctx.body.warehouseId);
+            if (!warehouseId || !(await warehousesFor(ctx, 'read')).some((w) => w.id === warehouseId)) throw new HttpError(403, 'Select an accessible warehouse');
+            const configId = str(ctx.body.configId);
+            const config = CONFIG_RE.test(configId) ? await getDoc(`${root}/stock_take_configs/${configId}`) : null;
+            if (!config) throw new HttpError(404, 'Configuration not found');
+            return { count: (await selectableLocations(root, warehouseId, config.data)).length };
+        }),
+    ],
+
     'POST /api/org/inventory/stocktake/count-session/create': [
         orgRoute('org.inventory.stocktake.count_session.create', null, async (ctx) => {
             const root = rootOf(ctx);
@@ -443,7 +464,8 @@ export const stockTakeRoutes = {
             if (!config || config.data.active === false) throw new HttpError(400, 'Choose an enabled configuration');
             if (str(config.data.warehouseId) && warehouseId !== str(config.data.warehouseId)) throw new HttpError(400, 'Selected warehouse does not match configuration');
             const now = nowIso();
-            const plan = readCampaign(b, now, Number(config.data.durationDays));
+            const wantsAll = isObj(b.metrics) && b.metrics.countAll === true;
+            const plan = readCampaign(b, now, Number(config.data.durationDays), wantsAll ? (await selectableLocations(root, warehouseId, config.data)).length : null);
             for (let attempt = 0; attempt < 3; attempt++) {
                 const n = await nextOrgCounter(ctx.orgId, 'stockTakeSessionSeq');
                 if (n > 99_999_999) throw new HttpError(409, 'Stock take session sequence exhausted');
@@ -494,7 +516,9 @@ export const stockTakeRoutes = {
             if (doc.data.setupRequired !== true) throw new HttpError(409, 'This session is already set up; its plan cannot be changed.');
             const name = str(ctx.body.name).trim();
             if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a session name of 3 to 80 characters');
-            const metrics = readMetrics(isObj(ctx.body.metrics) ? ctx.body.metrics : {});
+            const m = isObj(ctx.body.metrics) ? ctx.body.metrics : {};
+            const config = await getDoc(`${root}/stock_take_configs/${str(doc.data.configId)}`);
+            const metrics = readMetrics(m, m.countAll === true ? (await selectableLocations(root, str(doc.data.warehouseId), { ...(config?.data ?? {}), criticalityClasses: doc.data.criticalityClasses, byCriticality: Array.isArray(doc.data.criticalityClasses) && doc.data.criticalityClasses.length > 0 })).length : null);
             const now = nowIso();
             const ok = await writeDoc(
                 `${root}/${CAMPAIGNS}/${id}`,

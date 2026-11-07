@@ -133,7 +133,7 @@ test('Configuration: criticality classes, duration for every type, automatic or 
     assert.match(server, /eligible = eligible\.filter\(\(x\) => classes\.includes\(str\(x\.info\?\.criticalityClass\)\)\);/);
     const screen = read('src/org/StockTake.tsx');
     assert.match(screen, /label='Sessions are created \*'/);
-    assert.match(screen, /set\(\{ type: e\.target\.value, \.\.\.\(nameEdited \? \{\} : \{ name: e\.target\.value \}\) \}\)/, 'the name follows the type until edited');
+    assert.match(screen, /set\(\{ type: e\.target\.value, \.\.\.\(nameEdited \? \{\} : \{ name: form\.warehouseId \? `\$\{e\.target\.value\} – \$\{warehouseName\}`/, 'the name follows the type (and warehouse) until edited');
     assert.doesNotMatch(screen, /PI document size \(physical locations\)/);
     const detail = read('src/org/InventoryMaterialDetail.tsx');
     assert.match(detail, /'leadTimeDays', 'criticalityClass', 'remarks'/);
@@ -161,4 +161,17 @@ test('Automation: midnight session creation per configuration, one-time setup be
     assert.doesNotMatch(screen, /Close session/);
     assert.match(screen, /The session closes automatically when all its PI documents are posted/);
     assert.match(screen, /function SetupSessionPanel\(/);
+});
+
+test('Session plan: no accuracy or tolerance targets; All materials counted by the server; per-warehouse automation notice', () => {
+    const server = read('backend/stockTake.ts');
+    assert.doesNotMatch(server, /Target count accuracy|Target stock accuracy|Variance value tolerance must be/);
+    assert.match(server, /targetMaterials: countAll \? \(allCount as number\) : whole\(m\.targetMaterials/, 'with All the count comes from the server');
+    assert.match(server, /'POST \/api\/org\/inventory\/stocktake\/material-count'/);
+    assert.match(server, /async function selectableLocations\(root: string, warehouseId: string, config: Obj\)/);
+    const screen = read('src/org/StockTake.tsx');
+    assert.doesNotMatch(screen, /label='Count accuracy % \*'|label='Stock accuracy % \*'|label='Variance tolerance \*'/);
+    assert.match(screen, /function MaterialsToCount\(/);
+    assert.match(screen, /<span className='text-sm text-soft'>All materials<\/span>/);
+    assert.match(screen, /Automatic sessions are created for one warehouse only\. Create a separate configuration for each warehouse/);
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { BarChart3, CalendarClock, CheckCircle2, ClipboardCheck, Download, FileUp, Pencil, Plus, Printer, RefreshCw, RotateCcw, Save, Send, ShieldCheck, Trash2, Undo2, X, XCircle } from 'lucide-react';
 import { callBackend } from '../lib/backend';
@@ -145,7 +145,7 @@ interface CountSession {
     warehouseId: string;
     startAt: string;
     endAt: string;
-    metrics: { targetMaterials: number; materialsPerPi: number; targetCountAccuracyPct: number; targetStockAccuracyPct: number; varianceToleranceValue: number };
+    metrics: { targetMaterials: number; materialsPerPi: number; countAll?: boolean };
     status: 'open' | 'closed' | 'cancelled';
     createdAt: string;
     closedAt?: string;
@@ -1346,12 +1346,12 @@ function ProgressReport({ session: c, warehouse }: { session: CountSession; ware
             <div className='grid grid-cols-2 gap-2'>
                 <Stat label='Completion' value={pctText(p.completionPct)} note={`${p.piDocuments.closed} of ${p.piDocuments.live} complete`} />
                 <Stat label='PI documents' value={`${p.piDocuments.originals}/${p.piDocuments.planned}`} note={`${p.materials.perPi} per PI${p.piDocuments.recounts ? ` · ${count(p.piDocuments.recounts, 'recount')}` : ''}`} />
-                <Stat label='Count accuracy' value={pctText(p.countAccuracy.pct)} note={`${count(p.countAccuracy.errors, 'recount error')} · target ${p.countAccuracy.target}%`} tone={kpiTone(p.countAccuracy)} />
-                <Stat label='Stock accuracy' value={pctText(p.stockAccuracy.pct)} note={`${count(p.stockAccuracy.errors, 'error')} posted · target ${p.stockAccuracy.target}%`} tone={kpiTone(p.stockAccuracy)} />
+                <Stat label='Count accuracy' value={pctText(p.countAccuracy.pct)} note={`${count(p.countAccuracy.errors, 'recount error')} · ${p.countAccuracy.errorPct}% error`} tone={kpiTone(p.countAccuracy)} />
+                <Stat label='Stock accuracy' value={pctText(p.stockAccuracy.pct)} note={`${count(p.stockAccuracy.errors, 'error')} posted · ${p.stockAccuracy.errorPct}% error`} tone={kpiTone(p.stockAccuracy)} />
                 <Stat label='Materials on PIs' value={p.materials.onPis} note={`Of ${p.materials.target} to count · ${pctText(p.materials.onPisPct)}`} />
                 <Stat label='Materials counted' value={p.materials.counted} note={`${pctText(p.materials.countedPct)} of ${p.materials.target}`} />
                 <Stat label='Materials posted' value={p.materials.posted} note={`${pctText(p.materials.postedPct)} of ${p.materials.target}`} />
-                <Stat label='Variance value' value={money(p.variance.value)} note={p.variance.tolerance > 0 ? `Tolerance ${money(p.variance.tolerance)}` : 'No tolerance set'} tone={p.variance.within === null ? undefined : p.variance.within ? 'good' : 'bad'} />
+                <Stat label='Variance value' value={money(p.variance.value)} note='Sent for approval' />
                 <Stat label='Time used' value={p.timeUsedPct === null ? 'Open-ended' : pctText(p.timeUsedPct)} note={c.endAt ? `Ends ${fmtWhen(c.endAt)}` : `Started ${fmtWhen(c.startAt)}`} tone={p.phase === 'overdue' ? 'bad' : undefined} />
                 <Stat label='Disregarded PIs' value={p.piDocuments.disregarded} note='Not counted in completion' />
             </div>
@@ -1407,21 +1407,56 @@ function ProgressReport({ session: c, warehouse }: { session: CountSession; ware
     );
 }
 
+/**
+ * Materials to count, with "All materials": the server counts the mapped locations of the warehouse that the
+ * configuration selects (cluster and criticality applied) and the number is shown read-only. The server counts again
+ * when the session is saved, so the figure cannot be altered on the way.
+ */
+function MaterialsToCount({ id, all, value, configId, warehouseId, error, onAll, onValue }: { id: string; all: boolean; value: string; configId: string; warehouseId: string; error?: string; onAll: (on: boolean) => void; onValue: (v: string) => void }) {
+    const [loading, setLoading] = useState(false);
+    const [why, setWhy] = useState('');
+    const fetchAll = async () => {
+        setWhy('');
+        if (!configId || !warehouseId) return setWhy('Choose the configuration and warehouse first.');
+        setLoading(true);
+        try {
+            const r = await callBackend<{ count: number }>(API + 'material-count', { configId, warehouseId });
+            onValue(String(r.count));
+            if (!r.count) setWhy('No mapped materials match this configuration in the warehouse.');
+        } catch (err) {
+            setWhy(messageOf(err));
+        } finally {
+            setLoading(false);
+        }
+    };
+    useEffect(() => {
+        if (all) void fetchAll();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [all, configId, warehouseId]);
+    return (
+        <div className='space-y-2'>
+            <Field id={id} label='Materials to count *' inputMode='numeric' maxLength={7} value={loading ? '…' : value} readOnly={all} onChange={(e) => onValue(e.target.value)} error={why || error} hint={all ? 'All mapped materials in the warehouse for this configuration.' : undefined} />
+            <label className='flex min-h-[44px] items-center gap-3'>
+                <Toggle checked={all} onChange={onAll} label='All materials in the warehouse' />
+                <span className='text-sm text-soft'>All materials</span>
+            </label>
+        </div>
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Complete an automatically created session (once, before any PI document).
 // ---------------------------------------------------------------------------
 
 function SetupSessionPanel({ session: c, ask, onClose, onDone }: { session: CountSession; ask: Ask; onClose: () => void; onDone: (message: string) => void }) {
-    const [f, setF] = useState({ name: c.name, targetMaterials: '', materialsPerPi: '20', targetCountAccuracyPct: '98', targetStockAccuracyPct: '95', varianceToleranceValue: '0' });
+    const [f, setF] = useState({ name: c.name, targetMaterials: '', materialsPerPi: '20' });
+    const [all, setAll] = useState(false);
     const [tried, setTried] = useState(false);
     const e: Record<string, string> = {};
     if (f.name.trim().length < 3 || f.name.trim().length > 80) e.name = '3 to 80 characters';
     if (!isWhole(f.targetMaterials, 1, 1_000_000)) e.targetMaterials = 'Whole number, 1 or more';
     if (!isWhole(f.materialsPerPi, 1, 1000)) e.materialsPerPi = 'Whole number, 1 to 1000';
     else if (!e.targetMaterials && Math.ceil(Number(f.targetMaterials) / Number(f.materialsPerPi)) > 1000) e.materialsPerPi = 'More than 1000 PI documents';
-    if (!isNumber(f.targetCountAccuracyPct, 0, 100)) e.targetCountAccuracyPct = '0 to 100';
-    if (!isNumber(f.targetStockAccuracyPct, 0, 100)) e.targetStockAccuracyPct = '0 to 100';
-    if (!isNumber(f.varianceToleranceValue, 0, 1e12)) e.varianceToleranceValue = '0 or more';
     const problems = Object.keys(e);
     const pis = !e.targetMaterials && !e.materialsPerPi ? Math.ceil(Number(f.targetMaterials) / Number(f.materialsPerPi)) : 0;
     const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
@@ -1432,15 +1467,15 @@ function SetupSessionPanel({ session: c, ask, onClose, onDone }: { session: Coun
         ask(
             {
                 title: `Complete ${c.sessionNumber}?`,
-                message: `${count(Number(f.targetMaterials), 'material')} to count, ${f.materialsPerPi} per PI: ${count(pis, 'PI document')}. Targets: count accuracy ${f.targetCountAccuracyPct}%, stock accuracy ${f.targetStockAccuracyPct}%, variance tolerance ${money(Number(f.varianceToleranceValue))}.`,
+                message: `${all ? 'All ' : ''}${count(Number(f.targetMaterials), 'material')} to count, ${f.materialsPerPi} per PI: ${count(pis, 'PI document')}.`,
                 confirmLabel: 'Complete setup',
-                acknowledge: 'The plan and targets are correct. They cannot be changed once saved.',
+                acknowledge: 'The plan is correct. It cannot be changed once saved.',
             },
             async () => {
                 await callBackend(API + 'count-session/setup', {
                     id: c.id,
                     name: f.name.trim(),
-                    metrics: { targetMaterials: Number(f.targetMaterials), materialsPerPi: Number(f.materialsPerPi), targetCountAccuracyPct: Number(f.targetCountAccuracyPct), targetStockAccuracyPct: Number(f.targetStockAccuracyPct), varianceToleranceValue: Number(f.varianceToleranceValue) },
+                    metrics: { countAll: all, targetMaterials: Number(f.targetMaterials), materialsPerPi: Number(f.materialsPerPi) },
                 });
                 onDone(`${c.sessionNumber} is set up. PI documents can now be created.`);
             }
@@ -1462,11 +1497,8 @@ function SetupSessionPanel({ session: c, ask, onClose, onDone }: { session: Coun
             <Card className='space-y-3'>
                 <Field id='sts-setup-name' label='Session name *' maxLength={80} value={f.name} onChange={(x) => set('name', x.target.value)} error={show('name')} />
                 <div className='grid grid-cols-2 gap-2'>
-                    <Field id='sts-setup-materials' label='Materials to count *' inputMode='numeric' maxLength={7} value={f.targetMaterials} onChange={(x) => set('targetMaterials', x.target.value)} error={show('targetMaterials')} />
+                    <MaterialsToCount id='sts-setup-materials' all={all} value={f.targetMaterials} configId={c.configId} warehouseId={c.warehouseId} error={show('targetMaterials')} onAll={setAll} onValue={(v) => set('targetMaterials', v)} />
                     <Field id='sts-setup-per-pi' label='Materials per PI *' inputMode='numeric' maxLength={4} value={f.materialsPerPi} onChange={(x) => set('materialsPerPi', x.target.value)} error={show('materialsPerPi')} />
-                    <Field id='sts-setup-count' label='Count accuracy % *' inputMode='decimal' maxLength={6} value={f.targetCountAccuracyPct} onChange={(x) => set('targetCountAccuracyPct', x.target.value)} error={show('targetCountAccuracyPct')} />
-                    <Field id='sts-setup-stock' label='Stock accuracy % *' inputMode='decimal' maxLength={6} value={f.targetStockAccuracyPct} onChange={(x) => set('targetStockAccuracyPct', x.target.value)} error={show('targetStockAccuracyPct')} />
-                    <Field id='sts-setup-tolerance' label='Variance tolerance *' inputMode='decimal' maxLength={16} value={f.varianceToleranceValue} onChange={(x) => set('varianceToleranceValue', x.target.value)} error={show('varianceToleranceValue')} />
                     <div className='flex flex-col justify-center rounded-xl border border-line px-3'>
                         <span className='text-xs text-muted'>PI documents</span>
                         <span className='text-lg font-semibold text-ink'>{pis || '—'}</span>
@@ -1486,11 +1518,9 @@ interface PlanForm {
     configId: string;
     warehouseId: string;
     startAt: string;
+    countAll: boolean;
     targetMaterials: string;
     materialsPerPi: string;
-    targetCountAccuracyPct: string;
-    targetStockAccuracyPct: string;
-    varianceToleranceValue: string;
 }
 type PlanKey = keyof PlanForm;
 
@@ -1517,9 +1547,6 @@ function planErrors(f: PlanForm, cfg: Config | undefined, now: number): Partial<
     if (!isWhole(f.targetMaterials, 1, 1_000_000)) e.targetMaterials = 'Whole number, 1 or more';
     if (!isWhole(f.materialsPerPi, 1, 1000)) e.materialsPerPi = 'Whole number, 1 to 1000';
     else if (!e.targetMaterials && Math.ceil(Number(f.targetMaterials) / Number(f.materialsPerPi)) > 1000) e.materialsPerPi = 'More than 1000 PI documents; put more on each PI';
-    if (!isNumber(f.targetCountAccuracyPct, 0, 100)) e.targetCountAccuracyPct = '0 to 100';
-    if (!isNumber(f.targetStockAccuracyPct, 0, 100)) e.targetStockAccuracyPct = '0 to 100';
-    if (!isNumber(f.varianceToleranceValue, 0, 1e12)) e.varianceToleranceValue = '0 or more, up to 2 decimals';
     return e;
 }
 
@@ -1530,13 +1557,11 @@ const PLAN_LABELS: Record<PlanKey, string> = {
     startAt: 'Start',
     targetMaterials: 'Materials to count',
     materialsPerPi: 'Materials per PI',
-    targetCountAccuracyPct: 'Target count accuracy',
-    targetStockAccuracyPct: 'Target stock accuracy',
-    varianceToleranceValue: 'Variance value tolerance',
+    countAll: 'All materials',
 };
 
 function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: Ask; onClose: () => void; onCreated: (id: string) => void }) {
-    const [form, setForm] = useState<PlanForm>(() => ({ name: '', configId: '', warehouseId: '', startAt: localInput(new Date()), targetMaterials: '', materialsPerPi: '', targetCountAccuracyPct: '98', targetStockAccuracyPct: '95', varianceToleranceValue: '0' }));
+    const [form, setForm] = useState<PlanForm>(() => ({ name: '', configId: '', warehouseId: '', startAt: localInput(new Date()), countAll: false, targetMaterials: '', materialsPerPi: '' }));
     const [touched, setTouched] = useState<Partial<Record<PlanKey, boolean>>>({});
     const [tried, setTried] = useState(false);
     const cfg = data.configs.find((c) => c.id === form.configId);
@@ -1576,12 +1601,12 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                             {endIso ? ` to ${fmtWhen(endIso)}` : ''}.
                         </span>
                         <span className='block'>
-                            {count(Number(form.targetMaterials), 'material')} to count, {form.materialsPerPi} per PI: {count(piCount, 'PI document')}. Targets: count accuracy {form.targetCountAccuracyPct}%, stock accuracy {form.targetStockAccuracyPct}%, variance tolerance {money(Number(form.varianceToleranceValue))}.
+                            {form.countAll ? 'All ' : ''}{count(Number(form.targetMaterials), 'material')} to count, {form.materialsPerPi} per PI: {count(piCount, 'PI document')}.
                         </span>
                     </span>
                 ),
                 confirmLabel: 'Create session',
-                acknowledge: 'The configuration, warehouse, dates and targets are correct. They cannot be changed once the session is created.',
+                acknowledge: 'The configuration, warehouse, dates and plan are correct. They cannot be changed once the session is created.',
             },
             async () => {
                 const r = await callBackend<{ ok: boolean; id?: string }>(API + 'count-session/create', {
@@ -1590,11 +1615,9 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                     warehouseId: form.warehouseId,
                     startAt: new Date(form.startAt).toISOString(),
                     metrics: {
+                        countAll: form.countAll,
                         targetMaterials: Number(form.targetMaterials),
                         materialsPerPi: Number(form.materialsPerPi),
-                        targetCountAccuracyPct: Number(form.targetCountAccuracyPct),
-                        targetStockAccuracyPct: Number(form.targetStockAccuracyPct),
-                        varianceToleranceValue: Number(form.varianceToleranceValue),
                     },
                 });
                 onCreated(r.id ?? '');
@@ -1645,19 +1668,16 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                 <p className='text-xs text-muted'>PI documents can be created only between the start and the end. The end is the start plus the configuration's duration.</p>
             </Card>
             <Card className='space-y-3'>
-                <p className='text-sm font-medium text-ink'>Metrics</p>
+                <p className='text-sm font-medium text-ink'>Plan</p>
                 <div className='grid grid-cols-2 gap-2'>
-                    <Field id='sts-materials' label='Materials to count *' inputMode='numeric' maxLength={7} value={form.targetMaterials} onChange={(e) => set('targetMaterials', e.target.value)} onBlur={() => touch('targetMaterials')} error={shown('targetMaterials')} />
+                    <MaterialsToCount id='sts-materials' all={form.countAll} value={form.targetMaterials} configId={form.configId} warehouseId={form.warehouseId} error={shown('targetMaterials')} onAll={(on) => setForm((x) => ({ ...x, countAll: on }))} onValue={(v) => set('targetMaterials', v)} />
                     <Field id='sts-per-pi' label='Materials per PI *' inputMode='numeric' maxLength={4} value={form.materialsPerPi} onChange={(e) => (set('materialsPerPi', e.target.value), touch('materialsPerPi'))} error={shown('materialsPerPi')} />
-                    <Field id='sts-count-acc' label='Count accuracy % *' inputMode='decimal' maxLength={6} value={form.targetCountAccuracyPct} onChange={(e) => set('targetCountAccuracyPct', e.target.value)} onBlur={() => touch('targetCountAccuracyPct')} error={shown('targetCountAccuracyPct')} />
-                    <Field id='sts-stock-acc' label='Stock accuracy % *' inputMode='decimal' maxLength={6} value={form.targetStockAccuracyPct} onChange={(e) => set('targetStockAccuracyPct', e.target.value)} onBlur={() => touch('targetStockAccuracyPct')} error={shown('targetStockAccuracyPct')} />
-                    <Field id='sts-tolerance' label='Variance tolerance *' inputMode='decimal' maxLength={16} value={form.varianceToleranceValue} onChange={(e) => set('varianceToleranceValue', e.target.value)} onBlur={() => touch('varianceToleranceValue')} error={shown('varianceToleranceValue')} />
                     <div className='flex flex-col justify-center rounded-xl border border-line px-3'>
                         <span className='text-xs text-muted'>PI documents</span>
                         <span className='text-lg font-semibold text-ink'>{piCount || '—'}</span>
                     </div>
                 </div>
-                <p className='text-xs text-muted'>The number of PI documents is the materials to count divided by the materials per PI, rounded up. Count accuracy: share of counted materials whose count a recount did not change. Stock accuracy: share of counted materials posted with no difference from the system quantity. The tolerance is the total value of differences (organization currency) the session should stay within; 0 means none.</p>
+                <p className='text-xs text-muted'>The number of PI documents is the materials to count divided by the materials per PI, rounded up. Count accuracy, stock accuracy and variance value are measured in the progress report and Statistics.</p>
             </Card>
         </Panel>
     );
@@ -1979,7 +1999,7 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
         >
             <Problems items={problems} />
             <Card className='space-y-3'>
-                <SelectField id='st-cfg-type' label='Stock take type *' value={form.type} onChange={(e) => set({ type: e.target.value, ...(nameEdited ? {} : { name: e.target.value }) })} error={errors.type}>
+                <SelectField id='st-cfg-type' label='Stock take type *' value={form.type} onChange={(e) => set({ type: e.target.value, ...(nameEdited ? {} : { name: form.warehouseId ? `${e.target.value} – ${warehouseName}`.slice(0, 80) : e.target.value }) })} error={errors.type}>
                     {TYPES.map((t) => (
                         <option key={t}>{t}</option>
                     ))}
@@ -2069,7 +2089,16 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
                     </>
                 )}
                 {(automatic || form.warehouseId) && (
-                    <SelectField id='st-cfg-warehouse' label={automatic ? 'Warehouse *' : 'Warehouse'} value={form.warehouseId} onChange={(e) => (set({ warehouseId: e.target.value }), touch('warehouseId'))} error={err('warehouseId')} hint='Sessions of this configuration are for this warehouse.'>
+                    <SelectField
+                        id='st-cfg-warehouse'
+                        label={automatic ? 'Warehouse *' : 'Warehouse'}
+                        value={form.warehouseId}
+                        onChange={(e) => {
+                            const w = warehouses.find((x) => x.id === e.target.value);
+                            // Until the name is typed by hand it identifies the warehouse, so configurations can be told apart.
+                            set({ warehouseId: e.target.value, ...(nameEdited || !w ? {} : { name: `${form.type} – ${w.name}`.slice(0, 80) }) });
+                            touch('warehouseId');
+                        }} error={err('warehouseId')} hint='Sessions of this configuration are for this warehouse.'>
                         <option value=''>{automatic ? 'Select warehouse' : 'Any warehouse'}</option>
                         {warehouses.map((w) => (
                             <option key={w.id} value={w.id}>
@@ -2077,6 +2106,11 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
                             </option>
                         ))}
                     </SelectField>
+                )}
+                {automatic && (
+                    <Alert tone='warn'>
+                        Automatic sessions are created for one warehouse only. Create a separate configuration for each warehouse that should get automatic sessions, and give each an identifiable name that includes the warehouse (for example “Cycle Count – Main store”), because the name is how they are told apart.
+                    </Alert>
                 )}
                 {automatic && <p className='text-xs text-muted'>At midnight on each due day a session is created with this configuration, starting that midnight and ending after the duration. A planner then completes its name, materials to count, materials per PI and targets once, before any PI document can be created.</p>}
                 {config?.sessionCreation === 'automatic' && (
