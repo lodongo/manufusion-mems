@@ -915,5 +915,25 @@
       "Confirm each added photo has an audit entry (inventory.material.photo.add) and that a person without the inventory edit right sees no photo buttons"
     ],
     "expected": "Photos are added from the camera and the gallery, any problem is shown next to the buttons, and every change is audited."
+  },
+  {
+    "name": "Stock Take: separation of duties, and test mode for the super administrator",
+    "description": "Nobody verifies, approves or posts a PI they counted or submitted; the screen says so before the tap. Only the organization super administrator, while platform test mode is on, may do it alone.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "stock take separation of duties",
+      "stock take approve posting message",
+      "platform test mode bypass audit"
+    ],
+    "steps": [
+      "As the person who counted a PI and submitted it for posting, open it while it is Awaiting posting approval; confirm Approve posting is greyed out and a note says you cannot approve it and that another person with the posting approval permission must",
+      "Sign in as a different person with the posting approval permission at that warehouse; confirm Approve posting works and, for a PI with one line, the confirmation says '1 line will be released'",
+      "Confirm the same holds for Accept verification and Post & reconcile when you counted the PI",
+      "On the development server, as the organization super administrator with platform test mode on for the organization, open a PI you counted or submitted; confirm the buttons are active and a note says test mode lets you complete the step alone",
+      "Approve it; confirm it moves to Approved for posting and the audit trail holds testmode.controls_bypassed with inv.stocktake.approve_independence",
+      "Switch test mode off, or use a person who is not the super administrator; confirm the buttons are greyed out again and the server refuses the action"
+    ],
+    "expected": "Nobody can verify, approve or post their own PI and the screen says why before they tap; only a super administrator in platform test mode may, and every use is audited."
   }
 ]
