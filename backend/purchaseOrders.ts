@@ -199,7 +199,7 @@ export interface Step {
 }
 
 /** Who must approve an amount: each level of the chart of authority resolved to the job role that holds it. */
-async function approvalRoute(orgId: string, creator: Doc | null, amount: number, authority: Authority, testMode = false) {
+export async function approvalRoute(orgId: string, creator: Doc | null, amount: number, authority: Authority, testMode = false) {
     // Platform testing override: an unresolved level becomes a test-mode step the organization super admin approves.
     // The problem is still reported so validation shows it as a warning and the bypass is audited.
     const testStep = (lv: string, title: string): Step => ({ level: lv, title, positionCode: 'TEST_MODE', positionTitle: 'Test mode: organization super admin', viaReportingLine: false, status: 'pending', by: '', byName: '', at: '', note: '' });

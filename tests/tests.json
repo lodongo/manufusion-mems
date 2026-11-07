@@ -958,5 +958,28 @@
       "Tap the small question mark on a box: confirm the explanation opens in a sheet and the box height does not change"
     ],
     "expected": "Every material detail tab has one menu, no notes or buttons crowd the page, and the boxes or table use the whole screen and scroll on their own."
+  },
+  {
+    "name": "Stock take: sessions first, Chart of Authority on variances, session progress report",
+    "description": "A stock take starts with a session in Active sessions (configuration, warehouse, start, optional end, metrics). PI documents are created only inside an open session, variances are approved level by level under the Chart of Authority, and each session has a progress report.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "stock take sessions",
+      "stock take chart of authority",
+      "stock take progress report",
+      "stock take baseline guard"
+    ],
+    "steps": [
+      "Open Inventory > Stock take: confirm the first tab is Active sessions, the header button is New session, and the PI documents tab has no New PI button",
+      "Tap New session and tap Create session with the form empty: confirm the problems list and red field messages; enter a start in the past and confirm it is refused",
+      "Fill name, configuration, warehouse, start now, an end in two days and the metrics; confirm the summary sheet and tick the acknowledgement; confirm the session opens as In progress",
+      "In the session tap New PI document and create a PI; if any material in the picked locations has no reconciled stock, confirm the PI is refused and the materials are named",
+      "Work a PI to Verified with a variance and submit it for posting: confirm a Chart of Authority card shows the variance value and the levels, and a person without the level's job role sees why Approve is disabled",
+      "Approve each level with the right people (or as super admin in test mode); confirm the PI becomes Approved for posting only after the last level, and Return sends it back to Verified with the reason",
+      "Open the session's Progress report: confirm completion, PI documents and locations against targets, accuracy, variance value against tolerance, time used, stage bars and the stage table with Excel download",
+      "Try Close session while a PI is open: confirm it is disabled; finish or disregard the PIs, then close with a reason and confirm the session drops off the active list"
+    ],
+    "expected": "No PI document exists outside a session, no variance posts without every Chart of Authority level approving, and the progress report shows the session's state against its metrics."
   }
 ]
