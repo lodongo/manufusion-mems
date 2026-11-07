@@ -190,6 +190,9 @@ export default function RichTable<T>({
     allowExport = true,
     menuTop,
     menuTitle = 'Menu',
+    menuOpen,
+    onMenuOpenChange,
+    hideMenuButton = false,
 }: {
     /** Unique id used to remember templates for this table. */
     id: string;
@@ -212,6 +215,11 @@ export default function RichTable<T>({
     menuTop?: (close: () => void) => ReactNode;
     /** Name of the one menu when menuTop is used. */
     menuTitle?: string;
+    /** Let the screen open and close the one menu from its own button (use with hideMenuButton). */
+    menuOpen?: boolean;
+    onMenuOpenChange?: (open: boolean) => void;
+    /** The screen shows the menu button itself, so the search box takes the whole width. */
+    hideMenuButton?: boolean;
 }) {
     // Keep device templates isolated by the authenticated account. Older browser-only
     // templates are available to import explicitly rather than silently assigning
@@ -237,7 +245,12 @@ export default function RichTable<T>({
     const [templateError, setTemplateError] = useState('');
     const [search, setSearch] = useState('');
     const [panel, setPanel] = useState<'' | 'filters' | 'columns' | 'templates' | 'group' | 'formulas'>('');
-    const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+    const [toolsOpenLocal, setToolsOpenLocal] = useState(false);
+    const mobileToolsOpen = menuOpen ?? toolsOpenLocal;
+    const setMobileToolsOpen = (open: boolean) => {
+        if (menuOpen === undefined) setToolsOpenLocal(open);
+        onMenuOpenChange?.(open);
+    };
     const [mobileSnapshot, setMobileSnapshot] = useState<View | null>(null);
     const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
     const [limit, setLimit] = useState(PAGE);
@@ -393,7 +406,7 @@ export default function RichTable<T>({
                       : visible.map((c) => cellOf(c, it.row)),
               )
             : filtered.map((r) => visible.map((c) => cellOf(c, r)));
-        if (visibleValues.length) data.push(aggRow(`Total (${totals.rows} rows)`, totals.values));
+        if (visibleValues.length) data.push(aggRow(`Total (${totals.rows} ${totals.rows === 1 ? 'row' : 'rows'})`, totals.values));
         const stamp = new Date().toISOString().slice(0, 10);
         downloadBlob(buildXlsx(title || 'Data', header, data), `${(fileName || title || id).replace(/[^A-Za-z0-9_-]+/g, '_')}_${stamp}.xlsx`);
         // Every data export leaves an audit record (table, row count, filters applied), sent immediately.
@@ -694,11 +707,13 @@ export default function RichTable<T>({
                             value={search}
                             maxLength={100}
                             onChange={(e) => setSearch(e.target.value)}
-                            className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-14 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm'
+                            className={`h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 ${hideMenuButton ? 'pr-3' : 'pr-14'} text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm`}
                         />
+                        {!hideMenuButton && (
                         <button type='button' aria-expanded={mobileToolsOpen} aria-haspopup='dialog' aria-label={unified ? menuTitle : 'Table tools'} title={unified ? menuTitle : 'Table tools'} onClick={() => { setPanel(''); setMobileSnapshot(null); setMobileToolsOpen(true); }} className={`absolute right-1 top-1/2 flex h-9 w-10 -translate-y-1/2 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-white ${unified ? '' : 'sm:hidden'}`}>
                             {unified ? <MoreVertical className='h-5 w-5'/> : <Columns3 className='h-5 w-5'/>}
                         </button>
+                        )}
                     </div>
                     {!unified && <div className='hidden items-center gap-2 sm:flex'>
                     <button type='button' aria-label='Filters' title='Filter by criteria' onClick={() => setPanel(panel === 'filters' ? '' : 'filters')} className={iconBtn(panel === 'filters' || view.criteria.length > 0)}>
@@ -727,7 +742,7 @@ export default function RichTable<T>({
                 <div className='flex items-center justify-between gap-2'>
                     <p className='truncate text-xs text-slate-500'>
                         {title ? <span className='font-medium text-slate-300'>{title} · </span> : null}
-                        {filtered.length === rows.length ? `${rows.length} rows` : `${filtered.length} of ${rows.length} rows`}
+                        {filtered.length === rows.length ? `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}` : `${filtered.length} of ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`}
                         {groupBy.length ? ` · ${groups.length} groups` : ''}
                         {view.sort ? ` · sorted by ${byKey.get(view.sort.col)?.label ?? ''} ${view.sort.dir === 'asc' ? '↑' : '↓'}` : ''}
                     </p>
@@ -795,7 +810,7 @@ export default function RichTable<T>({
                                 <tr>
                                     {visible.map((c, i) => (
                                         <td key={c.key} className={`sticky bottom-0 z-10 border-t border-slate-700 bg-slate-900 px-3 py-2 align-top ${valueKeys.includes(c.key) ? 'text-right' : ''}`}>
-                                            {i === 0 && <span className='block whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-300'>Total · {totals.rows} rows</span>}
+                                            {i === 0 && <span className='block whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-300'>Total · {totals.rows} {totals.rows === 1 ? 'row' : 'rows'}</span>}
                                             {valueKeys.includes(c.key) && <AggCell agg={totals.values[c.key]} strong />}
                                         </td>
                                     ))}
