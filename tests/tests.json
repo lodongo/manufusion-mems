@@ -1062,5 +1062,25 @@
       "New config, type Cluster Stock Take: confirm the warehouse is asked first, then its clusters are listed with Select all; pick two and save; PIs only take locations of those clusters"
     ],
     "expected": "Cycle counts follow their periods with an explicit full-scope choice, and cluster counts cover the chosen clusters of the chosen warehouse."
+  },
+  {
+    "name": "Stock take: automatic PI documents and independent count sheets with mandatory recount",
+    "description": "A configuration says whether PI documents are created automatically. If so, all planned PIs are generated when the session is complete. Each session says how many sheets are printed per PI (_A, _B …); different people count them, and lines where they disagree must be recounted.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "stock take automatic PI documents",
+      "stock take count sheets",
+      "stock take mandatory recount"
+    ],
+    "steps": [
+      "Create a configuration with 'PI documents are created: Automatically'",
+      "Create a session from it with 2 PI documents printed per PI: confirm all planned PI documents appear at once and 'Create PI documents' shows no remaining",
+      "For an automatic session, complete its setup: confirm the PI documents are generated then",
+      "Tap Print and download PDF on a PI: confirm two PDFs PI_…_A and PI_…_B",
+      "Confirm printed (refused if the session has not started), submit sheet _A as one person, then try sheet _B as the same person: confirm it is refused; submit _B as another person",
+      "At verification confirm the Sheet A and Sheet B columns, the 'Sheets differ: recount' ticks that cannot be cleared, and that Accept verification refuses if those lines are not recounted"
+    ],
+    "expected": "PI documents are generated per configuration, each sheet is counted independently, and any disagreement forces a recount."
   }
 ]

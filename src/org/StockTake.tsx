@@ -46,6 +46,8 @@ interface Config {
     /** Cluster stock take: the clusters of the warehouse to count (older configurations hold clusterId). */
     clusterIds?: string[];
     sessionCreation?: 'automatic' | 'manual';
+    /** Automatic: every planned PI document is generated once the session is complete. */
+    piCreation?: 'automatic' | 'manual';
     lastSessionCreatedAt?: string;
     lastSessionId?: string;
     nextSessionDueOn?: string;
@@ -60,6 +62,9 @@ interface Line {
     verified: boolean;
     recount: boolean;
     posted: boolean;
+    /** Counts of each sheet when several were printed, and whether they disagree (then a recount is mandatory). */
+    copyCounts?: Record<string, number> | null;
+    copyMismatch?: boolean;
 }
 interface AttachmentMeta {
     name: string;
@@ -89,6 +94,10 @@ interface Session {
     closureReason?: string;
     campaignId?: string;
     campaignName?: string;
+    /** Independent count sheets printed for this PI (_A, _B …) and what each has submitted. */
+    copies?: number;
+    copyCounts?: Record<string, { countedAt: string; attachment?: AttachmentMeta }>;
+    copyMismatches?: number;
     varianceValue?: number;
     approval?: { amount: number; unvalued?: string[]; steps: CoaStep[] } | null;
     postingReturnReason?: string;
@@ -248,8 +257,11 @@ function readUpload(file: File): Promise<Upload> {
 }
 
 /** Fetches the signed PI scan (kept out of the list) and saves it as a file. */
-async function downloadAttachment(id: string) {
-    const file = await callBackend<Upload>(API + 'attachment', { id });
+/** Count sheet labels of a PI document: none for one sheet, otherwise A, B, … */
+const sheetsOf = (s: Session) => (Number(s.copies) > 1 ? ['A', 'B', 'C', 'D', 'E'].slice(0, Math.min(5, Number(s.copies))) : []);
+
+async function downloadAttachment(id: string, copy = '') {
+    const file = await callBackend<Upload>(API + 'attachment', copy ? { id, copy } : { id });
     const match = /^data:(application\/pdf|image\/jpeg|image\/png);base64,([A-Za-z0-9+/=]+)$/.exec(file.data || '');
     if (!match) throw new Error('The attached document is not a valid PDF or image.');
     const bytes = Uint8Array.from(atob(match[2]), (c) => c.charCodeAt(0));
@@ -267,17 +279,25 @@ async function downloadAttachment(id: string) {
 }
 
 /** A PDF copy of the PI count sheet. Counting is blind: no system quantities are printed. */
-function downloadPiPdf(s: Session, warehouse: string) {
+async function downloadPiPdf(s: Session, warehouse: string) {
+    // Several sheets: one PDF per sheet (PI_…_A, PI_…_B …), each counted independently.
+    const sheets = sheetsOf(s);
+    if (!sheets.length) return downloadPiSheet(s, warehouse, s.piNumber);
+    for (const c of sheets) await downloadPiSheet(s, warehouse, `${s.piNumber}_${c}`);
+}
+
+function downloadPiSheet(s: Session, warehouse: string, label: string) {
     const blind = s.status === 'awaiting_print' || s.status === 'counting';
     return downloadReportPdf({
-        title: `PI document ${s.piNumber}`,
+        title: `PI document ${label}`,
         subtitle: [s.campaignId ? `Session ${s.campaignId}${s.campaignName ? ` - ${s.campaignName}` : ''}` : '', s.sessionName || s.configName].filter(Boolean).join(' · '),
-        fileName: `${s.piNumber}`,
+        fileName: label,
         sections: [
             {
                 heading: 'Document',
                 facts: [
-                    ['PI document', s.piNumber],
+                    ['PI document', label],
+                    ...(label !== s.piNumber ? ([['Count sheet', `${label.slice(-1)} of ${sheetsOf(s).length} (counted independently)`]] as Array<[string, string]>) : []),
                     ['Warehouse', warehouse],
                     ['Configuration', s.configName],
                     ['Type', s.type || ''],
@@ -289,7 +309,7 @@ function downloadPiPdf(s: Session, warehouse: string) {
                 heading: 'Count sheet',
                 table: {
                     head: blind ? ['#', 'Physical location', 'Material', 'Description', 'Counted'] : ['#', 'Physical location', 'Material', 'Description', 'System qty', 'Counted'],
-                    body: s.lines.map((l, i) => [String(i + 1), l.binId, l.materialNumber, l.description, ...(blind ? [] : [l.expected === null ? '' : String(l.expected)]), l.counted === null ? '' : String(l.counted)]),
+                    body: s.lines.map((l, i) => [String(i + 1), l.binId, l.materialNumber, l.description, ...(blind ? [] : [l.expected === null ? '' : String(l.expected)]), blind || label !== s.piNumber ? (label !== s.piNumber && l.copyCounts ? String(l.copyCounts[label.slice(-1)] ?? '') : '') : l.counted === null ? '' : String(l.counted)]),
                 },
             },
             { heading: 'Signatures', text: 'Counted by: ______________________  Date: __________\n\nVerified by: _____________________  Date: __________' },
@@ -463,6 +483,7 @@ export default function StockTake() {
                     key={openedSession.id}
                     session={openedSession}
                     pis={allSessions.filter((p) => p.campaignId === openedSession.id)}
+                    autoPis={data.configs.find((x) => x.id === openedSession.configId)?.piCreation === 'automatic'}
                     warehouse={warehouseName.get(openedSession.warehouseId) || openedSession.warehouseId}
                     notice={opened ? '' : notice}
                     ask={confirm.ask}
@@ -494,9 +515,9 @@ export default function StockTake() {
                     data={data}
                     ask={confirm.ask}
                     onClose={() => setPlanning(false)}
-                    onCreated={(id) => {
+                    onCreated={(id, extra) => {
                         setPlanning(false);
-                        setNotice(`Stock take session ${id} created. Create its PI documents from here once it has started.`);
+                        setNotice(`Stock take session ${id} created.${extra || ' Create its PI documents from here.'}`);
                         setOpenSessionId(id);
                         reload();
                     }}
@@ -606,7 +627,12 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
     const [printed, setPrinted] = useState(false);
     const [editingCounts, setEditingCounts] = useState(false);
     const [counts, setCounts] = useState<Record<number, string>>({});
-    const [recounts, setRecounts] = useState<number[]>([]);
+    // Lines where the count sheets disagree must be recounted: they start selected and cannot be unticked.
+    const forced = s.lines.map((l, i) => (l.copyMismatch ? i : -1)).filter((i) => i >= 0);
+    const [recounts, setRecounts] = useState<number[]>(forced);
+    const sheets = sheetsOf(s);
+    const submittedSheets = sheets.filter((c) => !!s.copyCounts?.[c]);
+    const [sheet, setSheet] = useState(() => sheets.find((c) => !s.copyCounts?.[c]) ?? '');
     const [upload, setUpload] = useState<Upload | null>(null);
     const [uploadError, setUploadError] = useState('');
     const [downloading, setDownloading] = useState(false);
@@ -668,11 +694,11 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
         }
     };
 
-    const download = async () => {
+    const download = async (copy = '') => {
         setDownloading(true);
         setPanelError('');
         try {
-            await downloadAttachment(s.id);
+            await downloadAttachment(s.id, copy);
         } catch (err) {
             setPanelError(messageOf(err));
         } finally {
@@ -704,18 +730,20 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
         actions.push(
             <Button
                 key='counts'
-                disabled={countProblems.length > 0}
+                disabled={countProblems.length > 0 || (sheets.length > 0 && (!sheet || !!s.copyCounts?.[sheet]))}
                 onClick={() =>
                     run(
                         {
-                            title: 'Submit counts and signed PI?',
-                            message: `${count(s.lines.length, 'count')} and the signed PI “${upload?.name ?? ''}” are submitted. Another person must verify them; you will not be able to verify, approve or post this PI.`,
+                            title: sheets.length ? `Submit sheet ${s.piNumber}_${sheet}?` : 'Submit counts and signed PI?',
+                            message: sheets.length
+                                ? `${count(s.lines.length, 'count')} of sheet _${sheet} and its signed copy “${upload?.name ?? ''}” are submitted. Each sheet must be counted by a different person; where the sheets disagree a recount is mandatory.`
+                                : `${count(s.lines.length, 'count')} and the signed PI “${upload?.name ?? ''}” are submitted. Another person must verify them; you will not be able to verify, approve or post this PI.`,
                             confirmLabel: 'Submit counts',
                             acknowledge: 'Every location listed was physically counted and the attached document is the signed PI.',
                         },
                         'counts',
-                        () => `Counts for ${s.piNumber} submitted for verification.`,
-                        () => ({ counts: countValues(), attachment: upload })
+                        () => (sheets.length ? `Sheet ${s.piNumber}_${sheet} submitted.${submittedSheets.length + 1 < sheets.length ? ' Waiting for the other sheets.' : ' All sheets are in; ready for verification.'}` : `Counts for ${s.piNumber} submitted for verification.`),
+                        () => ({ counts: countValues(), attachment: upload, ...(sheets.length ? { copy: sheet } : {}) })
                     )
                 }
             >
@@ -1002,7 +1030,12 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                   label: 'Recount',
                   value: (r) => (recounts.includes(r.i) ? 'Yes' : ''),
                   render: (r) =>
-                      hasVariance(r.line) ? (
+                      r.line.copyMismatch ? (
+                          <span className='flex h-11 items-center gap-2'>
+                              <input type='checkbox' className='h-5 w-5 accent-amber-500' checked disabled aria-label='Recount required' />
+                              <span className='text-xs font-semibold text-amber-300'>Sheets differ: recount</span>
+                          </span>
+                      ) : hasVariance(r.line) ? (
                           <label className='flex h-11 items-center gap-2' onClick={(e) => e.stopPropagation()}>
                               <input
                                   type='checkbox'
@@ -1010,7 +1043,7 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                                   checked={recounts.includes(r.i)}
                                   onChange={(e) => {
                                       const on = e.target.checked;
-                                      setRecounts((list) => (on ? [...list.filter((x) => x !== r.i), r.i] : list.filter((x) => x !== r.i)));
+                                      setRecounts((list) => (on ? [...list.filter((x) => x !== r.i), r.i] : list.filter((x) => x !== r.i || forced.includes(x))));
                                   }}
                               />
                               <span className='text-xs text-soft'>Recount</span>
@@ -1020,6 +1053,9 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                       ),
               }
             : { key: 'recount', label: 'Recount', value: (r) => (r.line.recount ? 'Yes' : ''), hidden: blind },
+        ...(!blind && sheets.length
+            ? sheets.map((c) => ({ key: `sheet-${c}`, label: `Sheet ${c}`, type: 'number' as const, value: (r: LineRow) => r.line.copyCounts?.[c] ?? null }))
+            : []),
         { key: 'description', label: 'Description', value: (r) => r.line.description },
         { key: 'posted', label: 'Posted', value: (r) => (r.line.posted ? 'Yes' : 'No'), hidden: blind },
     ];
@@ -1073,12 +1109,40 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                     <p className='min-w-0 flex-1 text-sm text-soft'>
                         {count(varianceLines, 'line')} {varianceLines === 1 ? 'differs' : 'differ'} from the system quantity; tick the ones to recount ({recounts.length} selected).
                     </p>
-                    <Button variant='secondary' onClick={() => setRecounts(recounts.length ? [] : s.lines.map((l, i) => (hasVariance(l) ? i : -1)).filter((i) => i >= 0))}>
-                        {recounts.length ? 'Clear selection' : 'Select all variances'}
+                    <Button variant='secondary' onClick={() => setRecounts(recounts.length > forced.length ? forced : s.lines.map((l, i) => (hasVariance(l) || l.copyMismatch ? i : -1)).filter((i) => i >= 0))}>
+                        {recounts.length > forced.length ? 'Clear selection' : 'Select all variances'}
                     </Button>
                 </div>
             )}
 
+            {st === 'counting' && sheets.length > 0 && (
+                <Card className='space-y-2'>
+                    <p className='text-sm font-medium text-ink'>Count sheets ({submittedSheets.length} of {sheets.length} submitted)</p>
+                    <div className='grid grid-cols-3 gap-2'>
+                        {sheets.map((c) => {
+                            const done = !!s.copyCounts?.[c];
+                            return (
+                                <button
+                                    key={c}
+                                    type='button'
+                                    disabled={done}
+                                    aria-pressed={sheet === c}
+                                    onClick={() => {
+                                        setSheet(c);
+                                        setCounts({});
+                                        setUpload(null);
+                                    }}
+                                    className={`min-h-12 rounded-xl border px-2 text-sm font-semibold ${done ? 'border-line text-emerald-300 opacity-70' : sheet === c ? 'border-brand bg-brand/15 text-ink' : 'border-line text-soft active:bg-page'}`}
+                                >
+                                    {`_${c}`} {done ? '✓' : ''}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <p className='text-xs text-muted'>Enter the counts of sheet {s.piNumber}_{sheet || '?'} only. Each sheet is counted by a different person; the system quantities stay hidden until every sheet is in.</p>
+                </Card>
+            )}
+            {st === 'verification' && forced.length > 0 && <Alert tone='warn'>{count(forced.length, 'line')} {forced.length === 1 ? 'differs' : 'differ'} between the count sheets, so a recount is mandatory for {forced.length === 1 ? 'it' : 'them'}.</Alert>}
             {st === 'counting' && (
                 <Card className='space-y-2'>
                     <p className='text-sm font-medium text-ink'>Signed PI document *</p>
@@ -1124,9 +1188,17 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                             Signed PI: <span className='text-ink'>{s.piAttachment.name}</span>
                             {s.piAttachment.uploadedAt && <span className='block text-xs text-muted'>Uploaded {fmtDate(s.piAttachment.uploadedAt)}</span>}
                         </p>
-                        <Button variant='secondary' busy={downloading} onClick={() => void download()}>
-                            <Download className='h-4 w-4' /> Download
-                        </Button>
+                        {sheets.length ? (
+                            submittedSheets.map((c) => (
+                                <Button key={c} variant='secondary' busy={downloading} onClick={() => void download(c)}>
+                                    <Download className='h-4 w-4' /> _{c}
+                                </Button>
+                            ))
+                        ) : (
+                            <Button variant='secondary' busy={downloading} onClick={() => void download()}>
+                                <Download className='h-4 w-4' /> Download
+                            </Button>
+                        )}
                     </div>
                 )}
             </Card>
@@ -1215,6 +1287,7 @@ function CreatePanel({ session: c, warehouse, onClose, onCreated }: { session: C
 function CountSessionPanel({
     session: c,
     pis,
+    autoPis,
     warehouse,
     notice,
     ask,
@@ -1225,6 +1298,7 @@ function CountSessionPanel({
 }: {
     session: CountSession;
     pis: Session[];
+    autoPis: boolean;
     warehouse: string;
     notice: string;
     ask: Ask;
@@ -1255,6 +1329,24 @@ function CountSessionPanel({
                 <Pencil className='h-4 w-4' /> Complete setup
             </Button>
         );
+    } else if (open && autoPis) {
+        // Automatic configurations: every planned PI document at once (normally done when the session was completed;
+        // this retries after a problem such as a missing stock baseline was fixed).
+        const remaining = Math.max(0, c.progress.piDocuments.planned - c.progress.piDocuments.originals);
+        actions.push(
+            <Button
+                key='generate'
+                disabled={remaining === 0}
+                onClick={() =>
+                    ask({ title: 'Create PI documents?', message: `The remaining ${count(remaining, 'planned PI document')} of ${c.sessionNumber} are created now from the configuration.`, confirmLabel: 'Create PI documents' }, async () => {
+                        const r = await callBackend<{ created: string[] }>(API + 'count-session/generate', { id: c.id });
+                        onDone(`${count(r.created.length, 'PI document')} created in ${c.sessionNumber}.`);
+                    })
+                }
+            >
+                <Plus className='h-4 w-4' /> Create PI documents{remaining ? ` (${remaining})` : ''}
+            </Button>
+        );
     } else if (open) {
         actions.push(
             <Button key='new-pi' disabled={!c.canCreatePi} onClick={onNewPi}>
@@ -1273,6 +1365,7 @@ function CountSessionPanel({
         { key: 'pi', label: 'PI document', value: (p) => p.piNumber, render: (p) => <span className='font-mono text-xs font-semibold text-brandsoft'>{p.piNumber}</span> },
         { key: 'status', label: 'Status', value: (p) => statusOf(p.status).label, render: (p) => <Badge tone={statusOf(p.status).tone}>{statusOf(p.status).label}</Badge> },
         { key: 'lines', label: 'Locations', type: 'number', value: (p) => p.lines.length },
+        { key: 'sheets', label: 'Sheets', value: (p) => (sheetsOf(p).length ? sheetsOf(p).map((x) => `_${x}${p.copyCounts?.[x] ? '✓' : ''}`).join(' ') : '1') },
         { key: 'variances', label: 'Variances', type: 'number', value: (p) => p.lines.filter((l) => l.counted !== null && hasVariance(l)).length },
         { key: 'value', label: 'Variance value', type: 'number', value: (p) => p.varianceValue ?? null },
         { key: 'recount', label: 'Recount of', value: (p) => p.parentPi || '', hidden: true },
@@ -1285,7 +1378,7 @@ function CountSessionPanel({
             {open && c.setupRequired && <Alert tone='warn'>Created automatically on {fmtWhen(c.startAt)}. Complete its setup (name, materials to count, materials per PI and targets) before creating PI documents.</Alert>}
             {open && !c.setupRequired && !c.canCreatePi && <Alert tone='warn'>{c.whyNoPi}</Alert>}
             {open && <Alert tone='info'>The session closes automatically when all its PI documents are posted ({pctText(c.progress.stages.find((x) => x.key === 'closure')?.pct ?? 0)} so far).</Alert>}
-            {settingUp && <SetupSessionPanel session={c} ask={ask} onClose={() => setSettingUp(false)} onDone={(m) => (setSettingUp(false), onDone(m))} />}
+            {settingUp && <SetupSessionPanel session={c} autoPis={autoPis} ask={ask} onClose={() => setSettingUp(false)} onDone={(m) => (setSettingUp(false), onDone(m))} />}
             {c.closureReason && <Alert tone='info'>{c.status === 'cancelled' ? 'Cancelled' : 'Closed'} {c.closedAt ? fmtWhen(c.closedAt) : ''}: {c.closureReason}</Alert>}
             <Segmented
                 label='Session views'
@@ -1414,6 +1507,23 @@ function ProgressReport({ session: c, warehouse }: { session: CountSession; ware
     );
 }
 
+/** What happened to the PI documents of a session that has just been completed. */
+const generatedText = (r: { generated?: number; generateError?: string }) =>
+    r.generateError ? ` PI documents were not generated: ${r.generateError}` : r.generated ? ` ${count(r.generated, 'PI document')} generated.` : '';
+
+/** Count sheets printed per PI document (copies _A, _B …), 1 to 5. */
+function CopiesField({ id, value, error, onChange }: { id: string; value: string; error?: string; onChange: (v: string) => void }) {
+    return (
+        <SelectField id={id} label='PI documents printed per PI *' value={value} onChange={(e) => onChange(e.target.value)} error={error} hint={Number(value) > 1 ? `Sheets _A to _${'ABCDE'[Number(value) - 1]} are counted independently by different people; a recount is mandatory wherever they differ.` : 'One count sheet per PI document.'}>
+            {[1, 2, 3, 4, 5].map((n) => (
+                <option key={n} value={String(n)}>
+                    {n === 1 ? '1 (single count)' : `${n} (sheets _A–_${'ABCDE'[n - 1]})`}
+                </option>
+            ))}
+        </SelectField>
+    );
+}
+
 /**
  * Materials to count, with "All materials": the server counts the mapped locations of the warehouse that the
  * configuration selects (cluster and criticality applied) and the number is shown read-only. The server counts again
@@ -1455,8 +1565,8 @@ function MaterialsToCount({ id, all, locked = false, value, configId, warehouseI
 // Complete an automatically created session (once, before any PI document).
 // ---------------------------------------------------------------------------
 
-function SetupSessionPanel({ session: c, ask, onClose, onDone }: { session: CountSession; ask: Ask; onClose: () => void; onDone: (message: string) => void }) {
-    const [f, setF] = useState({ name: c.name, targetMaterials: '', materialsPerPi: '20' });
+function SetupSessionPanel({ session: c, autoPis, ask, onClose, onDone }: { session: CountSession; autoPis: boolean; ask: Ask; onClose: () => void; onDone: (message: string) => void }) {
+    const [f, setF] = useState({ name: c.name, targetMaterials: '', materialsPerPi: '20', piCopies: '1' });
     const [all, setAll] = useState(c.fullScope === true);
     const [tried, setTried] = useState(false);
     const e: Record<string, string> = {};
@@ -1474,17 +1584,17 @@ function SetupSessionPanel({ session: c, ask, onClose, onDone }: { session: Coun
         ask(
             {
                 title: `Complete ${c.sessionNumber}?`,
-                message: `${all ? 'All ' : ''}${count(Number(f.targetMaterials), 'material')} to count, ${f.materialsPerPi} per PI: ${count(pis, 'PI document')}.`,
+                message: `${all ? 'All ' : ''}${count(Number(f.targetMaterials), 'material')} to count, ${f.materialsPerPi} per PI: ${count(pis, 'PI document')}, each printed ${f.piCopies === '1' ? 'once' : `${f.piCopies} times (independent sheets; mismatches are recounted)`}.${autoPis ? ' All PI documents are generated now.' : ''}`,
                 confirmLabel: 'Complete setup',
                 acknowledge: 'The plan is correct. It cannot be changed once saved.',
             },
             async () => {
-                await callBackend(API + 'count-session/setup', {
+                const r = await callBackend<{ generated?: number; generateError?: string }>(API + 'count-session/setup', {
                     id: c.id,
                     name: f.name.trim(),
-                    metrics: { countAll: all, targetMaterials: Number(f.targetMaterials), materialsPerPi: Number(f.materialsPerPi) },
+                    metrics: { countAll: all, targetMaterials: Number(f.targetMaterials), materialsPerPi: Number(f.materialsPerPi), piCopies: Number(f.piCopies) },
                 });
-                onDone(`${c.sessionNumber} is set up. PI documents can now be created.`);
+                onDone(`${c.sessionNumber} is set up.${autoPis ? generatedText(r) : ' PI documents can now be created.'}`);
             }
         );
     };
@@ -1506,6 +1616,7 @@ function SetupSessionPanel({ session: c, ask, onClose, onDone }: { session: Coun
                 <div className='grid grid-cols-2 gap-2'>
                     <MaterialsToCount id='sts-setup-materials' all={all} locked={c.fullScope === true} value={f.targetMaterials} configId={c.configId} warehouseId={c.warehouseId} error={show('targetMaterials')} onAll={setAll} onValue={(v) => set('targetMaterials', v)} />
                     <Field id='sts-setup-per-pi' label='Materials per PI *' inputMode='numeric' maxLength={4} value={f.materialsPerPi} onChange={(x) => set('materialsPerPi', x.target.value)} error={show('materialsPerPi')} />
+                    <CopiesField id='sts-setup-copies' value={f.piCopies} onChange={(v) => set('piCopies', v)} />
                     <div className='flex flex-col justify-center rounded-xl border border-line px-3'>
                         <span className='text-xs text-muted'>PI documents</span>
                         <span className='text-lg font-semibold text-ink'>{pis || '—'}</span>
@@ -1528,6 +1639,7 @@ interface PlanForm {
     countAll: boolean;
     targetMaterials: string;
     materialsPerPi: string;
+    piCopies: string;
 }
 type PlanKey = keyof PlanForm;
 
@@ -1580,10 +1692,11 @@ const PLAN_LABELS: Record<PlanKey, string> = {
     targetMaterials: 'Materials to count',
     materialsPerPi: 'Materials per PI',
     countAll: 'All materials',
+    piCopies: 'PI documents printed per PI',
 };
 
-function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: Ask; onClose: () => void; onCreated: (id: string) => void }) {
-    const [form, setForm] = useState<PlanForm>(() => ({ name: '', configId: '', warehouseId: '', startAt: localInput(new Date()), countAll: false, targetMaterials: '', materialsPerPi: '' }));
+function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: Ask; onClose: () => void; onCreated: (id: string, extra: string) => void }) {
+    const [form, setForm] = useState<PlanForm>(() => ({ name: '', configId: '', warehouseId: '', startAt: localInput(new Date()), countAll: false, targetMaterials: '', materialsPerPi: '', piCopies: '1' }));
     const [touched, setTouched] = useState<Partial<Record<PlanKey, boolean>>>({});
     const [tried, setTried] = useState(false);
     const cfg = data.configs.find((c) => c.id === form.configId);
@@ -1633,7 +1746,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                 acknowledge: 'The configuration, warehouse, dates and plan are correct. They cannot be changed once the session is created.',
             },
             async () => {
-                const r = await callBackend<{ ok: boolean; id?: string }>(API + 'count-session/create', {
+                const r = await callBackend<{ ok: boolean; id?: string; generated?: number; generateError?: string }>(API + 'count-session/create', {
                     name: form.name.trim(),
                     configId: form.configId,
                     warehouseId: form.warehouseId,
@@ -1642,9 +1755,10 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                         countAll: form.countAll,
                         targetMaterials: Number(form.targetMaterials),
                         materialsPerPi: Number(form.materialsPerPi),
+                        piCopies: Number(form.piCopies),
                     },
                 });
-                onCreated(r.id ?? '');
+                onCreated(r.id ?? '', cfg?.piCreation === 'automatic' ? generatedText(r) : '');
             }
         );
     };
@@ -1696,6 +1810,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                 <div className='grid grid-cols-2 gap-2'>
                     <MaterialsToCount id='sts-materials' all={form.countAll} locked={cfg?.fullScope === true} value={form.targetMaterials} configId={form.configId} warehouseId={form.warehouseId} error={shown('targetMaterials')} onAll={(on) => setForm((x) => ({ ...x, countAll: on }))} onValue={(v) => set('targetMaterials', v)} />
                     <Field id='sts-per-pi' label='Materials per PI *' inputMode='numeric' maxLength={4} value={form.materialsPerPi} onChange={(e) => (set('materialsPerPi', e.target.value), touch('materialsPerPi'))} error={shown('materialsPerPi')} />
+                    <CopiesField id='sts-copies' value={form.piCopies} onChange={(v) => set('piCopies', v)} />
                     <div className='flex flex-col justify-center rounded-xl border border-line px-3'>
                         <span className='text-xs text-muted'>PI documents</span>
                         <span className='text-lg font-semibold text-ink'>{piCount || '—'}</span>
@@ -1897,6 +2012,7 @@ interface ConfigForm {
     periodic: boolean;
     period: string;
     sessionCreation: '' | 'automatic' | 'manual';
+    piCreation: '' | 'automatic' | 'manual';
     warehouseId: string;
     clusterIds: string[];
 }
@@ -1904,7 +2020,7 @@ type FormKey = keyof ConfigForm;
 const CLASSES = ['A', 'B', 'C', 'D'];
 
 function formOf(c: Config | null): ConfigForm {
-    if (!c) return { type: 'Cycle Count', name: 'Cycle Count', selection: 'Sequence', byCriticality: false, criticalityClasses: [], durationDays: '30', fullScope: '', periodic: true, period: 'Monthly', sessionCreation: '', warehouseId: '', clusterIds: [] };
+    if (!c) return { type: 'Cycle Count', name: 'Cycle Count', selection: 'Sequence', byCriticality: false, criticalityClasses: [], durationDays: '30', fullScope: '', periodic: true, period: 'Monthly', sessionCreation: '', piCreation: '', warehouseId: '', clusterIds: [] };
     return {
         type: c.type,
         name: c.name,
@@ -1916,6 +2032,7 @@ function formOf(c: Config | null): ConfigForm {
         periodic: c.type === 'Cycle Count' ? true : c.periodic,
         period: c.period || 'Monthly',
         sessionCreation: c.periodic ? (c.sessionCreation ?? 'manual') : '',
+        piCreation: c.piCreation ?? 'manual',
         warehouseId: c.warehouseId || '',
         clusterIds: c.clusterIds?.length ? c.clusterIds : c.clusterId ? [c.clusterId] : [],
     };
@@ -1934,6 +2051,7 @@ function configErrors(f: ConfigForm): Partial<Record<FormKey, string>> {
     if (f.type === 'Cluster Stock Take' && !f.warehouseId) e.warehouseId = 'Choose the warehouse first; its clusters are then listed.';
     else if (f.type === 'Cluster Stock Take' && !f.clusterIds.length) e.clusterIds = 'Choose at least one cluster.';
     if (f.periodic && !PERIODS.includes(f.period)) e.period = 'Choose how often the stock take runs.';
+    if (!f.piCreation) e.piCreation = 'Choose whether PI documents are created automatically or manually.';
     if (f.periodic && !f.sessionCreation) e.sessionCreation = 'Choose whether sessions are created automatically or manually.';
     if (f.periodic && f.sessionCreation === 'automatic' && !f.warehouseId) e.warehouseId = 'Choose the warehouse automatic sessions are created for.';
     return e;
@@ -2001,6 +2119,7 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
             periodic: cycle ? true : form.periodic,
             period: form.period,
             sessionCreation: form.periodic ? form.sessionCreation : 'manual',
+            piCreation: form.piCreation,
             warehouseId: form.warehouseId,
             clusterIds: form.type === 'Cluster Stock Take' ? form.clusterIds : [],
         };
@@ -2015,6 +2134,7 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
                             {cycle ? `; each cycle runs to the end of the ${payload.period.toLowerCase()} period and the next begins there${payload.fullScope ? '; every material is counted in each cycle' : ''}.` : `; each session runs ${count(Number(payload.durationDays), 'day')}.`}
                         </span>
                         <span className='block'>
+                            PI documents are created {payload.piCreation === 'automatic' ? 'automatically when a session is complete' : 'manually'}.{' '}
                             {payload.periodic ? `${payload.period}; sessions created ${automatic ? `automatically at midnight for ${warehouseName}, each needing its plan completed before PI documents` : 'manually'}.` : 'On demand; sessions are created manually.'}
                         </span>
                         {config && <span className='block'>Existing sessions keep their settings.</span>}
@@ -2202,6 +2322,11 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
                     </>
                 )}
                 {!clusterType && (automatic || form.warehouseId) && warehouseField}
+                <SelectField id='st-cfg-pis' label='PI documents are created *' value={form.piCreation} onChange={(e) => (set({ piCreation: e.target.value as ConfigForm['piCreation'] }), touch('piCreation'))} error={err('piCreation')} hint='Automatically: as soon as a session is complete (created, or set up for automatic sessions), all its planned PI documents are generated.'>
+                    <option value=''>Choose</option>
+                    <option value='automatic'>Automatically, all at once when the session is complete</option>
+                    <option value='manual'>Manually, one at a time</option>
+                </SelectField>
                 {automatic && (
                     <Alert tone='warn'>
                         Automatic sessions are created for one warehouse only. Create a separate configuration for each warehouse that should get automatic sessions, and give each an identifiable name that includes the warehouse (for example “Cycle Count – Main store”), because the name is how they are told apart.
