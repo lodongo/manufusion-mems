@@ -68,6 +68,8 @@ interface Session {
     countEditReason?: string;
     disregardReason?: string;
     closureReason?: string;
+    /** Where the signed-in person has a separation-of-duties conflict on this PI, from the server. */
+    you?: { testMode: boolean; counted: boolean; requestedPosting: boolean; verifyConflict: boolean; approveConflict: boolean; postConflict: boolean };
 }
 interface Data {
     warehouses: Array<{ id: string; name: string }>;
@@ -83,6 +85,8 @@ type Ask = (options: ConfirmOptions, run: (reason: string) => Promise<void>) => 
 type LineRow = { i: number; line: Line };
 
 const API = '/api/org/inventory/stocktake/';
+/** "1 line", "2 lines": counts in messages must read correctly. */
+const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const TYPES = ['Cycle Count', 'Full Stock Take', 'Cluster Stock Take', 'Random Stock Take'];
 const PERIODS = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annually'];
 const CLOSED = ['reconciled', 'disregarded', 'closed_posted'];
@@ -405,12 +409,20 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
     const varianceLines = s.lines.filter((l) => hasVariance(l)).length;
     const flagged = s.lines.filter((l) => l.recount && !l.posted).length;
     const postable = s.lines.filter((l) => l.verified && !l.recount && !l.posted).length;
+    // Separation of duties: the server enforces it; here the person is told before tapping. In platform test mode a
+    // super administrator may complete the step alone (development only; the server records it in the audit trail).
+    const you = s.you;
+    const testMode = you?.testMode === true;
+    const verifyBarred = !!you?.verifyConflict && !testMode;
+    const approveBarred = !!you?.approveConflict && !testMode;
+    const postBarred = !!you?.postConflict && !testMode;
+    const whyYou = (c: boolean, r: boolean) => (c && r ? 'counted this PI and submitted it for posting' : c ? 'counted this PI' : 'submitted this PI for posting');
 
     const missing = s.lines.filter((_, i) => countProblem(counts[i]) === 'Required').length;
     const invalid = s.lines.filter((_, i) => countProblem(counts[i]) && countProblem(counts[i]) !== 'Required').length;
     const countProblems = [
-        ...(missing ? [`${missing} of ${s.lines.length} locations still need a count.`] : []),
-        ...(invalid ? [`${invalid} counts are not valid numbers of 0 or more.`] : []),
+        ...(missing ? [`${missing} of ${count(s.lines.length, 'location')} still ${missing === 1 ? 'needs' : 'need'} a count.`] : []),
+        ...(invalid ? [`${count(invalid, 'count')} ${invalid === 1 ? 'is' : 'are'} not a valid number of 0 or more.`] : []),
         ...(st === 'counting' && !upload ? ['Attach the signed PI document (PDF, JPG or PNG, up to 450 KB).'] : []),
     ];
     const countValues = () => s.lines.map((_, i) => (counts[i] ?? '').trim());
@@ -478,7 +490,7 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                     run(
                         {
                             title: 'Submit counts and signed PI?',
-                            message: `${s.lines.length} counts and the signed PI “${upload?.name ?? ''}” are submitted. Another person must verify them; you will not be able to verify, approve or post this PI.`,
+                            message: `${count(s.lines.length, 'count')} and the signed PI “${upload?.name ?? ''}” are submitted. Another person must verify them; you will not be able to verify, approve or post this PI.`,
                             confirmLabel: 'Submit counts',
                             acknowledge: 'Every location listed was physically counted and the attached document is the signed PI.',
                         },
@@ -517,11 +529,12 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
         actions.push(
             <Button
                 key='verify'
+                disabled={verifyBarred}
                 onClick={() =>
                     run(
                         {
                             title: 'Accept verification?',
-                            message: `${recounts.length} of ${varianceLines} lines with a variance are flagged for recount; all other lines become verified and ready to submit for posting. Counts must be verified by someone other than the person who counted or corrected them.`,
+                            message: `${recounts.length} of ${count(varianceLines, 'line')} with a variance ${recounts.length === 1 ? 'is' : 'are'} flagged for recount; all other lines become verified and ready to submit for posting. ${testMode && you?.verifyConflict ? 'Test mode is on for your organization, so you may verify counts you made; this is recorded in the audit trail.' : 'Counts must be verified by someone other than the person who counted or corrected them.'}`,
                             confirmLabel: 'Accept verification',
                         },
                         'verify',
@@ -544,7 +557,7 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                     key='submit-posting'
                     onClick={() =>
                         run(
-                            { title: 'Submit for posting approval?', message: `${postable} verified lines (not flagged for recount) are sent for posting approval. Someone other than you and the counter must approve before stock is posted.`, confirmLabel: 'Submit for approval' },
+                            { title: 'Submit for posting approval?', message: `${count(postable, 'verified line')} (not flagged for recount) ${postable === 1 ? 'is' : 'are'} sent for posting approval. ${testMode ? 'Test mode is on for your organization, so you may approve it yourself; this is recorded in the audit trail.' : 'Someone other than you and the counter must approve before stock is posted.'}`, confirmLabel: 'Submit for approval' },
                             'submit_posting',
                             () => `${s.piNumber} submitted for posting approval.`
                         )
@@ -560,7 +573,7 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                     key='recount'
                     variant='secondary'
                     onClick={() =>
-                        run({ title: 'Create recount PI?', message: `A new PI document is created for the ${flagged} lines flagged for recount, with the current system quantities.`, confirmLabel: 'Create recount PI' }, 'recount', (r) => `Recount PI ${r.id ?? ''} created.`)
+                        run({ title: 'Create recount PI?', message: `A new PI document is created for the ${count(flagged, 'line')} flagged for recount, with the current system quantities.`, confirmLabel: 'Create recount PI' }, 'recount', (r) => `Recount PI ${r.id ?? ''} created.`)
                     }
                 >
                     <RotateCcw className='h-4 w-4' /> Create recount PI
@@ -587,11 +600,12 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
         actions.push(
             <Button
                 key='approve'
+                disabled={approveBarred}
                 onClick={() =>
                     run(
                         {
                             title: 'Approve posting?',
-                            message: `${postable} lines will be released for posting to the material journal. You cannot approve a PI you counted or submitted for posting.`,
+                            message: `${count(postable, 'line')} will be released for posting to the material journal. ${testMode && you?.approveConflict ? 'Test mode is on for your organization, so you may approve a PI you counted or submitted; this is recorded in the audit trail.' : 'You cannot approve a PI you counted or submitted for posting.'}`,
                             confirmLabel: 'Approve posting',
                             acknowledge: 'I have reviewed the counts and variances of this PI and approve them for posting.',
                         },
@@ -608,11 +622,12 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
         actions.push(
             <Button
                 key='post'
+                disabled={postBarred}
                 onClick={() =>
                     run(
                         {
                             title: 'Post and reconcile?',
-                            message: `Stock adjustments for ${postable} lines are posted to the material journal and the PI is reconciled${flagged ? ` (${flagged} recount lines stay open)` : ''}. Posting cannot be undone.`,
+                            message: `Stock adjustments for ${count(postable, 'line')} are posted to the material journal and the PI is reconciled${flagged ? ` (${count(flagged, 'recount line')} ${flagged === 1 ? 'stays' : 'stay'} open)` : ''}. Posting cannot be undone.`,
                             confirmLabel: 'Post & reconcile',
                             acknowledge: 'I understand this posts stock adjustments to the material journal and cannot be undone.',
                         },
@@ -768,10 +783,23 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
             {panelError && <Alert tone='error'>{panelError}</Alert>}
             {entering && <Problems items={countProblems} />}
             {st === 'awaiting_print' && !printed && <Alert tone='info'>Print the PI (or save it as PDF) first; then confirm it was printed.</Alert>}
+            {st === 'verification' && !editingCounts && verifyBarred && (
+                <Alert tone='warn'>You counted or corrected the counts of this PI, so you cannot verify it. Another person with the Stock Take verification permission at this warehouse must verify it.</Alert>
+            )}
+            {st === 'pending_post_approval' && approveBarred && (
+                <Alert tone='warn'>You {whyYou(!!you?.counted, !!you?.requestedPosting)}, so you cannot approve its posting. Another person with the Stock Take posting approval permission at this warehouse must approve it.</Alert>
+            )}
+            {st === 'approved_for_posting' && postBarred && (
+                <Alert tone='warn'>You counted this PI, so you cannot post it. Another person with the Stock Take posting permission at this warehouse must post it.</Alert>
+            )}
+            {testMode &&
+                ((st === 'verification' && !editingCounts && you?.verifyConflict) || (st === 'pending_post_approval' && you?.approveConflict) || (st === 'approved_for_posting' && you?.postConflict)) && (
+                    <Alert tone='info'>Platform test mode is on for your organization: as super administrator you may complete this step on a PI you worked on yourself. It is recorded in the audit trail.</Alert>
+                )}
             {st === 'verification' && !editingCounts && varianceLines > 0 && (
                 <div className='flex flex-wrap items-center gap-2'>
                     <p className='min-w-0 flex-1 text-sm text-soft'>
-                        {varianceLines} lines differ from the system quantity; tick the ones to recount ({recounts.length} selected).
+                        {count(varianceLines, 'line')} {varianceLines === 1 ? 'differs' : 'differ'} from the system quantity; tick the ones to recount ({recounts.length} selected).
                     </p>
                     <Button variant='secondary' onClick={() => setRecounts(recounts.length ? [] : s.lines.map((l, i) => (hasVariance(l) ? i : -1)).filter((i) => i >= 0))}>
                         {recounts.length ? 'Clear selection' : 'Select all variances'}

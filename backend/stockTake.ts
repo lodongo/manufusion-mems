@@ -3,6 +3,7 @@ import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, str, writeDoc, t
 import { allowedNodeIds, nextOrgCounter } from './positions';
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { audited, requireAt } from './scopeGuard';
+import { bypass } from './testModeCore';
 import { postStockTake } from './finOps';
 
 // ---------------------------------------------------------------------------
@@ -111,10 +112,29 @@ async function getSession(ctx: OrgContext, id: string, mode: 'read' | 'write') {
 }
 
 /**
+ * Where the signed-in person has a separation-of-duties conflict on this PI (they counted it, corrected the counts or
+ * requested posting). The server still enforces every rule on the action itself; this only lets the screen say so
+ * before the person taps. testMode is true only for an organization super administrator while the platform test mode
+ * applies to the organization (development only): the conflict is then allowed and recorded in the audit trail.
+ */
+function independenceFor(ctx: OrgContext, data: Record<string, unknown>) {
+    const counted = str(data.countedBy) === ctx.uid;
+    const requestedPosting = str(data.postingRequestedBy) === ctx.uid;
+    return {
+        testMode: ctx.testMode === true,
+        counted,
+        requestedPosting,
+        verifyConflict: counted || str(data.countEditedBy) === ctx.uid,
+        approveConflict: counted || requestedPosting,
+        postConflict: counted,
+    };
+}
+
+/**
  * Session as listed. Counting is blind: system quantities are withheld until counts are submitted. The signed PI
  * scan itself is fetched separately (stocktake/attachment).
  */
-function publicSession(x: Doc) {
+function publicSession(x: Doc, ctx: OrgContext) {
     const a = isObj(x.data.piAttachment) ? x.data.piAttachment : null;
     const blind = ['awaiting_print', 'counting'].includes(str(x.data.status));
     const lines = Array.isArray(x.data.lines) ? x.data.lines.filter(isObj).map((l) => (blind ? { ...l, expected: null } : l)) : [];
@@ -123,6 +143,7 @@ function publicSession(x: Doc) {
         ...x.data,
         lines,
         piAttachment: a ? { name: str(a.name), type: str(a.type), uploadedBy: str(a.uploadedBy), uploadedAt: str(a.uploadedAt) } : undefined,
+        you: independenceFor(ctx, x.data),
     };
 }
 
@@ -175,7 +196,7 @@ export const stockTakeRoutes = {
                 configs: configs.filter((x) => !str(x.data.warehouseId) || visible.has(str(x.data.warehouseId))).map((x) => ({ id: x.id, ...x.data })),
                 sessions: sessions
                     .filter((x) => visible.has(str(x.data.warehouseId)))
-                    .map(publicSession)
+                    .map((x) => publicSession(x, ctx))
                     .sort((a, b) => str((b as Record<string, unknown>).createdAt).localeCompare(str((a as Record<string, unknown>).createdAt))),
             };
         }),
@@ -411,7 +432,7 @@ export const stockTakeRoutes = {
 
             if (action === 'verify') {
                 if (status !== 'verification') throw new HttpError(409, 'Session not awaiting verification');
-                if (str(d.countedBy) === ctx.uid || str(d.countEditedBy) === ctx.uid) throw new HttpError(403, 'Counts must be verified by someone other than the person who counted or corrected them.');
+                if ((str(d.countedBy) === ctx.uid || str(d.countEditedBy) === ctx.uid) && !bypass(ctx, 'inv.stocktake.verify_independence')) throw new HttpError(403, 'Counts must be verified by someone other than the person who counted or corrected them.');
                 const recountIds = Array.isArray(ctx.body.recountIndices) ? ctx.body.recountIndices.map(Number) : [];
                 if (recountIds.some((i: number) => !Number.isInteger(i) || i < 0 || i >= lines.length || lines[i].expected === lines[i].counted)) throw new HttpError(400, 'Recount selection must contain inconsistent lines');
                 lines.forEach((line, i) => {
@@ -481,13 +502,13 @@ export const stockTakeRoutes = {
 
             if (action === 'approve_posting') {
                 if (status !== 'pending_post_approval') throw new HttpError(409, 'Posting not awaiting approval');
-                if (str(d.postingRequestedBy) === ctx.uid || str(d.countedBy) === ctx.uid) throw new HttpError(403, 'Posting must be approved by someone other than the person who requested it or counted the stock.');
+                if ((str(d.postingRequestedBy) === ctx.uid || str(d.countedBy) === ctx.uid) && !bypass(ctx, 'inv.stocktake.approve_independence')) throw new HttpError(403, 'Posting must be approved by someone other than the person who requested it or counted the stock.');
                 return save({ status: 'approved_for_posting', postingApprovedBy: ctx.uid, postingApprovedAt: nowIso() });
             }
 
             if (action === 'post') {
                 if (status !== 'approved_for_posting') throw new HttpError(409, 'Posting must be approved first. Submit the PI for posting approval.');
-                if (str(d.countedBy) === ctx.uid) throw new HttpError(403, 'The person who counted the stock cannot post it.');
+                if (str(d.countedBy) === ctx.uid && !bypass(ctx, 'inv.stocktake.post_independence')) throw new HttpError(403, 'The person who counted the stock cannot post it.');
                 const pending = lines.filter((x) => x.verified && !x.recount && !x.posted);
                 if (!pending.length) throw new HttpError(409, 'No eligible lines to reconcile');
                 // Value the differences in finance first (refused when finance is live and cannot post), then move the quantities.
