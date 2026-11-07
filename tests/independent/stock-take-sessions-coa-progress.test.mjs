@@ -159,7 +159,7 @@ test('Automation: midnight session creation per configuration, one-time setup be
     assert.equal(addPeriod('2026-11-07', 'Quarterly'), '2027-02-07');
     const screen = read('src/org/StockTake.tsx');
     assert.doesNotMatch(screen, /Close session/);
-    assert.match(screen, /The session closes automatically when all its PI documents are posted/);
+    assert.match(screen, /The session closes automatically once all its PI documents are posted/);
     assert.match(screen, /function SetupSessionPanel\(/);
 });
 
@@ -221,4 +221,25 @@ test('Automatic PI documents and independent count sheets (_A, _B) with a mandat
     assert.match(screen, /for \(const c of sheets\) await downloadPiSheet\(s, warehouse, `\$\{s\.piNumber\}_\$\{c\}`\);/);
     assert.match(screen, /Sheets differ: recount/);
     assert.match(screen, /key='generate'/);
+});
+
+test('Sessions close themselves once posting is complete; automatic PI problems are kept and retried', async () => {
+    const { sessionComplete } = await import('../../backend/stockTake.ts');
+    const now = '2026-11-20T00:00:00.000Z';
+    const s = (extra = {}) => ({ status: 'open', startAt: '2026-11-07T00:00:00.000Z', endAt: '2026-11-30T00:00:00.000Z', metrics: { targetMaterials: 4, materialsPerPi: 2 }, ...extra });
+    const pi = (status, parentPi = '') => ({ status, parentPi, lines: [] });
+    assert.equal(sessionComplete(s(), [pi('reconciled'), pi('reconciled')], now), true, 'all planned PIs posted');
+    assert.equal(sessionComplete(s(), [pi('reconciled'), pi('counting')], now), false, 'a PI is still open');
+    assert.equal(sessionComplete(s(), [pi('reconciled')], now), false, 'a planned PI is still to come');
+    assert.equal(sessionComplete(s({ endAt: '2026-11-10T00:00:00.000Z' }), [pi('reconciled')], now), true, 'past the end no more PIs can come');
+    assert.equal(sessionComplete(s({ locationsExhausted: true }), [pi('closed_posted')], now), true);
+    assert.equal(sessionComplete(s(), [], now), false, 'nothing posted, nothing to close');
+    assert.equal(sessionComplete(s({ setupRequired: true }), [pi('reconciled'), pi('reconciled')], now), false);
+    const server = read('backend/stockTake.ts');
+    assert.match(server, /countSessions: \(await closeCompleted\(ctx, campaigns, sessions, now\)\)/, 'closed as soon as Stock take is opened');
+    assert.match(server, /await recordGeneration\(orgId, campaignId, out\.generateError\);/);
+    assert.match(server, /out\.generated \+= \(await autoGenerate\(orgId, s\.id, cfg, 'automation'\)\)\.generated;/, 'the nightly run retries');
+    const screen = read('src/org/StockTake.tsx');
+    assert.match(screen, /The PI documents could not be generated/);
+    assert.match(screen, /They are generated automatically; tap Create PI documents to generate them now\./);
 });

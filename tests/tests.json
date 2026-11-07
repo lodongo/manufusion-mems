@@ -1082,5 +1082,21 @@
       "At verification confirm the Sheet A and Sheet B columns, the 'Sheets differ: recount' ticks that cannot be cleared, and that Accept verification refuses if those lines are not recounted"
     ],
     "expected": "PI documents are generated per configuration, each sheet is counted independently, and any disagreement forces a recount."
+  },
+  {
+    "name": "Stock take: sessions close automatically; automatic PI generation problems are shown and retried",
+    "description": "A session closes on its own as soon as all its PI documents are posted and no more can come (planned number reached, locations exhausted or end date passed). Opening Stock take, a posting or the nightly run triggers it. When automatic PI generation fails, the reason stays on the session until it is fixed.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "stock take session auto close",
+      "stock take automatic PI errors"
+    ],
+    "steps": [
+      "Post every planned PI document of a session: confirm it moves to Closed with 'Closed automatically: 100% of the PI documents are posted.'",
+      "For a session past its end date whose created PIs are all posted, open Stock take: confirm it closes",
+      "Create a session from an automatic-PI configuration in a warehouse whose materials have no opening stock: confirm the red notice names the materials and stays when you reopen the session; post opening stock and tap Create PI documents"
+    ],
+    "expected": "Sessions never need closing by hand, and a failed automatic generation always explains itself."
   }
 ]

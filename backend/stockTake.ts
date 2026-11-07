@@ -279,20 +279,46 @@ function campaignClosedReason(c: Obj, now: string): string {
  * left) and every PI document that is not disregarded is reconciled or closed with its stock posted. It cannot be
  * closed by hand. Returns true when it was closed now.
  */
+/**
+ * Whether a session's posting is 100% done: it is set up, has PI documents, every PI document that is not disregarded
+ * is reconciled or closed with its stock posted, and no more PI documents can come: the planned number exists, the
+ * locations ran out, or the session has passed its end date (after which no PI document can be created).
+ */
+export function sessionComplete(session: Obj, pis: Obj[], now: string): boolean {
+    if (str(session.status) !== 'open' || session.setupRequired === true) return false;
+    const live = pis.filter((x) => str(x.status) !== 'disregarded');
+    if (!live.length || !live.every((x) => ['reconciled', 'closed_posted'].includes(str(x.status)))) return false;
+    const p = sessionProgress(session, pis, now);
+    const ended = !!str(session.endAt) && Date.parse(now) > Date.parse(str(session.endAt));
+    return p.piDocuments.originals >= p.piDocuments.planned || session.locationsExhausted === true || ended;
+}
+
 export async function autoCloseSession(orgId: string, campaignId: string, by: string): Promise<boolean> {
     if (!CAMPAIGN_RE.test(campaignId)) return false;
     const root = `organizations/${orgId}`;
     const doc = await getDoc(`${root}/${CAMPAIGNS}/${campaignId}`);
     if (!doc || str(doc.data.status) !== 'open' || doc.data.setupRequired === true) return false;
     const pis = (await listDocs(`${root}/stock_take_sessions`)).filter((x) => str(x.data.campaignId) === campaignId);
-    const live = pis.filter((x) => str(x.data.status) !== 'disregarded');
-    if (!live.length || !live.every((x) => ['reconciled', 'closed_posted'].includes(str(x.data.status)))) return false;
     const now = nowIso();
+    if (!sessionComplete(doc.data, pis.map((x) => x.data), now)) return false;
     const progress = sessionProgress(doc.data, pis.map((x) => x.data), now);
-    if (progress.piDocuments.originals < progress.piDocuments.planned && doc.data.locationsExhausted !== true) return false;
     await writeDoc(`${root}/${CAMPAIGNS}/${campaignId}`, { ...doc.data, status: 'closed', closedAt: now, closedBy: by, closureReason: 'Closed automatically: 100% of the PI documents are posted.', finalProgress: progress, updatedAt: now, updatedBy: by } as never);
     await audit([{ category: 'inventory', action: 'inventory.stocktake.count_session.auto_close', orgId, target: { type: 'stock_take_session', id: campaignId, label: `Stock take session ${campaignId}` }, details: `PI documents ${progress.piDocuments.total}; stock accuracy ${progress.stockAccuracy.pct}%; count accuracy ${progress.countAccuracy.pct}%` }]);
     return true;
+}
+
+/**
+ * Sessions whose posting is complete are closed as soon as anyone opens Stock take (not only after a posting or at the
+ * nightly run). Decided from the data already loaded; only sessions that are complete are written.
+ */
+async function closeCompleted(ctx: OrgContext, campaigns: Doc[], pis: Doc[], now: string): Promise<Doc[]> {
+    const out: Doc[] = [];
+    for (const c of campaigns) {
+        if (str(c.data.status) === 'open' && sessionComplete(c.data, pis.filter((x) => str(x.data.campaignId) === c.id).map((x) => x.data), now) && (await autoCloseSession(ctx.orgId, c.id, 'automation'))) {
+            out.push((await getDoc(`${rootOf(ctx)}/${CAMPAIGNS}/${c.id}`)) ?? c);
+        } else out.push(c);
+    }
+    return out;
 }
 
 async function getSession(ctx: OrgContext, id: string, mode: 'read' | 'write') {
@@ -460,7 +486,7 @@ export const stockTakeRoutes = {
             const [configs, sessions, campaigns] = await Promise.all([listDocs(`${root}/stock_take_configs`), listDocs(`${root}/stock_take_sessions`), listDocs(`${root}/${CAMPAIGNS}`)]);
             const now = nowIso();
             return {
-                countSessions: campaigns
+                countSessions: (await closeCompleted(ctx, campaigns, sessions, now))
                     .filter((c) => visible.has(str(c.data.warehouseId)))
                     .map((c) => {
                         const pis = sessions.filter((x) => str(x.data.campaignId) === c.id).map((x) => x.data);
@@ -631,7 +657,14 @@ export const stockTakeRoutes = {
             if (!doc || !warehouses.some((w) => w.id === str(doc.data.warehouseId))) throw new HttpError(404, 'Stock take session not found');
             await requireAtWarehouse(ctx, 'INV_ST_008', str(doc.data.warehouseId));
             if (str(doc.data.endAt) && Date.parse(nowIso()) > Date.parse(str(doc.data.endAt))) throw new HttpError(409, 'This session has passed its end date.');
-            const r = await generateSessionPis(ctx.orgId, id, ctx.uid);
+            let r: { created: string[] };
+            try {
+                r = await generateSessionPis(ctx.orgId, id, ctx.uid);
+            } catch (e) {
+                await recordGeneration(ctx.orgId, id, e instanceof Error ? e.message : 'PI documents could not be generated');
+                throw e;
+            }
+            await recordGeneration(ctx.orgId, id, '');
             await audited(ctx, 'inventory.stocktake.count_session.generate', `Stock take session ${id}`, { created: r.created.length });
             return { ok: true, created: r.created };
         }),
@@ -1289,11 +1322,22 @@ export async function generateSessionPis(orgId: string, campaignId: string, by: 
 /** After a session is complete: generate its PI documents when the configuration says so; a failure is reported, not thrown. */
 async function autoGenerate(orgId: string, campaignId: string, configData: Obj | undefined, by: string) {
     if (str(configData?.piCreation) !== 'automatic') return { generated: 0, generateError: '' };
+    let out: { generated: number; generateError: string };
     try {
-        return { generated: (await generateSessionPis(orgId, campaignId, by)).created.length, generateError: '' };
+        out = { generated: (await generateSessionPis(orgId, campaignId, by)).created.length, generateError: '' };
     } catch (e) {
-        return { generated: 0, generateError: e instanceof Error ? e.message : 'PI documents could not be generated' };
+        out = { generated: 0, generateError: e instanceof Error ? e.message : 'PI documents could not be generated' };
     }
+    await recordGeneration(orgId, campaignId, out.generateError);
+    return out;
+}
+
+/** Keep the last automatic generation problem on the session, so the screen says why there are no PI documents. */
+async function recordGeneration(orgId: string, campaignId: string, error: string) {
+    const path = `organizations/${orgId}/${CAMPAIGNS}/${campaignId}`;
+    const doc = await getDoc(path);
+    if (!doc || str(doc.data.autoPiError) === error) return;
+    await writeDoc(path, { ...doc.data, autoPiError: error.slice(0, 500), autoPiErrorAt: error ? nowIso() : '', updatedAt: nowIso() } as never);
 }
 
 // ---------------------------------------------------------------------------
@@ -1306,7 +1350,7 @@ async function autoGenerate(orgId: string, campaignId: string, configData: Obj |
 // ---------------------------------------------------------------------------
 
 export async function stockTakeAutomationForOrg(orgId: string, deadline: number) {
-    const out = { created: 0, closed: 0, failed: 0, complete: true };
+    const out = { created: 0, closed: 0, generated: 0, failed: 0, complete: true };
     const root = `organizations/${orgId}`;
     const today = nairobiDay();
     const configs = await listDocs(`${root}/stock_take_configs`);
@@ -1371,9 +1415,18 @@ export async function stockTakeAutomationForOrg(orgId: string, deadline: number)
             await audit([{ category: 'inventory', action: 'inventory.stocktake.count_session.auto_create', outcome: 'failure', orgId, target: { type: 'stock_take_config', id: c.id }, details: (e instanceof Error ? e.message : 'failed').slice(0, 200) }]);
         }
     }
+    const cfgById = new Map(configs.map((c) => [c.id, c.data]));
     for (const s of await listDocs(`${root}/${CAMPAIGNS}`)) {
         if (Date.now() > deadline) return { ...out, complete: false };
-        if (str(s.data.status) === 'open' && (await autoCloseSession(orgId, s.id, 'automation'))) out.closed++;
+        if (str(s.data.status) !== 'open') continue;
+        // Automatic PI documents that could not be generated earlier (for example a missing stock baseline) are retried.
+        const cfg = cfgById.get(str(s.data.configId));
+        const ended = !!str(s.data.endAt) && Date.parse(nowIso()) > Date.parse(str(s.data.endAt));
+        if (str(cfg?.piCreation) === 'automatic' && s.data.setupRequired !== true && !ended && s.data.locationsExhausted !== true) {
+            const pis = (await listDocs(`${root}/stock_take_sessions`)).filter((x) => str(x.data.campaignId) === s.id && !str(x.data.parentPi) && str(x.data.status) !== 'disregarded');
+            if (pis.length < plannedPis(metricsOf(s.data).targetMaterials, metricsOf(s.data).materialsPerPi)) out.generated += (await autoGenerate(orgId, s.id, cfg, 'automation')).generated;
+        }
+        if (await autoCloseSession(orgId, s.id, 'automation')) out.closed++;
     }
     return out;
 }
