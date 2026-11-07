@@ -36,6 +36,6 @@ test('Stock Take screen: a barred step is disabled with the reason, test mode is
     assert.match(screen, /so you cannot approve its posting\. Another person with the Stock Take posting approval permission/);
     assert.match(screen, /Platform test mode is on for your organization: as super administrator/);
     assert.match(screen, /const count = \(n: number, one: string, many = `\$\{one\}s`\)/);
-    assert.match(screen, /\$\{count\(postable, 'line'\)\} will be released for posting to the material journal/);
+    assert.match(screen, /\$\{count\(postable, 'line'\)\} \$\{postable === 1 \? 'is' : 'are'\} posted to the material journal now/);
     assert.doesNotMatch(screen, /\$\{postable\} lines will be released/, 'the "1 lines" wording is gone');
 });

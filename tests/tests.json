@@ -1098,5 +1098,26 @@
       "Create a session from an automatic-PI configuration in a warehouse whose materials have no opening stock: confirm the red notice names the materials and stays when you reopen the session; post opening stock and tap Create PI documents"
     ],
     "expected": "Sessions never need closing by hand, and a failed automatic generation always explains itself."
+  },
+  {
+    "name": "Stock take: accept-and-post, recounts instead of edits, closed PIs hidden, cycle daily sessions and PI release",
+    "description": "After counting there is one Accept step. With no variance it posts and closes the PI. With a variance it goes for Chart of Authority approval, and the last approval posts. Counts cannot be edited; recount lines or the whole PI instead. Closed PIs leave the active list. Cycle counts run one session or a session per day, with PIs all at once or each day, and show the target PIs per day.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "stock take accept and post",
+      "stock take full recount",
+      "stock take closed PIs",
+      "stock take cycle daily sessions",
+      "stock take daily PI release"
+    ],
+    "steps": [
+      "Count a PI with no differences and accept it: confirm 'Accept & post' posts and closes it, and it leaves the session's list (toggle Show closed PI documents to see it)",
+      "Count a PI with a difference: confirm 'Accept & send for approval', then the last approver sees 'Approve & post' and the PI is posted on approval",
+      "Confirm there is no Edit counts button and Print is not offered after counts are submitted; use Full recount with a reason and confirm a recount PI is created and the original is closed as Recounted",
+      "Cycle Count config, one session, PIs each day: confirm the session shows Target PIs per day and 'Create today's PI documents' creates only today's share; the nightly run adds each day's share",
+      "Cycle Count config, a session each day (automatic): after midnight confirm a session for the day; set up the first one with the whole cycle's materials; confirm later days are set up automatically with an even share and never repeat a location"
+    ],
+    "expected": "PIs close in one accept step or on the last approval, closed PIs disappear from the active list, and cycle counts are spread across days."
   }
 ]

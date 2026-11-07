@@ -48,6 +48,9 @@ interface Config {
     sessionCreation?: 'automatic' | 'manual';
     /** Automatic: every planned PI document is generated once the session is complete. */
     piCreation?: 'automatic' | 'manual';
+    /** Cycle count: one session for the whole cycle or a session each day; with one session, PIs all at once or daily. */
+    cycleSessions?: 'single' | 'daily' | '';
+    cyclePiRelease?: 'all' | 'daily' | '';
     lastSessionCreatedAt?: string;
     lastSessionId?: string;
     nextSessionDueOn?: string;
@@ -171,6 +174,12 @@ interface CountSession {
     /** Why the automatic PI documents could not be generated (kept until a later run succeeds). */
     autoPiError?: string;
     autoPiErrorAt?: string;
+    cycleId?: string;
+    cycleStart?: string;
+    cycleEnd?: string;
+    cycleDays?: number;
+    cycleDay?: number;
+    cycleSessions?: string;
     fullScope?: boolean;
     origin?: 'manual' | 'automatic';
     criticalityClasses?: string[];
@@ -195,7 +204,8 @@ const API = '/api/org/inventory/stocktake/';
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const TYPES = ['Cycle Count', 'Full Stock Take', 'Cluster Stock Take', 'Random Stock Take'];
 const PERIODS = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annually'];
-const CLOSED = ['reconciled', 'disregarded', 'closed_posted'];
+/** Closed PI documents: reconciled, closed, disregarded, wholly recounted, or partly posted with the rest on a recount PI. */
+const CLOSED = ['reconciled', 'disregarded', 'closed_posted', 'recounted', 'recount_pending'];
 const MAX_UPLOAD_BYTES = 450_000;
 const UPLOAD_TYPES: Record<string, string[]> = { 'application/pdf': ['pdf'], 'image/jpeg': ['jpg', 'jpeg'], 'image/png': ['png'] };
 
@@ -206,7 +216,8 @@ const STATUS: Record<string, { label: string; tone: 'brand' | 'muted' | 'danger'
     verified: { label: 'Verified', tone: 'brand' },
     pending_post_approval: { label: 'Awaiting posting approval', tone: 'warn' },
     approved_for_posting: { label: 'Approved for posting', tone: 'brand' },
-    recount_pending: { label: 'Partially posted (recount pending)', tone: 'warn' },
+    recount_pending: { label: 'Posted (rest recounted)', tone: 'brand' },
+    recounted: { label: 'Recounted', tone: 'muted' },
     posted: { label: 'Posted', tone: 'brand' },
     reconciled: { label: 'Reconciled', tone: 'brand' },
     disregarded: { label: 'Disregarded', tone: 'danger' },
@@ -487,6 +498,7 @@ export default function StockTake() {
                     session={openedSession}
                     pis={allSessions.filter((p) => p.campaignId === openedSession.id)}
                     autoPis={data.configs.find((x) => x.id === openedSession.configId)?.piCreation === 'automatic'}
+                    cfg={data.configs.find((x) => x.id === openedSession.configId)}
                     warehouse={warehouseName.get(openedSession.warehouseId) || openedSession.warehouseId}
                     notice={opened ? '' : notice}
                     ask={confirm.ask}
@@ -645,7 +657,8 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
     const anyPosted = s.lines.some((l) => l.posted);
     const blind = st === 'awaiting_print' || st === 'counting';
     const entering = st === 'counting' || (st === 'verification' && editingCounts);
-    const canPrint = !['posted', 'reconciled', 'closed_posted', 'disregarded'].includes(st);
+    // Steps already done are not offered again: printing ends once the counts are in.
+    const canPrint = st === 'awaiting_print' || st === 'counting';
     const canDisregard = !['reconciled', 'disregarded', 'posted', 'recount_pending', 'closed_posted'].includes(st) && !anyPosted;
     const canClosePosted = (st === 'posted' || anyPosted) && !closed;
     const varianceLines = s.lines.filter((l) => hasVariance(l)).length;
@@ -663,6 +676,7 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
     const coaBarred = coaRouted && st === 'pending_post_approval' && !coa?.ok;
     const approveBarred = (!!you?.approveConflict && !testMode) || coaBarred;
     const steps = s.approval?.steps ?? [];
+    const lastApproval = !coaRouted || steps.filter((x) => x.status === 'pending').length <= 1;
     const postBarred = !!you?.postConflict && !testMode;
     const whyYou = (c: boolean, r: boolean) => (c && r ? 'counted this PI and submitted it for posting' : c ? 'counted this PI' : 'submitted this PI for posting');
 
@@ -776,6 +790,12 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
         );
     }
     if (st === 'verification' && !editingCounts) {
+        // One step: accept the counts and, for the lines not recounted, post at once when there is no variance or send the
+        // variance for approval under the Chart of Authority (posted on the last approval). Counts are never edited.
+        const remaining = s.lines.filter((_, i) => !recounts.includes(i));
+        const remainingVariance = remaining.filter((l) => hasVariance(l)).length;
+        const allRecount = remaining.length === 0;
+        const acceptLabel = allRecount ? 'Accept & recount' : remainingVariance ? 'Accept & send for approval' : 'Accept & post';
         actions.push(
             <Button
                 key='verify'
@@ -783,20 +803,39 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                 onClick={() =>
                     run(
                         {
-                            title: 'Accept verification?',
-                            message: `${recounts.length} of ${count(varianceLines, 'line')} with a variance ${recounts.length === 1 ? 'is' : 'are'} flagged for recount; all other lines become verified and ready to submit for posting. ${testMode && you?.verifyConflict ? 'Test mode is on for your organization, so you may verify counts you made; this is recorded in the audit trail.' : 'Counts must be verified by someone other than the person who counted or corrected them.'}`,
-                            confirmLabel: 'Accept verification',
+                            title: `${acceptLabel}?`,
+                            message: `${recounts.length ? `${count(recounts.length, 'line')} ${recounts.length === 1 ? 'goes' : 'go'} to a recount PI. ` : ''}${
+                                allRecount ? 'Nothing is posted from this PI.' : remainingVariance ? `${count(remaining.length, 'line')} with ${count(remainingVariance, 'variance')} ${remainingVariance === 1 ? 'is' : 'are'} sent for approval under the Chart of Authority and posted on the last approval.` : `${count(remaining.length, 'line')} with no variance ${remaining.length === 1 ? 'is' : 'are'} posted now and the PI is closed.`
+                            } ${testMode && you?.verifyConflict ? 'Test mode is on for your organization, so you may accept counts you made; this is recorded in the audit trail.' : 'Counts must be accepted by someone other than the person who counted them.'}`,
+                            confirmLabel: acceptLabel,
+                            acknowledge: 'I have reviewed the counts and variances of this PI.',
                         },
-                        'verify',
-                        () => `${s.piNumber} verified.`,
+                        'accept',
+                        (r) => {
+                            const o = (r as { outcome?: string; recountPi?: string }).outcome;
+                            const rc = (r as { recountPi?: string }).recountPi;
+                            return `${s.piNumber} ${o === 'posted' ? 'posted and closed' : o === 'recounted' ? 'closed' : 'sent for approval'}.${rc ? ` Recount PI ${rc} created.` : ''}`;
+                        },
                         () => ({ recountIndices: [...recounts].sort((a, b) => a - b) })
                     )
                 }
             >
-                <ClipboardCheck className='h-4 w-4' /> Accept verification
+                <ClipboardCheck className='h-4 w-4' /> {acceptLabel}
             </Button>,
-            <Button key='edit' variant='secondary' onClick={startEdit}>
-                <Pencil className='h-4 w-4' /> Edit counts
+            <Button
+                key='full-recount'
+                variant='secondary'
+                disabled={verifyBarred}
+                onClick={() =>
+                    run(
+                        { title: 'Recount the whole PI?', message: `All ${count(s.lines.length, 'location')} of ${s.piNumber} go to a new recount PI with fresh system quantities. Nothing is posted from this PI, which is closed as recounted.`, confirmLabel: 'Order full recount', reason: { label: 'Reason for a full recount', minLength: 10 } },
+                        'accept',
+                        (r) => `${s.piNumber} closed; recount PI ${(r as { recountPi?: string }).recountPi ?? ''} created.`,
+                        (reason) => ({ fullRecount: true, reason })
+                    )
+                }
+            >
+                <RotateCcw className='h-4 w-4' /> Full recount
             </Button>
         );
     }
@@ -858,17 +897,17 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                 onClick={() =>
                     run(
                         {
-                            title: coaRouted ? `Approve level ${coa?.level ?? ''}?` : 'Approve posting?',
-                            message: `${coaRouted ? `You approve level ${coa?.level} (${coa?.title}) for a variance value of ${money(s.varianceValue ?? 0)}. ${steps.filter((x) => x.status === 'pending').length > 1 ? 'The next level must then approve before posting.' : `${count(postable, 'line')} will then be released for posting to the material journal.`}` : `${count(postable, 'line')} will be released for posting to the material journal.`} ${testMode && (you?.approveConflict || coa?.testMode) ? 'Test mode is on for your organization, so you may approve this yourself; this is recorded in the audit trail.' : 'You cannot approve a PI you counted or submitted for posting.'}`,
-                            confirmLabel: coaRouted ? `Approve ${coa?.level ?? ''}` : 'Approve posting',
+                            title: lastApproval ? `${coaRouted ? `Approve level ${coa?.level ?? ''}` : 'Approve'} and post?` : `Approve level ${coa?.level ?? ''}?`,
+                            message: `${coaRouted ? `You approve level ${coa?.level} (${coa?.title}) for a variance value of ${money(s.varianceValue ?? 0)}. ${steps.filter((x) => x.status === 'pending').length > 1 ? 'The next level must then approve before posting.' : `As the last approval, ${count(postable, 'line')} ${postable === 1 ? 'is' : 'are'} posted to the material journal now.`}` : `${count(postable, 'line')} ${postable === 1 ? 'is' : 'are'} posted to the material journal now.`} ${testMode && (you?.approveConflict || coa?.testMode) ? 'Test mode is on for your organization, so you may approve this yourself; this is recorded in the audit trail.' : 'You cannot approve a PI you counted or submitted for posting.'}`,
+                            confirmLabel: lastApproval ? 'Approve & post' : `Approve ${coa?.level ?? ''}`,
                             acknowledge: 'I have reviewed the counts and variances of this PI and approve them for posting.',
                         },
                         'approve_posting',
-                        () => `Posting of ${s.piNumber} approved.`
+                        (r) => ((r as { outcome?: string }).outcome === 'posted' ? `${s.piNumber} approved, posted and closed.` : `Level ${coa?.level ?? ''} of ${s.piNumber} approved.`)
                     )
                 }
             >
-                <ShieldCheck className='h-4 w-4' /> {coaRouted ? `Approve ${coa?.level ?? ''}` : 'Approve posting'}
+                <ShieldCheck className='h-4 w-4' /> {lastApproval ? 'Approve & post' : `Approve ${coa?.level ?? ''}`}
             </Button>,
             <Button
                 key='return'
@@ -1291,6 +1330,7 @@ function CountSessionPanel({
     session: c,
     pis,
     autoPis,
+    cfg,
     warehouse,
     notice,
     ask,
@@ -1302,6 +1342,7 @@ function CountSessionPanel({
     session: CountSession;
     pis: Session[];
     autoPis: boolean;
+    cfg?: Config;
     warehouse: string;
     notice: string;
     ask: Ask;
@@ -1311,6 +1352,10 @@ function CountSessionPanel({
     onClose: () => void;
 }) {
     const [tab, setTab] = useState<'pis' | 'report'>('pis');
+    // Closed PI documents (posted, reconciled, recounted, disregarded) leave the active list unless asked for.
+    const [showClosedPis, setShowClosedPis] = useState(false);
+    const closedPis = pis.filter((p) => CLOSED.includes(p.status)).length;
+    const shownPis = showClosedPis ? pis : pis.filter((p) => !CLOSED.includes(p.status));
     const open = c.status === 'open';
     const openPis = pis.filter((p) => !CLOSED.includes(p.status));
     const anyPosted = pis.some((p) => p.lines.some((l) => l.posted));
@@ -1335,7 +1380,11 @@ function CountSessionPanel({
     } else if (open && autoPis) {
         // Automatic configurations: every planned PI document at once (normally done when the session was completed;
         // this retries after a problem such as a missing stock baseline was fixed).
-        const remaining = Math.max(0, c.progress.piDocuments.planned - c.progress.piDocuments.originals);
+        // Daily release (one session for a cycle): only today's share is due now.
+        const dailyRelease = cfg?.type === 'Cycle Count' && cfg.cycleSessions === 'single' && cfg.cyclePiRelease === 'daily';
+        const planned = c.progress.piDocuments.planned;
+        const dueNow = dailyRelease ? Math.min(planned, Math.ceil((planned * (Math.min(runDaysOf(c) - 1, Math.max(0, Math.floor((Date.now() - Date.parse(c.startAt)) / 86_400_000))) + 1)) / runDaysOf(c))) : planned;
+        const remaining = Math.max(0, dueNow - c.progress.piDocuments.originals);
         actions.push(
             <Button
                 key='generate'
@@ -1347,7 +1396,7 @@ function CountSessionPanel({
                     })
                 }
             >
-                <Plus className='h-4 w-4' /> Create PI documents{remaining ? ` (${remaining})` : ''}
+                <Plus className='h-4 w-4' /> {dailyRelease ? "Create today's PI documents" : 'Create PI documents'}{remaining ? ` (${remaining})` : ''}
             </Button>
         );
     } else if (open) {
@@ -1399,7 +1448,7 @@ function CountSessionPanel({
                 value={tab}
                 onChange={setTab}
                 options={[
-                    { value: 'pis', label: 'PI documents', count: pis.length },
+                    { value: 'pis', label: 'PI documents', count: pis.length - closedPis },
                     { value: 'report', label: 'Progress report' },
                 ]}
             />
@@ -1413,14 +1462,26 @@ function CountSessionPanel({
                             <Detail label='End'>{c.endAt ? fmtWhen(c.endAt) : 'Open-ended'}</Detail>
                             <Detail label='Materials to count'>{c.setupRequired ? 'Not set yet' : c.progress.materials.target}</Detail>
                             <Detail label='PI documents'>{c.setupRequired ? 'Not set yet' : `${c.progress.piDocuments.originals} of ${c.progress.piDocuments.planned} (${c.progress.materials.perPi} per PI)`}</Detail>
+                            {c.cycleId && (
+                                <Detail label='Cycle'>
+                                    {c.cycleSessions === 'daily' ? `Day ${c.cycleDay ?? '?'} of ${c.cycleDays ?? '?'}` : `${c.cycleStart} to ${c.cycleEnd}`}
+                                </Detail>
+                            )}
+                            {!c.setupRequired && runDaysOf(c) > 1 && <Detail label='Target PIs per day'>{Math.ceil(c.progress.piDocuments.planned / runDaysOf(c))}</Detail>}
                         </dl>
                     </Card>
+                    {closedPis > 0 && (
+                        <label className='flex min-h-[44px] items-center gap-3'>
+                            <Toggle checked={showClosedPis} onChange={setShowClosedPis} label='Show closed PI documents' />
+                            <span className='text-sm text-soft'>Show closed PI documents ({closedPis})</span>
+                        </label>
+                    )}
                     <RichTable
                         id='inv.stocktake.countsession.pis'
                         title={`${c.sessionNumber} PI documents`}
                         fileName={`Stock_take_${c.sessionNumber}_PI_documents`}
                         columns={piColumns}
-                        rows={pis}
+                        rows={shownPis}
                         rowKey={(p) => p.id}
                         onRowClick={(p) => onOpenPi(p.id)}
                         empty={open ? (c.setupRequired ? 'Complete the setup first, then create PI documents.' : autoPis ? 'No PI documents yet. They are generated automatically; tap Create PI documents to generate them now.' : 'No PI documents yet. Tap New PI document.') : 'No PI documents were created in this session.'}
@@ -1459,7 +1520,7 @@ function ProgressReport({ session: c, warehouse }: { session: CountSession; ware
         <div className='space-y-3'>
             <div className='grid grid-cols-2 gap-2'>
                 <Stat label='Completion' value={pctText(p.completionPct)} note={`${p.piDocuments.closed} of ${p.piDocuments.live} complete`} />
-                <Stat label='PI documents' value={`${p.piDocuments.originals}/${p.piDocuments.planned}`} note={`${p.materials.perPi} per PI${p.piDocuments.recounts ? ` · ${count(p.piDocuments.recounts, 'recount')}` : ''}`} />
+                <Stat label='PI documents' value={`${p.piDocuments.originals}/${p.piDocuments.planned}`} note={`${p.materials.perPi} per PI${runDaysOf(c) > 1 ? ` · target ${Math.ceil(p.piDocuments.planned / runDaysOf(c))}/day` : ''}${p.piDocuments.recounts ? ` · ${count(p.piDocuments.recounts, 'recount')}` : ''}`} />
                 <Stat label='Count accuracy' value={pctText(p.countAccuracy.pct)} note={`${count(p.countAccuracy.errors, 'recount error')} · ${p.countAccuracy.errorPct}% error`} tone={kpiTone(p.countAccuracy)} />
                 <Stat label='Stock accuracy' value={pctText(p.stockAccuracy.pct)} note={`${count(p.stockAccuracy.errors, 'error')} posted · ${p.stockAccuracy.errorPct}% error`} tone={kpiTone(p.stockAccuracy)} />
                 <Stat label='Materials on PIs' value={p.materials.onPis} note={`Of ${p.materials.target} to count · ${pctText(p.materials.onPisPct)}`} />
@@ -1525,6 +1586,9 @@ function ProgressReport({ session: c, warehouse }: { session: CountSession; ware
 const generatedText = (r: { generated?: number; generateError?: string }) =>
     r.generateError ? ` PI documents were not generated: ${r.generateError}` : r.generated ? ` ${count(r.generated, 'PI document')} generated.` : '';
 
+/** Days a session runs (whole days, at least 1). */
+const runDaysOf = (c: { startAt: string; endAt: string }) => (c.endAt ? Math.max(1, Math.ceil((Date.parse(c.endAt) - Date.parse(c.startAt)) / 86_400_000)) : 1);
+
 /** Count sheets printed per PI document (copies _A, _B …), 1 to 5. */
 function CopiesField({ id, value, error, onChange }: { id: string; value: string; error?: string; onChange: (v: string) => void }) {
     return (
@@ -1582,6 +1646,9 @@ function MaterialsToCount({ id, all, locked = false, value, configId, warehouseI
 function SetupSessionPanel({ session: c, autoPis, ask, onClose, onDone }: { session: CountSession; autoPis: boolean; ask: Ask; onClose: () => void; onDone: (message: string) => void }) {
     const [f, setF] = useState({ name: c.name, targetMaterials: '', materialsPerPi: '20', piCopies: '1' });
     const [all, setAll] = useState(c.fullScope === true);
+    // A cycle run as daily sessions: the figures entered are for the whole cycle; this day takes an even share.
+    const dailyCycle = c.cycleSessions === 'daily' && !!c.cycleEnd;
+    const daysLeft = dailyCycle ? Math.max(1, Math.round((Date.parse(`${c.cycleEnd}T00:00:00Z`) - Date.parse(`${new Date(Date.parse(c.startAt) + 3 * 3_600_000).toISOString().slice(0, 10)}T00:00:00Z`)) / 86_400_000) || 1) : 1;
     const [tried, setTried] = useState(false);
     const e: Record<string, string> = {};
     if (f.name.trim().length < 3 || f.name.trim().length > 80) e.name = '3 to 80 characters';
@@ -1632,8 +1699,9 @@ function SetupSessionPanel({ session: c, autoPis, ask, onClose, onDone }: { sess
                     <Field id='sts-setup-per-pi' label='Materials per PI *' inputMode='numeric' maxLength={4} value={f.materialsPerPi} onChange={(x) => set('materialsPerPi', x.target.value)} error={show('materialsPerPi')} />
                     <CopiesField id='sts-setup-copies' value={f.piCopies} onChange={(v) => set('piCopies', v)} />
                     <div className='flex flex-col justify-center rounded-xl border border-line px-3'>
-                        <span className='text-xs text-muted'>PI documents</span>
+                        <span className='text-xs text-muted'>{dailyCycle ? 'PI documents in the cycle' : 'PI documents'}</span>
                         <span className='text-lg font-semibold text-ink'>{pis || '—'}</span>
+                        {pis > 0 && dailyCycle && <span className='text-xs text-muted'>≈ {Math.ceil(Number(f.targetMaterials) / daysLeft)} materials ({Math.ceil(pis / daysLeft)} PIs) per day for {count(daysLeft, 'day')}</span>}
                     </div>
                 </div>
             </Card>
@@ -1719,10 +1787,12 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
     const shown = (k: PlanKey) => (touched[k] || tried ? errors[k] : undefined);
     const set = (k: PlanKey, v: string) => setForm((f) => ({ ...f, [k]: v }));
     const touch = (k: PlanKey) => setTouched((t) => ({ ...t, [k]: true }));
-    const enabledConfigs = data.configs.filter((c) => c.active !== false);
+    // Daily cycle sessions are only ever created by the automation.
+    const enabledConfigs = data.configs.filter((c) => c.active !== false && !(c.type === 'Cycle Count' && c.cycleSessions === 'daily'));
     const startMs = Date.parse(form.startAt);
     const cycleCfg = cfg?.type === 'Cycle Count';
     const endIso = !Number.isFinite(startMs) || !cfg ? '' : cycleCfg ? cyclePeriodEnd(startMs, cfg.period) : cfg.durationDays ? new Date(startMs + cfg.durationDays * 86_400_000).toISOString() : '';
+    const runDays = endIso && Number.isFinite(startMs) ? Math.max(1, Math.ceil((Date.parse(endIso) - startMs) / 86_400_000)) : 0;
     const piCount = isWhole(form.targetMaterials, 1, 1_000_000) && isWhole(form.materialsPerPi, 1, 1000) ? Math.ceil(Number(form.targetMaterials) / Number(form.materialsPerPi)) : 0;
 
     const pickConfig = (id: string) => {
@@ -1828,6 +1898,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                     <div className='flex flex-col justify-center rounded-xl border border-line px-3'>
                         <span className='text-xs text-muted'>PI documents</span>
                         <span className='text-lg font-semibold text-ink'>{piCount || '—'}</span>
+                        {piCount > 0 && runDays > 1 && <span className='text-xs text-muted'>Target {Math.ceil(piCount / runDays)} per day over {count(runDays, 'day')}</span>}
                     </div>
                 </div>
                 <p className='text-xs text-muted'>The number of PI documents is the materials to count divided by the materials per PI, rounded up. Count accuracy, stock accuracy and variance value are measured in the progress report and Statistics.</p>
@@ -2027,6 +2098,8 @@ interface ConfigForm {
     period: string;
     sessionCreation: '' | 'automatic' | 'manual';
     piCreation: '' | 'automatic' | 'manual';
+    cycleSessions: '' | 'single' | 'daily';
+    cyclePiRelease: '' | 'all' | 'daily';
     warehouseId: string;
     clusterIds: string[];
 }
@@ -2034,7 +2107,7 @@ type FormKey = keyof ConfigForm;
 const CLASSES = ['A', 'B', 'C', 'D'];
 
 function formOf(c: Config | null): ConfigForm {
-    if (!c) return { type: 'Cycle Count', name: 'Cycle Count', selection: 'Sequence', byCriticality: false, criticalityClasses: [], durationDays: '30', fullScope: '', periodic: true, period: 'Monthly', sessionCreation: '', piCreation: '', warehouseId: '', clusterIds: [] };
+    if (!c) return { type: 'Cycle Count', name: 'Cycle Count', selection: 'Sequence', byCriticality: false, criticalityClasses: [], durationDays: '30', fullScope: '', periodic: true, period: 'Monthly', sessionCreation: '', piCreation: '', cycleSessions: '', cyclePiRelease: '', warehouseId: '', clusterIds: [] };
     return {
         type: c.type,
         name: c.name,
@@ -2047,6 +2120,8 @@ function formOf(c: Config | null): ConfigForm {
         period: c.period || 'Monthly',
         sessionCreation: c.periodic ? (c.sessionCreation ?? 'manual') : '',
         piCreation: c.piCreation ?? 'manual',
+        cycleSessions: c.type === 'Cycle Count' ? (c.cycleSessions || 'single') : '',
+        cyclePiRelease: c.cyclePiRelease || '',
         warehouseId: c.warehouseId || '',
         clusterIds: c.clusterIds?.length ? c.clusterIds : c.clusterId ? [c.clusterId] : [],
     };
@@ -2066,6 +2141,9 @@ function configErrors(f: ConfigForm): Partial<Record<FormKey, string>> {
     else if (f.type === 'Cluster Stock Take' && !f.clusterIds.length) e.clusterIds = 'Choose at least one cluster.';
     if (f.periodic && !PERIODS.includes(f.period)) e.period = 'Choose how often the stock take runs.';
     if (!f.piCreation) e.piCreation = 'Choose whether PI documents are created automatically or manually.';
+    if (cycle && !f.cycleSessions) e.cycleSessions = 'Choose one session for the whole cycle or a session each day.';
+    if (cycle && f.cycleSessions === 'daily' && f.sessionCreation !== 'automatic') e.cycleSessions = 'Daily sessions are created by the automation: set sessions to be created automatically.';
+    if (cycle && f.cycleSessions === 'single' && f.piCreation === 'automatic' && !f.cyclePiRelease) e.cyclePiRelease = 'Choose whether the PI documents are created all at once or each day.';
     if (f.periodic && !f.sessionCreation) e.sessionCreation = 'Choose whether sessions are created automatically or manually.';
     if (f.periodic && f.sessionCreation === 'automatic' && !f.warehouseId) e.warehouseId = 'Choose the warehouse automatic sessions are created for.';
     return e;
@@ -2134,6 +2212,8 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
             period: form.period,
             sessionCreation: form.periodic ? form.sessionCreation : 'manual',
             piCreation: form.piCreation,
+            cycleSessions: cycle ? form.cycleSessions : '',
+            cyclePiRelease: cycle && form.cycleSessions === 'single' && form.piCreation === 'automatic' ? form.cyclePiRelease : '',
             warehouseId: form.warehouseId,
             clusterIds: form.type === 'Cluster Stock Take' ? form.clusterIds : [],
         };
@@ -2341,6 +2421,27 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
                     <option value='automatic'>Automatically, all at once when the session is complete</option>
                     <option value='manual'>Manually, one at a time</option>
                 </SelectField>
+                {cycle && (
+                    <SelectField
+                        id='st-cfg-cycle-sessions'
+                        label='Sessions for each cycle *'
+                        value={form.cycleSessions}
+                        onChange={(e) => (set({ cycleSessions: e.target.value as ConfigForm['cycleSessions'], ...(e.target.value === 'daily' ? { sessionCreation: 'automatic' as const } : {}) }), touch('cycleSessions'))}
+                        error={err('cycleSessions')}
+                        hint={form.cycleSessions === 'daily' ? 'The automation creates a session every day. The first day of each cycle is set up once (the whole cycle’s materials); every later day takes an even share of what is left.' : 'One session runs for the whole cycle.'}
+                    >
+                        <option value=''>Choose</option>
+                        <option value='single'>One session for the whole cycle</option>
+                        <option value='daily'>A session each day of the cycle</option>
+                    </SelectField>
+                )}
+                {cycle && form.cycleSessions === 'single' && form.piCreation === 'automatic' && (
+                    <SelectField id='st-cfg-release' label='PI documents of the cycle are created *' value={form.cyclePiRelease} onChange={(e) => (set({ cyclePiRelease: e.target.value as ConfigForm['cyclePiRelease'] }), touch('cyclePiRelease'))} error={err('cyclePiRelease')} hint={form.cyclePiRelease === 'daily' ? 'Each day the automation creates that day’s share: the planned PI documents spread evenly over the days of the cycle.' : undefined}>
+                        <option value=''>Choose</option>
+                        <option value='all'>All at once when the session is complete</option>
+                        <option value='daily'>Each day, that day’s share (target PIs per day)</option>
+                    </SelectField>
+                )}
                 {automatic && (
                     <Alert tone='warn'>
                         Automatic sessions are created for one warehouse only. Create a separate configuration for each warehouse that should get automatic sessions, and give each an identifiable name that includes the warehouse (for example “Cycle Count – Main store”), because the name is how they are told apart.
