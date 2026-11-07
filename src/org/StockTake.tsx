@@ -168,6 +168,9 @@ interface CountSession {
     whyNoPi: string;
     /** Sessions created by the automation: the plan is completed once before any PI document. */
     setupRequired?: boolean;
+    /** Why the automatic PI documents could not be generated (kept until a later run succeeds). */
+    autoPiError?: string;
+    autoPiErrorAt?: string;
     fullScope?: boolean;
     origin?: 'manual' | 'automatic';
     criticalityClasses?: string[];
@@ -1377,7 +1380,18 @@ function CountSessionPanel({
             {notice && <Alert tone='success'>{notice}</Alert>}
             {open && c.setupRequired && <Alert tone='warn'>Created automatically on {fmtWhen(c.startAt)}. Complete its setup (name, materials to count, materials per PI and targets) before creating PI documents.</Alert>}
             {open && !c.setupRequired && !c.canCreatePi && <Alert tone='warn'>{c.whyNoPi}</Alert>}
-            {open && <Alert tone='info'>The session closes automatically when all its PI documents are posted ({pctText(c.progress.stages.find((x) => x.key === 'closure')?.pct ?? 0)} so far).</Alert>}
+            {open && autoPis && !c.setupRequired && c.autoPiError && (
+                <Alert tone='error'>
+                    The PI documents could not be generated{c.autoPiErrorAt ? ` (${fmtWhen(c.autoPiErrorAt)})` : ''}: {c.autoPiError} Fix this, then tap Create PI documents; the nightly run also retries.
+                </Alert>
+            )}
+            {open && (
+                <Alert tone='info'>
+                    {c.progress.piDocuments.live
+                        ? `The session closes automatically once all its PI documents are posted (${c.progress.piDocuments.closed} of ${c.progress.piDocuments.live} so far).`
+                        : 'The session closes automatically once its PI documents are created and all of them are posted.'}
+                </Alert>
+            )}
             {settingUp && <SetupSessionPanel session={c} autoPis={autoPis} ask={ask} onClose={() => setSettingUp(false)} onDone={(m) => (setSettingUp(false), onDone(m))} />}
             {c.closureReason && <Alert tone='info'>{c.status === 'cancelled' ? 'Cancelled' : 'Closed'} {c.closedAt ? fmtWhen(c.closedAt) : ''}: {c.closureReason}</Alert>}
             <Segmented
@@ -1409,7 +1423,7 @@ function CountSessionPanel({
                         rows={pis}
                         rowKey={(p) => p.id}
                         onRowClick={(p) => onOpenPi(p.id)}
-                        empty={open ? (c.setupRequired ? 'Complete the setup first, then create PI documents.' : 'No PI documents yet. Tap New PI document.') : 'No PI documents were created in this session.'}
+                        empty={open ? (c.setupRequired ? 'Complete the setup first, then create PI documents.' : autoPis ? 'No PI documents yet. They are generated automatically; tap Create PI documents to generate them now.' : 'No PI documents yet. Tap New PI document.') : 'No PI documents were created in this session.'}
                         height='h-[calc(100dvh-22rem)]'
                     />
                 </>
