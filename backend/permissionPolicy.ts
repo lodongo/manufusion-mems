@@ -66,6 +66,8 @@ const STOCK_TAKE: PermDef[] = [
     p('INV_ST_026', 'Stock take: initiate posting'),
     p('INV_ST_027', 'Stock take: approve posting', true),
     p('INV_ST_028', 'Stock take: post and reconcile', true),
+    p('INV_ST_030', 'Stock take: plan stock take sessions'),
+    p('INV_ST_031', 'Stock take: close or cancel stock take sessions', true),
 ];
 
 const warehouse = (code: string): PermDef[] => [
@@ -261,6 +263,7 @@ export const SOD_RULES: SodRule[] = [
     { id: 'st-count-approve', a: 'INV_ST_017', b: 'INV_ST_027', why: 'The person who counts stock must not approve its posting.' },
     { id: 'st-count-post', a: 'INV_ST_017', b: 'INV_ST_028', why: 'The person who counts stock must not post the result to inventory.' },
     { id: 'st-initiate-approve', a: 'INV_ST_026', b: 'INV_ST_027', why: 'The person who requests a posting must not approve it.' },
+    { id: 'st-plan-approve', a: 'INV_ST_030', b: 'INV_ST_027', why: 'The person who plans a stock take session must not approve its variances.' },
     { id: 'vendor-create-approve', a: 'PRC.vendors.manage', b: 'PRC.vendors.approve', why: 'The person who creates a vendor must not approve it.' },
     { id: 'vendor-override-manage', a: 'PRC.vendors.override', b: 'PRC.vendors.manage', why: 'The person who waives a vendor document must not be the person who registers the vendor.' },
     { id: 'vendor-override-approve', a: 'PRC.vendors.override', b: 'PRC.vendors.approve', why: 'The person who waives a vendor document must not also approve the vendor.' },
@@ -331,11 +334,11 @@ export interface RoleTemplate {
 const T = (id: string, module: string, name: string, description: string, permissions: string[]): RoleTemplate => ({ id, module, name, description, permissions });
 
 export const ROLE_TEMPLATES: RoleTemplate[] = [
-    T('st_controller', 'INV', 'Stock Take Controller', 'Sets up stock take configurations and sessions. Cannot count, verify, approve or post.', ['INV_ST_001', 'INV_ST_002', 'INV_ST_003', 'INV_ST_005', 'INV_ST_007', 'INV_ST_008', 'INV_ST_010', 'INV_ST_011', 'INV_ST_012', 'INV_ST_013', 'INV_ST_024']),
+    T('st_controller', 'INV', 'Stock Take Controller', 'Sets up stock take configurations and sessions. Cannot count, verify, approve or post.', ['INV_ST_001', 'INV_ST_002', 'INV_ST_003', 'INV_ST_005', 'INV_ST_007', 'INV_ST_008', 'INV_ST_010', 'INV_ST_011', 'INV_ST_012', 'INV_ST_013', 'INV_ST_024', 'INV_ST_030', 'INV_ST_031']),
     T('st_counter', 'INV', 'Stock Take Counter', 'Counts stock and submits the counts.', ['INV_ST_007', 'INV_ST_011', 'INV_ST_016', 'INV_ST_017']),
     T('st_verifier', 'INV', 'Stock Take Verifier', 'Verifies submitted counts and asks for recounts.', ['INV_ST_007', 'INV_ST_011', 'INV_ST_020', 'INV_ST_022']),
     T('st_poster', 'INV', 'Stock Take Posting Clerk', 'Requests posting of verified counts and posts approved results.', ['INV_ST_007', 'INV_ST_011', 'INV_ST_026', 'INV_ST_028']),
-    T('st_approver', 'INV', 'Stock Take Approver', 'Approves stock take posting. Cannot count or request posting.', ['INV_ST_007', 'INV_ST_011', 'INV_ST_027']),
+    T('st_approver', 'INV', 'Stock Take Approver', 'Approves stock take variances at their Chart of Authority level (the job role mapped to the level must also be held). Cannot count, plan sessions or request posting.', ['INV_ST_007', 'INV_ST_011', 'INV_ST_027']),
     T('inv_viewer', 'INV', 'Inventory Viewer', 'Read-only view of inventory.', ['INV.view', 'INV.warehouse.view', 'INV.bin.view']),
     T('wh_manager', 'INV', 'Warehouse Manager', 'Sets up warehouses, clusters and bins and links materials to bins.', ['INV.view', 'INV.edit', 'INV.warehouse.view', 'INV.warehouse.configure', 'INV.cluster.create', 'INV.cluster.delete', 'INV.bin.view', 'INV.bin.history', 'INV.bin.link', 'INV.bin.unlink']),
     T('mnt_requester', 'MNT', 'Maintenance Requester', 'Raises and follows own work requests.', ['MNT.view', 'MNT.WR.create', 'MNT.WR.edit', 'MNT.WR.cancel']),

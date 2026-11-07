@@ -5,20 +5,32 @@ import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { audited, requireAt } from './scopeGuard';
 import { bypass } from './testModeCore';
 import { postStockTake } from './finOps';
+import { stockValOf } from './finCore';
+import { getAuthority } from './procurementPolicy';
+import { approvalRoute, myPositions } from './purchaseOrders';
+import { sessionProgress } from './stockTakeProgress';
 
 // ---------------------------------------------------------------------------
 // Stock take (physical inventory, PI documents).
 //   organizations/{org}/stock_take_configs/{COUNT_CONFIGnnnnnnnn}   reusable count configurations
+//   organizations/{org}/stock_take_count_sessions/{STSnnnnnnnnn}     a planned stock take session (configuration,
+//                                                                    warehouse, start/end, metrics) holding PI documents
 //   organizations/{org}/stock_take_sessions/{PInnnnnnnnn[_n]}       a PI document and its recounts
 //   organizations/{org}/stock_take_attachments/{sessionId}          the signed PI scan (kept out of the session)
 //
+// A session is created first (Active sessions); PI documents are only created inside an open session that has started
+// and not ended, and take the session's configuration and warehouse.
 // Flow: awaiting_print → counting → verification → verified → pending_post_approval → approved_for_posting
 //       → reconciled (or recount_pending while recount PIs are open); disregarded / closed_posted end a session.
 // Controls:
 //   - every action needs its INV_ST_ permission at the session's warehouse (job roles bound to places);
 //   - separation of duties: the counter cannot verify, approve or post; the person requesting posting cannot
 //     approve it; there is no self-approval exception for anyone;
-//   - stock is only posted after approval; every step is audited.
+//   - stock is only posted after approval; every step is audited;
+//   - variances are valued at moving average and approved under the Chart of Authority: each level of the value band
+//     is approved, in order, by a different person holding the mapped job role (L1 follows the reporting line of the
+//     person requesting posting); a PI with no variance needs one independent approval;
+//   - posting cannot be requested while a line has no reconciled stock baseline.
 // ---------------------------------------------------------------------------
 
 const TYPES = ['Cycle Count', 'Full Stock Take', 'Cluster Stock Take', 'Random Stock Take'];
@@ -27,6 +39,9 @@ const CLOSED = ['reconciled', 'disregarded', 'closed_posted'];
 const CLUSTER_RE = /^CL-\d{4}$/;
 const SESSION_RE = /^PI\d{9}(_\d{1,3})?$/;
 const CONFIG_RE = /^COUNT_CONFIG\d{8}$/;
+const CAMPAIGN_RE = /^STS\d{9}$/;
+const CAMPAIGNS = 'stock_take_count_sessions';
+const MAX_SESSION_DAYS = 366;
 const MAX_ATTACHMENT_CHARS = 650_000; // about 450 KB of file as base64
 const ACTION_PERMS: Record<string, string> = {
     printed: 'INV_ST_010',
@@ -37,12 +52,15 @@ const ACTION_PERMS: Record<string, string> = {
     refresh_baseline: 'INV_ST_024',
     submit_posting: 'INV_ST_026',
     approve_posting: 'INV_ST_027',
+    reject_posting: 'INV_ST_027',
     post: 'INV_ST_028',
     disregard: 'INV_ST_012',
     close_posted: 'INV_ST_013',
 };
 
 const rootOf = (ctx: OrgContext) => `organizations/${ctx.orgId}`;
+/** "1 line", "2 lines". */
+const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Warehouses the user may see ('read', includes view-only extra scopes) or act on ('write'). */
 async function warehousesFor(ctx: OrgContext, mode: 'read' | 'write') {
@@ -103,6 +121,112 @@ async function snapshot(root: string, warehouseId: string) {
         .sort((a, b) => a.binId.localeCompare(b.binId, undefined, { numeric: true }));
 }
 
+// ----- Chart of Authority for stock variances -----
+
+type Obj = Record<string, unknown>;
+interface CoaStep {
+    level: string;
+    title: string;
+    positionCode: string;
+    positionTitle: string;
+    status: 'pending' | 'approved';
+    by: string;
+    at: string;
+}
+const coaSteps = (d: Obj): CoaStep[] => (isObj(d.approval) && Array.isArray(d.approval.steps) ? (d.approval.steps as unknown[]).filter(isObj).map((x) => ({ ...x }) as unknown as CoaStep) : []);
+const currentCoaStep = (d: Obj) => coaSteps(d).find((x) => x.status === 'pending') ?? null;
+
+/**
+ * May this person approve the current Chart of Authority level of this PI, and if not, why not. Only for PIs whose
+ * variances were routed through the chart (a PI with no variance has no steps and keeps the single independent approval).
+ * The separation-of-duties rules (counter, requester) are checked separately on the action.
+ */
+function coaCheck(ctx: OrgContext, d: Obj): { routed: boolean; ok: boolean; why: string; level: string; title: string; positionTitle: string; testMode: boolean } {
+    const step = currentCoaStep(d);
+    const base = { routed: coaSteps(d).length > 0, level: step?.level ?? '', title: step?.title ?? '', positionTitle: step?.positionTitle ?? '', testMode: false };
+    if (str(d.status) !== 'pending_post_approval' || !step) return { ...base, ok: false, why: '' };
+    let why = '';
+    if (!myPositions(ctx.me).includes(step.positionCode)) why = `Level ${step.level} (${step.title}) is approved by ${step.positionTitle}.`;
+    else if (coaSteps(d).some((x) => x.status === 'approved' && x.by === ctx.uid)) why = 'You approved an earlier level, so a different person must approve this one.';
+    if (!why) return { ...base, ok: true, why: '' };
+    // Platform test mode (development only): the organization super admin may act at every level; the action records it.
+    if (ctx.testMode === true) return { ...base, ok: true, why: '', testMode: true };
+    return { ...base, ok: false, why };
+}
+
+/** Gross value of the differences at moving average (organization currency); materials with no cost are listed. */
+async function varianceValueOf(ctx: OrgContext, warehouseId: string, pending: Array<Record<string, any>>) {
+    const agg = new Map<string, { delta: number; number: string }>();
+    for (const line of pending) {
+        const delta = Number(line.counted) - Number(line.expected);
+        if (!delta) continue;
+        const k = str(line.materialId);
+        const v = agg.get(k) ?? { delta: 0, number: str(line.materialNumber) || k };
+        v.delta += delta;
+        agg.set(k, v);
+    }
+    let value = 0;
+    const unvalued: string[] = [];
+    const byMaterial: Array<{ materialId: string; materialNumber: string; delta: number; unitCost: number; value: number }> = [];
+    for (const [materialId, v] of agg) {
+        if (!v.delta) continue;
+        const sv = await stockValOf(ctx.orgId, warehouseId, materialId);
+        const unitCost = sv.avg > 0 ? sv.avg : 0;
+        if (!unitCost) unvalued.push(v.number);
+        const lineValue = Math.round(Math.abs(v.delta) * unitCost * 100) / 100;
+        value += lineValue;
+        byMaterial.push({ materialId, materialNumber: v.number, delta: Math.round(v.delta * 10000) / 10000, unitCost: Math.round(unitCost * 10000) / 10000, value: lineValue });
+    }
+    return { value: Math.round(value * 100) / 100, unvalued, byMaterial, differences: byMaterial.length };
+}
+
+// ----- Stock take sessions (planned first; PI documents are created inside them) -----
+
+function readCampaign(b: Obj, now: string) {
+    const name = str(b.name).trim();
+    if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a session name of 3 to 80 characters');
+    const startAt = str(b.startAt);
+    const endAt = str(b.endAt);
+    const startMs = Date.parse(startAt);
+    if (!startAt || !Number.isFinite(startMs)) throw new HttpError(400, 'Enter a valid start date and time');
+    // No backdating: a session cannot claim to have started before it was planned (10 minutes allowed for the clock).
+    if (startMs < Date.parse(now) - 10 * 60_000) throw new HttpError(400, 'The start cannot be in the past');
+    if (startMs > Date.parse(now) + MAX_SESSION_DAYS * 86_400_000) throw new HttpError(400, `The start must be within ${MAX_SESSION_DAYS} days`);
+    let end = '';
+    if (endAt) {
+        const endMs = Date.parse(endAt);
+        if (!Number.isFinite(endMs)) throw new HttpError(400, 'Enter a valid end date and time, or leave it empty');
+        if (endMs <= startMs) throw new HttpError(400, 'The end must be after the start');
+        if (endMs - startMs > MAX_SESSION_DAYS * 86_400_000) throw new HttpError(400, `A session can run for at most ${MAX_SESSION_DAYS} days`);
+        end = new Date(endMs).toISOString();
+    }
+    const m = isObj(b.metrics) ? b.metrics : {};
+    const whole = (v: unknown, label: string, min: number, max: number) => {
+        const n = Number(v);
+        if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${label} must be a whole number from ${min} to ${max}`);
+        return n;
+    };
+    const accuracy = Number(m.targetAccuracyPct);
+    if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100) throw new HttpError(400, 'Target count accuracy must be 0 to 100 %');
+    const tolerance = Number(m.varianceToleranceValue ?? 0);
+    if (!Number.isFinite(tolerance) || tolerance < 0 || tolerance > 1e12) throw new HttpError(400, 'Variance value tolerance must be 0 or more');
+    const metrics = {
+        targetPiDocuments: whole(m.targetPiDocuments, 'Target PI documents', 1, 1000),
+        targetLocations: whole(m.targetLocations, 'Target locations', 1, 1_000_000),
+        targetAccuracyPct: Math.round(accuracy * 10) / 10,
+        varianceToleranceValue: Math.round(tolerance * 100) / 100,
+    };
+    return { name, startAt: new Date(startMs).toISOString(), endAt: end, metrics };
+}
+
+/** Why a PI cannot be created in this session now, or '' when it can. */
+function campaignClosedReason(c: Obj, now: string): string {
+    if (str(c.status) !== 'open') return 'This stock take session is not open.';
+    if (Date.parse(now) < Date.parse(str(c.startAt))) return 'This stock take session has not started yet.';
+    if (str(c.endAt) && Date.parse(now) > Date.parse(str(c.endAt))) return 'This stock take session has ended. Close it, or create a new session.';
+    return '';
+}
+
 async function getSession(ctx: OrgContext, id: string, mode: 'read' | 'write') {
     if (!SESSION_RE.test(id)) throw new HttpError(400, 'Invalid PI document');
     const root = rootOf(ctx);
@@ -127,6 +251,7 @@ function independenceFor(ctx: OrgContext, data: Record<string, unknown>) {
         verifyConflict: counted || str(data.countEditedBy) === ctx.uid,
         approveConflict: counted || requestedPosting,
         postConflict: counted,
+        coa: coaCheck(ctx, data),
     };
 }
 
@@ -190,8 +315,16 @@ export const stockTakeRoutes = {
             const root = rootOf(ctx);
             const warehouses = await warehousesFor(ctx, 'read');
             const visible = new Set(warehouses.map((w) => w.id));
-            const [configs, sessions] = await Promise.all([listDocs(`${root}/stock_take_configs`), listDocs(`${root}/stock_take_sessions`)]);
+            const [configs, sessions, campaigns] = await Promise.all([listDocs(`${root}/stock_take_configs`), listDocs(`${root}/stock_take_sessions`), listDocs(`${root}/${CAMPAIGNS}`)]);
+            const now = nowIso();
             return {
+                countSessions: campaigns
+                    .filter((c) => visible.has(str(c.data.warehouseId)))
+                    .map((c) => {
+                        const pis = sessions.filter((x) => str(x.data.campaignId) === c.id).map((x) => x.data);
+                        return { id: c.id, ...c.data, piIds: sessions.filter((x) => str(x.data.campaignId) === c.id).map((x) => x.id), progress: sessionProgress(c.data, pis, now), canCreatePi: !campaignClosedReason(c.data, now), whyNoPi: campaignClosedReason(c.data, now) };
+                    })
+                    .sort((a, b) => str((b as Obj).createdAt).localeCompare(str((a as Obj).createdAt))),
                 warehouses: warehouses.map((w) => ({ id: w.id, name: str(w.data.name) || str(w.data.costCenterCode) || str(w.data.code) || w.id })),
                 configs: configs.filter((x) => !str(x.data.warehouseId) || visible.has(str(x.data.warehouseId))).map((x) => ({ id: x.id, ...x.data })),
                 sessions: sessions
@@ -199,6 +332,78 @@ export const stockTakeRoutes = {
                     .map((x) => publicSession(x, ctx))
                     .sort((a, b) => str((b as Record<string, unknown>).createdAt).localeCompare(str((a as Record<string, unknown>).createdAt))),
             };
+        }),
+    ],
+
+    'POST /api/org/inventory/stocktake/count-session/create': [
+        orgRoute('org.inventory.stocktake.count_session.create', null, async (ctx) => {
+            const root = rootOf(ctx);
+            const b = ctx.body;
+            const warehouseId = str(b.warehouseId);
+            const warehouses = await warehousesFor(ctx, 'write');
+            if (!warehouseId || !warehouses.some((w) => w.id === warehouseId)) throw new HttpError(403, 'Select an accessible warehouse for this session');
+            await requireAtWarehouse(ctx, 'INV_ST_030', warehouseId);
+            const configId = str(b.configId);
+            const config = CONFIG_RE.test(configId) ? await getDoc(`${root}/stock_take_configs/${configId}`) : null;
+            if (!config || config.data.active === false) throw new HttpError(400, 'Choose an enabled configuration');
+            if (str(config.data.warehouseId) && warehouseId !== str(config.data.warehouseId)) throw new HttpError(400, 'Selected warehouse does not match configuration');
+            const now = nowIso();
+            const plan = readCampaign(b, now);
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const n = await nextOrgCounter(ctx.orgId, 'stockCountSessionSeq');
+                if (n > 999_999_999) throw new HttpError(409, 'Stock take session sequence exhausted');
+                const id = `STS${String(n).padStart(9, '0')}`;
+                const ok = await writeDoc(
+                    `${root}/${CAMPAIGNS}/${id}`,
+                    {
+                        sessionNumber: id,
+                        ...plan,
+                        configId,
+                        configName: str(config.data.name),
+                        type: str(config.data.type),
+                        selection: str(config.data.selection),
+                        documentSize: Number(config.data.documentSize) || 1,
+                        warehouseId,
+                        status: 'open',
+                        createdAt: now,
+                        createdBy: ctx.uid,
+                    } as never,
+                    { exists: false }
+                );
+                if (ok) {
+                    await audited(ctx, 'inventory.stocktake.count_session.create', `Stock take session ${id}`, { warehouseId, configId, ...plan });
+                    return { ok: true, id };
+                }
+            }
+            throw new HttpError(409, 'Unable to reserve a session number. Retry.');
+        }),
+    ],
+
+    'POST /api/org/inventory/stocktake/count-session/action': [
+        orgRoute('org.inventory.stocktake.count_session.action', null, async (ctx) => {
+            const root = rootOf(ctx);
+            const id = str(ctx.body.id);
+            const action = str(ctx.body.action);
+            if (!CAMPAIGN_RE.test(id)) throw new HttpError(400, 'Invalid stock take session');
+            if (!['close', 'cancel'].includes(action)) throw new HttpError(400, 'Unsupported session action');
+            const doc = await getDoc(`${root}/${CAMPAIGNS}/${id}`);
+            const warehouses = await warehousesFor(ctx, 'write');
+            if (!doc || !warehouses.some((w) => w.id === str(doc.data.warehouseId))) throw new HttpError(404, 'Stock take session not found');
+            await requireAtWarehouse(ctx, 'INV_ST_031', str(doc.data.warehouseId));
+            if (str(doc.data.status) !== 'open') throw new HttpError(409, 'This session is already closed');
+            const reason = str(ctx.body.reason).trim();
+            if (reason.length < 10) throw new HttpError(400, 'Enter a reason of at least 10 characters');
+            const pis = (await listDocs(`${root}/stock_take_sessions`)).filter((x) => str(x.data.campaignId) === id);
+            const open = pis.filter((x) => !CLOSED.includes(str(x.data.status)));
+            if (open.length) throw new HttpError(409, `Finish or disregard the open PI documents first (${open.map((x) => x.id).slice(0, 5).join(', ')}${open.length > 5 ? ', …' : ''}).`);
+            if (action === 'cancel' && pis.some((x) => (Array.isArray(x.data.lines) ? x.data.lines : []).some((l: unknown) => isObj(l) && l.posted === true)))
+                throw new HttpError(409, 'Stock has been posted in this session, so it can only be closed, not cancelled.');
+            const now = nowIso();
+            const progress = sessionProgress(doc.data, pis.map((x) => x.data), now);
+            const status = action === 'close' ? 'closed' : 'cancelled';
+            await writeDoc(`${root}/${CAMPAIGNS}/${id}`, { ...doc.data, status, closedAt: now, closedBy: ctx.uid, closureReason: reason.slice(0, 500), finalProgress: progress, updatedAt: now, updatedBy: ctx.uid } as never);
+            await audited(ctx, `inventory.stocktake.count_session.${action}`, `Stock take session ${id}`, { reason: reason.slice(0, 500), piDocuments: pis.length, completionPct: progress.completionPct });
+            return { ok: true };
         }),
     ],
 
@@ -260,11 +465,17 @@ export const stockTakeRoutes = {
         orgRoute('org.inventory.stocktake.start', null, async (ctx) => {
             const root = rootOf(ctx);
             const b = ctx.body;
-            const warehouseId = str(b.warehouseId);
+            // A PI document is always created inside an open stock take session, which fixes its configuration and warehouse.
+            const campaignId = str(b.sessionId);
+            if (!CAMPAIGN_RE.test(campaignId)) throw new HttpError(400, 'Open a stock take session first; PI documents are created inside a session.');
+            const campaign = await getDoc(`${root}/${CAMPAIGNS}/${campaignId}`);
+            const warehouseId = str(campaign?.data.warehouseId);
             const warehouses = await warehousesFor(ctx, 'write');
-            if (!warehouseId || !warehouses.some((w) => w.id === warehouseId)) throw new HttpError(403, 'Select an accessible warehouse for this PI');
+            if (!campaign || !warehouseId || !warehouses.some((w) => w.id === warehouseId)) throw new HttpError(404, 'Stock take session not found');
             await requireAtWarehouse(ctx, 'INV_ST_008', warehouseId);
-            const configId = str(b.configId);
+            const closedWhy = campaignClosedReason(campaign.data, nowIso());
+            if (closedWhy) throw new HttpError(409, closedWhy);
+            const configId = str(campaign.data.configId);
             const config = CONFIG_RE.test(configId) ? await getDoc(`${root}/stock_take_configs/${configId}`) : null;
             if (!config || config.data.active === false) throw new HttpError(403, 'Configuration not accessible');
             if (str(config.data.warehouseId) && warehouseId !== str(config.data.warehouseId)) throw new HttpError(400, 'Selected warehouse does not match configuration');
@@ -286,6 +497,12 @@ export const stockTakeRoutes = {
                 eligible = randomSample(eligible, size);
             }
             if (!eligible.length) throw new HttpError(409, 'No physical locations selected');
+            // A count can only be posted against a reconciled stock baseline, so a PI is not started without one.
+            const unbased = eligible.filter((x) => x.expected === null);
+            if (unbased.length) {
+                const names = [...new Set(unbased.map((x) => x.materialNumber || x.materialId))];
+                throw new HttpError(409, `${names.length === 1 ? 'Material' : `${names.length} materials`} ${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''} ${names.length === 1 ? 'has' : 'have'} no reconciled stock in this warehouse, so ${names.length === 1 ? 'its' : 'their'} count could not be posted. Post the opening stock (Material detail > Current Status) or reconcile the open stock movements first.`);
+            }
             if (new Set(eligible.map((x) => x.materialId)).size !== eligible.length) {
                 throw new HttpError(409, 'Multiple mapped locations for one material require location-level stock ledger; select a smaller PI document to avoid unsafe reconciliation.');
             }
@@ -303,6 +520,8 @@ export const stockTakeRoutes = {
                     {
                         piNumber: id,
                         sessionName,
+                        campaignId,
+                        campaignName: str(campaign.data.name),
                         configId,
                         configName: str(config.data.name),
                         warehouseId,
@@ -319,7 +538,7 @@ export const stockTakeRoutes = {
                     { exists: false }
                 );
                 if (ok) {
-                    await audited(ctx, 'inventory.stocktake.start', `PI ${id}`, { configId, warehouseId, locations: eligible.length, selection: str(config.data.selection) });
+                    await audited(ctx, 'inventory.stocktake.start', `PI ${id}`, { sessionId: campaignId, configId, warehouseId, locations: eligible.length, selection: str(config.data.selection) });
                     return { ok: true, id };
                 }
             }
@@ -362,7 +581,7 @@ export const stockTakeRoutes = {
                 await audited(ctx, `inventory.stocktake.${action}`, `PI ${id}`, {
                     from: status,
                     to: str(patch.status) || status,
-                    reason: str(patch.disregardReason || patch.closureReason || patch.countEditReason),
+                    reason: str(patch.disregardReason || patch.closureReason || patch.countEditReason || patch.postingReturnReason),
                     linesChanged: Array.isArray(patch.lines) ? patch.lines.length : 0,
                     ...extra,
                 });
@@ -455,6 +674,8 @@ export const stockTakeRoutes = {
                     `${root}/stock_take_sessions/${next}`,
                     {
                         piNumber: next,
+                        campaignId: str(d.campaignId),
+                        campaignName: str(d.campaignName),
                         configId: d.configId,
                         configName: d.configName,
                         warehouseId,
@@ -496,19 +717,72 @@ export const stockTakeRoutes = {
 
             if (action === 'submit_posting') {
                 if (status !== 'verified') throw new HttpError(409, 'Verify the count before posting');
-                if (!lines.some((x) => x.verified && !x.recount && !x.posted)) throw new HttpError(409, 'No verified non-recount lines to post');
-                return save({ status: 'pending_post_approval', postingRequestedBy: ctx.uid, postingRequestedAt: nowIso() });
+                const pending = lines.filter((x) => x.verified && !x.recount && !x.posted);
+                if (!pending.length) throw new HttpError(409, 'No verified non-recount lines to post');
+                const unbased = pending.filter((x) => x.expected === null || x.counted === null);
+                if (unbased.length) {
+                    const names = [...new Set(unbased.map((x) => str(x.materialNumber) || str(x.materialId)))];
+                    throw new HttpError(409, `${count(unbased.length, 'line')} (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}) ${unbased.length === 1 ? 'has' : 'have'} no reconciled stock baseline, so ${unbased.length === 1 ? 'it' : 'they'} cannot be posted. Post the opening stock or reconcile the open movements, then Recheck baseline and verify again — or disregard this PI.`);
+                }
+                // Value the differences and route them through the Chart of Authority.
+                const variance = await varianceValueOf(ctx, warehouseId, pending);
+                let approval: Record<string, unknown> | null = null;
+                if (variance.differences > 0) {
+                    const authority = await getAuthority(ctx.orgId);
+                    const route = await approvalRoute(ctx.orgId, ctx.me, variance.value, authority, ctx.testMode === true);
+                    if (route.problems.length && !bypass(ctx, 'inv.stocktake.coa_route')) throw new HttpError(409, `The Chart of Authority cannot route this variance: ${route.problems.join(' ')}`);
+                    if (!route.steps.length) throw new HttpError(409, 'The Chart of Authority has no approval level for this variance value. Ask the chart of authority administrator to set the cost approval bands.');
+                    approval = {
+                        amount: variance.value,
+                        authorityVersion: route.authorityVersion,
+                        unvalued: variance.unvalued,
+                        byMaterial: variance.byMaterial,
+                        steps: route.steps.map((x) => ({ level: x.level, title: x.title, positionCode: x.positionCode, positionTitle: x.positionTitle, status: 'pending', by: '', at: '' })),
+                    };
+                }
+                return save(
+                    { status: 'pending_post_approval', postingRequestedBy: ctx.uid, postingRequestedAt: nowIso(), varianceValue: variance.value, approval, postingApprovedBy: '', postingApprovedAt: '', postingReturnReason: '' },
+                    { varianceValue: variance.value, unvalued: variance.unvalued, levels: approval ? (approval.steps as Array<{ level: string }>).map((x) => x.level) : ['independent'] }
+                );
             }
 
             if (action === 'approve_posting') {
                 if (status !== 'pending_post_approval') throw new HttpError(409, 'Posting not awaiting approval');
                 if ((str(d.postingRequestedBy) === ctx.uid || str(d.countedBy) === ctx.uid) && !bypass(ctx, 'inv.stocktake.approve_independence')) throw new HttpError(403, 'Posting must be approved by someone other than the person who requested it or counted the stock.');
-                return save({ status: 'approved_for_posting', postingApprovedBy: ctx.uid, postingApprovedAt: nowIso() });
+                const steps = coaSteps(d);
+                if (!steps.length) return save({ status: 'approved_for_posting', postingApprovedBy: ctx.uid, postingApprovedAt: nowIso() });
+                // Chart of Authority: the current level is approved by a different person holding its job role.
+                const check = coaCheck(ctx, d);
+                if (!check.ok) throw new HttpError(403, check.why || 'You cannot approve this level.');
+                if (check.testMode) bypass(ctx, 'inv.stocktake.coa_approver');
+                const step = steps.find((x) => x.status === 'pending')!;
+                step.status = 'approved';
+                step.by = ctx.uid;
+                step.at = nowIso();
+                const last = steps.every((x) => x.status === 'approved');
+                return save(
+                    { approval: { ...(d.approval as Obj), steps }, ...(last ? { status: 'approved_for_posting', postingApprovedBy: ctx.uid, postingApprovedAt: nowIso() } : {}) },
+                    { level: step.level, positionCode: step.positionCode, amount: Number(d.varianceValue) || 0, final: last }
+                );
+            }
+
+            if (action === 'reject_posting') {
+                if (status !== 'pending_post_approval') throw new HttpError(409, 'Posting not awaiting approval');
+                if ((str(d.postingRequestedBy) === ctx.uid || str(d.countedBy) === ctx.uid) && !bypass(ctx, 'inv.stocktake.approve_independence')) throw new HttpError(403, 'You cannot return a posting you requested or counted.');
+                if (coaSteps(d).length) {
+                    const check = coaCheck(ctx, d);
+                    if (!check.ok) throw new HttpError(403, check.why || 'You cannot return this posting.');
+                    if (check.testMode) bypass(ctx, 'inv.stocktake.coa_approver');
+                }
+                const reason = str(ctx.body.reason).trim();
+                if (reason.length < 10) throw new HttpError(400, 'Enter a reason of at least 10 characters');
+                return save({ status: 'verified', postingReturnReason: reason.slice(0, 500), postingReturnedBy: ctx.uid, postingReturnedAt: nowIso(), approval: null, postingRequestedBy: '', postingRequestedAt: '' }, { reason: reason.slice(0, 500) });
             }
 
             if (action === 'post') {
                 if (status !== 'approved_for_posting') throw new HttpError(409, 'Posting must be approved first. Submit the PI for posting approval.');
                 if (str(d.countedBy) === ctx.uid && !bypass(ctx, 'inv.stocktake.post_independence')) throw new HttpError(403, 'The person who counted the stock cannot post it.');
+                if (coaSteps(d).some((x) => x.status !== 'approved')) throw new HttpError(409, 'Every Chart of Authority level must approve before posting.');
                 const pending = lines.filter((x) => x.verified && !x.recount && !x.posted);
                 if (!pending.length) throw new HttpError(409, 'No eligible lines to reconcile');
                 // Value the differences in finance first (refused when finance is live and cannot post), then move the quantities.

@@ -29,7 +29,7 @@ test('Stock Take: the list tells the screen where the caller has a conflict, and
 
 test('Stock Take screen: a barred step is disabled with the reason, test mode is stated, counts read correctly', () => {
     const screen = read('src/org/StockTake.tsx');
-    assert.match(screen, /const approveBarred = !!you\?\.approveConflict && !testMode;/);
+    assert.match(screen, /const approveBarred = \(!!you\?\.approveConflict && !testMode\) \|\| coaBarred;/);
     assert.match(screen, /key='approve'\s+disabled=\{approveBarred\}/);
     assert.match(screen, /key='verify'\s+disabled=\{verifyBarred\}/);
     assert.match(screen, /key='post'\s+disabled=\{postBarred\}/);

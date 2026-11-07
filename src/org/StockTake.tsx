@@ -1,6 +1,6 @@
 import { useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { CheckCircle2, ClipboardCheck, Download, FileUp, Pencil, Plus, Printer, RefreshCw, RotateCcw, Save, Send, ShieldCheck, Trash2, X, XCircle } from 'lucide-react';
+import { BarChart3, CalendarClock, CheckCircle2, ClipboardCheck, Download, FileUp, Pencil, Plus, Printer, RefreshCw, RotateCcw, Save, Send, ShieldCheck, Trash2, Undo2, X, XCircle } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert, Field, SelectField } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
@@ -9,13 +9,17 @@ import { Badge, Button, Card, Spinner, Toggle, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 
 // Stock take (physical inventory, INV).
-//   Stock take process  PI documents (sessions) per warehouse; tap one to work it through its states:
+//   Active sessions     a stock take session is planned first (configuration, warehouse, start, optional end and the
+//                       metrics it is measured against). Opening a session lists its PI documents, creates new ones
+//                       (only while it is open and between its start and end) and shows its progress report.
+//   PI documents        every PI document per warehouse; tap one to work it through its states:
 //                       Created → Printed → Awaiting verification → Verified → Awaiting posting approval
 //                       → Approved for posting → Reconciled (or Partially posted while a recount PI is open).
 //                       Disregarded / Closed end a session.
 //   Configuration       reusable count configurations (type, selection order, PI size, cycle, cluster).
 // Separation of duties is enforced by the server (the counter cannot verify, approve or post; whoever requests
 // posting cannot approve it; nobody approves their own work). Its 403 messages are shown as they come.
+// Variances are valued and approved under the Chart of Authority, level by level, by the job roles mapped to them.
 // Counting is blind: the system quantity is not shown until counts are submitted.
 
 interface Config {
@@ -68,13 +72,75 @@ interface Session {
     countEditReason?: string;
     disregardReason?: string;
     closureReason?: string;
+    campaignId?: string;
+    campaignName?: string;
+    varianceValue?: number;
+    approval?: { amount: number; unvalued?: string[]; steps: CoaStep[] } | null;
+    postingReturnReason?: string;
     /** Where the signed-in person has a separation-of-duties conflict on this PI, from the server. */
-    you?: { testMode: boolean; counted: boolean; requestedPosting: boolean; verifyConflict: boolean; approveConflict: boolean; postConflict: boolean };
+    you?: {
+        testMode: boolean;
+        counted: boolean;
+        requestedPosting: boolean;
+        verifyConflict: boolean;
+        approveConflict: boolean;
+        postConflict: boolean;
+        coa?: { routed: boolean; ok: boolean; why: string; level: string; title: string; positionTitle: string; testMode: boolean };
+    };
+}
+interface CoaStep {
+    level: string;
+    title: string;
+    positionTitle: string;
+    status: 'pending' | 'approved';
+    by: string;
+    at: string;
+}
+interface Stage {
+    key: string;
+    label: string;
+    done: number;
+    total: number;
+    pct: number;
+}
+interface Progress {
+    phase: string;
+    piDocuments: { total: number; live: number; disregarded: number; recounts: number; closed: number; byStatus: Record<string, number> };
+    completionPct: number;
+    stages: Stage[];
+    locations: { planned: number; counted: number; posted: number; noBaseline: number; countedPct: number; postedPct: number };
+    accuracy: { comparable: number; matched: number; variances: number; pct: number };
+    varianceValue: number;
+    timeUsedPct: number | null;
+    targets: { piDocuments: number; locations: number; accuracyPct: number; varianceToleranceValue: number; piDocumentsPct: number; locationsPct: number; accuracyMet: boolean | null; withinTolerance: boolean | null };
+}
+interface CountSession {
+    id: string;
+    sessionNumber: string;
+    name: string;
+    configId: string;
+    configName: string;
+    type: string;
+    selection: string;
+    documentSize: number;
+    warehouseId: string;
+    startAt: string;
+    endAt: string;
+    metrics: { targetPiDocuments: number; targetLocations: number; targetAccuracyPct: number; varianceToleranceValue: number };
+    status: 'open' | 'closed' | 'cancelled';
+    createdAt: string;
+    closedAt?: string;
+    closureReason?: string;
+    piIds: string[];
+    progress: Progress;
+    canCreatePi: boolean;
+    whyNoPi: string;
 }
 interface Data {
     warehouses: Array<{ id: string; name: string }>;
     configs: Config[];
     sessions: Session[];
+    countSessions?: CountSession[];
 }
 interface Upload {
     name: string;
@@ -107,6 +173,17 @@ const STATUS: Record<string, { label: string; tone: 'brand' | 'muted' | 'danger'
     closed_posted: { label: 'Closed', tone: 'muted' },
 };
 const statusOf = (status: string) => STATUS[status] ?? { label: status.replace(/_/g, ' '), tone: 'muted' as const };
+const PHASE: Record<string, { label: string; tone: 'brand' | 'muted' | 'danger' | 'warn' }> = {
+    scheduled: { label: 'Scheduled', tone: 'muted' },
+    in_progress: { label: 'In progress', tone: 'brand' },
+    overdue: { label: 'Past end date', tone: 'warn' },
+    closed: { label: 'Closed', tone: 'muted' },
+    cancelled: { label: 'Cancelled', tone: 'danger' },
+};
+const phaseOf = (p: string) => PHASE[p] ?? { label: p.replace(/_/g, ' '), tone: 'muted' as const };
+const fmtWhen = (iso: string) => (iso ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '');
+const money = (n: number) => (Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pctText = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${n}%`);
 const hasVariance = (l: Line) => l.expected !== l.counted;
 const isWhole = (v: string, min: number, max: number) => /^\d+$/.test(v.trim()) && Number(v) >= min && Number(v) <= max;
 
@@ -162,10 +239,13 @@ async function downloadAttachment(id: string) {
 
 export default function StockTake() {
     const { data, error, loading, reload } = useLoad(() => callBackend<Data>(API + 'list'));
-    const [view, setView] = useState<'process' | 'config'>('process');
+    const [view, setView] = useState<'sessions' | 'process' | 'config'>('sessions');
     const [showClosed, setShowClosed] = useState(false);
+    const [showClosedSessions, setShowClosedSessions] = useState(false);
     const [openId, setOpenId] = useState('');
-    const [creating, setCreating] = useState(false);
+    const [openSessionId, setOpenSessionId] = useState('');
+    const [planning, setPlanning] = useState(false);
+    const [creating, setCreating] = useState<CountSession | null>(null);
     const [editing, setEditing] = useState<Config | 'new' | null>(null);
     const [notice, setNotice] = useState('');
     const confirm = useConfirm();
@@ -176,6 +256,10 @@ export default function StockTake() {
     const sessions = useMemo(() => (data?.sessions ?? []).filter((s) => showClosed || !CLOSED.includes(s.status)), [data, showClosed]);
     const configs = useMemo(() => data?.configs ?? [], [data]);
     const opened = allSessions.find((s) => s.id === openId) ?? null;
+    const allCountSessions = data?.countSessions ?? [];
+    const countSessions = useMemo(() => (data?.countSessions ?? []).filter((c) => showClosedSessions || c.status === 'open'), [data, showClosedSessions]);
+    const closedSessionCount = allCountSessions.filter((c) => c.status !== 'open').length;
+    const openedSession = allCountSessions.find((c) => c.id === openSessionId) ?? null;
 
     const done = (message: string) => {
         setNotice(message);
@@ -185,7 +269,8 @@ export default function StockTake() {
     const sessionColumns = useMemo<Array<Column<Session>>>(
         () => [
             { key: 'pi', label: 'PI document', value: (s) => s.piNumber, render: (s) => <span className='font-mono text-xs font-semibold text-brandsoft'>{s.piNumber}</span> },
-            { key: 'name', label: 'Session', value: (s) => s.sessionName || s.configName },
+            { key: 'name', label: 'PI name', value: (s) => s.sessionName || s.configName },
+            { key: 'session', label: 'Stock take session', value: (s) => s.campaignName || '' },
             { key: 'config', label: 'Configuration', value: (s) => s.configName, hidden: true },
             { key: 'warehouse', label: 'Warehouse', value: (s) => warehouseName.get(s.warehouseId) || s.warehouseId },
             { key: 'status', label: 'Status', value: (s) => statusOf(s.status).label, render: (s) => <Badge tone={statusOf(s.status).tone}>{statusOf(s.status).label}</Badge> },
@@ -194,6 +279,28 @@ export default function StockTake() {
             { key: 'parent', label: 'Parent PI', value: (s) => s.parentPi || '', hidden: true },
             { key: 'recount', label: 'Recount PI', value: (s) => s.recountPi || '', hidden: true },
             { key: 'created', label: 'Created', type: 'date', value: (s) => s.createdAt, render: (s) => fmtDate(s.createdAt) },
+        ],
+        [warehouseName]
+    );
+
+    const countSessionColumns = useMemo<Array<Column<CountSession>>>(
+        () => [
+            { key: 'number', label: 'Session', value: (c) => c.sessionNumber, render: (c) => <span className='font-mono text-xs font-semibold text-brandsoft'>{c.sessionNumber}</span> },
+            { key: 'name', label: 'Name', value: (c) => c.name },
+            { key: 'phase', label: 'Status', value: (c) => phaseOf(c.progress.phase).label, render: (c) => <Badge tone={phaseOf(c.progress.phase).tone}>{phaseOf(c.progress.phase).label}</Badge> },
+            { key: 'warehouse', label: 'Warehouse', value: (c) => warehouseName.get(c.warehouseId) || c.warehouseId },
+            { key: 'config', label: 'Configuration', value: (c) => c.configName },
+            { key: 'type', label: 'Type', value: (c) => c.type, hidden: true },
+            { key: 'start', label: 'Start', type: 'date', value: (c) => c.startAt, render: (c) => fmtWhen(c.startAt) },
+            { key: 'end', label: 'End', type: 'date', value: (c) => c.endAt || null, render: (c) => (c.endAt ? fmtWhen(c.endAt) : 'Open-ended') },
+            { key: 'pis', label: 'PI documents', type: 'number', value: (c) => c.progress.piDocuments.total },
+            { key: 'completion', label: 'Completion %', type: 'number', value: (c) => c.progress.completionPct },
+            { key: 'printed', label: 'Printed %', type: 'number', value: (c) => c.progress.stages.find((x) => x.key === 'printing')?.pct ?? 0, hidden: true },
+            { key: 'counted', label: 'Counted %', type: 'number', value: (c) => c.progress.stages.find((x) => x.key === 'counting')?.pct ?? 0 },
+            { key: 'posted', label: 'Posted %', type: 'number', value: (c) => c.progress.stages.find((x) => x.key === 'posting')?.pct ?? 0 },
+            { key: 'accuracy', label: 'Accuracy %', type: 'number', value: (c) => c.progress.accuracy.pct, hidden: true },
+            { key: 'variance', label: 'Variance value', type: 'number', value: (c) => c.progress.varianceValue, hidden: true },
+            { key: 'created', label: 'Created', type: 'date', value: (c) => c.createdAt, render: (c) => fmtDate(c.createdAt), hidden: true },
         ],
         [warehouseName]
     );
@@ -218,17 +325,17 @@ export default function StockTake() {
             <Screen
                 title='Stock take'
                 eyebrow='Inventory · INV'
-                subtitle='Physical inventory documents and count configurations'
+                subtitle='Stock take sessions, PI documents and count configurations'
                 actions={
-                    view === 'process' ? (
-                        <Button onClick={() => setCreating(true)} disabled={!data}>
-                            <Plus className='h-4 w-4' /> New PI
+                    view === 'sessions' ? (
+                        <Button onClick={() => setPlanning(true)} disabled={!data}>
+                            <Plus className='h-4 w-4' /> New session
                         </Button>
-                    ) : (
+                    ) : view === 'config' ? (
                         <Button onClick={() => setEditing('new')} disabled={!data}>
                             <Plus className='h-4 w-4' /> New config
                         </Button>
-                    )
+                    ) : undefined
                 }
                 toolbar={
                     <Segmented
@@ -239,7 +346,8 @@ export default function StockTake() {
                             setNotice('');
                         }}
                         options={[
-                            { value: 'process', label: 'Stock take process', count: allSessions.length - closedCount },
+                            { value: 'sessions', label: 'Active sessions', count: allCountSessions.length - closedSessionCount },
+                            { value: 'process', label: 'PI documents', count: allSessions.length - closedCount },
                             { value: 'config', label: 'Configuration', count: configs.length },
                         ]}
                     />
@@ -249,19 +357,43 @@ export default function StockTake() {
                 {notice && !opened && <Alert tone='success'>{notice}</Alert>}
                 {!data && loading ? (
                     <Spinner />
+                ) : view === 'sessions' ? (
+                    <>
+                        <div className='flex items-center gap-1'>
+                            <label className='flex min-h-[44px] items-center gap-3'>
+                                <Toggle checked={showClosedSessions} onChange={setShowClosedSessions} label='Show closed stock take sessions' />
+                                <span className='text-sm text-soft'>Show closed sessions ({closedSessionCount})</span>
+                            </label>
+                            <InfoTip label='Stock take sessions'>Start every stock take by creating a session: choose the configuration, warehouse, start and optional end, and the targets it is measured against. Open a session to create its PI documents and see its progress report.</InfoTip>
+                        </div>
+                        <RichTable
+                            id='inv.stocktake.countsessions'
+                            title='Stock take sessions'
+                            fileName='Stock_take_count_sessions'
+                            columns={countSessionColumns}
+                            rows={countSessions}
+                            rowKey={(c) => c.id}
+                            onRowClick={(c) => {
+                                setNotice('');
+                                setOpenSessionId(c.id);
+                            }}
+                            empty={showClosedSessions ? 'No stock take sessions yet. Tap New session to plan one.' : 'No active stock take sessions. Tap New session to plan one.'}
+                            height='h-[calc(100dvh-20rem)]'
+                        />
+                    </>
                 ) : view === 'process' ? (
                     <>
                         <div className='flex items-center gap-1'>
                             <label className='flex min-h-[44px] items-center gap-3'>
-                                <Toggle checked={showClosed} onChange={setShowClosed} label='Show closed sessions' />
-                                <span className='text-sm text-soft'>Show closed sessions ({closedCount})</span>
+                                <Toggle checked={showClosed} onChange={setShowClosed} label='Show closed PI documents' />
+                                <span className='text-sm text-soft'>Show closed PI documents ({closedCount})</span>
                             </label>
-                            <InfoTip label='Closed sessions'>Reconciled, disregarded and closed PI documents are hidden unless this is on.</InfoTip>
+                            <InfoTip label='PI documents'>Every PI document you can see. New PI documents are created inside a stock take session (Active sessions). Reconciled, disregarded and closed PI documents are hidden unless this is on.</InfoTip>
                         </div>
                         <RichTable
                             id='inv.stocktake.sessions'
-                            title='PI sessions'
-                            fileName='Stock_take_sessions'
+                            title='PI documents'
+                            fileName='Stock_take_PI_documents'
                             columns={sessionColumns}
                             rows={sessions}
                             rowKey={(s) => s.id}
@@ -269,7 +401,7 @@ export default function StockTake() {
                                 setNotice('');
                                 setOpenId(s.id);
                             }}
-                            empty={showClosed ? 'No PI sessions yet.' : 'No active PI sessions.'}
+                            empty={showClosed ? 'No PI documents yet.' : 'No open PI documents. Create them inside a stock take session.'}
                             height='h-[calc(100dvh-20rem)]'
                         />
                     </>
@@ -291,6 +423,39 @@ export default function StockTake() {
                 )}
             </Screen>
 
+            {openedSession && data && (
+                <CountSessionPanel
+                    key={openedSession.id}
+                    session={openedSession}
+                    pis={allSessions.filter((p) => p.campaignId === openedSession.id)}
+                    warehouse={warehouseName.get(openedSession.warehouseId) || openedSession.warehouseId}
+                    notice={opened ? '' : notice}
+                    ask={confirm.ask}
+                    onNewPi={() => setCreating(openedSession)}
+                    onOpenPi={(id) => {
+                        setNotice('');
+                        setOpenId(id);
+                    }}
+                    onDone={done}
+                    onClose={() => {
+                        setOpenSessionId('');
+                        setNotice('');
+                    }}
+                />
+            )}
+            {planning && data && (
+                <PlanSessionPanel
+                    data={data}
+                    ask={confirm.ask}
+                    onClose={() => setPlanning(false)}
+                    onCreated={(id) => {
+                        setPlanning(false);
+                        setNotice(`Stock take session ${id} created. Create its PI documents from here once it has started.`);
+                        setOpenSessionId(id);
+                        reload();
+                    }}
+                />
+            )}
             {opened && data && (
                 <>
                     <SessionPanel
@@ -310,10 +475,11 @@ export default function StockTake() {
             )}
             {creating && data && (
                 <CreatePanel
-                    data={data}
-                    onClose={() => setCreating(false)}
+                    session={creating}
+                    warehouse={warehouseName.get(creating.warehouseId) || creating.warehouseId}
+                    onClose={() => setCreating(null)}
                     onCreated={(id) => {
-                        setCreating(false);
+                        setCreating(null);
                         setNotice(`PI ${id} created. Print it, count, then submit the counts with the signed PI.`);
                         setOpenId(id);
                         reload();
@@ -414,7 +580,13 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
     const you = s.you;
     const testMode = you?.testMode === true;
     const verifyBarred = !!you?.verifyConflict && !testMode;
-    const approveBarred = !!you?.approveConflict && !testMode;
+    // Chart of Authority: where the variances were routed through it, only a holder of the current level's job role
+    // (not the counter, the requester or an earlier approver) may approve.
+    const coa = you?.coa;
+    const coaRouted = !!coa?.routed;
+    const coaBarred = coaRouted && st === 'pending_post_approval' && !coa?.ok;
+    const approveBarred = (!!you?.approveConflict && !testMode) || coaBarred;
+    const steps = s.approval?.steps ?? [];
     const postBarred = !!you?.postConflict && !testMode;
     const whyYou = (c: boolean, r: boolean) => (c && r ? 'counted this PI and submitted it for posting' : c ? 'counted this PI' : 'submitted this PI for posting');
 
@@ -557,7 +729,11 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                     key='submit-posting'
                     onClick={() =>
                         run(
-                            { title: 'Submit for posting approval?', message: `${count(postable, 'verified line')} (not flagged for recount) ${postable === 1 ? 'is' : 'are'} sent for posting approval. ${testMode ? 'Test mode is on for your organization, so you may approve it yourself; this is recorded in the audit trail.' : 'Someone other than you and the counter must approve before stock is posted.'}`, confirmLabel: 'Submit for approval' },
+                            {
+                                title: 'Submit for posting approval?',
+                                message: `${count(postable, 'verified line')} (not flagged for recount) ${postable === 1 ? 'is' : 'are'} sent for posting approval. Any differences are valued at moving average and approved under the Chart of Authority, level by level. ${testMode ? 'Test mode is on for your organization, so you may approve it yourself; this is recorded in the audit trail.' : 'Someone other than you and the counter must approve before stock is posted.'}`,
+                                confirmLabel: 'Submit for approval',
+                            },
                             'submit_posting',
                             () => `${s.piNumber} submitted for posting approval.`
                         )
@@ -604,9 +780,9 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                 onClick={() =>
                     run(
                         {
-                            title: 'Approve posting?',
-                            message: `${count(postable, 'line')} will be released for posting to the material journal. ${testMode && you?.approveConflict ? 'Test mode is on for your organization, so you may approve a PI you counted or submitted; this is recorded in the audit trail.' : 'You cannot approve a PI you counted or submitted for posting.'}`,
-                            confirmLabel: 'Approve posting',
+                            title: coaRouted ? `Approve level ${coa?.level ?? ''}?` : 'Approve posting?',
+                            message: `${coaRouted ? `You approve level ${coa?.level} (${coa?.title}) for a variance value of ${money(s.varianceValue ?? 0)}. ${steps.filter((x) => x.status === 'pending').length > 1 ? 'The next level must then approve before posting.' : `${count(postable, 'line')} will then be released for posting to the material journal.`}` : `${count(postable, 'line')} will be released for posting to the material journal.`} ${testMode && (you?.approveConflict || coa?.testMode) ? 'Test mode is on for your organization, so you may approve this yourself; this is recorded in the audit trail.' : 'You cannot approve a PI you counted or submitted for posting.'}`,
+                            confirmLabel: coaRouted ? `Approve ${coa?.level ?? ''}` : 'Approve posting',
                             acknowledge: 'I have reviewed the counts and variances of this PI and approve them for posting.',
                         },
                         'approve_posting',
@@ -614,7 +790,22 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                     )
                 }
             >
-                <ShieldCheck className='h-4 w-4' /> Approve posting
+                <ShieldCheck className='h-4 w-4' /> {coaRouted ? `Approve ${coa?.level ?? ''}` : 'Approve posting'}
+            </Button>,
+            <Button
+                key='return'
+                variant='secondary'
+                disabled={approveBarred}
+                onClick={() =>
+                    run(
+                        { title: 'Return for review?', message: 'The posting request is withdrawn and the PI goes back to Verified, so the counts can be rechecked or recounted and submitted again. Approvals already given are cleared.', confirmLabel: 'Return', reason: { label: 'Reason for returning', minLength: 10 } },
+                        'reject_posting',
+                        () => `${s.piNumber} returned to Verified.`,
+                        (reason) => ({ reason })
+                    )
+                }
+            >
+                <Undo2 className='h-4 w-4' /> Return
             </Button>
         );
     }
@@ -786,8 +977,32 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
             {st === 'verification' && !editingCounts && verifyBarred && (
                 <Alert tone='warn'>You counted or corrected the counts of this PI, so you cannot verify it. Another person with the Stock Take verification permission at this warehouse must verify it.</Alert>
             )}
-            {st === 'pending_post_approval' && approveBarred && (
+            {st === 'pending_post_approval' && !!you?.approveConflict && !testMode && (
                 <Alert tone='warn'>You {whyYou(!!you?.counted, !!you?.requestedPosting)}, so you cannot approve its posting. Another person with the Stock Take posting approval permission at this warehouse must approve it.</Alert>
+            )}
+            {st === 'pending_post_approval' && coaBarred && !you?.approveConflict && coa?.why && <Alert tone='warn'>{coa.why}</Alert>}
+            {s.postingReturnReason && st === 'verified' && <Alert tone='warn'>Returned from posting approval: {s.postingReturnReason}</Alert>}
+            {s.approval && steps.length > 0 && ['pending_post_approval', 'approved_for_posting'].includes(st) && (
+                <Card className='space-y-2'>
+                    <div className='flex items-baseline justify-between gap-2'>
+                        <p className='text-sm font-medium text-ink'>Chart of Authority</p>
+                        <p className='text-sm text-soft'>Variance value {money(s.approval.amount)}</p>
+                    </div>
+                    <ol className='space-y-1.5'>
+                        {steps.map((x) => (
+                            <li key={x.level} className='flex items-center justify-between gap-2 rounded-lg border border-line px-2 py-1.5'>
+                                <span className='min-w-0'>
+                                    <span className='block truncate text-sm text-ink'>
+                                        {x.level} · {x.title}
+                                    </span>
+                                    <span className='block truncate text-xs text-muted'>{x.status === 'approved' ? `Approved ${fmtDate(x.at)}` : x.positionTitle}</span>
+                                </span>
+                                <Badge tone={x.status === 'approved' ? 'brand' : 'warn'}>{x.status === 'approved' ? 'Approved' : 'Pending'}</Badge>
+                            </li>
+                        ))}
+                    </ol>
+                    {!!s.approval.unvalued?.length && <p className='text-xs text-amber-300'>No finance cost yet for {s.approval.unvalued.join(', ')}; valued at zero for routing.</p>}
+                </Card>
             )}
             {st === 'approved_for_posting' && postBarred && (
                 <Alert tone='warn'>You counted this PI, so you cannot post it. Another person with the Stock Take posting permission at this warehouse must post it.</Alert>
@@ -827,6 +1042,7 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
             <Card>
                 <dl className='grid grid-cols-2 gap-3 sm:grid-cols-3'>
                     <Detail label='PI document'>{s.piNumber}</Detail>
+                    {s.campaignId && <Detail label='Stock take session'>{s.campaignName ? `${s.campaignId} · ${s.campaignName}` : s.campaignId}</Detail>}
                     <Detail label='Configuration'>{s.configName}</Detail>
                     <Detail label='Warehouse'>{warehouse}</Detail>
                     {s.type && <Detail label='Type'>{s.type}</Detail>}
@@ -876,26 +1092,20 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
 // New PI document.
 // ---------------------------------------------------------------------------
 
-function CreatePanel({ data, onClose, onCreated }: { data: Data; onClose: () => void; onCreated: (id: string) => void }) {
-    const [configId, setConfigId] = useState('');
-    const [warehouseId, setWarehouseId] = useState('');
+function CreatePanel({ session: c, warehouse, onClose, onCreated }: { session: CountSession; warehouse: string; onClose: () => void; onCreated: (id: string) => void }) {
     const [startBin, setStartBin] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const cfg = data.configs.find((c) => c.id === configId);
+    const sequence = c.selection === 'Sequence';
 
-    const problems = [
-        ...(!cfg ? ['Choose a configuration.'] : cfg.active === false ? ['This configuration is disabled.'] : []),
-        ...(!warehouseId ? ['Choose a warehouse.'] : []),
-        ...(startBin.trim().length > 80 ? ['The starting location is too long.'] : []),
-    ];
+    const problems = [...(!c.canCreatePi ? [c.whyNoPi || 'This session is not open for new PI documents.'] : []), ...(startBin.trim().length > 80 ? ['The starting location is too long (80 characters at most).'] : [])];
 
     const create = async () => {
         if (problems.length) return;
         setBusy(true);
         setError('');
         try {
-            const r = await callBackend<{ ok: boolean; id?: string }>(API + 'start', { configId, warehouseId, startBin: cfg?.selection === 'Sequence' ? startBin.trim() : '' });
+            const r = await callBackend<{ ok: boolean; id?: string }>(API + 'start', { sessionId: c.id, startBin: sequence ? startBin.trim() : '' });
             onCreated(r.id ?? '');
         } catch (err) {
             setError(messageOf(err));
@@ -907,7 +1117,8 @@ function CreatePanel({ data, onClose, onCreated }: { data: Data; onClose: () => 
     return (
         <Panel
             title='New PI document'
-            subtitle='Locations are picked from the configuration'
+            eyebrow={c.sessionNumber}
+            subtitle={c.name}
             onClose={onClose}
             actions={
                 <Button busy={busy} disabled={problems.length > 0} onClick={() => void create()}>
@@ -917,26 +1128,379 @@ function CreatePanel({ data, onClose, onCreated }: { data: Data; onClose: () => 
         >
             {error && <Alert tone='error'>{error}</Alert>}
             <Problems items={problems} />
+            <Card>
+                <dl className='grid grid-cols-2 gap-3'>
+                    <Detail label='Stock take session'>{c.sessionNumber}</Detail>
+                    <Detail label='Warehouse'>{warehouse}</Detail>
+                    <Detail label='Configuration'>{c.configName}</Detail>
+                    <Detail label='Type'>{c.type}</Detail>
+                    <Detail label='Selection'>{c.selection}</Detail>
+                    <Detail label='PI size'>{count(c.documentSize, 'location')}</Detail>
+                </dl>
+            </Card>
+            {sequence ? (
+                <Card className='space-y-3'>
+                    <Field id='st-new-start' label='Starting physical location' maxLength={80} autoComplete='off' value={startBin} onChange={(e) => setStartBin(e.target.value)} placeholder='First mapped location by default' hint='Leave blank to start at the first mapped location.' error={startBin.trim().length > 80 ? 'Too long' : undefined} />
+                </Card>
+            ) : (
+                <Alert tone='info'>Locations are picked at random from the warehouse, so nobody can predict which ones will be counted.</Alert>
+            )}
+            <Alert tone='info'>Every material picked must already have reconciled stock in this warehouse; otherwise the PI is refused and the materials to fix are named.</Alert>
+        </Panel>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Stock take session: its PI documents and its progress report.
+// ---------------------------------------------------------------------------
+
+function CountSessionPanel({
+    session: c,
+    pis,
+    warehouse,
+    notice,
+    ask,
+    onNewPi,
+    onOpenPi,
+    onDone,
+    onClose,
+}: {
+    session: CountSession;
+    pis: Session[];
+    warehouse: string;
+    notice: string;
+    ask: Ask;
+    onNewPi: () => void;
+    onOpenPi: (id: string) => void;
+    onDone: (message: string) => void;
+    onClose: () => void;
+}) {
+    const [tab, setTab] = useState<'pis' | 'report'>('pis');
+    const open = c.status === 'open';
+    const openPis = pis.filter((p) => !CLOSED.includes(p.status));
+    const anyPosted = pis.some((p) => p.lines.some((l) => l.posted));
+    const phase = phaseOf(c.progress.phase);
+
+    const act = (action: 'close' | 'cancel') =>
+        ask(
+            action === 'close'
+                ? { title: `Close ${c.sessionNumber}?`, message: `The session is closed with its progress as it stands (${pctText(c.progress.completionPct)} complete). No more PI documents can be created in it. This cannot be reopened.`, confirmLabel: 'Close session', reason: { label: 'Closure reason', minLength: 10 } }
+                : { title: `Cancel ${c.sessionNumber}?`, message: 'The session is cancelled without any stock posted. No more PI documents can be created in it. This cannot be reopened.', confirmLabel: 'Cancel session', tone: 'danger', reason: { label: 'Reason for cancelling', minLength: 10 } },
+            async (reason) => {
+                await callBackend(API + 'count-session/action', { id: c.id, action, reason });
+                onDone(`${c.sessionNumber} ${action === 'close' ? 'closed' : 'cancelled'}.`);
+            }
+        );
+
+    const actions: ReactNode[] = [];
+    if (open) {
+        actions.push(
+            <Button key='new-pi' disabled={!c.canCreatePi} onClick={onNewPi}>
+                <Plus className='h-4 w-4' /> New PI document
+            </Button>
+        );
+        actions.push(
+            <Button key='close' variant='secondary' disabled={openPis.length > 0} onClick={() => act('close')}>
+                <XCircle className='h-4 w-4' /> Close session
+            </Button>
+        );
+        if (!anyPosted)
+            actions.push(
+                <Button key='cancel' variant='danger' disabled={openPis.length > 0} onClick={() => act('cancel')}>
+                    <Trash2 className='h-4 w-4' /> Cancel session
+                </Button>
+            );
+    }
+
+    const piColumns: Array<Column<Session>> = [
+        { key: 'pi', label: 'PI document', value: (p) => p.piNumber, render: (p) => <span className='font-mono text-xs font-semibold text-brandsoft'>{p.piNumber}</span> },
+        { key: 'status', label: 'Status', value: (p) => statusOf(p.status).label, render: (p) => <Badge tone={statusOf(p.status).tone}>{statusOf(p.status).label}</Badge> },
+        { key: 'lines', label: 'Locations', type: 'number', value: (p) => p.lines.length },
+        { key: 'variances', label: 'Variances', type: 'number', value: (p) => p.lines.filter((l) => l.counted !== null && hasVariance(l)).length },
+        { key: 'value', label: 'Variance value', type: 'number', value: (p) => p.varianceValue ?? null },
+        { key: 'recount', label: 'Recount of', value: (p) => p.parentPi || '', hidden: true },
+        { key: 'created', label: 'Created', type: 'date', value: (p) => p.createdAt, render: (p) => fmtDate(p.createdAt) },
+    ];
+
+    return (
+        <Panel title={c.name} eyebrow={c.sessionNumber} subtitle={<Badge tone={phase.tone}>{phase.label}</Badge>} actions={actions.length ? actions : undefined} onClose={onClose}>
+            {notice && <Alert tone='success'>{notice}</Alert>}
+            {open && !c.canCreatePi && <Alert tone='warn'>{c.whyNoPi}</Alert>}
+            {open && openPis.length > 0 && <Alert tone='info'>{count(openPis.length, 'PI document')} still open. Finish or disregard {openPis.length === 1 ? 'it' : 'them'} before the session can be closed.</Alert>}
+            {c.closureReason && <Alert tone='info'>{c.status === 'cancelled' ? 'Cancelled' : 'Closed'} {c.closedAt ? fmtWhen(c.closedAt) : ''}: {c.closureReason}</Alert>}
+            <Segmented
+                label='Session views'
+                value={tab}
+                onChange={setTab}
+                options={[
+                    { value: 'pis', label: 'PI documents', count: pis.length },
+                    { value: 'report', label: 'Progress report' },
+                ]}
+            />
+            {tab === 'pis' ? (
+                <>
+                    <Card>
+                        <dl className='grid grid-cols-2 gap-3'>
+                            <Detail label='Warehouse'>{warehouse}</Detail>
+                            <Detail label='Configuration'>{c.configName}</Detail>
+                            <Detail label='Start'>{fmtWhen(c.startAt)}</Detail>
+                            <Detail label='End'>{c.endAt ? fmtWhen(c.endAt) : 'Open-ended'}</Detail>
+                        </dl>
+                    </Card>
+                    <RichTable
+                        id='inv.stocktake.countsession.pis'
+                        title={`${c.sessionNumber} PI documents`}
+                        fileName={`Stock_take_${c.sessionNumber}_PI_documents`}
+                        columns={piColumns}
+                        rows={pis}
+                        rowKey={(p) => p.id}
+                        onRowClick={(p) => onOpenPi(p.id)}
+                        empty={open ? 'No PI documents yet. Tap New PI document.' : 'No PI documents were created in this session.'}
+                        height='h-[calc(100dvh-22rem)]'
+                    />
+                </>
+            ) : (
+                <ProgressReport session={c} warehouse={warehouse} />
+            )}
+        </Panel>
+    );
+}
+
+function Stat({ label, value, note, tone }: { label: string; value: ReactNode; note?: ReactNode; tone?: 'good' | 'bad' }) {
+    return (
+        <div className='min-w-0 rounded-xl border border-line bg-panel p-3'>
+            <p className='truncate text-xs text-muted'>{label}</p>
+            <p className={`mt-0.5 truncate text-lg font-semibold ${tone === 'good' ? 'text-emerald-300' : tone === 'bad' ? 'text-amber-300' : 'text-ink'}`}>{value}</p>
+            {note && <p className='truncate text-xs text-soft'>{note}</p>}
+        </div>
+    );
+}
+
+function ProgressReport({ session: c, warehouse }: { session: CountSession; warehouse: string }) {
+    const p = c.progress;
+    const t = p.targets;
+    const stageRows = useMemo(() => p.stages, [p]);
+    const stageColumns: Array<Column<Stage>> = [
+        { key: 'stage', label: 'Stage', value: (r) => r.label },
+        { key: 'done', label: 'PI documents', type: 'number', value: (r) => r.done },
+        { key: 'total', label: 'Of', type: 'number', value: (r) => r.total },
+        { key: 'pct', label: '% complete', type: 'number', value: (r) => r.pct, render: (r) => `${r.pct}%` },
+    ];
+    const statuses = Object.entries(p.piDocuments.byStatus).sort((a, b) => b[1] - a[1]);
+    return (
+        <div className='space-y-3'>
+            <div className='grid grid-cols-2 gap-2'>
+                <Stat label='Completion' value={pctText(p.completionPct)} note={`${p.piDocuments.closed} of ${p.piDocuments.live} complete`} />
+                <Stat label='PI documents' value={p.piDocuments.total} note={`Target ${t.piDocuments} · ${pctText(t.piDocumentsPct)}${p.piDocuments.recounts ? ` · ${count(p.piDocuments.recounts, 'recount')}` : ''}`} />
+                <Stat label='Locations planned' value={p.locations.planned} note={`Target ${t.locations} · ${pctText(t.locationsPct)}`} />
+                <Stat label='Locations counted' value={p.locations.counted} note={`${pctText(p.locations.countedPct)} of planned`} />
+                <Stat label='Locations posted' value={p.locations.posted} note={`${pctText(p.locations.postedPct)} of planned`} />
+                <Stat label='Count accuracy' value={pctText(p.accuracy.pct)} note={`Target ${t.accuracyPct}% · ${count(p.accuracy.variances, 'variance')}`} tone={t.accuracyMet === null ? undefined : t.accuracyMet ? 'good' : 'bad'} />
+                <Stat label='Variance value' value={money(p.varianceValue)} note={t.varianceToleranceValue > 0 ? `Tolerance ${money(t.varianceToleranceValue)}` : 'No tolerance set'} tone={t.withinTolerance === null ? undefined : t.withinTolerance ? 'good' : 'bad'} />
+                <Stat label='Time used' value={p.timeUsedPct === null ? 'Open-ended' : pctText(p.timeUsedPct)} note={c.endAt ? `Ends ${fmtWhen(c.endAt)}` : `Started ${fmtWhen(c.startAt)}`} tone={p.phase === 'overdue' ? 'bad' : undefined} />
+                <Stat label='Disregarded PIs' value={p.piDocuments.disregarded} note='Not counted in completion' />
+                <Stat label='No baseline' value={p.locations.noBaseline} note='Counted lines without system stock' tone={p.locations.noBaseline ? 'bad' : undefined} />
+            </div>
+
             <Card className='space-y-3'>
-                <SelectField
-                    id='st-new-config'
-                    label='Configuration *'
-                    value={configId}
-                    onChange={(e) => {
-                        setConfigId(e.target.value);
-                        setStartBin('');
-                    }}
-                    hint={cfg ? `${cfg.type} · ${cfg.selection} · ${cfg.documentSize} locations` : undefined}
-                >
+                <p className='text-sm font-medium text-ink'>Progress by stage</p>
+                {p.stages.map((st) => (
+                    <div key={st.key}>
+                        <div className='flex items-baseline justify-between gap-2 text-sm'>
+                            <span className='text-soft'>{st.label}</span>
+                            <span className='shrink-0 text-ink'>
+                                {st.done}/{st.total} · {st.pct}%
+                            </span>
+                        </div>
+                        <div className='mt-1 h-2 overflow-hidden rounded-full bg-page' role='progressbar' aria-label={st.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={st.pct}>
+                            <div className='h-full rounded-full bg-brand' style={{ width: `${Math.min(100, st.pct)}%` }} />
+                        </div>
+                    </div>
+                ))}
+                {p.timeUsedPct !== null && (
+                    <p className={`text-xs ${p.timeUsedPct > p.completionPct ? 'text-amber-300' : 'text-soft'}`}>
+                        {p.timeUsedPct}% of the time is used and {p.completionPct}% of the PI documents are complete{p.timeUsedPct > p.completionPct ? ': behind schedule.' : '.'}
+                    </p>
+                )}
+            </Card>
+
+            {statuses.length > 0 && (
+                <Card className='space-y-2'>
+                    <p className='text-sm font-medium text-ink'>PI documents by status</p>
+                    <div className='grid grid-cols-2 gap-2'>
+                        {statuses.map(([k, n]) => (
+                            <div key={k} className='flex items-center justify-between gap-2 rounded-lg border border-line px-2 py-1.5'>
+                                <Badge tone={statusOf(k).tone}>{statusOf(k).label}</Badge>
+                                <span className='text-sm font-semibold text-ink'>{n}</span>
+                            </div>
+                        ))}
+                    </div>
+                </Card>
+            )}
+
+            <RichTable
+                id='inv.stocktake.countsession.report'
+                title={`${c.sessionNumber} progress · ${warehouse}`}
+                fileName={`Stock_take_${c.sessionNumber}_progress`}
+                columns={stageColumns}
+                rows={stageRows}
+                rowKey={(r) => r.key}
+                empty='No PI documents yet.'
+                height='h-80'
+            />
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Plan a stock take session.
+// ---------------------------------------------------------------------------
+
+interface PlanForm {
+    name: string;
+    configId: string;
+    warehouseId: string;
+    startAt: string;
+    endAt: string;
+    targetPiDocuments: string;
+    targetLocations: string;
+    targetAccuracyPct: string;
+    varianceToleranceValue: string;
+}
+type PlanKey = keyof PlanForm;
+
+/** A date-time for the device's datetime-local input, in local time. */
+function localInput(d: Date) {
+    const z = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`;
+}
+const isNumber = (v: string, min: number, max: number) => /^\d+(\.\d{1,2})?$/.test(v.trim()) && Number(v) >= min && Number(v) <= max;
+
+function planErrors(f: PlanForm, cfg: Config | undefined, now: number): Partial<Record<PlanKey, string>> {
+    const e: Partial<Record<PlanKey, string>> = {};
+    const name = f.name.trim();
+    if (name.length < 3 || name.length > 80) e.name = '3 to 80 characters';
+    if (!cfg) e.configId = 'Choose a configuration';
+    else if (cfg.active === false) e.configId = 'This configuration is disabled';
+    if (!f.warehouseId) e.warehouseId = 'Choose a warehouse';
+    else if (cfg?.warehouseId && cfg.warehouseId !== f.warehouseId) e.warehouseId = 'Must be the configuration’s warehouse';
+    const start = Date.parse(f.startAt);
+    if (!f.startAt || !Number.isFinite(start)) e.startAt = 'Enter the start date and time';
+    else if (start < now - 10 * 60_000) e.startAt = 'Cannot be in the past';
+    else if (start > now + 366 * 86_400_000) e.startAt = 'Must be within 366 days';
+    if (f.endAt) {
+        const end = Date.parse(f.endAt);
+        if (!Number.isFinite(end)) e.endAt = 'Enter a valid date and time';
+        else if (Number.isFinite(start) && end <= start) e.endAt = 'Must be after the start';
+        else if (Number.isFinite(start) && end - start > 366 * 86_400_000) e.endAt = 'At most 366 days after the start';
+    }
+    if (!isWhole(f.targetPiDocuments, 1, 1000)) e.targetPiDocuments = 'Whole number, 1 to 1000';
+    if (!isWhole(f.targetLocations, 1, 1_000_000)) e.targetLocations = 'Whole number, 1 or more';
+    if (!isNumber(f.targetAccuracyPct, 0, 100)) e.targetAccuracyPct = '0 to 100';
+    if (!isNumber(f.varianceToleranceValue, 0, 1e12)) e.varianceToleranceValue = '0 or more, up to 2 decimals';
+    return e;
+}
+
+const PLAN_LABELS: Record<PlanKey, string> = {
+    name: 'Session name',
+    configId: 'Configuration',
+    warehouseId: 'Warehouse',
+    startAt: 'Start',
+    endAt: 'End',
+    targetPiDocuments: 'Target PI documents',
+    targetLocations: 'Target locations',
+    targetAccuracyPct: 'Target count accuracy',
+    varianceToleranceValue: 'Variance value tolerance',
+};
+
+function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: Ask; onClose: () => void; onCreated: (id: string) => void }) {
+    const [form, setForm] = useState<PlanForm>(() => ({ name: '', configId: '', warehouseId: '', startAt: localInput(new Date()), endAt: '', targetPiDocuments: '1', targetLocations: '', targetAccuracyPct: '98', varianceToleranceValue: '0' }));
+    const [touched, setTouched] = useState<Partial<Record<PlanKey, boolean>>>({});
+    const [tried, setTried] = useState(false);
+    const cfg = data.configs.find((c) => c.id === form.configId);
+    const errors = planErrors(form, cfg, Date.now());
+    const problems = (Object.keys(errors) as PlanKey[]).map((k) => `${PLAN_LABELS[k]}: ${errors[k]}`);
+    const shown = (k: PlanKey) => (touched[k] || tried ? errors[k] : undefined);
+    const set = (k: PlanKey, v: string) => setForm((f) => ({ ...f, [k]: v }));
+    const touch = (k: PlanKey) => setTouched((t) => ({ ...t, [k]: true }));
+    const enabledConfigs = data.configs.filter((c) => c.active !== false);
+
+    const pickConfig = (id: string) => {
+        const c = data.configs.find((x) => x.id === id);
+        setForm((f) => ({
+            ...f,
+            configId: id,
+            warehouseId: c?.warehouseId || f.warehouseId,
+            name: f.name || (c ? c.name : ''),
+            targetLocations: touched.targetLocations ? f.targetLocations : c ? String(c.documentSize * (Number(f.targetPiDocuments) || 1)) : f.targetLocations,
+        }));
+        touch('configId');
+    };
+
+    const submit = () => {
+        setTried(true);
+        if (problems.length || !cfg) return;
+        const warehouse = data.warehouses.find((w) => w.id === form.warehouseId)?.name ?? form.warehouseId;
+        ask(
+            {
+                title: 'Create stock take session?',
+                message: (
+                    <span className='block space-y-1'>
+                        <span className='block'>
+                            “{form.name.trim()}” at {warehouse}, configuration {cfg.name}, from {fmtWhen(new Date(form.startAt).toISOString())}
+                            {form.endAt ? ` to ${fmtWhen(new Date(form.endAt).toISOString())}` : ' with no end date'}.
+                        </span>
+                        <span className='block'>
+                            Targets: {count(Number(form.targetPiDocuments), 'PI document')}, {count(Number(form.targetLocations), 'location')}, {form.targetAccuracyPct}% accuracy, variance tolerance {money(Number(form.varianceToleranceValue))}.
+                        </span>
+                    </span>
+                ),
+                confirmLabel: 'Create session',
+                acknowledge: 'The configuration, warehouse, dates and targets are correct. They cannot be changed once the session is created.',
+            },
+            async () => {
+                const r = await callBackend<{ ok: boolean; id?: string }>(API + 'count-session/create', {
+                    name: form.name.trim(),
+                    configId: form.configId,
+                    warehouseId: form.warehouseId,
+                    startAt: new Date(form.startAt).toISOString(),
+                    endAt: form.endAt ? new Date(form.endAt).toISOString() : '',
+                    metrics: {
+                        targetPiDocuments: Number(form.targetPiDocuments),
+                        targetLocations: Number(form.targetLocations),
+                        targetAccuracyPct: Number(form.targetAccuracyPct),
+                        varianceToleranceValue: Number(form.varianceToleranceValue),
+                    },
+                });
+                onCreated(r.id ?? '');
+            }
+        );
+    };
+
+    return (
+        <Panel
+            title='New stock take session'
+            subtitle='Plan the session first; PI documents are created inside it'
+            onClose={onClose}
+            actions={
+                <Button onClick={submit} disabled={tried && problems.length > 0}>
+                    <CalendarClock className='h-4 w-4' /> Create session
+                </Button>
+            }
+        >
+            {tried && <Problems items={problems} />}
+            {!enabledConfigs.length && <Alert tone='warn'>There is no enabled configuration. Create one under Configuration first.</Alert>}
+            <Card className='space-y-3'>
+                <Field id='sts-name' label='Session name *' maxLength={80} autoComplete='off' value={form.name} onChange={(e) => set('name', e.target.value)} onBlur={() => touch('name')} error={shown('name')} placeholder='e.g. Main store year-end count' />
+                <SelectField id='sts-config' label='Configuration *' value={form.configId} onChange={(e) => pickConfig(e.target.value)} error={shown('configId')} hint={cfg ? `${cfg.type} · ${cfg.selection} · ${count(cfg.documentSize, 'location')} per PI` : undefined}>
                     <option value=''>Select configuration</option>
-                    {data.configs.map((c) => (
-                        <option key={c.id} value={c.id} disabled={c.active === false}>
+                    {enabledConfigs.map((c) => (
+                        <option key={c.id} value={c.id}>
                             {c.name}
-                            {c.active === false ? ' (disabled)' : ''}
                         </option>
                     ))}
                 </SelectField>
-                <SelectField id='st-new-warehouse' label='Warehouse *' value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} disabled={!cfg}>
+                <SelectField id='sts-warehouse' label='Warehouse *' value={form.warehouseId} onChange={(e) => (set('warehouseId', e.target.value), touch('warehouseId'))} disabled={!!cfg?.warehouseId} error={shown('warehouseId')} hint={cfg?.warehouseId ? 'Fixed by the configuration.' : undefined}>
                     <option value=''>Select accessible warehouse</option>
                     {data.warehouses.map((w) => (
                         <option key={w.id} value={w.id}>
@@ -944,9 +1508,23 @@ function CreatePanel({ data, onClose, onCreated }: { data: Data; onClose: () => 
                         </option>
                     ))}
                 </SelectField>
-                {cfg?.selection === 'Sequence' && (
-                    <Field id='st-new-start' label='Starting physical location' maxLength={80} autoComplete='off' value={startBin} onChange={(e) => setStartBin(e.target.value)} placeholder='First mapped location by default' hint='Leave blank to start at the first mapped location.' />
-                )}
+            </Card>
+            <Card className='space-y-3'>
+                <div className='space-y-3'>
+                    <Field id='sts-start' type='datetime-local' label='Start *' value={form.startAt} onChange={(e) => set('startAt', e.target.value)} onBlur={() => touch('startAt')} error={shown('startAt')} />
+                    <Field id='sts-end' type='datetime-local' label='End (optional)' value={form.endAt} onChange={(e) => set('endAt', e.target.value)} onBlur={() => touch('endAt')} error={shown('endAt')} />
+                </div>
+                <p className='text-xs text-muted'>PI documents can be created only between the start and the end. Leave the end empty for an open-ended session.</p>
+            </Card>
+            <Card className='space-y-3'>
+                <p className='text-sm font-medium text-ink'>Metrics</p>
+                <div className='grid grid-cols-2 gap-2'>
+                    <Field id='sts-pis' label='Target PI documents *' inputMode='numeric' maxLength={4} value={form.targetPiDocuments} onChange={(e) => set('targetPiDocuments', e.target.value)} onBlur={() => touch('targetPiDocuments')} error={shown('targetPiDocuments')} />
+                    <Field id='sts-locations' label='Target locations *' inputMode='numeric' maxLength={7} value={form.targetLocations} onChange={(e) => (set('targetLocations', e.target.value), touch('targetLocations'))} error={shown('targetLocations')} />
+                    <Field id='sts-accuracy' label='Target accuracy % *' inputMode='decimal' maxLength={6} value={form.targetAccuracyPct} onChange={(e) => set('targetAccuracyPct', e.target.value)} onBlur={() => touch('targetAccuracyPct')} error={shown('targetAccuracyPct')} />
+                    <Field id='sts-tolerance' label='Variance tolerance *' inputMode='decimal' maxLength={16} value={form.varianceToleranceValue} onChange={(e) => set('varianceToleranceValue', e.target.value)} onBlur={() => touch('varianceToleranceValue')} error={shown('varianceToleranceValue')} />
+                </div>
+                <p className='text-xs text-muted'>Accuracy is the share of counted locations that match the system quantity. The tolerance is the total value of differences (organization currency) the session should stay within; 0 means none set. The progress report measures the session against these.</p>
             </Card>
         </Panel>
     );
