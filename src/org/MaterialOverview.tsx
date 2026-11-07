@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type TouchEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode, type TouchEvent } from 'react';
 import { Camera, ChevronLeft, ChevronRight, FileImage, ImagePlus, Loader2, MapPin, Star, Tag, Trash2, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Badge } from '../admin/kit';
@@ -80,6 +80,29 @@ function health(available: number | null, min: number | null, max: number | null
     if (max !== null && available > max) return { label: 'Above maximum', tone: 'warn' };
     if (min === null && max === null) return { label: 'No min / max', tone: 'muted' };
     return { label: 'Within target', tone: 'brand' };
+}
+
+/**
+ * A button that opens the phone camera or the gallery. The file input sits INSIDE its label, so the tap itself opens the
+ * chooser. (The earlier version clicked a hidden input from script, which some phone web views ignore.)
+ * The chosen files are copied out of the input before it is cleared, so choosing the same photo again still works.
+ */
+function Pick({ mode, busy, label, className, children, onFiles }: { mode: 'camera' | 'gallery'; busy: boolean; label: string; className: string; children: ReactNode; onFiles: (files: File[]) => void }) {
+    const change = (e: ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files ?? []);
+        e.target.value = '';
+        onFiles(files);
+    };
+    return (
+        <label aria-label={label} aria-disabled={busy} className={`relative cursor-pointer ${className} ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+            {children}
+            {mode === 'camera' ? (
+                <input type='file' accept='image/*' capture='environment' disabled={busy} className='sr-only' onChange={change} />
+            ) : (
+                <input type='file' accept='image/*' multiple disabled={busy} className='sr-only' onChange={change} />
+            )}
+        </label>
+    );
 }
 
 /** Bar from 0 to a little above the maximum: the target band (min–max) and a marker for available stock. */
@@ -197,28 +220,35 @@ export default function MaterialOverview(props: OverviewProps) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [expanded, setExpanded] = useState(false);
-    const camera = useRef<HTMLInputElement>(null);
-    const gallery = useRef<HTMLInputElement>(null);
+    const [progress, setProgress] = useState('');
     useEffect(() => setPhotos(props.photos), [props.photos]);
 
-    const add = async (files: FileList | null) => {
-        const list = Array.from(files ?? []).slice(0, Math.max(0, MAX_PHOTOS - photos.length));
+    const add = async (picked: File[]) => {
+        if (!picked.length) return; // the chooser was closed without a photo
+        const list = picked.slice(0, Math.max(0, MAX_PHOTOS - photos.length));
         if (!list.length) {
-            if (files?.length) setError(`A material can have at most ${MAX_PHOTOS} photos. Remove one first.`);
+            setError(`A material can have at most ${MAX_PHOTOS} photos. Remove one first.`);
             return;
         }
         setBusy(true);
         setError('');
+        let shown = photos.length;
         try {
-            for (const file of list) {
-                const data = await photoData(file);
+            for (let n = 0; n < list.length; n++) {
+                setProgress(`Saving photo ${n + 1} of ${list.length}…`);
+                const data = await photoData(list[n]);
                 const res = await callBackend<{ photos: MaterialPhoto[] }>('/api/org/inventory/material/photo/add', { id, warehouseId, data });
                 setPhotos(res.photos);
+                // The server saved the photo but sent no viewable link for it: say so instead of looking as if nothing happened.
+                if (res.photos.length <= shown) throw new Error('The photo was saved, but it cannot be shown yet. Close and reopen this material to see it.');
+                shown = res.photos.length;
             }
+            if (picked.length > list.length) setError(`Only ${list.length} of ${picked.length} photos were added: a material can have at most ${MAX_PHOTOS}.`);
         } catch (err) {
             setError(messageOf(err));
         } finally {
             setBusy(false);
+            setProgress('');
         }
     };
     const setCover = async (p: MaterialPhoto) => {
@@ -253,18 +283,10 @@ export default function MaterialOverview(props: OverviewProps) {
     const cover = photos[0];
     const h = health(props.available, props.minimum, props.maximum);
     const room = photos.length < MAX_PHOTOS;
-    const pickers = (
-        <>
-            <input ref={camera} type='file' accept='image/*' capture='environment' className='hidden' onChange={(e) => { void add(e.target.files); e.target.value = ''; }} />
-            <input ref={gallery} type='file' accept='image/*' multiple className='hidden' onChange={(e) => { void add(e.target.files); e.target.value = ''; }} />
-        </>
-    );
-
     return (
         <div className='space-y-3'>
             {/* Photo + identity */}
             <section className='overflow-hidden rounded-2xl border border-line bg-panel lg:grid lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]'>
-                {pickers}
                 <div className='min-w-0 lg:border-r lg:border-line lg:pb-3'>
                 <div className='relative aspect-[16/10] max-h-72 w-full bg-page sm:aspect-[21/9] lg:aspect-[4/3] lg:max-h-none'>
                     {cover ? (
@@ -279,14 +301,14 @@ export default function MaterialOverview(props: OverviewProps) {
                             <p className='text-sm text-muted'>{props.canPhoto ? 'No photo yet. Take one with your phone or choose from the gallery.' : 'No photo of this material yet.'}</p>
                             {props.canPhoto && (
                                 <div className='flex gap-2'>
-                                    <button type='button' disabled={busy} onClick={() => camera.current?.click()} className='flex h-11 items-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-onbrand disabled:opacity-50'>
+                                    <Pick mode='camera' busy={busy} label='Take photo' onFiles={(f) => void add(f)} className='flex h-11 items-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-onbrand'>
                                         {busy ? <Loader2 className='h-4 w-4 animate-spin' /> : <Camera className='h-4 w-4' />}
                                         Take photo
-                                    </button>
-                                    <button type='button' disabled={busy} onClick={() => gallery.current?.click()} className='flex h-11 items-center gap-2 rounded-xl border border-line bg-panel px-4 text-sm font-semibold text-ink disabled:opacity-50'>
+                                    </Pick>
+                                    <Pick mode='gallery' busy={busy} label='Choose from gallery' onFiles={(f) => void add(f)} className='flex h-11 items-center gap-2 rounded-xl border border-line bg-panel px-4 text-sm font-semibold text-ink'>
                                         <FileImage className='h-4 w-4' />
                                         Gallery
-                                    </button>
+                                    </Pick>
                                 </div>
                             )}
                         </div>
@@ -299,12 +321,12 @@ export default function MaterialOverview(props: OverviewProps) {
                             </span>
                             {props.canPhoto && room && (
                                 <span className='pointer-events-auto flex gap-2'>
-                                    <button type='button' aria-label='Take photo' disabled={busy} onClick={() => camera.current?.click()} className='flex h-11 w-11 items-center justify-center rounded-full bg-[#000000]/55 text-[#ffffff] disabled:opacity-50'>
+                                    <Pick mode='camera' busy={busy} label='Take photo' onFiles={(f) => void add(f)} className='flex h-11 w-11 items-center justify-center rounded-full bg-[#000000]/55 text-[#ffffff]'>
                                         {busy ? <Loader2 className='h-5 w-5 animate-spin' /> : <Camera className='h-5 w-5' />}
-                                    </button>
-                                    <button type='button' aria-label='Add from gallery' disabled={busy} onClick={() => gallery.current?.click()} className='flex h-11 w-11 items-center justify-center rounded-full bg-[#000000]/55 text-[#ffffff] disabled:opacity-50'>
+                                    </Pick>
+                                    <Pick mode='gallery' busy={busy} label='Add from gallery' onFiles={(f) => void add(f)} className='flex h-11 w-11 items-center justify-center rounded-full bg-[#000000]/55 text-[#ffffff]'>
                                         <ImagePlus className='h-5 w-5' />
-                                    </button>
+                                    </Pick>
                                 </span>
                             )}
                         </div>
@@ -317,6 +339,17 @@ export default function MaterialOverview(props: OverviewProps) {
                                 <img src={p.url} alt='' className='h-full w-full object-cover' />
                             </button>
                         ))}
+                    </div>
+                )}
+                {(progress || error) && (
+                    <div className='space-y-2 px-3 pt-3' aria-live='polite'>
+                        {progress && (
+                            <p className='flex items-center gap-2 text-sm text-muted'>
+                                <Loader2 className='h-4 w-4 animate-spin' />
+                                {progress}
+                            </p>
+                        )}
+                        {error && <Alert tone='error'>{error}</Alert>}
                     </div>
                 )}
                 </div>
@@ -354,7 +387,6 @@ export default function MaterialOverview(props: OverviewProps) {
                             ))}
                         </div>
                     )}
-                    {error && <Alert tone='error'>{error}</Alert>}
                 </div>
             </section>
 
