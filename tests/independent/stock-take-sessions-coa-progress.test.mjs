@@ -145,7 +145,7 @@ test('Automation: midnight session creation per configuration, one-time setup be
     assert.match(server, /export async function stockTakeAutomationForOrg\(orgId: string, deadline: number\)/);
     assert.match(server, /stock_take_auto_keys\/\$\{c\.id\}_\$\{today\}`, \{ configId: c\.id, day: today, createdAt: nowIso\(\) \}, \{ exists: false \}/, 'one session per configuration and day');
     assert.match(server, /lastSessionCreatedAt: now, lastSessionId: id, nextSessionDueOn: next/);
-    assert.match(server, /setupRequired: true,/);
+    assert.match(server, /setupRequired: !share,/);
     assert.match(server, /Complete the session setup \(materials to count, materials per PI and targets\) before creating PI documents\./);
     assert.match(server, /This session is already set up; its plan cannot be changed\./);
     assert.match(server, /if \(action !== 'cancel'\) throw new HttpError\(400, 'A session closes automatically/);
@@ -204,7 +204,7 @@ test('Cycle count: always periodic, full-scope question, cycle runs to the perio
 test('Automatic PI documents and independent count sheets (_A, _B) with a mandatory recount where they differ', () => {
     const server = read('backend/stockTake.ts');
     assert.match(server, /Choose whether PI documents are created automatically or manually/);
-    assert.match(server, /export async function generateSessionPis\(orgId: string, campaignId: string, by: string\)/);
+    assert.match(server, /export async function generateSessionPis\(orgId: string, campaignId: string, by: string, limit = Infinity\)/);
     assert.match(server, /return \{ ok: true, id, \.\.\.\(await autoGenerate\(ctx\.orgId, id, config\.data, ctx\.uid\)\) \};/, 'manual session: generated at creation');
     assert.match(server, /return \{ ok: true, \.\.\.\(await autoGenerate\(ctx\.orgId, id, config\?\.data, ctx\.uid\)\) \};/, 'automatic session: generated at setup');
     assert.match(server, /'POST \/api\/org\/inventory\/stocktake\/count-session\/generate'/);
@@ -242,4 +242,49 @@ test('Sessions close themselves once posting is complete; automatic PI problems 
     const screen = read('src/org/StockTake.tsx');
     assert.match(screen, /The PI documents could not be generated/);
     assert.match(screen, /They are generated automatically; tap Create PI documents to generate them now\./);
+});
+
+test('PI workflow: one Accept step posts (no variance) or routes to the Chart of Authority, last approval posts, recounts replace edits', () => {
+    const server = read('backend/stockTake.ts');
+    assert.match(server, /if \(action === 'accept'\) \{/);
+    assert.match(server, /accept: 'INV_ST_020',/);
+    assert.match(server, /const routed = pending\.length && withVariance\.length \? await routeNow\(pending\) : null;/);
+    assert.match(server, /await postNow\(\{ \.\.\.verify, recountPi, varianceValue: 0 \}/, 'no variance: posted and closed at once');
+    assert.match(server, /if \(last\) return approveAndPost\(/, 'the last Chart of Authority level posts');
+    assert.match(server, /Submitted counts cannot be edited\. Order a recount of the lines, or of the whole PI, instead\./);
+    assert.match(server, /Give a reason of at least 10 characters for recounting the whole PI/);
+    assert.match(server, /status: !pending\.length \? 'recounted' : partial \? 'recount_pending' : 'reconciled'/);
+    assert.match(server, /const CLOSED = \['reconciled', 'disregarded', 'closed_posted', 'recounted', 'recount_pending'\];/);
+    const screen = read('src/org/StockTake.tsx');
+    assert.match(screen, /'Accept & recount' : remainingVariance \? 'Accept & send for approval' : 'Accept & post'/);
+    assert.match(screen, /key='full-recount'/);
+    assert.doesNotMatch(screen, /<Pencil className='h-4 w-4' \/> Edit counts/);
+    assert.match(screen, /const canPrint = st === 'awaiting_print' \|\| st === 'counting';/, 'printing is not offered once the counts are in');
+    assert.match(screen, /Show closed PI documents \(\{closedPis\}\)/);
+});
+
+test('Cycle counts: one session or a session each day; PI documents all at once or each day; target PIs per day', async () => {
+    const { periodStart, dueByToday } = await import('../../backend/stockTake.ts');
+    assert.equal(periodStart('2026-11-07', 'Monthly'), '2026-11-01');
+    assert.equal(periodStart('2026-11-07', 'Weekly'), '2026-11-02', 'Saturday -> its Monday');
+    assert.equal(periodStart('2026-11-09', 'Weekly'), '2026-11-09');
+    assert.equal(periodStart('2026-11-07', 'Quarterly'), '2026-10-01');
+    // 30 PIs over 10 days: 3 due on day 1, 15 by day 5, all 30 on the last day.
+    const start = '2026-11-01T00:00:00.000Z';
+    const end = '2026-11-11T00:00:00.000Z';
+    assert.equal(dueByToday(30, start, end, '2026-11-01T05:00:00.000Z'), 3);
+    assert.equal(dueByToday(30, start, end, '2026-11-05T05:00:00.000Z'), 15);
+    assert.equal(dueByToday(30, start, end, '2026-11-12T05:00:00.000Z'), 30);
+    const server = read('backend/stockTake.ts');
+    assert.match(server, /Choose one session for the whole cycle or a session each day/);
+    assert.match(server, /Daily sessions are created by the automation: choose that sessions are created automatically/);
+    assert.match(server, /Choose whether the PI documents are created all at once or each day/);
+    assert.match(server, /async function cycleDayShare\(/);
+    assert.match(server, /const materials = Math\.max\(0, Math\.ceil\(\(total - onPis\) \/ daysLeft\)\);/);
+    assert.match(server, /Daily sessions of one cycle never repeat a location another day of the same cycle already has\./);
+    assert.match(server, /if \(share\) out\.generated \+= \(await autoGenerate\(orgId, id, d, 'automation'\)\)\.generated;/);
+    const screen = read('src/org/StockTake.tsx');
+    assert.match(screen, /label='Sessions for each cycle \*'/);
+    assert.match(screen, /label='PI documents of the cycle are created \*'/);
+    assert.match(screen, /<Detail label='Target PIs per day'>/);
 });

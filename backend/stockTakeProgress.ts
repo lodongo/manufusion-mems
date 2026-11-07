@@ -38,6 +38,7 @@ const STAGE_RANK: Record<string, number> = {
     posted: 6,
     reconciled: 7,
     closed_posted: 7,
+    recounted: 7,
 };
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : 0);

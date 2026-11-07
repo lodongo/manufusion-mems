@@ -36,7 +36,9 @@ import { metricsOf, overallStatistics, plannedPis, sessionProgress } from './sto
 
 const TYPES = ['Cycle Count', 'Full Stock Take', 'Cluster Stock Take', 'Random Stock Take'];
 const PERIODS = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annually'];
-const CLOSED = ['reconciled', 'disregarded', 'closed_posted'];
+// A PI is closed once it is reconciled, closed, disregarded, wholly recounted (its lines live on in the recount PI) or
+// partly posted with the rest on a recount PI.
+const CLOSED = ['reconciled', 'disregarded', 'closed_posted', 'recounted', 'recount_pending'];
 const CLUSTER_RE = /^CL-\d{4}$/;
 // PI documents: PI_ + 8 digits (organization counter); older ones PI + 9 digits. Recounts add _n.
 const SESSION_RE = /^(PI_\d{8}|PI\d{9})(_\d{1,3})?$/;
@@ -51,6 +53,7 @@ const ACTION_PERMS: Record<string, string> = {
     counts: 'INV_ST_017',
     edit_counts: 'INV_ST_016',
     verify: 'INV_ST_020',
+    accept: 'INV_ST_020',
     recount: 'INV_ST_022',
     refresh_baseline: 'INV_ST_024',
     submit_posting: 'INV_ST_026',
@@ -287,7 +290,7 @@ function campaignClosedReason(c: Obj, now: string): string {
 export function sessionComplete(session: Obj, pis: Obj[], now: string): boolean {
     if (str(session.status) !== 'open' || session.setupRequired === true) return false;
     const live = pis.filter((x) => str(x.status) !== 'disregarded');
-    if (!live.length || !live.every((x) => ['reconciled', 'closed_posted'].includes(str(x.status)))) return false;
+    if (!live.length || !live.every((x) => ['reconciled', 'closed_posted', 'recounted', 'recount_pending'].includes(str(x.status)))) return false;
     const p = sessionProgress(session, pis, now);
     const ended = !!str(session.endAt) && Date.parse(now) > Date.parse(str(session.endAt));
     return p.piDocuments.originals >= p.piDocuments.planned || session.locationsExhausted === true || ended;
@@ -416,6 +419,47 @@ export function periodEnd(day: string, period: string): string {
     return end.toISOString().slice(0, 10);
 }
 const isCycle = (c: Obj) => str(c.type) === 'Cycle Count';
+/** The first day of the calendar period containing a day (the day the cycle began). */
+export function periodStart(day: string, period: string): string {
+    const d = new Date(`${day}T00:00:00.000Z`);
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth();
+    let start: Date;
+    if (period === 'Daily') start = d;
+    else if (period === 'Weekly') start = new Date(Date.UTC(y, m, d.getUTCDate() - ((d.getUTCDay() + 6) % 7)));
+    else if (period === 'Monthly') start = new Date(Date.UTC(y, m, 1));
+    else if (period === 'Quarterly') start = new Date(Date.UTC(y, m - (m % 3), 1));
+    else start = new Date(Date.UTC(y, 0, 1));
+    return start.toISOString().slice(0, 10);
+}
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00.000Z`) - Date.parse(`${a}T00:00:00.000Z`)) / 86_400_000);
+/**
+ * PI documents a session should have by today when they are released day by day: an even share per day of its run,
+ * rounded up, never more than planned.
+ */
+export function dueByToday(planned: number, startIso: string, endIso: string, nowIso: string): number {
+    const day = 86_400_000;
+    const days = Math.max(1, Math.ceil((Date.parse(endIso) - Date.parse(startIso)) / day));
+    const index = Math.min(days - 1, Math.max(0, Math.floor((Date.parse(nowIso) - Date.parse(startIso)) / day)));
+    return Math.min(planned, Math.ceil((planned * (index + 1)) / days));
+}
+const cyclePath = (orgId: string, configId: string, cycleStart: string) => `organizations/${orgId}/stock_take_cycles/${configId}_${cycleStart}`;
+
+/**
+ * Today's share of a cycle run as daily sessions: what is left of the cycle's materials (not yet on any PI document of
+ * the cycle) spread evenly over the days left, rounded up; the cycle's materials per PI and sheets per PI are kept.
+ */
+async function cycleDayShare(orgId: string, cycleId: string, plan: Obj, today: string, cycleEnd: string) {
+    const root = `organizations/${orgId}`;
+    const sessions = new Set((await listDocs(`${root}/${CAMPAIGNS}`)).filter((x) => str(x.data.cycleId) === cycleId && str(x.data.status) !== 'cancelled').map((x) => x.id));
+    const onPis = (await listDocs(`${root}/stock_take_sessions`))
+        .filter((x) => sessions.has(str(x.data.campaignId)) && !str(x.data.parentPi) && str(x.data.status) !== 'disregarded')
+        .reduce((n, x) => n + (Array.isArray(x.data.lines) ? x.data.lines.length : 0), 0);
+    const total = Number(plan.targetMaterials) || 0;
+    const daysLeft = Math.max(1, daysBetween(today, cycleEnd));
+    const materials = Math.max(0, Math.ceil((total - onPis) / daysLeft));
+    return { materials, metrics: { countAll: false, targetMaterials: materials, materialsPerPi: Number(plan.materialsPerPi) || 1, piCopies: Number(plan.piCopies) || 1 } };
+}
 /** Clusters of a configuration (several may be chosen; older configurations hold one). */
 const clustersOfConfig = (c: Obj) => (Array.isArray(c.clusterIds) ? (c.clusterIds as unknown[]).map(str) : str(c.clusterId) ? [str(c.clusterId)] : []).filter((x) => CLUSTER_RE.test(x));
 
@@ -448,6 +492,13 @@ function readConfig(b: Record<string, unknown>) {
     if (b.periodic === true && !['automatic', 'manual'].includes(str(b.sessionCreation))) throw new HttpError(400, 'Choose whether sessions are created automatically or manually');
     if (automatic && !str(b.warehouseId)) throw new HttpError(400, 'Choose the warehouse automatic sessions are created for');
     if (!['automatic', 'manual'].includes(str(b.piCreation))) throw new HttpError(400, 'Choose whether PI documents are created automatically or manually');
+    // Cycle counts: one session for the whole cycle, or a session for each day of the cycle (created by the automation).
+    const cycleSessions = cycle ? str(b.cycleSessions) : '';
+    if (cycle && !['single', 'daily'].includes(cycleSessions)) throw new HttpError(400, 'Choose one session for the whole cycle or a session each day');
+    if (cycle && cycleSessions === 'daily' && !automatic) throw new HttpError(400, 'Daily sessions are created by the automation: choose that sessions are created automatically');
+    // One session for the cycle with automatic PI documents: all PI documents at once, or each day's share each day.
+    const cyclePiRelease = cycle && cycleSessions === 'single' && str(b.piCreation) === 'automatic' ? str(b.cyclePiRelease) : '';
+    if (cycle && cycleSessions === 'single' && str(b.piCreation) === 'automatic' && !['all', 'daily'].includes(cyclePiRelease)) throw new HttpError(400, 'Choose whether the PI documents are created all at once or each day');
     return {
         name,
         type,
@@ -456,6 +507,8 @@ function readConfig(b: Record<string, unknown>) {
         period: b.periodic === true ? period : '',
         sessionCreation: b.periodic === true ? str(b.sessionCreation) : 'manual',
         piCreation: str(b.piCreation),
+        cycleSessions,
+        cyclePiRelease,
         durationDays: cycle ? null : duration,
         fullScope: cycle ? b.fullScope === true : false,
         byCriticality,
@@ -576,6 +629,7 @@ export const stockTakeRoutes = {
             if (!config || config.data.active === false) throw new HttpError(400, 'Choose an enabled configuration');
             if (str(config.data.warehouseId) && warehouseId !== str(config.data.warehouseId)) throw new HttpError(400, 'Selected warehouse does not match configuration');
             const now = nowIso();
+            if (isCycle(config.data) && str(config.data.cycleSessions) === 'daily') throw new HttpError(409, 'Sessions of this configuration are created each day by the automation.');
             // A cycle count with full scope counts every material in each session: "All" is forced.
             if (config.data.fullScope === true) b.metrics = { ...(isObj(b.metrics) ? b.metrics : {}), countAll: true };
             const wantsAll = isObj(b.metrics) && b.metrics.countAll === true;
@@ -598,6 +652,14 @@ export const stockTakeRoutes = {
                         durationDays: isCycle(config.data) ? null : Number(config.data.durationDays),
                         fullScope: config.data.fullScope === true,
                         criticalityClasses: config.data.byCriticality === true && Array.isArray(config.data.criticalityClasses) ? config.data.criticalityClasses : [],
+                        ...(isCycle(config.data)
+                            ? (() => {
+                                  const day = nairobiDay(Date.parse(plan.startAt));
+                                  const cs = periodStart(day, str(config.data.period));
+                                  const ce = periodEnd(day, str(config.data.period));
+                                  return { cycleId: `${configId}_${cs}`, cycleStart: cs, cycleEnd: ce, cycleDays: daysBetween(cs, ce), cycleDay: daysBetween(cs, day) + 1, cycleSessions: 'single' };
+                              })()
+                            : {}),
                         origin: 'manual',
                         setupRequired: false,
                         warehouseId,
@@ -633,8 +695,17 @@ export const stockTakeRoutes = {
             if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a session name of 3 to 80 characters');
             const config = await getDoc(`${root}/stock_take_configs/${str(doc.data.configId)}`);
             const m = { ...(isObj(ctx.body.metrics) ? ctx.body.metrics : {}), ...(config?.data.fullScope === true ? { countAll: true } : {}) };
-            const metrics = readMetrics(m, m.countAll === true ? (await selectableLocations(root, str(doc.data.warehouseId), { ...(config?.data ?? {}), criticalityClasses: doc.data.criticalityClasses, byCriticality: Array.isArray(doc.data.criticalityClasses) && doc.data.criticalityClasses.length > 0 })).length : null);
+            let metrics = readMetrics(m, m.countAll === true ? (await selectableLocations(root, str(doc.data.warehouseId), { ...(config?.data ?? {}), criticalityClasses: doc.data.criticalityClasses, byCriticality: Array.isArray(doc.data.criticalityClasses) && doc.data.criticalityClasses.length > 0 })).length : null);
             const now = nowIso();
+            // A cycle run as daily sessions: what is entered is the plan of the whole cycle. It is kept for the cycle (the
+            // first setup wins) and this day's session takes its share; later days are set up from it automatically.
+            if (str(doc.data.cycleSessions) === 'daily' && str(doc.data.cycleId)) {
+                const path = cyclePath(ctx.orgId, str(doc.data.configId), str(doc.data.cycleStart));
+                await writeDoc(path, { ...metrics, configId: str(doc.data.configId), cycleId: str(doc.data.cycleId), cycleStart: str(doc.data.cycleStart), cycleEnd: str(doc.data.cycleEnd), days: Number(doc.data.cycleDays) || 1, setBy: ctx.uid, setAt: now }, { exists: false });
+                const plan = (await getDoc(path))?.data ?? metrics;
+                metrics = (await cycleDayShare(ctx.orgId, str(doc.data.cycleId), plan, nairobiDay(), str(doc.data.cycleEnd))).metrics as typeof metrics;
+                if (!metrics.targetMaterials) throw new HttpError(409, 'Every material of this cycle is already on a PI document; nothing is left for this day.');
+            }
             const ok = await writeDoc(
                 `${root}/${CAMPAIGNS}/${id}`,
                 { ...doc.data, name, metrics, documentSize: metrics.materialsPerPi, plannedPiDocuments: plannedPis(metrics.targetMaterials, metrics.materialsPerPi), setupRequired: false, setupBy: ctx.uid, setupAt: now, updatedAt: now, updatedBy: ctx.uid } as never,
@@ -659,7 +730,10 @@ export const stockTakeRoutes = {
             if (str(doc.data.endAt) && Date.parse(nowIso()) > Date.parse(str(doc.data.endAt))) throw new HttpError(409, 'This session has passed its end date.');
             let r: { created: string[] };
             try {
-                r = await generateSessionPis(ctx.orgId, id, ctx.uid);
+                const config = await getDoc(`${root}/stock_take_configs/${str(doc.data.configId)}`);
+                const limit = await releaseLimit(ctx.orgId, id, config?.data);
+                if (limit <= 0) throw new HttpError(409, 'Today’s PI documents are already created; the next share is released tomorrow.');
+                r = await generateSessionPis(ctx.orgId, id, ctx.uid, limit);
             } catch (e) {
                 await recordGeneration(ctx.orgId, id, e instanceof Error ? e.message : 'PI documents could not be generated');
                 throw e;
@@ -914,6 +988,150 @@ export const stockTakeRoutes = {
                 return { ok: true };
             };
 
+            // Create the recount PI document for the lines flagged for recount (fresh system quantities, blind count).
+            const makeRecount = async (flagged: Array<Record<string, any>>) => {
+                const currentSnapshot = await snapshot(root, warehouseId);
+                const parent = str(d.parentPi) || id;
+                const siblings = (await listDocs(`${root}/stock_take_sessions`)).filter((x) => x.id === parent || x.id.startsWith(`${parent}_`));
+                const number = Math.max(0, ...siblings.map((x) => Number(new RegExp(`^${parent}_([0-9]+)$`).exec(x.id)?.[1] || 0))) + 1;
+                const next = `${parent}_${number}`;
+                const ok = await writeDoc(
+                    `${root}/stock_take_sessions/${next}`,
+                    {
+                        piNumber: next,
+                        campaignId: str(d.campaignId),
+                        campaignName: str(d.campaignName),
+                        configId: d.configId,
+                        configName: d.configName,
+                        warehouseId,
+                        type: d.type,
+                        status: 'awaiting_print',
+                        createdAt: nowIso(),
+                        createdBy: ctx.uid,
+                        parentPi: parent,
+                        recountNumber: number,
+                        lines: flagged.map((x) => ({
+                            ...x,
+                            copyMismatch: false,
+                            copyCounts: null,
+                            expected: currentSnapshot.find((v) => v.materialId === str(x.materialId) && v.binId === str(x.binId))?.expected ?? null,
+                            counted: null,
+                            verified: false,
+                            recount: false,
+                            posted: false,
+                        })),
+                        documentSize: flagged.length,
+                    } as never,
+                    { exists: false }
+                );
+                if (!ok) throw new HttpError(409, 'Recount already created; refresh');
+                return next;
+            };
+
+            // Value the differences and route them through the Chart of Authority; returns the patch that sends the PI
+            // for posting approval (the caller saves it).
+            const routeNow = async (pending: Array<Record<string, any>>) => {
+                const unbased = pending.filter((x) => x.expected === null || x.counted === null);
+                if (unbased.length) {
+                    const names = [...new Set(unbased.map((x) => str(x.materialNumber) || str(x.materialId)))];
+                    throw new HttpError(409, `${count(unbased.length, 'line')} (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}) ${unbased.length === 1 ? 'has' : 'have'} no reconciled stock baseline, so ${unbased.length === 1 ? 'it' : 'they'} cannot be posted. Post the opening stock or reconcile the open movements, then Recheck baseline and verify again — or disregard this PI.`);
+                }
+                // Value the differences and route them through the Chart of Authority.
+                const variance = await varianceValueOf(ctx, warehouseId, pending);
+                let approval: Record<string, unknown> | null = null;
+                if (variance.differences > 0) {
+                    const authority = await getAuthority(ctx.orgId);
+                    const route = await approvalRoute(ctx.orgId, ctx.me, variance.value, authority, ctx.testMode === true);
+                    if (route.problems.length && !bypass(ctx, 'inv.stocktake.coa_route')) throw new HttpError(409, `The Chart of Authority cannot route this variance: ${route.problems.join(' ')}`);
+                    if (!route.steps.length) throw new HttpError(409, 'The Chart of Authority has no approval level for this variance value. Ask the chart of authority administrator to set the cost approval bands.');
+                    approval = {
+                        amount: variance.value,
+                        authorityVersion: route.authorityVersion,
+                        unvalued: variance.unvalued,
+                        byMaterial: variance.byMaterial,
+                        steps: route.steps.map((x) => ({ level: x.level, title: x.title, positionCode: x.positionCode, positionTitle: x.positionTitle, status: 'pending', by: '', at: '' })),
+                    };
+                }
+                return {
+                    patch: { status: 'pending_post_approval', postingRequestedBy: ctx.uid, postingRequestedAt: nowIso(), varianceValue: variance.value, approval, postingApprovedBy: '', postingApprovedAt: '', postingReturnReason: '' },
+                    extra: { varianceValue: variance.value, unvalued: variance.unvalued, levels: approval ? (approval.steps as Array<{ level: string }>).map((x) => x.level) : ['independent'] },
+                };
+            };
+
+            // Post the verified lines that are not being recounted (none when the whole PI is recounted), value the
+            // differences in finance and close the PI: reconciled, partly posted (recount open) or recounted.
+            const postNow = async (patch: Record<string, unknown>, auditExtra: Record<string, unknown>) => {
+                const pending = lines.filter((x) => x.verified && !x.recount && !x.posted);
+                // Value the differences in finance first (refused when finance is live and cannot post), then move the quantities.
+                const freshStock = await snapshot(root, warehouseId);
+                const finDeltas: Array<{ materialId: string; delta: number }> = [];
+                for (const line of pending) {
+                    if (line.expected === null || line.counted === null) continue;
+                    const delta = Number(line.counted) - Number(line.expected);
+                    if (!delta) continue;
+                    const key = `PI_${id}_${str(line.materialId).replace(/[^a-zA-Z0-9_-]/g, '_')}_${str(line.binId).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                    if (await getDoc(`${root}/material_journal/${key}`)) continue;
+                    const current = freshStock.find((x) => x.materialId === str(line.materialId) && x.binId === str(line.binId));
+                    if (!current || current.expected !== line.expected) throw new HttpError(409, 'Stock has changed since counting; recount is required');
+                    finDeltas.push({ materialId: str(line.materialId), delta });
+                }
+                const financeJournal = await postStockTake(ctx, warehouseId, id, finDeltas);
+                let adjustments = 0;
+                for (const line of pending) {
+                    if (line.expected === null || line.counted === null) throw new HttpError(409, 'Cannot post without reconciled baseline and count');
+                    const delta = Number(line.counted) - Number(line.expected);
+                    const key = `PI_${id}_${str(line.materialId).replace(/[^a-zA-Z0-9_-]/g, '_')}_${str(line.binId).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                    if (delta !== 0) {
+                        const existing = await getDoc(`${root}/material_journal/${key}`);
+                        if (!existing) {
+                            const latest = await snapshot(root, warehouseId);
+                            const current = latest.find((x) => x.materialId === str(line.materialId) && x.binId === str(line.binId));
+                            if (!current || current.expected !== line.expected) throw new HttpError(409, 'Stock has changed since counting; recount is required');
+                            const created = await writeDoc(
+                                `${root}/material_journal/${key}`,
+                                {
+                                    materialId: str(line.materialId),
+                                    warehouseId,
+                                    type: 'STOCK_TAKE_ADJUSTMENT',
+                                    status: 'posted',
+                                    reconciled: true,
+                                    balancesDelta: { physicalStock: delta },
+                                    reference: id,
+                                    binId: str(line.binId),
+                                    createdAt: nowIso(),
+                                    postedAt: nowIso(),
+                                    postedBy: ctx.uid,
+                                    approvedBy: str(d.postingApprovedBy),
+                                    source: 'stock_take',
+                                    version: 1,
+                                },
+                                { exists: false }
+                            );
+                            if (!created) throw new HttpError(409, 'Concurrent stock take posting detected');
+                            adjustments++;
+                        }
+                    }
+                    line.posted = true;
+                }
+                const partial = lines.some((x) => x.recount && !x.posted);
+                const result = await save({ ...patch, lines, status: !pending.length ? 'recounted' : partial ? 'recount_pending' : 'reconciled', postedAt: pending.length ? nowIso() : '', postedBy: pending.length ? ctx.uid : '', reconciledAt: partial || !pending.length ? '' : nowIso(), financeJournal }, { ...auditExtra, linesPosted: pending.length, adjustments, financeJournal });
+                if (d.parentPi && !partial) {
+                    const parentId = str(d.parentPi);
+                    const parent = await getDoc(`${root}/stock_take_sessions/${parentId}`);
+                    if (parent) {
+                        const siblings = (await listDocs(`${root}/stock_take_sessions`)).filter((x) => str(x.data.parentPi) === parentId);
+                        if (siblings.length && siblings.every((x) => x.id === id || CLOSED.includes(str(x.data.status)))) {
+                            const pLines = Array.isArray(parent.data.lines) ? parent.data.lines.filter(isObj) : [];
+                            if (pLines.every((x) => x.posted || x.recount)) await writeDoc(`${root}/stock_take_sessions/${parentId}`, { ...parent.data, status: 'reconciled', reconciledAt: nowIso(), updatedAt: nowIso() });
+                        }
+                    }
+                }
+                // A session closes itself once every PI document in it is posted.
+                await autoCloseSession(ctx.orgId, str(d.campaignId), ctx.uid);
+                return result;
+            };
+
+
             if (action === 'close_posted') {
                 if (status !== 'posted' && !lines.some((x) => x.posted)) throw new HttpError(409, 'Only sessions with posted stock can use Close Posted Session');
                 if (CLOSED.includes(status)) throw new HttpError(409, 'Session already closed');
@@ -1000,6 +1218,12 @@ export const stockTakeRoutes = {
             }
 
             if (action === 'edit_counts') {
+                // Counts are never corrected once submitted: the variance is already known at that point, so a correction
+                // could hide it. A recount (of some lines or the whole PI) is ordered instead.
+                throw new HttpError(409, 'Submitted counts cannot be edited. Order a recount of the lines, or of the whole PI, instead.');
+            }
+
+            if (action === 'edit_counts_disabled') {
                 if (status !== 'verification') throw new HttpError(409, 'Counts may only be edited before verification');
                 const reason = str(ctx.body.reason).trim();
                 if (reason.length < 10) throw new HttpError(400, 'Count correction reason must be at least 10 characters');
@@ -1011,6 +1235,41 @@ export const stockTakeRoutes = {
                     lines[i].counted = Number(v);
                 });
                 return save({ lines, countEditedBy: ctx.uid, countEditedAt: nowIso(), countEditReason: reason.slice(0, 500) }, { before, after: lines.map((x) => x.counted) });
+            }
+
+            if (action === 'accept') {
+                // One step after counting: accept the counts, order recounts (chosen lines, every line whose sheets differ,
+                // or the whole PI), then either post at once (no variance on the remaining lines) or send the variance for
+                // approval under the Chart of Authority (posted automatically on the last approval).
+                if (status !== 'verification') throw new HttpError(409, 'PI is not awaiting verification');
+                if ((countersOf(d).includes(ctx.uid) || str(d.countEditedBy) === ctx.uid) && !bypass(ctx, 'inv.stocktake.verify_independence')) throw new HttpError(403, 'Counts must be accepted by someone other than the person who counted them.');
+                const full = ctx.body.fullRecount === true;
+                const picked: number[] = full ? lines.map((_, i) => i) : Array.isArray(ctx.body.recountIndices) ? ctx.body.recountIndices.map(Number) : [];
+                if (!full && picked.some((i: number) => !Number.isInteger(i) || i < 0 || i >= lines.length || (lines[i].expected === lines[i].counted && lines[i].copyMismatch !== true))) throw new HttpError(400, 'Only lines with a difference can be picked for recount; use a full recount for the whole PI');
+                const missing = lines.map((l, i) => (l.copyMismatch === true && !picked.includes(i) ? i : -1)).filter((i) => i >= 0);
+                if (missing.length) throw new HttpError(409, `${count(missing.length, 'line')} differ${missing.length === 1 ? 's' : ''} between the count sheets and must be recounted.`);
+                if (full) {
+                    const reason = str(ctx.body.reason).trim();
+                    if (reason.length < 10) throw new HttpError(400, 'Give a reason of at least 10 characters for recounting the whole PI');
+                }
+                lines.forEach((line, i) => {
+                    line.verified = true;
+                    line.recount = picked.includes(i);
+                });
+                const verify = { verifiedAt: nowIso(), verifiedBy: ctx.uid, ...(full ? { fullRecountReason: str(ctx.body.reason).trim().slice(0, 500) } : {}) };
+                const flagged = lines.filter((x) => x.recount && !x.posted);
+                const pending = lines.filter((x) => x.verified && !x.recount && !x.posted);
+                const withVariance = pending.filter((x) => x.expected === null || x.counted === null || Number(x.counted) !== Number(x.expected));
+                // Route first (it may refuse, e.g. a missing baseline) so nothing is created when the step fails.
+                const routed = pending.length && withVariance.length ? await routeNow(pending) : null;
+                const recountPi = flagged.length ? await makeRecount(flagged) : '';
+                if (routed) {
+                    await save({ ...verify, lines, recountPi, ...routed.patch }, { ...routed.extra, recountLines: flagged.length, recountPi });
+                    return { ok: true, outcome: 'approval', recountPi };
+                }
+                // No variance left (or everything goes to recount): post and close now.
+                await postNow({ ...verify, recountPi, varianceValue: 0 }, { recountLines: flagged.length, recountPi, fullRecount: full });
+                return { ok: true, outcome: pending.length ? 'posted' : 'recounted', recountPi };
             }
 
             if (action === 'verify') {
@@ -1032,41 +1291,7 @@ export const stockTakeRoutes = {
                 if (status !== 'verified') throw new HttpError(409, 'Verify discrepancies before recount');
                 const flagged = lines.filter((x) => x.recount && !x.posted);
                 if (!flagged.length) throw new HttpError(409, 'No discrepancies marked for recount');
-                const currentSnapshot = await snapshot(root, warehouseId);
-                const parent = str(d.parentPi) || id;
-                const siblings = (await listDocs(`${root}/stock_take_sessions`)).filter((x) => x.id === parent || x.id.startsWith(`${parent}_`));
-                const number = Math.max(0, ...siblings.map((x) => Number(new RegExp(`^${parent}_([0-9]+)$`).exec(x.id)?.[1] || 0))) + 1;
-                const next = `${parent}_${number}`;
-                const ok = await writeDoc(
-                    `${root}/stock_take_sessions/${next}`,
-                    {
-                        piNumber: next,
-                        campaignId: str(d.campaignId),
-                        campaignName: str(d.campaignName),
-                        configId: d.configId,
-                        configName: d.configName,
-                        warehouseId,
-                        type: d.type,
-                        status: 'awaiting_print',
-                        createdAt: nowIso(),
-                        createdBy: ctx.uid,
-                        parentPi: parent,
-                        recountNumber: number,
-                        lines: flagged.map((x) => ({
-                            ...x,
-                            copyMismatch: false,
-                            copyCounts: null,
-                            expected: currentSnapshot.find((v) => v.materialId === str(x.materialId) && v.binId === str(x.binId))?.expected ?? null,
-                            counted: null,
-                            verified: false,
-                            recount: false,
-                            posted: false,
-                        })),
-                        documentSize: flagged.length,
-                    } as never,
-                    { exists: false }
-                );
-                if (!ok) throw new HttpError(409, 'Recount already created; refresh');
+                const next = await makeRecount(flagged);
                 await save({ recountPi: next }, { recountPi: next });
                 return { ok: true, id: next };
             }
@@ -1088,38 +1313,27 @@ export const stockTakeRoutes = {
                 if (status !== 'verified') throw new HttpError(409, 'Verify the count before posting');
                 const pending = lines.filter((x) => x.verified && !x.recount && !x.posted);
                 if (!pending.length) throw new HttpError(409, 'No verified non-recount lines to post');
-                const unbased = pending.filter((x) => x.expected === null || x.counted === null);
-                if (unbased.length) {
-                    const names = [...new Set(unbased.map((x) => str(x.materialNumber) || str(x.materialId)))];
-                    throw new HttpError(409, `${count(unbased.length, 'line')} (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}) ${unbased.length === 1 ? 'has' : 'have'} no reconciled stock baseline, so ${unbased.length === 1 ? 'it' : 'they'} cannot be posted. Post the opening stock or reconcile the open movements, then Recheck baseline and verify again — or disregard this PI.`);
-                }
-                // Value the differences and route them through the Chart of Authority.
-                const variance = await varianceValueOf(ctx, warehouseId, pending);
-                let approval: Record<string, unknown> | null = null;
-                if (variance.differences > 0) {
-                    const authority = await getAuthority(ctx.orgId);
-                    const route = await approvalRoute(ctx.orgId, ctx.me, variance.value, authority, ctx.testMode === true);
-                    if (route.problems.length && !bypass(ctx, 'inv.stocktake.coa_route')) throw new HttpError(409, `The Chart of Authority cannot route this variance: ${route.problems.join(' ')}`);
-                    if (!route.steps.length) throw new HttpError(409, 'The Chart of Authority has no approval level for this variance value. Ask the chart of authority administrator to set the cost approval bands.');
-                    approval = {
-                        amount: variance.value,
-                        authorityVersion: route.authorityVersion,
-                        unvalued: variance.unvalued,
-                        byMaterial: variance.byMaterial,
-                        steps: route.steps.map((x) => ({ level: x.level, title: x.title, positionCode: x.positionCode, positionTitle: x.positionTitle, status: 'pending', by: '', at: '' })),
-                    };
-                }
-                return save(
-                    { status: 'pending_post_approval', postingRequestedBy: ctx.uid, postingRequestedAt: nowIso(), varianceValue: variance.value, approval, postingApprovedBy: '', postingApprovedAt: '', postingReturnReason: '' },
-                    { varianceValue: variance.value, unvalued: variance.unvalued, levels: approval ? (approval.steps as Array<{ level: string }>).map((x) => x.level) : ['independent'] }
-                );
+                const routed = await routeNow(pending);
+                return save(routed.patch, routed.extra);
             }
 
             if (action === 'approve_posting') {
                 if (status !== 'pending_post_approval') throw new HttpError(409, 'Posting not awaiting approval');
                 if ((str(d.postingRequestedBy) === ctx.uid || countersOf(d).includes(ctx.uid)) && !bypass(ctx, 'inv.stocktake.approve_independence')) throw new HttpError(403, 'Posting must be approved by someone other than the person who requested it or counted the stock.');
                 const steps = coaSteps(d);
-                if (!steps.length) return save({ status: 'approved_for_posting', postingApprovedBy: ctx.uid, postingApprovedAt: nowIso() });
+                // The last approval posts the stock at once. If posting fails (for example the stock moved since counting),
+                // the approval is kept and the PI waits at Approved for posting with the reason.
+                const approveAndPost = async (patch: Record<string, unknown>, extra: Record<string, unknown>) => {
+                    try {
+                        await postNow({ ...patch, postingApprovedBy: ctx.uid, postingApprovedAt: nowIso() }, { ...extra, approvedAndPosted: true });
+                        return { ok: true, outcome: 'posted' };
+                    } catch (e) {
+                        const why = e instanceof Error ? e.message : 'Posting failed';
+                        await save({ ...patch, status: 'approved_for_posting', postingApprovedBy: ctx.uid, postingApprovedAt: nowIso(), postError: why.slice(0, 300) }, { ...extra, postError: why.slice(0, 300) });
+                        throw new HttpError(409, `Approved, but the stock could not be posted: ${why}`);
+                    }
+                };
+                if (!steps.length) return approveAndPost({}, {});
                 // Chart of Authority: the current level is approved by a different person holding its job role.
                 const check = coaCheck(ctx, d);
                 if (!check.ok) throw new HttpError(403, check.why || 'You cannot approve this level.');
@@ -1129,6 +1343,7 @@ export const stockTakeRoutes = {
                 step.by = ctx.uid;
                 step.at = nowIso();
                 const last = steps.every((x) => x.status === 'approved');
+                if (last) return approveAndPost({ approval: { ...(d.approval as Obj), steps } }, { level: step.level, positionCode: step.positionCode, amount: Number(d.varianceValue) || 0, final: true });
                 return save(
                     { approval: { ...(d.approval as Obj), steps }, ...(last ? { status: 'approved_for_posting', postingApprovedBy: ctx.uid, postingApprovedAt: nowIso() } : {}) },
                     { level: step.level, positionCode: step.positionCode, amount: Number(d.varianceValue) || 0, final: last }
@@ -1152,75 +1367,8 @@ export const stockTakeRoutes = {
                 if (status !== 'approved_for_posting') throw new HttpError(409, 'Posting must be approved first. Submit the PI for posting approval.');
                 if (countersOf(d).includes(ctx.uid) && !bypass(ctx, 'inv.stocktake.post_independence')) throw new HttpError(403, 'The person who counted the stock cannot post it.');
                 if (coaSteps(d).some((x) => x.status !== 'approved')) throw new HttpError(409, 'Every Chart of Authority level must approve before posting.');
-                const pending = lines.filter((x) => x.verified && !x.recount && !x.posted);
-                if (!pending.length) throw new HttpError(409, 'No eligible lines to reconcile');
-                // Value the differences in finance first (refused when finance is live and cannot post), then move the quantities.
-                const freshStock = await snapshot(root, warehouseId);
-                const finDeltas: Array<{ materialId: string; delta: number }> = [];
-                for (const line of pending) {
-                    if (line.expected === null || line.counted === null) continue;
-                    const delta = Number(line.counted) - Number(line.expected);
-                    if (!delta) continue;
-                    const key = `PI_${id}_${str(line.materialId).replace(/[^a-zA-Z0-9_-]/g, '_')}_${str(line.binId).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-                    if (await getDoc(`${root}/material_journal/${key}`)) continue;
-                    const current = freshStock.find((x) => x.materialId === str(line.materialId) && x.binId === str(line.binId));
-                    if (!current || current.expected !== line.expected) throw new HttpError(409, 'Stock has changed since counting; recount is required');
-                    finDeltas.push({ materialId: str(line.materialId), delta });
-                }
-                const financeJournal = await postStockTake(ctx, warehouseId, id, finDeltas);
-                let adjustments = 0;
-                for (const line of pending) {
-                    if (line.expected === null || line.counted === null) throw new HttpError(409, 'Cannot post without reconciled baseline and count');
-                    const delta = Number(line.counted) - Number(line.expected);
-                    const key = `PI_${id}_${str(line.materialId).replace(/[^a-zA-Z0-9_-]/g, '_')}_${str(line.binId).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-                    if (delta !== 0) {
-                        const existing = await getDoc(`${root}/material_journal/${key}`);
-                        if (!existing) {
-                            const latest = await snapshot(root, warehouseId);
-                            const current = latest.find((x) => x.materialId === str(line.materialId) && x.binId === str(line.binId));
-                            if (!current || current.expected !== line.expected) throw new HttpError(409, 'Stock has changed since counting; recount is required');
-                            const created = await writeDoc(
-                                `${root}/material_journal/${key}`,
-                                {
-                                    materialId: str(line.materialId),
-                                    warehouseId,
-                                    type: 'STOCK_TAKE_ADJUSTMENT',
-                                    status: 'posted',
-                                    reconciled: true,
-                                    balancesDelta: { physicalStock: delta },
-                                    reference: id,
-                                    binId: str(line.binId),
-                                    createdAt: nowIso(),
-                                    postedAt: nowIso(),
-                                    postedBy: ctx.uid,
-                                    approvedBy: str(d.postingApprovedBy),
-                                    source: 'stock_take',
-                                    version: 1,
-                                },
-                                { exists: false }
-                            );
-                            if (!created) throw new HttpError(409, 'Concurrent stock take posting detected');
-                            adjustments++;
-                        }
-                    }
-                    line.posted = true;
-                }
-                const partial = lines.some((x) => x.recount && !x.posted);
-                const result = await save({ lines, status: partial ? 'recount_pending' : 'reconciled', postedAt: nowIso(), postedBy: ctx.uid, reconciledAt: partial ? '' : nowIso(), financeJournal }, { linesPosted: pending.length, adjustments, financeJournal });
-                if (d.parentPi && !partial) {
-                    const parentId = str(d.parentPi);
-                    const parent = await getDoc(`${root}/stock_take_sessions/${parentId}`);
-                    if (parent) {
-                        const siblings = (await listDocs(`${root}/stock_take_sessions`)).filter((x) => str(x.data.parentPi) === parentId);
-                        if (siblings.length && siblings.every((x) => x.id === id || str(x.data.status) === 'reconciled')) {
-                            const pLines = Array.isArray(parent.data.lines) ? parent.data.lines.filter(isObj) : [];
-                            if (pLines.every((x) => x.posted || x.recount)) await writeDoc(`${root}/stock_take_sessions/${parentId}`, { ...parent.data, status: 'reconciled', reconciledAt: nowIso(), updatedAt: nowIso() });
-                        }
-                    }
-                }
-                // A session closes itself once every PI document in it is posted.
-                await autoCloseSession(ctx.orgId, str(d.campaignId), ctx.uid);
-                return result;
+                if (!lines.some((x) => x.verified && !x.recount && !x.posted)) throw new HttpError(409, 'No eligible lines to reconcile');
+                return postNow({}, {});
             }
 
             throw new HttpError(400, 'Unknown stock take action');
@@ -1242,7 +1390,7 @@ const piName = (configName: string, iso: string) => {
     return `${configName} ${part('day')}${part('month').toUpperCase()}${part('year')}${part('hour')}${part('minute')}`;
 };
 
-export async function generateSessionPis(orgId: string, campaignId: string, by: string): Promise<{ created: string[] }> {
+export async function generateSessionPis(orgId: string, campaignId: string, by: string, limit = Infinity): Promise<{ created: string[] }> {
     const root = `organizations/${orgId}`;
     const campaign = await getDoc(`${root}/${CAMPAIGNS}/${campaignId}`);
     if (!campaign || str(campaign.data.status) !== 'open') throw new HttpError(409, 'This stock take session is not open.');
@@ -1252,14 +1400,20 @@ export async function generateSessionPis(orgId: string, campaignId: string, by: 
     const warehouseId = str(campaign.data.warehouseId);
     const metrics = metricsOf(campaign.data);
     const planned = plannedPis(metrics.targetMaterials, metrics.materialsPerPi);
-    const existing = (await listDocs(`${root}/stock_take_sessions`)).filter((x) => str(x.data.campaignId) === campaignId && !str(x.data.parentPi) && str(x.data.status) !== 'disregarded');
-    const room = planned - existing.length;
+    const allPis = await listDocs(`${root}/stock_take_sessions`);
+    const existing = allPis.filter((x) => str(x.data.campaignId) === campaignId && !str(x.data.parentPi) && str(x.data.status) !== 'disregarded');
+    const room = Math.min(planned - existing.length, limit);
     if (room <= 0) return { created: [] };
-    const taken = new Set(existing.flatMap((x) => (Array.isArray(x.data.lines) ? x.data.lines : [])).filter(isObj).map((l) => `${str(l.materialId)}|${str(l.binId)}`));
+    const linesOf = (docs: Doc[]) => docs.flatMap((x) => (Array.isArray(x.data.lines) ? x.data.lines : [])).filter(isObj).map((l) => `${str(l.materialId)}|${str(l.binId)}`);
+    const onSession = new Set(linesOf(existing));
+    // Daily sessions of one cycle never repeat a location another day of the same cycle already has.
+    const cycleId = str(campaign.data.cycleId);
+    const cycleSessions = cycleId ? new Set((await listDocs(`${root}/${CAMPAIGNS}`)).filter((x) => str(x.data.cycleId) === cycleId && str(x.data.status) !== 'cancelled').map((x) => x.id)) : new Set<string>();
+    const taken = new Set([...onSession, ...linesOf(allPis.filter((x) => cycleSessions.has(str(x.data.campaignId)) && str(x.data.status) !== 'disregarded'))]);
     let pool = (await selectableLocations(root, warehouseId, config.data)).filter((x) => !taken.has(`${x.materialId}|${x.binId}`));
     if (str(config.data.selection) !== 'Sequence') pool = randomSample(pool, pool.length);
-    const need = Math.max(0, metrics.targetMaterials - taken.size);
-    const picked = pool.slice(0, need);
+    const need = Math.max(0, metrics.targetMaterials - onSession.size);
+    const picked = pool.slice(0, Math.min(need, room * metrics.materialsPerPi));
     if (!picked.length) {
         await writeDoc(`${root}/${CAMPAIGNS}/${campaignId}`, { ...campaign.data, locationsExhausted: true, updatedAt: nowIso() } as never);
         throw new HttpError(409, 'There are no more mapped locations to put on PI documents for this session.');
@@ -1314,7 +1468,7 @@ export async function generateSessionPis(orgId: string, campaignId: string, by: 
         );
         if (ok) created.push(id);
     }
-    if (created.length < room && chunks.length < room) await writeDoc(`${root}/${CAMPAIGNS}/${campaignId}`, { ...((await getDoc(`${root}/${CAMPAIGNS}/${campaignId}`))?.data ?? campaign.data), locationsExhausted: true, updatedAt: nowIso() } as never);
+    if (pool.length < need && chunks.length < room) await writeDoc(`${root}/${CAMPAIGNS}/${campaignId}`, { ...((await getDoc(`${root}/${CAMPAIGNS}/${campaignId}`))?.data ?? campaign.data), locationsExhausted: true, updatedAt: nowIso() } as never);
     await audit([{ category: 'inventory', action: 'inventory.stocktake.generate', orgId, target: { type: 'stock_take_session', id: campaignId, label: `Stock take session ${campaignId}` }, details: `${created.length} PI document(s) by ${by}: ${created.slice(0, 20).join(', ')}${created.length > 20 ? ', …' : ''}` }]);
     return { created };
 }
@@ -1324,12 +1478,23 @@ async function autoGenerate(orgId: string, campaignId: string, configData: Obj |
     if (str(configData?.piCreation) !== 'automatic') return { generated: 0, generateError: '' };
     let out: { generated: number; generateError: string };
     try {
-        out = { generated: (await generateSessionPis(orgId, campaignId, by)).created.length, generateError: '' };
+        const limit = await releaseLimit(orgId, campaignId, configData);
+        out = { generated: limit > 0 ? (await generateSessionPis(orgId, campaignId, by, limit)).created.length : 0, generateError: '' };
     } catch (e) {
         out = { generated: 0, generateError: e instanceof Error ? e.message : 'PI documents could not be generated' };
     }
     await recordGeneration(orgId, campaignId, out.generateError);
     return out;
+}
+
+/** One session for a cycle with PI documents released each day: only what is due by today may be created. */
+async function releaseLimit(orgId: string, campaignId: string, configData: Obj | undefined): Promise<number> {
+    if (!(isCycle(configData ?? {}) && str(configData?.cycleSessions) === 'single' && str(configData?.cyclePiRelease) === 'daily')) return Infinity;
+    const s = await getDoc(`organizations/${orgId}/${CAMPAIGNS}/${campaignId}`);
+    if (!s) return 0;
+    const m = metricsOf(s.data);
+    const have = (await listDocs(`organizations/${orgId}/stock_take_sessions`)).filter((x) => str(x.data.campaignId) === campaignId && !str(x.data.parentPi) && str(x.data.status) !== 'disregarded').length;
+    return Math.max(0, dueByToday(plannedPis(m.targetMaterials, m.materialsPerPi), str(s.data.startAt), str(s.data.endAt), nowIso()) - have);
 }
 
 /** Keep the last automatic generation problem on the session, so the screen says why there are no PI documents. */
@@ -1370,8 +1535,22 @@ export async function stockTakeAutomationForOrg(orgId: string, deadline: number)
             const claimed = await writeDoc(`${root}/stock_take_auto_keys/${c.id}_${today}`, { configId: c.id, day: today, createdAt: nowIso() }, { exists: false });
             let next = due;
             // A cycle count runs to the end of its period and the next cycle begins there.
-            if (cycle) next = periodEnd(today, str(d.period));
+            // Daily cycle sessions: a session every day of the cycle.
+            const daily = cycle && str(d.cycleSessions) === 'daily';
+            if (daily) next = addPeriod(today, 'Daily');
+            else if (cycle) next = periodEnd(today, str(d.period));
             else while (next <= today) next = addPeriod(next, str(d.period));
+            // The cycle this session belongs to, and (for daily sessions) the plan set on its first session.
+            const cycleStart = cycle ? periodStart(today, str(d.period)) : '';
+            const cycleEnd = cycle ? periodEnd(today, str(d.period)) : '';
+            const cycleId = cycle ? `${c.id}_${cycleStart}` : '';
+            const plan = daily ? (await getDoc(cyclePath(orgId, c.id, cycleStart)))?.data : undefined;
+            const share = daily && plan ? await cycleDayShare(orgId, cycleId, plan, today, cycleEnd) : null;
+            if (claimed && share !== null && share.materials <= 0) {
+                // The cycle's materials are all on PI documents already: no session today.
+                await writeDoc(`${root}/stock_take_configs/${c.id}`, { ...d, nextSessionDueOn: next, updatedAt: nowIso() });
+                continue;
+            }
             if (claimed) {
                 const n = await nextOrgCounter(orgId, 'stockTakeSessionSeq');
                 if (n > 99_999_999) throw new Error('session sequence exhausted');
@@ -1384,26 +1563,29 @@ export async function stockTakeAutomationForOrg(orgId: string, deadline: number)
                         sessionNumber: id,
                         name: `${str(d.name)} ${today}`.slice(0, 80),
                         startAt,
-                        endAt: sessionEnd(d, startAt),
-                        metrics: {},
+                        endAt: daily ? nairobiMidnight(addPeriod(today, 'Daily')) : sessionEnd(d, startAt),
+                        metrics: share ? share.metrics : {},
+                        ...(cycle ? { cycleId, cycleStart, cycleEnd, cycleDays: daysBetween(cycleStart, cycleEnd), cycleDay: daysBetween(cycleStart, today) + 1, cycleSessions: str(d.cycleSessions) } : {}),
                         configId: c.id,
                         configName: str(d.name),
                         type: str(d.type),
                         selection: str(d.selection),
-                        documentSize: 0,
-                        plannedPiDocuments: 0,
+                        documentSize: share ? share.metrics.materialsPerPi : 0,
+                        plannedPiDocuments: share ? plannedPis(share.metrics.targetMaterials, share.metrics.materialsPerPi) : 0,
                         durationDays: cycle ? null : duration,
                         fullScope: d.fullScope === true,
                         criticalityClasses: d.byCriticality === true && Array.isArray(d.criticalityClasses) ? d.criticalityClasses : [],
                         warehouseId,
                         status: 'open',
                         origin: 'automatic',
-                        setupRequired: true,
+                        // A later day of a cycle takes its plan from the cycle; otherwise a planner sets it up once.
+                        setupRequired: !share,
                         createdAt: now,
                         createdBy: 'automation',
                     } as never,
                     { exists: false }
                 );
+                if (share) out.generated += (await autoGenerate(orgId, id, d, 'automation')).generated;
                 await writeDoc(`${root}/stock_take_configs/${c.id}`, { ...d, lastSessionCreatedAt: now, lastSessionId: id, nextSessionDueOn: next, updatedAt: now });
                 await audit([{ category: 'inventory', action: 'inventory.stocktake.count_session.auto_create', orgId, target: { type: 'stock_take_session', id, label: `Stock take session ${id}` }, details: `Configuration ${c.id} (${str(d.period)}); next due ${next}` }]);
                 out.created++;
@@ -1419,6 +1601,18 @@ export async function stockTakeAutomationForOrg(orgId: string, deadline: number)
     for (const s of await listDocs(`${root}/${CAMPAIGNS}`)) {
         if (Date.now() > deadline) return { ...out, complete: false };
         if (str(s.data.status) !== 'open') continue;
+        // A daily cycle session still waiting for setup takes the cycle's plan once a planner has set it.
+        if (s.data.setupRequired === true && str(s.data.cycleSessions) === 'daily' && str(s.data.cycleId)) {
+            const plan = (await getDoc(cyclePath(orgId, str(s.data.configId), str(s.data.cycleStart))))?.data;
+            if (plan) {
+                const share = await cycleDayShare(orgId, str(s.data.cycleId), plan, nairobiDay(), str(s.data.cycleEnd));
+                if (share.materials > 0) {
+                    await writeDoc(`${root}/${CAMPAIGNS}/${s.id}`, { ...s.data, metrics: share.metrics, documentSize: share.metrics.materialsPerPi, plannedPiDocuments: plannedPis(share.metrics.targetMaterials, share.metrics.materialsPerPi), setupRequired: false, setupBy: 'automation', setupAt: nowIso(), updatedAt: nowIso() } as never);
+                    s.data.setupRequired = false;
+                    s.data.metrics = share.metrics;
+                }
+            }
+        }
         // Automatic PI documents that could not be generated earlier (for example a missing stock baseline) are retried.
         const cfg = cfgById.get(str(s.data.configId));
         const ended = !!str(s.data.endAt) && Date.parse(nowIso()) > Date.parse(str(s.data.endAt));
