@@ -1044,5 +1044,23 @@
       "New config, Periodic, Automatically, pick a warehouse: confirm the notice to create one configuration per warehouse and that the name becomes 'type – warehouse' until edited"
     ],
     "expected": "Sessions are planned from materials only, All counts on the server, and automatic configurations are named per warehouse."
+  },
+  {
+    "name": "Stock take configuration: cycle count full scope and period cycles; cluster stock take with several clusters",
+    "description": "A cycle count is always periodic, asks whether the full scope must be counted in each session, and runs each cycle to the end of its period with the next cycle beginning there. A cluster stock take picks the warehouse first and then one or more of its clusters.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "stock take cycle count",
+      "stock take full scope",
+      "stock take cluster selection"
+    ],
+    "steps": [
+      "New config, type Cycle Count: confirm Periodic is on and cannot be turned off, there is no Duration field, and 'Complete the full scope of materials within each session?' must be answered",
+      "Answer Yes, monthly, manual; create a session from it: confirm All materials is on and locked and the End shown is the 1st of next month at midnight",
+      "Make the same configuration automatic: confirm Next due is the end of the current period (for monthly, the 1st of next month)",
+      "New config, type Cluster Stock Take: confirm the warehouse is asked first, then its clusters are listed with Select all; pick two and save; PIs only take locations of those clusters"
+    ],
+    "expected": "Cycle counts follow their periods with an explicit full-scope choice, and cluster counts cover the chosen clusters of the chosen warehouse."
   }
 ]

@@ -76,11 +76,22 @@ function canView(ctx: OrgContext) {
     if (!['INV.view', 'INV.edit', 'INV_ST_001', 'INV_ST_007'].some((p) => hasPerm(ctx.permissions, p))) throw new HttpError(403, 'Inventory access required');
 }
 
-/** A configuration bound to a warehouse (needed for automatic sessions) may only name one the person can act on. */
-async function checkConfigWarehouse(ctx: OrgContext, warehouseId: string) {
+/**
+ * A configuration bound to a warehouse (automatic sessions, cluster stock takes) may only name one the person can act
+ * on, and only clusters that exist in it.
+ */
+async function checkConfigWarehouse(ctx: OrgContext, warehouseId: string, clusterIds: string[] = []) {
     if (!warehouseId) return;
     if (!(await warehousesFor(ctx, 'write')).some((w) => w.id === warehouseId)) throw new HttpError(403, 'Choose a warehouse you can act on');
+    if (clusterIds.length) {
+        const have = new Set((await listDocs(`${rootOf(ctx)}/warehouses/${warehouseId}/clusters`)).map((x) => x.id));
+        const missing = clusterIds.filter((c) => !have.has(c));
+        if (missing.length) throw new HttpError(400, `Cluster ${missing.slice(0, 5).join(', ')} does not exist in this warehouse`);
+    }
 }
+
+/** First automatic session: a cycle count begins at the end of the current period; other types at the next midnight. */
+const firstDue = (config: { type: string; period: string }) => (config.type === 'Cycle Count' ? periodEnd(nairobiDay(), config.period) : nairobiDay());
 
 /** Configurations are organization-wide templates: the permission counts wherever it is held. */
 function requireAnywhere(ctx: OrgContext, key: string) {
@@ -217,14 +228,29 @@ function readMetrics(m: Obj, allCount: number | null = null) {
 /** Mapped locations of a warehouse that a configuration would put on PI documents (cluster and criticality applied). */
 async function selectableLocations(root: string, warehouseId: string, config: Obj) {
     let rows = await snapshot(root, warehouseId);
-    if (str(config.type) === 'Cluster Stock Take') rows = rows.filter((x) => x.binId.startsWith(`${str(config.clusterId)}__`));
+    if (str(config.type) === 'Cluster Stock Take') {
+        const clusters = clustersOfConfig(config);
+        rows = rows.filter((x) => clusters.some((c) => x.binId.startsWith(`${c}__`)));
+    }
     const classes = config.byCriticality === true && Array.isArray(config.criticalityClasses) ? (config.criticalityClasses as unknown[]).map(str) : [];
     if (classes.length) rows = rows.filter((x) => classes.includes(str(x.info?.criticalityClass)));
     return rows;
 }
 
 /** A session runs from its start for the configuration's duration; nothing may be backdated. */
-function readCampaign(b: Obj, now: string, durationDays: number, allCount: number | null) {
+/** When a session that starts at startIso ends: a cycle count at the end of its period, others after the duration. */
+function sessionEnd(config: Obj, startIso: string): string {
+    const startMs = Date.parse(startIso);
+    if (isCycle(config)) {
+        if (!PERIODS.includes(str(config.period))) throw new HttpError(400, 'Set the cycle period on the configuration first.');
+        return nairobiMidnight(periodEnd(nairobiDay(startMs), str(config.period)));
+    }
+    const days = Number(config.durationDays);
+    if (!Number.isInteger(days) || days < 1) throw new HttpError(400, 'Set the duration (days) on the configuration first; the session end date is worked out from it.');
+    return new Date(startMs + days * 86_400_000).toISOString();
+}
+
+function readCampaign(b: Obj, now: string, config: Obj, allCount: number | null) {
     const name = str(b.name).trim();
     if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a session name of 3 to 80 characters');
     const startAt = str(b.startAt);
@@ -233,8 +259,7 @@ function readCampaign(b: Obj, now: string, durationDays: number, allCount: numbe
     // No backdating: a session cannot claim to have started before it was planned (10 minutes allowed for the clock).
     if (startMs < Date.parse(now) - 10 * 60_000) throw new HttpError(400, 'The start cannot be in the past');
     if (startMs > Date.parse(now) + MAX_SESSION_DAYS * 86_400_000) throw new HttpError(400, `The start must be within ${MAX_SESSION_DAYS} days`);
-    if (!Number.isInteger(durationDays) || durationDays < 1) throw new HttpError(400, 'Set the duration (days) on the configuration first; the session end date is worked out from it.');
-    const end = new Date(startMs + durationDays * 86_400_000).toISOString();
+    const end = sessionEnd(config, new Date(startMs).toISOString());
     return { name, startAt: new Date(startMs).toISOString(), endAt: end, metrics: readMetrics(isObj(b.metrics) ? b.metrics : {}, allCount) };
 }
 
@@ -336,19 +361,49 @@ export function addPeriod(day: string, period: string): string {
     return d.toISOString().slice(0, 10);
 }
 
+/**
+ * The day the calendar period containing a day ends (the next period starts that midnight): tomorrow, next Monday, the
+ * 1st of next month, the next quarter (January, April, July, October) or 1 January. A cycle count runs until this
+ * boundary and the next cycle begins there.
+ */
+export function periodEnd(day: string, period: string): string {
+    const d = new Date(`${day}T00:00:00.000Z`);
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth();
+    let end: Date;
+    if (period === 'Daily') end = new Date(Date.UTC(y, m, d.getUTCDate() + 1));
+    else if (period === 'Weekly') end = new Date(Date.UTC(y, m, d.getUTCDate() + (((8 - d.getUTCDay()) % 7) || 7)));
+    else if (period === 'Monthly') end = new Date(Date.UTC(y, m + 1, 1));
+    else if (period === 'Quarterly') end = new Date(Date.UTC(y, m - (m % 3) + 3, 1));
+    else end = new Date(Date.UTC(y + 1, 0, 1));
+    return end.toISOString().slice(0, 10);
+}
+const isCycle = (c: Obj) => str(c.type) === 'Cycle Count';
+/** Clusters of a configuration (several may be chosen; older configurations hold one). */
+const clustersOfConfig = (c: Obj) => (Array.isArray(c.clusterIds) ? (c.clusterIds as unknown[]).map(str) : str(c.clusterId) ? [str(c.clusterId)] : []).filter((x) => CLUSTER_RE.test(x));
+
 function readConfig(b: Record<string, unknown>) {
     const name = str(b.name).trim();
     const type = str(b.type);
     const selection = str(b.selection);
     const period = str(b.period);
     const duration = Number(b.durationDays);
-    const clusterId = str(b.clusterId).trim().toUpperCase();
+    const clusterIds = Array.isArray(b.clusterIds) ? [...new Set((b.clusterIds as unknown[]).map((x) => str(x).trim().toUpperCase()))].sort() : [];
+    const cycle = type === 'Cycle Count';
+    // A cycle count is always periodic: each cycle runs for one period and the next begins at the period's end.
+    if (cycle) b = { ...b, periodic: true };
     if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a configuration name of 3 to 80 characters');
     if (!TYPES.includes(type) || !['Sequence', 'Random'].includes(selection)) throw new HttpError(400, 'Invalid stock take type or selection order');
     if (b.periodic === true && !PERIODS.includes(period)) throw new HttpError(400, 'Select a valid period');
-    // Every session runs for the configuration's duration: its end date is the start plus this many days.
-    if (!Number.isInteger(duration) || duration < 1 || duration > 3650) throw new HttpError(400, 'Duration must be 1–3650 days');
-    if (type === 'Cluster Stock Take' && !CLUSTER_RE.test(clusterId)) throw new HttpError(400, 'Enter the cluster code, for example CL-0001');
+    // Other types: every session runs for the configuration's duration (end = start + days). A cycle count's session
+    // runs to the end of its period instead.
+    if (!cycle && (!Number.isInteger(duration) || duration < 1 || duration > 3650)) throw new HttpError(400, 'Duration must be 1–3650 days');
+    if (cycle && typeof b.fullScope !== 'boolean') throw new HttpError(400, 'Say whether the full scope of materials must be counted within each session');
+    if (type === 'Cluster Stock Take') {
+        if (!str(b.warehouseId)) throw new HttpError(400, 'Choose the warehouse first; its clusters are then listed');
+        if (!clusterIds.length || clusterIds.some((x) => !CLUSTER_RE.test(x))) throw new HttpError(400, 'Choose at least one cluster of the warehouse');
+        if (clusterIds.length > 200) throw new HttpError(400, 'Choose at most 200 clusters');
+    }
     const byCriticality = b.byCriticality === true;
     const classes = Array.isArray(b.criticalityClasses) ? [...new Set((b.criticalityClasses as unknown[]).map(str))].filter((c) => CRITICALITY.includes(c)).sort() : [];
     if (byCriticality && !classes.length) throw new HttpError(400, 'Choose at least one criticality class (A, B, C or D)');
@@ -362,10 +417,12 @@ function readConfig(b: Record<string, unknown>) {
         periodic: b.periodic === true,
         period: b.periodic === true ? period : '',
         sessionCreation: b.periodic === true ? str(b.sessionCreation) : 'manual',
-        durationDays: duration,
+        durationDays: cycle ? null : duration,
+        fullScope: cycle ? b.fullScope === true : false,
         byCriticality,
         criticalityClasses: byCriticality ? classes : [],
-        clusterId: type === 'Cluster Stock Take' ? clusterId : '',
+        clusterIds: type === 'Cluster Stock Take' ? clusterIds : [],
+        clusterId: '',
         warehouseId: str(b.warehouseId),
     };
 }
@@ -437,6 +494,22 @@ export const stockTakeRoutes = {
         }),
     ],
 
+    'POST /api/org/inventory/stocktake/clusters': [
+        orgRoute('org.inventory.stocktake.clusters', null, async (ctx) => {
+            // Clusters configured in a warehouse, for choosing them in a Cluster Stock Take configuration.
+            canView(ctx);
+            const warehouseId = str(ctx.body.warehouseId);
+            if (!warehouseId || !(await warehousesFor(ctx, 'read')).some((w) => w.id === warehouseId)) throw new HttpError(403, 'Select an accessible warehouse');
+            const docs = await listDocs(`${rootOf(ctx)}/warehouses/${warehouseId}/clusters`);
+            return {
+                clusters: docs
+                    .filter((d) => CLUSTER_RE.test(d.id))
+                    .map((d) => ({ code: d.id, name: str(d.data.name), locationCode: str(d.data.locationCode), locations: Number(d.data.count) || 0 }))
+                    .sort((a, b) => a.code.localeCompare(b.code)),
+            };
+        }),
+    ],
+
     'POST /api/org/inventory/stocktake/material-count': [
         orgRoute('org.inventory.stocktake.material_count', null, async (ctx) => {
             // How many materials "All" means: the mapped locations of the warehouse this configuration would count.
@@ -464,8 +537,10 @@ export const stockTakeRoutes = {
             if (!config || config.data.active === false) throw new HttpError(400, 'Choose an enabled configuration');
             if (str(config.data.warehouseId) && warehouseId !== str(config.data.warehouseId)) throw new HttpError(400, 'Selected warehouse does not match configuration');
             const now = nowIso();
+            // A cycle count with full scope counts every material in each session: "All" is forced.
+            if (config.data.fullScope === true) b.metrics = { ...(isObj(b.metrics) ? b.metrics : {}), countAll: true };
             const wantsAll = isObj(b.metrics) && b.metrics.countAll === true;
-            const plan = readCampaign(b, now, Number(config.data.durationDays), wantsAll ? (await selectableLocations(root, warehouseId, config.data)).length : null);
+            const plan = readCampaign(b, now, config.data, wantsAll ? (await selectableLocations(root, warehouseId, config.data)).length : null);
             for (let attempt = 0; attempt < 3; attempt++) {
                 const n = await nextOrgCounter(ctx.orgId, 'stockTakeSessionSeq');
                 if (n > 99_999_999) throw new HttpError(409, 'Stock take session sequence exhausted');
@@ -481,7 +556,8 @@ export const stockTakeRoutes = {
                         selection: str(config.data.selection),
                         documentSize: plan.metrics.materialsPerPi,
                         plannedPiDocuments: plannedPis(plan.metrics.targetMaterials, plan.metrics.materialsPerPi),
-                        durationDays: Number(config.data.durationDays),
+                        durationDays: isCycle(config.data) ? null : Number(config.data.durationDays),
+                        fullScope: config.data.fullScope === true,
                         criticalityClasses: config.data.byCriticality === true && Array.isArray(config.data.criticalityClasses) ? config.data.criticalityClasses : [],
                         origin: 'manual',
                         setupRequired: false,
@@ -516,8 +592,8 @@ export const stockTakeRoutes = {
             if (doc.data.setupRequired !== true) throw new HttpError(409, 'This session is already set up; its plan cannot be changed.');
             const name = str(ctx.body.name).trim();
             if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a session name of 3 to 80 characters');
-            const m = isObj(ctx.body.metrics) ? ctx.body.metrics : {};
             const config = await getDoc(`${root}/stock_take_configs/${str(doc.data.configId)}`);
+            const m = { ...(isObj(ctx.body.metrics) ? ctx.body.metrics : {}), ...(config?.data.fullScope === true ? { countAll: true } : {}) };
             const metrics = readMetrics(m, m.countAll === true ? (await selectableLocations(root, str(doc.data.warehouseId), { ...(config?.data ?? {}), criticalityClasses: doc.data.criticalityClasses, byCriticality: Array.isArray(doc.data.criticalityClasses) && doc.data.criticalityClasses.length > 0 })).length : null);
             const now = nowIso();
             const ok = await writeDoc(
@@ -565,9 +641,9 @@ export const stockTakeRoutes = {
             requireAnywhere(ctx, 'INV_ST_002');
             const root = rootOf(ctx);
             const config = readConfig(ctx.body);
-            await checkConfigWarehouse(ctx, config.warehouseId);
+            await checkConfigWarehouse(ctx, config.warehouseId, config.clusterIds);
             // Automatic sessions: the first is created at the next midnight run; the automation keeps the schedule.
-            const schedule = config.sessionCreation === 'automatic' ? { nextSessionDueOn: nairobiDay(), lastSessionCreatedAt: '', lastSessionId: '' } : { nextSessionDueOn: '' };
+            const schedule = config.sessionCreation === 'automatic' ? { nextSessionDueOn: firstDue(config), lastSessionCreatedAt: '', lastSessionId: '' } : { nextSessionDueOn: '' };
             for (let attempt = 0; attempt < 3; attempt++) {
                 const n = await nextOrgCounter(ctx.orgId, 'stockCountConfigSeq');
                 if (n > 99_999_999) throw new HttpError(409, 'Stock count configuration sequence exhausted');
@@ -591,10 +667,10 @@ export const stockTakeRoutes = {
             const existing = await getDoc(`${root}/stock_take_configs/${id}`);
             if (!existing) throw new HttpError(404, 'Configuration not found');
             const config = readConfig(ctx.body);
-            await checkConfigWarehouse(ctx, config.warehouseId);
+            await checkConfigWarehouse(ctx, config.warehouseId, config.clusterIds);
             const wasAuto = str(existing.data.sessionCreation) === 'automatic';
             const isAuto = config.sessionCreation === 'automatic';
-            const schedule = !isAuto ? { nextSessionDueOn: '' } : !wasAuto || !str(existing.data.nextSessionDueOn) ? { nextSessionDueOn: nairobiDay() } : {};
+            const schedule = !isAuto ? { nextSessionDueOn: '' } : !wasAuto || !str(existing.data.nextSessionDueOn) || str(existing.data.period) !== config.period || str(existing.data.type) !== config.type ? { nextSessionDueOn: firstDue(config) } : {};
             const patch = { ...existing.data, ...config, ...schedule, documentSize: null, updatedBy: ctx.uid, updatedAt: nowIso() };
             await writeDoc(`${root}/stock_take_configs/${id}`, patch);
             const changed = Object.keys(config).filter((k) => JSON.stringify(existing.data[k] ?? null) !== JSON.stringify((config as Record<string, unknown>)[k] ?? null));
@@ -642,9 +718,9 @@ export const stockTakeRoutes = {
 
             let eligible = await snapshot(root, warehouseId);
             if (str(config.data.type) === 'Cluster Stock Take') {
-                const cluster = str(config.data.clusterId);
-                if (!CLUSTER_RE.test(cluster)) throw new HttpError(400, 'Cluster configuration required');
-                eligible = eligible.filter((x) => x.binId.startsWith(`${cluster}__`));
+                const clusters = clustersOfConfig(config.data);
+                if (!clusters.length) throw new HttpError(400, 'Cluster configuration required');
+                eligible = eligible.filter((x) => clusters.some((c) => x.binId.startsWith(`${c}__`)));
             }
             if (!eligible.length) throw new HttpError(409, 'No mapped physical locations found for this selection');
             // The session plans the work: materials to count and materials per PI give the number of PI documents.
@@ -1069,13 +1145,16 @@ export async function stockTakeAutomationForOrg(orgId: string, deadline: number)
         if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || due > today) continue;
         try {
             const warehouseId = str(d.warehouseId);
+            const cycle = isCycle(d);
             const duration = Number(d.durationDays);
             if (!warehouseId || !(await getDoc(`${root}/warehouses/${warehouseId}`))) throw new Error('warehouse missing');
-            if (!Number.isInteger(duration) || duration < 1) throw new Error('duration missing');
+            if (!cycle && (!Number.isInteger(duration) || duration < 1)) throw new Error('duration missing');
             // One session per configuration and day, however often the run is repeated.
             const claimed = await writeDoc(`${root}/stock_take_auto_keys/${c.id}_${today}`, { configId: c.id, day: today, createdAt: nowIso() }, { exists: false });
             let next = due;
-            while (next <= today) next = addPeriod(next, str(d.period));
+            // A cycle count runs to the end of its period and the next cycle begins there.
+            if (cycle) next = periodEnd(today, str(d.period));
+            else while (next <= today) next = addPeriod(next, str(d.period));
             if (claimed) {
                 const n = await nextOrgCounter(orgId, 'stockTakeSessionSeq');
                 if (n > 99_999_999) throw new Error('session sequence exhausted');
@@ -1088,7 +1167,7 @@ export async function stockTakeAutomationForOrg(orgId: string, deadline: number)
                         sessionNumber: id,
                         name: `${str(d.name)} ${today}`.slice(0, 80),
                         startAt,
-                        endAt: new Date(Date.parse(startAt) + duration * 86_400_000).toISOString(),
+                        endAt: sessionEnd(d, startAt),
                         metrics: {},
                         configId: c.id,
                         configName: str(d.name),
@@ -1096,7 +1175,8 @@ export async function stockTakeAutomationForOrg(orgId: string, deadline: number)
                         selection: str(d.selection),
                         documentSize: 0,
                         plannedPiDocuments: 0,
-                        durationDays: duration,
+                        durationDays: cycle ? null : duration,
+                        fullScope: d.fullScope === true,
                         criticalityClasses: d.byCriticality === true && Array.isArray(d.criticalityClasses) ? d.criticalityClasses : [],
                         warehouseId,
                         status: 'open',

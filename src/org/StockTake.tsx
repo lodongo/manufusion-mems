@@ -11,8 +11,8 @@ import { downloadReportPdf } from '../lib/report';
 
 // Stock take (physical inventory, INV).
 //   Active sessions     a stock take session (CNT_SES_ + 8 digits) is planned first: configuration, warehouse, start,
-//                       optional end, materials to count and materials per PI (which give the number of PI documents)
-//                       and the targets. Every PI document (PI_ + 8 digits) lives inside its session: opening a session
+//                       end (duration, or the period end for a cycle count), materials to count (or All) and materials
+//                       per PI (which give the number of PI documents). Every PI document (PI_ + 8 digits) lives inside its session: opening a session
 //                       lists its PI documents, creates the next one (only while it is open, between its start and end
 //                       and until the planned number is reached) and shows its progress report.
 //   Statistics          all sessions over a period, year to date by default (from the financial year start).
@@ -41,6 +41,10 @@ interface Config {
     active?: boolean;
     byCriticality?: boolean;
     criticalityClasses?: string[];
+    /** Cycle count: every material must be counted within each session. */
+    fullScope?: boolean;
+    /** Cluster stock take: the clusters of the warehouse to count (older configurations hold clusterId). */
+    clusterIds?: string[];
     sessionCreation?: 'automatic' | 'manual';
     lastSessionCreatedAt?: string;
     lastSessionId?: string;
@@ -155,6 +159,7 @@ interface CountSession {
     whyNoPi: string;
     /** Sessions created by the automation: the plan is completed once before any PI document. */
     setupRequired?: boolean;
+    fullScope?: boolean;
     origin?: 'manual' | 'automatic';
     criticalityClasses?: string[];
     durationDays?: number;
@@ -352,7 +357,9 @@ export default function StockTake() {
             { key: 'name', label: 'Name', value: (c) => c.name },
             { key: 'type', label: 'Type', value: (c) => c.type },
             { key: 'selection', label: 'Selection', value: (c) => c.selection },
-            { key: 'duration', label: 'Duration days', type: 'number', value: (c) => c.durationDays },
+            { key: 'duration', label: 'Duration days', type: 'number', value: (c) => c.durationDays, render: (c) => (c.type === 'Cycle Count' ? 'To period end' : c.durationDays ?? '') },
+            { key: 'fullScope', label: 'Full scope', value: (c) => (c.type === 'Cycle Count' ? (c.fullScope ? 'Yes' : 'No') : ''), hidden: true },
+            { key: 'clusters', label: 'Clusters', value: (c) => (c.clusterIds?.length ? c.clusterIds : c.clusterId ? [c.clusterId] : []).join(', '), hidden: true },
             { key: 'criticality', label: 'Criticality', value: (c) => (c.byCriticality ? (c.criticalityClasses ?? []).join(', ') : 'All') },
             { key: 'creation', label: 'Sessions', value: (c) => (c.periodic ? (c.sessionCreation === 'automatic' ? 'Automatic' : 'Manual') : 'Manual') },
             { key: 'nextDue', label: 'Next session due', type: 'date', value: (c) => c.nextSessionDueOn || null, hidden: true },
@@ -1412,7 +1419,7 @@ function ProgressReport({ session: c, warehouse }: { session: CountSession; ware
  * configuration selects (cluster and criticality applied) and the number is shown read-only. The server counts again
  * when the session is saved, so the figure cannot be altered on the way.
  */
-function MaterialsToCount({ id, all, value, configId, warehouseId, error, onAll, onValue }: { id: string; all: boolean; value: string; configId: string; warehouseId: string; error?: string; onAll: (on: boolean) => void; onValue: (v: string) => void }) {
+function MaterialsToCount({ id, all, locked = false, value, configId, warehouseId, error, onAll, onValue }: { id: string; all: boolean; locked?: boolean; value: string; configId: string; warehouseId: string; error?: string; onAll: (on: boolean) => void; onValue: (v: string) => void }) {
     const [loading, setLoading] = useState(false);
     const [why, setWhy] = useState('');
     const fetchAll = async () => {
@@ -1435,10 +1442,10 @@ function MaterialsToCount({ id, all, value, configId, warehouseId, error, onAll,
     }, [all, configId, warehouseId]);
     return (
         <div className='space-y-2'>
-            <Field id={id} label='Materials to count *' inputMode='numeric' maxLength={7} value={loading ? '…' : value} readOnly={all} onChange={(e) => onValue(e.target.value)} error={why || error} hint={all ? 'All mapped materials in the warehouse for this configuration.' : undefined} />
+            <Field id={id} label='Materials to count *' inputMode='numeric' maxLength={7} value={loading ? '…' : value} readOnly={all} onChange={(e) => onValue(e.target.value)} error={why || error} hint={locked ? 'Full scope: every mapped material in scope is counted in this cycle.' : all ? 'All mapped materials in the warehouse for this configuration.' : undefined} />
             <label className='flex min-h-[44px] items-center gap-3'>
-                <Toggle checked={all} onChange={onAll} label='All materials in the warehouse' />
-                <span className='text-sm text-soft'>All materials</span>
+                <Toggle checked={all} onChange={(v) => !locked && onAll(v)} label='All materials in the warehouse' />
+                <span className='text-sm text-soft'>All materials{locked ? ' (required by the configuration)' : ''}</span>
             </label>
         </div>
     );
@@ -1450,7 +1457,7 @@ function MaterialsToCount({ id, all, value, configId, warehouseId, error, onAll,
 
 function SetupSessionPanel({ session: c, ask, onClose, onDone }: { session: CountSession; ask: Ask; onClose: () => void; onDone: (message: string) => void }) {
     const [f, setF] = useState({ name: c.name, targetMaterials: '', materialsPerPi: '20' });
-    const [all, setAll] = useState(false);
+    const [all, setAll] = useState(c.fullScope === true);
     const [tried, setTried] = useState(false);
     const e: Record<string, string> = {};
     if (f.name.trim().length < 3 || f.name.trim().length > 80) e.name = '3 to 80 characters';
@@ -1497,7 +1504,7 @@ function SetupSessionPanel({ session: c, ask, onClose, onDone }: { session: Coun
             <Card className='space-y-3'>
                 <Field id='sts-setup-name' label='Session name *' maxLength={80} value={f.name} onChange={(x) => set('name', x.target.value)} error={show('name')} />
                 <div className='grid grid-cols-2 gap-2'>
-                    <MaterialsToCount id='sts-setup-materials' all={all} value={f.targetMaterials} configId={c.configId} warehouseId={c.warehouseId} error={show('targetMaterials')} onAll={setAll} onValue={(v) => set('targetMaterials', v)} />
+                    <MaterialsToCount id='sts-setup-materials' all={all} locked={c.fullScope === true} value={f.targetMaterials} configId={c.configId} warehouseId={c.warehouseId} error={show('targetMaterials')} onAll={setAll} onValue={(v) => set('targetMaterials', v)} />
                     <Field id='sts-setup-per-pi' label='Materials per PI *' inputMode='numeric' maxLength={4} value={f.materialsPerPi} onChange={(x) => set('materialsPerPi', x.target.value)} error={show('materialsPerPi')} />
                     <div className='flex flex-col justify-center rounded-xl border border-line px-3'>
                         <span className='text-xs text-muted'>PI documents</span>
@@ -1524,6 +1531,21 @@ interface PlanForm {
 }
 type PlanKey = keyof PlanForm;
 
+/** End of the calendar period containing a moment, as the server works it out (Nairobi business days). */
+function cyclePeriodEnd(ms: number, period: string): string {
+    const n = new Date(ms + 3 * 3_600_000);
+    const y = n.getUTCFullYear();
+    const m = n.getUTCMonth();
+    const day = n.getUTCDate();
+    const end =
+        period === 'Daily' ? Date.UTC(y, m, day + 1)
+        : period === 'Weekly' ? Date.UTC(y, m, day + (((8 - n.getUTCDay()) % 7) || 7))
+        : period === 'Monthly' ? Date.UTC(y, m + 1, 1)
+        : period === 'Quarterly' ? Date.UTC(y, m - (m % 3) + 3, 1)
+        : Date.UTC(y + 1, 0, 1);
+    return new Date(end - 3 * 3_600_000).toISOString();
+}
+
 /** A date-time for the device's datetime-local input, in local time. */
 function localInput(d: Date) {
     const z = (n: number) => String(n).padStart(2, '0');
@@ -1543,7 +1565,7 @@ function planErrors(f: PlanForm, cfg: Config | undefined, now: number): Partial<
     if (!f.startAt || !Number.isFinite(start)) e.startAt = 'Enter the start date and time';
     else if (start < now - 10 * 60_000) e.startAt = 'Cannot be in the past';
     else if (start > now + 366 * 86_400_000) e.startAt = 'Must be within 366 days';
-    if (cfg && !(Number(cfg.durationDays) >= 1)) e.configId = 'Set the duration (days) on this configuration first';
+    if (cfg && cfg.type !== 'Cycle Count' && !(Number(cfg.durationDays) >= 1)) e.configId = 'Set the duration (days) on this configuration first';
     if (!isWhole(f.targetMaterials, 1, 1_000_000)) e.targetMaterials = 'Whole number, 1 or more';
     if (!isWhole(f.materialsPerPi, 1, 1000)) e.materialsPerPi = 'Whole number, 1 to 1000';
     else if (!e.targetMaterials && Math.ceil(Number(f.targetMaterials) / Number(f.materialsPerPi)) > 1000) e.materialsPerPi = 'More than 1000 PI documents; put more on each PI';
@@ -1572,7 +1594,8 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
     const touch = (k: PlanKey) => setTouched((t) => ({ ...t, [k]: true }));
     const enabledConfigs = data.configs.filter((c) => c.active !== false);
     const startMs = Date.parse(form.startAt);
-    const endIso = cfg?.durationDays && Number.isFinite(startMs) ? new Date(startMs + cfg.durationDays * 86_400_000).toISOString() : '';
+    const cycleCfg = cfg?.type === 'Cycle Count';
+    const endIso = !Number.isFinite(startMs) || !cfg ? '' : cycleCfg ? cyclePeriodEnd(startMs, cfg.period) : cfg.durationDays ? new Date(startMs + cfg.durationDays * 86_400_000).toISOString() : '';
     const piCount = isWhole(form.targetMaterials, 1, 1_000_000) && isWhole(form.materialsPerPi, 1, 1000) ? Math.ceil(Number(form.targetMaterials) / Number(form.materialsPerPi)) : 0;
 
     const pickConfig = (id: string) => {
@@ -1582,6 +1605,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
             configId: id,
             warehouseId: c?.warehouseId || f.warehouseId,
             name: f.name || (c ? c.name : ''),
+            countAll: c?.fullScope === true ? true : f.countAll,
             materialsPerPi: touched.materialsPerPi ? f.materialsPerPi : c ? String(c.documentSize || 20) : f.materialsPerPi,
         }));
         touch('configId');
@@ -1661,7 +1685,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                 <div className='space-y-3'>
                     <Field id='sts-start' type='datetime-local' label='Start *' value={form.startAt} onChange={(e) => set('startAt', e.target.value)} onBlur={() => touch('startAt')} error={shown('startAt')} />
                     <div className='rounded-xl border border-line px-3 py-2'>
-                        <span className='block text-xs text-muted'>End (start + {cfg?.durationDays ? count(cfg.durationDays, 'day') : 'configuration duration'})</span>
+                        <span className='block text-xs text-muted'>{cycleCfg ? `End (end of the ${(cfg?.period || 'period').toLowerCase()} period; the next cycle begins then)` : `End (start + ${cfg?.durationDays ? count(cfg.durationDays, 'day') : 'configuration duration'})`}</span>
                         <span className='block text-base text-ink'>{endIso ? fmtWhen(endIso) : '—'}</span>
                     </div>
                 </div>
@@ -1670,7 +1694,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
             <Card className='space-y-3'>
                 <p className='text-sm font-medium text-ink'>Plan</p>
                 <div className='grid grid-cols-2 gap-2'>
-                    <MaterialsToCount id='sts-materials' all={form.countAll} value={form.targetMaterials} configId={form.configId} warehouseId={form.warehouseId} error={shown('targetMaterials')} onAll={(on) => setForm((x) => ({ ...x, countAll: on }))} onValue={(v) => set('targetMaterials', v)} />
+                    <MaterialsToCount id='sts-materials' all={form.countAll} locked={cfg?.fullScope === true} value={form.targetMaterials} configId={form.configId} warehouseId={form.warehouseId} error={shown('targetMaterials')} onAll={(on) => setForm((x) => ({ ...x, countAll: on }))} onValue={(v) => set('targetMaterials', v)} />
                     <Field id='sts-per-pi' label='Materials per PI *' inputMode='numeric' maxLength={4} value={form.materialsPerPi} onChange={(e) => (set('materialsPerPi', e.target.value), touch('materialsPerPi'))} error={shown('materialsPerPi')} />
                     <div className='flex flex-col justify-center rounded-xl border border-line px-3'>
                         <span className='text-xs text-muted'>PI documents</span>
@@ -1869,17 +1893,18 @@ interface ConfigForm {
     byCriticality: boolean;
     criticalityClasses: string[];
     durationDays: string;
+    fullScope: '' | 'yes' | 'no';
     periodic: boolean;
     period: string;
     sessionCreation: '' | 'automatic' | 'manual';
     warehouseId: string;
-    clusterId: string;
+    clusterIds: string[];
 }
 type FormKey = keyof ConfigForm;
 const CLASSES = ['A', 'B', 'C', 'D'];
 
 function formOf(c: Config | null): ConfigForm {
-    if (!c) return { type: 'Cycle Count', name: 'Cycle Count', selection: 'Sequence', byCriticality: false, criticalityClasses: [], durationDays: '30', periodic: false, period: 'Monthly', sessionCreation: '', warehouseId: '', clusterId: '' };
+    if (!c) return { type: 'Cycle Count', name: 'Cycle Count', selection: 'Sequence', byCriticality: false, criticalityClasses: [], durationDays: '30', fullScope: '', periodic: true, period: 'Monthly', sessionCreation: '', warehouseId: '', clusterIds: [] };
     return {
         type: c.type,
         name: c.name,
@@ -1887,11 +1912,12 @@ function formOf(c: Config | null): ConfigForm {
         byCriticality: c.byCriticality === true,
         criticalityClasses: c.criticalityClasses ?? [],
         durationDays: c.durationDays ? String(c.durationDays) : '',
-        periodic: c.periodic,
+        fullScope: c.type === 'Cycle Count' ? (c.fullScope === true ? 'yes' : c.fullScope === false ? 'no' : '') : '',
+        periodic: c.type === 'Cycle Count' ? true : c.periodic,
         period: c.period || 'Monthly',
         sessionCreation: c.periodic ? (c.sessionCreation ?? 'manual') : '',
         warehouseId: c.warehouseId || '',
-        clusterId: c.clusterId || '',
+        clusterIds: c.clusterIds?.length ? c.clusterIds : c.clusterId ? [c.clusterId] : [],
     };
 }
 
@@ -1902,8 +1928,11 @@ function configErrors(f: ConfigForm): Partial<Record<FormKey, string>> {
     if (name.length < 3 || name.length > 80) e.name = 'Enter a name of 3 to 80 characters.';
     if (!['Sequence', 'Random'].includes(f.selection)) e.selection = 'Choose a selection order.';
     if (f.byCriticality && !f.criticalityClasses.length) e.criticalityClasses = 'Choose at least one criticality class.';
-    if (!isWhole(f.durationDays, 1, 3650)) e.durationDays = 'Whole number of days from 1 to 3650.';
-    if (f.type === 'Cluster Stock Take' && !/^CL-\d{4}$/.test(f.clusterId.trim().toUpperCase())) e.clusterId = 'Use the cluster code, for example CL-0001.';
+    const cycle = f.type === 'Cycle Count';
+    if (!cycle && !isWhole(f.durationDays, 1, 3650)) e.durationDays = 'Whole number of days from 1 to 3650.';
+    if (cycle && !f.fullScope) e.fullScope = 'Say whether the full scope of materials must be counted within each session.';
+    if (f.type === 'Cluster Stock Take' && !f.warehouseId) e.warehouseId = 'Choose the warehouse first; its clusters are then listed.';
+    else if (f.type === 'Cluster Stock Take' && !f.clusterIds.length) e.clusterIds = 'Choose at least one cluster.';
     if (f.periodic && !PERIODS.includes(f.period)) e.period = 'Choose how often the stock take runs.';
     if (f.periodic && !f.sessionCreation) e.sessionCreation = 'Choose whether sessions are created automatically or manually.';
     if (f.periodic && f.sessionCreation === 'automatic' && !f.warehouseId) e.warehouseId = 'Choose the warehouse automatic sessions are created for.';
@@ -1921,7 +1950,43 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
     const set = (patch: Partial<ConfigForm>) => setForm((f) => ({ ...f, ...patch }));
     const touch = (k: FormKey) => setTouched((t) => ({ ...t, [k]: true }));
     const err = (k: FormKey) => (touched[k] ? errors[k] : undefined);
+    const cycle = form.type === 'Cycle Count';
+    const clusterType = form.type === 'Cluster Stock Take';
     const automatic = form.periodic && form.sessionCreation === 'automatic';
+    // Clusters of the chosen warehouse, for a cluster stock take.
+    const [clusters, setClusters] = useState<Array<{ code: string; name: string; locationCode: string; locations: number }> | null>(null);
+    const [clusterError, setClusterError] = useState('');
+    useEffect(() => {
+        setClusters(null);
+        setClusterError('');
+        if (!clusterType || !form.warehouseId) return;
+        let live = true;
+        callBackend<{ clusters: Array<{ code: string; name: string; locationCode: string; locations: number }> }>(API + 'clusters', { warehouseId: form.warehouseId })
+            .then((r) => live && setClusters(r.clusters))
+            .catch((err) => live && setClusterError(messageOf(err)));
+        return () => {
+            live = false;
+        };
+    }, [clusterType, form.warehouseId]);
+    const warehouseField = (
+        <SelectField
+                            id='st-cfg-warehouse'
+                            label={automatic || clusterType ? 'Warehouse *' : 'Warehouse'}
+                            value={form.warehouseId}
+                            onChange={(e) => {
+                                const w = warehouses.find((x) => x.id === e.target.value);
+                                // Until the name is typed by hand it identifies the warehouse, so configurations can be told apart.
+                                set({ warehouseId: e.target.value, clusterIds: [], ...(nameEdited || !w ? {} : { name: `${form.type} – ${w.name}`.slice(0, 80) }) });
+                                touch('warehouseId');
+                            }} error={err('warehouseId')} hint={clusterType ? 'Choose the warehouse first; its clusters are listed below.' : 'Sessions of this configuration are for this warehouse.'}>
+                            <option value=''>{automatic || clusterType ? 'Select warehouse' : 'Any warehouse'}</option>
+                            {warehouses.map((w) => (
+                                <option key={w.id} value={w.id}>
+                                    {w.name}
+                                </option>
+                            ))}
+                        </SelectField>
+    );
     const warehouseName = warehouses.find((w) => w.id === form.warehouseId)?.name ?? form.warehouseId;
 
     const save = () => {
@@ -1931,12 +1996,13 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
             selection: form.selection,
             byCriticality: form.byCriticality,
             criticalityClasses: form.byCriticality ? form.criticalityClasses : [],
-            durationDays: Number(form.durationDays),
-            periodic: form.periodic,
+            durationDays: cycle ? null : Number(form.durationDays),
+            fullScope: cycle ? form.fullScope === 'yes' : undefined,
+            periodic: cycle ? true : form.periodic,
             period: form.period,
             sessionCreation: form.periodic ? form.sessionCreation : 'manual',
             warehouseId: form.warehouseId,
-            clusterId: form.clusterId.trim().toUpperCase(),
+            clusterIds: form.type === 'Cluster Stock Take' ? form.clusterIds : [],
         };
         ask(
             {
@@ -1944,7 +2010,9 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
                 message: (
                     <span className='block space-y-1'>
                         <span className='block'>
-                            {payload.type}, {payload.selection.toLowerCase()} order{payload.byCriticality ? `, criticality ${payload.criticalityClasses.join(', ')}` : ''}; each session runs {count(payload.durationDays, 'day')}.
+                            {payload.type}, {payload.selection.toLowerCase()} order{payload.byCriticality ? `, criticality ${payload.criticalityClasses.join(', ')}` : ''}
+                            {payload.clusterIds.length ? `, clusters ${payload.clusterIds.join(', ')}` : ''}
+                            {cycle ? `; each cycle runs to the end of the ${payload.period.toLowerCase()} period and the next begins there${payload.fullScope ? '; every material is counted in each cycle' : ''}.` : `; each session runs ${count(Number(payload.durationDays), 'day')}.`}
                         </span>
                         <span className='block'>
                             {payload.periodic ? `${payload.period}; sessions created ${automatic ? `automatically at midnight for ${warehouseName}, each needing its plan completed before PI documents` : 'manually'}.` : 'On demand; sessions are created manually.'}
@@ -1999,7 +2067,7 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
         >
             <Problems items={problems} />
             <Card className='space-y-3'>
-                <SelectField id='st-cfg-type' label='Stock take type *' value={form.type} onChange={(e) => set({ type: e.target.value, ...(nameEdited ? {} : { name: form.warehouseId ? `${e.target.value} – ${warehouseName}`.slice(0, 80) : e.target.value }) })} error={errors.type}>
+                <SelectField id='st-cfg-type' label='Stock take type *' value={form.type} onChange={(e) => set({ type: e.target.value, ...(e.target.value === 'Cycle Count' ? { periodic: true } : {}), ...(nameEdited ? {} : { name: form.warehouseId ? `${e.target.value} – ${warehouseName}`.slice(0, 80) : e.target.value }) })} error={errors.type}>
                     {TYPES.map((t) => (
                         <option key={t}>{t}</option>
                     ))}
@@ -2022,20 +2090,65 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
                     <option>Sequence</option>
                     <option>Random</option>
                 </SelectField>
-                {form.type === 'Cluster Stock Take' && (
-                    <Field id='st-cfg-cluster' label='Cluster code *' maxLength={7} autoComplete='off' placeholder='CL-0001' value={form.clusterId} onChange={(e) => set({ clusterId: e.target.value.toUpperCase() })} onBlur={() => touch('clusterId')} error={err('clusterId')} hint='Format CL-0001' />
+                {clusterType && warehouseField}
+                {clusterType && form.warehouseId && (
+                    <div className='space-y-1'>
+                        <p className='text-sm text-soft'>Clusters * (one or more)</p>
+                        {clusterError && <p className='text-xs text-red-300'>{clusterError}</p>}
+                        {!clusters && !clusterError && <p className='text-xs text-muted'>Loading clusters…</p>}
+                        {clusters && !clusters.length && <p className='text-xs text-amber-300'>This warehouse has no clusters. Create them under Warehouse setup first.</p>}
+                        {clusters && clusters.length > 0 && (
+                            <>
+                                <div className='flex flex-wrap items-center gap-2'>
+                                    <Button variant='secondary' onClick={() => (touch('clusterIds'), set({ clusterIds: form.clusterIds.length === clusters.length ? [] : clusters.map((c) => c.code) }))}>
+                                        {form.clusterIds.length === clusters.length ? 'Clear all' : 'Select all'}
+                                    </Button>
+                                    <span className='text-xs text-muted'>{form.clusterIds.length} of {clusters.length} selected</span>
+                                </div>
+                                <div className='grid max-h-64 grid-cols-2 gap-2 overflow-y-auto overscroll-contain'>
+                                    {clusters.map((c) => {
+                                        const on = form.clusterIds.includes(c.code);
+                                        return (
+                                            <button
+                                                key={c.code}
+                                                type='button'
+                                                aria-pressed={on}
+                                                onClick={() => (touch('clusterIds'), set({ clusterIds: on ? form.clusterIds.filter((x) => x !== c.code) : [...form.clusterIds, c.code].sort() }))}
+                                                className={`min-h-12 rounded-xl border px-2 py-1.5 text-left ${on ? 'border-brand bg-brand/15 text-ink' : 'border-line text-soft active:bg-page'}`}
+                                            >
+                                                <span className='block font-mono text-sm font-semibold'>{c.code}</span>
+                                                <span className='block truncate text-xs text-muted'>{[c.name, c.locationCode, c.locations ? count(c.locations, 'location') : ''].filter(Boolean).join(' · ')}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </>
+                        )}
+                        {err('clusterIds') && <p className='text-xs text-red-300'>{errors.clusterIds}</p>}
+                    </div>
                 )}
-                <Field
-                    id='st-cfg-cycle'
-                    label='Duration (days) *'
-                    inputMode='numeric'
-                    maxLength={4}
-                    value={form.durationDays}
-                    onChange={(e) => set({ durationDays: e.target.value })}
-                    onBlur={() => touch('durationDays')}
-                    error={err('durationDays')}
-                    hint='Each session ends this many days after it starts (1 to 3650).'
-                />
+                {cycle ? (
+                    <>
+                        <SelectField id='st-cfg-full' label='Complete the full scope of materials within each session? *' value={form.fullScope} onChange={(e) => (set({ fullScope: e.target.value as ConfigForm['fullScope'] }), touch('fullScope'))} error={err('fullScope')} hint='Yes: every material in scope is counted in each cycle (materials to count is set to All).'>
+                            <option value=''>Choose</option>
+                            <option value='yes'>Yes, count every material each cycle</option>
+                            <option value='no'>No, the planner sets how many per session</option>
+                        </SelectField>
+                        <p className='text-xs text-muted'>A cycle count is always periodic. Each cycle runs until the end of its period (for example the end of the month) and the next cycle begins there.</p>
+                    </>
+                ) : (
+                    <Field
+                        id='st-cfg-cycle'
+                        label='Duration (days) *'
+                        inputMode='numeric'
+                        maxLength={4}
+                        value={form.durationDays}
+                        onChange={(e) => set({ durationDays: e.target.value })}
+                        onBlur={() => touch('durationDays')}
+                        error={err('durationDays')}
+                        hint='Each session ends this many days after it starts (1 to 3650).'
+                    />
+                )}
             </Card>
             <Card className='space-y-3'>
                 <label className='flex min-h-[44px] items-center gap-3'>
@@ -2071,10 +2184,10 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
             </Card>
             <Card className='space-y-3'>
                 <label className='flex min-h-[44px] items-center gap-3'>
-                    <Toggle checked={form.periodic} onChange={(v) => set({ periodic: v, sessionCreation: v ? form.sessionCreation : '' })} label='Periodic stock take' />
-                    <span className='text-sm text-soft'>Periodic stock take</span>
+                    <Toggle checked={cycle || form.periodic} onChange={(v) => !cycle && set({ periodic: v, sessionCreation: v ? form.sessionCreation : '' })} label='Periodic stock take' />
+                    <span className='text-sm text-soft'>Periodic stock take{cycle ? ' (always on for a cycle count)' : ''}</span>
                 </label>
-                {form.periodic && (
+                {(cycle || form.periodic) && (
                     <>
                         <SelectField id='st-cfg-period' label='Audit frequency *' value={form.period} onChange={(e) => set({ period: e.target.value })} error={errors.period}>
                             {PERIODS.map((p) => (
@@ -2088,31 +2201,13 @@ function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Con
                         </SelectField>
                     </>
                 )}
-                {(automatic || form.warehouseId) && (
-                    <SelectField
-                        id='st-cfg-warehouse'
-                        label={automatic ? 'Warehouse *' : 'Warehouse'}
-                        value={form.warehouseId}
-                        onChange={(e) => {
-                            const w = warehouses.find((x) => x.id === e.target.value);
-                            // Until the name is typed by hand it identifies the warehouse, so configurations can be told apart.
-                            set({ warehouseId: e.target.value, ...(nameEdited || !w ? {} : { name: `${form.type} – ${w.name}`.slice(0, 80) }) });
-                            touch('warehouseId');
-                        }} error={err('warehouseId')} hint='Sessions of this configuration are for this warehouse.'>
-                        <option value=''>{automatic ? 'Select warehouse' : 'Any warehouse'}</option>
-                        {warehouses.map((w) => (
-                            <option key={w.id} value={w.id}>
-                                {w.name}
-                            </option>
-                        ))}
-                    </SelectField>
-                )}
+                {!clusterType && (automatic || form.warehouseId) && warehouseField}
                 {automatic && (
                     <Alert tone='warn'>
                         Automatic sessions are created for one warehouse only. Create a separate configuration for each warehouse that should get automatic sessions, and give each an identifiable name that includes the warehouse (for example “Cycle Count – Main store”), because the name is how they are told apart.
                     </Alert>
                 )}
-                {automatic && <p className='text-xs text-muted'>At midnight on each due day a session is created with this configuration, starting that midnight and ending after the duration. A planner then completes its name, materials to count, materials per PI and targets once, before any PI document can be created.</p>}
+                {automatic && <p className='text-xs text-muted'>At midnight on each due day a session is created with this configuration, starting that midnight and ending {cycle ? 'at the end of the period; the first cycle begins at the end of the current period' : 'after the duration'}. A planner then completes its name, materials to count and materials per PI once, before any PI document can be created.</p>}
                 {config?.sessionCreation === 'automatic' && (
                     <dl className='grid grid-cols-2 gap-3 border-t border-line pt-3'>
                         <Detail label='Last created'>{config.lastSessionCreatedAt ? fmtWhen(config.lastSessionCreatedAt) : 'Not yet'}</Detail>
