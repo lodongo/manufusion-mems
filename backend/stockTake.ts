@@ -3,6 +3,7 @@ import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, str, writeDoc, t
 import { allowedNodeIds, nextOrgCounter } from './positions';
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { audited, requireAt } from './scopeGuard';
+import { audit } from './audit';
 import { bypass } from './testModeCore';
 import { postStockTake } from './finOps';
 import { stockValOf } from './finCore';
@@ -73,6 +74,12 @@ async function warehousesFor(ctx: OrgContext, mode: 'read' | 'write') {
 function canView(ctx: OrgContext) {
     if (ctx.role === 'org_super_admin') return;
     if (!['INV.view', 'INV.edit', 'INV_ST_001', 'INV_ST_007'].some((p) => hasPerm(ctx.permissions, p))) throw new HttpError(403, 'Inventory access required');
+}
+
+/** A configuration bound to a warehouse (needed for automatic sessions) may only name one the person can act on. */
+async function checkConfigWarehouse(ctx: OrgContext, warehouseId: string) {
+    if (!warehouseId) return;
+    if (!(await warehousesFor(ctx, 'write')).some((w) => w.id === warehouseId)) throw new HttpError(403, 'Choose a warehouse you can act on');
 }
 
 /** Configurations are organization-wide templates: the permission counts wherever it is held. */
@@ -184,25 +191,8 @@ async function varianceValueOf(ctx: OrgContext, warehouseId: string, pending: Ar
 
 // ----- Stock take sessions (planned first; PI documents are created inside them) -----
 
-function readCampaign(b: Obj, now: string) {
-    const name = str(b.name).trim();
-    if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a session name of 3 to 80 characters');
-    const startAt = str(b.startAt);
-    const endAt = str(b.endAt);
-    const startMs = Date.parse(startAt);
-    if (!startAt || !Number.isFinite(startMs)) throw new HttpError(400, 'Enter a valid start date and time');
-    // No backdating: a session cannot claim to have started before it was planned (10 minutes allowed for the clock).
-    if (startMs < Date.parse(now) - 10 * 60_000) throw new HttpError(400, 'The start cannot be in the past');
-    if (startMs > Date.parse(now) + MAX_SESSION_DAYS * 86_400_000) throw new HttpError(400, `The start must be within ${MAX_SESSION_DAYS} days`);
-    let end = '';
-    if (endAt) {
-        const endMs = Date.parse(endAt);
-        if (!Number.isFinite(endMs)) throw new HttpError(400, 'Enter a valid end date and time, or leave it empty');
-        if (endMs <= startMs) throw new HttpError(400, 'The end must be after the start');
-        if (endMs - startMs > MAX_SESSION_DAYS * 86_400_000) throw new HttpError(400, `A session can run for at most ${MAX_SESSION_DAYS} days`);
-        end = new Date(endMs).toISOString();
-    }
-    const m = isObj(b.metrics) ? b.metrics : {};
+/** Metrics of a session: materials to count, materials per PI document and the targets. */
+function readMetrics(m: Obj) {
     const whole = (v: unknown, label: string, min: number, max: number) => {
         const n = Number(v);
         if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${label} must be a whole number from ${min} to ${max}`);
@@ -223,15 +213,52 @@ function readCampaign(b: Obj, now: string) {
         varianceToleranceValue: Math.round(tolerance * 100) / 100,
     };
     if (plannedPis(metrics.targetMaterials, metrics.materialsPerPi) > 1000) throw new HttpError(400, 'A session can have at most 1000 PI documents; count fewer materials or put more on each PI.');
-    return { name, startAt: new Date(startMs).toISOString(), endAt: end, metrics };
+    return metrics;
+}
+
+/** A session runs from its start for the configuration's duration; nothing may be backdated. */
+function readCampaign(b: Obj, now: string, durationDays: number) {
+    const name = str(b.name).trim();
+    if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a session name of 3 to 80 characters');
+    const startAt = str(b.startAt);
+    const startMs = Date.parse(startAt);
+    if (!startAt || !Number.isFinite(startMs)) throw new HttpError(400, 'Enter a valid start date and time');
+    // No backdating: a session cannot claim to have started before it was planned (10 minutes allowed for the clock).
+    if (startMs < Date.parse(now) - 10 * 60_000) throw new HttpError(400, 'The start cannot be in the past');
+    if (startMs > Date.parse(now) + MAX_SESSION_DAYS * 86_400_000) throw new HttpError(400, `The start must be within ${MAX_SESSION_DAYS} days`);
+    if (!Number.isInteger(durationDays) || durationDays < 1) throw new HttpError(400, 'Set the duration (days) on the configuration first; the session end date is worked out from it.');
+    const end = new Date(startMs + durationDays * 86_400_000).toISOString();
+    return { name, startAt: new Date(startMs).toISOString(), endAt: end, metrics: readMetrics(isObj(b.metrics) ? b.metrics : {}) };
 }
 
 /** Why a PI cannot be created in this session now, or '' when it can. */
 function campaignClosedReason(c: Obj, now: string): string {
     if (str(c.status) !== 'open') return 'This stock take session is not open.';
     if (Date.parse(now) < Date.parse(str(c.startAt))) return 'This stock take session has not started yet.';
-    if (str(c.endAt) && Date.parse(now) > Date.parse(str(c.endAt))) return 'This stock take session has ended. Close it, or create a new session.';
+    if (str(c.endAt) && Date.parse(now) > Date.parse(str(c.endAt))) return 'This stock take session has passed its end date, so no more PI documents can be created in it.';
+    if (c.setupRequired === true) return 'Complete the session setup (materials to count, materials per PI and targets) before creating PI documents.';
     return '';
+}
+
+/**
+ * A session closes by itself once posting is 100% done: every planned PI document exists (or no unplanned location is
+ * left) and every PI document that is not disregarded is reconciled or closed with its stock posted. It cannot be
+ * closed by hand. Returns true when it was closed now.
+ */
+export async function autoCloseSession(orgId: string, campaignId: string, by: string): Promise<boolean> {
+    if (!CAMPAIGN_RE.test(campaignId)) return false;
+    const root = `organizations/${orgId}`;
+    const doc = await getDoc(`${root}/${CAMPAIGNS}/${campaignId}`);
+    if (!doc || str(doc.data.status) !== 'open' || doc.data.setupRequired === true) return false;
+    const pis = (await listDocs(`${root}/stock_take_sessions`)).filter((x) => str(x.data.campaignId) === campaignId);
+    const live = pis.filter((x) => str(x.data.status) !== 'disregarded');
+    if (!live.length || !live.every((x) => ['reconciled', 'closed_posted'].includes(str(x.data.status)))) return false;
+    const now = nowIso();
+    const progress = sessionProgress(doc.data, pis.map((x) => x.data), now);
+    if (progress.piDocuments.originals < progress.piDocuments.planned && doc.data.locationsExhausted !== true) return false;
+    await writeDoc(`${root}/${CAMPAIGNS}/${campaignId}`, { ...doc.data, status: 'closed', closedAt: now, closedBy: by, closureReason: 'Closed automatically: 100% of the PI documents are posted.', finalProgress: progress, updatedAt: now, updatedBy: by } as never);
+    await audit([{ category: 'inventory', action: 'inventory.stocktake.count_session.auto_close', orgId, target: { type: 'stock_take_session', id: campaignId, label: `Stock take session ${campaignId}` }, details: `PI documents ${progress.piDocuments.total}; stock accuracy ${progress.stockAccuracy.pct}%; count accuracy ${progress.countAccuracy.pct}%` }]);
+    return true;
 }
 
 async function getSession(ctx: OrgContext, id: string, mode: 'read' | 'write') {
@@ -279,29 +306,60 @@ function publicSession(x: Doc, ctx: OrgContext) {
     };
 }
 
+const CRITICALITY = ['A', 'B', 'C', 'D'];
+const NAIROBI_MS = 3 * 3_600_000;
+/** Today's date in Nairobi (the platform's business day), YYYY-MM-DD. */
+const nairobiDay = (ms = Date.now()) => new Date(ms + NAIROBI_MS).toISOString().slice(0, 10);
+/** Midnight at the start of a Nairobi business day, as an ISO instant. */
+const nairobiMidnight = (day: string) => new Date(Date.parse(`${day}T00:00:00.000Z`) - NAIROBI_MS).toISOString();
+/** The day one period after a day (months are calendar months, kept to the month's last day when shorter). */
+export function addPeriod(day: string, period: string): string {
+    const d = new Date(`${day}T00:00:00.000Z`);
+    if (period === 'Daily') d.setUTCDate(d.getUTCDate() + 1);
+    else if (period === 'Weekly') d.setUTCDate(d.getUTCDate() + 7);
+    else {
+        const months = period === 'Monthly' ? 1 : period === 'Quarterly' ? 3 : 12;
+        const target = d.getUTCMonth() + months;
+        const day0 = d.getUTCDate();
+        d.setUTCDate(1);
+        d.setUTCMonth(target);
+        const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+        d.setUTCDate(Math.min(day0, last));
+    }
+    return d.toISOString().slice(0, 10);
+}
+
 function readConfig(b: Record<string, unknown>) {
     const name = str(b.name).trim();
     const type = str(b.type);
     const selection = str(b.selection);
     const period = str(b.period);
-    const size = Number(b.documentSize);
     const duration = Number(b.durationDays);
     const clusterId = str(b.clusterId).trim().toUpperCase();
     if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a configuration name of 3 to 80 characters');
     if (!TYPES.includes(type) || !['Sequence', 'Random'].includes(selection)) throw new HttpError(400, 'Invalid stock take type or selection order');
-    if (!Number.isInteger(size) || size < 1 || size > 1000) throw new HttpError(400, 'PI document size must be 1–1000 physical locations');
     if (b.periodic === true && !PERIODS.includes(period)) throw new HttpError(400, 'Select a valid period');
-    if (type === 'Cycle Count' && (!Number.isInteger(duration) || duration < 1 || duration > 3650)) throw new HttpError(400, 'Cycle count duration must be 1–3650 days');
+    // Every session runs for the configuration's duration: its end date is the start plus this many days.
+    if (!Number.isInteger(duration) || duration < 1 || duration > 3650) throw new HttpError(400, 'Duration must be 1–3650 days');
     if (type === 'Cluster Stock Take' && !CLUSTER_RE.test(clusterId)) throw new HttpError(400, 'Enter the cluster code, for example CL-0001');
+    const byCriticality = b.byCriticality === true;
+    const classes = Array.isArray(b.criticalityClasses) ? [...new Set((b.criticalityClasses as unknown[]).map(str))].filter((c) => CRITICALITY.includes(c)).sort() : [];
+    if (byCriticality && !classes.length) throw new HttpError(400, 'Choose at least one criticality class (A, B, C or D)');
+    const automatic = b.periodic === true && str(b.sessionCreation) === 'automatic';
+    if (b.periodic === true && !['automatic', 'manual'].includes(str(b.sessionCreation))) throw new HttpError(400, 'Choose whether sessions are created automatically or manually');
+    if (automatic && !str(b.warehouseId)) throw new HttpError(400, 'Choose the warehouse automatic sessions are created for');
     return {
         name,
         type,
         selection,
         periodic: b.periodic === true,
         period: b.periodic === true ? period : '',
-        durationDays: type === 'Cycle Count' ? duration : null,
-        documentSize: size,
+        sessionCreation: b.periodic === true ? str(b.sessionCreation) : 'manual',
+        durationDays: duration,
+        byCriticality,
+        criticalityClasses: byCriticality ? classes : [],
         clusterId: type === 'Cluster Stock Take' ? clusterId : '',
+        warehouseId: str(b.warehouseId),
     };
 }
 
@@ -385,7 +443,7 @@ export const stockTakeRoutes = {
             if (!config || config.data.active === false) throw new HttpError(400, 'Choose an enabled configuration');
             if (str(config.data.warehouseId) && warehouseId !== str(config.data.warehouseId)) throw new HttpError(400, 'Selected warehouse does not match configuration');
             const now = nowIso();
-            const plan = readCampaign(b, now);
+            const plan = readCampaign(b, now, Number(config.data.durationDays));
             for (let attempt = 0; attempt < 3; attempt++) {
                 const n = await nextOrgCounter(ctx.orgId, 'stockTakeSessionSeq');
                 if (n > 99_999_999) throw new HttpError(409, 'Stock take session sequence exhausted');
@@ -401,6 +459,10 @@ export const stockTakeRoutes = {
                         selection: str(config.data.selection),
                         documentSize: plan.metrics.materialsPerPi,
                         plannedPiDocuments: plannedPis(plan.metrics.targetMaterials, plan.metrics.materialsPerPi),
+                        durationDays: Number(config.data.durationDays),
+                        criticalityClasses: config.data.byCriticality === true && Array.isArray(config.data.criticalityClasses) ? config.data.criticalityClasses : [],
+                        origin: 'manual',
+                        setupRequired: false,
                         warehouseId,
                         status: 'open',
                         createdAt: now,
@@ -417,13 +479,42 @@ export const stockTakeRoutes = {
         }),
     ],
 
+    'POST /api/org/inventory/stocktake/count-session/setup': [
+        orgRoute('org.inventory.stocktake.count_session.setup', null, async (ctx) => {
+            // Sessions created by the automation carry only the configuration and dates. Their remaining data (name,
+            // materials to count, materials per PI, targets) is completed once, here, before any PI document is created.
+            const root = rootOf(ctx);
+            const id = str(ctx.body.id);
+            if (!CAMPAIGN_RE.test(id)) throw new HttpError(400, 'Invalid stock take session');
+            const doc = await getDoc(`${root}/${CAMPAIGNS}/${id}`);
+            const warehouses = await warehousesFor(ctx, 'write');
+            if (!doc || !warehouses.some((w) => w.id === str(doc.data.warehouseId))) throw new HttpError(404, 'Stock take session not found');
+            await requireAtWarehouse(ctx, 'INV_ST_030', str(doc.data.warehouseId));
+            if (str(doc.data.status) !== 'open') throw new HttpError(409, 'This session is not open');
+            if (doc.data.setupRequired !== true) throw new HttpError(409, 'This session is already set up; its plan cannot be changed.');
+            const name = str(ctx.body.name).trim();
+            if (name.length < 3 || name.length > 80) throw new HttpError(400, 'Enter a session name of 3 to 80 characters');
+            const metrics = readMetrics(isObj(ctx.body.metrics) ? ctx.body.metrics : {});
+            const now = nowIso();
+            const ok = await writeDoc(
+                `${root}/${CAMPAIGNS}/${id}`,
+                { ...doc.data, name, metrics, documentSize: metrics.materialsPerPi, plannedPiDocuments: plannedPis(metrics.targetMaterials, metrics.materialsPerPi), setupRequired: false, setupBy: ctx.uid, setupAt: now, updatedAt: now, updatedBy: ctx.uid } as never,
+                doc.updateTime ? { updateTime: doc.updateTime } : { exists: true }
+            );
+            if (ok === false) throw new HttpError(409, 'Someone else changed this session; reopen it and try again.');
+            await audited(ctx, 'inventory.stocktake.count_session.setup', `Stock take session ${id}`, { name, ...metrics });
+            return { ok: true };
+        }),
+    ],
+
     'POST /api/org/inventory/stocktake/count-session/action': [
         orgRoute('org.inventory.stocktake.count_session.action', null, async (ctx) => {
             const root = rootOf(ctx);
             const id = str(ctx.body.id);
             const action = str(ctx.body.action);
             if (!CAMPAIGN_RE.test(id)) throw new HttpError(400, 'Invalid stock take session');
-            if (!['close', 'cancel'].includes(action)) throw new HttpError(400, 'Unsupported session action');
+            // A session is never closed by hand: it closes itself when posting is 100% done. Only cancelling is offered.
+            if (action !== 'cancel') throw new HttpError(400, 'A session closes automatically once all its PI documents are posted; it can only be cancelled.');
             const doc = await getDoc(`${root}/${CAMPAIGNS}/${id}`);
             const warehouses = await warehousesFor(ctx, 'write');
             if (!doc || !warehouses.some((w) => w.id === str(doc.data.warehouseId))) throw new HttpError(404, 'Stock take session not found');
@@ -435,10 +526,10 @@ export const stockTakeRoutes = {
             const open = pis.filter((x) => !CLOSED.includes(str(x.data.status)));
             if (open.length) throw new HttpError(409, `Finish or disregard the open PI documents first (${open.map((x) => x.id).slice(0, 5).join(', ')}${open.length > 5 ? ', …' : ''}).`);
             if (action === 'cancel' && pis.some((x) => (Array.isArray(x.data.lines) ? x.data.lines : []).some((l: unknown) => isObj(l) && l.posted === true)))
-                throw new HttpError(409, 'Stock has been posted in this session, so it can only be closed, not cancelled.');
+                throw new HttpError(409, 'Stock has been posted in this session, so it cannot be cancelled; it closes automatically once all its PI documents are posted.');
             const now = nowIso();
             const progress = sessionProgress(doc.data, pis.map((x) => x.data), now);
-            const status = action === 'close' ? 'closed' : 'cancelled';
+            const status = 'cancelled';
             await writeDoc(`${root}/${CAMPAIGNS}/${id}`, { ...doc.data, status, closedAt: now, closedBy: ctx.uid, closureReason: reason.slice(0, 500), finalProgress: progress, updatedAt: now, updatedBy: ctx.uid } as never);
             await audited(ctx, `inventory.stocktake.count_session.${action}`, `Stock take session ${id}`, { reason: reason.slice(0, 500), piDocuments: pis.length, completionPct: progress.completionPct });
             return { ok: true };
@@ -450,11 +541,14 @@ export const stockTakeRoutes = {
             requireAnywhere(ctx, 'INV_ST_002');
             const root = rootOf(ctx);
             const config = readConfig(ctx.body);
+            await checkConfigWarehouse(ctx, config.warehouseId);
+            // Automatic sessions: the first is created at the next midnight run; the automation keeps the schedule.
+            const schedule = config.sessionCreation === 'automatic' ? { nextSessionDueOn: nairobiDay(), lastSessionCreatedAt: '', lastSessionId: '' } : { nextSessionDueOn: '' };
             for (let attempt = 0; attempt < 3; attempt++) {
                 const n = await nextOrgCounter(ctx.orgId, 'stockCountConfigSeq');
                 if (n > 99_999_999) throw new HttpError(409, 'Stock count configuration sequence exhausted');
                 const id = `COUNT_CONFIG${String(n).padStart(8, '0')}`;
-                const ok = await writeDoc(`${root}/stock_take_configs/${id}`, { warehouseId: '', ...config, createdBy: ctx.uid, createdAt: nowIso(), active: true }, { exists: false });
+                const ok = await writeDoc(`${root}/stock_take_configs/${id}`, { ...config, ...schedule, createdBy: ctx.uid, createdAt: nowIso(), active: true }, { exists: false });
                 if (ok) {
                     await audited(ctx, 'inventory.stocktake.config.create', `Stock take configuration ${id}`, config);
                     return { ok: true, id };
@@ -473,7 +567,11 @@ export const stockTakeRoutes = {
             const existing = await getDoc(`${root}/stock_take_configs/${id}`);
             if (!existing) throw new HttpError(404, 'Configuration not found');
             const config = readConfig(ctx.body);
-            const patch = { ...existing.data, ...config, updatedBy: ctx.uid, updatedAt: nowIso() };
+            await checkConfigWarehouse(ctx, config.warehouseId);
+            const wasAuto = str(existing.data.sessionCreation) === 'automatic';
+            const isAuto = config.sessionCreation === 'automatic';
+            const schedule = !isAuto ? { nextSessionDueOn: '' } : !wasAuto || !str(existing.data.nextSessionDueOn) ? { nextSessionDueOn: nairobiDay() } : {};
+            const patch = { ...existing.data, ...config, ...schedule, documentSize: null, updatedBy: ctx.uid, updatedAt: nowIso() };
             await writeDoc(`${root}/stock_take_configs/${id}`, patch);
             const changed = Object.keys(config).filter((k) => JSON.stringify(existing.data[k] ?? null) !== JSON.stringify((config as Record<string, unknown>)[k] ?? null));
             await audited(ctx, 'inventory.stocktake.config.edit', `Stock take configuration ${id}`, {
@@ -535,7 +633,18 @@ export const stockTakeRoutes = {
             const taken = new Set(sessionPis.flatMap((x) => (Array.isArray(x.data.lines) ? x.data.lines : [])).filter(isObj).map((l) => `${str(l.materialId)}|${str(l.binId)}`));
             const onPis = taken.size;
             eligible = eligible.filter((x) => !taken.has(`${x.materialId}|${x.binId}`));
-            if (!eligible.length) throw new HttpError(409, 'Every mapped location in this selection is already on a PI document of this session.');
+            // Criticality: a configuration may count only materials of chosen classes (A to D, set per material and warehouse).
+            const classes = Array.isArray(config.data.criticalityClasses) && config.data.byCriticality === true ? (config.data.criticalityClasses as unknown[]).map(str) : [];
+            if (classes.length) {
+                eligible = eligible.filter((x) => classes.includes(str(x.info?.criticalityClass)));
+                if (!eligible.length && !onPis) throw new HttpError(409, `No mapped material in this warehouse has criticality class ${classes.join(', ')}. Set the class under Material detail > Inventory Information.`);
+            }
+            if (!eligible.length) {
+                // Nothing left to plan: the session can close itself once its PI documents are posted.
+                await writeDoc(`${root}/${CAMPAIGNS}/${campaignId}`, { ...campaign.data, locationsExhausted: true, updatedAt: nowIso() } as never);
+                await autoCloseSession(ctx.orgId, campaignId, ctx.uid);
+                throw new HttpError(409, 'Every mapped location in this selection is already on a PI document of this session.');
+            }
             const size = Math.max(1, Math.min(metrics.materialsPerPi, metrics.targetMaterials - onPis));
             if (str(config.data.selection) === 'Sequence') {
                 // Without a starting location the PI continues from the first location not yet on this session's PIs.
@@ -645,7 +754,9 @@ export const stockTakeRoutes = {
                 const reason = str(ctx.body.reason).trim();
                 if (reason.length < 10) throw new HttpError(400, 'Enter a closure reason of at least 10 characters');
                 if ((await children()).some((x) => !CLOSED.includes(str(x.data.status)))) throw new HttpError(409, 'Close active recount PI documents first');
-                return save({ status: 'closed_posted', closedAt: nowIso(), closedBy: ctx.uid, closureReason: reason.slice(0, 500), closureType: 'posted_session', reconciledAt: d.reconciledAt || '' });
+                const closedResult = await save({ status: 'closed_posted', closedAt: nowIso(), closedBy: ctx.uid, closureReason: reason.slice(0, 500), closureType: 'posted_session', reconciledAt: d.reconciledAt || '' });
+                await autoCloseSession(ctx.orgId, str(d.campaignId), ctx.uid);
+                return closedResult;
             }
 
             if (action === 'disregard') {
@@ -653,7 +764,9 @@ export const stockTakeRoutes = {
                 const reason = str(ctx.body.reason).trim();
                 if (reason.length < 10) throw new HttpError(400, 'Enter a reason of at least 10 characters');
                 if ((await children()).some((x) => !CLOSED.includes(str(x.data.status)))) throw new HttpError(409, 'Close active recount PI documents first');
-                return save({ status: 'disregarded', disregardedAt: nowIso(), disregardedBy: ctx.uid, disregardReason: reason.slice(0, 500) });
+                const disregarded = await save({ status: 'disregarded', disregardedAt: nowIso(), disregardedBy: ctx.uid, disregardReason: reason.slice(0, 500) });
+                await autoCloseSession(ctx.orgId, str(d.campaignId), ctx.uid);
+                return disregarded;
             }
 
             if (action === 'printed') {
@@ -900,6 +1013,8 @@ export const stockTakeRoutes = {
                         }
                     }
                 }
+                // A session closes itself once every PI document in it is posted.
+                await autoCloseSession(ctx.orgId, str(d.campaignId), ctx.uid);
                 return result;
             }
 
@@ -907,3 +1022,84 @@ export const stockTakeRoutes = {
         }),
     ],
 };
+
+// ---------------------------------------------------------------------------
+// Automation (shared heartbeat, job inv.stocktake-sessions): at each Nairobi midnight, every enabled periodic
+// configuration set to create sessions automatically gets its next session when it is due. The session carries the
+// configuration, warehouse, start (that midnight) and end (start + duration); its name, materials to count, materials
+// per PI and targets are completed once by a planner before any PI document can be created. The configuration keeps
+// lastSessionCreatedAt, lastSessionId and nextSessionDueOn for the next run. Open sessions whose posting is complete
+// are closed. Duplicate runs for the same day are refused by a per-day key.
+// ---------------------------------------------------------------------------
+
+export async function stockTakeAutomationForOrg(orgId: string, deadline: number) {
+    const out = { created: 0, closed: 0, failed: 0, complete: true };
+    const root = `organizations/${orgId}`;
+    const today = nairobiDay();
+    const configs = await listDocs(`${root}/stock_take_configs`);
+    for (const c of configs) {
+        if (Date.now() > deadline) return { ...out, complete: false };
+        const d = c.data;
+        if (d.active === false || d.periodic !== true || str(d.sessionCreation) !== 'automatic') continue;
+        const due = str(d.nextSessionDueOn);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || due > today) continue;
+        try {
+            const warehouseId = str(d.warehouseId);
+            const duration = Number(d.durationDays);
+            if (!warehouseId || !(await getDoc(`${root}/warehouses/${warehouseId}`))) throw new Error('warehouse missing');
+            if (!Number.isInteger(duration) || duration < 1) throw new Error('duration missing');
+            // One session per configuration and day, however often the run is repeated.
+            const claimed = await writeDoc(`${root}/stock_take_auto_keys/${c.id}_${today}`, { configId: c.id, day: today, createdAt: nowIso() }, { exists: false });
+            let next = due;
+            while (next <= today) next = addPeriod(next, str(d.period));
+            if (claimed) {
+                const n = await nextOrgCounter(orgId, 'stockTakeSessionSeq');
+                if (n > 99_999_999) throw new Error('session sequence exhausted');
+                const id = `CNT_SES_${String(n).padStart(8, '0')}`;
+                const startAt = nairobiMidnight(today);
+                const now = nowIso();
+                await writeDoc(
+                    `${root}/${CAMPAIGNS}/${id}`,
+                    {
+                        sessionNumber: id,
+                        name: `${str(d.name)} ${today}`.slice(0, 80),
+                        startAt,
+                        endAt: new Date(Date.parse(startAt) + duration * 86_400_000).toISOString(),
+                        metrics: {},
+                        configId: c.id,
+                        configName: str(d.name),
+                        type: str(d.type),
+                        selection: str(d.selection),
+                        documentSize: 0,
+                        plannedPiDocuments: 0,
+                        durationDays: duration,
+                        criticalityClasses: d.byCriticality === true && Array.isArray(d.criticalityClasses) ? d.criticalityClasses : [],
+                        warehouseId,
+                        status: 'open',
+                        origin: 'automatic',
+                        setupRequired: true,
+                        createdAt: now,
+                        createdBy: 'automation',
+                    } as never,
+                    { exists: false }
+                );
+                await writeDoc(`${root}/stock_take_configs/${c.id}`, { ...d, lastSessionCreatedAt: now, lastSessionId: id, nextSessionDueOn: next, updatedAt: now });
+                await audit([{ category: 'inventory', action: 'inventory.stocktake.count_session.auto_create', orgId, target: { type: 'stock_take_session', id, label: `Stock take session ${id}` }, details: `Configuration ${c.id} (${str(d.period)}); next due ${next}` }]);
+                out.created++;
+            } else if (str(d.nextSessionDueOn) !== next) {
+                await writeDoc(`${root}/stock_take_configs/${c.id}`, { ...d, nextSessionDueOn: next, updatedAt: nowIso() });
+            }
+        } catch (e) {
+            out.failed++;
+            await audit([{ category: 'inventory', action: 'inventory.stocktake.count_session.auto_create', outcome: 'failure', orgId, target: { type: 'stock_take_config', id: c.id }, details: (e instanceof Error ? e.message : 'failed').slice(0, 200) }]);
+        }
+    }
+    for (const s of await listDocs(`${root}/${CAMPAIGNS}`)) {
+        if (Date.now() > deadline) return { ...out, complete: false };
+        if (str(s.data.status) === 'open' && (await autoCloseSession(orgId, s.id, 'automation'))) out.closed++;
+    }
+    return out;
+}
+
+/** The job is due once per Nairobi day, at the first heartbeat after midnight. */
+export const stockTakeAutomationDue = (lastCompletedAt: string, at: Date) => !lastCompletedAt || nairobiDay(Date.parse(lastCompletedAt)) < nairobiDay(at.getTime());

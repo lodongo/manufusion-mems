@@ -32,12 +32,19 @@ interface Config {
     warehouseId: string;
     type: string;
     selection: string;
-    documentSize: number;
+    /** Older configurations only: sessions now set the materials per PI. */
+    documentSize?: number | null;
     periodic: boolean;
     period: string;
     durationDays: number | null;
     clusterId: string;
     active?: boolean;
+    byCriticality?: boolean;
+    criticalityClasses?: string[];
+    sessionCreation?: 'automatic' | 'manual';
+    lastSessionCreatedAt?: string;
+    lastSessionId?: string;
+    nextSessionDueOn?: string;
 }
 interface Line {
     binId: string;
@@ -146,6 +153,11 @@ interface CountSession {
     progress: Progress;
     canCreatePi: boolean;
     whyNoPi: string;
+    /** Sessions created by the automation: the plan is completed once before any PI document. */
+    setupRequired?: boolean;
+    origin?: 'manual' | 'automatic';
+    criticalityClasses?: string[];
+    durationDays?: number;
 }
 interface Data {
     warehouses: Array<{ id: string; name: string }>;
@@ -186,6 +198,7 @@ const STATUS: Record<string, { label: string; tone: 'brand' | 'muted' | 'danger'
 const statusOf = (status: string) => STATUS[status] ?? { label: status.replace(/_/g, ' '), tone: 'muted' as const };
 const PHASE: Record<string, { label: string; tone: 'brand' | 'muted' | 'danger' | 'warn' }> = {
     scheduled: { label: 'Scheduled', tone: 'muted' },
+    setup_required: { label: 'Setup needed', tone: 'warn' },
     in_progress: { label: 'In progress', tone: 'brand' },
     overdue: { label: 'Past end date', tone: 'warn' },
     closed: { label: 'Closed', tone: 'muted' },
@@ -339,9 +352,12 @@ export default function StockTake() {
             { key: 'name', label: 'Name', value: (c) => c.name },
             { key: 'type', label: 'Type', value: (c) => c.type },
             { key: 'selection', label: 'Selection', value: (c) => c.selection },
-            { key: 'size', label: 'PI size', type: 'number', value: (c) => c.documentSize },
+            { key: 'duration', label: 'Duration days', type: 'number', value: (c) => c.durationDays },
+            { key: 'criticality', label: 'Criticality', value: (c) => (c.byCriticality ? (c.criticalityClasses ?? []).join(', ') : 'All') },
+            { key: 'creation', label: 'Sessions', value: (c) => (c.periodic ? (c.sessionCreation === 'automatic' ? 'Automatic' : 'Manual') : 'Manual') },
+            { key: 'nextDue', label: 'Next session due', type: 'date', value: (c) => c.nextSessionDueOn || null, hidden: true },
+            { key: 'lastCreated', label: 'Last session created', type: 'date', value: (c) => c.lastSessionCreatedAt || null, render: (c) => (c.lastSessionCreatedAt ? fmtWhen(c.lastSessionCreatedAt) : ''), hidden: true },
             { key: 'frequency', label: 'Frequency', value: (c) => (c.periodic ? c.period : 'On demand') },
-            { key: 'cycle', label: 'Cycle days', type: 'number', value: (c) => (c.type === 'Cycle Count' ? c.durationDays : null) },
             { key: 'cluster', label: 'Cluster', value: (c) => c.clusterId || '' },
             { key: 'status', label: 'Status', value: (c) => (c.active === false ? 'Disabled' : 'Enabled'), render: (c) => <Badge tone={c.active === false ? 'muted' : 'brand'}>{c.active === false ? 'Disabled' : 'Enabled'}</Badge> },
         ],
@@ -512,6 +528,7 @@ export default function StockTake() {
             {editing && (
                 <ConfigPanel
                     config={editing === 'new' ? null : editing}
+                    warehouses={data?.warehouses ?? []}
                     ask={confirm.ask}
                     onClose={() => setEditing(null)}
                     onDone={(message) => {
@@ -886,14 +903,14 @@ function SessionPanel({ session: s, warehouse, notice, ask, onDone, onClose }: {
                 variant='secondary'
                 onClick={() =>
                     run(
-                        { title: 'Close posted session?', message: 'The session is closed. Posted stock movements stay as they are; open recount PIs must be closed first.', confirmLabel: 'Close session', reason: { label: 'Closure reason', minLength: 10 } },
+                        { title: 'Close this posted PI?', message: 'The PI document is closed. Posted stock movements stay as they are; open recount PIs must be closed first.', confirmLabel: 'Close PI', reason: { label: 'Closure reason', minLength: 10 } },
                         'close_posted',
                         () => `${s.piNumber} closed.`,
                         (reason) => ({ reason })
                     )
                 }
             >
-                <XCircle className='h-4 w-4' /> Close posted session
+                <XCircle className='h-4 w-4' /> Close posted PI
             </Button>
         );
     }
@@ -1215,36 +1232,35 @@ function CountSessionPanel({
     const anyPosted = pis.some((p) => p.lines.some((l) => l.posted));
     const phase = phaseOf(c.progress.phase);
 
-    const act = (action: 'close' | 'cancel') =>
-        ask(
-            action === 'close'
-                ? { title: `Close ${c.sessionNumber}?`, message: `The session is closed with its progress as it stands (${pctText(c.progress.completionPct)} complete). No more PI documents can be created in it. This cannot be reopened.`, confirmLabel: 'Close session', reason: { label: 'Closure reason', minLength: 10 } }
-                : { title: `Cancel ${c.sessionNumber}?`, message: 'The session is cancelled without any stock posted. No more PI documents can be created in it. This cannot be reopened.', confirmLabel: 'Cancel session', tone: 'danger', reason: { label: 'Reason for cancelling', minLength: 10 } },
-            async (reason) => {
-                await callBackend(API + 'count-session/action', { id: c.id, action, reason });
-                onDone(`${c.sessionNumber} ${action === 'close' ? 'closed' : 'cancelled'}.`);
-            }
-        );
+    const [settingUp, setSettingUp] = useState(false);
+    // A session is never closed by hand: it closes itself once all its PI documents are posted. It can be cancelled
+    // while nothing is posted and no PI document is open.
+    const cancel = () =>
+        ask({ title: `Cancel ${c.sessionNumber}?`, message: 'The session is cancelled without any stock posted. No more PI documents can be created in it. This cannot be reopened.', confirmLabel: 'Cancel session', tone: 'danger', reason: { label: 'Reason for cancelling', minLength: 10 } }, async (reason) => {
+            await callBackend(API + 'count-session/action', { id: c.id, action: 'cancel', reason });
+            onDone(`${c.sessionNumber} cancelled.`);
+        });
 
     const actions: ReactNode[] = [];
-    if (open) {
+    if (open && c.setupRequired) {
+        actions.push(
+            <Button key='setup' onClick={() => setSettingUp(true)}>
+                <Pencil className='h-4 w-4' /> Complete setup
+            </Button>
+        );
+    } else if (open) {
         actions.push(
             <Button key='new-pi' disabled={!c.canCreatePi} onClick={onNewPi}>
                 <Plus className='h-4 w-4' /> New PI document
             </Button>
         );
+    }
+    if (open && !anyPosted)
         actions.push(
-            <Button key='close' variant='secondary' disabled={openPis.length > 0} onClick={() => act('close')}>
-                <XCircle className='h-4 w-4' /> Close session
+            <Button key='cancel' variant='danger' disabled={openPis.length > 0} onClick={cancel}>
+                <Trash2 className='h-4 w-4' /> Cancel session
             </Button>
         );
-        if (!anyPosted)
-            actions.push(
-                <Button key='cancel' variant='danger' disabled={openPis.length > 0} onClick={() => act('cancel')}>
-                    <Trash2 className='h-4 w-4' /> Cancel session
-                </Button>
-            );
-    }
 
     const piColumns: Array<Column<Session>> = [
         { key: 'pi', label: 'PI document', value: (p) => p.piNumber, render: (p) => <span className='font-mono text-xs font-semibold text-brandsoft'>{p.piNumber}</span> },
@@ -1259,8 +1275,10 @@ function CountSessionPanel({
     return (
         <Panel title={c.name} eyebrow={c.sessionNumber} subtitle={<Badge tone={phase.tone}>{phase.label}</Badge>} actions={actions.length ? actions : undefined} onClose={onClose}>
             {notice && <Alert tone='success'>{notice}</Alert>}
-            {open && !c.canCreatePi && <Alert tone='warn'>{c.whyNoPi}</Alert>}
-            {open && openPis.length > 0 && <Alert tone='info'>{count(openPis.length, 'PI document')} still open. Finish or disregard {openPis.length === 1 ? 'it' : 'them'} before the session can be closed.</Alert>}
+            {open && c.setupRequired && <Alert tone='warn'>Created automatically on {fmtWhen(c.startAt)}. Complete its setup (name, materials to count, materials per PI and targets) before creating PI documents.</Alert>}
+            {open && !c.setupRequired && !c.canCreatePi && <Alert tone='warn'>{c.whyNoPi}</Alert>}
+            {open && <Alert tone='info'>The session closes automatically when all its PI documents are posted ({pctText(c.progress.stages.find((x) => x.key === 'closure')?.pct ?? 0)} so far).</Alert>}
+            {settingUp && <SetupSessionPanel session={c} ask={ask} onClose={() => setSettingUp(false)} onDone={(m) => (setSettingUp(false), onDone(m))} />}
             {c.closureReason && <Alert tone='info'>{c.status === 'cancelled' ? 'Cancelled' : 'Closed'} {c.closedAt ? fmtWhen(c.closedAt) : ''}: {c.closureReason}</Alert>}
             <Segmented
                 label='Session views'
@@ -1279,8 +1297,8 @@ function CountSessionPanel({
                             <Detail label='Configuration'>{c.configName}</Detail>
                             <Detail label='Start'>{fmtWhen(c.startAt)}</Detail>
                             <Detail label='End'>{c.endAt ? fmtWhen(c.endAt) : 'Open-ended'}</Detail>
-                            <Detail label='Materials to count'>{c.progress.materials.target}</Detail>
-                            <Detail label='PI documents'>{`${c.progress.piDocuments.originals} of ${c.progress.piDocuments.planned} (${c.progress.materials.perPi} per PI)`}</Detail>
+                            <Detail label='Materials to count'>{c.setupRequired ? 'Not set yet' : c.progress.materials.target}</Detail>
+                            <Detail label='PI documents'>{c.setupRequired ? 'Not set yet' : `${c.progress.piDocuments.originals} of ${c.progress.piDocuments.planned} (${c.progress.materials.perPi} per PI)`}</Detail>
                         </dl>
                     </Card>
                     <RichTable
@@ -1291,7 +1309,7 @@ function CountSessionPanel({
                         rows={pis}
                         rowKey={(p) => p.id}
                         onRowClick={(p) => onOpenPi(p.id)}
-                        empty={open ? 'No PI documents yet. Tap New PI document.' : 'No PI documents were created in this session.'}
+                        empty={open ? (c.setupRequired ? 'Complete the setup first, then create PI documents.' : 'No PI documents yet. Tap New PI document.') : 'No PI documents were created in this session.'}
                         height='h-[calc(100dvh-22rem)]'
                     />
                 </>
@@ -1390,6 +1408,76 @@ function ProgressReport({ session: c, warehouse }: { session: CountSession; ware
 }
 
 // ---------------------------------------------------------------------------
+// Complete an automatically created session (once, before any PI document).
+// ---------------------------------------------------------------------------
+
+function SetupSessionPanel({ session: c, ask, onClose, onDone }: { session: CountSession; ask: Ask; onClose: () => void; onDone: (message: string) => void }) {
+    const [f, setF] = useState({ name: c.name, targetMaterials: '', materialsPerPi: '20', targetCountAccuracyPct: '98', targetStockAccuracyPct: '95', varianceToleranceValue: '0' });
+    const [tried, setTried] = useState(false);
+    const e: Record<string, string> = {};
+    if (f.name.trim().length < 3 || f.name.trim().length > 80) e.name = '3 to 80 characters';
+    if (!isWhole(f.targetMaterials, 1, 1_000_000)) e.targetMaterials = 'Whole number, 1 or more';
+    if (!isWhole(f.materialsPerPi, 1, 1000)) e.materialsPerPi = 'Whole number, 1 to 1000';
+    else if (!e.targetMaterials && Math.ceil(Number(f.targetMaterials) / Number(f.materialsPerPi)) > 1000) e.materialsPerPi = 'More than 1000 PI documents';
+    if (!isNumber(f.targetCountAccuracyPct, 0, 100)) e.targetCountAccuracyPct = '0 to 100';
+    if (!isNumber(f.targetStockAccuracyPct, 0, 100)) e.targetStockAccuracyPct = '0 to 100';
+    if (!isNumber(f.varianceToleranceValue, 0, 1e12)) e.varianceToleranceValue = '0 or more';
+    const problems = Object.keys(e);
+    const pis = !e.targetMaterials && !e.materialsPerPi ? Math.ceil(Number(f.targetMaterials) / Number(f.materialsPerPi)) : 0;
+    const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
+    const show = (k: string) => (tried ? e[k] : undefined);
+    const submit = () => {
+        setTried(true);
+        if (problems.length) return;
+        ask(
+            {
+                title: `Complete ${c.sessionNumber}?`,
+                message: `${count(Number(f.targetMaterials), 'material')} to count, ${f.materialsPerPi} per PI: ${count(pis, 'PI document')}. Targets: count accuracy ${f.targetCountAccuracyPct}%, stock accuracy ${f.targetStockAccuracyPct}%, variance tolerance ${money(Number(f.varianceToleranceValue))}.`,
+                confirmLabel: 'Complete setup',
+                acknowledge: 'The plan and targets are correct. They cannot be changed once saved.',
+            },
+            async () => {
+                await callBackend(API + 'count-session/setup', {
+                    id: c.id,
+                    name: f.name.trim(),
+                    metrics: { targetMaterials: Number(f.targetMaterials), materialsPerPi: Number(f.materialsPerPi), targetCountAccuracyPct: Number(f.targetCountAccuracyPct), targetStockAccuracyPct: Number(f.targetStockAccuracyPct), varianceToleranceValue: Number(f.varianceToleranceValue) },
+                });
+                onDone(`${c.sessionNumber} is set up. PI documents can now be created.`);
+            }
+        );
+    };
+    return (
+        <Panel
+            title='Complete session setup'
+            eyebrow={c.sessionNumber}
+            subtitle={`${c.configName} · ${fmtWhen(c.startAt)} to ${fmtWhen(c.endAt)}`}
+            onClose={onClose}
+            actions={
+                <Button onClick={submit} disabled={tried && problems.length > 0}>
+                    <Save className='h-4 w-4' /> Complete setup
+                </Button>
+            }
+        >
+            {tried && problems.length > 0 && <Problems items={problems.map((k) => `${k === 'name' ? 'Session name' : PLAN_LABELS[k as PlanKey]}: ${e[k]}`)} />}
+            <Card className='space-y-3'>
+                <Field id='sts-setup-name' label='Session name *' maxLength={80} value={f.name} onChange={(x) => set('name', x.target.value)} error={show('name')} />
+                <div className='grid grid-cols-2 gap-2'>
+                    <Field id='sts-setup-materials' label='Materials to count *' inputMode='numeric' maxLength={7} value={f.targetMaterials} onChange={(x) => set('targetMaterials', x.target.value)} error={show('targetMaterials')} />
+                    <Field id='sts-setup-per-pi' label='Materials per PI *' inputMode='numeric' maxLength={4} value={f.materialsPerPi} onChange={(x) => set('materialsPerPi', x.target.value)} error={show('materialsPerPi')} />
+                    <Field id='sts-setup-count' label='Count accuracy % *' inputMode='decimal' maxLength={6} value={f.targetCountAccuracyPct} onChange={(x) => set('targetCountAccuracyPct', x.target.value)} error={show('targetCountAccuracyPct')} />
+                    <Field id='sts-setup-stock' label='Stock accuracy % *' inputMode='decimal' maxLength={6} value={f.targetStockAccuracyPct} onChange={(x) => set('targetStockAccuracyPct', x.target.value)} error={show('targetStockAccuracyPct')} />
+                    <Field id='sts-setup-tolerance' label='Variance tolerance *' inputMode='decimal' maxLength={16} value={f.varianceToleranceValue} onChange={(x) => set('varianceToleranceValue', x.target.value)} error={show('varianceToleranceValue')} />
+                    <div className='flex flex-col justify-center rounded-xl border border-line px-3'>
+                        <span className='text-xs text-muted'>PI documents</span>
+                        <span className='text-lg font-semibold text-ink'>{pis || '—'}</span>
+                    </div>
+                </div>
+            </Card>
+        </Panel>
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Plan a stock take session.
 // ---------------------------------------------------------------------------
 
@@ -1398,7 +1486,6 @@ interface PlanForm {
     configId: string;
     warehouseId: string;
     startAt: string;
-    endAt: string;
     targetMaterials: string;
     materialsPerPi: string;
     targetCountAccuracyPct: string;
@@ -1426,12 +1513,7 @@ function planErrors(f: PlanForm, cfg: Config | undefined, now: number): Partial<
     if (!f.startAt || !Number.isFinite(start)) e.startAt = 'Enter the start date and time';
     else if (start < now - 10 * 60_000) e.startAt = 'Cannot be in the past';
     else if (start > now + 366 * 86_400_000) e.startAt = 'Must be within 366 days';
-    if (f.endAt) {
-        const end = Date.parse(f.endAt);
-        if (!Number.isFinite(end)) e.endAt = 'Enter a valid date and time';
-        else if (Number.isFinite(start) && end <= start) e.endAt = 'Must be after the start';
-        else if (Number.isFinite(start) && end - start > 366 * 86_400_000) e.endAt = 'At most 366 days after the start';
-    }
+    if (cfg && !(Number(cfg.durationDays) >= 1)) e.configId = 'Set the duration (days) on this configuration first';
     if (!isWhole(f.targetMaterials, 1, 1_000_000)) e.targetMaterials = 'Whole number, 1 or more';
     if (!isWhole(f.materialsPerPi, 1, 1000)) e.materialsPerPi = 'Whole number, 1 to 1000';
     else if (!e.targetMaterials && Math.ceil(Number(f.targetMaterials) / Number(f.materialsPerPi)) > 1000) e.materialsPerPi = 'More than 1000 PI documents; put more on each PI';
@@ -1446,7 +1528,6 @@ const PLAN_LABELS: Record<PlanKey, string> = {
     configId: 'Configuration',
     warehouseId: 'Warehouse',
     startAt: 'Start',
-    endAt: 'End',
     targetMaterials: 'Materials to count',
     materialsPerPi: 'Materials per PI',
     targetCountAccuracyPct: 'Target count accuracy',
@@ -1455,7 +1536,7 @@ const PLAN_LABELS: Record<PlanKey, string> = {
 };
 
 function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: Ask; onClose: () => void; onCreated: (id: string) => void }) {
-    const [form, setForm] = useState<PlanForm>(() => ({ name: '', configId: '', warehouseId: '', startAt: localInput(new Date()), endAt: '', targetMaterials: '', materialsPerPi: '', targetCountAccuracyPct: '98', targetStockAccuracyPct: '95', varianceToleranceValue: '0' }));
+    const [form, setForm] = useState<PlanForm>(() => ({ name: '', configId: '', warehouseId: '', startAt: localInput(new Date()), targetMaterials: '', materialsPerPi: '', targetCountAccuracyPct: '98', targetStockAccuracyPct: '95', varianceToleranceValue: '0' }));
     const [touched, setTouched] = useState<Partial<Record<PlanKey, boolean>>>({});
     const [tried, setTried] = useState(false);
     const cfg = data.configs.find((c) => c.id === form.configId);
@@ -1465,6 +1546,8 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
     const set = (k: PlanKey, v: string) => setForm((f) => ({ ...f, [k]: v }));
     const touch = (k: PlanKey) => setTouched((t) => ({ ...t, [k]: true }));
     const enabledConfigs = data.configs.filter((c) => c.active !== false);
+    const startMs = Date.parse(form.startAt);
+    const endIso = cfg?.durationDays && Number.isFinite(startMs) ? new Date(startMs + cfg.durationDays * 86_400_000).toISOString() : '';
     const piCount = isWhole(form.targetMaterials, 1, 1_000_000) && isWhole(form.materialsPerPi, 1, 1000) ? Math.ceil(Number(form.targetMaterials) / Number(form.materialsPerPi)) : 0;
 
     const pickConfig = (id: string) => {
@@ -1474,7 +1557,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
             configId: id,
             warehouseId: c?.warehouseId || f.warehouseId,
             name: f.name || (c ? c.name : ''),
-            materialsPerPi: touched.materialsPerPi ? f.materialsPerPi : c ? String(c.documentSize) : f.materialsPerPi,
+            materialsPerPi: touched.materialsPerPi ? f.materialsPerPi : c ? String(c.documentSize || 20) : f.materialsPerPi,
         }));
         touch('configId');
     };
@@ -1490,7 +1573,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                     <span className='block space-y-1'>
                         <span className='block'>
                             “{form.name.trim()}” at {warehouse}, configuration {cfg.name}, from {fmtWhen(new Date(form.startAt).toISOString())}
-                            {form.endAt ? ` to ${fmtWhen(new Date(form.endAt).toISOString())}` : ' with no end date'}.
+                            {endIso ? ` to ${fmtWhen(endIso)}` : ''}.
                         </span>
                         <span className='block'>
                             {count(Number(form.targetMaterials), 'material')} to count, {form.materialsPerPi} per PI: {count(piCount, 'PI document')}. Targets: count accuracy {form.targetCountAccuracyPct}%, stock accuracy {form.targetStockAccuracyPct}%, variance tolerance {money(Number(form.varianceToleranceValue))}.
@@ -1506,7 +1589,6 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
                     configId: form.configId,
                     warehouseId: form.warehouseId,
                     startAt: new Date(form.startAt).toISOString(),
-                    endAt: form.endAt ? new Date(form.endAt).toISOString() : '',
                     metrics: {
                         targetMaterials: Number(form.targetMaterials),
                         materialsPerPi: Number(form.materialsPerPi),
@@ -1535,7 +1617,7 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
             {!enabledConfigs.length && <Alert tone='warn'>There is no enabled configuration. Create one under Configuration first.</Alert>}
             <Card className='space-y-3'>
                 <Field id='sts-name' label='Session name *' maxLength={80} autoComplete='off' value={form.name} onChange={(e) => set('name', e.target.value)} onBlur={() => touch('name')} error={shown('name')} placeholder='e.g. Main store year-end count' />
-                <SelectField id='sts-config' label='Configuration *' value={form.configId} onChange={(e) => pickConfig(e.target.value)} error={shown('configId')} hint={cfg ? `${cfg.type} · ${cfg.selection} · ${count(cfg.documentSize, 'location')} per PI` : undefined}>
+                <SelectField id='sts-config' label='Configuration *' value={form.configId} onChange={(e) => pickConfig(e.target.value)} error={shown('configId')} hint={cfg ? `${cfg.type} · ${cfg.selection}${cfg.durationDays ? ` · ${count(cfg.durationDays, 'day')}` : ''}${cfg.byCriticality ? ` · criticality ${(cfg.criticalityClasses ?? []).join(', ')}` : ''}` : undefined}>
                     <option value=''>Select configuration</option>
                     {enabledConfigs.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -1555,9 +1637,12 @@ function PlanSessionPanel({ data, ask, onClose, onCreated }: { data: Data; ask: 
             <Card className='space-y-3'>
                 <div className='space-y-3'>
                     <Field id='sts-start' type='datetime-local' label='Start *' value={form.startAt} onChange={(e) => set('startAt', e.target.value)} onBlur={() => touch('startAt')} error={shown('startAt')} />
-                    <Field id='sts-end' type='datetime-local' label='End (optional)' value={form.endAt} onChange={(e) => set('endAt', e.target.value)} onBlur={() => touch('endAt')} error={shown('endAt')} />
+                    <div className='rounded-xl border border-line px-3 py-2'>
+                        <span className='block text-xs text-muted'>End (start + {cfg?.durationDays ? count(cfg.durationDays, 'day') : 'configuration duration'})</span>
+                        <span className='block text-base text-ink'>{endIso ? fmtWhen(endIso) : '—'}</span>
+                    </div>
                 </div>
-                <p className='text-xs text-muted'>PI documents can be created only between the start and the end. Leave the end empty for an open-ended session.</p>
+                <p className='text-xs text-muted'>PI documents can be created only between the start and the end. The end is the start plus the configuration's duration.</p>
             </Card>
             <Card className='space-y-3'>
                 <p className='text-sm font-medium text-ink'>Metrics</p>
@@ -1758,69 +1843,95 @@ function Statistics({ warehouseName }: { warehouseName: Map<string, string> }) {
 // ---------------------------------------------------------------------------
 
 interface ConfigForm {
-    name: string;
     type: string;
+    name: string;
     selection: string;
+    byCriticality: boolean;
+    criticalityClasses: string[];
+    durationDays: string;
     periodic: boolean;
     period: string;
-    durationDays: string;
-    documentSize: string;
+    sessionCreation: '' | 'automatic' | 'manual';
+    warehouseId: string;
     clusterId: string;
 }
 type FormKey = keyof ConfigForm;
+const CLASSES = ['A', 'B', 'C', 'D'];
 
 function formOf(c: Config | null): ConfigForm {
-    if (!c) return { name: '', type: 'Cycle Count', selection: 'Sequence', periodic: false, period: 'Monthly', durationDays: '30', documentSize: '20', clusterId: '' };
+    if (!c) return { type: 'Cycle Count', name: 'Cycle Count', selection: 'Sequence', byCriticality: false, criticalityClasses: [], durationDays: '30', periodic: false, period: 'Monthly', sessionCreation: '', warehouseId: '', clusterId: '' };
     return {
-        name: c.name,
         type: c.type,
+        name: c.name,
         selection: c.selection,
+        byCriticality: c.byCriticality === true,
+        criticalityClasses: c.criticalityClasses ?? [],
+        durationDays: c.durationDays ? String(c.durationDays) : '',
         periodic: c.periodic,
         period: c.period || 'Monthly',
-        durationDays: String(c.durationDays || 30),
-        documentSize: String(c.documentSize),
+        sessionCreation: c.periodic ? (c.sessionCreation ?? 'manual') : '',
+        warehouseId: c.warehouseId || '',
         clusterId: c.clusterId || '',
     };
 }
 
 function configErrors(f: ConfigForm): Partial<Record<FormKey, string>> {
     const e: Partial<Record<FormKey, string>> = {};
+    if (!TYPES.includes(f.type)) e.type = 'Choose a stock take type.';
     const name = f.name.trim();
     if (name.length < 3 || name.length > 80) e.name = 'Enter a name of 3 to 80 characters.';
-    if (!TYPES.includes(f.type)) e.type = 'Choose a stock take type.';
     if (!['Sequence', 'Random'].includes(f.selection)) e.selection = 'Choose a selection order.';
-    if (!isWhole(f.documentSize, 1, 1000)) e.documentSize = 'Whole number of locations from 1 to 1000.';
-    if (f.type === 'Cycle Count' && !isWhole(f.durationDays, 1, 3650)) e.durationDays = 'Whole number of days from 1 to 3650.';
+    if (f.byCriticality && !f.criticalityClasses.length) e.criticalityClasses = 'Choose at least one criticality class.';
+    if (!isWhole(f.durationDays, 1, 3650)) e.durationDays = 'Whole number of days from 1 to 3650.';
     if (f.type === 'Cluster Stock Take' && !/^CL-\d{4}$/.test(f.clusterId.trim().toUpperCase())) e.clusterId = 'Use the cluster code, for example CL-0001.';
     if (f.periodic && !PERIODS.includes(f.period)) e.period = 'Choose how often the stock take runs.';
+    if (f.periodic && !f.sessionCreation) e.sessionCreation = 'Choose whether sessions are created automatically or manually.';
+    if (f.periodic && f.sessionCreation === 'automatic' && !f.warehouseId) e.warehouseId = 'Choose the warehouse automatic sessions are created for.';
     return e;
 }
 
-function ConfigPanel({ config, ask, onClose, onDone }: { config: Config | null; ask: Ask; onClose: () => void; onDone: (message: string) => void }) {
+function ConfigPanel({ config, warehouses, ask, onClose, onDone }: { config: Config | null; warehouses: Array<{ id: string; name: string }>; ask: Ask; onClose: () => void; onDone: (message: string) => void }) {
     const [form, setForm] = useState<ConfigForm>(() => formOf(config));
     const [touched, setTouched] = useState<Partial<Record<FormKey, boolean>>>({});
+    // The name starts as the stock take type and follows it until the person types their own.
+    const [nameEdited, setNameEdited] = useState(!!config);
     const errors = configErrors(form);
     const problems = Object.values(errors).filter((x): x is string => !!x);
     const changed = JSON.stringify(form) !== JSON.stringify(formOf(config));
     const set = (patch: Partial<ConfigForm>) => setForm((f) => ({ ...f, ...patch }));
     const touch = (k: FormKey) => setTouched((t) => ({ ...t, [k]: true }));
     const err = (k: FormKey) => (touched[k] ? errors[k] : undefined);
+    const automatic = form.periodic && form.sessionCreation === 'automatic';
+    const warehouseName = warehouses.find((w) => w.id === form.warehouseId)?.name ?? form.warehouseId;
 
     const save = () => {
         const payload = {
             name: form.name.trim(),
             type: form.type,
             selection: form.selection,
+            byCriticality: form.byCriticality,
+            criticalityClasses: form.byCriticality ? form.criticalityClasses : [],
+            durationDays: Number(form.durationDays),
             periodic: form.periodic,
             period: form.period,
-            durationDays: Number(form.durationDays),
-            documentSize: Number(form.documentSize),
+            sessionCreation: form.periodic ? form.sessionCreation : 'manual',
+            warehouseId: form.warehouseId,
             clusterId: form.clusterId.trim().toUpperCase(),
         };
         ask(
             {
                 title: config ? `Save changes to ${config.id}?` : 'Create configuration?',
-                message: config ? 'The configuration is shared across the organization; new PI documents use the changed settings. Existing PIs keep their lines.' : `“${payload.name}” becomes available to everyone who creates stock take PIs.`,
+                message: (
+                    <span className='block space-y-1'>
+                        <span className='block'>
+                            {payload.type}, {payload.selection.toLowerCase()} order{payload.byCriticality ? `, criticality ${payload.criticalityClasses.join(', ')}` : ''}; each session runs {count(payload.durationDays, 'day')}.
+                        </span>
+                        <span className='block'>
+                            {payload.periodic ? `${payload.period}; sessions created ${automatic ? `automatically at midnight for ${warehouseName}, each needing its plan completed before PI documents` : 'manually'}.` : 'On demand; sessions are created manually.'}
+                        </span>
+                        {config && <span className='block'>Existing sessions keep their settings.</span>}
+                    </span>
+                ),
                 confirmLabel: config ? 'Save changes' : 'Create configuration',
             },
             async () => {
@@ -1835,7 +1946,7 @@ function ConfigPanel({ config, ask, onClose, onDone }: { config: Config | null; 
         ask(
             {
                 title: `Delete ${config.id}?`,
-                message: `“${config.name}” is deleted permanently. Configurations that already have PI sessions cannot be deleted.`,
+                message: `“${config.name}” is deleted permanently. Configurations that already have PI documents cannot be deleted.`,
                 confirmLabel: 'Delete configuration',
                 tone: 'danger',
                 phrase: 'DELETE',
@@ -1867,65 +1978,113 @@ function ConfigPanel({ config, ask, onClose, onDone }: { config: Config | null; 
             }
         >
             <Problems items={problems} />
-            <Card className='grid gap-3 sm:grid-cols-2'>
-                <Field id='st-cfg-name' label='Configuration name *' maxLength={80} autoComplete='off' value={form.name} onChange={(e) => set({ name: e.target.value })} onBlur={() => touch('name')} error={err('name')} hint='3 to 80 characters' />
-                <SelectField id='st-cfg-type' label='Stock take type *' value={form.type} onChange={(e) => set({ type: e.target.value })} error={errors.type}>
+            <Card className='space-y-3'>
+                <SelectField id='st-cfg-type' label='Stock take type *' value={form.type} onChange={(e) => set({ type: e.target.value, ...(nameEdited ? {} : { name: e.target.value }) })} error={errors.type}>
                     {TYPES.map((t) => (
                         <option key={t}>{t}</option>
                     ))}
                 </SelectField>
+                <Field
+                    id='st-cfg-name'
+                    label='Configuration name *'
+                    maxLength={80}
+                    autoComplete='off'
+                    value={form.name}
+                    onChange={(e) => {
+                        setNameEdited(true);
+                        set({ name: e.target.value });
+                    }}
+                    onBlur={() => touch('name')}
+                    error={err('name')}
+                    hint='Starts as the type; add to it, for example “Cycle Count – spares”.'
+                />
                 <SelectField id='st-cfg-selection' label='Selection order *' value={form.selection} onChange={(e) => set({ selection: e.target.value })} error={errors.selection} hint='Random picks locations unpredictably'>
                     <option>Sequence</option>
                     <option>Random</option>
                 </SelectField>
                 {form.type === 'Cluster Stock Take' && (
-                    <Field
-                        id='st-cfg-cluster'
-                        label='Cluster code *'
-                        maxLength={7}
-                        autoComplete='off'
-                        placeholder='CL-0001'
-                        value={form.clusterId}
-                        onChange={(e) => set({ clusterId: e.target.value.toUpperCase() })}
-                        onBlur={() => touch('clusterId')}
-                        error={err('clusterId')}
-                        hint='Format CL-0001'
-                    />
+                    <Field id='st-cfg-cluster' label='Cluster code *' maxLength={7} autoComplete='off' placeholder='CL-0001' value={form.clusterId} onChange={(e) => set({ clusterId: e.target.value.toUpperCase() })} onBlur={() => touch('clusterId')} error={err('clusterId')} hint='Format CL-0001' />
                 )}
                 <Field
-                    id='st-cfg-size'
-                    label='PI document size (physical locations) *'
+                    id='st-cfg-cycle'
+                    label='Duration (days) *'
                     inputMode='numeric'
                     maxLength={4}
-                    value={form.documentSize}
-                    onChange={(e) => set({ documentSize: e.target.value })}
-                    onBlur={() => touch('documentSize')}
-                    error={err('documentSize')}
-                    hint='1 to 1000'
+                    value={form.durationDays}
+                    onChange={(e) => set({ durationDays: e.target.value })}
+                    onBlur={() => touch('durationDays')}
+                    error={err('durationDays')}
+                    hint='Each session ends this many days after it starts (1 to 3650).'
                 />
-                {form.type === 'Cycle Count' && (
-                    <Field
-                        id='st-cfg-cycle'
-                        label='Cycle duration (days) *'
-                        inputMode='numeric'
-                        maxLength={4}
-                        value={form.durationDays}
-                        onChange={(e) => set({ durationDays: e.target.value })}
-                        onBlur={() => touch('durationDays')}
-                        error={err('durationDays')}
-                        hint='1 to 3650'
-                    />
+            </Card>
+            <Card className='space-y-3'>
+                <label className='flex min-h-[44px] items-center gap-3'>
+                    <Toggle checked={form.byCriticality} onChange={(v) => set({ byCriticality: v, criticalityClasses: v ? form.criticalityClasses : [] })} label='Count by criticality' />
+                    <span className='text-sm text-soft'>Count by criticality</span>
+                </label>
+                {form.byCriticality && (
+                    <div className='space-y-1'>
+                        <p className='text-sm text-soft'>Criticality classes * (one or more)</p>
+                        <div className='grid grid-cols-4 gap-2'>
+                            {CLASSES.map((c) => {
+                                const on = form.criticalityClasses.includes(c);
+                                return (
+                                    <button
+                                        key={c}
+                                        type='button'
+                                        aria-pressed={on}
+                                        onClick={() => {
+                                            touch('criticalityClasses');
+                                            set({ criticalityClasses: on ? form.criticalityClasses.filter((x) => x !== c) : [...form.criticalityClasses, c].sort() });
+                                        }}
+                                        className={`h-12 rounded-xl border text-base font-semibold ${on ? 'border-brand bg-brand text-onbrand' : 'border-line text-soft active:bg-page'}`}
+                                    >
+                                        {c}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {err('criticalityClasses') && <p className='text-xs text-red-300'>{errors.criticalityClasses}</p>}
+                        <p className='text-xs text-muted'>Only materials with these classes (Material detail &gt; Inventory Information) are put on PI documents.</p>
+                    </div>
                 )}
-                <label className='flex min-h-[44px] items-center gap-3 sm:col-span-2'>
-                    <Toggle checked={form.periodic} onChange={(v) => set({ periodic: v })} label='Periodic stock take' />
+            </Card>
+            <Card className='space-y-3'>
+                <label className='flex min-h-[44px] items-center gap-3'>
+                    <Toggle checked={form.periodic} onChange={(v) => set({ periodic: v, sessionCreation: v ? form.sessionCreation : '' })} label='Periodic stock take' />
                     <span className='text-sm text-soft'>Periodic stock take</span>
                 </label>
                 {form.periodic && (
-                    <SelectField id='st-cfg-period' label='Audit frequency *' value={form.period} onChange={(e) => set({ period: e.target.value })} error={errors.period}>
-                        {PERIODS.map((p) => (
-                            <option key={p}>{p}</option>
+                    <>
+                        <SelectField id='st-cfg-period' label='Audit frequency *' value={form.period} onChange={(e) => set({ period: e.target.value })} error={errors.period}>
+                            {PERIODS.map((p) => (
+                                <option key={p}>{p}</option>
+                            ))}
+                        </SelectField>
+                        <SelectField id='st-cfg-creation' label='Sessions are created *' value={form.sessionCreation} onChange={(e) => (set({ sessionCreation: e.target.value as ConfigForm['sessionCreation'] }), touch('sessionCreation'))} error={err('sessionCreation')}>
+                            <option value=''>Choose</option>
+                            <option value='automatic'>Automatically, at midnight when due</option>
+                            <option value='manual'>Manually</option>
+                        </SelectField>
+                    </>
+                )}
+                {(automatic || form.warehouseId) && (
+                    <SelectField id='st-cfg-warehouse' label={automatic ? 'Warehouse *' : 'Warehouse'} value={form.warehouseId} onChange={(e) => (set({ warehouseId: e.target.value }), touch('warehouseId'))} error={err('warehouseId')} hint='Sessions of this configuration are for this warehouse.'>
+                        <option value=''>{automatic ? 'Select warehouse' : 'Any warehouse'}</option>
+                        {warehouses.map((w) => (
+                            <option key={w.id} value={w.id}>
+                                {w.name}
+                            </option>
                         ))}
                     </SelectField>
+                )}
+                {automatic && <p className='text-xs text-muted'>At midnight on each due day a session is created with this configuration, starting that midnight and ending after the duration. A planner then completes its name, materials to count, materials per PI and targets once, before any PI document can be created.</p>}
+                {config?.sessionCreation === 'automatic' && (
+                    <dl className='grid grid-cols-2 gap-3 border-t border-line pt-3'>
+                        <Detail label='Last created'>{config.lastSessionCreatedAt ? fmtWhen(config.lastSessionCreatedAt) : 'Not yet'}</Detail>
+                        <Detail label='Last session'>{config.lastSessionId || '—'}</Detail>
+                        <Detail label='Next due'>{config.nextSessionDueOn || '—'}</Detail>
+                    </dl>
                 )}
             </Card>
         </Panel>

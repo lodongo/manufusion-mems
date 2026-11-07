@@ -1004,5 +1004,27 @@
       "Open Statistics: confirm it opens year to date from the financial year start, change the dates and tap Show, and download the by-session and by-month tables to Excel"
     ],
     "expected": "No PI exists outside a session, codes are sequential from the database, PI numbers follow the plan, and both KPIs and the statistics read correctly."
+  },
+  {
+    "name": "Stock take configuration: criticality, duration, automatic sessions at midnight, automatic closing",
+    "description": "In a configuration the type comes first and gives the name. Optional criticality classes A to D can be chosen. There is a duration instead of a PI size. Periodic configurations create sessions automatically at midnight or manually. An automatic session needs its plan completed once before PIs. Sessions close themselves when all PIs are posted.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "stock take configuration criticality",
+      "stock take session duration",
+      "stock take automatic sessions",
+      "stock take session auto close",
+      "material criticality class"
+    ],
+    "steps": [
+      "Open a material > Inventory Information, tap Edit and set Criticality class to A; save",
+      "Stock take > Configuration > New config: confirm the type is first and the name follows it until you type; turn on Count by criticality and pick A and B; confirm there is no PI document size and Duration (days) is required",
+      "Turn on Periodic: confirm 'Sessions are created' must be chosen; choose Automatically and confirm a warehouse is required; save and reopen it to see Last created, Last session and Next due",
+      "Create a session manually from another configuration: confirm there is no End field, the End shown is start plus the duration, and PI documents only include materials of the chosen classes",
+      "After the next midnight (or a manual run of 'inv.stocktake-sessions' in the Automation Center) confirm a session 'Setup needed' exists for the automatic configuration, that New PI document is not offered, and Complete setup asks for name, materials, per PI and targets once",
+      "Post every PI document of a session: confirm there is no Close session button and the session closes on its own with the reason 'Closed automatically: 100% of the PI documents are posted.'"
+    ],
+    "expected": "Configurations carry criticality and duration, automatic sessions appear at midnight and must be completed before PIs, and sessions close only by themselves once fully posted."
   }
 ]
