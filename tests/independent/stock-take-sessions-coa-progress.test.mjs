@@ -121,3 +121,44 @@ test('Screen: no PI documents tab; sessions, statistics and configuration; PI PD
     assert.match(screen, /callBackend<\{ ok: boolean; id\?: string \}>\(API \+ 'start', \{ sessionId: c\.id/);
     assert.match(screen, /const approveBarred = \(!!you\?\.approveConflict && !testMode\) \|\| coaBarred;/);
 });
+
+test('Configuration: criticality classes, duration for every type, automatic or manual sessions; no PI size', () => {
+    const server = read('backend/stockTake.ts');
+    assert.match(server, /Choose at least one criticality class \(A, B, C or D\)/);
+    assert.match(server, /Choose whether sessions are created automatically or manually/);
+    assert.match(server, /Choose the warehouse automatic sessions are created for/);
+    assert.match(server, /if \(!Number\.isInteger\(duration\) \|\| duration < 1 \|\| duration > 3650\) throw new HttpError\(400, 'Duration must be 1–3650 days'\);/);
+    assert.doesNotMatch(server, /PI document size must be 1–1000 physical locations/);
+    assert.match(server, /const end = new Date\(startMs \+ durationDays \* 86_400_000\)\.toISOString\(\);/, 'session end comes from the configuration duration');
+    assert.match(server, /eligible = eligible\.filter\(\(x\) => classes\.includes\(str\(x\.info\?\.criticalityClass\)\)\);/);
+    const screen = read('src/org/StockTake.tsx');
+    assert.match(screen, /label='Sessions are created \*'/);
+    assert.match(screen, /set\(\{ type: e\.target\.value, \.\.\.\(nameEdited \? \{\} : \{ name: e\.target\.value \}\) \}\)/, 'the name follows the type until edited');
+    assert.doesNotMatch(screen, /PI document size \(physical locations\)/);
+    const detail = read('src/org/InventoryMaterialDetail.tsx');
+    assert.match(detail, /'leadTimeDays', 'criticalityClass', 'remarks'/);
+    assert.match(read('backend/procurement.ts'), /Criticality class must be A, B, C or D\./);
+});
+
+test('Automation: midnight session creation per configuration, one-time setup before PIs, automatic closing only', async () => {
+    const server = read('backend/stockTake.ts');
+    assert.match(server, /export async function stockTakeAutomationForOrg\(orgId: string, deadline: number\)/);
+    assert.match(server, /stock_take_auto_keys\/\$\{c\.id\}_\$\{today\}`, \{ configId: c\.id, day: today, createdAt: nowIso\(\) \}, \{ exists: false \}/, 'one session per configuration and day');
+    assert.match(server, /lastSessionCreatedAt: now, lastSessionId: id, nextSessionDueOn: next/);
+    assert.match(server, /setupRequired: true,/);
+    assert.match(server, /Complete the session setup \(materials to count, materials per PI and targets\) before creating PI documents\./);
+    assert.match(server, /This session is already set up; its plan cannot be changed\./);
+    assert.match(server, /if \(action !== 'cancel'\) throw new HttpError\(400, 'A session closes automatically/);
+    assert.match(server, /await autoCloseSession\(ctx\.orgId, str\(d\.campaignId\), ctx\.uid\);/);
+    assert.match(read('backend/automationEngine.ts'), /id: ST_JOB_ID,[\s\S]*executeStockTakeSessions\(mode, deadline\)/);
+    const { stockTakeAutomationDue, addPeriod } = await import('../../backend/stockTake.ts');
+    assert.equal(stockTakeAutomationDue('2026-11-07T20:00:00.000Z', new Date('2026-11-07T20:30:00.000Z')), false, '23:30 Nairobi: same day');
+    assert.equal(stockTakeAutomationDue('2026-11-07T20:00:00.000Z', new Date('2026-11-07T21:05:00.000Z')), true, '00:05 Nairobi: next day');
+    assert.equal(addPeriod('2026-01-31', 'Monthly'), '2026-02-28');
+    assert.equal(addPeriod('2026-11-07', 'Weekly'), '2026-11-14');
+    assert.equal(addPeriod('2026-11-07', 'Quarterly'), '2027-02-07');
+    const screen = read('src/org/StockTake.tsx');
+    assert.doesNotMatch(screen, /Close session/);
+    assert.match(screen, /The session closes automatically when all its PI documents are posted/);
+    assert.match(screen, /function SetupSessionPanel\(/);
+});

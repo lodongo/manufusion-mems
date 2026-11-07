@@ -132,7 +132,7 @@ export function sessionProgress(session: Obj, pis: Obj[], nowIso: string) {
     const nowMs = Date.parse(nowIso);
     const open = s(session.status) === 'open';
     const timeUsedPct = Number.isFinite(endMs) && Number.isFinite(startMs) && endMs > startMs ? Math.max(0, Math.min(100, pct(nowMs - startMs, endMs - startMs))) : null;
-    const phase = !open ? s(session.status) : nowMs < startMs ? 'scheduled' : Number.isFinite(endMs) && nowMs > endMs ? 'overdue' : 'in_progress';
+    const phase = !open ? s(session.status) : session.setupRequired === true ? 'setup_required' : nowMs < startMs ? 'scheduled' : Number.isFinite(endMs) && nowMs > endMs ? 'overdue' : 'in_progress';
     const planned = plannedPis(metrics.targetMaterials, metrics.materialsPerPi);
     const closedPis = stages[stages.length - 1].done;
 

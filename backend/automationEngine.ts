@@ -1,6 +1,7 @@
 import { OAuth2Client } from 'google-auth-library';
 import { PROJECT_ID, HttpError, getDoc, googleRequest, listDocs, nowIso, orderDesc, randomId, runQuery, str, writeDoc } from './core';
 import { sweepOrganization } from './replenishment';
+import { stockTakeAutomationDue, stockTakeAutomationForOrg } from './stockTake';
 import { json, error, type RouterContext } from './platform/sdk';
 import { audit } from './audit';
 import { staff } from './guards';
@@ -83,6 +84,7 @@ async function status() {
     const connected = !!lastSeen && Date.now() - Date.parse(lastSeen) < 20 * 60 * 1000;
     const mrp = await mrpSweepConfig();
     const mrpState = await sweepState();
+    const stState = await getDoc(ST_STATE);
     return {
         engine: { name: 'MEMS shared automation engine', version: '2.0', registered: JOBS.map((j) => j.id),
             tickMinutes: 5, lastHeartbeat: lastSeen, connected, sharedTrigger: scheduler },
@@ -101,6 +103,13 @@ async function status() {
                 lastStartedAt: str(mrpState?.data.lastStartedAt), lastCompletedAt: str(mrpState?.data.lastCompletedAt),
                 lastError: str(mrpState?.data.lastError), lastErrorAt: str(mrpState?.data.lastErrorAt),
                 lastResult: mrpState?.data.lastResult || null },
+            { id: ST_JOB_ID, label: 'Stock take sessions (automatic creation and closing)', category: 'Inventory',
+                enabled: true, schedule: { daily: '00:00 Africa/Nairobi' },
+                scheduleText: `Daily at midnight (Nairobi)${str(stState?.data.cursor) ? ' · resuming an unfinished run' : ''}`,
+                configurable: 'none',
+                lastStartedAt: str(stState?.data.lastStartedAt), lastCompletedAt: str(stState?.data.lastCompletedAt),
+                lastError: str(stState?.data.lastError), lastErrorAt: str(stState?.data.lastErrorAt),
+                lastResult: stState?.data.lastResult || null },
         ],
         history: runs.map((r) => ({ id: r.id, ...r.data })),
     };
@@ -215,6 +224,48 @@ async function executeMrpSweep(mode: 'scheduled' | 'manual', deadline: number) {
     }
 }
 
+// ===== Stock take sessions (daily at Nairobi midnight) =====
+// Creates the sessions of periodic configurations set to automatic and closes sessions whose posting is complete.
+// A long run resumes on the next tick from the organization where it stopped.
+
+const ST_JOB_ID = 'inv.stocktake-sessions';
+const ST_STATE = 'system/stocktake_sessions_state';
+
+async function executeStockTakeSessions(mode: 'scheduled' | 'manual', deadline: number) {
+    const startedAt = nowIso();
+    const t0 = Date.now();
+    const eventId = `${startedAt.replace(/[^0-9]/g, '')}_${randomId(4)}`;
+    const prior = (await getDoc(ST_STATE))?.data ?? {};
+    await writeDoc(ST_STATE, { ...prior, lastStartedAt: startedAt });
+    try {
+        const orgs = (await listDocs('organizations')).filter((o) => !['suspended', 'pending_approval', 'rejected'].includes(str(o.data.status))).map((o) => o.id).sort();
+        const cursor = str(prior.cursor);
+        const todo = cursor ? orgs.filter((id) => id >= cursor) : orgs;
+        const total = { organizations: 0, created: 0, closed: 0, failed: 0 };
+        let next = '';
+        for (const orgId of todo) {
+            if (Date.now() > deadline) { next = orgId; break; }
+            const r = await stockTakeAutomationForOrg(orgId, deadline);
+            total.organizations++; total.created += r.created; total.closed += r.closed; total.failed += r.failed;
+            if (!r.complete) { next = orgId; break; }
+        }
+        const completedAt = nowIso();
+        const result = { ...total, complete: !next, resumeFrom: next };
+        await writeDoc(ST_STATE, { ...prior, lastStartedAt: startedAt, cursor: next, ...(next ? {} : { lastCompletedAt: completedAt }), lastResult: result, lastError: '', lastErrorAt: '' });
+        await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: ST_JOB_ID, mode, status: 'success', startedAt, completedAt, durationMs: Date.now() - t0, ...result,
+            summary: `${total.created} session(s) created and ${total.closed} closed in ${total.organizations} organization(s), ${total.failed} failed${next ? '; continues next tick' : ''}` }, { exists: false });
+        await audit([{ category: 'automation', action: 'inv.stocktake_sessions.success', details: `${mode}: ${total.created} created, ${total.closed} closed, ${total.failed} failed${next ? ' (partial)' : ''}` }]);
+        return result;
+    } catch (e) {
+        const message = e instanceof Error ? e.message : 'Stock take session automation failed';
+        const completedAt = nowIso();
+        await writeDoc(ST_STATE, { ...prior, lastStartedAt: startedAt, lastError: message.slice(0, 250), lastErrorAt: completedAt });
+        await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: ST_JOB_ID, mode, status: 'failed', startedAt, completedAt, durationMs: Date.now() - t0, error: message.slice(0, 250) }, { exists: false });
+        await audit([{ category: 'automation', action: 'inv.stocktake_sessions.failure', outcome: 'failure', details: message.slice(0, 400) }]);
+        throw e;
+    }
+}
+
 // ===== Job registry =====
 // One shared, OIDC-verified heartbeat drives every job. Each job decides whether it is due, runs under its own lock for
 // the tick, keeps its own state and history, and fails on its own without stopping the others.
@@ -237,6 +288,14 @@ const JOBS: Job[] = [
             return mrpSweepDue(await mrpSweepConfig(), { lastCompletedAt: str(s.lastCompletedAt), cursor: str(s.cursor) }, at);
         },
         run: (mode, deadline) => executeMrpSweep(mode, deadline),
+    },
+    {
+        id: ST_JOB_ID,
+        due: async (at) => {
+            const s = (await getDoc(ST_STATE))?.data ?? {};
+            return !!str(s.cursor) || stockTakeAutomationDue(str(s.lastCompletedAt), at);
+        },
+        run: (mode, deadline) => executeStockTakeSessions(mode, deadline),
     },
 ];
 const TICK_BUDGET_MS = 100_000;

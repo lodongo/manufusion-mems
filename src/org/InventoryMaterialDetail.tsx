@@ -150,7 +150,8 @@ const STOCK_FIELDS=[
  ['ownershipSettlementTrigger','ownershipSettlementTriggers'],
 ] as const;
 const STOCK_FIELD_LOOKUP=new Map<string,string>(STOCK_FIELDS);
-const INVENTORY_FIELDS = ['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'remarks'];
+const INVENTORY_FIELDS = ['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'criticalityClass', 'remarks'];
+const CRITICALITY_CLASSES = ['A', 'B', 'C', 'D'];
 // Strategy parameters (Replenishment tab). Which of them are shown depends on the replenishment strategy.
 const REPLENISHMENT_FIELDS = ['annualDemand', 'orderCost', 'holdingCostRate', 'demandLookbackDays', 'coverageDays', 'emergencyLevel', 'strategicLevel', 'seasonalFactors', 'rotablesInRepair', 'binQuantity', 'kanbanCardQuantity', 'kanbanCards', 'reviewPeriodDays', 'forecastMonthlyDemand'];
 const REPLENISHMENT_LIMITS: Record<string, { min: number; max: number; integer?: boolean }> = {
@@ -203,6 +204,7 @@ const EXPLANATIONS: Record<string, string> = {
     reorderPoint: 'Available stock threshold that triggers a replenishment recommendation.',
     reorderQuantity: 'Normal quantity to replenish when the reorder point is reached.',
     leadTimeDays: 'Expected calendar days between ordering and receipt of the material.',
+    criticalityClass: 'Criticality class of the material in this warehouse, A (most critical) to D. Stock take configurations can count only chosen classes.',
     remarks: 'Additional warehouse-specific handling, stocking, or replenishment instructions.',
     ...Object.fromEntries(REPLENISHMENT_FIELDS.map((k) => [k, PARAMS[k as keyof typeof PARAMS].hint])),
     incoterms: 'International delivery rule defining buyer and seller responsibilities for transport, risk and costs.',
@@ -226,7 +228,7 @@ const BALANCE_HELP: Record<string, string> = {
     allocatedStock: 'Physical stock allocated to demand but not yet issued.',
 };
 
-const label = (x: string) => (REPLENISHMENT_FIELDS.includes(x) ? PARAMS[x as keyof typeof PARAMS].label : x.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()));
+const label = (x: string) => (x === 'criticalityClass' ? 'Criticality class' : REPLENISHMENT_FIELDS.includes(x) ? PARAMS[x as keyof typeof PARAMS].label : x.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()));
 const words = (s: string) => (s || '').replace(/_/g, ' ');
 const blank = (v: unknown) => v === null || v === undefined || v === '';
 const qty = (v: unknown) => Number(v || 0).toLocaleString();
@@ -818,6 +820,7 @@ function SettingValue({
         const selected=dim?.items.find(x=>x.code===value);
         return <>{selected?selected.label+' ('+value+')':value}</>;
     }
+    if (field === 'criticalityClass') return <>{`Class ${value}`}</>;
     if (field === 'stockingPolicy') return <>{metadata?.stockingPolicies.find((x) => x.code === value)?.description || value}</>;
     if (field === 'paymentTerms') return <>{metadata?.paymentTerms.find((x) => x.code === value)?.description || value}</>;
     if (field === 'incoterms') return <>{metadata?.incoterms.find((x) => x.code === value)?.description || value}</>;
@@ -857,6 +860,18 @@ function SettingInput({
     const hint = compact ? undefined : EXPLANATIONS[field];
     const error = errors[field];
 
+    if (field === 'criticalityClass') {
+        return (
+            <SelectField id={id} label='Criticality class' value={value} hint={hint} error={error} onChange={(e) => onChange(field, e.target.value)}>
+                <option value=''>Not classified</option>
+                {CRITICALITY_CLASSES.map((c) => (
+                    <option key={c} value={c}>
+                        Class {c}
+                    </option>
+                ))}
+            </SelectField>
+        );
+    }
     if(STOCK_FIELD_LOOKUP.has(field)){
         const list=metadata?.stockDimensions?.find(x=>x.key===STOCK_FIELD_LOOKUP.get(field));
         const active=list?.items.filter(x=>x.enabled)||[];

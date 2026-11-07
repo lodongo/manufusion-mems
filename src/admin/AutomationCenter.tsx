@@ -8,9 +8,9 @@ import { appPrompt } from '../components/dialogs';
 
 type Run = { id: string; jobId: string; mode: string; status: string; startedAt: string; completedAt: string; provider?: string; matched?: number; changed?: number; missing?: number; error?: string; summary?: string; durationMs?: number };
 type Job = { id: string; label: string; category: string; enabled: boolean; schedule: { frequency?: string; timeUtc?: string; provider?: string; enabled?: boolean; intervalHours?: number };
-    scheduleText?: string; configurable?: 'fx_monitor' | 'inline';
+    scheduleText?: string; configurable?: 'fx_monitor' | 'inline' | 'none';
     lastStartedAt: string; lastCompletedAt: string; lastError: string; lastErrorAt: string; lastResult: unknown };
-const JOB_LABEL: Record<string, string> = { 'fx.world-rates': 'Exchange rates', 'inv.replenishment-sweep': 'Replenishment sweep', 'inv.mrp-sweep': 'Replenishment sweep (earlier MRP runs)' };
+const JOB_LABEL: Record<string, string> = { 'fx.world-rates': 'Exchange rates', 'inv.replenishment-sweep': 'Replenishment sweep', 'inv.mrp-sweep': 'Replenishment sweep (earlier MRP runs)', 'inv.stocktake-sessions': 'Stock take sessions' };
 const runText = (r: Run) => r.summary || (r.matched !== undefined ? `${r.matched} currencies matched, ${r.changed} changed, ${r.missing} unmatched` : '');
 type Engine = {
     engine: { name: string; version: string; registered: string[]; tickMinutes: number;
@@ -108,7 +108,7 @@ export default function AutomationCenter() {
                 <p className='text-xs text-soft'>{j.category} · {j.scheduleText || `Frequency: ${j.schedule.frequency} · Provider: ${j.schedule.provider} · UTC: ${j.schedule.timeUtc}`}</p>
                 <p className='text-xs text-soft'>Last completed run: {pretty(j.lastCompletedAt)}</p>
                 {j.lastError && <Alert tone='error'>{j.lastError} ({pretty(j.lastErrorAt)})</Alert>}
-                {j.configurable === 'inline' ? <ReplenishmentSweepControls job={j} onDone={reload}/> : <Button variant='secondary' onClick={()=>navigate('admin/fx_monitor')}>Configure exchange rates</Button>}
+                {j.configurable === 'none' ? <p className='text-xs text-soft'>Scheduled by each organization's stock take configurations; nothing to set here.</p> : j.configurable === 'inline' ? <ReplenishmentSweepControls job={j} onDone={reload}/> : <Button variant='secondary' onClick={()=>navigate('admin/fx_monitor')}>Configure exchange rates</Button>}
             </div>)}
         </Card>
         <Card className='space-y-3'>
