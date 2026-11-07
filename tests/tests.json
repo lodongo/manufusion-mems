@@ -935,5 +935,28 @@
       "Switch test mode off, or use a person who is not the super administrator; confirm the buttons are greyed out again and the server refuses the action"
     ],
     "expected": "Nobody can verify, approve or post their own PI and the screen says why before they tap; only a super administrator in platform test mode may, and every use is audited."
+  },
+  {
+    "name": "Material detail: one menu and a two-column grid that scrolls",
+    "description": "On a phone, the material detail tabs show only the header with Edit and one menu button, the tabs, and a two-column grid of boxes that scrolls on its own; notes, key information and links are in the menu.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "material detail one menu",
+      "material detail two-column grid",
+      "material movements table menu",
+      "material replenishment key information"
+    ],
+    "steps": [
+      "Open a material from Inventory on hand and go to Inventory Information: confirm the boxes are two per row, the page itself does not scroll, and only the boxes move when you swipe",
+      "Tap the menu (three dots) in the header: confirm it shows the physical location (link or delink a bin), notes and Refresh",
+      "Open Stock Control: confirm the long note is not on the page but in the menu under Notes, and that all fifteen boxes scroll while the header and tabs stay in place",
+      "Open Replenishment: confirm the strategy, what it does, and the Stock Control values are in the menu under Key information; with a strategy that is missing a required level, confirm a dot on the menu button and the box marked Required",
+      "Open Procurement Information: confirm Display currency is chosen in the menu and the note about stored prices is under Notes",
+      "Open Movements: confirm the search box takes the full width, the menu button in the header opens the table tools (filters, group by, formula columns, columns, saved templates, Export Excel) together with the note, and a single row reads '1 row'",
+      "Tap Edit on Inventory Information: confirm the inputs are two per row, Cancel is an icon, Save stays in the header, and the Field guide is in the menu",
+      "Tap the small question mark on a box: confirm the explanation opens in a sheet and the box height does not change"
+    ],
+    "expected": "Every material detail tab has one menu, no notes or buttons crowd the page, and the boxes or table use the whole screen and scroll on their own."
   }
 ]

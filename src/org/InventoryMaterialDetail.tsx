@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link2, Link2Off, PackagePlus, Pencil, Save, Send, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Check, HelpCircle, Link2, Link2Off, MoreVertical, PackagePlus, Pencil, RefreshCw, Save, Send, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert, Field, SelectField } from '../components/ui';
 import { InfoTip, Screen, Segmented, messageOf, useConfirm } from '../components/screen';
@@ -381,6 +382,89 @@ function Sheet({ title, onClose, action, children }: { title: string; onClose: (
     );
 }
 
+/** The one menu: key information, notes and action links, as a bottom sheet that looks like the table menu. */
+function MenuSheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [onClose]);
+    return createPortal(
+        <div className='fixed inset-0 z-[9999] flex items-end justify-center bg-black/70' role='presentation'>
+            <button type='button' aria-label='Close menu' onClick={onClose} className='absolute inset-0 cursor-default' />
+            <section role='dialog' aria-modal='true' aria-label={title} className='relative z-10 flex max-h-[90dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-slate-700 bg-slate-900 text-white shadow-2xl'>
+                <div className='flex shrink-0 items-center gap-3 border-b border-slate-700 px-4 py-3'>
+                    <h2 className='min-w-0 flex-1 truncate text-base font-semibold'>{title}</h2>
+                    <button type='button' onClick={onClose} aria-label='Close menu' className='flex h-10 w-10 items-center justify-center rounded-lg border border-slate-700'>
+                        <X className='h-5 w-5' />
+                    </button>
+                </div>
+                <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain p-3'>{children}</div>
+                <div className='shrink-0 border-t border-slate-700 bg-slate-900 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]'>
+                    <button type='button' onClick={onClose} className='min-h-11 w-full rounded-xl border border-slate-600 text-sm font-semibold'>
+                        Done
+                    </button>
+                </div>
+            </section>
+        </div>,
+        document.body,
+    );
+}
+
+function MenuSection({ title, children }: { title: string; children: ReactNode }) {
+    return (
+        <section className='space-y-2'>
+            <h3 className='px-1 text-xs font-semibold uppercase tracking-wide text-slate-400'>{title}</h3>
+            {children}
+        </section>
+    );
+}
+
+const MENU_ROW = 'flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400 disabled:opacity-40';
+
+function MenuRow({ icon, label: text, onClick, selected, radio }: { icon?: ReactNode; label: string; onClick: () => void; selected?: boolean; radio?: boolean }) {
+    return (
+        <button type='button' role={radio ? 'radio' : undefined} aria-checked={radio ? !!selected : undefined} onClick={onClick} className={`${MENU_ROW} ${selected ? 'bg-emerald-500/10' : ''}`}>
+            {icon}
+            <span className='min-w-0 flex-1 truncate'>{text}</span>
+            {selected && <Check className='h-5 w-5 shrink-0 text-emerald-300' />}
+        </button>
+    );
+}
+
+/** Content that scrolls on its own below the fixed header and tabs. */
+function ScrollBody({ children }: { children: ReactNode }) {
+    return <div className='h-full space-y-3 overflow-y-auto overscroll-contain py-3'>{children}</div>;
+}
+
+/** Boxes in a two-column grid that scrolls on its own; the header, tabs and menu stay where they are. */
+function ScrollGrid({ children, gap = 'gap-2', dense = false }: { children: ReactNode; gap?: string; dense?: boolean }) {
+    return (
+        <div className='h-full overflow-y-auto overscroll-contain py-2'>
+            <div className={`grid grid-cols-2 ${gap} ${dense ? 'grid-flow-dense' : ''}`}>{children}</div>
+        </div>
+    );
+}
+
+/** One value box in the grid: label, value, and a small help button that opens the explanation in a sheet (boxes stay the same height). */
+function FieldBox({ title, help, onHelp, className = '', warn = false, children }: { title: string; help?: string; onHelp: (h: { title: string; text: string }) => void; className?: string; warn?: boolean; children: ReactNode }) {
+    return (
+        <div className={`min-w-0 rounded-xl border p-3 ${warn ? 'border-amber-500/60 bg-amber-500/10' : 'border-line bg-panel'} ${className}`}>
+            <div className='flex items-start gap-1'>
+                <span className='min-w-0 flex-1 text-xs text-muted'>{title}</span>
+                {help && (
+                    <button type='button' aria-label={`Help: ${title}`} onClick={() => onHelp({ title, text: help })} className='-m-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted active:bg-page'>
+                        <HelpCircle className='h-4 w-4' />
+                    </button>
+                )}
+            </div>
+            <strong className='mt-1 block break-words text-sm font-semibold text-ink'>{children}</strong>
+        </div>
+    );
+}
+
 /** Readable rendering of a material master value (names for people, structure nodes, units and catalogue codes). */
 function humanValue(key: string, v: unknown, data: Detail, metadata: Metadata | null): ReactNode {
     if (blank(v)) return '—';
@@ -612,12 +696,24 @@ function BinPanel({
     );
 }
 
-/** How replenishment treats this material in this warehouse. It follows Stock Control: strategy, ownership and supply arrangement. */
-function ReplenishmentSummary({ data, metadata, onStockControl }: { data: Detail; metadata: Metadata | null; onStockControl: () => void }) {
+/** What the material's strategy needs: the levels it uses and the ones still missing. Drives the grid and the menu. */
+function replenishmentState(data: Detail) {
     const inv = data.inventory as Record<string, unknown>;
     const proc = data.procurement as Record<string, unknown>;
+    const m = METHODS[methodOf(inv.replenishmentStrategy)];
+    const has = (k: string) => {
+        const v = k === 'seasonalFactors' ? inv[k] : inv[k] ?? proc[k];
+        return k === 'seasonalFactors' ? !!factorsOf(v) : v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v));
+    };
+    const missing = m ? m.required.filter((k) => !has(k)) : [];
+    const levels = m ? [...m.required, ...m.optional].filter((k) => CLASSIC_LEVELS.includes(k)) : [];
+    return { inv, m, has, missing, levels };
+}
+
+/** How replenishment treats this material in this warehouse (shown in the menu). It follows Stock Control: strategy, ownership and supply arrangement. */
+function ReplenishmentInfo({ data, metadata }: { data: Detail; metadata: Metadata | null }) {
+    const { inv, m } = replenishmentState(data);
     const code = methodOf(inv.replenishmentStrategy);
-    const m = METHODS[code];
     const settings: Array<[string, string]> = [
         ['Replenishment strategy', m ? `${m.code} — ${m.name}` : 'Not specified'],
         ['Stock ownership', stockLabel(metadata, 'stockOwnership', inv.stockOwnership) || 'Not specified'],
@@ -626,14 +722,7 @@ function ReplenishmentSummary({ data, metadata, onStockControl }: { data: Detail
     ];
     const fromStockControl = (
         <div className='rounded-xl border border-line bg-page p-3'>
-            <div className='flex items-center justify-between gap-2'>
-                <p className='text-xs font-medium uppercase tracking-wide text-muted'>From Stock Control</p>
-                {data.canEdit && (
-                    <button type='button' onClick={onStockControl} className='min-h-[44px] px-2 text-sm font-medium text-brandsoft'>
-                        Change
-                    </button>
-                )}
-            </div>
+            <p className='text-xs font-medium uppercase tracking-wide text-muted'>From Stock Control</p>
             <dl className='divide-y divide-line'>
                 {settings.map(([k, v]) => (
                     <div key={k} className='grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] gap-3 py-2 text-sm'>
@@ -646,21 +735,15 @@ function ReplenishmentSummary({ data, metadata, onStockControl }: { data: Detail
     );
     if (!m)
         return (
-            <Card className='space-y-3'>
+            <div className='space-y-3'>
                 <Badge tone='warn'>Not planned</Badge>
                 <p className='text-sm text-soft'>No replenishment strategy is set in Stock Control, so this material is not replenished automatically. Automatic replenishment runs for {AUTOMATED_TEXT}.</p>
                 {fromStockControl}
-            </Card>
+            </div>
         );
     const route = routeFor(String(inv.stockOwnership || ''), String(inv.supplyArrangement || ''), code);
-    const has = (k: string) => {
-        const v = k === 'seasonalFactors' ? inv[k] : inv[k] ?? proc[k];
-        return k === 'seasonalFactors' ? !!factorsOf(v) : v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v));
-    };
-    const missing = m.required.filter((k) => !has(k));
-    const levels = [...m.required, ...m.optional].filter((k) => CLASSIC_LEVELS.includes(k));
     return (
-        <Card className='space-y-3'>
+        <div className='space-y-3'>
             <div className='flex flex-wrap items-center gap-2'>
                 <Badge tone={m.automated ? 'brand' : 'muted'}>{m.automated ? 'Planned automatically' : 'Recorded only'}</Badge>
                 <span className='font-mono text-xs text-muted'>{m.code}</span>
@@ -680,22 +763,7 @@ function ReplenishmentSummary({ data, metadata, onStockControl }: { data: Detail
                 </p>
             )}
             {fromStockControl}
-            {m.automated && levels.length > 0 && (
-                <div className='space-y-1'>
-                    <p className='text-xs text-muted'>Levels used (edit them in Inventory Information)</p>
-                    <ul className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
-                        {levels.map((k) => (
-                            <li key={k} className={`min-w-0 rounded-lg border px-3 py-2 text-xs ${m.required.includes(k) && !has(k) ? 'border-amber-500/60 text-amber-200' : 'border-line text-soft'}`}>
-                                {PARAMS[k as keyof typeof PARAMS].label}
-                                <strong className='block truncate text-sm text-ink'>{has(k) ? String(inv[k]) : m.required.includes(k) ? 'Required' : '—'}</strong>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
-            {missing.length > 0 && m.automated && <Alert tone='warn'>Not planned until set: {missing.map((k) => PARAMS[k as keyof typeof PARAMS].label).join(', ')}.</Alert>}
-            {m.code === 'RP03' && <p className='text-xs text-muted'>Economic order quantity also uses the unit price from Procurement Information.</p>}
-        </Card>
+        </div>
     );
 }
 
@@ -769,6 +837,7 @@ function SettingInput({
     onChange,
     suppliers,
     supplierScope,
+    compact = false,
 }: {
     field: string;
     values: Values;
@@ -780,10 +849,12 @@ function SettingInput({
     onChange: (field: string, value: string) => void;
     suppliers: SupplierOption[];
     supplierScope: string;
+    /** Explanations live in the menu (Field guide) instead of under every input. */
+    compact?: boolean;
 }) {
     const id = `material-${field}`;
     const value = values[field] ?? '';
-    const hint = EXPLANATIONS[field];
+    const hint = compact ? undefined : EXPLANATIONS[field];
     const error = errors[field];
 
     if(STOCK_FIELD_LOOKUP.has(field)){
@@ -930,7 +1001,7 @@ function TechnicalData({ data, metadata }: { data: Detail; metadata: Metadata | 
     return (
         <>
             <h2 className='text-sm font-semibold text-ink'>Original material master information</h2>
-            <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>
+            <div className='grid grid-cols-2 gap-2'>
                 {entries.map(([k, v]) => (
                     <div key={k} className='min-w-0 rounded-xl border border-line bg-panel p-3'>
                         <div className='text-xs text-muted'>{label(k)}</div>
@@ -1158,6 +1229,9 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
     const [opening, setOpening] = useState(false);
     const [isolation, setIsolation] = useState('');
     const [movement, setMovement] = useState<Movement | null>(null);
+    const [menu, setMenu] = useState(false);
+    const [help, setHelp] = useState<{ title: string; text: string } | null>(null);
+    const [tableMenu, setTableMenu] = useState(false);
 
     const section: Section | null = (tab === 'Inventory Information' || tab === 'Stock Control' || tab === 'Replenishment') ? 'inventory' : tab === 'Procurement Information' ? 'procurement' : null;
     const fields = tab === 'Stock Control' ? STOCK_FIELDS.map(([field]) => field) : tab === 'Replenishment' ? replenishmentFieldsOf(data?.inventory) : section === 'procurement' ? PROCUREMENT_FIELDS : INVENTORY_FIELDS;
@@ -1317,8 +1391,9 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
         if (section && data.canEdit && fields.length) {
             return editing ? (
                 <>
-                    <Button variant='secondary' disabled={saving} onClick={() => setEditing(false)}>
-                        Cancel
+                    <Button variant='secondary' disabled={saving} onClick={() => setEditing(false)} aria-label='Cancel editing'>
+                        <X className='h-4 w-4' />
+                        <span className='hidden sm:inline'>Cancel</span>
                     </Button>
                     <Button busy={saving} disabled={problems.length > 0 || !dirty} onClick={() => void save()}>
                         <Save className='h-4 w-4' />
@@ -1343,156 +1418,305 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
         return undefined;
     })();
 
-    return (
-        <Screen
-            title={data ? materialName : 'Material'}
-            eyebrow={materialNumber}
-            subtitle={data?.warehouse.name || warehouseId}
-            onBack={onBack}
-            actions={actions}
-            toolbar={<Segmented<Tab> label='Material sections' value={tab} onChange={changeTab} options={TABS.map((t) => ({ value: t, label: t }))} />}
+    // ---- The one menu: key information, notes and action links for the open tab (table tools join it on Movements) ----
+    const repl = data ? replenishmentState(data) : null;
+    const attention =
+        tab === 'Replenishment' && repl?.m?.automated && repl.missing.length ? [`Not planned until set: ${repl.missing.map((k) => PARAMS[k as keyof typeof PARAMS].label).join(', ')}.`] : [];
+    const notes: string[] = [];
+    if (tab === 'Current Status' && data?.currentStatus?.canInitialize) notes.push('No journal entries yet. Use Opening stock at the top to post the first-time stock loading.');
+    if (tab === 'Inventory Information') notes.push('The physical location changes only by linking or delinking a bin here, never through Edit.');
+    if (tab === 'Stock Control')
+        notes.push(`The Replenishment tab follows the strategy chosen here, with the stock ownership and supply arrangement. Only ${AUTOMATED_TEXT} replenish automatically. These settings do not change posted stock ownership or GL balances.`);
+    if (tab === 'Replenishment' && repl?.m?.automated && repl.levels.length) notes.push('The levels shown here are edited in Inventory Information.');
+    if (tab === 'Replenishment' && repl?.m?.code === 'RP03') notes.push('Economic order quantity also uses the unit price from Procurement Information.');
+    if (tab === 'Procurement Information')
+        notes.push('Prices are stored in their entered currency. Display conversion is available only where an explicit configured rate exists; changing the display currency does not rewrite stored prices.');
+    if (tab === 'Movements') notes.push('Chronological transaction record for this material and warehouse. Posted, reconciled entries drive Current Status.');
+
+    const menuBody = (close: () => void) => (
+        <div className='space-y-4'>
+            {attention.length > 0 && (
+                <MenuSection title='Needs attention'>
+                    {attention.map((a) => (
+                        <Alert key={a} tone='warn'>
+                            {a}
+                        </Alert>
+                    ))}
+                </MenuSection>
+            )}
+            {data && tab === 'Replenishment' && (
+                <MenuSection title='Key information'>
+                    <ReplenishmentInfo data={data} metadata={metadata} />
+                </MenuSection>
+            )}
+            {data && tab === 'Inventory Information' && (
+                <MenuSection title='Physical location'>
+                    <BinPanel
+                        data={data}
+                        binChoice={binChoice}
+                        onChoose={setBinChoice}
+                        onLink={() => {
+                            close();
+                            linkBin();
+                        }}
+                        onUnlink={() => {
+                            close();
+                            unlinkBin();
+                        }}
+                    />
+                </MenuSection>
+            )}
+            {tab === 'Procurement Information' && !editing && currencies.length > 1 && (
+                <MenuSection title='Display currency'>
+                    <div role='radiogroup' aria-label='Display currency' className='space-y-1'>
+                        {currencies.map((c) => (
+                            <MenuRow
+                                key={c}
+                                radio
+                                selected={c === displayCurrency}
+                                label={`${c}${c === base ? ' (local)' : ''}`}
+                                onClick={() => {
+                                    setCurrency(c);
+                                    close();
+                                }}
+                            />
+                        ))}
+                    </div>
+                </MenuSection>
+            )}
+            {editing && section && (
+                <MenuSection title='Field guide'>
+                    {fields
+                        .filter((k) => EXPLANATIONS[k])
+                        .map((k) => (
+                            <div key={k} className='rounded-xl bg-slate-800/60 p-3 text-sm'>
+                                <p className='font-medium text-white'>{k === 'leadTimeDays' ? 'Lead time (days)' : label(k)}</p>
+                                <p className='mt-0.5 text-slate-300'>{EXPLANATIONS[k]}</p>
+                            </div>
+                        ))}
+                </MenuSection>
+            )}
+            {notes.length > 0 && (
+                <MenuSection title='Notes'>
+                    {notes.map((n) => (
+                        <p key={n} className='rounded-xl bg-slate-800/60 p-3 text-sm text-slate-200'>
+                            {n}
+                        </p>
+                    ))}
+                </MenuSection>
+            )}
+            <MenuSection title='Actions'>
+                <div className='space-y-1'>
+                    {data?.canEdit && tab === 'Replenishment' && (
+                        <MenuRow
+                            icon={<Pencil className='h-5 w-5 shrink-0 text-emerald-300' />}
+                            label='Change strategy in Stock Control'
+                            onClick={() => {
+                                close();
+                                changeTab('Stock Control');
+                            }}
+                        />
+                    )}
+                    <MenuRow
+                        icon={<RefreshCw className='h-5 w-5 shrink-0 text-emerald-300' />}
+                        label='Refresh'
+                        onClick={() => {
+                            close();
+                            reload();
+                        }}
+                    />
+                </div>
+            </MenuSection>
+        </div>
+    );
+    const menuTitle = `Menu · ${tab}`;
+    const menuButton = data ? (
+        <button
+            type='button'
+            aria-label='Menu'
+            aria-haspopup='dialog'
+            aria-expanded={tab === 'Movements' ? tableMenu : menu}
+            onClick={() => (tab === 'Movements' ? setTableMenu(true) : setMenu(true))}
+            className='relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line text-soft active:bg-panel'
         >
-            {loading && <Spinner />}
+            <MoreVertical className='h-5 w-5' />
+            {attention.length > 0 && <span aria-hidden='true' className='absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-amber-400' />}
+        </button>
+    ) : null;
+
+    // Messages that need an answer stay under the tabs (small, and never scrolled away); everything else is in the menu.
+    const strip = (
+        <>
             {!loading && error && <Alert tone='error'>{error}</Alert>}
             {notice && (
                 <div ref={noticeRef}>
                     <Alert tone={notice.tone}>{notice.text}</Alert>
                 </div>
             )}
+            {editing && problems.length > 0 && (
+                <div className='max-h-28 overflow-y-auto overscroll-contain'>
+                    <Problems items={problems} />
+                </div>
+            )}
+            {editing && controlWarnings.length > 0 && <Alert tone='warn'>Automatic replenishment is not active yet: {controlWarnings.join(' ')}</Alert>}
+            {editing && !problems.length && !dirty && <p className='px-1 text-xs text-muted'>Change a value to enable Save.</p>}
+        </>
+    );
+
+    const wide = new Set(['purchaseUom', 'remarks', 'preferredVendor', 'paymentTerms', 'seasonalFactors']);
+    const levelBoxes =
+        tab === 'Replenishment' && !editing && repl?.m?.automated
+            ? repl.levels.map((k) => {
+                  const required = !!repl.m?.required.includes(k);
+                  return (
+                      <FieldBox key={k} title={PARAMS[k as keyof typeof PARAMS]?.label || label(k)} help={EXPLANATIONS[k]} onHelp={setHelp} warn={required && !repl.has(k)}>
+                          {repl.has(k) ? String(repl.inv[k]) : required ? 'Required' : '—'}
+                      </FieldBox>
+                  );
+              })
+            : [];
+
+    return (
+        <Screen
+            title={data ? materialName : 'Material'}
+            eyebrow={materialNumber}
+            subtitle={data?.warehouse.name || warehouseId}
+            onBack={onBack}
+            actions={
+                <>
+                    {actions}
+                    {menuButton}
+                </>
+            }
+            bodyFlush
+            toolbar={
+                <>
+                    <Segmented<Tab> label='Material sections' value={tab} onChange={changeTab} options={TABS.map((t) => ({ value: t, label: t }))} />
+                    {strip}
+                </>
+            }
+        >
+            {loading && (
+                <ScrollBody>
+                    <Spinner />
+                </ScrollBody>
+            )}
 
             {!loading && !error && data && (
                 <>
-                    {tab === 'Overview' &&
-                        (() => {
-                            const o = overviewFacts(data, base, metadata);
-                            const status = data.currentStatus;
-                            return (
-                                <MaterialOverview
-                                    id={id}
-                                    warehouseId={warehouseId}
-                                    warehouseName={data.warehouse.name}
-                                    materialNumber={materialNumber}
-                                    description={String(data.material.shortText || data.material.name || '—')}
-                                    categoryLabel={o.category}
-                                    status={String(data.material.status || '')}
-                                    photos={data.photos || []}
-                                    canPhoto={!!data.canPhoto}
-                                    available={status?.reconciled ? Number(status.balances.availableStock || 0) : null}
-                                    minimum={numOrNull(data.inventory.minimumLevel)}
-                                    maximum={numOrNull(data.inventory.maximumLevel)}
-                                    safety={numOrNull(data.inventory.safetyStock)}
-                                    facts={o.facts}
-                                    chips={o.chips}
-                                    ask={ask}
-                                    onOpen={changeTab}
-                                />
-                            );
-                        })()}
+                    {tab === 'Overview' && (
+                        <ScrollBody>
+                            {(() => {
+                                const o = overviewFacts(data, base, metadata);
+                                const status = data.currentStatus;
+                                return (
+                                    <MaterialOverview
+                                        id={id}
+                                        warehouseId={warehouseId}
+                                        warehouseName={data.warehouse.name}
+                                        materialNumber={materialNumber}
+                                        description={String(data.material.shortText || data.material.name || '—')}
+                                        categoryLabel={o.category}
+                                        status={String(data.material.status || '')}
+                                        photos={data.photos || []}
+                                        canPhoto={!!data.canPhoto}
+                                        available={status?.reconciled ? Number(status.balances.availableStock || 0) : null}
+                                        minimum={numOrNull(data.inventory.minimumLevel)}
+                                        maximum={numOrNull(data.inventory.maximumLevel)}
+                                        safety={numOrNull(data.inventory.safetyStock)}
+                                        facts={o.facts}
+                                        chips={o.chips}
+                                        ask={ask}
+                                        onOpen={changeTab}
+                                    />
+                                );
+                            })()}
+                        </ScrollBody>
+                    )}
 
                     {tab === 'Current Status' && (
-                        <>
-                            {data.currentStatus?.canInitialize && (
-                                <Alert tone='info'>No journal entries yet. Use “Opening stock” at the top to post the first-time stock loading.</Alert>
-                            )}
+                        <ScrollBody>
                             <StockPosition data={data} onIsolate={setIsolation} />
-                        </>
+                        </ScrollBody>
                     )}
 
                     {section && (
-                        <>
-                            {tab === 'Inventory Information' && <BinPanel data={data} binChoice={binChoice} onChoose={setBinChoice} onLink={linkBin} onUnlink={unlinkBin} />}
-                            {section === 'procurement' && !editing && currencies.length > 1 && (
-                                <SelectField id='material-display-currency' label='Display currency' value={displayCurrency} onChange={(e) => setCurrency(e.target.value)}>
-                                    {currencies.map((c) => (
-                                        <option key={c} value={c}>
-                                            {c}
-                                            {c === base ? ' (local)' : ''}
-                                        </option>
-                                    ))}
-                                </SelectField>
-                            )}
-                            {tab === 'Stock Control' && (
-                                <Alert tone='info'>
-                                    The Replenishment tab follows the strategy chosen here, with the stock ownership and supply arrangement. Only {AUTOMATED_TEXT} replenish automatically. These settings do not change posted stock ownership or GL balances.
-                                </Alert>
-                            )}
-                            {tab === 'Replenishment' && <ReplenishmentSummary data={data} metadata={metadata} onStockControl={() => changeTab('Stock Control')} />}
-                            {editing ? (
-                                <Card className='space-y-3'>
-                                    <h2 className='text-sm font-semibold text-ink'>Edit {tab.toLowerCase()}</h2>
-                                    <Problems items={problems} />
-                                    {controlWarnings.length > 0 && <Alert tone='warn'>Automatic replenishment is not active yet: {controlWarnings.join(' ')}</Alert>}
-                                    {!problems.length && !dirty && <p className='text-xs text-muted'>Change a value to enable Save.</p>}
-                                    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
-                                        {fields.map((k) => (
-                                            <div key={k} className={`min-w-0 ${k === 'purchaseUom' || k === 'remarks' ? 'sm:col-span-2' : ''}`}>
-                                                <SettingInput
-                                                    field={k}
-                                                    values={values}
-                                                    errors={errors}
-                                                    metadata={metadata}
-                                                    currencies={currencies}
-                                                    uomCategory={uomCategory}
-                                                    onUomCategory={(code) => {
-                                                        setUomCategory(code);
-                                                        setValues((p) => ({ ...p, purchaseUom: '' }));
-                                                    }}
-                                                    onChange={(field, value) => setValues((p) => ({ ...p, [field]: value }))}
-                                                    suppliers={suppliers}
-                                                    supplierScope={supplierScope}
-                                                />
-                                            </div>
-                                        ))}
-                                    </div>
-                                </Card>
-                            ) : (
-                                <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>
-                                    {fields.map((k) => (
-                                        <div key={k} className='min-w-0 rounded-xl border border-line bg-panel p-3'>
-                                            <HelpLabel text={k === 'leadTimeDays' ? 'Lead time (days)' : label(k)} help={EXPLANATIONS[k]} />
-                                            <strong className='mt-1 block break-words text-sm font-semibold text-ink'>
-                                                <SettingValue section={section} field={k} data={data} metadata={metadata} base={base} displayCurrency={displayCurrency} />
-                                            </strong>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                            {section === 'procurement' && (
-                                <p className='text-xs text-muted'>
-                                    Prices are stored in their entered currency. Display conversion is available only where an explicit configured rate exists; changing the display currency does not rewrite stored prices.
-                                </p>
-                            )}
-                        </>
+                        <ScrollGrid gap={editing ? 'gap-3' : 'gap-2'} dense={editing}>
+                            {editing
+                                ? fields.map((k) => (
+                                      <div key={k} className={`min-w-0 ${wide.has(k) ? 'col-span-2' : ''}`}>
+                                          <SettingInput
+                                              field={k}
+                                              values={values}
+                                              errors={errors}
+                                              metadata={metadata}
+                                              currencies={currencies}
+                                              uomCategory={uomCategory}
+                                              onUomCategory={(code) => {
+                                                  setUomCategory(code);
+                                                  setValues((p) => ({ ...p, purchaseUom: '' }));
+                                              }}
+                                              onChange={(field, value) => setValues((p) => ({ ...p, [field]: value }))}
+                                              suppliers={suppliers}
+                                              supplierScope={supplierScope}
+                                              compact
+                                          />
+                                      </div>
+                                  ))
+                                : [
+                                      ...levelBoxes,
+                                      ...fields.map((k) => (
+                                          <FieldBox key={k} title={k === 'leadTimeDays' ? 'Lead time (days)' : label(k)} help={EXPLANATIONS[k]} onHelp={setHelp} className={k === 'remarks' ? 'col-span-2' : ''}>
+                                              <SettingValue section={section} field={k} data={data} metadata={metadata} base={base} displayCurrency={displayCurrency} />
+                                          </FieldBox>
+                                      )),
+                                      ...(tab === 'Replenishment' && !levelBoxes.length && !fields.length
+                                          ? [
+                                                <p key='none' className='col-span-2 rounded-xl border border-line bg-panel p-3 text-sm text-soft'>
+                                                    {repl?.m ? `${repl.m.code} ${repl.m.name} is recorded only and has no parameters here.` : 'No replenishment strategy is set.'} Open the menu to see how this material is treated.
+                                                </p>,
+                                            ]
+                                          : []),
+                                  ]}
+                        </ScrollGrid>
                     )}
 
                     {tab === 'Movements' && (
-                        <>
-                            <p className='text-xs text-muted'>Chronological transaction record for this material and warehouse. Posted, reconciled entries drive Current Status.</p>
-                            <RichTable<Movement>
-                                id='inv.material.movements'
-                                tabKey='Movements'
-                                title='Material journal'
-                                columns={journalColumns}
-                                rows={data.materialMovements || []}
-                                rowKey={(m) => m.id}
-                                onRowClick={setMovement}
-                                empty='No journal entries yet. Post the first-time stock loading on Current Status.'
-                                fileName={`material-journal-${materialNumber}`}
-                                height='h-[calc(100dvh-20rem)]'
-                            />
-                        </>
+                        <RichTable<Movement>
+                            id='inv.material.movements'
+                            tabKey='Movements'
+                            title='Material journal'
+                            columns={journalColumns}
+                            rows={data.materialMovements || []}
+                            rowKey={(m) => m.id}
+                            onRowClick={setMovement}
+                            empty='No journal entries yet. Post the first-time stock loading on Current Status.'
+                            fileName={`material-journal-${materialNumber}`}
+                            height='h-full'
+                            menuTitle={menuTitle}
+                            menuTop={menuBody}
+                            menuOpen={tableMenu}
+                            onMenuOpenChange={setTableMenu}
+                            hideMenuButton
+                        />
                     )}
 
                     {tab === 'Criticality Analysis' && (
-                        <Card className='space-y-2'>
-                            <h2 className='text-sm font-semibold text-ink'>Criticality analysis</h2>
-                            <p className='text-sm text-muted'>
-                                Criticality assessment is not yet configured for this material. A future assessment will record operational impact, safety, lead time, redundancy and stockout risk.
-                            </p>
-                        </Card>
+                        <ScrollBody>
+                            <Card className='space-y-2'>
+                                <h2 className='text-sm font-semibold text-ink'>Criticality analysis</h2>
+                                <p className='text-sm text-muted'>
+                                    Criticality assessment is not yet configured for this material. A future assessment will record operational impact, safety, lead time, redundancy and stockout risk.
+                                </p>
+                            </Card>
+                        </ScrollBody>
                     )}
 
-                    {tab === 'Technical Data' && <TechnicalData data={data} metadata={metadata} />}
+                    {tab === 'Technical Data' && (
+                        <ScrollBody>
+                            <TechnicalData data={data} metadata={metadata} />
+                        </ScrollBody>
+                    )}
 
                     {opening && <OpeningStockSheet onClose={() => setOpening(false)} onPost={postOpening} />}
                     {isolation && <IsolationSheet data={data} initialReason={isolation} onClose={() => setIsolation('')} onSubmit={requestIsolation} />}
@@ -1517,6 +1741,16 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                         </Sheet>
                     )}
                 </>
+            )}
+            {help && (
+                <MenuSheet title={help.title} onClose={() => setHelp(null)}>
+                    <p className='rounded-xl bg-slate-800/60 p-3 text-sm text-slate-200'>{help.text}</p>
+                </MenuSheet>
+            )}
+            {menu && data && (
+                <MenuSheet title={menuTitle} onClose={() => setMenu(false)}>
+                    {menuBody(() => setMenu(false))}
+                </MenuSheet>
             )}
             {sheet}
         </Screen>

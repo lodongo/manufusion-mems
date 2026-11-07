@@ -30,6 +30,7 @@ export function Screen({
     toolbar,
     children,
     bodyClassName = '',
+    bodyFlush = false,
 }: {
     title: string;
     eyebrow?: string;
@@ -39,6 +40,8 @@ export function Screen({
     toolbar?: ReactNode;
     children: ReactNode;
     bodyClassName?: string;
+    /** The body does not scroll or pad itself: the screen places one full-height child (a table or a scrolling grid) that scrolls on its own. */
+    bodyFlush?: boolean;
 }) {
     return (
         <div className='flex h-[calc(100dvh-7rem)] flex-col'>
@@ -58,7 +61,7 @@ export function Screen({
                 </div>
                 {toolbar}
             </header>
-            <div className={`min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3 ${bodyClassName}`}>{children}</div>
+            <div className={bodyFlush ? `min-h-0 flex-1 overflow-hidden ${bodyClassName}` : `min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3 ${bodyClassName}`}>{children}</div>
         </div>
     );
 }
