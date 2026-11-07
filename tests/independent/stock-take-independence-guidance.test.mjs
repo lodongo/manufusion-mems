@@ -8,9 +8,9 @@ test('Stock Take: separation of duties is relaxed only through the platform test
     const server = read('backend/stockTake.ts');
     assert.match(server, /import \{ bypass \} from '\.\/testModeCore';/);
     // The conflict is tested first, so a bypass is recorded only when the rule would have refused.
-    assert.match(server, /\(str\(d\.countedBy\) === ctx\.uid \|\| str\(d\.countEditedBy\) === ctx\.uid\) && !bypass\(ctx, 'inv\.stocktake\.verify_independence'\)\) throw new HttpError\(403/);
-    assert.match(server, /\(str\(d\.postingRequestedBy\) === ctx\.uid \|\| str\(d\.countedBy\) === ctx\.uid\) && !bypass\(ctx, 'inv\.stocktake\.approve_independence'\)\) throw new HttpError\(403/);
-    assert.match(server, /str\(d\.countedBy\) === ctx\.uid && !bypass\(ctx, 'inv\.stocktake\.post_independence'\)\) throw new HttpError\(403/);
+    assert.match(server, /\(countersOf\(d\)\.includes\(ctx\.uid\) \|\| str\(d\.countEditedBy\) === ctx\.uid\) && !bypass\(ctx, 'inv\.stocktake\.verify_independence'\)\) throw new HttpError\(403/);
+    assert.match(server, /\(str\(d\.postingRequestedBy\) === ctx\.uid \|\| countersOf\(d\)\.includes\(ctx\.uid\)\) && !bypass\(ctx, 'inv\.stocktake\.approve_independence'\)\) throw new HttpError\(403/);
+    assert.match(server, /countersOf\(d\)\.includes\(ctx\.uid\) && !bypass\(ctx, 'inv\.stocktake\.post_independence'\)\) throw new HttpError\(403/);
     // The rules themselves are still there for everybody who is not in test mode.
     assert.match(server, /Posting must be approved by someone other than the person who requested it or counted the stock\./);
     assert.match(server, /The person who counted the stock cannot post it\./);

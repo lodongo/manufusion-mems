@@ -220,6 +220,8 @@ function readMetrics(m: Obj, allCount: number | null = null) {
         countAll,
         targetMaterials: countAll ? (allCount as number) : whole(m.targetMaterials, 'Materials to count', 1, 1_000_000),
         materialsPerPi: whole(m.materialsPerPi, 'Materials per PI document', 1, 1000),
+        // Independent count sheets printed per PI document (copies _A, _B …): where they disagree a recount is mandatory.
+        piCopies: whole(m.piCopies ?? 1, 'PI documents printed per PI', 1, MAX_COPIES),
     };
     if (plannedPis(metrics.targetMaterials, metrics.materialsPerPi) > 1000) throw new HttpError(400, 'A session can have at most 1000 PI documents; count fewer materials or put more on each PI.');
     return metrics;
@@ -308,7 +310,7 @@ async function getSession(ctx: OrgContext, id: string, mode: 'read' | 'write') {
  * applies to the organization (development only): the conflict is then allowed and recorded in the audit trail.
  */
 function independenceFor(ctx: OrgContext, data: Record<string, unknown>) {
-    const counted = str(data.countedBy) === ctx.uid;
+    const counted = countersOf(data).includes(ctx.uid);
     const requestedPosting = str(data.postingRequestedBy) === ctx.uid;
     return {
         testMode: ctx.testMode === true,
@@ -339,6 +341,15 @@ function publicSession(x: Doc, ctx: OrgContext) {
 }
 
 const CRITICALITY = ['A', 'B', 'C', 'D'];
+const MAX_COPIES = 5;
+const COPY_LETTERS = ['A', 'B', 'C', 'D', 'E'];
+/** Copy labels of a PI document: none when one sheet is printed, otherwise A, B, … */
+const copiesOf = (d: Obj) => {
+    const n = Math.min(MAX_COPIES, Math.max(1, Number(d.copies) || 1));
+    return n > 1 ? COPY_LETTERS.slice(0, n) : [];
+};
+/** Everyone who counted a PI document (all its copies). */
+const countersOf = (d: Obj) => [...new Set([str(d.countedBy), ...(Array.isArray(d.countedByAll) ? (d.countedByAll as unknown[]).map(str) : [])].filter(Boolean))];
 const NAIROBI_MS = 3 * 3_600_000;
 /** Today's date in Nairobi (the platform's business day), YYYY-MM-DD. */
 const nairobiDay = (ms = Date.now()) => new Date(ms + NAIROBI_MS).toISOString().slice(0, 10);
@@ -410,6 +421,7 @@ function readConfig(b: Record<string, unknown>) {
     const automatic = b.periodic === true && str(b.sessionCreation) === 'automatic';
     if (b.periodic === true && !['automatic', 'manual'].includes(str(b.sessionCreation))) throw new HttpError(400, 'Choose whether sessions are created automatically or manually');
     if (automatic && !str(b.warehouseId)) throw new HttpError(400, 'Choose the warehouse automatic sessions are created for');
+    if (!['automatic', 'manual'].includes(str(b.piCreation))) throw new HttpError(400, 'Choose whether PI documents are created automatically or manually');
     return {
         name,
         type,
@@ -417,6 +429,7 @@ function readConfig(b: Record<string, unknown>) {
         periodic: b.periodic === true,
         period: b.periodic === true ? period : '',
         sessionCreation: b.periodic === true ? str(b.sessionCreation) : 'manual',
+        piCreation: str(b.piCreation),
         durationDays: cycle ? null : duration,
         fullScope: cycle ? b.fullScope === true : false,
         byCriticality,
@@ -570,7 +583,7 @@ export const stockTakeRoutes = {
                 );
                 if (ok) {
                     await audited(ctx, 'inventory.stocktake.count_session.create', `Stock take session ${id}`, { warehouseId, configId, ...plan });
-                    return { ok: true, id };
+                    return { ok: true, id, ...(await autoGenerate(ctx.orgId, id, config.data, ctx.uid)) };
                 }
             }
             throw new HttpError(409, 'Unable to reserve a session number. Retry.');
@@ -603,7 +616,24 @@ export const stockTakeRoutes = {
             );
             if (ok === false) throw new HttpError(409, 'Someone else changed this session; reopen it and try again.');
             await audited(ctx, 'inventory.stocktake.count_session.setup', `Stock take session ${id}`, { name, ...metrics });
-            return { ok: true };
+            return { ok: true, ...(await autoGenerate(ctx.orgId, id, config?.data, ctx.uid)) };
+        }),
+    ],
+
+    'POST /api/org/inventory/stocktake/count-session/generate': [
+        orgRoute('org.inventory.stocktake.count_session.generate', null, async (ctx) => {
+            // Create all remaining planned PI documents of a session at once (automatic configurations, or a retry).
+            const root = rootOf(ctx);
+            const id = str(ctx.body.id);
+            if (!CAMPAIGN_RE.test(id)) throw new HttpError(400, 'Invalid stock take session');
+            const doc = await getDoc(`${root}/${CAMPAIGNS}/${id}`);
+            const warehouses = await warehousesFor(ctx, 'write');
+            if (!doc || !warehouses.some((w) => w.id === str(doc.data.warehouseId))) throw new HttpError(404, 'Stock take session not found');
+            await requireAtWarehouse(ctx, 'INV_ST_008', str(doc.data.warehouseId));
+            if (str(doc.data.endAt) && Date.parse(nowIso()) > Date.parse(str(doc.data.endAt))) throw new HttpError(409, 'This session has passed its end date.');
+            const r = await generateSessionPis(ctx.orgId, id, ctx.uid);
+            await audited(ctx, 'inventory.stocktake.count_session.generate', `Stock take session ${id}`, { created: r.created.length });
+            return { ok: true, created: r.created };
         }),
     ],
 
@@ -789,6 +819,7 @@ export const stockTakeRoutes = {
                         status: 'awaiting_print',
                         createdAt: now,
                         createdBy: ctx.uid,
+                        copies: Math.min(MAX_COPIES, Math.max(1, Number(isObj(campaign.data.metrics) ? campaign.data.metrics.piCopies : 1) || 1)),
                         printedAt: '',
                         parentPi: '',
                         recountNumber: 0,
@@ -812,11 +843,13 @@ export const stockTakeRoutes = {
             const id = str(ctx.body.id);
             const { root, doc } = await getSession(ctx, id, 'read');
             await requireAt(ctx, ['INV_ST_011', 'INV_ST_017', 'INV_ST_020', 'INV_ST_027', 'INV.view'], str(doc.data.warehouseId), 'read', 'You do not have permission to view PI documents for this warehouse.');
-            const stored = await getDoc(`${root}/stock_take_attachments/${id}`);
+            const copy = str(ctx.body.copy);
+            if (copy && !copiesOf(doc.data).includes(copy)) throw new HttpError(400, 'Unknown count sheet');
+            const stored = await getDoc(`${root}/stock_take_attachments/${copy ? `${id}_${copy}` : id}`);
             const legacy = isObj(doc.data.piAttachment) ? doc.data.piAttachment : null;
             const source = stored?.data ?? legacy;
             if (!source || !str(source.data)) throw new HttpError(404, 'No signed PI document is attached');
-            await audited(ctx, 'inventory.stocktake.attachment.view', `PI ${id}`, { name: str(source.name) });
+            await audited(ctx, 'inventory.stocktake.attachment.view', `PI ${id}${copy ? `_${copy}` : ''}`, { name: str(source.name) });
             return { name: str(source.name), type: str(source.type), data: str(source.data) };
         }),
     ],
@@ -871,6 +904,11 @@ export const stockTakeRoutes = {
 
             if (action === 'printed') {
                 if (status !== 'awaiting_print') throw new HttpError(409, 'PI is not awaiting printing');
+                // PI documents may be generated in advance; counting starts only once the session has started.
+                if (str(d.campaignId)) {
+                    const camp = await getDoc(`${root}/${CAMPAIGNS}/${str(d.campaignId)}`);
+                    if (camp && Date.parse(nowIso()) < Date.parse(str(camp.data.startAt))) throw new HttpError(409, 'This session has not started yet, so its PI documents cannot be issued for counting.');
+                }
                 return save({ status: 'counting', printedAt: nowIso(), printedBy: ctx.uid });
             }
 
@@ -878,9 +916,9 @@ export const stockTakeRoutes = {
                 if (status !== 'counting') throw new HttpError(409, 'PI must be printed before counts are entered');
                 const values = Array.isArray(ctx.body.counts) ? ctx.body.counts : [];
                 if (values.length !== lines.length) throw new HttpError(400, 'Every line requires a count');
-                values.forEach((v: unknown, i: number) => {
+                const counts = values.map((v: unknown) => {
                     if (v === '' || v === null || !Number.isFinite(Number(v)) || Number(v) < 0) throw new HttpError(400, 'Enter a non-negative count for every physical location');
-                    lines[i].counted = Number(v);
+                    return Number(v);
                 });
                 const attachment = ctx.body.attachment;
                 const type = isObj(attachment) ? str(attachment.type) : '';
@@ -895,8 +933,37 @@ export const stockTakeRoutes = {
                     throw new HttpError(400, 'Attach a signed PI PDF or image (maximum 450 KB)');
                 }
                 const meta = { name: str(attachment.name).slice(0, 120), type, uploadedBy: ctx.uid, uploadedAt: nowIso() };
-                await writeDoc(`${root}/stock_take_attachments/${id}`, { ...meta, data, sessionId: id, warehouseId });
-                return save({ lines, status: 'verification', countedAt: nowIso(), countedBy: ctx.uid, piAttachment: meta }, { attachment: meta.name });
+                const copies = copiesOf(d);
+                if (!copies.length) {
+                    counts.forEach((v: number, i: number) => (lines[i].counted = v));
+                    await writeDoc(`${root}/stock_take_attachments/${id}`, { ...meta, data, sessionId: id, warehouseId });
+                    return save({ lines, status: 'verification', countedAt: nowIso(), countedBy: ctx.uid, countedByAll: [ctx.uid], piAttachment: meta }, { attachment: meta.name });
+                }
+                // Several independent count sheets (PI_…_A, _B …): each is counted and signed by a different person.
+                const copy = str(ctx.body.copy);
+                if (!copies.includes(copy)) throw new HttpError(400, `Choose the count sheet (${copies.map((c) => `${id}_${c}`).join(', ')})`);
+                const done: Record<string, any> = isObj(d.copyCounts) ? { ...(d.copyCounts as Obj) } : {};
+                if (done[copy]) throw new HttpError(409, `Counts for ${id}_${copy} are already submitted`);
+                if (Object.values(done).some((x: any) => str(x?.countedBy) === ctx.uid) && !bypass(ctx, 'inv.stocktake.copy_independence'))
+                    throw new HttpError(403, 'Each count sheet must be counted by a different person; you already submitted another sheet of this PI.');
+                await writeDoc(`${root}/stock_take_attachments/${id}_${copy}`, { ...meta, data, sessionId: id, copy, warehouseId });
+                done[copy] = { counts, countedBy: ctx.uid, countedAt: nowIso(), attachment: meta };
+                const counters = [...new Set([...countersOf(d), ctx.uid])];
+                const remaining = copies.filter((c) => !done[c]);
+                if (remaining.length) return save({ copyCounts: done, countedByAll: counters, countedBy: str(d.countedBy) || ctx.uid }, { copy, remaining });
+                // Every sheet is in: where the sheets agree the count stands; where they differ a recount is mandatory.
+                let mismatched = 0;
+                lines.forEach((line, i) => {
+                    const seen = copies.map((c) => Number(done[c].counts[i]));
+                    line.copyCounts = Object.fromEntries(copies.map((c, k) => [c, seen[k]]));
+                    line.copyMismatch = seen.some((v) => v !== seen[0]);
+                    line.counted = seen[0];
+                    if (line.copyMismatch) mismatched++;
+                });
+                return save(
+                    { lines, copyCounts: done, countedByAll: counters, status: 'verification', countedAt: nowIso(), countedBy: str(d.countedBy) || ctx.uid, piAttachment: done[copies[0]].attachment, copyMismatches: mismatched },
+                    { copy, mismatched }
+                );
             }
 
             if (action === 'edit_counts') {
@@ -915,9 +982,12 @@ export const stockTakeRoutes = {
 
             if (action === 'verify') {
                 if (status !== 'verification') throw new HttpError(409, 'Session not awaiting verification');
-                if ((str(d.countedBy) === ctx.uid || str(d.countEditedBy) === ctx.uid) && !bypass(ctx, 'inv.stocktake.verify_independence')) throw new HttpError(403, 'Counts must be verified by someone other than the person who counted or corrected them.');
+                if ((countersOf(d).includes(ctx.uid) || str(d.countEditedBy) === ctx.uid) && !bypass(ctx, 'inv.stocktake.verify_independence')) throw new HttpError(403, 'Counts must be verified by someone other than the person who counted or corrected them.');
                 const recountIds = Array.isArray(ctx.body.recountIndices) ? ctx.body.recountIndices.map(Number) : [];
-                if (recountIds.some((i: number) => !Number.isInteger(i) || i < 0 || i >= lines.length || lines[i].expected === lines[i].counted)) throw new HttpError(400, 'Recount selection must contain inconsistent lines');
+                if (recountIds.some((i: number) => !Number.isInteger(i) || i < 0 || i >= lines.length || (lines[i].expected === lines[i].counted && lines[i].copyMismatch !== true))) throw new HttpError(400, 'Recount selection must contain inconsistent lines');
+                // Where the count sheets disagree the recount is mandatory: such a line can never be accepted as counted.
+                const missingRecount = lines.map((l, i) => (l.copyMismatch === true && !recountIds.includes(i) ? i : -1)).filter((i) => i >= 0);
+                if (missingRecount.length) throw new HttpError(409, `${count(missingRecount.length, 'line')} differ${missingRecount.length === 1 ? 's' : ''} between the count sheets and must be recounted.`);
                 lines.forEach((line, i) => {
                     line.verified = true;
                     line.recount = recountIds.includes(i);
@@ -951,6 +1021,8 @@ export const stockTakeRoutes = {
                         recountNumber: number,
                         lines: flagged.map((x) => ({
                             ...x,
+                            copyMismatch: false,
+                            copyCounts: null,
                             expected: currentSnapshot.find((v) => v.materialId === str(x.materialId) && v.binId === str(x.binId))?.expected ?? null,
                             counted: null,
                             verified: false,
@@ -1012,7 +1084,7 @@ export const stockTakeRoutes = {
 
             if (action === 'approve_posting') {
                 if (status !== 'pending_post_approval') throw new HttpError(409, 'Posting not awaiting approval');
-                if ((str(d.postingRequestedBy) === ctx.uid || str(d.countedBy) === ctx.uid) && !bypass(ctx, 'inv.stocktake.approve_independence')) throw new HttpError(403, 'Posting must be approved by someone other than the person who requested it or counted the stock.');
+                if ((str(d.postingRequestedBy) === ctx.uid || countersOf(d).includes(ctx.uid)) && !bypass(ctx, 'inv.stocktake.approve_independence')) throw new HttpError(403, 'Posting must be approved by someone other than the person who requested it or counted the stock.');
                 const steps = coaSteps(d);
                 if (!steps.length) return save({ status: 'approved_for_posting', postingApprovedBy: ctx.uid, postingApprovedAt: nowIso() });
                 // Chart of Authority: the current level is approved by a different person holding its job role.
@@ -1032,7 +1104,7 @@ export const stockTakeRoutes = {
 
             if (action === 'reject_posting') {
                 if (status !== 'pending_post_approval') throw new HttpError(409, 'Posting not awaiting approval');
-                if ((str(d.postingRequestedBy) === ctx.uid || str(d.countedBy) === ctx.uid) && !bypass(ctx, 'inv.stocktake.approve_independence')) throw new HttpError(403, 'You cannot return a posting you requested or counted.');
+                if ((str(d.postingRequestedBy) === ctx.uid || countersOf(d).includes(ctx.uid)) && !bypass(ctx, 'inv.stocktake.approve_independence')) throw new HttpError(403, 'You cannot return a posting you requested or counted.');
                 if (coaSteps(d).length) {
                     const check = coaCheck(ctx, d);
                     if (!check.ok) throw new HttpError(403, check.why || 'You cannot return this posting.');
@@ -1045,7 +1117,7 @@ export const stockTakeRoutes = {
 
             if (action === 'post') {
                 if (status !== 'approved_for_posting') throw new HttpError(409, 'Posting must be approved first. Submit the PI for posting approval.');
-                if (str(d.countedBy) === ctx.uid && !bypass(ctx, 'inv.stocktake.post_independence')) throw new HttpError(403, 'The person who counted the stock cannot post it.');
+                if (countersOf(d).includes(ctx.uid) && !bypass(ctx, 'inv.stocktake.post_independence')) throw new HttpError(403, 'The person who counted the stock cannot post it.');
                 if (coaSteps(d).some((x) => x.status !== 'approved')) throw new HttpError(409, 'Every Chart of Authority level must approve before posting.');
                 const pending = lines.filter((x) => x.verified && !x.recount && !x.posted);
                 if (!pending.length) throw new HttpError(409, 'No eligible lines to reconcile');
@@ -1122,6 +1194,107 @@ export const stockTakeRoutes = {
         }),
     ],
 };
+
+// ---------------------------------------------------------------------------
+// Automatic PI documents: when a configuration says PI documents are created automatically, every planned PI document
+// of a session is generated as soon as the session is complete (at creation for a manual session, at setup for an
+// automatic one). Locations already on the session's PI documents are skipped; one material is never put twice on a
+// PI; nothing is generated for materials with no reconciled stock baseline (the whole run is refused, naming them).
+// Counting still waits for the session's start (Confirm printed is refused before it).
+// ---------------------------------------------------------------------------
+
+const piName = (configName: string, iso: string) => {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(iso));
+    const part = (key: string) => parts.find((p) => p.type === key)?.value || '';
+    return `${configName} ${part('day')}${part('month').toUpperCase()}${part('year')}${part('hour')}${part('minute')}`;
+};
+
+export async function generateSessionPis(orgId: string, campaignId: string, by: string): Promise<{ created: string[] }> {
+    const root = `organizations/${orgId}`;
+    const campaign = await getDoc(`${root}/${CAMPAIGNS}/${campaignId}`);
+    if (!campaign || str(campaign.data.status) !== 'open') throw new HttpError(409, 'This stock take session is not open.');
+    if (campaign.data.setupRequired === true) throw new HttpError(409, 'Complete the session setup first.');
+    const config = await getDoc(`${root}/stock_take_configs/${str(campaign.data.configId)}`);
+    if (!config || config.data.active === false) throw new HttpError(403, 'Configuration not accessible');
+    const warehouseId = str(campaign.data.warehouseId);
+    const metrics = metricsOf(campaign.data);
+    const planned = plannedPis(metrics.targetMaterials, metrics.materialsPerPi);
+    const existing = (await listDocs(`${root}/stock_take_sessions`)).filter((x) => str(x.data.campaignId) === campaignId && !str(x.data.parentPi) && str(x.data.status) !== 'disregarded');
+    const room = planned - existing.length;
+    if (room <= 0) return { created: [] };
+    const taken = new Set(existing.flatMap((x) => (Array.isArray(x.data.lines) ? x.data.lines : [])).filter(isObj).map((l) => `${str(l.materialId)}|${str(l.binId)}`));
+    let pool = (await selectableLocations(root, warehouseId, config.data)).filter((x) => !taken.has(`${x.materialId}|${x.binId}`));
+    if (str(config.data.selection) !== 'Sequence') pool = randomSample(pool, pool.length);
+    const need = Math.max(0, metrics.targetMaterials - taken.size);
+    const picked = pool.slice(0, need);
+    if (!picked.length) {
+        await writeDoc(`${root}/${CAMPAIGNS}/${campaignId}`, { ...campaign.data, locationsExhausted: true, updatedAt: nowIso() } as never);
+        throw new HttpError(409, 'There are no more mapped locations to put on PI documents for this session.');
+    }
+    const unbased = picked.filter((x) => x.expected === null);
+    if (unbased.length) {
+        const names = [...new Set(unbased.map((x) => x.materialNumber || x.materialId))];
+        throw new HttpError(409, `${names.length === 1 ? 'Material' : `${names.length} materials`} ${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''} ${names.length === 1 ? 'has' : 'have'} no reconciled stock in this warehouse, so no PI documents were generated. Post the opening stock (Material detail > Current Status) or reconcile the open stock movements, then tap Create PI documents.`);
+    }
+    // Fill PI documents in order; a material already on a PI moves to the next one (one material per PI document).
+    const chunks: Array<typeof picked> = [];
+    for (const loc of picked) {
+        let target = chunks.find((c) => c.length < metrics.materialsPerPi && !c.some((x) => x.materialId === loc.materialId));
+        if (!target) {
+            if (chunks.length >= room) continue;
+            target = [];
+            chunks.push(target);
+        }
+        target.push(loc);
+    }
+    const copies = Math.min(MAX_COPIES, Math.max(1, Number(isObj(campaign.data.metrics) ? campaign.data.metrics.piCopies : 1) || 1));
+    const created: string[] = [];
+    for (const [k, chunk] of chunks.entries()) {
+        const n = await nextOrgCounter(orgId, 'stockTakePiSeq');
+        if (n > 99_999_999) throw new HttpError(409, 'PI document sequence exhausted');
+        const id = `PI_${String(n).padStart(8, '0')}`;
+        const now = nowIso();
+        const ok = await writeDoc(
+            `${root}/stock_take_sessions/${id}`,
+            {
+                piNumber: id,
+                sessionName: piName(str(config.data.name), now),
+                campaignId,
+                campaignName: str(campaign.data.name),
+                piSequenceInSession: existing.length + k + 1,
+                configId: config.id,
+                configName: str(config.data.name),
+                warehouseId,
+                type: str(config.data.type),
+                status: 'awaiting_print',
+                createdAt: now,
+                createdBy: by,
+                generated: true,
+                copies,
+                printedAt: '',
+                parentPi: '',
+                recountNumber: 0,
+                lines: chunk.map((x) => ({ binId: x.binId, materialId: x.materialId, materialNumber: x.materialNumber, description: x.description, expected: x.expected, counted: null, verified: false, recount: false, posted: false })),
+                documentSize: chunk.length,
+            } as never,
+            { exists: false }
+        );
+        if (ok) created.push(id);
+    }
+    if (created.length < room && chunks.length < room) await writeDoc(`${root}/${CAMPAIGNS}/${campaignId}`, { ...((await getDoc(`${root}/${CAMPAIGNS}/${campaignId}`))?.data ?? campaign.data), locationsExhausted: true, updatedAt: nowIso() } as never);
+    await audit([{ category: 'inventory', action: 'inventory.stocktake.generate', orgId, target: { type: 'stock_take_session', id: campaignId, label: `Stock take session ${campaignId}` }, details: `${created.length} PI document(s) by ${by}: ${created.slice(0, 20).join(', ')}${created.length > 20 ? ', …' : ''}` }]);
+    return { created };
+}
+
+/** After a session is complete: generate its PI documents when the configuration says so; a failure is reported, not thrown. */
+async function autoGenerate(orgId: string, campaignId: string, configData: Obj | undefined, by: string) {
+    if (str(configData?.piCreation) !== 'automatic') return { generated: 0, generateError: '' };
+    try {
+        return { generated: (await generateSessionPis(orgId, campaignId, by)).created.length, generateError: '' };
+    } catch (e) {
+        return { generated: 0, generateError: e instanceof Error ? e.message : 'PI documents could not be generated' };
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Automation (shared heartbeat, job inv.stocktake-sessions): at each Nairobi midnight, every enabled periodic

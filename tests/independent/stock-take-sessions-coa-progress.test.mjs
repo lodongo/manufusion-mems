@@ -200,3 +200,25 @@ test('Cycle count: always periodic, full-scope question, cycle runs to the perio
     assert.match(screen, /\{clusterType && warehouseField\}/);
     assert.match(screen, /locked=\{cfg\?\.fullScope === true\}/);
 });
+
+test('Automatic PI documents and independent count sheets (_A, _B) with a mandatory recount where they differ', () => {
+    const server = read('backend/stockTake.ts');
+    assert.match(server, /Choose whether PI documents are created automatically or manually/);
+    assert.match(server, /export async function generateSessionPis\(orgId: string, campaignId: string, by: string\)/);
+    assert.match(server, /return \{ ok: true, id, \.\.\.\(await autoGenerate\(ctx\.orgId, id, config\.data, ctx\.uid\)\) \};/, 'manual session: generated at creation');
+    assert.match(server, /return \{ ok: true, \.\.\.\(await autoGenerate\(ctx\.orgId, id, config\?\.data, ctx\.uid\)\) \};/, 'automatic session: generated at setup');
+    assert.match(server, /'POST \/api\/org\/inventory\/stocktake\/count-session\/generate'/);
+    assert.match(server, /piCopies: whole\(m\.piCopies \?\? 1, 'PI documents printed per PI', 1, MAX_COPIES\)/);
+    assert.match(server, /Each count sheet must be counted by a different person/);
+    assert.match(server, /line\.copyMismatch = seen\.some\(\(v\) => v !== seen\[0\]\);/);
+    assert.match(server, /must be recounted\./);
+    assert.match(server, /copyMismatch: false,\s+copyCounts: null,/, 'recount PIs start clean');
+    assert.match(server, /This session has not started yet, so its PI documents cannot be issued for counting\./);
+    assert.match(server, /const counted = countersOf\(data\)\.includes\(ctx\.uid\);/);
+    const screen = read('src/org/StockTake.tsx');
+    assert.match(screen, /label='PI documents are created \*'/);
+    assert.match(screen, /label='PI documents printed per PI \*'/);
+    assert.match(screen, /for \(const c of sheets\) await downloadPiSheet\(s, warehouse, `\$\{s\.piNumber\}_\$\{c\}`\);/);
+    assert.match(screen, /Sheets differ: recount/);
+    assert.match(screen, /key='generate'/);
+});
