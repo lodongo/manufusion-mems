@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronDown, ChevronRight, ChevronUp, Columns3, Download, Eye, EyeOff, Filter, Layers, Plus, RotateCcw, Search, Sigma, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronDown, ChevronRight, ChevronUp, Columns3, Download, Eye, EyeOff, Filter, Layers, MoreVertical, Plus, RotateCcw, Search, Sigma, Trash2, X } from 'lucide-react';
 import { FUNCTIONS, FormulaError, QUICK, evaluate, parseFormula, toNumber } from '../lib/tableFormula';
 import { MAX_GROUP_LEVELS, aggregate, allPaths, buildGroups, detectValueColumns, flatten, fmtNumber, type Agg, type FlatItem } from '../lib/tableGroups';
 import { buildXlsx, downloadBlob, type Cell } from '../lib/xlsx';
@@ -12,6 +12,8 @@ import { flush, track } from '../lib/audit';
 // global search, criteria filters, sortable columns, show/hide/reorder columns, group by up to four levels with sum,
 // average and count of value columns (detected automatically), formula columns, Excel download, saved templates,
 // lazy rendering and an always-visible action bar.
+// A screen can pass menuTop to fold its own choices (warehouse, refresh, status ...) into the same single menu button as the
+// table tools, so the page needs no header or toolbar of its own and the table gets the whole screen.
 // The table body scrolls inside its own frame so the page itself never scrolls.
 
 export interface Column<T> {
@@ -186,6 +188,8 @@ export default function RichTable<T>({
     height = 'h-[calc(100dvh-12rem)]',
     rowClassName,
     allowExport = true,
+    menuTop,
+    menuTitle = 'Menu',
 }: {
     /** Unique id used to remember templates for this table. */
     id: string;
@@ -204,6 +208,10 @@ export default function RichTable<T>({
     rowClassName?: (row: T) => string;
     /** Set false when data export is restricted pending a server-audited export handler. */
     allowExport?: boolean;
+    /** Screen choices shown at the top of the one menu (above the table tools). Receives a function that closes the menu. */
+    menuTop?: (close: () => void) => ReactNode;
+    /** Name of the one menu when menuTop is used. */
+    menuTitle?: string;
 }) {
     // Keep device templates isolated by the authenticated account. Older browser-only
     // templates are available to import explicitly rather than silently assigning
@@ -212,6 +220,8 @@ export default function RichTable<T>({
     const storeKey = `mems.table.${ownerUid}.${id}`;
     const legacyKey = `mems.table.${id}`;
     const route = window.location.hash.replace(/^#\/?/, '');
+    // One menu button for everything (screen choices and table tools), on phones and on larger screens.
+    const unified = !!menuTop;
     const canSync = !!firebaseAuth.currentUser && /^organization_(home|admin)\/[A-Za-z0-9_/-]{1,145}$/.test(route);
     const defaults = useMemo<View>(() => ({ order: columns.map((c) => c.key), hidden: columns.filter((c) => c.hidden).map((c) => c.key), sort: null, criteria: [], groupBy: [], valueCols: null, formulas: [] }), [columns]);
     const [view, setView] = useState<View>(() => {
@@ -646,15 +656,16 @@ export default function RichTable<T>({
         <div className={`flex ${height} min-h-[22rem] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900`}>
 
             {mobileToolsOpen && createPortal(
-                <div className='fixed inset-0 z-[9999] flex items-end justify-center bg-black/70 sm:hidden' role='presentation'>
+                <div className={`fixed inset-0 z-[9999] flex items-end justify-center bg-black/70 ${unified ? '' : 'sm:hidden'}`} role='presentation'>
                     <button type='button' aria-label='Close table tools' onClick={() => closeMobile(true)} className='absolute inset-0 cursor-default' />
-                    <section role='dialog' aria-modal='true' aria-label={activeAction ? activeAction.label : 'Table tools'} className='relative z-10 flex max-h-[90dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-slate-700 bg-slate-900 text-white shadow-2xl'>
+                    <section role='dialog' aria-modal='true' aria-label={activeAction ? activeAction.label : unified ? menuTitle : 'Table tools'} className='relative z-10 flex max-h-[90dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-slate-700 bg-slate-900 text-white shadow-2xl'>
                         <div className='flex shrink-0 items-center gap-3 border-b border-slate-700 px-4 py-3'>
                             {activeAction && <button type='button' onClick={() => { setPanel(''); setMobileSnapshot(null); }} aria-label='Back to table tools' className='flex h-10 w-10 items-center justify-center rounded-lg border border-slate-700'><ChevronRight className='h-5 w-5 rotate-180'/></button>}
-                            <h2 className='min-w-0 flex-1 text-base font-semibold'>{activeAction?.label ?? 'Table tools'}</h2>
+                            <h2 className='min-w-0 flex-1 text-base font-semibold'>{activeAction?.label ?? (unified ? menuTitle : 'Table tools')}</h2>
                             <button type='button' onClick={() => closeMobile(true)} aria-label='Close table tools' className='flex h-10 w-10 items-center justify-center rounded-lg border border-slate-700'><X className='h-5 w-5'/></button>
                         </div>
                         <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain p-3'>
+                            {!panel && menuTop && <div className='mb-3 border-b border-slate-700 pb-3'>{menuTop(() => closeMobile(false))}</div>}
                             {!panel && <div className='space-y-1'>
                                 {mobileActions.map(({key,label,Icon})=><button key={key} type='button' onClick={() => { setMobileSnapshot(view); setPanel(key); }} className='flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400'><Icon className='h-5 w-5 shrink-0 text-emerald-300'/><span className='flex-1'>{label}</span><ChevronRight className='h-4 w-4 text-slate-400'/></button>)}
                                 {allowExport && <button type='button' onClick={() => { exportExcel(); closeMobile(false); }} disabled={!filtered.length} className='flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm disabled:opacity-40'><Download className='h-5 w-5 text-emerald-300'/>Export Excel</button>}
@@ -685,11 +696,11 @@ export default function RichTable<T>({
                             onChange={(e) => setSearch(e.target.value)}
                             className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-14 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none sm:text-sm'
                         />
-                        <button type='button' aria-expanded={mobileToolsOpen} aria-label='Table tools' title='Table tools' onClick={() => { setPanel(''); setMobileSnapshot(null); setMobileToolsOpen(true); }} className='absolute right-1 top-1/2 flex h-9 w-10 -translate-y-1/2 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-white sm:hidden'>
-                            <Columns3 className='h-5 w-5'/>
+                        <button type='button' aria-expanded={mobileToolsOpen} aria-haspopup='dialog' aria-label={unified ? menuTitle : 'Table tools'} title={unified ? menuTitle : 'Table tools'} onClick={() => { setPanel(''); setMobileSnapshot(null); setMobileToolsOpen(true); }} className={`absolute right-1 top-1/2 flex h-9 w-10 -translate-y-1/2 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-white ${unified ? '' : 'sm:hidden'}`}>
+                            {unified ? <MoreVertical className='h-5 w-5'/> : <Columns3 className='h-5 w-5'/>}
                         </button>
                     </div>
-                    <div className='hidden items-center gap-2 sm:flex'>
+                    {!unified && <div className='hidden items-center gap-2 sm:flex'>
                     <button type='button' aria-label='Filters' title='Filter by criteria' onClick={() => setPanel(panel === 'filters' ? '' : 'filters')} className={iconBtn(panel === 'filters' || view.criteria.length > 0)}>
                         <Filter className='h-4 w-4' />
                         {view.criteria.length > 0 && <span className='absolute -right-1 -top-1 rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-onbrand'>{view.criteria.length}</span>}
@@ -711,7 +722,7 @@ export default function RichTable<T>({
                     {allowExport && <button type='button' aria-label='Download Excel' title='Download Excel' onClick={exportExcel} disabled={!filtered.length} className={`${iconBtn(false)} disabled:opacity-40`}>
                         <Download className='h-4 w-4' />
                     </button>}
-                    </div>
+                    </div>}
                 </div>
                 <div className='flex items-center justify-between gap-2'>
                     <p className='truncate text-xs text-slate-500'>
@@ -723,7 +734,7 @@ export default function RichTable<T>({
                     {actions && <div className='flex shrink-0 items-center gap-2'>{actions}</div>}
                 </div>
 
-                <div className='hidden sm:block'>{panelContent}</div>
+                {!unified && <div className='hidden sm:block'>{panelContent}</div>}
             </div>
 
             {/* Scrollable content: only this area scrolls */}

@@ -875,5 +875,45 @@
       "Confirm a user outside the relevant organization, assignment or Chat room cannot view its monitored action or its Calendar milestone"
     ],
     "expected": "My To-do shows each owned or assigned action with one source-linked status/history, and Quick Calendar displays due/closure markers without generating duplicate actions. Updates notify the originating source while privacy and mail permissions remain enforced."
+  },
+  {
+    "name": "Inventory on hand: one action bar and one menu",
+    "description": "The Inventory on hand page has no header block; the search box and one menu button are the action bar and the table fills the screen.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "inventory on hand layout",
+      "warehouse choice in the table menu",
+      "table tools in one menu"
+    ],
+    "steps": [
+      "On a phone open Inventory Management > Inventory on hand",
+      "Confirm there is no title block, refresh button or warehouse dropdown above the table: only the search box with a menu button, one line with the row count, then the table to the bottom of the screen",
+      "Scroll the table: only the rows scroll, the search box and menu button stay on top, the page itself does not move",
+      "Open the menu: with more than one accessible warehouse a Warehouse list shows with a tick on the current choice; choose one and confirm the table and the row-count line follow",
+      "In the menu confirm Refresh, then Filters, Group by, Formula columns, Columns, Saved templates and Export Excel; use a filter such as On hand less than 10 and confirm the rows update",
+      "Tap a row and confirm the material opens as before"
+    ],
+    "expected": "The table has the whole screen, every choice sits behind the one menu button, and Excel downloads are still audited."
+  },
+  {
+    "name": "Material photos: take photo and gallery",
+    "description": "On a phone, Take photo opens the camera and Gallery opens the picker; the saved photo or the reason it failed is shown right under the photo area.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "material photo capture",
+      "material photo gallery",
+      "android wrapper camera hand-off"
+    ],
+    "steps": [
+      "Install the latest Manufusion MEMS DEV Android APK (uninstall the older one first) and open a material that has no photo, as a person with the inventory edit right for that warehouse",
+      "Tap Take photo: the camera app opens; take a photo and accept it; confirm Saving photo appears and then the photo shows as the cover",
+      "Tap the gallery button and choose two photos at once; confirm all are added and the count updates, up to eight photos",
+      "Cancel the camera and the picker once each; confirm nothing is added and no error shows",
+      "Choose a file that is not a photo; confirm a clear message appears directly under the photo area",
+      "Confirm each added photo has an audit entry (inventory.material.photo.add) and that a person without the inventory edit right sees no photo buttons"
+    ],
+    "expected": "Photos are added from the camera and the gallery, any problem is shown next to the buttons, and every change is audited."
   }
 ]
