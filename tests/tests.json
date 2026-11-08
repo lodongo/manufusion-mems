@@ -1119,5 +1119,26 @@
       "Cycle Count config, a session each day (automatic): after midnight confirm a session for the day; set up the first one with the whole cycle's materials; confirm later days are set up automatically with an even share and never repeat a location"
     ],
     "expected": "PIs close in one accept step or on the last approval, closed PIs disappear from the active list, and cycle counts are spread across days."
+  },
+  {
+    "name": "Material criticality analysis: assessment, grid, approval and on-demand strategy",
+    "description": "Materials are assessed per warehouse on the consequence and supply-risk factors declared in Inventory > Setup, each rated 1 to 3. The score is scaled to class A–D, with a very significant safety, food safety, environment or legal rating forcing A. Movement 1–4 comes from months with issues, or is set by hand when there is less than six months of history. The result is placed on the 4×4 grid and needs approval by someone else. When the setup makes the strategy follow the analysis, cells at or below the cutoff become RP07 (on demand) and are locked. RP07 never replenishes automatically.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "criticality setup",
+      "criticality assessment",
+      "criticality approval",
+      "criticality grid",
+      "on-demand strategy lock"
+    ],
+    "steps": [
+      "Inventory > Setup > Criticality setup: declare factors and weights, keep the high-consequence override on, pick cutoff C2, choose 'Dependent on criticality', save with a reason",
+      "Material detail > Criticality Analysis: rate every factor, check the movement from the monthly bars (or choose it with a reason when history is under six months), and submit; confirm the preview cell",
+      "As another person approve it: confirm the approved cell, the class shown in Inventory Information (read only), and for a cell at or below C2 that the strategy is RP07 and Stock Control refuses a change",
+      "Rate personal safety 3 on a low-scoring material: confirm the class becomes A",
+      "Inventory > Setup > Criticality grid: confirm counts per cell, tap a cell to filter, and download the register to Excel; switch the setup back to Manual and confirm strategies are unlocked"
+    ],
+    "expected": "Every material gets a reproducible, approved criticality cell. Materials at or below the cutoff are bought on demand and never replenished automatically."
   }
 ]

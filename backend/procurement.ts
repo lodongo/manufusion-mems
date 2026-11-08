@@ -1,3 +1,4 @@
+import { strategyLockedByCriticality } from './criticality';
 import { catalogueGuidance, type CatalogueGuidance } from './catalogueGuidance';
 import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
 import {integratedReleaseProblems} from './catalogueReleaseGuard';
@@ -1047,6 +1048,14 @@ export const procurementRoutes = {
                 const selected=options.find(v=>v.code===str(clean[field]));
                 if(!selected||!selected.active||!selected.selectable)
                     throw new HttpError(400,field+' must use an enabled code from MEMS Admin → Procurement metadata.');
+            }
+            // The criticality class comes only from an approved criticality assessment.
+            if(has('criticalityClass')&&str(clean.criticalityClass)!==str(before.criticalityClass))
+                throw new HttpError(409,'The criticality class comes from the criticality assessment (Material detail → Criticality Analysis).');
+            // A strategy set by the criticality analysis (on demand below the cutoff) cannot be changed by hand.
+            if(has('replenishmentStrategy')&&str(clean.replenishmentStrategy)!==str(before.replenishmentStrategy)){
+                const lock=await strategyLockedByCriticality(ctx.orgId,before);
+                if(lock)throw new HttpError(409,lock);
             }
             if(has('replenishmentStrategy')){
                 // Preserve the MRP engine's existing stockingPolicy index and

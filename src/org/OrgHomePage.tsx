@@ -39,6 +39,7 @@ const InventoryOnHand = lazy(() => import('./InventoryOnHand'));
 const InventoryDashboard = lazy(() => import('./InventoryDashboard'));
 const InventoryOperations = lazy(() => import('./InventoryOperations'));
 const StockTake = lazy(() => import('./StockTake'));
+const InventorySetup = lazy(() => import('./CriticalityAnalysis'));
 const WorkflowInbox = lazy(() => import('./WorkflowInbox'));
 const MyAccess = lazy(() => import('./MyAccess'));
 const HrShell = lazy(() => import('./HrShell'));
@@ -184,7 +185,7 @@ function moduleMenus(data: OrgContextData, canAdmin: boolean): ModuleMenu[] {
             const contractOwners = new Set(['FIN','INV','MNT','AST','PRC','PAY','SAL','LOG','MFG','QLT','CST']);
             if(contractOwners.has(module.code) && hasAny(data.permissions,'FIN'))
                 links.push({label:'GL-linked transaction handlers',path:`fin_transactions/${module.code}`,prefix:'FIN.'});
-            const capabilities = (module.code === 'INV' ? ['Dashboard','On Hand List','Invoices','Stock Take','Stock Movements','Alerts'] : [] as string[]).map((label, index) => ({
+            const capabilities = (module.code === 'INV' ? ['Dashboard','On Hand List','Invoices','Stock Take','Stock Movements','Alerts','Setup'] : [] as string[]).map((label, index) => ({
                 label,
                 path: module.code === 'INV' && index === 1 ? 'inventory_on_hand' : `module/${module.code}/feature/${index}`,
                 permission: `${module.code}.feature.${index}.view`,
@@ -436,6 +437,7 @@ export default function OrgHomePage({
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='3') content = <StockTake />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='4') content = <InventoryOperations mode='movements' />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='5') content = <InventoryOperations mode='alerts' />;
+    else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='6') content = <InventorySetup />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub!=='feature') content = <ModuleWorkspace menu={activeModule} />;
     else if (section === 'module' && activeModule) {
         const featureIndex = sub === 'feature' ? Number(route.split('/')[4]) : undefined;
