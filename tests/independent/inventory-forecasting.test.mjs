@@ -127,6 +127,8 @@ test('server: levels from the forecast are locked on the update route, proposals
     assert.match(policy, /id: 'forecast-propose-approve', a: 'INV\.forecast\.edit', b: 'INV\.forecast\.approve'/);
     assert.match(policy, /T\('inv_forecast_approver'/);
     assert.match(read('backend/index.ts'), /\.\.\.forecastingRoutes/);
+    assert.doesNotMatch(server, /orgRoute\('org\.inventory\.forecast\.[a-z.]+', null/, 'every forecast route declares its permission');
+    assert.doesNotMatch(read('backend/criticality.ts'), /orgRoute\('org\.inventory\.criticality\.[a-z.]+', null/, 'every criticality route declares its permission');
 });
 
 test('UI: Forecasting tab after Criticality Analysis, simulation off on load, criticality results on the Overview', () => {

@@ -206,7 +206,7 @@ function publicSetup(setup: ForecastSetup, version: number, saved: Obj | null) {
 
 export const forecastingRoutes = {
     'POST /api/org/inventory/forecast/setup/get': [
-        orgRoute('org.inventory.forecast.setup.get', null, async (ctx) => {
+        orgRoute('org.inventory.forecast.setup.get', 'INV.forecast.view', async (ctx) => {
             canView(ctx);
             const { setup, version, saved } = await getForecastSetup(ctx.orgId);
             return { ...publicSetup(setup, version, saved), canEdit: holdsAnywhere(ctx, [FC.setup]) };
@@ -214,7 +214,7 @@ export const forecastingRoutes = {
     ],
 
     'POST /api/org/inventory/forecast/setup/save': [
-        orgRoute('org.inventory.forecast.setup.save', null, async (ctx) => {
+        orgRoute('org.inventory.forecast.setup.save', 'INV.forecast.setup', async (ctx) => {
             if (!holdsAnywhere(ctx, [FC.setup])) throw new HttpError(403, 'Forecasting setup permission required');
             const reason = str(ctx.body.reason).trim();
             if (reason.length < 10) throw new HttpError(400, 'Give a reason of at least 10 characters for the change');
@@ -244,7 +244,7 @@ export const forecastingRoutes = {
     ],
 
     'POST /api/org/inventory/forecast/status': [
-        orgRoute('org.inventory.forecast.status', null, async (ctx) => {
+        orgRoute('org.inventory.forecast.status', 'INV.forecast.view', async (ctx) => {
             canView(ctx);
             const { materialId, warehouseId } = ids(ctx.body);
             await visibleWarehouse(ctx, warehouseId);
@@ -256,7 +256,7 @@ export const forecastingRoutes = {
     ],
 
     'POST /api/org/inventory/forecast/get': [
-        orgRoute('org.inventory.forecast.get', null, async (ctx) => {
+        orgRoute('org.inventory.forecast.get', 'INV.forecast.view', async (ctx) => {
             canView(ctx);
             const { materialId, warehouseId } = ids(ctx.body);
             await visibleWarehouse(ctx, warehouseId);
@@ -290,7 +290,7 @@ export const forecastingRoutes = {
     ],
 
     'POST /api/org/inventory/forecast/save': [
-        orgRoute('org.inventory.forecast.save', null, async (ctx) => {
+        orgRoute('org.inventory.forecast.save', 'INV.forecast.edit', async (ctx) => {
             const { materialId, warehouseId } = ids(ctx.body);
             await requireAt(ctx, [FC.edit], warehouseId, 'write', 'Forecast permission is required for this warehouse.');
             if (!(await getDoc(`${root(ctx.orgId)}/materials/${materialId}`))) throw new HttpError(404, 'Material not found');
@@ -321,7 +321,7 @@ export const forecastingRoutes = {
     ],
 
     'POST /api/org/inventory/forecast/propose': [
-        orgRoute('org.inventory.forecast.propose', null, async (ctx) => {
+        orgRoute('org.inventory.forecast.propose', 'INV.forecast.edit', async (ctx) => {
             const { materialId, warehouseId } = ids(ctx.body);
             await requireAt(ctx, [FC.edit], warehouseId, 'write', 'Forecast permission is required for this warehouse.');
             const [{ setup, version }, instances, doc, m] = await Promise.all([getForecastSetup(ctx.orgId), journalInstances(ctx.orgId, materialId, warehouseId), getDoc(forecastPath(ctx.orgId, materialId, warehouseId)), materialInputs(ctx.orgId, materialId, warehouseId)]);
@@ -377,7 +377,7 @@ export const forecastingRoutes = {
     ],
 
     'POST /api/org/inventory/forecast/action': [
-        orgRoute('org.inventory.forecast.action', null, async (ctx) => {
+        orgRoute('org.inventory.forecast.action', 'INV.forecast.view', async (ctx) => {
             const { materialId, warehouseId } = ids(ctx.body);
             const action = str(ctx.body.action);
             if (!['approve', 'return', 'withdraw'].includes(action)) throw new HttpError(400, 'Unsupported action');
@@ -435,7 +435,7 @@ export const forecastingRoutes = {
     ],
 
     'POST /api/org/inventory/forecast/source': [
-        orgRoute('org.inventory.forecast.source', null, async (ctx) => {
+        orgRoute('org.inventory.forecast.source', 'INV.forecast.edit', async (ctx) => {
             const { materialId, warehouseId } = ids(ctx.body);
             await requireAt(ctx, [FC.edit], warehouseId, 'write', 'Forecast permission is required for this warehouse.');
             const source = str(ctx.body.source);
