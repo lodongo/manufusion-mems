@@ -139,9 +139,11 @@ export async function receiptPlan(orgId: string, po: Obj): Promise<Obj[]> {
  * Posts a delivery of materials or assets. Call it inside the order lock, after the quantities were checked.
  * Idempotent: the same delivery id never posts twice.
  */
-export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; deliveryId: string; date: string; ref: string; lines: ReceiptLine[] }): Promise<{ journals: string[]; note: string }> {
+export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; deliveryId: string; date: string; ref: string; lines: ReceiptLine[] }): Promise<{ journals: string[]; note: string; rates: Record<string, number>; posted: Array<{ no: number; leId: string; costCenterId: string; glCode: string; type: string; warehouse: boolean; materialId: string; qty: number; value: number; docValue: number }> }> {
     const units = await unitsOf(ctx.orgId);
     const cache = new Map<string, LeInfo>();
+    const rates: Record<string, number> = {};
+    const postedLines: Array<{ no: number; leId: string; costCenterId: string; glCode: string; type: string; warehouse: boolean; materialId: string; qty: number; value: number; docValue: number }> = [];
     type Item = { l: Obj; qty: number; cc: string; wh: boolean; material: Doc | null; le: LeInfo; docValue: number };
     const items: Item[] = [];
     for (const g of a.lines) {
@@ -170,9 +172,12 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
         if (info.state === 'not_live') {
             for (const [i, it] of list.entries()) if (it.material) await writeDoc(mjPath(ctx.orgId, mj(it, i).id), { ...mj(it, i).data, journalId: '', financeNote: 'Finance not live: not posted' } as unknown as Fields, { exists: false });
             notLive.push(info.le.code);
+            for (const it of list) postedLines.push({ no: Number(it.l.no), leId, costCenterId: it.cc, glCode: str(it.l.glCode), type: str(it.l.type), warehouse: it.wh, materialId: it.material?.id ?? '', qty: it.qty, value: 0, docValue: it.docValue });
             continue;
         }
         const rate = await fxRate(str(a.po.currency), info.currency);
+        rates[leId] = rate;
+        for (const it of list) postedLines.push({ no: Number(it.l.no), leId, costCenterId: it.cc, glCode: it.wh ? '' : str(it.l.glCode), type: str(it.l.type), warehouse: it.wh, materialId: it.material?.id ?? '', qty: it.qty, value: round2(it.docValue * rate), docValue: it.docValue });
         const map = await mappingOf(ctx.orgId, leId);
         const grirFor=(event:'GR_STOCK'|'GR_DIRECT'|'GR_ASSET')=>roleAccount(map,'GRIR','',{event});
         const groups: Record<string, { lines: PostLine[]; stock: StockMove[]; extra: Write[] }> = {};
@@ -226,7 +231,7 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
             journals.push(p.id);
         }
     }
-    return { journals, note: notLive.length ? `Finance is not live for ${notLive.join(', ')}: quantities were recorded, nothing was posted.` : '' };
+    return { journals, rates, posted: postedLines, note: notLive.length ? `Finance is not live for ${notLive.join(', ')}: quantities were recorded, nothing was posted.` : '' };
 }
 
 /** Preserve maintenance provenance on external-service actuals. PO GL remains unchanged. */
@@ -647,4 +652,116 @@ export async function postMaintenanceReturn(ctx:OrgContext,issue:Doc,line:Obj,qt
    else {const path=P(ctx.orgId).stock(wh,materialId),doc=await getDoc(path);await commit([...extra,{path,fields:{...(doc?.data||{}),warehouseId:wh,materialId,qtyM:(Number(doc?.data.qtyM)||0)+Math.round(qty*10000),valueC:Number(doc?.data.valueC)||0,glCode:inv,updatedAt:nowIso()},...(doc?{updateTime:doc.updateTime}:{exists:false})}]);}
   }else await commit(extra);
  });
+}
+
+// ===== Receipt reversal and re-posting (approved receipt adjustment requests) =====
+
+export interface PostedLine { no: number; leId: string; costCenterId: string; glCode: string; type: string; warehouse: boolean; materialId: string; qty: number; value: number; docValue: number }
+
+/**
+ * Reverses received quantities of one delivery: Dr GR/IR, Cr inventory (stock leaves the warehouse), the line account
+ * or asset clearing, at the value they were received at. Stock must still be available in the warehouse.
+ */
+export async function reverseGoods(ctx: OrgContext, a: { po: Obj; poId: string; recNo: string; posted: PostedLine[]; rates: Record<string, number>; lines: Array<{ no: number; qty: number }>; key: string }): Promise<{ journals: string[]; note: string }> {
+    const units = await unitsOf(ctx.orgId);
+    const journals: string[] = [];
+    const notLive: string[] = [];
+    const byLe = new Map<string, Array<{ p: PostedLine; qty: number; l: Obj }>>();
+    for (const g of a.lines) {
+        const p = a.posted.find((x) => x.no === g.no);
+        const l = objs(a.po.lines).find((x) => Number(x.no) === g.no);
+        if (!p || !l) throw new HttpError(400, `Line ${g.no} is not on ${a.recNo}.`);
+        byLe.set(p.leId, [...(byLe.get(p.leId) ?? []), { p, qty: g.qty, l }]);
+    }
+    for (const [leId, list] of byLe) {
+        for (const it of list) {
+            if (!it.p.warehouse) continue;
+            const ph = await physicalOf(ctx.orgId, it.p.costCenterId, it.p.materialId);
+            if (ph.available + 1e-9 < it.qty) throw new HttpError(409, `Line ${it.p.no}: only ${ph.available} is available in warehouse ${units.get(it.p.costCenterId)?.code ?? it.p.costCenterId}; ${it.qty} cannot be reversed.`);
+        }
+        const state = await financeState(ctx.orgId, leId);
+        if (state === 'blocked') throw new HttpError(409, `Finance for ${units.get(leId)?.code ?? leId} is blocked, so nothing can be reversed now.`);
+        const mjFor = (it: { p: PostedLine; qty: number; l: Obj }, i: number) => ({ id: safeId(`GRX_${a.key}_${it.p.no}_${i}`), data: mjEntry(it.p.materialId, it.p.costCenterId, str(it.l.itemCode), 'GOODS_RECEIPT_REVERSAL', -it.qty, a.poId, ctx.uid, { receiptNo: a.recNo, source: 'receipt_adjustment', adjustmentId: a.key }) });
+        if (state === 'not_live' || !a.rates[leId]) {
+            for (const [i, it] of list.entries()) if (it.p.warehouse) await writeDoc(mjPath(ctx.orgId, mjFor(it, i).id), { ...mjFor(it, i).data, journalId: '', financeNote: 'Finance not live: not posted' } as unknown as Fields, { exists: false });
+            notLive.push(units.get(leId)?.code ?? leId);
+            continue;
+        }
+        const rate = a.rates[leId];
+        const map = await mappingOf(ctx.orgId, leId);
+        const groups: Record<string, { lines: PostLine[]; stock: StockMove[]; extra: Write[] }> = {};
+        const add = (t: string) => (groups[t] ??= { lines: [], stock: [], extra: [] });
+        for (const [i, it] of list.entries()) {
+            const doc = round2(it.qty * (Number(it.l.netUnitPrice) || 0));
+            const value = round2(doc * rate);
+            if (!(value > 0)) continue;
+            const desc = `Reversal of ${a.recNo} line ${it.p.no}`.slice(0, 200);
+            if (it.p.warehouse) {
+                const g = add('GR_STOCK');
+                const gl = roleAccount(map, 'INVENTORY', str(it.l.categoryCode), { event: 'GR_STOCK', costCenterId: it.p.costCenterId });
+                g.lines.push({ side: 'D', glCode: roleAccount(map, 'GRIR', '', { event: 'GR_STOCK' }), ccId: it.p.costCenterId, amount: value, docAmount: doc, description: desc });
+                g.lines.push({ side: 'C', glCode: gl, ccId: it.p.costCenterId, amount: value, docAmount: doc, description: desc, materialId: it.p.materialId, qty: -it.qty });
+                const v = await stockValOf(ctx.orgId, it.p.costCenterId, it.p.materialId);
+                g.stock.push({ warehouseId: it.p.costCenterId, materialId: it.p.materialId, materialNumber: str(it.l.itemCode), qty: -it.qty, value: -value, expectedUpdateTime: v.updateTime, glCode: gl } as StockMove);
+                const m = mjFor(it, i);
+                g.extra.push({ path: mjPath(ctx.orgId, m.id), exists: false, fields: m.data });
+            } else if (it.p.type === 'asset') {
+                const g = add('GR_ASSET');
+                g.lines.push({ side: 'D', glCode: roleAccount(map, 'GRIR', '', { event: 'GR_ASSET' }), ccId: it.p.costCenterId, amount: value, docAmount: doc, description: desc });
+                g.lines.push({ side: 'C', glCode: roleAccount(map, 'ASSET_CLEARING', '', { event: 'GR_ASSET', costCenterId: it.p.costCenterId }), ccId: it.p.costCenterId, amount: value, docAmount: doc, description: desc, qty: -it.qty });
+            } else {
+                const g = add('GR_DIRECT');
+                g.lines.push({ side: 'D', glCode: roleAccount(map, 'GRIR', '', { event: 'GR_DIRECT' }), ccId: it.p.costCenterId, amount: value, docAmount: doc, description: desc });
+                g.lines.push({ side: 'C', glCode: it.p.glCode || str(it.l.glCode), ccId: it.p.costCenterId, amount: value, docAmount: doc, description: desc, qty: -it.qty });
+            }
+        }
+        for (const [type, g] of Object.entries(groups)) {
+            const p = await post(ctx, { leId, type, docCurrency: str(a.po.currency), fxRate: rate, lines: g.lines, narrative: `Reversal of receipt ${a.recNo} on ${a.poId} (${a.key})`, source: { kind: 'receipt_adjustment', id: a.key, ref: a.recNo, route: `organization_home/fin_ap/adjustments/${a.key}` }, trace: { poId: a.poId, receiptNo: a.recNo, adjustmentId: a.key }, sourceKey: `GRX_${a.key}_${leId}_${type}`, approvalRef: a.key, stock: g.stock, extra: g.extra });
+            journals.push(p.id);
+        }
+    }
+    return { journals, note: notLive.length ? `Finance is not live for ${notLive.join(', ')}: quantities were reversed, nothing was posted.` : '' };
+}
+
+/**
+ * Moves what a delivery posted for non-stock lines to another cost center (same legal entity) and GL account:
+ * Dr the new account and cost center, Cr the old ones (asset lines move asset clearing between cost centers).
+ */
+export async function repostGoods(ctx: OrgContext, a: { po: Obj; poId: string; recNo: string; posted: PostedLine[]; rates: Record<string, number>; changes: Array<{ no: number; qty: number; costCenterId: string; glCode: string }>; key: string }): Promise<{ journals: string[]; note: string }> {
+    const units = await unitsOf(ctx.orgId);
+    const journals: string[] = [];
+    const byLe = new Map<string, Array<{ p: PostedLine; c: { no: number; qty: number; costCenterId: string; glCode: string }; l: Obj }>>();
+    for (const c of a.changes) {
+        const p = a.posted.find((x) => x.no === c.no);
+        const l = objs(a.po.lines).find((x) => Number(x.no) === c.no);
+        if (!p || !l) throw new HttpError(400, `Line ${c.no} is not on ${a.recNo}.`);
+        if (p.warehouse) throw new HttpError(400, `Line ${c.no} is warehouse stock and posts to its warehouse.`);
+        if (leOf(units, c.costCenterId)?.id !== p.leId) throw new HttpError(400, `Line ${c.no}: the cost center must stay in the same legal entity.`);
+        byLe.set(p.leId, [...(byLe.get(p.leId) ?? []), { p, c, l }]);
+    }
+    for (const [leId, list] of byLe) {
+        const state = await financeState(ctx.orgId, leId);
+        if (state !== 'live' || !a.rates[leId]) continue;
+        const rate = a.rates[leId];
+        const map = await mappingOf(ctx.orgId, leId);
+        const groups: Record<string, PostLine[]> = {};
+        for (const it of list) {
+            const doc = round2(it.c.qty * (Number(it.l.netUnitPrice) || 0));
+            const value = round2(doc * rate);
+            if (!(value > 0)) continue;
+            const desc = `${a.recNo} line ${it.p.no} re-posted`.slice(0, 200);
+            if (it.p.type === 'asset') {
+                const fromGl = roleAccount(map, 'ASSET_CLEARING', '', { event: 'GR_ASSET', costCenterId: it.p.costCenterId });
+                const toGl = roleAccount(map, 'ASSET_CLEARING', '', { event: 'GR_ASSET', costCenterId: it.c.costCenterId });
+                (groups.GR_ASSET ??= []).push({ side: 'D', glCode: toGl, ccId: it.c.costCenterId, amount: value, docAmount: doc, description: desc }, { side: 'C', glCode: fromGl, ccId: it.p.costCenterId, amount: value, docAmount: doc, description: desc });
+            } else {
+                (groups.GR_DIRECT ??= []).push({ side: 'D', glCode: it.c.glCode, ccId: it.c.costCenterId, amount: value, docAmount: doc, description: desc }, { side: 'C', glCode: it.p.glCode || str(it.l.glCode), ccId: it.p.costCenterId, amount: value, docAmount: doc, description: desc });
+            }
+        }
+        for (const [type, lines] of Object.entries(groups)) {
+            const p = await post(ctx, { leId, type, docCurrency: str(a.po.currency), fxRate: rate, lines, narrative: `Re-posting of receipt ${a.recNo} on ${a.poId} (${a.key})`, source: { kind: 'receipt_adjustment', id: a.key, ref: a.recNo, route: `organization_home/fin_ap/adjustments/${a.key}` }, trace: { poId: a.poId, receiptNo: a.recNo, adjustmentId: a.key }, sourceKey: `GRP_${a.key}_${leId}_${type}`, approvalRef: a.key });
+            journals.push(p.id);
+        }
+    }
+    return { journals, note: '' };
 }

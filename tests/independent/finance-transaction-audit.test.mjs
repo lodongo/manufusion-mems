@@ -49,7 +49,8 @@ test('Missing installed routes, invalid predefined codes and event mismatch are 
  const cc=report.postingRows.find(x=>x.event==='GI_CC');
  assert.equal(cc?.installedRouteEvidence,false);
  assert.equal(cc?.action,'REASSIGN_REVIEW');
- assert.ok(report.postingRows.find(x=>x.event==='AP_PAYMENT')?.action==='ADD_HANDLER');
+ assert.ok(report.postingRows.find(x=>x.event==='AR_RECEIPT')?.action==='ADD_HANDLER');
+ assert.ok(report.postingRows.find(x=>x.event==='AP_PAYMENT')?.action==='RETAIN');
 });
 test('Every descriptive master event has one registered crosswalk, and gaps never invent posting events',()=>{
  const keys=CATALOGUE_POSTING_CROSSWALK.map(x=>x.kind+'|'+x.catalogueEvent);

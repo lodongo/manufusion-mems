@@ -23,6 +23,8 @@ test('invalid combinations and empty accounts rejected before approval',()=>{
  assert.throws(()=>validateRuleDraft([{...basic,account:''}]),/approved GL/);
 });
 test('planned events have explicit implementation flags',()=>{
- assert.equal(DETERMINATION_EVENTS.find(e=>e.code==='AP_INVOICE')?.implemented,false);
+ assert.equal(DETERMINATION_EVENTS.find(e=>e.code==='AR_INVOICE')?.implemented,false);
+ assert.equal(DETERMINATION_EVENTS.find(e=>e.code==='AP_INVOICE')?.implemented,true);
+ assert.equal(DETERMINATION_EVENTS.find(e=>e.code==='AP_PAYMENT')?.implemented,true);
  assert.equal(DETERMINATION_EVENTS.find(e=>e.code==='GR_STOCK')?.implemented,true);
 });

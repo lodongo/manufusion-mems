@@ -15,7 +15,8 @@ export const DETERMINATION_EVENTS = [
   {code:'INV_RECON',label:'Inventory reconciliation',roles:['INVENTORY','RECON_DIFF'],implemented:true},
   {code:'REALLOC',label:'Cost-center reallocation',roles:[],implemented:true},
   {code:'YE_CLOSE',label:'Year-end profit transfer',roles:['RETAINED_EARNINGS'],implemented:true},
-  {code:'AP_INVOICE',label:'Supplier invoice',roles:['GRIR','VAT_INPUT'],implemented:false},
+  {code:'AP_INVOICE',label:'Supplier invoice',roles:['GRIR','VAT_INPUT','SUPPLIER_PAYABLE','PRICE_VARIANCE'],implemented:true},
+  {code:'AP_PAYMENT',label:'Supplier payment',roles:['SUPPLIER_PAYABLE','BANK','WHT_PAYABLE'],implemented:true},
   {code:'AR_INVOICE',label:'Customer invoice',roles:['VAT_OUTPUT'],implemented:false},
 ] as const;
 

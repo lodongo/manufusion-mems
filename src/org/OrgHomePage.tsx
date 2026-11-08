@@ -62,6 +62,8 @@ const FinTaxes = lazy(() => import('./FinTaxes'));
 const FinSetup = lazy(() => import('./FinSetup'));
 const FinApprovals = lazy(() => import('./FinApprovals'));
 const GoodsIssue = lazy(() => import('./GoodsIssue'));
+const AccountsPayable = lazy(() => import('./AccountsPayable'));
+const InventoryPendingPos = lazy(() => import('./InventoryPendingPos'));
 const ReplenishmentRequests = lazy(() => import('./ReplenishmentRequests'));
 const Vendors = lazy(() => import('./Vendors'));
 const Quotations = lazy(() => import('./Quotations'));
@@ -142,7 +144,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Warehouses', path: 'warehouse_overview', everyone: true },
         { label: 'Setup', path: 'procurement_setup', permission: 'PRC.setup.view' },
     ],
-    INV: [{ label: 'Goods issue', path: 'goods_issue', permission: 'INV.issue' }, { label: 'Replenishment', path: 'replenishment', permission: 'INV.replenishment.view' }],
+    INV: [{ label: 'Pending POs', path: 'inventory_pending_pos', permission: 'INV.receive' }, { label: 'Goods issue', path: 'goods_issue', permission: 'INV.issue' }, { label: 'Replenishment', path: 'replenishment', permission: 'INV.replenishment.view' }],
     FIN: [
         { label: 'GL Accounts', path: 'fin_gl', prefix: 'FIN.' },
         { label: 'Cost Centers', path: 'fin_cc', prefix: 'FIN.' },
@@ -153,7 +155,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Reports', path: 'fin_reports', prefix: 'FIN.' },
         { label: 'Setup', path: 'fin_setup', prefix: 'FIN.' },
         { label: 'Accounts Receivable', path: 'fin_ar', prefix: 'FIN.' },
-        { label: 'Accounts Payable', path: 'fin_ap', prefix: 'FIN.' },
+        { label: 'Accounts Payable', path: 'fin_ap', permission: 'FIN.ap.view' },
         { label: 'Asset Finance', path: 'fin_assets', prefix: 'FIN.' },
         { label: 'Finance approvals', path: 'fin_approvals', prefix: 'FIN.' },
         { label: 'GL account master (MEMS)', path: 'gl_accounts', permission: 'FIN.gl.view' },
@@ -487,7 +489,8 @@ export default function OrgHomePage({
     else if (activeMenu && section === 'fin_budget') content = <NotBuilt title='Budgeting' note='Budgets per cost center and GL account, with versions, approval under the finance chart of authority and actual against budget, will be built here.' />;
     else if (activeMenu && section === 'fin_reports') content = <NotBuilt title='Reports' note='Financial statements and management reports will be built here. Meanwhile the trial balance is in Financial Calendar, inside each period.' />;
     else if (activeMenu && section === 'fin_ar') content = <NotBuilt title='Accounts Receivable' note='Customers, customer invoices, receipts and the receivable ledger will be built here.' />;
-    else if (activeMenu && section === 'fin_ap') content = <NotBuilt title='Accounts Payable' note='Supplier invoices matched against GR/IR, payments and the payable ledger will be built here. Until then, receipts and accepted services stay on the GR/IR account.' />;
+    else if (activeMenu && section === 'fin_ap') content = <AccountsPayable id={id} sub={sub} permissions={data.permissions} />;
+    else if (activeMenu && section === 'inventory_pending_pos') content = <InventoryPendingPos id={id} />;
     else if (activeMenu && section === 'fin_assets') content = <NotBuilt title='Asset Finance' note='Capitalisation of assets received (from the asset clearing account), depreciation and disposals will be built here.' />;
     else if (activeMenu && section === 'goods_issue') content = <GoodsIssue />;
     else if (activeMenu && (section === 'replenishment' || section === 'mrp_requests')) content = <ReplenishmentRequests id={id} />;

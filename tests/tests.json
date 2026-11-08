@@ -1273,5 +1273,35 @@
       "As a level-3 Procurement Specialist, align a non-stock line to another cost center and GL with a reason; warehouse lines cannot be realigned"
     ],
     "expected": "Overheads are visible and approved, orders stay single-category, every delivery has its note, invoices are recorded against deliveries, and posting changes at receipt are controlled and audited."
+  },
+  {
+    "name": "Receipts (REC_), supplier invoices (INV_) with matching and chart of authority, payments (PAY_), receipt corrections, Inventory Pending POs",
+    "description": "Deliveries show received against pending with a + to record a delivery; each receipt (REC_) opens to its documents, posting and invoice. An invoice (INV_) covers one receipt, or the whole order once it is delivered in full; it is matched against requirement, requisition, order, receipts, quantity, price, tax, duplicates, supplier and finance, approved under the chart of authority and only then posted to payables. Payments (PAY_) are approved and post Dr payables, Cr bank and withholding tax. Before payment, a receipt can be reversed or re-posted to another cost center/GL only through an approved request (RAD_). Stores receive from Inventory > Pending POs with INV.receive only and see no prices.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "REC_/INV_/PAY_ numbering",
+      "deliveries history and +",
+      "delivery dashboard tab",
+      "invoice matching",
+      "invoice chart of authority",
+      "AP posting",
+      "supplier payments",
+      "receipt reversal and re-posting",
+      "Inventory Pending POs",
+      "segregation of duties"
+    ],
+    "steps": [
+      "As a Storekeeper with Goods Receiver at the warehouse, open Inventory > Pending POs: only orders for your warehouses (stock lines and mapped categories) are listed, without prices",
+      "Open an order, tap +, attach the delivery note, enter quantities and record: a REC_ number is shown and the order moves to delivered partially",
+      "On the purchase order Deliveries tab confirm received/pending bars per line, the + button while lines are pending, and the history; tap the receipt to open it",
+      "As an AP clerk, tap Add invoice on the receipt: 'Whole order' is disabled until the order is delivered in full; record the invoice and see the due diligence checks",
+      "With a price difference beyond tolerance and no reason the invoice is on hold; add the reason in Finance > Accounts Payable and Check again",
+      "Approve each chart-of-authority level as a different person than the clerk and the receiver; only the last level posts the AP journal (Dr GR/IR, Dr input VAT, variance, Cr payables)",
+      "Prepare a payment with withholding tax; approve it; the invoice becomes Paid and the journal posts Dr payables, Cr bank and WHT",
+      "On an unpaid, uninvoiced receipt request a reversal and a cost center/GL change; approve as Finance Controller; stock and the ledger are corrected; after payment the request is refused",
+      "Open the Delivery dashboard tab and Accounts Payable dashboard (ageing, owed by supplier)"
+    ],
+    "expected": "Every receipt, invoice, payment and correction has a database number, is audited, and nothing reaches payables or the bank without matching and chart-of-authority approval."
   }
 ]

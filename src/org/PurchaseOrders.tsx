@@ -5,7 +5,8 @@ import { navigate } from '../lib/route';
 import { downloadReportPdf } from '../lib/report';
 import { Alert, Field, SelectField } from '../components/ui';
 import { API, PO_BASE, RQ_BASE, money, todayIso, Facts, Section, AckPanel, ServicePanel, ReassignPanel, LinesEditor, QuotesView, VisibilitySettings, FinanceSettings, FilePick, type Receipt } from './PoExtras';
-import { openStored, type Upload } from './fileTools';
+import { type Upload } from './fileTools';
+import { DeliveriesTab, DeliveryDashboard, type DPo, type DReceipt } from './PoDeliveries';
 import type { Charge } from '../shared/procurementCharges';
 import RichTable, { type Column } from '../components/RichTable';
 import { ConsolidationView, SpecOrderForm, TraceBreakdown, WindowSetting } from './PoConsolidation';
@@ -182,35 +183,6 @@ interface Step {
     at: string;
     note: string;
 }
-interface Delivery {
-    id: string;
-    at: string;
-    date: string;
-    ref: string;
-    byName: string;
-    note: string;
-    lines: Array<{ no: number; qty: number }>;
-    files: Array<{ id: string; kind: string; name: string }>;
-    invoiceId: string;
-    realigned: string[];
-    postingReason: string;
-}
-interface Invoice {
-    id: string;
-    number: string;
-    date: string;
-    deliveryId: string;
-    byName: string;
-    at: string;
-    fileId: string;
-    fileName: string;
-    amount?: number;
-    taxAmount?: number;
-    currency?: string;
-    expected?: number;
-    variancePct?: number;
-    varianceReason?: string;
-}
 interface PoFull extends Omit<PoRow, never> {
     vendorId: string;
     vendorEmail: string;
@@ -229,11 +201,9 @@ interface PoFull extends Omit<PoRow, never> {
     validation: { at: string; byName: string; rev: number; current: boolean; fails: number; warns: number; checks: Check[]; ackReason: string };
     approval: { amount: number; steps: Step[]; authorityVersion: number };
     approveWhy: string;
-    deliveries: Delivery[];
-    invoices: Invoice[];
+    deliveries: DReceipt[];
     invoiceStatus: string;
-    canInvoice: boolean;
-    invoiceTolerancePct?: number;
+    ap: DPo['ap'];
     charges: Charge[];
     chargesTotal: number | null;
     grandTotal: number | null;
@@ -915,47 +885,6 @@ const chargeRows = (charges: Charge[] | undefined, currency: string): Array<[str
 
 type PlanLine = { no: number; type: string; warehouse: boolean; materialId: string; materialNumber: string; materialName: string; options: Array<{ id: string; number: string; name: string }>; finance: string; costCenterId: string; costCenterCode: string; costCenterName: string; glCode: string; glName: string; legalEntityId: string };
 type ReceivePlan = { lines: PlanLine[]; costCenters: Record<string, Array<{ id: string; code: string; name: string }>>; canAlign: boolean; invoiceTolerancePct: number; charges: Charge[]; goodsTotal: number };
-type InvoiceDraft = { number: string; date: string; amount: string; taxAmount: string; reason: string; file: Upload | null };
-const blankInvoice = (): InvoiceDraft => ({ number: '', date: todayIso(), amount: '', taxAmount: '', reason: '', file: null });
-
-/** The value the supplier should invoice for these quantities: order price plus the share of taxes and charges. */
-function expectedOf(po: PoFull, given: Array<{ no: number; qty: number }>, charges: number) {
-    const goods = given.reduce((s, g) => s + g.qty * (po.lines.find((l) => l.no === g.no)?.netUnitPrice ?? 0), 0);
-    const total = po.total ?? 0;
-    return Math.round((goods + (total > 0 ? (charges * goods) / total : 0)) * 100) / 100;
-}
-
-function invoiceProblems(inv: InvoiceDraft, expected: number, tolerance: number) {
-    const out: string[] = [];
-    const amount = Number(inv.amount);
-    const tax = Number(inv.taxAmount || 0);
-    if (inv.number.trim().length < 2) out.push('The invoice number');
-    if (!inv.date || inv.date > todayIso()) out.push('An invoice date that is not in the future');
-    if (!(amount > 0)) out.push('The invoice amount including tax');
-    if (!(tax >= 0) || (amount > 0 && tax >= amount)) out.push('Tax of zero or more, below the invoice amount');
-    if (!inv.file) out.push('The invoice document');
-    const variance = expected > 0 && amount > 0 ? Math.round(((amount - expected) / expected) * 10000) / 100 : 0;
-    if (Math.abs(variance) > tolerance && inv.reason.trim().length < 20) out.push(`A reason (20+ characters) for the ${variance}% difference from the expected amount`);
-    return { problems: out, variance };
-}
-
-function InvoiceFields({ inv, set, expected, currency, tolerance, onError }: { inv: InvoiceDraft; set: (v: InvoiceDraft) => void; expected: number; currency: string; tolerance: number; onError: (m: string) => void }) {
-    const { variance } = invoiceProblems(inv, expected, tolerance);
-    return (
-        <div className='space-y-2 rounded-xl border border-line p-2'>
-            <p className='text-xs text-muted'>Expected for these quantities: {money(expected, currency)} (order price plus the share of taxes and charges). Tolerance {tolerance}%.</p>
-            <Field id='iv-no' label='Invoice number *' value={inv.number} maxLength={40} onChange={(e) => set({ ...inv, number: e.target.value })} />
-            <Field id='iv-date' label='Invoice date *' type='date' max={todayIso()} value={inv.date} onChange={(e) => set({ ...inv, date: e.target.value })} />
-            <Field id='iv-amt' label={`Invoice amount including tax (${currency}) *`} inputMode='decimal' value={inv.amount} onChange={(e) => set({ ...inv, amount: e.target.value.replace(/[^\d.]/g, '') })} />
-            <Field id='iv-tax' label={`Tax on the invoice (${currency})`} inputMode='decimal' value={inv.taxAmount} onChange={(e) => set({ ...inv, taxAmount: e.target.value.replace(/[^\d.]/g, '') })} />
-            {Number(inv.amount) > 0 && <p className={`text-xs ${Math.abs(variance) > tolerance ? 'text-amber-300' : 'text-muted'}`}>Difference from expected: {variance}%</p>}
-            {Math.abs(variance) > tolerance && <Field id='iv-why' label='Reason for the difference *' value={inv.reason} maxLength={300} onChange={(e) => set({ ...inv, reason: e.target.value })} />}
-            <FilePick label='Invoice document *' value={inv.file} onPick={(f) => set({ ...inv, file: f })} onError={onError} />
-            <p className='text-[11px] text-muted'>The invoice is recorded against the order (invoiced quantities and status). Accounts payable posting is not live yet.</p>
-        </div>
-    );
-}
-
 function GlPick({ id, costCenterId, value, onChange }: { id: string; costCenterId: string; value: string; onChange: (v: string) => void }) {
     const [q, setQ] = useState('');
     const found = useLoad(() => (q.trim().length >= 2 && costCenterId ? callBackend<{ items: Array<{ code: string; name: string }> }>(`${API}/req/gl`, { costCenterId, q }) : Promise.resolve({ items: [] })), [costCenterId, q]);
@@ -985,8 +914,6 @@ function ReceiveForm({ po, onDone }: { po: PoFull; onDone: (m: string) => void }
     const [dn, setDn] = useState<Upload | null>(null);
     const [post, setPost] = useState<Record<number, { cc: string; gl: string }>>({});
     const [postReason, setPostReason] = useState('');
-    const [withInvoice, setWithInvoice] = useState(false);
-    const [inv, setInv] = useState<InvoiceDraft>(blankInvoice);
     const [problem, setProblem] = useState('');
     const confirm = useConfirm();
     const open = po.lines.filter((l) => (l.outstanding ?? 0) > 0);
@@ -1001,9 +928,6 @@ function ReceiveForm({ po, onDone }: { po: PoFull; onDone: (m: string) => void }
         .filter((x) => x.qty > 0);
     const realigned = given.filter((g) => 'costCenterId' in g);
     const over = open.filter((l) => (Number(qty[l.no]) || 0) > (l.outstanding ?? 0));
-    const chargesSum = (plan.data?.charges ?? []).reduce((s, c) => s + c.amount, 0);
-    const expected = expectedOf(po, given, chargesSum);
-    const tol = plan.data?.invoiceTolerancePct ?? 0;
     const problems: string[] = [];
     if (ref.trim().length < 2) problems.push('The delivery note number');
     if (!date || date > todayIso()) problems.push('A delivery date that is not in the future');
@@ -1014,12 +938,11 @@ function ReceiveForm({ po, onDone }: { po: PoFull; onDone: (m: string) => void }
     if (needMat.length) problems.push(`The warehouse material received on line ${needMat.map((g) => g.no).join(', ')}`);
     if (realigned.some((g) => !g.glCode)) problems.push('A GL account for each line posting elsewhere');
     if (realigned.length && postReason.trim().length < 10) problems.push('The reason for changing the posting (10+ characters)');
-    if (withInvoice) problems.push(...invoiceProblems(inv, expected, tol).problems);
     const save = () =>
         confirm.ask(
             {
                 title: 'Record the delivery',
-                message: `${given.length} line(s) on delivery note ${ref.trim()}, dated ${date}.${realigned.length ? ` Posting changed on line ${realigned.map((g) => g.no).join(', ')}.` : ''}${withInvoice ? ` Invoice ${inv.number.trim()} for ${money(Number(inv.amount), po.currency)} is recorded with it.` : ''}`,
+                message: `${given.length} line(s) on delivery note ${ref.trim()}, dated ${date}.${realigned.length ? ` Posting changed on line ${realigned.map((g) => g.no).join(', ')}.` : ''}`,
                 confirmLabel: 'Record delivery',
                 acknowledge: 'The quantities are what was physically received and counted, and the attached delivery note is the supplier’s.',
             },
@@ -1032,7 +955,6 @@ function ReceiveForm({ po, onDone }: { po: PoFull; onDone: (m: string) => void }
                     lines: given,
                     deliveryNote: { kind: 'delivery_note', ...dn },
                     ...(realigned.length ? { postingReason: postReason } : {}),
-                    ...(withInvoice ? { invoice: { number: inv.number, date: inv.date, amount: Number(inv.amount), taxAmount: Number(inv.taxAmount || 0), reason: inv.reason, file: { kind: 'invoice', ...inv.file } } } : {}),
                 });
                 setRef('');
                 setNote('');
@@ -1040,9 +962,7 @@ function ReceiveForm({ po, onDone }: { po: PoFull; onDone: (m: string) => void }
                 setDn(null);
                 setPost({});
                 setPostReason('');
-                setWithInvoice(false);
-                setInv(blankInvoice());
-                onDone(withInvoice ? 'Delivery and invoice recorded.' : 'Delivery recorded.');
+                onDone('Delivery recorded. Open it in the history to add the invoice.');
             }
         );
     return (
@@ -1107,8 +1027,6 @@ function ReceiveForm({ po, onDone }: { po: PoFull; onDone: (m: string) => void }
             })}
             {realigned.length > 0 && <Field id='rc-why' label='Reason for changing the posting *' value={postReason} maxLength={300} onChange={(e) => setPostReason(e.target.value)} />}
             <Field id='rc-note' label='Note, optional' value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />
-            <Toggle checked={withInvoice} onChange={setWithInvoice} label='The supplier’s invoice came with this delivery' />
-            {withInvoice && <InvoiceFields inv={inv} set={setInv} expected={expected} currency={po.currency} tolerance={tol} onError={setProblem} />}
             {problem && <Alert tone='error'>{problem}</Alert>}
             {problems.length > 0 && (
                 <div className='text-xs text-amber-300'>
@@ -1124,70 +1042,6 @@ function ReceiveForm({ po, onDone }: { po: PoFull; onDone: (m: string) => void }
                 Record delivery
             </Button>
             {confirm.sheet}
-        </Section>
-    );
-}
-
-/** Invoice a delivery recorded earlier without one. */
-function InvoiceLater({ po, delivery, onDone }: { po: PoFull; delivery: Delivery; onDone: (m: string) => void }) {
-    const [openForm, setOpenForm] = useState(false);
-    const [inv, setInv] = useState<InvoiceDraft>(blankInvoice);
-    const [problem, setProblem] = useState('');
-    const confirm = useConfirm();
-    const tol = po.invoiceTolerancePct ?? 5;
-    const expected = expectedOf(po, delivery.lines, po.chargesTotal ?? 0);
-    const { problems } = invoiceProblems(inv, expected, tol);
-    if (!openForm) return <Button variant='secondary' onClick={() => setOpenForm(true)}>Record the invoice</Button>;
-    return (
-        <div className='space-y-2'>
-            <InvoiceFields inv={inv} set={setInv} expected={expected} currency={po.currency} tolerance={tol} onError={setProblem} />
-            {problem && <Alert tone='error'>{problem}</Alert>}
-            {problems.length > 0 && <p className='text-xs text-amber-300'>Still needed: {problems.join('; ')}</p>}
-            <Button
-                disabled={problems.length > 0}
-                onClick={() =>
-                    confirm.ask({ title: 'Record the invoice', message: `Invoice ${inv.number.trim()} for ${money(Number(inv.amount), po.currency)} against delivery ${delivery.ref}.`, confirmLabel: 'Record invoice', acknowledge: 'The attached document is the supplier’s invoice for this delivery.' }, async () => {
-                        await callBackend(`${API}/orders/invoice`, { id: po.id, deliveryId: delivery.id, invoice: { number: inv.number, date: inv.date, amount: Number(inv.amount), taxAmount: Number(inv.taxAmount || 0), reason: inv.reason, file: { kind: 'invoice', ...inv.file } } });
-                        onDone('Invoice recorded.');
-                    })
-                }
-            >
-                Record invoice
-            </Button>
-            {confirm.sheet}
-        </div>
-    );
-}
-
-function DeliveryCard({ po, d, onDone }: { po: PoFull; d: Delivery; onDone: (m: string) => void }) {
-    const [problem, setProblem] = useState('');
-    const inv = po.invoices.find((i) => i.id === d.invoiceId);
-    return (
-        <Section title={`${d.ref} · ${d.date}`} right={inv ? <Badge tone='brand'>Invoiced</Badge> : <Badge tone='warn'>Not invoiced</Badge>}>
-            <p className='text-xs text-muted'>
-                Recorded {fmtDate(d.at)} by {d.byName}
-                {d.note ? `: ${d.note}` : ''}
-            </p>
-            <ul className='text-sm text-ink'>
-                {d.lines.map((l) => (
-                    <li key={l.no}>
-                        Line {l.no}: {l.qty}
-                    </li>
-                ))}
-            </ul>
-            {d.realigned.length > 0 && <p className='text-xs text-sky-300'>Posting aligned: {d.realigned.join('; ')}{d.postingReason ? ` (${d.postingReason})` : ''}</p>}
-            {inv && (
-                <Facts rows={[['Invoice', `${inv.number} · ${inv.date}`], ['Amount', inv.amount !== undefined ? `${money(inv.amount, inv.currency)} (tax ${money(inv.taxAmount ?? 0, inv.currency)})` : 'Hidden'], ['Expected', inv.expected !== undefined ? `${money(inv.expected, inv.currency)} · ${inv.variancePct}%` : 'Hidden'], ['Reason', inv.varianceReason ?? '']]} />
-            )}
-            <div className='flex flex-wrap gap-2'>
-                {d.files.map((f) => (
-                    <Button key={f.id} variant='secondary' onClick={() => void openStored(`${API}/orders/file`, { fileId: f.id }).catch((e) => setProblem(messageOf(e)))}>
-                        <Paperclip className='mr-1 h-4 w-4' /> {f.kind === 'invoice' ? 'Invoice' : 'Delivery note'}
-                    </Button>
-                ))}
-            </div>
-            {problem && <Alert tone='error'>{problem}</Alert>}
-            {!inv && po.canInvoice && <InvoiceLater po={po} delivery={d} onDone={onDone} />}
         </Section>
     );
 }
@@ -1222,11 +1076,11 @@ async function printOrder(po: PoFull) {
 
 // ----- One order -----
 
-type Tab = 'overview' | 'consolidate' | 'validation' | 'approval' | 'deliveries' | 'quotes' | 'trace' | 'history';
+type Tab = 'overview' | 'consolidate' | 'validation' | 'approval' | 'deliveries' | 'deliverydash' | 'quotes' | 'trace' | 'history';
 
 function OrderDetail({ id }: { id: string }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<PoFull>(`${API}/orders/get`, { id }), [id]);
-    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['overview','consolidate','validation','approval','deliveries','quotes','trace','history'], 'overview'));
+    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['overview','consolidate','validation','approval','deliveries','deliverydash','quotes','trace','history'], 'overview'));
     const [notice, setNotice] = useState('');
     const [problem, setProblem] = useState('');
     const [busy, setBusy] = useState(false);
@@ -1319,6 +1173,7 @@ function OrderDetail({ id }: { id: string }) {
         { value: 'validation' as Tab, label: 'Validation', count: po.validation.checks.length || undefined },
         { value: 'approval' as Tab, label: 'Approval' },
         { value: 'deliveries' as Tab, label: isService ? 'Services' : 'Deliveries', count: (isService ? po.receipts.length : po.deliveries.length) || undefined },
+        ...(['open', 'sent', 'partial', 'full', 'closed'].includes(po.status) || po.deliveries.length ? [{ value: 'deliverydash' as Tab, label: 'Delivery dashboard' }] : []),
         ...(po.seesQuotes ? [{ value: 'quotes' as Tab, label: 'Quotes' }] : []),
         { value: 'trace' as Tab, label: 'Trace' },
         { value: 'history' as Tab, label: 'History' },
@@ -1494,16 +1349,9 @@ function OrderDetail({ id }: { id: string }) {
             {tab === 'approval' && <ApprovalView po={po} />}
             {tab === 'deliveries' && isService && <ServicePanel po={po} onDone={done} />}
             {tab === 'quotes' && po.seesQuotes && <QuotesView id={po.id} />}
-            {tab === 'deliveries' && !isService && (
-                <div className='space-y-3'>
-                    {po.deliveries.length === 0 && <p className='text-sm text-muted'>No deliveries recorded yet.</p>}
-                    {po.invoiceStatus !== 'none' && <p className='text-xs text-muted'>Invoiced: {po.invoiceStatus === 'full' ? 'in full' : 'partially'} · {po.invoices.length} invoice(s)</p>}
-                    {po.deliveries.map((d) => (
-                        <DeliveryCard key={d.id} po={po} d={d} onDone={done} />
-                    ))}
-                    {c.receive && <ReceiveForm po={po} onDone={done} />}
-                </div>
-            )}
+            {tab === 'deliveries' && !isService && <DeliveriesTab po={po as unknown as DPo} canReceive={c.receive} receiveForm={<ReceiveForm po={po} onDone={done} />} onDone={done} />}
+            {tab === 'deliveries' && isService && po.deliveries.length > 0 && <DeliveriesTab po={po as unknown as DPo} canReceive={false} receiveForm={null} onDone={done} />}
+            {tab === 'deliverydash' && <DeliveryDashboard po={po as unknown as DPo} />}
             {tab === 'trace' && <TraceView id={id} />}
             {tab === 'consolidate' && <ConsolidationView id={id} onAttached={done} />}
             {tab === 'history' && (
