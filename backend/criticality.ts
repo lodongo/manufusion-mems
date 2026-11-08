@@ -174,7 +174,7 @@ function publicSetup(setup: CriticalitySetup, version: number, saved: Obj | null
 
 export const criticalityRoutes = {
     'POST /api/org/inventory/criticality/setup/get': [
-        orgRoute('org.inventory.criticality.setup.get', null, async (ctx) => {
+        orgRoute('org.inventory.criticality.setup.get', 'INV.criticality.view', async (ctx) => {
             canView(ctx);
             const { setup, version, saved } = await getCriticalitySetup(ctx.orgId);
             return { ...publicSetup(setup, version, saved), canEdit: ctx.role === 'org_super_admin' || holdsAnywhere(ctx, [CRIT.setup]) };
@@ -182,7 +182,7 @@ export const criticalityRoutes = {
     ],
 
     'POST /api/org/inventory/criticality/setup/save': [
-        orgRoute('org.inventory.criticality.setup.save', null, async (ctx) => {
+        orgRoute('org.inventory.criticality.setup.save', 'INV.criticality.setup', async (ctx) => {
             if (ctx.role !== 'org_super_admin' && !holdsAnywhere(ctx, [CRIT.setup])) throw new HttpError(403, 'Criticality setup permission required');
             const reason = str(ctx.body.reason).trim();
             if (reason.length < 10) throw new HttpError(400, 'Give a reason of at least 10 characters for the change');
@@ -220,7 +220,7 @@ export const criticalityRoutes = {
     ],
 
     'POST /api/org/inventory/criticality/get': [
-        orgRoute('org.inventory.criticality.get', null, async (ctx) => {
+        orgRoute('org.inventory.criticality.get', 'INV.criticality.view', async (ctx) => {
             canView(ctx);
             const { materialId, warehouseId } = ids(ctx.body);
             if (!(await warehouses(ctx, 'read')).some((w) => w.id === warehouseId)) throw new HttpError(404, 'Warehouse not found');
@@ -252,7 +252,7 @@ export const criticalityRoutes = {
     ],
 
     'POST /api/org/inventory/criticality/save': [
-        orgRoute('org.inventory.criticality.save', null, async (ctx) => {
+        orgRoute('org.inventory.criticality.save', 'INV.criticality.assess', async (ctx) => {
             const { materialId, warehouseId } = ids(ctx.body);
             await requireAt(ctx, [CRIT.assess], warehouseId, 'write', 'Criticality assessment permission is required for this warehouse.');
             if (!(await getDoc(`${root(ctx.orgId)}/materials/${materialId}`))) throw new HttpError(404, 'Material not found');
@@ -306,7 +306,7 @@ export const criticalityRoutes = {
     ],
 
     'POST /api/org/inventory/criticality/action': [
-        orgRoute('org.inventory.criticality.action', null, async (ctx) => {
+        orgRoute('org.inventory.criticality.action', 'INV.criticality.approve', async (ctx) => {
             const { materialId, warehouseId } = ids(ctx.body);
             const action = str(ctx.body.action);
             if (!['approve', 'return'].includes(action)) throw new HttpError(400, 'Unsupported action');
@@ -338,7 +338,7 @@ export const criticalityRoutes = {
     ],
 
     'POST /api/org/inventory/criticality/register': [
-        orgRoute('org.inventory.criticality.register', null, async (ctx) => {
+        orgRoute('org.inventory.criticality.register', 'INV.criticality.view', async (ctx) => {
             canView(ctx);
             const visible = new Set((await warehouses(ctx, 'read')).map((w) => w.id));
             const [assessments, materials, whs, { setup }] = await Promise.all([listDocs(`${root(ctx.orgId)}/criticality_assessments`), listDocs(`${root(ctx.orgId)}/materials`), listDocs(`${root(ctx.orgId)}/warehouses`), getCriticalitySetup(ctx.orgId)]);
