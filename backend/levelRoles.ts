@@ -47,7 +47,7 @@ const PRC_VIEW = ['PRC.view', 'PRC.vendors.view', 'PRC.quotes.view', 'PRC.prq.vi
 const MNT_VIEW = ['MNT.view', 'MNT.activities.view'];
 const MNT_REQUEST = ['MNT.WR.create', 'MNT.WR.edit', 'MNT.WR.cancel'];
 // ----- Inventory -----
-const INV_VIEW = ['INV.view', 'INV.warehouse.view', 'INV.bin.view', 'INV.bin.history', 'INV.replenishment.view', 'INV_ST_001', 'INV_ST_007', 'INV_ST_011', 'INV.criticality.view', 'INV.forecast.view'];
+const INV_VIEW = ['INV.view', 'INV.warehouse.view', 'INV.bin.view', 'INV.bin.history', 'INV.replenishment.view', 'INV_ST_001', 'INV_ST_007', 'INV_ST_011', 'INV.criticality.view', 'INV.forecast.view', 'INV.audit.view'];
 const WHS_VIEW = ['WHS.view', 'WHS.warehouse.view', 'WHS.bin.view', 'WHS.bin.history'];
 const AST_VIEW = ['AST.view', 'AST.catalog.view', 'AST.utilities.view'];
 const SAF_VIEW = ['SAF.view', 'SAF.risk.view'];
@@ -81,7 +81,7 @@ const DEFINITIONS: LevelRole[] = [
     L('INV', 'Inventory', 2, 'Storekeeper', 'Issues stock (including Stores Issue Vouchers), links materials to bins and counts stock.', [...INV_VIEW, 'INV.issue', 'INV.bin.link', 'INV.bin.unlink', 'INV_ST_016', 'INV_ST_017'], 'Never verifies, approves or posts counts, never approves stock valuations.'),
     L('INV', 'Inventory', 3, 'Planner', 'Maintains materials, runs and verifies replenishment, assesses material criticality, proposes forecast levels, plans stock take sessions, creates their PI documents and requests their posting.', [...INV_VIEW, 'INV.edit', 'INV.replenishment.run', 'INV.replenishment.verify', 'INV_ST_002', 'INV_ST_003', 'INV_ST_008', 'INV_ST_010', 'INV_ST_024', 'INV_ST_026', 'INV_ST_030', 'INV.criticality.assess', 'INV.forecast.edit'], 'Never counts, approves or posts stock take results, never acknowledges the requirements it verifies.'),
     L('INV', 'Inventory', 4, 'Controller', 'Verifies counts, requests recounts, approves stock take variances at their Chart of Authority level, posts results, closes PI documents and stock take sessions, approves criticality assessments and forecast levels.', [...INV_VIEW, 'INV_ST_013', 'INV_ST_020', 'INV_ST_022', 'INV_ST_027', 'INV_ST_028', 'INV_ST_031', 'INV.criticality.approve', 'INV.forecast.approve'], 'Never counts stock, requests posting or issues stock.'),
-    L('INV', 'Inventory', 5, 'Administrator', 'Configures warehouses, clusters, stock take configurations the criticality and forecasting setups; may disregard sessions.', [...INV_VIEW, 'INV.edit', 'INV.warehouse.configure', 'INV.cluster.create', 'INV.cluster.delete', 'INV_ST_002', 'INV_ST_003', 'INV_ST_005', 'INV_ST_012', 'INV.criticality.setup', 'INV.forecast.setup'], 'Never counts, verifies, approves or posts stock movements.'),
+    L('INV', 'Inventory', 5, 'Administrator', 'Configures warehouses, clusters, stock take configurations the criticality and forecasting setups; may disregard sessions.', [...INV_VIEW, 'INV.edit', 'INV.warehouse.configure', 'INV.cluster.create', 'INV.cluster.delete', 'INV_ST_002', 'INV_ST_003', 'INV_ST_005', 'INV_ST_012', 'INV.criticality.setup', 'INV.forecast.setup', 'INV.controls.setup'], 'Never counts, verifies, approves or posts stock movements.'),
 
     // Warehousing
     L('WHS', 'Warehousing', 1, 'Viewer', 'Read-only view of warehouses and bins.', WHS_VIEW, 'Never changes layout or bins.'),

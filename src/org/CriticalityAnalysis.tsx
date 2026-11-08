@@ -20,6 +20,7 @@ import { Screen, Segmented, messageOf, useConfirm } from '../components/screen';
 import { Badge, Button, Card, Spinner, Toggle, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { ForecastSetupForm } from './Forecasting';
+import { AuditRegister, ChangeControlForm } from './MaterialAudit';
 
 const API = '/api/org/inventory/criticality/';
 
@@ -508,11 +509,11 @@ export function CriticalitySummary({ materialId, warehouseId, onOpen }: { materi
 }
 
 export default function InventorySetup() {
-    const [tab, setTab] = useState<'setup' | 'grid' | 'forecast'>('setup');
+    const [tab, setTab] = useState<'setup' | 'grid' | 'forecast' | 'controls' | 'audits'>('setup');
     return (
         <Screen
             title='Inventory setup'
-            subtitle={tab === 'forecast' ? 'Forecasting' : 'Criticality analysis'}
+            subtitle={tab === 'forecast' ? 'Forecasting' : tab === 'controls' ? 'Change control' : tab === 'audits' ? 'Material audits' : 'Criticality analysis'}
             toolbar={
                 <Segmented
                     label='Setup views'
@@ -522,11 +523,13 @@ export default function InventorySetup() {
                         { value: 'setup', label: 'Criticality setup' },
                         { value: 'grid', label: 'Criticality grid' },
                         { value: 'forecast', label: 'Forecasting setup' },
+                        { value: 'controls', label: 'Change control' },
+                        { value: 'audits', label: 'Material audits' },
                     ]}
                 />
             }
         >
-            {tab === 'setup' ? <CriticalitySetupForm /> : tab === 'grid' ? <CriticalityRegister /> : <ForecastSetupForm />}
+            {tab === 'setup' ? <CriticalitySetupForm /> : tab === 'grid' ? <CriticalityRegister /> : tab === 'forecast' ? <ForecastSetupForm /> : tab === 'controls' ? <ChangeControlForm /> : <AuditRegister />}
         </Screen>
     );
 }

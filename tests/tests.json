@@ -1187,5 +1187,26 @@
       "Confirm the Supply card (available, open supply, reorder month, stock-out month) and the projected stock, Min and Max lines on the chart"
     ],
     "expected": "Levels reflect real lead times, the criticality classification and supply; simulated levels can be approved but are always identified as simulated."
+  },
+  {
+    "name": "Material audit, change control and level change impact; Technical Data after Current Status",
+    "description": "Technical Data sits after Current Status. Inventory > Setup > Change control allows or stops manual changes to Stock Control, Replenishment and Procurement Information (server enforced, versioned with reasons) and sets the audit tolerance. The material Audit tab runs the forecast in the background and reports what has not been done (criticality, forecast levels, lead time), whether min/max and strategy are in line with the analysis and forecast, stock count adjustment patterns, and the risk (stock-out exposure) and opportunity (excess, slow or dead stock) of the stock held, with a score. A report is saved per day for trending and downloads as PDF. Every accepted level change (forecast approval or manual) is logged with its impact on stock holding. Inventory > Setup > Material audits lists the latest audits with organization trends.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "material audit",
+      "audit trend",
+      "change control",
+      "level change impact",
+      "tab order"
+    ],
+    "steps": [
+      "Open a material: confirm the tab order Overview, Current Status, Technical Data, Inventory Information, ... Forecasting, Audit",
+      "Inventory > Setup > Change control: switch Replenishment off, save with a reason; on a material confirm Replenishment shows Locked and a direct save is refused",
+      "Open the Audit tab: confirm the score, the done checklist (tap an item to open its tab), risk and opportunity values, findings with actions, levels against the forecast and count adjustments; download the PDF",
+      "Approve forecast levels (or change min/max by hand): run the audit again and confirm the level change appears with average stock, value, holding cost and max value impact",
+      "Run the audit on different days: confirm the score and excess/risk trend lines; Inventory > Setup > Material audits: confirm the register (search, filter, Excel) and the organization trend"
+    ],
+    "expected": "Gaps and misalignments are visible per material with their value at risk or tied up, and their trend over time; manual changes follow the change control setup."
   }
 ]

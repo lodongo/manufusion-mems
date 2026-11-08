@@ -1113,6 +1113,11 @@ export const procurementRoutes = {
         if(section==='inventory'){const min=numOf('minimumLevel'),max=numOf('maximumLevel'),safety=numOf('safetyStock'),reorder=numOf('reorderPoint');if(min!==null&&max!==null&&min>max)throw new HttpError(400,'Minimum level cannot be above maximum level.');if(safety!==null&&max!==null&&safety>max)throw new HttpError(400,'Safety stock cannot be above maximum level.');if(reorder!==null&&max!==null&&reorder>max)throw new HttpError(400,'Reorder point cannot be above maximum level.');}
         const changed=Object.keys(clean).filter(k=>JSON.stringify(old?.data?.[k]??null)!==JSON.stringify(clean[k]));
         if(!changed.length)return {ok:true,changed:0};
+        // Change control (Inventory › Setup): manual changes to Stock Control, Replenishment or Procurement Information
+        // may be switched off for the organization.
+        {const {manualChangeBlocked}=await import('./materialAudit');
+        const blockedWhy=await manualChangeBlocked(ctx.orgId,section,changed,{stockControl:[...MATERIAL_STOCK_DIMENSIONS.map(([field])=>field as string),'stockingPolicy'],replenishment:[...REPLENISHMENT_NUMBER_FIELDS,'seasonalFactors']});
+        if(blockedWhy)throw new HttpError(409,blockedWhy);}
         if(section==='inventory'&&changed.includes('warehouseRestriction')){
             // Stock already in a bin was matched to that bin's restriction: the restriction cannot drift away from it.
             const nextRestriction=effectiveRestriction(merged,material.data);
@@ -1139,6 +1144,11 @@ export const procurementRoutes = {
         }
         await writeDoc(path,{...merged,materialId:id,warehouseId,updatedBy:ctx.uid,updatedAt:nowIso()});
         await audited(ctx,'inventory.material.'+section+'_settings',str(material.data.materialNumber||id)+' · '+warehouseId,Object.fromEntries(changed.map(k=>[k,{from:old?.data?.[k]??null,to:clean[k]}])));
+        // Accepted level changes are logged with their impact on stock holding (Audit tab).
+        if(section==='inventory'&&changed.some(k=>['minimumLevel','maximumLevel','reorderQuantity','safetyStock','reorderPoint'].includes(k))){
+            const {logLevelChange}=await import('./materialAudit');
+            await logLevelChange(ctx.orgId,id,warehouseId,old?.data??null,clean,{source:'manual',by:ctx.uid});
+        }
         return {ok:true,changed:changed.length};
     })],
     'POST /api/org/inventory/operations': [orgRoute('org.inventory.operations',null,async ctx=>{
