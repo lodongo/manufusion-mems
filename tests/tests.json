@@ -1228,5 +1228,26 @@
       "On a quotation recommended earlier with one quote, Request waiver approval with a reason"
     ],
     "expected": "One quote is possible, but only with a reason and an approved, audited waiver before the requisition and purchase order."
+  },
+  {
+    "name": "Purchase orders: open with a specification, consolidate, consolidation window on confirm, trace pie",
+    "description": "Purchase orders > + opens an empty order with a vendor, kind of purchase, currency and the categories/subcategories it covers (only those the approved vendor is registered for, within the buyer's groups). Confirmed requisitions that fit (same vendor, currency, categories; payment terms and buyer group set by the first) are added from the order's Consolidate tab or the requisition's Matching draft orders. A separate new order while a matching draft exists needs a 20+ character reason. Validation adds 'Time to consolidate': when even the most urgent line can still be ordered after the window (date required less lead time; window in order settings, default 7 days, 0 off) it warns that the order could wait, lists requisitions that fit and work on the way, and confirming needs a reason and acknowledgement. Trace shows each step's lead time, share of the total and who it waited on, as a pie chart by step or by party.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "order specification",
+      "requisition consolidation",
+      "consolidation window",
+      "order trace pie"
+    ],
+    "steps": [
+      "Purchase orders > +: choose the vendor, Materials, tick a subcategory, open the order; confirm the specification note and the Consolidate tab",
+      "Consolidate tab: Add a confirmed requisition of that vendor and subcategory; confirm payment terms and buyer group come from it and a non-matching requisition is not offered",
+      "On another confirmed requisition that fits, press New order: confirm it asks for a reason for a separate order",
+      "Order settings: set the consolidation window (e.g. 7 days) with a reason",
+      "Validate an order whose lines are needed well after their lead time: confirm 'Time to consolidate' warns with the date it could wait until, and Confirm asks for the reason and acknowledgement; with a pressed line it passes",
+      "Trace tab: confirm the pie chart by step and by who it waited on, and the table of steps with lead time and percentage"
+    ],
+    "expected": "Orders consolidate by default, releasing early is a recorded decision, and the trace shows where the time went."
   }
 ]

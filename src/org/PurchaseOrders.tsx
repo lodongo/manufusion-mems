@@ -6,6 +6,7 @@ import { downloadReportPdf } from '../lib/report';
 import { Alert, Field, SelectField } from '../components/ui';
 import { API, PO_BASE, RQ_BASE, money, todayIso, Facts, Section, AckPanel, ServicePanel, ReassignPanel, LinesEditor, QuotesView, VisibilitySettings, FinanceSettings, type Receipt } from './PoExtras';
 import RichTable, { type Column } from '../components/RichTable';
+import { ConsolidationView, SpecOrderForm, TraceBreakdown, WindowSetting } from './PoConsolidation';
 import { restoredTableTab } from '../lib/tableTabs';
 import { Badge, Button, Spinner, Toggle, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
@@ -221,6 +222,7 @@ interface PoFull extends Omit<PoRow, never> {
     versions: Array<{ id: string; ver: number; status: string; statusLabel: string; createdAt: string; approvedAt: string; reason: string; current: boolean }>;
     seesQuotes: boolean;
     seesPrices: boolean;
+    spec: { scopes: Array<{ kind: string; categoryName: string; subcategoryName: string }>; byName: string; at: string } | null;
     ownsCostCenter: boolean;
     can: { edit: boolean; validate: boolean; confirm: boolean; reopen: boolean; approve: boolean; send: boolean; receive: boolean; cancel: boolean; amend: boolean; reassign: boolean; acknowledge: boolean; renderService: boolean; acceptService: boolean };
 }
@@ -229,11 +231,14 @@ interface Trace {
     timeline: Array<{ at: string; stage: string; ref: string; title: string; byName: string; note: string; hoursSincePrevious: number; hoursSinceStart: number }>;
     milestones: Array<{ key: string; label: string; at: string; hoursFromPrevious: number }>;
     totalHours: number;
+    steps: Array<{ from: string; to: string; key: string; party: string; hours: number; days: number; pct: number }>;
+    byParty: Array<{ party: string; hours: number; pct: number }>;
     leadTime: { quotedDays: number; actualDays: number | null; elapsedDays: number | null; onTime: boolean | null; since: string };
 }
 interface Options {
     currency: string;
     autoSend: boolean;
+    consolidationWindowDays: number;
     emailReady: boolean;
     payableGlCode: string;
     can: { manage: boolean; approve: boolean; receive: boolean; settings: boolean; reassign: boolean; journals: boolean };
@@ -390,16 +395,29 @@ function RequisitionDetail({ id }: { id: string }) {
             await callBackend(`${API}/requisitions/${path}`, { id, reason });
             done(ok);
         });
-    const newOrder = () =>
-        confirm.ask({ title: 'Create a purchase order', message: `A new draft order will be made from the ${r.items} item(s) of ${r.number}.`, confirmLabel: 'Create order' }, async () => {
-            const out = await callBackend<{ id: string }>(`${API}/orders/create`, { requisitionId: id, mode: 'new' });
-            navigate(`${PO_BASE}/${out.id}`);
-        });
+    // Aim to consolidate: when draft orders already fit, a separate order needs a reason.
+    const newOrder = async () => {
+        let fits: Array<{ number: string }> = [];
+        try {
+            fits = (await callBackend<{ items: Array<{ number: string }> }>(`${API}/requisitions/targets`, { id })).items;
+        } catch {
+            fits = [];
+        }
+        confirm.ask(
+            fits.length
+                ? { title: 'A matching order exists', message: `${fits.map((f) => f.number).join(', ')} already fit${fits.length === 1 ? 's' : ''} this requisition (see Matching draft orders below). Orders should be consolidated; a separate order needs a reason.`, confirmLabel: 'Create separate order', reason: { label: 'Why a separate order', minLength: 20 } }
+                : { title: 'Create a purchase order', message: `A new draft order will be made from the ${r.items} item(s) of ${r.number}.`, confirmLabel: 'Create order' },
+            async (reason) => {
+                const out = await callBackend<{ id: string }>(`${API}/orders/create`, { requisitionId: id, mode: 'new', separateReason: reason });
+                navigate(`${PO_BASE}/${out.id}`);
+            }
+        );
+    };
 
     const primary = r.can.confirm ? (
         <Button onClick={confirmIt}>Confirm</Button>
     ) : r.can.convert ? (
-        <Button onClick={newOrder}>
+        <Button onClick={() => void newOrder()}>
             <Plus className='mr-1 h-4 w-4' /> New order
         </Button>
     ) : undefined;
@@ -625,6 +643,7 @@ function OrderList() {
     const [view, setView] = useState('approvals');
     const [notice, setNotice] = useState('');
     const [showSettings, setShowSettings] = useState(false);
+    const [showNew, setShowNew] = useState(false);
     const options = useLoad(() => callBackend<Options>(`${API}/orders/options`));
     const { data, error, loading, reload } = useLoad(() => callBackend<PoList>(`${API}/orders/list`, { view }), [view]);
     if (loading && !data) return <Spinner />;
@@ -660,13 +679,26 @@ function OrderList() {
                             <Settings className='h-4 w-4' />
                         </Button>
                     )}
+                    {options.data?.can.manage && (
+                        <Button aria-label='New order with a specification' onClick={() => setShowNew(!showNew)}>
+                            <Plus className='h-4 w-4' />
+                        </Button>
+                    )}
                 </>
             }
             toolbar={<Segmented label='Order views' value={view} options={views} onChange={setView} />}
         >
             {notice && <Alert tone='success'>{notice}</Alert>}
+            {showNew && <SpecOrderForm onClose={() => setShowNew(false)} />}
             {showSettings && options.data && (
                 <>
+                    <WindowSetting
+                        days={options.data.consolidationWindowDays}
+                        onDone={(m) => {
+                            setNotice(m);
+                            options.reload();
+                        }}
+                    />
                     <OrderSettings
                         options={options.data}
                         onDone={(m) => {
@@ -795,6 +827,9 @@ function TraceView({ id }: { id: string }) {
                         ['Against the quote', lt.onTime === null ? '' : lt.onTime ? 'On time' : 'Late'],
                     ]}
                 />
+            </Section>
+            <Section title='Where the time went'>
+                <TraceBreakdown steps={data.steps ?? []} byParty={data.byParty ?? []} totalHours={data.totalHours} />
             </Section>
             <Section title='Milestones'>
                 <ol className='space-y-1'>
@@ -947,11 +982,11 @@ async function printOrder(po: PoFull) {
 
 // ----- One order -----
 
-type Tab = 'overview' | 'validation' | 'approval' | 'deliveries' | 'quotes' | 'trace' | 'history';
+type Tab = 'overview' | 'consolidate' | 'validation' | 'approval' | 'deliveries' | 'quotes' | 'trace' | 'history';
 
 function OrderDetail({ id }: { id: string }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<PoFull>(`${API}/orders/get`, { id }), [id]);
-    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['overview','validation','approval','deliveries','quotes','trace','history'], 'overview'));
+    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['overview','consolidate','validation','approval','deliveries','quotes','trace','history'], 'overview'));
     const [notice, setNotice] = useState('');
     const [problem, setProblem] = useState('');
     const [busy, setBusy] = useState(false);
@@ -986,14 +1021,15 @@ function OrderDetail({ id }: { id: string }) {
             setBusy(false);
         }
     };
+    const waitCheck = po.validation.checks.find((x) => x.code === 'consolidation.window' && x.result === 'warn');
     const confirmOrder = () =>
         confirm.ask(
             {
-                title: `Confirm ${po.number}`,
-                message: `${po.validation.warns > 0 ? `${po.validation.warns} warning(s) need your written reason. ` : ''}The order goes to approval: ${po.approval.steps.length ? po.approval.steps.map((s) => s.level).join(' then ') : 'the levels the chart of authority sets for its value'}. You will not be able to change it unless an approver returns it.`,
+                title: waitCheck ? `${po.number} could wait to consolidate` : `Confirm ${po.number}`,
+                message: `${waitCheck ? `${waitCheck.detail} ` : ''}${po.validation.warns > 0 ? `${po.validation.warns} warning(s) need your written reason. ` : ''}The order goes to approval: ${po.approval.steps.length ? po.approval.steps.map((s) => s.level).join(' then ') : 'the levels the chart of authority sets for its value'}. You will not be able to change it unless an approver returns it.`,
                 confirmLabel: 'Confirm for approval',
-                acknowledge: 'I have reviewed the lines and the validation results.',
-                reason: po.validation.warns > 0 ? { label: 'Why the warnings are acceptable', minLength: 20, placeholder: 'Explain each warning you accept' } : undefined,
+                acknowledge: waitCheck ? 'I have reviewed the lines and the validation results, and release the order now although it could wait to consolidate.' : 'I have reviewed the lines and the validation results.',
+                reason: po.validation.warns > 0 ? { label: waitCheck ? 'Why release now instead of consolidating (and the other warnings)' : 'Why the warnings are acceptable', minLength: 20, placeholder: 'Explain each warning you accept' } : undefined,
             },
             async (reason) => call('confirm', { acknowledge: true, reason }, 'Confirmed and sent for approval.')
         );
@@ -1039,6 +1075,7 @@ function OrderDetail({ id }: { id: string }) {
     const newest = po.versions.reduce((m, v) => Math.max(m, v.ver), 0);
     const tabs = [
         { value: 'overview' as Tab, label: 'Overview' },
+        ...(['draft', 'validated'].includes(po.status) ? [{ value: 'consolidate' as Tab, label: 'Consolidate' }] : []),
         { value: 'validation' as Tab, label: 'Validation', count: po.validation.checks.length || undefined },
         { value: 'approval' as Tab, label: 'Approval' },
         { value: 'deliveries' as Tab, label: isService ? 'Services' : 'Deliveries', count: (isService ? po.receipts.length : po.deliveries.length) || undefined },
@@ -1100,6 +1137,13 @@ function OrderDetail({ id }: { id: string }) {
                 </Alert>
             )}
             {!po.mine && ['draft', 'validated', 'open', 'sent', 'partial'].includes(po.status) && !po.ownsCostCenter && <p className='text-xs text-muted'>This order belongs to {po.ownerName}. Only the owner can change, send, acknowledge or amend it.</p>}
+            {po.spec && ['draft', 'validated'].includes(po.status) && (
+                <Alert tone='info'>
+                    Opened with a specification by {po.spec.byName}: {po.spec.scopes.map((x) => `${x.categoryName} › ${x.subcategoryName || 'all'}`).join(', ')}.{' '}
+                    {lines.length ? '' : 'Add requisitions that fit on the Consolidate tab.'}{' '}
+                    <button type='button' className='min-h-11 text-brand' onClick={() => setTab('consolidate')}>Open Consolidate</button>
+                </Alert>
+            )}
             {po.rejectReason && <Alert tone='error'>Rejected: {po.rejectReason}</Alert>}
             {po.sendError && <Alert tone='error'>The automatic email failed: {po.sendError}. Print the order and send it, or try again.</Alert>}
             {c.approve && <Alert tone='info'>This order is waiting for your approval at {po.waitingFor}. Review the lines and the Validation tab first.</Alert>}
@@ -1229,6 +1273,7 @@ function OrderDetail({ id }: { id: string }) {
                 </div>
             )}
             {tab === 'trace' && <TraceView id={id} />}
+            {tab === 'consolidate' && <ConsolidationView id={id} onAttached={done} />}
             {tab === 'history' && (
                 <Section title='History'>
                     <HistoryList items={po.history} />
