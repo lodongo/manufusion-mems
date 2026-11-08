@@ -96,6 +96,9 @@ export interface ReceiptLine {
     no: number;
     qty: number;
     materialId?: string;
+    /** Posting aligned at receipt (not for warehouse stock): checked by the caller (same legal entity, approved GL). */
+    costCenterId?: string;
+    glCode?: string;
 }
 /** What receiving each line of an order will do: warehouse or not, the material it lands as, and the finance state. */
 export async function receiptPlan(orgId: string, po: Obj): Promise<Obj[]> {
@@ -126,7 +129,8 @@ export async function receiptPlan(orgId: string, po: Obj): Promise<Obj[]> {
         } catch {
             state = 'blocked';
         }
-        out.push({ no: Number(l.no), costCenterId: cc, warehouse: wh, materialId: linked?.id ?? '', materialNumber: str(linked?.data.materialNumber), materialName: str(linked?.data.name), options, finance: state });
+        const le = leOf(units, cc);
+        out.push({ no: Number(l.no), type: str(l.type), costCenterId: cc, costCenterCode: units.get(cc)?.code ?? cc, costCenterName: units.get(cc)?.name ?? '', glCode: str(l.glCode), glName: str(l.glName), legalEntityId: le?.id ?? '', warehouse: wh, materialId: linked?.id ?? '', materialNumber: str(linked?.data.materialNumber), materialName: str(linked?.data.name), options, finance: state });
     }
     return out;
 }
@@ -143,15 +147,17 @@ export async function receiveGoods(ctx: OrgContext, a: { po: Obj; poId: string; 
     for (const g of a.lines) {
         const l = objs(a.po.lines).find((x) => Number(x.no) === g.no);
         if (!l) throw new HttpError(400, `Line ${g.no} does not exist on this order.`);
-        const cc = ccOfLine(l);
+        const planned = ccOfLine(l);
+        const whPlanned = str(l.type) === 'material' && (await isWarehouse(ctx.orgId, planned));
+        const cc = !whPlanned && g.costCenterId ? g.costCenterId : planned;
         const le = await leInfo(ctx.orgId, units, cc, cache);
-        const wh = str(l.type) === 'material' && (await isWarehouse(ctx.orgId, cc));
+        const wh = whPlanned;
         let material: Doc | null = null;
         if (wh) {
             material = (str(l.itemCode) ? await materialIn(ctx.orgId, str(l.itemCode), cc) : null) ?? (g.materialId ? await materialIn(ctx.orgId, g.materialId, cc) : null);
             if (!material) throw new HttpError(400, `Line ${g.no} goes into warehouse ${units.get(cc)?.code ?? cc}: choose the warehouse material it is received as.`);
         }
-        items.push({ l, qty: g.qty, cc, wh, material, le, docValue: round2(g.qty * (Number(l.netUnitPrice) || 0)) });
+        items.push({ l: !wh && g.glCode ? { ...l, glCode: g.glCode } : l, qty: g.qty, cc, wh, material, le, docValue: round2(g.qty * (Number(l.netUnitPrice) || 0)) });
     }
     // Stock quantities move in every case. They are written with the posting when finance is live.
     const mj = (it: Item, i: number) => ({ id: safeId(`GR_${a.deliveryId}_${Number(it.l.no)}_${i}`), data: mjEntry(it.material!.id, it.cc, str(it.material!.data.materialNumber), 'GOODS_RECEIPT', it.qty, a.poId, ctx.uid, { deliveryId: a.deliveryId, deliveryNote: a.ref, source: 'purchase_order' }) });

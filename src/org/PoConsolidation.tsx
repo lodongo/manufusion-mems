@@ -31,6 +31,7 @@ export function SpecOrderForm({ onClose }: { onClose: () => void }) {
     const [vendorId, setVendorId] = useState('');
     const [kind, setKind] = useState('');
     const [picked, setPicked] = useState<Set<string>>(new Set());
+    const [category, setCategory] = useState('');
     const [currency, setCurrency] = useState('');
     const [notes, setNotes] = useState('');
     if (loading && !data) return <Spinner />;
@@ -38,10 +39,14 @@ export function SpecOrderForm({ onClose }: { onClose: () => void }) {
     const vendor = data.vendors.find((v) => v.id === vendorId);
     const kinds = vendor ? Array.from(new Set(vendor.scopes.map((x) => x.kind))) : [];
     const k = kinds.includes(kind) ? kind : kinds[0] ?? '';
-    const options = vendor ? vendor.scopes.filter((x) => x.kind === k) : [];
+    const ofKind = vendor ? vendor.scopes.filter((x) => x.kind === k) : [];
+    // An order holds one category: the category is chosen first, then its subcategories.
+    const categories = Array.from(new Map(ofKind.map((x) => [x.categoryCode, x.categoryName || x.categoryCode])).entries());
+    const cat = categories.some(([c]) => c === category) ? category : categories.length === 1 ? categories[0][0] : '';
+    const options = ofKind.filter((x) => x.categoryCode === cat);
     const chosen = options.filter((x) => picked.has(scopeId(x)));
     const cur = (currency || vendor?.currency || data.currency).toUpperCase();
-    const problems = [...(!vendor ? ['Choose the vendor.'] : []), ...(vendor && !chosen.length ? ['Tick at least one category or subcategory.'] : []), ...(!/^[A-Z]{3}$/.test(cur) ? ['The currency is a 3-letter code.'] : [])];
+    const problems = [...(!vendor ? ['Choose the vendor.'] : []), ...(vendor && !cat ? ['Choose the one category this order holds.'] : []), ...(vendor && cat && !chosen.length ? ['Tick at least one subcategory.'] : []), ...(!/^[A-Z]{3}$/.test(cur) ? ['The currency is a 3-letter code.'] : [])];
     const create = () =>
         confirm.ask(
             {
@@ -69,6 +74,7 @@ export function SpecOrderForm({ onClose }: { onClose: () => void }) {
                             setVendorId(e.target.value);
                             setPicked(new Set());
                             setKind('');
+                            setCategory('');
                             setCurrency('');
                         }}
                     >
@@ -86,13 +92,36 @@ export function SpecOrderForm({ onClose }: { onClose: () => void }) {
                             options={kinds.map((x) => ({ value: x, label: KIND_LABEL[x] ?? x }))}
                             onChange={(v) => {
                                 setKind(v);
+                                setCategory('');
                                 setPicked(new Set());
                             }}
                         />
                     )}
-                    {vendor && (
+                    {vendor && categories.length > 0 && (
                         <div className='space-y-1'>
-                            <p className='text-xs font-semibold text-muted'>{KIND_LABEL[k]}: categories and subcategories *</p>
+                            <p className='text-xs font-semibold text-muted'>{KIND_LABEL[k]}: category * (one per order)</p>
+                            <div className='max-h-48 space-y-1 overflow-y-auto overscroll-contain'>
+                                {categories.map(([code, name]) => (
+                                    <label key={code} className='flex min-h-11 items-center gap-3 rounded-xl border border-line px-3 text-sm text-ink'>
+                                        <input
+                                            type='radio'
+                                            name='spec-category'
+                                            className='h-5 w-5 accent-emerald-500'
+                                            checked={cat === code}
+                                            onChange={() => {
+                                                setCategory(code);
+                                                setPicked(new Set());
+                                            }}
+                                        />
+                                        {name}
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {vendor && cat && (
+                        <div className='space-y-1'>
+                            <p className='text-xs font-semibold text-muted'>Subcategories *</p>
                             <div className='max-h-64 space-y-1 overflow-y-auto overscroll-contain'>
                                 {options.map((x) => {
                                     const idk = scopeId(x);
