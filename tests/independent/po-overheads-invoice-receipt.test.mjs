@@ -39,19 +39,15 @@ test('chart of authority on the discounted amount plus overheads; one category p
     assert.match(po, /caseLines\.map\(\(l\) => `\$\{str\(l\.type\)\}\|\$\{str\(l\.categoryCode\)\}`\)/);
 });
 
-test('receipt: delivery note required, optional invoice validated, posting aligned with permission and reason', () => {
+test('receipt: delivery note required, posting aligned with permission and reason; invoices moved to accounts payable', () => {
     const po = read('backend/purchaseOrders.ts');
     assert.match(po, /Attach the supplier's delivery note/);
-    assert.match(po, /cleanFile\(\{ \.\.\.o\(ctx\.body\.deliveryNote\), kind: 'delivery_note' \}, \['delivery_note'\]\)/);
-    assert.match(po, /'POST \/api\/org\/procurement\/orders\/invoice': \[\s*orgRoute\('org\.procurement\.orders\.invoice', 'PRC\.po\.receive'/);
-    assert.match(po, /is already recorded on/);
-    assert.match(po, /matchTolerancePct/);
-    assert.match(po, /Give the reason in at least 20 characters/);
+    assert.match(po, /cleanFile\(\{ \.\.\.o\(body\.deliveryNote\), kind: 'delivery_note' \}, \['delivery_note'\]\)/);
+    assert.doesNotMatch(po, /'POST \/api\/org\/procurement\/orders\/invoice'/);
     assert.match(po, /can\(ctx, 'PRC\.po\.receive_posting'\)/);
     assert.match(po, /same legal entity/);
     assert.match(po, /checkChosenGl\(ctx\.orgId, cc, gl/);
     assert.match(po, /goes into warehouse stock/);
-    assert.match(po, /invoiceStatusOf\(lines\)/);
     const perms = read('backend/permissionPolicy.ts');
     assert.match(perms, /p\('PRC\.po\.receive_posting'/);
     assert.match(perms, /a: 'PRC\.po\.manage', b: 'PRC\.po\.receive_posting'/);
@@ -59,9 +55,7 @@ test('receipt: delivery note required, optional invoice validated, posting align
     assert.match(fin, /costCenterId\?: string;[\s\S]{0,40}glCode\?: string/);
     const ui = read('src/org/PurchaseOrders.tsx');
     assert.match(ui, /Delivery note document \*/);
-    assert.match(ui, /The supplier’s invoice came with this delivery/);
     assert.match(ui, /Align the cost center or GL account/);
-    assert.match(ui, /function InvoiceLater/);
     const qf = read('src/org/Quotations.tsx');
     assert.match(qf, /Taxes, freight and other charges/);
     const spec = read('src/org/PoConsolidation.tsx');

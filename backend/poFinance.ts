@@ -237,6 +237,9 @@ export const poFinanceRoutes = {
             const [units, authority, orders] = await Promise.all([unitsOf(ctx.orgId), getAuthority(ctx.orgId), listDocs(ordersPath(ctx.orgId))]);
             const owned = ownedCostCenters(units, ctx.me);
             let journalId = '';
+            const ap = await import('./accountsPayable');
+            const recNo = await ap.docNoFor(ctx.orgId, 'REC');
+            let register: Record<string, unknown> | null = null;
             const out = await mutate(ctx, 'po', doc.id, 'service.accept', async (d) => {
                 if (!DELIVERING.includes(str(d.status))) throw new HttpError(409, 'This order is not open for services.');
                 const receipts = objs(d.receipts);
@@ -271,11 +274,12 @@ export const poFinanceRoutes = {
                 });
                 const full = lines.every((l) => outstanding(l) <= 0);
                 const seqD = (Number(d.deliverySeq) || 0) + 1;
-                const delivery = { id: `${doc.id}_D${seqD}`, at, date: today(), ref: `${rid} / ${str(r.invoiceNo)}`, by: ctx.uid, byName: nameOfUser(ctx.me), note: `Service accepted${journalId ? `, journal ${journalId}` : ''}${posted.note ? `. ${posted.note}` : ''}`.slice(0, 300), lines: rlines.map((x) => ({ no: Number(x.no), qty: Number(x.qty) })) };
+                const delivery = { id: `${doc.id}_D${seqD}`, recNo, status: 'posted', kind: 'service', via: 'procurement', at, date: today(), ref: `${rid} / ${str(r.invoiceNo)}`, by: str(r.renderedBy) || ctx.uid, byName: nameOfUser(ctx.me), note: `Service accepted${journalId ? `, journal ${journalId}` : ''}${posted.note ? `. ${posted.note}` : ''}`.slice(0, 300), lines: rlines.map((x) => ({ no: Number(x.no), qty: Number(x.qty) })) };
+                register = { recNo, poId: doc.id, poNumber: str(d.number) || doc.id, vendorId: str(d.vendorId), vendorName: str(d.vendorName), currency: str(d.currency), deliveryId: delivery.id, kind: 'service', via: 'procurement', date: delivery.date, ref: delivery.ref, status: 'posted', lines: rlines.map((x) => ({ no: Number(x.no), qty: Number(x.qty) || 0, value: Number(x.amount) || 0, itemName: str(pl(Number(x.no))?.itemName) || str(pl(Number(x.no))?.requirement), unit: str(pl(Number(x.no))?.unit) })), warehouseIds: [], invoiceId: '', by: ctx.uid, byName: nameOfUser(ctx.me), at };
                 return {
                     patch: {
                         lines,
-                        receipts: receipts.map((x) => (str(x.id) === rid ? { ...x, status: 'accepted', decidedBy: ctx.uid, decidedByName: nameOfUser(ctx.me), decidedAt: at, decisionNote: note, journalId, financeNote: posted.note } : x)),
+                        receipts: receipts.map((x) => (str(x.id) === rid ? { ...x, recNo, status: 'accepted', decidedBy: ctx.uid, decidedByName: nameOfUser(ctx.me), decidedAt: at, decisionNote: note, journalId, financeNote: posted.note } : x)),
                         deliveries: [...objs(d.deliveries), delivery],
                         deliverySeq: seqD,
                         status: full ? 'full' : 'partial',
@@ -317,7 +321,9 @@ export const poFinanceRoutes = {
                     result: { journalId },
                 };
             });
-            return { ...out, journalId };
+            const reg = register as Record<string, unknown> | null;
+            if (reg) await ap.writeReceipt(ctx, { ...reg, journals: journalId ? journalId.split(', ') : [] });
+            return { ...out, journalId, recNo };
         }),
     ],
 

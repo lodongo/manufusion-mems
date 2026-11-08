@@ -133,6 +133,7 @@ test('financial codes carry their postings in the catalogue; shared-route postin
   assert.equal(byCode.get('INV-CNT-PS').state, 'live');
   assert.ok(byCode.get('INV-CNT-PS').routes.includes('POST /api/org/inventory/stocktake/action'));
   assert.deepEqual(byCode.get('INV-GIS-PS').postings.map((p) => p.event).sort(), ['GI_CC', 'GI_WO']);
-  assert.equal(byCode.get('FIN-APY-PS').postings[0].state, 'planned');
+  // AP invoice posting is live; its code is reserved here only because this fixture installs no AP route.
+  assert.equal(byCode.get('FIN-APY-PS').postings[0].state, 'live');
   assert.equal(byCode.get('FIN-APY-PS').state, 'reserved');
 });

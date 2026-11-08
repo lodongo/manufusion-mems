@@ -840,7 +840,7 @@ async function orderSettings(orgId: string) {
 // confirming warns while there is still time to wait for more (no line is pressed on its date required).
 
 /** Invoiced against received: none, partial or full (every ordered quantity invoiced). */
-const invoiceStatusOf = (lines: Obj[]) => {
+export const invoiceStatusOf = (lines: Obj[]) => {
     const inv = lines.reduce((s, l) => s + (Number(l.invoicedQty) || 0), 0);
     if (!(inv > 0)) return 'none';
     return lines.every((l) => (Number(l.invoicedQty) || 0) + 1e-9 >= (Number(l.quantity) || 0)) ? 'full' : 'partial';
@@ -850,7 +850,7 @@ const invoiceStatusOf = (lines: Obj[]) => {
  * Posting aligned at receipt: a line that does not go into warehouse stock may post to another cost center of the same
  * legal entity and another approved GL account of that cost center. Needs PRC.po.receive_posting and a reason.
  */
-async function alignPosting(ctx: OrgContext, po: Obj, given: Array<{ no: number; qty: number; materialId: string; costCenterId: string; glCode: string }>) {
+async function alignPosting(ctx: OrgContext, po: Obj, given: Array<{ no: number; qty: number; materialId: string; costCenterId: string; glCode: string }>, body: Obj) {
     const { unitsOf: finUnits, leOf: finLeOf, checkChosenGl } = await import('./finCore');
     const units = await finUnits(ctx.orgId);
     const changes: string[] = [];
@@ -876,44 +876,68 @@ async function alignPosting(ctx: OrgContext, po: Obj, given: Array<{ no: number;
         changes.push(`line ${g.no} ${units.get(cc0)?.code ?? cc0}/${str(l.glCode)} → ${unit.code}/${gl}`);
         lines.push({ no: g.no, qty: g.qty, materialId: g.materialId, costCenterId: cc, glCode: gl });
     }
-    const reason = cleanText(ctx.body.postingReason).slice(0, 300);
+    const reason = cleanText(body.postingReason).slice(0, 300);
     if (changes.length && reason.length < 10) throw new HttpError(400, 'Give the reason for changing the cost center or GL account (at least 10 characters).');
     return { lines, changes, reason: changes.length ? reason : '' };
 }
 
 /**
- * The supplier's invoice for received quantities: number (unique for the supplier), date, amount including tax, tax,
- * and the invoice document. It is compared with the value expected: delivered quantity × order price plus the share
- * of taxes and charges. A difference beyond the chart-of-authority price tolerance needs a reason.
+ * Records one delivery (a goods receipt, REC_ + 8 digits) against an approved order: quantities within what is
+ * outstanding, the supplier's delivery note attached, stock and the ledger posted (Dr inventory, the line account or
+ * asset clearing, Cr GR/IR). Used by Procurement and by Inventory > Pending POs (the warehouse view, which never
+ * realigns posting). The receipt is also written to the receipts register for Inventory, Accounts Payable and audit.
  */
-async function readInvoice(ctx: OrgContext, po: Obj, poId: string, v: Obj, given: Array<{ no: number; qty: number }>) {
-    const { cleanFile } = await import('./poFinance');
-    const number = oneLine(v.number, 40);
-    if (number.length < 2) throw new HttpError(400, 'Enter the invoice number.');
-    const date = str(v.date);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today()) throw new HttpError(400, 'Enter the invoice date. It cannot be in the future.');
-    if (date < str(po.approvedAt).slice(0, 10)) throw new HttpError(400, 'The invoice cannot be dated before the order was approved.');
-    const amount = Number(v.amount);
-    const tax = Number(v.taxAmount ?? 0);
-    if (!Number.isFinite(amount) || amount <= 0 || amount > 1e12) throw new HttpError(400, 'Enter the invoice amount including tax.');
-    if (!Number.isFinite(tax) || tax < 0 || tax >= amount) throw new HttpError(400, 'The tax on the invoice must be zero or more and less than the invoice amount.');
-    const file = cleanFile({ ...o(v.file), kind: 'invoice' }, ['invoice']);
-    // The same invoice number from the same supplier is never recorded twice.
-    const dup = (await listDocs(ordersPath(ctx.orgId))).find((p) => str(p.data.vendorId) === str(po.vendorId) && objs(p.data.invoices).some((i) => str(i.number).toLowerCase() === number.toLowerCase()));
-    if (dup) throw new HttpError(409, `Invoice ${number} from ${str(po.vendorName)} is already recorded on ${dup.id}.`);
-    const goods = given.reduce((s, g) => {
-        const l = objs(po.lines).find((x) => Number(x.no) === g.no);
-        return s + g.qty * (Number(l?.netUnitPrice) || 0);
-    }, 0);
-    const orderGoods = Number(po.total) || objs(po.lines).reduce((s, l) => s + (Number(l.total) || 0), 0);
-    const charges = chargesTotal(liveCharges(po));
-    const expected = round(goods + (orderGoods > 0 ? (charges * goods) / orderGoods : 0));
-    const variancePct = expected > 0 ? round(((amount - expected) / expected) * 100, 2) : 0;
-    const tolerance = (await getAuthority(ctx.orgId)).controls.matchTolerancePct;
-    const reason = cleanText(v.reason).slice(0, 300);
-    if (Math.abs(variancePct) > tolerance && reason.length < 20) throw new HttpError(409, `The invoice (${fmt(amount)}) is ${variancePct}% from the ${fmt(expected)} expected for these quantities (tolerance ${tolerance}%). Give the reason in at least 20 characters.`);
-    void poId;
-    return { number, file, record: { number, date, amount: round(amount), taxAmount: round(tax), currency: str(po.currency), expected, variancePct, varianceReason: Math.abs(variancePct) > tolerance ? reason : '', lines: given, status: 'recorded', apPosting: 'Accounts payable posting is not live yet: the invoice is recorded against the order.' } };
+export async function recordDelivery(ctx: OrgContext, doc: Doc, body: Obj, via: 'procurement' | 'inventory', onlyLines?: Set<number>) {
+    if ((str(doc.data.poType) || poTypeOf(objs(doc.data.lines))) === 'service') throw new HttpError(409, 'Services are received by the requester and accepted by the cost center owner, not as a delivery.');
+    if ((await versionsOf(ctx.orgId, baseOf(doc.id))).some((p) => p.id !== doc.id && str(p.data.status) === 'pending_approval')) throw new HttpError(409, 'An amendment of this order is in approval. Deliveries wait for its decision.');
+    const ref = oneLine(body.ref, 40);
+    if (ref.length < 2) throw new HttpError(400, 'Enter the delivery note number.');
+    const date = str(body.date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today()) throw new HttpError(400, 'Enter the delivery date. It cannot be in the future.');
+    const { cleanFile, storeFiles } = await import('./poFinance');
+    if (!body.deliveryNote) throw new HttpError(400, "Attach the supplier's delivery note (PDF, JPEG or PNG).");
+    const noteFile = cleanFile({ ...o(body.deliveryNote), kind: 'delivery_note' }, ['delivery_note']);
+    const given = objs(body.lines).map((l) => ({ no: Number(l.no), qty: Number(l.qty), materialId: str(l.materialId).slice(0, 120), costCenterId: via === 'procurement' ? str(l.costCenterId).slice(0, 120) : '', glCode: via === 'procurement' ? str(l.glCode).slice(0, 40) : '' })).filter((l) => l.qty > 0);
+    if (!given.length) throw new HttpError(400, 'Enter the quantity received for at least one line.');
+    if (onlyLines && given.some((g) => !onlyLines.has(g.no))) throw new HttpError(403, 'A line is not received through a warehouse you work in.');
+    if (given.some((g) => !Number.isFinite(g.qty) || g.qty > 1e9)) throw new HttpError(400, 'Enter valid quantities.');
+    const aligned = await alignPosting(ctx, doc.data, given, body);
+    const { docNoFor } = await import('./accountsPayable');
+    const recNo = await docNoFor(ctx.orgId, 'REC');
+    let register: Obj | null = null;
+    const out = await mutate(ctx, 'po', doc.id, 'receive', async (d) => {
+        if (!DELIVERING.includes(str(d.status))) throw new HttpError(409, 'Deliveries can only be recorded on an approved order.');
+        if (date < str(d.approvedAt).slice(0, 10)) throw new HttpError(400, 'The delivery cannot be before the order was approved.');
+        if (objs(d.deliveries).length >= MAX_DELIVERIES) throw new HttpError(400, `An order can have up to ${MAX_DELIVERIES} deliveries.`);
+        const lines = objs(d.lines).map((l) => {
+            const g = given.find((x) => x.no === Number(l.no));
+            if (!g) return l;
+            if (g.qty > outstanding(l) + 1e-9) throw new HttpError(400, `Line ${Number(l.no)}: only ${outstanding(l)} ${str(l.unit)} is still to be delivered.`);
+            return { ...l, receivedQty: round((Number(l.receivedQty) || 0) + g.qty, 4) };
+        });
+        if (given.some((g) => !lines.some((l) => Number(l.no) === g.no))) throw new HttpError(400, 'A line does not exist on this order.');
+        const full = lines.every((l) => outstanding(l) <= 0);
+        const seq = (Number(d.deliverySeq) || 0) + 1;
+        const at = nowIso();
+        const deliveryId = `${doc.id}_D${seq}`;
+        const posted = await receiveGoods(ctx, { po: d, poId: doc.id, deliveryId, date, ref, lines: aligned.lines });
+        const [noteStored] = await storeFiles(ctx, doc.id, [noteFile], ref);
+        const files = [{ id: str(noteStored.id), kind: 'delivery_note', name: str(noteStored.name) }];
+        const entry = { id: deliveryId, recNo, status: 'posted', kind: 'goods', via, at, date, ref, by: ctx.uid, byName: nameOfUser(ctx.me), note: cleanText(body.note).slice(0, 300), lines: aligned.lines, realigned: aligned.changes, postingReason: aligned.reason, files, invoiceId: '', journals: posted.journals, financeNote: posted.note, rates: posted.rates, posted: posted.posted };
+        register = { recNo, poId: doc.id, poNumber: str(d.number) || doc.id, vendorId: str(d.vendorId), vendorName: str(d.vendorName), currency: str(d.currency), deliveryId, kind: 'goods', via, date, ref, status: 'posted', lines: posted.posted.map((x) => ({ ...x, itemName: str(objs(d.lines).find((l) => Number(l.no) === x.no)?.itemName) || str(objs(d.lines).find((l) => Number(l.no) === x.no)?.requirement), unit: str(objs(d.lines).find((l) => Number(l.no) === x.no)?.unit) })), warehouseIds: Array.from(new Set(posted.posted.filter((x) => x.warehouse).map((x) => x.costCenterId))), legalEntityIds: Array.from(new Set(posted.posted.map((x) => x.leId))), journals: posted.journals, invoiceId: '', by: ctx.uid, byName: nameOfUser(ctx.me), at };
+        return {
+            patch: { lines, deliveries: [...objs(d.deliveries), entry], deliverySeq: seq, status: full ? 'full' : 'partial', ...(full ? { deliveredAt: at } : {}), ...(!str(d.firstDeliveryAt) ? { firstDeliveryAt: at } : {}) },
+            event: full ? 'delivered in full' : 'delivered partially',
+            note: `${recNo}, delivery note ${ref}, ${given.length} line(s)${via === 'inventory' ? ' (received in the warehouse)' : ''}${aligned.changes.length ? `; posting aligned: ${aligned.changes.join('; ')} (${aligned.reason})` : ''}${posted.journals.length ? `; journal ${posted.journals.join(', ')}` : ''}${posted.note ? `; ${posted.note}` : ''}`.slice(0, 380),
+            label: `${recNo}: ${full ? 'delivered in full' : 'delivered partially'}`,
+            result: { recNo, journals: posted.journals, financeNote: posted.note },
+        };
+    });
+    if (register) {
+        const { writeReceipt } = await import('./accountsPayable');
+        await writeReceipt(ctx, register);
+    }
+    return out;
 }
 
 /** Taxes and charges of the requisitions still on the order. */
@@ -1546,14 +1570,13 @@ export const purchaseOrderRoutes = {
                 validation: { at: str(val.at), byName: str(val.byName), rev: Number(val.rev) || 0, current: Number(val.rev) === (Number(d.rev) || 0), fails: Number(val.fails) || 0, warns: Number(val.warns) || 0, checks: objs(val.checks), ackReason: str(val.ackReason) },
                 approval: { amount: priceOk ? Number(o(d.approval).amount) || 0 : 0, steps: steps(d), authorityVersion: Number(o(d.approval).authorityVersion) || 0 },
                 approveWhy: ap.why,
-                deliveries: deliveries.map((x) => ({ id: str(x.id), at: str(x.at), date: str(x.date), ref: str(x.ref), byName: str(x.byName), note: str(x.note), lines: objs(x.lines), files: objs(x.files).map((f) => ({ id: str(f.id), kind: str(f.kind), name: str(f.name) })), invoiceId: str(x.invoiceId), realigned: Array.isArray(x.realigned) ? x.realigned.map(String) : [], postingReason: str(x.postingReason) })),
+                deliveries: deliveries.map((x) => ({ id: str(x.id), recNo: str(x.recNo) || str(x.id), status: str(x.status) || 'posted', kind: str(x.kind) || 'goods', via: str(x.via) || 'procurement', journals: Array.isArray(x.journals) ? x.journals.map(String) : [], financeNote: str(x.financeNote), at: str(x.at), date: str(x.date), ref: str(x.ref), byName: str(x.byName), note: str(x.note), lines: objs(x.lines).map((y) => ({ no: Number(y.no), qty: Number(y.qty) || 0, reversedQty: Number(y.reversedQty) || 0 })), posted: objs(x.posted).map((y) => ({ no: Number(y.no), costCenterId: str(y.costCenterId), glCode: str(y.glCode), warehouse: y.warehouse === true, type: str(y.type), leId: str(y.leId) })), files: objs(x.files).map((f) => ({ id: str(f.id), kind: str(f.kind), name: str(f.name) })), invoiceId: str(x.invoiceId), realigned: Array.isArray(x.realigned) ? x.realigned.map(String) : [], postingReason: str(x.postingReason) })),
                 charges: priceOk ? liveCharges(d) : [],
                 chargesTotal: priceOk ? chargesTotal(liveCharges(d)) : null,
                 grandTotal: priceOk ? round((Number(d.total) || 0) + chargesTotal(liveCharges(d))) : null,
                 grossGoods: priceOk ? Number(d.grossGoods) || null : null,
-                invoices: objs(d.invoices).map((i) => ({ id: str(i.id), number: str(i.number), date: str(i.date), deliveryId: str(i.deliveryId), byName: str(i.byName), at: str(i.at), fileId: str(i.fileId), fileName: str(i.fileName), ...(priceOk ? { amount: Number(i.amount) || 0, taxAmount: Number(i.taxAmount) || 0, currency: str(i.currency), expected: Number(i.expected) || 0, variancePct: Number(i.variancePct) || 0, varianceReason: str(i.varianceReason) } : {}) })),
                 invoiceStatus: str(d.invoiceStatus) || 'none',
-                canInvoice: can(ctx, 'PRC.po.receive'),
+                ap: await (await import('./accountsPayable')).apSummaryForPo(ctx, doc.id, priceOk),
                 invoiceTolerancePct: (await getAuthority(ctx.orgId)).controls.matchTolerancePct,
                 receipts: objs(d.receipts).map((r) => ({ id: str(r.id), status: str(r.status), periodFrom: str(r.periodFrom), periodTo: str(r.periodTo), renderedByName: str(r.renderedByName), renderedAt: str(r.renderedAt), invoiceNo: str(r.invoiceNo), invoiceAmount: Number(r.invoiceAmount) || 0, amount: Number(r.amount) || 0, journalId: str(r.journalId), lines: objs(r.lines), files: objs(r.files).map((f) => ({ id: str(f.id), kind: str(f.kind), name: str(f.name) })), decidedByName: str(r.decidedByName), decidedAt: str(r.decidedAt), decisionNote: str(r.decisionNote), mine: str(r.renderedBy) === ctx.uid })),
                 ack: { at: str(ack.at), byName: str(ack.byName), ref: str(ack.ref), date: str(ack.date), note: str(ack.note), fileName: str(ack.fileName), fileId: str(ack.fileId) },
@@ -2195,87 +2218,7 @@ export const purchaseOrderRoutes = {
     'POST /api/org/procurement/orders/receive': [
         orgRoute('org.procurement.orders.receive', 'PRC.po.receive', async (ctx) => {
             const doc = await loadPo(ctx, str(ctx.body.id));
-            if ((str(doc.data.poType) || poTypeOf(objs(doc.data.lines))) === 'service') throw new HttpError(409, 'Services are received by the requester and accepted by the cost center owner, not as a delivery.');
-            if ((await versionsOf(ctx.orgId, baseOf(doc.id))).some((p) => p.id !== doc.id && str(p.data.status) === 'pending_approval')) throw new HttpError(409, 'An amendment of this order is in approval. Deliveries wait for its decision.');
-            const ref = oneLine(ctx.body.ref, 40);
-            if (ref.length < 2) throw new HttpError(400, 'Enter the delivery note number.');
-            const date = str(ctx.body.date);
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today()) throw new HttpError(400, 'Enter the delivery date. It cannot be in the future.');
-            const { cleanFile, storeFiles } = await import('./poFinance');
-            // The supplier's delivery note is attached to every delivery.
-            if (!ctx.body.deliveryNote) throw new HttpError(400, "Attach the supplier's delivery note (PDF, JPEG or PNG).");
-            const noteFile = cleanFile({ ...o(ctx.body.deliveryNote), kind: 'delivery_note' }, ['delivery_note']);
-            const given = objs(ctx.body.lines).map((l) => ({ no: Number(l.no), qty: Number(l.qty), materialId: str(l.materialId).slice(0, 120), costCenterId: str(l.costCenterId).slice(0, 120), glCode: str(l.glCode).slice(0, 40) })).filter((l) => l.qty > 0);
-            if (!given.length) throw new HttpError(400, 'Enter the quantity received for at least one line.');
-            const aligned = await alignPosting(ctx, doc.data, given);
-            const invoiceIn = ctx.body.invoice ? await readInvoice(ctx, doc.data, doc.id, o(ctx.body.invoice), given) : null;
-            return mutate(ctx, 'po', doc.id, 'receive', async (d) => {
-                if (!DELIVERING.includes(str(d.status))) throw new HttpError(409, 'Deliveries can only be recorded on an approved order.');
-                if (date < str(d.approvedAt).slice(0, 10)) throw new HttpError(400, 'The delivery cannot be before the order was approved.');
-                if (objs(d.deliveries).length >= MAX_DELIVERIES) throw new HttpError(400, `An order can have up to ${MAX_DELIVERIES} deliveries.`);
-                const lines = objs(d.lines).map((l) => {
-                    const g = given.find((x) => x.no === Number(l.no));
-                    if (!g) return l;
-                    if (g.qty > outstanding(l) + 1e-9) throw new HttpError(400, `Line ${Number(l.no)}: only ${outstanding(l)} ${str(l.unit)} is still to be delivered.`);
-                    return { ...l, receivedQty: round((Number(l.receivedQty) || 0) + g.qty, 4), ...(invoiceIn ? { invoicedQty: round((Number(l.invoicedQty) || 0) + g.qty, 4) } : {}) };
-                });
-                if (given.some((g) => !lines.some((l) => Number(l.no) === g.no))) throw new HttpError(400, 'A line does not exist on this order.');
-                const full = lines.every((l) => outstanding(l) <= 0);
-                const seq = (Number(d.deliverySeq) || 0) + 1;
-                const at = nowIso();
-                const deliveryId = `${doc.id}_D${seq}`;
-                // Stock and the ledger move with the delivery, or the delivery is refused: Dr inventory, the line account or asset clearing, Cr GR/IR.
-                const posted = await receiveGoods(ctx, { po: d, poId: doc.id, deliveryId, date, ref, lines: aligned.lines });
-                const [noteStored] = await storeFiles(ctx, doc.id, [noteFile], ref);
-                const files = [{ id: str(noteStored.id), kind: 'delivery_note', name: str(noteStored.name) }];
-                let invoice: Obj | null = null;
-                if (invoiceIn) {
-                    const [invStored] = await storeFiles(ctx, doc.id, [invoiceIn.file], invoiceIn.number);
-                    invoice = { ...invoiceIn.record, id: `${doc.id}_I${(Number(d.invoiceSeq) || 0) + 1}`, deliveryId, fileId: str(invStored.id), fileName: str(invStored.name), at, by: ctx.uid, byName: nameOfUser(ctx.me) };
-                    files.push({ id: str(invStored.id), kind: 'invoice', name: str(invStored.name) });
-                }
-                const entry = { id: deliveryId, at, date, ref, by: ctx.uid, byName: nameOfUser(ctx.me), note: cleanText(ctx.body.note).slice(0, 300), lines: aligned.lines, realigned: aligned.changes, postingReason: aligned.reason, files, invoiceId: str(invoice?.id), journals: posted.journals, financeNote: posted.note };
-                const invoices = invoice ? [...objs(d.invoices), invoice] : objs(d.invoices);
-                return {
-                    patch: { lines, deliveries: [...objs(d.deliveries), entry], deliverySeq: seq, status: full ? 'full' : 'partial', ...(full ? { deliveredAt: at } : {}), ...(!str(d.firstDeliveryAt) ? { firstDeliveryAt: at } : {}), ...(invoice ? { invoices, invoiceSeq: (Number(d.invoiceSeq) || 0) + 1, invoiceStatus: invoiceStatusOf(lines) } : {}) },
-                    event: full ? 'delivered in full' : 'delivered partially',
-                    note: `Delivery note ${ref}, ${given.length} line(s)${aligned.changes.length ? `; posting aligned: ${aligned.changes.join('; ')} (${aligned.reason})` : ''}${invoice ? `; invoice ${str(invoice.number)} ${fmt(Number(invoice.amount))}${invoice.variancePct ? ` (${invoice.variancePct}% against expected)` : ''}` : ''}${posted.journals.length ? `; journal ${posted.journals.join(', ')}` : ''}${posted.note ? `; ${posted.note}` : ''}`.slice(0, 380),
-                    label: full ? 'Delivered in full' : 'Delivery recorded: delivered partially',
-                    result: { journals: posted.journals, financeNote: posted.note, invoiceId: str(invoice?.id) },
-                };
-            });
-        }),
-    ],
-
-    // The supplier's invoice for a delivery recorded earlier without one.
-    'POST /api/org/procurement/orders/invoice': [
-        orgRoute('org.procurement.orders.invoice', 'PRC.po.receive', async (ctx) => {
-            const doc = await loadPo(ctx, str(ctx.body.id));
-            const deliveryId = str(ctx.body.deliveryId);
-            const dv = objs(doc.data.deliveries).find((x) => str(x.id) === deliveryId);
-            if (!dv) throw new HttpError(404, 'Delivery not found.');
-            if (str(dv.invoiceId)) throw new HttpError(409, 'This delivery is already invoiced.');
-            const given = objs(dv.lines).map((l) => ({ no: Number(l.no), qty: Number(l.qty) }));
-            const inv = await readInvoice(ctx, doc.data, doc.id, o(ctx.body.invoice), given);
-            const { storeFiles } = await import('./poFinance');
-            return mutate(ctx, 'po', doc.id, 'invoice', async (d) => {
-                const fresh = objs(d.deliveries).find((x) => str(x.id) === deliveryId);
-                if (!fresh || str(fresh.invoiceId)) throw new HttpError(409, 'This delivery is already invoiced.');
-                const [stored] = await storeFiles(ctx, doc.id, [inv.file], inv.number);
-                const at = nowIso();
-                const invoice = { ...inv.record, id: `${doc.id}_I${(Number(d.invoiceSeq) || 0) + 1}`, deliveryId, fileId: str(stored.id), fileName: str(stored.name), at, by: ctx.uid, byName: nameOfUser(ctx.me) };
-                const lines = objs(d.lines).map((l) => {
-                    const g = given.find((x) => x.no === Number(l.no));
-                    return g ? { ...l, invoicedQty: round((Number(l.invoicedQty) || 0) + g.qty, 4) } : l;
-                });
-                const deliveries = objs(d.deliveries).map((x) => (str(x.id) === deliveryId ? { ...x, invoiceId: invoice.id, files: [...objs(x.files), { id: str(stored.id), kind: 'invoice', name: str(stored.name) }] } : x));
-                return {
-                    patch: { lines, deliveries, invoices: [...objs(d.invoices), invoice], invoiceSeq: (Number(d.invoiceSeq) || 0) + 1, invoiceStatus: invoiceStatusOf(lines) },
-                    event: 'invoiced',
-                    note: `Invoice ${inv.number} for delivery ${str(fresh.ref)}: ${fmt(inv.record.amount)}${inv.record.variancePct ? ` (${inv.record.variancePct}% against expected)` : ''}`.slice(0, 380),
-                    label: `Invoice ${inv.number} recorded`,
-                };
-            });
+            return recordDelivery(ctx, doc, ctx.body, 'procurement');
         }),
     ],
 

@@ -546,9 +546,12 @@ export const ROLES: Array<{ code: string; label: string; statement: 'BS' | 'PL';
     { code: 'STOCK_DIFF', label: 'Stock count differences', statement: 'PL', required: true, note: 'Stock take losses and gains.' },
     { code: 'RECON_DIFF', label: 'Reconciliation differences', statement: 'PL', required: true, note: 'Approved differences found by period-end reconciliation.' },
     { code: 'RETAINED_EARNINGS', label: 'Retained earnings', statement: 'BS', required: true, note: 'Receives the profit or loss when the year is closed.' },
-    { code: 'VAT_INPUT', label: 'VAT recoverable (input)', statement: 'BS', required: false, note: 'Used by Accounts Payable invoices (not built yet).' },
+    { code: 'VAT_INPUT', label: 'VAT recoverable (input)', statement: 'BS', required: false, note: 'Debited by approved supplier invoices (Accounts Payable) for the VAT on them.' },
     { code: 'VAT_OUTPUT', label: 'VAT payable (output)', statement: 'BS', required: false, note: 'Used by Accounts Receivable invoices (not built yet).' },
-    { code: 'WHT_PAYABLE', label: 'Withholding tax payable', statement: 'BS', required: false, note: 'Used by Accounts Payable payments (not built yet).' },
+    { code: 'WHT_PAYABLE', label: 'Withholding tax payable', statement: 'BS', required: false, note: 'Credited by approved supplier payments for the withholding tax kept back.' },
+    { code: 'SUPPLIER_PAYABLE', label: 'Supplier payables (trade creditors)', statement: 'BS', required: false, note: 'Credited by approved supplier invoices, debited by approved payments.' },
+    { code: 'BANK', label: 'Bank', statement: 'BS', required: false, note: 'Credited by approved supplier payments.' },
+    { code: 'PRICE_VARIANCE', label: 'Purchase price and charges variance', statement: 'PL', required: false, note: 'Difference between an approved supplier invoice (excluding VAT) and the goods received at the order price: freight, duty, clearing and price differences.' },
 ];
 export const TXNS: Array<{ code: string; label: string; debit: string; credit: string; live: boolean; taxStage: string; source: string }> = [
     { code: 'GR_STOCK', label: 'Goods receipt into a warehouse', debit: 'INVENTORY', credit: 'GRIR', live: true, taxStage: 'purchase', source: 'Purchase order delivery' },
@@ -562,7 +565,8 @@ export const TXNS: Array<{ code: string; label: string; debit: string; credit: s
     { code: 'INV_RECON', label: 'Inventory reconciliation adjustment', debit: 'INVENTORY / RECON_DIFF', credit: 'RECON_DIFF / INVENTORY', live: true, taxStage: '', source: 'Approved reconciliation' },
     { code: 'REALLOC', label: 'Cost reallocation between cost centers', debit: 'Same account, receiving cost centers', credit: 'Same account, sending cost center', live: true, taxStage: '', source: 'Approved reallocation' },
     { code: 'YE_CLOSE', label: 'Year-end close of profit and loss', debit: 'P&L accounts / RETAINED_EARNINGS', credit: 'RETAINED_EARNINGS / P&L accounts', live: true, taxStage: '', source: 'Approved year-end close' },
-    { code: 'AP_INVOICE', label: 'Supplier invoice (Accounts Payable)', debit: 'GRIR + VAT_INPUT', credit: 'Supplier payable', live: false, taxStage: 'purchase', source: 'Accounts Payable (not built yet)' },
+    { code: 'AP_INVOICE', label: 'Supplier invoice (Accounts Payable)', debit: 'GRIR + VAT_INPUT ± PRICE_VARIANCE', credit: 'Supplier payable', live: true, taxStage: 'purchase', source: 'Approved supplier invoice' },
+    { code: 'AP_PAYMENT', label: 'Supplier payment', debit: 'Supplier payable', credit: 'BANK + WHT_PAYABLE', live: true, taxStage: '', source: 'Approved supplier payment' },
     { code: 'AR_INVOICE', label: 'Customer invoice (Accounts Receivable)', debit: 'Customer receivable', credit: 'Revenue + VAT_OUTPUT', live: false, taxStage: 'sale', source: 'Accounts Receivable (not built yet)' },
 ];
 export const TXN_LABEL: Record<string, string> = Object.fromEntries(TXNS.map((t) => [t.code, t.label]));
