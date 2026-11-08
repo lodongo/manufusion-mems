@@ -36,8 +36,8 @@ import { PROCUREMENT_UNITS } from './procurementUnits';
 import { requirementsPath } from './procurementSetup';
 import { record } from './org';
 import {
-    AUTOMATED_METHODS, CONSUMPTION_TYPES, METHODS, PO_OPEN, PRQ_OPEN, REQ_OPEN, RETURN_TYPES,
-    factorsOf, legacyMethodOf, methodOf, numberOrNull, openQuantity, plan, routeFor, type Channel, type Params, type PlanResult,
+    AUTOMATED_METHODS, CONSUMPTION_TYPES, METHODS, RETURN_TYPES,
+    factorsOf, legacyMethodOf, methodOf, numberOrNull, plan, routeFor, type Channel, type Params, type PlanResult,
 } from './replenishmentPlan';
 
 type Obj = Record<string, unknown>;
@@ -91,27 +91,42 @@ export async function stockPosition(orgId: string, warehouseId: string, material
     return { physical, available, consumed: r3(Math.max(0, consumed)), consumedDays: docs.length ? days : lookbackDays };
 }
 
-export type Supply = Map<string, { qty: number; refs: string[] }>;
-/** Open quantities on requirements, requisitions, purchase orders and replenishment signals, by material and warehouse. */
+export type Supply = Map<string, { qty: number; refs: string[]; shortage?: number }>;
+
+/** Everything the strict pipeline needs: requirements, quotations, requisitions, orders, signals and material numbers. */
+export async function pipelineDocs(orgId: string) {
+    const [requirements, quotations, requisitions, orders, signals, materials] = await Promise.all([
+        listDocs(`${root(orgId)}/procurement_requirements`),
+        listDocs(`${root(orgId)}/procurement_quotations`),
+        listDocs(`${root(orgId)}/procurement_requisitions`),
+        listDocs(`${root(orgId)}/procurement_orders`),
+        runQuery({ from: [{ collectionId: 'replenishment_signals' }], where: fieldIn('status', ['acknowledged']) }, root(orgId)),
+        listDocs(`${root(orgId)}/materials`),
+    ]);
+    const materialsByNumber = new Map(materials.filter((m) => str(m.data.materialNumber)).map((m) => [str(m.data.materialNumber), m.id] as [string, string]));
+    return { requirements, quotations, requisitions, orders, signals, materialsByNumber };
+}
+
+/**
+ * Open supply by material and warehouse, each purchase need counted once at the furthest stage it reached
+ * (requirement → quotation → requisition → order net of deliveries; see supplyPipeline.ts), plus acknowledged
+ * signals, and the maintenance shortages (spares short on open work orders) as demand. The engine's own open
+ * unverified requests are left out: it re-plans them.
+ */
 export async function supplyIndex(orgId: string): Promise<Supply> {
-    const q = (collectionId: string, statuses: string[]) => runQuery({ from: [{ collectionId }], where: fieldIn('status', statuses) }, root(orgId));
-    const [reqs, prqs, pos, signals] = await Promise.all([q('procurement_requirements', REQ_OPEN), q('procurement_requisitions', PRQ_OPEN), q('procurement_orders', PO_OPEN), q('replenishment_signals', ['acknowledged'])]);
+    const { buildPipeline, maintenanceNeeds, shortageOf } = await import('./supplyPipeline');
+    const [docs, wos] = await Promise.all([pipelineDocs(orgId), listDocs(`${root(orgId)}/work_orders`)]);
+    const own = new Set(docs.requirements.filter((r) => str(r.data.status) === 'unverified' && SOURCES.includes(str(r.data.source))).map((r) => r.id));
+    const pipe = buildPipeline(docs, own);
+    const needs = maintenanceNeeds(wos);
     const out: Supply = new Map();
-    const add = (k: string, qty: number, ref: string) => {
-        if (qty <= 0) return;
+    for (const [k, p] of pipe) out.set(k, { qty: p.qty, refs: p.entries.filter((e) => e.qty > 0).slice(0, 10).map((e) => `${e.ref} (${e.qty})`) });
+    for (const [k, list] of needs) {
+        const sh = shortageOf(list);
+        if (!(sh > 0)) continue;
         const e = out.get(k) ?? { qty: 0, refs: [] };
-        e.qty = r3(e.qty + qty);
-        if (e.refs.length < 10) e.refs.push(`${ref} (${qty})`);
-        out.set(k, e);
-    };
-    const take = (kind: 'req' | 'prq' | 'po', docs: Doc[]) => {
-        for (const d of docs) for (const l of objs(d.data.lines)) if (str(l.materialId) && str(l.warehouseId)) add(keyOf(str(l.materialId), str(l.warehouseId)), openQuantity(kind, l), str(d.data.number) || d.id);
-    };
-    take('req', reqs);
-    take('prq', prqs);
-    take('po', pos);
-    // An acknowledged signal is supply on its way from the supplier, owner or pool.
-    for (const s of signals) add(s.id, Number(s.data.quantity) || 0, `signal ${str(s.data.signalLabel) || s.id}`);
+        out.set(k, { ...e, shortage: sh });
+    }
     return out;
 }
 
@@ -144,7 +159,7 @@ const modulesOn = (org: Doc) => {
 
 // ----- Building blocks -----
 
-function paramsOf(i: Obj, p: Obj): Params {
+export function paramsOf(i: Obj, p: Obj): Params {
     const n = (k: string, src: Obj = i) => numberOrNull(src[k]);
     return {
         minimumLevel: n('minimumLevel'), maximumLevel: n('maximumLevel'), reorderPoint: n('reorderPoint'), reorderQuantity: n('reorderQuantity'), safetyStock: n('safetyStock'),
@@ -269,13 +284,15 @@ export async function planMaterial(orgId: string, materialId: string, warehouseI
         }
         const lookback = Math.max(7, Math.min(730, Math.trunc(params.demandLookbackDays ?? DEFAULT_LOOKBACK)));
         const [stock, supply] = await Promise.all([stockPosition(orgId, warehouseId, materialId, lookback), ctx?.supply ? Promise.resolve(ctx.supply) : supplyIndex(orgId)]);
-        const open = supply.get(key) ?? { qty: 0, refs: [] };
+        const open = supply.get(key) ?? { qty: 0, refs: [] as string[], shortage: 0 };
+        // Spares short on open maintenance work orders are demand on top of what is already reserved.
+        const shortage = open.shortage ?? 0;
         const daysSinceReview = state?.data.lastReviewAt ? (Date.now() - Date.parse(str(state.data.lastReviewAt))) / 86_400_000 : null;
         const result = plan(method, params, {
-            available: stock.available, openSupply: open.qty, consumed: stock.consumed, consumedDays: stock.consumedDays,
+            available: r3(stock.available - shortage), openSupply: open.qty, consumed: stock.consumed, consumedDays: stock.consumedDays,
             arrivalMonth: new Date(Date.now() + params.leadTimeDays * 86_400_000).getUTCMonth(), daysSinceReview,
         });
-        const numbers = { method, channel: channel.kind === 'signal' ? channel.signal : 'purchase', physical: stock.physical, available: stock.available, openSupply: open.qty, supplyRefs: open.refs, consumed: stock.consumed, consumedDays: stock.consumedDays };
+        const numbers = { method, channel: channel.kind === 'signal' ? channel.signal : 'purchase', physical: stock.physical, available: stock.available, maintenanceShortage: shortage, openSupply: open.qty, supplyRefs: open.refs, consumed: stock.consumed, consumedDays: stock.consumedDays };
         if (result.kind === 'not_due') return finish('not_due', result.reason, numbers);
         if (method === 'RP15') await writeDoc(paths.state(key), { lastReviewAt: nowIso(), materialId, warehouseId });
 

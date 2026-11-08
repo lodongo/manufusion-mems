@@ -64,6 +64,7 @@ const FinApprovals = lazy(() => import('./FinApprovals'));
 const GoodsIssue = lazy(() => import('./GoodsIssue'));
 const AccountsPayable = lazy(() => import('./AccountsPayable'));
 const InventoryPendingPos = lazy(() => import('./InventoryPendingPos'));
+const InventoryRequirements = lazy(() => import('./InventoryRequirements'));
 const ReplenishmentRequests = lazy(() => import('./ReplenishmentRequests'));
 const Vendors = lazy(() => import('./Vendors'));
 const Quotations = lazy(() => import('./Quotations'));
@@ -144,7 +145,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Warehouses', path: 'warehouse_overview', everyone: true },
         { label: 'Setup', path: 'procurement_setup', permission: 'PRC.setup.view' },
     ],
-    INV: [{ label: 'Pending POs', path: 'inventory_pending_pos', permission: 'INV.receive' }, { label: 'Goods issue', path: 'goods_issue', permission: 'INV.issue' }, { label: 'Replenishment', path: 'replenishment', permission: 'INV.replenishment.view' }],
+    INV: [{ label: 'Requirements', path: 'inventory_requirements', permission: 'INV.req.view' }, { label: 'Pending POs', path: 'inventory_pending_pos', permission: 'INV.receive' }, { label: 'Goods issue', path: 'goods_issue', permission: 'INV.issue' }, { label: 'Replenishment', path: 'replenishment', permission: 'INV.replenishment.view' }],
     FIN: [
         { label: 'GL Accounts', path: 'fin_gl', prefix: 'FIN.' },
         { label: 'Cost Centers', path: 'fin_cc', prefix: 'FIN.' },
@@ -491,6 +492,7 @@ export default function OrgHomePage({
     else if (activeMenu && section === 'fin_ar') content = <NotBuilt title='Accounts Receivable' note='Customers, customer invoices, receipts and the receivable ledger will be built here.' />;
     else if (activeMenu && section === 'fin_ap') content = <AccountsPayable id={id} sub={sub} permissions={data.permissions} />;
     else if (activeMenu && section === 'inventory_pending_pos') content = <InventoryPendingPos id={id} />;
+    else if (activeMenu && section === 'inventory_requirements') content = <InventoryRequirements id={id} />;
     else if (activeMenu && section === 'fin_assets') content = <NotBuilt title='Asset Finance' note='Capitalisation of assets received (from the asset clearing account), depreciation and disposals will be built here.' />;
     else if (activeMenu && section === 'goods_issue') content = <GoodsIssue />;
     else if (activeMenu && (section === 'replenishment' || section === 'mrp_requests')) content = <ReplenishmentRequests id={id} />;

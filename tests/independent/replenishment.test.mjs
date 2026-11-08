@@ -172,7 +172,8 @@ test('Replenishment rights, segregation, templates, codes; earlier MRP rights ke
 test('engine and screens: unverified requests are private, verified in scope, audited; tabs save only their own fields', () => {
   const req = fs.readFileSync(new URL('../../backend/purchaseRequirements.ts', import.meta.url), 'utf8');
   assert.match(req, /if \(status === 'unverified'\) return can\(ctx, 'PRC\.req\.viewall'\) \|\| can\(ctx, 'INV\.replenishment\.view'\);/);
-  assert.match(req, /requireAt\(ctx, \['INV\.replenishment\.verify'\], w, 'write'/);
+  assert.match(req, /requireAt\(ctx, \[perm\], w, 'write'/);
+  assert.match(req, /perm = 'INV\.replenishment\.verify'/);
   assert.match(req, /await record\(ctx, 'org\.inventory\.replenishment\.verify'/);
   const eng = fs.readFileSync(new URL('../../backend/replenishment.ts', import.meta.url), 'utf8');
   assert.match(eng, /status: 'unverified', source: 'replenishment'/);

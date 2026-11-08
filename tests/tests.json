@@ -1303,5 +1303,29 @@
       "Open the Delivery dashboard tab and Accounts Payable dashboard (ageing, owed by supplier)"
     ],
     "expected": "Every receipt, invoice, payment and correction has a database number, is audited, and nothing reaches payables or the bank without matching and chart-of-authority approval."
+  },
+  {
+    "name": "Inventory > Requirements: stores release with a strict stock position before procurement",
+    "description": "Every purchase requirement for warehouse stock is reviewed by the stores before procurement can acknowledge it. Automatic (Replenishment/MRP) and maintenance-reservation requirements are released or cancelled; those raised by people are released or returned. The position counts each purchase need once at its furthest stage (requirement incl. not yet approved, quotation, requisition, order net of partial deliveries, signals), shows maintenance reservations and shortages with planned dates, lead time (actual orders or material), strategy, levels and their source, and recommends release, reduce or cancel. Cancelling an automatic request warns it will be raised again unless levels or strategy (RP07/RP18) change, pointing to Stock Control, Forecasting or Criticality.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "stores release gate",
+      "strict supply pipeline",
+      "maintenance reservations and planned dates",
+      "lead time",
+      "regeneration warning",
+      "replenishment engine counts once"
+    ],
+    "steps": [
+      "As Inventory Controller open Inventory > Requirements: To review lists automatic, maintenance and people's requirements for your warehouses",
+      "Open an automatic request: check available, reserved, short on work orders with planned dates, pipeline entries by stage (a partly delivered PO shows only the outstanding quantity), lead time and arrival date",
+      "If covered, the verdict is 'Not needed'; Release asks for a reason of 20+ characters; Cancel shows that Replenishment will raise it again and how to stop it (levels manual/forecast, strategy RP07/RP18, criticality)",
+      "Release a reduced quantity using the suggested value: it is verified, goes to your manager for approval and then procurement",
+      "As procurement try to acknowledge an approved requirement for warehouse stock that the stores have not released: refused with the reason",
+      "Return a person's requirement with a reason: it goes back to the requester; the requester cannot release their own",
+      "Run Replenishment for a material already on a partly delivered order and on a quotation: the request quantity counts each need once"
+    ],
+    "expected": "Nothing for warehouse stock reaches procurement without a stores release based on stock, reservations, the full pipeline and lead time, and automation never double counts what is already requested, quoted, required or ordered."
   }
 ]
