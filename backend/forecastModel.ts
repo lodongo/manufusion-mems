@@ -12,10 +12,15 @@
  *
  * Levels (units):
  *   L   = (external + internal lead time) / 30.44 months,  d = forecast demand per month,  σ = forecast error (RMSE)
- *   SS  = z · √(L·σ² + d²·σL²)        z from the service level of the criticality class, σL = L · variability %
+ *         lead times come from purchase orders (average, worst or best case over the look-back), else the material
+ *   SS  = z · √(L·σ² + d²·σL²)        z from the service level of the criticality class, σL = spread of the actual
+ *                                     lead times (3+ orders), else L · variability %
  *   ROP = forecast demand over the lead time + SS        Minimum = ROP
  *   ROQ = forecast demand over the cover period, or EOQ = √(2·D·S / (h·price)); then MOQ and order multiple
  *   Maximum = Minimum + ROQ (so a Min-Max order at the minimum is exactly the ROQ)
+ * A material bought on demand (RP07, or at or below the criticality cutoff when the strategy follows the analysis)
+ * holds no stock: its levels are zero and the forecast only shows the expected demand.
+ * Supply: available stock plus open supply, less the forecast demand, projects when the reorder point is reached.
  */
 
 import { CONSUMPTION_TYPES, RETURN_TYPES } from './replenishmentPlan';
@@ -71,8 +76,11 @@ export interface ForecastSetup {
     excludeOutliers: boolean;
     outlierZ: number;
     serviceLevels: { A: number; B: number; C: number; D: number; none: number };
-    internalLeadDays: number;
+    leadTimeStatistic: 'average' | 'worst' | 'best';
+    leadTimeLookbackMonths: number;
+    leadTimeMinSamples: number;
     leadTimeVariabilityPct: number;
+    allowSimulatedLevels: boolean;
     roqMethod: 'cover' | 'eoq';
     coverDays: number;
     orderingCost: number;
@@ -94,8 +102,11 @@ export function defaultForecastSetup(): ForecastSetup {
         excludeOutliers: true,
         outlierZ: 3.5,
         serviceLevels: { A: 99, B: 97.5, C: 95, D: 90, none: 95 },
-        internalLeadDays: 3,
+        leadTimeStatistic: 'average',
+        leadTimeLookbackMonths: 24,
+        leadTimeMinSamples: 2,
         leadTimeVariabilityPct: 20,
+        allowSimulatedLevels: true,
         roqMethod: 'cover',
         coverDays: 60,
         orderingCost: 0,
@@ -121,6 +132,8 @@ export function readForecastSetup(v: unknown): ForecastSetup {
     if (!['auto', ...METHODS.map((m) => m.code)].includes(method)) throw new Error('Choose a forecast method');
     const roqMethod = String(v.roqMethod ?? d.roqMethod) as ForecastSetup['roqMethod'];
     if (!['cover', 'eoq'].includes(roqMethod)) throw new Error('Choose how the reorder quantity is worked out');
+    const leadTimeStatistic = String(v.leadTimeStatistic ?? d.leadTimeStatistic) as ForecastSetup['leadTimeStatistic'];
+    if (!['average', 'worst', 'best'].includes(leadTimeStatistic)) throw new Error('Choose average, worst case or best case lead time');
     const sl = isObj(v.serviceLevels) ? v.serviceLevels : d.serviceLevels;
     const serviceLevels = {
         A: num(sl.A, 'Service level A', 50, 99.9),
@@ -143,7 +156,10 @@ export function readForecastSetup(v: unknown): ForecastSetup {
         excludeOutliers: v.excludeOutliers !== false,
         outlierZ: num(v.outlierZ ?? d.outlierZ, 'Outlier limit', 2, 6),
         serviceLevels,
-        internalLeadDays: num(v.internalLeadDays ?? d.internalLeadDays, 'Internal lead time', 0, 120, true),
+        leadTimeStatistic,
+        leadTimeLookbackMonths: num(v.leadTimeLookbackMonths ?? d.leadTimeLookbackMonths, 'Lead time look-back', 3, 60, true),
+        leadTimeMinSamples: num(v.leadTimeMinSamples ?? d.leadTimeMinSamples, 'Minimum orders for actual lead time', 1, 20, true),
+        allowSimulatedLevels: v.allowSimulatedLevels !== false,
         leadTimeVariabilityPct: num(v.leadTimeVariabilityPct ?? d.leadTimeVariabilityPct, 'Lead time variability', 0, 100),
         roqMethod,
         coverDays: num(v.coverDays ?? d.coverDays, 'Cover period', 7, 365, true),
@@ -453,6 +469,61 @@ export function readEvents(v: unknown): PlannedEvent[] {
 
 const eventApplies = (e: PlannedEvent, month: string) => (e.recurrence === 'once' ? e.month === month : month.slice(5, 7) === e.month);
 
+// ----- Lead times from purchase orders -----
+
+export interface LeadSample {
+    po: string;
+    start: string;
+    startBasis: 'acknowledged' | 'approved';
+    requirementAt: string;
+    deliveredOn: string;
+    internalDays: number | null;
+    externalDays: number | null;
+}
+export interface LeadTime {
+    externalDays: number;
+    internalDays: number;
+    externalSource: 'actual' | 'material' | 'none';
+    internalSource: 'actual' | 'material' | 'none';
+    externalSamples: number;
+    internalSamples: number;
+    sigmaDays: number | null;
+    statistic: ForecastSetup['leadTimeStatistic'];
+    external: { average: number | null; worst: number | null; best: number | null };
+    internal: { average: number | null; worst: number | null; best: number | null };
+}
+
+/**
+ * Lead times from purchase orders received in the look-back:
+ *   internal = purchase requirement created → PO acknowledged by the supplier (or final approval when not acknowledged)
+ *   external = PO acknowledged (or final approval) → date of the delivery that completed the line
+ * The setup picks the average, the worst case (longest) or the best case (shortest). With fewer orders than the
+ * minimum, the material's lead time is used (Inventory Information: lead time, internal lead time).
+ */
+export function leadTimeFrom(samples: LeadSample[], setup: Pick<ForecastSetup, 'leadTimeStatistic' | 'leadTimeMinSamples'>, material: { externalDays: number | null; internalDays: number | null }): LeadTime {
+    const stats = (xs: number[]) => (xs.length ? { average: r3(mean(xs)), worst: Math.max(...xs), best: Math.min(...xs) } : { average: null, worst: null, best: null });
+    const ext = samples.map((x) => x.externalDays).filter((x): x is number => x !== null && Number.isFinite(x));
+    const int = samples.map((x) => x.internalDays).filter((x): x is number => x !== null && Number.isFinite(x));
+    const pick = (xs: number[]) => (setup.leadTimeStatistic === 'worst' ? Math.max(...xs) : setup.leadTimeStatistic === 'best' ? Math.min(...xs) : mean(xs));
+    const useExt = ext.length >= setup.leadTimeMinSamples;
+    const useInt = int.length >= setup.leadTimeMinSamples;
+    const matExt = Number(material.externalDays) > 0 ? Number(material.externalDays) : 0;
+    const matInt = Number(material.internalDays) > 0 ? Number(material.internalDays) : 0;
+    const totals = samples.filter((x) => x.externalDays !== null).map((x) => (x.externalDays as number) + (useInt && x.internalDays !== null ? x.internalDays : 0));
+    return {
+        externalDays: useExt ? Math.round(pick(ext) * 10) / 10 : matExt,
+        internalDays: useInt ? Math.round(pick(int) * 10) / 10 : matInt,
+        externalSource: useExt ? 'actual' : matExt ? 'material' : 'none',
+        internalSource: useInt ? 'actual' : matInt ? 'material' : 'none',
+        externalSamples: ext.length,
+        internalSamples: int.length,
+        sigmaDays: useExt && totals.length >= 3 ? r3(stdev(totals)) : null,
+        statistic: setup.leadTimeStatistic,
+        external: stats(ext),
+        internal: stats(int),
+    };
+}
+
 // ----- Forecast and levels -----
 
 export interface ForecastInput {
@@ -466,10 +537,16 @@ export interface ForecastInput {
     futureMonths?: number;
     externalLeadDays: number;
     internalLeadDays?: number | null;
+    /** Spread of the actual lead times in days (else the setup's variability % is used). */
+    leadSigmaDays?: number | null;
     criticalityClass?: string;
     unitPrice?: number | null;
     moq?: number | null;
     orderMultiple?: number | null;
+    /** Why the material is bought on demand (no stock is held), or empty. */
+    onDemand?: string;
+    /** Available stock and open supply (requirements, requisitions, orders not yet received). */
+    stock?: { available: number; openSupply: number } | null;
 }
 
 export interface FutureRow {
@@ -498,6 +575,8 @@ export interface Levels {
     minimumLevel: number;
     maximumLevel: number;
     roqBasis: string;
+    sigmaLeadDays: number;
+    onDemand: boolean;
     notes: string[];
 }
 
@@ -516,7 +595,7 @@ function demandOver(future: FutureRow[], months: number) {
     return sum;
 }
 
-export function levelsFrom(future: FutureRow[], sigma: number, a: { setup: ForecastSetup; externalLeadDays: number; internalLeadDays: number; criticalityClass?: string; unitPrice?: number | null; moq?: number | null; orderMultiple?: number | null }): Levels {
+export function levelsFrom(future: FutureRow[], sigma: number, a: { setup: ForecastSetup; externalLeadDays: number; internalLeadDays: number; leadSigmaDays?: number | null; criticalityClass?: string; unitPrice?: number | null; moq?: number | null; orderMultiple?: number | null; onDemand?: string }): Levels {
     const s = a.setup;
     const cls = (['A', 'B', 'C', 'D'].includes(String(a.criticalityClass)) ? a.criticalityClass : 'none') as keyof ForecastSetup['serviceLevels'];
     const serviceLevel = s.serviceLevels[cls];
@@ -526,9 +605,10 @@ export function levelsFrom(future: FutureRow[], sigma: number, a: { setup: Forec
     const leadDays = external + internal;
     const L = leadDays / 30.44;
     const notes: string[] = [];
-    if (!external) notes.push('No supplier lead time is recorded (Procurement or Inventory information); only the internal lead time is used.');
+    if (!external) notes.push('No supplier lead time: no received purchase orders in the look-back and none set on the material (Inventory Information).');
     const d = future.length ? mean(future.map((f) => f.total)) : 0;
-    const sigmaL = L * (s.leadTimeVariabilityPct / 100);
+    const actualSpread = a.leadSigmaDays !== null && a.leadSigmaDays !== undefined && Number.isFinite(a.leadSigmaDays);
+    const sigmaL = actualSpread ? (a.leadSigmaDays as number) / 30.44 : L * (s.leadTimeVariabilityPct / 100);
     const ss = z * Math.sqrt(L * sigma * sigma + d * d * sigmaL * sigmaL);
     const dlt = demandOver(future, L);
     const rop = dlt + ss;
@@ -560,6 +640,11 @@ export function levelsFrom(future: FutureRow[], sigma: number, a: { setup: Forec
     const reorderPoint = round(rop);
     const reorderQuantity = Math.max(0, round(roq)) + 0;
     if (!d && !dlt) notes.push('No demand is forecast: the levels are zero. Consider buying on demand.');
+    const sigmaLeadDays = r3(sigmaL * 30.44);
+    if (a.onDemand) {
+        // Bought on demand: no stock is held, so no safety stock, reorder point, minimum or maximum.
+        return { serviceLevel, z: Math.round(z * 1000) / 1000, externalLeadDays: external, internalLeadDays: internal, leadDays, leadMonths: r3(L), demandPerMonth: r3(d), sigma: r3(sigma), demandDuringLead: r3(dlt), safetyStock: 0, reorderPoint: 0, reorderQuantity: 0, minimumLevel: 0, maximumLevel: 0, roqBasis: 'Bought on demand: ordered for each need', sigmaLeadDays, onDemand: true, notes: [a.onDemand] };
+    }
     return {
         serviceLevel,
         z: Math.round(z * 1000) / 1000,
@@ -576,7 +661,26 @@ export function levelsFrom(future: FutureRow[], sigma: number, a: { setup: Forec
         minimumLevel: reorderPoint,
         maximumLevel: round(reorderPoint + reorderQuantity),
         roqBasis,
+        sigmaLeadDays,
+        onDemand: false,
         notes,
+    };
+}
+
+/** Stock projected month by month from available stock and open supply, with no new orders. */
+export function projectStock(future: FutureRow[], stock: { available: number; openSupply: number }, reorderPoint: number) {
+    let level = stock.available + stock.openSupply;
+    const rows = future.map((f) => {
+        level -= f.total;
+        return { month: f.month, projected: r3(level) };
+    });
+    return {
+        start: r3(stock.available + stock.openSupply),
+        available: r3(stock.available),
+        openSupply: r3(stock.openSupply),
+        rows,
+        reorderMonth: rows.find((r) => r.projected < reorderPoint)?.month ?? '',
+        stockoutMonth: rows.find((r) => r.projected < 0)?.month ?? '',
     };
 }
 
@@ -633,12 +737,15 @@ export function runForecast(input: ForecastInput) {
     const levels = levelsFrom(future, sigma, {
         setup: s,
         externalLeadDays: input.externalLeadDays,
-        internalLeadDays: input.internalLeadDays ?? s.internalLeadDays,
+        internalLeadDays: input.internalLeadDays ?? 0,
+        leadSigmaDays: input.leadSigmaDays,
         criticalityClass: input.criticalityClass,
         unitPrice: input.unitPrice,
         moq: input.moq,
         orderMultiple: input.orderMultiple,
+        onDemand: input.onDemand,
     });
+    const projection = input.stock ? projectStock(future, input.stock, levels.onDemand ? 0 : levels.reorderPoint) : null;
     return {
         pastMonths,
         futureMonths,
@@ -659,6 +766,7 @@ export function runForecast(input: ForecastInput) {
         historyMonths,
         sufficient: historyMonths >= s.minHistoryMonths,
         levels,
+        projection,
     };
 }
 export type ForecastResult = ReturnType<typeof runForecast>;
@@ -676,42 +784,89 @@ function prng(seed: number) {
     };
 }
 
+export type SimProfile = 'very_light' | 'light' | 'moderate' | 'high' | 'very_high';
+export type SimDistribution = 'uniform' | 'normal' | 'right_skewed' | 'left_skewed';
+export type SimTrend = 'none' | 'rising' | 'falling';
+export const SIM_PROFILES: Array<{ code: SimProfile; name: string; base: number }> = [
+    { code: 'very_light', name: 'Very light', base: 1 },
+    { code: 'light', name: 'Light', base: 3 },
+    { code: 'moderate', name: 'Moderate', base: 10 },
+    { code: 'high', name: 'High', base: 30 },
+    { code: 'very_high', name: 'Very high', base: 80 },
+];
+export const SIM_DISTRIBUTIONS: Array<{ code: SimDistribution; name: string; note: string }> = [
+    { code: 'uniform', name: 'Random', note: 'Any size in a wide range, equally likely' },
+    { code: 'normal', name: 'Normal', note: 'Sizes cluster around the average' },
+    { code: 'right_skewed', name: 'Right-skewed', note: 'Mostly small issues, a few large ones' },
+    { code: 'left_skewed', name: 'Left-skewed', note: 'Mostly large issues, a few small ones' },
+];
+export interface SimOptions {
+    profile: SimProfile;
+    distribution: SimDistribution;
+    trend: SimTrend;
+    years: number;
+    seed: number;
+    now: string;
+}
+
+/** Validates simulation options (throws an Error with the message to show). */
+export function readSimOptions(v: unknown): SimOptions {
+    if (!isObj(v)) throw new Error('Simulation options required');
+    const profile = String(v.profile) as SimProfile;
+    if (!SIM_PROFILES.some((p) => p.code === profile)) throw new Error('Choose a consumption level');
+    const distribution = String(v.distribution) as SimDistribution;
+    if (!SIM_DISTRIBUTIONS.some((p) => p.code === distribution)) throw new Error('Choose a distribution');
+    const trend = String(v.trend ?? 'none') as SimTrend;
+    if (!['none', 'rising', 'falling'].includes(trend)) throw new Error('Choose a trend');
+    const now = String(v.now ?? '');
+    if (!Number.isFinite(Date.parse(now))) throw new Error('Simulation time missing');
+    return { profile, distribution, trend, years: num(v.years ?? 1, 'Simulated years', 1, 3, true), seed: num(v.seed, 'Simulation seed', 0, 2_147_483_647, true), now: new Date(Date.parse(now)).toISOString() };
+}
+
 /**
- * About 100 random movements over the last year to try the forecast: heavy (large, frequent, slowly rising issues) or
- * light (small, irregular issues), with receipts that replenish, a few reversals and always one one-off issue.
+ * About 100 random movements a year, ending now (whatever the year): issues sized by the consumption level and drawn
+ * from the chosen distribution (random, normal, right- or left-skewed), optionally rising or falling, receipts that
+ * replenish, a few reversals and always one one-off issue. The same options and seed always give the same data, so the
+ * server can rebuild a simulated proposal exactly.
  */
-export function simulate(profile: 'heavy' | 'light', seed: number, nowIso: string, count = 100): Instance[] {
-    const rnd = prng(seed);
-    const end = Date.parse(nowIso);
-    const start = end - 365 * 86_400_000;
-    const at = (f: number) => new Date(start + f * (end - start)).toISOString();
+export function simulate(o: SimOptions): Instance[] {
+    const rnd = prng(o.seed);
+    const gauss = () => {
+        const u = Math.max(1e-12, rnd());
+        return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd());
+    };
+    const base = SIM_PROFILES.find((p) => p.code === o.profile)!.base;
+    const size = () => {
+        if (o.distribution === 'normal') return base * Math.max(0.1, 1 + 0.3 * gauss());
+        if (o.distribution === 'right_skewed') return base * Math.exp(0.8 * gauss() - 0.32);
+        if (o.distribution === 'left_skewed') return base * Math.max(0.05, 1.8 - 0.8 * Math.exp(0.7 * gauss() - 0.245));
+        return base * (0.2 + 1.6 * rnd());
+    };
+    const end = Date.parse(o.now);
+    const start = end - o.years * 365 * 86_400_000;
+    const at = (f: number) => new Date(start + Math.min(0.9999, Math.max(0, f)) * (end - start)).toISOString();
+    const count = 100 * o.years;
     const issues = Math.round(count * 0.7);
     const reversals = Math.round(count * 0.1);
     const receipts = count - issues - reversals - 1;
     const out: Instance[] = [];
-    const base = profile === 'heavy' ? 24 : 2;
     const issueList: Array<{ f: number; qty: number }> = [];
     for (let i = 0; i < issues; i++) {
-        // Heavy demand rises about 60% over the year; light demand is small and irregular.
         const f = rnd();
-        const growth = profile === 'heavy' ? 0.7 + 0.6 * f : 1;
-        const qty = Math.max(1, Math.round(base * growth * (profile === 'heavy' ? 0.7 + 0.6 * rnd() : 0.5 + rnd() * 1.5)));
-        issueList.push({ f, qty });
+        const growth = o.trend === 'rising' ? 0.6 + 0.8 * f : o.trend === 'falling' ? 1.4 - 0.8 * f : 1;
+        issueList.push({ f, qty: Math.max(1, Math.round(size() * growth)) });
     }
     issueList.sort((x, y) => x.f - y.f);
     issueList.forEach((x, i) => out.push({ id: `SIM-I${String(i + 1).padStart(3, '0')}`, at: at(x.f), kind: 'issue', qty: x.qty, type: 'GOODS_ISSUE', reference: `SIM-GI-${1000 + i}`, simulated: true }));
-    const typical = Math.round(mean(issueList.map((x) => x.qty)));
-    const spikeF = 0.35 + rnd() * 0.4;
-    out.push({ id: 'SIM-ONEOFF', at: at(spikeF), kind: 'issue', qty: Math.max(10, typical * 10), type: 'GOODS_ISSUE', reference: 'SIM-BREAKDOWN', simulated: true, note: 'One-off issue (breakdown or project): mask it to see its effect' });
+    const typical = Math.max(1, Math.round(mean(issueList.map((x) => x.qty))));
+    out.push({ id: 'SIM-ONEOFF', at: at(0.35 + rnd() * 0.4), kind: 'issue', qty: Math.max(10, typical * 10), type: 'GOODS_ISSUE', reference: 'SIM-BREAKDOWN', simulated: true, note: 'One-off issue (breakdown or project): mask it to see its effect' });
     for (let i = 0; i < reversals; i++) {
         const src = issueList[Math.floor(rnd() * issueList.length)];
-        const f = Math.min(0.999, src.f + rnd() * 0.03);
-        out.push({ id: `SIM-R${String(i + 1).padStart(3, '0')}`, at: at(f), kind: 'reversal', qty: Math.max(1, Math.round(src.qty * (0.1 + rnd() * 0.3))), type: 'MATERIAL_RETURN', reference: `SIM-RET-${2000 + i}`, simulated: true });
+        out.push({ id: `SIM-R${String(i + 1).padStart(3, '0')}`, at: at(src.f + rnd() * 0.01), kind: 'reversal', qty: Math.max(1, Math.round(src.qty * (0.1 + rnd() * 0.3))), type: 'MATERIAL_RETURN', reference: `SIM-RET-${2000 + i}`, simulated: true });
     }
     const total = issueList.reduce((sum, x) => sum + x.qty, 0);
     for (let i = 0; i < receipts; i++) {
-        const f = (i + 0.2 + rnd() * 0.6) / receipts;
-        out.push({ id: `SIM-G${String(i + 1).padStart(3, '0')}`, at: at(Math.min(0.999, f)), kind: 'receipt', qty: Math.max(1, Math.round((total / receipts) * (0.8 + rnd() * 0.4))), type: 'GOODS_RECEIPT', reference: `SIM-GR-${3000 + i}`, simulated: true });
+        out.push({ id: `SIM-G${String(i + 1).padStart(3, '0')}`, at: at((i + 0.2 + rnd() * 0.6) / receipts), kind: 'receipt', qty: Math.max(1, Math.round((total / receipts) * (0.8 + rnd() * 0.4))), type: 'GOODS_RECEIPT', reference: `SIM-GR-${3000 + i}`, simulated: true });
     }
     return out.sort((x, y) => x.at.localeCompare(y.at));
 }

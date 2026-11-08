@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { classify, defaultForecastSetup, demandPattern, effectiveSource, inverseNormal, levelsFrom, monthlyHistory, readEvents, readForecastSetup, runForecast, simulate, trendOf } from '../../backend/forecastModel.ts';
+import { classify, defaultForecastSetup, demandPattern, effectiveSource, inverseNormal, leadTimeFrom, levelsFrom, monthlyHistory, projectStock, readEvents, readForecastSetup, readSimOptions, runForecast, simulate, trendOf } from '../../backend/forecastModel.ts';
 
 const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
 const NOW = '2026-11-08T09:00:00Z';
@@ -88,18 +88,69 @@ test('masking a one-off issue removes it from the demand', () => {
     assert.equal(masked.levels.demandPerMonth, 10);
 });
 
-test('simulation gives about 100 movements over a year with one one-off issue, for heavy and light use', () => {
-    for (const p of ['heavy', 'light']) {
-        const s = simulate(p, 7, NOW);
+const sim = (o) => simulate({ profile: 'moderate', distribution: 'uniform', trend: 'none', years: 1, seed: 7, now: NOW, ...o });
+
+test('simulation: about 100 movements a year ending now (any year), five consumption levels, one one-off issue', () => {
+    for (const profile of ['very_light', 'light', 'moderate', 'high', 'very_high']) {
+        const s = sim({ profile });
         assert.equal(s.length, 100);
         assert.equal(s.filter((x) => x.id === 'SIM-ONEOFF').length, 1);
         assert.ok(s.every((x) => x.simulated && x.id.startsWith('SIM-')));
         assert.ok(s.some((x) => x.kind === 'receipt') && s.some((x) => x.kind === 'reversal'));
-        assert.ok(Date.parse(s[0].at) >= Date.parse(NOW) - 366 * 86_400_000);
+        assert.ok(Date.parse(s[0].at) >= Date.parse(NOW) - 366 * 86_400_000 && Date.parse(s.at(-1).at) <= Date.parse(NOW));
     }
-    const heavy = simulate('heavy', 7, NOW).filter((x) => x.kind === 'issue' && x.id !== 'SIM-ONEOFF');
-    const light = simulate('light', 7, NOW).filter((x) => x.kind === 'issue' && x.id !== 'SIM-ONEOFF');
-    assert.ok(heavy.reduce((s, x) => s + x.qty, 0) > 5 * light.reduce((s, x) => s + x.qty, 0));
+    const total = (profile) => sim({ profile }).filter((x) => x.kind === 'issue' && x.id !== 'SIM-ONEOFF').reduce((a, x) => a + x.qty, 0);
+    assert.ok(total('very_high') > total('high') && total('high') > total('moderate') && total('moderate') > total('light') && total('light') >= total('very_light'));
+    const later = simulate({ profile: 'moderate', distribution: 'normal', trend: 'none', years: 2, seed: 3, now: '2029-03-01T00:00:00Z' });
+    assert.equal(later.length, 200);
+    assert.ok(later.at(-1).at.startsWith('2029') && later[0].at.startsWith('2027'));
+    // Same options and seed rebuild the same data (the server relies on this for simulated proposals).
+    assert.deepEqual(sim({ distribution: 'right_skewed' }), sim({ distribution: 'right_skewed' }));
+    assert.throws(() => readSimOptions({ profile: 'heavy', distribution: 'uniform', seed: 1, now: NOW }), /consumption level/);
+});
+
+test('simulation distributions: right-skewed has mean above median, left-skewed below, normal clusters', () => {
+    const stats = (distribution) => {
+        const q = sim({ profile: 'very_high', distribution, seed: 11 }).filter((x) => x.kind === 'issue' && x.id !== 'SIM-ONEOFF').map((x) => x.qty).sort((a, b) => a - b);
+        const mean = q.reduce((a, x) => a + x, 0) / q.length;
+        return { mean, median: q[Math.floor(q.length / 2)] };
+    };
+    const r = stats('right_skewed');
+    const l = stats('left_skewed');
+    assert.ok(r.mean > r.median, 'right skew: a few large issues pull the mean up');
+    assert.ok(l.mean < l.median, 'left skew: a few small issues pull the mean down');
+    assert.ok(sim({ trend: 'rising', profile: 'very_high', seed: 5 }).filter((x) => x.kind === 'issue' && x.id !== 'SIM-ONEOFF').slice(-20).reduce((a, x) => a + x.qty, 0) > sim({ trend: 'falling', profile: 'very_high', seed: 5 }).filter((x) => x.kind === 'issue' && x.id !== 'SIM-ONEOFF').slice(-20).reduce((a, x) => a + x.qty, 0));
+});
+
+test('lead time: actual orders by average, worst or best case, else the material lead time; spread from 3+ orders', () => {
+    const samples = [10, 20, 30].map((e, i) => ({ po: `PO${i}`, start: NOW, startBasis: 'approved', requirementAt: NOW, deliveredOn: '2026-10-01', internalDays: 4 + i, externalDays: e }));
+    const base = { leadTimeMinSamples: 2 };
+    assert.equal(leadTimeFrom(samples, { ...base, leadTimeStatistic: 'average' }, { externalDays: 99, internalDays: 9 }).externalDays, 20);
+    assert.equal(leadTimeFrom(samples, { ...base, leadTimeStatistic: 'worst' }, { externalDays: 99, internalDays: 9 }).externalDays, 30);
+    const best = leadTimeFrom(samples, { ...base, leadTimeStatistic: 'best' }, { externalDays: 99, internalDays: 9 });
+    assert.equal(best.externalDays, 10);
+    assert.equal(best.internalDays, 4);
+    assert.equal(best.externalSource, 'actual');
+    assert.ok(best.sigmaDays > 0);
+    const fallback = leadTimeFrom(samples.slice(0, 1), { leadTimeMinSamples: 2, leadTimeStatistic: 'average' }, { externalDays: 45, internalDays: 7 });
+    assert.deepEqual([fallback.externalDays, fallback.internalDays, fallback.externalSource, fallback.internalSource, fallback.sigmaDays], [45, 7, 'material', 'material', null]);
+    assert.throws(() => readForecastSetup({ ...defaultForecastSetup(), leadTimeStatistic: 'median' }), /average, worst case or best case/);
+    assert.equal('internalLeadDays' in defaultForecastSetup(), false, 'lead times are not set in the forecasting setup');
+});
+
+test('classification: a material bought on demand holds no levels; supply projects when the reorder point is reached', () => {
+    const inst = monthly([20, 20, 20, 20, 20, 20, 20, 20]);
+    const setup = defaultForecastSetup();
+    const od = runForecast({ instances: inst, masked: [], setup, events: [], now: NOW, externalLeadDays: 30, onDemand: 'Bought on demand (RP07).' });
+    assert.equal(od.levels.onDemand, true);
+    assert.deepEqual([od.levels.minimumLevel, od.levels.maximumLevel, od.levels.reorderQuantity, od.levels.safetyStock], [0, 0, 0, 0]);
+    assert.ok(od.levels.demandPerMonth > 0, 'the expected demand is still shown');
+    const p = projectStock([{ month: '2026-12', total: 30 }, { month: '2027-01', total: 30 }, { month: '2027-02', total: 30 }], { available: 50, openSupply: 20 }, 25);
+    assert.deepEqual(p.rows.map((r) => r.projected), [40, 10, -20]);
+    assert.equal(p.reorderMonth, '2027-01');
+    assert.equal(p.stockoutMonth, '2027-02');
+    const withStock = runForecast({ instances: inst, masked: [], setup, events: [], now: NOW, externalLeadDays: 30, stock: { available: 100, openSupply: 0 } });
+    assert.ok(withStock.projection && withStock.projection.rows.length === setup.futureMonths);
 });
 
 test('level source: forecast needs the minimum history, manual stays manual, manual-unless-forced follows the switch', () => {
@@ -121,6 +172,11 @@ test('server: levels from the forecast are locked on the update route, proposals
     assert.match(server, /bypass\(ctx, 'inv\.forecast\.approve_independence'\)/);
     assert.match(server, /approvalRoute\(ctx\.orgId, ctx\.me, value, authority/);
     assert.match(server, /Only real journal movements can be masked and saved/);
+    assert.match(server, /The forecasting setup does not allow levels from simulated data/);
+    assert.match(server, /data = simulate\(sim\)/, 'simulated proposals are rebuilt on the server from the seed');
+    assert.match(server, /if \(m\.onDemand\) throw new HttpError\(409, m\.onDemand\)/);
+    assert.match(server, /requirement created → start/);
+    assert.match(read('backend/procurement.ts'), /'leadTimeDays','internalLeadTimeDays'/);
     assert.match(server, /Give a reason of at least 10 characters for masking movements or changing planned events/);
     for (const a of ['setup.save', 'save', 'propose', 'approve', 'return', 'source']) assert.match(server, new RegExp(`audited\\(ctx, 'inventory\\.forecast\\.${a.replace('.', '\\.')}'`));
     const policy = read('backend/permissionPolicy.ts');
@@ -138,6 +194,7 @@ test('UI: Forecasting tab after Criticality Analysis, simulation off on load, cr
     assert.match(detail, /locked=\{levelLock && LEVEL_SET\.has\(k\) \? levelLock : undefined\}/);
     const ui = read('src/org/Forecasting.tsx');
     assert.match(ui, /const \[sim, setSim\] = useState\(false\)/);
-    assert.match(ui, /Nothing here can be saved or proposed/);
+    assert.match(ui, /Propose simulated levels/);
+    assert.match(ui, /I understand these levels were worked out from simulated data/);
     assert.match(read('src/org/CriticalityAnalysis.tsx'), /label: 'Forecasting setup'/);
 });
