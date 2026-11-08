@@ -1,3 +1,4 @@
+import { MaterialCriticality } from './CriticalityAnalysis';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, HelpCircle, Link2, Link2Off, MoreVertical, PackagePlus, Pencil, RefreshCw, Save, Send, X } from 'lucide-react';
@@ -204,7 +205,7 @@ const EXPLANATIONS: Record<string, string> = {
     reorderPoint: 'Available stock threshold that triggers a replenishment recommendation.',
     reorderQuantity: 'Normal quantity to replenish when the reorder point is reached.',
     leadTimeDays: 'Expected calendar days between ordering and receipt of the material.',
-    criticalityClass: 'Criticality class of the material in this warehouse, A (most critical) to D. Stock take configurations can count only chosen classes.',
+    criticalityClass: 'Criticality class of the material in this warehouse, A (very critical) to D (non-critical), set by an approved criticality assessment (Criticality Analysis tab). Stock take configurations can count only chosen classes.',
     remarks: 'Additional warehouse-specific handling, stocking, or replenishment instructions.',
     ...Object.fromEntries(REPLENISHMENT_FIELDS.map((k) => [k, PARAMS[k as keyof typeof PARAMS].hint])),
     incoterms: 'International delivery rule defining buyer and seller responsibilities for transport, risk and costs.',
@@ -861,16 +862,8 @@ function SettingInput({
     const error = errors[field];
 
     if (field === 'criticalityClass') {
-        return (
-            <SelectField id={id} label='Criticality class' value={value} hint={hint} error={error} onChange={(e) => onChange(field, e.target.value)}>
-                <option value=''>Not classified</option>
-                {CRITICALITY_CLASSES.map((c) => (
-                    <option key={c} value={c}>
-                        Class {c}
-                    </option>
-                ))}
-            </SelectField>
-        );
+        // Set only by an approved criticality assessment (Criticality Analysis tab).
+        return <Field id={id} label='Criticality class' value={value ? `Class ${value}` : 'Not assessed'} readOnly hint='From the criticality assessment' onChange={() => undefined} />;
     }
     if(STOCK_FIELD_LOOKUP.has(field)){
         const list=metadata?.stockDimensions?.find(x=>x.key===STOCK_FIELD_LOOKUP.get(field));
@@ -1270,6 +1263,9 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
     // otherwise an incomplete earlier profile is shown as a warning and does not block other changes.
     const controlErrors = editing && tab === 'Stock Control' ? stockControlErrors(values) : {};
     const controlChanged = ['replenishmentStrategy', 'stockOwnership', 'supplyArrangement'].some((k) => k in payload);
+    // A strategy set by the criticality analysis (on demand at or below the cutoff) is changed through the assessment.
+    if (editing && tab === 'Stock Control' && String(data?.inventory?.strategySource ?? '') === 'criticality' && 'replenishmentStrategy' in payload)
+        controlErrors.replenishmentStrategy = 'Set by the criticality analysis (bought on demand); change the assessment or the criticality setup.';
     const errors: Errors = section && editing ? { ...validateSettings(section, values, fields), ...(controlChanged ? controlErrors : {}) } : {};
     if (editing && section === 'procurement' && values.preferredVendor && values.preferredVendor !== String(record?.preferredVendor ?? '') && !suppliers.some((v) => v.id === values.preferredVendor))
         errors.preferredVendor = 'Choose an approved supplier from the list.';
@@ -1718,12 +1714,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
 
                     {tab === 'Criticality Analysis' && (
                         <ScrollBody>
-                            <Card className='space-y-2'>
-                                <h2 className='text-sm font-semibold text-ink'>Criticality analysis</h2>
-                                <p className='text-sm text-muted'>
-                                    Criticality assessment is not yet configured for this material. A future assessment will record operational impact, safety, lead time, redundancy and stockout risk.
-                                </p>
-                            </Card>
+                            <MaterialCriticality materialId={id} warehouseId={warehouseId} onChanged={reload} />
                         </ScrollBody>
                     )}
 

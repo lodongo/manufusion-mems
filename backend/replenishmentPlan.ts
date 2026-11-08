@@ -150,6 +150,8 @@ const set = (v: number | null | undefined) => v !== null && v !== undefined && N
 export function plan(method: string, p: Params, s: Situation): PlanResult {
     const def = METHODS[method];
     if (!def) return { kind: 'not_planned', reason: 'No replenishment strategy is set in Stock Control for this material and warehouse.' };
+    // Bought on demand (RP07, set by hand or by the criticality analysis): never replenished automatically, whatever else says so.
+    if (method === 'RP07') return { kind: 'not_planned', reason: 'RP07 Direct purchase: bought on demand against each requirement; automatic replenishment never runs for it.' };
     if (!def.automated) return { kind: 'not_planned', reason: `${def.code} ${def.name} is recorded for planning only; automatic replenishment runs for ${AUTOMATED_METHODS.join(', ')}.` };
     return calculate(method, p, s);
 }
