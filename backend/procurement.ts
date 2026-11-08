@@ -1,4 +1,5 @@
 import { strategyLockedByCriticality } from './criticality';
+import { levelsLockedByForecast } from './forecasting';
 import { catalogueGuidance, type CatalogueGuidance } from './catalogueGuidance';
 import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
 import {integratedReleaseProblems} from './catalogueReleaseGuard';
@@ -1055,6 +1056,13 @@ export const procurementRoutes = {
             // A strategy set by the criticality analysis (on demand below the cutoff) cannot be changed by hand.
             if(has('replenishmentStrategy')&&str(clean.replenishmentStrategy)!==str(before.replenishmentStrategy)){
                 const lock=await strategyLockedByCriticality(ctx.orgId,before);
+                if(lock)throw new HttpError(409,lock);
+            }
+            // Levels derived from the forecast (forecasting setup or the material's switch) are changed only through an
+            // approved forecast proposal, never typed here.
+            const levelChanges=['minimumLevel','maximumLevel','reorderQuantity','safetyStock','reorderPoint'].filter(k=>has(k)&&str(clean[k])!==str(before[k]));
+            if(levelChanges.length){
+                const lock=await levelsLockedByForecast(ctx.orgId,id,warehouseId,before,levelChanges);
                 if(lock)throw new HttpError(409,lock);
             }
             if(has('replenishmentStrategy')){

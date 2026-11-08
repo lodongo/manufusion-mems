@@ -1140,5 +1140,29 @@
       "Inventory > Setup > Criticality grid: confirm counts per cell, tap a cell to filter, and download the register to Excel; switch the setup back to Manual and confirm strategies are unlocked"
     ],
     "expected": "Every material gets a reproducible, approved criticality cell. Materials at or below the cutoff are bought on demand and never replenished automatically."
+  },
+  {
+    "name": "Material demand forecasting: chart, masking, simulation, forecast levels and approval; criticality on the Overview",
+    "description": "Material detail has a Forecasting tab after Criticality Analysis. Past months show receipts, issues and reversals as columns (demand = issues - reversals); tapping a month shows each movement day by day and tapping a movement masks it. A dashed Now line splits the past from the forecast line with its 80% band. Methods (moving averages, exponential smoothing, Holt damped trend, regression, Croston) are compared by one-step-ahead error; trend and demand pattern are shown. Planned overhauls and peaks are added on top. Safety stock, reorder point, minimum, maximum and reorder quantity come from lead times (supplier + internal), the service level of the criticality class and the forecast error. Inventory > Setup > Forecasting setup decides whether levels come from the forecast (manual under six months of history), are manual, or are manual unless a material is switched. Forecast levels need approval by someone else and the Chart of Authority on the change in stock value. Simulation uses about 100 random movements and is never saved. The Overview shows the approved criticality result.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "forecasting setup",
+      "demand forecast chart",
+      "movement masking",
+      "forecast simulation",
+      "forecast levels approval",
+      "level source lock",
+      "criticality overview"
+    ],
+    "steps": [
+      "Open a material with an approved criticality assessment: confirm the Overview shows the criticality card with the grid, class, movement, factor ratings and monthly issues",
+      "Inventory > Setup > Forecasting setup: choose 'Manual unless forced', set service levels A 99 / B 97.5 / C 95 / D 90, save with a reason",
+      "Material > Forecasting: confirm Simulation is off; switch it on, try Heavy and Light use, tap the month with SIM-BREAKDOWN and mask it, and confirm demand and levels drop; reload the page and confirm simulation is off again",
+      "With real data: tap a month, mask a one-off issue, add a yearly overhaul, Save inputs with a reason; switch the material to forecasting; Propose levels",
+      "Inventory Information > Edit: confirm minimum, maximum, reorder quantity, safety stock and reorder point are read only with 'From the approved forecast'; as another person approve the proposal at each Chart of Authority level and confirm the levels are written",
+      "Switch the material back to manual with a reason and confirm the levels are editable again; set the setup to 'From the forecast' and confirm a material with less than six months of issues stays manual"
+    ],
+    "expected": "Forecast levels are reproducible from the posted journal, can only change through an approved proposal when the material is forecast-driven, and simulation never touches real data."
   }
 ]

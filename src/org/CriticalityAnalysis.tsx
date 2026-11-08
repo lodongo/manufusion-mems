@@ -19,6 +19,7 @@ import RichTable, { type Column } from '../components/RichTable';
 import { Screen, Segmented, messageOf, useConfirm } from '../components/screen';
 import { Badge, Button, Card, Spinner, Toggle, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
+import { ForecastSetupForm } from './Forecasting';
 
 const API = '/api/org/inventory/criticality/';
 
@@ -60,6 +61,10 @@ interface Assessment {
     approvedAt?: string;
     strategyChange?: string;
     approved?: { cell: string; approvedAt: string } | null;
+    score?: number;
+    max?: number;
+    scaled?: number;
+    overrideBy?: string[];
 }
 interface MaterialData {
     setup: Setup;
@@ -439,12 +444,75 @@ interface RegisterRow {
     overdue: boolean;
 }
 
+/**
+ * Criticality results for the material Overview: shown only once an assessment has been approved. The grid marks the
+ * approved cell (and a newer cell waiting for approval), with the factor ratings and the 12-month issue profile.
+ */
+export function CriticalitySummary({ materialId, warehouseId, onOpen }: { materialId: string; warehouseId: string; onOpen: () => void }) {
+    const { data } = useLoad(() => callBackend<MaterialData>(API + 'get', { materialId, warehouseId }).catch(() => null), [materialId, warehouseId]);
+    if (!data || !data.current.cell) return null;
+    const { current, assessment: a, setup, factors } = data;
+    const marks: Record<string, 'current' | 'pending'> = { [current.cell]: 'current' };
+    if (a && a.status === 'submitted' && a.cell && a.cell !== current.cell) marks[a.cell] = 'pending';
+    const od = onDemand(current.cell, setup.cutoff);
+    const rated = a && a.status === 'approved' ? factors.filter((f) => setup.factors[f.code]?.enabled && a.ratings[f.code]) : [];
+    const months = data.movementData.months;
+    const peak = Math.max(1, ...months.map((m) => m.quantity));
+    return (
+        <Card className='space-y-3'>
+            <div className='flex items-center justify-between gap-2'>
+                <p className='flex items-center gap-1.5 text-sm font-semibold text-ink'>
+                    <Grid3X3 className='h-4 w-4' /> Criticality analysis
+                </p>
+                <Badge tone={od ? 'warn' : 'brand'}>{current.cell}</Badge>
+            </div>
+            <div className='grid grid-cols-2 gap-2 text-xs'>
+                <Result label='Class' value={`${current.criticalityClass} · ${CLASS_LABEL[current.criticalityClass] ?? ''}`} />
+                <Result label='Movement' value={current.movementClass ? `${current.movementClass} · ${data.movementLabels[current.movementClass] ?? ''}` : '—'} />
+                <Result label='Procurement' value={od && setup.strategyMode === 'criticality' ? `On demand (${data.onDemandStrategy})` : current.strategy || 'Manual'} note={current.strategySource === 'criticality' ? 'Set by the analysis' : 'Manual strategy'} />
+                <Result label='Review due' value={current.reviewDue || '—'} note={current.reviewDue && current.reviewDue < new Date().toISOString().slice(0, 10) ? 'Overdue' : undefined} />
+            </div>
+            <CriticalityGrid cutoff={setup.cutoff} marks={marks} compact />
+            {rated.length > 0 && (
+                <div className='space-y-1'>
+                    <p className='text-xs font-semibold text-muted'>
+                        Factor ratings{a?.score !== undefined && a?.max ? ` · score ${a.score} of ${a.max}` : ''}
+                    </p>
+                    {rated.map((f) => (
+                        <div key={f.code} className='flex items-center gap-2 text-[11px]'>
+                            <span className='w-28 shrink-0 truncate text-soft'>{f.name}</span>
+                            <span className='h-2 flex-1 rounded bg-slate-800'>
+                                <span className={`block h-2 rounded ${a!.ratings[f.code] === 3 ? 'bg-red-400' : a!.ratings[f.code] === 2 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${(a!.ratings[f.code] / 3) * 100}%` }} />
+                            </span>
+                            <span className='w-4 text-right text-ink'>{a!.ratings[f.code]}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+            {months.some((m) => m.quantity > 0) && (
+                <div className='space-y-1'>
+                    <p className='text-xs font-semibold text-muted'>Issues per month (last 12)</p>
+                    <div className='flex h-14 items-end gap-0.5' role='img' aria-label='Net issues per month over the last twelve months'>
+                        {months.map((m) => (
+                            <span key={m.month} title={`${m.month}: ${m.quantity}`} className='flex-1 rounded-t bg-sky-400/80' style={{ height: `${Math.max(2, (m.quantity / peak) * 100)}%` }} />
+                        ))}
+                    </div>
+                </div>
+            )}
+            {a && a.status === 'submitted' && <p className='text-xs text-amber-300'>A new assessment ({a.cell}) is waiting for approval.</p>}
+            <Button variant='secondary' onClick={onOpen}>
+                Open criticality analysis
+            </Button>
+        </Card>
+    );
+}
+
 export default function InventorySetup() {
-    const [tab, setTab] = useState<'setup' | 'grid'>('setup');
+    const [tab, setTab] = useState<'setup' | 'grid' | 'forecast'>('setup');
     return (
         <Screen
             title='Inventory setup'
-            subtitle='Criticality analysis'
+            subtitle={tab === 'forecast' ? 'Forecasting' : 'Criticality analysis'}
             toolbar={
                 <Segmented
                     label='Setup views'
@@ -453,11 +521,12 @@ export default function InventorySetup() {
                     options={[
                         { value: 'setup', label: 'Criticality setup' },
                         { value: 'grid', label: 'Criticality grid' },
+                        { value: 'forecast', label: 'Forecasting setup' },
                     ]}
                 />
             }
         >
-            {tab === 'setup' ? <CriticalitySetupForm /> : <CriticalityRegister />}
+            {tab === 'setup' ? <CriticalitySetupForm /> : tab === 'grid' ? <CriticalityRegister /> : <ForecastSetupForm />}
         </Screen>
     );
 }

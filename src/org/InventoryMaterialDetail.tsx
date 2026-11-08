@@ -1,4 +1,5 @@
-import { MaterialCriticality } from './CriticalityAnalysis';
+import { CriticalitySummary, MaterialCriticality } from './CriticalityAnalysis';
+import { MaterialForecast } from './Forecasting';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, HelpCircle, Link2, Link2Off, MoreVertical, PackagePlus, Pencil, RefreshCw, Save, Send, X } from 'lucide-react';
@@ -130,7 +131,7 @@ type Section = 'inventory' | 'procurement';
 type Values = Record<string, string>;
 type Errors = Record<string, string>;
 
-const TABS = ['Overview', 'Current Status', 'Inventory Information', 'Stock Control', 'Replenishment', 'Procurement Information', 'Movements', 'Criticality Analysis', 'Technical Data'] as const;
+const TABS = ['Overview', 'Current Status', 'Inventory Information', 'Stock Control', 'Replenishment', 'Procurement Information', 'Movements', 'Criticality Analysis', 'Forecasting', 'Technical Data'] as const;
 type Tab = (typeof TABS)[number];
 
 const STOCK_FIELDS=[
@@ -829,6 +830,44 @@ function SettingValue({
     return <>{value}</>;
 }
 
+interface LevelSource {
+    levelMode: 'forecast' | 'manual' | 'manual_unless_forced';
+    minHistoryMonths: number;
+    historyMonths: number;
+    source: 'forecast' | 'manual';
+    why: string;
+    forced: boolean;
+    canSwitch: boolean;
+    appliedAt: string;
+}
+const LEVEL_SET = new Set(['minimumLevel', 'maximumLevel', 'reorderQuantity', 'safetyStock', 'reorderPoint']);
+
+/** Whether the stock levels are typed here or come from the approved forecast, with the switch when the setup allows it. */
+function LevelSourceBar({ status, editing, onOpen, onSwitch }: { status: LevelSource; editing: boolean; onOpen: () => void; onSwitch: () => void }) {
+    const forecast = status.source === 'forecast';
+    return (
+        <div className='col-span-2 space-y-1.5 rounded-xl border border-line bg-panel p-2.5'>
+            <div className='flex items-center justify-between gap-2'>
+                <p className='text-sm font-semibold text-ink'>Levels: {forecast ? 'from the forecast' : 'manual'}</p>
+                <Badge tone={forecast ? 'brand' : 'muted'}>{editing ? (forecast ? 'Not editable' : 'Editable') : status.levelMode === 'manual_unless_forced' ? 'Manual unless forced' : status.levelMode === 'forecast' ? 'Forecast setup' : 'Manual setup'}</Badge>
+            </div>
+            <p className='text-xs text-muted'>
+                {status.why} {forecast ? 'Minimum, maximum, reorder quantity, safety stock and reorder point change only through an approved forecast proposal.' : ''}
+            </p>
+            <div className='flex flex-wrap gap-2'>
+                <Button variant='secondary' onClick={onOpen}>
+                    Open forecast
+                </Button>
+                {status.canSwitch && (
+                    <Button variant='secondary' onClick={onSwitch}>
+                        {status.forced ? 'Switch to manual' : 'Switch to forecasting'}
+                    </Button>
+                )}
+            </div>
+        </div>
+    );
+}
+
 /** Edit control for one settings field, with its explanation as hint and the validation message as error. */
 function SettingInput({
     field,
@@ -842,6 +881,7 @@ function SettingInput({
     suppliers,
     supplierScope,
     compact = false,
+    locked,
 }: {
     field: string;
     values: Values;
@@ -855,12 +895,17 @@ function SettingInput({
     supplierScope: string;
     /** Explanations live in the menu (Field guide) instead of under every input. */
     compact?: boolean;
+    /** Why the value cannot be typed (levels derived from the approved forecast). */
+    locked?: string;
 }) {
     const id = `material-${field}`;
     const value = values[field] ?? '';
     const hint = compact ? undefined : EXPLANATIONS[field];
     const error = errors[field];
 
+    if (locked) {
+        return <Field id={id} label={field === 'leadTimeDays' ? 'Lead time (days)' : label(field)} value={value === '' ? 'Not set' : value} readOnly hint={locked} onChange={() => undefined} />;
+    }
     if (field === 'criticalityClass') {
         // Set only by an approved criticality assessment (Criticality Analysis tab).
         return <Field id={id} label='Criticality class' value={value ? `Class ${value}` : 'Not assessed'} readOnly hint='From the criticality assessment' onChange={() => undefined} />;
@@ -1224,6 +1269,9 @@ function IsolationSheet({
 export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { id: string; warehouseId: string; onBack: () => void }) {
     const { data, loading, error, reload } = useLoad(() => callBackend<Detail>('/api/org/inventory/material/detail', { id, warehouseId }));
     const { data: metadata } = useLoad(() => callBackend<Metadata>('/api/org/inventory/material/metadata'));
+    // Where minimum, maximum, reorder quantity, safety stock and reorder point come from (forecasting setup).
+    const { data: levelSource, reload: reloadLevelSource } = useLoad(() => callBackend<LevelSource>('/api/org/inventory/forecast/status', { materialId: id, warehouseId }).catch(() => null));
+    const levelLock = levelSource?.source === 'forecast' ? 'From the approved forecast (Forecasting tab)' : '';
     const { ask, sheet } = useConfirm();
 
     const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>([...TABS], 'Overview'));
@@ -1642,6 +1690,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                                     />
                                 );
                             })()}
+                            <CriticalitySummary materialId={id} warehouseId={warehouseId} onOpen={() => changeTab('Criticality Analysis')} />
                         </ScrollBody>
                     )}
 
@@ -1653,6 +1702,30 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
 
                     {section && (
                         <ScrollGrid gap={editing ? 'gap-3' : 'gap-2'} dense={editing}>
+                            {tab === 'Inventory Information' && levelSource && (
+                                <LevelSourceBar
+                                    status={levelSource}
+                                    editing={editing}
+                                    onOpen={() => changeTab('Forecasting')}
+                                    onSwitch={() =>
+                                        ask(
+                                            {
+                                                title: levelSource.forced ? 'Switch to manual levels?' : 'Use forecasting for this material?',
+                                                message: levelSource.forced ? 'Minimum, maximum, reorder quantity, safety stock and reorder point can then be typed here. A pending forecast proposal is withdrawn.' : 'These levels can then only change through approved forecast proposals (Forecasting tab).',
+                                                confirmLabel: levelSource.forced ? 'Switch to manual' : 'Use forecasting',
+                                                reason: { label: 'Reason', minLength: 10 },
+                                            },
+                                            async (reason) => {
+                                                await callBackend('/api/org/inventory/forecast/source', { materialId: id, warehouseId, source: levelSource.forced ? 'manual' : 'forecast', reason });
+                                                setEditing(false);
+                                                reloadLevelSource();
+                                                reload();
+                                                flash('success', levelSource.forced ? 'The levels are manual now.' : 'The levels now come from the forecast.');
+                                            }
+                                        )
+                                    }
+                                />
+                            )}
                             {editing
                                 ? fields.map((k) => (
                                       <div key={k} className={`min-w-0 ${wide.has(k) ? 'col-span-2' : ''}`}>
@@ -1670,6 +1743,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                                               onChange={(field, value) => setValues((p) => ({ ...p, [field]: value }))}
                                               suppliers={suppliers}
                                               supplierScope={supplierScope}
+                                              locked={levelLock && LEVEL_SET.has(k) ? levelLock : undefined}
                                               compact
                                           />
                                       </div>
@@ -1715,6 +1789,19 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                     {tab === 'Criticality Analysis' && (
                         <ScrollBody>
                             <MaterialCriticality materialId={id} warehouseId={warehouseId} onChanged={reload} />
+                        </ScrollBody>
+                    )}
+
+                    {tab === 'Forecasting' && (
+                        <ScrollBody>
+                            <MaterialForecast
+                                materialId={id}
+                                warehouseId={warehouseId}
+                                onChanged={() => {
+                                    reload();
+                                    reloadLevelSource();
+                                }}
+                            />
                         </ScrollBody>
                     )}
 
