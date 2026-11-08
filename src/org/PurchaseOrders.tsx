@@ -1,10 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { CheckCircle2, FileDown, Info, Plus, Printer, Send, Settings, ShieldAlert, XCircle, AlertTriangle, BarChart3, BookOpen } from 'lucide-react';
+import { CheckCircle2, FileDown, Paperclip, Info, Plus, Printer, Send, Settings, ShieldAlert, XCircle, AlertTriangle, BarChart3, BookOpen } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import { downloadReportPdf } from '../lib/report';
 import { Alert, Field, SelectField } from '../components/ui';
-import { API, PO_BASE, RQ_BASE, money, todayIso, Facts, Section, AckPanel, ServicePanel, ReassignPanel, LinesEditor, QuotesView, VisibilitySettings, FinanceSettings, type Receipt } from './PoExtras';
+import { API, PO_BASE, RQ_BASE, money, todayIso, Facts, Section, AckPanel, ServicePanel, ReassignPanel, LinesEditor, QuotesView, VisibilitySettings, FinanceSettings, FilePick, type Receipt } from './PoExtras';
+import { openStored, type Upload } from './fileTools';
+import type { Charge } from '../shared/procurementCharges';
 import RichTable, { type Column } from '../components/RichTable';
 import { ConsolidationView, SpecOrderForm, TraceBreakdown, WindowSetting } from './PoConsolidation';
 import { restoredTableTab } from '../lib/tableTabs';
@@ -110,6 +112,10 @@ interface RqFull extends RqRow {
     paymentTermsLabel: string;
     leadTimeDays: number;
     validUntil: string;
+    categoryName: string;
+    charges: Charge[];
+    chargesTotal: number;
+    grandTotal: number;
     quoteFxRate: number | null;
     latestRate: number | null;
     latestBase: number | null;
@@ -184,6 +190,26 @@ interface Delivery {
     byName: string;
     note: string;
     lines: Array<{ no: number; qty: number }>;
+    files: Array<{ id: string; kind: string; name: string }>;
+    invoiceId: string;
+    realigned: string[];
+    postingReason: string;
+}
+interface Invoice {
+    id: string;
+    number: string;
+    date: string;
+    deliveryId: string;
+    byName: string;
+    at: string;
+    fileId: string;
+    fileName: string;
+    amount?: number;
+    taxAmount?: number;
+    currency?: string;
+    expected?: number;
+    variancePct?: number;
+    varianceReason?: string;
 }
 interface PoFull extends Omit<PoRow, never> {
     vendorId: string;
@@ -204,6 +230,14 @@ interface PoFull extends Omit<PoRow, never> {
     approval: { amount: number; steps: Step[]; authorityVersion: number };
     approveWhy: string;
     deliveries: Delivery[];
+    invoices: Invoice[];
+    invoiceStatus: string;
+    canInvoice: boolean;
+    invoiceTolerancePct?: number;
+    charges: Charge[];
+    chargesTotal: number | null;
+    grandTotal: number | null;
+    grossGoods: number | null;
     history: Hist[];
     returnReason: string;
     rejectReason: string;
@@ -457,7 +491,9 @@ function RequisitionDetail({ id }: { id: string }) {
             <Section title='Value and currency'>
                 <Facts
                     rows={[
-                        ['Quoted value', money(r.total, r.currency)],
+                        ['Goods or services (after discount)', money(r.total, r.currency)],
+                        ...chargeRows(r.charges, r.currency),
+                        ['Total with taxes and charges', money(r.grandTotal, r.currency)],
                         ...(r.currency !== r.orgCurrency
                             ? ([
                                   ['At the quote rate', r.quoteBase !== null ? money(r.quoteBase, r.orgCurrency) : ''],
@@ -871,45 +907,156 @@ function TraceView({ id }: { id: string }) {
     );
 }
 
+/** Taxes and charges as fact rows, each on its own line. */
+const chargeRows = (charges: Charge[] | undefined, currency: string): Array<[string, ReactNode]> =>
+    (charges ?? []).map((c) => [`${c.kind === 'tax' ? 'Tax' : 'Charge'}: ${c.label}${c.basis === 'percent' ? ` ${c.value}%` : ''}`, `${money(c.amount, currency)}${c.note ? ` · ${c.note}` : ''}`]);
+
 // ----- Deliveries -----
 
+type PlanLine = { no: number; type: string; warehouse: boolean; materialId: string; materialNumber: string; materialName: string; options: Array<{ id: string; number: string; name: string }>; finance: string; costCenterId: string; costCenterCode: string; costCenterName: string; glCode: string; glName: string; legalEntityId: string };
+type ReceivePlan = { lines: PlanLine[]; costCenters: Record<string, Array<{ id: string; code: string; name: string }>>; canAlign: boolean; invoiceTolerancePct: number; charges: Charge[]; goodsTotal: number };
+type InvoiceDraft = { number: string; date: string; amount: string; taxAmount: string; reason: string; file: Upload | null };
+const blankInvoice = (): InvoiceDraft => ({ number: '', date: todayIso(), amount: '', taxAmount: '', reason: '', file: null });
+
+/** The value the supplier should invoice for these quantities: order price plus the share of taxes and charges. */
+function expectedOf(po: PoFull, given: Array<{ no: number; qty: number }>, charges: number) {
+    const goods = given.reduce((s, g) => s + g.qty * (po.lines.find((l) => l.no === g.no)?.netUnitPrice ?? 0), 0);
+    const total = po.total ?? 0;
+    return Math.round((goods + (total > 0 ? (charges * goods) / total : 0)) * 100) / 100;
+}
+
+function invoiceProblems(inv: InvoiceDraft, expected: number, tolerance: number) {
+    const out: string[] = [];
+    const amount = Number(inv.amount);
+    const tax = Number(inv.taxAmount || 0);
+    if (inv.number.trim().length < 2) out.push('The invoice number');
+    if (!inv.date || inv.date > todayIso()) out.push('An invoice date that is not in the future');
+    if (!(amount > 0)) out.push('The invoice amount including tax');
+    if (!(tax >= 0) || (amount > 0 && tax >= amount)) out.push('Tax of zero or more, below the invoice amount');
+    if (!inv.file) out.push('The invoice document');
+    const variance = expected > 0 && amount > 0 ? Math.round(((amount - expected) / expected) * 10000) / 100 : 0;
+    if (Math.abs(variance) > tolerance && inv.reason.trim().length < 20) out.push(`A reason (20+ characters) for the ${variance}% difference from the expected amount`);
+    return { problems: out, variance };
+}
+
+function InvoiceFields({ inv, set, expected, currency, tolerance, onError }: { inv: InvoiceDraft; set: (v: InvoiceDraft) => void; expected: number; currency: string; tolerance: number; onError: (m: string) => void }) {
+    const { variance } = invoiceProblems(inv, expected, tolerance);
+    return (
+        <div className='space-y-2 rounded-xl border border-line p-2'>
+            <p className='text-xs text-muted'>Expected for these quantities: {money(expected, currency)} (order price plus the share of taxes and charges). Tolerance {tolerance}%.</p>
+            <Field id='iv-no' label='Invoice number *' value={inv.number} maxLength={40} onChange={(e) => set({ ...inv, number: e.target.value })} />
+            <Field id='iv-date' label='Invoice date *' type='date' max={todayIso()} value={inv.date} onChange={(e) => set({ ...inv, date: e.target.value })} />
+            <Field id='iv-amt' label={`Invoice amount including tax (${currency}) *`} inputMode='decimal' value={inv.amount} onChange={(e) => set({ ...inv, amount: e.target.value.replace(/[^\d.]/g, '') })} />
+            <Field id='iv-tax' label={`Tax on the invoice (${currency})`} inputMode='decimal' value={inv.taxAmount} onChange={(e) => set({ ...inv, taxAmount: e.target.value.replace(/[^\d.]/g, '') })} />
+            {Number(inv.amount) > 0 && <p className={`text-xs ${Math.abs(variance) > tolerance ? 'text-amber-300' : 'text-muted'}`}>Difference from expected: {variance}%</p>}
+            {Math.abs(variance) > tolerance && <Field id='iv-why' label='Reason for the difference *' value={inv.reason} maxLength={300} onChange={(e) => set({ ...inv, reason: e.target.value })} />}
+            <FilePick label='Invoice document *' value={inv.file} onPick={(f) => set({ ...inv, file: f })} onError={onError} />
+            <p className='text-[11px] text-muted'>The invoice is recorded against the order (invoiced quantities and status). Accounts payable posting is not live yet.</p>
+        </div>
+    );
+}
+
+function GlPick({ id, costCenterId, value, onChange }: { id: string; costCenterId: string; value: string; onChange: (v: string) => void }) {
+    const [q, setQ] = useState('');
+    const found = useLoad(() => (q.trim().length >= 2 && costCenterId ? callBackend<{ items: Array<{ code: string; name: string }> }>(`${API}/req/gl`, { costCenterId, q }) : Promise.resolve({ items: [] })), [costCenterId, q]);
+    return (
+        <div className='space-y-1'>
+            <Field id={id} label={`GL account${value ? `: ${value}` : ''}`} placeholder='Type 2+ characters to search approved accounts' value={q} onChange={(e) => setQ(e.target.value)} />
+            {(found.data?.items ?? []).length > 0 && (
+                <div className='max-h-40 overflow-y-auto rounded-xl border border-line'>
+                    {found.data!.items.map((a) => (
+                        <button key={a.code} type='button' className={`block min-h-11 w-full px-3 text-left text-sm ${a.code === value ? 'bg-brand/20 text-ink' : 'text-ink active:bg-page'}`} onClick={() => { onChange(a.code); setQ(''); }}>
+                            {a.code} {a.name}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function ReceiveForm({ po, onDone }: { po: PoFull; onDone: (m: string) => void }) {
-    const plan = useLoad(() => callBackend<{ lines: Array<{ no: number; warehouse: boolean; materialId: string; materialNumber: string; materialName: string; options: Array<{ id: string; number: string; name: string }>; finance: string }> }>(`${API}/orders/receive/prepare`, { id: po.id }), [po.id]);
+    const plan = useLoad(() => callBackend<ReceivePlan>(`${API}/orders/receive/prepare`, { id: po.id }), [po.id]);
     const [mat, setMat] = useState<Record<number, string>>({});
     const [ref, setRef] = useState('');
     const [date, setDate] = useState(todayIso());
     const [note, setNote] = useState('');
     const [qty, setQty] = useState<Record<number, string>>({});
+    const [dn, setDn] = useState<Upload | null>(null);
+    const [post, setPost] = useState<Record<number, { cc: string; gl: string }>>({});
+    const [postReason, setPostReason] = useState('');
+    const [withInvoice, setWithInvoice] = useState(false);
+    const [inv, setInv] = useState<InvoiceDraft>(blankInvoice);
+    const [problem, setProblem] = useState('');
     const confirm = useConfirm();
     const open = po.lines.filter((l) => (l.outstanding ?? 0) > 0);
-    const given = open.map((l) => ({ no: l.no, qty: Number(qty[l.no]) || 0, materialId: mat[l.no] ?? '' })).filter((x) => x.qty > 0);
+    const pl = (no: number) => plan.data?.lines.find((x) => x.no === no);
+    const given = open
+        .map((l) => {
+            const p = pl(l.no);
+            const a = post[l.no];
+            const changed = !!p && !!a && (a.cc !== p.costCenterId || a.gl !== p.glCode);
+            return { no: l.no, qty: Number(qty[l.no]) || 0, materialId: mat[l.no] ?? '', ...(changed ? { costCenterId: a.cc, glCode: a.gl } : {}) };
+        })
+        .filter((x) => x.qty > 0);
+    const realigned = given.filter((g) => 'costCenterId' in g);
     const over = open.filter((l) => (Number(qty[l.no]) || 0) > (l.outstanding ?? 0));
+    const chargesSum = (plan.data?.charges ?? []).reduce((s, c) => s + c.amount, 0);
+    const expected = expectedOf(po, given, chargesSum);
+    const tol = plan.data?.invoiceTolerancePct ?? 0;
     const problems: string[] = [];
     if (ref.trim().length < 2) problems.push('The delivery note number');
     if (!date || date > todayIso()) problems.push('A delivery date that is not in the future');
+    if (!dn) problems.push("The supplier's delivery note document");
     if (!given.length) problems.push('A quantity received for at least one line');
     if (over.length) problems.push(`Quantities within what is outstanding (line ${over.map((l) => l.no).join(', ')})`);
-    const needMat = given.filter((g) => { const p = plan.data?.lines.find((x) => x.no === g.no); return !!p && p.warehouse && !p.materialId && !g.materialId; });
+    const needMat = given.filter((g) => { const p = pl(g.no); return !!p && p.warehouse && !p.materialId && !g.materialId; });
     if (needMat.length) problems.push(`The warehouse material received on line ${needMat.map((g) => g.no).join(', ')}`);
+    if (realigned.some((g) => !g.glCode)) problems.push('A GL account for each line posting elsewhere');
+    if (realigned.length && postReason.trim().length < 10) problems.push('The reason for changing the posting (10+ characters)');
+    if (withInvoice) problems.push(...invoiceProblems(inv, expected, tol).problems);
     const save = () =>
         confirm.ask(
-            { title: 'Record the delivery', message: `${given.length} line(s) on delivery note ${ref.trim()}, dated ${date}.`, confirmLabel: 'Record delivery', acknowledge: 'The quantities are what was physically received and counted.' },
+            {
+                title: 'Record the delivery',
+                message: `${given.length} line(s) on delivery note ${ref.trim()}, dated ${date}.${realigned.length ? ` Posting changed on line ${realigned.map((g) => g.no).join(', ')}.` : ''}${withInvoice ? ` Invoice ${inv.number.trim()} for ${money(Number(inv.amount), po.currency)} is recorded with it.` : ''}`,
+                confirmLabel: 'Record delivery',
+                acknowledge: 'The quantities are what was physically received and counted, and the attached delivery note is the supplier’s.',
+            },
             async () => {
-                await callBackend(`${API}/orders/receive`, { id: po.id, ref, date, note, lines: given });
+                await callBackend(`${API}/orders/receive`, {
+                    id: po.id,
+                    ref,
+                    date,
+                    note,
+                    lines: given,
+                    deliveryNote: { kind: 'delivery_note', ...dn },
+                    ...(realigned.length ? { postingReason: postReason } : {}),
+                    ...(withInvoice ? { invoice: { number: inv.number, date: inv.date, amount: Number(inv.amount), taxAmount: Number(inv.taxAmount || 0), reason: inv.reason, file: { kind: 'invoice', ...inv.file } } } : {}),
+                });
                 setRef('');
                 setNote('');
                 setQty({});
-                onDone('Delivery recorded.');
+                setDn(null);
+                setPost({});
+                setPostReason('');
+                setWithInvoice(false);
+                setInv(blankInvoice());
+                onDone(withInvoice ? 'Delivery and invoice recorded.' : 'Delivery recorded.');
             }
         );
     return (
         <Section title='Record a delivery'>
             <Field id='rc-ref' label='Delivery note number *' value={ref} maxLength={40} onChange={(e) => setRef(e.target.value)} />
             <Field id='rc-date' label='Delivery date *' type='date' max={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} />
+            <FilePick label='Delivery note document *' value={dn} onPick={setDn} onError={setProblem} />
             {plan.data && plan.data.lines.some((x) => x.finance === 'live') && <p className='text-xs text-sky-300'>This delivery posts to the journal: Dr inventory (or the line account, or asset clearing), Cr GR/IR.</p>}
             {plan.data && plan.data.lines.some((x) => x.finance === 'blocked') && <Alert tone='error'>Finance is blocked or closed for a legal entity on this order, so the delivery will be refused.</Alert>}
             {open.map((l) => {
-                const p = plan.data?.lines.find((x) => x.no === l.no);
+                const p = pl(l.no);
+                const a = post[l.no];
+                const ccs = p ? plan.data?.costCenters[p.legalEntityId] ?? [] : [];
+                const alignable = !!p && !p.warehouse && !!plan.data?.canAlign && (Number(qty[l.no]) || 0) > 0;
                 return (
                 <div key={l.no} className='space-y-1'>
                 <Field
@@ -932,10 +1079,37 @@ function ReceiveForm({ po, onDone }: { po: PoFull; onDone: (m: string) => void }
                         ))}
                     </SelectField>
                 ))}
+                {p && !p.warehouse && (
+                    <p className='text-xs text-muted'>
+                        Posts to {p.costCenterCode} {p.costCenterName}
+                        {p.type !== 'asset' ? ` · GL ${p.glCode} ${p.glName}` : ' · asset clearing'}
+                        {a && (a.cc !== p.costCenterId || a.gl !== p.glCode) ? ` → ${ccs.find((c) => c.id === a.cc)?.code ?? a.cc}${p.type !== 'asset' ? ` / ${a.gl || '?'}` : ''}` : ''}
+                    </p>
+                )}
+                {alignable && (
+                    <details className='rounded-xl border border-line px-2 py-1'>
+                        <summary className='min-h-11 cursor-pointer py-2 text-xs text-brand'>Align the cost center or GL account</summary>
+                        <div className='space-y-1 pb-2'>
+                            <SelectField id={`rc-cc-${l.no}`} label='Cost center (same legal entity)' value={a?.cc ?? p!.costCenterId} onChange={(e) => setPost({ ...post, [l.no]: { cc: e.target.value, gl: p!.type === 'asset' ? p!.glCode : '' } })}>
+                                {ccs.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.code} {c.name}
+                                    </option>
+                                ))}
+                            </SelectField>
+                            {p!.type !== 'asset' && <GlPick id={`rc-gl-${l.no}`} costCenterId={a?.cc ?? p!.costCenterId} value={a?.gl ?? p!.glCode} onChange={(gl) => setPost({ ...post, [l.no]: { cc: a?.cc ?? p!.costCenterId, gl } })} />}
+                            {a && <Button variant='secondary' onClick={() => { const n = { ...post }; delete n[l.no]; setPost(n); }}>Keep the order posting</Button>}
+                        </div>
+                    </details>
+                )}
                 </div>
                 );
             })}
+            {realigned.length > 0 && <Field id='rc-why' label='Reason for changing the posting *' value={postReason} maxLength={300} onChange={(e) => setPostReason(e.target.value)} />}
             <Field id='rc-note' label='Note, optional' value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />
+            <Toggle checked={withInvoice} onChange={setWithInvoice} label='The supplier’s invoice came with this delivery' />
+            {withInvoice && <InvoiceFields inv={inv} set={setInv} expected={expected} currency={po.currency} tolerance={tol} onError={setProblem} />}
+            {problem && <Alert tone='error'>{problem}</Alert>}
             {problems.length > 0 && (
                 <div className='text-xs text-amber-300'>
                     <p className='font-semibold'>Still needed:</p>
@@ -950,6 +1124,70 @@ function ReceiveForm({ po, onDone }: { po: PoFull; onDone: (m: string) => void }
                 Record delivery
             </Button>
             {confirm.sheet}
+        </Section>
+    );
+}
+
+/** Invoice a delivery recorded earlier without one. */
+function InvoiceLater({ po, delivery, onDone }: { po: PoFull; delivery: Delivery; onDone: (m: string) => void }) {
+    const [openForm, setOpenForm] = useState(false);
+    const [inv, setInv] = useState<InvoiceDraft>(blankInvoice);
+    const [problem, setProblem] = useState('');
+    const confirm = useConfirm();
+    const tol = po.invoiceTolerancePct ?? 5;
+    const expected = expectedOf(po, delivery.lines, po.chargesTotal ?? 0);
+    const { problems } = invoiceProblems(inv, expected, tol);
+    if (!openForm) return <Button variant='secondary' onClick={() => setOpenForm(true)}>Record the invoice</Button>;
+    return (
+        <div className='space-y-2'>
+            <InvoiceFields inv={inv} set={setInv} expected={expected} currency={po.currency} tolerance={tol} onError={setProblem} />
+            {problem && <Alert tone='error'>{problem}</Alert>}
+            {problems.length > 0 && <p className='text-xs text-amber-300'>Still needed: {problems.join('; ')}</p>}
+            <Button
+                disabled={problems.length > 0}
+                onClick={() =>
+                    confirm.ask({ title: 'Record the invoice', message: `Invoice ${inv.number.trim()} for ${money(Number(inv.amount), po.currency)} against delivery ${delivery.ref}.`, confirmLabel: 'Record invoice', acknowledge: 'The attached document is the supplier’s invoice for this delivery.' }, async () => {
+                        await callBackend(`${API}/orders/invoice`, { id: po.id, deliveryId: delivery.id, invoice: { number: inv.number, date: inv.date, amount: Number(inv.amount), taxAmount: Number(inv.taxAmount || 0), reason: inv.reason, file: { kind: 'invoice', ...inv.file } } });
+                        onDone('Invoice recorded.');
+                    })
+                }
+            >
+                Record invoice
+            </Button>
+            {confirm.sheet}
+        </div>
+    );
+}
+
+function DeliveryCard({ po, d, onDone }: { po: PoFull; d: Delivery; onDone: (m: string) => void }) {
+    const [problem, setProblem] = useState('');
+    const inv = po.invoices.find((i) => i.id === d.invoiceId);
+    return (
+        <Section title={`${d.ref} · ${d.date}`} right={inv ? <Badge tone='brand'>Invoiced</Badge> : <Badge tone='warn'>Not invoiced</Badge>}>
+            <p className='text-xs text-muted'>
+                Recorded {fmtDate(d.at)} by {d.byName}
+                {d.note ? `: ${d.note}` : ''}
+            </p>
+            <ul className='text-sm text-ink'>
+                {d.lines.map((l) => (
+                    <li key={l.no}>
+                        Line {l.no}: {l.qty}
+                    </li>
+                ))}
+            </ul>
+            {d.realigned.length > 0 && <p className='text-xs text-sky-300'>Posting aligned: {d.realigned.join('; ')}{d.postingReason ? ` (${d.postingReason})` : ''}</p>}
+            {inv && (
+                <Facts rows={[['Invoice', `${inv.number} · ${inv.date}`], ['Amount', inv.amount !== undefined ? `${money(inv.amount, inv.currency)} (tax ${money(inv.taxAmount ?? 0, inv.currency)})` : 'Hidden'], ['Expected', inv.expected !== undefined ? `${money(inv.expected, inv.currency)} · ${inv.variancePct}%` : 'Hidden'], ['Reason', inv.varianceReason ?? '']]} />
+            )}
+            <div className='flex flex-wrap gap-2'>
+                {d.files.map((f) => (
+                    <Button key={f.id} variant='secondary' onClick={() => void openStored(`${API}/orders/file`, { fileId: f.id }).catch((e) => setProblem(messageOf(e)))}>
+                        <Paperclip className='mr-1 h-4 w-4' /> {f.kind === 'invoice' ? 'Invoice' : 'Delivery note'}
+                    </Button>
+                ))}
+            </div>
+            {problem && <Alert tone='error'>{problem}</Alert>}
+            {!inv && po.canInvoice && <InvoiceLater po={po} delivery={d} onDone={onDone} />}
         </Section>
     );
 }
@@ -969,7 +1207,9 @@ async function printOrder(po: PoFull) {
                     ['Currency', po.currency],
                     ['Payment terms', po.paymentTermsLabel || '-'],
                     ['Contract reference', po.contractRef || '-'],
-                    ['Order total', money(po.total, po.currency)],
+                    ['Goods or services', money(po.total, po.currency)],
+                    ...(po.charges ?? []).map((c) => [c.label, money(c.amount, po.currency)] as [string, string]),
+                    ['Order total', money(po.grandTotal ?? po.total, po.currency)],
                     ['Approved', po.approvedAt ? fmtDate(po.approvedAt) : 'Not yet'],
                 ],
             },
@@ -1174,7 +1414,10 @@ function OrderDetail({ id }: { id: string }) {
                     <Section title='Value and currency'>
                         <Facts
                             rows={[
-                                ['Order value', money(po.total, po.currency)],
+                                ['Goods or services (after discount)', money(po.total, po.currency)],
+                                ...(po.grossGoods && po.total !== null && po.grossGoods > po.total + 0.005 ? ([['Before discount', money(po.grossGoods, po.currency)]] as Array<[string, ReactNode]>) : []),
+                                ...chargeRows(po.charges, po.currency),
+                                ['Order total with taxes and charges', money(po.grandTotal ?? po.total, po.currency)],
                                 ...(po.currency !== po.orgCurrency
                                     ? ([
                                           ['Rate used', po.fxRate ? `1 ${po.currency} = ${po.fxRate} ${po.orgCurrency}${po.fxAsOf ? ` (${fmtDate(po.fxAsOf)})` : ''}` : ''],
@@ -1182,7 +1425,7 @@ function OrderDetail({ id }: { id: string }) {
                                           ['At the latest rate', po.latestBase !== null ? money(po.latestBase, po.orgCurrency) : ''],
                                       ] as Array<[string, ReactNode]>)
                                     : []),
-                                [`Value in ${po.orgCurrency}`, po.baseTotal ? money(po.baseTotal, po.orgCurrency) : 'Worked out when validated'],
+                                [`Value in ${po.orgCurrency}`, po.baseTotal ? `${money(po.baseTotal, po.orgCurrency)} (chart of authority: discounted amount plus taxes and charges)` : 'Worked out when validated'],
                             ]}
                         />
                     </Section>
@@ -1254,20 +1497,9 @@ function OrderDetail({ id }: { id: string }) {
             {tab === 'deliveries' && !isService && (
                 <div className='space-y-3'>
                     {po.deliveries.length === 0 && <p className='text-sm text-muted'>No deliveries recorded yet.</p>}
+                    {po.invoiceStatus !== 'none' && <p className='text-xs text-muted'>Invoiced: {po.invoiceStatus === 'full' ? 'in full' : 'partially'} · {po.invoices.length} invoice(s)</p>}
                     {po.deliveries.map((d) => (
-                        <Section key={d.id} title={`${d.ref} · ${d.date}`}>
-                            <p className='text-xs text-muted'>
-                                Recorded {fmtDate(d.at)} by {d.byName}
-                                {d.note ? `: ${d.note}` : ''}
-                            </p>
-                            <ul className='text-sm text-ink'>
-                                {d.lines.map((l) => (
-                                    <li key={l.no}>
-                                        Line {l.no}: {l.qty}
-                                    </li>
-                                ))}
-                            </ul>
-                        </Section>
+                        <DeliveryCard key={d.id} po={po} d={d} onDone={done} />
                     ))}
                     {c.receive && <ReceiveForm po={po} onDone={done} />}
                 </div>

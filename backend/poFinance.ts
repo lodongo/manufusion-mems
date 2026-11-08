@@ -55,7 +55,7 @@ const filesPath = (orgId: string) => `organizations/${orgId}/procurement_files`;
 const financePath = (orgId: string) => `organizations/${orgId}/procurement_setup/finance`;
 const journalsPath = (orgId: string) => `organizations/${orgId}/finance_journals`;
 const JNL_ID = /^JNL\d{9}$/;
-const KIND_LABEL: Record<string, string> = { acknowledgement: 'Acknowledgement', timesheet: 'Signed and stamped timesheet', report: 'Service report', invoice: 'Supplier invoice' };
+const KIND_LABEL: Record<string, string> = { acknowledgement: 'Acknowledgement', timesheet: 'Signed and stamped timesheet', report: 'Service report', invoice: 'Supplier invoice', delivery_note: 'Delivery note' };
 
 interface Upload {
     kind: string;
@@ -63,7 +63,7 @@ interface Upload {
     type: string;
     data: string;
 }
-function cleanFile(v: unknown, kinds: string[]): Upload {
+export function cleanFile(v: unknown, kinds: string[]): Upload {
     const f = o(v);
     const kind = str(f.kind);
     const type = str(f.type);
@@ -75,7 +75,7 @@ function cleanFile(v: unknown, kinds: string[]): Upload {
     const name = oneLine(str(f.name).replace(/[\\/:*?"<>|]/g, '_'), 80) || KIND_LABEL[kind];
     return { kind, name, type, data };
 }
-async function storeFiles(ctx: OrgContext, poId: string, uploads: Upload[], ref: string): Promise<Obj[]> {
+export async function storeFiles(ctx: OrgContext, poId: string, uploads: Upload[], ref: string): Promise<Obj[]> {
     const out: Obj[] = [];
     for (const u of uploads) {
         const id = `F${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
@@ -138,7 +138,7 @@ export const poFinanceRoutes = {
             const doc = await loadPo(ctx, str(f.data.poId));
             const a = doc.acc;
             const money = a.owner || a.ccOwner || a.requester || a.approver || can(ctx, 'PRC.journal.view');
-            if (str(f.data.kind) !== 'acknowledgement' && !money) throw new HttpError(404, 'File not found.');
+            if (!['acknowledgement', 'delivery_note'].includes(str(f.data.kind)) && !money && !can(ctx, 'PRC.po.receive')) throw new HttpError(404, 'File not found.');
             await record(ctx, 'org.procurement.file.view', str(f.data.poId), `${str(f.data.kind)}: ${str(f.data.name)}`.slice(0, 200));
             return { name: str(f.data.name), type: str(f.data.type), data: str(f.data.data), kind: str(f.data.kind) };
         }),

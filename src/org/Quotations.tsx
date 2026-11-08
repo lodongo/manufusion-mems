@@ -9,6 +9,7 @@ import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { Screen, Segmented, messageOf, useConfirm } from '../components/screen';
+import { CHARGE_TYPES, type Charge } from '../shared/procurementCharges';
 
 // Quotations (QTN + 9 digits). Procurement picks up an acknowledged purchase requirement and works it to a recommendation:
 //   1. Review: decide the mode of procurement (or record that the best method is still being researched or consulted on).
@@ -188,6 +189,11 @@ interface Quote {
     attachments: FileMeta[];
     total: number;
     base: number | null;
+    gross?: number;
+    goods?: number;
+    discount?: number;
+    overheads?: number;
+    charges?: Charge[];
     gaps: string[];
 }
 interface Ranked {
@@ -431,7 +437,9 @@ interface Draft {
     vatIncluded: '' | 'yes' | 'no';
     notes: string;
     lines: Array<{ no: number; bid: boolean; unitPrice: string; quantity: string; discountPct: string; leadTimeDays: string; warrantyMonths: string; brand: string; origin: string; compliance: string; note: string }>;
+    charges: ChargeDraft[];
 }
+type ChargeDraft = { code: string; basis: 'amount' | 'percent'; value: string; note: string };
 
 const s = (v: unknown) => (v === null || v === undefined ? '' : String(v));
 
@@ -451,6 +459,7 @@ function draftOf(c: CaseOut, vendorId: string, orgCurrency: string): Draft {
         deliveryTerms: q?.deliveryTerms ?? '',
         vatIncluded: q?.vatIncluded === true ? 'yes' : q?.vatIncluded === false ? 'no' : '',
         notes: q?.notes ?? '',
+        charges: (q?.charges ?? []).map((x) => ({ code: x.code, basis: x.basis, value: String(x.value), note: x.note ?? '' })),
         lines: c.lines.map((l) => {
             const x = q?.lines.find((y) => y.no === l.no);
             return {
@@ -487,6 +496,10 @@ function QuoteForm({ c, vendorId, options, onClose, onSaved }: { c: CaseOut; ven
         const sub = d.lines.filter((l) => l.bid).reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0) * (1 - (Number(l.discountPct) || 0) / 100), 0);
         return sub * (1 - (Number(d.discountPct) || 0) / 100);
     }, [d]);
+    const gross = useMemo(() => d.lines.filter((l) => l.bid).reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0), [d]);
+    const chargeAmt = (x: ChargeDraft) => (x.basis === 'percent' ? (total * (Number(x.value) || 0)) / 100 : Number(x.value) || 0);
+    const overheads = d.charges.reduce((sum, x) => sum + chargeAmt(x), 0);
+    const setCharge = (i: number, p: Partial<ChargeDraft>) => setD({ ...d, charges: d.charges.map((x, j) => (j === i ? { ...x, ...p } : x)) });
 
     // Mandatory fields are listed so the person knows what is still missing; the quote can be saved part-filled.
     const missing: string[] = [];
@@ -499,10 +512,20 @@ function QuoteForm({ c, vendorId, options, onClose, onSaved }: { c: CaseOut; ven
     if (d.leadTimeDays.trim() === '') missing.push('Lead time');
     if (!d.lines.some((l) => l.bid)) missing.push('At least one item quoted');
     for (const l of d.lines) if (l.bid && (!(Number(l.unitPrice) > 0) || !(Number(l.quantity) > 0))) missing.push(`Price and quantity for item ${l.no}`);
+    // Taxes and charges are checked before saving; the server checks them again.
+    const chargeErrs: string[] = [];
+    d.charges.forEach((x, i) => {
+        const t = CHARGE_TYPES.find((y) => y.code === x.code);
+        if (!t) chargeErrs.push(`Tax or charge ${i + 1}: choose the type`);
+        else if (!(Number(x.value) > 0) || (x.basis === 'percent' && Number(x.value) > 100)) chargeErrs.push(`${t.label}: enter an amount above zero${x.basis === 'percent' ? ' and at most 100%' : ''}`);
+        else if (x.code.startsWith('OTHER_') && x.note.trim().length < 3) chargeErrs.push(`${t.label}: describe it`);
+        if (x.code && x.code !== 'OTHER_TAX' && x.code !== 'OTHER_CHARGE' && d.charges.filter((y) => y.code === x.code).length > 1) chargeErrs.push(`${t?.label ?? x.code} is entered more than once`);
+        if (x.code === 'VAT' && d.vatIncluded === 'yes') chargeErrs.push('VAT is already in the prices: remove the VAT line or say prices exclude VAT');
+    });
 
     const dateErr = d.date && d.date > today ? 'The quote date cannot be in the future.' : '';
     const validErr = d.date && d.validUntil && d.validUntil < d.date ? 'Cannot be before the quote date.' : '';
-    const blocked = !!dateErr || !!validErr;
+    const blocked = !!dateErr || !!validErr || chargeErrs.length > 0;
 
     const save = async () => {
         setBusy(true);
@@ -524,6 +547,7 @@ function QuoteForm({ c, vendorId, options, onClose, onSaved }: { c: CaseOut; ven
                 deliveryTerms: d.deliveryTerms,
                 vatIncluded: d.vatIncluded === '' ? null : d.vatIncluded === 'yes',
                 notes: d.notes,
+                charges: d.charges.map((x) => ({ code: x.code, basis: x.basis, value: Number(x.value), note: x.note })),
                 lines: d.lines.map((l) => (l.bid ? { ...l } : { no: l.no, bid: false })),
             });
             onSaved();
@@ -593,6 +617,56 @@ function QuoteForm({ c, vendorId, options, onClose, onSaved }: { c: CaseOut; ven
                     <span className='mb-1 block text-sm text-soft'>Notes</span>
                     <textarea id='q-notes' value={d.notes} maxLength={600} rows={3} onChange={(e) => set({ notes: e.target.value })} className='w-full rounded-xl border border-line bg-panel p-3 text-base text-ink focus:border-brand focus:outline-none' />
                 </label>
+            </section>
+
+            <section className='space-y-3 rounded-2xl border border-line bg-panel p-3'>
+                <div className='flex items-center justify-between gap-2'>
+                    <h2 className='text-sm font-semibold text-ink'>Taxes, freight and other charges</h2>
+                    <Button variant='secondary' disabled={d.charges.length >= 15} onClick={() => set({ charges: [...d.charges, { code: '', basis: 'amount', value: '', note: '' }] })}>
+                        <Plus className='mr-1 h-4 w-4' /> Add
+                    </Button>
+                </div>
+                <p className='text-xs text-muted'>Enter each tax, duty and charge on the quote separately: VAT, import duty, freight, insurance, clearing, port handling and so on. A percentage is worked out on the discounted price. They are added to the quote total and the chart of authority.</p>
+                {d.charges.length === 0 && <p className='text-xs text-soft'>No taxes or charges on this quote.</p>}
+                {d.charges.map((x, i) => (
+                    <div key={i} className='space-y-2 rounded-xl border border-line p-2'>
+                        <SelectField id={`ch-t-${i}`} label='Type *' value={x.code} onChange={(e) => setCharge(i, { code: e.target.value })}>
+                            <option value=''>Choose</option>
+                            <optgroup label='Taxes and duties'>
+                                {CHARGE_TYPES.filter((t) => t.kind === 'tax').map((t) => (
+                                    <option key={t.code} value={t.code}>{t.label}</option>
+                                ))}
+                            </optgroup>
+                            <optgroup label='Charges'>
+                                {CHARGE_TYPES.filter((t) => t.kind === 'charge').map((t) => (
+                                    <option key={t.code} value={t.code}>{t.label}</option>
+                                ))}
+                            </optgroup>
+                        </SelectField>
+                        <div className='grid grid-cols-2 gap-3'>
+                            <SelectField id={`ch-b-${i}`} label='Basis' value={x.basis} onChange={(e) => setCharge(i, { basis: e.target.value as ChargeDraft['basis'] })}>
+                                <option value='amount'>Amount ({d.currency || 'currency'})</option>
+                                <option value='percent'>% of discounted price</option>
+                            </SelectField>
+                            <Field id={`ch-v-${i}`} label={x.basis === 'percent' ? 'Rate, % *' : 'Amount *'} type='number' inputMode='decimal' min='0' step='any' value={x.value} onChange={(e) => setCharge(i, { value: e.target.value })} />
+                        </div>
+                        <Field id={`ch-n-${i}`} label={x.code.startsWith('OTHER_') ? 'Description *' : 'Note'} maxLength={120} value={x.note} onChange={(e) => setCharge(i, { note: e.target.value })} />
+                        <div className='flex items-center justify-between'>
+                            <p className='text-xs text-muted'>{money(chargeAmt(x), d.currency)}</p>
+                            <button type='button' aria-label='Remove this charge' onClick={() => set({ charges: d.charges.filter((_, j) => j !== i) })} className='flex h-11 w-11 items-center justify-center text-red-400'>
+                                <Trash2 className='h-4 w-4' />
+                            </button>
+                        </div>
+                    </div>
+                ))}
+                {chargeErrs.length > 0 && <Alert tone='warn'>{chargeErrs.join('. ')}.</Alert>}
+                <dl className='space-y-1 text-sm'>
+                    <div className='flex justify-between'><dt className='text-muted'>Before discount</dt><dd className='text-ink'>{money(gross, d.currency)}</dd></div>
+                    <div className='flex justify-between'><dt className='text-muted'>After discount</dt><dd className='text-ink'>{money(total, d.currency)}</dd></div>
+                    <div className='flex justify-between'><dt className='text-muted'>Taxes and charges</dt><dd className='text-ink'>{money(overheads, d.currency)}</dd></div>
+                    <div className='flex justify-between font-semibold'><dt className='text-ink'>Quote total</dt><dd className='text-ink'>{money(total + overheads, d.currency)}</dd></div>
+                </dl>
+                <p className='text-[11px] text-muted'>The chart of authority uses the discounted price plus taxes and charges, not the price before discount.</p>
             </section>
 
             {c.lines.map((l) => {
@@ -1069,6 +1143,12 @@ function QuotesTab({ c, run, confirm, onEdit, setProblem }: { c: CaseOut; run: R
                                 {q.currency !== c.currency && q.latestBase !== null && <p className='text-xs text-muted'>{money(q.latestBase, c.currency)} at the latest rate{c.ratesAsOf ? ` (${fmtDate(c.ratesAsOf)})` : ''}</p>}
                             </div>
                         </div>
+                        {(q.charges?.length || (q.discount ?? 0) > 0) && (
+                            <p className='text-xs text-muted'>
+                                {(q.discount ?? 0) > 0 ? `Before discount ${money(q.gross ?? 0, q.currency)} · after ${money(q.goods ?? 0, q.currency)}` : `Price ${money(q.goods ?? 0, q.currency)}`}
+                                {(q.charges ?? []).map((x) => ` · ${x.label} ${money(x.amount, q.currency)}`).join('')}
+                            </p>
+                        )}
                         <p className='text-xs text-soft'>{q.paymentTermsLabel || 'No payment terms'} · lead time {q.leadTimeDays ?? '-'} days{q.warrantyMonths !== null ? ` · warranty ${q.warrantyMonths} months` : ''}{q.discountPct ? ` · discount ${q.discountPct}%` : ''}</p>
                         {q.gaps.length > 0 ? <Alert tone='warn'>Not ranked yet. Missing: {q.gaps.join(', ')}.</Alert> : <p className='text-xs text-brandsoft'>All mandatory fields filled.</p>}
                         {q.tech.preference && <Badge tone={q.tech.preference === 'not_acceptable' ? 'danger' : 'brand'}>Technical: {TECH_LABEL[q.tech.preference]}</Badge>}

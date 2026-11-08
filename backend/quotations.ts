@@ -7,6 +7,7 @@ import { KIND_LABEL, LINE_KINDS, can, requireProcurement, requirementsPath, type
 import { METHODS, describeApproval, getAuthority, resolveAuthority } from './procurementPolicy';
 import { covers, deskScope, inScope, lineKeyOf, ownersOf, type DeskScope } from './buyerGroups';
 import { metaList, vendorsPath } from './vendors';
+import { chargesTotal, readCharges } from '../src/shared/procurementCharges';
 import { approvalRoute, lastPricesFor, myPositions, type Step } from './purchaseOrders';
 
 // ---------------------------------------------------------------------------
@@ -152,12 +153,19 @@ function money2(n: number) {
 }
 
 /** Totals of a quote in its own currency and in the organization currency. */
+/**
+ * Totals of a quote in its own currency and in the organization currency. `total` (and `base`, which the chart of
+ * authority uses) is the discounted goods plus taxes and charges; `gross` is the goods before any discount.
+ */
 function totalsOf(q: Obj, orgCurrency: string) {
     const lines = objs(q.lines).filter((l) => l.bid !== false);
+    const gross = money2(lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0));
     const sub = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0) * (1 - (Number(l.discountPct) || 0) / 100), 0);
-    const total = money2(sub * (1 - (Number(q.discountPct) || 0) / 100));
+    const goods = money2(sub * (1 - (Number(q.discountPct) || 0) / 100));
+    const overheads = chargesTotal(objs(q.charges));
+    const total = money2(goods + overheads);
     const fx = str(q.currency) === orgCurrency ? 1 : Number(q.fxRate) || 0;
-    return { total, base: fx > 0 ? money2(total * fx) : null as number | null };
+    return { total, base: fx > 0 ? money2(total * fx) : null as number | null, gross, goods, discount: money2(gross - goods), overheads, grossBase: fx > 0 ? money2((gross + overheads) * fx) : null as number | null };
 }
 
 /** What a quote still lacks. A quote with gaps is kept but is not ranked. */
@@ -528,6 +536,15 @@ async function readQuote(ctx: OrgContext, body: Obj, d: Obj, vendor: Doc, existi
     for (const g of given) if (!caseNos.has(Number(g.no))) throw new HttpError(400, 'A quoted item is not part of this quotation.');
     void orgCurrency;
     const cls = (await metaList('vendorClasses')).find((x) => x.code === str(vendor.data.classCode));
+    // Taxes, freight, clearing and other overheads: a fixed amount or a percentage of the goods after discounts.
+    const vatIncluded = typeof body.vatIncluded === 'boolean' ? body.vatIncluded : null;
+    const goodsNet = lines.filter((l) => l.bid !== false).reduce((sum, l) => sum + (Number((l as Obj).quantity) || 0) * (Number((l as Obj).unitPrice) || 0) * (1 - (Number((l as Obj).discountPct) || 0) / 100), 0) * (1 - (Number(pct(body.discountPct, 'Discount')) || 0) / 100);
+    let charges;
+    try {
+        charges = readCharges(body.charges, goodsNet, vatIncluded);
+    } catch (e) {
+        throw new HttpError(400, e instanceof Error ? e.message : 'Check the taxes and charges.');
+    }
     return {
         ...(existing ?? {}),
         vendorId: vendor.id,
@@ -547,8 +564,9 @@ async function readQuote(ctx: OrgContext, body: Obj, d: Obj, vendor: Doc, existi
         warrantyMonths: days(body.warrantyMonths, 'Warranty', 600),
         discountPct: pct(body.discountPct, 'Discount'),
         deliveryTerms: oneLine(body.deliveryTerms, 200),
-        vatIncluded: typeof body.vatIncluded === 'boolean' ? body.vatIncluded : null,
+        vatIncluded,
         notes: cleanText(body.notes).slice(0, 600),
+        charges,
         lines,
     };
 }

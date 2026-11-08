@@ -1249,5 +1249,29 @@
       "Trace tab: confirm the pie chart by step and by who it waited on, and the table of steps with lead time and percentage"
     ],
     "expected": "Orders consolidate by default, releasing early is a recorded decision, and the trace shows where the time went."
+  },
+  {
+    "name": "Procurement: quote overheads, one category per order, delivery note, invoice at receipt and posting alignment",
+    "description": "Quotes carry taxes, duties, freight, clearing and other charges as separate lines (amount or % of the discounted price). Totals, ranking and the chart of authority use the discounted price plus overheads, never the price before discount. Requisitions are split by kind and category and carry their share of the charges; an order holds one category only. A delivery needs the supplier's delivery note; the supplier invoice can be recorded with the delivery or later, checked against the expected value within the price tolerance, and the order shows invoiced quantities and status. Non-stock lines may post to another cost center of the same legal entity and an approved GL with PRC.po.receive_posting and a reason.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "PRC quotations",
+      "PRC requisitions",
+      "PRC purchase orders",
+      "PRC deliveries",
+      "PRC.po.receive_posting"
+    ],
+    "steps": [
+      "Record a quote with a 10% discount, VAT 16% and Freight 2,500: confirm before discount, after discount, taxes and charges and the quote total; VAT cannot be added when prices include VAT",
+      "Make requisitions from a quotation covering two categories: confirm one requisition per category, each with its share of the charges",
+      "New order with a specification: confirm only one category can be chosen, then its subcategories",
+      "Validate an order: confirm 'One category per order' passes, the taxes and charges info check, and the approval value is the discounted amount plus charges",
+      "Record a delivery without a delivery note: the button stays disabled; attach it and record",
+      "Record a delivery with the invoice: an amount outside tolerance asks for a reason; the delivery shows Invoiced with both documents",
+      "Record the invoice later on an un-invoiced delivery; a duplicate invoice number for the same supplier is refused",
+      "As a level-3 Procurement Specialist, align a non-stock line to another cost center and GL with a reason; warehouse lines cannot be realigned"
+    ],
+    "expected": "Overheads are visible and approved, orders stay single-category, every delivery has its note, invoices are recorded against deliveries, and posting changes at receipt are controlled and audited."
   }
 ]
