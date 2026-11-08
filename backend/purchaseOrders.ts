@@ -339,7 +339,7 @@ export function accessFlags(ctx: OrgContext, d: Obj, scope: DeskScope, owned: Se
         ccOwner: lines.some((l) => owned.has(ccOf(l))) || ctx.testMode === true,
         requester: requesterIds(d).includes(ctx.uid) || ctx.testMode === true,
         approver: steps(d).some((s) => mine.has(s.positionCode)) && can(ctx, 'PRC.po.approve'),
-        viewer: canViewPo(ctx) && covers(scope, lines),
+        viewer: canViewPo(ctx) && covers(scope, scopeLinesOf(d)),
     };
     return { ...a, any: Object.values(a).some(Boolean) };
 }
@@ -744,6 +744,16 @@ async function runChecks(ctx: OrgContext, po: Obj, id: string) {
         }
     }
     if (!anyOpen) add('Deliveries', 'open.none', 'Open deliveries of the same material', 'pass', 'No other order, from any supplier, has this material still to be delivered.');
+    {
+        const settings = await orderSettings(ctx.orgId);
+        const w = consolidationWindow(lines, settings.consolidationWindowDays);
+        const cand = editable(po) ? await consolidationCandidates(ctx, po, id) : { ready: [], pipeline: [] };
+        const waiting = cand.ready.length + cand.pipeline.length;
+        if (!w.enabled) add('Deliveries', 'consolidation.window', 'Time to consolidate', 'info', 'The consolidation window is switched off in the order settings.');
+        else if (!w.known) add('Deliveries', 'consolidation.window', 'Time to consolidate', 'info', 'No line has a date required, so the time left to consolidate is unknown.');
+        else if (w.pressed) add('Deliveries', 'consolidation.window', 'Time to consolidate', 'pass', `Line ${w.urgent?.no} (needed ${w.urgent?.dateRequired}, lead time ${w.urgent?.leadTimeDays} days) must be ordered by ${w.latestOrderDate}${w.slackDays !== null && w.slackDays < 0 ? `, ${-w.slackDays} day(s) ago` : ''}: the order should go now.${cand.ready.length ? ` ${cand.ready.length} requisition(s) fit it and can be added first.` : ''}`);
+        else add('Deliveries', 'consolidation.window', 'Time to consolidate', 'warn', `Nothing is pressed: the most urgent line (${w.urgent?.no}, needed ${w.urgent?.dateRequired}, lead time ${w.urgent?.leadTimeDays} days) must be ordered by ${w.latestOrderDate}, ${w.slackDays} day(s) from now. The order could wait until ${w.canWaitUntil} to consolidate${waiting ? `: ${cand.ready.length} requisition(s) fit now and ${cand.pipeline.length} item(s) for this vendor and categories are on the way` : ''}. Releasing it now needs your reason.`);
+    }
     const late = lines.filter((l) => str(l.dateRequired) && addDays(today0, Number(l.leadTimeDays) || 0) > str(l.dateRequired));
     add('Deliveries', 'delivery.timing', 'Delivery meets the date required', late.length ? 'warn' : 'pass', late.length ? `Expected after the date required: ${late.map((l) => `line ${l.no} (needed ${str(l.dateRequired)}, lead time ${Number(l.leadTimeDays) || 0} days)`).join('; ')}.` : 'Every line can arrive by the date required.');
 
@@ -810,7 +820,72 @@ async function sendOrder(ctx: OrgContext, id: string, method: 'email' | 'print',
 
 async function orderSettings(orgId: string) {
     const doc = await getDoc(settingsPath(orgId));
-    return { autoSend: doc?.data.autoSend === true, version: Number(doc?.data.version) || 0 };
+    const w = Number(doc?.data.consolidationWindowDays);
+    return { autoSend: doc?.data.autoSend === true, consolidationWindowDays: Number.isInteger(w) && w >= 0 && w <= 90 ? w : 7, version: Number(doc?.data.version) || 0, data: doc?.data ?? {} };
+}
+
+// ----- Order specification and consolidation -----
+// An order can be opened empty with a specification: vendor, kind of purchase, currency and the categories and
+// subcategories it is for (chosen from those the vendor is registered for). Confirmed requisitions that fit are then
+// attached to it. Every order aims to consolidate: a separate new order needs a reason when a matching one exists, and
+// confirming warns while there is still time to wait for more (no line is pressed on its date required).
+
+/** The specification scopes of an order opened empty (kind, category, subcategory; an empty subcategory is the whole category). */
+export const specOf = (d: Obj) => objs(o(d.spec).scopes);
+/** The lines an order is judged by for buyer groups: its lines, or its specification while it has none. */
+export const scopeLinesOf = (d: Obj) => (objs(d.lines).length ? objs(d.lines) : specOf(d).map((x) => ({ type: str(x.kind), categoryCode: str(x.categoryCode), subcategoryCode: str(x.subcategoryCode) })));
+export function specCovers(spec: Obj[], key: string): boolean {
+    const [k, c, sub] = key.split('|');
+    return spec.some((x) => str(x.kind) === k && str(x.categoryCode) === c && (str(x.subcategoryCode) === '' || str(x.subcategoryCode) === sub));
+}
+
+/**
+ * Is there still time to consolidate? For each line with a date required, the latest day to order is the date required
+ * less the lead time. When even the most urgent line has at least the window (days) left, nothing is pressed and the
+ * order could wait for more requisitions; otherwise it should go now.
+ */
+const daysSigned = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+export function consolidationWindow(lines: Obj[], windowDays: number, on = today()) {
+    const dated = lines
+        .filter((l) => /^\d{4}-\d{2}-\d{2}$/.test(str(l.dateRequired)))
+        .map((l) => {
+            const latestOrderDate = addDays(str(l.dateRequired), -(Number(l.leadTimeDays) || 0));
+            return { no: Number(l.no) || 0, item: str(l.itemName), dateRequired: str(l.dateRequired), leadTimeDays: Number(l.leadTimeDays) || 0, latestOrderDate, slackDays: daysSigned(on, latestOrderDate) };
+        })
+        .sort((a, b) => a.slackDays - b.slackDays);
+    if (!dated.length || windowDays <= 0) return { known: dated.length > 0, enabled: windowDays > 0, windowDays, pressed: true, slackDays: null as number | null, latestOrderDate: '', canWaitUntil: '', urgent: null as (typeof dated)[number] | null, lines: dated, undated: lines.length - dated.length };
+    const urgent = dated[0];
+    const pressed = urgent.slackDays < windowDays;
+    return { known: true, enabled: true, windowDays, pressed, slackDays: urgent.slackDays, latestOrderDate: urgent.latestOrderDate, canWaitUntil: pressed ? '' : addDays(urgent.latestOrderDate, -windowDays), urgent, lines: dated, undated: lines.length - dated.length };
+}
+
+/** Confirmed requisitions that fit an order now, and work on its way (draft requisitions, recommended quotations) for the same vendor and categories. */
+async function consolidationCandidates(ctx: OrgContext, po: Obj, poId: string) {
+    const [reqs, cases, scope] = await Promise.all([listDocs(reqsPath(ctx.orgId)), listDocs(casesPath(ctx.orgId)), deskScope(ctx)]);
+    const keysOk = (keys: string[]) => {
+        const spec = specOf(po);
+        if (spec.length) return keys.every((k) => specCovers(spec, k));
+        const have = new Set(scopeKeysOf(objs(po.lines)));
+        return keys.some((k) => have.has(k));
+    };
+    const ready = reqs
+        .filter((r) => str(r.data.status) === 'confirmed' && !(str(r.data.validUntil) && str(r.data.validUntil) < today()) && covers(scope, objs(r.data.lines)) && matches(po, r.data, scopeKeysOf(objs(r.data.lines))))
+        .map((r) => ({ id: r.id, number: str(r.data.number) || r.id, title: str(r.data.requirementTitle), items: objs(r.data.lines).length, total: Number(r.data.total) || objs(r.data.lines).reduce((x, l) => x + (Number(l.total) || 0), 0), currency: str(r.data.currency), requester: str(r.data.requesterName), dateRequired: objs(r.data.lines).map((l) => str(l.dateRequired)).filter(Boolean).sort()[0] ?? '' }));
+    const pipeline: Array<{ kind: string; ref: string; title: string; items: number; dateRequired: string; status: string }> = [];
+    for (const r of reqs) {
+        if (!['draft', 'returned'].includes(str(r.data.status)) || str(r.data.vendorId) !== str(po.vendorId) || !keysOk(scopeKeysOf(objs(r.data.lines)))) continue;
+        pipeline.push({ kind: 'Requisition waiting for the requester', ref: str(r.data.number) || r.id, title: str(r.data.requirementTitle), items: objs(r.data.lines).length, dateRequired: objs(r.data.lines).map((l) => str(l.dateRequired)).filter(Boolean).sort()[0] ?? '', status: str(r.data.status) });
+    }
+    const taken = new Set(reqs.filter((r) => str(r.data.status) !== 'cancelled').map((r) => str(r.data.quotationId)));
+    for (const c of cases) {
+        const rec = o(c.data.recommendation);
+        const status = str(c.data.status);
+        if (status === 'recommended' && taken.has(c.id)) continue;
+        const vendorHere = status === 'recommended' ? str(rec.vendorId) === str(po.vendorId) : status === 'sourcing' && objs(c.data.invites).some((i) => str(i.vendorId) === str(po.vendorId));
+        if (!vendorHere || !keysOk(scopeKeysOf(objs(c.data.lines)))) continue;
+        pipeline.push({ kind: status === 'recommended' ? (waiverBlock(c.data) ? 'Recommended quotation (waiver pending)' : 'Recommended quotation, no requisition yet') : 'Quotation collecting quotes (vendor invited)', ref: str(c.data.number) || c.id, title: str(c.data.requirementTitle), items: objs(c.data.lines).length, dateRequired: objs(c.data.lines).map((l) => str(l.dateRequired)).filter(Boolean).sort()[0] ?? '', status });
+    }
+    return { ready: ready.filter((r) => !objs(po.lines).some((l) => str(l.requisitionId) === r.id)), pipeline: pipeline.slice(0, 50), poId };
 }
 
 // ----- Building order lines from a requisition -----
@@ -1210,8 +1285,8 @@ export const purchaseOrderRoutes = {
             const newest = new Map<string, number>();
             for (const p of all) newest.set(baseOf(p.id), Math.max(newest.get(baseOf(p.id)) ?? 0, verOf(p.id)));
             const items = all
-                .filter((p) => editable(p.data) && ownerOf(p.data) === ctx.uid && verOf(p.id) === newest.get(baseOf(p.id)) && !str(p.data.amendOf) && covers(scope, objs(p.data.lines)) && matches(p.data, rq, keys))
-                .map((p) => ({ id: p.id, number: str(p.data.number) || p.id, lines: objs(p.data.lines).length, total: Number(p.data.total) || 0, currency: str(p.data.currency), createdByName: str(p.data.createdByName), status: str(p.data.status) }));
+                .filter((p) => editable(p.data) && ownerOf(p.data) === ctx.uid && verOf(p.id) === newest.get(baseOf(p.id)) && !str(p.data.amendOf) && covers(scope, scopeLinesOf(p.data)) && matches(p.data, rq, keys))
+                .map((p) => ({ id: p.id, number: str(p.data.number) || p.id, lines: objs(p.data.lines).length, total: Number(p.data.total) || 0, currency: str(p.data.currency), createdByName: str(p.data.createdByName), status: str(p.data.status), spec: specOf(p.data).map((x) => [str(x.categoryName), str(x.subcategoryName)].filter(Boolean).join(' › ')).join(', ') }));
             return { items };
         }),
     ],
@@ -1226,6 +1301,7 @@ export const purchaseOrderRoutes = {
             return {
                 currency: str(ctx.org.data.currencyCode),
                 autoSend: s.autoSend,
+                consolidationWindowDays: s.consolidationWindowDays,
                 emailReady: can(ctx, 'PRC.setup.manage') || can(ctx, 'PRC.po.manage') ? await mailerReady() : false,
                 payableGlCode: str(fin?.data.payableGlCode),
                 can: { manage: can(ctx, 'PRC.po.manage'), approve: can(ctx, 'PRC.po.approve'), receive: can(ctx, 'PRC.po.receive'), settings: can(ctx, 'PRC.setup.manage'), reassign: can(ctx, 'PRC.po.reassign'), journals: can(ctx, 'PRC.journal.view') },
@@ -1237,12 +1313,15 @@ export const purchaseOrderRoutes = {
         orgRoute('org.procurement.orders.settings', 'PRC.setup.manage', async (ctx) => {
             requireProcurement(ctx);
             const reason = reasonOf(ctx.body);
-            if (typeof ctx.body.autoSend !== 'boolean') throw new HttpError(400, 'Choose on or off.');
             const cur = await orderSettings(ctx.orgId);
-            if (ctx.body.autoSend && !(await mailerReady())) throw new HttpError(409, 'Automatic email needs an email service. Ask the MEMS administrator to connect one first.');
-            if (cur.autoSend === ctx.body.autoSend) throw new HttpError(400, 'Nothing has changed.');
-            await writeDoc(settingsPath(ctx.orgId), { autoSend: ctx.body.autoSend, version: cur.version + 1, updatedAt: nowIso(), updatedBy: ctx.uid });
-            await record(ctx, 'org.procurement.orders.settings', 'Purchase order settings', `Send approved orders automatically: ${ctx.body.autoSend ? 'on' : 'off'}. Reason: ${reason}`.slice(0, 400));
+            const autoSend = ctx.body.autoSend === undefined ? cur.autoSend : ctx.body.autoSend;
+            if (typeof autoSend !== 'boolean') throw new HttpError(400, 'Choose on or off.');
+            const windowDays = ctx.body.consolidationWindowDays === undefined ? cur.consolidationWindowDays : Number(ctx.body.consolidationWindowDays);
+            if (!Number.isInteger(windowDays) || windowDays < 0 || windowDays > 90) throw new HttpError(400, 'The consolidation window is a whole number of days from 0 (off) to 90.');
+            if (autoSend && !cur.autoSend && !(await mailerReady())) throw new HttpError(409, 'Automatic email needs an email service. Ask the MEMS administrator to connect one first.');
+            if (cur.autoSend === autoSend && cur.consolidationWindowDays === windowDays) throw new HttpError(400, 'Nothing has changed.');
+            await writeDoc(settingsPath(ctx.orgId), { ...cur.data, autoSend, consolidationWindowDays: windowDays, version: cur.version + 1, updatedAt: nowIso(), updatedBy: ctx.uid });
+            await record(ctx, 'org.procurement.orders.settings', 'Purchase order settings', `Send automatically: ${autoSend ? 'on' : 'off'}; consolidation window: ${windowDays} day(s). Reason: ${reason}`.slice(0, 400));
             return { ok: true };
         }),
     ],
@@ -1365,6 +1444,7 @@ export const purchaseOrderRoutes = {
                 autoSend: s.autoSend,
                 emailReady: can(ctx, 'PRC.po.manage') ? await mailerReady() : false,
                 seesQuotes: quotesOk,
+                spec: specOf(d).length ? { scopes: specOf(d), byName: str(o(d.spec).byName), at: str(o(d.spec).at) } : null,
                 seesPrices: priceOk,
                 ownsCostCenter: acc.ccOwner,
                 myCostCenters: Array.from(myOwn),
@@ -1401,6 +1481,7 @@ export const purchaseOrderRoutes = {
             const vendor = await getDoc(`${vendorsPath(ctx.orgId)}/${str(rqDoc.data.vendorId)}`);
             if (!vendor || str(vendor.data.status) !== 'approved') throw new HttpError(409, 'The vendor is not an approved vendor.');
 
+            let bypassNote = '';
             const attach = async (poId: string, build: (rq: Obj) => Obj) =>
                 lock(ctx, rqId, async () => {
                     const fresh = await getDoc(`${reqsPath(ctx.orgId)}/${rqId}`);
@@ -1420,6 +1501,16 @@ export const purchaseOrderRoutes = {
                 });
 
             if (mode === 'new') {
+                // Aim to consolidate: a separate order while a matching draft order exists needs a written reason.
+                const keys = scopeKeysOf(objs(rqDoc.data.lines));
+                const scopeNow = await deskScope(ctx);
+                const all = await listDocs(ordersPath(ctx.orgId));
+                const newestV = new Map<string, number>();
+                for (const p of all) newestV.set(baseOf(p.id), Math.max(newestV.get(baseOf(p.id)) ?? 0, verOf(p.id)));
+                const open = all.filter((p) => editable(p.data) && ownerOf(p.data) === ctx.uid && verOf(p.id) === newestV.get(baseOf(p.id)) && !str(p.data.amendOf) && covers(scopeNow, scopeLinesOf(p.data)) && matches(p.data, rqDoc.data, keys));
+                const separate = cleanText(ctx.body.separateReason).slice(0, 400);
+                if (open.length && separate.length < 20) throw new HttpError(409, `${open.map((p) => str(p.data.number) || p.id).join(', ')} already fit${open.length === 1 ? 's' : ''} this requisition. Add it there, or give the reason for a separate order (at least 20 characters).`);
+                if (open.length) bypassNote = `Separate order although ${open.map((p) => p.id).join(', ')} fit: ${separate}`;
                 const n = await nextOrgCounter(ctx.orgId, 'orderSeq');
                 if (n > 99_999_999) throw new HttpError(500, 'The order number range is exhausted.');
                 const base = `PO${String(n).padStart(8, '0')}`;
@@ -1462,7 +1553,7 @@ export const purchaseOrderRoutes = {
                     };
                 });
                 if (!(await writeDoc(`${ordersPath(ctx.orgId)}/${id}`, data, { exists: false }))) throw new HttpError(409, 'That order number is already in use. Please try again.');
-                await record(ctx, 'org.procurement.order.create', id, `From ${rqId}`);
+                await record(ctx, 'org.procurement.order.create', id, `From ${rqId}${bypassNote ? `. ${bypassNote}` : ''}`.slice(0, 400));
                 return { ok: true, id };
             }
 
@@ -1471,7 +1562,7 @@ export const purchaseOrderRoutes = {
             await lock(ctx, targetId, async () => {
                 const target = await getDoc(`${ordersPath(ctx.orgId)}/${targetId}`);
                 const scope = await deskScope(ctx);
-                if (!target || !covers(scope, objs(target.data.lines))) throw new HttpError(404, 'Purchase order not found.');
+                if (!target || !covers(scope, scopeLinesOf(target.data))) throw new HttpError(404, 'Purchase order not found.');
                 needOwner(ctx, target.data);
                 if (str(target.data.amendOf)) throw new HttpError(409, 'An amendment cannot take lines from other requisitions.');
                 if (!editable(target.data)) throw new HttpError(409, 'Only a draft or validated order can take more lines.');
@@ -1484,8 +1575,11 @@ export const purchaseOrderRoutes = {
                     const lines = [...cur, ...added];
                     const at = nowIso();
                     const uids = Array.from(new Set([...requesterIds(target.data), str(rq.requesterUid)]));
+                    // The first requisition in an order opened with a specification sets its payment terms and buyer group.
+                    const adopt = cur.length ? {} : { paymentTermsCode: str(rq.paymentTermsCode), paymentTermsLabel: str(rq.paymentTermsLabel), groupKey: str(rq.groupKey), groupLabel: str(rq.groupLabel), poType: str(rq.poType) || str(target.data.poType) };
                     return {
                         ...target.data,
+                        ...adopt,
                         lines,
                         total: sumTotal(lines),
                         baseTotal: 0,
@@ -1502,6 +1596,107 @@ export const purchaseOrderRoutes = {
             });
             await record(ctx, 'org.procurement.order.consolidate', targetId, `Added ${rqId}`);
             return { ok: true, id: targetId };
+        }),
+    ],
+
+    // ===== Orders opened with a specification, and consolidation =====
+
+    // Approved vendors with the categories and subcategories they are registered for, to open an order with a specification.
+    'POST /api/org/procurement/orders/spec-options': [
+        orgRoute('org.procurement.orders.spec_options', 'PRC.po.manage', async (ctx) => {
+            requireProcurement(ctx);
+            const [vendors, scope] = await Promise.all([listDocs(vendorsPath(ctx.orgId)), deskScope(ctx)]);
+            const mine = (x: Obj) => scope.all || (str(x.subcategoryCode) ? scope.keys.has(lineKeyOf({ type: str(x.kind), categoryCode: str(x.categoryCode), subcategoryCode: str(x.subcategoryCode) })) : [...scope.keys].some((k) => k.startsWith(`${str(x.kind)}|${str(x.categoryCode)}|`)));
+            return {
+                currency: str(ctx.org.data.currencyCode),
+                vendors: vendors
+                    .filter((v) => str(v.data.status) === 'approved')
+                    .map((v) => ({ id: v.id, number: str(v.data.number) || v.id, name: str(v.data.legalName), currency: str(v.data.currencyCode) || str(v.data.currency) || str(ctx.org.data.currencyCode), scopes: objs(v.data.scopes).filter(mine).map((x) => ({ kind: str(x.kind), categoryCode: str(x.categoryCode), categoryName: str(x.categoryName), subcategoryCode: str(x.subcategoryCode), subcategoryName: str(x.subcategoryName) })) }))
+                    .filter((v) => v.scopes.length)
+                    .sort((a, b) => a.name.localeCompare(b.name)),
+            };
+        }),
+    ],
+
+    'POST /api/org/procurement/orders/create-spec': [
+        orgRoute('org.procurement.orders.create_spec', 'PRC.po.manage', async (ctx) => {
+            requireProcurement(ctx);
+            const vendorId = str(ctx.body.vendorId);
+            if (!/^[A-Za-z0-9_-]{1,40}$/.test(vendorId)) throw new HttpError(400, 'Choose the vendor.');
+            const kind = str(ctx.body.poType);
+            if (!TYPE_LABEL[kind]) throw new HttpError(400, 'Choose materials, services or assets.');
+            const currency = str(ctx.body.currency).toUpperCase();
+            if (!/^[A-Z]{3}$/.test(currency)) throw new HttpError(400, 'Choose the currency.');
+            const picked = objs(ctx.body.scopes);
+            if (!picked.length || picked.length > 30) throw new HttpError(400, 'Choose 1 to 30 categories or subcategories.');
+            const [vendor, scope] = await Promise.all([getDoc(`${vendorsPath(ctx.orgId)}/${vendorId}`), deskScope(ctx)]);
+            if (!vendor || str(vendor.data.status) !== 'approved') throw new HttpError(409, 'Choose an approved vendor.');
+            const registered = objs(vendor.data.scopes);
+            const scopes = picked.map((p) => {
+                const hit = registered.find((x) => str(x.kind) === str(p.kind) && str(x.categoryCode) === str(p.categoryCode) && str(x.subcategoryCode) === str(p.subcategoryCode));
+                if (!hit) throw new HttpError(400, `${str(vendor.data.legalName)} is not registered for one of the categories chosen.`);
+                if (str(hit.kind) !== kind) throw new HttpError(400, `An order is entirely ${TYPE_LABEL[kind].toLowerCase()}: choose only ${TYPE_LABEL[kind].toLowerCase()} categories.`);
+                return { kind: str(hit.kind), categoryCode: str(hit.categoryCode), categoryName: str(hit.categoryName), subcategoryCode: str(hit.subcategoryCode), subcategoryName: str(hit.subcategoryName) };
+            });
+            const pseudo = { spec: { scopes } };
+            if (!covers(scope, scopeLinesOf(pseudo))) throw new HttpError(403, 'These categories are outside your buyer groups.');
+            const notes = oneLine(ctx.body.notes, 400);
+            const n = await nextOrgCounter(ctx.orgId, 'orderSeq');
+            if (n > 99_999_999) throw new HttpError(500, 'The order number range is exhausted.');
+            const base = `PO${String(n).padStart(8, '0')}`;
+            const id = `${base}-V1`;
+            const at = nowIso();
+            const byName = nameOfUser(ctx.me);
+            const label = scopes.map((x) => [x.categoryName, x.subcategoryName || 'all subcategories'].join(' › ')).join(', ');
+            const data = {
+                number: id,
+                baseNumber: base,
+                ver: 1,
+                poType: kind,
+                status: 'draft',
+                vendorId,
+                vendorName: str(vendor.data.legalName),
+                vendorEmail: str(o(vendor.data.contact).email),
+                currency,
+                paymentTermsCode: '',
+                paymentTermsLabel: '',
+                groupKey: '',
+                groupLabel: '',
+                contractRef: '',
+                notes,
+                spec: { scopes, by: ctx.uid, byName, at },
+                lines: [],
+                total: 0,
+                baseTotal: 0,
+                rev: 1,
+                deliveries: [],
+                deliverySeq: 0,
+                requesterUids: [],
+                ownerUid: ctx.uid,
+                ownerName: byName,
+                createdBy: ctx.uid,
+                createdByName: byName,
+                createdAt: at,
+                originAt: at,
+                updatedAt: at,
+                version: 1,
+                history: [{ at, by: ctx.uid, byName, action: 'created with a specification', note: `${str(vendor.data.legalName)}, ${TYPE_LABEL[kind]}, ${currency}: ${label}`.slice(0, 380), from: '', to: 'draft' }],
+            };
+            if (!(await writeDoc(`${ordersPath(ctx.orgId)}/${id}`, data, { exists: false }))) throw new HttpError(409, 'That order number is already in use. Please try again.');
+            await record(ctx, 'org.procurement.order.create_spec', id, `${str(vendor.data.legalName)}, ${TYPE_LABEL[kind]}, ${currency}: ${label}`.slice(0, 400));
+            return { ok: true, id };
+        }),
+    ],
+
+    // What fits this order now, what is on its way, and whether there is still time to wait for it.
+    'POST /api/org/procurement/orders/consolidation': [
+        orgRoute('org.procurement.orders.consolidation', 'PRC.po.view', async (ctx) => {
+            const doc = await loadPo(ctx, str(ctx.body.id));
+            const d = doc.data;
+            const settings = await orderSettings(ctx.orgId);
+            const window = consolidationWindow(objs(d.lines), settings.consolidationWindowDays);
+            const cand = editable(d) ? await consolidationCandidates(ctx, d, doc.id) : { ready: [], pipeline: [] };
+            return { window, ready: cand.ready, pipeline: cand.pipeline, canAttach: editable(d) && ownerOf(d) === ctx.uid && can(ctx, 'PRC.po.manage') && !str(d.amendOf), spec: specOf(d) };
         }),
     ],
 
@@ -2001,6 +2196,7 @@ export const purchaseOrderRoutes = {
                 { key: 'acknowledged', label: 'Acknowledged by procurement', at: str(o(objs(r0.history).find((h) => str(h.action).startsWith('acknowledged')) ?? {}).at) },
                 { key: 'quotation', label: 'Quotation opened', at: str(c0.createdAt) },
                 { key: 'recommended', label: 'Quote recommended', at: str(o(c0.recommendation).at) },
+                { key: 'waiver', label: 'Fewer-quotes waiver approved', at: str(o(o(c0.recommendation).waiver).approvedAt) },
                 { key: 'requisition', label: 'Requisition created', at: str(q0.createdAt) },
                 { key: 'reqConfirmed', label: 'Requisition confirmed by requester', at: str(q0.confirmedAt) },
                 { key: 'poCreated', label: 'Order created', at: str(d.originAt) || str(d.createdAt) },
@@ -2016,6 +2212,22 @@ export const purchaseOrderRoutes = {
                 .filter((m) => m.at)
                 .sort((a, b) => a.at.localeCompare(b.at));
             const milestones = ms.map((m, i) => ({ ...m, hoursFromPrevious: i ? round((Date.parse(m.at) - Date.parse(ms[i - 1].at)) / 3_600_000, 1) : 0 }));
+            // Each step between two milestones, who it waited on, and its share of the whole elapsed time (the pie chart).
+            const PARTY: Record<string, string> = { submitted: 'Requester', approved: 'Manager', acknowledged: 'Procurement', quotation: 'Procurement', recommended: 'Procurement (sourcing)', waiver: 'Approvers', requisition: 'Procurement', reqConfirmed: 'Requester', poCreated: 'Procurement', validated: 'Procurement', confirmed: 'Procurement', open: 'Approvers', sent: 'Procurement', ack: 'Supplier', first: 'Supplier', full: 'Supplier' };
+            const spanHours = milestones.length > 1 ? (Date.parse(milestones[milestones.length - 1].at) - Date.parse(milestones[0].at)) / 3_600_000 : 0;
+            const stepRows = milestones.slice(1).map((m, i) => {
+                const hours = Math.max(0, m.hoursFromPrevious);
+                return { from: milestones[i].label, to: m.label, key: m.key, party: PARTY[m.key] ?? (m.key.startsWith('ap') ? 'Approvers' : 'Procurement'), hours, days: round(hours / 24, 2), pct: spanHours > 0 ? round((hours / spanHours) * 100, 1) : 0 };
+            });
+            const byParty = Object.values(
+                stepRows.reduce<Record<string, { party: string; hours: number; pct: number }>>((acc, x) => {
+                    const cur = acc[x.party] ?? { party: x.party, hours: 0, pct: 0 };
+                    cur.hours = round(cur.hours + x.hours, 1);
+                    cur.pct = round(cur.pct + x.pct, 1);
+                    acc[x.party] = cur;
+                    return acc;
+                }, {})
+            ).sort((a, b) => b.hours - a.hours);
 
             const quoted = Math.max(0, ...lines.map((l) => Number(l.leadTimeDays) || 0));
             const start = str(d.sentAt) || str(d.approvedAt);
@@ -2031,6 +2243,8 @@ export const purchaseOrderRoutes = {
                 timeline,
                 milestones,
                 totalHours: milestones.length > 1 ? round((Date.parse(milestones[milestones.length - 1].at) - Date.parse(milestones[0].at)) / 3_600_000, 1) : 0,
+                steps: stepRows,
+                byParty,
                 leadTime: { quotedDays: quoted, actualDays: actual, elapsedDays: elapsed, onTime: actual === null ? null : actual <= quoted, since: start },
             };
         }),
@@ -2058,6 +2272,14 @@ async function releaseRequisitions(ctx: OrgContext, po: Obj, poId: string, why: 
 function matches(po: Obj, rq: Obj, keys: string[]): boolean {
     const pt = str(po.poType) || poTypeOf(objs(po.lines));
     if (pt && str(rq.poType) && pt !== str(rq.poType)) return false;
+    const spec = specOf(po);
+    if (spec.length) {
+        // An order opened with a specification: same vendor and currency, every category of the requisition in the
+        // specification; payment terms and buyer group are taken from the first requisition attached.
+        if (str(po.vendorId) !== str(rq.vendorId) || str(po.currency) !== str(rq.currency)) return false;
+        if (objs(po.lines).length && (str(po.paymentTermsCode) !== str(rq.paymentTermsCode) || str(po.groupKey) !== str(rq.groupKey))) return false;
+        return keys.length > 0 && keys.every((k) => specCovers(spec, k));
+    }
     if (str(po.vendorId) !== str(rq.vendorId) || str(po.currency) !== str(rq.currency) || str(po.paymentTermsCode) !== str(rq.paymentTermsCode) || str(po.groupKey) !== str(rq.groupKey)) return false;
     const have = new Set(scopeKeysOf(objs(po.lines)));
     return !have.size || keys.every((k) => have.has(k));
