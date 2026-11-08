@@ -39,6 +39,18 @@ export const verOf = (id: string) => {
 export const reqsPath = (orgId: string) => `organizations/${orgId}/procurement_requisitions`;
 export const ordersPath = (orgId: string) => `organizations/${orgId}/procurement_orders`;
 export const casesPath = (orgId: string) => `organizations/${orgId}/procurement_quotations`;
+
+/**
+ * Why a recommended quotation cannot go on to a requisition and purchase order yet, or ''. A recommendation with fewer
+ * quotes than the chart of authority asks for (it carries a shortfall reason) needs its waiver approved first.
+ */
+export function waiverBlock(q: Obj): string {
+    const rec = o(q.recommendation);
+    if (!str(rec.shortfallReason)) return '';
+    const w = o(rec.waiver);
+    if (str(w.status) === 'approved') return '';
+    return isObj(rec.waiver) ? 'The waiver for going ahead with fewer quotes is waiting for approval on the quotation.' : 'This quotation has fewer quotes than the chart of authority asks for: request the waiver on the quotation and have it approved first.';
+}
 const settingsPath = (orgId: string) => `organizations/${orgId}/procurement_setup/orders`;
 const visibilityPath = (orgId: string) => `organizations/${orgId}/procurement_setup/po_visibility`;
 
@@ -667,13 +679,20 @@ async function runChecks(ctx: OrgContext, po: Obj, id: string) {
     const sourcing = resolveAuthority(authority, baseTotal);
     const shorts: string[] = [];
     const lessCompetition: string[] = [];
+    const waived: string[] = [];
+    const waiverFails: string[] = [];
     for (const d of caseDocs) {
         if (!d) continue;
         const received = objs(d.data.quotes).length;
         if (received < sourcing.sourcing.minQuotes && !str(o(d.data.recommendation).shortfallReason)) shorts.push(`${str(d.data.number)} has ${received} quote(s)`);
+        const waiver = o(o(d.data.recommendation).waiver);
+        if (waiverBlock(d.data)) waiverFails.push(`${str(d.data.number)}: ${waiverBlock(d.data)}`);
+        else if (str(waiver.status) === 'approved') waived.push(`${str(d.data.number)} went ahead with ${Number(waiver.received) || received} of ${Number(waiver.required) || sourcing.sourcing.minQuotes} quote(s) on a waiver approved by ${str(waiver.approvedByName) || 'the chart of authority'}`);
         const mode = str(o(d.data.review).mode);
         if ((COMPETITION[mode] ?? 0) < (COMPETITION[sourcing.sourcing.method] ?? 0)) lessCompetition.push(`${str(d.data.number)} was sourced by ${METHODS.find((m) => m.code === mode)?.label ?? mode}`);
     }
+    if (waiverFails.length) add('Cost', 'cost.waiver', 'Fewer quotes approved', 'fail', `${waiverFails.join('; ')}.`);
+    else if (waived.length) add('Cost', 'cost.waiver', 'Fewer quotes approved', 'warn', `${waived.join('; ')}.`);
     add('Cost', 'cost.sourcing', 'Sourcing follows the chart of authority', shorts.length || lessCompetition.length ? 'warn' : 'pass', shorts.length || lessCompetition.length ? `For ${orgCurrency} ${fmt(baseTotal)} the chart asks for ${sourcing.sourcing.methodLabel} and ${sourcing.sourcing.minQuotes} quote(s). ${[...shorts, ...lessCompetition].join('; ')}.` : `${sourcing.sourcing.methodLabel} with ${sourcing.sourcing.minQuotes} quote(s) is met.`);
     if (baseTotal >= c.contractThreshold) add('Cost', 'cost.contract', 'Written contract', str(po.contractRef) ? 'pass' : 'warn', str(po.contractRef) ? `Contract reference ${str(po.contractRef)}.` : `Orders from ${orgCurrency} ${fmt(c.contractThreshold)} need a written contract. Enter its reference on the order.`);
     const since = addDays(today(), -c.splitOrderDays);
@@ -914,7 +933,7 @@ export const purchaseOrderRoutes = {
             if (can(ctx, 'PRC.prq.manage')) {
                 const taken = new Set(docs.filter((r) => str(r.data.status) !== 'cancelled').map((r) => str(r.data.quotationId)));
                 waiting = (await listDocs(casesPath(ctx.orgId)))
-                    .filter((c) => str(c.data.status) === 'recommended' && covers(scope, objs(c.data.lines)))
+                    .filter((c) => str(c.data.status) === 'recommended' && !waiverBlock(c.data) && covers(scope, objs(c.data.lines)))
                     .map((c) => {
                         const kinds = Array.from(new Set(objs(c.data.lines).map((l) => str(l.type))));
                         const open = kinds.filter((k) => !docs.some((r) => str(r.data.quotationId) === c.id && str(r.data.poType) === k && str(r.data.status) !== 'cancelled') && !(taken.has(c.id) && !docs.some((r) => str(r.data.quotationId) === c.id && str(r.data.poType))));
@@ -982,6 +1001,8 @@ export const purchaseOrderRoutes = {
             if (!qdoc || !covers(scope, objs(qdoc.data.lines))) throw new HttpError(404, 'Quotation not found.');
             const d = qdoc.data;
             if (str(d.status) !== 'recommended') throw new HttpError(409, 'Only a recommended quotation can become a requisition.');
+            const blocked = waiverBlock(d);
+            if (blocked) throw new HttpError(409, blocked);
             const rec = o(d.recommendation);
             const quote = objs(d.quotes).find((q) => str(q.id) === str(rec.quoteId));
             if (!quote) throw new HttpError(409, 'The recommended quote could not be found.');
