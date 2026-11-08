@@ -85,7 +85,7 @@ export async function levelsLockedByForecast(orgId: string, materialId: string, 
     return `${levels.map((k) => LEVEL_LABEL[k]).join(', ')} ${levels.length === 1 ? 'comes' : 'come'} from the forecast: ${src.why} Propose new levels on the Forecasting tab (they need approval)${src.setup.levelMode === 'manual_unless_forced' ? ' or switch the material back to manual' : ''}.`;
 }
 
-function maskedIds(d: Obj | undefined): string[] {
+export function maskedIds(d: Obj | undefined): string[] {
     return Array.isArray(d?.masked) ? (d!.masked as unknown[]).filter(isObj).map((m) => str(m.id)).filter(Boolean) : [];
 }
 
@@ -149,7 +149,7 @@ export async function leadTimeSamples(orgId: string, materialId: string, warehou
 }
 
 /** Inputs of the forecast that live on the material: lead times, class, strategy, stock, supply, price, order constraints. */
-async function materialInputs(orgId: string, materialId: string, warehouseId: string, setup: ForecastSetup) {
+export async function materialInputs(orgId: string, materialId: string, warehouseId: string, setup: ForecastSetup) {
     const [{ stockValOf }, repl] = await Promise.all([import('./finCore'), import('./replenishment')]);
     const [info, proc, val, samples, crit, stock, supply] = await Promise.all([
         getDoc(infoPath(orgId, materialId, warehouseId)),
@@ -221,7 +221,7 @@ function readInputs(b: Obj, setup: ForecastSetup, simulated = false) {
     return { events, method, pastMonths, futureMonths, masked };
 }
 
-function forecastFor(setup: ForecastSetup, instances: Instance[], inputs: Obj, m: Awaited<ReturnType<typeof materialInputs>>, now = nowIso()) {
+export function forecastFor(setup: ForecastSetup, instances: Instance[], inputs: Obj, m: Awaited<ReturnType<typeof materialInputs>>, now = nowIso()) {
     const method = str(inputs.method);
     return runForecast({
         instances,
@@ -523,9 +523,12 @@ export const forecastingRoutes = {
             const patch: Obj = { forecastAppliedAt: now, forecastAppliedBy: ctx.uid, forecastMethod: str(p.method), forecastSimulated: p.simulated === true, updatedAt: now, updatedBy: ctx.uid };
             for (const k of LEVEL_FIELDS) if (Number.isFinite(Number(values[k]))) patch[k] = Number(values[k]);
             await writeDoc(infoPath(ctx.orgId, materialId, warehouseId), { ...info, ...patch } as never);
+            // The accepted levels and their impact on stock holding are logged for the Audit tab.
+            const { logLevelChange } = await import('./materialAudit');
+            const impact = await logLevelChange(ctx.orgId, materialId, warehouseId, info, patch, { source: 'forecast', by: ctx.uid, simulated: p.simulated === true, proposalAt: str(p.requestedAt), method: str(p.method) });
             const history = [{ values, previous: p.previous, value: p.value, approvedAt: now, approvedBy: ctx.uid, requestedBy: p.requestedBy, method: p.method }, ...(Array.isArray(f.history) ? f.history : [])].slice(0, 20);
             await writeDoc(path, { ...f, proposal: { ...p, steps, status: 'approved', closedAt: now, closedBy: ctx.uid }, history } as never);
-            await audited(ctx, 'inventory.forecast.approve', `Forecast ${materialId} @ ${warehouseId}`, { values, previous: p.previous, value: p.value, levels: steps.map((s) => s.level), simulated: p.simulated === true });
+            await audited(ctx, 'inventory.forecast.approve', `Forecast ${materialId} @ ${warehouseId}`, { values, previous: p.previous, value: p.value, levels: steps.map((s) => s.level), simulated: p.simulated === true, averageValueChange: impact?.averageValueChange ?? null, holdingCostChangeYear: impact?.holdingCostChangeYear ?? null });
             return { ok: true, outcome: 'applied' };
         }),
     ],

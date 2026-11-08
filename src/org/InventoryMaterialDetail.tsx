@@ -1,8 +1,9 @@
 import { CriticalitySummary, MaterialCriticality } from './CriticalityAnalysis';
 import { MaterialForecast } from './Forecasting';
+import MaterialAudit from './MaterialAudit';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, HelpCircle, Link2, Link2Off, MoreVertical, PackagePlus, Pencil, RefreshCw, Save, Send, X } from 'lucide-react';
+import { Check, HelpCircle, Link2, Link2Off, Lock, MoreVertical, PackagePlus, Pencil, RefreshCw, Save, Send, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert, Field, SelectField } from '../components/ui';
 import { InfoTip, Screen, Segmented, messageOf, useConfirm } from '../components/screen';
@@ -131,7 +132,7 @@ type Section = 'inventory' | 'procurement';
 type Values = Record<string, string>;
 type Errors = Record<string, string>;
 
-const TABS = ['Overview', 'Current Status', 'Inventory Information', 'Stock Control', 'Replenishment', 'Procurement Information', 'Movements', 'Criticality Analysis', 'Forecasting', 'Technical Data'] as const;
+const TABS = ['Overview', 'Current Status', 'Technical Data', 'Inventory Information', 'Stock Control', 'Replenishment', 'Procurement Information', 'Movements', 'Criticality Analysis', 'Forecasting', 'Audit'] as const;
 type Tab = (typeof TABS)[number];
 
 const STOCK_FIELDS=[
@@ -1273,6 +1274,8 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
     // Where minimum, maximum, reorder quantity, safety stock and reorder point come from (forecasting setup).
     const { data: levelSource, reload: reloadLevelSource } = useLoad(() => callBackend<LevelSource>('/api/org/inventory/forecast/status', { materialId: id, warehouseId }).catch(() => null));
     const levelLock = levelSource?.source === 'forecast' ? 'From the approved forecast (Forecasting tab)' : '';
+    // Change control (Inventory › Setup): manual changes to these tabs may be switched off; the server enforces it too.
+    const { data: changeControl } = useLoad(() => callBackend<{ control: { manual: Record<'stockControl' | 'replenishment' | 'procurement', boolean> } }>('/api/org/inventory/controls/get', {}).catch(() => null));
     const { ask, sheet } = useConfirm();
 
     const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>([...TABS], 'Overview'));
@@ -1290,6 +1293,8 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
     const [help, setHelp] = useState<{ title: string; text: string } | null>(null);
     const [tableMenu, setTableMenu] = useState(false);
 
+    const controlArea = tab === 'Stock Control' ? 'stockControl' : tab === 'Replenishment' ? 'replenishment' : tab === 'Procurement Information' ? 'procurement' : null;
+    const manualBlocked = !!controlArea && changeControl?.control.manual[controlArea] === false;
     const section: Section | null = (tab === 'Inventory Information' || tab === 'Stock Control' || tab === 'Replenishment') ? 'inventory' : tab === 'Procurement Information' ? 'procurement' : null;
     const fields = tab === 'Stock Control' ? STOCK_FIELDS.map(([field]) => field) : tab === 'Replenishment' ? replenishmentFieldsOf(data?.inventory) : section === 'procurement' ? PROCUREMENT_FIELDS : INVENTORY_FIELDS;
     const base = data?.currency.local || '';
@@ -1448,6 +1453,13 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
 
     const actions = (() => {
         if (!data) return undefined;
+        if (section && data.canEdit && fields.length && manualBlocked)
+            return (
+                <Button variant='secondary' disabled aria-label='Manual changes are switched off'>
+                    <Lock className='h-4 w-4' />
+                    <span className='hidden sm:inline'>Locked</span>
+                </Button>
+            );
         if (section && data.canEdit && fields.length) {
             return editing ? (
                 <>
@@ -1484,6 +1496,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
         tab === 'Replenishment' && repl?.m?.automated && repl.missing.length ? [`Not planned until set: ${repl.missing.map((k) => PARAMS[k as keyof typeof PARAMS].label).join(', ')}.`] : [];
     const notes: string[] = [];
     if (tab === 'Current Status' && data?.currentStatus?.canInitialize) notes.push('No journal entries yet. Use Opening stock at the top to post the first-time stock loading.');
+    if (manualBlocked) notes.push(`Manual changes to ${tab} are switched off in Inventory › Setup › Change control.`);
     if (tab === 'Inventory Information') notes.push('The physical location changes only by linking or delinking a bin here, never through Edit.');
     if (tab === 'Stock Control')
         notes.push(`The Replenishment tab follows the strategy chosen here, with the stock ownership and supply arrangement. Only ${AUTOMATED_TEXT} replenish automatically. These settings do not change posted stock ownership or GL balances.`);
@@ -1803,6 +1816,12 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                                     reloadLevelSource();
                                 }}
                             />
+                        </ScrollBody>
+                    )}
+
+                    {tab === 'Audit' && (
+                        <ScrollBody>
+                            <MaterialAudit materialId={id} warehouseId={warehouseId} materialName={materialName} warehouseName={data.warehouse.name} onOpen={changeTab} />
                         </ScrollBody>
                     )}
 

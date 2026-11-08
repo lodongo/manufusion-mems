@@ -189,7 +189,7 @@ test('server: levels from the forecast are locked on the update route, proposals
 
 test('UI: Forecasting tab after Criticality Analysis, simulation off on load, criticality results on the Overview', () => {
     const detail = read('src/org/InventoryMaterialDetail.tsx');
-    assert.match(detail, /'Criticality Analysis', 'Forecasting', 'Technical Data'/);
+    assert.match(detail, /'Criticality Analysis', 'Forecasting', 'Audit'/);
     assert.match(detail, /<CriticalitySummary materialId=\{id\}/);
     assert.match(detail, /locked=\{levelLock && LEVEL_SET\.has\(k\) \? levelLock : undefined\}/);
     const ui = read('src/org/Forecasting.tsx');
