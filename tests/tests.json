@@ -1327,5 +1327,29 @@
       "Run Replenishment for a material already on a partly delivered order and on a quotation: the request quantity counts each need once"
     ],
     "expected": "Nothing for warehouse stock reaches procurement without a stores release based on stock, reservations, the full pipeline and lead time, and automation never double counts what is already requested, quoted, required or ordered."
+  },
+  {
+    "name": "Requirements: trace to delivery and payment, delays (internal/external), dashboards, reminders",
+    "description": "Each released requirement is traced from raised through stores release, approval, procurement, quotation, requisition, order, supplier, deliveries, invoice and payment, with days per step, an open step counting against the next, a pie chart of internal, external and finance time (or by step / by party), internal delay (order out after need date − supplier lead time), external delay (delivered after expected date) and delay against the need date. Each requirement has a dashboard view and personal reminders. The Requirements dashboard shows averages, on-time %, undelivered, expired delivery dates, due in 7 days, not yet ordered, materials and empty bins awaiting delivery, delivered not paid, delay pyramid, slowest steps, where requirements are now, supplier performance and monthly trend; every section opens its details.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "requirement trace",
+      "delay pie chart",
+      "requirement dashboard view",
+      "requirements dashboard",
+      "delay pyramid",
+      "expired delivery dates",
+      "empty bins awaiting delivery",
+      "reminders"
+    ],
+    "steps": [
+      "Inventory > Requirements > Released: open a requirement; it opens on Trace with the milestones, days between them and the step still open",
+      "Switch the pie between Internal / external, Step and Who",
+      "Open the Dashboard view of the requirement: stage, internal and external days and delays, quantities, set a reminder for a date",
+      "Open the Requirements Dashboard tab: tap Expired delivery dates, Empty bins awaiting delivery, Materials awaiting delivery and a pyramid level; each opens a pop-up table with search, filters and Excel",
+      "Confirm due reminders and overdue / due-soon deliveries appear at the top and open the requirement"
+    ],
+    "expected": "Every released requirement can be followed to payment with its delays split internal and external, and the dashboard shows where time and deliveries are slipping."
   }
 ]

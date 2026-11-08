@@ -331,7 +331,7 @@ export function WindowSetting({ days, onDone }: { days: number; onDone: (m: stri
 
 // ----- Trace: where the time went -----
 
-const PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#64748b'];
+export const PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#64748b'];
 interface StepRow {
     from: string;
     to: string;
@@ -343,7 +343,7 @@ interface StepRow {
 }
 const span = (h: number) => (h >= 48 ? `${Math.round((h / 24) * 10) / 10} days` : `${Math.round(h * 10) / 10} h`);
 
-function Pie({ slices, size = 180 }: { slices: Array<{ label: string; value: number; color: string }>; size?: number }) {
+export function Pie({ slices, size = 180 }: { slices: Array<{ label: string; value: number; color: string }>; size?: number }) {
     const total = slices.reduce((s, x) => s + x.value, 0);
     if (total <= 0) return null;
     const r = size / 2 - 4;

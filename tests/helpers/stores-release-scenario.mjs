@@ -22,7 +22,7 @@ seed(r + '/procurement_requirements/REQ000000001', { number: 'REQ000000001', sta
 seed(r + '/procurement_requirements/REQ000000002', { number: 'REQ000000002', status: 'acknowledged', source: 'user', requesterUid: 'U2', lines: [line(10)], history: [], storesRelease: { status: 'released' } });
 seed(r + '/procurement_quotations/QTN000000001', { number: 'QTN000000001', status: 'recommended', requirementId: 'REQ000000002', lines: [{ no: 10, quantity: 10 }] });
 seed(r + '/procurement_requisitions/PRQ000000001', { number: 'PRQ000000001', status: 'converted', requirementId: 'REQ000000002', lines: [{ requirementLineNo: 10, quantity: 10 }] });
-seed(r + '/procurement_orders/PO00000001-V1', { number: 'PO00000001', status: 'partial', approvedAt: '2026-11-01T00:00:00Z', lines: [{ no: 10, type: 'material', requirementId: 'REQ000000002', requirementLineNo: 10, quantity: 10, receivedQty: 4, leadTimeDays: 10 }] });
+seed(r + '/procurement_orders/PO00000001-V1', { number: 'PO00000001', status: 'partial', approvedAt: '2026-11-01T00:00:00Z', lines: [{ no: 10, type: 'material', requirementId: 'REQ000000002', requirementLineNo: 10, quantity: 10, receivedQty: 4, leadTimeDays: 10 }], deliveries: [{ id: 'PO00000001-V1_D1', recNo: 'REC_00000001', at: '2026-11-05T08:00:00Z', date: '2026-11-05', lines: [{ no: 10, qty: 4 }] }] });
 // A request not yet approved for 5 more counts too.
 seed(r + '/procurement_requirements/REQ000000003', { number: 'REQ000000003', status: 'pending_approval', source: 'user', requesterUid: 'U3', requesterName: 'Ann', lines: [line(5)], history: [] });
 // A maintenance work order: 4 required, 3 reserved, 1 short, planned soon.
@@ -72,3 +72,17 @@ assert.equal(storesGate(r3), '');
 // Changing the stock lines after release needs a new release.
 assert.match(storesGate({ ...r3, lines: [{ ...r3.lines[0], quantity: 9 }] }), /changed after/);
 console.log('stores release scenario passed: strict pipeline counted once, reservations with planned dates, verdict, regeneration warning, cancel, gate, release with override');
+
+// Trace, dashboard and reminders on the same store.
+const { requirementAnalyticsRoutes } = await import('../../backend/requirementAnalytics.ts');
+const ra = (path, uid, body) => requirementAnalyticsRoutes['POST ' + path][0](ctx(uid, body));
+const tr = await ra('/api/org/inventory/requirements/trace', 'SUP', { id: 'REQ000000002' });
+assert.equal(tr.trace.outstanding, 6);
+assert.equal(tr.trace.stageLabel, 'Partly delivered');
+const dash = await ra('/api/org/inventory/requirements/dashboard', 'SUP', {});
+assert.ok(dash.rows.some((x) => x.id === 'REQ000000002'));
+assert.ok(dash.awaitingMaterials.some((m) => m.outstanding >= 6));
+const rem = await ra('/api/org/inventory/requirements/reminder', 'SUP', { action: 'set', requirementId: 'REQ000000002', date: soon, note: 'Chase Krones for the balance' });
+await assert.rejects(() => ra('/api/org/inventory/requirements/reminder', 'OTHER', { action: 'done', id: rem.id }), /not found/);
+assert.equal((await ra('/api/org/inventory/requirements/trace', 'SUP', { id: 'REQ000000002' })).reminders.length, 1);
+console.log('requirement trace scenario passed: trace, dashboard, reminders');
