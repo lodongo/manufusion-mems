@@ -152,7 +152,7 @@ const STOCK_FIELDS=[
  ['ownershipSettlementTrigger','ownershipSettlementTriggers'],
 ] as const;
 const STOCK_FIELD_LOOKUP=new Map<string,string>(STOCK_FIELDS);
-const INVENTORY_FIELDS = ['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'criticalityClass', 'remarks'];
+const INVENTORY_FIELDS = ['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'internalLeadTimeDays', 'criticalityClass', 'remarks'];
 const CRITICALITY_CLASSES = ['A', 'B', 'C', 'D'];
 // Strategy parameters (Replenishment tab). Which of them are shown depends on the replenishment strategy.
 const REPLENISHMENT_FIELDS = ['annualDemand', 'orderCost', 'holdingCostRate', 'demandLookbackDays', 'coverageDays', 'emergencyLevel', 'strategicLevel', 'seasonalFactors', 'rotablesInRepair', 'binQuantity', 'kanbanCardQuantity', 'kanbanCards', 'reviewPeriodDays', 'forecastMonthlyDemand'];
@@ -169,7 +169,7 @@ function replenishmentFieldsOf(inventory: Record<string, unknown> | undefined): 
 }
 const AUTOMATED_TEXT = AUTOMATED_METHODS.map((c) => `${c} ${METHODS[c].name}`).join(', ');
 const PROCUREMENT_FIELDS = ['incoterms', 'preferredVendor', 'vendorPartNumber', 'purchaseUom', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice', 'priceCurrency', 'paymentTerms'];
-const NUMBER_FIELDS = new Set(['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice', ...REPLENISHMENT_FIELDS.filter((k) => k !== 'seasonalFactors')]);
+const NUMBER_FIELDS = new Set(['minimumLevel', 'maximumLevel', 'safetyStock', 'reorderPoint', 'reorderQuantity', 'leadTimeDays', 'internalLeadTimeDays', 'minimumOrderQuantity', 'orderMultiple', 'unitPrice', ...REPLENISHMENT_FIELDS.filter((k) => k !== 'seasonalFactors')]);
 const OPENING_KEYS = ['physicalStock', 'reservedStock', 'quarantinedStock', 'damagedStock', 'expiredStock', 'onOrder', 'onRequisition', 'inTransit', 'allocatedStock'];
 const DELTA_KEYS = ['physicalStock', 'reservedStock', 'quarantinedStock', 'damagedStock', 'expiredStock', 'other', 'onOrder', 'onRequisition', 'inTransit', 'allocatedStock'];
 const ISOLATION_REASONS = [
@@ -205,7 +205,8 @@ const EXPLANATIONS: Record<string, string> = {
     safetyStock: 'Buffer stock held to protect against demand variation or replenishment delays.',
     reorderPoint: 'Available stock threshold that triggers a replenishment recommendation.',
     reorderQuantity: 'Normal quantity to replenish when the reorder point is reached.',
-    leadTimeDays: 'Expected calendar days between ordering and receipt of the material.',
+    leadTimeDays: 'Expected calendar days between ordering and receipt of the material (supplier lead time). Forecasting uses actual purchase order lead times when there are enough orders, else this value.',
+    internalLeadTimeDays: 'Expected calendar days from raising the purchase requirement to the final approval (or supplier acknowledgement) of the purchase order. Forecasting uses actual order history when there is enough, else this value.',
     criticalityClass: 'Criticality class of the material in this warehouse, A (very critical) to D (non-critical), set by an approved criticality assessment (Criticality Analysis tab). Stock take configurations can count only chosen classes.',
     remarks: 'Additional warehouse-specific handling, stocking, or replenishment instructions.',
     ...Object.fromEntries(REPLENISHMENT_FIELDS.map((k) => [k, PARAMS[k as keyof typeof PARAMS].hint])),
@@ -230,7 +231,7 @@ const BALANCE_HELP: Record<string, string> = {
     allocatedStock: 'Physical stock allocated to demand but not yet issued.',
 };
 
-const label = (x: string) => (x === 'criticalityClass' ? 'Criticality class' : REPLENISHMENT_FIELDS.includes(x) ? PARAMS[x as keyof typeof PARAMS].label : x.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()));
+const label = (x: string) => (x === 'criticalityClass' ? 'Criticality class' : x === 'internalLeadTimeDays' ? 'Internal lead time (days)' : REPLENISHMENT_FIELDS.includes(x) ? PARAMS[x as keyof typeof PARAMS].label : x.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()));
 const words = (s: string) => (s || '').replace(/_/g, ' ');
 const blank = (v: unknown) => v === null || v === undefined || v === '';
 const qty = (v: unknown) => Number(v || 0).toLocaleString();
@@ -261,7 +262,7 @@ function validateSettings(section: Section, values: Values, fields: string[]): E
         if (key === 'seasonalFactors') {
             if (raw.trim() && !factorsOf(raw)) errors[key] = 'Enter 12 comma-separated factors from 0 to 10 (January to December).';
         } else if (NUMBER_FIELDS.has(key)) {
-            const problem = numberProblem(raw, key === 'leadTimeDays' ? 3650 : undefined);
+            const problem = numberProblem(raw, key === 'leadTimeDays' ? 3650 : key === 'internalLeadTimeDays' ? 365 : undefined);
             const limit = REPLENISHMENT_LIMITS[key];
             const n = Number(raw.trim());
             if (problem) errors[key] = problem;

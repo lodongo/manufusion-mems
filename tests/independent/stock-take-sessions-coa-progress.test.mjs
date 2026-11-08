@@ -136,7 +136,7 @@ test('Configuration: criticality classes, duration for every type, automatic or 
     assert.match(screen, /set\(\{ type: e\.target\.value, \.\.\.\(e\.target\.value === 'Cycle Count' \? \{ periodic: true \} : \{\}\), \.\.\.\(nameEdited/, 'the name follows the type until edited; a cycle count turns periodic on');
     assert.doesNotMatch(screen, /PI document size \(physical locations\)/);
     const detail = read('src/org/InventoryMaterialDetail.tsx');
-    assert.match(detail, /'leadTimeDays', 'criticalityClass', 'remarks'/);
+    assert.match(detail, /'leadTimeDays', 'internalLeadTimeDays', 'criticalityClass', 'remarks'/);
     assert.match(read('backend/procurement.ts'), /Criticality class must be A, B, C or D\./);
 });
 

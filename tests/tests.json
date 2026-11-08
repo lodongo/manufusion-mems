@@ -1164,5 +1164,28 @@
       "Switch the material back to manual with a reason and confirm the levels are editable again; set the setup to 'From the forecast' and confirm a material with less than six months of issues stays manual"
     ],
     "expected": "Forecast levels are reproducible from the posted journal, can only change through an approved proposal when the material is forecast-driven, and simulation never touches real data."
+  },
+  {
+    "name": "Forecasting: actual lead times, on-demand classification, supply projection, richer simulation and simulated levels",
+    "description": "Lead times come from purchase orders: internal = purchase requirement created to PO final approval (or supplier acknowledgement); external = approval or acknowledgement to the delivery that completed the line. The forecasting setup chooses average, worst case or best case over a look-back with a minimum number of orders; with fewer orders the material's lead time and new internal lead time (Inventory Information) are used. The safety stock uses the spread of actual lead times. Materials bought on demand (RP07, or at or below the criticality cutoff when the strategy follows the analysis) hold no levels. Available stock and open supply project when the reorder point is reached. Simulation offers very light to very high use, random/normal/right-/left-skewed sizes, flat/rising/falling trend and 1-3 years ending today; levels from simulated data can be proposed (server rebuilds the data from the seed) and are marked as simulated for the approvers.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "actual lead time",
+      "lead time statistic",
+      "on-demand classification",
+      "supply projection",
+      "simulation distributions",
+      "simulated levels approval"
+    ],
+    "steps": [
+      "Inventory > Setup > Forecasting setup: choose Worst case, look back 24 months, minimum 2 orders; confirm there is no lead time field; save with a reason",
+      "Material with received purchase orders > Forecasting: confirm the Lead time card shows internal and external days from the orders (acknowledged orders marked) and the levels change between Average, Worst and Best case",
+      "Material without orders: confirm the lead times come from Inventory Information (lead time and internal lead time)",
+      "Material in a cell at or below the cutoff (strategy follows the analysis) or on RP07: confirm the on-demand notice, zero levels and no Propose",
+      "Switch Simulation on: try Very light to Very high, each distribution and trend, and 2 years; mask SIM-BREAKDOWN; Propose simulated levels with the acknowledgement; as another person confirm the proposal says simulated and approval asks to acknowledge it",
+      "Confirm the Supply card (available, open supply, reorder month, stock-out month) and the projected stock, Min and Max lines on the chart"
+    ],
+    "expected": "Levels reflect real lead times, the criticality classification and supply; simulated levels can be approved but are always identified as simulated."
   }
 ]

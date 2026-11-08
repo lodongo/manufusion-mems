@@ -22,7 +22,9 @@ import { bypass } from './testModeCore';
 // Purchase orders, procurement policy and finance are loaded when used: the material update route (procurement.ts)
 // imports this module, and a static import back into that graph would create an initialization cycle.
 const po = () => import('./purchaseOrders');
-import { LEVEL_FIELDS, METHODS, classify, defaultForecastSetup, effectiveSource, historyMonthsOf, readEvents, readForecastSetup, runForecast, type ForecastSetup, type Instance, type Method } from './forecastModel';
+import { LEVEL_FIELDS, METHODS, classify, defaultForecastSetup, effectiveSource, historyMonthsOf, leadTimeFrom, readEvents, readForecastSetup, readSimOptions, runForecast, simulate, type ForecastSetup, type Instance, type LeadSample, type Method, type SimOptions } from './forecastModel';
+import { getCriticalitySetup } from './criticality';
+import { onDemand as belowCutoff } from './criticalityModel';
 
 type Obj = Record<string, unknown>;
 const ID = /^[A-Za-z0-9_-]{1,120}$/;
@@ -105,20 +107,85 @@ async function visibleWarehouse(ctx: OrgContext, warehouseId: string) {
     if (allowed !== 'all' && !allowed.has(warehouseId)) throw new HttpError(404, 'Warehouse not found');
 }
 
-/** Inputs of the forecast that live on the material: lead times, class, price, order constraints. */
-async function materialInputs(orgId: string, materialId: string, warehouseId: string) {
-    const { stockValOf } = await import('./finCore');
-    const [info, proc, val] = await Promise.all([getDoc(infoPath(orgId, materialId, warehouseId)), getDoc(procPath(orgId, materialId, warehouseId)), stockValOf(orgId, warehouseId, materialId).catch(() => null)]);
+/**
+ * Lead time samples from purchase orders for this material and warehouse received within the look-back.
+ * Start: supplier acknowledgement (its date) when recorded, else final approval. Internal: requirement created → start.
+ * External: start → date of the delivery that completed the line. Superseded, returned and cancelled versions are skipped.
+ */
+export async function leadTimeSamples(orgId: string, materialId: string, warehouseId: string, lookbackMonths: number): Promise<LeadSample[]> {
+    const [{ ordersPath }, { requirementsPath }] = await Promise.all([po(), import('./procurementSetup')]);
+    const since = Date.now() - lookbackMonths * 30.44 * 86_400_000;
+    const out: LeadSample[] = [];
+    const reqCache = new Map<string, string>();
+    const day = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T09:00:00.000Z` : v);
+    for (const d of await listDocs(ordersPath(orgId))) {
+        const x = d.data;
+        if (!['open', 'sent', 'partial', 'full'].includes(str(x.status)) || !str(x.approvedAt)) continue;
+        const ack = isObj(x.ack) ? x.ack : {};
+        const ackAt = str(ack.date) || str(ack.at);
+        const start = ackAt ? day(ackAt) : str(x.approvedAt);
+        const deliveries = Array.isArray(x.deliveries) ? (x.deliveries as unknown[]).filter(isObj) : [];
+        for (const l of (Array.isArray(x.lines) ? (x.lines as unknown[]) : []).filter(isObj)) {
+            // A warehouse line goes into its cost center (the warehouse); the material is the item code or the material
+            // chosen when the delivery was received.
+            const wh = str(l.warehouseId) || str(l.costCenterId) || str(l.costCenterCode);
+            const lineDeliveries = deliveries.flatMap((dv) => (Array.isArray(dv.lines) ? (dv.lines as unknown[]) : []).filter((g): g is Obj => isObj(g) && Number(g.no) === Number(l.no)));
+            const mat = str(l.materialId) || str(l.itemCode) || str(lineDeliveries.find((g) => str(g.materialId))?.materialId);
+            if (mat !== materialId || wh !== warehouseId) continue;
+            const ordered = Number(l.quantity ?? l.qty) || 0;
+            const received = Number(l.receivedQty) || 0;
+            if (!ordered || received + 1e-9 < ordered) continue;
+            const dates = deliveries.filter((dv) => (Array.isArray(dv.lines) ? (dv.lines as unknown[]) : []).some((g) => isObj(g) && Number(g.no) === Number(l.no))).map((dv) => str(dv.date) || str(dv.at).slice(0, 10)).filter(Boolean).sort();
+            const delivered = dates.at(-1) || str(x.deliveredAt).slice(0, 10);
+            if (!delivered || Date.parse(day(delivered)) < since) continue;
+            const reqId = str(l.requirementId);
+            if (reqId && !reqCache.has(reqId)) reqCache.set(reqId, str((await getDoc(`${requirementsPath(orgId)}/${reqId}`))?.data.createdAt));
+            const reqAt = reqId ? reqCache.get(reqId) || '' : '';
+            const days = (a: string, b: string) => Math.max(0, Math.round(((Date.parse(b) - Date.parse(a)) / 86_400_000) * 10) / 10);
+            out.push({ po: str(x.number) || d.id, start, startBasis: ackAt ? 'acknowledged' : 'approved', requirementAt: reqAt, deliveredOn: delivered, internalDays: reqAt ? days(reqAt, start) : null, externalDays: days(start, day(delivered)) });
+        }
+    }
+    return out.sort((a, b) => b.deliveredOn.localeCompare(a.deliveredOn)).slice(0, 200);
+}
+
+/** Inputs of the forecast that live on the material: lead times, class, strategy, stock, supply, price, order constraints. */
+async function materialInputs(orgId: string, materialId: string, warehouseId: string, setup: ForecastSetup) {
+    const [{ stockValOf }, repl] = await Promise.all([import('./finCore'), import('./replenishment')]);
+    const [info, proc, val, samples, crit, stock, supply] = await Promise.all([
+        getDoc(infoPath(orgId, materialId, warehouseId)),
+        getDoc(procPath(orgId, materialId, warehouseId)),
+        stockValOf(orgId, warehouseId, materialId).catch(() => null),
+        leadTimeSamples(orgId, materialId, warehouseId, setup.leadTimeLookbackMonths),
+        getCriticalitySetup(orgId),
+        repl.stockPosition(orgId, warehouseId, materialId, 365).catch(() => null),
+        repl.supplyIndex(orgId).catch(() => null),
+    ]);
     const i = info?.data ?? {};
     const p = proc?.data ?? {};
     const pos = (v: unknown) => (Number(v) > 0 ? Number(v) : null);
-    const externalLeadDays = pos(p.leadTimeDays) ?? pos(i.leadTimeDays) ?? 0;
+    const lead = leadTimeFrom(samples, setup, { externalDays: pos(i.leadTimeDays) ?? pos(p.leadTimeDays), internalDays: pos(i.internalLeadTimeDays) });
+    // Bought on demand: RP07 (by hand or by the analysis), or at or below the cutoff when the strategy follows the analysis.
+    const cell = str(i.criticalityCell);
+    const strategy = str(i.replenishmentStrategy);
+    const cs = crit.setup;
+    const onDemandWhy =
+        strategy === 'RP07'
+            ? `Bought on demand (RP07 Direct purchase${str(i.strategySource) === 'criticality' ? `, set by the criticality analysis: ${cell} is at or below the cutoff ${cs.cutoff}` : ''}): no stock is held, so there is no minimum or maximum.`
+            : cs.strategyMode === 'criticality' && /^[ABCD][1-4]$/.test(cell) && belowCutoff(cell, cs.cutoff)
+              ? `Criticality ${cell} is at or below the cutoff ${cs.cutoff}: the material is bought on demand, so there is no minimum or maximum.`
+              : '';
+    const open = supply?.get(repl.keyOf(materialId, warehouseId));
     return {
         info: i,
-        externalLeadDays,
-        externalLeadSource: pos(p.leadTimeDays) ? 'procurement' : pos(i.leadTimeDays) ? 'inventory' : 'none',
+        lead,
+        samples,
+        externalLeadDays: lead.externalDays,
         criticalityClass: str(i.criticalityClass),
-        criticalityCell: str(i.criticalityCell),
+        criticalityCell: cell,
+        cutoff: cs.cutoff,
+        strategyMode: cs.strategyMode,
+        onDemand: onDemandWhy,
+        stock: stock ? { available: Math.max(0, stock.available), openSupply: open?.qty ?? 0, physical: stock.physical, openRefs: open?.refs ?? [] } : null,
         unitPrice: pos(p.unitPrice),
         unitCost: val && val.avg > 0 ? val.avg : pos(p.unitPrice) ?? 0,
         moq: pos(p.minimumOrderQuantity),
@@ -127,7 +194,7 @@ async function materialInputs(orgId: string, materialId: string, warehouseId: st
     };
 }
 
-function readInputs(b: Obj, setup: ForecastSetup) {
+function readInputs(b: Obj, setup: ForecastSetup, simulated = false) {
     let events;
     try {
         events = readEvents(b.events);
@@ -144,30 +211,32 @@ function readInputs(b: Obj, setup: ForecastSetup) {
     };
     const pastMonths = n(b.pastMonths, 'Past months', setup.minHistoryMonths, 36);
     const futureMonths = n(b.futureMonths, 'Future months', 1, 24);
-    const internalLeadDays = n(b.internalLeadDays, 'Internal lead time', 0, 120);
     const masks = Array.isArray(b.masked) ? b.masked : [];
     if (masks.length > 500) throw new HttpError(400, 'At most 500 masked movements');
     const masked = masks.map((m) => {
         const id = str(isObj(m) ? m.id : m);
-        if (!ID.test(id) || id.startsWith('SIM-')) throw new HttpError(400, 'Only real journal movements can be masked and saved');
+        if (!ID.test(id) || id.startsWith('SIM-') !== simulated) throw new HttpError(400, simulated ? 'Only simulated movements can be masked in a simulated proposal' : 'Only real journal movements can be masked and saved');
         return { id, note: str(isObj(m) ? m.note : '').trim().slice(0, 200) };
     });
-    return { events, method, pastMonths, futureMonths, internalLeadDays, masked };
+    return { events, method, pastMonths, futureMonths, masked };
 }
 
-function forecastFor(setup: ForecastSetup, instances: Instance[], inputs: Obj, m: Awaited<ReturnType<typeof materialInputs>>) {
+function forecastFor(setup: ForecastSetup, instances: Instance[], inputs: Obj, m: Awaited<ReturnType<typeof materialInputs>>, now = nowIso()) {
     const method = str(inputs.method);
     return runForecast({
         instances,
         masked: maskedIds(inputs),
         setup,
         events: readEvents(inputs.events ?? []),
-        now: nowIso(),
+        now,
         method: method && method !== 'setup' ? (method as Method) : undefined,
         pastMonths: Number(inputs.pastMonths) || undefined,
         futureMonths: Number(inputs.futureMonths) || undefined,
-        externalLeadDays: m.externalLeadDays,
-        internalLeadDays: inputs.internalLeadDays === null || inputs.internalLeadDays === undefined ? null : Number(inputs.internalLeadDays),
+        externalLeadDays: m.lead.externalDays,
+        internalLeadDays: m.lead.internalDays,
+        leadSigmaDays: m.lead.sigmaDays,
+        onDemand: m.onDemand,
+        stock: m.stock,
         criticalityClass: m.criticalityClass,
         unitPrice: m.unitPrice,
         moq: m.moq,
@@ -251,7 +320,7 @@ export const forecastingRoutes = {
             const info = (await getDoc(infoPath(ctx.orgId, materialId, warehouseId)))?.data ?? null;
             const src = await levelSourceOf(ctx.orgId, materialId, warehouseId, info);
             const canSwitch = src.setup.levelMode === 'manual_unless_forced' && (await allowedAt(ctx, [FC.edit], warehouseId, 'write'));
-            return { levelMode: src.setup.levelMode, minHistoryMonths: src.setup.minHistoryMonths, historyMonths: src.historyMonths, source: src.source, why: src.why, forced: str(info?.levelsSource) === 'forecast', canSwitch, appliedAt: str(info?.forecastAppliedAt), levelFields: LEVEL_FIELDS };
+            return { levelMode: src.setup.levelMode, minHistoryMonths: src.setup.minHistoryMonths, historyMonths: src.historyMonths, source: src.source, why: src.why, forced: str(info?.levelsSource) === 'forecast', canSwitch, appliedAt: str(info?.forecastAppliedAt), appliedSimulated: info?.forecastSimulated === true, levelFields: LEVEL_FIELDS };
         }),
     ],
 
@@ -260,7 +329,7 @@ export const forecastingRoutes = {
             canView(ctx);
             const { materialId, warehouseId } = ids(ctx.body);
             await visibleWarehouse(ctx, warehouseId);
-            const [{ setup, version }, instances, doc, m] = await Promise.all([getForecastSetup(ctx.orgId), journalInstances(ctx.orgId, materialId, warehouseId), getDoc(forecastPath(ctx.orgId, materialId, warehouseId)), materialInputs(ctx.orgId, materialId, warehouseId)]);
+            const [{ setup, version }, instances, doc, m] = await Promise.all([getForecastSetup(ctx.orgId), journalInstances(ctx.orgId, materialId, warehouseId), getDoc(forecastPath(ctx.orgId, materialId, warehouseId))]).then(async ([a, b, c]) => [a, b, c, await materialInputs(ctx.orgId, materialId, warehouseId, a.setup)] as const);
             const f = doc?.data ?? {};
             const masked = new Set(maskedIds(f));
             const historyMonths = historyMonthsOf(instances, masked, nowIso());
@@ -274,9 +343,12 @@ export const forecastingRoutes = {
                 setupVersion: version,
                 methods: METHODS,
                 instances,
-                saved: { masked: Array.isArray(f.masked) ? f.masked : [], events: Array.isArray(f.events) ? f.events : [], method: str(f.method) || 'setup', pastMonths: f.pastMonths ?? null, futureMonths: f.futureMonths ?? null, internalLeadDays: f.internalLeadDays ?? null, updatedAt: str(f.updatedAt), updatedBy: str(f.updatedBy), reason: str(f.reason) },
-                material: { externalLeadDays: m.externalLeadDays, externalLeadSource: m.externalLeadSource, criticalityClass: m.criticalityClass, criticalityCell: m.criticalityCell, unitPrice: m.unitPrice, unitCost: m.unitCost, moq: m.moq, orderMultiple: m.orderMultiple, current: m.current, strategy: str(m.info.replenishmentStrategy) },
-                source: { ...src, levelMode: setup.levelMode, historyMonths, forced: str(m.info.levelsSource) === 'forecast', appliedAt: str(m.info.forecastAppliedAt), appliedMethod: str(m.info.forecastMethod) },
+                saved: { masked: Array.isArray(f.masked) ? f.masked : [], events: Array.isArray(f.events) ? f.events : [], method: str(f.method) || 'setup', pastMonths: f.pastMonths ?? null, futureMonths: f.futureMonths ?? null, updatedAt: str(f.updatedAt), updatedBy: str(f.updatedBy), reason: str(f.reason) },
+                material: { criticalityClass: m.criticalityClass, criticalityCell: m.criticalityCell, cutoff: m.cutoff, strategyMode: m.strategyMode, onDemand: m.onDemand, unitPrice: m.unitPrice, unitCost: m.unitCost, moq: m.moq, orderMultiple: m.orderMultiple, current: m.current, strategy: str(m.info.replenishmentStrategy), materialExternalDays: Number(m.info.leadTimeDays) || null, materialInternalDays: Number(m.info.internalLeadTimeDays) || null },
+                lead: m.lead,
+                leadSamples: m.samples.slice(0, 50),
+                stock: m.stock,
+                source: { ...src, levelMode: setup.levelMode, historyMonths, forced: str(m.info.levelsSource) === 'forecast', appliedAt: str(m.info.forecastAppliedAt), appliedMethod: str(m.info.forecastMethod), appliedSimulated: m.info.forecastSimulated === true },
                 proposal,
                 can: {
                     edit: canEdit,
@@ -313,9 +385,9 @@ export const forecastingRoutes = {
             const now = nowIso();
             const oldMasks = new Map((Array.isArray(prev.masked) ? (prev.masked as unknown[]) : []).filter(isObj).map((m) => [str(m.id), m]));
             const masked = inputs.masked.map((m) => oldMasks.get(m.id) ?? { ...m, by: ctx.uid, at: now, reason: reason.slice(0, 300) });
-            const doc = { ...prev, materialId, warehouseId, masked, events: inputs.events, method: inputs.method, pastMonths: inputs.pastMonths, futureMonths: inputs.futureMonths, internalLeadDays: inputs.internalLeadDays, reason: reason.slice(0, 500), updatedAt: now, updatedBy: ctx.uid, createdAt: str(prev.createdAt) || now, createdBy: str(prev.createdBy) || ctx.uid };
+            const doc = { ...prev, materialId, warehouseId, masked, events: inputs.events, method: inputs.method, pastMonths: inputs.pastMonths, futureMonths: inputs.futureMonths, reason: reason.slice(0, 500), updatedAt: now, updatedBy: ctx.uid, createdAt: str(prev.createdAt) || now, createdBy: str(prev.createdBy) || ctx.uid };
             await writeDoc(path, doc as never);
-            await audited(ctx, 'inventory.forecast.save', `Forecast ${materialId} @ ${warehouseId}`, { masked: masked.length, added, removed, events: inputs.events.map((e) => `${e.label} ${e.recurrence} ${e.month} +${e.qty}${e.upliftPct ? `/${e.upliftPct}%` : ''}`), method: inputs.method, pastMonths: inputs.pastMonths, futureMonths: inputs.futureMonths, internalLeadDays: inputs.internalLeadDays, reason });
+            await audited(ctx, 'inventory.forecast.save', `Forecast ${materialId} @ ${warehouseId}`, { masked: masked.length, added, removed, events: inputs.events.map((e) => `${e.label} ${e.recurrence} ${e.month} +${e.qty}${e.upliftPct ? `/${e.upliftPct}%` : ''}`), method: inputs.method, pastMonths: inputs.pastMonths, futureMonths: inputs.futureMonths, reason });
             return { ok: true };
         }),
     ],
@@ -324,15 +396,35 @@ export const forecastingRoutes = {
         orgRoute('org.inventory.forecast.propose', 'INV.forecast.edit', async (ctx) => {
             const { materialId, warehouseId } = ids(ctx.body);
             await requireAt(ctx, [FC.edit], warehouseId, 'write', 'Forecast permission is required for this warehouse.');
-            const [{ setup, version }, instances, doc, m] = await Promise.all([getForecastSetup(ctx.orgId), journalInstances(ctx.orgId, materialId, warehouseId), getDoc(forecastPath(ctx.orgId, materialId, warehouseId)), materialInputs(ctx.orgId, materialId, warehouseId)]);
+            const [{ setup, version }, instances, doc, m] = await Promise.all([getForecastSetup(ctx.orgId), journalInstances(ctx.orgId, materialId, warehouseId), getDoc(forecastPath(ctx.orgId, materialId, warehouseId))]).then(async ([a, b, c]) => [a, b, c, await materialInputs(ctx.orgId, materialId, warehouseId, a.setup)] as const);
             const f = doc?.data ?? {};
             if (isObj(f.proposal) && str(f.proposal.status) === 'pending') throw new HttpError(409, 'Proposed levels are already waiting for approval.');
-            const historyMonths = historyMonthsOf(instances, new Set(maskedIds(f)), nowIso());
+            // Simulated proposal: the server rebuilds the same dummy data from the options and seed, so the levels are
+            // still worked out here, never taken from the browser. The proposal is marked as simulated everywhere.
+            let sim: SimOptions | null = null;
+            let data = instances;
+            let inputs: Obj = f;
+            if (ctx.body.simulation !== undefined && ctx.body.simulation !== null) {
+                if (!setup.allowSimulatedLevels) throw new HttpError(403, 'The forecasting setup does not allow levels from simulated data.');
+                try {
+                    sim = readSimOptions(ctx.body.simulation);
+                } catch (e) {
+                    throw new HttpError(400, e instanceof Error ? e.message : 'Invalid simulation');
+                }
+                if (Math.abs(Date.now() - Date.parse(sim.now)) > 24 * 3_600_000) throw new HttpError(409, 'The simulation is more than a day old; switch it off and on again.');
+                data = simulate(sim);
+                const given = readInputs(isObj(ctx.body.inputs) ? ctx.body.inputs : {}, setup, true);
+                const known = new Set(data.map((x) => x.id));
+                if (given.masked.some((x) => !known.has(x.id))) throw new HttpError(400, 'A masked movement is not in the simulated data');
+                inputs = { ...given, masked: given.masked };
+            }
+            const asOf = sim ? sim.now : nowIso();
+            const historyMonths = historyMonthsOf(data, new Set(maskedIds(inputs)), asOf);
             const src = effectiveSource(setup, m.info, historyMonths);
             if (src.source !== 'forecast') throw new HttpError(409, `The levels of this material are manual: ${src.why}`);
-            if (str(m.info.replenishmentStrategy) === 'RP07') throw new HttpError(409, 'This material is bought on demand (RP07 Direct purchase), so it keeps no minimum or maximum.');
-            const result = forecastFor(setup, instances, f, m);
-            if (!result.levels.leadDays) throw new HttpError(409, 'Record the supplier lead time (Procurement Information) or an internal lead time before proposing levels.');
+            if (m.onDemand) throw new HttpError(409, m.onDemand);
+            const result = forecastFor(setup, data, inputs, m, asOf);
+            if (!result.levels.leadDays) throw new HttpError(409, 'No lead time: there are no received purchase orders in the look-back and no lead time on the material (Inventory Information). Record one before proposing levels.');
             const proposed = Object.fromEntries(LEVEL_FIELDS.map((k) => [k, result.levels[k]])) as Record<string, number>;
             const changes = LEVEL_FIELDS.filter((k) => m.current[k] !== proposed[k]);
             if (!changes.length) throw new HttpError(409, 'The forecast levels are the same as the current levels; nothing to approve.');
@@ -365,13 +457,16 @@ export const forecastingRoutes = {
                 levels: result.levels,
                 historyMonths,
                 setupVersion: version,
-                masked: maskedIds(f).length,
-                events: Array.isArray(f.events) ? f.events.length : 0,
+                masked: maskedIds(inputs).length,
+                events: Array.isArray(inputs.events) ? inputs.events.length : 0,
+                lead: { externalDays: m.lead.externalDays, internalDays: m.lead.internalDays, externalSource: m.lead.externalSource, internalSource: m.lead.internalSource, statistic: m.lead.statistic, samples: m.samples.length },
+                simulated: !!sim,
+                simulation: sim,
                 requestedBy: ctx.uid,
                 requestedAt: now,
             };
             await writeDoc(forecastPath(ctx.orgId, materialId, warehouseId), { ...f, materialId, warehouseId, proposal, createdAt: str(f.createdAt) || now, createdBy: str(f.createdBy) || ctx.uid } as never);
-            await audited(ctx, 'inventory.forecast.propose', `Forecast ${materialId} @ ${warehouseId}`, { values: proposed, previous: m.current, value, levels: steps.map((s) => s.level), method: result.method, mae: result.accuracy.mae, historyMonths });
+            await audited(ctx, 'inventory.forecast.propose', `Forecast ${materialId} @ ${warehouseId}`, { values: proposed, previous: m.current, value, levels: steps.map((s) => s.level), method: result.method, mae: result.accuracy.mae, historyMonths, lead: `${m.lead.externalDays}+${m.lead.internalDays} days (${m.lead.externalSource}/${m.lead.internalSource}, ${m.lead.statistic})`, simulated: !!sim, simulation: sim });
             return { ok: true, values: proposed, value, levels: steps.map((s) => s.level) };
         }),
     ],
@@ -421,15 +516,16 @@ export const forecastingRoutes = {
             const { setup } = await getForecastSetup(ctx.orgId);
             const info = (await getDoc(infoPath(ctx.orgId, materialId, warehouseId)))?.data ?? {};
             const instances = await journalInstances(ctx.orgId, materialId, warehouseId);
-            const src = effectiveSource(setup, info, historyMonthsOf(instances, new Set(maskedIds(f)), now));
+            const src = effectiveSource(setup, info, p.simulated === true ? Number(p.historyMonths) || 0 : historyMonthsOf(instances, new Set(maskedIds(f)), now));
+            if (p.simulated === true && !setup.allowSimulatedLevels) throw new HttpError(409, 'The forecasting setup no longer allows levels from simulated data; return the proposal.');
             if (src.source !== 'forecast') throw new HttpError(409, `The levels of this material are manual now (${src.why}); return the proposal.`);
             const values = isObj(p.values) ? p.values : {};
-            const patch: Obj = { forecastAppliedAt: now, forecastAppliedBy: ctx.uid, forecastMethod: str(p.method), updatedAt: now, updatedBy: ctx.uid };
+            const patch: Obj = { forecastAppliedAt: now, forecastAppliedBy: ctx.uid, forecastMethod: str(p.method), forecastSimulated: p.simulated === true, updatedAt: now, updatedBy: ctx.uid };
             for (const k of LEVEL_FIELDS) if (Number.isFinite(Number(values[k]))) patch[k] = Number(values[k]);
             await writeDoc(infoPath(ctx.orgId, materialId, warehouseId), { ...info, ...patch } as never);
             const history = [{ values, previous: p.previous, value: p.value, approvedAt: now, approvedBy: ctx.uid, requestedBy: p.requestedBy, method: p.method }, ...(Array.isArray(f.history) ? f.history : [])].slice(0, 20);
             await writeDoc(path, { ...f, proposal: { ...p, steps, status: 'approved', closedAt: now, closedBy: ctx.uid }, history } as never);
-            await audited(ctx, 'inventory.forecast.approve', `Forecast ${materialId} @ ${warehouseId}`, { values, previous: p.previous, value: p.value, levels: steps.map((s) => s.level) });
+            await audited(ctx, 'inventory.forecast.approve', `Forecast ${materialId} @ ${warehouseId}`, { values, previous: p.previous, value: p.value, levels: steps.map((s) => s.level), simulated: p.simulated === true });
             return { ok: true, outcome: 'applied' };
         }),
     ],
