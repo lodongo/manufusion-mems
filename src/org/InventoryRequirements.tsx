@@ -7,6 +7,7 @@ import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Spinner, Toggle, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { Screen, Segmented, useConfirm } from '../components/screen';
+import { RequirementTrace, RequirementsDashboard } from './RequirementInsights';
 
 // Inventory > Requirements: every purchase requirement for warehouse stock is reviewed by the stores before
 // procurement processes it. Automatic (Replenishment/MRP) and maintenance reservation requirements are released or
@@ -393,10 +394,19 @@ function Decide({ d, onDone }: { d: Detail; onDone: (m: string) => void }) {
 function DetailView({ id }: { id: string }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<Detail>(`${API}/position`, { id }), [id]);
     const [notice, setNotice] = useState('');
+    const [picked, setTab] = useState<'review' | 'trace' | 'dashboard' | null>(null);
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Requirement not found.'}</Alert>;
+    const tab = picked ?? (data.queue === 'released' ? 'trace' : 'review');
+    const toolbar = <Segmented label='Requirement view' value={tab} onChange={setTab} options={[{ value: 'review', label: 'Review' }, { value: 'trace', label: 'Trace' }, { value: 'dashboard', label: 'Dashboard' }]} />;
+    if (tab !== 'review')
+        return (
+            <Screen title={data.number} eyebrow={`Requirements · ${data.sourceLabel}`} subtitle={`${data.statusLabel}${data.woCode ? ` · ${data.woCode}` : ''}`} onBack={() => navigate(BASE)} toolbar={toolbar}>
+                <RequirementTrace id={id} view={tab} />
+            </Screen>
+        );
     return (
-        <Screen title={data.number} eyebrow={`Requirements · ${data.sourceLabel}`} subtitle={`${data.statusLabel}${data.woCode ? ` · ${data.woCode}` : ''}`} onBack={() => navigate(BASE)}>
+        <Screen title={data.number} eyebrow={`Requirements · ${data.sourceLabel}`} subtitle={`${data.statusLabel}${data.woCode ? ` · ${data.woCode}` : ''}`} onBack={() => navigate(BASE)} toolbar={toolbar}>
             {notice && <Alert tone='success'>{notice}</Alert>}
             {data.queue === 'released' && <Alert tone='success'>Released by {data.releasedBy || 'the stores'}{data.releasedAt ? `, ${fmtDate(data.releasedAt)}` : ''}.</Alert>}
             {data.positions.map((p) => (
@@ -419,7 +429,7 @@ function DetailView({ id }: { id: string }) {
 }
 
 export default function InventoryRequirements({ id }: { id?: string }) {
-    const [queue, setQueue] = useState<'review' | 'released' | 'closed'>('review');
+    const [queue, setQueue] = useState<'review' | 'released' | 'closed' | 'dashboard'>('review');
     const { data, error, loading } = useLoad(() => callBackend<{ rows: Row[]; can: { release: boolean } }>(`${API}/list`, {}), []);
     if (id && /^REQ\d{9}$/.test(id)) return <DetailView id={id} />;
     const rows = (data?.rows ?? []).filter((r) => r.queue === queue);
@@ -429,10 +439,10 @@ export default function InventoryRequirements({ id }: { id?: string }) {
             title='Requirements'
             eyebrow='Inventory'
             subtitle='Stores review before procurement: stock, reservations, pipeline and lead time'
-            toolbar={<Segmented label='Requirements' value={queue} onChange={setQueue} options={[{ value: 'review', label: 'To review', count: count('review') || undefined }, { value: 'released', label: 'Released', count: count('released') || undefined }, { value: 'closed', label: 'Cancelled', count: count('closed') || undefined }]} />}
+            toolbar={<Segmented label='Requirements' value={queue} onChange={setQueue} options={[{ value: 'dashboard', label: 'Dashboard' }, { value: 'review', label: 'To review', count: count('review') || undefined }, { value: 'released', label: 'Released', count: count('released') || undefined }, { value: 'closed', label: 'Cancelled', count: count('closed') || undefined }]} />}
             bodyFlush
         >
-            {loading && !data ? <Spinner /> : error || !data ? <Alert tone='error'>{error || 'Could not load.'}</Alert> : (
+            {queue === 'dashboard' ? <RequirementsDashboard /> : loading && !data ? <Spinner /> : error || !data ? <Alert tone='error'>{error || 'Could not load.'}</Alert> : (
                 <RichTable id='inv.requirements' tabKey={queue} columns={COLS} rows={rows} rowKey={(r) => r.id} onRowClick={(r) => navigate(`${BASE}/${r.id}`)} empty={queue === 'review' ? 'Nothing waits for the stores.' : 'None.'} fileName={`requirements-${queue}`} height='h-full' rowClassName={(r) => (r.source === 'automation' && r.queue === 'review' ? 'bg-amber-500/5' : '')} />
             )}
         </Screen>

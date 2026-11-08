@@ -175,6 +175,7 @@ import { forecastingRoutes } from './forecasting';
 import { materialAuditRoutes } from './materialAudit';
 import { apRoutes } from './accountsPayable';
 import { storesReleaseRoutes } from './storesRelease';
+import { requirementAnalyticsRoutes } from './requirementAnalytics';
 import { shortcutRoutes } from './shortcuts';
 import { maintenanceRoutes } from './maintenance';
 import { maintenanceOperationRoutes } from './maintenanceOperations';
@@ -1680,6 +1681,7 @@ export const handler = router(recordWiredRoutes({
     ...materialAuditRoutes,
     ...apRoutes,
     ...storesReleaseRoutes,
+    ...requirementAnalyticsRoutes,
     ...shortcutRoutes,
     ...maintenanceRoutes,
     ...maintenanceOperationRoutes,
