@@ -158,7 +158,7 @@ function flags(ctx: OrgContext, d: Obj) {
         approve: status === 'pending_approval' && isManager(ctx, d),
         reject: status === 'pending_approval' && isManager(ctx, d),
         returnManager: status === 'pending_approval' && isManager(ctx, d),
-        acknowledge: status === 'approved' && desk,
+        acknowledge: status === 'approved' && desk && !storesGate(d),
         returnDesk: ['approved', 'acknowledged'].includes(status) && desk,
     };
 }
@@ -736,34 +736,29 @@ const requiredMaintenanceTitle = (s: Obj) => `${str(s.woCode)} · ${str(s.descri
 const RPL_KEYS = (orgId: string, key: string) => [`organizations/${orgId}/replenishment_keys/${key}`, `organizations/${orgId}/mrp_keys/${key}`];
 const REPLENISHMENT_SOURCES = ['replenishment', 'mrp'];
 const rplKeyOf = (d: Obj) => str(d.replenishmentKey) || str(d.mrpKey);
-async function replenishmentRequest(ctx: OrgContext, id: string): Promise<Doc> {
+async function replenishmentRequest(ctx: OrgContext, id: string, perm = 'INV.replenishment.verify'): Promise<Doc> {
     if (!ID.test(id)) throw new HttpError(404, 'Replenishment request not found.');
     const doc = await getDoc(`${requirementsPath(ctx.orgId)}/${id}`);
     if (!doc || !REPLENISHMENT_SOURCES.includes(str(doc.data.source))) throw new HttpError(404, 'Replenishment request not found.');
     if (str(doc.data.status) !== 'unverified') throw new HttpError(409, 'This replenishment request has already been verified, dismissed or cancelled.');
     const w = str(objs(doc.data.lines)[0]?.warehouseId);
-    await requireAt(ctx, ['INV.replenishment.verify'], w, 'write', 'You can verify or dismiss replenishment requests only for warehouses where you hold INV.replenishment.verify.');
+    await requireAt(ctx, [perm], w, 'write', `You can act on replenishment requests only for warehouses where you hold ${perm}.`);
     return doc;
 }
 
-export const replenishmentVerificationRoutes = {
-    // The planner checks quantity, date, urgency, unit and GL account; the request then follows the normal manager
-    // approval (and chart of authority) as the planner's own requirement.
-    'POST /api/org/inventory/replenishment/verify': [
-        orgRoute('org.inventory.replenishment.verify', 'INV.replenishment.verify', async (ctx) => {
-            requireProcurement(ctx);
-            const id = str(ctx.body.id);
-            await replenishmentRequest(ctx, id);
+export async function verifyReplenishment(ctx: OrgContext, id: string, input: Obj, perm = 'INV.replenishment.verify', extra: Obj = {}) {
+    requireProcurement(ctx);
+    await replenishmentRequest(ctx, id, perm);
             return lock(ctx, id, async () => {
                 const path = `${requirementsPath(ctx.orgId)}/${id}`;
-                const doc = await replenishmentRequest(ctx, id);
+                const doc = await replenishmentRequest(ctx, id, perm);
                 const d = doc.data;
                 const cur = objs(d.lines)[0] ?? {};
-                const quantity = ctx.body.quantity === undefined || ctx.body.quantity === '' ? Number(cur.quantity) : Number(String(ctx.body.quantity).replace(/,/g, ''));
+                const quantity = input.quantity === undefined || input.quantity === '' ? Number(cur.quantity) : Number(String(input.quantity).replace(/,/g, ''));
                 const changedQty = Number(cur.quantity) !== quantity;
-                const reason = cleanText(ctx.body.reason);
+                const reason = cleanText(input.reason);
                 if (changedQty && (reason.length < 10 || reason.length > 300)) throw new HttpError(400, 'Give the reason for changing the planned quantity (10 to 300 characters).');
-                const line = await prepareItem(ctx, { ...cur, source: 'warehouse', quantity, dateRequired: str(ctx.body.dateRequired) || str(cur.dateRequired), urgency: str(ctx.body.urgency) || str(cur.urgency), glCode: str(ctx.body.glCode), uomCode: str(ctx.body.uomCode) || str(cur.uomCode), costCenterId: str(cur.warehouseId) }, 10);
+                const line = await prepareItem(ctx, { ...cur, source: 'warehouse', quantity, dateRequired: str(input.dateRequired) || str(cur.dateRequired), urgency: str(input.urgency) || str(cur.urgency), glCode: str(input.glCode), uomCode: str(input.uomCode) || str(cur.uomCode), costCenterId: str(cur.warehouseId) }, 10);
                 if (str(line.materialId) !== str(cur.materialId) || str(line.warehouseId) !== str(cur.warehouseId)) throw new HttpError(409, 'The material or warehouse of a replenishment request cannot be changed.');
                 const missing = missingOf(line);
                 if (missing.length) throw new HttpError(400, `Complete before verifying: ${missing.join(', ')}.`);
@@ -789,6 +784,7 @@ export const replenishmentVerificationRoutes = {
                     updatedAt: at,
                     version: (Number(d.version) || 1) + 1,
                     history: [...history(d), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: 'verified', note, from: 'unverified', to: 'pending_approval' }],
+                    ...extra,
                 }, { updateTime: doc.updateTime });
                 if (!ok) throw new HttpError(409, 'Replenishment re-planned this request while you were verifying it. Refresh and check the quantity again.');
                 for (const kp of RPL_KEYS(ctx.orgId, rplKeyOf(d))) {
@@ -798,20 +794,17 @@ export const replenishmentVerificationRoutes = {
                 await record(ctx, 'org.inventory.replenishment.verify', id, `Replenishment request verified: ${str(line.materialNumber)} ${quantity} ${str(line.unit)} for ${str(line.warehouseCode)}; sent to ${approver.managerTitle} for approval. ${note}`.slice(0, 400));
                 return { ok: true, id, status: 'pending_approval', approver: approver.managerTitle };
             });
-        }),
-    ],
-    'POST /api/org/inventory/replenishment/dismiss': [
-        orgRoute('org.inventory.replenishment.dismiss', 'INV.replenishment.verify', async (ctx) => {
-            const id = str(ctx.body.id);
-            const reason = reasonOf(ctx.body);
-            await replenishmentRequest(ctx, id);
+}
+
+export async function dismissReplenishment(ctx: OrgContext, id: string, reason: string, perm = 'INV.replenishment.verify', extra: Obj = {}) {
+    await replenishmentRequest(ctx, id, perm);
             return lock(ctx, id, async () => {
                 const path = `${requirementsPath(ctx.orgId)}/${id}`;
-                const doc = await replenishmentRequest(ctx, id);
+                const doc = await replenishmentRequest(ctx, id, perm);
                 const d = doc.data;
                 const cur = objs(d.lines)[0] ?? {};
                 const at = nowIso();
-                const ok = await writeDoc(path, { ...d, status: 'cancelled', cancelReason: `Dismissed by ${nameOfUser(ctx.me)}: ${reason}`, dismissedBy: ctx.uid, dismissedAt: at, updatedAt: at, version: (Number(d.version) || 1) + 1, history: [...history(d), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: 'dismissed', note: reason, from: 'unverified', to: 'cancelled' }] }, { updateTime: doc.updateTime });
+                const ok = await writeDoc(path, { ...d, status: 'cancelled', cancelReason: `Dismissed by ${nameOfUser(ctx.me)}: ${reason}`, dismissedBy: ctx.uid, dismissedAt: at, updatedAt: at, version: (Number(d.version) || 1) + 1, history: [...history(d), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: 'dismissed', note: reason, from: 'unverified', to: 'cancelled' }], ...extra }, { updateTime: doc.updateTime });
                 if (!ok) throw new HttpError(409, 'Replenishment re-planned this request at the same moment. Refresh and try again.');
                 const until = new Date(Date.now() + 7 * 86_400_000).toISOString();
                 const [keyPath, legacyPath] = RPL_KEYS(ctx.orgId, rplKeyOf(d));
@@ -820,6 +813,31 @@ export const replenishmentVerificationRoutes = {
                 await record(ctx, 'org.inventory.replenishment.dismiss', id, `Replenishment request dismissed: ${str(cur.materialNumber)} for ${str(cur.warehouseCode)}. ${reason}`.slice(0, 400));
                 return { ok: true, id, status: 'cancelled' };
             });
+}
+
+/** Stock lines (a material for a warehouse) of a requirement, and a fingerprint of what the stores released. */
+export const stockLinesOf = (d: Obj) => objs(d.lines).filter((l) => str(l.materialId) && str(l.warehouseId));
+export const stockHash = (d: Obj) => stockLinesOf(d).map((l) => `${Number(l.no)}:${str(l.materialId)}@${str(l.warehouseId)}=${Number(l.quantity) || 0}`).sort().join('|');
+/** Why procurement cannot take this requirement yet ('' when it may): stock lines need a current stores release. */
+export function storesGate(d: Obj): string {
+    if (!stockLinesOf(d).length) return '';
+    const r = isObj(d.storesRelease) ? d.storesRelease : {};
+    if (str(r.status) !== 'released') return 'The stores have not released this requirement yet. Stock for a warehouse is reviewed in Inventory > Requirements (stock, pipeline, reservations and lead time) before procurement processes it.';
+    if (str(r.hash) !== stockHash(d)) return 'The stock lines changed after the stores released this requirement. The stores must review and release it again.';
+    return '';
+}
+
+export const replenishmentVerificationRoutes = {
+    // The planner checks quantity, date, urgency, unit and GL account; the request then follows the normal manager
+    // approval (and chart of authority) as the planner's own requirement.
+    'POST /api/org/inventory/replenishment/verify': [
+        orgRoute('org.inventory.replenishment.verify', 'INV.replenishment.verify', async (ctx) => {
+            return verifyReplenishment(ctx, str(ctx.body.id), ctx.body);
+        }),
+    ],
+    'POST /api/org/inventory/replenishment/dismiss': [
+        orgRoute('org.inventory.replenishment.dismiss', 'INV.replenishment.verify', async (ctx) => {
+            return dismissReplenishment(ctx, str(ctx.body.id), reasonOf(ctx.body));
         }),
     ],
 };
@@ -1173,6 +1191,8 @@ export const purchaseRequirementRoutes = {
                 currency: str(ctx.org.data.currencyCode),
                 version: Number(d.version) || 1,
                 can: f,
+                storesGate: ['approved', 'pending_approval', 'unverified'].includes(str(d.status)) ? storesGate(d) : '',
+                storesRelease: isObj(d.storesRelease) ? { status: str(d.storesRelease.status), byName: str(d.storesRelease.byName), at: str(d.storesRelease.at), note: str(d.storesRelease.note) } : null,
                 mine: str(d.requesterUid) === ctx.uid,
             };
         }),
@@ -1244,6 +1264,9 @@ export const purchaseRequirementRoutes = {
                 if (!covers(scope, objs(d.lines))) throw new HttpError(403, 'This requirement belongs to another buyer group.');
                 if (str(d.requesterUid) === ctx.uid && !bypass(ctx, 'prc.requirement.desk_independence')) throw new HttpError(403, 'You cannot acknowledge your own requirement.');
                 if (approvedByMe(ctx, d) && !bypass(ctx, 'prc.requirement.desk_independence')) throw new HttpError(403, 'You approved this requirement, so you cannot also acknowledge it.');
+                // Stock for a warehouse goes to procurement only after the stores have reviewed and released it.
+                const gate = storesGate(d);
+                if (gate && !bypass(ctx, 'prc.requirement.stores_release')) throw new HttpError(409, gate);
                 return { patch: { status: 'acknowledged', acknowledgedBy: ctx.uid, acknowledgedAt: nowIso() }, note: '', label: 'Acknowledged: offline quotation started' };
             });
         }),

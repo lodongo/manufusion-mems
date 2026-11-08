@@ -119,6 +119,8 @@ interface DetailFull extends Omit<Row, 'attachments'> {
     mine: boolean;
     trail?: Trail;
     can: { edit: boolean; submit: boolean; discard: boolean; cancel: boolean; approve: boolean; reject: boolean; returnManager: boolean; acknowledge: boolean; returnDesk: boolean };
+    storesGate?: string;
+    storesRelease?: { status: string; byName: string; at: string; note: string } | null;
 }
 interface TrailDoc { id: string; number: string; status: string }
 interface Trail {
@@ -1403,6 +1405,7 @@ function Detail({ id }: { id: string }) {
             {notice && <Alert tone='success'>{notice}</Alert>}
             {problem && <Alert tone='error'>{problem}</Alert>}
             {data.status === 'returned_user' && data.returnReason && <Alert tone='warn'>Returned: {data.returnReason}</Alert>}
+            {data.storesGate ? <Alert tone='info'>{data.storesGate}</Alert> : data.storesRelease?.status === 'released' ? <Alert tone='success'>Released by the stores ({data.storesRelease.byName}, {data.storesRelease.at.slice(0, 10)}){data.storesRelease.note ? `: ${data.storesRelease.note}` : ''}</Alert> : null}
             {c.edit && o?.approver.problem && <Alert tone='error'>{o.approver.problem}</Alert>}
             <section className='space-y-2 rounded-2xl border border-line bg-panel p-3'>
                 <div className='flex flex-wrap items-center gap-2'>
