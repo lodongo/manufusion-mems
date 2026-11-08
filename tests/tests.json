@@ -1208,5 +1208,25 @@
       "Run the audit on different days: confirm the score and excess/risk trend lines; Inventory > Setup > Material audits: confirm the register (search, filter, Excel) and the organization trend"
     ],
     "expected": "Gaps and misalignments are visible per material with their value at risk or tied up, and their trend over time; manual changes follow the change control setup."
+  },
+  {
+    "name": "Quotation with fewer quotes than the chart of authority: reason, waiver approval, then requisition and PO",
+    "description": "A quotation can be recommended with fewer quotes (even one) than the chart of authority asks for, with a written reason. A fewer-quotes waiver is then routed through the chart of authority for the recommended value; approvers hold PRC.quotes.waiver, cannot be the recommender, and each level is a different person. Until it is approved the quotation cannot become a requisition (and the purchase order check fails); rejecting reopens the quotation. Approved quotations show Make requisitions on the Analysis tab. Quotations recommended earlier with a shortfall can request the waiver.",
+    "sanity": true,
+    "viewport": "mobile",
+    "covers": [
+      "fewer quotes waiver",
+      "quotation to requisition",
+      "chart of authority"
+    ],
+    "steps": [
+      "Quotation with one quote: on Analysis recommend it with a reason of 20+ characters and confirm the waiver card shows the chart-of-authority levels as pending",
+      "Purchase requisitions: confirm the quotation is not offered yet; Make requisitions is not shown",
+      "As the recommender, confirm you cannot approve; as an approver (Procurement level 4 at the right level) approve each level with the risk acknowledgement",
+      "After the last level, confirm Make requisitions appears on Analysis and in Purchase requisitions; continue to the purchase order and confirm the check 'Fewer quotes approved' warns with the approver",
+      "On another quotation reject the waiver with a reason and confirm it returns to collecting quotes",
+      "On a quotation recommended earlier with one quote, Request waiver approval with a reason"
+    ],
+    "expected": "One quote is possible, but only with a reason and an approved, audited waiver before the requisition and purchase order."
   }
 ]

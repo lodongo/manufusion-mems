@@ -237,13 +237,26 @@ interface CaseOut extends Row {
     quotes: Quote[];
     ranking: Ranked[];
     signs: Sign[];
-    recommendation: { quoteId: string; vendorName: string; total: number; score: number; rank: number | null; reason: string; shortfallReason: string; byName: string; at: string } | null;
+    recommendation: { quoteId: string; vendorName: string; total: number; base?: number; score: number; rank: number | null; reason: string; shortfallReason: string; byName: string; at: string; waiver?: Waiver | null } | null;
+    lastWaiver?: (Waiver & { rejectedByName?: string; rejectedAt?: string; rejectReason?: string }) | null;
     authority: Authority;
     evaluation: { criteria: Criterion[] };
     history: Array<{ at: string; byName: string; action: string; note: string; from: string; to: string }>;
     currency: string;
     ratesAsOf: string;
-    can: { review: boolean; invite: boolean; record: boolean; technical: boolean; sign: boolean; recommend: boolean; reopen: boolean; cancel: boolean };
+    can: { review: boolean; invite: boolean; record: boolean; technical: boolean; sign: boolean; recommend: boolean; reopen: boolean; cancel: boolean; waiverRequest: boolean; waiverDecide: boolean; waiverWhy: string; requisition: boolean };
+}
+interface Waiver {
+    status: 'pending' | 'approved' | 'rejected';
+    reason: string;
+    received: number;
+    required: number;
+    value: number;
+    steps: Array<{ level: string; title: string; positionTitle: string; status: string; byName: string; at: string; note: string }>;
+    requestedByName: string;
+    requestedAt: string;
+    approvedAt?: string;
+    approvedByName?: string;
 }
 interface VendorHit {
     id: string;
@@ -1151,7 +1164,7 @@ function AnalysisTab({ c, o, confirm }: { c: CaseOut; o: Options; confirm: Confi
         confirm.ask(
             {
                 title: `Recommend ${c.ranking.find((r) => r.quoteId === pick)?.vendorName ?? 'this vendor'}`,
-                message: `The quotation moves to Recommended. The chart of authority then shows who approves the spend of ${money(c.ranking.find((r) => r.quoteId === pick)?.base, c.currency)}. Quotes can no longer be changed unless it is reopened.`,
+                message: `The quotation moves to Recommended. The chart of authority then shows who approves the spend of ${money(c.ranking.find((r) => r.quoteId === pick)?.base, c.currency)}. Quotes can no longer be changed unless it is reopened.${short ? ` With ${c.received} of ${c.authority.minQuotes} quotes, a waiver goes to the chart of authority for approval; the quotation becomes a requisition and purchase order only once it is approved.` : ''}`,
                 confirmLabel: 'Recommend',
                 acknowledge: 'I have checked the analysis and the vendor documents.',
             },
@@ -1267,10 +1280,36 @@ function AnalysisTab({ c, o, confirm }: { c: CaseOut; o: Options; confirm: Confi
                 )}
             </section>
 
-            {c.recommendation ? (
-                <Alert tone='success'>
-                    Recommended: {c.recommendation.vendorName}, {money(c.recommendation.total, c.currency)}, score {c.recommendation.score}. By {c.recommendation.byName} on {fmtDate(c.recommendation.at)}.{c.recommendation.reason ? ` ${c.recommendation.reason}` : ''}
+            {!c.recommendation && c.lastWaiver?.status === 'rejected' && (
+                <Alert tone='warn'>
+                    The fewer-quotes waiver was rejected by {c.lastWaiver.rejectedByName} on {fmtDate(c.lastWaiver.rejectedAt ?? '')}: {c.lastWaiver.rejectReason}. Get more quotes or recommend again with a new reason.
                 </Alert>
+            )}
+            {c.recommendation ? (
+                <>
+                    <Alert tone='success'>
+                        Recommended: {c.recommendation.vendorName}, {money(c.recommendation.total, c.currency)}, score {c.recommendation.score}. By {c.recommendation.byName} on {fmtDate(c.recommendation.at)}.{c.recommendation.reason ? ` ${c.recommendation.reason}` : ''}
+                    </Alert>
+                    <WaiverCard c={c} confirm={confirm} />
+                    {c.can.requisition && (
+                        <section className='space-y-2 rounded-2xl border border-line bg-panel p-3'>
+                            <h2 className='text-sm font-semibold text-ink'>Proceed to purchase order</h2>
+                            <p className='text-xs text-muted'>Makes the requisition(s) from this recommendation. The person who raised the requirement confirms them, then the purchase order is prepared and approved under the chart of authority.</p>
+                            <Button
+                                onClick={() =>
+                                    confirm.ask(
+                                        { title: 'Make the requisition(s)?', message: `${c.recommendation!.vendorName}, ${money(c.recommendation!.total, c.currency)}. One requisition is made for each kind of purchase (materials, services, assets).`, confirmLabel: 'Make requisitions' },
+                                        async () => {
+                                            await callBackend('/api/org/procurement/requisitions/create', { quotationId: c.id });
+                                        }
+                                    )
+                                }
+                            >
+                                Make requisitions
+                            </Button>
+                        </section>
+                    )}
+                </>
             ) : (
                 c.can.recommend && (
                     <section className='space-y-2 rounded-2xl border border-line bg-panel p-3'>
@@ -1293,6 +1332,83 @@ function AnalysisTab({ c, o, confirm }: { c: CaseOut; o: Options; confirm: Confi
                 )
             )}
         </div>
+    );
+}
+
+/** Going ahead with fewer quotes: the reason, the chart-of-authority levels and the approve / reject actions. */
+function WaiverCard({ c, confirm }: { c: CaseOut; confirm: Confirm }) {
+    const w = c.recommendation?.waiver;
+    if (!w && !c.can.waiverRequest) return null;
+    if (!w)
+        return (
+            <section className='space-y-2 rounded-2xl border border-amber-500/50 bg-panel p-3'>
+                <h2 className='text-sm font-semibold text-ink'>Fewer quotes than needed</h2>
+                <p className='text-xs text-muted'>
+                    {c.received} of {c.authority.minQuotes} quote(s). Before this quotation can become a requisition and purchase order, a waiver must be approved through the chart of authority.
+                </p>
+                <Button
+                    onClick={() =>
+                        confirm.ask(
+                            { title: 'Request the fewer-quotes waiver?', message: 'The waiver goes to the approvers of the chart of authority for the recommended value. You cannot approve it yourself.', confirmLabel: 'Request approval', reason: { label: 'Why are fewer quotes acceptable?', minLength: 20 } },
+                            async (reason) => {
+                                await callBackend(`${API}/waiver/request`, { id: c.id, reason });
+                            }
+                        )
+                    }
+                >
+                    Request waiver approval
+                </Button>
+            </section>
+        );
+    const decide = (action: 'approve' | 'reject') =>
+        confirm.ask(
+            {
+                title: action === 'approve' ? 'Approve going ahead with fewer quotes?' : 'Reject the waiver?',
+                message: action === 'approve' ? `${w.received} of ${w.required} quote(s) for ${money(w.value, c.currency)}. Reason given: ${w.reason}` : 'The quotation is reopened so more quotes can be collected; evaluators sign again.',
+                confirmLabel: action === 'approve' ? 'Approve waiver' : 'Reject',
+                tone: action === 'approve' ? 'primary' : 'danger',
+                ...(action === 'approve' ? { acknowledge: 'I accept the risk of buying with less competition than the chart of authority asks for.' } : { reason: { label: 'Reason for rejecting', minLength: 20 } }),
+            },
+            async (reason) => {
+                await callBackend(`${API}/waiver/decide`, { id: c.id, action, reason });
+            }
+        );
+    return (
+        <section className={`space-y-2 rounded-2xl border bg-panel p-3 ${w.status === 'approved' ? 'border-emerald-500/50' : 'border-amber-500/50'}`}>
+            <div className='flex items-center justify-between gap-2'>
+                <h2 className='text-sm font-semibold text-ink'>Fewer-quotes waiver</h2>
+                <Badge tone={w.status === 'approved' ? 'brand' : 'warn'}>{w.status === 'approved' ? 'Approved' : 'Waiting for approval'}</Badge>
+            </div>
+            <p className='text-xs text-soft'>
+                {w.received} of {w.required} quote(s) · {money(w.value, c.currency)} · requested by {w.requestedByName} on {fmtDate(w.requestedAt)}
+            </p>
+            <p className='text-xs text-muted'>Reason: {w.reason}</p>
+            {w.steps.length > 0 ? (
+                <ol className='space-y-1'>
+                    {w.steps.map((x) => (
+                        <li key={x.level} className='flex items-center justify-between gap-2 rounded-lg border border-line px-2 py-1.5 text-xs'>
+                            <span className='min-w-0 text-soft'>
+                                <span className='text-brandsoft'>{x.level}</span> {x.title} · {x.positionTitle}
+                                {x.status === 'approved' && <span className='block text-muted'>{x.byName}, {fmtDate(x.at)}</span>}
+                            </span>
+                            <Badge tone={x.status === 'approved' ? 'brand' : 'muted'}>{x.status === 'approved' ? 'Approved' : 'Pending'}</Badge>
+                        </li>
+                    ))}
+                </ol>
+            ) : (
+                <p className='text-xs text-muted'>One independent approval.</p>
+            )}
+            {w.status === 'approved' && <p className='text-xs text-emerald-300'>Approved by {w.approvedByName} on {fmtDate(w.approvedAt ?? '')}. The quotation can go on to a requisition and purchase order.</p>}
+            {w.status === 'pending' && c.can.waiverWhy && <p className='text-xs text-amber-300'>{c.can.waiverWhy}</p>}
+            {c.can.waiverDecide && (
+                <div className='grid grid-cols-2 gap-2'>
+                    <Button variant='danger' onClick={() => decide('reject')}>
+                        Reject
+                    </Button>
+                    <Button onClick={() => decide('approve')}>Approve</Button>
+                </div>
+            )}
+        </section>
     );
 }
 

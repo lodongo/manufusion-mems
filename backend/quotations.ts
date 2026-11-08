@@ -7,7 +7,7 @@ import { KIND_LABEL, LINE_KINDS, can, requireProcurement, requirementsPath, type
 import { METHODS, describeApproval, getAuthority, resolveAuthority } from './procurementPolicy';
 import { covers, deskScope, inScope, lineKeyOf, ownersOf, type DeskScope } from './buyerGroups';
 import { metaList, vendorsPath } from './vendors';
-import { lastPricesFor } from './purchaseOrders';
+import { approvalRoute, lastPricesFor, myPositions, type Step } from './purchaseOrders';
 
 // ---------------------------------------------------------------------------
 // Quotations (QTN + 9 digits): procurement works an acknowledged purchase requirement towards an award.
@@ -301,7 +301,7 @@ function analyse(c: Obj, quotes: Obj[], vendors: Map<string, Doc>, cfg: EvalConf
 
 // ----- Access -----
 
-const canView = (ctx: OrgContext) => can(ctx, 'PRC.quotes.view') || can(ctx, 'PRC.quotes.manage') || can(ctx, 'PRC.quotes.evaluate');
+const canView = (ctx: OrgContext) => can(ctx, 'PRC.quotes.view') || can(ctx, 'PRC.quotes.manage') || can(ctx, 'PRC.quotes.evaluate') || can(ctx, 'PRC.quotes.waiver');
 function requireView(ctx: OrgContext) {
     requireProcurement(ctx);
     if (!canView(ctx)) throw new HttpError(403, 'You do not have permission to view quotations.');
@@ -314,7 +314,7 @@ const visibleTo = (scope: DeskScope, d: Obj) => covers(scope, objs(d.lines));
 /** Buyers see their groups' cases. Evaluators (the technical team) see every case they may be asked to evaluate. */
 async function scopeOf(ctx: OrgContext): Promise<DeskScope> {
     const s = await deskScope(ctx);
-    return !s.all && can(ctx, 'PRC.quotes.evaluate') ? { ...s, all: true } : s;
+    return !s.all && (can(ctx, 'PRC.quotes.evaluate') || can(ctx, 'PRC.quotes.waiver')) ? { ...s, all: true } : s;
 }
 
 async function lock<T>(ctx: OrgContext, id: string, fn: () => Promise<T>): Promise<T> {
@@ -364,6 +364,45 @@ async function change(ctx: OrgContext, body: Obj, action: string, write: boolean
 }
 
 const history = (d: Obj) => objs(d.history);
+
+// ----- Fewer quotes than the chart of authority asks for -----
+// Recommending with fewer quotes needs a written reason and then an approved waiver before the quotation can become a
+// requisition (and so a purchase order). The waiver is routed through the chart of authority on the recommended value
+// (the requester's reporting line and the job-role levels); approvers hold PRC.quotes.waiver, are never the person who
+// recommended, and each level is approved by a different person.
+interface Waiver {
+    status: 'pending' | 'approved';
+    reason: string;
+    received: number;
+    required: number;
+    value: number;
+    steps: Step[];
+    authorityVersion: unknown;
+    requestedBy: string;
+    requestedByName: string;
+    requestedAt: string;
+    approvedAt?: string;
+}
+
+async function buildWaiver(ctx: OrgContext, d: Obj, value: number, reason: string, received: number, required: number): Promise<Waiver> {
+    const authority = await getAuthority(ctx.orgId);
+    const route = await approvalRoute(ctx.orgId, ctx.me, value, authority, ctx.testMode === true);
+    if (route.problems.length && !bypass(ctx, 'prc.quotes.waiver_route')) throw new HttpError(409, `The fewer-quotes waiver cannot be routed through the chart of authority: ${route.problems.join(' ')}`);
+    return { status: 'pending', reason, received, required, value: round(value), steps: route.steps, authorityVersion: route.authorityVersion ?? authority.version, requestedBy: ctx.uid, requestedByName: nameOfUser(ctx.me), requestedAt: nowIso() };
+}
+
+/** The current step of a waiver this person may approve, or why not. */
+function waiverTurn(ctx: OrgContext, w: Obj): { ok: boolean; why: string; step: Obj | null } {
+    if (str(w.status) !== 'pending') return { ok: false, why: 'Nothing waiting for approval.', step: null };
+    if (!can(ctx, 'PRC.quotes.waiver')) return { ok: false, why: 'Approving fewer quotes needs the waiver approval permission.', step: null };
+    if (str(w.requestedBy) === ctx.uid && ctx.testMode !== true) return { ok: false, why: 'You recommended this quotation, so someone else must approve the waiver.', step: null };
+    const steps = objs(w.steps);
+    const step = steps.find((x) => str(x.status) === 'pending') ?? null;
+    if (!step) return { ok: true, why: '', step: null };
+    if (steps.some((x) => str(x.status) === 'approved' && str(x.by) === ctx.uid) && ctx.testMode !== true) return { ok: false, why: 'You approved an earlier level, so a different person must approve this one.', step };
+    if (!myPositions(ctx.me).includes(str(step.positionCode)) && ctx.testMode !== true) return { ok: false, why: `Level ${str(step.level)} (${str(step.title)}) is approved by ${str(step.positionTitle)}.`, step };
+    return { ok: true, why: '', step };
+}
 const estimateOf = (d: Obj): number | null => {
     const manual = num(o(d.review).estimateTotal);
     if (manual !== null && !Number.isNaN(manual) && manual > 0) return manual;
@@ -695,7 +734,12 @@ export const quotationRoutes = {
                     recommend: can(ctx, 'PRC.quotes.manage') && status === 'sourcing',
                     reopen: can(ctx, 'PRC.quotes.manage') && status === 'recommended',
                     cancel: can(ctx, 'PRC.quotes.manage') && OPEN.includes(status),
+                    waiverRequest: can(ctx, 'PRC.quotes.manage') && status === 'recommended' && !isObj(rec.waiver) && quotes.length < (Number(o(d.review).minQuotes) || minQuotes),
+                    waiverDecide: status === 'recommended' && isObj(rec.waiver) && waiverTurn(ctx, o(rec.waiver)).ok,
+                    waiverWhy: status === 'recommended' && isObj(rec.waiver) && str(o(rec.waiver).status) === 'pending' ? waiverTurn(ctx, o(rec.waiver)).why : '',
+                    requisition: can(ctx, 'PRC.prq.manage') && status === 'recommended' && (quotes.length >= (Number(o(d.review).minQuotes) || minQuotes) || str(o(rec.waiver).status) === 'approved'),
                 },
+                lastWaiver: d.lastWaiver ?? null,
             };
         }),
     ],
@@ -961,10 +1005,59 @@ export const quotationRoutes = {
                 if (objs(d.quotes).length < minQuotes && shortfall.length < 20) throw new HttpError(400, `The chart of authority asks for ${minQuotes} quote(s) and ${objs(d.quotes).length} were received. Explain the shortfall in at least 20 characters.`);
                 // Platform testing override: one valid sign-off (the super admin's own) stands in for the evaluation panel.
                 if (validSigns(d).length < minSigns && !(validSigns(d).length >= 1 && bypass(ctx, 'prc.quotes.min_evaluators'))) throw new HttpError(409, `${minSigns} evaluator sign-off(s) are needed on the current quotes and ${validSigns(d).length} are valid. A sign-off lapses when a quote changes.`);
-                const rec = { quoteId: chosen.quoteId, vendorId: chosen.vendorId, vendorName: chosen.vendorName, total: chosen.total, base: chosen.base, score: chosen.score, rank: chosen.rank, reason, shortfallReason: shortfall, by: ctx.uid, byName: nameOfUser(ctx.me), at: nowIso(), evaluationVersion: cfg.version, authorityVersion: authority.version, ranking: ranked.map((r) => ({ vendorName: r.vendorName, total: r.total, base: r.base, score: r.score, rank: r.rank, flags: r.flags })) };
-                return { patch: { status: 'recommended', recommendation: rec }, event: 'recommended', note: `${chosen.vendorName}, ${chosen.total.toLocaleString()}, score ${chosen.score}${reason ? `. ${reason}` : ''}`.slice(0, 380), label: `Recommended: ${chosen.vendorName}` };
+                const received = objs(d.quotes).length;
+                const waiver = received < minQuotes ? await buildWaiver(ctx, d, chosen.base ?? chosen.total, shortfall, received, minQuotes) : null;
+                const rec = { quoteId: chosen.quoteId, vendorId: chosen.vendorId, vendorName: chosen.vendorName, total: chosen.total, base: chosen.base, score: chosen.score, rank: chosen.rank, reason, shortfallReason: received < minQuotes ? shortfall : '', waiver, by: ctx.uid, byName: nameOfUser(ctx.me), at: nowIso(), evaluationVersion: cfg.version, authorityVersion: authority.version, ranking: ranked.map((r) => ({ vendorName: r.vendorName, total: r.total, base: r.base, score: r.score, rank: r.rank, flags: r.flags })) };
+                return { patch: { status: 'recommended', recommendation: rec }, event: 'recommended', note: `${chosen.vendorName}, ${chosen.total.toLocaleString()}, score ${chosen.score}${reason ? `. ${reason}` : ''}${waiver ? `. ${received} of ${minQuotes} quotes: waiver sent for approval (${waiver.steps.map((x) => x.level).join(', ') || 'one approver'}). ${shortfall}` : ''}`.slice(0, 380), label: `Recommended: ${chosen.vendorName}${waiver ? ' (fewer quotes: waiver pending)' : ''}` };
             })
         ),
+    ],
+
+    // A quotation recommended with fewer quotes before waivers existed: ask for the waiver now (the reason is kept).
+    'POST /api/org/procurement/quotes/waiver/request': [
+        orgRoute('org.procurement.quotes.waiver.request', 'PRC.quotes.manage', async (ctx) =>
+            change(ctx, ctx.body, 'waiver_request', true, async (d) => {
+                if (str(d.status) !== 'recommended') throw new HttpError(409, 'Only a recommended quotation can ask for a fewer-quotes waiver.');
+                const rec = o(d.recommendation);
+                if (isObj(rec.waiver)) throw new HttpError(409, 'A waiver is already recorded for this recommendation.');
+                const authority = await getAuthority(ctx.orgId);
+                const received = objs(d.quotes).length;
+                const required = Number(o(d.review).minQuotes) || resolveAuthority(authority, estimateOf(d) ?? Number(rec.base) ?? 0).sourcing.minQuotes;
+                if (received >= required) throw new HttpError(409, `${received} quote(s) meet the ${required} needed; no waiver is needed.`);
+                const reason = cleanText(ctx.body.reason || rec.shortfallReason).slice(0, 600);
+                if (reason.length < 20) throw new HttpError(400, 'Explain why fewer quotes are acceptable in at least 20 characters.');
+                const waiver = await buildWaiver(ctx, d, Number(rec.base) || Number(rec.total) || 0, reason, received, required);
+                return { patch: { recommendation: { ...rec, shortfallReason: reason, waiver } }, event: 'waiver requested', note: `${received} of ${required} quotes. ${reason}`.slice(0, 380), label: 'Fewer-quotes waiver requested' };
+            })
+        ),
+    ],
+
+    // Approve (level by level along the chart of authority) or reject the waiver. Rejecting reopens the quotation.
+    'POST /api/org/procurement/quotes/waiver/decide': [
+        orgRoute('org.procurement.quotes.waiver.decide', 'PRC.quotes.waiver', async (ctx) => {
+            const action = str(ctx.body.action);
+            if (!['approve', 'reject'].includes(action)) throw new HttpError(400, 'Approve or reject the waiver.');
+            const note = cleanText(ctx.body.reason).slice(0, 400);
+            if (action === 'reject' && note.length < 20) throw new HttpError(400, 'Give the reason for rejecting in at least 20 characters.');
+            return change(ctx, ctx.body, 'waiver_' + action, false, async (d) => {
+                if (str(d.status) !== 'recommended') throw new HttpError(409, 'Only a recommended quotation has a waiver to decide.');
+                const rec = o(d.recommendation);
+                const w = o(rec.waiver);
+                const turn = waiverTurn(ctx, w);
+                if (!turn.ok) throw new HttpError(403, turn.why);
+                if (ctx.testMode === true && (str(w.requestedBy) === ctx.uid || (turn.step && !myPositions(ctx.me).includes(str(turn.step.positionCode))))) bypass(ctx, 'prc.quotes.waiver_approver');
+                const at = nowIso();
+                const byName = nameOfUser(ctx.me);
+                if (action === 'reject')
+                    return { patch: { status: 'sourcing', recommendation: null, rev: (Number(d.rev) || 0) + 1, lastWaiver: { ...w, status: 'rejected', rejectedBy: ctx.uid, rejectedByName: byName, rejectedAt: at, rejectReason: note } }, event: 'waiver rejected', note, label: 'Fewer-quotes waiver rejected: quotation reopened' };
+                const steps = objs(w.steps).map((x) => ({ ...x }));
+                const step = steps.find((x) => str(x.status) === 'pending');
+                if (step) Object.assign(step, { status: 'approved', by: ctx.uid, byName, at, note });
+                const done = !steps.some((x) => str(x.status) === 'pending');
+                const waiver = { ...w, steps, ...(done ? { status: 'approved', approvedAt: at, approvedBy: ctx.uid, approvedByName: byName } : {}) };
+                return { patch: { recommendation: { ...rec, waiver } }, event: done ? 'waiver approved' : 'waiver level approved', note: `${step ? `${str(step.level)} ${str(step.title)}` : 'Approved'}${note ? `. ${note}` : ''}`.slice(0, 380), label: done ? 'Fewer-quotes waiver approved: the quotation can become a requisition' : `Fewer-quotes waiver approved at ${str(step?.level)}` };
+            });
+        }),
     ],
 
     'POST /api/org/procurement/quotes/reopen': [
