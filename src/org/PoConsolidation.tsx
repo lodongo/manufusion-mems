@@ -26,7 +26,7 @@ const scopeLabel = (x: Scope) => `${x.categoryName || x.categoryCode} › ${x.su
 // ----- New order with a specification -----
 
 export function SpecOrderForm({ onClose }: { onClose: () => void }) {
-    const { data, error, loading } = useLoad(() => callBackend<{ currency: string; vendors: Array<{ id: string; number: string; name: string; currency: string; scopes: Scope[] }> }>(`${API}/orders/spec-options`, {}), []);
+    const { data, error, loading } = useLoad(() => callBackend<{ currency: string; currencies: Array<{ code: string; name: string }>; vendors: Array<{ id: string; number: string; name: string; currency: string; scopes: Scope[] }> }>(`${API}/orders/spec-options`, {}), []);
     const confirm = useConfirm();
     const [vendorId, setVendorId] = useState('');
     const [kind, setKind] = useState('');
@@ -45,8 +45,8 @@ export function SpecOrderForm({ onClose }: { onClose: () => void }) {
     const cat = categories.some(([c]) => c === category) ? category : categories.length === 1 ? categories[0][0] : '';
     const options = ofKind.filter((x) => x.categoryCode === cat);
     const chosen = options.filter((x) => picked.has(scopeId(x)));
-    const cur = (currency || vendor?.currency || data.currency).toUpperCase();
-    const problems = [...(!vendor ? ['Choose the vendor.'] : []), ...(vendor && !cat ? ['Choose the one category this order holds.'] : []), ...(vendor && cat && !chosen.length ? ['Tick at least one subcategory.'] : []), ...(!/^[A-Z]{3}$/.test(cur) ? ['The currency is a 3-letter code.'] : [])];
+    const cur = (currency || data.currency).toUpperCase();
+    const problems = [...(!vendor ? ['Choose the vendor.'] : []), ...(vendor && !cat ? ['Choose the one category this order holds.'] : []), ...(vendor && cat && !chosen.length ? ['Tick at least one subcategory.'] : []), ...(!data.currencies.some((c) => c.code === cur) ? ['Choose an enabled currency from the currency master.'] : [])];
     const create = () =>
         confirm.ask(
             {
@@ -146,7 +146,9 @@ export function SpecOrderForm({ onClose }: { onClose: () => void }) {
                         </div>
                     )}
                     <div className='grid grid-cols-2 gap-2'>
-                        <Field id='spec-currency' label='Currency *' maxLength={3} value={currency || vendor?.currency || data.currency} onChange={(e) => setCurrency(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))} />
+                        <SelectField id='spec-currency' label='Currency *' value={cur} onChange={(e) => setCurrency(e.target.value)}>
+                            {data.currencies.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
+                        </SelectField>
                     </div>
                     <Field id='spec-notes' label='Notes' maxLength={400} value={notes} onChange={(e) => setNotes(e.target.value)} />
                     {problems.length > 0 && vendorId && <p className='text-xs text-amber-300'>{problems[0]}</p>}
