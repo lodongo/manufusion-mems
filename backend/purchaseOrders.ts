@@ -1752,10 +1752,17 @@ export const purchaseOrderRoutes = {
     'POST /api/org/procurement/orders/spec-options': [
         orgRoute('org.procurement.orders.spec_options', 'PRC.po.manage', async (ctx) => {
             requireProcurement(ctx);
-            const [vendors, scope] = await Promise.all([listDocs(vendorsPath(ctx.orgId)), deskScope(ctx)]);
+            const [vendors, scope, currencyMaster] = await Promise.all([listDocs(vendorsPath(ctx.orgId)), deskScope(ctx), getDoc('reference/currencies')]);
+            const currencies = objs(currencyMaster?.data.items)
+                .filter((c) => c.enabled !== false && /^[A-Z]{3}$/.test(str(c.code)))
+                .map((c) => ({ code: str(c.code), name: str(c.name) || str(c.currencyName) || str(c.code) }))
+                .sort((a, b) => a.code.localeCompare(b.code));
+            const localCurrency = str(ctx.org.data.currencyCode).toUpperCase();
+            if (localCurrency && !currencies.some((c) => c.code === localCurrency)) currencies.unshift({ code: localCurrency, name: localCurrency });
             const mine = (x: Obj) => scope.all || (str(x.subcategoryCode) ? scope.keys.has(lineKeyOf({ type: str(x.kind), categoryCode: str(x.categoryCode), subcategoryCode: str(x.subcategoryCode) })) : [...scope.keys].some((k) => k.startsWith(`${str(x.kind)}|${str(x.categoryCode)}|`)));
             return {
-                currency: str(ctx.org.data.currencyCode),
+                currency: localCurrency,
+                currencies,
                 vendors: vendors
                     .filter((v) => str(v.data.status) === 'approved')
                     .map((v) => ({ id: v.id, number: str(v.data.number) || v.id, name: str(v.data.legalName), currency: str(v.data.currencyCode) || str(v.data.currency) || str(ctx.org.data.currencyCode), scopes: objs(v.data.scopes).filter(mine).map((x) => ({ kind: str(x.kind), categoryCode: str(x.categoryCode), categoryName: str(x.categoryName), subcategoryCode: str(x.subcategoryCode), subcategoryName: str(x.subcategoryName) })) }))
@@ -1774,6 +1781,9 @@ export const purchaseOrderRoutes = {
             if (!TYPE_LABEL[kind]) throw new HttpError(400, 'Choose materials, services or assets.');
             const currency = str(ctx.body.currency).toUpperCase();
             if (!/^[A-Z]{3}$/.test(currency)) throw new HttpError(400, 'Choose the currency.');
+            const currencyMaster = await getDoc('reference/currencies');
+            const enabledCurrencies = objs(currencyMaster?.data.items).filter((c) => c.enabled !== false).map((c) => str(c.code));
+            if (currency !== str(ctx.org.data.currencyCode).toUpperCase() && !enabledCurrencies.includes(currency)) throw new HttpError(400, 'Choose an enabled currency from the currency master.');
             const picked = objs(ctx.body.scopes);
             if (!picked.length || picked.length > 30) throw new HttpError(400, 'Choose 1 to 30 categories or subcategories.');
             const [vendor, scope] = await Promise.all([getDoc(`${vendorsPath(ctx.orgId)}/${vendorId}`), deskScope(ctx)]);
