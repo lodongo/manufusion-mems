@@ -195,12 +195,12 @@ function RequestList({ setup, area }: { setup: MntSetup; area: 'requests' | 'ass
             requested = sessionStorage.getItem('mems.table.tab.' + route) || '';
             sessionStorage.removeItem('mems.table.tab.' + route);
         } catch { /* Restoring a table is optional. */ }
-        return (['all', 'open', 'mine', 'review'].includes(requested) && (requested !== 'review' || can.WR_review || can.assessment_review)
-            ? requested : (can.WR_review || can.assessment_review ? 'review' : 'all')) as Tab;
+        return (['all', 'open', 'mine', 'review'].includes(requested) && (requested !== 'review' || can.WR_review)
+            ? requested : (can.WR_review ? 'review' : 'all')) as Tab;
     });
     const { data, error, loading } = useLoad(() => callBackend<{ rows: Row[] }>('/api/org/mnt/wr/list', { view: area === 'assessments' ? 'assessment' : tab }), [tab, area]);
     const columns = useColumns();
-    const tabs: Array<[Tab, string]> = [...((can.WR_review || can.assessment_review) ? ([['review', 'To review']] as Array<[Tab, string]>) : []), ['open', 'Open'], ['mine', 'Mine'], ['all', 'All']];
+    const tabs: Array<[Tab, string]> = [...(can.WR_review ? ([['review', 'To review']] as Array<[Tab, string]>) : []), ['open', 'Open'], ['mine', 'Mine'], ['all', 'All']];
     return (
         <div className='space-y-3'>
             {area === 'requests' && <div className='flex gap-1 overflow-x-auto rounded-xl border border-slate-800 p-1'>
