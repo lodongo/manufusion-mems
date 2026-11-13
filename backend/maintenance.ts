@@ -406,8 +406,8 @@ function wrOut(doc: Doc) {
 
 /**
  * What the requester reports. Only the place is required to raise a request; title, description, source, impacts,
- * criticality and failure mode are optional and are completed at review or assessment. A value the requester gave is
- * never overwritten afterwards (see the enrich action).
+ * criticality are reported or assessed separately. Failure mode is classified in Work Assessment,
+ * never on the work request. Existing request fields are preserved for historic records.
  */
 const MAX_IMPACTS = 5;
 async function readFinding(l: Lists, b: Record<string, unknown>) {
@@ -420,7 +420,6 @@ async function readFinding(l: Lists, b: Record<string, unknown>) {
     if (impactCodes.length > MAX_IMPACTS) throw new HttpError(400, `Choose up to ${MAX_IMPACTS} impacts.`);
     const impacts = impactCodes.map((c) => findIn(l.impacts, c));
     if (impacts.some((i) => !i)) throw new HttpError(400, 'Choose impacts from the list.');
-    const failure = str(b.failureModeCode) ? pickGrouped(l.failureModes, str(b.failureModeCode), 'failure mode', false) : null;
     return {
         title,
         description,
@@ -429,7 +428,6 @@ async function readFinding(l: Lists, b: Record<string, unknown>) {
         sourceGroup: source?.group ?? '',
         ...(crit ? { criticalityCode: crit.code, criticalityLabel: crit.label, criticalityColor: crit.color } : {}),
         impacts: impacts.map((i) => ({ code: i!.code, label: i!.label, group: i!.group })),
-        ...(failure ? { failureModeCode: failure.code, failureModeLabel: `${failure.group} · ${failure.label}` } : {}),
     };
 }
 /**
@@ -494,7 +492,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         assess: status === 'under_review' && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
         return: status === 'under_review' && !assessmentStarted && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         decline: status === 'under_review' && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
-        // Review and assessment build on the request: fill what is empty, add photos, add or change the assembly.
+        // Legacy compatibility for already-open older clients; the new UI has no Add details stage.
         enrich: ['submitted', 'under_review'].includes(status) && (at(P.WR_review) || at(P.assessment_edit)) && !assessmentReviewCurrent(doc.data),
         // Fixed on the spot, no planning needed: the reviewer closes; another person confirms.
         close: ['submitted', 'under_review'].includes(status) && at(P.WR_close) && independent(ctx, !mine, 'mnt.wr.reviewer_independence') && !assessmentReviewCurrent(doc.data),
@@ -1277,7 +1275,7 @@ export const maintenanceRoutes = {
             const d = doc.data;
             // Assemblies of the request's equipment, for the reviewer or assessor who adds or changes it.
             let assemblyOptions: Array<{ id: string; code: string; name: string }> = [];
-            if (can.enrich && str(d.unitId)) {
+            if ((can.enrich || can.assess) && str(d.unitId)) {
                 const nodes = (await listDocs(col(ctx.orgId))).filter((n) => str(n.data.status) !== 'inactive');
                 const parent = new Map(nodes.map((n) => [n.id, str(n.data.parentId)]));
                 const under = (id: string) => { for (let cur = parent.get(id), i = 0; cur && i < 14; cur = parent.get(cur), i++) if (cur === str(d.unitId)) return true; return false; };
@@ -1388,8 +1386,9 @@ export const maintenanceRoutes = {
                     await done({ status: 'cancelled', cancelReason: note, closedAt: now }, 'Cancelled', 'mnt.wr.cancelled');
                     return { ok: true };
                 case 'enrich': {
-                    // Review and assessment complete the request; what the requester recorded is kept as written.
-                    deny(can.enrich, 'You cannot add details to this request.');
+                    // Legacy older clients only: new screens use requester Edit and independent Work Assessment.
+                    deny(can.enrich, 'You cannot change this request outside the allowed workflow.');
+                    if (str(ctx.body.failureModeCode)) throw new HttpError(400, 'Failure mode is selected in Work Assessment, not the work request.');
                     const d = doc.data;
                     const fields: Record<string, Plain> = {};
                     const changes: string[] = [];
@@ -1430,10 +1429,6 @@ export const maintenanceRoutes = {
                     if (f.criticalityCode && f.criticalityCode !== str(d.criticalityCode)) {
                         if (!str(d.criticalityCode)) { Object.assign(fields, { criticalityCode: f.criticalityCode, criticalityLabel: f.criticalityLabel, criticalityColor: f.criticalityColor }); changes.push(`Criticality: ${f.criticalityLabel}`); }
                         else keep('The criticality');
-                    }
-                    if (f.failureModeCode && f.failureModeCode !== str(d.failureModeCode)) {
-                        if (!str(d.failureModeCode)) { Object.assign(fields, { failureModeCode: f.failureModeCode, failureModeLabel: f.failureModeLabel }); changes.push(`Failure mode: ${f.failureModeLabel}`); }
-                        else keep('The failure mode');
                     }
                     const existing = objs(d.photos).map((x) => str(x.path));
                     const newPhotos = [...new Set(strs(ctx.body.addPhotos))].filter((x) => !existing.includes(x));
@@ -1493,7 +1488,25 @@ export const maintenanceRoutes = {
                     const b = ctx.body;
                     const evaluation = str(b.technicalEvaluation).trim().slice(0, 3000);
                     if (evaluation.length < 20) throw new HttpError(400, 'Write the technical evaluation of the request (at least 20 characters).');
-                    const nature = pickGrouped(l.failureModes, str(b.natureCode), 'nature (failure mode)')!;
+                    const nature = pickGrouped(l.failureModes, str(b.natureCode), 'failure mode')!;
+                    // A request may initially refer to equipment only. Resolve its assembly
+                    // when the technical assessment starts, before task assessment is possible.
+                    const selectedAssembly = str(b.assemblyId) || str(doc.data.assemblyId);
+                    if (!selectedAssembly) throw new HttpError(400, 'Choose the assembly before saving the assessment.');
+                    const assemblyPatch: Record<string, Plain> = {};
+                    if (selectedAssembly !== str(doc.data.assemblyId)) {
+                        if (objs(doc.data.assessmentTasks).length || str(doc.data.assessmentTasksAt))
+                            throw new HttpError(409, 'Task assessment has started; the assembly cannot be changed.');
+                        const place = await assemblyContext(ctx, selectedAssembly, P.assessment_edit);
+                        if (!place.assembly || !place.unit || place.unit.id !== str(doc.data.unitId))
+                            throw new HttpError(409, `Choose an assembly of ${str(doc.data.unitCode)} ${str(doc.data.unitName)}. The equipment of a request cannot change.`);
+                        if (place.defaultAssetTag !== str(doc.data.assetTag))
+                            throw new HttpError(409, 'The assembly does not match the equipment-linked asset of the work request.');
+                        Object.assign(assemblyPatch, {
+                            assemblyId: place.assembly.id, assemblyCode: place.assembly.code, assemblyName: place.assembly.name,
+                            path: place.path.map((x) => x.id),
+                        });
+                    }
                     const crit = pick(l.criticality, str(b.severityCode), 'severity')!;
                     const solutionCodes = [...new Set(strs(b.solutionCodes))];
                     if (!solutionCodes.length || solutionCodes.length > 5) throw new HttpError(400, 'Choose between 1 and 5 solution categories.');
@@ -1506,9 +1519,13 @@ export const maintenanceRoutes = {
                     const changedCrit = crit.code !== str(doc.data.criticalityCode);
                     await done(
                         {
+                            ...assemblyPatch,
                             technicalEvaluation: evaluation,
                             natureCode: nature.code,
                             natureLabel: `${nature.group} · ${nature.label}`,
+                            // Retain legacy consumers' names, updated exclusively by assessment.
+                            failureModeCode: nature.code,
+                            failureModeLabel: `${nature.group} · ${nature.label}`,
                             solutions: solutions.map((x) => ({ code: x!.code, label: x!.label, group: x!.group })) as unknown as Plain,
                             maintenanceTypeCode: mtype.code,
                             maintenanceTypeLabel: mtype.label,
@@ -1533,7 +1550,7 @@ export const maintenanceRoutes = {
                 }
                 case 'save_task_assessment': {
                     deny(can.assess, 'You cannot assess this request.');
-                    if (!str(doc.data.assemblyId)) throw new HttpError(409, 'Add the assembly to the request (Add details) before assessing tasks.');
+                    if (!str(doc.data.assemblyId)) throw new HttpError(409, 'Add the assembly in Work Assessment before assessing tasks.');
                     let tasks;
                     try{
                         const matrixDoc=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);

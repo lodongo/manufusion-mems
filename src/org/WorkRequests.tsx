@@ -636,7 +636,7 @@ function ReviewBlock({ label, onEdit, children }: { label: string; onEdit?: () =
 // Detail: review, assess, return, decline, convert; requester edit, resubmit, cancel
 // ---------------------------------------------------------------------------
 
-type Mode = '' | 'edit' | 'enrich' | 'close' | 'confirm_closure' | 'reject_closure' | 'assess' | 'review_assessment' | 'return_assessment' | 'return' | 'decline' | 'convert' | 'cancel';
+type Mode = '' | 'edit' | 'close' | 'confirm_closure' | 'reject_closure' | 'assess' | 'review_assessment' | 'return_assessment' | 'return' | 'decline' | 'convert' | 'cancel';
 
 function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; area: 'requests' | 'assessments' }) {
     const lists = setup.lists!;
@@ -681,7 +681,6 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
     };
 
     if (mode === 'edit') return <EditRequest detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
-    if (mode === 'enrich') return <EnrichRequest detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
     if (mode === 'close') return <CloseAtReview detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
 
     const assessed = !!r.assessment.maintenanceTypeCode && !r.assessment.headerIssue;
@@ -694,7 +693,6 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
     }
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
     if (can.close) buttons.push({ key: 'close', label: 'Close – no planning needed', icon: <Check className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('close') });
-    if (can.enrich) buttons.push({ key: 'enrich', label: r.assemblyId ? 'Add details' : 'Add assembly & details', icon: <Pencil className='h-4 w-4' />, variant: r.assemblyId ? 'secondary' : 'primary', onClick: () => setMode('enrich') });
     if (can.assess && !can.reviewAssessment) buttons.push({ key: 'assess', label: assessed ? 'Update work assessment' : 'Start work assessment', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => {setSection('assessment');setMode('assess');} });
     if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Approve assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => {setSection('summary');setMode('review_assessment');} });
     if (can.convert) buttons.push({ key: 'convert', label: 'Convert to work order', icon: <Wrench className='h-4 w-4' />, variant: assessed ? 'primary' : 'secondary', onClick: () => setMode('convert') });
@@ -750,15 +748,14 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                 {actionError && !mode && <MntGateHint message={actionError} />}
                 {section==='assessment' && !mode && <Card className='space-y-3'>
                    <p className='text-xs font-semibold uppercase tracking-wider text-emerald-300'>Separate stage · Work Assessment</p>
-                   <h2 className='text-lg font-semibold text-white'>Technical assessment and outstanding request information</h2>
-                   <p className='text-sm text-slate-300'>Review the original finding, complete missing details, assess the technical need, and add task-by-task resources and safety. The Maintenance Lead approves only a complete assessment.</p>
+                   <h2 className='text-lg font-semibold text-white'>Technical work assessment</h2>
+                   <p className='text-sm text-slate-300'>Review the original finding, identify the assembly and failure mode, assess the technical need, and add task-by-task resources and safety. The original work request stays separate from the assessment.</p>
                    <Info label='Short title' value={r.titleAuto?'Not provided':r.title}/>
                    <Info label='Finding description' value={r.description||'Not provided'}/>
                    <Info label='Source of finding' value={r.sourceLabel||'Not provided'}/>
                    <Info label='Impacts' value={r.impacts.length?r.impacts.map(i=>i.label).join('; '):'REQUIRED: add at least one impact'}/>
                    <Info label='Assembly' value={r.assemblyCode||'REQUIRED: select assembly before tasks'}/>
                    {r.assessment.headerIssue&&<p className='rounded-xl border border-amber-700/50 p-3 text-sm text-amber-200'>{r.assessment.headerIssue}</p>}
-                   {can.enrich&&<Button variant='secondary' onClick={()=>setMode('enrich')}>Complete missing request details and impacts</Button>}
                    {can.assess&&<Button onClick={()=>setMode('assess')}>{assessed?'Update technical assessment':'Start technical assessment'}</Button>}
                    <Button variant='secondary' onClick={()=>void goSection('tasks')}>Open assessment tasks, spares, services and safety</Button>
                  </Card>}
@@ -891,7 +888,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                     <Card className='space-y-2 text-sm'>
                         <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Assessment</p>
                         {r.assessment.technicalEvaluation && <Info label='Technical evaluation' value={r.assessment.technicalEvaluation} />}
-                        {r.assessment.natureLabel && <Info label='Nature' value={r.assessment.natureLabel} />}
+                        {r.assessment.natureLabel && <Info label='Failure mode' value={r.assessment.natureLabel} />}
                         {r.assessment.severityCode && <Info label='Severity' value={r.criticalityLabel} />}
                         {r.assessment.solutions.length > 0 && <Info label='Solution categories' value={r.assessment.solutions.map((x) => `${x.group} · ${x.label}`).join('; ')} />}
                         {r.assessment.maintenanceTypeLabel && <Info label='Maintenance type' value={r.assessment.maintenanceTypeLabel} />}
@@ -909,7 +906,6 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                     <Info label='Equipment unit' value={`${r.unitCode} · ${r.unitName}`} />
                     <Info label='Cost center' value={`${r.costCenterCode} · ${r.costCenterName}`} />
                     <Info label='Source of finding' value={r.sourceLabel ? `${r.sourceGroup} · ${r.sourceLabel}` : 'Not given'} />
-                    {r.failureModeLabel && <Info label='Failure mode' value={r.failureModeLabel} />}
                     <div className='border-t border-slate-800 pt-2'>
                         <p className='text-xs text-slate-500'>Impacts</p>
                         {!r.impacts.length && <p className='text-xs text-slate-400'>None given.</p>}
@@ -985,7 +981,7 @@ function AssessmentSummary({detail,canReview,busy,onApprove,onReturn}:{detail:De
       <Card className='space-y-2 text-sm'>
         <p className='font-semibold text-white'>Technical verification</p>
         <Info label='Technical evaluation' value={detail.assessment.technicalEvaluation||'Not yet written'}/>
-        <Info label='Nature' value={detail.assessment.natureLabel||'Not yet classified'}/>
+        <Info label='Failure mode' value={detail.assessment.natureLabel||'Not yet assessed'}/>
         <Info label='Severity' value={detail.assessment.severityCode?detail.criticalityLabel:'Not yet classified'}/>
         <Info label='Solution categories' value={detail.assessment.solutions.map(x=>x.group+' · '+x.label).join('; ')||'Not yet chosen'}/>
         <Info label='Maintenance type' value={detail.assessment.maintenanceTypeLabel||'Not yet classified'}/>
@@ -1051,7 +1047,8 @@ export function HistoryCard({ history }: { history: Array<{ at: string; name: st
 function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; lists: MntLists; onDone: () => void; onCancel: () => void }) {
     const a = detail.assessment;
     const [evaluation, setEvaluation] = useState(a.technicalEvaluation);
-    const [nature, setNature] = useState(a.natureCode);
+    const [assemblyId, setAssemblyId] = useState(detail.assemblyId);
+    const [nature, setNature] = useState(a.natureCode || detail.failureModeCode);
     const [severity, setSeverity] = useState(a.severityCode || detail.criticalityCode);
     const [solutions, setSolutions] = useState<string[]>(a.solutions.map((x) => x.code));
     const [mtype, setMtype] = useState(a.maintenanceTypeCode);
@@ -1061,7 +1058,8 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
     const [error, setError] = useState('');
     const missing = [
         evaluation.trim().length >= 20 ? '' : 'technical evaluation (20+ characters)',
-        nature ? '' : 'nature',
+        assemblyId ? '' : 'assembly',
+        nature ? '' : 'failure mode',
         severity ? '' : 'severity',
         solutions.length ? '' : 'solution categories',
         mtype ? '' : 'maintenance type',
@@ -1070,7 +1068,7 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
         setBusy(true);
         setError('');
         try {
-            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'assess', technicalEvaluation: evaluation.trim(), natureCode: nature, severityCode: severity, solutionCodes: solutions, maintenanceTypeCode: mtype, priorityCode: prio, note: note.trim() });
+            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'assess', technicalEvaluation: evaluation.trim(), assemblyId, natureCode: nature, severityCode: severity, solutionCodes: solutions, maintenanceTypeCode: mtype, priorityCode: prio, note: note.trim() });
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save the assessment.');
@@ -1082,10 +1080,17 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
         <Card className='space-y-3'>
             <p className='font-medium text-white'>Work assessment</p>
             <p className='text-xs text-slate-400'>Verify the need technically and choose the solution. Add the tasks (spares, skills, people, tools, services, machine status, LOTO and permits) on the Tasks tab. A technical supervisor approves it.</p>
+            <SelectField id='as-assembly' label='Assembly to assess *' value={assemblyId} disabled={detail.assessmentTasks.length > 0} onChange={(e) => setAssemblyId(e.target.value)}>
+                <option value=''>Choose the assembly</option>
+                {detail.assemblyOptions.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
+                {detail.assemblyId && !detail.assemblyOptions.some((a) => a.id === detail.assemblyId) && <option value={detail.assemblyId}>{detail.assemblyCode} · {detail.assemblyName}</option>}
+            </SelectField>
+            {detail.assessmentTasks.length > 0 && <p className='text-xs text-slate-400'>The assembly cannot change once task assessment has been saved.</p>}
             <TextArea id='as-eval' label='1. Technical evaluation of the request *' rows={4} maxLength={3000} placeholder='What was verified, the condition found and why work is needed.' value={evaluation} onChange={(e) => setEvaluation(e.target.value)} />
-            <ChoicePicker title='2. Nature (failure mode)' required groups={lists.failureModes} selected={nature ? [nature] : []} onToggle={(c) => setNature(c === nature ? '' : c)} />
+            {detail.failureModeCode && !a.natureCode && <p className='text-xs text-amber-300'>A failure mode was recorded earlier. Confirm or change it during this technical assessment.</p>}
+            <ChoicePicker title='2. Failure mode *' required groups={lists.failureModes} selected={nature ? [nature] : []} onToggle={(c) => setNature(c === nature ? '' : c)} />
             <div>
-                <p className='mb-1 text-sm text-slate-300'>2. Severity *</p>
+                <p className='mb-1 text-sm text-slate-300'>3. Severity *</p>
                 <div className='grid grid-cols-2 gap-2 sm:grid-cols-5'>
                     {lists.criticality.map((c) => {
                         const color = critColor(c.code, c.color, lists.criticality);
@@ -1098,8 +1103,8 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
                     })}
                 </div>
             </div>
-            <ChoicePicker title='3. Solution categories' required multi max={5} hint='Choose a category, then tick up to 5 solutions.' groups={lists.solutions} selected={solutions} onToggle={(c) => setSolutions((cur) => (cur.includes(c) ? cur.filter((x) => x !== c) : cur.length >= 5 ? cur : [...cur, c]))} />
-            <SelectField id='as-mtype' label='Maintenance type * (decides the GL account)' value={mtype} onChange={(e) => setMtype(e.target.value)}>
+            <ChoicePicker title='4. Solution categories' required multi max={5} hint='Choose a category, then tick up to 5 solutions.' groups={lists.solutions} selected={solutions} onToggle={(c) => setSolutions((cur) => (cur.includes(c) ? cur.filter((x) => x !== c) : cur.length >= 5 ? cur : [...cur, c]))} />
+            <SelectField id='as-mtype' label='5. Maintenance type * (decides the GL account)' value={mtype} onChange={(e) => setMtype(e.target.value)}>
                 <option value=''>Select…</option>
                 {lists.maintenanceTypes.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}
             </SelectField>
@@ -1181,105 +1186,6 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
                 <Field id='cl-confirm' label={`Type ${detail.code} to confirm`} autoComplete='off' value={typed} onChange={(e) => setTyped(e.target.value)} />
                 {missing.length > 0 && <p className='text-xs text-amber-300'>Still needed: {missing.join(', ')}.</p>}
                 {error && <MntGateHint message={error} />}
-            </div>
-        </div>
-    );
-}
-
-/**
- * Review and assessment build on the request: fill what the requester left empty, add photos and add or change the
- * assembly (of the same equipment). What the requester wrote stays as written; every change is logged.
- */
-function EnrichRequest({ detail, lists, onDone, onCancel }: { detail: Detail; lists: MntLists; onDone: () => void; onCancel: () => void }) {
-    const [assemblyId, setAssemblyId] = useState(detail.assemblyId);
-    const [title, setTitle] = useState(detail.titleAuto ? '' : detail.title);
-    const [description, setDescription] = useState(detail.description);
-    const [sourceCode, setSourceCode] = useState(detail.sourceCode);
-    const [impactCodes, setImpactCodes] = useState(detail.impacts.map((i) => i.code));
-    const [failureMode, setFailureMode] = useState(detail.failureModeCode);
-    const [photos, setPhotos] = useState<Array<{ token: string; url: string }>>([]);
-    const [uploading, setUploading] = useState(0);
-    const [busy, setBusy] = useState(false);
-    const [error, setError] = useState('');
-    const screen = useFullScreen(true);
-    const fixed = { title: !detail.titleAuto && !!detail.title, description: !!detail.description, source: !!detail.sourceCode, failure: !!detail.failureModeCode };
-    const had = detail.impacts.map((i) => i.code);
-    const tasksSaved = detail.assessmentTasks.length > 0;
-    const changed = assemblyId !== detail.assemblyId || (!fixed.title && !!title.trim()) || (!fixed.description && !!description.trim()) || (!fixed.source && !!sourceCode) || impactCodes.some((c) => !had.includes(c)) || (!fixed.failure && !!failureMode) || photos.length > 0;
-    const addPhotos = async (e: ChangeEvent<HTMLInputElement>) => {
-        const files = Array.from(e.target.files ?? []);
-        e.target.value = '';
-        for (const file of files) {
-            setUploading((n) => n + 1);
-            try {
-                const res = await callBackend<{ token: string; url: string }>('/api/org/mnt/wr/photo', { data: await compressPhoto(file) });
-                setPhotos((p) => [...p, res]);
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'The photo could not be uploaded.');
-            } finally {
-                setUploading((n) => n - 1);
-            }
-        }
-    };
-    const save = async () => {
-        setBusy(true);
-        setError('');
-        try {
-            await callBackend('/api/org/mnt/wr/action', {
-                code: detail.code, action: 'enrich',
-                assemblyId: assemblyId !== detail.assemblyId ? assemblyId : '',
-                title: fixed.title ? '' : title.trim(), description: fixed.description ? '' : description.trim(),
-                sourceCode: fixed.source ? '' : sourceCode, impactCodes: impactCodes.filter((c) => !had.includes(c)),
-                failureModeCode: fixed.failure ? '' : failureMode, addPhotos: photos.map((p) => p.token),
-            });
-            onDone();
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Could not save.');
-        } finally {
-            setBusy(false);
-        }
-    };
-    const kept = (label: string, value: string) => (
-        <div className='rounded-xl border border-line bg-panel p-3'>
-            <p className='text-xs text-slate-500'>{label} · from the requester (kept)</p>
-            <p className='mt-1 whitespace-pre-wrap text-sm text-slate-200'>{value}</p>
-        </div>
-    );
-    return (
-        <div className={screen.className} onFocusCapture={screen.keepInView}>
-            <div className='flex shrink-0 items-center gap-2 border-b border-line bg-page pb-3'>
-                <Button variant='secondary' aria-label='Back' onClick={onCancel}><ArrowLeft className='h-4 w-4' /></Button>
-                <div className='min-w-0 flex-1'><p className='truncate font-semibold text-white'>Add details · {detail.code}</p><p className='truncate text-xs text-slate-400'>Empty fields only · every change is logged</p></div>
-                <Button busy={busy} disabled={!changed || !!uploading} onClick={save}><Check className='h-4 w-4' />Save</Button>
-            </div>
-            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
-                <SelectField id='en-asm' label={`Assembly of ${detail.unitCode} ${detail.unitName}`} value={assemblyId} disabled={tasksSaved} onChange={(e) => setAssemblyId(e.target.value)}>
-                    <option value='' disabled={!!detail.assemblyId}>Not known yet</option>
-                    {detail.assemblyOptions.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
-                </SelectField>
-                {tasksSaved && <p className='text-xs text-slate-400'>Tasks are already assessed against this assembly, so it can no longer change.</p>}
-                {!detail.assemblyId && !tasksSaved && <p className='text-xs text-amber-300'>Add the assembly before assessing tasks.</p>}
-                {fixed.title ? kept('Title', detail.title) : <Field id='en-title' label='Title' maxLength={120} placeholder={detail.title} value={title} onChange={(e) => setTitle(e.target.value)} />}
-                {fixed.description ? kept('Description', detail.description) : <TextArea id='en-desc' label='Description' rows={3} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />}
-                {fixed.source ? kept('Source of the finding', `${detail.sourceGroup} · ${detail.sourceLabel}`) : <GroupPicker title='Source of the finding *' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />}
-                <ChoicePicker title={`Impacts (add up to ${MAX_IMPACTS} in total)`} multi max={MAX_IMPACTS} groups={lists.impacts} selected={impactCodes} onToggle={(c) => { if (!had.includes(c)) setImpactCodes(toggleImpact(c)); }} />
-                {fixed.failure ? kept('Failure mode', detail.failureModeLabel) : <ChoicePicker title='Failure mode' groups={lists.failureModes} selected={failureMode ? [failureMode] : []} onToggle={(c) => setFailureMode(c === failureMode ? '' : c)} />}
-                <div className='grid grid-cols-3 gap-2'>
-                    {photos.map((p) => (
-                        <div key={p.token} className='relative overflow-hidden rounded-xl border border-slate-800'>
-                            <img src={p.url} alt='New photo' className='aspect-square w-full object-cover' />
-                            <button type='button' aria-label='Remove photo' onClick={() => setPhotos((cur) => cur.filter((x) => x.token !== p.token))} className='absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-full bg-slate-950/80 text-red-300'><Trash2 className='h-4 w-4' /></button>
-                        </div>
-                    ))}
-                    {(
-                        <label className='relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-emerald-500/50 text-xs text-emerald-300'>
-                            <Camera className='h-6 w-6' />
-                            Add photo
-                            <input type='file' accept='image/*' multiple className='absolute inset-0 h-full w-full cursor-pointer opacity-0' onChange={addPhotos} />
-                        </label>
-                    )}
-                </div>
-                {error && <Alert tone='error'>{error}</Alert>}
             </div>
         </div>
     );

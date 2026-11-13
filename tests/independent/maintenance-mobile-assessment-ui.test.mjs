@@ -15,6 +15,14 @@ test('work request separates Request, Work Assessment, Assessment Tasks and Summ
  assert.match(ui,/overflow-x-hidden/);
  assert.doesNotMatch(ui,/flex gap-2 overflow-x-auto pb-1'>\s*\{buttons.map/);
 });
+test('failure mode and assembly selection belong to assessment, not request enrichment',()=>{
+ const ui=src('WorkRequests.tsx');
+ assert.doesNotMatch(ui,/function EnrichRequest/);
+ assert.doesNotMatch(ui,/Add assembly & details|Complete missing request details and impacts/);
+ assert.match(ui,/label='Assembly to assess \*'/);
+ assert.match(ui,/title='2\. Failure mode \*'/);
+ assert.match(ui,/assemblyId, natureCode: nature/);
+});
 test('tasks start as a list, with add action and individual 5-part editor (services per addendum)',()=>{
  const ui=src('MntTaskAssessment.tsx');
  assert.match(ui,/useState<TaskAssessment\[]>\(initial\)/);

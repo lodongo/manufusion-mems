@@ -1002,6 +1002,38 @@ eq = snapshot(r + '/work_requests/' + eqWr.code).data;
 assert.equal(eq.status, 'closed');
 assert.equal(eq.closure.confirmedBy, people.reviewer[0]);
 assert.equal(eq.maintenanceTypeCode, l.maintenanceTypes[0].code, 'The closure records the GL maintenance type');
+// Equipment-only requests can choose their assembly and classify failure mode in the
+// independent assessment without any request-enrichment action.
+const equipmentAssessmentWr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', {
+    equipmentId: 'CONVEYOR', assetTag: 'AST000001', title: 'Bearing noise on conveyor',
+    description: 'Intermittent vibration at the conveyor drive bearing.',
+    sourceCode: first(l.sources), impactCodes: [first(l.impacts)],
+    failureModeCode: first(l.failureModes),
+});
+const preAssessment = snapshot(r + '/work_requests/' + equipmentAssessmentWr.code).data;
+assert.equal(preAssessment.assemblyId, '');
+assert.equal(preAssessment.failureModeCode || '', '', 'Failure mode must not be collected in work request creation');
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: equipmentAssessmentWr.code, action: 'start_review' });
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
+        code: equipmentAssessmentWr.code, action: 'assess', ...header, assemblyId: 'OTHER_ASSEMBLY',
+    }),
+    /assembly of CONVEYOR/,
+);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
+    code: equipmentAssessmentWr.code, action: 'assess', ...header, assemblyId: 'GEARBOX',
+});
+const afterAssessment = snapshot(r + '/work_requests/' + equipmentAssessmentWr.code).data;
+assert.equal(afterAssessment.assemblyId, 'GEARBOX', 'Assessment links the assembly to an equipment-only request');
+assert.equal(afterAssessment.natureCode, header.natureCode, 'Failure mode is recorded by assessment');
+assert.equal(afterAssessment.failureModeCode, header.natureCode, 'Legacy failure mode remains aligned to assessment');
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'requester', {
+        code: equipmentAssessmentWr.code, action: 'edit',
+        title: 'Changed after assessment', description: 'Changed after assessment',
+        sourceCode: first(l.sources), impactCodes: [first(l.impacts)],
+    }), /before technical assessment/,
+);
 
 // ----- Period maintenance budget: proposed, approved under the Chart of Authority, committed by approved estimates -----
 const month = date.slice(0, 7);
