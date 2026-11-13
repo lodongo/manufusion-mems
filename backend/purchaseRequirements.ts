@@ -1,6 +1,7 @@
 import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, str, writeDoc, type Doc } from './core';
 import { orgRoute, type OrgContext } from './guards';
 import { bypass } from './testModeCore';
+import { mayDeferReplenishmentGl, requiresGlResolution } from './replenishmentGlException';
 import { orgUsers, record } from './org';
 import { allowedNodeIds, nextOrgCounter } from './positions';
 import { catalogItemSpec, catalogSummary, catalogTree, searchCatalog, type ItemSpec, type TreeOut } from './procurement';
@@ -366,7 +367,7 @@ async function refsOf(ctx: OrgContext) {
     };
 }
 
-async function prepareItem(ctx: OrgContext, l: Obj, no: number): Promise<Obj> {
+async function prepareItem(ctx: OrgContext, l: Obj, no: number, options: { deferMissingReplenishmentGl?: boolean } = {}): Promise<Obj> {
     const at = `Item ${no}: `;
     const refs = await refsOf(ctx);
     const type = str(l.type) as LineKind;
@@ -414,7 +415,8 @@ async function prepareItem(ctx: OrgContext, l: Obj, no: number): Promise<Obj> {
     if (!cc) throw new HttpError(400, `${at}choose a cost center that you have access to.`);
     const glCode = str(l.glCode);
     // Only accounts approved in the chart of the cost center's legal entity, open, and allowed for the cost center.
-    const glOk = await checkChosenGl(ctx.orgId, cc.id, glCode, at);
+    const glDeferred = options.deferMissingReplenishmentGl === true && mayDeferReplenishmentGl(ctx, glCode);
+    const glOk = glDeferred ? null : await checkChosenGl(ctx.orgId, cc.id, glCode, at);
 
     // Family and catalogue entry (dropdowns down to the technical attributes).
     const asked = str(l.source);
@@ -499,7 +501,8 @@ async function prepareItem(ctx: OrgContext, l: Obj, no: number): Promise<Obj> {
         costCenterCode: str(cc.data.code),
         costCenterName: str(cc.data.name),
         glCode,
-        glName: glOk.name,
+        glName: glOk?.name ?? '',
+        ...(glDeferred ? { glResolutionRequired: true } : {}),
     };
 }
 
@@ -758,14 +761,16 @@ export async function verifyReplenishment(ctx: OrgContext, id: string, input: Ob
                 const changedQty = Number(cur.quantity) !== quantity;
                 const reason = cleanText(input.reason);
                 if (changedQty && (reason.length < 10 || reason.length > 300)) throw new HttpError(400, 'Give the reason for changing the planned quantity (10 to 300 characters).');
-                const line = await prepareItem(ctx, { ...cur, source: 'warehouse', quantity, dateRequired: str(input.dateRequired) || str(cur.dateRequired), urgency: str(input.urgency) || str(cur.urgency), glCode: str(input.glCode), uomCode: str(input.uomCode) || str(cur.uomCode), costCenterId: str(cur.warehouseId) }, 10);
+                const requestedGl = str(input.glCode);
+                const deferGl = mayDeferReplenishmentGl(ctx, requestedGl);
+                const line = await prepareItem(ctx, { ...cur, source: 'warehouse', quantity, dateRequired: str(input.dateRequired) || str(cur.dateRequired), urgency: str(input.urgency) || str(cur.urgency), glCode: requestedGl, uomCode: str(input.uomCode) || str(cur.uomCode), costCenterId: str(cur.warehouseId) }, 10, { deferMissingReplenishmentGl: deferGl });
                 if (str(line.materialId) !== str(cur.materialId) || str(line.warehouseId) !== str(cur.warehouseId)) throw new HttpError(409, 'The material or warehouse of a replenishment request cannot be changed.');
                 const missing = missingOf(line);
                 if (missing.length) throw new HttpError(400, `Complete before verifying: ${missing.join(', ')}.`);
                 const approver = await approverFor(ctx, ctx.me);
                 if (approver.problem) throw new HttpError(409, approver.problem);
                 const at = nowIso();
-                const note = `${changedQty ? `Quantity ${Number(cur.quantity)} → ${quantity}. ` : ''}${reason}`.trim() || 'Verified as planned';
+                const note = (`${changedQty ? `Quantity ${Number(cur.quantity)} → ${quantity}. ` : ''}${reason}`.trim() || 'Verified as planned') + (deferGl ? '; development override: GL pending assignment before procurement acknowledgement' : '');
                 const ok = await writeDoc(path, {
                     ...d,
                     status: 'pending_approval',
@@ -777,6 +782,7 @@ export async function verifyReplenishment(ctx: OrgContext, id: string, input: Ob
                     approverTitle: approver.managerTitle,
                     source: 'replenishment',
                     lines: [{ ...line, replenishmentSource: { key: rplKeyOf(d), plannedQuantity: Number(cur.quantity) } }],
+                    ...(deferGl ? { glDeferredBy: ctx.uid, glDeferredAt: at } : {}),
                     submittedAt: at,
                     verifiedBy: ctx.uid,
                     verifiedByName: nameOfUser(ctx.me),
@@ -787,6 +793,7 @@ export async function verifyReplenishment(ctx: OrgContext, id: string, input: Ob
                     ...extra,
                 }, { updateTime: doc.updateTime });
                 if (!ok) throw new HttpError(409, 'Replenishment re-planned this request while you were verifying it. Refresh and check the quantity again.');
+                if (deferGl) bypass(ctx, 'prc.replenishment.verify.gl_assignment_deferred');
                 for (const kp of RPL_KEYS(ctx.orgId, rplKeyOf(d))) {
                     const key = await getDoc(kp);
                     if (key && str(key.data.prId) === id) await deleteDoc(kp);
@@ -1192,6 +1199,7 @@ export const purchaseRequirementRoutes = {
                 version: Number(d.version) || 1,
                 can: f,
                 storesGate: ['approved', 'pending_approval', 'unverified'].includes(str(d.status)) ? storesGate(d) : '',
+                glResolutionRequired: requiresGlResolution(objs(d.lines)),
                 storesRelease: isObj(d.storesRelease) ? { status: str(d.storesRelease.status), byName: str(d.storesRelease.byName), at: str(d.storesRelease.at), note: str(d.storesRelease.note) } : null,
                 mine: str(d.requesterUid) === ctx.uid,
             };
@@ -1261,6 +1269,7 @@ export const purchaseRequirementRoutes = {
             const scope = await deskScope(ctx);
             return transition(ctx, ctx.body, 'acknowledged', (d) => {
                 if (str(d.status) !== 'approved') throw new HttpError(409, 'Only an approved requirement can be acknowledged.');
+                if (requiresGlResolution(objs(d.lines))) throw new HttpError(409, 'GL assignment was deferred under the development override. Return this requirement to the requester to select an approved GL account before procurement acknowledgement.');
                 if (!covers(scope, objs(d.lines))) throw new HttpError(403, 'This requirement belongs to another buyer group.');
                 if (str(d.requesterUid) === ctx.uid && !bypass(ctx, 'prc.requirement.desk_independence')) throw new HttpError(403, 'You cannot acknowledge your own requirement.');
                 if (approvedByMe(ctx, d) && !bypass(ctx, 'prc.requirement.desk_independence')) throw new HttpError(403, 'You approved this requirement, so you cannot also acknowledge it.');

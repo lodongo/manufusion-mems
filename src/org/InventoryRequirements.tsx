@@ -86,6 +86,7 @@ interface Position {
 }
 interface Detail extends Row {
     positions: Position[];
+    glMissingTestOverride?: boolean;
     history: Array<{ at: string; byName: string; action: string; note: string }>;
     can: { release: boolean; changeQty: boolean; cancel: boolean; returnToRequester: boolean };
     note: string;
@@ -291,6 +292,7 @@ function Decide({ d, onDone }: { d: Detail; onDone: (m: string) => void }) {
             )}
             {mode === 'release' && (
                 <div className='space-y-2'>
+                    {d.glMissingTestOverride && <Alert tone='warn'>Development super-admin override: this automatic request has no GL account. Release is allowed and audited; assign an approved GL account before procurement acknowledgement.</Alert>}
                     {d.can.changeQty ? (
                         <div className='flex items-end gap-2'>
                             <Field id='sr-q' label={`Quantity to release (${p0?.unit ?? ''}) *`} inputMode='decimal' value={qty} onChange={(e) => setQty(e.target.value.replace(/[^\d.]/g, ''))} />
@@ -317,7 +319,7 @@ function Decide({ d, onDone }: { d: Detail; onDone: (m: string) => void }) {
                         <Button
                             disabled={missingRelease.length > 0}
                             onClick={() =>
-                                confirm.ask({ title: `Release ${d.number}`, message: `${q} ${p0?.unit ?? ''} goes on to ${d.status === 'unverified' ? 'manager approval, then procurement' : 'procurement'}. This is recorded with the stock position.`, confirmLabel: 'Release' }, async () => {
+                                confirm.ask({ title: `Release ${d.number}`, message: `${q} ${p0?.unit ?? ''} goes on to ${d.status === 'unverified' ? 'manager approval, then procurement' : 'procurement'}. This is recorded with the stock position.${d.glMissingTestOverride ? ' Test override: GL assignment remains outstanding before procurement acknowledgement.' : ''}`, confirmLabel: 'Release' }, async () => {
                                     await callBackend(`${API}/release`, { id: d.id, quantity: d.can.changeQty ? q : undefined, reason, overrideReason: override, note, reviewed: true });
                                     onDone(`${d.number} released.`);
                                 })

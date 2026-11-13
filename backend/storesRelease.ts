@@ -3,6 +3,7 @@ import { orgRoute, type OrgContext } from './guards';
 import { allowedNodeIds } from './positions';
 import { record } from './org';
 import { requirementsPath } from './procurementSetup';
+import { mayDeferReplenishmentGl } from './replenishmentGlException';
 import { dismissReplenishment, stockHash, stockLinesOf, verifyReplenishment } from './purchaseRequirements';
 import { METHODS, methodOf, plan } from './replenishmentPlan';
 import { buildPipeline, keyOf, maintenanceNeeds, shortageOf, STAGE_LABEL, verdictFor, type MaintenanceNeed, type Pipe } from './supplyPipeline';
@@ -236,6 +237,7 @@ export const storesReleaseRoutes = {
                     returnToRequester: can(ctx, 'INV.req.release') && kind === 'people' && ['pending_approval', 'approved'].includes(status) && row.queue === 'review',
                 },
                 note: kind === 'automation' && status === 'unverified' ? 'Releasing verifies the automatic request: you become its requester and it goes to your manager for approval under the chart of authority, then to procurement.' : kind === 'maintenance' && status === 'unverified' ? 'Releasing clears it for procurement; the maintenance planner still verifies it for the work order.' : 'Releasing clears it for procurement once it is approved.',
+                glMissingTestOverride: kind === 'automation' && status === 'unverified' && mayDeferReplenishmentGl(ctx, str(stockLinesOf(d)[0]?.glCode)),
             };
         }),
     ],

@@ -120,6 +120,7 @@ interface DetailFull extends Omit<Row, 'attachments'> {
     trail?: Trail;
     can: { edit: boolean; submit: boolean; discard: boolean; cancel: boolean; approve: boolean; reject: boolean; returnManager: boolean; acknowledge: boolean; returnDesk: boolean };
     storesGate?: string;
+    glResolutionRequired?: boolean;
     storesRelease?: { status: string; byName: string; at: string; note: string } | null;
 }
 interface TrailDoc { id: string; number: string; status: string }
@@ -1405,6 +1406,7 @@ function Detail({ id }: { id: string }) {
             {notice && <Alert tone='success'>{notice}</Alert>}
             {problem && <Alert tone='error'>{problem}</Alert>}
             {data.status === 'returned_user' && data.returnReason && <Alert tone='warn'>Returned: {data.returnReason}</Alert>}
+            {data.glResolutionRequired && <Alert tone='warn'>GL assignment deferred under development override. Return to the requester to choose an approved GL account before procurement acknowledgement. No financial posting is permitted without valid GL assignment.</Alert>}
             {data.storesGate ? <Alert tone='info'>{data.storesGate}</Alert> : data.storesRelease?.status === 'released' ? <Alert tone='success'>Released by the stores ({data.storesRelease.byName}, {data.storesRelease.at.slice(0, 10)}){data.storesRelease.note ? `: ${data.storesRelease.note}` : ''}</Alert> : null}
             {c.edit && o?.approver.problem && <Alert tone='error'>{o.approver.problem}</Alert>}
             <section className='space-y-2 rounded-2xl border border-line bg-panel p-3'>
