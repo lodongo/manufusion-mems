@@ -270,7 +270,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     const [photos, setPhotos] = useState<Array<{ token: string; url: string }>>([]);
     const [uploading, setUploading] = useState(0);
     const [photoError, setPhotoError] = useState('');
-    const [confirmed, setConfirmed] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [created, setCreated] = useState('');
@@ -291,7 +290,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         setLoadingPlace(true);
         setPlaceError('');
         try {
-            const p = await callBackend<Place>('/api/org/mnt/assembly', { assemblyId: id, purpose: 'wr' });
+            const p = await callBackend<Place>('/api/org/mnt/assembly', { assemblyId: id, purpose: 'wr', remember: true });
             const handoff = pendingGembaWr(id);
             // Asset selection was already completed during the one-to-one
             // equipment/asset setup. It is never repeated here.
@@ -317,7 +316,15 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         }
     };
     useEffect(() => {
-        if (assemblyId) void choose(assemblyId);
+        if (assemblyId) {
+            void choose(assemblyId);
+        } else {
+            void callBackend<{ lastSelectionId?: string }>('/api/org/mnt/locations', { purpose: 'wr' })
+                .then(({ lastSelectionId }) => {
+                    if (lastSelectionId) void choose(lastSelectionId);
+                })
+                .catch(() => undefined);
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [assemblyId]);
 
@@ -328,7 +335,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         setSourceCode('');
         setImpactCodes([]);
         setPhotos([]);
-        setConfirmed(false);
         setError('');
         setStep(place ? 1 : 0);
     };
@@ -336,14 +342,14 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     const source = findIn(lists.sources, sourceCode);
     const asset = place?.assets.find((a) => a.tag === place.defaultAssetTag && a.linked);
 
-    // Title, finding description and source are mandatory; impact is deferred to assessment.
+    // All finding fields, including impacts, are required before request submission.
     const problems: string[][] = [
         place && asset && assetTag===place.defaultAssetTag ? [] : ['Choose the equipment (or its assembly) with a valid linked asset.'],
-        [...(title.trim().length < 3 ? ['Short title is required (at least 3 characters).'] : []), ...(description.trim().length < 10 ? ['What did you find? is required (at least 10 characters).'] : []), ...(!sourceCode ? ['Source of the finding is required.'] : [])],
+        [...(title.trim().length < 3 ? ['Short title is required (at least 3 characters).'] : []), ...(description.trim().length < 10 ? ['What did you find? is required (at least 10 characters).'] : []), ...(!sourceCode ? ['Source of the finding is required.'] : []), ...(!impactCodes.length ? ['Choose at least one impact.'] : [])],
         [...(uploading ? ['Wait for the photos to finish uploading.'] : [])],
-        [...(uploading ? ['Wait for the photos to finish uploading.'] : []), ...(confirmed ? [] : ['Confirm that the details are correct.'])],
+        [...(uploading ? ['Wait for the photos to finish uploading.'] : [])],
     ];
-    const canNext = problems[step].length === 0;
+    const canNext = step === STEPS.length - 1 ? problems.every((p) => !p.length) : problems[step].length === 0;
     const screen = useFullScreen(!created);
     const swipeStart = useRef<{ x: number; y: number; at: number } | null>(null);
     const startSwipe = (event: TouchEvent<HTMLDivElement>) => {
@@ -369,9 +375,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         const files = Array.from(e.target.files ?? []);
         e.target.value = '';
         setPhotoError('');
-        const room = 4 - photos.length - uploading;
-        if (files.length > room) setPhotoError('Up to 4 photos per request.');
-        for (const file of files.slice(0, Math.max(0, room))) {
+        for (const file of files) {
             setUploading((n) => n + 1);
             try {
                 const data = await compressPhoto(file);
@@ -399,7 +403,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                 impactCodes,
                 photos: photos.map((p) => p.token),
                 gembaId: pendingLink?.id || '', gembaObservationId: pendingLink?.observationId || '',
-                confirm: confirmed,
             });
             if (pendingLink && pendingLink.assetTag === assetTag && pendingLink.assemblyId === place?.assembly?.id) {
                 try { await linkToGemba(res.code, pendingLink); }
@@ -500,15 +503,18 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
 
                 {step === 1 && (
                     <>
-                        <p className='rounded-xl border border-line bg-panel p-3 text-sm text-soft'>Complete the three required fields below. Other information can be added now or completed in Work Assessment. Continue to <strong className='text-ink'>Photos</strong> or <strong className='text-ink'>Review</strong>.</p>
                         <Field id='wr-title' label='Short title *' maxLength={120} placeholder='e.g. Oil leak at gearbox output seal' value={title} onChange={(e) => setTitle(e.target.value)} />
                         <TextArea id='wr-desc' label='What did you find? *' rows={3} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
                         <p className='text-right text-xs text-slate-500'>{description.length}/2000</p>
                         {pendingLink?.gembaTypeName && <p className='rounded-lg bg-brand/10 px-3 py-2 text-xs text-brand'>From {pendingLink.gembaTypeName} · linked Gemba observation</p>}
-                        <GroupPicker title='Source of the finding *' collapsed groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
+                        <div className='rounded-2xl border-2 border-brand/50 bg-brand/5 p-2'>
+                            <p className='mb-2 px-1 text-sm font-semibold text-ink'>Source of the finding *</p>
+                            <GroupPicker title='Select the source' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
+                        </div>
                         <ChoicePicker
-                            title='Impact (optional at request; required in Work Assessment)'
+                            title='Impact'
                             multi
+                            required
                             max={MAX_IMPACTS}
                             hint='Up to 5 impacts: choose a category, tick the impacts, then change category to add more.'
                             groups={lists.impacts}
@@ -520,17 +526,17 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
 
                 {step === 2 && (
                     <>
-                        <p className='text-sm text-slate-400'>Photos are optional. Add up to 4 if available; Gemba photos transfer without needing another upload.</p>
+                        <p className='text-sm text-slate-400'>Photos are optional. Select images of any original size; each is compressed on your device before upload. Gemba photos transfer automatically.</p>
                         <div className='grid grid-cols-2 gap-2'>
-                            <label className={`flex h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-emerald-500/50 text-sm text-emerald-300 ${photos.length + uploading >= 4 ? 'pointer-events-none opacity-40' : ''}`}>
+                            <label className='relative flex h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-emerald-500/50 text-sm text-emerald-300'>
                                 <Camera className='h-7 w-7' />
                                 Take photo
-                                <input type='file' accept='image/*' capture='environment' className='sr-only' onChange={addPhotos} />
+                                <input type='file' accept='image/*' capture='environment' className='absolute inset-0 h-full w-full cursor-pointer opacity-0' onChange={addPhotos} />
                             </label>
-                            <label className={`flex h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-slate-700 text-sm text-slate-300 ${photos.length + uploading >= 4 ? 'pointer-events-none opacity-40' : ''}`}>
+                            <label className='relative flex h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-slate-700 text-sm text-slate-300'>
                                 <ImagePlus className='h-7 w-7' />
                                 From gallery
-                                <input type='file' accept='image/*' multiple className='sr-only' onChange={addPhotos} />
+                                <input type='file' accept='image/*,.heic,.heif' multiple className='absolute inset-0 h-full w-full cursor-pointer opacity-0' onChange={addPhotos} />
                             </label>
                         </div>
                         {photoError && <Alert tone='error'>{photoError}</Alert>}
@@ -558,7 +564,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                             <p className='text-white'>
                                 {place.assembly ? `${place.assembly.code} · ${place.assembly.name}` : `${place.unit?.code} · ${place.unit?.name}`}
                             </p>
-                            {!place.assembly && <p className='text-xs text-amber-300'>Equipment only: the reviewer adds the assembly.</p>}
+                            {!place.assembly && <p className='text-xs text-soft'>Equipment selected · assemblies are available beneath it.</p>}
                             <p className='text-xs text-slate-400'>{place.path.map((p) => `${LEVEL_LABEL[p.level] ?? p.level} ${p.code}`).join(' › ')}</p>
                         </ReviewBlock>
                         <ReviewBlock label='Equipment-linked asset'>
@@ -575,7 +581,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                             </p>
                         </ReviewBlock>
                         <ReviewBlock label={`Impact (${impactCodes.length}/${MAX_IMPACTS})`} onEdit={() => setStep(1)}>
-                            {!impactCodes.length && <p className='text-sm text-slate-400'>None given.</p>}
+                            {!impactCodes.length && <p className='text-sm text-amber-300'>At least one impact is required.</p>}
                             <div className='flex flex-wrap gap-1'>
                                 {impactCodes.map((c) => {
                                     const i = findIn(lists.impacts, c);
@@ -591,10 +597,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                                 ))}
                             </div>
                         </ReviewBlock>
-                        <label className='flex items-start gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-3 text-sm text-slate-200'>
-                            <input type='checkbox' className='mt-0.5 h-5 w-5 accent-emerald-500' checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-                            I confirm these details are correct. The request will be numbered and sent for review. You can change it only until review starts, and never after it is converted to a work order.
-                        </label>
                         {error && <Alert tone='error'>{error}</Alert>}
                     </>
                 )}
