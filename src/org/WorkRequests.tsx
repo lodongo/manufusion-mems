@@ -50,6 +50,10 @@ interface Row {
     assessmentReviewStatus: string;
     woCode: string;
     updatedAt: string;
+    reviewerUid?: string;
+    assessmentCode?: string;
+    workRequestCode?: string;
+    reviewProcessVersion?: number;
 }
 interface WrCan {
     view: boolean;
@@ -57,6 +61,9 @@ interface WrCan {
     resubmit: boolean;
     cancel: boolean;
     startReview: boolean;
+    assignReview: boolean;
+    reviewCancel: boolean;
+    toAssessment: boolean;
     assess: boolean;
     reviewAssessment: boolean;
     return: boolean;
@@ -69,14 +76,19 @@ interface WrCan {
 }
 interface Closure {
     causeCode: string; causeLabel: string; causeGroup: string;
-    solutionCode: string; solutionLabel: string; solutionGroup: string;
-    maintenanceTypeCode: string; maintenanceTypeLabel: string;
+    solutionCode?: string; solutionLabel?: string; solutionGroup?: string;
+    maintenanceTypeCode?: string; maintenanceTypeLabel?: string;
     description: string; name: string; at: string;
+    dateClosed?: string; durationMinutes?: number;
     confirmedName?: string; confirmedAt?: string; confirmNote?: string;
 }
 interface Detail extends Row {
     description: string;
     sourceCode: string;
+    reviewAssignedName?: string;
+    reviewDecision?: string;
+    reviewCancellationCategory?: string;
+    repeatRequestCode?: string;
     criticalityOriginalLabel: string;
     failureModeCode: string;
     failureModeLabel: string;
@@ -115,7 +127,7 @@ interface Detail extends Row {
     can: WrCan;
 }
 
-export const WR_TONE: Record<string, 'brand' | 'muted' | 'danger' | 'warn'> = { submitted: 'warn', under_review: 'warn', returned: 'danger', declined: 'muted', cancelled: 'muted', converted: 'brand', closure_pending: 'warn', closed: 'brand' };
+export const WR_TONE: Record<string, 'brand' | 'muted' | 'danger' | 'warn'> = { created: 'warn', to_be_assessed: 'brand', submitted: 'warn', under_review: 'warn', returned: 'danger', declined: 'muted', cancelled: 'muted', converted: 'brand', closure_pending: 'warn', closed: 'brand' };
 
 export function useMntSetup() {
     return useLoad(() => callBackend<MntSetup>('/api/org/mnt/setup'));
@@ -143,7 +155,7 @@ export default function WorkRequests({ id, sub, area = 'requests' }: { id?: stri
     if (!s.enabled) return <NotEnabled />;
     if (id === 'new' && area === 'assessments') return <Alert tone='error'>Create work requests in the Work Requests submodule.</Alert>;
     if (id === 'new') return s.can.WR_create ? <NewRequest key={sub ?? 'new'} setup={s} assemblyId={sub} /> : <Alert tone='error'>Your job role or security role does not include raising work requests.</Alert>;
-    if (id && /^WR\d{8}$/.test(id)) return <RequestDetail key={id} code={id} setup={s} area={area} />;
+    if (id && (/^WR\d{8}$/.test(id) || (area === 'assessments' && /^ASSM_\d{8}$/.test(id)))) return <RequestDetail key={id} code={id} setup={s} area={area} />;
     return <RequestList setup={s} area={area} />;
 }
 
@@ -280,6 +292,8 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     const [linkedGemba, setLinkedGemba] = useState('');
     const [linkError, setLinkError] = useState('');
     const [pendingLink, setPendingLink] = useState<GembaWrHandoff | null>(null);
+    const [reviewerUid, setReviewerUid] = useState('');
+    const reviewerOptions = useLoad(() => callBackend<{ reviewers: Array<{ uid: string; name: string }> }>('/api/org/mnt/wr/reviewers'), []);
 
     const linkToGemba = async (code: string, handoff: GembaWrHandoff) => {
         await callBackend('/api/org/quick/gemba/link-wr', {
@@ -339,6 +353,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         setSourceCode('');
         setImpactCodes([]);
         setPhotos([]);
+        setReviewerUid('');
         setError('');
         setStep(place ? 1 : 0);
     };
@@ -351,7 +366,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         place && asset && assetTag===place.defaultAssetTag ? [] : ['Choose the equipment (or its assembly) with a valid linked asset.'],
         [...(title.trim().length < 3 ? ['Short title is required (at least 3 characters).'] : []), ...(description.trim().length < 10 ? ['What did you find? is required (at least 10 characters).'] : []), ...(!sourceCode ? ['Source of the finding is required.'] : []), ...(!impactCodes.length ? ['Choose at least one impact.'] : [])],
         [...(uploading ? ['Wait for the photos to finish uploading.'] : [])],
-        [...(uploading ? ['Wait for the photos to finish uploading.'] : [])],
+        [...(uploading ? ['Wait for the photos to finish uploading.'] : []), ...(reviewerOptions.data?.reviewers.length && !reviewerUid ? ['Assign an employee to review this request.'] : [])],
     ];
     const canNext = step === STEPS.length - 1 ? problems.every((p) => !p.length) : problems[step].length === 0;
     const screen = useFullScreen(!created);
@@ -406,6 +421,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                 sourceCode,
                 impactCodes,
                 photos: photos.map((p) => p.token),
+                reviewerUid,
                 gembaId: pendingLink?.id || '', gembaObservationId: pendingLink?.observationId || '',
             });
             if (pendingLink && pendingLink.assetTag === assetTag && pendingLink.assemblyId === place?.assembly?.id) {
@@ -602,6 +618,16 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                                 ))}
                             </div>
                         </ReviewBlock>
+                        <div className='rounded-2xl border border-line bg-panel p-3'>
+                            <SelectField id='wr-reviewer' label='Assigned work request reviewer *' value={reviewerUid} onChange={(e) => setReviewerUid(e.target.value)}>
+                                <option value=''>Choose the employee who will review</option>
+                                {(reviewerOptions.data?.reviewers ?? []).map((u) => <option key={u.uid} value={u.uid}>{u.name}</option>)}
+                            </SelectField>
+                            {reviewerOptions.loading && <p className='text-xs text-muted'>Loading employees…</p>}
+                            {reviewerOptions.error && <Alert tone='error'>{reviewerOptions.error}</Alert>}
+                            {!reviewerOptions.loading && !reviewerOptions.data?.reviewers.length && <p className='text-xs text-amber-400'>No employees available. The request can be saved as Created and assigned later by an authorized reviewer.</p>}
+                            <p className='mt-2 text-xs text-soft'>Only the assigned employee, with MNT.WR.review permission at this equipment, can complete the review.</p>
+                        </div>
                         {error && <Alert tone='error'>{error}</Alert>}
                     </>
                 )}
@@ -636,7 +662,7 @@ function ReviewBlock({ label, onEdit, children }: { label: string; onEdit?: () =
 // Detail: review, assess, return, decline, convert; requester edit, resubmit, cancel
 // ---------------------------------------------------------------------------
 
-type Mode = '' | 'edit' | 'close' | 'confirm_closure' | 'reject_closure' | 'assess' | 'review_assessment' | 'return_assessment' | 'return' | 'decline' | 'convert' | 'cancel';
+type Mode = '' | 'edit' | 'close' | 'review_cancel' | 'to_assess' | 'confirm_closure' | 'reject_closure' | 'assess' | 'review_assessment' | 'return_assessment' | 'return' | 'decline' | 'convert' | 'cancel';
 
 function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; area: 'requests' | 'assessments' }) {
     const lists = setup.lists!;
@@ -667,11 +693,12 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
         setBusy(true);
         setActionError('');
         try {
-            const res = await callBackend<{ ok: boolean; woCode?: string }>('/api/org/mnt/wr/action', { code: r.code, action, note: note.trim(), confirm: typed.trim(), ...extra });
+            const res = await callBackend<{ ok: boolean; woCode?: string; assessmentCode?: string }>('/api/org/mnt/wr/action', { code: r.code, action, note: note.trim(), confirm: typed.trim(), ...extra });
             setMode('');
             setNote('');
             setTyped('');
-            if (res.woCode) navigate(`organization_admin/work_orders/${res.woCode}`);
+            if (res.assessmentCode) navigate(`organization_admin/work_assessments/${res.assessmentCode}`);
+            else if (res.woCode) navigate(`organization_admin/work_orders/${res.woCode}`);
             else reload();
         } catch (err) {
             setActionError(err instanceof Error ? err.message : 'The action failed.');
@@ -682,6 +709,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
 
     if (mode === 'edit') return <EditRequest detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
     if (mode === 'close') return <CloseAtReview detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
+    if (mode === 'review_cancel') return <CancelAtReview detail={r} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
 
     const assessed = !!r.assessment.maintenanceTypeCode && !r.assessment.headerIssue;
     const today = new Date().toISOString().slice(0, 10);
@@ -692,7 +720,9 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
         buttons.push({ key: 'rejectClosure', label: 'Not fixed – reopen', icon: <Undo2 className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('reject_closure') });
     }
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
-    if (can.close) buttons.push({ key: 'close', label: 'Close – no planning needed', icon: <Check className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('close') });
+    if (can.close) buttons.push({ key: 'close', label: r.reviewProcessVersion === 2 ? 'Close (no assessment)' : 'Close – no planning needed', icon: <Check className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('close') });
+    if (can.reviewCancel) buttons.push({ key: 'reviewCancel', label: 'Cancel (review)', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('review_cancel') });
+    if (can.toAssessment) buttons.push({ key: 'toAssessment', label: 'To Be Assessed', icon: <ClipboardList className='h-4 w-4' />, onClick: () => setMode('to_assess') });
     if (can.assess && !can.reviewAssessment) buttons.push({ key: 'assess', label: assessed ? 'Update work assessment' : 'Start work assessment', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => {setSection('assessment');setMode('assess');} });
     if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Approve assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => {setSection('summary');setMode('review_assessment');} });
     if (can.convert) buttons.push({ key: 'convert', label: 'Convert to work order', icon: <Wrench className='h-4 w-4' />, variant: assessed ? 'primary' : 'secondary', onClick: () => setMode('convert') });
@@ -703,8 +733,8 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
     if (can.cancel) buttons.push({ key: 'cancel', label: 'Cancel request', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('cancel') });
     // Work Requests and Work Assessments are separate workspaces, with no mixed edit buttons.
     const visibleButtons = area === 'assessments'
-        ? buttons.filter((b) => ['assess', 'reviewAssessment'].includes(b.key))
-        : buttons.filter((b) => !['assess', 'reviewAssessment'].includes(b.key));
+        ? buttons.filter((b) => ['assess', 'reviewAssessment', 'convert'].includes(b.key))
+        : buttons.filter((b) => !['assess', 'reviewAssessment'].includes(b.key) && !(b.key === 'convert' && !!r.assessmentCode));
 
     const typedNeeded = mode === 'decline' || mode === 'convert' || mode === 'cancel';
     const noteNeeded = mode === 'return' || mode === 'decline' || mode === 'cancel' || mode === 'review_assessment' || mode === 'return_assessment' || mode === 'reject_closure';
@@ -719,7 +749,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                         <ArrowLeft className='h-4 w-4' />
                     </Button>
                     <div className='min-w-0 flex-1'>
-                        <p className='font-mono text-sm font-bold tracking-wider text-emerald-300'>{r.code}</p>
+                        <p className='font-mono text-sm font-bold tracking-wider text-emerald-300'>{area === 'assessments' ? r.assessmentCode || r.code : r.code}</p>
                         <p className='truncate text-xs text-slate-400'>{r.statusLabel}</p>
                     </div>
                     {area === 'assessments' && <Button variant='secondary' onClick={() => navigate(`organization_admin/work_requests/${r.code}`)}>Original request</Button>}
@@ -768,6 +798,15 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                   </Card>
                 )}
 
+                {mode === 'to_assess' && <Card className='space-y-3'>
+                    <h2 className='text-lg font-semibold text-ink'>Send to Work Assessment</h2>
+                    <p className='text-sm text-soft'>This is the final request-review decision. MEMS will issue a separate ASSM_######## assessment number from the organization's database counter. The request remains linked and read-only; the assessor works in Work Assessments.</p>
+                    {actionError && <Alert tone='error'>{actionError}</Alert>}
+                    <div className='flex gap-2'>
+                        <Button busy={busy} onClick={() => run('to_assessment')}>Create assessment</Button>
+                        <Button variant='secondary' onClick={() => setMode('')}>Back</Button>
+                    </div>
+                </Card>}
                 {mode === 'assess' && <AssessPanel detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />}
 
                 {(mode === 'return' || mode === 'decline' || mode === 'convert' || mode === 'cancel' || mode === 'review_assessment' || mode === 'return_assessment' || mode === 'confirm_closure' || mode === 'reject_closure') && (
@@ -824,6 +863,18 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                     <p className='text-xs font-semibold uppercase tracking-wider text-emerald-300'>Work request</p>
                     <h2 className='text-lg font-semibold text-white'>Request details</h2>
                   </div>
+                  {!!r.reviewAssignedName && <p className='text-sm text-soft'>Assigned reviewer: <strong>{r.reviewAssignedName}</strong></p>}
+                  {r.status === 'created' && !r.reviewerUid && <Alert tone='warn'>Created — awaiting an assigned reviewer before review can begin.</Alert>}
+                  {can.assignReview && <ReviewerAssignment code={r.code} current={r.reviewerUid || ''} onDone={reload} />}
+                  {!!r.assessmentCode && <Card className='space-y-2'>
+                      <p className='text-xs font-semibold uppercase tracking-wide text-soft'>Independent work assessment</p>
+                      <button type='button' className='text-left font-semibold text-emerald-600 underline' onClick={() => navigate(`organization_admin/work_assessments/${r.assessmentCode}`)}>{r.assessmentCode}</button>
+                      <p className='text-xs text-soft'>This work request is final: To Be Assessed. Further technical work and approval belong to its assessment document.</p>
+                  </Card>}
+                  {r.status === 'cancelled' && r.reviewCancellationCategory && <Card className='space-y-1 text-sm'>
+                      <strong>Review cancellation: {r.reviewCancellationCategory.replace(/_/g, ' ')}</strong>
+                      {r.repeatRequestCode && <p>Repeat of {r.repeatRequestCode}</p>}
+                  </Card>}
                   {visibleButtons.length>0&&<div className='grid grid-cols-2 gap-2'>
                     {visibleButtons.map(b=><Button key={b.key} variant={b.variant??'primary'} busy={busy&&b.key!=='edit'} className='min-w-0 justify-center text-xs' onClick={b.onClick}>
                       {b.icon}<span className='min-w-0 break-words text-center'>{b.label}</span>
@@ -1133,11 +1184,13 @@ export function ClosureCard({ closure }: { closure: Closure }) {
         <Card className='space-y-2 text-sm'>
             <div className='flex flex-wrap items-center justify-between gap-2'>
                 <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Closed at review</p>
-                <Badge tone={closure.confirmedAt ? 'brand' : 'warn'}>{closure.confirmedAt ? 'Confirmed' : 'Awaiting confirmation'}</Badge>
+                <Badge tone={closure.confirmedAt || closure.dateClosed ? 'brand' : 'warn'}>{closure.dateClosed ? 'Closed at review' : closure.confirmedAt ? 'Confirmed' : 'Awaiting confirmation'}</Badge>
             </div>
             <Info label='Cause' value={`${closure.causeGroup} · ${closure.causeLabel}`} />
-            <Info label='Solution' value={`${closure.solutionGroup} · ${closure.solutionLabel}`} />
-            <Info label='Maintenance type' value={closure.maintenanceTypeLabel} />
+            {closure.solutionLabel && <Info label='Solution' value={`${closure.solutionGroup} · ${closure.solutionLabel}`} />}
+            {closure.maintenanceTypeLabel && <Info label='Maintenance type' value={closure.maintenanceTypeLabel} />}
+            {closure.dateClosed && <Info label='Date closed' value={closure.dateClosed} />}
+            {closure.durationMinutes && <Info label='Actual time taken' value={`${closure.durationMinutes} minutes`} />
             <Info label='What was done' value={closure.description} />
             <Info label='Closed by' value={`${closure.name} · ${fmtDate(closure.at)}`} />
             {closure.confirmedAt && <Info label='Confirmed by' value={`${closure.confirmedName} · ${fmtDate(closure.confirmedAt)}`} sub={closure.confirmNote} />}
@@ -1152,15 +1205,20 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
     const [mtype, setMtype] = useState('');
     const [description, setDescription] = useState('');
     const [typed, setTyped] = useState('');
+    const [closedDate, setClosedDate] = useState(() => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,10));
+    const [durationMinutes, setDurationMinutes] = useState('');
+    const direct = detail.reviewProcessVersion === 2;
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const screen = useFullScreen(true);
-    const missing = [cause ? '' : 'cause', solution ? '' : 'solution', mtype ? '' : 'maintenance type', description.trim().length >= 10 ? '' : 'what was done (10+ characters)', typed.trim() === detail.code ? '' : `type ${detail.code}`].filter(Boolean);
+    const missing = (direct
+        ? [!cause ? 'failure cause' : '', description.trim().length < 10 ? 'what was done (10+ characters)' : '', !closedDate ? 'date closed' : '', Number(durationMinutes) <= 0 ? 'actual time taken' : '']
+        : [cause ? '' : 'cause', solution ? '' : 'solution', mtype ? '' : 'maintenance type', description.trim().length >= 10 ? '' : 'what was done (10+ characters)', typed.trim() === detail.code ? '' : `type ${detail.code}`]).filter(Boolean);
     const save = async () => {
         setBusy(true);
         setError('');
         try {
-            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'close_review', causeCode: cause, solutionCode: solution, maintenanceTypeCode: mtype, description: description.trim(), confirm: typed.trim() });
+            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'close_review', causeCode: cause, ...(direct ? { closedDate, durationMinutes: Number(durationMinutes) } : {solutionCode: solution, maintenanceTypeCode: mtype, confirm: typed.trim() }), description: description.trim() });
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not close the request.');
@@ -1172,23 +1230,111 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
         <div className={screen.className} onFocusCapture={screen.keepInView}>
             <div className='flex shrink-0 items-center gap-2 border-b border-line bg-page pb-3'>
                 <Button variant='secondary' aria-label='Back' onClick={onCancel}><ArrowLeft className='h-4 w-4' /></Button>
-                <div className='min-w-0 flex-1'><p className='truncate font-semibold text-white'>Close {detail.code}</p><p className='truncate text-xs text-slate-400'>No planning needed · a supervisor confirms</p></div>
+                <div className='min-w-0 flex-1'><p className='truncate font-semibold text-white'>Close {detail.code}</p><p className='truncate text-xs text-slate-400'>{direct ? 'Final review outcome · no assessment required' : 'No planning needed · a supervisor confirms'}</p></div>
                 <Button busy={busy} disabled={missing.length > 0} onClick={save}><Check className='h-4 w-4' />Close</Button>
             </div>
             <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
-                <ChoicePicker title='Cause' required groups={lists.rootCauses} selected={cause ? [cause] : []} onToggle={(c) => setCause(c === cause ? '' : c)} />
-                <ChoicePicker title='Solution' required groups={lists.solutions} selected={solution ? [solution] : []} onToggle={(c) => setSolution(c === solution ? '' : c)} />
+                <ChoicePicker title='Failure cause *' required groups={lists.rootCauses} selected={cause ? [cause] : []} onToggle={(c) => setCause(c === cause ? '' : c)} />
+                {!direct && <ChoicePicker title='Solution' required groups={lists.solutions} selected={solution ? [solution] : []} onToggle={(c) => setSolution(c === solution ? '' : c)} />}
                 <TextArea id='cl-desc' label='What was done? *' rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
-                <SelectField id='cl-mtype' label='Type of maintenance * (decides the GL account)' value={mtype} onChange={(e) => setMtype(e.target.value)}>
+                {!direct && <SelectField id='cl-mtype' label='Type of maintenance * (decides the GL account)' value={mtype} onChange={(e) => setMtype(e.target.value)}>
                     <option value=''>Select…</option>
                     {lists.maintenanceTypes.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}
-                </SelectField>
-                <Field id='cl-confirm' label={`Type ${detail.code} to confirm`} autoComplete='off' value={typed} onChange={(e) => setTyped(e.target.value)} />
+                </SelectField>}
+                {direct && <>
+                    <Field id='cl-date' type='date' label='Date closed *' max={new Date().toISOString().slice(0,10)} value={closedDate} onChange={(e) => setClosedDate(e.target.value)} />
+                    <Field id='cl-duration' type='number' min={1} label='Actual time taken (minutes) *' value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} />
+                </>}
+                {!direct && <Field id='cl-confirm' label={`Type ${detail.code} to confirm`} autoComplete='off' value={typed} onChange={(e) => setTyped(e.target.value)} />}
                 {missing.length > 0 && <p className='text-xs text-amber-300'>Still needed: {missing.join(', ')}.</p>}
                 {error && <MntGateHint message={error} />}
             </div>
         </div>
     );
+}
+
+
+const CANCEL_REASONS = [
+    { value: 'repeat', label: 'Repeat / duplicate request' },
+    { value: 'not_required', label: 'Not Required' },
+    { value: 'already_resolved', label: 'Already Resolved' },
+    { value: 'invalid_request', label: 'Invalid Request' },
+    { value: 'other', label: 'Other' },
+] as const;
+
+function ReviewerAssignment({ code, current, onDone }: { code: string; current: string; onDone: () => void }) {
+    const directory = useLoad(() => callBackend<{ reviewers: Array<{ uid: string; name: string }> }>('/api/org/mnt/wr/reviewers'), []);
+    const [uid, setUid] = useState(current);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const save = async () => {
+        setBusy(true); setError('');
+        try {
+            await callBackend('/api/org/mnt/wr/action', { code, action: 'assign_review', reviewerUid: uid });
+            onDone();
+        } catch (e) { setError(e instanceof Error ? e.message : 'Assignment failed.'); }
+        finally { setBusy(false); }
+    };
+    return <Card className='space-y-2'>
+        <p className='font-semibold text-ink'>Assign employee for review</p>
+        <SelectField id='wr-assigned-reviewer' label='Reviewer *' value={uid} onChange={(e) => setUid(e.target.value)}>
+            <option value=''>Select employee</option>
+            {(directory.data?.reviewers ?? []).map((u) => <option key={u.uid} value={u.uid}>{u.name}</option>)}
+        </SelectField>
+        <p className='text-xs text-soft'>The selected employee must have Work Request Review permission at this equipment. Only that employee can decide Close, Cancel or To Be Assessed.</p>
+        {directory.error && <Alert tone='error'>{directory.error}</Alert>}
+        {error && <Alert tone='error'>{error}</Alert>}
+        <Button busy={busy} disabled={!uid || uid === current} onClick={save}>Assign reviewer</Button>
+    </Card>;
+}
+
+function CancelAtReview({ detail, onDone, onCancel }: { detail: Detail; onDone: () => void; onCancel: () => void }) {
+    const [category, setCategory] = useState('');
+    const [reason, setReason] = useState('');
+    const [query, setQuery] = useState('');
+    const [repeatCode, setRepeatCode] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const lookup = useLoad(() => category === 'repeat'
+        ? callBackend<{ rows: Array<{ code: string; title: string; description: string; status: string }> }>('/api/org/mnt/wr/repeat-search', { code: detail.code, query })
+        : Promise.resolve({ rows: [] as Array<{ code: string; title: string; description: string; status: string }> }),
+        [detail.code, category, query]);
+    const missing = !category || reason.trim().length < 10 || (category === 'repeat' && !repeatCode);
+    const save = async () => {
+        setBusy(true); setError('');
+        try {
+            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'cancel_review', category, reason: reason.trim(), repeatRequestCode: category === 'repeat' ? repeatCode : '' });
+            onDone();
+        } catch (e) { setError(e instanceof Error ? e.message : 'Could not cancel this request.'); }
+        finally { setBusy(false); }
+    };
+    return <Card className='space-y-3'>
+        <h2 className='text-lg font-semibold text-ink'>Cancel at review · {detail.code}</h2>
+        <p className='text-xs text-soft'>This is a final Work Request outcome. The reason and selected repeat request, if applicable, are recorded in the audit history.</p>
+        <SelectField id='wr-cancel-category' label='Cancellation category *' value={category} onChange={(e) => { setCategory(e.target.value); setRepeatCode(''); }}>
+            <option value=''>Choose reason</option>
+            {CANCEL_REASONS.map((r) => <option value={r.value} key={r.value}>{r.label}</option>)}
+        </SelectField>
+        {category === 'repeat' && <>
+            <Field id='wr-search-repeat' label='Find the earlier request on this equipment *' placeholder='Search number or description' value={query} onChange={(e) => {setQuery(e.target.value);setRepeatCode('');}} />
+            {lookup.loading && <p className='text-xs text-soft'>Searching equipment requests…</p>}
+            {lookup.error && <Alert tone='error'>{lookup.error}</Alert>}
+            <div className='max-h-56 space-y-1 overflow-y-auto'>
+                {(lookup.data?.rows ?? []).map((r) => <button type='button' key={r.code} aria-pressed={repeatCode === r.code} onClick={() => setRepeatCode(r.code)}
+                    className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${repeatCode === r.code ? 'border-emerald-600 bg-emerald-500/10' : 'border-line bg-panel'}`}>
+                    <strong>{r.code}</strong> · {r.title}
+                    <p className='line-clamp-2 text-xs text-soft'>{r.description}</p>
+                </button>)}
+            </div>
+            {repeatCode && <p className='text-sm text-emerald-700'>Repeat of: {repeatCode}</p>}
+        </>}
+        <TextArea id='wr-review-cancel-reason' label='Explain the cancellation *' rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+        {error && <Alert tone='error'>{error}</Alert>}
+        <div className='flex gap-2'>
+            <Button variant='danger' busy={busy} disabled={missing} onClick={save}>Cancel request</Button>
+            <Button variant='secondary' onClick={onCancel}>Back</Button>
+        </div>
+    </Card>;
 }
 
 function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; lists: MntLists; onDone: () => void; onCancel: () => void }) {

@@ -146,10 +146,18 @@ const context = (who, body = {}) => {
     };
 };
 const op = (who, action, body = {}) => maintenanceOperations(context(who, { action, ...body }));
-const route = (routes, path, who, body) => {
+// Older scenario cases exercise the legacy WR lifecycle; the modern created →
+// assigned review → three outcomes lifecycle is exercised separately below.
+const route = async (routes, path, who, body) => {
     const handler = routes['POST ' + path]?.[0];
     assert.ok(handler, 'Missing handler ' + path);
-    return handler(context(who, body));
+    const result = await handler(context(who, body));
+    if (routes === maintenanceRoutes && path === '/api/org/mnt/wr/create' && result.code) {
+        const key = r + '/work_requests/' + result.code;
+        const existing = snapshot(key).data;
+        seed(key, { ...existing, status: 'submitted', reviewProcessVersion: 1, reviewerUid: '' });
+    }
+    return result;
 };
 function catalogue(kind, items) {
     const base = 'module_workspaces/' + (kind === 'gl_accounts' ? 'FIN' : 'PRC') + '/catalogs/' + kind;
@@ -1033,6 +1041,87 @@ await assert.rejects(
         title: 'Changed after assessment', description: 'Changed after assessment',
         sourceCode: first(l.sources), impactCodes: [first(l.impacts)],
     }), /before technical assessment/,
+);
+
+// ----- New WR lifecycle: created → named reviewer → Closed / Canceled / To Be Assessed -----
+const createNewWorkRequest = (body) => maintenanceRoutes['POST /api/org/mnt/wr/create'][0](context('requester', {
+    ...finding, title: 'Conveyor defect needing review', description: 'New conveyor drive condition requires review.',
+    reviewerUid: people.assessor[0], ...body,
+}));
+const noReviewer = await createNewWorkRequest({ reviewerUid: '', title: 'Unassigned conveyor defect' });
+assert.equal(snapshot(r + '/work_requests/' + noReviewer.code).data.status, 'created');
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: noReviewer.code, action: 'start_review' }),
+    /assigned employee|assigned/,
+);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
+    code: noReviewer.code, action: 'assign_review', reviewerUid: people.assessor[0],
+});
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
+    code: noReviewer.code, action: 'start_review',
+});
+assert.equal(snapshot(r + '/work_requests/' + noReviewer.code).data.status, 'under_review');
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: noReviewer.code, action: 'to_assessment' }),
+    /assigned reviewer/,
+);
+const linkedAssessment = await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
+    code: noReviewer.code, action: 'to_assessment',
+});
+assert.match(linkedAssessment.assessmentCode, /^ASSM_\d{8}$/);
+const linkedWr = snapshot(r + '/work_requests/' + noReviewer.code).data;
+assert.equal(linkedWr.status, 'to_be_assessed');
+assert.equal(linkedWr.assessmentCode, linkedAssessment.assessmentCode);
+assert.equal(snapshot(r + '/work_assessments/' + linkedAssessment.assessmentCode).data.workRequestCode, noReviewer.code);
+const sameAssessment = await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
+    code: noReviewer.code, action: 'to_assessment',
+});
+assert.equal(sameAssessment.assessmentCode, linkedAssessment.assessmentCode, 'Repeat click must not issue a second number');
+const foundAssm = await route(maintenanceRoutes, '/api/org/mnt/wr/list', 'assessor', { view: 'assessment' });
+assert.ok(foundAssm.rows.some((x) => x.code === linkedAssessment.assessmentCode && x.workRequestCode === noReviewer.code));
+const assmDetail = await route(maintenanceRoutes, '/api/org/mnt/wr/get', 'assessor', { code: linkedAssessment.assessmentCode });
+assert.equal(assmDetail.code, noReviewer.code);
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:noReviewer.code,action:'assess',...header});
+assert.equal(snapshot(r + '/work_assessments/' + linkedAssessment.assessmentCode).data.natureCode, header.natureCode,
+    'Independent assessment document must reflect saved technical assessment');
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'requester', {
+        code: noReviewer.code, action: 'edit', title: 'Changed',
+        description: 'Changed after review stage.', sourceCode: first(l.sources), impactCodes: [first(l.impacts)],
+    }), /before technical assessment/,
+);
+const directClose = await createNewWorkRequest({ title: 'Fixed on site', description: 'Conveyor guard retightened during inspection.' });
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:directClose.code,action:'start_review'});
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
+    code: directClose.code, action: 'close_review', causeCode: first(l.rootCauses),
+    description: 'Restored the conveyor guard and verified a safe condition.',
+    closedDate: new Date().toISOString().slice(0,10), durationMinutes: 25,
+});
+assert.equal(snapshot(r + '/work_requests/' + directClose.code).data.status, 'closed');
+assert.equal(snapshot(r + '/work_requests/' + directClose.code).data.closure.durationMinutes, 25);
+const repeat = await createNewWorkRequest({ title:'Same conveyor fault reported twice', description:'Duplicate request on the conveyor drive.' });
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:repeat.code,action:'start_review'});
+const search = await route(maintenanceRoutes, '/api/org/mnt/wr/repeat-search', 'assessor', {
+    code:repeat.code,query:directClose.code,
+});
+assert.ok(search.rows.some(x=>x.code===directClose.code),'Same equipment request can be found by number');
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
+    code:repeat.code,action:'cancel_review',category:'repeat',
+    repeatRequestCode:directClose.code,reason:'This repeats the same conveyor repair already completed.',
+});
+const repeatDoc=snapshot(r + '/work_requests/' + repeat.code).data;
+assert.equal(repeatDoc.status,'cancelled');
+assert.equal(repeatDoc.reviewCancellationCategory,'repeat');
+assert.equal(repeatDoc.repeatRequestCode,directClose.code);
+const otherUnit = await createNewWorkRequest({ assemblyId:'OTHER_ASSEMBLY', assetTag:'AST000002',
+    title:'Other equipment failure', description:'A different equipment unit needs maintenance.'});
+const invalidRepeat = await createNewWorkRequest({title:'Check duplicate equipment',description:'Repeated report from a different equipment.'});
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:invalidRepeat.code,action:'start_review'});
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
+        code:invalidRepeat.code,action:'cancel_review',category:'repeat',
+        repeatRequestCode:otherUnit.code,reason:'This purported repeat is on other equipment.',
+    }), /same equipment/,
 );
 
 // ----- Period maintenance budget: proposed, approved under the Chart of Authority, committed by approved estimates -----

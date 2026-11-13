@@ -5,8 +5,9 @@ import { requireMaintenanceRole } from './maintenanceAccess';
 import { prepareMaintenanceAssessment } from './maintenanceAssessmentIntegration';
 import { resolveMaintenanceEquipmentAsset } from './maintenanceAssetLink';
 import { assessmentReviewCurrent, approvedAssessmentSnapshot, reviewAssessmentPrerequisites } from './maintenanceAssessmentReview';
-import { HttpError, getDoc, isObj, listDocs, nowIso, randomId, rateLimit, runQuery, fieldEq, str, updateFields, writeDoc, type Doc, type Obj, type Plain } from './core';
+import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, randomId, rateLimit, runQuery, fieldEq, str, updateFields, writeDoc, type Doc, type Obj, type Plain } from './core';
 import { audit } from './audit';
+import { orgUsers } from './org';
 import { orgRoute, type OrgContext } from './guards';
 import { bypass } from './testModeCore';
 import { nextOrgCounter } from './positions';
@@ -24,10 +25,11 @@ import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} 
 // Maintenance Management (MNT)
 //
 // Work request  organizations/{orgId}/work_requests/{WR00000001}   (counter organizations/{orgId}.wrSeq)
-//   submitted -> under_review -> assessment approved -> converted (locked, linked to the work order)
-//                             -> returned (requester adds information, resubmits) -> submitted
-//                             -> declined (with reason)
-//   submitted | returned -> cancelled (requester, with reason)
+//   created -> assigned review -> closed (work completed at review, cause, time, date)
+//                              -> cancelled (reason, optional same-equipment repeat reference)
+//                              -> to_be_assessed (independent ASSM_######## document)
+//   to_be_assessed remains the final request outcome while the linked assessment is planned and converted.
+//   Legacy submitted / under_review / closure_pending records remain readable and actionable.
 //
 // Work order    organizations/{orgId}/work_orders/{WO00000001}     (counter organizations/{orgId}.woSeq)
 //   planning -> plan_ready -> released -> scheduled -> in_progress -> completed -> verified -> closed
@@ -48,6 +50,9 @@ export {MNT_ACTIVITIES} from './maintenanceActivities';
 const P = Object.fromEntries(MNT_ACTIVITIES.map((a) => [a.key.replace(/^MNT\./, '').replace('.', '_'), a.key])) as Record<string, string>;
 
 const WR_RE = /^WR\d{8}$/;
+const ASSM_RE = /^ASSM_\d{8}$/;
+const assessmentCol = (orgId: string) => `organizations/${orgId}/work_assessments`;
+const REVIEW_CANCELLATION_REASONS = ['repeat', 'not_required', 'already_resolved', 'invalid_request', 'other'] as const;
 const WO_RE = /^WO\d{8}$/;
 const PHOTO_RE = /^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/wr_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png)$/;
 const ASSESSMENT_PHOTO_RE=/^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/assessment_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png|pdf)$/;
@@ -345,6 +350,8 @@ const pathOf = (doc: Doc) => strs(doc.data.path);
 // ----- Work request -----
 
 const WR_STATUS: Record<string, string> = {
+    created: 'Created',
+    to_be_assessed: 'To Be Assessed',
     submitted: 'Submitted',
     under_review: 'Under review',
     returned: 'Returned for information',
@@ -397,7 +404,10 @@ function wrOut(doc: Doc) {
         requestedBy: str(d.requestedBy),
         requestedByName: str(d.requestedByName),
         requestedAt: str(d.requestedAt),
-        reviewerName: str(d.reviewerName),
+        reviewerName: str(d.reviewerName) || str(d.reviewAssignedName),
+        reviewerUid: str(d.reviewerUid),
+        assessmentCode: str(d.assessmentCode),
+        reviewProcessVersion: Number(d.reviewProcessVersion) || 1,
         assessmentReviewStatus: str((isObj(d.assessmentReview)?d.assessmentReview:{}).status) || 'pending',
         woCode: str(d.woCode),
         updatedAt: str(d.updatedAt),
@@ -485,20 +495,32 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
     const at = (perm: string) => canAt(ctx, perm, path, scope);
     return {
         view: mine || at(P.view),
-        edit: mine && ['submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_edit),
+        edit: mine && ['created', 'submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_edit),
         resubmit: mine && status === 'returned' && !assessmentStarted && at(P.WR_edit),
-        cancel: mine && ['submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_cancel),
-        startReview: status === 'submitted' && at(P.WR_review) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
-        assess: status === 'under_review' && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
-        return: status === 'under_review' && !assessmentStarted && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
-        decline: status === 'under_review' && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
-        // Legacy compatibility for already-open older clients; the new UI has no Add details stage.
-        enrich: ['submitted', 'under_review'].includes(status) && (at(P.WR_review) || at(P.assessment_edit)) && !assessmentReviewCurrent(doc.data),
-        // Fixed on the spot, no planning needed: the reviewer closes; another person confirms.
-        close: ['submitted', 'under_review'].includes(status) && at(P.WR_close) && independent(ctx, !mine, 'mnt.wr.reviewer_independence') && !assessmentReviewCurrent(doc.data),
+        cancel: mine && ['created', 'submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_cancel),
+        assignReview: status === 'created' && at(P.WR_review) && independent(ctx, !mine, 'mnt.wr.assign_independence'),
+        startReview: ['created', 'submitted'].includes(status) && at(P.WR_review)
+            && independent(ctx, !mine, 'mnt.wr.reviewer_independence')
+            && (status === 'submitted' || str(doc.data.reviewerUid) === ctx.uid),
+        reviewCancel: status === 'under_review' && Number(doc.data.reviewProcessVersion) === 2
+            && str(doc.data.reviewerUid) === ctx.uid && at(P.WR_review),
+        toAssessment: status === 'under_review' && Number(doc.data.reviewProcessVersion) === 2
+            && str(doc.data.reviewerUid) === ctx.uid && at(P.WR_review),
+        assess: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
+            && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
+        return: status === 'under_review' && Number(doc.data.reviewProcessVersion) !== 2 && !assessmentStarted && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+        decline: status === 'under_review' && Number(doc.data.reviewProcessVersion) !== 2 && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+        // Legacy compatibility only for records created before the dedicated assessment flow.
+        enrich: Number(doc.data.reviewProcessVersion) !== 2 && ['submitted', 'under_review'].includes(status) && (at(P.WR_review) || at(P.assessment_edit)) && !assessmentReviewCurrent(doc.data),
+        close: ['submitted', 'under_review'].includes(status) && (Number(doc.data.reviewProcessVersion) === 2 ? at(P.WR_review) : at(P.WR_close))
+            && independent(ctx, !mine, 'mnt.wr.reviewer_independence')
+            && (Number(doc.data.reviewProcessVersion) !== 2 || (status === 'under_review' && str(doc.data.reviewerUid) === ctx.uid))
+            && !assessmentReviewCurrent(doc.data),
         confirmClosure: status === 'closure_pending' && at(P.WR_closeConfirm) && independent(ctx, str(object(doc.data.closure).by) !== ctx.uid, 'mnt.wr.closure_independence'),
-        reviewAssessment: status === 'under_review' && at(P.assessment_review) && independent(ctx, !mine && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid), 'mnt.assessment.review_independence'),
-        convert: status === 'under_review' && at(P.WR_convert) && assessmentReviewCurrent(doc.data) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+        reviewAssessment: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
+            && at(P.assessment_review) && independent(ctx, !mine && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid), 'mnt.assessment.review_independence'),
+        convert: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
+            && at(P.WR_convert) && assessmentReviewCurrent(doc.data) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         ownRequest: mine,
     };
 }
@@ -667,7 +689,7 @@ async function createWo(ctx: OrgContext, base: Obj, wrCode: string): Promise<str
                 updatedAt: now,
                 history: history(null, ctx, wrCode ? `Created from ${wrCode}` : 'Created directly'),
         };
-        if(wrCode){const request=await getWr(ctx,wrCode);if(!assessmentReviewCurrent(request.data))throw new HttpError(409,'Approved assessment required before conversion.');if(str(request.data.status)!=='under_review')throw new HttpError(409,'The request has already progressed.');await commit([{path:`${woCol(ctx.orgId)}/${code}`,fields:data,exists:false},{path:`${wrCol(ctx.orgId)}/${wrCode}`,fields:{...request.data,status:'converted',woCode:code,convertedBy:ctx.uid,convertedByName:displayName(ctx),convertedAt:now,closedAt:now,updatedAt:now,history:history(request,ctx,`Converted to ${code}`,code)},updateTime:request.updateTime}]);return code;}
+        if(wrCode){const request=await getWr(ctx,wrCode);if(!assessmentReviewCurrent(request.data))throw new HttpError(409,'Approved assessment required before conversion.');if(!['under_review','to_be_assessed'].includes(str(request.data.status)))throw new HttpError(409,'The request has already progressed.');await commit([{path:`${woCol(ctx.orgId)}/${code}`,fields:data,exists:false},{path:`${wrCol(ctx.orgId)}/${wrCode}`,fields:{...request.data,status:str(request.data.status)==='to_be_assessed'?'to_be_assessed':'converted',woCode:code,convertedBy:ctx.uid,convertedByName:displayName(ctx),convertedAt:now,updatedAt:now,history:history(request,ctx,`Converted to ${code}`,code)},updateTime:request.updateTime}]);return code;}
         const created=await writeDoc(`${woCol(ctx.orgId)}/${code}`,data,{exists:false});
         if (created) return code;
     }
@@ -995,7 +1017,7 @@ export const maintenanceRoutes = {
             const record=WR_RE.test(code)?await getWr(ctx,code):WO_RE.test(code)?await getWo(ctx,code):null;
             if(!record)throw new HttpError(400,'Choose a valid work assessment.');
             need(ctx,P.assessment_edit,pathOf(record),await scopeOf(ctx));
-            if((WR_RE.test(code)&&!['submitted','under_review'].includes(wrStatus(record)))||
+            if((WR_RE.test(code)&&!['submitted','under_review','to_be_assessed'].includes(wrStatus(record)))||
                (WO_RE.test(code)&&str(record.data.status)!=='planning'))
                 throw new HttpError(409,'This assessment is locked.');
             await rateLimit('mnt-assessment-photo',ctx.uid,30,3600);
@@ -1178,6 +1200,15 @@ export const maintenanceRoutes = {
             const provided = strs(b.photos);
             const fresh = provided.filter(p => p !== inheritedPhoto);
             const photos = [...readPhotos(ctx, fresh), ...(inheritedPhoto && provided.includes(inheritedPhoto) ? [inheritedPhoto] : [])];
+            const selectedReviewer = str(b.reviewerUid);
+            let reviewerName = '';
+            if (selectedReviewer) {
+                const reviewer = (await orgUsers(ctx.orgId)).find((u) => u.id === selectedReviewer && str(u.data.status) !== 'disabled');
+                if (!reviewer) throw new HttpError(400, 'Choose an active employee of your organization to review the request.');
+                if (selectedReviewer === ctx.uid && !bypass(ctx, 'mnt.wr.reviewer_independence'))
+                    throw new HttpError(403, 'The requester cannot review their own request. Choose another employee.');
+                reviewerName = [str(reviewer.data.firstName), str(reviewer.data.lastName)].filter(Boolean).join(' ') || str(reviewer.data.email);
+            }
             const now = nowIso();
             for (let attempt = 0; attempt < 3; attempt++) {
                 const n = await nextOrgCounter(ctx.orgId, 'wrSeq');
@@ -1190,20 +1221,24 @@ export const maintenanceRoutes = {
                         ...loc,
                         ...finding,
                         titleAuto,
-                        status: 'submitted',
+                        status: 'created',
+                        reviewProcessVersion: 2,
+                        reviewerUid: selectedReviewer, reviewAssignedName: reviewerName,
+                        reviewerAssignedAt: selectedReviewer ? now : '',
+                        reviewerAssignedBy: selectedReviewer ? ctx.uid : '',
                         photos: photos.map((p) => ({ path: p, addedAt: now })),
                         gembaId, gembaObservationId: observationId, gembaTypeCode, gembaTypeName,
                         requestedBy: ctx.uid,
                         requestedByName: displayName(ctx),
                         requestedAt: now,
-                        history: history(null, ctx, 'Submitted'),
+                        history: history(null, ctx, 'Created', reviewerName ? `Review assigned to ${reviewerName}` : 'Awaiting reviewer assignment'),
                         createdAt: now,
                         updatedAt: now,
                     },
                     { exists: false }
                 );
                 if (created) {
-                    await rec(ctx, 'mnt.wr.submitted', code, `${finding.title} · ${loc.assemblyCode || loc.unitCode} · ${loc.assetTag}`);
+                    await rec(ctx, 'mnt.wr.created', code, `${finding.title} · ${loc.assemblyCode || loc.unitCode} · ${loc.assetTag}`);
                     return { code };
                 }
             }
@@ -1211,6 +1246,35 @@ export const maintenanceRoutes = {
         }),
     ],
 
+    'POST /api/org/mnt/wr/reviewers': [
+        orgRoute('org.mnt.wr.reviewers', null, async (ctx) => {
+            requireMnt(ctx);
+            if (!canAnywhere(ctx, P.WR_create) && !canAnywhere(ctx, P.WR_review))
+                throw new HttpError(403, 'Work request permission is required to look up reviewers.');
+            const docs = await orgUsers(ctx.orgId);
+            const rows = docs.filter((d) => str(d.data.status) !== 'disabled' && d.id !== ctx.uid)
+                .map((d) => ({ uid: d.id, name: [str(d.data.firstName),str(d.data.lastName)].filter(Boolean).join(' ') || str(d.data.email) }))
+                .sort((a,b)=>a.name.localeCompare(b.name));
+            return { reviewers: rows };
+        }),
+    ],
+    'POST /api/org/mnt/wr/repeat-search': [
+        orgRoute('org.mnt.wr.repeat_search', null, async (ctx) => {
+            requireMnt(ctx);
+            const doc = await getWr(ctx, str(ctx.body.code));
+            const scope = await scopeOf(ctx);
+            need(ctx, P.WR_review, pathOf(doc), scope);
+            if (str(doc.data.reviewerUid) !== ctx.uid)
+                throw new HttpError(403, 'Only the assigned reviewer may search repeat requests.');
+            const q = clean(ctx.body.query, 120).toLowerCase();
+            const candidates = (await listDocs(wrCol(ctx.orgId)))
+                .filter((d) => d.id !== doc.id && str(d.data.unitId) === str(doc.data.unitId) && !['cancelled','declined'].includes(wrStatus(d)))
+                .filter((d) => !q || `${d.id} ${str(d.data.title)} ${str(d.data.description)}`.toLowerCase().includes(q))
+                .sort((a,b)=>b.id.localeCompare(a.id)).slice(0,40)
+                .map((d)=>({ code:d.id,title:str(d.data.title),description:str(d.data.description).slice(0,160),status:wrStatus(d) }));
+            return { rows: candidates };
+        }),
+    ],
     'POST /api/org/mnt/wr/list': [
         orgRoute('org.mnt.wr.list', null, async (ctx) => {
             requireMnt(ctx);
@@ -1221,16 +1285,33 @@ export const maintenanceRoutes = {
                 .filter((d) => {
                     const s = wrStatus(d);
                     const mine = str(d.data.requestedBy) === ctx.uid;
-                    if (view === 'assessment') return s === 'under_review' && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
+                    if (view === 'assessment') return (s === 'under_review' && Number(d.data.reviewProcessVersion) !== 2 || s === 'to_be_assessed') && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
                     if (view === 'mine') return mine;
                     if (view === 'review') return (s === 'closure_pending' && canAt(ctx, P.WR_closeConfirm, pathOf(d), scope) && str(object(d.data.closure).by) !== ctx.uid)
+                        || (s === 'created' && canAt(ctx, P.WR_review, pathOf(d), scope)
+                            && (!str(d.data.reviewerUid) || str(d.data.reviewerUid) === ctx.uid))
                         || ((!mine || ctx.testMode === true) && ['submitted', 'under_review'].includes(s)
+                            && (Number(d.data.reviewProcessVersion) !== 2 || str(d.data.reviewerUid) === ctx.uid)
                             && (canAt(ctx, P.WR_review, pathOf(d), scope) || canAt(ctx, P.WR_close, pathOf(d), scope)));
-                    if (view === 'open') return ['submitted', 'under_review', 'returned', 'closure_pending'].includes(s);
+                    if (view === 'open') return ['created', 'submitted', 'under_review', 'returned', 'closure_pending'].includes(s);
                     return true;
                 })
                 .sort((a, b) => b.id.localeCompare(a.id))
                 .map(wrOut);
+            if (view === 'assessment') {
+                // Assessments are independent documents. Existing legacy assessments
+                // still appear under their WR numbers until migrated.
+                const documents = await listDocs(assessmentCol(ctx.orgId));
+                const wrs = new Map((await listDocs(wrCol(ctx.orgId))).map((d) => [d.id, d]));
+                const independent = documents.flatMap((assm) => {
+                    const wr = wrs.get(str(assm.data.workRequestCode));
+                    if (!wr || str(wr.data.assessmentCode) !== assm.id) return [];
+                    if (str(wr.data.requestedBy) !== ctx.uid && !canAt(ctx, P.view, pathOf(wr), scope)) return [];
+                    if (![P.assessment_edit, P.assessment_review, P.WR_convert].some((p) => canAt(ctx, p, pathOf(wr), scope))) return [];
+                    return [{ ...wrOut(wr), code: assm.id, workRequestCode: wr.id, assessmentCode: assm.id }];
+                });
+                return { rows: [...independent, ...rows.filter((r) => !r.assessmentCode)].sort((a, b) => b.code.localeCompare(a.code)) };
+            }
             return { rows };
         }),
     ],
@@ -1239,7 +1320,12 @@ export const maintenanceRoutes = {
         orgRoute('org.mnt.wr.get', null, async (ctx) => {
             requireMnt(ctx);
             const scope = await scopeOf(ctx);
-            const doc = await getWr(ctx, str(ctx.body.code));
+            const selectedCode = str(ctx.body.code);
+            const assessmentRecord = ASSM_RE.test(selectedCode) ? await getDoc(`${assessmentCol(ctx.orgId)}/${selectedCode}`) : null;
+            if (ASSM_RE.test(selectedCode) && !assessmentRecord) throw new HttpError(404, 'Work assessment not found.');
+            const doc = await getWr(ctx, assessmentRecord ? str(assessmentRecord.data.workRequestCode) : selectedCode);
+            if (assessmentRecord && str(doc.data.assessmentCode) !== selectedCode)
+                throw new HttpError(409, 'The assessment is not linked to this work request.');
             const can = wrCan(ctx, doc, scope);
             const workflowConfig=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
             const assignedReviewerRole=str(isObj(workflowConfig?.data.approverRoles)?workflowConfig.data.approverRoles['MNT.ASSESS.REVIEW']:'');
@@ -1255,7 +1341,7 @@ export const maintenanceRoutes = {
             can.convert = can.convert && currentReview;
             // Return precise, actionable review readiness instead of silently hiding approval.
             const reviewBlockers: string[] = [];
-            if (str(doc.data.status) !== 'under_review') reviewBlockers.push('Start work request review first.');
+            if (!['under_review','to_be_assessed'].includes(str(doc.data.status))) reviewBlockers.push('Send the work request to assessment first.');
             if (!assignedReviewerRole) reviewBlockers.push('MEMS Admin > Maintenance Workflows: assign MNT.ASSESS.REVIEW to the Maintenance Lead job role.');
             if (!canAt(ctx, P.assessment_review, pathOf(doc), scope)) reviewBlockers.push('Grant MNT.assessment.review security permission at this asset/location.');
             if (assignedReviewerRole) {
@@ -1324,6 +1410,10 @@ export const maintenanceRoutes = {
                 assessmentReviewCurrent: currentReview,
                 assessmentStarted: assessmentHasStarted(d),
                 returnNote: str(d.returnNote),
+                reviewAssignedName: str(d.reviewAssignedName),
+                reviewDecision: str(d.reviewDecision),
+                reviewCancellationCategory: str(d.reviewCancellationCategory),
+                repeatRequestCode: str(d.repeatRequestCode),
                 declineReason: str(d.declineReason),
                 history: objs(d.history).map((h) => ({ at: str(h.at), name: str(h.name), action: str(h.action), note: str(h.note) })),
                 can,
@@ -1353,12 +1443,27 @@ export const maintenanceRoutes = {
             const now = nowIso();
             const done = async (fields: Record<string, Plain>, label: string, auditAction: string, details = note) => {
                 await updateFields(ref, { ...fields, history: history(doc, ctx, label, details), updatedAt: now });
+                const linked = str(fields.assessmentCode) || str(doc.data.assessmentCode);
+                if (linked && ASSM_RE.test(linked)) {
+                    const assessmentPath = `${assessmentCol(ctx.orgId)}/${linked}`;
+                    if (await getDoc(assessmentPath)) {
+                        const { status: _requestStatus, ...assessmentFields } = fields;
+                        const assessmentStatus = auditAction === 'mnt.assessment.approved' ? 'approved'
+                            : auditAction === 'mnt.assessment.returned' ? 'changes_requested'
+                            : auditAction === 'mnt.wr.converted' ? 'converted'
+                            : auditAction === 'mnt.wr.assessed' || auditAction === 'mnt.wr.task_assessments' ? 'in_progress' : 'created';
+                        await updateFields(assessmentPath, { ...assessmentFields, status: assessmentStatus,
+                            updatedAt: now, lastAction: label, lastActionBy: ctx.uid });
+                    }
+                }
                 await rec(ctx, auditAction, doc.id, details);
             };
             const deny = (allowed: boolean, why: string) => {
                 if (!allowed) throw new HttpError(403, why);
             };
             const l = await lists();
+            const assignedReviewer = str(doc.data.reviewerUid) === ctx.uid;
+            const reviewNew = Number(doc.data.reviewProcessVersion) === 2;
             switch (action) {
                 case 'edit': {
                     deny(can.edit, 'Only the requester can edit before technical assessment is saved.');
@@ -1441,10 +1546,43 @@ export const maintenanceRoutes = {
                     await done(fields, 'Details added', 'mnt.wr.enriched', changes.join(' · '));
                     return { ok: true };
                 }
+                case 'assign_review': {
+                    deny(can.assignReview, 'Only a permitted reviewer can assign a work request before review starts.');
+                    const targetUid = str(ctx.body.reviewerUid);
+                    const user = (await orgUsers(ctx.orgId)).find((u) => u.id === targetUid && str(u.data.status) !== 'disabled');
+                    if (!user) throw new HttpError(400, 'Choose an active employee of this organization.');
+                    if (targetUid === str(doc.data.requestedBy) && !bypass(ctx, 'mnt.wr.reviewer_independence'))
+                        throw new HttpError(403, 'The requester cannot review their own request.');
+                    const name = [str(user.data.firstName), str(user.data.lastName)].filter(Boolean).join(' ') || str(user.data.email);
+                    await done({ reviewerUid: targetUid, reviewAssignedName: name, reviewerAssignedAt: now, reviewerAssignedBy: ctx.uid },
+                        'Review assigned', 'mnt.wr.reviewer_assigned', `Assigned to ${name}`);
+                    return { ok: true };
+                }
                 case 'close_review': {
                     // Fixed on the spot: no planning needed. Recorded with cause, solution and maintenance type (the
                     // same maintenance type list Finance uses for GL account rules); another person confirms.
                     deny(can.close, can.ownRequest ? 'You cannot close your own request.' : 'You cannot close this request.');
+                    if (reviewNew) {
+                        if (str(doc.data.status) !== 'under_review' || !assignedReviewer)
+                            throw new HttpError(403, 'Only the assigned reviewer can close this work request after starting review.');
+                        const cause = pickGrouped(l.rootCauses, str(ctx.body.causeCode), 'failure cause')!;
+                        const description = str(ctx.body.description).trim().slice(0, 2000);
+                        if (description.length < 10) throw new HttpError(400, 'Describe what was done (at least 10 characters).');
+                        const closedDate = str(ctx.body.closedDate);
+                        if (!/^\d{4}-\d{2}-\d{2}$/.test(closedDate) || !Number.isFinite(Date.parse(closedDate))
+                            || closedDate > new Date(Date.now() + 14 * 3600_000).toISOString().slice(0, 10) || closedDate < str(doc.data.requestedAt).slice(0, 10))
+                            throw new HttpError(400, 'Choose a closure date from the request date up to today.');
+                        const durationMinutes = Number(ctx.body.durationMinutes);
+                        if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || durationMinutes > 525600)
+                            throw new HttpError(400, 'Enter the actual time taken in minutes (greater than zero).');
+                        const closure = { causeCode: cause.code, causeLabel: cause.label, causeGroup: cause.group,
+                            description, dateClosed: closedDate, durationMinutes, by: ctx.uid,
+                            name: displayName(ctx), at: now };
+                        await done({ status: 'closed', reviewDecision: 'closed', closedAt: now, closure: closure as Plain,
+                            reviewer: ctx.uid, reviewerName: displayName(ctx), reviewCompletedAt: now },
+                            'Closed after review', 'mnt.wr.closed_at_review', `${cause.group} · ${cause.label}; ${durationMinutes} min; ${description}`);
+                        return { ok: true };
+                    }
                     const cause = pickGrouped(l.rootCauses, str(ctx.body.causeCode), 'cause')!;
                     const solution = pickGrouped(l.solutions, str(ctx.body.solutionCode), 'solution')!;
                     const mtype = pick(l.maintenanceTypes, str(ctx.body.maintenanceTypeCode), 'maintenance type')!;
@@ -1479,9 +1617,66 @@ export const maintenanceRoutes = {
                     return { ok: true };
                 }
                 case 'start_review':
-                    deny(can.startReview, can.ownRequest ? 'You cannot review your own request.' : 'You cannot review this request.');
-                    await done({ status: 'under_review', reviewer: ctx.uid, reviewerName: displayName(ctx), reviewStartedAt: now }, 'Review started', 'mnt.wr.review_started', '');
+                    deny(can.startReview, can.ownRequest ? 'You cannot review your own request.' : 'You are not the assigned employee or lack review permission.');
+                    await done({ status: 'under_review', reviewer: ctx.uid, reviewerUid: ctx.uid, reviewerName: displayName(ctx),
+                        reviewAssignedName: displayName(ctx), reviewStartedAt: now }, 'Review started', 'mnt.wr.review_started', '');
                     return { ok: true };
+                case 'cancel_review': {
+                    deny(can.reviewCancel, 'Only the assigned reviewer can cancel during review.');
+                    const category = str(ctx.body.category);
+                    if (!REVIEW_CANCELLATION_REASONS.includes(category as typeof REVIEW_CANCELLATION_REASONS[number]))
+                        throw new HttpError(400, 'Choose a cancellation reason category.');
+                    const reason = clean(ctx.body.reason, 500);
+                    if (reason.length < 10) throw new HttpError(400, 'Provide a cancellation reason of at least 10 characters.');
+                    let repeatRequestCode = '';
+                    if (category === 'repeat') {
+                        repeatRequestCode = str(ctx.body.repeatRequestCode);
+                        if (!WR_RE.test(repeatRequestCode) || repeatRequestCode === doc.id)
+                            throw new HttpError(400, 'Choose a different existing work request for the same equipment.');
+                        const other = await getWr(ctx, repeatRequestCode);
+                        if (str(other.data.unitId) !== str(doc.data.unitId) || ['cancelled','declined'].includes(wrStatus(other)))
+                            throw new HttpError(400, 'The repeat request must exist on the same equipment and must not be canceled.');
+                    }
+                    await done({ status: 'cancelled', reviewDecision: 'cancelled', reviewCancellationCategory: category,
+                        repeatRequestCode, cancelReason: reason, closedAt: now, reviewCompletedAt: now,
+                        reviewedBy: ctx.uid, reviewerName: displayName(ctx) },
+                        'Canceled during review', 'mnt.wr.review_cancelled',
+                        `${category}${repeatRequestCode ? ' · repeat of '+repeatRequestCode : ''}: ${reason}`);
+                    return { ok: true };
+                }
+                case 'to_assessment': {
+                    if (str(doc.data.assessmentCode) && str(doc.data.status) === 'to_be_assessed')
+                        return { ok: true, assessmentCode: str(doc.data.assessmentCode) };
+                    deny(can.toAssessment, 'Only the assigned reviewer can send this request to assessment.');
+                    let assessmentCode = '';
+                    for (let attempt = 0; attempt < 3; attempt++) {
+                        const number = await nextOrgCounter(ctx.orgId, 'assessmentSeq');
+                        if (number > 99999999) throw new HttpError(409, 'Work assessment numbers are exhausted.');
+                        const candidate = `ASSM_${String(number).padStart(8,'0')}`;
+                        const created = await writeDoc(`${assessmentCol(ctx.orgId)}/${candidate}`, {
+                            code: candidate, workRequestCode: doc.id,
+                            sourceRequest: { code: doc.id, title: str(doc.data.title), description: str(doc.data.description),
+                                unitId: str(doc.data.unitId), unitCode: str(doc.data.unitCode),
+                                assemblyId: str(doc.data.assemblyId), assetTag: str(doc.data.assetTag),
+                                siteId: str(doc.data.siteId), costCenterId: str(doc.data.costCenterId),
+                                impactCodes: objs(doc.data.impacts).map((x) => str(x.code)) },
+                            status: 'created', assessmentTasks: [], assessmentTasksVersion: 0,
+                            createdAt: now, updatedAt: now, createdBy: ctx.uid, createdByName: displayName(ctx),
+                            reviewCompletedAt: now, reviewerUid: ctx.uid, reviewerName: displayName(ctx),
+                        }, { exists: false });
+                        if (created) { assessmentCode = candidate; break; }
+                    }
+                    if (!assessmentCode) throw new HttpError(409, 'Could not create a unique work assessment.');
+                    try {
+                        await done({ status: 'to_be_assessed', assessmentCode, reviewDecision: 'to_be_assessed',
+                            reviewCompletedAt: now, reviewer: ctx.uid, reviewerName: displayName(ctx) },
+                            'Sent for work assessment', 'mnt.wr.to_assessment', assessmentCode);
+                    } catch (error) {
+                        await deleteDoc(`${assessmentCol(ctx.orgId)}/${assessmentCode}`).catch(() => undefined);
+                        throw error;
+                    }
+                    return { ok: true, assessmentCode };
+                }
                 case 'assess': {
                     // The technical verification of the need and the proposed solution.
                     deny(can.assess, 'You cannot assess this request.');
@@ -1603,7 +1798,7 @@ export const maintenanceRoutes = {
                 }
                 case 'review_assessment':
                 case 'return_assessment': {
-                    if(str(doc.data.status)!=='under_review')throw new HttpError(409,'Start the work request review before assessment approval.');
+                    if(!['under_review','to_be_assessed'].includes(str(doc.data.status)))throw new HttpError(409,'The work request is not in assessment.');
                     need(ctx,P.assessment_review,pathOf(doc),scope);
                     const role=await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
                     const issue=reviewIssue(ctx,doc.data);
@@ -1662,7 +1857,7 @@ export const maintenanceRoutes = {
                     base.scheduledEnd = scheduledEnd;
                     base.convertedBy = ctx.uid;
                     const woCode = await createWo(ctx, base, doc.id);
-                    await done({ status: 'converted', woCode, convertedBy: ctx.uid, convertedByName: displayName(ctx), convertedAt: now, closedAt: now }, `Converted to ${woCode}`, 'mnt.wr.converted', woCode);
+                    await done({ ...(str(d.status)==='to_be_assessed'?{}:{status:'converted'}), woCode, convertedBy: ctx.uid, convertedByName: displayName(ctx), convertedAt: now }, `Converted to ${woCode}`, 'mnt.wr.converted', woCode);
                     await rec(ctx, 'mnt.wo.created', woCode, `From ${doc.id}`);
                     return { ok: true, woCode };
                 }
