@@ -77,35 +77,67 @@ const CRIT_FALLBACK = ['#dc2626', '#ea580c', '#d97706', '#16a34a', '#64748b'];
 export const critColor = (code: string, color: string, list?: ListItem[]) => color || CRIT_FALLBACK[Math.max(0, list?.findIndex((c) => c.code === code) ?? 0)] || '#64748b';
 
 export async function compressPhoto(file: File): Promise<string> {
-    if (!file.type.startsWith('image/')) throw new Error('Choose a photo.');
-    let bitmap: ImageBitmap;
-    try {
-        bitmap = await createImageBitmap(file);
-    } catch {
-        throw new Error('This photo format cannot be read. Take the photo again or use JPEG.');
-    }
-    const encode = (maxSide: number, quality: number) =>
-        new Promise<Blob>((resolve, reject) => {
-            const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.round(bitmap.width * scale);
-            canvas.height = Math.round(bitmap.height * scale);
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return reject(new Error('Could not process the photo.'));
-            ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not process the photo.'))), 'image/jpeg', quality);
-        });
-    let blob = await encode(1600, 0.82);
-    if (blob.size > 1_300_000) blob = await encode(1200, 0.7);
-    if (blob.size > 1_400_000) throw new Error('The photo is too large.');
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
-        reader.onerror = () => reject(new Error('Could not read the photo.'));
-        reader.readAsDataURL(blob);
-    });
-}
+    // Do not reject an original image based on file size. Decode it on the device,
+    // then progressively reduce its dimensions/quality to fit the upload payload.
+    if (!file.type.startsWith('image/') && !/\.(jpe?g|png|webp|heic|heif|bmp)$/i.test(file.name))
+        throw new Error('Choose a photo from the camera or gallery.');
 
+    let source: CanvasImageSource;
+    let width = 0;
+    let height = 0;
+    let bitmap: ImageBitmap | null = null;
+    let objectUrl = '';
+    try {
+        try {
+            if (typeof createImageBitmap !== 'function') throw new Error('Bitmap API unavailable');
+            bitmap = await createImageBitmap(file);
+            source = bitmap;
+            width = bitmap.width;
+            height = bitmap.height;
+        } catch {
+            // Android WebViews commonly lack createImageBitmap for gallery images.
+            objectUrl = URL.createObjectURL(file);
+            const img = new Image();
+            img.src = objectUrl;
+            await new Promise<void>((resolve, reject) => {
+                img.onload = () => resolve();
+                img.onerror = () => reject(new Error('Could not decode this gallery image. Please choose a JPEG/PNG image.'));
+            });
+            source = img;
+            width = img.naturalWidth;
+            height = img.naturalHeight;
+        }
+        if (!width || !height) throw new Error('This photo could not be decoded.');
+
+        const encode = (maxSide: number, quality: number) =>
+            new Promise<Blob>((resolve, reject) => {
+                const scale = Math.min(1, maxSide / Math.max(width, height));
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.max(1, Math.round(width * scale));
+                canvas.height = Math.max(1, Math.round(height * scale));
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return reject(new Error('Could not process this photo.'));
+                ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob((b) => b ? resolve(b) : reject(new Error('Could not compress this photo.')), 'image/jpeg', quality);
+            });
+
+        let blob: Blob | null = null;
+        for (const [maxSide, quality] of [[1920, 0.84], [1600, 0.75], [1200, 0.65], [900, 0.55], [640, 0.45], [420, 0.38]] as Array<[number, number]>) {
+            blob = await encode(maxSide, quality);
+            if (blob.size <= 1_350_000) break;
+        }
+        if (!blob || blob.size > 1_350_000) throw new Error('Unable to compress the image sufficiently for upload.');
+        return await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+            reader.onerror = () => reject(new Error('Could not read the compressed photo.'));
+            reader.readAsDataURL(blob);
+        });
+    } finally {
+        bitmap?.close();
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+    }
+}
 
 /**
  * Choose a category from a drop-down, then tick items on cards. Selected items are listed above with a clear
