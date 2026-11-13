@@ -135,15 +135,16 @@ export function NotEnabled() {
     );
 }
 
-export default function WorkRequests({ id, sub }: { id?: string; sub?: string }) {
+export default function WorkRequests({ id, sub, area = 'requests' }: { id?: string; sub?: string; area?: 'requests' | 'assessments' }) {
     const setup = useMntSetup();
     if (setup.loading && !setup.data) return <Spinner />;
     if (setup.error || !setup.data) return <Alert tone='error'>{setup.error || 'Could not load maintenance.'}</Alert>;
     const s = setup.data;
     if (!s.enabled) return <NotEnabled />;
+    if (id === 'new' && area === 'assessments') return <Alert tone='error'>Create work requests in the Work Requests submodule.</Alert>;
     if (id === 'new') return s.can.WR_create ? <NewRequest key={sub ?? 'new'} setup={s} assemblyId={sub} /> : <Alert tone='error'>Your job role or security role does not include raising work requests.</Alert>;
-    if (id && /^WR\d{8}$/.test(id)) return <RequestDetail key={id} code={id} setup={s} />;
-    return <RequestList setup={s} />;
+    if (id && /^WR\d{8}$/.test(id)) return <RequestDetail key={id} code={id} setup={s} area={area} />;
+    return <RequestList setup={s} area={area} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +185,7 @@ function useColumns(): Array<Column<Row>> {
     );
 }
 
-function RequestList({ setup }: { setup: MntSetup }) {
+function RequestList({ setup, area }: { setup: MntSetup; area: 'requests' | 'assessments' }) {
     const can = setup.can;
     type Tab = 'all' | 'open' | 'mine' | 'review';
     const [tab, setTab] = useState<Tab>(() => {
@@ -197,35 +198,36 @@ function RequestList({ setup }: { setup: MntSetup }) {
         return (['all', 'open', 'mine', 'review'].includes(requested) && (requested !== 'review' || can.WR_review || can.assessment_review)
             ? requested : (can.WR_review || can.assessment_review ? 'review' : 'all')) as Tab;
     });
-    const { data, error, loading } = useLoad(() => callBackend<{ rows: Row[] }>('/api/org/mnt/wr/list', { view: tab }), [tab]);
+    const { data, error, loading } = useLoad(() => callBackend<{ rows: Row[] }>('/api/org/mnt/wr/list', { view: area === 'assessments' ? 'assessment' : tab }), [tab, area]);
     const columns = useColumns();
     const tabs: Array<[Tab, string]> = [...((can.WR_review || can.assessment_review) ? ([['review', 'To review']] as Array<[Tab, string]>) : []), ['open', 'Open'], ['mine', 'Mine'], ['all', 'All']];
     return (
         <div className='space-y-3'>
-            <div className='flex gap-1 overflow-x-auto rounded-xl border border-slate-800 p-1'>
+            {area === 'requests' && <div className='flex gap-1 overflow-x-auto rounded-xl border border-slate-800 p-1'>
                 {tabs.map(([k, label]) => (
                     <button key={k} type='button' onClick={() => setTab(k)} className={`h-11 shrink-0 rounded-lg px-3 text-sm ${tab === k ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
                         {label}
                     </button>
                 ))}
-            </div>
+            </div>}
+            {area === 'assessments' && <p className='text-sm text-soft'>Independent technical assessments of work requests under review. Open a request to assess activities, resources, safety and approval.</p>}
             {error && <Alert tone='error'>{error}</Alert>}
             {loading && !data ? (
                 <Spinner />
             ) : (
                 <RichTable
-                    id={`mnt.wr.${tab}`}
+                    id={area === 'assessments' ? 'mnt.assessments' : `mnt.wr.${tab}`}
                     tabKey={tab}
-                    title='Work requests'
-                    fileName={`work_requests_${tab}`}
+                    title={area === 'assessments' ? 'Work assessments' : 'Work requests'}
+                    fileName={area === 'assessments' ? 'work_assessments' : `work_requests_${tab}`}
                     columns={columns}
                     rows={data?.rows ?? []}
                     rowKey={(r) => r.code}
-                    onRowClick={(r) => navigate(`organization_admin/work_requests/${r.code}`)}
-                    empty={tab === 'review' ? 'Nothing is waiting for your review.' : 'No work requests here.'}
+                    onRowClick={(r) => navigate(`organization_admin/${area === 'assessments' ? 'work_assessments' : 'work_requests'}/${r.code}`)}
+                    empty={area === 'assessments' ? 'No work requests are ready for technical assessment.' : tab === 'review' ? 'Nothing is waiting for your review.' : 'No work requests here.'}
                     height='h-[calc(100dvh-12rem)]'
                     actions={
-                        can.WR_create ? (
+                        can.WR_create && area === 'requests' ? (
                             <Button onClick={() => navigate('organization_admin/work_requests/new')}>
                                 <Wrench className='h-4 w-4' />
                                 New
@@ -633,7 +635,7 @@ function ReviewBlock({ label, onEdit, children }: { label: string; onEdit?: () =
 
 type Mode = '' | 'edit' | 'enrich' | 'close' | 'confirm_closure' | 'reject_closure' | 'assess' | 'review_assessment' | 'return_assessment' | 'return' | 'decline' | 'convert' | 'cancel';
 
-function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
+function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; area: 'requests' | 'assessments' }) {
     const lists = setup.lists!;
     const { data, error, loading, reload } = useLoad(() => callBackend<Detail>('/api/org/mnt/wr/get', { code }), [code]);
     const [mode, setMode] = useState<Mode>('');
@@ -644,7 +646,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     const [zoom, setZoom] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [section,setSection]=useState<'request'|'assessment'|'tasks'|'summary'>('request');
+    const [section,setSection]=useState<'request'|'assessment'|'tasks'|'summary'>(area === 'assessments' ? 'assessment' : 'request');
     const [tasksDirty,setTasksDirty]=useState(false);
     const goSection=async (next:'request'|'assessment'|'tasks'|'summary')=>{
         if(next!==section&&tasksDirty&&!(await appConfirm('You have unsaved task changes. Leave without saving them?')))return;
@@ -698,6 +700,10 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
     if (can.edit) buttons.push({ key: 'edit', label: 'Edit', icon: <Pencil className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('edit') });
     if (can.resubmit) buttons.push({ key: 'resubmit', label: 'Resubmit', icon: <Send className='h-4 w-4' />, onClick: () => run('resubmit') });
     if (can.cancel) buttons.push({ key: 'cancel', label: 'Cancel request', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('cancel') });
+    // Work Requests and Work Assessments are separate workspaces, with no mixed edit buttons.
+    const visibleButtons = area === 'assessments'
+        ? buttons.filter((b) => ['assess', 'reviewAssessment'].includes(b.key))
+        : buttons.filter((b) => !['assess', 'reviewAssessment'].includes(b.key));
 
     const typedNeeded = mode === 'decline' || mode === 'convert' || mode === 'cancel';
     const noteNeeded = mode === 'return' || mode === 'decline' || mode === 'cancel' || mode === 'review_assessment' || mode === 'return_assessment' || mode === 'reject_closure';
@@ -708,13 +714,14 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
             {/* Action bar on top */}
             <div className='shrink-0 space-y-2 border-b border-line bg-page pb-2'>
                 <div className='flex items-center gap-2'>
-                    <Button variant='secondary' aria-label='Back' onClick={async () => { if(tasksDirty&&!(await appConfirm('You have unsaved task changes. Leave without saving?')))return; navigate('organization_admin/work_requests'); }}>
+                    <Button variant='secondary' aria-label='Back' onClick={async () => { if(tasksDirty&&!(await appConfirm('You have unsaved task changes. Leave without saving?')))return; navigate(area === 'assessments' ? 'organization_admin/work_assessments' : 'organization_admin/work_requests'); }}>
                         <ArrowLeft className='h-4 w-4' />
                     </Button>
                     <div className='min-w-0 flex-1'>
                         <p className='font-mono text-sm font-bold tracking-wider text-emerald-300'>{r.code}</p>
                         <p className='truncate text-xs text-slate-400'>{r.statusLabel}</p>
                     </div>
+                    {area === 'assessments' && <Button variant='secondary' onClick={() => navigate(`organization_admin/work_requests/${r.code}`)}>Original request</Button>}
                     {r.woCode && (
                         <Button variant='secondary' onClick={() => navigate(`organization_admin/work_orders/${r.woCode}`)}>
                             {r.woCode}
@@ -731,7 +738,7 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                    ['assessment','Work Assessment',<ClipboardList key='a' className='h-4 w-4'/>],
                    ['tasks','Assessment Tasks'+(r.assessmentTasks?.length?' ('+r.assessmentTasks.length+')':''),<Wrench key='t' className='h-4 w-4'/>],
                    ['summary','Summary',<CheckCircle2 key='s' className='h-4 w-4'/>],
-                ] as const).map(([key,title,icon])=><button type='button' key={key} aria-current={section===key?'page':undefined}
+                ] as const).filter(([key]) => area === 'assessments' ? key !== 'request' : key === 'request').map(([key,title,icon])=><button type='button' key={key} aria-current={section===key?'page':undefined}
                   onClick={()=>goSection(key)}
                   className={'flex min-h-[44px] flex-1 shrink-0 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold '+(section===key?'bg-emerald-900/50 text-emerald-200 ring-1 ring-emerald-700':'text-slate-400')}>
                   {icon}<span>{title}</span></button>)}
@@ -817,12 +824,12 @@ function RequestDetail({ code, setup }: { code: string; setup: MntSetup }) {
                     <p className='text-xs font-semibold uppercase tracking-wider text-emerald-300'>Work request</p>
                     <h2 className='text-lg font-semibold text-white'>Request details</h2>
                   </div>
-                  {buttons.length>0&&<div className='grid grid-cols-2 gap-2'>
-                    {buttons.map(b=><Button key={b.key} variant={b.variant??'primary'} busy={busy&&b.key!=='edit'} className='min-w-0 justify-center text-xs' onClick={b.onClick}>
+                  {visibleButtons.length>0&&<div className='grid grid-cols-2 gap-2'>
+                    {visibleButtons.map(b=><Button key={b.key} variant={b.variant??'primary'} busy={busy&&b.key!=='edit'} className='min-w-0 justify-center text-xs' onClick={b.onClick}>
                       {b.icon}<span className='min-w-0 break-words text-center'>{b.label}</span>
                     </Button>)}
                   </div>}
-                  {can.ownRequest&&['submitted','under_review'].includes(r.status)&&<p className='text-xs text-slate-400'>You raised this request. Independent review is handled by another authorized person.</p>}
+                  {can.ownRequest&&['submitted','under_review'].includes(r.status)&&<p className='text-xs text-slate-400'>You raised this request. You may edit or cancel it until technical assessment begins.</p>}
                 {r.status === 'returned' && r.returnNote && (
                     <Card>
                         <p className='text-xs font-semibold uppercase tracking-wider text-red-300'>Information requested</p>
@@ -1199,7 +1206,7 @@ function EnrichRequest({ detail, lists, onDone, onCancel }: { detail: Detail; li
     const addPhotos = async (e: ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files ?? []);
         e.target.value = '';
-        for (const file of files.slice(0, Math.max(0, 8 - detail.photos.length - photos.length - uploading))) {
+        for (const file of files) {
             setUploading((n) => n + 1);
             try {
                 const res = await callBackend<{ token: string; url: string }>('/api/org/mnt/wr/photo', { data: await compressPhoto(file) });
@@ -1262,10 +1269,10 @@ function EnrichRequest({ detail, lists, onDone, onCancel }: { detail: Detail; li
                         </div>
                     ))}
                     {detail.photos.length + photos.length + uploading < 8 && (
-                        <label className='flex aspect-square cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-emerald-500/50 text-xs text-emerald-300'>
+                        <label className='relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-emerald-500/50 text-xs text-emerald-300'>
                             <Camera className='h-6 w-6' />
                             Add photo
-                            <input type='file' accept='image/*' capture='environment' className='sr-only' onChange={addPhotos} />
+                            <input type='file' accept='image/*' multiple className='absolute inset-0 h-full w-full cursor-pointer opacity-0' onChange={addPhotos} />
                         </label>
                     )}
                 </div>
@@ -1284,13 +1291,13 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
     const [uploading, setUploading] = useState(0);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const ok = (!title.trim() || title.trim().length >= 3) && impactCodes.length <= MAX_IMPACTS && !uploading;
+    const ok = title.trim().length >= 3 && description.trim().length >= 10 && !!sourceCode && impactCodes.length > 0 && impactCodes.length <= MAX_IMPACTS && !uploading;
     const screen = useFullScreen(true);
 
     const addPhotos = async (e: ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files ?? []);
         e.target.value = '';
-        for (const file of files.slice(0, Math.max(0, 4 - photos.length - uploading))) {
+        for (const file of files) {
             setUploading((n) => n + 1);
             try {
                 const res = await callBackend<{ token: string; url: string }>('/api/org/mnt/wr/photo', { data: await compressPhoto(file) });
@@ -1328,10 +1335,10 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
             </div>
             <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
                 {detail.returnNote && <Alert tone='info'>Requested: {detail.returnNote}</Alert>}
-                <Field id='ed-title' label='Short title (optional)' maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} />
-                <TextArea id='ed-desc' label='What did you find? (optional)' rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
-                <GroupPicker title='Source of the finding (optional)' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
-                <ChoicePicker title='Impact (optional)' multi max={MAX_IMPACTS} groups={lists.impacts} selected={impactCodes} onToggle={(c) => setImpactCodes(toggleImpact(c))} />
+                <Field id='ed-title' label='Short title *' maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} />
+                <TextArea id='ed-desc' label='What did you find? *' rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
+                <GroupPicker title='Source of the finding *' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
+                <ChoicePicker title='Impact' required multi max={MAX_IMPACTS} groups={lists.impacts} selected={impactCodes} onToggle={(c) => setImpactCodes(toggleImpact(c))} />
                 <div className='grid grid-cols-3 gap-2'>
                     {photos.map((p) => (
                         <div key={p.token} className='relative overflow-hidden rounded-xl border border-slate-800'>
@@ -1341,7 +1348,7 @@ function EditRequest({ detail, lists, onDone, onCancel }: { detail: Detail; list
                             </button>
                         </div>
                     ))}
-                    {photos.length + uploading < 4 && (
+                    {(
                         <label className='flex aspect-square cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-emerald-500/50 text-xs text-emerald-300'>
                             <Camera className='h-6 w-6' />
                             Add photo
