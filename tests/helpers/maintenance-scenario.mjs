@@ -967,11 +967,12 @@ assert.equal(
     'Cancellation releases material reservations without consuming stock',
 );
 // ----- Raising on the equipment only; review builds on the request; closure at review needs a second person -----
-const eqWr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', { confirm: true, equipmentId: 'CONVEYOR', assetTag: 'AST000001', title: 'Gearbox knocking', description: 'Loud knocking noise from the drive end.', sourceCode: first(l.sources) });
+const eqWr = await route(maintenanceRoutes, '/api/org/mnt/wr/create', 'requester', { equipmentId: 'CONVEYOR', assetTag: 'AST000001', title: 'Gearbox knocking', description: 'Loud knocking noise from the drive end.', sourceCode: first(l.sources), impactCodes: [first(l.impacts)] });
 let eq = snapshot(r + '/work_requests/' + eqWr.code).data;
 assert.equal(eq.assemblyId, '', 'Only the equipment is required to raise a request');
 assert.equal(eq.titleAuto, false, 'The requester now supplies a mandatory short title');
 assert.equal(eq.title, 'Gearbox knocking');
+await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'start_review' });
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'save_task_assessment', tasks: [task('x', 'Inspect', 'GEARBOX')] }), /Add the assembly/);
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'enrich', description: 'A different description from the reviewer.' }), /kept as written/);
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'enrich', assemblyId: 'OTHER_ASSEMBLY' }), /assembly of CONVEYOR/);
@@ -980,7 +981,7 @@ await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqW
 eq = snapshot(r + '/work_requests/' + eqWr.code).data;
 assert.equal(eq.assemblyId, 'GEARBOX');
 assert.equal(eq.title, 'Gearbox knocking');
-assert.equal(eq.impacts.length, 1, 'Impact is supplied during assessment enrichment');
+assert.equal(eq.impacts.length, 1, 'Impact is present from the request stage');
 assert.equal(eq.description, 'Loud knocking noise from the drive end.', 'The requester description is kept');
 assert.ok(eq.path.includes('GEARBOX'));
 assert.ok(eq.history.some((h) => h.action === 'Details added' && /Assembly/.test(h.note)), 'Every change is logged');
