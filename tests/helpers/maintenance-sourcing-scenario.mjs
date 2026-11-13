@@ -143,10 +143,17 @@ const context = (who, body = {}) => {
     };
 };
 const op = (who, action, body = {}) => maintenanceOperations(context(who, { action, ...body }));
-const route = (routes, path, who, body) => {
+// Keep this regression focused on historical sourcing mechanics; the modern
+// created / assigned review / ASSM lifecycle has dedicated coverage.
+const route = async (routes, path, who, body) => {
     const handler = routes['POST ' + path]?.[0];
     assert.ok(handler, 'Missing handler ' + path);
-    return handler(context(who, body));
+    const result = await handler(context(who, body));
+    if (routes === maintenanceRoutes && path === '/api/org/mnt/wr/create' && result.code) {
+        const key = r + '/work_requests/' + result.code;
+        seed(key, { ...snapshot(key).data, status: 'submitted', reviewProcessVersion: 1, reviewerUid: '' });
+    }
+    return result;
 };
 function catalogue(kind, items) {
     const base = 'module_workspaces/' + (kind === 'gl_accounts' ? 'FIN' : 'PRC') + '/catalogs/' + kind;
