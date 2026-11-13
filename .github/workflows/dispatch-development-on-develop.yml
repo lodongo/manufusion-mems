@@ -1,0 +1,27 @@
+name: Dispatch MEMS development deployment from develop
+
+on:
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: mems-development-dispatch
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    if: github.repository == 'lodongo/manufusion-mems' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start the authorized development deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run deploy-development.yml --ref develop
