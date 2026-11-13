@@ -37,7 +37,10 @@ test('Work Assessment has a separate submodule and all four finding fields are r
  assert.match(ui,/Short title \*/);
  assert.match(ui,/What did you find\? \*/);
  assert.match(ui,/Source of the finding \*/);
- assert.match(ui,/Complete missing request details and impacts/);
+ assert.doesNotMatch(ui,/Complete missing request details and impacts|function EnrichRequest|Add assembly & details/);
+ assert.match(ui,/label='Assembly to assess \\*'/);
+ assert.match(ui,/title='2\\. Failure mode \\*'/);
+ assert.match(ui,/natureCode: nature/);
  assert.match(ui,/title='Impact' required multi|title='Impact'[\s\S]*?required/);
  const home=readFileSync('src/org/OrgHomePage.tsx','utf8');
  assert.match(home,/label: 'Work assessments', path: 'work_assessments'/);
