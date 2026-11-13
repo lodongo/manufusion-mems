@@ -1190,7 +1190,7 @@ export function ClosureCard({ closure }: { closure: Closure }) {
             {closure.solutionLabel && <Info label='Solution' value={`${closure.solutionGroup} · ${closure.solutionLabel}`} />}
             {closure.maintenanceTypeLabel && <Info label='Maintenance type' value={closure.maintenanceTypeLabel} />}
             {closure.dateClosed && <Info label='Date closed' value={closure.dateClosed} />}
-            {closure.durationMinutes && <Info label='Actual time taken' value={`${closure.durationMinutes} minutes`} />
+            {closure.durationMinutes && <Info label='Actual time taken' value={`${closure.durationMinutes} minutes`} />}
             <Info label='What was done' value={closure.description} />
             <Info label='Closed by' value={`${closure.name} · ${fmtDate(closure.at)}`} />
             {closure.confirmedAt && <Info label='Confirmed by' value={`${closure.confirmedName} · ${fmtDate(closure.confirmedAt)}`} sub={closure.confirmNote} />}
