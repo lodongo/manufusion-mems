@@ -492,7 +492,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         cancel: mine && ['submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_cancel),
         startReview: status === 'submitted' && at(P.WR_review) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         assess: status === 'under_review' && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
-        return: status === 'under_review' && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+        return: status === 'under_review' && !assessmentStarted && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         decline: status === 'under_review' && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         // Review and assessment build on the request: fill what is empty, add photos, add or change the assembly.
         enrich: ['submitted', 'under_review'].includes(status) && (at(P.WR_review) || at(P.assessment_edit)) && !assessmentReviewCurrent(doc.data),
