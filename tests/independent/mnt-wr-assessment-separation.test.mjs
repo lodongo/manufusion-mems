@@ -27,16 +27,19 @@ test('Legacy assessments are not allowed to bypass newly required finding comple
 });
 test('Work Request mandatory fields are enforced on server and assessment review cannot bypass them',()=>{
  const src=readFileSync('backend/maintenance.ts','utf8');
- assert.match(src,/finding\.title\.length<3\|\|finding\.description\.length<10\|\|!finding\.sourceCode/);
+ assert.match(src,/finding\.title\.length\s*<\s*3\s*\|\|\s*finding\.description\.length\s*<\s*10\s*\|\|\s*!finding\.sourceCode\s*\|\|\s*!finding\.impacts\.length/);
  assert.match(src,/const header=WR_RE\.test\(str\(record\.code\)\)\?assessmentHeaderIssue\(record\)/);
  assert.match(src,/if\(header\)return header/);
 });
-test('Separate Work Assessment stage and three required finding fields are visible in the UI',()=>{
+test('Work Assessment has a separate submodule and all four finding fields are required',()=>{
  const ui=readFileSync('src/org/WorkRequests.tsx','utf8');
  assert.match(ui,/\['assessment','Work Assessment'/);
  assert.match(ui,/Short title \*/);
  assert.match(ui,/What did you find\? \*/);
  assert.match(ui,/Source of the finding \*/);
  assert.match(ui,/Complete missing request details and impacts/);
- assert.match(ui,/Impact \(optional at request; required in Work Assessment\)/);
+ assert.match(ui,/title='Impact' required multi|title='Impact'[\s\S]*?required/);
+ const home=readFileSync('src/org/OrgHomePage.tsx','utf8');
+ assert.match(home,/label: 'Work assessments', path: 'work_assessments'/);
+ assert.match(ui,/area === 'assessments'/);
 });
