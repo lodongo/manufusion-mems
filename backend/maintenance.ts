@@ -50,7 +50,6 @@ const P = Object.fromEntries(MNT_ACTIVITIES.map((a) => [a.key.replace(/^MNT\./, 
 const WR_RE = /^WR\d{8}$/;
 const WO_RE = /^WO\d{8}$/;
 const PHOTO_RE = /^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/wr_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png)$/;
-const MAX_PHOTOS = 4;
 const ASSESSMENT_PHOTO_RE=/^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/assessment_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png|pdf)$/;
 /** A reused library task is unchanged when it equals the approved template, ignoring its ASSMTASK reference. */
 const sameTemplate=(template:unknown,task:unknown)=>{
@@ -268,6 +267,18 @@ async function assemblyContext(ctx: OrgContext, assemblyId: string, perm: string
     if (!node || node.id !== assemblyId || (level !== 'assembly' && !atEquipment)) throw new HttpError(400, allowEquipment ? 'Choose the equipment or the assembly.' : 'Choose an assembly.');
     if (str(node.data.status) === 'inactive') throw new HttpError(400, atEquipment ? 'This equipment is inactive.' : 'This assembly is inactive.');
     const assembly = atEquipment ? null : node;
+    // Equipment is selectable only if it contains at least one active assembly.
+    if (atEquipment) {
+        const nodes = (await listDocs(col(ctx.orgId))).filter((n) => str(n.data.status) !== 'inactive');
+        const parents = new Map(nodes.map((n) => [n.id, str(n.data.parentId)]));
+        const under = (id: string) => {
+            for (let cur = parents.get(id), depth = 0; cur && depth < 16; cur = parents.get(cur), depth++)
+                if (cur === assemblyId) return true;
+            return false;
+        };
+        if (!nodes.some((n) => str(n.data.level) === 'assembly' && under(n.id)))
+            throw new HttpError(400, 'This equipment has no assembly configured. Add an assembly in Organization Design before selecting the equipment.');
+    }
     const pathIds = docs.map((d) => d.id);
     need(ctx, perm, pathIds, scope);
     const unit = docs.find((d) => ['work_center', 'equipment'].includes(str(d.data.level))) ?? null;
@@ -448,7 +459,6 @@ const autoTitle = (loc: { assemblyName: string; unitName: string }) => `Defect o
 
 function readPhotos(ctx: OrgContext, raw: unknown, existing: string[] = []) {
     const photos = [...new Set(strs(raw))];
-    if (photos.length > MAX_PHOTOS) throw new HttpError(400, `Attach up to ${MAX_PHOTOS} photos.`);
     const prefix = `organizations/${ctx.orgId}/mnt/wr_photos/`;
     for (const p of photos) {
         if (existing.includes(p)) continue;
@@ -464,18 +474,24 @@ async function getWr(ctx: OrgContext, code: string): Promise<Doc> {
     return doc;
 }
 
+function assessmentHasStarted(d: Obj): boolean {
+    return !!str(d.assessedAt) || !!str(d.assessmentTasksAt) || objs(d.assessmentTasks).length > 0
+        || !!str(d.assessedBy) || !!str(d.assessmentTasksBy) || isObj(d.assessmentReview);
+}
+
 function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
     const status = wrStatus(doc);
     const path = pathOf(doc);
     const mine = str(doc.data.requestedBy) === ctx.uid;
+    const assessmentStarted = assessmentHasStarted(doc.data);
     const at = (perm: string) => canAt(ctx, perm, path, scope);
     return {
         view: mine || at(P.view),
-        edit: mine && ['submitted', 'returned'].includes(status) && at(P.WR_edit),
-        resubmit: mine && status === 'returned' && at(P.WR_edit),
-        cancel: mine && ['submitted', 'returned'].includes(status) && at(P.WR_cancel),
+        edit: mine && ['submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_edit),
+        resubmit: mine && status === 'returned' && !assessmentStarted && at(P.WR_edit),
+        cancel: mine && ['submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_cancel),
         startReview: status === 'submitted' && at(P.WR_review) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
-        assess: ['submitted','under_review'].includes(status) && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
+        assess: status === 'under_review' && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
         return: status === 'under_review' && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         decline: status === 'under_review' && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         // Review and assessment build on the request: fill what is empty, add photos, add or change the assembly.
@@ -1066,7 +1082,9 @@ export const maintenanceRoutes = {
                 code: str(d.data.code),
                 name: str(d.data.name),
                 assetTag: isObj(d.data.attributes) ? str(d.data.attributes.assetTag) : '',
-                inScope: (str(d.data.level) === 'assembly' || (perm === P.WR_create && UNIT_LEVELS.includes(str(d.data.level)))) && canAt(ctx, perm, pathTo(d.id), scope),
+                inScope: (str(d.data.level) === 'assembly' || (perm === P.WR_create && UNIT_LEVELS.includes(str(d.data.level))
+                    && docs.some((child) => str(child.data.level) === 'assembly' && pathTo(child.id).includes(d.id))))
+                    && canAt(ctx, perm, pathTo(d.id), scope),
             }));
             const keep = new Set<string>();
             for (const n of nodes) if (n.inScope) for (const id of pathTo(n.id)) keep.add(id);
@@ -1084,7 +1102,16 @@ export const maintenanceRoutes = {
                     break;
                 }
             }
-            return { nodes: nodes.filter((n) => keep.has(n.id)), homeId };
+            const preferred = await getDoc(`organizations/${ctx.orgId}/mnt_wr_preferences/${ctx.uid}`);
+            let lastSelectionId = str(preferred?.data.lastSelectionId);
+            if (!lastSelectionId && perm === P.WR_create) {
+                const recent = (await listDocs(wrCol(ctx.orgId)))
+                    .filter((w) => str(w.data.requestedBy) === ctx.uid)
+                    .sort((a, b) => str(b.data.requestedAt).localeCompare(str(a.data.requestedAt)))[0];
+                lastSelectionId = str(recent?.data.assemblyId) || str(recent?.data.unitId);
+            }
+            if (!nodes.some((n) => n.id === lastSelectionId && n.inScope)) lastSelectionId = '';
+            return { nodes: nodes.filter((n) => keep.has(n.id)), homeId, lastSelectionId };
         }),
     ],
 
@@ -1092,7 +1119,14 @@ export const maintenanceRoutes = {
         orgRoute('org.mnt.assembly', null, async (ctx) => {
             requireMnt(ctx);
             const forWr = str(ctx.body.purpose) !== 'wo';
-            return assemblyContext(ctx, str(ctx.body.assemblyId), forWr ? P.WR_create : P.WO_create, forWr);
+            const selected = str(ctx.body.assemblyId);
+            const place = await assemblyContext(ctx, selected, forWr ? P.WR_create : P.WO_create, forWr);
+            if (forWr && ctx.body.remember === true) {
+                await writeDoc(`organizations/${ctx.orgId}/mnt_wr_preferences/${ctx.uid}`, {
+                    lastSelectionId: selected, selectedAt: nowIso(), selectedBy: ctx.uid,
+                });
+            }
+            return place;
         }),
     ],
 
@@ -1120,13 +1154,12 @@ export const maintenanceRoutes = {
         orgRoute('org.mnt.wr.create', null, async (ctx) => {
             requireMnt(ctx);
             const b = ctx.body;
-            if (b.confirm !== true) throw new HttpError(400, 'Review the request and confirm that the details are correct.');
             // The defect must be placed at least at equipment level (assembly preferred), within the person's scope.
             const place = await assemblyContext(ctx, str(b.assemblyId) || str(b.equipmentId), P.WR_create, true);
             const loc = placeFields(place, str(b.assetTag));
             const finding = await readFinding(await lists(), b);
-            if(finding.title.length<3||finding.description.length<10||!finding.sourceCode)
-                throw new HttpError(400,'Short title (3+ characters), finding description (10+ characters), and source of finding are required to submit a Work Request.');
+            if (finding.title.length < 3 || finding.description.length < 10 || !finding.sourceCode || !finding.impacts.length)
+                throw new HttpError(400, 'Short title (3+ characters), finding description (10+ characters), source of finding and at least one impact are required.');
             const titleAuto = !finding.title;
             if (titleAuto) finding.title = autoTitle(loc);
             const gembaId = str(b.gembaId), observationId = str(b.gembaObservationId);
@@ -1147,7 +1180,6 @@ export const maintenanceRoutes = {
             const provided = strs(b.photos);
             const fresh = provided.filter(p => p !== inheritedPhoto);
             const photos = [...readPhotos(ctx, fresh), ...(inheritedPhoto && provided.includes(inheritedPhoto) ? [inheritedPhoto] : [])];
-            if (photos.length > MAX_PHOTOS) throw new HttpError(400, 'Attach up to four photos.');
             const now = nowIso();
             for (let attempt = 0; attempt < 3; attempt++) {
                 const n = await nextOrgCounter(ctx.orgId, 'wrSeq');
@@ -1191,6 +1223,7 @@ export const maintenanceRoutes = {
                 .filter((d) => {
                     const s = wrStatus(d);
                     const mine = str(d.data.requestedBy) === ctx.uid;
+                    if (view === 'assessment') return s === 'under_review' && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
                     if (view === 'mine') return mine;
                     if (view === 'review') return (s === 'closure_pending' && canAt(ctx, P.WR_closeConfirm, pathOf(d), scope) && str(object(d.data.closure).by) !== ctx.uid)
                         || ((!mine || ctx.testMode === true) && (['submitted', 'under_review'].includes(s) && (canAt(ctx, P.WR_review, pathOf(d), scope) || canAt(ctx, P.WR_close, pathOf(d), scope)) || s==='under_review' && !assessmentReviewCurrent(d.data) && canAt(ctx, P.assessment_review, pathOf(d), scope)));
@@ -1290,6 +1323,7 @@ export const maintenanceRoutes = {
                 assessmentTasks: objs(d.assessmentTasks),
                 assessmentReview: isObj(d.assessmentReview)?d.assessmentReview:{status:'pending'},
                 assessmentReviewCurrent: currentReview,
+                assessmentStarted: assessmentHasStarted(d),
                 returnNote: str(d.returnNote),
                 declineReason: str(d.declineReason),
                 history: objs(d.history).map((h) => ({ at: str(h.at), name: str(h.name), action: str(h.action), note: str(h.note) })),
@@ -1328,10 +1362,10 @@ export const maintenanceRoutes = {
             const l = await lists();
             switch (action) {
                 case 'edit': {
-                    deny(can.edit, 'Only the requester can edit, and only before review starts.');
+                    deny(can.edit, 'Only the requester can edit before technical assessment is saved.');
                     const finding = await readFinding(l, ctx.body);
-                    if(finding.title.length<3||finding.description.length<10||!finding.sourceCode)
-                        throw new HttpError(400,'Short title, finding description and source of finding are required.');
+                    if (finding.title.length < 3 || finding.description.length < 10 || !finding.sourceCode || !finding.impacts.length)
+                        throw new HttpError(400, 'Short title, finding description, source of finding and at least one impact are required.');
                     const titleAuto = !finding.title;
                     if (titleAuto) finding.title = autoTitle({ assemblyName: str(doc.data.assemblyName), unitName: str(doc.data.unitName) });
                     const existing = objs(doc.data.photos).map((p) => str(p.path));
@@ -1342,12 +1376,12 @@ export const maintenanceRoutes = {
                 }
                 case 'resubmit':
                     deny(can.resubmit, 'Only the requester can resubmit a returned request.');
-                    if(str(doc.data.title).length<3||doc.data.titleAuto===true||str(doc.data.description).length<10||!str(doc.data.sourceCode))
+                    if(str(doc.data.title).length<3||doc.data.titleAuto===true||str(doc.data.description).length<10||!str(doc.data.sourceCode)||!objs(doc.data.impacts).length)
                         throw new HttpError(409,'Complete the mandatory title, finding description and source before resubmitting.');
                     await done({ status: 'submitted', returnNote: '', assessmentReview: null }, 'Resubmitted', 'mnt.wr.resubmitted');
                     return { ok: true };
                 case 'cancel':
-                    deny(can.cancel, 'Only the requester can cancel, and only before review starts.');
+                    deny(can.cancel, 'Only the requester can cancel before technical assessment is saved.');
                     if (note.length < 5) throw new HttpError(400, 'Give the reason for cancelling (at least 5 characters).');
                     confirmCode(ctx, doc);
                     await done({ status: 'cancelled', cancelReason: note, closedAt: now }, 'Cancelled', 'mnt.wr.cancelled');
@@ -1403,7 +1437,6 @@ export const maintenanceRoutes = {
                     const existing = objs(d.photos).map((x) => str(x.path));
                     const newPhotos = [...new Set(strs(ctx.body.addPhotos))].filter((x) => !existing.includes(x));
                     if (newPhotos.length) {
-                        if (existing.length + newPhotos.length > MAX_PHOTOS * 2) throw new HttpError(400, `A request holds up to ${MAX_PHOTOS * 2} photos.`);
                         readPhotos(ctx, newPhotos);
                         fields.photos = [...objs(d.photos), ...newPhotos.map((x) => ({ path: x, addedAt: now, addedBy: ctx.uid }))] as unknown as Plain;
                         changes.push(`${newPhotos.length} photo(s) added`);
