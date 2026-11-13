@@ -1226,7 +1226,8 @@ export const maintenanceRoutes = {
                     if (view === 'assessment') return s === 'under_review' && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
                     if (view === 'mine') return mine;
                     if (view === 'review') return (s === 'closure_pending' && canAt(ctx, P.WR_closeConfirm, pathOf(d), scope) && str(object(d.data.closure).by) !== ctx.uid)
-                        || ((!mine || ctx.testMode === true) && (['submitted', 'under_review'].includes(s) && (canAt(ctx, P.WR_review, pathOf(d), scope) || canAt(ctx, P.WR_close, pathOf(d), scope)) || s==='under_review' && !assessmentReviewCurrent(d.data) && canAt(ctx, P.assessment_review, pathOf(d), scope)));
+                        || ((!mine || ctx.testMode === true) && ['submitted', 'under_review'].includes(s)
+                            && (canAt(ctx, P.WR_review, pathOf(d), scope) || canAt(ctx, P.WR_close, pathOf(d), scope)));
                     if (view === 'open') return ['submitted', 'under_review', 'returned', 'closure_pending'].includes(s);
                     return true;
                 })
