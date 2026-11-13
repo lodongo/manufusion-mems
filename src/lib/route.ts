@@ -17,7 +17,7 @@ export function useHashRoute(): string {
 /** Keep operational workspaces inside organization home for non-admin users. */
 export function workspaceNavigate(path: string) {
     const inHome = currentRoute().startsWith('organization_home/');
-    if (inHome && /^organization_admin\/(work_requests|work_orders|assets|asset_approvals)(\/|$)/.test(path)) {
+    if (inHome && /^organization_admin\/(work_requests|work_assessments|work_orders|assets|asset_approvals)(\/|$)/.test(path)) {
         navigate(path.replace(/^organization_admin\//, 'organization_home/'));
     } else navigate(path);
 }
