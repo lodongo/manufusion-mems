@@ -118,6 +118,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
     MNT: [
         { label: 'Maintenance workspace', path: 'mnt', prefix: 'MNT.' },
         { label: 'Work requests', path: 'work_requests', prefix: 'MNT.WR.' },
+        { label: 'Work assessments', path: 'work_assessments', prefix: 'MNT.assessment.' },
         { label: 'Work orders', path: 'work_orders', prefix: 'MNT.WO.' },
         { label: 'Maintenance windows', path: 'maintenance_windows', prefix: 'MNT.' },
         { label: 'Budgets & cost approvals', path: 'mnt_budgets', prefix: 'MNT.' },
@@ -464,6 +465,7 @@ export default function OrgHomePage({
     else if (activeMenu && section === 'mnt_budgets') content = <MntBudgets />;
     else if (activeMenu && section === 'mnt_task_validation') content = <MntTaskValidation />;
     else if (activeMenu && section === 'work_requests') content = <WorkRequests id={id} sub={sub} />;
+    else if (activeMenu && section === 'work_assessments') content = <WorkRequests id={id} sub={sub} area='assessments' />;
     else if (activeMenu && section === 'work_orders') content = <WorkOrders id={id} sub={sub} />;
     else if (activeMenu && section === 'assets') content = <AssetRegister view='register' id={id} />;
     else if (activeMenu && section === 'asset_approvals') content = <AssetRegister view='approvals' id={id} />;
