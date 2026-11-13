@@ -829,7 +829,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                       {b.icon}<span className='min-w-0 break-words text-center'>{b.label}</span>
                     </Button>)}
                   </div>}
-                  {can.ownRequest&&['submitted','under_review'].includes(r.status)&&<p className='text-xs text-slate-400'>You raised this request. You may edit or cancel it until technical assessment begins.</p>}
+                  {can.ownRequest&&['submitted','under_review'].includes(r.status)&&<p className='text-xs text-slate-400'>You raised this request. You may edit or cancel it until technical assessment is first saved.</p>}
                 {r.status === 'returned' && r.returnNote && (
                     <Card>
                         <p className='text-xs font-semibold uppercase tracking-wider text-red-300'>Information requested</p>
@@ -1258,7 +1258,7 @@ function EnrichRequest({ detail, lists, onDone, onCancel }: { detail: Detail; li
                 {!detail.assemblyId && !tasksSaved && <p className='text-xs text-amber-300'>Add the assembly before assessing tasks.</p>}
                 {fixed.title ? kept('Title', detail.title) : <Field id='en-title' label='Title' maxLength={120} placeholder={detail.title} value={title} onChange={(e) => setTitle(e.target.value)} />}
                 {fixed.description ? kept('Description', detail.description) : <TextArea id='en-desc' label='Description' rows={3} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />}
-                {fixed.source ? kept('Source of the finding', `${detail.sourceGroup} · ${detail.sourceLabel}`) : <GroupPicker title='Source of the finding' collapsed groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />}
+                {fixed.source ? kept('Source of the finding', `${detail.sourceGroup} · ${detail.sourceLabel}`) : <GroupPicker title='Source of the finding *' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />}
                 <ChoicePicker title={`Impacts (add up to ${MAX_IMPACTS} in total)`} multi max={MAX_IMPACTS} groups={lists.impacts} selected={impactCodes} onToggle={(c) => { if (!had.includes(c)) setImpactCodes(toggleImpact(c)); }} />
                 {fixed.failure ? kept('Failure mode', detail.failureModeLabel) : <ChoicePicker title='Failure mode' groups={lists.failureModes} selected={failureMode ? [failureMode] : []} onToggle={(c) => setFailureMode(c === failureMode ? '' : c)} />}
                 <div className='grid grid-cols-3 gap-2'>
@@ -1268,7 +1268,7 @@ function EnrichRequest({ detail, lists, onDone, onCancel }: { detail: Detail; li
                             <button type='button' aria-label='Remove photo' onClick={() => setPhotos((cur) => cur.filter((x) => x.token !== p.token))} className='absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-full bg-slate-950/80 text-red-300'><Trash2 className='h-4 w-4' /></button>
                         </div>
                     ))}
-                    {detail.photos.length + photos.length + uploading < 8 && (
+                    {(
                         <label className='relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-emerald-500/50 text-xs text-emerald-300'>
                             <Camera className='h-6 w-6' />
                             Add photo
