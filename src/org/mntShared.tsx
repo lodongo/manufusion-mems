@@ -354,7 +354,9 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipmen
     const assemblies = nodes.filter((n) => n.level === 'assembly' && n.inScope);
     const isUnit = (n?: LocNode) => !!n && (n.level === 'work_center' || n.level === 'equipment');
     // Reporting is allowed against the equipment itself when the assembly is not known (it is added at review).
-    const equipment = allowEquipment ? nodes.filter((n) => isUnit(n) && n.inScope) : [];
+    // Equipment without any configured assembly is not a selectable finding location.
+    const hasAssembly = (id: string) => nodes.some((n) => n.level === 'assembly' && n.inScope && (() => { let p = n.parentId; const seen = new Set<string>(); while (p && !seen.has(p)) { if (p === id) return true; seen.add(p); p = byId.get(p)?.parentId ?? ''; } return false; })());
+    const equipment = allowEquipment ? nodes.filter((n) => isUnit(n) && n.inScope && hasAssembly(n.id)) : [];
     const here = byId.get(at);
     const label = (n: LocNode) => {
         const parent = byId.get(n.parentId);
@@ -373,7 +375,7 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipmen
 
     return (
         <div className='space-y-3'>
-            <p className='text-sm text-slate-400'>{allowEquipment ? 'Open the equipment, then the assembly if you know it. Go through your sites, or search.' : 'Open the assembly. Go through your sites and equipment units, or search.'}</p>
+            <p className='text-sm text-slate-400'>{allowEquipment ? 'Choose equipment with a configured assembly, or select an assembly directly. Browse your sites or search.' : 'Open the assembly. Go through your sites and equipment units, or search.'}</p>
             <div className='relative'>
                 <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={allowEquipment ? `Search ${equipment.length} equipment and ${assemblies.length} assemblies…` : `Search ${assemblies.length} assemblies…`} className='h-12 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-sm text-white' />
@@ -406,7 +408,7 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipmen
                             </span>
                         ))}
                     </nav>
-                    {isUnit(here) && here!.inScope && allowEquipment && (
+                    {isUnit(here) && here!.inScope && allowEquipment && hasAssembly(here!.id) && (
                         <div className='space-y-1'>
                             <AssemblyButton node={here!} sub='This equipment · assembly not known' selected={selected === here!.id} onPick={onPick} />
                             <p className='text-xs text-slate-500'>Or choose the assembly below if you know it.</p>

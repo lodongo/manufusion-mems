@@ -272,6 +272,8 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     const [photos, setPhotos] = useState<Array<{ token: string; url: string }>>([]);
     const [uploading, setUploading] = useState(0);
     const [photoError, setPhotoError] = useState('');
+    const galleryRef = useRef<HTMLInputElement>(null);
+    const cameraRef = useRef<HTMLInputElement>(null);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [created, setCreated] = useState('');
@@ -509,8 +511,9 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                         <TextArea id='wr-desc' label='What did you find? *' rows={3} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
                         <p className='text-right text-xs text-slate-500'>{description.length}/2000</p>
                         {pendingLink?.gembaTypeName && <p className='rounded-lg bg-brand/10 px-3 py-2 text-xs text-brand'>From {pendingLink.gembaTypeName} · linked Gemba observation</p>}
-                        <div className='rounded-2xl border-2 border-brand/50 bg-brand/5 p-2'>
-                            <p className='mb-2 px-1 text-sm font-semibold text-ink'>Source of the finding *</p>
+                        <div className='rounded-2xl border-2 border-brand bg-brand/10 p-4 shadow-sm'>
+                            <p className='mb-2 text-base font-bold text-ink'>Source of the finding *</p>
+                            <p className='mb-3 text-sm text-soft'>Choose where this finding originated. This is required before submission.</p>
                             <GroupPicker title='Select the source' groups={lists.sources} selected={sourceCode ? [sourceCode] : []} onToggle={(c) => setSourceCode(c === sourceCode ? '' : c)} />
                         </div>
                         <ChoicePicker
@@ -530,16 +533,16 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                     <>
                         <p className='text-sm text-slate-400'>Photos are optional. Select images of any original size; each is compressed on your device before upload. Gemba photos transfer automatically.</p>
                         <div className='grid grid-cols-2 gap-2'>
-                            <label className='relative flex h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-emerald-500/50 text-sm text-emerald-300'>
+                            <button type='button' onClick={() => cameraRef.current?.click()} className='flex h-24 flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-emerald-500/50 text-sm text-emerald-300'>
                                 <Camera className='h-7 w-7' />
                                 Take photo
-                                <input type='file' accept='image/*' capture='environment' className='absolute inset-0 h-full w-full cursor-pointer opacity-0' onChange={addPhotos} />
-                            </label>
-                            <label className='relative flex h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-slate-700 text-sm text-slate-300'>
+                            </button>
+                            <button type='button' onClick={() => galleryRef.current?.click()} className='flex h-24 flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-slate-700 text-sm text-slate-300'>
                                 <ImagePlus className='h-7 w-7' />
                                 From gallery
-                                <input type='file' accept='image/*,.heic,.heif' multiple className='absolute inset-0 h-full w-full cursor-pointer opacity-0' onChange={addPhotos} />
-                            </label>
+                            </button>
+                            <input ref={cameraRef} type='file' accept='image/*' capture='environment' className='sr-only' onChange={addPhotos} aria-label='Take a photo' />
+                            <input ref={galleryRef} type='file' accept='image/*,.heic,.heif' multiple className='sr-only' onChange={addPhotos} aria-label='Choose photos from gallery' />
                         </div>
                         {photoError && <Alert tone='error'>{photoError}</Alert>}
                         <div className='grid grid-cols-2 gap-2'>
