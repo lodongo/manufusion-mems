@@ -5,6 +5,6 @@ const hazardGroups:Group[]=[["01","Mechanical","Machine motion and integrity",["
 const records=(groups:Group[],prefix:string)=>groups.flatMap(([id,category,subcategory,labels])=>labels.map((label,i)=>({code:prefix+'_'+id+'_'+String(101+i).padStart(3,'0'),label,category,subcategory,active:true,selectable:true,description:label+' — assess credible exposure, operating conditions and applicable controls; verify applicability at the site.'})));
 export const EXPANDED_ENERGY=records(energyGroups,'SAF_03');
 export const EXPANDED_HAZARDS=records(hazardGroups,'SAF_01');
-export function appendCatalogue<T extends {code:unknown}>(existing:T[],defaults:T[]):T[]{
+export function appendCatalogue<T extends Record<string,unknown>>(existing:T[],defaults:T[]):T[]{
  const known=new Set(existing.map(x=>x.code));return [...existing,...defaults.filter(x=>!known.has(x.code))];
 }
