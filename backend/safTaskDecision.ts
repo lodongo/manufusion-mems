@@ -14,21 +14,54 @@ export const TASK_QUESTIONS=[
  ['partial','Can unrelated hazardous energy be isolated while only technically necessary energy remains?'],
 ] as const;
 export type Answers=Record<string,string>;
-export function questionsFor(a:Answers){
- const core=TASK_QUESTIONS.slice(0,8);
- const exposed=['body','door','moving'].some(k=>a[k]==='yes');
- return [...core,...(a.routine==='yes'&&a.stop==='yes'&&exposed&&a.inching!=='yes'?[TASK_QUESTIONS[8]]:[]),...(exposed||a.otherExposure==='yes'||a.inching==='yes'?[TASK_QUESTIONS[9],TASK_QUESTIONS[10]]:[]),...(a.inching==='yes'||a.infeasible==='yes'?[TASK_QUESTIONS[11]]:[])];
+export type Question=typeof TASK_QUESTIONS[number];
+type Decision={code:string;reason:string;exception:boolean};
+const pending:Decision={code:'',reason:'Complete the next screening question.',exception:false};
+// Walk only the reachable branch; unanswered questions halt evaluation. Extra/stale answers are ignored.
+export function taskDecisionPath(a:Answers):{path:Question[];answers:Answers;next:Question|null;decision:Decision}{
+ const path:Question[]=[],answers:Answers={};
+ let next:Question|null=null;
+ const ask=(key:Question[0])=>{
+  const q=TASK_QUESTIONS.find(x=>x[0]===key)!;path.push(q);
+  const v=a[key];if(v!=='yes'&&v!=='no'){next=q;return null;}
+  answers[key]=v;return v;
+ };
+ const result=(decision:Decision=pending)=>({path,answers,next,decision});
+ const routine=ask('routine');if(!routine)return result();
+ const stop=routine==='yes'?ask('stop'):'no';if(!stop)return result();
+ const body=ask('body');if(!body)return result();
+ const door=ask('door');if(!door)return result();
+ const moving=ask('moving');if(!moving)return result();
+ const other=ask('otherExposure');if(!other)return result();
+ const inch=ask('inching');if(!inch)return result();
+ if(inch==='yes')return result({code:'AC22',reason:'Controlled motion is technically necessary; identify and isolate unrelated energy and validate safeguards. Independent authorization required.',exception:true});
+ const exposed=[body,door,moving,other].includes('yes');
+ if(!exposed){
+  const nonEnergy=ask('nonEnergy');if(!nonEnergy)return result();
+  return result(nonEnergy==='yes'?{code:'AC20',reason:'Other hazards or permit-triggering conditions are present. Assess all applicable additional classes.',exception:false}:{code:'AC01',reason:'No credible exposure identified in the defined scope. Verify screening and reassess if conditions change.',exception:false});
+ }
+ if(routine==='yes'&&stop==='yes'&&(body==='yes'||door==='yes'||moving==='yes')&&!(door==='yes'&&moving==='yes')&&other!=='yes'){
+  const protection=ask('minorProtected');if(!protection)return result();
+  if(protection==='yes')return result({code:'AC02',reason:'Routine minor intervention with effective alternative protection proposed. Verify eligibility and safeguards before execution.',exception:true});
+ }
+ const loss=ask('loss');if(!loss)return result();
+ const infeasible=ask('infeasible');if(!infeasible)return result();
+ if(infeasible==='no')return result({code:'AC03',reason:loss==='yes'?'Production loss alone does not justify live work. Full LOTO remains the default.':'Hazardous energy exposure: full LOTO is the default.',exception:false});
+ const partial=ask('partial');if(!partial)return result();
+ return result(partial==='yes'?{code:'AC06',reason:'Partial LOTO candidate: isolate all energy not technically required and assess retained energy. Independent authorization required.',exception:true}:{code:'AC05',reason:'Live work candidate: independently establish technical infeasibility or increased safety hazard and lawful authorization.',exception:true});
 }
-export function decideTask(a:Answers){
- const required=questionsFor(a);
- if(required.some(([k])=>!['yes','no'].includes(a[k])))return {code:'',reason:'Complete all applicable screening questions.',exception:false};
- const exposed=['body','door','moving'].some(k=>a[k]==='yes'),hazard=exposed||a.otherExposure==='yes';
- if(a.inching==='yes')return {code:'AC22',reason:'Controlled motion is technically necessary; isolate unrelated energy and validate safeguards. Independent authorization required.',exception:true};
- if(!hazard&&a.nonEnergy==='yes')return {code:'AC20',reason:'Non-energy hazards or permit-triggering conditions are present. Select all applicable additional classes and assess risks.',exception:false};
- if(!hazard)return {code:'AC01',reason:'No credible exposure identified in the defined scope. Document and verify screening; reassess if conditions change.',exception:false};
- if(a.routine==='yes'&&a.stop==='yes'&&exposed&&a.minorProtected==='yes'&&a.infeasible!=='yes'&&!(a.door==='yes'&&a.moving==='yes')&&a.otherExposure!=='yes')return {code:'AC02',reason:'Routine minor intervention with effective alternative protection proposed. Verify eligibility and safeguards before execution.',exception:true};
- if(a.infeasible==='yes')return a.partial==='yes'?{code:'AC06',reason:'Partial LOTO candidate: isolate all energy not technically required, assess retained energy separately.',exception:true}:{code:'AC05',reason:'Live work candidate: independently establish technical infeasibility or increased safety hazard and lawful authorization.',exception:true};
- return {code:'AC03',reason:a.loss==='yes'?'Production loss alone does not justify live work. Full LOTO remains the default.':'Hazardous energy exposure: full LOTO is the default.',exception:false};
+export function questionsFor(a:Answers){return taskDecisionPath(a).path;}
+export function decideTask(a:Answers){return taskDecisionPath(a).decision;}
+export function answerTaskQuestion(a:Answers,key:string,value:string):Answers{
+ const state=taskDecisionPath(a);
+ if(state.next?.[0]!==key||!['yes','no'].includes(value))return state.answers;
+ return taskDecisionPath({...state.answers,[key]:value}).answers;
+}
+export function backTaskQuestion(a:Answers):Answers{
+ const state=taskDecisionPath(a),prior={...state.answers};
+ const answered=state.path.filter(([key])=>Object.prototype.hasOwnProperty.call(prior,key));
+ const last=answered[answered.length-1];if(last)delete prior[last[0]];
+ return taskDecisionPath(prior).answers;
 }
 export const TASK_ADDITIONAL_CLASSES=['AC04','AC07','AC08','AC09','AC10','AC11','AC12','AC13','AC14','AC15','AC16','AC17','AC18','AC19','AC20','AC21'];
 export const EXECUTOR_TYPES=['Operator','Technical operator','Mechanical technician','Electrical / automation technician','Shift specialist','Engineer','Maintenance supervisor','Authorized specialist','External service provider','Multi-disciplinary team'];

@@ -12,7 +12,8 @@ import {statutoryProfile,mergeUtilityEnergy,utilityDefinition,candidateInspectio
 import {utilityLinkIssue} from './astUtilities';
 import {energyColor} from './safEnergyColors';
 import {profileAdoption} from './safHazardControlLibrary';
-import {decideTask,questionsFor,TASK_ADDITIONAL_CLASSES,EXECUTOR_TYPES,TASK_PLAN_STATES} from './safTaskDecision';
+import {taskDecisionPath,TASK_ADDITIONAL_CLASSES,EXECUTOR_TYPES,TASK_PLAN_STATES} from './safTaskDecision';
+import {injuryCodes,combinedControlCodes} from './safInjurySelection';
 const idRe=/^[A-Za-z0-9_-]{1,120}$/;
 const array=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const root=(ctx:OrgContext)=>`organizations/${ctx.orgId}`;
@@ -82,16 +83,20 @@ async function scoreHazardRows(ctx:OrgContext,raw:unknown,matrix:RiskMatrix,prio
  const legacyImpacts=await effectiveSafetyItems(ctx.orgId,'impacts'),legacyControls=await effectiveSafetyItems(ctx.orgId,'controlMeasures');
  const has=(a:Obj[],c:string)=>a.some(x=>str(x.code)===c);
  return Promise.all(array(raw).map(async r=>{
-  const hazard=str(r.hazard),impact=str(r.impact),selected=stringList(r.controls);
+  const hazard=str(r.hazard),impacts=injuryCodes(r),selected=stringList(r.controls);
+  if(r.impactCodes!==undefined&&(!Array.isArray(r.impactCodes)||r.impactCodes.length>300||r.impactCodes.some(v=>typeof v!=='string'||!v.trim())))throw new HttpError(400,'Invalid potential injuries.');
   if(!profiles.has(hazard))profiles.set(hazard,adoptedHazardProfile(ctx.orgId,hazard));
   const profile=await profiles.get(hazard)!;
-  const old=prior.find(p=>p.hazard===hazard&&p.impact===impact);
-  const oldControls=stringList(old?.controls);
-  const injuryOk=profile.injuries.some(x=>x.code===impact&&x.effective)||!!old&&has(legacyImpacts,impact);
-  const allowed=new Set(profile.layers.flatMap(l=>l.measures.filter(m=>m.effective&&!m.guidance).map(m=>m.code)));
-  if(!profile.hazardEnabled||!injuryOk||!selected.length||selected.some(c=>!allowed.has(c)&&!(oldControls.includes(c)&&has(legacyControls,c))))throw new HttpError(400,'Choose adopted injury and hazard-specific mitigation controls. Historical selections may be retained only if still adopted.');
+  const oldRows=prior.filter(p=>p.hazard===hazard&&injuryCodes(p).some(c=>impacts.includes(c)));
+  const oldInjuries=new Set(oldRows.flatMap(injuryCodes));
+  const oldControls=oldRows.flatMap(p=>stringList(p.controls));
+  const injuryOk=impacts.length>0&&impacts.every(code=>profile.injuries.some(x=>x.code===code&&x.effective)||oldInjuries.has(code)&&has(legacyImpacts,code));
+  const allowed=combinedControlCodes(profile,impacts);
+  // Existing still-adopted controls remain visible and valid for historical records only.
+  const historicalAllowed=new Set(profile.layers.flatMap(l=>l.measures.filter(m=>m.effective&&!m.guidance).map(m=>m.code)));
+  if(!profile.hazardEnabled||!injuryOk||!selected.length||selected.some(c=>!allowed.has(c)&&!(oldControls.includes(c)&&(has(legacyControls,c)||historicalAllowed.has(c)))))throw new HttpError(400,'Choose adopted injury and hazard-specific mitigation controls. Historical selections may be retained only if still adopted.');
   if(!matrix||!isObj(r.before)||!isObj(r.after))throw new HttpError(400,'Configure the risk matrix and provide initial and residual ratings.');
-  try{return {hazard,impact,controls:selected,before:scoreMaintenanceRisk(matrix,r.before as Record<string,number>),after:scoreMaintenanceRisk(matrix,r.after as Record<string,number>)};}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid ratings.');}
+  try{return {hazard,impact:impacts[0],impactCodes:impacts,impactLabels:impacts.map(c=>profile.injuries.find(i=>i.code===c)?.label||str(legacyImpacts.find(i=>i.code===c)?.label)||c),controls:selected,before:scoreMaintenanceRisk(matrix,r.before as Record<string,number>),after:scoreMaintenanceRisk(matrix,r.after as Record<string,number>)};}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid ratings.');}
  }));
 }
 export const safEquipmentRoutes={
@@ -110,8 +115,8 @@ export const safEquipmentRoutes={
   if(Number(ctx.body.version)!==version)throw new HttpError(409,'Task changed. Reload.');
   const name=str(ctx.body.name).trim().slice(0,250),executor=str(ctx.body.executor),skillCodes=stringList(ctx.body.skillCodes),duration=Number(ctx.body.durationMinutes);
   if(name.length<3||!EXECUTOR_TYPES.includes(executor)||!Number.isFinite(duration)||duration<=0||duration>525600||!skillCodes.length||skillCodes.length>2000)throw new HttpError(400,'Enter task name, executor, positive duration in minutes and HR skills.');
-  const answers=isObj(ctx.body.answers)?Object.fromEntries(Object.entries(ctx.body.answers).filter(([k,v])=>typeof v==='string'&&['yes','no'].includes(v)&&questionsFor(ctx.body.answers as Record<string,string>).some(([q])=>q===k))):{};
-  const decision=decideTask(answers as Record<string,string>);
+  const path=taskDecisionPath(isObj(ctx.body.answers)?ctx.body.answers as Record<string,string>:{});
+  const {answers,decision}=path;
   if(!decision.code)throw new HttpError(400,decision.reason);
   const additional=stringList(ctx.body.additionalClasses);
   if(additional.some(c=>!TASK_ADDITIONAL_CLASSES.includes(c)))throw new HttpError(400,'Invalid additional task class.');

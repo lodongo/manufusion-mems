@@ -91,8 +91,8 @@ function EnergyEditor({workCenterId,data,reload,tab,setTab}:{workCenterId:string
  {data.canEdit&&<div className='sticky bottom-0 space-y-2 rounded-xl border border-line bg-panel p-3'><Button variant='secondary' busy={busy} disabled={blocked} onClick={()=>save(false)}>Save draft</Button>{tab==='configure'&&<Button busy={busy} disabled={blocked||!rows.length} onClick={()=>save(true)}>Mark register documented</Button>}</div>}</div>;
 }
 type Ratings=Record<string,number>;
-type RiskRow={hazard:string;impact:string;controls:string[];before:Ratings;after:Ratings};
-type SavedRow={hazard:string;impact:string;controls:string[];before:{ratings:Ratings};after:{ratings:Ratings;tolerability:string;score:number}};
+type RiskRow=TaskRiskRow;
+type SavedRow={hazard:string;impact:string;impactCodes?:string[];impactLabels?:string[];controls:string[];before:{ratings:Ratings};after:{ratings:Ratings;tolerability:string;score:number}};
 type ClassRecord={scope:string;screening:string;noExposure:boolean;permitCodes:string[];energyTags:string[];rows:SavedRow[];version:number;status:string};
 type ActivityClass={code:string;label:string;assessmentKind:string;requiredPermits:string[];permitAlternatives?:string[];description:string;adopted:boolean;record:ClassRecord|null};
 type ClassData={equipmentName:string;classes:ActivityClass[];catalogue:{hazards:Ref[];impacts:Ref[];controls:Ref[];permits:Ref[]};matrix:{factors:{code:string;label:string;max:number;enabled:boolean}[]}|null;energy:{tag:string;label:string}[];canEdit:boolean};
