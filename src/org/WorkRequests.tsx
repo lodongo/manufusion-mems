@@ -88,6 +88,7 @@ interface Detail extends Row {
     reviewRoleCode?: string;
     reviewRoleName?: string;
     reviewWorkflowConfigured?: boolean;
+    testModeOverride?: boolean;
     reviewDecision?: string;
     reviewCancellationCategory?: string;
     repeatRequestCode?: string;
@@ -785,7 +786,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                    <Info label='Impacts' value={r.impacts.length?r.impacts.map(i=>i.label).join('; '):'REQUIRED: add at least one impact'}/>
                    <Info label='Assembly' value={r.assemblyCode||'Equipment level (no assembly selected)'}/>
                    {r.assessment.headerIssue&&<p className='rounded-xl border border-amber-700/50 p-3 text-sm text-amber-200'>{r.assessment.headerIssue}</p>}
-                   {can.assess&&<Button onClick={()=>setMode('assess')}>{assessed?'Update technical assessment':'Start technical assessment'}</Button>}
+                   {can.assess&&<Button testOverride={r.testModeOverride} onClick={()=>setMode('assess')}>{assessed?'Update technical assessment':'Start technical assessment'}</Button>}
                    <Button variant='secondary' onClick={()=>void goSection('tasks')}>Open assessment tasks, spares, services and safety</Button>
                  </Card>}
                  {section==='summary' && !r.assessmentReviewCurrent && !can.reviewAssessment && (r.assessmentReviewBlockers?.length||0)>0 && (
@@ -802,7 +803,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                     <p className='text-sm text-soft'>This is the final request-review decision. MEMS will issue a separate ASSM_######## assessment number from the organization's database counter. The request remains linked and read-only; the assessor works in Work Assessments.</p>
                     {actionError && <Alert tone='error'>{actionError}</Alert>}
                     <div className='flex gap-2'>
-                        <Button busy={busy} onClick={() => run('to_assessment')}>Create assessment</Button>
+                        <Button testOverride={r.testModeOverride} busy={busy} onClick={() => run('to_assessment')}>Create assessment</Button>
                         <Button variant='secondary' onClick={() => setMode('')}>Back</Button>
                     </div>
                 </Card>}
@@ -842,6 +843,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                         {actionError && <MntGateHint message={actionError} />}
                         <div className='flex gap-2'>
                             <Button
+                                testOverride={r.testModeOverride && mode !== 'cancel'}
                                 className='flex-1'
                                 variant={mode === 'decline' || mode === 'cancel' ? 'danger' : 'primary'}
                                 busy={busy}
@@ -865,7 +867,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                   {!!r.reviewAssignedName && <p className='text-sm text-soft'>Assigned reviewer: <strong>{r.reviewAssignedName}</strong></p>}
                   {r.status === 'created' && <Card className='space-y-1'>
                       <p className='text-sm font-semibold text-ink'>Workflow review</p>
-                      {r.reviewWorkflowConfigured ? <p className='text-xs text-soft'>Routed to {r.reviewRoleName || r.reviewRoleCode}. {r.reviewAssignedName ? 'The assigned reviewer can start review.' : 'An eligible employee can start review from their review queue.'}</p> : <Alert tone='warn'>Awaiting configuration of MNT.WR.REVIEW in Maintenance Workflows. Your request is saved.</Alert>}
+                      {r.reviewWorkflowConfigured ? <p className='text-xs text-soft'>Routed to {r.reviewRoleName || r.reviewRoleCode}. {r.reviewAssignedName ? 'The assigned reviewer can start review.' : 'An eligible employee can start review from their review queue.'}</p> : <Alert tone='warn'>{r.testModeOverride ? 'Test mode allows review before this workflow role is configured.' : 'Awaiting configuration of MNT.WR.REVIEW in Maintenance Workflows. Your request is saved.'}</Alert>}
                   </Card>}
                   {!!r.assessmentCode && <Card className='space-y-2'>
                       <p className='text-xs font-semibold uppercase tracking-wide text-soft'>Independent work assessment</p>
@@ -877,7 +879,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                       {r.repeatRequestCode && <p>Repeat of {r.repeatRequestCode}</p>}
                   </Card>}
                   {visibleButtons.length>0&&<div className='grid grid-cols-2 gap-2'>
-                    {visibleButtons.map(b=><Button key={b.key} variant={b.variant??'primary'} busy={busy&&b.key!=='edit'} className='min-w-0 justify-center text-xs' onClick={b.onClick}>
+                    {visibleButtons.map(b=><Button testOverride={r.testModeOverride && ['start','close','reviewCancel','toAssessment','reviewAssessment','convert','confirmClosure','rejectClosure','return','decline','assess'].includes(b.key)} key={b.key} variant={b.variant??'primary'} busy={busy&&b.key!=='edit'} className='min-w-0 justify-center text-xs' onClick={b.onClick}>
                       {b.icon}<span className='min-w-0 break-words text-center'>{b.label}</span>
                     </Button>)}
                   </div>}
@@ -1026,8 +1028,8 @@ function AssessmentSummary({detail,canReview,busy,onApprove,onReturn}:{detail:De
         {detail.assessmentReview.name&&<Info label='Reviewed by' value={detail.assessmentReview.name}/>}
         {detail.assessmentReview.note&&<Info label='Review notes' value={detail.assessmentReview.note}/>}
         {canReview&&<div className='grid grid-cols-1 gap-2 pt-2'>
-          <Button busy={busy} onClick={onApprove}>Approve assessment</Button>
-          <Button variant='secondary' busy={busy} onClick={onReturn}>Return for correction</Button>
+          <Button testOverride={detail.testModeOverride} busy={busy} onClick={onApprove}>Approve assessment</Button>
+          <Button testOverride={detail.testModeOverride} variant='secondary' busy={busy} onClick={onReturn}>Return for correction</Button>
         </div>}
       </Card>
       <Card className='space-y-2 text-sm'>
@@ -1167,7 +1169,7 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
             {missing.length > 0 && <p className='text-xs text-amber-300'>Still needed: {missing.join(', ')}.</p>}
             {error && <Alert tone='error'>{error}</Alert>}
             <div className='flex gap-2'>
-                <Button className='flex-1' busy={busy} disabled={missing.length > 0} onClick={save}>
+                <Button testOverride={detail.testModeOverride} className='flex-1' busy={busy} disabled={missing.length > 0} onClick={save}>
                     <Check className='h-4 w-4' />
                     Save assessment
                 </Button>
@@ -1231,7 +1233,7 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
             <div className='flex shrink-0 items-center gap-2 border-b border-line bg-page pb-3'>
                 <Button variant='secondary' aria-label='Back' onClick={onCancel}><ArrowLeft className='h-4 w-4' /></Button>
                 <div className='min-w-0 flex-1'><p className='truncate font-semibold text-white'>Close {detail.code}</p><p className='truncate text-xs text-slate-400'>{direct ? 'Final review outcome · no assessment required' : 'No planning needed · a supervisor confirms'}</p></div>
-                <Button busy={busy} disabled={missing.length > 0} onClick={save}><Check className='h-4 w-4' />Close</Button>
+                <Button testOverride={detail.testModeOverride} busy={busy} disabled={missing.length > 0} onClick={save}><Check className='h-4 w-4' />Close</Button>
             </div>
             <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
                 <ChoicePicker title='Failure cause *' required groups={lists.rootCauses} selected={cause ? [cause] : []} onToggle={(c) => setCause(c === cause ? '' : c)} />
@@ -1305,7 +1307,7 @@ function CancelAtReview({ detail, onDone, onCancel }: { detail: Detail; onDone: 
         <TextArea id='wr-review-cancel-reason' label='Explain the cancellation *' rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
         {error && <Alert tone='error'>{error}</Alert>}
         <div className='flex gap-2'>
-            <Button variant='danger' busy={busy} disabled={missing} onClick={save}>Cancel request</Button>
+            <Button testOverride={detail.testModeOverride} variant='danger' busy={busy} disabled={missing} onClick={save}>Cancel request</Button>
             <Button variant='secondary' onClick={onCancel}>Back</Button>
         </div>
     </Card>;

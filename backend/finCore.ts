@@ -1,3 +1,4 @@
+import { bypass } from './testModeCore';
 import { industryAdoptionRecommendation } from './industryCatalog';
 import {resolveAccountRule,validateRuleDraft,type AccountRule,type DeterminationContext} from './finAccountRules';
 import { createHash } from 'crypto';
@@ -1095,13 +1096,14 @@ export async function createRequest(ctx: OrgContext, r: { leId: string; type: st
 /** Why this person cannot decide the request now ('' when they can). */
 export function cannotDecide(ctx: OrgContext, req: Obj, units: Map<string, Unit>, scope: Scope): string {
     if (str(req.status) !== 'pending') return 'This request is not waiting for a decision.';
-    if (str(req.makerUid) === ctx.uid) return 'You submitted this request, so someone else must decide it.';
+    const maintenanceOverride = (rule:string) => ['mnt.budget.set','mnt.wo.cost'].includes(str(req.type)) && ctx.role==='org_super_admin' && bypass(ctx,rule);
+    if (str(req.makerUid) === ctx.uid && !maintenanceOverride('mnt.finance.maker_checker')) return 'You submitted this request, so someone else must decide it.';
     if (!permAt(ctx, str(req.approvePerm), str(req.leId), units, scope)) return `Deciding needs ${str(req.approvePerm)} for this legal entity.`;
     const steps = objs(req.steps) as unknown as Step[];
     const step = steps.find((s) => s.status === 'pending');
     if (!step) return 'Nothing left to approve.';
-    if (step.positionCode && !activePositions(ctx.me).includes(step.positionCode)) return `Level ${step.level} is approved by ${step.positionTitle}.`;
-    if (steps.some((s) => s.status === 'approved' && s.by === ctx.uid)) return 'You approved an earlier level, so a different person must approve this one.';
+    if (step.positionCode && !activePositions(ctx.me).includes(step.positionCode) && !maintenanceOverride('mnt.finance.position')) return `Level ${step.level} is approved by ${step.positionTitle}.`;
+    if (steps.some((s) => s.status === 'approved' && s.by === ctx.uid) && !maintenanceOverride('mnt.finance.distinct_approvers')) return 'You approved an earlier level, so a different person must approve this one.';
     return '';
 }
 

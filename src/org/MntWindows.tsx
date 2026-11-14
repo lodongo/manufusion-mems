@@ -350,7 +350,7 @@ export default function MntWindows() {
                     <Button variant="secondary" aria-label="Refresh windows" onClick={reload}>
                         <RefreshCw size={16} />
                     </Button>
-                    <Button onClick={() => edit()}>
+                    <Button testOverride={!!data?.testModeOverride} onClick={() => edit()}>
                         <Plus size={16} />
                         New window
                     </Button>
@@ -447,7 +447,7 @@ export default function MntWindows() {
                         <Gantt schedule={selected.liveSchedule || selected.schedule} start={selected.start} onMove={() => {}} />
                         <div className="flex flex-wrap gap-2">
                             {selected.model === 'equipment_v2' && ['scheduled', 'draft'].includes(selected.status) && (
-                                <Button variant="secondary" onClick={() => edit(selected)}>
+                                <Button testOverride={!!data?.testModeOverride} variant="secondary" onClick={() => edit(selected)}>
                                     Change window
                                 </Button>
                             )}
@@ -467,7 +467,7 @@ export default function MntWindows() {
                                 <p className="whitespace-pre-wrap text-sm">{s.instruction}</p>
                                 <p className="text-xs text-soft">{s.completedAt ? 'Verified ' + new Date(s.completedAt).toLocaleString() : 'To verify'}</p>
                                 {!s.completedAt && ['authorized', 'scheduled', 'in_progress'].includes(selected.status) && (
-                                    <Button variant="secondary" onClick={() => setDialog('safety_prerequisite:' + s.id)}>
+                                    <Button testOverride={!!data?.testModeOverride} variant="secondary" onClick={() => setDialog('safety_prerequisite:' + s.id)}>
                                         Record verification
                                     </Button>
                                 )}
@@ -502,7 +502,7 @@ export default function MntWindows() {
                 <MntDialog title="Record safety verification" onClose={() => setDialog('')}>
                     <div className="space-y-4">
                         <MntField label="Evidence (what was checked, by whom)" value={note} multiline onChange={setNote} />
-                        <Button busy={busy} disabled={note.trim().length < 5} onClick={() => action('safety_prerequisite', { note, stepId: dialog.split(':')[1] })}>
+                        <Button testOverride={!!data?.testModeOverride} busy={busy} disabled={note.trim().length < 5} onClick={() => action('safety_prerequisite', { note, stepId: dialog.split(':')[1] })}>
                             Confirm
                         </Button>
                         {failure && <MntGateHint message={failure} />}

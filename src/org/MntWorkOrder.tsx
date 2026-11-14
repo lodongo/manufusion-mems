@@ -765,12 +765,12 @@ export default function MntWorkOrder({ code }: { code: string }) {
             {message && <Alert tone="info">{message}</Alert>}
             <div className="flex flex-wrap gap-2">
                 {can.cancel && (
-                    <Button variant="secondary" onClick={() => open('cancel_order')}>
+                    <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('cancel_order')}>
                         Cancel work order
                     </Button>
                 )}
                 {wo.status === 'planning' && can.assess && (
-                    <Button onClick={() => setAssessing(true)}>
+                    <Button testOverride={!!data.testModeOverride} onClick={() => setAssessing(true)}>
                         <Wrench size={16} />
                         {tasks.length ? 'Edit task assessment' : 'Assess tasks and requirements'}
                     </Button>
@@ -780,13 +780,13 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     tasks.length > 0 &&
                     !['closed', 'cancelled'].includes(wo.status) &&
                     !Object.values(wo.taskExecution || {}).some((e: any) => e.startedAt) && (
-                        <Button variant="secondary" onClick={() => open('reassess')}>
+                        <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('reassess')}>
                             Controlled reassessment
                         </Button>
                     )}
             </div>
             {tasks.length > 0 && wo.assessmentReviewCurrent && data.checklist && (
-                <MntReadiness code={code} wo={wo} checklist={data.checklist} canPlan={!!can.plan} currency={data.currency || ''} onDone={reload} />
+                <MntReadiness code={code} wo={wo} checklist={data.checklist} canPlan={!!can.plan} testModeOverride={!!data.testModeOverride} currency={data.currency || ''} onDone={reload} />
             )}
             {tasks.length>0&&<Card className="space-y-3">
                 <p className="font-semibold">Independent work assessment review</p>
@@ -797,8 +797,8 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         <textarea rows={3} value={assessmentReviewNote} onChange={e=>setAssessmentReviewNote(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-600 bg-transparent p-3 text-base" />
                     </label>
                     <div className="flex flex-wrap gap-2">
-                        <Button busy={busy} disabled={assessmentReviewNote.trim().length<10} onClick={async()=>{if(await legacy('review_assessment',{note:assessmentReviewNote}))setAssessmentReviewNote('');}}>Approve assessment</Button>
-                        <Button variant="secondary" busy={busy} disabled={assessmentReviewNote.trim().length<10} onClick={async()=>{if(await legacy('return_assessment',{note:assessmentReviewNote}))setAssessmentReviewNote('');}}>Return for correction</Button>
+                        <Button testOverride={!!data.testModeOverride} busy={busy} disabled={assessmentReviewNote.trim().length<10} onClick={async()=>{if(await legacy('review_assessment',{note:assessmentReviewNote}))setAssessmentReviewNote('');}}>Approve assessment</Button>
+                        <Button testOverride={!!data.testModeOverride} variant="secondary" busy={busy} disabled={assessmentReviewNote.trim().length<10} onClick={async()=>{if(await legacy('return_assessment',{note:assessmentReviewNote}))setAssessmentReviewNote('');}}>Return for correction</Button>
                     </div>
                 </div>}
             </Card>}
@@ -901,22 +901,22 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                             {editable && (
                                                 <div className="flex flex-wrap gap-2">
                                                     {hasCode && r.shortage > 0 && !['awaiting_procurement', 'linked_replenishment', 'received_reserve'].includes(r.status) && (
-                                                        <Button onClick={() => open('secure_spare', s, p)}>
+                                                        <Button testOverride={!!data.testModeOverride} onClick={() => open('secure_spare', s, p)}>
                                                             {r.status === 'awaiting_verification' ? 'Verify and submit requirement' : 'Reserve and cover shortage'}
                                                         </Button>
                                                     )}
                                                     {r.status === 'received_reserve' && (
-                                                        <Button busy={busy} onClick={() => run('reserve', { taskId: task.id, resourceId: s.id })}>
+                                                        <Button testOverride={!!data.testModeOverride} busy={busy} onClick={() => run('reserve', { taskId: task.id, resourceId: s.id })}>
                                                             Reserve received stock
                                                         </Button>
                                                     )}
                                                     {!hasCode && (
-                                                        <Button disabled={!!p.materialDraftId} onClick={() => open('candidate', s, p)}>
+                                                        <Button testOverride={!!data.testModeOverride} disabled={!!p.materialDraftId} onClick={() => open('candidate', s, p)}>
                                                             Send for material creation
                                                         </Button>
                                                     )}
                                                     {!hasCode && !p.materialDraftId && (
-                                                        <Button variant="secondary" onClick={() => open('match_spare', s, p)}>
+                                                        <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('match_spare', s, p)}>
                                                             Match an approved stock material
                                                         </Button>
                                                     )}
@@ -961,15 +961,15 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                             {editable && (
                                                 <div className="flex flex-wrap gap-2">
                                                     {!p.requirementId && (
-                                                        <Button variant={p.sourcing ? 'secondary' : 'primary'} onClick={() => open('service_sourcing', s, p)}>
+                                                        <Button testOverride={!!data.testModeOverride} variant={p.sourcing ? 'secondary' : 'primary'} onClick={() => open('service_sourcing', s, p)}>
                                                             {p.sourcing ? 'Change supplier' : 'Choose supplier'}
                                                         </Button>
                                                     )}
                                                     {p.sourcing && !p.requirementId && (
-                                                        <Button onClick={() => open('procure', s, p)}>Raise purchase requirement</Button>
+                                                        <Button testOverride={!!data.testModeOverride} onClick={() => open('procure', s, p)}>Raise purchase requirement</Button>
                                                     )}
                                                     {p.requirementId && p.status !== 'secured' && (
-                                                        <Button variant={r.orderReady ? 'primary' : 'secondary'} onClick={() => open('secure_service', s, { ...p, item: r })}>
+                                                        <Button testOverride={!!data.testModeOverride} variant={r.orderReady ? 'primary' : 'secondary'} onClick={() => open('secure_service', s, { ...p, item: r })}>
                                                             Confirm service order
                                                         </Button>
                                                     )}
@@ -996,7 +996,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                 {can.plan &&
                                     ['planning', 'plan_ready', 'released', 'scheduled', 'in_progress'].includes(wo.status) &&
                                     !execution.startedAt && (
-                                        <Button variant="secondary" onClick={() => open('allocate', {}, planning.allocation || {})}>
+                                        <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('allocate', {}, planning.allocation || {})}>
                                             Allocate personnel and confirm tools
                                         </Button>
                                     )}
@@ -1014,22 +1014,22 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                 {can.execute && !wo.safetySignoff && !['closed', 'cancelled'].includes(wo.status) && (
                                     <div className="flex flex-wrap gap-2">
                                         {execution.status !== 'completed' && (
-                                            <Button busy={busy} onClick={() => run('start_task', { taskId: task.id })}>
+                                            <Button testOverride={!!data.testModeOverride} busy={busy} onClick={() => run('start_task', { taskId: task.id })}>
                                                 {execution.status === 'blocked' ? 'Resume task' : 'Start task'}
                                             </Button>
                                         )}
                                         {['in_progress', 'blocked'].includes(execution.status) && (
                                             <>
-                                                <Button variant="secondary" onClick={() => open('feedback')}>
+                                                <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('feedback')}>
                                                     Record completion feedback
                                                 </Button>
-                                                <Button variant="secondary" onClick={() => open('block_task')}>
+                                                <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('block_task')}>
                                                     Mark blocked
                                                 </Button>
                                             </>
                                         )}
                                         {execution.status === 'completed' && !execution.reconciled && (
-                                            <Button variant="secondary" onClick={() => open('consumption')}>
+                                            <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('consumption')}>
                                                 <Package size={16} />
                                                 Confirm actual spares and BOM
                                             </Button>
@@ -1046,7 +1046,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                             </p>
                                         ))}
                                         {can.reconcile && !execution.reconciled && (
-                                            <Button busy={busy} onClick={() => run('reconcile_task', { taskId: task.id })}>
+                                            <Button testOverride={!!data.testModeOverride} busy={busy} onClick={() => run('reconcile_task', { taskId: task.id })}>
                                                 Stores: reconcile returns and update BOM
                                             </Button>
                                         )}
@@ -1098,19 +1098,19 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 <div className="flex flex-wrap gap-2">
                     {can.safety && !wo.safetySignoff && (
                         <>
-                            <Button variant="secondary" onClick={() => open('safety_signoff')}>
+                            <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('safety_signoff')}>
                                 Safety sign-off
                             </Button>
-                            <Button variant="secondary" onClick={() => open('report_incident')}>
+                            <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('report_incident')}>
                                 Report incident / near miss
                             </Button>
                         </>
                     )}
                     {can.handover && wo.safetySignoff && !wo.handover && (
-                        <Button onClick={() => open('handover')}>Accept equipment handover</Button>
+                        <Button testOverride={!!data.testModeOverride} onClick={() => open('handover')}>Accept equipment handover</Button>
                     )}
                     {can.close && wo.status !== 'closed' && (
-                        <Button onClick={() => open('technical_close')}>Technical Manager final closure</Button>
+                        <Button testOverride={!!data.testModeOverride} onClick={() => open('technical_close')}>Technical Manager final closure</Button>
                     )}
                 </div>
                 {data.incidents.map((i: MntData) => (
@@ -1120,7 +1120,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         </p>
                         <p>{i.narrative}</p>
                         {can.safety && i.status === 'open' && (
-                            <Button variant="secondary" onClick={() => open('clear_incident', i)}>
+                            <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('clear_incident', i)}>
                                 Record independent safety clearance
                             </Button>
                         )}
@@ -1290,7 +1290,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                     onChange={(v) => setForm({ ...form, note: v })}
                                 />
                             )}
-                            <Button
+                            <Button testOverride={!!data.testModeOverride}
                                 busy={busy}
                                 onClick={() =>
                                     submitDialog(dialog.kind, {

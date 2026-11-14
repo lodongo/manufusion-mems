@@ -16,6 +16,7 @@ import { HttpError, fieldEq, getDoc, isObj, listDocs, nowIso, runQuery, str, typ
 import { canAnywhere, canAt } from './access';
 import { orgRoute, type OrgContext } from './guards';
 import { audit } from './audit';
+import { bypass } from './testModeCore';
 import { cannotDecide, commit, createRequest, leOf, reasonOf, registerHandler, scopeOf as finScope, unitsOf } from './finCore';
 import { decideRequest } from './finRoutes';
 import { scopeOf } from './access';
@@ -158,7 +159,7 @@ registerHandler(COST_REQUEST, {
         const ca = obj(wo.data.costApproval);
         if (str(ca.requestId) !== str(req.id) || Number(ca.version) !== (Number(wo.data.assessmentTasksVersion) || 0))
             throw new HttpError(409, 'The work order was reassessed after this request. Reject it; the planner submits the new estimate.');
-        if (str(wo.data.plannedBy) === ctx.uid || str(ca.submittedBy) === ctx.uid) throw new HttpError(403, 'You planned this work order, so someone else must approve its cost.');
+        if ((str(wo.data.plannedBy) === ctx.uid || str(ca.submittedBy) === ctx.uid) && !(ctx.role==='org_super_admin' && bypass(ctx,'mnt.wo.cost_independence'))) throw new HttpError(403, 'You planned this work order, so someone else must approve its cost.');
         await commit([{
             path: `${root(ctx.orgId)}/work_orders/${code}`,
             fields: {
@@ -292,7 +293,7 @@ export const maintenancePlanningRoutes = {
                         woCode: str(p.woCode), amount: Number(p.amount) || 0, currency: str(p.currency), period: str(p.period),
                         estimate: obj(p.estimate), budget: obj(p.budget), maker: str(d.data.makerName), createdAt: str(d.data.createdAt),
                         level: step ? `${str(step.level)} · ${str(step.positionTitle)}` : '',
-                        whyNot: cannotDecide(ctx, d.data, units, scope), mine: str(d.data.makerUid) === ctx.uid,
+                        whyNot: cannotDecide(ctx, d.data, units, scope), testModeOverride:ctx.role==='org_super_admin' && ctx.testMode===true, mine: str(d.data.makerUid) === ctx.uid,
                     };
                 })
                 .map((r) => ({ ...r, canDecide: !r.whyNot }))

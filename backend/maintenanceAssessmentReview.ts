@@ -26,11 +26,11 @@ export function assessmentReviewCurrent(record:AssessmentRecord,assignedJobRole?
   && !!value(review.by) && !!value(review.jobRole)
   && (!assignedJobRole||value(review.jobRole)===assignedJobRole);
 }
-export function approvedAssessmentSnapshot(record:AssessmentRecord,by:string,name:string,jobRole:string,at:string,note:string):Record<string,string|number> {
- const problem=reviewAssessmentPrerequisites(record,by);
+export function approvedAssessmentSnapshot(record:AssessmentRecord,by:string,name:string,jobRole:string,at:string,note:string,testOverride=false):Record<string,string|number> {
+ const problem=reviewAssessmentPrerequisites(record,testOverride?`test-mode-${by}`:by);
  if(problem)throw new Error(problem);
  if(!jobRole)throw new Error('Configure the assessment reviewer organizational job role.');
  if(note.trim().length<10)throw new Error('Write review notes of at least 10 characters.');
  return {status:'approved',version:Number(record.assessmentTasksVersion),assessmentTasksAt:value(record.assessmentTasksAt),
-  assessedAt:value(record.assessedAt),by,name,jobRole,at,note:note.trim().slice(0,500)};
+  assessedAt:value(record.assessedAt),by,name,jobRole,at,note:note.trim().slice(0,500),...(testOverride?{approvalMode:'development_test_override'}:{})};
 }

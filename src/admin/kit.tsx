@@ -36,13 +36,16 @@ export function Button({
     children,
     className = '',
     disabled,
+    testOverride = false,
     ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; busy?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; busy?: boolean; testOverride?: boolean }) {
     return (
         <button
             {...rest}
             disabled={busy || disabled}
-            className={`flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50 ${VARIANTS[variant]} ${className}`}
+            data-test-override={testOverride ? 'true' : undefined}
+            title={testOverride ? 'Development test override available — normal status and data checks still apply' : rest.title}
+            className={`flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50 ${VARIANTS[variant]} ${testOverride && !disabled ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-transparent' : ''} ${className}`}
         >
             {busy && <Loader2 className='h-4 w-4 animate-spin' />}
             {children}

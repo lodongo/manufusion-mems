@@ -14,7 +14,7 @@ import MntGateHint from './MntGateHint';
 const money = (n: number, currency: string) => `${currency} ${Number(n || 0).toLocaleString('en', { maximumFractionDigits: 2 })}`;
 const COST_LABEL: Record<string, string> = { none: 'Not submitted', pending: 'Waiting for approval', approved: 'Approved', stale: 'Changed since approval: submit again', rejected: 'Rejected: submit again', withdrawn: 'Withdrawn', superseded: 'Dates moved to another period: submit again' };
 
-export default function MntReadiness({ code, wo, checklist, canPlan, currency, onDone }: { code: string; wo: MntData; checklist: MntData; canPlan: boolean; currency: string; onDone: () => void }) {
+export default function MntReadiness({ code, wo, checklist, canPlan, currency, onDone, testModeOverride = false }: { code: string; wo: MntData; checklist: MntData; canPlan: boolean; currency: string; onDone: () => void; testModeOverride?: boolean }) {
     const [start, setStart] = useState<string>(wo.scheduledStart || '');
     const [end, setEnd] = useState<string>(wo.scheduledEnd || '');
     const [dateNote, setDateNote] = useState('');
@@ -94,7 +94,7 @@ export default function MntReadiness({ code, wo, checklist, canPlan, currency, o
                             <label className='text-sm text-soft'>End<input type='date' className={mntInput} min={start} value={end} onChange={(e) => setEnd(e.target.value)} /></label>
                         </div>
                         {datesChanged && <label className='block text-sm text-soft'>Why do the dates change? *<input className={mntInput} value={dateNote} onChange={(e) => setDateNote(e.target.value)} /></label>}
-                        <Button variant='secondary' busy={busy === 'lock_schedule'} disabled={!start || !end || end < start || (datesChanged && dateNote.trim().length < 10)}
+                        <Button testOverride={testModeOverride} variant='secondary' busy={busy === 'lock_schedule'} disabled={!start || !end || end < start || (datesChanged && dateNote.trim().length < 10)}
                             onClick={() => act('lock_schedule', { scheduledStart: start, scheduledEnd: end, note: dateNote.trim() }, 'Dates locked')}>{done('schedule') && !datesChanged ? 'Locked' : 'Lock dates'}</Button>
                     </section>
 
@@ -102,7 +102,7 @@ export default function MntReadiness({ code, wo, checklist, canPlan, currency, o
                         <p className='flex items-center gap-2 text-sm font-semibold text-ink'><ShieldCheck className='h-4 w-4' />Risk assessment {done('risk') && <Badge tone='brand'>Reviewed</Badge>}</p>
                         <p className='text-xs text-soft'>Review each task's hazards, machine status, LOTO and permits on the Risk assessment tab, then record the review.</p>
                         {!done('risk') && <label className='block text-sm text-soft'>Review notes *<textarea rows={2} className={mntInput} value={riskNote} onChange={(e) => setRiskNote(e.target.value)} /></label>}
-                        {!done('risk') && <Button variant='secondary' busy={busy === 'review_risk'} disabled={riskNote.trim().length < 10} onClick={() => act('review_risk', { note: riskNote.trim() }, 'Risk review recorded')}>Confirm risk review</Button>}
+                        {!done('risk') && <Button testOverride={testModeOverride} variant='secondary' busy={busy === 'review_risk'} disabled={riskNote.trim().length < 10} onClick={() => act('review_risk', { note: riskNote.trim() }, 'Risk review recorded')}>Confirm risk review</Button>}
                     </section>
 
                     <section className='space-y-2 rounded-xl border border-line p-3'>
@@ -125,7 +125,7 @@ export default function MntReadiness({ code, wo, checklist, canPlan, currency, o
                                 <label className='block text-sm text-soft'>Allowance for items without a cost<input type='number' inputMode='decimal' min={0} className={mntInput} value={allowance} onChange={(e) => setAllowance(e.target.value)} /></label>
                                 {overBudget && <label className='block text-sm text-soft'>{budget.budget === null || budget.budget === undefined ? 'No budget is set for this period: why must the work go ahead? *' : 'Over budget: why? *'}<textarea rows={2} className={mntInput} value={justification} onChange={(e) => setJustification(e.target.value)} /></label>}
                                 <label className='block text-sm text-soft'>Reason for the request *<input className={mntInput} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-                                <Button busy={busy === 'submit_cost'} disabled={reason.trim().length < 10 || (overBudget && justification.trim().length < 20) || allowanceNum < 0}
+                                <Button testOverride={testModeOverride} busy={busy === 'submit_cost'} disabled={reason.trim().length < 10 || (overBudget && justification.trim().length < 20) || allowanceNum < 0}
                                     onClick={() => act('submit_cost', { allowance: allowanceNum, reason: reason.trim(), justification: justification.trim() }, 'Sent for Chart of Authority approval')}>Submit cost for approval</Button>
                             </>
                         )}
@@ -136,7 +136,7 @@ export default function MntReadiness({ code, wo, checklist, canPlan, currency, o
             {failure && <MntGateHint message={failure} />}
             {info && <Alert tone='success'>{info}</Alert>}
             {editable && (
-                <Button className='w-full' busy={busy === 'confirm_readiness'} disabled={!checklist.ready} onClick={() => act('confirm_readiness', {}, 'Readiness confirmed: add it to a maintenance window')}>
+                <Button testOverride={testModeOverride} className='w-full' busy={busy === 'confirm_readiness'} disabled={!checklist.ready} onClick={() => act('confirm_readiness', {}, 'Readiness confirmed: add it to a maintenance window')}>
                     <ClipboardCheck className='h-4 w-4' />Confirm readiness
                 </Button>
             )}

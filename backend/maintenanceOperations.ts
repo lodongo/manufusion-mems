@@ -1731,6 +1731,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         }
         return {
             orders: items,
+            testModeOverride: ctx.role==='org_super_admin' && ctx.testMode===true,
             windows: windows.map((w) => ({
                 id: w.id,
                 ...w.data,
@@ -1791,6 +1792,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
             checklist: await planChecklist(ctx, wo, readinessData),
             currency: str(ctx.org.data.currencyCode),
             permissions,
+            testModeOverride: ctx.role==='org_super_admin' && ctx.testMode===true,
             currentUserId: ctx.uid,
             people: users
                 .filter((u) => u.data.orgId === ctx.orgId && u.data.status !== 'disabled')

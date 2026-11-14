@@ -6,7 +6,7 @@ import {workspaceNavigate as navigate} from '../lib/route';
 type Task={description:string;tools:string;spares:Array<{description:string;qty:number;source:string}>;services:Array<{description:string}>;risk:Array<{hazard:string;impact:string;controls:string;before:string;after:string}>};
 type Item={id:string;wrCode:string;taskId:string;description:string;assemblyId:string;equipmentId?:string;assetTag:string;createdBy:string;task:Task};
 export default function MntTaskValidation(){
- const {data,error,loading,reload}=useLoad(()=>callBackend<{items:Item[];configurationNeeded:boolean}>('/api/org/mnt/tasks/pending'));
+ const {data,error,loading,reload}=useLoad(()=>callBackend<{items:Item[];configurationNeeded:boolean;testModeOverride?:boolean}>('/api/org/mnt/tasks/pending'));
  const [busy,setBusy]=useState(''),[message,setMessage]=useState('');
  const approve=async(id:string)=>{setBusy(id);setMessage('');
   try{await callBackend('/api/org/mnt/tasks/validate',{id});setMessage('Task validated and added to the reusable assembly task registry.');reload();}
@@ -29,7 +29,7 @@ export default function MntTaskValidation(){
     </div>)}
     {(item.task.spares||[]).map((v,i)=><p className='text-sm text-slate-300' key={i}>Spare: {v.description} × {v.qty} ({v.source})</p>)}
     {(item.task.services||[]).map((v,i)=><p className='text-sm text-slate-300' key={i}>Service: {v.description}</p>)}
-    <Button disabled={!!busy||item.createdBy===''} busy={busy===item.id} onClick={()=>approve(item.id)}>Validate and publish reusable task</Button>
+    <Button testOverride={data?.testModeOverride} disabled={!!busy||item.createdBy===''} busy={busy===item.id} onClick={()=>approve(item.id)}>Validate and publish reusable task</Button>
    </Card>)}
    {!data?.items.length&&!data?.configurationNeeded&&<Card><p className='text-sm text-slate-300'>No task proposals need your validation.</p></Card>}
   </>}

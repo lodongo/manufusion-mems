@@ -1058,6 +1058,20 @@ await assert.rejects(
     () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: noReviewer.code, action: 'assign_review', reviewerUid: people.assessor[0] }),
     /controlled by Maintenance Workflows/,
 );
+// The development override can complete the same review without a configured job role.
+const overrideWr=await createNewWorkRequest({title:'Development override workflow review'});
+const testAction=async(action,extra={})=>{
+ const ctx=context('requester',{code:overrideWr.code,action,...extra});
+ ctx.testMode=true;ctx.bypassed=[];
+ const result=await maintenanceRoutes['POST /api/org/mnt/wr/action'][0](ctx);
+ assert.ok(ctx.bypassed.length,'An actual relaxed rule must be audited');
+ return result;
+};
+await testAction('start_review');
+assert.equal(snapshot(r+'/work_requests/'+overrideWr.code).data.status,'under_review');
+await assert.rejects(()=>testAction('close_review',{causeCode:first(l.rootCauses),description:'Recorded corrective work at site.',closedDate:new Date().toISOString().slice(0,10),durationMinutes:0}),/time taken/);
+await testAction('close_review',{causeCode:first(l.rootCauses),description:'Recorded corrective work at site.',closedDate:new Date().toISOString().slice(0,10),durationMinutes:15});
+assert.equal(snapshot(r+'/work_requests/'+overrideWr.code).data.status,'closed');
 seed(r + '/maintenance_workflow_settings/default', { version: 1, approverRoles: {...roles, 'MNT.WR.REVIEW': 'ASSESS'} });
 const spoofed=await createNewWorkRequest({reviewerUid:people.reviewer[0],title:'Ignore requester nominated reviewer'});
 assert.equal(snapshot(r+'/work_requests/'+spoofed.code).data.reviewerUid,people.assessor[0]);

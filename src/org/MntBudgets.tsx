@@ -21,7 +21,7 @@ interface BudgetRow {
 }
 interface CostRow {
     id: string; status: string; title: string; summary: string; reason: string; woCode: string; amount: number; currency: string; period: string;
-    estimate: Record<string, number>; budget: Record<string, number | null>; maker: string; createdAt: string; level: string; canDecide: boolean; whyNot: string; mine: boolean;
+    estimate: Record<string, number>; budget: Record<string, number | null>; maker: string; createdAt: string; level: string; canDecide: boolean; whyNot: string; mine: boolean; testModeOverride?:boolean;
 }
 const money = (n: number | null | undefined, c: string) => (n === null || n === undefined ? 'Not set' : `${c} ${Number(n).toLocaleString('en', { maximumFractionDigits: 2 })}`);
 const thisMonth = () => new Date().toISOString().slice(0, 7);
@@ -162,7 +162,7 @@ function Decide({ row, onClose, onDone }: { row: CostRow; onClose: () => void; o
     const e = row.estimate || {};
     const b = row.budget || {};
     return (
-        <Sheet title={row.id} onClose={onClose} footer={row.canDecide ? <div className='flex w-full gap-2'><Button className='flex-1' onClick={() => decide('approve')}><CheckCircle2 className='h-4 w-4' />Approve</Button><Button variant='secondary' onClick={() => decide('reject')}>Reject</Button></div> : undefined}>
+        <Sheet title={row.id} onClose={onClose} footer={row.canDecide ? <div className='flex w-full gap-2'><Button testOverride={row.testModeOverride} className='flex-1' onClick={() => decide('approve')}><CheckCircle2 className='h-4 w-4' />Approve</Button><Button testOverride={row.testModeOverride} variant='secondary' onClick={() => decide('reject')}>Reject</Button></div> : undefined}>
             <p className='text-base font-semibold text-ink'>{row.title}</p>
             <dl className='grid grid-cols-2 gap-x-3 gap-y-1 text-sm'>
                 {(['labour', 'spares', 'services', 'allowance', 'total'] as const).map((k) => <Fragment key={k}><dt className='capitalize text-soft'>{k}</dt><dd className='text-right text-ink'>{money(e[k] ?? 0, row.currency)}</dd></Fragment>)}
