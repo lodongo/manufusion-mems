@@ -36,3 +36,21 @@ test('hot work and ground disturbance require an applicable permit instead of we
  assert.equal(meetsClassPermitMinimum('AC13',['SAF_08_04_006']),true);
  assert.equal(meetsClassPermitMinimum('AC21',[]),false);
 });
+
+
+test('class assessments do not duplicate task decision-tree notes; legacy notes and safety gates remain',()=>{
+ const api=readFileSync('backend/safEquipment.ts','utf8');
+ const ui=readFileSync('src/org/SafEquipment.tsx','utf8');
+ const task=readFileSync('src/org/EquipmentTasks.tsx','utf8');
+ assert.ok(!ui.includes("id='class-scope'"));
+ assert.ok(!ui.includes("id='class-verification'"));
+ assert.ok(!ui.includes('scope.trim().length'));
+ assert.ok(api.includes('const scope=str(old?.data.scope)'));
+ assert.ok(api.includes(":str(old?.data.screening)"));
+ assert.ok(!api.includes('Describe the applicable activity and limits.'));
+ assert.ok(!api.includes('Document the intervention limits, required verification and stop-work criteria.'));
+ assert.ok(api.includes('No Risk requires documented screening'));
+ assert.ok(api.includes('Add at least one hazard assessment.'));
+ assert.ok(api.includes('meetsClassPermitMinimum(code,permitCodes)'));
+ assert.ok(task.includes('taskDecisionPath'));
+});

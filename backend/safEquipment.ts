@@ -338,7 +338,8 @@ export const safEquipmentRoutes={
   if(!cl||!(await effectiveSafetyItems(ctx.orgId,'activityClasses')).some(x=>str(x.code)===code))throw new HttpError(400,'Select an adopted activity class.');
   const path=classPath(ctx,id,code),old=await getDoc(path),version=Number(old?.data.version)||0;
   if(Number(ctx.body.version)!==version)throw new HttpError(409,'Assessment changed. Reload.');
-  const scope=str(ctx.body.scope).trim().slice(0,3000);if(scope.length<10)throw new HttpError(400,'Describe the applicable activity and limits.');
+  // Legacy notes remain available on previously recorded class assessments. Task-specific limits belong to the task decision and risk assessment.
+  const scope=str(old?.data.scope);
   const permitCodes=stringList(ctx.body.permitCodes);
   const [hazards,impacts,controls,permits,matrixDoc,energyDoc]=await Promise.all([effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'impacts'),effectiveSafetyItems(ctx.orgId,'controlMeasures'),effectiveSafetyItems(ctx.orgId,'permitTypes'),getDoc(`${root(ctx)}/saf/risk_matrix`),getDoc(energyPath(ctx,id))]);
   const has=(a:Obj[],c:string)=>a.some(x=>str(x.code)===c);
@@ -348,8 +349,7 @@ export const safEquipmentRoutes={
   const energyTags=stringList(ctx.body.energyTags);
   const currentEnergy=(await energyContext(ctx,id,array(energyDoc?.data.items))).rows;
   if(energyTags.some(t=>!currentEnergy.some(x=>str(x.tag)===t)))throw new HttpError(400,'Unknown equipment energy tag.');
-  const screening=str(ctx.body.screening).trim().slice(0,3000);
-  if(cl.assessmentKind!=='screening'&&screening.length<20)throw new HttpError(400,'Document the intervention limits, required verification and stop-work criteria.');
+  const screening=cl.assessmentKind==='screening'?str(ctx.body.screening).trim().slice(0,3000):str(old?.data.screening);
   const raw=ctx.body.rows;
   if(!Array.isArray(raw)||raw.length>100||array(raw).length!==raw.length)throw new HttpError(400,'Invalid risk rows.');
   if(cl.assessmentKind==='screening'&&(ctx.body.noExposure!==true||screening.length<20||raw.length||permitCodes.length||energyTags.length))throw new HttpError(400,'No Risk requires documented screening with no credible exposure. If there is a hazard, choose a risk-bearing class.');

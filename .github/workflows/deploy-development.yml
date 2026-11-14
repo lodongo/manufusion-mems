@@ -52,7 +52,13 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_DEV_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEV_DEPLOYER_SA }}
 
-      - uses: google-github-actions/setup-gcloud@v3
+      # ubuntu-latest includes the Google Cloud CLI; avoid reinstalling the SDK.
+      - name: Verify runner-provided Google Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v gcloud
+          gcloud --version
 
       - name: Validate application before deployment
         run: |
