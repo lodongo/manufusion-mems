@@ -33,6 +33,8 @@ test('server keeps evidence scoped to equipment, point and individual test, and 
  assert.ok(api.includes('configurationIssues(profile,values,tests,today)'));
  assert.ok(api.includes('if(finalize&&issues.length)'));
  assert.ok(api.includes('/revisions/v'));
- assert.ok(ui.includes('All adopted subcategories'));
+ assert.ok(ui.includes('Select subcategory…'));
+ assert.ok(ui.includes('disabled={!category}'));
+ assert.ok(ui.includes('Showing selected energy sources only.'));
  assert.ok(ui.includes('Configure & tag'));
 });
