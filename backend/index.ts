@@ -188,6 +188,8 @@ import { utilityRoutes } from './astUtilities';
 import { storedEnergyRoutes } from './storedEnergy';
 import {assemblyActivityRoutes} from './assemblyActivities';
 import {activityRiskRoutes} from './activityRisk';
+import {safEquipmentRoutes} from './safEquipment';
+import {categoryColor} from './safActivityClasses';
 import {activityLegacyRoutes} from './activityRiskLegacy';
 import { safRiskRoutes } from './safRiskMatrix';
 import { safConfigurationRoutes } from './safConfiguration';
@@ -398,7 +400,7 @@ function metaListOut(doc: Doc) {
         key: doc.id,
         title: str(d.title),
         description: str(d.description),
-        items: (Array.isArray(d.items) ? d.items : []).filter(isObj).map((i) => ({ code: str(i.code), label: str(i.label), active: i.active !== false, color: str(i.color), category: str(i.category), subcategory: str(i.subcategory), description: str(i.description), attributes: Array.isArray(i.attributes) ? i.attributes : [], selectable: i.selectable !== false, symbol: str(i.symbol), system: str(i.system), baseUnit: str(i.baseUnit), categoryCode: str(i.categoryCode), multiplier: num(i.multiplier) ?? 1 })),
+        items: (Array.isArray(d.items) ? d.items : []).filter(isObj).map((i) => ({ code: str(i.code), label: str(i.label), active: i.active !== false, color: doc.id==='hazards' ? categoryColor(str(i.category),isObj(d.categoryColors)?d.categoryColors:{}) : str(i.color), category: str(i.category), subcategory: str(i.subcategory), description: str(i.description), attributes: Array.isArray(i.attributes) ? i.attributes : [], selectable: i.selectable !== false, symbol: str(i.symbol), system: str(i.system), baseUnit: str(i.baseUnit), categoryCode: str(i.categoryCode), multiplier: num(i.multiplier) ?? 1 })),
         updatedAt: str(d.updatedAt),
     };
 }
@@ -1190,6 +1192,20 @@ export const handler = router(recordWiredRoutes({
 
     'POST /api/admin/modules/metadata/skills/status': [staff('admin.modules.metadata.skills.status','write',async ctx=>{const changes=ctx.body.changes;if(!Array.isArray(changes)||changes.length>500)throw new HttpError(400,'Invalid skill updates.');const path='module_workspaces/HRM/metadata/skillsMaster';const doc=await getDoc(path);if(!doc)throw new HttpError(404,'Load HRM Skills Master defaults first.');const items=(Array.isArray(doc.data.items)?doc.data.items:[]).filter(isObj);const allowed=new Set(items.map(x=>str(x.code)));const updates=new Map<string,boolean>();for(const change of changes){if(!isObj(change)||!allowed.has(str(change.code))||typeof change.active!=='boolean')throw new HttpError(400,'Invalid skill status.');updates.set(str(change.code),change.active);}await writeDoc(path,{...doc.data,items:items.map(x=>updates.has(str(x.code))?{...x,active:updates.get(str(x.code))}:x),updatedAt:nowIso()});await record(ctx,'admin','module.metadata.skills.status','HRM.skillsMaster',String(updates.size)+' status updates');return {ok:true};})],
 
+    'POST /api/admin/modules/metadata/hazard-colors': [
+        staff('admin.modules.metadata.hazard_colors','write',async ctx=>{
+            await seedModuleMetadata('SAF');
+            const path='module_workspaces/SAF/metadata/hazards';
+            const doc=await getDoc(path);
+            if(!doc)throw new HttpError(404,'Hazards master not found.');
+            const category=str(ctx.body.category),color=str(ctx.body.color);
+            if(!(Array.isArray(doc.data.items)?doc.data.items:[]).filter(isObj).some(x=>str(x.category)===category)||!/^#[0-9a-fA-F]{6}$/.test(color))throw new HttpError(400,'Choose a known hazard category and valid color.');
+            const categoryColors={...(isObj(doc.data.categoryColors)?doc.data.categoryColors:{}),[category]:color.toUpperCase()};
+            if(!(await writeDoc(path,{...doc.data,categoryColors,updatedAt:nowIso()},{updateTime:doc.updateTime})))throw new HttpError(409,'Master changed. Reload and retry.');
+            await record(ctx,'admin','module.metadata.hazard_colors',category,color.toUpperCase());
+            return {ok:true,color:color.toUpperCase()};
+        }),
+    ],
     'POST /api/admin/modules/metadata/save': [
         staff('admin.modules.metadata.save', 'write', async (ctx) => {
             const code = str(ctx.body.code);
@@ -1695,6 +1711,7 @@ export const handler = router(recordWiredRoutes({
     ...storedEnergyRoutes,
     ...assemblyActivityRoutes,
     ...activityRiskRoutes,
+    ...safEquipmentRoutes,
     ...activityLegacyRoutes,
     ...safRiskRoutes,
     ...safConfigurationRoutes,

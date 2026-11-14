@@ -7,6 +7,7 @@ import StoredEnergyReview from './StoredEnergyReview';
 import AssemblyActivities from './AssemblyActivities';
 import ActivityRiskRegister from './ActivityRiskRegister';
 import ActivityRiskLegacy from './ActivityRiskLegacy';
+import {EquipmentEnergySources,ActivityClassRisks} from './SafEquipment';
 import ActivityRiskReview from './ActivityRiskReview';
 import WarehouseSetup from './WarehouseSetup';
 import ClassField from './ClassField';
@@ -73,7 +74,7 @@ interface NodeData {
     design: Design;
 }
 
-type Mode = null | { type: 'create'; level: string } | { type: 'edit' } | { type: 'bom'; bom?: Bom } | { type: 'levels' } | { type: 'expand' } | { type: 'roles' } | { type: 'details' } | { type: 'asset'; configure?: boolean } | { type: 'utilities' } | { type: 'stored-energy' } | { type: 'activity-risk' } | { type: 'activity-risk-review' } | { type: 'loto-program' } | { type: 'stored-energy-review' } | { type: 'storage' } | { type: 'activities' };
+type Mode = null | { type: 'create'; level: string } | { type: 'edit' } | { type: 'bom'; bom?: Bom } | { type: 'levels' } | { type: 'expand' } | { type: 'roles' } | { type: 'details' } | { type: 'asset'; configure?: boolean } | { type: 'utilities' } | { type: 'hazardous-energy' } | { type: 'class-risk' } | { type: 'stored-energy' } | { type: 'activity-risk' } | { type: 'activity-risk-review' } | { type: 'loto-program' } | { type: 'stored-energy-review' } | { type: 'storage' } | { type: 'activities' };
 
 const open = (id: string) => navigate(id === 'root' ? 'organization_admin/structure' : `organization_admin/structure/${id}`);
 
@@ -158,6 +159,8 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                 }}
             />
         );
+    if (mode?.type === 'hazardous-energy' && node) return <EquipmentEnergySources workCenterId={node.id} onBack={()=>setMode(null)}/>;
+    if (mode?.type === 'class-risk' && node) return <ActivityClassRisks workCenterId={node.id} onBack={()=>setMode(null)} onLegacy={()=>setMode({type:'activity-risk'})}/>;
     if (mode?.type === 'activities' && node) return <AssemblyActivities assemblyId={node.id} onBack={()=>setMode(null)}/>;
     if (mode?.type === 'utilities' && node) return <EquipmentUtilities workCenterId={node.id} onBack={()=>setMode(null)}/>;
     if (mode?.type === 'activity-risk' && node) return <ActivityRiskLegacy workCenterId={node.id} onBack={()=>setMode(null)} onReview={()=>setMode({type:'activity-risk-review'})} hierarchy={[...(data?.ancestors||[]),node].map(n=>({level:n.level,code:n.code,name:n.name}))}/>;
@@ -410,7 +413,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                             </li>
                         )}
                         {node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'utilities'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-blue-400'/><div className='min-w-0 flex-1'><p className='text-sm text-white'>Utilities</p><p className='truncate text-xs text-slate-500'>Add electrical, water, steam, CIP and other supplies</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}
-                        {node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'loto-program'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-blue-500'/><div className='min-w-0 flex-1'><p className='text-sm'>LOTO Program</p><p className='truncate text-xs text-slate-500'>To be configured</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}{node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'stored-energy'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-orange-400'/><div className='min-w-0 flex-1'><p className='text-sm'>Activities and Activity-Based Risk Assessment</p><p className='truncate text-xs text-slate-500'>Assembly activities, hazards, impacts, risk review and downloads</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}
+                        {node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'hazardous-energy'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-amber-500'/><div className='min-w-0 flex-1'><p className='text-sm'>Hazardous Energy Sources</p><p className='truncate text-xs text-muted'>Adopted sources, equipment tags and photos</p></div><ChevronRight className='h-4 w-4 shrink-0 text-muted'/></button></li>)}{node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'loto-program'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-blue-500'/><div className='min-w-0 flex-1'><p className='text-sm'>LOTO Program</p><p className='truncate text-xs text-slate-500'>To be configured</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}{node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'class-risk'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-orange-400'/><div className='min-w-0 flex-1'><p className='text-sm'>Activity Class Risk Assessment</p><p className='truncate text-xs text-slate-500'>Adopted activity classes and required risk assessments</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}
                         {data.children.map((c) => (
                             <li key={c.id} className='mx-2 my-2 rounded-xl border border-line bg-panel shadow-sm'>
                                 <button onClick={() => open(c.id)} className='flex w-full items-center gap-3 px-3 py-3 text-left'>
@@ -515,6 +518,11 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
             />
         );
 
+    if (mode?.type === 'hazardous-energy' && node) return <EquipmentEnergySources workCenterId={node.id} onBack={()=>setMode(null)}/>;
+    if (mode?.type === 'class-risk' && node) return <ActivityClassRisks workCenterId={node.id} onBack={()=>setMode(null)} onLegacy={()=>setMode({type:'activity-risk'})}/>;
+    if(mode?.type==='activity-risk'&&node)return <ActivityRiskLegacy workCenterId={node.id} onBack={()=>setMode({type:'class-risk'})} onReview={()=>setMode({type:'activity-risk-review'})} hierarchy={[...data.ancestors,node].map(n=>({level:n.level,code:n.code,name:n.name}))}/>;
+    if(mode?.type==='activity-risk-review'&&node)return <ActivityRiskReview workCenterId={node.id} onBack={()=>setMode({type:'activity-risk'})} hierarchy={[...data.ancestors,node].map(n=>({level:n.level,code:n.code,name:n.name}))}/>;
+    if(mode?.type==='loto-program'&&node)return <section><Button onClick={()=>setMode(null)}>Back</Button><h2>LOTO Program</h2><p>Program configuration will be defined later.</p></section>;
     const chooseSingle = async () => {
         setBusy(true);
         setActionError('');
@@ -688,12 +696,12 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
             {allowed.length > 0 || data.children.length > 0 ? (
                 <section>
                     <h2 className='mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500'>{node ? 'Inside this' : 'Top level'}</h2>
-                    {data.children.length === 0 ? (
+                    {data.children.length === 0 && node?.level !== 'work_center' ? (
                         <Empty>Nothing here yet.</Empty>
                     ) : (
                         <Card className='p-0'>
                             <ul className='divide-y divide-slate-800'>
-                                {node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'loto-program'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-blue-500'/><div className='min-w-0 flex-1'><p className='text-sm'>LOTO Program</p><p className='truncate text-xs text-slate-500'>To be configured</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}{node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'stored-energy'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-orange-400'/><div className='min-w-0 flex-1'><p className='text-sm'>Activities and Activity-Based Risk Assessment</p><p className='truncate text-xs text-slate-500'>Assembly activities, hazards, impacts, risk review and downloads</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}
+                                {node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'hazardous-energy'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-amber-500'/><div className='min-w-0 flex-1'><p className='text-sm'>Hazardous Energy Sources</p><p className='truncate text-xs text-muted'>Adopted sources, equipment tags and photos</p></div><ChevronRight className='h-4 w-4 shrink-0 text-muted'/></button></li>)}{node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'loto-program'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-blue-500'/><div className='min-w-0 flex-1'><p className='text-sm'>LOTO Program</p><p className='truncate text-xs text-slate-500'>To be configured</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}{node?.level === 'work_center' && (<li><button type='button' onClick={()=>setMode({type:'class-risk'})} className='flex w-full items-center gap-3 px-4 py-3 text-left'><Cog className='h-5 w-5 shrink-0 text-orange-400'/><div className='min-w-0 flex-1'><p className='text-sm'>Activity Class Risk Assessment</p><p className='truncate text-xs text-slate-500'>Adopted activity classes and required risk assessments</p></div><ChevronRight className='h-4 w-4 shrink-0 text-slate-500'/></button></li>)}
                         {data.children.map((c) => (
                                     <li key={c.id}>
                                         <button onClick={() => open(c.id)} className='flex w-full items-center gap-3 px-4 py-3 text-left'>

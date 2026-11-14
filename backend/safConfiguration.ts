@@ -2,10 +2,11 @@ import {HttpError,getDoc,isObj,nowIso,str,writeDoc,type Obj} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {PERMS,holdsAnywhere,holdsDirect,audited} from './scopeGuard';
 import {SAF_DEFAULT_LISTS} from './safDefaults';
+import {categoryColor} from './safActivityClasses';
 import {fieldsForPermit,normalizePermitFields} from './safPermitTemplates';
 import {EXPANDED_PERMIT_REFERENCES} from './safPermitExpanded';
 
-export const SAF_ADOPTION_KEYS=['machineStatuses','permitTypes','hazards','impacts','hazardousEnergy','controlMeasures','ppe','riskMethods','severityLevels','likelihoodLevels','riskAcceptance','criticalRules','emergencyScenarios'] as const;
+export const SAF_ADOPTION_KEYS=['activityClasses','machineStatuses','permitTypes','hazards','impacts','hazardousEnergy','controlMeasures','ppe','riskMethods','severityLevels','likelihoodLevels','riskAcceptance','criticalRules','emergencyScenarios'] as const;
 type Key=typeof SAF_ADOPTION_KEYS[number];
 const root=(orgId:string)=>`organizations/${orgId}/saf`;
 const entries=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj) as Obj[]:[];
@@ -23,12 +24,13 @@ export function adoptedRecords(master:Obj[],disabled:unknown):Obj[]{
 export async function safetyCatalogue(orgId:string,key:Key){
  const [master,policy]=await Promise.all([getDoc(`module_workspaces/SAF/metadata/${key}`),getDoc(`${root(orgId)}/adoption_${key}`)]);
  const fallback=SAF_DEFAULT_LISTS.find(x=>x.key===key);
- const items=entries(Array.isArray(master?.data.items)?master?.data.items:fallback?.items);
+ const raw=entries(Array.isArray(master?.data.items)?master?.data.items:fallback?.items);
+ const items=key==='hazards'?raw.map(x=>({...x,color:categoryColor(str(x.category),isObj(master?.data.categoryColors)?master.data.categoryColors:{})})):raw;
  const active=adoptedRecords(items,policy?.data.disabledCodes);
  return {key,title:str(master?.data.title)||fallback?.title||key,items,active,policy,version:Number(policy?.data.version)||0};
 }
 export async function effectiveSafetyItems(orgId:string,key:Key){return (await safetyCatalogue(orgId,key)).active;}
-const safeOption=(x:Obj)=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description)});
+const safeOption=(x:Obj)=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description),color:str(x.color)});
 const validCode=(v:unknown)=>{const x=str(v);if(!/^[A-Za-z0-9_-]{1,80}$/.test(x))throw new HttpError(400,'Invalid permit type code.');return x;};
 async function permitContext(orgId:string,code:string){
  const catalogue=await safetyCatalogue(orgId,'permitTypes');

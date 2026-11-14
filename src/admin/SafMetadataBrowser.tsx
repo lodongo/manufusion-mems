@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import {callBackend} from '../lib/backend';
 import RichTable, { type Column } from '../components/RichTable';
 import { Screen, Segmented } from '../components/screen';
 import { Badge, Button, Empty, Toggle } from './kit';
@@ -8,7 +9,7 @@ import { Breadcrumb, DetailRow, DetailSheet, GroupList, type Crumb } from './bro
 // Browse Category → Subcategory → Entry (or every entry in one table) and tap an entry for its description.
 // Disabled entries are hidden unless "Include disabled" is on.
 
-type Item = { code: string; label: string; category?: string; subcategory?: string; description?: string; active?: boolean };
+type Item = { code: string; label: string; category?: string; subcategory?: string; description?: string; active?: boolean; color?:string };
 
 type View = 'browse' | 'all';
 
@@ -17,7 +18,10 @@ const subOf = (x: Item) => x.subcategory || 'General';
 const plural = (n: number, word: string, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
 const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-export default function SafMetadataBrowser({ title, items, onCancel }: { title: string; items: Item[]; onCancel: () => void }) {
+export default function SafMetadataBrowser({ title, items, onCancel, canWrite=false, hazardColors=false }: { title: string; items: Item[]; onCancel: () => void; canWrite?:boolean; hazardColors?:boolean }) {
+    const [colors,setColors]=useState<Record<string,string>>(()=>Object.fromEntries(items.map(x=>[catOf(x),x.color||'#D97706'])));
+    const [saving,setSaving]=useState(false),[colorError,setColorError]=useState(''),[colorNotice,setColorNotice]=useState('');
+    const saveColor=async(c:string)=>{setSaving(true);setColorError('');setColorNotice('');try{await callBackend('/api/admin/modules/metadata/hazard-colors',{category:c,color:colors[c]});setColorNotice(c+' color saved.');}catch(e){setColorError(e instanceof Error?e.message:'Unable to save color.');}finally{setSaving(false);}};
     const [view, setView] = useState<View>('browse');
     const [category, setCategory] = useState('');
     const [subcategory, setSubcategory] = useState('');
@@ -112,6 +116,7 @@ export default function SafMetadataBrowser({ title, items, onCancel }: { title: 
                 </div>
             }
         >
+            {hazardColors&&!category&&view==='browse'&&<div className='mb-3 space-y-3 rounded-xl border border-line bg-panel p-3'><p className='font-semibold text-ink'>Hazard category colors</p><p className='text-xs text-soft'>MEMS display palette inspired by international safety colors. These colors do not replace standardized signage or risk ratings.</p>{[...tree.keys()].sort().map(c=><div key={c} className='flex flex-wrap items-center gap-2 border-b border-line pb-2'><span className='min-w-0 flex-1 text-sm'>{c}</span><input aria-label={c+' color selector'} type='color' disabled={!canWrite} className='h-11 w-14 rounded-lg border border-line' value={/^#[0-9a-fA-F]{6}$/.test(colors[c]||'')?colors[c]:'#D97706'} onChange={e=>setColors(old=>({...old,[c]:e.target.value}))}/><input aria-label={c+' hex color'} disabled={!canWrite} className='w-24 rounded-lg border border-line bg-panel p-2 font-mono text-xs' value={colors[c]||''} onChange={e=>setColors(old=>({...old,[c]:e.target.value}))}/>{canWrite&&<Button variant='secondary' disabled={saving||!/^#[0-9a-fA-F]{6}$/.test(colors[c]||'')} onClick={()=>saveColor(c)}>Save</Button>}</div>)}{colorError&&<p role='alert' className='text-red-500'>{colorError}</p>}{colorNotice&&<p className='text-green-600'>{colorNotice}</p>}</div>}
             {filtered.length === 0 ? (
                 <Empty>{items.length ? `No enabled entries in this list.${emptyHint}` : 'This list has no entries yet.'}</Empty>
             ) : view === 'all' ? (

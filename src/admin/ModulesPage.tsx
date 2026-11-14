@@ -336,7 +336,7 @@ function Workspace({ module, view, canWrite, isSuper }: { module: Module; view: 
 
     if (editing && editing !== 'new' && module.code === 'AST' && editing.key === 'utilitySupplies') return <UtilityBrowser items={editing.items as Utility[]} onBack={()=>setEditing(null)}/>;
 
-    if (editing && editing !== 'new' && module.code === 'SAF') return <SafMetadataBrowser title={editing.title} items={editing.items} onCancel={()=>setEditing(null)}/>;
+    if (editing && editing !== 'new' && module.code === 'SAF') return <SafMetadataBrowser title={editing.title} items={editing.items} canWrite={canWrite} hazardColors={editing.key==='hazards'} onCancel={()=>{setEditing(null);reload();}}/>;
 
 
     if (editing && editing !== 'new' && module.code === 'PRC' && editing.key === 'unitsOfMeasure') {
