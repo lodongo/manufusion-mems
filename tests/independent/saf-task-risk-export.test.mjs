@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import ExcelJS from 'exceljs';
+import {PDFDocument} from 'pdf-lib';
+import {readFileSync} from 'node:fs';
+import {buildTaskRiskExcel,buildTaskRiskPdf,reportValues,reportColumns} from '../../src/org/taskRiskExport.ts';
+import {defaultMaintenanceRiskMatrix,scoreMaintenanceRisk} from '../../backend/maintenanceTaskRisk.ts';
+const matrix={...defaultMaintenanceRiskMatrix,tolerableMax:75};
+const row={id:'row',taskId:'TSK_000000001',task:'Test task',classes:'Full LOTO',source:'Activity-specific',hazards:'Slippery ramp',injuries:'Fracture',initial:scoreMaintenanceRisk(matrix,{P:5,S:5,E:5,A:2}),residual:scoreMaintenanceRisk(matrix,{P:1,S:5,E:1,A:1}),mitigation:['Engineering controls - guard','Administrative controls - procedure'],requirements:['Full LOTO','Permit required - LOTO isolation'],review:['Severity escalation required'],status:'review_required'};
+const input={equipment:'Filler Line 9',hierarchy:[{level:'equipment',code:'MAL-01-MFG-003-001',name:'Filler Line 9'}],matrix,rows:[row],filtered:false};
+test('Excel export round trips, keeps risk colours, requirements and frozen headings',async()=>{const blob=await buildTaskRiskExcel(input),book=new ExcelJS.Workbook();await book.xlsx.load(Buffer.from(await blob.arrayBuffer()));const sheet=book.getWorksheet('Task risk assessment');assert.equal(sheet.getCell('A1').value,'TASK BASED RISK ASSESSMENT');assert.equal(sheet.getCell('J7').value,250);assert.equal(sheet.getCell('K7').fill.fgColor.argb,'FFFEE2E2');assert.equal(sheet.getCell('Q7').value,5);assert.equal(sheet.getCell('R7').fill.fgColor.argb,'FFDCFCE7');assert.match(sheet.getCell('L7').value,/Full LOTO\nPermit required/);assert.equal(sheet.views[0].ySplit,6);assert.ok(book.getWorksheet('Control details'));assert.equal(reportValues(input,row).length,reportColumns(input).length);});
+test('PDF export is valid and pages are landscape',async()=>{const blob=await buildTaskRiskPdf({...input,rows:Array.from({length:45},(_,i)=>({...row,id:String(i)}))});const doc=await PDFDocument.load(await blob.arrayBuffer());assert.ok(doc.getPageCount()>1);assert.ok(doc.getPage(0).getWidth()>doc.getPage(0).getHeight());});
+test('Android native download uses restricted main frame and OS picker',()=>{const native=readFileSync('android-dev-wrapper/app/src/main/java/com/manufusion/mems/devclient/MainActivity.java','utf8'),web=readFileSync('src/lib/reportDownload.ts','utf8');assert.match(native,/addWebMessageListener/);assert.match(native,/!isMainFrame/);assert.match(native,/ACTION_CREATE_DOCUMENT/);assert.match(native,/openOutputStream/);assert.match(web,/memsFileDownload/);assert.ok(!web.includes("target = '_blank'"));});
