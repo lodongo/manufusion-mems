@@ -102,7 +102,7 @@ export const safEquipmentRoutes={
   // An existing utility is neither selectable nor removable from Safety. Require the exact same set.
   for(const code of context.utilityByCode.keys())if(submitted.filter(x=>str(x.code)===code&&str(x.pointId)===utilityPointId(context.utilityByCode.get(code)!)).length!==1)throw new HttpError(400,'All configured utility connections must appear exactly once. Refresh the register.');
   const finalize=ctx.body.finalize===true,today=nowIso().slice(0,10);
-  const items=await Promise.all(array(ctx.body.items).map(async (x,i)=>{
+  const items:Obj[]=await Promise.all(array(ctx.body.items).map(async (x,i):Promise<Obj>=>{
    const code=str(x.code),tag=str(x.tag).trim(),photoToken=str(x.photoToken),source=known.get(code),pointId=str(x.pointId)||'legacy-'+i;
    if(!idRe.test(pointId)||ids.has(pointId))throw new HttpError(400,'Invalid or duplicate energy point ID.');
    ids.add(pointId);

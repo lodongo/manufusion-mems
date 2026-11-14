@@ -34,6 +34,8 @@ export const STATUTORY_INSPECTIONS=[
  entry('SI-RD-03','Radiation protection survey / exposure verification','Radiation','IAEA GSR Part 3; national radiation rules','Formal exposure or shielding verification required by applicable regime.'),
  entry('SI-CH-01','Regulated hazardous substance / explosion protection inspection','Chemical and explosion','Applicable national hazardous substance legislation; UK DSEAR where applicable','Formal inspection required by applicable law, not routine chemical checks.'),
  entry('SI-CH-02','Regulated fuel storage / gas installation examination','Chemical and explosion','Applicable petroleum, gas storage and installation legislation','Formal licence / inspection report where required.'),
+ entry('SI-RF-01','Regulated fluorinated-gas leak examination','Refrigeration and F-gas','EU Regulation 2024/573 art. 5; applicable national F-gas rules','Only qualifying installations with regulated gas and charge thresholds; competent certification as required.'),
+ entry('SI-RF-02','Regulated F-gas leakage detection system verification','Refrigeration and F-gas','EU Regulation 2024/573 art. 6; applicable national F-gas rules','Where legally required leak-detection equipment is installed.'),
  entry('SI-EN-01','Regulated discharge / emissions compliance monitoring','Environmental','Applicable environmental permit and national regulation','Only when the equipment connection is included in the legal monitoring scope.'),
  entry('SI-EN-02','Regulated water quality / abstraction compliance verification','Environmental','Applicable drinking water, water abstraction and public health rules','Only formal required monitoring within permit or legal scope.'),
  entry('SI-CH-03','Local exhaust ventilation statutory thorough examination and test','Chemical and explosion','UK COSHH reg. 9; applicable national exposure-control law','Formal LEV examination for equipment in legal scope.'),
@@ -64,10 +66,12 @@ export function candidateInspectionCodes(code:string):string[]{
  if(['04','05','06'].includes(family)||utility&&['05','14','15','16','27'].includes(g)){add('SI-PR-01','SI-PR-05','SI-PR-06','SI-PR-08');}
  if(utility&&['06','07'].includes(g)||code==='SAF_03_06_001'||code==='SAF_03_06_002')add('SI-PR-02','SI-PR-03');
  if(utility&&['08','09'].includes(g)||code==='SAF_03_05_002')add('SI-PR-04');
- if(utility&&['10','11','16','26','27'].includes(g)||code==='SAF_03_06_006')add('SI-PR-07');
+ if(utility&&['10','11','16','26','27','32'].includes(g)||code==='SAF_03_06_006')add('SI-PR-07');
  if(['02','03','04'].includes(family))add('SI-LF-01','SI-LF-02','SI-LF-03');
  if(family==='07'||utility&&['10','11','12','13','16','17','18','19','27','32'].includes(g))add('SI-CH-01','SI-CH-02');
  if(utility&&(g==='21'||code==='UTL-31-005'))add('SI-CH-03');
+ if(code==='SAF_03_08_008'||utility&&['UTL-16-002','UTL-16-003'].includes(code))add('SI-PR-01','SI-PR-05','SI-PR-06','SI-RF-01','SI-RF-02');
+ if(code==='UTL-26-002'||utility&&['UTL-28-001','UTL-28-002'].includes(code))add('SI-RF-01','SI-RF-02');
  if(family==='09')add('SI-RD-01','SI-RD-02','SI-RD-03');
  if(utility&&['03','04','22','23','26','31','33'].includes(g))add('SI-EN-01','SI-EN-02');
  if(utility&&(code==='UTL-26-001'||code==='UTL-26-002'||['UTL-31-002','UTL-31-003','UTL-31-004'].includes(code)))add('SI-FR-01');
