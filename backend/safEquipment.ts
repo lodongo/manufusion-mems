@@ -105,9 +105,9 @@ const devicePhotoValid=(ctx:OrgContext,id:string,token:string)=>token.startsWith
 export const safEquipmentRoutes={
  'POST /api/org/saf/equipment-devices/read':[orgRoute('org.saf.equipment_devices.read','SAF.view',async ctx=>{
   const {id,node}=await equipment(ctx);const path=devicePath(ctx,id);
-  const [doc,master]=await Promise.all([getDoc(path),safetyDeviceCatalogue(ctx.orgId)]);
-  const items=await Promise.all(array(doc?.data.items).map(async r=>{const def=master.devices.find(d=>d.code===r.code),photoToken=str(r.photoToken),eligible=def?.shortEligible===true;return {...r,label:def?.label||str(r.label),category:def?.category||str(r.category),role:def?.role||'unknown',adopted:def?.adopted===true,shortEligible:eligible,url:devicePhotoValid(ctx,id,photoToken)?await signedUrl(photoToken):'',status:r.shortSelected===true?(eligible&&str(r.tag)&&photoToken&&str(r.procedure)?'documented_review_required':'incomplete_or_eligibility_withdrawn'):'registered'};}));
-  return {equipmentName:str(node.data.name),equipmentCode:str(node.data.code),version:Number(doc?.data.version)||0,policyVersion:master.version,catalogue:master.devices.filter(d=>d.adopted),items,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
+  const [doc,master,policy]=await Promise.all([getDoc(path),safetyDeviceCatalogue(ctx.orgId),lotoPolicy(ctx.orgId)]);
+  const items=await Promise.all(array(doc?.data.items).map(async r=>{const def=master.devices.find(d=>d.code===r.code),photoToken=str(r.photoToken),eligible=def?.shortEligible===true;return {...r,safetyCategory:str(r.safetyCategory),categoryCompliant:['B','1','2','3','4'].indexOf(str(r.safetyCategory))>=['B','1','2','3','4'].indexOf(policy.minimumSafetyCategory),label:def?.label||str(r.label),category:def?.category||str(r.category),role:def?.role||'unknown',adopted:def?.adopted===true,shortEligible:eligible,url:devicePhotoValid(ctx,id,photoToken)?await signedUrl(photoToken):'',status:r.shortSelected===true?(eligible&&str(r.tag)&&photoToken&&str(r.procedure)?'documented_review_required':'incomplete_or_eligibility_withdrawn'):'registered'};}));
+  return {equipmentName:str(node.data.name),equipmentCode:str(node.data.code),version:Number(doc?.data.version)||0,policyVersion:master.version,minimumSafetyCategory:policy.minimumSafetyCategory,catalogue:master.devices.filter(d=>d.adopted),items,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],
  'POST /api/org/saf/equipment-devices/program-photo':[orgRoute('org.saf.equipment_devices.program_photo','SAF.view',async ctx=>{
   const {id}=await equipment(ctx);await rateLimit('saf-program-photo',ctx.uid,240,3600);const deviceId=str(ctx.body.deviceId);
@@ -143,7 +143,9 @@ export const safEquipmentRoutes={
    if(shortSelected&&!def?.shortEligible&&(!prior||prior.shortSelected!==true||tag!==str(prior.tag)||photoToken!==str(prior.photoToken)||procedure!==str(prior.procedure)||location!==str(prior.location)))throw new HttpError(400,'Safety must explicitly enable this candidate for Short Intervention.');
    if(shortSelected&&(!tag||!photoToken||procedure.length<20))throw new HttpError(400,'Short Intervention requires a physical tag, photo and documented procedure.');
    if(photoToken){const photo=devicePhotoValid(ctx,id,photoToken)?await getDoc(path+'/photos/'+photoToken.slice(devicePhotoPrefix(ctx,id).length)):null;if(!photo||photo.data.pointId!==deviceId)throw new HttpError(400,'Photo must belong to this equipment device.');}
-   return {deviceId,code,label:def?.label||str(prior?.label),category:def?.category||str(prior?.category),tag,photoToken,procedure,location,shortSelected};
+   const technical=Object.fromEntries(['manufacturer','make','model','safetyCategory','validationReference'].map(k=>[k,str((def?.adopted&&r[k]!==undefined)?r[k]:prior?.[k]).trim().slice(0,500)]));
+   if(technical.safetyCategory&&!['B','1','2','3','4','NA'].includes(technical.safetyCategory))throw new HttpError(400,'Invalid safety category.');
+   return {...technical,deviceId,code,label:def?.label||str(prior?.label),category:def?.category||str(prior?.category),tag,photoToken,procedure,location,shortSelected};
   }));
   const next={items,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid,policyVersion:master.version};
   if(!await writeDoc(path,next,old?{updateTime:old.updateTime}:{exists:false}))throw new HttpError(409,'Register changed. Reload.');
