@@ -14,7 +14,11 @@ test('new work requests are Created, reviewer assignment is explicit, and the re
     assert.ok(backend.includes("case 'to_assessment'"));
     assert.ok(backend.includes("status: 'to_be_assessed'"));
     assert.ok(backend.includes("reviewerUid"));
-    assert.ok(ui.includes('Assign reviewer'));
+    assert.ok(!ui.includes('Choose the employee who will review'));
+    assert.ok(!ui.includes('ReviewerAssignment'));
+    assert.ok(backend.includes('automaticWrReviewer'));
+    assert.ok(backend.includes('eligibleReview'));
+    assert.ok(backend.includes("reviewAssignmentSource: 'workflow'"));
     assert.ok(ui.includes('Close (no assessment)'));
     assert.ok(ui.includes('Cancel (review)'));
     assert.ok(ui.includes('To Be Assessed'));

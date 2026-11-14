@@ -54,3 +54,11 @@ test('maintenance windows are scheduled by the planner after readiness and Chart
  assert.equal(close?.permission,'MNT.WR.close');
 });
 
+
+test('initial request review is assigned by the operational workflow and security role',()=>{
+ const gate=maintenanceGateReadiness({}).find(g=>g.code==='MNT.WR.REVIEW');
+ assert.equal(gate?.permission,'MNT.WR.review');
+ assert.equal(gate?.roleRequired,true);
+ assert.equal(gate?.ready,false);
+ assert.equal(maintenanceGateReadiness({'MNT.WR.REVIEW':'ASSESS'}).find(g=>g.code==='MNT.WR.REVIEW')?.ready,true);
+});

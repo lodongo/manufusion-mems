@@ -1,6 +1,7 @@
 // Suggested job roles for unconfigured maintenance workflow gates, matched on job role titles. A suggestion only
 // fills the form: an administrator reviews it, gives a reason and saves (ADM.workflows, versioned and audited).
 export const GATE_KEYWORDS: Record<string, string[]> = {
+    'MNT.WR.REVIEW': ['maintenance supervisor', 'shift specialist', 'artisan', 'maintenance engineer', 'technician'],
     'MNT.WR.CONVERT': ['maintenance planner', 'planner', 'maintenance supervisor', 'supervisor'],
     'MNT.WO.PLAN': ['maintenance planner', 'planner', 'planning', 'scheduler'],
     'MNT.ASSESS.REVIEW': ['maintenance supervisor', 'maintenance engineer', 'supervisor', 'engineer'],

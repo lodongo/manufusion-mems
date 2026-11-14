@@ -122,6 +122,7 @@ for (const [key, [uid, rs]] of Object.entries(people))
     seed('users/' + uid, {
         orgId: org,
         status: 'active',
+        role: 'org_super_admin',
         firstName: key,
         lastName: 'Fixture',
         email: key + '@example.test',
@@ -1045,17 +1046,27 @@ await assert.rejects(
 // ----- New WR lifecycle: created → named reviewer → Closed / Canceled / To Be Assessed -----
 const createNewWorkRequest = (body) => maintenanceRoutes['POST /api/org/mnt/wr/create'][0](context('requester', {
     ...finding, title: 'Conveyor defect needing review', description: 'New conveyor drive condition requires review.',
-    reviewerUid: people.assessor[0], ...body,
+    ...body,
 }));
 const noReviewer = await createNewWorkRequest({ reviewerUid: '', title: 'Unassigned conveyor defect' });
 assert.equal(snapshot(r + '/work_requests/' + noReviewer.code).data.status, 'created');
 await assert.rejects(
     () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: noReviewer.code, action: 'start_review' }),
-    /assigned employee|assigned/,
+    /Configure MNT.WR.REVIEW/,
 );
-await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
-    code: noReviewer.code, action: 'assign_review', reviewerUid: people.assessor[0],
-});
+await assert.rejects(
+    () => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: noReviewer.code, action: 'assign_review', reviewerUid: people.assessor[0] }),
+    /controlled by Maintenance Workflows/,
+);
+seed(r + '/maintenance_workflow_settings/default', { version: 1, approverRoles: {...roles, 'MNT.WR.REVIEW': 'ASSESS'} });
+const spoofed=await createNewWorkRequest({reviewerUid:people.reviewer[0],title:'Ignore requester nominated reviewer'});
+assert.equal(snapshot(r+'/work_requests/'+spoofed.code).data.reviewerUid,people.assessor[0]);
+assert.equal(snapshot(r+'/work_requests/'+spoofed.code).data.reviewerAssignedBy,'workflow');
+await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wr/action','reviewer',{code:spoofed.code,action:'start_review'}),/workflow reviewer/);
+await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wr/action','requester',{code:spoofed.code,action:'start_review'}),/own request/);
+const deniedSecurity=context('assessor',{code:spoofed.code,action:'start_review'});
+deniedSecurity.role='org_user'; deniedSecurity.permissions=['MNT.view']; deniedSecurity.directPermissions=['MNT.view']; deniedSecurity.grants=[];
+await assert.rejects(()=>maintenanceRoutes['POST /api/org/mnt/wr/action'][0](deniedSecurity),/workflow reviewer|security permission/);
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
     code: noReviewer.code, action: 'start_review',
 });

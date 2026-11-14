@@ -12,6 +12,7 @@ export interface MntGate {
 export const MAINTENANCE_GATES:readonly MntGate[] = [
  {code:'MNT.WO.PLAN',stage:'planning',label:'Secure assessed task resources and schedule work',mode:'permission',permission:'MNT.WO.plan',status:'existing',requires:['work_assessment_completed'],owner:'Configured maintenance planner',separation:'Technical scope changes require controlled reassessment'},
  {code:'MNT.WR.CREATE',stage:'request',label:'Create a work request',mode:'permission',permission:'MNT.WR.create',status:'existing',requires:[],owner:'Any permitted employee',separation:'No maker/checker'},
+ {code:'MNT.WR.REVIEW',stage:'request',label:'Review work request and decide Close, Cancel or To Be Assessed',mode:'permission',permission:'MNT.WR.review',status:'existing',requires:['configured_job_role','location_scoped_security_permission','independent_reviewer'],owner:'Configured work request reviewer',separation:'Requester cannot assign or review their own request'},
  {code:'MNT.WR.CLOSE',stage:'request',label:'Close a request at review when no planning is needed (cause, solution, maintenance type)',mode:'approval',permission:'MNT.WR.close',status:'existing',requires:['cause','solution','maintenance_type','description'],owner:'Artisan reviewer; confirmed by a supervisor (MNT.WR.closeConfirm)',separation:'The person who closes cannot confirm the closure'},
  {code:'MNT.WR.ASSESS',stage:'assessment',label:'Complete open work assessment',mode:'permission',permission:'MNT.assessment.edit',status:'existing',requires:['request_present','tasks_and_resources_captured','task_risk_assessment_completed'],owner:'Any authenticated organization employee with work-request access at the equipment',separation:'No separate assessor authorization or second-person approval'},
  {code:'MNT.ASSESS.REVIEW',stage:'assessment',label:'Independently approve completed task work assessment',mode:'approval',permission:'MNT.assessment.review',status:'existing',requires:['assessment_details_complete','all_tasks_risk_assessed','independent_reviewer','current_assessment_version'],owner:'Configured Maintenance Supervisor or Engineer reviewer',separation:'Reviewer must not be requester, creator or assessor; changes invalidate approval'},
@@ -31,7 +32,7 @@ export const MAINTENANCE_GATES:readonly MntGate[] = [
 ] as const;
 
 export function maintenanceGateReadiness(configuredRoles:Readonly<Record<string,string>>,gates:readonly MntGate[]=MAINTENANCE_GATES){
- const ownerRoles=['MNT.ASSESS.REVIEW','MNT.SPARES.RECONCILE','MNT.WO.PLAN','MNT.TASK.FEEDBACK','MNT.WR.CONVERT','MNT.TASK.VALIDATE','MNT.SAFETY.SIGNOFF','MNT.HANDOVER','MNT.WO.TECHNICAL_CLOSE'];
+ const ownerRoles=['MNT.WR.REVIEW','MNT.ASSESS.REVIEW','MNT.SPARES.RECONCILE','MNT.WO.PLAN','MNT.TASK.FEEDBACK','MNT.WR.CONVERT','MNT.TASK.VALIDATE','MNT.SAFETY.SIGNOFF','MNT.HANDOVER','MNT.WO.TECHNICAL_CLOSE'];
  return gates.map(g=>({
   ...g,
   configuredRole:configuredRoles[g.code]||'',

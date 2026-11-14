@@ -61,7 +61,6 @@ interface WrCan {
     resubmit: boolean;
     cancel: boolean;
     startReview: boolean;
-    assignReview: boolean;
     reviewCancel: boolean;
     toAssessment: boolean;
     assess: boolean;
@@ -86,6 +85,9 @@ interface Detail extends Row {
     description: string;
     sourceCode: string;
     reviewAssignedName?: string;
+    reviewRoleCode?: string;
+    reviewRoleName?: string;
+    reviewWorkflowConfigured?: boolean;
     reviewDecision?: string;
     reviewCancellationCategory?: string;
     repeatRequestCode?: string;
@@ -294,8 +296,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     const [linkedGemba, setLinkedGemba] = useState('');
     const [linkError, setLinkError] = useState('');
     const [pendingLink, setPendingLink] = useState<GembaWrHandoff | null>(null);
-    const [reviewerUid, setReviewerUid] = useState('');
-    const reviewerOptions = useLoad(() => callBackend<{ reviewers: Array<{ uid: string; name: string }> }>('/api/org/mnt/wr/reviewers'), []);
 
     const linkToGemba = async (code: string, handoff: GembaWrHandoff) => {
         await callBackend('/api/org/quick/gemba/link-wr', {
@@ -352,7 +352,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         setSourceCode('');
         setImpactCodes([]);
         setPhotos([]);
-        setReviewerUid('');
         setError('');
         setPlace(null);
         setAssetTag('');
@@ -368,7 +367,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         place && asset && assetTag===place.defaultAssetTag ? [] : ['Choose the equipment (or its assembly) with a valid linked asset.'],
         [...(title.trim().length < 3 ? ['Short title is required (at least 3 characters).'] : []), ...(description.trim().length < 10 ? ['What did you find? is required (at least 10 characters).'] : []), ...(!sourceCode ? ['Source of the finding is required.'] : []), ...(!impactCodes.length ? ['Choose at least one impact.'] : [])],
         [...(uploading ? ['Wait for the photos to finish uploading.'] : [])],
-        [...(uploading ? ['Wait for the photos to finish uploading.'] : []), ...(reviewerOptions.data?.reviewers.length && !reviewerUid ? ['Assign an employee to review this request.'] : [])],
+        [...(uploading ? ['Wait for the photos to finish uploading.'] : [])],
     ];
     const canNext = step === STEPS.length - 1 ? problems.every((p) => !p.length) : problems[step].length === 0;
     const screen = useFullScreen(!created);
@@ -430,7 +429,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                 sourceCode,
                 impactCodes,
                 photos: photos.map((p) => p.token),
-                reviewerUid,
                 gembaId: pendingLink?.id || '', gembaObservationId: pendingLink?.observationId || '',
             });
             if (pendingLink && pendingLink.assetTag === assetTag && pendingLink.assemblyId === place?.assembly?.id) {
@@ -629,16 +627,6 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                                 ))}
                             </div>
                         </ReviewBlock>
-                        <div className='rounded-2xl border border-line bg-panel p-3'>
-                            <SelectField id='wr-reviewer' label='Assigned work request reviewer *' value={reviewerUid} onChange={(e) => setReviewerUid(e.target.value)}>
-                                <option value=''>Choose the employee who will review</option>
-                                {(reviewerOptions.data?.reviewers ?? []).map((u) => <option key={u.uid} value={u.uid}>{u.name}</option>)}
-                            </SelectField>
-                            {reviewerOptions.loading && <p className='text-xs text-muted'>Loading employees…</p>}
-                            {reviewerOptions.error && <Alert tone='error'>{reviewerOptions.error}</Alert>}
-                            {!reviewerOptions.loading && !reviewerOptions.data?.reviewers.length && <p className='text-xs text-amber-400'>No employees available. The request can be saved as Created and assigned later by an authorized reviewer.</p>}
-                            <p className='mt-2 text-xs text-soft'>Only the assigned employee, with MNT.WR.review permission at this equipment, can complete the review.</p>
-                        </div>
                         {error && <Alert tone='error'>{error}</Alert>}
                     </>
                 )}
@@ -875,8 +863,10 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                     <h2 className='text-lg font-semibold text-white'>Request details</h2>
                   </div>
                   {!!r.reviewAssignedName && <p className='text-sm text-soft'>Assigned reviewer: <strong>{r.reviewAssignedName}</strong></p>}
-                  {r.status === 'created' && !r.reviewerUid && <Alert tone='warn'>Created — awaiting an assigned reviewer before review can begin.</Alert>}
-                  {can.assignReview && <ReviewerAssignment code={r.code} current={r.reviewerUid || ''} onDone={reload} />}
+                  {r.status === 'created' && <Card className='space-y-1'>
+                      <p className='text-sm font-semibold text-ink'>Workflow review</p>
+                      {r.reviewWorkflowConfigured ? <p className='text-xs text-soft'>Routed to {r.reviewRoleName || r.reviewRoleCode}. {r.reviewAssignedName ? 'The assigned reviewer can start review.' : 'An eligible employee can start review from their review queue.'}</p> : <Alert tone='warn'>Awaiting configuration of MNT.WR.REVIEW in Maintenance Workflows. Your request is saved.</Alert>}
+                  </Card>}
                   {!!r.assessmentCode && <Card className='space-y-2'>
                       <p className='text-xs font-semibold uppercase tracking-wide text-soft'>Independent work assessment</p>
                       <button type='button' className='text-left font-semibold text-emerald-600 underline' onClick={() => navigate(`organization_admin/work_assessments/${r.assessmentCode}`)}>{r.assessmentCode}</button>
@@ -1271,32 +1261,6 @@ const CANCEL_REASONS = [
     { value: 'invalid_request', label: 'Invalid Request' },
     { value: 'other', label: 'Other' },
 ] as const;
-
-function ReviewerAssignment({ code, current, onDone }: { code: string; current: string; onDone: () => void }) {
-    const directory = useLoad(() => callBackend<{ reviewers: Array<{ uid: string; name: string }> }>('/api/org/mnt/wr/reviewers'), []);
-    const [uid, setUid] = useState(current);
-    const [busy, setBusy] = useState(false);
-    const [error, setError] = useState('');
-    const save = async () => {
-        setBusy(true); setError('');
-        try {
-            await callBackend('/api/org/mnt/wr/action', { code, action: 'assign_review', reviewerUid: uid });
-            onDone();
-        } catch (e) { setError(e instanceof Error ? e.message : 'Assignment failed.'); }
-        finally { setBusy(false); }
-    };
-    return <Card className='space-y-2'>
-        <p className='font-semibold text-ink'>Assign employee for review</p>
-        <SelectField id='wr-assigned-reviewer' label='Reviewer *' value={uid} onChange={(e) => setUid(e.target.value)}>
-            <option value=''>Select employee</option>
-            {(directory.data?.reviewers ?? []).map((u) => <option key={u.uid} value={u.uid}>{u.name}</option>)}
-        </SelectField>
-        <p className='text-xs text-soft'>The selected employee must have Work Request Review permission at this equipment. Only that employee can decide Close, Cancel or To Be Assessed.</p>
-        {directory.error && <Alert tone='error'>{directory.error}</Alert>}
-        {error && <Alert tone='error'>{error}</Alert>}
-        <Button busy={busy} disabled={!uid || uid === current} onClick={save}>Assign reviewer</Button>
-    </Card>;
-}
 
 function CancelAtReview({ detail, onDone, onCancel }: { detail: Detail; onDone: () => void; onCancel: () => void }) {
     const [category, setCategory] = useState('');

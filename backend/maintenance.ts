@@ -8,7 +8,7 @@ import { assessmentReviewCurrent, approvedAssessmentSnapshot, reviewAssessmentPr
 import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, randomId, rateLimit, runQuery, fieldEq, str, updateFields, writeDoc, type Doc, type Obj, type Plain } from './core';
 import { audit } from './audit';
 import { orgUsers } from './org';
-import { orgRoute, type OrgContext } from './guards';
+import { effectiveAccess, orgRoute, type OrgContext } from './guards';
 import { bypass } from './testModeCore';
 import { nextOrgCounter } from './positions';
 import { detectImage } from './branding';
@@ -475,25 +475,59 @@ function assessmentHasStarted(d: Obj): boolean {
         || !!str(d.assessedBy) || !!str(d.assessmentTasksBy) || isObj(d.assessmentReview);
 }
 
-function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
+const WR_REVIEW_GATE = 'MNT.WR.REVIEW';
+function reviewRoleOf(settings: Doc | null | undefined): string {
+    return str(object(settings?.data.approverRoles)[WR_REVIEW_GATE]);
+}
+function holdsReviewRole(user: Doc, role: string, path: string[]): boolean {
+    const today = nowIso().slice(0,10);
+    return !!role && str(user.data.status) !== 'disabled' && objs(user.data.assignments).some(a =>
+        str(a.positionCode) === role && path.includes(str(a.nodeId))
+        && (!str(a.startsOn) || str(a.startsOn) <= today)
+        && (!str(a.endsOn) || str(a.endsOn) >= today));
+}
+function eligibleReview(ctx: OrgContext, doc: Doc, scope: Scope, role: string): boolean {
+    return str(doc.data.requestedBy) !== ctx.uid
+        && holdsReviewRole(ctx.me, role, pathOf(doc))
+        && canAt(ctx, P.WR_review, pathOf(doc), scope)
+        && canAt(ctx, P.view, pathOf(doc), scope);
+}
+/** Named assignment only when the workflow has one eligible holder; otherwise the
+ * eligible role queue is claimed atomically by its first reviewer. */
+async function automaticWrReviewer(ctx: OrgContext, role: string, path: string[]) {
+    if (!role) return null;
+    const candidates = (await orgUsers(ctx.orgId)).filter(u => u.id !== ctx.uid && holdsReviewRole(u, role, path));
+    const eligible = [];
+    for (const user of candidates) {
+        const storedRole = str(user.data.role);
+        const securityRole = storedRole === 'org_admin' ? 'org_super_admin' : storedRole || 'org_user';
+        const access = await effectiveAccess(ctx.orgId, securityRole, user, ctx.org.data.modules);
+        const candidate = { ...ctx, me: user, uid: user.id, role: securityRole, ...access, testMode: false };
+        const scope = await scopeOf(candidate);
+        if (canAt(candidate,P.WR_review,path,scope) && canAt(candidate,P.view,path,scope)) eligible.push(user);
+    }
+    return eligible.length === 1 ? eligible[0] : null;
+}
+function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
     const status = wrStatus(doc);
     const path = pathOf(doc);
     const mine = str(doc.data.requestedBy) === ctx.uid;
     const assessmentStarted = assessmentHasStarted(doc.data);
+    const workflowEligible = eligibleReview(ctx, doc, scope, reviewRole);
+    const assigned = str(doc.data.reviewerUid);
+    const workflowNamed = doc.data.reviewAssignmentSource === 'workflow' && str(doc.data.reviewRoleCode) === reviewRole;
     const at = (perm: string) => canAt(ctx, perm, path, scope);
     return {
         view: mine || at(P.view),
         edit: mine && ['created', 'submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_edit),
         resubmit: mine && status === 'returned' && !assessmentStarted && at(P.WR_edit),
         cancel: mine && ['created', 'submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_cancel),
-        assignReview: status === 'created' && at(P.WR_review) && independent(ctx, !mine, 'mnt.wr.assign_independence'),
-        startReview: ['created', 'submitted'].includes(status) && at(P.WR_review)
-            && independent(ctx, !mine, 'mnt.wr.reviewer_independence')
-            && (status === 'submitted' || str(doc.data.reviewerUid) === ctx.uid),
+        startReview: status === 'created' ? workflowEligible && (!workflowNamed || !assigned || assigned === ctx.uid)
+            : status === 'submitted' && at(P.WR_review) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         reviewCancel: status === 'under_review' && Number(doc.data.reviewProcessVersion) === 2
-            && str(doc.data.reviewerUid) === ctx.uid && at(P.WR_review),
+            && assigned === ctx.uid && workflowEligible,
         toAssessment: status === 'under_review' && Number(doc.data.reviewProcessVersion) === 2
-            && str(doc.data.reviewerUid) === ctx.uid && at(P.WR_review),
+            && assigned === ctx.uid && workflowEligible,
         assess: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
             && at(P.assessment_edit) && !assessmentReviewCurrent(doc.data),
         return: status === 'under_review' && Number(doc.data.reviewProcessVersion) !== 2 && !assessmentStarted && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
@@ -502,7 +536,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope) {
         enrich: Number(doc.data.reviewProcessVersion) !== 2 && ['submitted', 'under_review'].includes(status) && (at(P.WR_review) || at(P.assessment_edit)) && !assessmentReviewCurrent(doc.data),
         close: ['submitted', 'under_review'].includes(status) && (Number(doc.data.reviewProcessVersion) === 2 ? at(P.WR_review) : at(P.WR_close))
             && independent(ctx, !mine, 'mnt.wr.reviewer_independence')
-            && (Number(doc.data.reviewProcessVersion) !== 2 || (status === 'under_review' && str(doc.data.reviewerUid) === ctx.uid))
+            && (Number(doc.data.reviewProcessVersion) !== 2 || (status === 'under_review' && assigned === ctx.uid && workflowEligible))
             && !assessmentReviewCurrent(doc.data),
         confirmClosure: status === 'closure_pending' && at(P.WR_closeConfirm) && independent(ctx, str(object(doc.data.closure).by) !== ctx.uid, 'mnt.wr.closure_independence'),
         reviewAssessment: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
@@ -1212,15 +1246,11 @@ export const maintenanceRoutes = {
             const provided = strs(b.photos);
             const fresh = provided.filter(p => p !== inheritedPhoto);
             const photos = [...readPhotos(ctx, fresh), ...(inheritedPhoto && provided.includes(inheritedPhoto) ? [inheritedPhoto] : [])];
-            const selectedReviewer = str(b.reviewerUid);
-            let reviewerName = '';
-            if (selectedReviewer) {
-                const reviewer = (await orgUsers(ctx.orgId)).find((u) => u.id === selectedReviewer && str(u.data.status) !== 'disabled');
-                if (!reviewer) throw new HttpError(400, 'Choose an active employee of your organization to review the request.');
-                if (selectedReviewer === ctx.uid && !bypass(ctx, 'mnt.wr.reviewer_independence'))
-                    throw new HttpError(403, 'The requester cannot review their own request. Choose another employee.');
-                reviewerName = [str(reviewer.data.firstName), str(reviewer.data.lastName)].filter(Boolean).join(' ') || str(reviewer.data.email);
-            }
+            const settings = await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const reviewRole = reviewRoleOf(settings);
+            const reviewer = await automaticWrReviewer(ctx, reviewRole, loc.path);
+            const selectedReviewer = reviewer?.id || '';
+            const reviewerName = reviewer ? [str(reviewer.data.firstName), str(reviewer.data.lastName)].filter(Boolean).join(' ') || str(reviewer.data.email) : '';
             const now = nowIso();
             for (let attempt = 0; attempt < 3; attempt++) {
                 const n = await nextOrgCounter(ctx.orgId, 'wrSeq');
@@ -1237,13 +1267,15 @@ export const maintenanceRoutes = {
                         reviewProcessVersion: 2,
                         reviewerUid: selectedReviewer, reviewAssignedName: reviewerName,
                         reviewerAssignedAt: selectedReviewer ? now : '',
-                        reviewerAssignedBy: selectedReviewer ? ctx.uid : '',
+                        reviewerAssignedBy: selectedReviewer ? 'workflow' : '',
+                        reviewRoleCode: reviewRole, reviewAssignmentSource: 'workflow',
+                        reviewWorkflowVersion: Number(settings?.data.version) || 0,
                         photos: photos.map((p) => ({ path: p, addedAt: now })),
                         gembaId, gembaObservationId: observationId, gembaTypeCode, gembaTypeName,
                         requestedBy: ctx.uid,
                         requestedByName: displayName(ctx),
                         requestedAt: now,
-                        history: history(null, ctx, 'Created', reviewerName ? `Review assigned to ${reviewerName}` : 'Awaiting reviewer assignment'),
+                        history: history(null, ctx, 'Created', reviewerName ? `Workflow assigned review to ${reviewerName}` : reviewRole ? `Routed to workflow role ${reviewRole}` : 'Awaiting workflow role configuration'),
                         createdAt: now,
                         updatedAt: now,
                     },
@@ -1258,26 +1290,14 @@ export const maintenanceRoutes = {
         }),
     ],
 
-    'POST /api/org/mnt/wr/reviewers': [
-        orgRoute('org.mnt.wr.reviewers', null, async (ctx) => {
-            requireMnt(ctx);
-            if (!canAnywhere(ctx, P.WR_create) && !canAnywhere(ctx, P.WR_review))
-                throw new HttpError(403, 'Work request permission is required to look up reviewers.');
-            const docs = await orgUsers(ctx.orgId);
-            const rows = docs.filter((d) => str(d.data.status) !== 'disabled' && d.id !== ctx.uid)
-                .map((d) => ({ uid: d.id, name: [str(d.data.firstName),str(d.data.lastName)].filter(Boolean).join(' ') || str(d.data.email) }))
-                .sort((a,b)=>a.name.localeCompare(b.name));
-            return { reviewers: rows };
-        }),
-    ],
     'POST /api/org/mnt/wr/repeat-search': [
         orgRoute('org.mnt.wr.repeat_search', null, async (ctx) => {
             requireMnt(ctx);
             const doc = await getWr(ctx, str(ctx.body.code));
             const scope = await scopeOf(ctx);
             need(ctx, P.WR_review, pathOf(doc), scope);
-            if (str(doc.data.reviewerUid) !== ctx.uid)
-                throw new HttpError(403, 'Only the assigned reviewer may search repeat requests.');
+            if (str(doc.data.reviewerUid) !== ctx.uid || !eligibleReview(ctx,doc,scope,reviewRoleOf(await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`))))
+                throw new HttpError(403, 'Only the assigned workflow reviewer may search repeat requests.');
             const q = clean(ctx.body.query, 120).toLowerCase();
             const candidates = (await listDocs(wrCol(ctx.orgId)))
                 .filter((d) => d.id !== doc.id && str(d.data.unitId) === str(doc.data.unitId) && !['cancelled','declined'].includes(wrStatus(d)))
@@ -1292,6 +1312,7 @@ export const maintenanceRoutes = {
             requireMnt(ctx);
             const view = str(ctx.body.view);
             const scope = await scopeOf(ctx);
+            const reviewRole = reviewRoleOf(await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`));
             const rows = (await listDocs(wrCol(ctx.orgId)))
                 .filter((d) => str(d.data.requestedBy) === ctx.uid || canAt(ctx, P.view, pathOf(d), scope))
                 .filter((d) => {
@@ -1300,10 +1321,9 @@ export const maintenanceRoutes = {
                     if (view === 'assessment') return (s === 'under_review' && Number(d.data.reviewProcessVersion) !== 2 || s === 'to_be_assessed') && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
                     if (view === 'mine') return mine;
                     if (view === 'review') return (s === 'closure_pending' && canAt(ctx, P.WR_closeConfirm, pathOf(d), scope) && str(object(d.data.closure).by) !== ctx.uid)
-                        || (s === 'created' && canAt(ctx, P.WR_review, pathOf(d), scope)
-                            && (!str(d.data.reviewerUid) || str(d.data.reviewerUid) === ctx.uid))
+                        || (s === 'created' && wrCan(ctx,d,scope,reviewRole).startReview)
                         || ((!mine || ctx.testMode === true) && ['submitted', 'under_review'].includes(s)
-                            && (Number(d.data.reviewProcessVersion) !== 2 || str(d.data.reviewerUid) === ctx.uid)
+                            && (Number(d.data.reviewProcessVersion) !== 2 || (str(d.data.reviewerUid) === ctx.uid && eligibleReview(ctx,d,scope,reviewRole)))
                             && (canAt(ctx, P.WR_review, pathOf(d), scope) || canAt(ctx, P.WR_close, pathOf(d), scope)));
                     if (view === 'open') return ['created', 'submitted', 'under_review', 'returned', 'closure_pending'].includes(s);
                     return true;
@@ -1338,8 +1358,9 @@ export const maintenanceRoutes = {
             const doc = await getWr(ctx, assessmentRecord ? str(assessmentRecord.data.workRequestCode) : selectedCode);
             if (assessmentRecord && str(doc.data.assessmentCode) !== selectedCode)
                 throw new HttpError(409, 'The assessment is not linked to this work request.');
-            const can = wrCan(ctx, doc, scope);
             const workflowConfig=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const reviewRole = reviewRoleOf(workflowConfig);
+            const can = wrCan(ctx, doc, scope, reviewRole);
             const assignedReviewerRole=str(isObj(workflowConfig?.data.approverRoles)?workflowConfig.data.approverRoles['MNT.ASSESS.REVIEW']:'');
             // The configured assessment approver reviews only; technical assessors edit.
             // Never offer editing to the same assigned Maintenance Lead.
@@ -1422,7 +1443,10 @@ export const maintenanceRoutes = {
                 assessmentReviewCurrent: currentReview,
                 assessmentStarted: assessmentHasStarted(d),
                 returnNote: str(d.returnNote),
-                reviewAssignedName: str(d.reviewAssignedName),
+                reviewAssignedName: str(d.status) === 'created' && (d.reviewAssignmentSource !== 'workflow' || str(d.reviewRoleCode) !== reviewRole) ? '' : str(d.reviewAssignedName),
+                reviewRoleCode: reviewRole,
+                reviewRoleName: reviewRole ? str((await getDoc(`organizations/${ctx.orgId}/positions/${reviewRole}`))?.data.title) || reviewRole : '',
+                reviewWorkflowConfigured: !!reviewRole,
                 reviewDecision: str(d.reviewDecision),
                 reviewCancellationCategory: str(d.reviewCancellationCategory),
                 repeatRequestCode: str(d.repeatRequestCode),
@@ -1441,9 +1465,10 @@ export const maintenanceRoutes = {
             const note = str(ctx.body.note).trim().slice(0, 500);
             const scope = await scopeOf(ctx);
             const doc = await getWr(ctx, str(ctx.body.code));
-            const can = wrCan(ctx, doc, scope);
-            // Enforce assessor/approver separation on the server as well as in the UI.
             const workflowSettings = await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const reviewRole = reviewRoleOf(workflowSettings);
+            const can = wrCan(ctx, doc, scope, reviewRole);
+            // Enforce assessor/approver separation on the server as well as in the UI.
             const assessmentLeadRole = str(isObj(workflowSettings?.data.approverRoles) ? workflowSettings.data.approverRoles['MNT.ASSESS.REVIEW'] : '');
             if (assessmentLeadRole && ctx.testMode !== true) {
                 try {
@@ -1558,18 +1583,8 @@ export const maintenanceRoutes = {
                     await done(fields, 'Details added', 'mnt.wr.enriched', changes.join(' · '));
                     return { ok: true };
                 }
-                case 'assign_review': {
-                    deny(can.assignReview, 'Only a permitted reviewer can assign a work request before review starts.');
-                    const targetUid = str(ctx.body.reviewerUid);
-                    const user = (await orgUsers(ctx.orgId)).find((u) => u.id === targetUid && str(u.data.status) !== 'disabled');
-                    if (!user) throw new HttpError(400, 'Choose an active employee of this organization.');
-                    if (targetUid === str(doc.data.requestedBy) && !bypass(ctx, 'mnt.wr.reviewer_independence'))
-                        throw new HttpError(403, 'The requester cannot review their own request.');
-                    const name = [str(user.data.firstName), str(user.data.lastName)].filter(Boolean).join(' ') || str(user.data.email);
-                    await done({ reviewerUid: targetUid, reviewAssignedName: name, reviewerAssignedAt: now, reviewerAssignedBy: ctx.uid },
-                        'Review assigned', 'mnt.wr.reviewer_assigned', `Assigned to ${name}`);
-                    return { ok: true };
-                }
+                case 'assign_review':
+                    throw new HttpError(403, 'Reviewer assignment is controlled by Maintenance Workflows, not by the requester or another employee.');
                 case 'close_review': {
                     // Fixed on the spot: no planning needed. Recorded with cause, solution and maintenance type (the
                     // same maintenance type list Finance uses for GL account rules); another person confirms.
@@ -1629,9 +1644,13 @@ export const maintenanceRoutes = {
                     return { ok: true };
                 }
                 case 'start_review':
-                    deny(can.startReview, can.ownRequest ? 'You cannot review your own request.' : 'You are not the assigned employee or lack review permission.');
+                    if (wrStatus(doc) === 'created' && !reviewRole)
+                        throw new HttpError(409, 'Configure MNT.WR.REVIEW in Maintenance Workflows before proceeding.');
+                    deny(can.startReview, can.ownRequest ? 'You cannot review your own request.' : 'You are not the assigned workflow reviewer or lack the required job role and security permission.');
                     await done({ status: 'under_review', reviewer: ctx.uid, reviewerUid: ctx.uid, reviewerName: displayName(ctx),
-                        reviewAssignedName: displayName(ctx), reviewStartedAt: now }, 'Review started', 'mnt.wr.review_started', '');
+                        reviewAssignedName: displayName(ctx), reviewStartedAt: now,
+                        ...(reviewNew ? {reviewRoleCode: reviewRole, reviewAssignmentSource: 'workflow', reviewerAssignedBy:'workflow', reviewerAssignedAt: str(doc.data.reviewerAssignedAt) || now,
+                            reviewWorkflowVersion:Number(workflowSettings?.data.version)||0} : {}) }, 'Review started', 'mnt.wr.review_started', '');
                     return { ok: true };
                 case 'cancel_review': {
                     deny(can.reviewCancel, 'Only the assigned reviewer can cancel during review.');
