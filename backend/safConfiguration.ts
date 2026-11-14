@@ -42,7 +42,7 @@ async function permitContext(orgId:string,code:string){
  return {permit:{...safeOption(permit),adopted:catalogue.active.some(x=>str(x.code)===code)},path,doc,definitions,fields};
 }
 export const safConfigurationRoutes={
- 'POST /api/org/saf/adoption/read':[orgRoute('org.saf.adoption.read',null,async ctx=>{
+ 'POST /api/org/saf/adoption/read':[orgRoute('org.saf.adoption.read','SAF.view',async ctx=>{
   assertRead(ctx);
   const key=asKey(ctx.body.key);
   const c=await safetyCatalogue(ctx.orgId,key);
@@ -50,7 +50,7 @@ export const safConfigurationRoutes={
   return {key,title:c.title,version:c.version,canEdit:holdsDirect(ctx,PERMS.matrixConfigure),keys:SAF_ADOPTION_KEYS,
    rows:c.items.filter(x=>x.selectable!==false).map(x=>({...safeOption(x),masterActive:x.active!==false,enabled:enabled.has(str(x.code))}))};
  })],
- 'POST /api/org/saf/adoption/save':[orgRoute('org.saf.adoption.save',null,async ctx=>{
+ 'POST /api/org/saf/adoption/save':[orgRoute('org.saf.adoption.save','SAF.configure',async ctx=>{
   assertEdit(ctx);
   const key=asKey(ctx.body.key);
   const c=await safetyCatalogue(ctx.orgId,key);
@@ -67,7 +67,7 @@ export const safConfigurationRoutes={
   await audited(ctx,'saf.adoption.save',key,{version,reason,disabledCount:disabled.length,disabledCodes:disabled});
   return {ok:true,version};
  })],
- 'POST /api/org/saf/permits/list':[orgRoute('org.saf.permits.list',null,async ctx=>{
+ 'POST /api/org/saf/permits/list':[orgRoute('org.saf.permits.list','SAF.view',async ctx=>{
   assertRead(ctx);
   const c=await safetyCatalogue(ctx.orgId,'permitTypes');
   const rows=await Promise.all(c.items.filter(x=>x.selectable!==false).map(async x=>{
@@ -76,13 +76,13 @@ export const safConfigurationRoutes={
   }));
   return {rows,canEdit:holdsDirect(ctx,PERMS.matrixConfigure)};
  })],
- 'POST /api/org/saf/permits/template/read':[orgRoute('org.saf.permits.template.read',null,async ctx=>{
+ 'POST /api/org/saf/permits/template/read':[orgRoute('org.saf.permits.template.read','SAF.view',async ctx=>{
   assertRead(ctx);
   const c=await permitContext(ctx.orgId,validCode(ctx.body.code));
   return {permit:c.permit,fields:c.fields,referenceBasis:['HSE HSG250',...(EXPANDED_PERMIT_REFERENCES[c.permit.code]||[])],schemaRevision:2,version:Number(c.doc?.data.version)||0,canEdit:holdsDirect(ctx,PERMS.matrixConfigure),
     policy:isObj(c.doc?.data.policy)?c.doc.data.policy:{maxHours:8,allowExtension:false,allowShiftHandover:false,requireAttachments:false},updatedAt:str(c.doc?.data.updatedAt)};
  })],
- 'POST /api/org/saf/permits/template/save':[orgRoute('org.saf.permits.template.save',null,async ctx=>{
+ 'POST /api/org/saf/permits/template/save':[orgRoute('org.saf.permits.template.save','SAF.configure',async ctx=>{
   assertEdit(ctx);
   const code=validCode(ctx.body.code);
   const c=await permitContext(ctx.orgId,code);
