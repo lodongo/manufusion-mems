@@ -3,8 +3,7 @@ import {orgRoute,type OrgContext} from './guards';
 import {PERMS,holdsAnywhere,holdsDirect,audited} from './scopeGuard';
 import {SAF_DEFAULT_LISTS} from './safDefaults';
 import {AST_UTILITY_ITEMS} from './astUtilityDefaults';
-import {categoryColor} from './safActivityClasses';
-import {energyColor} from './safEnergyColors';
+import {loadSafetyHazardMaster} from './safHazardMaster';
 import {fieldsForPermit,normalizePermitFields} from './safPermitTemplates';
 import {EXPANDED_PERMIT_REFERENCES} from './safPermitExpanded';
 
@@ -31,15 +30,13 @@ export async function safetyCatalogue(orgId:string,key:Key){
  const utilityItems=entries(Array.isArray(utilities?.data.items)?utilities?.data.items:AST_UTILITY_ITEMS);
  const shared=utilities&&str(utilities.data.source)==='MEMS defaults'&&Number(utilities.data.version)<2?[...utilityItems,...AST_UTILITY_ITEMS.filter(x=>!utilityItems.some(u=>str(u.code)===x.code))]:utilityItems;
  const raw=key==='externalEnergySources'?shared:entries(Array.isArray(master?.data.items)?master?.data.items:fallback?.items);
- const energy=key==='hazardousEnergy'||key==='externalEnergySources';
- const hazards=energy?await getDoc('module_workspaces/SAF/metadata/hazards'):null;
- const colorOverrides=isObj(hazards?.data.categoryColors)?hazards.data.categoryColors:{};
- const items:Obj[]=key==='hazards'?raw.map(x=>({...x,color:categoryColor(str(x.category),isObj(master?.data.categoryColors)?master.data.categoryColors:{})})):energy?raw.map(x=>({...x,color:energyColor(x,colorOverrides)})):raw;
+ const unified=['hazards','hazardousEnergy','externalEnergySources'].includes(key)?await loadSafetyHazardMaster():null;
+ const items:Obj[]=unified?(key==='hazards'?unified.hazards:key==='hazardousEnergy'?unified.internal:unified.external):raw;
  const active=adoptedRecords(items,policy?.data.disabledCodes);
  return {key,title:str(master?.data.title)||fallback?.title||key,items,active,policy,version:Number(policy?.data.version)||0};
 }
 export async function effectiveSafetyItems(orgId:string,key:Key){return (await safetyCatalogue(orgId,key)).active;}
-const safeOption=(x:Obj)=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description),color:str(x.color)});
+const safeOption=(x:Obj)=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description),color:str(x.color),hazardCategory:str(x.hazardCategory),hazardCodes:Array.isArray(x.hazardCodes)?x.hazardCodes.map(str):[],energySourceCode:str(x.energySourceCode)});
 const validCode=(v:unknown)=>{const x=str(v);if(!/^[A-Za-z0-9_-]{1,80}$/.test(x))throw new HttpError(400,'Invalid permit type code.');return x;};
 async function permitContext(orgId:string,code:string){
  const catalogue=await safetyCatalogue(orgId,'permitTypes');
