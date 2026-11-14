@@ -15,7 +15,7 @@ function calculate(matrix:RiskMatrix|null,r:Rating|undefined){if(!matrix||!r)ret
 export function assembleTaskRiskReport(data:ReportData):ReportRow[]{
  const refs=data.reportReferences||{hazards:[],injuries:[],controls:[],hierarchy:[],permits:[]},matrix=data.matrix;
  const className=(code:string)=>data.classes.find(c=>c.code===code)?.label||ACTIVITY_CLASSES.find(c=>c.code===code)?.label||code;
- return data.tasks.flatMap(t=>{
+ return data.tasks.flatMap<ReportRow>(t=>{
   const codes=t.classCodes||[],classes=codes.map(className).join('; '),review:string[]=[];
   const entries=new Map<string,{row:RiskRow;sources:string[]}>();
   const add=(r:RiskRow,source:string)=>{const key=fingerprint(r),found=entries.get(key);if(found)found.sources=unique([...found.sources,source]);else entries.set(key,{row:r,sources:[source]});};
@@ -27,7 +27,7 @@ export function assembleTaskRiskReport(data:ReportData):ReportRow[]{
   if(codes.includes('AC02'))req.push('Short Intervention Control — verify eligibility and equipment safeguards; not a substitute for required LOTO.');
   if(codes.includes('AC03'))req.push('Full LOTO — isolate hazardous energy and verify zero energy.');
   else if(codes.includes('AC06'))req.push('Partial LOTO — isolate applicable energy and review retained energy.');
-  else if(t.energyPlan?.some(p=>p.state==='isolate')||t.permitCodes?.includes('SAF_08_01_003'))req.push('LOTO — applicable isolation and verification.');
+  else if(t.energyPlan?.some(p=>p.state==='isolate')||t.permitCodes?.includes('SAF_08_01_003')||baselines.some(b=>b.permitCodes?.includes('SAF_08_01_003')))req.push('LOTO — applicable isolation and verification.');
   const tags=unique([...(t.energyPlan||[]).filter(p=>p.state==='isolate').map(p=>p.tag||p.label||''),...baselines.flatMap(b=>b.energyTags||[])]);
   if(tags.length)req.push('Affected / isolation points — '+tags.join('; '));
   const permits=unique([...(t.permitCodes||[]),...baselines.flatMap(b=>b.permitCodes||[]),...codes.flatMap(c=>ACTIVITY_CLASSES.find(x=>x.code===c)?.requiredPermits||[])]);
