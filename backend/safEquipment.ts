@@ -2,7 +2,7 @@ import {storage} from './platform/sdk';
 import {HttpError,getDoc,isObj,nowIso,randomId,rateLimit,str,writeDoc,type Obj} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {PERMS,allowedAt,requireAt,audited} from './scopeGuard';
-import {effectiveSafetyItems,safetyCatalogue} from './safConfiguration';
+import {effectiveSafetyItems,safetyCatalogue,lotoPolicy} from './safConfiguration';
 import {ACTIVITY_CLASSES,CLASS_PERMIT_ALTERNATIVES,meetsClassPermitMinimum} from './safActivityClasses';
 import {detectImage} from './branding';
 import {signedUrl} from './structure';
@@ -73,7 +73,7 @@ export const safEquipmentRoutes={
    const status=issues.length?'incomplete':x.status==='documented'?'documented':'draft';
    return {...x,pointId:pointIdOf(x,i),values,tests:reports,status,issues,utilityAttrs:context.attrs(code).map(a=>({key:str(a.key),label:str(a.label),unit:str(a.unit)})),unadoptedInspections:candidateInspectionCodes(code).filter(c=>!context.adoptedTests.has(c)),url:tokenValid(ctx,id,str(x.photoToken))?await signedUrl(str(x.photoToken)):''};
   }));
-  return {equipmentName:str(node.data.name),catalogue:context.catalogue,profiles:Object.fromEntries(context.rows.map(x=>[str(x.code),context.profile(str(x.code))])),items,utilityVersion:context.utilityVersion,version:Number(doc?.data.version)||0,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
+  return {equipmentName:str(node.data.name),lotoPolicy:await lotoPolicy(ctx.orgId).then(({doc,...p})=>p),catalogue:context.catalogue,profiles:Object.fromEntries(context.rows.map(x=>[str(x.code),context.profile(str(x.code))])),items,utilityVersion:context.utilityVersion,version:Number(doc?.data.version)||0,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],
  'POST /api/org/saf/equipment-energy/photo':[orgRoute('org.saf.equipment_energy.photo','SAF.risk.assess',async ctx=>{
   const {id}=await equipment(ctx,true);await rateLimit('saf-energy-photo',ctx.uid,60,3600);

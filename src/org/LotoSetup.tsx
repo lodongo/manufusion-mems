@@ -1,0 +1,11 @@
+import {useState} from 'react';
+import {callBackend} from '../lib/backend';
+import {Alert} from '../components/ui';
+import {Button,Card,Spinner,useLoad,TextArea} from '../admin/kit';
+export default function LotoSetup(){
+ const {data,loading,error,reload}=useLoad(()=>callBackend<{mode:string;version:number;canEdit:boolean}>('/api/org/saf/loto/setup/read',{}),[]);
+ const [mode,setMode]=useState(''),[reason,setReason]=useState(''),[busy,setBusy]=useState(false),[problem,setProblem]=useState('');
+ const chosen=mode||data?.mode||'';
+ const save=async()=>{setBusy(true);setProblem('');try{await callBackend('/api/org/saf/loto/setup/save',{mode:chosen,reason,version:data?.version});setMode('');setReason('');reload();}catch(e){setProblem(e instanceof Error?e.message:String(e));}finally{setBusy(false);}};
+ return <section className='space-y-3'><h1 className='text-2xl font-semibold'>LOTO</h1><Card className='space-y-3'><h2 className='font-semibold'>Setup · Lockout method</h2>{loading&&<Spinner/>}{error&&<Alert tone='error'>{error}</Alert>}{data&&<>{[['individual_points','Individual multi-lock isolation points','Each authorized worker applies a personal lock at every required isolation point.'],['group_box','Common group LOTO box','Authorized maintenance supervisor coordinates isolation, secures isolation keys in the group box; each authorized worker applies a personal lock to the box.']].map(([v,label,detail])=><label key={v} className='flex gap-3 rounded-xl border border-line p-3'><input type='radio' name='loto-method' checked={chosen===v} disabled={!data.canEdit||busy} onChange={()=>setMode(v)}/><span><strong>{label}</strong><span className='block text-sm text-soft'>{detail}</span></span></label>)}<Alert tone='info'>Configuration is not permission to work. Verify isolation, stored energy control and zero energy on site under an approved equipment-specific procedure.</Alert>{data.canEdit&&<><TextArea id='loto-reason' label='Reason for configuration' value={reason} onChange={e=>setReason(e.target.value)} rows={2}/><Button busy={busy} disabled={!chosen||reason.trim().length<10} onClick={()=>void save()}>Save setup</Button></>}{problem&&<Alert tone='error'>{problem}</Alert>}<p className='text-xs text-soft'>Policy revision {data.version} · {data.mode?'Configured':'Not configured'}</p></>}</Card></section>;
+}

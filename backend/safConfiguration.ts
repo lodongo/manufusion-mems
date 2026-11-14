@@ -48,7 +48,23 @@ async function permitContext(orgId:string,code:string){
  const fields=normalizePermitFields(definitions,overrides);
  return {permit:{...safeOption(permit),adopted:catalogue.active.some(x=>str(x.code)===code)},path,doc,definitions,fields};
 }
+export async function lotoPolicy(orgId:string){
+ const doc=await getDoc(root(orgId)+'/loto_policy');
+ return {mode:str(doc?.data.mode),version:Number(doc?.data.version)||0,updatedAt:str(doc?.data.updatedAt),doc};
+}
 export const safConfigurationRoutes={
+ 'POST /api/org/saf/loto/setup/read':[orgRoute('org.saf.loto.setup.read','SAF.view',async ctx=>{
+  assertRead(ctx);const {doc,...policy}=await lotoPolicy(ctx.orgId);return {...policy,canEdit:holdsDirect(ctx,PERMS.matrixConfigure)};
+ })],
+ 'POST /api/org/saf/loto/setup/save':[orgRoute('org.saf.loto.setup.save','SAF.configure',async ctx=>{
+  assertEdit(ctx);const old=await lotoPolicy(ctx.orgId),mode=str(ctx.body.mode);
+  if(!['group_box','individual_points'].includes(mode))throw new HttpError(400,'Select the approved lockout method.');
+  if(Number(ctx.body.version)!==old.version)throw new HttpError(409,'LOTO policy changed. Reload.');
+  const reason=str(ctx.body.reason).trim().slice(0,500);if(reason.length<10)throw new HttpError(400,'Record the reason for the configuration.');
+  const next={mode,version:old.version+1,updatedAt:nowIso(),updatedBy:ctx.uid,reason};
+  if(!await writeDoc(root(ctx.orgId)+'/loto_policy',next,old.doc?{updateTime:old.doc.updateTime}:{exists:false}))throw new HttpError(409,'Policy changed. Reload.');
+  await audited(ctx,'saf.loto.setup.save','loto_policy',next);return {ok:true};
+ })],
  'POST /api/org/saf/adoption/read':[orgRoute('org.saf.adoption.read','SAF.view',async ctx=>{
   assertRead(ctx);
   const key=asKey(ctx.body.key);
