@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {ACTIVITY_CLASSES,categoryColor,HAZARD_COLORS} from '../../backend/safActivityClasses.ts';
+import {ACTIVITY_CLASSES,categoryColor,HAZARD_COLORS,meetsClassPermitMinimum} from '../../backend/safActivityClasses.ts';
 import {SAF_DEFAULT_LISTS} from '../../backend/safDefaults.ts';
 test('activity classes have stable unique codes and valid mandatory permits',()=>{
  const permits=SAF_DEFAULT_LISTS.find(x=>x.key==='permitTypes').items;
@@ -26,4 +26,11 @@ test('equipment energy and activity class screens enforce adopted codes and main
  assert.ok(api.includes('equipment_activity_class_risks'));
  assert.ok(ui.includes('Activity Class Risk Assessment'));
  assert.ok(ui.indexOf('Hazardous Energy Sources')<ui.lastIndexOf('LOTO Program'));
+});
+
+test('hot work and ground disturbance require an applicable permit instead of welding or excavation for every task',()=>{
+ assert.equal(meetsClassPermitMinimum('AC09',['SAF_08_02_002']),true);
+ assert.equal(meetsClassPermitMinimum('AC09',['SAF_08_01_003']),false);
+ assert.equal(meetsClassPermitMinimum('AC13',['SAF_08_04_006']),true);
+ assert.equal(meetsClassPermitMinimum('AC21',[]),false);
 });

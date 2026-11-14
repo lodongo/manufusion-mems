@@ -3,7 +3,7 @@ import {HttpError,getDoc,isObj,nowIso,randomId,rateLimit,str,writeDoc,type Obj} 
 import {orgRoute,type OrgContext} from './guards';
 import {PERMS,allowedAt,requireAt,audited} from './scopeGuard';
 import {effectiveSafetyItems} from './safConfiguration';
-import {ACTIVITY_CLASSES} from './safActivityClasses';
+import {ACTIVITY_CLASSES,CLASS_PERMIT_ALTERNATIVES,meetsClassPermitMinimum} from './safActivityClasses';
 import {detectImage} from './branding';
 import {signedUrl} from './structure';
 import {scoreMaintenanceRisk,type RiskMatrix} from './maintenanceTaskRisk';
@@ -64,7 +64,7 @@ export const safEquipmentRoutes={
   const {id,node}=await equipment(ctx);const [classes,hazards,impacts,controls,permits,matrix,energy]=await Promise.all([
    effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'impacts'),effectiveSafetyItems(ctx.orgId,'controlMeasures'),effectiveSafetyItems(ctx.orgId,'permitTypes'),getDoc(`${root(ctx)}/saf/risk_matrix`),getDoc(energyPath(ctx,id))]);
   const adopted=new Set(classes.map(x=>str(x.code)));
-  const rows=await Promise.all(ACTIVITY_CLASSES.map(async cl=>{const doc=await getDoc(classPath(ctx,id,cl.code));return {...cl,adopted:adopted.has(cl.code),record:doc?.data||null};}));
+  const rows=await Promise.all(ACTIVITY_CLASSES.map(async cl=>{const doc=await getDoc(classPath(ctx,id,cl.code));return {...cl,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[cl.code]||[],adopted:adopted.has(cl.code),record:doc?.data||null};}));
   return {equipmentName:str(node.data.name),classes:rows.filter(x=>x.adopted||x.record),catalogue:{hazards:hazards.map(ref),impacts:impacts.map(ref),controls:controls.map(ref),permits:permits.map(ref)},matrix:matrix?.data.configuration||null,energy:array(energy?.data.items).map(x=>({tag:str(x.tag),label:str(x.label)})),canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],
  'POST /api/org/saf/activity-classes/save':[orgRoute('org.saf.activity_classes.save','SAF.risk.assess',async ctx=>{
@@ -78,10 +78,11 @@ export const safEquipmentRoutes={
   const has=(a:Obj[],c:string)=>a.some(x=>str(x.code)===c);
   if(permitCodes.some(c=>!has(permits,c)))throw new HttpError(400,'Select only adopted permits.');
   // A class only sets a minimum. It cannot authorize work or exempt actual hazards.
-  if(cl.requiredPermits.some(c=>!permitCodes.includes(c)))throw new HttpError(400,'The class requires its adopted permit(s); enable missing required permits in Safety.');
+  if(!meetsClassPermitMinimum(code,permitCodes))throw new HttpError(400,'The class requires its adopted permit(s); select the applicable permit or enable missing permit types in Safety.');
   const energyTags=stringList(ctx.body.energyTags);
   if(energyTags.some(t=>!array(energyDoc?.data.items).some(x=>str(x.tag)===t)))throw new HttpError(400,'Unknown equipment energy tag.');
   const screening=str(ctx.body.screening).trim().slice(0,3000);
+  if(cl.assessmentKind!=='screening'&&screening.length<20)throw new HttpError(400,'Document the intervention limits, required verification and stop-work criteria.');
   const raw=ctx.body.rows;
   if(!Array.isArray(raw)||raw.length>100||array(raw).length!==raw.length)throw new HttpError(400,'Invalid risk rows.');
   if(cl.assessmentKind==='screening'&&(ctx.body.noExposure!==true||screening.length<20||raw.length||permitCodes.length||energyTags.length))throw new HttpError(400,'No Risk requires documented screening with no credible exposure. If there is a hazard, choose a risk-bearing class.');
