@@ -55,9 +55,7 @@ async function energyContext(ctx:OrgContext,id:string,saved:Obj[]){
  return {rows,catalogue,metadata,profile,utilityByCode,attrs,adoptedTests,allowedExternal,utilityVersion:Number(utilityDoc?.data.version)||0};
 }
 function reviewIssues(profile:ReturnType<typeof statutoryProfile>,values:Obj,tests:Obj,today:string){
- const issues=configurationIssues(profile,values,tests,today);
- if(str(values.legal_review).trim().length<20)issues.push('Document competent jurisdiction and legal applicability review.');
- return issues;
+ return configurationIssues(profile,values,tests,today);
 }
 async function taskClassBaseline(ctx:OrgContext,id:string,code:string){
  const d=await getDoc(classPath(ctx,id,code));
@@ -296,6 +294,8 @@ export const safEquipmentRoutes={
    }
    const profile=context.profile(code),rawValues=isObj(x.values)?x.values:{},rawTests=isObj(x.tests)?x.tests:{};
    const values:Obj={},tests:Obj={};
+   // Retain removed fields for historical records; they are no longer editable or validation gates.
+   if(isObj(historical?.values))for(const k of ['exposure_basis','legal_jurisdiction','legal_review'])if(historical.values[k]!==undefined)values[k]=historical.values[k];
    // Preserve former routine tests and non-adopted statutory reports without treating them as current obligations.
    if(isObj(historical?.tests))for(const [k,v] of Object.entries(historical.tests))if(!profile.tests.some(t=>t.code===k))tests[k]=v;
    for(const field of profile.fields){

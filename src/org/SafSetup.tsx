@@ -41,7 +41,7 @@ export function SafAdoption(){
   {current&&<>
    <Card className='space-y-3'>
     <p className='font-semibold text-ink'>{current.title} · {current.rows.filter(x=>x.masterActive&&!off.has(x.code)).length}/{current.rows.length} enabled</p>
-    {!current.canEdit&&<Alert tone='info'>Read only — organization SAF configuration rights are required to change adoption.</Alert>}
+    {key==='statutoryInspections'&&<Alert tone='info'>Approve only formal inspections required by your organization. Unapproved master entries are not added to equipment energy registers. Confirm local legal applicability before approving or excluding requirements.</Alert>}{!current.canEdit&&<Alert tone='info'>Read only — organization SAF configuration rights are required to change adoption.</Alert>}
     <Field id='saf-adopt-search' label='Search master' placeholder='Code, name or category' value={query} onChange={e=>setQuery(e.target.value)}/>
     <SelectField id='saf-adopt-category' label='Category' value={category} onChange={e=>setCategory(e.target.value)}><option value=''>All categories</option>{[...new Set(current.rows.map(x=>x.category).filter(Boolean))].sort().map(c=><option key={c}>{c}</option>)}</SelectField>
     {current.canEdit&&<div className='flex flex-wrap gap-2'><Button variant='secondary' onClick={()=>setDisabled(old=>old.filter(code=>!visible.some(x=>x.masterActive&&x.code===code)))}>Enable filtered</Button><Button variant='secondary' onClick={()=>{if(window.confirm('Disable the filtered master entries for future use in this organization?'))setDisabled(old=>[...new Set([...old,...visible.filter(x=>x.masterActive).map(x=>x.code)])]);}}>Disable filtered</Button></div>}

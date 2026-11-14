@@ -36,7 +36,11 @@ export async function safetyCatalogue(orgId:string,key:Key){
  const unified=['hazards','hazardousEnergy','externalEnergySources'].includes(key)?await loadSafetyHazardMaster():null;
  const items:Obj[]=unified?(key==='hazards'?unified.hazards:key==='hazardousEnergy'?unified.internal:unified.external):raw;
  const merged=(key==='activityClasses'||key==='permitTypes')?[...items.map(x=>{const def=entries(fallback?.items).find(d=>d.code===x.code);return def&&key==='activityClasses'?{...x,label:def.label,description:def.description,requiredPermits:def.requiredPermits}:x;}),...entries(fallback?.items).filter(d=>!items.some(x=>x.code===d.code))]:items;
- const active=adoptedRecords(merged,policy?.data.disabledCodes);
+ const eligible=adoptedRecords(merged,policy?.data.disabledCodes);
+ // Statutory master entries are candidates, not automatically approved legal obligations.
+ // Preserve previously saved adoption decisions; new approvals use an explicit allow-list.
+ const approved=policy&&Array.isArray(policy.data.approvedCodes)?new Set(policy.data.approvedCodes.map(str)):policy&&Number(policy.data.version)>0&&Array.isArray(policy.data.disabledCodes)?new Set(eligible.map(x=>str(x.code))):new Set<string>();
+ const active=key==='statutoryInspections'?eligible.filter(x=>approved.has(str(x.code))):eligible;
  return {key,title:str(master?.data.title)||fallback?.title||key,items:merged,active,policy,version:Number(policy?.data.version)||0};
 }
 export async function effectiveSafetyItems(orgId:string,key:Key){return (await safetyCatalogue(orgId,key)).active;}
@@ -127,9 +131,10 @@ export const safConfigurationRoutes={
   const shortDeviceCodes=key==='safetyDevices'?strings(ctx.body.shortDeviceCodes):[];
   if(key==='safetyDevices'&&(!Array.isArray(ctx.body.shortDeviceCodes)||ctx.body.shortDeviceCodes.some(x=>typeof x!=='string')||shortDeviceCodes.some(code=>!c.items.some(x=>str(x.code)===code&&shortDeviceEligible(x,x.active!==false&&x.selectable!==false&&!disabled.includes(code),true)))))throw new HttpError(400,'Short Intervention eligibility requires an adopted candidate safeguard.');
   const version=c.version+1;
-  const ok=await writeDoc(`${root(ctx.orgId)}/adoption_${key}`,{key,version,disabledCodes:disabled,...(key==='safetyDevices'?{shortDeviceCodes}:{}),updatedBy:ctx.uid,updatedAt:nowIso(),reason},c.policy?{updateTime:c.policy.updateTime}:{exists:false});
+  const approvedCodes=key==='statutoryInspections'?adoptedRecords(c.items,disabled).map(x=>str(x.code)):[];
+  const ok=await writeDoc(`${root(ctx.orgId)}/adoption_${key}`,{key,version,disabledCodes:disabled,...(key==='statutoryInspections'?{approvedCodes}:{}),...(key==='safetyDevices'?{shortDeviceCodes}:{}),updatedBy:ctx.uid,updatedAt:nowIso(),reason},c.policy?{updateTime:c.policy.updateTime}:{exists:false});
   if(!ok)throw new HttpError(409,'Configuration changed. Reload before saving.');
-  await audited(ctx,'saf.adoption.save',key,{version,reason,disabledCount:disabled.length,disabledCodes:disabled,...(key==='safetyDevices'?{shortDeviceCodes}:{})});
+  await audited(ctx,'saf.adoption.save',key,{version,reason,disabledCount:disabled.length,disabledCodes:disabled,...(key==='statutoryInspections'?{approvedCodes}:{}),...(key==='safetyDevices'?{shortDeviceCodes}:{})});
   return {ok:true,version};
  })],
  'POST /api/org/saf/permits/list':[orgRoute('org.saf.permits.list','SAF.view',async ctx=>{

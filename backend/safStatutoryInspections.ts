@@ -81,10 +81,7 @@ export function candidateInspectionCodes(code:string):string[]{
  if(family==='10'||utility&&['26','27','30','31'].includes(g))add('SI-SP-01');
  return [...out];
 }
-const reviewFields:EnergyField[]=[
- {code:'legal_jurisdiction',label:'Applicable country / jurisdiction',kind:'text',required:true},
- {code:'legal_review',label:'Competent applicability review — authority, legal references and examination scope (include exclusions)',kind:'text',required:true},
-];
+// Statutory eligibility is approved in organization SAF adoption, not by repeating a legal review on each energy point.
 export function statutoryProfile(code:string,adopted:ReadonlySet<string>,utilityAttrs:string[]=[]):EnergyProfile{
  const linked=code.startsWith('UTL-');
  const family=linked?utilityEnergyFamily(code):'';
@@ -110,10 +107,9 @@ export function statutoryProfile(code:string,adopted:ReadonlySet<string>,utility
   const shared=new Set(utilityAttrs);
   const duplicate=(f:EnergyField)=>shared.has(f.code)||(aliases[f.code]||[]).some(x=>shared.has(x));
   fields=[hazard,...fields.filter(f=>common.includes(f.code)||family!=='signal'&&!duplicate(f)).map(f=>f.code==='location'||f.code==='source_id'?f:{...f,whenAll:[{field:'exposure',values:['Hazardous energy present']}]})];
-  fields.push({code:'exposure_basis',label:'Hazard screening / exposure and isolation applicability basis',kind:'text',required:true});
  }
  const tests:EnergyTest[]=candidateInspectionCodes(code).filter(x=>adopted.has(x)).map(code=>{const def=STATUTORY_INSPECTIONS.find(x=>x.code===code)!;return {code,label:def.label,critical:true,conditional:true,reference:def.reference};});
- return {fields:[...fields,...reviewFields],tests};
+ return {fields:fields.map(f=>f.code==='source_id'?{...f,required:false}:f),tests};
 }
 export function utilityFingerprint(row:{code:string;values?:unknown;connectionId?:unknown;sourceAssetTag?:unknown;isInternalSupply?:unknown;supplyLinkRule?:unknown}):string{
  const values=row.values&&typeof row.values==='object'?row.values as Record<string,unknown>:{};

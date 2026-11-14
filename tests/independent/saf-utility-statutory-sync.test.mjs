@@ -39,8 +39,8 @@ test('statutory profiles show only adopted formal inspection types and avoid dup
  assert.deepEqual(p.tests.map(t=>t.code),['SI-EL-01','SI-EL-06']);
  assert.ok(p.tests.every(x=>x.reference));
  assert.ok(!p.fields.some(f=>['voltage','current','frequency','power'].includes(f.code)));
- assert.ok(p.fields.some(f=>f.code==='legal_jurisdiction'&&f.required));
- assert.ok(p.fields.some(f=>f.code==='legal_review'&&f.required));
+ assert.ok(!p.fields.some(f=>['exposure_basis','legal_jurisdiction','legal_review'].includes(f.code)));
+ assert.equal(p.fields.find(f=>f.code==='source_id').required,false);
  assert.ok(p.fields.find(f=>f.code==='phase').options.every(x=>x.startsWith('Three phase')));
  assert.equal(statutoryProfile('SAF_03_02_005',all).tests.some(x=>x.code==='guard_test'),false);
  assert.equal(statutoryProfile('UTL-25-001',all).tests.length,0);
@@ -61,4 +61,13 @@ test('a supply asset relink reopens hazardous energy review without losing the c
  const row={...mergeUtilityEnergy([a],[])[0],status:'documented',values:{legal_review:'previous source'}};
  const changed=mergeUtilityEnergy([{...a,sourceAssetTag:'AST-000002'}],[row])[0];
  assert.equal(changed.pointId,row.pointId);assert.equal(changed.status,'draft');assert.equal(changed.sourceAssetTag,'AST-000002');assert.equal(changed.values.legal_review,undefined);
+});
+
+
+test('statutory inspections require Safety approval and optional reference does not block documentation',()=>{
+ const api=readFileSync('backend/safEquipment.ts','utf8'),cfg=readFileSync('backend/safConfiguration.ts','utf8');
+ assert.ok(cfg.includes("key==='statutoryInspections'?eligible.filter(x=>approved.has(str(x.code)))"));
+ assert.ok(cfg.includes('approvedCodes'));
+ assert.ok(!api.includes('Document competent jurisdiction and legal applicability review.'));
+ for(const code of ['UTL-01-002','UTL-11-001','SAF_03_01_001','SAF_03_07_001']){const p=statutoryProfile(code,new Set());assert.equal(p.tests.length,0);assert.ok(!p.fields.some(f=>['exposure_basis','legal_jurisdiction','legal_review'].includes(f.code)));assert.equal(p.fields.find(f=>f.code==='source_id').required,false);}
 });
