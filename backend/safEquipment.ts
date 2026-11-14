@@ -85,8 +85,10 @@ async function scoreHazardRows(ctx:OrgContext,raw:unknown,matrix:RiskMatrix,prio
  return Promise.all(array(raw).map(async r=>{
   const hazard=str(r.hazard),impacts=injuryCodes(r),selected=stringList(r.controls);
   if(r.impactCodes!==undefined&&(!Array.isArray(r.impactCodes)||r.impactCodes.length>300||r.impactCodes.some(v=>typeof v!=='string'||!v.trim())))throw new HttpError(400,'Invalid potential injuries.');
-  if(!profiles.has(hazard))profiles.set(hazard,adoptedHazardProfile(ctx.orgId,hazard));
-  const profile=await profiles.get(hazard)!;
+  const hazardCodes=r.hazardCodes===undefined?[hazard]:stringList(r.hazardCodes);
+  if(!hazardCodes.length||hazardCodes.length>100||hazardCodes[0]!==hazard)throw new HttpError(400,'Invalid selected hazards.');
+  const group=await Promise.all(hazardCodes.map(code=>{if(!profiles.has(code))profiles.set(code,adoptedHazardProfile(ctx.orgId,code));return profiles.get(code)!;}));
+  const profile={hazardEnabled:group.every(p=>p.hazardEnabled),injuries:group.flatMap(p=>p.injuries),layers:group.flatMap(p=>p.layers)};
   const oldRows=prior.filter(p=>p.hazard===hazard&&injuryCodes(p).some(c=>impacts.includes(c)));
   const oldInjuries=new Set(oldRows.flatMap(injuryCodes));
   const oldControls=oldRows.flatMap(p=>stringList(p.controls));
@@ -96,7 +98,7 @@ async function scoreHazardRows(ctx:OrgContext,raw:unknown,matrix:RiskMatrix,prio
   const historicalAllowed=new Set(profile.layers.flatMap(l=>l.measures.filter(m=>m.effective&&!m.guidance).map(m=>m.code)));
   if(!profile.hazardEnabled||!injuryOk||!selected.length||selected.some(c=>!allowed.has(c)&&!(oldControls.includes(c)&&(has(legacyControls,c)||historicalAllowed.has(c)))))throw new HttpError(400,'Choose adopted injury and hazard-specific mitigation controls. Historical selections may be retained only if still adopted.');
   if(!matrix||!isObj(r.before)||!isObj(r.after))throw new HttpError(400,'Configure the risk matrix and provide initial and residual ratings.');
-  try{return {hazard,impact:impacts[0],impactCodes:impacts,impactLabels:impacts.map(c=>profile.injuries.find(i=>i.code===c)?.label||str(legacyImpacts.find(i=>i.code===c)?.label)||c),controls:selected,before:scoreMaintenanceRisk(matrix,r.before as Record<string,number>),after:scoreMaintenanceRisk(matrix,r.after as Record<string,number>)};}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid ratings.');}
+  try{return {hazard,hazardCodes,impact:impacts[0],impactCodes:impacts,impactLabels:impacts.map(c=>profile.injuries.find(i=>i.code===c)?.label||str(legacyImpacts.find(i=>i.code===c)?.label)||c),controls:selected,before:scoreMaintenanceRisk(matrix,r.before as Record<string,number>),after:scoreMaintenanceRisk(matrix,r.after as Record<string,number>)};}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid ratings.');}
  }));
 }
 const devicePath=(ctx:OrgContext,id:string)=>root(ctx)+'/equipment_safety_devices/'+id;
@@ -198,6 +200,9 @@ export const safEquipmentRoutes={
   if(decision.code!=='AC01'&&!raw.length&&!(baselineComplete&&baseline.some(b=>b.rows.length>0)&&noAdditionalRisks))throw new HttpError(400,'Add a task-specific hazard assessment, or confirm no additional risks beyond the recorded class assessments.');
   if(raw.length&&noAdditionalRisks)throw new HttpError(400,'Additional risks and no-additional-risks confirmation conflict.');
   if(baseline.some(b=>b.permitCodes.some(c=>!permitCodes.includes(c))))throw new HttpError(400,'Retain the class-level permit requirements or correct the class assessment.');
+  const inherited=new Set(baseline.flatMap(b=>b.rows.flatMap(r=>Array.isArray(r.hazardCodes)?stringList(r.hazardCodes):[str(r.hazard)])));
+  const seen=new Set<string>();
+  for(const r of array(raw))for(const h of r.hazardCodes===undefined?[str(r.hazard)]:stringList(r.hazardCodes)){if(inherited.has(h)||seen.has(h))throw new HttpError(400,'Hazard already covered by a task class or another additional row. Review the inherited assessment instead.');seen.add(h);}
   const rows=await scoreHazardRows(ctx,raw,matrixDoc?.data.configuration as unknown as RiskMatrix,array(old?.data.rows));
   const n=requested?0:await nextSequence('equipmentTask');
   if(!requested&&n>999999999)throw new HttpError(409,'Task sequence exhausted.');
