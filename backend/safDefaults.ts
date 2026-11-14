@@ -4,7 +4,11 @@ import {ACTIVITY_CLASSES} from './safActivityClasses';
 import {AST_UTILITY_ITEMS} from './astUtilityDefaults';
 import {STATUTORY_INSPECTIONS} from './safStatutoryInspections';
 import {EXPANDED_ENERGY,EXPANDED_HAZARDS} from './safHazardExpansion';
+import {MITIGATION_HIERARCHY_MASTER,MITIGATION_MEASURE_MASTER,INJURY_NATURE_MASTER} from './safHazardControlLibrary';
 export const SAF_DEFAULT_LISTS = [
+{key:'mitigationHierarchy',title:'Mitigation hierarchy',description:'Five ordered levels of the hierarchy of controls, based on NIOSH. Candidate selection is not work authorization.',version:1,items:MITIGATION_HIERARCHY_MASTER},
+{key:'hazardMitigations',title:'Hazard mitigation measures',description:'Mechanism-specific mitigation options organized by hierarchy. Assess applicability and effectiveness before use.',version:1,items:MITIGATION_MEASURE_MASTER},
+{key:'injuryNatures',title:'Nature of potential injuries and illnesses',description:'Specific potential injury and illness outcomes, not pre-assigned risk severity.',version:1,items:INJURY_NATURE_MASTER},
 {key:'externalEnergySources',title:'External energy sources (shared utility master)',description:'Uses the AST utility supplies master and stable UTL codes. Organization adoption governs new utility selection; existing connections must remain visible.',version:1,items:AST_UTILITY_ITEMS},
 {key:'statutoryInspections',title:'Statutory and legal inspections',description:'Formal inspections and standard-based verification where applicable by law, licence or adopted technical standard; not routine PM. Review local legal applicability.',version:2,items:STATUTORY_INSPECTIONS},
 {key:'activityClasses',title:'Activity classes',description:'Controlled activity classification and minimum assessment requirements; not authorization to work.',version:2,items:ACTIVITY_CLASSES},

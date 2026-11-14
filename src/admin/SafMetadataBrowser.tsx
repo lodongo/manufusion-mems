@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {callBackend} from '../lib/backend';
+import HazardControlProfile from '../org/HazardControlProfile';
 import RichTable, { type Column } from '../components/RichTable';
 import { Screen, Segmented } from '../components/screen';
 import { Badge, Button, Empty, Toggle } from './kit';
@@ -168,6 +169,7 @@ export default function SafMetadataBrowser({ title, items, onCancel, canWrite=fa
                         <div>
                             <DetailRow label='Category'>{catOf(opened)}</DetailRow>
                             <DetailRow label='Subcategory'>{subOf(opened)}</DetailRow>{hazardColors&&<DetailRow label='Shared hazard classification'>{opened.hazardCategory||catOf(opened)} · {colorOf(opened)}</DetailRow>}{opened.hazardCodes?.length?<div className='space-y-1'><p className='font-semibold text-ink'>Linked Hazards master references</p><p className='text-xs text-soft'>Source reference: {opened.energySourceCode||opened.code}. Additional candidate exposures must be assessed for the actual task.</p>{opened.relatedHazards?.map(h=><p key={h.code} className='text-xs text-soft'>{h.code} · {h.label}</p>)}</div>:null}
+                            {hazardColors&&<HazardControlProfile key={opened.code} code={opened.code} mode='master'/>}
                             <DetailRow label='Status'>
                                 <Badge tone={opened.active === false ? 'danger' : 'brand'}>{opened.active === false ? 'Disabled' : 'Enabled'}</Badge>
                             </DetailRow>

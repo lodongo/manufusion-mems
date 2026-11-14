@@ -4,10 +4,11 @@ import {PERMS,holdsAnywhere,holdsDirect,audited} from './scopeGuard';
 import {SAF_DEFAULT_LISTS} from './safDefaults';
 import {AST_UTILITY_ITEMS} from './astUtilityDefaults';
 import {loadSafetyHazardMaster} from './safHazardMaster';
+import {hazardControlProfile,profileAdoption,type ProfileSelection} from './safHazardControlLibrary';
 import {fieldsForPermit,normalizePermitFields} from './safPermitTemplates';
 import {EXPANDED_PERMIT_REFERENCES} from './safPermitExpanded';
 
-export const SAF_ADOPTION_KEYS=['activityClasses','machineStatuses','permitTypes','hazards','impacts','hazardousEnergy','externalEnergySources','statutoryInspections','controlMeasures','ppe','riskMethods','severityLevels','likelihoodLevels','riskAcceptance','criticalRules','emergencyScenarios'] as const;
+export const SAF_ADOPTION_KEYS=['activityClasses','machineStatuses','permitTypes','hazards','mitigationHierarchy','hazardMitigations','injuryNatures','impacts','hazardousEnergy','externalEnergySources','statutoryInspections','controlMeasures','ppe','riskMethods','severityLevels','likelihoodLevels','riskAcceptance','criticalRules','emergencyScenarios'] as const;
 type Key=typeof SAF_ADOPTION_KEYS[number];
 const root=(orgId:string)=>`organizations/${orgId}/saf`;
 const entries=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj) as Obj[]:[];
@@ -53,7 +54,37 @@ export async function lotoPolicy(orgId:string){
  const doc=await getDoc(root(orgId)+'/loto_policy');
  return {mode:str(doc?.data.mode),version:Number(doc?.data.version)||0,updatedAt:str(doc?.data.updatedAt),doc};
 }
+const profilePath=(orgId:string,code:string)=>root(orgId)+'/hazard_profile_'+code;
+const strings=(value:unknown):string[]=>Array.isArray(value)?[...new Set(value.filter(x=>typeof x==='string'))]:[];
+const localSelection=(value:Obj|undefined):ProfileSelection=>({disabledLayers:strings(value?.disabledLayers),disabledMeasures:strings(value?.disabledMeasures),disabledInjuries:strings(value?.disabledInjuries)});
+async function controlContext(orgId:string,code:string){
+ const [hazards,hierarchy,measures,injuries,doc]=await Promise.all([safetyCatalogue(orgId,'hazards'),safetyCatalogue(orgId,'mitigationHierarchy'),safetyCatalogue(orgId,'hazardMitigations'),safetyCatalogue(orgId,'injuryNatures'),getDoc(profilePath(orgId,code))]);
+ const hazard=hazards.items.find(h=>str(h.code)===code);
+ if(!hazard)throw new HttpError(404,'Hazard master reference not found.');
+ const profile=hazardControlProfile(hazard),local=localSelection(doc?.data);
+ const global={hierarchy:hierarchy.active.map(x=>str(x.code)),measures:measures.active.map(x=>str(x.code)),injuries:injuries.active.map(x=>str(x.code))};
+ const enabled=hazards.active.some(x=>str(x.code)===code);
+ return {hazard,profile,doc,local,global,enabled,version:Number(doc?.data.version)||0};
+}
 export const safConfigurationRoutes={
+ 'POST /api/org/saf/hazard-profile/read':[orgRoute('org.saf.hazard_profile.read','SAF.view',async ctx=>{
+  assertRead(ctx);const c=await controlContext(ctx.orgId,validCode(ctx.body.code));
+  return {...profileAdoption(c.profile,c.local,c.global,c.enabled),version:c.version,canEdit:holdsDirect(ctx,PERMS.matrixConfigure),selection:c.local};
+ })],
+ 'POST /api/org/saf/hazard-profile/save':[orgRoute('org.saf.hazard_profile.save','SAF.configure',async ctx=>{
+  assertEdit(ctx);const code=validCode(ctx.body.code),c=await controlContext(ctx.orgId,code);
+  if(Number(ctx.body.version)!==c.version)throw new HttpError(409,'Hazard adoption changed. Reload.');
+  const validate=(key:string,known:ReadonlySet<string>)=>{const v=ctx.body[key];if(!Array.isArray(v)||v.length>1000||v.some(x=>typeof x!=='string'||!known.has(x)))throw new HttpError(400,'Unknown '+key+' reference.');return strings(v);};
+  const disabledLayers=validate('disabledLayers',new Set(c.profile.layers.map(x=>x.code)));
+  const disabledMeasures=validate('disabledMeasures',new Set(c.profile.layers.flatMap(x=>x.measures.map(m=>m.code))));
+  const disabledInjuries=validate('disabledInjuries',new Set(c.profile.injuries.map(x=>x.code)));
+  const reason=str(ctx.body.reason).trim().slice(0,500);if(reason.length<10)throw new HttpError(400,'Explain the adoption change.');
+  const selection={disabledLayers,disabledMeasures,disabledInjuries};
+  const version=c.version+1,next={...selection,code,version,schemaVersion:c.profile.schemaVersion,updatedAt:nowIso(),updatedBy:ctx.uid,reason};
+  if(!await writeDoc(profilePath(ctx.orgId,code),next,c.doc?{updateTime:c.doc.updateTime}:{exists:false}))throw new HttpError(409,'Hazard adoption changed. Reload.');
+  await audited(ctx,'saf.hazard_profile.save',code,{version,reason,before:c.local,after:selection});
+  return {ok:true,version};
+ })],
  'POST /api/org/saf/loto/setup/read':[orgRoute('org.saf.loto.setup.read','SAF.view',async ctx=>{
   assertRead(ctx);const {doc,...policy}=await lotoPolicy(ctx.orgId);return {...policy,canEdit:holdsDirect(ctx,PERMS.matrixConfigure)};
  })],

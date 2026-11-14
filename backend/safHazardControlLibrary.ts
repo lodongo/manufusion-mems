@@ -73,3 +73,13 @@ export function hazardControlProfile(h:Hazard){
  const layers=CONTROL_HIERARCHY.map((layer,index)=>({...layer,measures:selected.flatMap(pack=>pack[index+3] instanceof Array?(pack[index+3] as string[]).map((label,i)=>({code:'CTL-'+pack[0]+'-'+layer.code+'-'+String(i+1).padStart(2,'0'),label,mechanism:pack[1]})):[])}));
  return {hazardCode:String(h.code||''),hazardLabel:String(h.label||''),mechanisms:selected.map(p=>({code:p[0],label:p[1]})),injuries,layers,reviewRequired:true,referenceBasis:['NIOSH Hierarchy of Controls','OSHA Job Hazard Analysis — hazard and control evaluation'],schemaVersion:1};
 }
+
+export const MITIGATION_HIERARCHY_MASTER=CONTROL_HIERARCHY.map(h=>({...h,category:'Hierarchy of controls',subcategory:'Rank '+h.rank,active:true,selectable:true}));
+export const MITIGATION_MEASURE_MASTER=CONTROL_HIERARCHY.flatMap((h,i)=>packs.flatMap(p=>(p[i+3] as string[]).map((label,j)=>({code:'CTL-'+p[0]+'-'+h.code+'-'+String(j+1).padStart(2,'0'),label,category:h.label,subcategory:p[1],description:label+'. Candidate measure; verify technical feasibility, applicability and effectiveness for the actual exposure.',active:true,selectable:true,hierarchyCode:h.code}))));
+export const INJURY_NATURE_MASTER=packs.flatMap(p=>p[2].map((label,i)=>({code:'INJ-'+p[0]+'-'+String(i+1).padStart(2,'0'),label,category:p[1],subcategory:'Potential injury or illness',description:label+'. Potential consequence only; evaluate actual exposure, severity and affected persons.',active:true,selectable:true})));
+export type ProfileSelection={disabledLayers:string[];disabledMeasures:string[];disabledInjuries:string[]};
+export function profileAdoption(profile:ReturnType<typeof hazardControlProfile>,local:ProfileSelection,global:{hierarchy:string[];measures:string[];injuries:string[]},hazardEnabled:boolean){
+ const layerOff=new Set(local.disabledLayers),measureOff=new Set(local.disabledMeasures),injuryOff=new Set(local.disabledInjuries);
+ const h=new Set(global.hierarchy),m=new Set(global.measures),i=new Set(global.injuries);
+ return {...profile,hazardEnabled,layers:profile.layers.map(l=>({...l,enabled:!layerOff.has(l.code),globalEnabled:h.has(l.code),measures:l.measures.map(c=>({...c,enabled:!measureOff.has(c.code),globalEnabled:m.has(c.code),effective:hazardEnabled&&h.has(l.code)&&!layerOff.has(l.code)&&m.has(c.code)&&!measureOff.has(c.code)}))})),injuries:profile.injuries.map(x=>({...x,enabled:!injuryOff.has(x.code),globalEnabled:i.has(x.code),effective:hazardEnabled&&i.has(x.code)&&!injuryOff.has(x.code)}))};
+}

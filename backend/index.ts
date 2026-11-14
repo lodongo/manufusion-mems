@@ -191,6 +191,7 @@ import {activityRiskRoutes} from './activityRisk';
 import {safEquipmentRoutes} from './safEquipment';
 import {categoryColor} from './safActivityClasses';
 import {loadSafetyHazardMaster} from './safHazardMaster';
+import {hazardControlProfile} from './safHazardControlLibrary';
 import {activityLegacyRoutes} from './activityRiskLegacy';
 import { safRiskRoutes } from './safRiskMatrix';
 import { safConfigurationRoutes } from './safConfiguration';
@@ -1198,6 +1199,7 @@ export const handler = router(recordWiredRoutes({
 
     'POST /api/admin/modules/metadata/skills/status': [staff('admin.modules.metadata.skills.status','write',async ctx=>{const changes=ctx.body.changes;if(!Array.isArray(changes)||changes.length>500)throw new HttpError(400,'Invalid skill updates.');const path='module_workspaces/HRM/metadata/skillsMaster';const doc=await getDoc(path);if(!doc)throw new HttpError(404,'Load HRM Skills Master defaults first.');const items=(Array.isArray(doc.data.items)?doc.data.items:[]).filter(isObj);const allowed=new Set(items.map(x=>str(x.code)));const updates=new Map<string,boolean>();for(const change of changes){if(!isObj(change)||!allowed.has(str(change.code))||typeof change.active!=='boolean')throw new HttpError(400,'Invalid skill status.');updates.set(str(change.code),change.active);}await writeDoc(path,{...doc.data,items:items.map(x=>updates.has(str(x.code))?{...x,active:updates.get(str(x.code))}:x),updatedAt:nowIso()});await record(ctx,'admin','module.metadata.skills.status','HRM.skillsMaster',String(updates.size)+' status updates');return {ok:true};})],
 
+    'POST /api/admin/modules/metadata/hazard-profile': [staff('admin.modules.metadata.hazard_profile','read',async ctx=>{const code=str(ctx.body.code);const h=(await loadSafetyHazardMaster()).hazards.find(x=>str(x.code)===code);if(!h)throw new HttpError(404,'Hazard master reference not found.');return hazardControlProfile(h);})],
     'POST /api/admin/modules/metadata/hazard-colors': [
         staff('admin.modules.metadata.hazard_colors','write',async ctx=>{
             await seedModuleMetadata('SAF');
@@ -1218,7 +1220,7 @@ export const handler = router(recordWiredRoutes({
             if (!/^[A-Z]{3}$/.test(code) || !(await getDoc(`module_workspaces/${code}`))) throw new HttpError(400, 'Initialise the module before adding metadata.');
             const raw = (isObj(ctx.body.list) ? ctx.body.list : {}) as Record<string, unknown>;
             const key = str(raw.key).trim();
-            if(code==='SAF'&&['hazards','hazardousEnergy','externalEnergySources'].includes(key))throw new HttpError(400,'This unified safety master is maintained through controlled catalogue updates and shared color configuration.');
+            if(code==='SAF'&&['hazards','hazardousEnergy','externalEnergySources','mitigationHierarchy','hazardMitigations','injuryNatures'].includes(key))throw new HttpError(400,'This unified safety master is maintained through controlled catalogue updates and shared color configuration.');
             if (!/^[a-z][a-zA-Z0-9_]{1,39}$/.test(key)) throw new HttpError(400, 'The list key must start with a lower-case letter and use letters, numbers or underscores (2 to 40).');
             const title = text(raw, 'title', 2, 60, 'Enter a list title (2 to 60 characters).');
             const description = text(raw, 'description', 0, 300, 'Description can be up to 300 characters.');
@@ -1294,7 +1296,7 @@ export const handler = router(recordWiredRoutes({
         staff('admin.modules.metadata.delete', 'write', async (ctx) => {
             const code = str(ctx.body.code);
             const key = str(ctx.body.key);
-            if(code==='SAF'&&['hazards','hazardousEnergy','externalEnergySources','statutoryInspections'].includes(key))throw new HttpError(400,'The controlled shared safety catalogue cannot be deleted. Use adoption instead.');
+            if(code==='SAF'&&['hazards','hazardousEnergy','externalEnergySources','statutoryInspections','mitigationHierarchy','hazardMitigations','injuryNatures'].includes(key))throw new HttpError(400,'The controlled shared safety catalogue cannot be deleted. Use adoption instead.');
             if (!/^[A-Z]{3}$/.test(code) || !/^[a-z][a-zA-Z0-9_]{1,39}$/.test(key)) throw new HttpError(400, 'Invalid metadata list.');
             if ((code === 'INV' && (key === 'materialClassifications' || key === 'storageLocationTypes')) ||  (code === 'PRC' && (key === 'unitsOfMeasure' || STOCK_META_BY_KEY.has(key))) || (code === 'HRM' && key === 'skillsMaster')) throw new HttpError(400, 'This controlled reference list cannot be deleted. Disable individual entries instead.');
             await deleteDoc(`module_workspaces/${code}/metadata/${key}`);
