@@ -3,7 +3,7 @@ import {callBackend} from '../lib/backend';
 import {Alert,Field,SelectField} from '../components/ui';
 import {Button,Card,Spinner,TextArea,useLoad,Badge} from '../admin/kit';
 
-const CATALOGUES=[['activityClasses','Activity classes'],['machineStatuses','Machine status during execution'],['permitTypes','Permit types'],['hazards','Hazards'],['impacts','Potential impacts'],['hazardousEnergy','Hazardous energy sources'],['controlMeasures','Control measures'],['ppe','Personal protective equipment'],['riskMethods','Risk assessment methods'],['severityLevels','Severity levels'],['likelihoodLevels','Likelihood levels'],['riskAcceptance','Risk acceptance criteria'],['criticalRules','Safety critical rules'],['emergencyScenarios','Emergency scenarios']];
+const CATALOGUES=[['activityClasses','Activity classes'],['machineStatuses','Machine status during execution'],['permitTypes','Permit types'],['hazards','Hazards'],['impacts','Potential impacts'],['hazardousEnergy','Internal / stored hazardous energy sources'],['externalEnergySources','External energy sources / utilities'],['statutoryInspections','Statutory and legal inspections'],['controlMeasures','Control measures'],['ppe','Personal protective equipment'],['riskMethods','Risk assessment methods'],['severityLevels','Severity levels'],['likelihoodLevels','Likelihood levels'],['riskAcceptance','Risk acceptance criteria'],['criticalRules','Safety critical rules'],['emergencyScenarios','Emergency scenarios']];
 type Entry={code:string;label:string;category:string;subcategory:string;description:string;color?:string};
 type AdoptionRow=Entry&{enabled:boolean;masterActive:boolean};
 type Adoption={key:string;title:string;version:number;canEdit:boolean;rows:AdoptionRow[]};

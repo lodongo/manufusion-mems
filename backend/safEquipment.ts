@@ -2,12 +2,13 @@ import {storage} from './platform/sdk';
 import {HttpError,getDoc,isObj,nowIso,randomId,rateLimit,str,writeDoc,type Obj} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {PERMS,allowedAt,requireAt,audited} from './scopeGuard';
-import {effectiveSafetyItems} from './safConfiguration';
+import {effectiveSafetyItems,safetyCatalogue} from './safConfiguration';
 import {ACTIVITY_CLASSES,CLASS_PERMIT_ALTERNATIVES,meetsClassPermitMinimum} from './safActivityClasses';
 import {detectImage} from './branding';
 import {signedUrl} from './structure';
 import {scoreMaintenanceRisk,type RiskMatrix} from './maintenanceTaskRisk';
-import {energyProfile,applies,configuredField,configurationIssues,validDay} from './safEnergyProfiles';
+import {configuredField,configurationIssues,validDay} from './safEnergyProfiles';
+import {statutoryProfile,mergeUtilityEnergy,utilityDefinition,candidateInspectionCodes,utilityPointId} from './safStatutoryInspections';
 const idRe=/^[A-Za-z0-9_-]{1,120}$/;
 const array=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const root=(ctx:OrgContext)=>`organizations/${ctx.orgId}`;
@@ -27,28 +28,59 @@ const tokenValid=(ctx:OrgContext,id:string,token:string)=>token.startsWith(photo
 const evidenceValid=(ctx:OrgContext,id:string,token:string)=>token.startsWith(photoPrefix(ctx,id))&&/^report_[A-Za-z0-9_-]+\.(pdf|jpg|png)$/.test(token.slice(photoPrefix(ctx,id).length));
 const pointIdOf=(x:Obj,i:number)=>idRe.test(str(x.pointId))?str(x.pointId):'legacy-'+i;
 const stringList=(v:unknown):string[]=>Array.isArray(v)?[...new Set(v.map(str).filter(Boolean))]:[];
+async function energyContext(ctx:OrgContext,id:string,saved:Obj[]){
+ const [internal,external,statutory,utilityDoc]=await Promise.all([
+  effectiveSafetyItems(ctx.orgId,'hazardousEnergy'),safetyCatalogue(ctx.orgId,'externalEnergySources'),
+  safetyCatalogue(ctx.orgId,'statutoryInspections'),getDoc(`${root(ctx)}/equipment_utilities/${id}`)]);
+ const utilities=array(utilityDoc?.data.items);
+ const rows=mergeUtilityEnergy(utilities,saved);
+ const allowedExternal=new Set(external.active.map(x=>str(x.code)));
+ const adoptedTests=new Set(statutory.active.map(x=>str(x.code)));
+ const utilityByCode=new Map(utilities.map(x=>[str(x.code),x]));
+ const defs=new Map(external.items.map(x=>[str(x.code),x]));
+ const attrs=(code:string)=>array(defs.get(code)?.attributes||utilityDefinition(code)?.attributes);
+ const profile=(code:string)=>statutoryProfile(code,adoptedTests,attrs(code).map(a=>str(a.key)));
+ const linked=utilities.map(u=>{
+  const code=str(u.code),def=defs.get(code);
+  return {...ref(def||u),code,label:str(u.label)||str(def?.label)||code,category:str(def?.category)||'External utility',subcategory:str(def?.subcategory)||'Existing connection',
+   linkedUtility:true,adopted:allowedExternal.has(code),profile:profile(code)};
+ });
+ const catalogue=[...internal.map(x=>({...ref(x),linkedUtility:false,adopted:true,profile:profile(str(x.code))})),...linked];
+ return {rows,catalogue,profile,utilityByCode,attrs,adoptedTests,allowedExternal,utilityVersion:Number(utilityDoc?.data.version)||0};
+}
+function reviewIssues(profile:ReturnType<typeof statutoryProfile>,values:Obj,tests:Obj,today:string){
+ const issues=configurationIssues(profile,values,tests,today);
+ if(str(values.legal_review).trim().length<20)issues.push('Document competent jurisdiction and legal applicability review.');
+ return issues;
+}
 export const safEquipmentRoutes={
  'POST /api/org/saf/equipment-energy/read':[orgRoute('org.saf.equipment_energy.read','SAF.view',async ctx=>{
-  const {id,node}=await equipment(ctx);const [master,doc]=await Promise.all([effectiveSafetyItems(ctx.orgId,'hazardousEnergy'),getDoc(energyPath(ctx,id))]);
+  const {id,node}=await equipment(ctx);const doc=await getDoc(energyPath(ctx,id));
+  const context=await energyContext(ctx,id,array(doc?.data.items));
   const today=nowIso().slice(0,10);
-  const items=await Promise.all(array(doc?.data.items).map(async (x,i)=>{
+  const items=await Promise.all(context.rows.map(async (x,i)=>{
    const tests=isObj(x.tests)?x.tests:{},values=isObj(x.values)?x.values:{};
    const reports=Object.fromEntries(await Promise.all(Object.entries(tests).filter(([,v])=>isObj(v)).map(async ([key,v])=>{
     const test=v as Obj,token=str(test.evidenceToken);
     return [key,{...test,evidenceUrl:evidenceValid(ctx,id,token)?await signedUrl(token):''}];
    })));
-   const issues=configurationIssues(energyProfile(str(x.code)),values,tests,today);
+   const code=str(x.code),profile=context.profile(code);
+   const issues=reviewIssues(profile,values,tests,today);
+   if(x.linkedUtility&&!context.allowedExternal.has(code))issues.push('Existing utility is not currently adopted in Safety.');
    if(!str(x.tag)||!str(x.photoToken))issues.unshift('Tag and equipment photo');
    const status=issues.length?'incomplete':x.status==='documented'?'documented':'draft';
-   return {...x,pointId:pointIdOf(x,i),values,tests:reports,status,issues,url:tokenValid(ctx,id,str(x.photoToken))?await signedUrl(str(x.photoToken)):''};
+   return {...x,pointId:pointIdOf(x,i),values,tests:reports,status,issues,utilityAttrs:context.attrs(code).map(a=>({key:str(a.key),label:str(a.label),unit:str(a.unit)})),unadoptedInspections:candidateInspectionCodes(code).filter(c=>!context.adoptedTests.has(c)),url:tokenValid(ctx,id,str(x.photoToken))?await signedUrl(str(x.photoToken)):''};
   }));
-  return {equipmentName:str(node.data.name),catalogue:master.map(x=>({...ref(x),profile:energyProfile(str(x.code))})),profiles:Object.fromEntries(array(doc?.data.items).map(x=>[str(x.code),energyProfile(str(x.code))])),items,version:Number(doc?.data.version)||0,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
+  return {equipmentName:str(node.data.name),catalogue:context.catalogue,profiles:Object.fromEntries(context.rows.map(x=>[str(x.code),context.profile(str(x.code))])),items,utilityVersion:context.utilityVersion,version:Number(doc?.data.version)||0,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],
  'POST /api/org/saf/equipment-energy/photo':[orgRoute('org.saf.equipment_energy.photo','SAF.risk.assess',async ctx=>{
   const {id}=await equipment(ctx,true);await rateLimit('saf-energy-photo',ctx.uid,60,3600);
   const report=ctx.body.purpose==='test_evidence';
   const pointId=str(ctx.body.pointId),testCode=str(ctx.body.testCode),sourceCode=str(ctx.body.sourceCode);
-  if(report&&(!idRe.test(pointId)||!energyProfile(sourceCode).tests.some(t=>t.code===testCode)||!(await effectiveSafetyItems(ctx.orgId,'hazardousEnergy')).some(x=>str(x.code)===sourceCode)))throw new HttpError(400,'Invalid test evidence reference.');
+  if(report){
+   const sources=await energyContext(ctx,id,[]);
+   if(!idRe.test(pointId)||!sources.profile(sourceCode).tests.some(t=>t.code===testCode)||!sources.catalogue.some(x=>x.code===sourceCode)||sourceCode.startsWith('UTL-')&&(!sources.utilityByCode.has(sourceCode)||pointId!==utilityPointId(sources.utilityByCode.get(sourceCode)!)))throw new HttpError(400,'Invalid or non-adopted statutory test evidence reference.');
+  }
   const data=str(ctx.body.data);if(!data||data.length>2_000_000||!/^[A-Za-z0-9+/=]+$/.test(data))throw new HttpError(400,'Upload a compressed image or a PDF up to 1.5 MB.');
   const bytes=Buffer.from(data,'base64');const detected=detectImage(bytes)||(report&&bytes.subarray(0,5).toString()==='%PDF-'?{ext:'pdf',contentType:'application/pdf'}:null);
   if(!detected||bytes.length>1_500_000)throw new HttpError(400,'Upload a supported image or PDF up to 1.5 MB.');
@@ -62,14 +94,23 @@ export const safEquipmentRoutes={
   const {id}=await equipment(ctx,true);const path=energyPath(ctx,id);const old=await getDoc(path);const version=Number(old?.data.version)||0;
   if(Number(ctx.body.version)!==version)throw new HttpError(409,'Energy register changed. Reload.');
   if(!Array.isArray(ctx.body.items)||ctx.body.items.length>100||array(ctx.body.items).length!==ctx.body.items.length)throw new HttpError(400,'Invalid energy register.');
-  const catalogue=await effectiveSafetyItems(ctx.orgId,'hazardousEnergy');const known=new Map(catalogue.map(x=>[str(x.code),x]));const tags=new Set<string>(),ids=new Set<string>();
   const previous=array(old?.data.items);
+  const context=await energyContext(ctx,id,previous),catalogue=context.catalogue;
+  if(Number(ctx.body.utilityVersion)!==context.utilityVersion&&(ctx.body.utilityVersion!==undefined||context.utilityByCode.size))throw new HttpError(409,'Equipment utilities changed. Reload the energy register.');
+  const known=new Map(catalogue.map(x=>[str(x.code),x]));const tags=new Set<string>(),ids=new Set<string>();
+  const submitted=array(ctx.body.items);
+  // An existing utility is neither selectable nor removable from Safety. Require the exact same set.
+  for(const code of context.utilityByCode.keys())if(submitted.filter(x=>str(x.code)===code&&str(x.pointId)===utilityPointId(context.utilityByCode.get(code)!)).length!==1)throw new HttpError(400,'All configured utility connections must appear exactly once. Refresh the register.');
   const finalize=ctx.body.finalize===true,today=nowIso().slice(0,10);
   const items=await Promise.all(array(ctx.body.items).map(async (x,i)=>{
    const code=str(x.code),tag=str(x.tag).trim(),photoToken=str(x.photoToken),source=known.get(code),pointId=str(x.pointId)||'legacy-'+i;
    if(!idRe.test(pointId)||ids.has(pointId))throw new HttpError(400,'Invalid or duplicate energy point ID.');
    ids.add(pointId);
-   const historical=previous.find((y,j)=>pointIdOf(y,j)===pointId&&str(y.code)===code);
+   const linked=code.startsWith('UTL-');
+   if(linked&&(!context.utilityByCode.has(code)||pointId!==utilityPointId(context.utilityByCode.get(code)!)))throw new HttpError(400,'External connections are maintained in Utilities.');
+   const current=linked?context.rows.find(y=>str(y.pointId)===pointId):null;
+   const historical=linked?current:previous.find((y,j)=>pointIdOf(y,j)===pointId&&str(y.code)===code);
+   if(linked&&finalize&&!context.allowedExternal.has(code))throw new HttpError(400,'Adopt the existing utility in Safety before marking the register documented.');
    // Existing clients must not erase newer technical records by omitting profile data.
    if(historical&&(!isObj(x.values)||!isObj(x.tests))&&(isObj(historical.values)||isObj(historical.tests)))throw new HttpError(409,'Refresh MEMS before editing the expanded energy register.');
    if(!source){
@@ -85,8 +126,10 @@ export const safEquipmentRoutes={
     const photo=tokenValid(ctx,id,photoToken)?await getDoc(`${path}/photos/${photoToken.slice(photoPrefix(ctx,id).length)}`):null;
     if(!photo||photo.data.purpose==='test_evidence')throw new HttpError(400,'Add a photo for each energy point.');
    }
-   const profile=energyProfile(code),rawValues=isObj(x.values)?x.values:{},rawTests=isObj(x.tests)?x.tests:{};
+   const profile=context.profile(code),rawValues=isObj(x.values)?x.values:{},rawTests=isObj(x.tests)?x.tests:{};
    const values:Obj={},tests:Obj={};
+   // Preserve former routine tests and non-adopted statutory reports without treating them as current obligations.
+   if(isObj(historical?.tests))for(const [k,v] of Object.entries(historical.tests))if(!profile.tests.some(t=>t.code===k))tests[k]=v;
    for(const field of profile.fields){
     const value=rawValues[field.code];
     if(value===undefined||value===null||value==='')continue;
@@ -105,10 +148,10 @@ export const safEquipmentRoutes={
     }
     tests[test.code]={result,lastDate,nextDue,tester,basis,justification,evidenceToken,measurement};
    }
-   const issues=configurationIssues(profile,values,tests,today);
+   const issues=reviewIssues(profile,values,tests,today);
    if(!tag||!photoToken)issues.unshift('Tag and equipment photo');
    if(finalize&&issues.length)throw new HttpError(400,(tag||str(source.label))+': '+issues.slice(0,5).join('; '));
-   return {code,pointId,tag,photoToken,label:str(source.label),values,tests,status:finalize?'documented':'draft',profileVersion:1};
+   return {code,pointId,tag,photoToken,label:str(source.label),values,tests,status:finalize?'documented':'draft',profileVersion:2,...(linked?{utilityFingerprint:str(current?.utilityFingerprint),utilityConnectionId:str(current?.utilityConnectionId)}:{})};
   }));
   if(finalize&&!items.length)throw new HttpError(400,'Record at least one actual energy point; an empty register does not establish zero energy.');
   // Preserve the previous register in a bounded-size separate revision document when changed.
@@ -126,7 +169,7 @@ export const safEquipmentRoutes={
    effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'impacts'),effectiveSafetyItems(ctx.orgId,'controlMeasures'),effectiveSafetyItems(ctx.orgId,'permitTypes'),getDoc(`${root(ctx)}/saf/risk_matrix`),getDoc(energyPath(ctx,id))]);
   const adopted=new Set(classes.map(x=>str(x.code)));
   const rows=await Promise.all(ACTIVITY_CLASSES.map(async cl=>{const doc=await getDoc(classPath(ctx,id,cl.code));return {...cl,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[cl.code]||[],adopted:adopted.has(cl.code),record:doc?.data||null};}));
-  return {equipmentName:str(node.data.name),classes:rows.filter(x=>x.adopted||x.record),catalogue:{hazards:hazards.map(ref),impacts:impacts.map(ref),controls:controls.map(ref),permits:permits.map(ref)},matrix:matrix?.data.configuration||null,energy:array(energy?.data.items).map(x=>({tag:str(x.tag),label:str(x.label)})),canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
+  return {equipmentName:str(node.data.name),classes:rows.filter(x=>x.adopted||x.record),catalogue:{hazards:hazards.map(ref),impacts:impacts.map(ref),controls:controls.map(ref),permits:permits.map(ref)},matrix:matrix?.data.configuration||null,energy:(await energyContext(ctx,id,array(energy?.data.items))).rows.filter(x=>str(x.tag)).map(x=>({tag:str(x.tag),label:str(x.label)})),canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],
  'POST /api/org/saf/activity-classes/save':[orgRoute('org.saf.activity_classes.save','SAF.risk.assess',async ctx=>{
   const {id}=await equipment(ctx,true);const code=str(ctx.body.classCode),cl=ACTIVITY_CLASSES.find(x=>x.code===code);
@@ -141,7 +184,8 @@ export const safEquipmentRoutes={
   // A class only sets a minimum. It cannot authorize work or exempt actual hazards.
   if(!meetsClassPermitMinimum(code,permitCodes))throw new HttpError(400,'The class requires its adopted permit(s); select the applicable permit or enable missing permit types in Safety.');
   const energyTags=stringList(ctx.body.energyTags);
-  if(energyTags.some(t=>!array(energyDoc?.data.items).some(x=>str(x.tag)===t)))throw new HttpError(400,'Unknown equipment energy tag.');
+  const currentEnergy=(await energyContext(ctx,id,array(energyDoc?.data.items))).rows;
+  if(energyTags.some(t=>!currentEnergy.some(x=>str(x.tag)===t)))throw new HttpError(400,'Unknown equipment energy tag.');
   const screening=str(ctx.body.screening).trim().slice(0,3000);
   if(cl.assessmentKind!=='screening'&&screening.length<20)throw new HttpError(400,'Document the intervention limits, required verification and stop-work criteria.');
   const raw=ctx.body.rows;

@@ -2,11 +2,12 @@ import {HttpError,getDoc,isObj,nowIso,str,writeDoc,type Obj} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {PERMS,holdsAnywhere,holdsDirect,audited} from './scopeGuard';
 import {SAF_DEFAULT_LISTS} from './safDefaults';
+import {AST_UTILITY_ITEMS} from './astUtilityDefaults';
 import {categoryColor} from './safActivityClasses';
 import {fieldsForPermit,normalizePermitFields} from './safPermitTemplates';
 import {EXPANDED_PERMIT_REFERENCES} from './safPermitExpanded';
 
-export const SAF_ADOPTION_KEYS=['activityClasses','machineStatuses','permitTypes','hazards','impacts','hazardousEnergy','controlMeasures','ppe','riskMethods','severityLevels','likelihoodLevels','riskAcceptance','criticalRules','emergencyScenarios'] as const;
+export const SAF_ADOPTION_KEYS=['activityClasses','machineStatuses','permitTypes','hazards','impacts','hazardousEnergy','externalEnergySources','statutoryInspections','controlMeasures','ppe','riskMethods','severityLevels','likelihoodLevels','riskAcceptance','criticalRules','emergencyScenarios'] as const;
 type Key=typeof SAF_ADOPTION_KEYS[number];
 const root=(orgId:string)=>`organizations/${orgId}/saf`;
 const entries=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj) as Obj[]:[];
@@ -24,7 +25,11 @@ export function adoptedRecords(master:Obj[],disabled:unknown):Obj[]{
 export async function safetyCatalogue(orgId:string,key:Key){
  const [master,policy]=await Promise.all([getDoc(`module_workspaces/SAF/metadata/${key}`),getDoc(`${root(orgId)}/adoption_${key}`)]);
  const fallback=SAF_DEFAULT_LISTS.find(x=>x.key===key);
- const raw=entries(Array.isArray(master?.data.items)?master?.data.items:fallback?.items);
+ // External types use the live AST utility master, never a separately edited mapping.
+ const utilities=key==='externalEnergySources'?await getDoc('module_workspaces/AST/metadata/utilitySupplies'):null;
+ const utilityItems=entries(Array.isArray(utilities?.data.items)?utilities?.data.items:AST_UTILITY_ITEMS);
+ const shared=utilities&&str(utilities.data.source)==='MEMS defaults'&&Number(utilities.data.version)<2?[...utilityItems,...AST_UTILITY_ITEMS.filter(x=>!utilityItems.some(u=>str(u.code)===x.code))]:utilityItems;
+ const raw=key==='externalEnergySources'?shared:entries(Array.isArray(master?.data.items)?master?.data.items:fallback?.items);
  const items:Obj[]=key==='hazards'?raw.map(x=>({...x,color:categoryColor(str(x.category),isObj(master?.data.categoryColors)?master.data.categoryColors:{})})):raw;
  const active=adoptedRecords(items,policy?.data.disabledCodes);
  return {key,title:str(master?.data.title)||fallback?.title||key,items,active,policy,version:Number(policy?.data.version)||0};

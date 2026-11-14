@@ -148,7 +148,7 @@ function UtilityEditor({
 }
 
 export default function EquipmentUtilities({ workCenterId, onBack }: { workCenterId: string; onBack: () => void }) {
-    const { data, setData, error, loading, reload } = useLoad(() => callBackend<{ catalogue: Utility[]; items: Entry[] }>('/api/org/ast/utilities/read', { workCenterId }), [workCenterId]);
+    const { data, setData, error, loading, reload } = useLoad(() => callBackend<{ catalogue: Utility[]; items: Entry[]; version:number }>('/api/org/ast/utilities/read', { workCenterId }), [workCenterId]);
     const [browse, setBrowse] = useState(false);
     const [editing, setEditing] = useState<{ utility: Utility; values: Record<string, string | number> } | null>(null);
     const [saving, setSaving] = useState(false);
@@ -163,8 +163,8 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
 
     /** Saves the complete list; the server checks every entry against the catalogue again. */
     const persist = async (rows: Entry[]) => {
-        await callBackend('/api/org/ast/utilities/save', { workCenterId, items: rows });
-        setData((d) => (d ? { ...d, items: rows } : d));
+        const result=await callBackend<{version:number}>('/api/org/ast/utilities/save', { workCenterId, items: rows,version:data?.version||0 });
+        setData((d) => (d ? { ...d, items: rows,version:result.version } : d));
     };
 
     const edit = (utility: Utility, values: Record<string, string | number>) => {
@@ -237,7 +237,7 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
         <Screen
             title='Utilities'
             eyebrow='AST · equipment unit'
-            subtitle='Utilities used by this unit and their technical values'
+            subtitle='Utilities used by this unit — automatically linked to Hazardous Energy Sources'
             onBack={onBack}
             actions={
                 data && (
@@ -258,10 +258,10 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
                 </div>
             )}
             {notice && <Alert tone='success'>{notice}</Alert>}
-            {data && catalogue.length === 0 && <Alert tone='warn'>No utility records found in AST metadata. Ask an administrator to load the Utility supplies master defaults.</Alert>}
+            {data && catalogue.length === 0 && <Alert tone='warn'>No adopted utilities found. Check MEMS Admin utility master and Safety → Metadata Adoption.</Alert>}
             {stale.length > 0 && (
                 <Alert tone='warn'>
-                    {stale.map((e) => e.label).join(', ')} {stale.length === 1 ? 'is' : 'are'} no longer active in the AST utility catalogue. Remove {stale.length === 1 ? 'it' : 'them'} before saving other changes.
+                    {stale.map((e) => e.label).join(', ')} {stale.length === 1 ? 'is' : 'are'} not currently adopted or active. Existing connections remain visible in the energy register; review adoption before editing.
                 </Alert>
             )}
             {full && <Alert tone='warn'>This unit has the maximum of {MAX_UTILITIES} utilities.</Alert>}

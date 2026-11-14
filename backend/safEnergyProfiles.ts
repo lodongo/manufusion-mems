@@ -1,6 +1,6 @@
 // Equipment energy profile schemas. Values describe installed equipment; never imply isolation or authorization.
-export type EnergyField={code:string;label:string;kind:'number'|'select'|'text';required:boolean;unit?:string;options?:string[];min?:number;when?:{field:string;values:string[]}};
-export type EnergyTest={code:string;label:string;critical:boolean;conditional?:boolean;when?:{field:string;values:string[]}};
+export type EnergyField={code:string;label:string;kind:'number'|'select'|'text';required:boolean;unit?:string;options?:string[];min?:number;when?:{field:string;values:string[]};whenAll?:{field:string;values:string[]}[]};
+export type EnergyTest={code:string;label:string;critical:boolean;conditional?:boolean;reference?:string;when?:{field:string;values:string[]};whenAll?:{field:string;values:string[]}[]};
 export type EnergyProfile={fields:EnergyField[];tests:EnergyTest[]};
 const n=(code:string,label:string,unit:string,required=true,min=0):EnergyField=>({code,label,kind:'number',unit,required,min});
 const t=(code:string,label:string,required=true):EnergyField=>({code,label,kind:'text',required});
@@ -129,7 +129,7 @@ export function energyProfile(code:string):EnergyProfile{
  if(code==='SAF_03_01_001')fields=fields.map(f=>f.code==='supply'?{...f,options:['AC','Unknown — investigate']}:f.code==='phase'?{...f,options:f.options?.filter(x=>!x.startsWith('DC'))}:f);
  return {fields:[...new Map(fields.map(f=>[f.code,f])).values()],tests:[...new Map([...commonTests,...base.tests,...extra.tests].map(x=>[x.code,x])).values()]};
 }
-export function applies(field:{when?:{field:string;values:string[]}},values:Record<string,unknown>){return !field.when||field.when.values.includes(String(values[field.when.field]??''));}
+export function applies(field:{when?:{field:string;values:string[]};whenAll?:{field:string;values:string[]}[]},values:Record<string,unknown>){return [...(field.when?[field.when]:[]),...(field.whenAll||[])].every(w=>w.values.includes(String(values[w.field]??'')));}
 export function validDay(s:string){return /^\d{4}-\d{2}-\d{2}$/.test(s)&&!Number.isNaN(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s;}
 export function configuredField(f:EnergyField,value:unknown){if(f.kind==='number')return typeof value==='number'&&Number.isFinite(value)&&value>=(f.min??0);if(typeof value!=='string'||!value.trim()||value.length>1000)return false;return f.kind!=='select'||!!f.options?.includes(value);}
 export function configurationIssues(profile:EnergyProfile,values:Record<string,unknown>,tests:Record<string,unknown>,today:string):string[]{

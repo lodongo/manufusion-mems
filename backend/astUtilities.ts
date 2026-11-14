@@ -1,6 +1,7 @@
-import { HttpError, getDoc, isObj, nowIso, str, writeDoc } from './core';
+import { HttpError, getDoc, isObj, nowIso, randomId, str, writeDoc } from './core';
 import { orgRoute, type OrgContext } from './guards';
 import { seedModuleMetadata } from './moduleDefaults';
+import { effectiveSafetyItems } from './safConfiguration';
 import { PERMS, audited, diffByKey, requireAt } from './scopeGuard';
 
 // ---------------------------------------------------------------------------
@@ -32,8 +33,10 @@ export const utilityRoutes = {
             const { id } = await equipmentUnit(ctx);
             await requireAt(ctx, PERMS.utilitiesView, id, 'read', 'You do not have permission to view the utilities of this equipment unit.');
             await seedModuleMetadata('AST');
-            const [catalogue, doc] = await Promise.all([definitions(), getDoc(docPath(ctx.orgId, id))]);
-            return { catalogue, items: Array.isArray(doc?.data.items) ? doc.data.items : [] };
+            const [defs, doc, adopted] = await Promise.all([definitions(), getDoc(docPath(ctx.orgId, id)), effectiveSafetyItems(ctx.orgId,'externalEnergySources')]);
+            const allowed=new Set(adopted.map(x=>str(x.code)));
+            const catalogue=defs.filter(x=>allowed.has(str(x.code)));
+            return { catalogue, items: Array.isArray(doc?.data.items) ? doc.data.items : [], version:Number(doc?.data.version)||0 };
         }),
     ],
 
@@ -43,15 +46,26 @@ export const utilityRoutes = {
             await requireAt(ctx, PERMS.utilitiesEdit, id, 'write', 'You do not have permission to change the utilities of this equipment unit.');
             const rows = ctx.body.items;
             if (!Array.isArray(rows) || rows.length > 80) throw new HttpError(400, 'Invalid entries');
-            const defs = await definitions();
+            await seedModuleMetadata('AST');
+            const path=docPath(ctx.orgId,id), existing=await getDoc(path);
+            const version=Number(existing?.data.version)||0;
+            if(ctx.body.version!==undefined&&Number(ctx.body.version)!==version)throw new HttpError(409,'Utility register changed. Reload.');
+            const before=(Array.isArray(existing?.data.items)?existing.data.items:[]).filter(isObj);
+            const [defs,adopted]=await Promise.all([definitions(),effectiveSafetyItems(ctx.orgId,'externalEnergySources')]);
+            const allowed=new Set(adopted.map(x=>str(x.code)));
             if (!defs.length) throw new HttpError(409, 'AST utility metadata is not loaded');
             const seen = new Set<string>();
             const items = rows.map((row: unknown) => {
                 if (!isObj(row)) throw new HttpError(400, 'Invalid utility');
                 const code = str(row.code);
                 const def = defs.find((x) => str(x.code) === code);
-                if (!def || seen.has(code)) throw new HttpError(400, 'Invalid or duplicate utility');
+                if(seen.has(code)) throw new HttpError(400,'Duplicate utility');
                 seen.add(code);
+                const prior=before.find(x=>str(x.code)===code);
+                if(!def||!allowed.has(code)){
+                    if(!prior||JSON.stringify(row.values)!==JSON.stringify(prior.values))throw new HttpError(400,'Select an adopted utility or retain the existing historical values.');
+                    return prior;
+                }
                 const values: Record<string, string | number> = {};
                 const raw = isObj(row.values) ? row.values : {};
                 for (const attr of (Array.isArray(def.attributes) ? def.attributes : []).filter(isObj)) {
@@ -72,16 +86,13 @@ export const utilityRoutes = {
                         values[key] = value;
                     }
                 }
-                return { code, label: str(def.label), values };
+                return { code, label: str(def.label), values, connectionId:prior?str(prior.connectionId)||'legacy-'+code:randomId(16) };
             });
 
-            const path = docPath(ctx.orgId, id);
-            const existing = await getDoc(path);
-            const before = (Array.isArray(existing?.data.items) ? existing.data.items : []).filter(isObj);
-            await writeDoc(path, { ...(existing?.data ?? {}), items, updatedAt: nowIso(), updatedBy: ctx.uid });
+            if(!await writeDoc(path, { ...(existing?.data ?? {}), items, version:version+1, updatedAt: nowIso(), updatedBy: ctx.uid },existing?{updateTime:existing.updateTime}:{exists:false}))throw new HttpError(409,'Utility register changed. Reload.');
             const diff = diffByKey(before, items, (x: any) => str(x.code));
             await audited(ctx, 'ast.utilities.save', `Utilities of ${str(node.data.code) || id}`, diff);
-            return { saved: items.length };
+            return { saved: items.length,version:version+1 };
         }),
     ],
 };

@@ -1180,11 +1180,16 @@ export const handler = router(recordWiredRoutes({
             const workspace = await getDoc(`module_workspaces/${code}`);
             if (!workspace) return { workspace: null, files: [], metadata: [] };
             if (code === 'AST' || code === 'DOC' || code === 'SAF') await seedModuleMetadata(code);
+            if(code==='SAF')await seedModuleMetadata('AST');
             const [files, metadata] = await Promise.all([listDocs(`module_workspaces/${code}/files`), listDocs(`module_workspaces/${code}/metadata`)]);
             return {
                 workspace: { ...workspace.data, code },
                 files: files.map((f) => ({ id: f.id, ...f.data })),
-                metadata: metadata.map(metaListOut).sort((a, b) => a.title.localeCompare(b.title)),
+                metadata: (await Promise.all(metadata.map(async m=>{
+                    if(code!=='SAF'||m.id!=='externalEnergySources')return metaListOut(m);
+                    const shared=await getDoc('module_workspaces/AST/metadata/utilitySupplies');
+                    return metaListOut(shared?{...m,data:{...m.data,items:shared.data.items,updatedAt:shared.data.updatedAt}}:m);
+                }))).sort((a, b) => a.title.localeCompare(b.title)),
                 defaultsAvailable: pendingDefaultKeys(code, metadata),
             };
         }),
@@ -1212,6 +1217,7 @@ export const handler = router(recordWiredRoutes({
             if (!/^[A-Z]{3}$/.test(code) || !(await getDoc(`module_workspaces/${code}`))) throw new HttpError(400, 'Initialise the module before adding metadata.');
             const raw = (isObj(ctx.body.list) ? ctx.body.list : {}) as Record<string, unknown>;
             const key = str(raw.key).trim();
+            if(code==='SAF'&&key==='externalEnergySources')throw new HttpError(400,'External energy uses the common AST utility supplies master; configure the shared master instead.');
             if (!/^[a-z][a-zA-Z0-9_]{1,39}$/.test(key)) throw new HttpError(400, 'The list key must start with a lower-case letter and use letters, numbers or underscores (2 to 40).');
             const title = text(raw, 'title', 2, 60, 'Enter a list title (2 to 60 characters).');
             const description = text(raw, 'description', 0, 300, 'Description can be up to 300 characters.');
@@ -1287,6 +1293,7 @@ export const handler = router(recordWiredRoutes({
         staff('admin.modules.metadata.delete', 'write', async (ctx) => {
             const code = str(ctx.body.code);
             const key = str(ctx.body.key);
+            if(code==='SAF'&&['externalEnergySources','statutoryInspections'].includes(key))throw new HttpError(400,'The controlled shared safety catalogue cannot be deleted. Use adoption instead.');
             if (!/^[A-Z]{3}$/.test(code) || !/^[a-z][a-zA-Z0-9_]{1,39}$/.test(key)) throw new HttpError(400, 'Invalid metadata list.');
             if ((code === 'INV' && (key === 'materialClassifications' || key === 'storageLocationTypes')) ||  (code === 'PRC' && (key === 'unitsOfMeasure' || STOCK_META_BY_KEY.has(key))) || (code === 'HRM' && key === 'skillsMaster')) throw new HttpError(400, 'This controlled reference list cannot be deleted. Disable individual entries instead.');
             await deleteDoc(`module_workspaces/${code}/metadata/${key}`);

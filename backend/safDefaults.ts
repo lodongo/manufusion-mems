@@ -1,7 +1,11 @@
 // SAF enterprise safety metadata reference catalogue. Default records are reviewed and adapted by competent site safety professionals.
 import {SAF_MACHINE_STATES,SAF_PERMIT_PARAMETER_MASTER} from './safPermitTemplates';
 import {ACTIVITY_CLASSES} from './safActivityClasses';
+import {AST_UTILITY_ITEMS} from './astUtilityDefaults';
+import {STATUTORY_INSPECTIONS} from './safStatutoryInspections';
 export const SAF_DEFAULT_LISTS = [
+{key:'externalEnergySources',title:'External energy sources (shared utility master)',description:'Uses the AST utility supplies master and stable UTL codes. Organization adoption governs new utility selection; existing connections must remain visible.',version:1,items:AST_UTILITY_ITEMS},
+{key:'statutoryInspections',title:'Statutory and legal inspections',description:'Formal inspections and standard-based verification where applicable by law, licence or adopted technical standard; not routine PM. Review local legal applicability.',version:1,items:STATUTORY_INSPECTIONS},
 {key:'activityClasses',title:'Activity classes',description:'Controlled activity classification and minimum assessment requirements; not authorization to work.',version:2,items:ACTIVITY_CLASSES},
 {key:'machineStatuses',title:'Machine status during execution',description:'Controlled execution-state master. Shutdown alone is not isolation.',version:1,items:SAF_MACHINE_STATES},
 {key:'permitParameters',title:'Permit form parameter master',description:'Controlled form parameter library for standard permit type templates, including common and permit-specific fields.',version:2,items:SAF_PERMIT_PARAMETER_MASTER},
