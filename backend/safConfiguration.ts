@@ -2,6 +2,7 @@ import {HttpError,getDoc,isObj,nowIso,str,writeDoc,type Obj} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {PERMS,holdsAnywhere,holdsDirect,audited} from './scopeGuard';
 import {shortDeviceEligible} from './safSafetyDevices';
+import {readDeviceReferencePhoto} from './safDeviceReferencePhotos';
 import {SAF_DEFAULT_LISTS} from './safDefaults';
 import {AST_UTILITY_ITEMS} from './astUtilityDefaults';
 import {loadSafetyHazardMaster} from './safHazardMaster';
@@ -70,6 +71,7 @@ export async function controlContext(orgId:string,code:string){
  return {hazard,profile,doc,local,global,enabled,version:Number(doc?.data.version)||0};
 }
 export const safConfigurationRoutes={
+ 'POST /api/org/saf/device-photo/read':[orgRoute('org.saf.device_photo.read','SAF.view',async ctx=>{assertRead(ctx);return readDeviceReferencePhoto(ctx.body.code);})],
  'POST /api/org/saf/hazard-profile/read':[orgRoute('org.saf.hazard_profile.read','SAF.view',async ctx=>{
   assertRead(ctx);const c=await controlContext(ctx.orgId,validCode(ctx.body.code));
   return {...profileAdoption(c.profile,c.local,c.global,c.enabled),version:c.version,canEdit:holdsDirect(ctx,PERMS.matrixConfigure),selection:c.local};

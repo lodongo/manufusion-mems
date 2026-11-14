@@ -191,6 +191,7 @@ import {activityRiskRoutes} from './activityRisk';
 import {safEquipmentRoutes} from './safEquipment';
 import {categoryColor} from './safActivityClasses';
 import {loadSafetyHazardMaster} from './safHazardMaster';
+import {readDeviceReferencePhoto,saveDeviceReferencePhoto} from './safDeviceReferencePhotos';
 import {hazardControlProfile} from './safHazardControlLibrary';
 import {activityLegacyRoutes} from './activityRiskLegacy';
 import { safRiskRoutes } from './safRiskMatrix';
@@ -1200,6 +1201,8 @@ export const handler = router(recordWiredRoutes({
     'POST /api/admin/modules/metadata/skills/status': [staff('admin.modules.metadata.skills.status','write',async ctx=>{const changes=ctx.body.changes;if(!Array.isArray(changes)||changes.length>500)throw new HttpError(400,'Invalid skill updates.');const path='module_workspaces/HRM/metadata/skillsMaster';const doc=await getDoc(path);if(!doc)throw new HttpError(404,'Load HRM Skills Master defaults first.');const items=(Array.isArray(doc.data.items)?doc.data.items:[]).filter(isObj);const allowed=new Set(items.map(x=>str(x.code)));const updates=new Map<string,boolean>();for(const change of changes){if(!isObj(change)||!allowed.has(str(change.code))||typeof change.active!=='boolean')throw new HttpError(400,'Invalid skill status.');updates.set(str(change.code),change.active);}await writeDoc(path,{...doc.data,items:items.map(x=>updates.has(str(x.code))?{...x,active:updates.get(str(x.code))}:x),updatedAt:nowIso()});await record(ctx,'admin','module.metadata.skills.status','HRM.skillsMaster',String(updates.size)+' status updates');return {ok:true};})],
 
     'POST /api/admin/modules/metadata/hazard-profile': [staff('admin.modules.metadata.hazard_profile','read',async ctx=>{const code=str(ctx.body.code);const h=(await loadSafetyHazardMaster()).hazards.find(x=>str(x.code)===code);if(!h)throw new HttpError(404,'Hazard master reference not found.');return hazardControlProfile(h);})],
+    'POST /api/admin/modules/metadata/device-photo/read': [staff('admin.modules.metadata.device_photo.read','read',async ctx=>readDeviceReferencePhoto(ctx.body.code))],
+    'POST /api/admin/modules/metadata/device-photo/save': [staff('admin.modules.metadata.device_photo.save','write',async ctx=>{const r=await saveDeviceReferencePhoto(ctx.body,ctx.uid);await record(ctx,'admin','module.metadata.device_photo.save',r.code,'Reference photo revision '+r.version);return r;})],
     'POST /api/admin/modules/metadata/hazard-colors': [
         staff('admin.modules.metadata.hazard_colors','write',async ctx=>{
             await seedModuleMetadata('SAF');
