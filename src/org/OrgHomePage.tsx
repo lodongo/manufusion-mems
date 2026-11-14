@@ -32,6 +32,7 @@ const MntWorkflowSettings = lazy(() => import('./MntWorkflowSettings'));
 const MntBudgets = lazy(() => import('./MntBudgets'));
 const MntTaskValidation = lazy(() => import('./MntTaskValidation'));
 const SafConfiguration = lazy(() => import('./SafConfiguration'));
+const SafetyRiskAssessments = lazy(() => import('./SafetyRiskAssessments'));
 const LotoSetup = lazy(() => import('./LotoSetup'));
 const SafAdoption = lazy(() => import('./SafSetup').then(m=>({default:m.SafAdoption})));
 const SafPermits = lazy(() => import('./SafSetup').then(m=>({default:m.SafPermits})));
@@ -117,7 +118,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         {label:'Digital forms & records',path:'doc_forms',permission:'ADM.document_registry'},
         {label:'Document settings',path:'doc_config',permission:'ADM.document_config'},
     ],
-    SAF: [{label:'Safety metadata adoption',path:'saf_adoption',prefix:'SAF.'},{label:'Permits',path:'saf_permits',prefix:'SAF.'},{label:'LOTO',path:'saf_loto',prefix:'SAF.'},{ label: 'Risk matrix', path: 'saf_configuration', prefix: 'SAF.' }],
+    SAF: [{label:'Risk Assessments',path:'saf_risk_assessments',permission:'SAF.view'},{label:'Safety metadata adoption',path:'saf_adoption',prefix:'SAF.'},{label:'Permits',path:'saf_permits',prefix:'SAF.'},{label:'LOTO',path:'saf_loto',prefix:'SAF.'},{ label: 'Risk matrix', path: 'saf_configuration', prefix: 'SAF.' }],
     MNT: [
         { label: 'Maintenance workspace', path: 'mnt', prefix: 'MNT.' },
         { label: 'Work requests', path: 'work_requests', prefix: 'MNT.WR.' },
@@ -461,6 +462,7 @@ export default function OrgHomePage({
                 documentId={id ?? ''} />;
         } else content = <Alert tone='error'>Unknown documentation workspace.</Alert>;
     } else if (activeMenu && section === 'saf_configuration') content = <SafConfiguration />;
+    else if(activeMenu?.module.code==='SAF'&&section==='saf_risk_assessments') content=<SafetyRiskAssessments nodeId={id} routeBase='organization_home/saf_risk_assessments'/>;
     else if(activeMenu?.module.code==='SAF'&&section==='saf_adoption') content=<SafAdoption/>;
     else if(activeMenu?.module.code==='SAF'&&section==='saf_permits') content=<SafPermits/>;
     else if(activeMenu?.module.code==='SAF'&&section==='saf_loto') content=<LotoSetup/>;

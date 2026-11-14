@@ -25,6 +25,7 @@ const MntHome = lazy(() => import('./MntHome'));
 const MntWindows = lazy(() => import('./MntWindows'));
 const MntBudgets = lazy(() => import('./MntBudgets'));
 const SafConfiguration = lazy(() => import('./SafConfiguration'));
+const SafetyRiskAssessments = lazy(() => import('./SafetyRiskAssessments'));
 const LotoSetup = lazy(() => import('./LotoSetup'));
 const OrgModules = lazy(() => import('./OrgModules'));
 const OrgSubscription = lazy(() => import('./OrgSubscription'));
@@ -76,7 +77,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
     },
     {
         title: 'Safety (SAF)',
-        items: [{ key: 'saf_configuration', label: 'Risk matrix configuration', Icon: ShieldCheck, perm: 'SAF.', module: 'SAF' }, {key:'saf_loto',label:'LOTO',Icon:ShieldCheck,perm:'SAF.',module:'SAF'}],
+        items: [{key:'saf_risk_assessments',label:'Risk Assessments',Icon:ShieldCheck,perm:'SAF.view',module:'SAF'},{ key: 'saf_configuration', label: 'Risk matrix configuration', Icon: ShieldCheck, perm: 'SAF.', module: 'SAF' }, {key:'saf_loto',label:'LOTO',Icon:ShieldCheck,perm:'SAF.',module:'SAF'}],
     },
     {
         title: 'Maintenance (MNT)',
@@ -259,6 +260,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             break;
         case 'saf_loto':
             content = <LotoSetup />;
+            break;
+        case 'saf_risk_assessments':
+            content = <SafetyRiskAssessments nodeId={id} routeBase='organization_admin/saf_risk_assessments' />;
             break;
         case 'saf_configuration':
             content = <SafConfiguration />;

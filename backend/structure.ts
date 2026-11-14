@@ -401,6 +401,20 @@ export const structureRoutes = {
         orgRoute('org.structure.node', null, async (ctx) => {
             const design = designOf(ctx.org);
             const id = str(ctx.body.id) || 'root';
+            if(ctx.body.safetyOnly===true){
+                // Same organization hierarchy and node IDs; only disclose paths to equipment in Safety read scope.
+                if(!hasPerm(ctx.permissions,'SAF.view')&&ctx.role!=='org_super_admin')throw new HttpError(403,'Safety view rights are required.');
+                const [{canAt},{allowedNodeIds},{PERMS}]=await Promise.all([import('./access'),import('./positions'),import('./scopeGuard')]);
+                const [docs,scope]=await Promise.all([listDocs(col(ctx.orgId)),ctx.role==='org_super_admin'?Promise.resolve('all' as const):allowedNodeIds(ctx.orgId,ctx.me,true)]);
+                const nodes=docs.map(nodeOut),byId=new Map(nodes.map(n=>[n.id,n]));
+                const pathOf=(target:string)=>{const path:string[]=[];let current=target;for(let i=0;i<15&&current&&current!=='root';i++){const n=byId.get(current);if(!n||path.includes(current))return [];path.unshift(current);current=n.parentId;}return current==='root'?path:[];};
+                const visible=new Set<string>();
+                for(const n of nodes){if(n.level!=='work_center')continue;const path=pathOf(n.id);if(path.length&&PERMS.riskView.some(p=>canAt(ctx,p,path,scope)))for(const part of path)visible.add(part);}
+                if(id!=='root'&&!visible.has(id))throw new HttpError(403,'No Safety equipment access at this organization unit.');
+                const compact=(n:ReturnType<typeof nodeOut>)=>({id:n.id,level:n.level,tier:n.tier,parentId:n.parentId,code:n.code,name:n.name,status:n.status});
+                const node=id==='root'?null:byId.get(id)!;
+                return {node:node?compact(node):null,ancestors:node?pathOf(id).slice(0,-1).map(p=>compact(byId.get(p)!)):[],children:node?.level==='work_center'?[]:nodes.filter(n=>n.parentId===id&&visible.has(n.id)).sort((a,b)=>a.code.localeCompare(b.code)).map(compact),design:{...design,locked:true}};
+            }
             if (id === 'root') {
                 const [children, all] = await Promise.all([childrenOf(ctx.orgId, 'root'), listDocs(col(ctx.orgId))]);
                 const withCounts = children.map((c) => ({ ...c, childCount: all.filter((n) => str(n.data.parentId) === c.id).length }));

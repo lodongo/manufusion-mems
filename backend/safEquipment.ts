@@ -1,7 +1,7 @@
 import {storage} from './platform/sdk';
 import {HttpError,getDoc,isObj,nowIso,randomId,rateLimit,str,writeDoc,listDocs,nextSequence,type Obj} from './core';
 import {orgRoute,type OrgContext} from './guards';
-import {PERMS,allowedAt,requireAt,audited} from './scopeGuard';
+import {PERMS,allowedAt,requireAt,audited,holdsDirect} from './scopeGuard';
 import {effectiveSafetyItems,safetyCatalogue,lotoPolicy,controlContext,safetyDeviceCatalogue} from './safConfiguration';
 import {ACTIVITY_CLASSES,CLASS_PERMIT_ALTERNATIVES,meetsClassPermitMinimum} from './safActivityClasses';
 import {detectImage} from './branding';
@@ -157,11 +157,14 @@ export const safEquipmentRoutes={
  'POST /api/org/saf/equipment-tasks/read':[orgRoute('org.saf.equipment_tasks.read','SAF.view',async ctx=>{
   const {id,node}=await equipment(ctx);
   const [docs,classes,hazards,permits,skills,matrix,energy]=await Promise.all([listDocs(taskCollection(ctx,id)),effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'permitTypes'),taskSkills(),getDoc(root(ctx)+'/saf/risk_matrix'),currentTaskEnergy(ctx,id)]);
-  return {equipmentName:str(node.data.name),tasks:docs.map(d=>({...d.data,taskId:d.id})).sort((a,b)=>String(b.taskId).localeCompare(String(a.taskId))),classes:await Promise.all(ACTIVITY_CLASSES.filter(c=>classes.some(x=>x.code===c.code)).map(async c=>({...c,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[c.code]||[],baseline:await taskClassBaseline(ctx,id,c.code)}))),hazards:hazards.map(ref),permits:permits.map(ref),skills,matrix:matrix?.data.configuration||null,energy,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
+  return {equipmentName:str(node.data.name),tasks:docs.map(d=>({...d.data,taskId:d.id})).sort((a,b)=>String(b.taskId).localeCompare(String(a.taskId))),classes:await Promise.all(ACTIVITY_CLASSES.filter(c=>classes.some(x=>x.code===c.code)).map(async c=>({...c,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[c.code]||[],baseline:await taskClassBaseline(ctx,id,c.code)}))),hazards:hazards.map(ref),permits:permits.map(ref),skills,matrix:matrix?.data.configuration||null,energy,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write'),canCreate:holdsDirect(ctx,['ADM.structure'])&&await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],
  'POST /api/org/saf/equipment-tasks/save':[orgRoute('org.saf.equipment_tasks.save','SAF.risk.assess',async ctx=>{
   const {id}=await equipment(ctx,true);
   const requested=str(ctx.body.taskId);
+  // Safety can update existing risk records but may not allocate new task IDs.
+  // A source label is not a permission: creation additionally needs direct design rights.
+  if(!requested&&(ctx.body.source==='safety'||!holdsDirect(ctx,['ADM.structure'])))throw new HttpError(403,'Create tasks in Organization Design with authorized design rights.');
   if(requested&&!taskCodeRe.test(requested))throw new HttpError(400,'Invalid task ID.');
   const col=taskCollection(ctx,id),old=requested?await getDoc(col+'/'+requested):null;
   if(requested&&!old)throw new HttpError(404,'Task not found on this equipment.');
