@@ -13,13 +13,23 @@ export function buildSafetyHazardMaster(hazards:Obj[],energy:Obj[],utilities:Obj
  const sourceCodes=new Set([...energy,...utilities].map(x=>text(x.code)));
  const base=hazards.filter(h=>!sourceCodes.has(text(h.code))&&!h.energySourceCode);
  const hazardMap=new Map(base.map(h=>[text(h.code),h]));
- const project=(source:Obj)=>{
+ const project=(source:Obj):Obj=>{
   const code=text(source.code),hazardCategory=energyHazardCategory(source);
-  const hazardCodes=[code,...(related[hazardCategory]||[]).filter(c=>hazardMap.has(c))];
-  return {...source,hazardCategory,hazardCodes,color:categoryColor(hazardCategory,overrides)};
+  const label=text(source.label).toLowerCase(), extra=new Set<string>();
+  const add=(...codes:string[])=>codes.forEach(c=>extra.add(c));
+  if(/gas|nitrogen|argon|helium|carbon dioxide|refrigerant|cryogenic|inerting/.test(label))add('SAF_01_14_001','SAF_01_14_002','SAF_01_09_007');
+  if(/hydrogen|fuel|combust|flamm|lpg|solvent|dust|battery|biogas|propulsion/.test(label))add('SAF_01_07_001','SAF_01_07_003','SAF_01_18_008');
+  if(/steam|hot |heat|furnace|burner|thermal|cryogenic|refrigerant|molten|cold/.test(label))add('SAF_01_10_001','SAF_01_10_002','SAF_01_10_004','SAF_01_10_007');
+  if(/hydraulic|pneumatic|press|vacuum|pipe|header|fluid|water|receiver|cylinder/.test(label))add('SAF_01_09_004','SAF_01_09_009','SAF_01_09_010');
+  if(/lifting|hoist|raised|elevat|crane|counterweight|suspended|winch/.test(label))add('SAF_01_06_003','SAF_01_06_006','SAF_01_06_008');
+  if(/drive|rotat|motor|robot|actuator|conveyor|ram|turbine|spring|tension/.test(label))add('SAF_01_01_006','SAF_01_01_009','SAF_01_01_010');
+  if(/acid|caustic|cip|ammonia|chlorine|chemical|oxidiz|solvent|peroxide/.test(label))add('SAF_01_08_001','SAF_01_08_002','SAF_01_08_004','SAF_01_21_003');
+  if(/laser|radiation|radiograph|x-ray|radioactive|magnetic|microwave|ultraviolet/.test(label))add('SAF_01_11_006','SAF_01_11_007','SAF_01_11_008','SAF_01_11_009');
+  const hazardCodes=[code,...[...new Set([...(related[hazardCategory]||[]),...extra])].filter(c=>hazardMap.has(c))];
+  return {...source,hazardCategory,hazardCodes,relatedHazards:hazardCodes.slice(1).map(c=>({code:c,label:text(hazardMap.get(c)?.label)})),color:categoryColor(hazardCategory,overrides)};
  };
  const internal=energy.map(project),external=utilities.map(project);
- const entries=[...base.map(h=>({...h,color:categoryColor(text(h.category),overrides)})),...[...internal,...external].map(s=>({code:text(s.code),label:text(s.label),category:s.hazardCategory,subcategory:'Energy sources · '+text(s.category),description:'Energy-source reference: '+text(s.label)+'. Assess the actual exposure and applicable controls. '+text(s.description),active:s.active!==false,selectable:s.selectable!==false,energySourceCode:text(s.code),hazardCodes:s.hazardCodes,color:s.color}))];
+ const entries:Obj[]=[...base.map(h=>({...h,color:categoryColor(text(h.category),overrides)})),...[...internal,...external].map(s=>({code:text(s.code),label:text(s.label),category:text(s.hazardCategory),subcategory:'Energy sources · '+text(s.category),description:'Energy-source reference: '+text(s.label)+'. Assess the actual exposure and applicable controls. '+text(s.description),active:s.active!==false,selectable:s.selectable!==false,energySourceCode:text(s.code),hazardCodes:s.hazardCodes,relatedHazards:s.relatedHazards,color:s.color}))];
  return {hazards:entries,internal,external};
 }
 export async function loadSafetyHazardMaster(){

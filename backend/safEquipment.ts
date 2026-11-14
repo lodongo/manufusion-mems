@@ -14,7 +14,7 @@ import {energyColor} from './safEnergyColors';
 const idRe=/^[A-Za-z0-9_-]{1,120}$/;
 const array=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const root=(ctx:OrgContext)=>`organizations/${ctx.orgId}`;
-const ref=(x:Obj)=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description),color:str(x.color)});
+const ref=(x:Obj)=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description),color:str(x.color),hazardCategory:str(x.hazardCategory),hazardCodes:Array.isArray(x.hazardCodes)?x.hazardCodes.map(str):[],relatedHazards:Array.isArray(x.relatedHazards)?x.relatedHazards:[]});
 async function equipment(ctx:OrgContext,write=false){
  const id=str(ctx.body.workCenterId);
  if(!idRe.test(id))throw new HttpError(400,'Invalid equipment.');
@@ -44,7 +44,7 @@ async function energyContext(ctx:OrgContext,id:string,saved:Obj[]){
  const profile=(code:string)=>statutoryProfile(code,adoptedTests,attrs(code).map(a=>str(a.key)));
  const linked=utilities.map(u=>{
   const code=str(u.code),def=defs.get(code);
-  return {...ref(def||u),code,label:str(u.label)||str(def?.label)||code,category:str(def?.category)||'External utility',subcategory:str(def?.subcategory)||'Existing connection',
+  return {...ref(def||u),code,label:str(def?.label)||str(u.label)||code,category:str(def?.category)||'External utility',subcategory:str(def?.subcategory)||'Existing connection',
    linkedUtility:true,adopted:allowedExternal.has(code),profile:profile(code)};
  });
  const catalogue=[...internal.active.map(x=>({...ref(x),linkedUtility:false,adopted:true,profile:profile(str(x.code))})),...linked];
@@ -74,7 +74,7 @@ export const safEquipmentRoutes={
    if(x.linkedUtility){const issue=await utilityLinkIssue(ctx.orgId,node,context.utilityByCode.get(code)!,{attributes:context.attrs(code)});if(issue)issues.push(issue);}
    if(!str(x.tag)||!str(x.photoToken))issues.unshift('Tag and equipment photo');
    const status=issues.length?'incomplete':x.status==='documented'?'documented':'draft';
-   return {...x,pointId:pointIdOf(x,i),label:str(def.label)||str(x.label)||code,category:str(def.category)||'Unclassified',color:energyColor(def),values,tests:reports,status,issues,utilityAttrs:context.attrs(code).map(a=>({key:str(a.key),label:str(a.label),unit:str(a.unit)})),unadoptedInspections:candidateInspectionCodes(code).filter(c=>!context.adoptedTests.has(c)),url:tokenValid(ctx,id,str(x.photoToken))?await signedUrl(str(x.photoToken)):''};
+   return {...x,pointId:pointIdOf(x,i),label:str(def.label)||str(x.label)||code,category:str(def.category)||'Unclassified',color:str(def.color)||energyColor(def),hazardCategory:str(def.hazardCategory),hazardCodes:Array.isArray(def.hazardCodes)?def.hazardCodes:[],relatedHazards:Array.isArray(def.relatedHazards)?def.relatedHazards:[],values,tests:reports,status,issues,utilityAttrs:context.attrs(code).map(a=>({key:str(a.key),label:str(a.label),unit:str(a.unit)})),unadoptedInspections:candidateInspectionCodes(code).filter(c=>!context.adoptedTests.has(c)),url:tokenValid(ctx,id,str(x.photoToken))?await signedUrl(str(x.photoToken)):''};
   }));
   return {equipmentName:str(node.data.name),lotoPolicy:await lotoPolicy(ctx.orgId).then(({doc,...p})=>p),catalogue:context.catalogue,profiles:Object.fromEntries(context.rows.map(x=>[str(x.code),context.profile(str(x.code))])),items,utilityVersion:context.utilityVersion,version:Number(doc?.data.version)||0,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],

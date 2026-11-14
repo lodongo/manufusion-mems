@@ -174,7 +174,7 @@ export const utilityRoutes = {
                 const supply=valid&&asset&&def?publicSummary(supplySummary(asset,def,docs,id)):null;
                 const internal=isInternalUtilitySupply(row);
                 const complete=!!def&&allowed.has(str(row.code))&&(internal||valid&&(!supply?.determinant||!!supply.capacity&&!!positive(isObj(row.values)?row.values[supply.determinant.key]:null)));
-                return {...row,label:str(def?.label)||str(row.label),energyTag:str(energy?.tag),energyColor:energyColor(def||row),energyPointId:str(energy?.pointId),isInternalSupply:internal,supplyLinkRule:2,sourceAssetName:valid?str(asset?.data.name):'',sourceAssetStatus:valid?str(asset?.data.status):'',supply,configurationComplete:complete};
+                return {...row,label:str(def?.label)||str(row.label),energyTag:str(energy?.tag),energyColor:str(def?.color)||energyColor(def||row),energyPointId:str(energy?.pointId),isInternalSupply:internal,supplyLinkRule:2,sourceAssetName:valid?str(asset?.data.name):'',sourceAssetStatus:valid?str(asset?.data.status):'',supply,configurationComplete:complete};
             }));
             return { catalogue, items:enriched, configurationComplete:enriched.every(x=>x.configurationComplete),version:Number(doc?.data.version)||0 };
         }),

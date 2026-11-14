@@ -1,3 +1,4 @@
+import {loadSafetyHazardMaster} from './safHazardMaster';
 import { HttpError, getDoc, isObj, listDocs, nowIso, str, writeDoc } from './core';
 import { orgRoute } from './guards';
 import { PERMS, audited, requireAt } from './scopeGuard';
@@ -16,6 +17,7 @@ const base = (org: string, id: string) => `organizations/${org}/activity_risk_as
 const matrixPath = (org: string) => `organizations/${org}/saf/risk_matrix`;
 
 async function master(key: string) {
+    if(key==='hazards')return (await loadSafetyHazardMaster()).hazards;
     const doc = await getDoc(`module_workspaces/SAF/metadata/${key}`);
     return (Array.isArray(doc?.data.items) ? doc.data.items : []).filter(isObj);
 }

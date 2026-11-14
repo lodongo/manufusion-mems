@@ -1,3 +1,4 @@
+import {loadSafetyHazardMaster} from './safHazardMaster';
 import { HttpError, getDoc, isObj, listDocs, nowIso, str, writeDoc } from './core';
 import { orgRoute, type OrgContext } from './guards';
 import { seedModuleMetadata } from './moduleDefaults';
@@ -16,6 +17,7 @@ const path = (org: string, assembly: string, activity: string) => `organizations
 const matrixPath = (org: string) => `organizations/${org}/saf/risk_matrix`;
 
 async function master(key: string) {
+    if(key==='hazards')return (await loadSafetyHazardMaster()).hazards .filter(x=>x.active!==false).map(x=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description)}));
     const doc = await getDoc(`module_workspaces/SAF/metadata/${key}`);
     return (Array.isArray(doc?.data.items) ? doc.data.items : [])
         .filter(isObj)

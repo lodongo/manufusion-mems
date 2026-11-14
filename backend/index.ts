@@ -190,6 +190,7 @@ import {assemblyActivityRoutes} from './assemblyActivities';
 import {activityRiskRoutes} from './activityRisk';
 import {safEquipmentRoutes} from './safEquipment';
 import {categoryColor} from './safActivityClasses';
+import {loadSafetyHazardMaster} from './safHazardMaster';
 import {activityLegacyRoutes} from './activityRiskLegacy';
 import { safRiskRoutes } from './safRiskMatrix';
 import { safConfigurationRoutes } from './safConfiguration';
@@ -400,7 +401,7 @@ function metaListOut(doc: Doc) {
         key: doc.id,
         title: str(d.title),
         description: str(d.description),
-        items: (Array.isArray(d.items) ? d.items : []).filter(isObj).map((i) => ({ code: str(i.code), label: str(i.label), active: i.active !== false, color: doc.id==='hazards' ? categoryColor(str(i.category),isObj(d.categoryColors)?d.categoryColors:{}) : str(i.color), category: str(i.category), subcategory: str(i.subcategory), description: str(i.description), attributes: Array.isArray(i.attributes) ? i.attributes : [], selectable: i.selectable !== false, symbol: str(i.symbol), system: str(i.system), baseUnit: str(i.baseUnit), categoryCode: str(i.categoryCode), multiplier: num(i.multiplier) ?? 1 })),
+        items: (Array.isArray(d.items) ? d.items : []).filter(isObj).map((i) => ({ code: str(i.code), label: str(i.label), active: i.active !== false, color: doc.id==='hazards' ? categoryColor(str(i.category),isObj(d.categoryColors)?d.categoryColors:{}) : str(i.color), hazardCategory:str(i.hazardCategory),hazardCodes:Array.isArray(i.hazardCodes)?i.hazardCodes.map(str):[],relatedHazards:Array.isArray(i.relatedHazards)?i.relatedHazards:[],energySourceCode:str(i.energySourceCode), category: str(i.category), subcategory: str(i.subcategory), description: str(i.description), attributes: Array.isArray(i.attributes) ? i.attributes : [], selectable: i.selectable !== false, symbol: str(i.symbol), system: str(i.system), baseUnit: str(i.baseUnit), categoryCode: str(i.categoryCode), multiplier: num(i.multiplier) ?? 1 })),
         updatedAt: str(d.updatedAt),
     };
 }
@@ -1181,14 +1182,14 @@ export const handler = router(recordWiredRoutes({
             if (!workspace) return { workspace: null, files: [], metadata: [] };
             if (code === 'AST' || code === 'DOC' || code === 'SAF') await seedModuleMetadata(code);
             if(code==='SAF')await seedModuleMetadata('AST');
+            const unified=code==='SAF'||code==='AST'?await loadSafetyHazardMaster():null;
             const [files, metadata] = await Promise.all([listDocs(`module_workspaces/${code}/files`), listDocs(`module_workspaces/${code}/metadata`)]);
             return {
                 workspace: { ...workspace.data, code },
                 files: files.map((f) => ({ id: f.id, ...f.data })),
                 metadata: (await Promise.all(metadata.map(async m=>{
-                    if(code!=='SAF'||m.id!=='externalEnergySources')return metaListOut(m);
-                    const shared=await getDoc('module_workspaces/AST/metadata/utilitySupplies');
-                    return metaListOut(shared?{...m,data:{...m.data,items:shared.data.items,updatedAt:shared.data.updatedAt}}:m);
+                    const projected=unified&&(code==='SAF'&&m.id==='hazards'?unified.hazards:code==='SAF'&&m.id==='hazardousEnergy'?unified.internal:(code==='SAF'&&m.id==='externalEnergySources'||code==='AST'&&m.id==='utilitySupplies')?unified.external:null);
+                    return metaListOut(projected?{...m,data:{...m.data,items:projected}}:m);
                 }))).sort((a, b) => a.title.localeCompare(b.title)),
                 defaultsAvailable: pendingDefaultKeys(code, metadata),
             };
@@ -1204,7 +1205,7 @@ export const handler = router(recordWiredRoutes({
             const doc=await getDoc(path);
             if(!doc)throw new HttpError(404,'Hazards master not found.');
             const category=str(ctx.body.category),color=str(ctx.body.color);
-            if(!(Array.isArray(doc.data.items)?doc.data.items:[]).filter(isObj).some(x=>str(x.category)===category)||!/^#[0-9a-fA-F]{6}$/.test(color))throw new HttpError(400,'Choose a known hazard category and valid color.');
+            if(!(await loadSafetyHazardMaster()).hazards.some(x=>str(x.category)===category)||!/^#[0-9a-fA-F]{6}$/.test(color))throw new HttpError(400,'Choose a known hazard category and valid color.');
             const categoryColors={...(isObj(doc.data.categoryColors)?doc.data.categoryColors:{}),[category]:color.toUpperCase()};
             if(!(await writeDoc(path,{...doc.data,categoryColors,updatedAt:nowIso()},{updateTime:doc.updateTime})))throw new HttpError(409,'Master changed. Reload and retry.');
             await record(ctx,'admin','module.metadata.hazard_colors',category,color.toUpperCase());
@@ -1217,7 +1218,7 @@ export const handler = router(recordWiredRoutes({
             if (!/^[A-Z]{3}$/.test(code) || !(await getDoc(`module_workspaces/${code}`))) throw new HttpError(400, 'Initialise the module before adding metadata.');
             const raw = (isObj(ctx.body.list) ? ctx.body.list : {}) as Record<string, unknown>;
             const key = str(raw.key).trim();
-            if(code==='SAF'&&key==='externalEnergySources')throw new HttpError(400,'External energy uses the common AST utility supplies master; configure the shared master instead.');
+            if(code==='SAF'&&['hazards','hazardousEnergy','externalEnergySources'].includes(key))throw new HttpError(400,'This unified safety master is maintained through controlled catalogue updates and shared color configuration.');
             if (!/^[a-z][a-zA-Z0-9_]{1,39}$/.test(key)) throw new HttpError(400, 'The list key must start with a lower-case letter and use letters, numbers or underscores (2 to 40).');
             const title = text(raw, 'title', 2, 60, 'Enter a list title (2 to 60 characters).');
             const description = text(raw, 'description', 0, 300, 'Description can be up to 300 characters.');
@@ -1293,7 +1294,7 @@ export const handler = router(recordWiredRoutes({
         staff('admin.modules.metadata.delete', 'write', async (ctx) => {
             const code = str(ctx.body.code);
             const key = str(ctx.body.key);
-            if(code==='SAF'&&['externalEnergySources','statutoryInspections'].includes(key))throw new HttpError(400,'The controlled shared safety catalogue cannot be deleted. Use adoption instead.');
+            if(code==='SAF'&&['hazards','hazardousEnergy','externalEnergySources','statutoryInspections'].includes(key))throw new HttpError(400,'The controlled shared safety catalogue cannot be deleted. Use adoption instead.');
             if (!/^[A-Z]{3}$/.test(code) || !/^[a-z][a-zA-Z0-9_]{1,39}$/.test(key)) throw new HttpError(400, 'Invalid metadata list.');
             if ((code === 'INV' && (key === 'materialClassifications' || key === 'storageLocationTypes')) ||  (code === 'PRC' && (key === 'unitsOfMeasure' || STOCK_META_BY_KEY.has(key))) || (code === 'HRM' && key === 'skillsMaster')) throw new HttpError(400, 'This controlled reference list cannot be deleted. Disable individual entries instead.');
             await deleteDoc(`module_workspaces/${code}/metadata/${key}`);

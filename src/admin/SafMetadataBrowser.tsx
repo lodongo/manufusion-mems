@@ -9,7 +9,7 @@ import { Breadcrumb, DetailRow, DetailSheet, GroupList, type Crumb } from './bro
 // Browse Category → Subcategory → Entry (or every entry in one table) and tap an entry for its description.
 // Disabled entries are hidden unless "Include disabled" is on.
 
-type Item = { code: string; label: string; category?: string; subcategory?: string; description?: string; active?: boolean; color?:string };
+type Item = { code: string; label: string; category?: string; subcategory?: string; description?: string; active?: boolean; color?:string; hazardCategory?:string; hazardCodes?:string[]; relatedHazards?:{code:string;label:string}[];energySourceCode?:string };
 
 type View = 'browse' | 'all';
 
@@ -19,9 +19,10 @@ const plural = (n: number, word: string, many = `${word}s`) => `${n} ${n === 1 ?
 const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 export default function SafMetadataBrowser({ title, items, onCancel, canWrite=false, hazardColors=false }: { title: string; items: Item[]; onCancel: () => void; canWrite?:boolean; hazardColors?:boolean }) {
-    const [colors,setColors]=useState<Record<string,string>>(()=>Object.fromEntries(items.map(x=>[catOf(x),x.color||'#D97706'])));
+    const [colors,setColors]=useState<Record<string,string>>(()=>Object.fromEntries(items.map(x=>[x.hazardCategory||catOf(x),x.color||'#D97706'])));
+    const [savedColors,setSavedColors]=useState<Record<string,string>>({});
     const [saving,setSaving]=useState(false),[colorError,setColorError]=useState(''),[colorNotice,setColorNotice]=useState('');
-    const saveColor=async(c:string)=>{setSaving(true);setColorError('');setColorNotice('');try{await callBackend('/api/admin/modules/metadata/hazard-colors',{category:c,color:colors[c]});setColorNotice(c+' color saved.');}catch(e){setColorError(e instanceof Error?e.message:'Unable to save color.');}finally{setSaving(false);}};
+    const saveColor=async(c:string)=>{setSaving(true);setColorError('');setColorNotice('');try{await callBackend('/api/admin/modules/metadata/hazard-colors',{category:c,color:colors[c]});setSavedColors(old=>({...old,[c]:colors[c]}));setColorNotice(c+' color saved across all linked Safety and utility views.');}catch(e){setColorError(e instanceof Error?e.message:'Unable to save color.');}finally{setSaving(false);}};
     const [view, setView] = useState<View>('browse');
     const [category, setCategory] = useState('');
     const [subcategory, setSubcategory] = useState('');
@@ -57,9 +58,11 @@ export default function SafMetadataBrowser({ title, items, onCancel, canWrite=fa
     if (category) trail.push({ label: category, onClick: subcategory ? () => setSubcategory('') : undefined });
     if (subcategory) trail.push({ label: subcategory });
 
+    const colorOf=(x:Item)=>savedColors[x.hazardCategory||catOf(x)]||x.color||'';
     const columns: Array<Column<Item>> = [
         { key: 'code', label: 'Code', value: (x) => x.code, className: 'font-mono text-xs' },
-        { key: 'label', label: noun, value: (x) => x.label, className: 'font-semibold text-ink' },
+        { key: 'label', label: noun, value: (x) => x.label, className: 'font-semibold text-ink',render:x=><span>{colorOf(x)&&<span className='mr-2 inline-block h-3 w-3 rounded border border-line' style={{backgroundColor:colorOf(x)}}/>}{x.label}</span> },
+        ...(hazardColors?[{key:'hazardClassification',label:'Hazard classification',value:(x:Item)=>x.hazardCategory||catOf(x)}]:[]),
         { key: 'category', label: 'Category', value: catOf, hidden: view === 'browse' },
         { key: 'subcategory', label: 'Subcategory', value: subOf, hidden: view === 'browse' },
         { key: 'description', label: 'Description', value: (x) => x.description ?? '', className: 'text-muted' },
@@ -116,7 +119,7 @@ export default function SafMetadataBrowser({ title, items, onCancel, canWrite=fa
                 </div>
             }
         >
-            {hazardColors&&!category&&view==='browse'&&<div className='mb-3 space-y-3 rounded-xl border border-line bg-panel p-3'><p className='font-semibold text-ink'>Hazard category colors</p><p className='text-xs text-soft'>MEMS display palette inspired by international safety colors. These colors do not replace standardized signage or risk ratings.</p>{[...tree.keys()].sort().map(c=><div key={c} className='flex flex-wrap items-center gap-2 border-b border-line pb-2'><span className='min-w-0 flex-1 text-sm'>{c}</span><input aria-label={c+' color selector'} type='color' disabled={!canWrite} className='h-11 w-14 rounded-lg border border-line' value={/^#[0-9a-fA-F]{6}$/.test(colors[c]||'')?colors[c]:'#D97706'} onChange={e=>setColors(old=>({...old,[c]:e.target.value}))}/><input aria-label={c+' hex color'} disabled={!canWrite} className='w-24 rounded-lg border border-line bg-panel p-2 font-mono text-xs' value={colors[c]||''} onChange={e=>setColors(old=>({...old,[c]:e.target.value}))}/>{canWrite&&<Button variant='secondary' disabled={saving||!/^#[0-9a-fA-F]{6}$/.test(colors[c]||'')} onClick={()=>saveColor(c)}>Save</Button>}</div>)}{colorError&&<p role='alert' className='text-red-500'>{colorError}</p>}{colorNotice&&<p className='text-green-600'>{colorNotice}</p>}</div>}
+            {hazardColors&&!category&&view==='browse'&&<div className='mb-3 space-y-3 rounded-xl border border-line bg-panel p-3'><p className='font-semibold text-ink'>Shared hazard classification colors</p><p className='text-xs text-soft'>One color applies to the hazard classification and every linked energy source, utility and LOTO view. These are display colors, not physical lock or risk severity standards.</p>{[...new Set(filtered.map(x=>x.hazardCategory||catOf(x)))].sort().map(c=><div key={c} className='flex flex-wrap items-center gap-2 border-b border-line pb-2'><span className='min-w-0 flex-1 text-sm'>{c}</span><input aria-label={c+' color selector'} type='color' disabled={!canWrite} className='h-11 w-14 rounded-lg border border-line' value={/^#[0-9a-fA-F]{6}$/.test(colors[c]||'')?colors[c]:'#D97706'} onChange={e=>setColors(old=>({...old,[c]:e.target.value}))}/><input aria-label={c+' hex color'} disabled={!canWrite} className='w-24 rounded-lg border border-line bg-panel p-2 font-mono text-xs' value={colors[c]||''} onChange={e=>setColors(old=>({...old,[c]:e.target.value}))}/>{canWrite&&<Button variant='secondary' disabled={saving||!/^#[0-9a-fA-F]{6}$/.test(colors[c]||'')} onClick={()=>saveColor(c)}>Save</Button>}</div>)}{colorError&&<p role='alert' className='text-red-500'>{colorError}</p>}{colorNotice&&<p className='text-green-600'>{colorNotice}</p>}</div>}
             {filtered.length === 0 ? (
                 <Empty>{items.length ? `No enabled entries in this list.${emptyHint}` : 'This list has no entries yet.'}</Empty>
             ) : view === 'all' ? (
@@ -164,7 +167,7 @@ export default function SafMetadataBrowser({ title, items, onCancel, canWrite=fa
                         <p className='leading-relaxed text-ink'>{opened.description || 'No description configured.'}</p>
                         <div>
                             <DetailRow label='Category'>{catOf(opened)}</DetailRow>
-                            <DetailRow label='Subcategory'>{subOf(opened)}</DetailRow>
+                            <DetailRow label='Subcategory'>{subOf(opened)}</DetailRow>{hazardColors&&<DetailRow label='Shared hazard classification'>{opened.hazardCategory||catOf(opened)} · {colorOf(opened)}</DetailRow>}{opened.hazardCodes?.length?<div className='space-y-1'><p className='font-semibold text-ink'>Linked Hazards master references</p><p className='text-xs text-soft'>Source reference: {opened.energySourceCode||opened.code}. Additional candidate exposures must be assessed for the actual task.</p>{opened.relatedHazards?.map(h=><p key={h.code} className='text-xs text-soft'>{h.code} · {h.label}</p>)}</div>:null}
                             <DetailRow label='Status'>
                                 <Badge tone={opened.active === false ? 'danger' : 'brand'}>{opened.active === false ? 'Disabled' : 'Enabled'}</Badge>
                             </DetailRow>
