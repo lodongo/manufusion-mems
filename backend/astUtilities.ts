@@ -97,8 +97,8 @@ async function assetSupplies(ctx:OrgContext, defs:Obj[], adopted:Set<string>) {
     const docs=await listDocs('organizations/'+ctx.orgId+'/equipment_utilities');
     const linked=new Set(docs.flatMap(d=>rowsOf(d).filter(r=>r.sourceAssetTag===asset.id).map(r=>str(r.code))));
     const ratings=ratingsOf(asset);
-    const available=defs.filter(d=>adopted.has(str(d.code))||linked.has(str(d.code))||Object.hasOwn(ratings,str(d.code)));
-    const summaries=await Promise.all(available.filter(d=>linked.has(str(d.code))||Object.hasOwn(ratings,str(d.code))).map(async d=>{
+    const available=defs.filter(d=>adopted.has(str(d.code))||linked.has(str(d.code))||Object.prototype.hasOwnProperty.call(ratings,str(d.code)));
+    const summaries=await Promise.all(available.filter(d=>linked.has(str(d.code))||Object.prototype.hasOwnProperty.call(ratings,str(d.code))).map(async d=>{
         const s=supplySummary(asset,d,docs);
         const consumers=await Promise.all(s.connections.map(async c=>{
             if(!await allowedAt(ctx,PERMS.utilitiesView,c.workCenterId,'read')) return {name:'Restricted equipment',demand:c.demand};
