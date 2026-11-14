@@ -9,6 +9,7 @@ import {EquipmentEnergySources,ActivityClassRisks} from './SafEquipment';
 import EquipmentLoto from './EquipmentLoto';
 import EquipmentSafetyDevices from './EquipmentSafetyDevices';
 import EquipmentTasks from './EquipmentTasks';
+import TaskBasedRiskAssessment from './TaskBasedRiskAssessment';
 import ActivityRiskLegacy from './ActivityRiskLegacy';
 import ActivityRiskReview from './ActivityRiskReview';
 
@@ -20,6 +21,7 @@ const SECTIONS=[
  {key:'loto-program',label:'LOTO Program',hint:'Energy isolation register and locking responsibilities',color:'text-blue-500'},
  {key:'equipment-safety-devices',label:'Equipment Interlocks and Safety Devices',hint:'Register, tag and configure Short Intervention devices',color:'text-blue-500'},
  {key:'class-risk',label:'Task Class Risk Assessment',hint:'Adopted task classes and optional global risk assessments',color:'text-orange-400'},
+ {key:'task-based-risk',label:'Task Based Risk Assessment',hint:'Combined task and class risks · initial and residual risk matrix',color:'text-orange-400'},
  {key:'equipment-tasks',label:'Tasks',hint:'Existing task register · skills, permits and risk classification',color:'text-blue-500'},
 ] as const;
 type Panel=typeof SECTIONS[number]['key']|'activity-risk'|'activity-risk-review';
@@ -48,6 +50,7 @@ function HierarchyNode({id,routeBase}:{id:string;routeBase:string}){
    case 'loto-program':content=<EquipmentLoto workCenterId={workCenterId} onBack={back} onConfigure={()=>setPanel('hazardous-energy')}/>;break;
    case 'equipment-safety-devices':content=<EquipmentSafetyDevices workCenterId={workCenterId} onBack={back} onConfigure={()=>setPanel('short-intervention')}/>;break;
    case 'class-risk':content=<ActivityClassRisks workCenterId={workCenterId} onBack={back} onLegacy={()=>setPanel('activity-risk')}/>;break;
+   case 'task-based-risk':content=<TaskBasedRiskAssessment workCenterId={workCenterId} hierarchy={hierarchy} onBack={back}/>;break;
    case 'equipment-tasks':content=<EquipmentTasks workCenterId={workCenterId} onBack={back} allowCreate={false}/>;break;
    case 'activity-risk':content=<ActivityRiskLegacy workCenterId={workCenterId} hierarchy={hierarchy} onBack={()=>setPanel('class-risk')} onReview={()=>setPanel('activity-risk-review')}/>;break;
    case 'activity-risk-review':content=<ActivityRiskReview workCenterId={workCenterId} hierarchy={hierarchy} onBack={()=>setPanel('activity-risk')}/>;break;

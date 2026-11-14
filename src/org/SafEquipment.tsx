@@ -95,7 +95,7 @@ type RiskRow=TaskRiskRow;
 type SavedRow={hazard:string;impact:string;impactCodes?:string[];impactLabels?:string[];controls:string[];before:{ratings:Ratings};after:{ratings:Ratings;tolerability:string;score:number}};
 type ClassRecord={scope:string;screening:string;noExposure:boolean;permitCodes:string[];energyTags:string[];rows:SavedRow[];version:number;status:string};
 type ActivityClass={code:string;label:string;assessmentKind:string;requiredPermits:string[];permitAlternatives?:string[];description:string;adopted:boolean;record:ClassRecord|null};
-type ClassData={equipmentName:string;classes:ActivityClass[];catalogue:{hazards:Ref[];impacts:Ref[];controls:Ref[];permits:Ref[]};matrix:{factors:{code:string;label:string;max:number;enabled:boolean}[]}|null;energy:{tag:string;label:string}[];canEdit:boolean};
+type ClassData={equipmentName:string;classes:ActivityClass[];catalogue:{hazards:Ref[];impacts:Ref[];controls:Ref[];permits:Ref[]};matrix:import('./TaskRiskRows').TaskRiskMatrix;energy:{tag:string;label:string}[];canEdit:boolean};
 const toggle=(a:string[],v:string)=>a.includes(v)?a.filter(x=>x!==v):[...a,v];
 export function ActivityClassRisks({workCenterId,onBack,onLegacy}:{workCenterId:string;onBack:()=>void;onLegacy:()=>void}){
  const {data,error,loading,reload}=useLoad(()=>callBackend<ClassData>('/api/org/saf/activity-classes/read',{workCenterId}),[workCenterId]);const [code,setCode]=useState('');
