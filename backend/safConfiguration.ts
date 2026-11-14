@@ -33,8 +33,9 @@ export async function safetyCatalogue(orgId:string,key:Key){
  const raw=key==='externalEnergySources'?shared:entries(Array.isArray(master?.data.items)?master?.data.items:fallback?.items);
  const unified=['hazards','hazardousEnergy','externalEnergySources'].includes(key)?await loadSafetyHazardMaster():null;
  const items:Obj[]=unified?(key==='hazards'?unified.hazards:key==='hazardousEnergy'?unified.internal:unified.external):raw;
- const active=adoptedRecords(items,policy?.data.disabledCodes);
- return {key,title:str(master?.data.title)||fallback?.title||key,items,active,policy,version:Number(policy?.data.version)||0};
+ const merged=key==='activityClasses'?[...items.map(x=>{const def=entries(fallback?.items).find(d=>d.code===x.code);return def?{...x,label:def.label,description:def.description,requiredPermits:def.requiredPermits}:x;}),...entries(fallback?.items).filter(d=>!items.some(x=>x.code===d.code))]:items;
+ const active=adoptedRecords(merged,policy?.data.disabledCodes);
+ return {key,title:str(master?.data.title)||fallback?.title||key,items:merged,active,policy,version:Number(policy?.data.version)||0};
 }
 export async function effectiveSafetyItems(orgId:string,key:Key){return (await safetyCatalogue(orgId,key)).active;}
 const safeOption=(x:Obj)=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description),color:str(x.color),hazardCategory:str(x.hazardCategory),hazardCodes:Array.isArray(x.hazardCodes)?x.hazardCodes.map(str):[],energySourceCode:str(x.energySourceCode)});
@@ -57,7 +58,7 @@ export async function lotoPolicy(orgId:string){
 const profilePath=(orgId:string,code:string)=>root(orgId)+'/hazard_profile_'+code;
 const strings=(value:unknown):string[]=>Array.isArray(value)?[...new Set(value.filter(x=>typeof x==='string'))]:[];
 const localSelection=(value:Obj|undefined):ProfileSelection=>({disabledLayers:strings(value?.disabledLayers),disabledMeasures:strings(value?.disabledMeasures),disabledInjuries:strings(value?.disabledInjuries)});
-async function controlContext(orgId:string,code:string){
+export async function controlContext(orgId:string,code:string){
  const [hazards,hierarchy,measures,injuries,doc]=await Promise.all([safetyCatalogue(orgId,'hazards'),safetyCatalogue(orgId,'mitigationHierarchy'),safetyCatalogue(orgId,'hazardMitigations'),safetyCatalogue(orgId,'injuryNatures'),getDoc(profilePath(orgId,code))]);
  const hazard=hazards.items.find(h=>str(h.code)===code);
  if(!hazard)throw new HttpError(404,'Hazard master reference not found.');

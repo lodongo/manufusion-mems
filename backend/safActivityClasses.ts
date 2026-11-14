@@ -5,7 +5,7 @@ export const ACTIVITY_CLASSES = [
  ['AC03','Full LOTO','full',['SAF_08_01_003'],'Full hazardous energy isolation and verified zero energy. Requires LOTO permit planning.'],
  ['AC04','Line Breaking','full',['SAF_08_04_002'],'Process opening with approved isolation and residual energy controls.'],
  ['AC05','Working on Live Equipment','full',[],'Document why the work cannot be performed de-energized. Independent competent authorization appropriate to the actual energy and task is required; a risk record is not authorization.'],
- ['AC06','Partial Isolation','full',['SAF_08_01_003'],'Document remaining energy and applicable additional permits.'],
+ ['AC06','Partial LOTO','full',['SAF_08_01_003'],'Document remaining energy and applicable additional permits.'],
  ['AC07','Electrical Work','full',['SAF_08_01_001'],'Electrical work by competent authorized personnel.'],
  ['AC08','High Voltage Switching','full',['SAF_08_01_002'],'Approved switching plan and qualified authorization.'],
  ['AC09','Hot Work','full',[],'Select applicable hot-work permit(s) for the actual task.'],
@@ -21,6 +21,7 @@ export const ACTIVITY_CLASSES = [
  ['AC19','Work Near Traffic','full',['SAF_08_04_005'],'Traffic segregation and interface controls.'],
  ['AC20','Other Hazardous / Nonroutine Work','full',[],'Full assessment and applicable permit determination.'],
  ['AC21','Live Electrical Work','full',['SAF_08_01_004'],'Qualified independent assessment and energized electrical work authorization.'],
+ ['AC22','Operation With Inching','full',[],'Controlled limited motion only where technically necessary. Validate safeguarding and isolation of unrelated energy; independent review and applicable permit required.'],
 ] .map(([code,label,assessmentKind,requiredPermits,description])=>({code:code as string,label:label as string,assessmentKind:assessmentKind as string,requiredPermits:requiredPermits as string[],description:description as string,category:'Activity class',subcategory:assessmentKind as string,active:true,selectable:true}));
 // A grouped class requires at least one applicable permit, not an unrelated default.
 export const CLASS_PERMIT_ALTERNATIVES:Record<string,string[]> = {
