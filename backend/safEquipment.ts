@@ -109,6 +109,13 @@ export const safEquipmentRoutes={
   const items=await Promise.all(array(doc?.data.items).map(async r=>{const def=master.devices.find(d=>d.code===r.code),photoToken=str(r.photoToken),eligible=def?.shortEligible===true;return {...r,label:def?.label||str(r.label),category:def?.category||str(r.category),role:def?.role||'unknown',adopted:def?.adopted===true,shortEligible:eligible,url:devicePhotoValid(ctx,id,photoToken)?await signedUrl(photoToken):'',status:r.shortSelected===true?(eligible&&str(r.tag)&&photoToken&&str(r.procedure)?'documented_review_required':'incomplete_or_eligibility_withdrawn'):'registered'};}));
   return {equipmentName:str(node.data.name),equipmentCode:str(node.data.code),version:Number(doc?.data.version)||0,policyVersion:master.version,catalogue:master.devices.filter(d=>d.adopted),items,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],
+ 'POST /api/org/saf/equipment-devices/program-photo':[orgRoute('org.saf.equipment_devices.program_photo','SAF.view',async ctx=>{
+  const {id}=await equipment(ctx);await rateLimit('saf-program-photo',ctx.uid,240,3600);const deviceId=str(ctx.body.deviceId);
+  const doc=await getDoc(devicePath(ctx,id));const row=array(doc?.data.items).find(r=>r.deviceId===deviceId&&r.shortSelected===true);const token=str(row?.photoToken);
+  if(!row||!devicePhotoValid(ctx,id,token))throw new HttpError(404,'Program photo not found.');
+  const metadata=await getDoc(devicePath(ctx,id)+'/photos/'+token.slice(devicePhotoPrefix(ctx,id).length));if(metadata?.data.pointId!==deviceId)throw new HttpError(404,'Program photo not found.');
+  const bytes=await storage.read(token),image=detectImage(bytes);if(!image||bytes.length>1500000)throw new HttpError(400,'Invalid program photo.');return {data:bytes.toString('base64'),contentType:image.contentType};
+ })],
  'POST /api/org/saf/equipment-devices/photo':[orgRoute('org.saf.equipment_devices.photo','SAF.risk.assess',async ctx=>{
   const {id}=await equipment(ctx,true);await rateLimit('saf-device-photo',ctx.uid,60,3600);
   const data=str(ctx.body.data),pointId=str(ctx.body.deviceId);
