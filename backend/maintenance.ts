@@ -13,7 +13,7 @@ import { bypass } from './testModeCore';
 import { nextOrgCounter } from './positions';
 import { detectImage } from './branding';
 import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
-import { SAF_DEFAULT_LISTS } from './safDefaults';
+import { effectiveSafetyItems } from './safConfiguration';
 import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
 import { searchCatalog,serviceCatalogHierarchy } from './procurement';
@@ -790,19 +790,14 @@ async function orgUserMap(orgId: string) {
 }
 
 async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:AssessedTask[]){
-    const [energyDoc,permitDoc]=await Promise.all([
-        getDoc('module_workspaces/SAF/metadata/hazardousEnergy'),
-        getDoc('module_workspaces/SAF/metadata/permitTypes')
+    const [energies,permits,states]=await Promise.all([
+        effectiveSafetyItems(ctx.orgId,'hazardousEnergy'),effectiveSafetyItems(ctx.orgId,'permitTypes'),effectiveSafetyItems(ctx.orgId,'machineStatuses')
     ]);
-    const master=(doc:Doc|null,key:string)=>{
-        const defaults=SAF_DEFAULT_LISTS.find(x=>x.key===key);
-        return objs(Array.isArray(doc?.data.items)?doc?.data.items:defaults?.items)
-            .filter(x=>x.active!==false&&x.selectable!==false);
-    };
-    const energies=master(energyDoc,'hazardousEnergy'),permits=master(permitDoc,'permitTypes');
+    const statesSet=new Set(states.map(x=>str(x.code)));
     const energyIds=new Set(energies.map(e=>str(e.code))),permitIds=new Set(permits.map(e=>str(e.code)));
     const oldPaths=new Set(assessmentFiles(record.data.assessmentTasks));
     for(const task of tasks){
+        if(task.machineStatus&&!statesSet.has(task.machineStatus))throw new HttpError(400,'This machine status is not enabled in organization Safety. Select an adopted status.');
         if(task.energySourceCodes?.some(code=>!energyIds.has(code)))
             throw new HttpError(400,'Choose hazardous energy sources from the active SAF list.');
         if(task.permitCodes?.some(code=>!permitIds.has(code)))
@@ -810,15 +805,17 @@ async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:Assesse
         if(task.lotoRequired){
             if(!task.energySourceCodes?.every(code=>task.risk.some(r=>r.energyCode===code)))
                 throw new HttpError(400,'Complete risk assessment for every selected LOTO hazardous energy source.');
-            const lotoPermit=permits.find(x=>/loto|lock.?out|isolation/i.test(str(x.label)));
-            if(lotoPermit&&!task.permitCodes?.includes(str(lotoPermit.code)))
+            const lotoPermit=permits.find(x=>str(x.code)==='SAF_08_01_003')||permits.find(x=>/loto|lock.?out/i.test(str(x.label)));
+            if(!lotoPermit)throw new HttpError(400,'LOTO is not available: enable the LOTO isolation permit in organization Safety before planning this hazardous work.');
+            if(!task.permitCodes?.includes(str(lotoPermit.code)))
                 throw new HttpError(400,'Add the SAF LOTO isolation permit for this task.');
         }
         if(task.liveEquipment){
             if(!task.risk.some(r=>r.energyCode==='LIVE_EQUIPMENT'))
                 throw new HttpError(400,'Assess live-equipment hazards and mitigation for this task.');
-            const livePermit=permits.find(x=>/live/i.test(str(x.label)));
-            if(livePermit&&!task.permitCodes?.includes(str(livePermit.code)))
+            const livePermit=permits.find(x=>str(x.code)==='SAF_08_01_004')||permits.find(x=>/live/i.test(str(x.label)));
+            if(!livePermit)throw new HttpError(400,'Live work is not available: enable the applicable live-work permit in organization Safety; do not proceed without authorization.');
+            if(!task.permitCodes?.includes(str(livePermit.code)))
                 throw new HttpError(400,'Add the SAF live work permit for this task.');
         }
         for(const file of assessmentFiles([task])){
@@ -1068,17 +1065,12 @@ export const maintenanceRoutes = {
             requireMnt(ctx);
             const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
             const serviceVendors=vendors.filter(d=>str(d.data.status)==='approved'&&objs(d.data.scopes).some(x=>str(x.kind)==='service'));
-            const [riskDoc,serviceHierarchy,energyDoc,permitsDoc]=await Promise.all([
+            const [riskDoc,serviceHierarchy,energy,permits,machineStates,hazards,impacts,controls]=await Promise.all([
                 getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`),serviceCatalogHierarchy(),
-                getDoc('module_workspaces/SAF/metadata/hazardousEnergy'),
-                getDoc('module_workspaces/SAF/metadata/permitTypes')]);
-            const safetyOptions=(doc:Doc|null,key:string)=> {
-                const defaults=SAF_DEFAULT_LISTS.find(l=>l.key===key);
-                const records=Array.isArray(doc?.data.items)?objs(doc?.data.items):objs(defaults?.items);
-                return records.filter(v=>v.active!==false&&v.selectable!==false)
-                    .map(v=>({code:str(v.code),label:str(v.label),category:str(v.category),subcategory:str(v.subcategory)}))
-                    .filter(v=>v.code&&v.label);
-            };
+                effectiveSafetyItems(ctx.orgId,'hazardousEnergy'),effectiveSafetyItems(ctx.orgId,'permitTypes'),
+                effectiveSafetyItems(ctx.orgId,'machineStatuses'),effectiveSafetyItems(ctx.orgId,'hazards'),
+                effectiveSafetyItems(ctx.orgId,'impacts'),effectiveSafetyItems(ctx.orgId,'controlMeasures')]);
+            const safetyOptions=(records:Obj[])=>records.map(v=>({code:str(v.code),label:str(v.label),category:str(v.category),subcategory:str(v.subcategory),description:str(v.description)})).filter(v=>v.code&&v.label);
             const code=str(ctx.body.code);
             const record=WO_RE.test(code)?await getWo(ctx,code):WR_RE.test(code)?await getWr(ctx,code):null;
             const equipmentOptions=[];
@@ -1091,8 +1083,9 @@ export const maintenanceRoutes = {
             }
             return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),photos,serviceHierarchy,
                 maintenanceTypes:flat(await rawList('maintenanceTypes')),vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
-                hazardousEnergy:safetyOptions(energyDoc,'hazardousEnergy'),
-                safetyPermits:safetyOptions(permitsDoc,'permitTypes'),
+                hazardousEnergy:safetyOptions(energy),
+                safetyPermits:safetyOptions(permits),
+                machineStatuses:safetyOptions(machineStates),safetyHazards:safetyOptions(hazards),safetyImpacts:safetyOptions(impacts),safetyControls:safetyOptions(controls),
                 riskMatrix:riskDoc?.data?.configuration||defaultMaintenanceRiskMatrix};
         })
     ],

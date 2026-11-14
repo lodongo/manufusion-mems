@@ -10,8 +10,8 @@ type Spare={id:string;source:'warehouse'|'material'|'catalog'|'description';mate
 type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;instructions?:string;certifications?:string;personnel?:number;durationHours?:number;executionDate?:string;supplierCategory?:string;attachments?:string[]};
 type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;energyCode?:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;exposedPersonnel?:string;responsiblePerson?:string;precautions?:string};
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
-type SafetyOption={code:string;label:string;category:string;subcategory:string};
-type Options={maintenanceTypes?:Array<{code:string;label:string}>;serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
+type SafetyOption={code:string;label:string;category:string;subcategory:string;description?:string};
+type Options={maintenanceTypes?:Array<{code:string;label:string}>;serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];machineStatuses?:SafetyOption[];safetyHazards?:SafetyOption[];safetyImpacts?:SafetyOption[];safetyControls?:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
 export type TaskAssessment={id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
 export type MachineStatus='total_shutdown'|'live'|'full_loto'|'partial_isolation';
 export const MACHINE_STATUS:Array<[MachineStatus,string,string]>=[
@@ -325,11 +325,12 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    {step===4&&<>
     <StepSection title='Machine status during execution' hint='Sets isolation or live work, and adds the required permits and hazards automatically.'>
      <div role='radiogroup' aria-label='Machine status during execution' className='grid gap-2 sm:grid-cols-2'>
-      {MACHINE_STATUS.map(([value,title,detail])=>{const on=machineOf(task)===value;return <button key={value} type='button' role='radio' aria-checked={on} onClick={()=>setMachine(value)}
+      {MACHINE_STATUS.filter(([value])=>!options.data?.machineStatuses||options.data.machineStatuses.some(x=>x.code===value)).map(([value,title,detail])=>{const on=machineOf(task)===value;return <button key={value} type='button' role='radio' aria-checked={on} onClick={()=>setMachine(value)}
         className={'min-h-16 rounded-xl border p-3 text-left '+(on?'border-brand bg-brand/10':'border-line bg-page')}>
         <span className='block text-sm font-semibold text-ink'>{title}</span><span className='mt-0.5 block text-xs text-soft'>{detail}</span></button>;})}
      </div>
      <div className='mt-2 space-y-2'>
+      {options.data?.machineStatuses&&!options.data.machineStatuses.some(x=>x.code===machineOf(task))&&<Alert tone='error'>The current machine status is disabled by organization Safety. Select an adopted status before saving.</Alert>}
       {task.lotoRequired&&<div className='space-y-2 rounded-xl border border-amber-400/40 bg-amber-400/5 p-3'>
         <p className='text-sm font-semibold text-ink'>LOTO: hazardous energy sources to isolate (SAF master)</p>
         <input type='search' className={input} placeholder='Filter SAF energy sources (optional)' value={energySearch} onChange={e=>setEnergySearch(e.target.value)}/>
@@ -337,7 +338,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
          <p className='mt-3 text-xs font-semibold uppercase tracking-wide text-brand'>{cat}</p>
          <div className='mt-1 grid gap-1.5 sm:grid-cols-2'>{options.data?.hazardousEnergy.filter(x=>(x.category||'Other')===cat&&(x.label.toLowerCase().includes(energySearch.toLowerCase())||x.code.toLowerCase().includes(energySearch.toLowerCase()))).map(x=><ChoiceChip key={x.code} checked={(task.energySourceCodes||[]).includes(x.code)} onToggle={()=>toggleEnergy(x.code,!(task.energySourceCodes||[]).includes(x.code))}>{x.label}</ChoiceChip>)}</div>
         </div>)}
-        {options.data?.hazardousEnergy.length===0&&<Alert tone='error'>No hazardous energy sources configured in the SAF master. Contact MEMS Admin.</Alert>}
+        {options.data?.hazardousEnergy.length===0&&<Alert tone='error'>No hazardous energy sources adopted in organization Safety. Contact your Safety administrator.</Alert>}
        </div>}
       {task.liveEquipment&&<p className='rounded-xl border border-amber-400/40 bg-amber-400/5 p-3 text-sm text-amber-400'>Live work requires an independent hazard assessment and SAF-authorized live-work permit. Confirm controls before execution.</p>}
      </div>
@@ -350,11 +351,12 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
       return <ChoiceChip key={x.code} checked={on} onToggle={()=>{if(locked)return;patch({permitCodes:on?(task.permitCodes||[]).filter(code=>code!==x.code):[...(task.permitCodes||[]),x.code]});}}>{x.label}{locked?' (required)':''}</ChoiceChip>;
      })}</div>
     </StepSection>
-    <StepSection title='Task hazards and mitigation (SAF risk matrix)' hint='Hazards from selected energy sources and live work are added automatically. Complete impact, controls and risk ratings before saving.'>
+    <StepSection title='Task hazards and mitigation (SAF risk matrix)' hint='Adopted SAF master hazards and impacts are offered as suggestions. Assess actual hazards and complete controls and ratings before saving.'>
+     <datalist id='saf-task-hazards'>{options.data?.safetyHazards?.map(x=><option key={x.code} value={x.label}/>)}</datalist><datalist id='saf-task-impacts'>{options.data?.safetyImpacts?.map(x=><option key={x.code} value={x.label}/>)}</datalist>
      <div className='space-y-2'>
       {task.risk.map((risk,i)=><div key={i} className='space-y-2 rounded-xl border border-line bg-page p-3'>
-        <label className={label}>Hazard<input className={input} value={risk.hazard} readOnly={!!risk.energyCode} onChange={e=>patch({risk:task.risk.map((x,j)=>i===j?{...x,hazard:e.target.value}:x)})}/></label>
-        <label className={label}>Potential impact<input className={input} value={risk.impact} onChange={e=>patch({risk:task.risk.map((x,j)=>i===j?{...x,impact:e.target.value}:x)})}/></label>
+        <label className={label}>Hazard<input list='saf-task-hazards' className={input} value={risk.hazard} readOnly={!!risk.energyCode} onChange={e=>patch({risk:task.risk.map((x,j)=>i===j?{...x,hazard:e.target.value}:x)})}/></label>
+        <label className={label}>Potential impact<input list='saf-task-impacts' className={input} value={risk.impact} onChange={e=>patch({risk:task.risk.map((x,j)=>i===j?{...x,impact:e.target.value}:x)})}/></label>
         <label className={label}>Mitigations<textarea rows={2} className={input} value={risk.controls} onChange={e=>patch({risk:task.risk.map((x,j)=>i===j?{...x,controls:e.target.value}:x)})}/></label>
         {(['beforeRatings','afterRatings'] as const).map(kind=><div key={kind}>
          <p className='text-xs font-semibold text-ink'>{kind==='beforeRatings'?'Before mitigation':'After mitigation'}</p>

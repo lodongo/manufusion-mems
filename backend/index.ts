@@ -190,6 +190,7 @@ import {assemblyActivityRoutes} from './assemblyActivities';
 import {activityRiskRoutes} from './activityRisk';
 import {activityLegacyRoutes} from './activityRiskLegacy';
 import { safRiskRoutes } from './safRiskMatrix';
+import { safConfigurationRoutes } from './safConfiguration';
 
 const RATES_URL = 'https://open.er-api.com/v6/latest/USD';
 const RATES_SOURCE = 'ExchangeRate-API (open.er-api.com)';
@@ -1176,7 +1177,7 @@ export const handler = router(recordWiredRoutes({
             if (!/^[A-Z]{3}$/.test(code)) throw new HttpError(400, 'Invalid module code.');
             const workspace = await getDoc(`module_workspaces/${code}`);
             if (!workspace) return { workspace: null, files: [], metadata: [] };
-            if (code === 'AST' || code === 'DOC') await seedModuleMetadata(code);
+            if (code === 'AST' || code === 'DOC' || code === 'SAF') await seedModuleMetadata(code);
             const [files, metadata] = await Promise.all([listDocs(`module_workspaces/${code}/files`), listDocs(`module_workspaces/${code}/metadata`)]);
             return {
                 workspace: { ...workspace.data, code },
@@ -1696,5 +1697,6 @@ export const handler = router(recordWiredRoutes({
     ...activityRiskRoutes,
     ...activityLegacyRoutes,
     ...safRiskRoutes,
+    ...safConfigurationRoutes,
 }));
 
