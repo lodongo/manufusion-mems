@@ -50,7 +50,11 @@ test('class assessments do not duplicate task decision-tree notes; legacy notes 
  assert.ok(!api.includes('Describe the applicable activity and limits.'));
  assert.ok(!api.includes('Document the intervention limits, required verification and stop-work criteria.'));
  assert.ok(api.includes('No Risk requires documented screening'));
- assert.ok(api.includes('Add at least one hazard assessment.'));
+ assert.ok(!api.includes('Add at least one hazard assessment.'));
+ assert.ok(api.includes("if(raw.length&&!meetsClassPermitMinimum(code,permitCodes))"));
+ assert.ok(ui.includes('Save task class'));
+ assert.ok(ui.includes('||[]'));
+ assert.ok(ui.includes('rows.length>0&&(!data.matrix'));
  assert.ok(api.includes('meetsClassPermitMinimum(code,permitCodes)'));
  assert.ok(task.includes('taskDecisionPath'));
 });

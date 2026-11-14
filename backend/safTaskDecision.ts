@@ -66,3 +66,9 @@ export function backTaskQuestion(a:Answers):Answers{
 export const TASK_ADDITIONAL_CLASSES=['AC04','AC07','AC08','AC09','AC10','AC11','AC12','AC13','AC14','AC15','AC16','AC17','AC18','AC19','AC20','AC21'];
 export const EXECUTOR_TYPES=['Operator','Technical operator','Mechanical technician','Electrical / automation technician','Shift specialist','Engineer','Maintenance supervisor','Authorized specialist','External service provider','Multi-disciplinary team'];
 export const TASK_PLAN_STATES=['isolate','retained','not_applicable'];
+
+// Optional class-level risk records never block task configuration. A risk-bearing
+// task without risk coverage remains pending and is not an authorization to execute.
+export function taskRiskAssessmentPending(code:string,ownRows:number,hasGlobalRisks:boolean,noAdditionalRisks:boolean):boolean{
+ return !!code&&code!=='AC01'&&ownRows===0&&!(hasGlobalRisks&&noAdditionalRisks);
+}

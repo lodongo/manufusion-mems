@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {decideTask,questionsFor,taskDecisionPath,answerTaskQuestion,backTaskQuestion} from '../../backend/safTaskDecision.ts';
+import {decideTask,questionsFor,taskDecisionPath,answerTaskQuestion,backTaskQuestion,taskRiskAssessmentPending} from '../../backend/safTaskDecision.ts';
 import {ACTIVITY_CLASSES} from '../../backend/safActivityClasses.ts';
 const base={routine:'yes',stop:'yes',body:'no',door:'no',moving:'no',otherExposure:'no',nonEnergy:'no',inching:'no',minorProtected:'no',loss:'no',infeasible:'no',partial:'no'};
 test('task decision protects against false no-risk and economic override',()=>{
@@ -36,4 +36,22 @@ test('wizard exposes a single unanswered question and terminal result ignores st
  a=backTaskQuestion(terminal);assert.equal(taskDecisionPath(a).next[0],'inching');assert.equal(a.inching,undefined);
  a=answerTaskQuestion(a,'inching','no');assert.equal(taskDecisionPath(a).next[0],'nonEnergy');
  a=answerTaskQuestion(a,'nonEnergy','no');assert.equal(taskDecisionPath(a).decision.code,'AC01');assert.equal(taskDecisionPath(a).next,null);
+});
+
+
+test('global class assessments are optional; task coverage remains independently reviewable',()=>{
+ assert.equal(taskRiskAssessmentPending('AC02',1,false,false),false);
+ assert.equal(taskRiskAssessmentPending('AC02',0,true,true),false);
+ assert.equal(taskRiskAssessmentPending('AC02',0,true,false),true);
+ assert.equal(taskRiskAssessmentPending('AC02',0,false,true),true);
+ assert.equal(taskRiskAssessmentPending('AC02',0,false,false),true);
+ assert.equal(taskRiskAssessmentPending('AC01',0,false,false),false);
+ const api=readFileSync('backend/safEquipment.ts','utf8');
+ const ui=readFileSync('src/org/EquipmentTasks.tsx','utf8');
+ assert.ok(!api.includes('baselineComplete'));
+ assert.ok(!ui.includes('Complete missing class assessments'));
+ assert.ok(api.includes('task_assessment_pending'));
+ assert.ok(api.includes('executionAuthorized:false'));
+ assert.ok(api.includes('inherited.has(h)||seen.has(h)'));
+ assert.ok(ui.includes('Save task (assessment pending)'));
 });

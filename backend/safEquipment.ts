@@ -12,7 +12,7 @@ import {statutoryProfile,mergeUtilityEnergy,utilityDefinition,candidateInspectio
 import {utilityLinkIssue} from './astUtilities';
 import {energyColor} from './safEnergyColors';
 import {profileAdoption} from './safHazardControlLibrary';
-import {taskDecisionPath,TASK_ADDITIONAL_CLASSES,EXECUTOR_TYPES,TASK_PLAN_STATES} from './safTaskDecision';
+import {taskDecisionPath,TASK_ADDITIONAL_CLASSES,EXECUTOR_TYPES,TASK_PLAN_STATES,taskRiskAssessmentPending} from './safTaskDecision';
 import {injuryCodes,combinedControlCodes} from './safInjurySelection';
 const idRe=/^[A-Za-z0-9_-]{1,120}$/;
 const array=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
@@ -192,12 +192,13 @@ export const safEquipmentRoutes={
    if(['AC05','AC22'].includes(decision.code)&&energy.length&&!plan.some(p=>p.state==='retained'))throw new HttpError(400,'Identify the technically necessary retained energy.');
   }
   const baseline=await Promise.all(classCodes.map(c=>taskClassBaseline(ctx,id,c)));
-  const baselineComplete=baseline.every(b=>b.version>0&&b.status==='recorded');
   const noAdditionalRisks=ctx.body.noAdditionalRisks===true;
   const raw=ctx.body.rows;
   if(!Array.isArray(raw))throw new HttpError(400,'Invalid risk rows.');
   if(decision.code==='AC01'&&(raw.length||permitCodes.length||plan.some(x=>x.state!=='not_applicable')))throw new HttpError(400,'No Risk conflicts with recorded hazards, permits or energy intervention. Re-screen.');
-  if(decision.code!=='AC01'&&!raw.length&&!(baselineComplete&&baseline.some(b=>b.rows.length>0)&&noAdditionalRisks))throw new HttpError(400,'Add a task-specific hazard assessment, or confirm no additional risks beyond the recorded class assessments.');
+  const hasGlobalRisks=baseline.some(b=>b.rows.length>0);
+  if(decision.code!=='AC01'&&noAdditionalRisks&&!hasGlobalRisks)throw new HttpError(400,'No global risks are recorded; assess applicable activity-specific risks or save with assessment pending.');
+  const assessmentPending=taskRiskAssessmentPending(decision.code,raw.length,hasGlobalRisks,noAdditionalRisks);
   if(raw.length&&noAdditionalRisks)throw new HttpError(400,'Additional risks and no-additional-risks confirmation conflict.');
   if(baseline.some(b=>b.permitCodes.some(c=>!permitCodes.includes(c))))throw new HttpError(400,'Retain the class-level permit requirements or correct the class assessment.');
   const inherited=new Set(baseline.flatMap(b=>b.rows.flatMap(r=>Array.isArray(r.hazardCodes)?stringList(r.hazardCodes):[str(r.hazard)])));
@@ -207,7 +208,7 @@ export const safEquipmentRoutes={
   const n=requested?0:await nextSequence('equipmentTask');
   if(!requested&&n>999999999)throw new HttpError(409,'Task sequence exhausted.');
   const taskId=requested||'TSK_'+String(n).padStart(9,'0');
-  const status=rows.some(r=>r.after.tolerability==='Intolerable')||baseline.some(b=>b.status==='intolerable')?'intolerable':(!energy.length||energy.some(e=>!e.tag))&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':!baselineComplete?'class_assessment_incomplete':'review_required';
+  const status=rows.some(r=>r.after.tolerability==='Intolerable')||baseline.some(b=>b.status==='intolerable')?'intolerable':(!energy.length||energy.some(e=>!e.tag))&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':assessmentPending?'task_assessment_pending':'review_required';
   const next={taskId,workCenterId:id,name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
   if(!(await writeDoc(col+'/'+taskId,next,old?{updateTime:old.updateTime}:{exists:false})))throw new HttpError(409,'Task changed. Reload.');
   await audited(ctx,'saf.equipment_task.save',id,{taskId,version:version+1,classCodes,status});
@@ -345,18 +346,17 @@ export const safEquipmentRoutes={
   const has=(a:Obj[],c:string)=>a.some(x=>str(x.code)===c);
   if(permitCodes.some(c=>!has(permits,c)))throw new HttpError(400,'Select only adopted permits.');
   // A class only sets a minimum. It cannot authorize work or exempt actual hazards.
-  if(!meetsClassPermitMinimum(code,permitCodes))throw new HttpError(400,'The class requires its adopted permit(s); select the applicable permit or enable missing permit types in Safety.');
   const energyTags=stringList(ctx.body.energyTags);
   const currentEnergy=(await energyContext(ctx,id,array(energyDoc?.data.items))).rows;
   if(energyTags.some(t=>!currentEnergy.some(x=>str(x.tag)===t)))throw new HttpError(400,'Unknown equipment energy tag.');
   const screening=cl.assessmentKind==='screening'?str(ctx.body.screening).trim().slice(0,3000):str(old?.data.screening);
   const raw=ctx.body.rows;
   if(!Array.isArray(raw)||raw.length>100||array(raw).length!==raw.length)throw new HttpError(400,'Invalid risk rows.');
-  if(cl.assessmentKind==='screening'&&(ctx.body.noExposure!==true||screening.length<20||raw.length||permitCodes.length||energyTags.length))throw new HttpError(400,'No Risk requires documented screening with no credible exposure. If there is a hazard, choose a risk-bearing class.');
-  if(cl.assessmentKind!=='screening'&&!raw.length)throw new HttpError(400,'Add at least one hazard assessment.');
+  if(cl.assessmentKind==='screening'&&(raw.length||permitCodes.length||energyTags.length||((ctx.body.noExposure===true||!!screening)&&(ctx.body.noExposure!==true||screening.length<20))))throw new HttpError(400,'No Risk requires documented screening when a screening is recorded, with no credible exposure. If there is a hazard, choose a risk-bearing class.');
+  if(raw.length&&!meetsClassPermitMinimum(code,permitCodes))throw new HttpError(400,'The class requires its adopted permit(s) when recording global risks.');
   const matrix=matrixDoc?.data.configuration as unknown as RiskMatrix;
   const rows=await scoreHazardRows(ctx,raw,matrix,array(old?.data.rows));
-  const status=rows.some(r=>r.after.tolerability==='Intolerable')?'intolerable':'recorded';
+  const status=rows.some(r=>r.after.tolerability==='Intolerable')?'intolerable':rows.length||cl.assessmentKind==='screening'&&ctx.body.noExposure===true?'recorded':'not_assessed';
   const ok=await writeDoc(path,{classCode:code,scope,screening,noExposure:ctx.body.noExposure===true,permitCodes,energyTags,rows,status,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid},old?{updateTime:old.updateTime}:{exists:false});
   if(!ok)throw new HttpError(409,'Assessment changed. Reload.');
   await audited(ctx,'saf.activity_class_risk.save',id,{classCode:code,version:version+1,status});
