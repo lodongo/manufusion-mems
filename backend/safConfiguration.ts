@@ -76,7 +76,7 @@ export const safConfigurationRoutes={
   if(Number(ctx.body.version)!==c.version)throw new HttpError(409,'Hazard adoption changed. Reload.');
   const validate=(key:string,known:ReadonlySet<string>)=>{const v=ctx.body[key];if(!Array.isArray(v)||v.length>1000||v.some(x=>typeof x!=='string'||!known.has(x)))throw new HttpError(400,'Unknown '+key+' reference.');return strings(v);};
   const disabledLayers=validate('disabledLayers',new Set(c.profile.layers.map(x=>x.code)));
-  const disabledMeasures=validate('disabledMeasures',new Set(c.profile.layers.flatMap(x=>x.measures.map(m=>m.code))));
+  const disabledMeasures=validate('disabledMeasures',new Set(c.profile.layers.flatMap(x=>x.measures.filter(m=>!m.guidance).map(m=>m.code))));
   const disabledInjuries=validate('disabledInjuries',new Set(c.profile.injuries.map(x=>x.code)));
   const reason=str(ctx.body.reason).trim().slice(0,500);if(reason.length<10)throw new HttpError(400,'Explain the adoption change.');
   const selection={disabledLayers,disabledMeasures,disabledInjuries};
