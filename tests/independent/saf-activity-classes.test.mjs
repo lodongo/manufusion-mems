@@ -20,7 +20,9 @@ test('equipment energy and activity class screens enforce adopted codes and main
  const api=readFileSync('backend/safEquipment.ts','utf8');
  const ui=readFileSync('src/org/StructurePage.tsx','utf8');
  assert.ok(api.includes("effectiveSafetyItems(ctx.orgId,'activityClasses')"));
- assert.ok(api.includes("effectiveSafetyItems(ctx.orgId,'hazardousEnergy')"));
+ assert.ok(api.includes("safetyCatalogue(ctx.orgId,'hazardousEnergy')"));
+ assert.ok(api.includes('internal.active.map'));
+ assert.ok(api.includes('const source=known.get(code)')||api.includes('source=known.get(code)'));
  assert.ok(api.includes('Add a photo for each energy point'));
  assert.ok(api.includes('No Risk requires documented screening'));
  assert.ok(api.includes('equipment_activity_class_risks'));
