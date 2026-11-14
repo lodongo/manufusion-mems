@@ -56,7 +56,7 @@ async function permitContext(orgId:string,code:string){
 }
 export async function lotoPolicy(orgId:string){
  const doc=await getDoc(root(orgId)+'/loto_policy');
- return {mode:str(doc?.data.mode),version:Number(doc?.data.version)||0,updatedAt:str(doc?.data.updatedAt),doc};
+ return {mode:str(doc?.data.mode),minimumShortMethods:Math.max(1,Math.min(20,Number(doc?.data.minimumShortMethods)||2)),countRepeatedMethods:doc?.data.countRepeatedMethods===true,version:Number(doc?.data.version)||0,updatedAt:str(doc?.data.updatedAt),doc};
 }
 const profilePath=(orgId:string,code:string)=>root(orgId)+'/hazard_profile_'+code;
 const strings=(value:unknown):string[]=>Array.isArray(value)?[...new Set(value.filter(x=>typeof x==='string'))]:[];
@@ -98,7 +98,9 @@ export const safConfigurationRoutes={
   if(!['group_box','individual_points'].includes(mode))throw new HttpError(400,'Select the approved lockout method.');
   if(Number(ctx.body.version)!==old.version)throw new HttpError(409,'LOTO policy changed. Reload.');
   const reason=str(ctx.body.reason).trim().slice(0,500);if(reason.length<10)throw new HttpError(400,'Record the reason for the configuration.');
-  const next={mode,version:old.version+1,updatedAt:nowIso(),updatedBy:ctx.uid,reason};
+  const minimumShortMethods=ctx.body.minimumShortMethods===undefined?old.minimumShortMethods:Number(ctx.body.minimumShortMethods);if(!Number.isInteger(minimumShortMethods)||minimumShortMethods<1||minimumShortMethods>20)throw new HttpError(400,'Minimum Short Intervention methods must be 1–20.');
+  const countRepeatedMethods=ctx.body.countRepeatedMethods===undefined?old.countRepeatedMethods:ctx.body.countRepeatedMethods===true;
+  const next={mode,minimumShortMethods,countRepeatedMethods,version:old.version+1,updatedAt:nowIso(),updatedBy:ctx.uid,reason};
   if(!await writeDoc(root(ctx.orgId)+'/loto_policy',next,old.doc?{updateTime:old.doc.updateTime}:{exists:false}))throw new HttpError(409,'Policy changed. Reload.');
   await audited(ctx,'saf.loto.setup.save','loto_policy',next);return {ok:true};
  })],
