@@ -25,6 +25,8 @@ interface Entry {
     isInternalSupply?: boolean;
     supplyLinkRule?: number;
     sourceAssetTag?: string;
+    energyTag?: string;
+    energyColor?: string;
     sourceAssetName?: string;
     sourceAssetStatus?: string;
     configurationComplete?: boolean;
@@ -337,13 +339,13 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
                                     aria-label={def ? `Edit ${e.label}` : `${e.label} (not in catalogue)`}
                                     className='flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-xl px-2 text-left active:bg-page disabled:opacity-80'
                                 >
-                                    <Zap className='h-5 w-5 shrink-0 text-brandsoft' />
+                                    <Zap className='h-5 w-5 shrink-0 text-brandsoft' style={e.energyColor?{color:e.energyColor}:undefined} />
                                     <span className='min-w-0 flex-1'>
                                         <span className='flex flex-wrap items-center gap-2 font-semibold text-ink'>
                                             {e.label}
                                             {!def && <Badge tone='warn'>Not in catalogue</Badge>}
                                         </span>
-                                        <span className='block text-xs text-muted'>{text || 'No values recorded'}</span>
+                                        <span className='block text-xs text-muted'>{text || 'No values recorded'}</span><span className='block text-xs text-soft'>{e.energyColor&&<span className='mr-1 inline-block h-3 w-3 rounded border border-line' style={{backgroundColor:e.energyColor}}/>}Isolation tag: {e.energyTag||'Configure in Hazardous Energy Sources'}</span>
                                         <span className='block text-xs text-soft'>{e.isInternalSupply===true?'Internal supply · asset link not required':e.sourceAssetTag?'External supply: '+e.sourceAssetTag+' · '+(e.sourceAssetName||'Source not verified'):'External supply · asset not linked'}</span>
                                         {e.supply&&<CapacityLine supply={e.supply}/>}
                                         {e.sourceAssetStatus&&e.sourceAssetStatus!=='active'&&<span className='block text-xs text-amber-400'>Source approval: {e.sourceAssetStatus}</span>}

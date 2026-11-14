@@ -32,6 +32,7 @@ const MntWorkflowSettings = lazy(() => import('./MntWorkflowSettings'));
 const MntBudgets = lazy(() => import('./MntBudgets'));
 const MntTaskValidation = lazy(() => import('./MntTaskValidation'));
 const SafConfiguration = lazy(() => import('./SafConfiguration'));
+const LotoSetup = lazy(() => import('./LotoSetup'));
 const SafAdoption = lazy(() => import('./SafSetup').then(m=>({default:m.SafAdoption})));
 const SafPermits = lazy(() => import('./SafSetup').then(m=>({default:m.SafPermits})));
 const AssetRegister = lazy(() => import('./AssetRegister'));
@@ -116,7 +117,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         {label:'Digital forms & records',path:'doc_forms',permission:'ADM.document_registry'},
         {label:'Document settings',path:'doc_config',permission:'ADM.document_config'},
     ],
-    SAF: [{label:'Safety metadata adoption',path:'saf_adoption',prefix:'SAF.'},{label:'Permits',path:'saf_permits',prefix:'SAF.'},{ label: 'Risk matrix', path: 'saf_configuration', prefix: 'SAF.' }],
+    SAF: [{label:'Safety metadata adoption',path:'saf_adoption',prefix:'SAF.'},{label:'Permits',path:'saf_permits',prefix:'SAF.'},{label:'LOTO',path:'saf_loto',prefix:'SAF.'},{ label: 'Risk matrix', path: 'saf_configuration', prefix: 'SAF.' }],
     MNT: [
         { label: 'Maintenance workspace', path: 'mnt', prefix: 'MNT.' },
         { label: 'Work requests', path: 'work_requests', prefix: 'MNT.WR.' },
@@ -462,6 +463,7 @@ export default function OrgHomePage({
     } else if (activeMenu && section === 'saf_configuration') content = <SafConfiguration />;
     else if(activeMenu?.module.code==='SAF'&&section==='saf_adoption') content=<SafAdoption/>;
     else if(activeMenu?.module.code==='SAF'&&section==='saf_permits') content=<SafPermits/>;
+    else if(activeMenu?.module.code==='SAF'&&section==='saf_loto') content=<LotoSetup/>;
     else if (activeMenu && section === 'maintenance_windows') content = <MntWindows />;
     else if (activeMenu && section === 'mnt_material_candidates') content = <MntMaterialCandidates />;
     else if (activeMenu && section === 'mnt') content = <MntHome />;

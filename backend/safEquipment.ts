@@ -10,6 +10,7 @@ import {scoreMaintenanceRisk,type RiskMatrix} from './maintenanceTaskRisk';
 import {configuredField,configurationIssues,validDay} from './safEnergyProfiles';
 import {statutoryProfile,mergeUtilityEnergy,utilityDefinition,candidateInspectionCodes,utilityPointId} from './safStatutoryInspections';
 import {utilityLinkIssue} from './astUtilities';
+import {energyColor} from './safEnergyColors';
 const idRe=/^[A-Za-z0-9_-]{1,120}$/;
 const array=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const root=(ctx:OrgContext)=>`organizations/${ctx.orgId}`;
@@ -31,7 +32,7 @@ const pointIdOf=(x:Obj,i:number)=>idRe.test(str(x.pointId))?str(x.pointId):'lega
 const stringList=(v:unknown):string[]=>Array.isArray(v)?[...new Set(v.map(str).filter(Boolean))]:[];
 async function energyContext(ctx:OrgContext,id:string,saved:Obj[]){
  const [internal,external,statutory,utilityDoc]=await Promise.all([
-  effectiveSafetyItems(ctx.orgId,'hazardousEnergy'),safetyCatalogue(ctx.orgId,'externalEnergySources'),
+  safetyCatalogue(ctx.orgId,'hazardousEnergy'),safetyCatalogue(ctx.orgId,'externalEnergySources'),
   safetyCatalogue(ctx.orgId,'statutoryInspections'),getDoc(`${root(ctx)}/equipment_utilities/${id}`)]);
  const utilities=array(utilityDoc?.data.items);
  const rows=mergeUtilityEnergy(utilities,saved);
@@ -46,8 +47,9 @@ async function energyContext(ctx:OrgContext,id:string,saved:Obj[]){
   return {...ref(def||u),code,label:str(u.label)||str(def?.label)||code,category:str(def?.category)||'External utility',subcategory:str(def?.subcategory)||'Existing connection',
    linkedUtility:true,adopted:allowedExternal.has(code),profile:profile(code)};
  });
- const catalogue=[...internal.map(x=>({...ref(x),linkedUtility:false,adopted:true,profile:profile(str(x.code))})),...linked];
- return {rows,catalogue,profile,utilityByCode,attrs,adoptedTests,allowedExternal,utilityVersion:Number(utilityDoc?.data.version)||0};
+ const catalogue=[...internal.active.map(x=>({...ref(x),linkedUtility:false,adopted:true,profile:profile(str(x.code))})),...linked];
+ const metadata=new Map([...internal.items,...external.items].map(x=>[str(x.code),x]));
+ return {rows,catalogue,metadata,profile,utilityByCode,attrs,adoptedTests,allowedExternal,utilityVersion:Number(utilityDoc?.data.version)||0};
 }
 function reviewIssues(profile:ReturnType<typeof statutoryProfile>,values:Obj,tests:Obj,today:string){
  const issues=configurationIssues(profile,values,tests,today);
@@ -65,13 +67,14 @@ export const safEquipmentRoutes={
     const test=v as Obj,token=str(test.evidenceToken);
     return [key,{...test,evidenceUrl:evidenceValid(ctx,id,token)?await signedUrl(token):''}];
    })));
-   const code=str(x.code),profile=context.profile(code);
+   const code=str(x.code),profile=context.profile(code),def=context.metadata.get(code)||x;
    const issues=reviewIssues(profile,values,tests,today);
+   if(!x.linkedUtility&&!context.catalogue.some(s=>s.code===code))issues.push('Historical source is no longer adopted in Safety.');
    if(x.linkedUtility&&!context.allowedExternal.has(code))issues.push('Existing utility is not currently adopted in Safety.');
    if(x.linkedUtility){const issue=await utilityLinkIssue(ctx.orgId,node,context.utilityByCode.get(code)!,{attributes:context.attrs(code)});if(issue)issues.push(issue);}
    if(!str(x.tag)||!str(x.photoToken))issues.unshift('Tag and equipment photo');
    const status=issues.length?'incomplete':x.status==='documented'?'documented':'draft';
-   return {...x,pointId:pointIdOf(x,i),values,tests:reports,status,issues,utilityAttrs:context.attrs(code).map(a=>({key:str(a.key),label:str(a.label),unit:str(a.unit)})),unadoptedInspections:candidateInspectionCodes(code).filter(c=>!context.adoptedTests.has(c)),url:tokenValid(ctx,id,str(x.photoToken))?await signedUrl(str(x.photoToken)):''};
+   return {...x,pointId:pointIdOf(x,i),label:str(def.label)||str(x.label)||code,category:str(def.category)||'Unclassified',color:energyColor(def),values,tests:reports,status,issues,utilityAttrs:context.attrs(code).map(a=>({key:str(a.key),label:str(a.label),unit:str(a.unit)})),unadoptedInspections:candidateInspectionCodes(code).filter(c=>!context.adoptedTests.has(c)),url:tokenValid(ctx,id,str(x.photoToken))?await signedUrl(str(x.photoToken)):''};
   }));
   return {equipmentName:str(node.data.name),lotoPolicy:await lotoPolicy(ctx.orgId).then(({doc,...p})=>p),catalogue:context.catalogue,profiles:Object.fromEntries(context.rows.map(x=>[str(x.code),context.profile(str(x.code))])),items,utilityVersion:context.utilityVersion,version:Number(doc?.data.version)||0,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],

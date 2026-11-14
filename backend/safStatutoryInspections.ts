@@ -123,7 +123,9 @@ export function utilityFingerprint(row:{code:string;values?:unknown;connectionId
 export function mergeUtilityEnergy(utilities:Obj[],saved:Obj[]):Obj[]{
  const external=utilities.map(u=>{
   const code=String(u.code),pointId=utilityPointId(u);
-  const found:Obj=saved.find(x=>x.pointId===pointId&&x.code===code)||{};
+  const candidates=saved.filter(x=>x.code===code&&(x.pointId===pointId||x.utilityConnectionId===String(u.connectionId||'legacy-'+code)||(!u.connectionId&&!x.utilityConnectionId&&!x.pointId)));
+  // Never move a physical isolation tag to a new or ambiguous connection.
+  const found:Obj=saved.find(x=>x.pointId===pointId&&x.code===code)||(candidates.length===1?candidates[0]:{});
   const old:Obj=found.utilityConnectionId&&found.utilityConnectionId!==String(u.connectionId||'legacy-'+code)?{}:found;
   const connectionId=String(u.connectionId||'legacy-'+code);
  const fingerprint=utilityFingerprint({code,values:u.values,connectionId,sourceAssetTag:u.sourceAssetTag,isInternalSupply:u.isInternalSupply,supplyLinkRule:u.supplyLinkRule});

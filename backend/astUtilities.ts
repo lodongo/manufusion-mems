@@ -3,7 +3,9 @@ export {isInternalUtilitySupply} from './utilitySupplyPolicy';
 import { HttpError, getDoc, isObj, listDocs, nowIso, randomId, str, writeDoc, type Doc, type Obj } from './core';
 import { orgRoute, type OrgContext } from './guards';
 import { seedModuleMetadata } from './moduleDefaults';
-import { effectiveSafetyItems } from './safConfiguration';
+import { effectiveSafetyItems, safetyCatalogue } from './safConfiguration';
+import { mergeUtilityEnergy } from './safStatutoryInspections';
+import { energyColor } from './safEnergyColors';
 import { PERMS, allowedAt, audited, diffByKey, requireAt, stableJson } from './scopeGuard';
 
 // ---------------------------------------------------------------------------
@@ -151,9 +153,10 @@ export const utilityRoutes = {
             const { id, node } = await equipmentUnit(ctx);
             await requireAt(ctx, PERMS.utilitiesView, id, 'read', 'You do not have permission to view the utilities of this equipment unit.');
             await seedModuleMetadata('AST');
-            const [defs, doc, adopted] = await Promise.all([definitions(), getDoc(docPath(ctx.orgId, id)), effectiveSafetyItems(ctx.orgId,'externalEnergySources')]);
-            const allowed=new Set(adopted.map(x=>str(x.code)));
-            const catalogue=defs.filter(x=>allowed.has(str(x.code)));
+            const [master, doc, energyDoc] = await Promise.all([safetyCatalogue(ctx.orgId,'externalEnergySources'), getDoc(docPath(ctx.orgId, id)),getDoc('organizations/'+ctx.orgId+'/equipment_energy_sources/'+id)]);
+            const defs=master.items,allowed=new Set(master.active.map(x=>str(x.code)));
+            const catalogue=master.active;
+            const energyRows=mergeUtilityEnergy(rowsOf(doc),rowsOf(energyDoc));
             const requested=str(ctx.body.code);
             if(requested){
                 const def=catalogue.find(x=>x.code===requested);
@@ -165,12 +168,13 @@ export const utilityRoutes = {
             const site=await siteOf(ctx.orgId,node);
             const enriched=await Promise.all(items.map(async row=>{
                 const tag=str(row.sourceAssetTag),def=defs.find(d=>d.code===row.code);
+                const energy=energyRows.find(x=>x.code===row.code&&x.linkedUtility===true);
                 const asset=TAG_RE.test(tag)?await getDoc(assetCol(ctx.orgId)+'/'+tag):null;
                 const valid=!!asset&&!!site&&asset.data.siteId===site&&eligibleStatus(asset)&&asset.data.workCenterId!==id;
                 const supply=valid&&asset&&def?publicSummary(supplySummary(asset,def,docs,id)):null;
                 const internal=isInternalUtilitySupply(row);
                 const complete=!!def&&allowed.has(str(row.code))&&(internal||valid&&(!supply?.determinant||!!supply.capacity&&!!positive(isObj(row.values)?row.values[supply.determinant.key]:null)));
-                return {...row,isInternalSupply:internal,supplyLinkRule:2,sourceAssetName:valid?str(asset?.data.name):'',sourceAssetStatus:valid?str(asset?.data.status):'',supply,configurationComplete:complete};
+                return {...row,label:str(def?.label)||str(row.label),energyTag:str(energy?.tag),energyColor:energyColor(def||row),energyPointId:str(energy?.pointId),isInternalSupply:internal,supplyLinkRule:2,sourceAssetName:valid?str(asset?.data.name):'',sourceAssetStatus:valid?str(asset?.data.status):'',supply,configurationComplete:complete};
             }));
             return { catalogue, items:enriched, configurationComplete:enriched.every(x=>x.configurationComplete),version:Number(doc?.data.version)||0 };
         }),

@@ -4,6 +4,7 @@ import {PERMS,holdsAnywhere,holdsDirect,audited} from './scopeGuard';
 import {SAF_DEFAULT_LISTS} from './safDefaults';
 import {AST_UTILITY_ITEMS} from './astUtilityDefaults';
 import {categoryColor} from './safActivityClasses';
+import {energyColor} from './safEnergyColors';
 import {fieldsForPermit,normalizePermitFields} from './safPermitTemplates';
 import {EXPANDED_PERMIT_REFERENCES} from './safPermitExpanded';
 
@@ -30,7 +31,10 @@ export async function safetyCatalogue(orgId:string,key:Key){
  const utilityItems=entries(Array.isArray(utilities?.data.items)?utilities?.data.items:AST_UTILITY_ITEMS);
  const shared=utilities&&str(utilities.data.source)==='MEMS defaults'&&Number(utilities.data.version)<2?[...utilityItems,...AST_UTILITY_ITEMS.filter(x=>!utilityItems.some(u=>str(u.code)===x.code))]:utilityItems;
  const raw=key==='externalEnergySources'?shared:entries(Array.isArray(master?.data.items)?master?.data.items:fallback?.items);
- const items:Obj[]=key==='hazards'?raw.map(x=>({...x,color:categoryColor(str(x.category),isObj(master?.data.categoryColors)?master.data.categoryColors:{})})):raw;
+ const energy=key==='hazardousEnergy'||key==='externalEnergySources';
+ const hazards=energy?await getDoc('module_workspaces/SAF/metadata/hazards'):null;
+ const colorOverrides=isObj(hazards?.data.categoryColors)?hazards.data.categoryColors:{};
+ const items:Obj[]=key==='hazards'?raw.map(x=>({...x,color:categoryColor(str(x.category),isObj(master?.data.categoryColors)?master.data.categoryColors:{})})):energy?raw.map(x=>({...x,color:energyColor(x,colorOverrides)})):raw;
  const active=adoptedRecords(items,policy?.data.disabledCodes);
  return {key,title:str(master?.data.title)||fallback?.title||key,items,active,policy,version:Number(policy?.data.version)||0};
 }

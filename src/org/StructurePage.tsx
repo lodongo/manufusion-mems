@@ -166,7 +166,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
     if (mode?.type === 'utilities' && node) return <EquipmentUtilities workCenterId={node.id} onBack={()=>setMode(null)}/>;
     if (mode?.type === 'activity-risk' && node) return <ActivityRiskLegacy workCenterId={node.id} onBack={()=>setMode(null)} onReview={()=>setMode({type:'activity-risk-review'})} hierarchy={[...(data?.ancestors||[]),node].map(n=>({level:n.level,code:n.code,name:n.name}))}/>;
     if (mode?.type === 'activity-risk-review' && node) return <ActivityRiskReview workCenterId={node.id} onBack={()=>setMode({type:'activity-risk'})} hierarchy={[...(data?.ancestors||[]),node].map(n=>({level:n.level,code:n.code,name:n.name}))}/>;
-    if(mode?.type==='loto-program'&&node)return <EquipmentLoto workCenterId={node.id} onBack={()=>setMode(null)}/>;
+    if(mode?.type==='loto-program'&&node)return <EquipmentLoto workCenterId={node.id} onBack={()=>setMode(null)} onConfigure={()=>setMode({type:'hazardous-energy'})}/>;
     if (mode?.type === 'stored-energy' && node) return <ActivityRiskLegacy workCenterId={node.id} onBack={()=>setMode(null)} onReview={()=>setMode({type:'stored-energy-review'})} hierarchy={[...(data?.ancestors||[]),node].map(n=>({level:n.level,code:n.code,name:n.name}))}/>;
     if (mode?.type === 'stored-energy-review' && node) return <ActivityRiskReview workCenterId={node.id} onBack={()=>setMode({type:'stored-energy'})} hierarchy={[...(data?.ancestors||[]),node].map(n=>({level:n.level,code:n.code,name:n.name}))}/>;
     if (mode?.type === 'storage' && node)
@@ -523,7 +523,7 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
     if (mode?.type === 'class-risk' && node) return <ActivityClassRisks workCenterId={node.id} onBack={()=>setMode(null)} onLegacy={()=>setMode({type:'activity-risk'})}/>;
     if(mode?.type==='activity-risk'&&node)return <ActivityRiskLegacy workCenterId={node.id} onBack={()=>setMode({type:'class-risk'})} onReview={()=>setMode({type:'activity-risk-review'})} hierarchy={[...data.ancestors,node].map(n=>({level:n.level,code:n.code,name:n.name}))}/>;
     if(mode?.type==='activity-risk-review'&&node)return <ActivityRiskReview workCenterId={node.id} onBack={()=>setMode({type:'activity-risk'})} hierarchy={[...data.ancestors,node].map(n=>({level:n.level,code:n.code,name:n.name}))}/>;
-    if(mode?.type==='loto-program'&&node)return <EquipmentLoto workCenterId={node.id} onBack={()=>setMode(null)}/>;
+    if(mode?.type==='loto-program'&&node)return <EquipmentLoto workCenterId={node.id} onBack={()=>setMode(null)} onConfigure={()=>setMode({type:'hazardous-energy'})}/>;
     const chooseSingle = async () => {
         setBusy(true);
         setActionError('');
