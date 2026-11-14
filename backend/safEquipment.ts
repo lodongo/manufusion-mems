@@ -112,7 +112,7 @@ export const safEquipmentRoutes={
   const additional=stringList(ctx.body.additionalClasses);
   if(additional.some(c=>!TASK_ADDITIONAL_CLASSES.includes(c)))throw new HttpError(400,'Invalid additional task class.');
   if(decision.code==='AC01'&&additional.length)throw new HttpError(400,'Additional hazards conflict with No Risk. Revisit the screening.');
-  const classCodes=[decision.code,...additional],permitCodes=stringList(ctx.body.permitCodes),justification=str(ctx.body.justification).trim().slice(0,3000);
+  const classCodes=[...new Set([decision.code,...additional])],permitCodes=stringList(ctx.body.permitCodes),justification=str(ctx.body.justification).trim().slice(0,3000);
   if(justification.length<20)throw new HttpError(400,'Document screening, technical basis, safeguards and work limits.');
   const [classes,permits,skills,matrixDoc,energy]=await Promise.all([effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'permitTypes'),taskSkills(),getDoc(root(ctx)+'/saf/risk_matrix'),currentTaskEnergy(ctx,id)]);
   if(skillCodes.some(c=>!skills.some(s=>s.code===c)))throw new HttpError(400,'Select active HR master skills.');
@@ -122,8 +122,10 @@ export const safEquipmentRoutes={
   if(new Set(plan.map(x=>x.pointId)).size!==plan.length||plan.some(x=>!energy.some(e=>e.pointId===x.pointId)||!TASK_PLAN_STATES.includes(x.state)))throw new HttpError(400,'Invalid equipment energy plan.');
   if(['AC03','AC05','AC06','AC22'].includes(decision.code)){
    if(plan.length!==energy.length||plan.some(p=>(p.state==='retained'||p.state==='not_applicable')&&p.reason.length<10))throw new HttpError(400,'Classify every equipment energy point and justify retained or non-applicable energy.');
+   if(decision.code==='AC03'&&energy.length&&!plan.some(p=>p.state==='isolate'))throw new HttpError(400,'Identify at least one isolation point, or correct the classification and energy register.');
    if(decision.code==='AC03'&&plan.some(p=>p.state==='retained'))throw new HttpError(400,'Full LOTO cannot retain hazardous energy.');
    if(decision.code==='AC06'&&(!plan.some(p=>p.state==='isolate')||!plan.some(p=>p.state==='retained')))throw new HttpError(400,'Partial LOTO needs isolation and retained-energy points.');
+   if(['AC05','AC22'].includes(decision.code)&&plan.some(p=>p.state==='isolate')&&!permitCodes.includes('SAF_08_01_003'))throw new HttpError(400,'LOTO permit is required for isolated energy points.');
    if(['AC05','AC22'].includes(decision.code)&&energy.length&&!plan.some(p=>p.state==='retained'))throw new HttpError(400,'Identify the technically necessary retained energy.');
   }
   const raw=ctx.body.rows;
@@ -134,7 +136,7 @@ export const safEquipmentRoutes={
   const n=requested?0:await nextSequence('equipmentTask');
   if(!requested&&n>999999999)throw new HttpError(409,'Task sequence exhausted.');
   const taskId=requested||'TSK_'+String(n).padStart(9,'0');
-  const status=rows.some(r=>r.after.tolerability==='Intolerable')?'intolerable':!energy.length&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':'review_required';
+  const status=rows.some(r=>r.after.tolerability==='Intolerable')?'intolerable':(!energy.length||energy.some(e=>!e.tag))&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':'review_required';
   const next={taskId,workCenterId:id,name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
   if(!(await writeDoc(col+'/'+taskId,next,old?{updateTime:old.updateTime}:{exists:false})))throw new HttpError(409,'Task changed. Reload.');
   await audited(ctx,'saf.equipment_task.save',id,{taskId,version:version+1,classCodes,status});

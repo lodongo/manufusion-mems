@@ -26,7 +26,7 @@ test('equipment energy and activity class screens enforce adopted codes and main
  assert.ok(api.includes('Add a photo for each energy point'));
  assert.ok(api.includes('No Risk requires documented screening'));
  assert.ok(api.includes('equipment_activity_class_risks'));
- assert.ok(ui.includes('Activity Class Risk Assessment'));
+ assert.ok(ui.includes('Task Class Risk Assessment'));
  assert.ok(ui.indexOf('Hazardous Energy Sources')<ui.lastIndexOf('LOTO Program'));
 });
 

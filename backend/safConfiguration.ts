@@ -33,7 +33,7 @@ export async function safetyCatalogue(orgId:string,key:Key){
  const raw=key==='externalEnergySources'?shared:entries(Array.isArray(master?.data.items)?master?.data.items:fallback?.items);
  const unified=['hazards','hazardousEnergy','externalEnergySources'].includes(key)?await loadSafetyHazardMaster():null;
  const items:Obj[]=unified?(key==='hazards'?unified.hazards:key==='hazardousEnergy'?unified.internal:unified.external):raw;
- const merged=key==='activityClasses'?[...items.map(x=>{const def=entries(fallback?.items).find(d=>d.code===x.code);return def?{...x,label:def.label,description:def.description,requiredPermits:def.requiredPermits}:x;}),...entries(fallback?.items).filter(d=>!items.some(x=>x.code===d.code))]:items;
+ const merged=(key==='activityClasses'||key==='permitTypes')?[...items.map(x=>{const def=entries(fallback?.items).find(d=>d.code===x.code);return def&&key==='activityClasses'?{...x,label:def.label,description:def.description,requiredPermits:def.requiredPermits}:x;}),...entries(fallback?.items).filter(d=>!items.some(x=>x.code===d.code))]:items;
  const active=adoptedRecords(merged,policy?.data.disabledCodes);
  return {key,title:str(master?.data.title)||fallback?.title||key,items:merged,active,policy,version:Number(policy?.data.version)||0};
 }
