@@ -110,6 +110,7 @@ export const safEquipmentRoutes={
    if(linked&&(!context.utilityByCode.has(code)||pointId!==utilityPointId(context.utilityByCode.get(code)!)))throw new HttpError(400,'External connections are maintained in Utilities.');
    const current=linked?context.rows.find(y=>str(y.pointId)===pointId):null;
    const historical=linked?current:previous.find((y,j)=>pointIdOf(y,j)===pointId&&str(y.code)===code);
+   if(linked&&finalize&&!str(context.utilityByCode.get(code)?.sourceAssetTag))throw new HttpError(400,'Link this utility to a supply asset before documenting the energy register.');
    if(linked&&finalize&&!context.allowedExternal.has(code))throw new HttpError(400,'Adopt the existing utility in Safety before marking the register documented.');
    // Existing clients must not erase newer technical records by omitting profile data.
    if(historical&&(!isObj(x.values)||!isObj(x.tests))&&(isObj(historical.values)||isObj(historical.tests)))throw new HttpError(409,'Refresh MEMS before editing the expanded energy register.');

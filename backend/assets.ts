@@ -28,6 +28,7 @@ import { audit } from './audit';
 import { hasPerm, orgRoute, staff, type OrgContext, type SecureContext } from './guards';
 import { allowedNodeIds, nextOrgCounter } from './positions';
 import { allowedAt } from './scopeGuard';
+import { assertUtilitySourceUnlinked } from './astUtilities';
 import { identicalAssetEquipmentClass, assetIsAssignable, unitIsAssignable } from './assetEquipmentRules';
 
 // ---------------------------------------------------------------------------
@@ -1395,6 +1396,7 @@ export const assetRoutes = {
             const now = nowIso();
             const location = { nodeId, nodeCode: str(node.data.code), nodeName: str(node.data.name), nodeLevel: str(node.data.level), siteId, legalEntityId };
             if (existing) {
+                if(siteId!==str(existing.data.siteId))await assertUtilitySourceUnlinked(ctx.orgId,tag);
                 const status = str(existing.data.status);
                 if (status === 'pending_approval' || status === 'change_pending' || status === 'disposal_pending') throw new HttpError(400, 'This asset is waiting for approval and cannot be changed now.');
                 if (status === 'disposed') throw new HttpError(400, 'Disposed assets cannot be changed.');
@@ -1498,6 +1500,7 @@ export const assetRoutes = {
 
             if (action === 'request_disposal') {
                 await need('AST.edit');
+                await assertUtilitySourceUnlinked(ctx.orgId,tag);
                 if (status !== 'active') throw new HttpError(400, 'Only active assets can be proposed for disposal.');
                 if (note.length < 5) throw new HttpError(400, 'Give the reason for disposal (at least 5 characters).');
                 await updateFields(path, { status: 'disposal_pending', pendingNote: note, submittedBy: ctx.uid, submittedByName: displayName(ctx), submittedAt: now, updatedAt: now, history: withHistory(doc, ctx, 'disposal_requested', note) });
@@ -1535,6 +1538,7 @@ export const assetRoutes = {
                     if (!p) throw new HttpError(400, 'The pending change is missing.');
                     const fields: Fields = {};
                     for (const k of ['name', 'description', 'attributes', 'nodeId', 'nodeCode', 'nodeName', 'nodeLevel', 'siteId', 'legalEntityId', 'completeness']) if (p[k] !== undefined) fields[k] = p[k];
+                    if(str(p.siteId)!==str(doc.data.siteId))await assertUtilitySourceUnlinked(ctx.orgId,tag);
                     if (str(p.siteId) !== str(doc.data.siteId) && str(doc.data.workCenterId)) {
                         await unlinkFromWorkCenter(ctx, doc);
                         fields.workCenterId = '';
@@ -1543,6 +1547,7 @@ export const assetRoutes = {
                     if (str(doc.data.workCenterId) && fields.name) await renameOnWorkCenter(ctx, str(doc.data.workCenterId), tag, str(fields.name));
                     await updateFields(path, { ...fields, status: 'active', pending: null, pendingNote: '', approvedBy: ctx.uid, approvedByName: displayName(ctx), approvedAt: now, updatedAt: now, history: withHistory(doc, ctx, 'change_approved', note) });
                 } else {
+                    await assertUtilitySourceUnlinked(ctx.orgId,tag);
                     await unlinkFromWorkCenter(ctx, doc);
                     await updateFields(path, { status: 'disposed', workCenterId: '', workCenterCode: '', disposedAt: now, approvedBy: ctx.uid, approvedByName: displayName(ctx), approvedAt: now, updatedAt: now, history: withHistory(doc, ctx, 'disposal_approved', note) });
                 }
@@ -1561,6 +1566,7 @@ export const assetRoutes = {
             await requireAssetRight(ctx, ['AST.delete'], str(doc.data.nodeId));
             if (str(ctx.body.confirm) !== doc.id) throw new HttpError(400, 'Type the asset tag exactly to confirm.');
             if (!['draft', 'rejected'].includes(str(doc.data.status)) || str(doc.data.approvedAt)) throw new HttpError(400, 'Only drafts that were never approved can be deleted. Approved assets are disposed through approval.');
+            await assertUtilitySourceUnlinked(ctx.orgId,doc.id);
             await unlinkFromWorkCenter(ctx, doc);
             await deleteDoc(`${assetCol(ctx.orgId)}/${doc.id}`);
             await rec(ctx, 'data', 'org.assets.delete', `${doc.id} ${str(doc.data.name)}`, 'Draft deleted', ctx.orgId);

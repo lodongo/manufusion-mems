@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { AssetForm } from './AssetRegister';
+import { CapacityLine, type SupplySummary, type SourceOption } from './AssetUtilitySupplies';
 import { ChevronRight, Plus, Save, Trash2, X, Zap } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert, Field, SelectField } from '../components/ui';
@@ -19,6 +21,11 @@ interface Entry {
     code: string;
     label: string;
     values: Record<string, string | number>;
+    sourceAssetTag?: string;
+    sourceAssetName?: string;
+    sourceAssetStatus?: string;
+    configurationComplete?: boolean;
+    supply?: SupplySummary | null;
 }
 type Attr = Utility['attributes'][number];
 
@@ -49,6 +56,8 @@ const summary = (entry: Entry, def?: Utility) =>
 function UtilityEditor({
     utility,
     initial,
+    workCenterId,
+    initialSource,
     busy,
     error,
     onCancel,
@@ -56,13 +65,25 @@ function UtilityEditor({
 }: {
     utility: Utility;
     initial: Record<string, string | number>;
+    workCenterId:string;
+    initialSource:string;
     busy: boolean;
     error: string;
     onCancel: () => void;
-    onSave: (values: Record<string, string | number>) => void;
+    onSave: (values: Record<string, string | number>, sourceAssetTag:string) => void;
 }) {
     const attrs = utility.attributes ?? [];
+    const sources=useLoad(()=>callBackend<{sources:SourceOption[];determinant:SupplySummary['determinant']}>('/api/org/ast/utilities/read',{workCenterId,code:utility.code}),[workCenterId,utility.code]);
+    const [source,setSource]=useState(initialSource);
+    const [creating,setCreating]=useState(false);
+    const [rating,setRating]=useState('');
+    const [ratingBusy,setRatingBusy]=useState(false);
+    const [ratingError,setRatingError]=useState('');
+    const option=sources.data?.sources.find(x=>x.tag===source);
+    const determinant=sources.data?.determinant;
     const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(attrs.map((a) => [a.key, initial[a.key] === undefined || initial[a.key] === null ? '' : String(initial[a.key])])));
+    const demand=determinant?Number(values[determinant.key]):0;
+    const sourceReady=!!option&&(!determinant||!!option.capacity&&Number.isFinite(demand)&&demand>0);
     const [touched, setTouched] = useState<string[]>([]);
     const [showAll, setShowAll] = useState(Object.keys(initial).length > 0);
 
@@ -73,15 +94,17 @@ function UtilityEditor({
         setTouched((t) => (t.includes(key) ? t : [...t, key]));
     };
     const save = () => {
-        if (problems.length) return setShowAll(true);
+        if (problems.length || !sourceReady) return setShowAll(true);
         const out: Record<string, string | number> = {};
         for (const a of attrs) {
             const v = (values[a.key] ?? '').trim();
             if (v) out[a.key] = a.type === 'number' ? Number(v) : v;
         }
-        onSave(out);
+        onSave(out,source);
     };
 
+    const saveRating=async()=>{if(!option||!determinant)return;setRatingBusy(true);setRatingError('');try{await callBackend('/api/org/ast/utilities/save',{assetTag:source,code:utility.code,capacity:Number(rating),expectedRating:option.capacity===null?null:{key:determinant.key,unit:determinant.unit,capacity:option.capacity}});setRating('');sources.reload();}catch(err){setRatingError(messageOf(err));}finally{setRatingBusy(false);}};
+    if(creating)return <AssetForm onCancel={()=>setCreating(false)} onDone={tag=>{setSource(tag);setCreating(false);sources.reload();}}/>;
     return (
         <Screen
             title={utility.label}
@@ -93,7 +116,7 @@ function UtilityEditor({
                         <X className='h-4 w-4' />
                         <span className='hidden sm:inline'>Cancel</span>
                     </Button>
-                    <Button busy={busy} disabled={problems.length > 0} onClick={save}>
+                    <Button busy={busy} disabled={problems.length > 0 || !sourceReady || sources.loading || ratingBusy} onClick={save}>
                         {!busy && <Save className='h-4 w-4' />}
                         Save
                     </Button>
@@ -109,6 +132,25 @@ function UtilityEditor({
             {problems.length > 0 && !showAll && touched.length === 0 && (
                 <p className='text-xs text-muted'>Fields marked * are required. Save unlocks once they are filled in.</p>
             )}
+            <Card className='space-y-3'>
+                <h3 className='font-semibold text-ink'>Supplying asset *</h3>
+                <p className='text-xs text-muted'>Select a registered source at this site. Multiple machines may use the same source.</p>
+                {sources.error&&<Alert tone='error'>{sources.error}</Alert>}
+                {sources.loading&&<Spinner/>}
+                <SelectField id='utility-source' label='Supply asset *' value={source} onChange={e=>{setSource(e.target.value);setRating('');setRatingError('');}}>
+                    <option value=''>Select registered asset…</option>
+                    {sources.data?.sources.map(a=><option key={a.tag} value={a.tag}>{a.tag} · {a.name} · {a.className} ({a.assetStatus})</option>)}
+                </SelectField>
+                <Button variant='secondary' onClick={()=>setCreating(true)}><Plus className='h-4 w-4'/> Create new supply asset</Button>
+                {source&&!option&&!sources.loading&&<Alert tone='warn'>Supply asset is unavailable or outside your scope. Select an eligible asset.</Alert>}
+                {option&&option.assetStatus!=='active'&&<Alert tone='warn'>The source asset is not fully approved. This is a configuration record, not an authorization to operate.</Alert>}
+                {option&&determinant&&<><CapacityLine supply={option} projected={option.total-option.ownDemand+(Number.isFinite(demand)&&demand>0?demand:0)}/>
+                    {!option.capacity&&<><Field id='utility-source-rating' label={'Usable supply capacity ('+determinant.unit+') *'} inputMode='decimal' value={rating} onChange={e=>setRating(e.target.value)}/>
+                    <Button variant='secondary' busy={ratingBusy} disabled={!(Number(rating)>0)||!Number.isFinite(Number(rating))} onClick={()=>void saveRating()}>Save source capacity</Button></>}
+                    {ratingError&&<Alert tone='error'>{ratingError}</Alert>}
+                </>}
+                {option&&!determinant&&<p className='text-xs text-muted'>This utility has no additive capacity determinant in the catalogue. Asset linkage remains mandatory.</p>}
+            </Card>
             <Card className='space-y-3'>
                 {utility.description && <p className='text-sm text-soft'>{utility.description}</p>}
                 {attrs.length === 0 && <p className='text-sm text-muted'>This utility has no attributes to record. Save to add it to the unit.</p>}
@@ -150,7 +192,7 @@ function UtilityEditor({
 export default function EquipmentUtilities({ workCenterId, onBack }: { workCenterId: string; onBack: () => void }) {
     const { data, setData, error, loading, reload } = useLoad(() => callBackend<{ catalogue: Utility[]; items: Entry[]; version:number }>('/api/org/ast/utilities/read', { workCenterId }), [workCenterId]);
     const [browse, setBrowse] = useState(false);
-    const [editing, setEditing] = useState<{ utility: Utility; values: Record<string, string | number> } | null>(null);
+    const [editing, setEditing] = useState<{ utility: Utility; values: Record<string, string | number>; sourceAssetTag:string } | null>(null);
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState('');
     const [notice, setNotice] = useState('');
@@ -165,18 +207,19 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
     const persist = async (rows: Entry[]) => {
         const result=await callBackend<{version:number}>('/api/org/ast/utilities/save', { workCenterId, items: rows,version:data?.version||0 });
         setData((d) => (d ? { ...d, items: rows,version:result.version } : d));
+        reload();
     };
 
-    const edit = (utility: Utility, values: Record<string, string | number>) => {
+    const edit = (utility: Utility, values: Record<string, string | number>, sourceAssetTag='') => {
         setNotice('');
         setSaveError('');
         setBrowse(false);
-        setEditing({ utility, values });
+        setEditing({ utility, values, sourceAssetTag });
     };
 
-    const saveUtility = async (values: Record<string, string | number>) => {
+    const saveUtility = async (values: Record<string, string | number>,sourceAssetTag:string) => {
         if (!editing) return;
-        const row: Entry = { code: editing.utility.code, label: editing.utility.label, values };
+        const row: Entry = { code: editing.utility.code, label: editing.utility.label, values, sourceAssetTag };
         const exists = entries.some((e) => e.code === row.code);
         setSaving(true);
         setSaveError('');
@@ -221,13 +264,15 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
                 key={editing.utility.code}
                 utility={editing.utility}
                 initial={editing.values}
+                workCenterId={workCenterId}
+                initialSource={editing.sourceAssetTag}
                 busy={saving}
                 error={saveError}
                 onCancel={() => {
                     setSaveError('');
                     setEditing(null);
                 }}
-                onSave={(values) => void saveUtility(values)}
+                onSave={(values,source) => void saveUtility(values,source)}
             />
         );
     }
@@ -264,6 +309,7 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
                     {stale.map((e) => e.label).join(', ')} {stale.length === 1 ? 'is' : 'are'} not currently adopted or active. Existing connections remain visible in the energy register; review adoption before editing.
                 </Alert>
             )}
+            {entries.some(e=>!e.configurationComplete)&&<Alert tone='warn'>Utility configuration incomplete: link all existing supplies to valid assets and record required capacity.</Alert>}
             {full && <Alert tone='warn'>This unit has the maximum of {MAX_UTILITIES} utilities.</Alert>}
             {data && entries.length === 0 && <Empty>No utilities recorded for this unit yet. Tap Add to choose one from the catalogue.</Empty>}
             {entries.length > 0 && (
@@ -276,7 +322,7 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
                                 <button
                                     type='button'
                                     disabled={!def}
-                                    onClick={() => def && edit(def, e.values)}
+                                    onClick={() => def && edit(def, e.values,e.sourceAssetTag)}
                                     aria-label={def ? `Edit ${e.label}` : `${e.label} (not in catalogue)`}
                                     className='flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-xl px-2 text-left active:bg-page disabled:opacity-80'
                                 >
@@ -287,6 +333,9 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
                                             {!def && <Badge tone='warn'>Not in catalogue</Badge>}
                                         </span>
                                         <span className='block text-xs text-muted'>{text || 'No values recorded'}</span>
+                                        <span className='block text-xs text-soft'>{e.sourceAssetTag?e.sourceAssetTag+' · '+(e.sourceAssetName||'Source not verified'):'Supply asset not linked'}</span>
+                                        {e.supply&&<CapacityLine supply={e.supply}/>}
+                                        {e.sourceAssetStatus&&e.sourceAssetStatus!=='active'&&<span className='block text-xs text-amber-400'>Source approval: {e.sourceAssetStatus}</span>}
                                     </span>
                                     {def && <ChevronRight className='h-4 w-4 shrink-0 text-muted' />}
                                 </button>
