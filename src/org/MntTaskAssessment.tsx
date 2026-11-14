@@ -15,7 +15,7 @@ type Options={maintenanceTypes?:Array<{code:string;label:string}>;serviceHierarc
 export type TaskAssessment={id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
 export type MachineStatus='total_shutdown'|'live'|'full_loto'|'partial_isolation';
 export const MACHINE_STATUS:Array<[MachineStatus,string,string]>=[
- ['total_shutdown','Total shutdown','The equipment is stopped and shut down for the work.'],
+ ['total_shutdown','Total shutdown','Equipment is stopped. Shutdown alone is not verified hazardous energy isolation.'],
  ['full_loto','Full LOTO','Every hazardous energy source is isolated, locked, tagged and proven at zero.'],
  ['partial_isolation','Partial isolation','Only the listed energy sources are isolated; the rest stays energised.'],
  ['live','Work on live equipment','The equipment stays running or energised during the work.'],
@@ -325,7 +325,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    {step===4&&<>
     <StepSection title='Machine status during execution' hint='Sets isolation or live work, and adds the required permits and hazards automatically.'>
      <div role='radiogroup' aria-label='Machine status during execution' className='grid gap-2 sm:grid-cols-2'>
-      {MACHINE_STATUS.filter(([value])=>!options.data?.machineStatuses||options.data.machineStatuses.some(x=>x.code===value)).map(([value,title,detail])=>{const on=machineOf(task)===value;return <button key={value} type='button' role='radio' aria-checked={on} onClick={()=>setMachine(value)}
+      {MACHINE_STATUS.filter(([value])=>!options.data?.machineStatuses||options.data.machineStatuses.some(x=>x.code===value)).map(([value,defaultTitle,defaultDetail])=>{const master=options.data?.machineStatuses?.find(x=>x.code===value);const title=master?.label||defaultTitle,detail=master?.description||defaultDetail;const on=machineOf(task)===value;return <button key={value} type='button' role='radio' aria-checked={on} onClick={()=>setMachine(value)}
         className={'min-h-16 rounded-xl border p-3 text-left '+(on?'border-brand bg-brand/10':'border-line bg-page')}>
         <span className='block text-sm font-semibold text-ink'>{title}</span><span className='mt-0.5 block text-xs text-soft'>{detail}</span></button>;})}
      </div>
