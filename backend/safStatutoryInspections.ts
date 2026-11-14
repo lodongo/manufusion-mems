@@ -114,9 +114,9 @@ export function statutoryProfile(code:string,adopted:ReadonlySet<string>,utility
  const tests:EnergyTest[]=candidateInspectionCodes(code).filter(x=>adopted.has(x)).map(code=>{const def=STATUTORY_INSPECTIONS.find(x=>x.code===code)!;return {code,label:def.label,critical:true,conditional:true,reference:def.reference};});
  return {fields:[...fields,...reviewFields],tests};
 }
-export function utilityFingerprint(row:{code:string;values?:unknown;connectionId?:unknown;sourceAssetTag?:unknown}):string{
+export function utilityFingerprint(row:{code:string;values?:unknown;connectionId?:unknown;sourceAssetTag?:unknown;isInternalSupply?:unknown}):string{
  const values=row.values&&typeof row.values==='object'?row.values as Record<string,unknown>:{};
- return JSON.stringify([row.code,row.connectionId||'',Object.entries(values).sort(([a],[b])=>a.localeCompare(b)),...(row.sourceAssetTag?[row.sourceAssetTag]:[])]);
+ return JSON.stringify([row.code,row.connectionId||'',Object.entries(values).sort(([a],[b])=>a.localeCompare(b)),...(row.sourceAssetTag?[row.sourceAssetTag]:[]),...(row.isInternalSupply===false?['external-supply']:[])]);
 }
 // Exactly one external row per existing utility record. Safety-only points remain independent.
 export function mergeUtilityEnergy(utilities:Obj[],saved:Obj[]):Obj[]{
@@ -125,11 +125,11 @@ export function mergeUtilityEnergy(utilities:Obj[],saved:Obj[]):Obj[]{
   const found:Obj=saved.find(x=>x.pointId===pointId&&x.code===code)||{};
   const old:Obj=found.utilityConnectionId&&found.utilityConnectionId!==String(u.connectionId||'legacy-'+code)?{}:found;
   const connectionId=String(u.connectionId||'legacy-'+code);
- const fingerprint=utilityFingerprint({code,values:u.values,connectionId,sourceAssetTag:u.sourceAssetTag});
+ const fingerprint=utilityFingerprint({code,values:u.values,connectionId,sourceAssetTag:u.sourceAssetTag,isInternalSupply:u.isInternalSupply});
   const changed=old.utilityFingerprint!==fingerprint;
   const values={...(old.values&&typeof old.values==='object'?old.values as Obj:{})};
   if(changed){delete values.legal_review;}
-  return {...old,code,pointId,label:String(u.label||code),tag:old.tag||'',photoToken:old.photoToken||'',values,tests:old.tests||{},linkedUtility:true,sourceAssetTag:String(u.sourceAssetTag||''),utilityValues:u.values||{},utilityFingerprint:fingerprint,utilityConnectionId:connectionId,status:changed?'draft':old.status||'draft',utilityChanged:changed};
+  return {...old,code,pointId,label:String(u.label||code),tag:old.tag||'',photoToken:old.photoToken||'',values,tests:old.tests||{},linkedUtility:true,isInternalSupply:u.isInternalSupply!==false,sourceAssetTag:String(u.sourceAssetTag||''),utilityValues:u.values||{},utilityFingerprint:fingerprint,utilityConnectionId:connectionId,status:changed?'draft':old.status||'draft',utilityChanged:changed};
  });
  return [...external,...saved.filter(x=>!String(x.code).startsWith('UTL-')&&!String(x.pointId||'').startsWith('utility-'))];
 }

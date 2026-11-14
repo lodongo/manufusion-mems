@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { utilityOptionLabel } from '../lib/iso8573Labels';
 import { Plus } from 'lucide-react';
 import { Alert } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
@@ -18,7 +19,7 @@ export type Utility = { code: string; label: string; category: string; subcatego
 type View = 'browse' | 'all';
 
 const plural = (n: number, word: string, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
-const attrType = (a: Attr) => (a.type === 'select' ? `List: ${(a.options ?? []).join(', ')}` : a.type === 'number' ? 'Number' : 'Text');
+const attrType = (a: Attr) => (a.type === 'select' ? `List: ${(a.options ?? []).map(o=>utilityOptionLabel(a.label,o)).join(', ')}` : a.type === 'number' ? 'Number' : 'Text');
 /** Attributes of a utility (tolerates records saved without the list). */
 const attrsOf = (x: Utility): Attr[] => x.attributes ?? [];
 

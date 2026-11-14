@@ -127,7 +127,10 @@ async function saveRating(ctx:OrgContext, defs:Obj[], adopted:Set<string>){
     await audited(ctx,'ast.utilities.supply_rating',asset.id,{code,before:prior??null,after:next[code]});
     return {saved:true};
 }
+// Legacy connections retain the existing internal-link rule until explicitly classified.
+export const isInternalUtilitySupply = (row: {isInternalSupply?:unknown}) => row.isInternalSupply !== false;
 export async function utilityLinkIssue(org:string,node:Doc,row:Obj,def:Obj|undefined):Promise<string>{
+    if(!isInternalUtilitySupply(row))return '';
     const tag=str(row.sourceAssetTag);
     if(!TAG_RE.test(tag))return 'Link the external utility to its supply asset.';
     const [asset,site]=await Promise.all([getDoc(assetCol(org)+'/'+tag),siteOf(org,node)]);
@@ -165,8 +168,9 @@ export const utilityRoutes = {
                 const asset=TAG_RE.test(tag)?await getDoc(assetCol(ctx.orgId)+'/'+tag):null;
                 const valid=!!asset&&!!site&&asset.data.siteId===site&&eligibleStatus(asset)&&asset.data.workCenterId!==id;
                 const supply=valid&&asset&&def?publicSummary(supplySummary(asset,def,docs,id)):null;
-                const complete=valid&&!!def&&allowed.has(str(row.code))&&(!supply?.determinant||!!supply.capacity&&!!positive(isObj(row.values)?row.values[supply.determinant.key]:null));
-                return {...row,sourceAssetName:valid?str(asset?.data.name):'',sourceAssetStatus:valid?str(asset?.data.status):'',supply,configurationComplete:complete};
+                const internal=isInternalUtilitySupply(row);
+                const complete=!!def&&allowed.has(str(row.code))&&(!internal||valid&&(!supply?.determinant||!!supply.capacity&&!!positive(isObj(row.values)?row.values[supply.determinant.key]:null)));
+                return {...row,isInternalSupply:internal,sourceAssetName:valid?str(asset?.data.name):'',sourceAssetStatus:valid?str(asset?.data.status):'',supply,configurationComplete:complete};
             }));
             return { catalogue, items:enriched, configurationComplete:enriched.every(x=>x.configurationComplete),version:Number(doc?.data.version)||0 };
         }),
@@ -196,12 +200,14 @@ export const utilityRoutes = {
                 if(seen.has(code)) throw new HttpError(400,'Duplicate utility');
                 seen.add(code);
                 const prior=before.find(x=>str(x.code)===code);
+                if(row.isInternalSupply!==undefined&&typeof row.isInternalSupply!=='boolean')throw new HttpError(400,'Internal supply must be true or false.');
+                const internal=row.isInternalSupply===undefined?(prior?isInternalUtilitySupply(prior):true):row.isInternalSupply;
                 if(!def||!allowed.has(code)){
-                    if(!prior||stableJson(row.values)!==stableJson(prior.values)||str(row.sourceAssetTag)!==str(prior.sourceAssetTag))throw new HttpError(400,'Select an adopted utility or retain the existing historical values.');
+                    if(!prior||stableJson(row.values)!==stableJson(prior.values)||str(row.sourceAssetTag)!==str(prior.sourceAssetTag)||internal!==isInternalUtilitySupply(prior))throw new HttpError(400,'Select an adopted utility or retain the existing historical values.');
                     return prior;
                 }
                 // An unchanged historical row is never promoted to complete by an unrelated edit.
-                if(prior&&stableJson(prior.values)===stableJson(row.values)&&str(prior.sourceAssetTag)===str(row.sourceAssetTag))return prior;
+                if(prior&&stableJson(prior.values)===stableJson(row.values)&&str(prior.sourceAssetTag)===str(row.sourceAssetTag)&&internal===isInternalUtilitySupply(prior))return prior;
                 const values: Record<string, string | number> = {};
                 const raw = isObj(row.values) ? row.values : {};
                 for (const attr of (Array.isArray(def.attributes) ? def.attributes : []).filter(isObj)) {
@@ -223,6 +229,11 @@ export const utilityRoutes = {
                     }
                 }
                 const sourceAssetTag=str(row.sourceAssetTag);
+                const connectionId=prior?str(prior.connectionId)||'legacy-'+code:randomId(16);
+                if(!internal){
+                    if(sourceAssetTag)throw new HttpError(400,'Clear the internal asset link when selecting an external supply.');
+                    return {code,label:str(def.label),values,isInternalSupply:false,sourceAssetTag:'',connectionId};
+                }
                 // Legacy rows can remain unchanged while colleagues repair links individually; they stay incomplete.
                 if(!sourceAssetTag&&prior&&!str(prior.sourceAssetTag)&&stableJson(prior.values)===stableJson(values))return prior;
                 const asset=await checkedAsset(ctx,sourceAssetTag);
@@ -230,7 +241,7 @@ export const utilityRoutes = {
                 if(!prior||str(prior.sourceAssetTag)!==sourceAssetTag)await requireAt(ctx,PERMS.utilitiesView,str(asset.data.nodeId),'read','You cannot link to this source asset.');
                 const det=capacityDeterminant(def),rating=ratingsOf(asset)[code];
                 if(det&&(!positive(values[det.key])||!isObj(rating)||rating.key!==det.key||rating.unit!==det.unit||!positive(rating.capacity)))throw new HttpError(400,'A positive equipment demand and source supply capacity in '+det.unit+' are required.');
-                return { code, label: str(def.label), values, sourceAssetTag, connectionId:prior?str(prior.connectionId)||'legacy-'+code:randomId(16) };
+                return { code, label: str(def.label), values, isInternalSupply:true, sourceAssetTag, connectionId };
             }));
 
             if(!await writeDoc(path, { ...(existing?.data ?? {}), items, version:version+1, updatedAt: nowIso(), updatedBy: ctx.uid },existing?{updateTime:existing.updateTime}:{exists:false}))throw new HttpError(409,'Utility register changed. Reload.');
