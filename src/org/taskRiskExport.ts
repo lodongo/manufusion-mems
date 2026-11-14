@@ -12,7 +12,7 @@ const nLines=(s:string,w:number)=>s.split('\n').reduce((n,l)=>n+Math.max(1,Math.
 export async function buildTaskRiskExcel(i:TaskRiskExportInput):Promise<Blob>{
  const ExcelJS=(await import('exceljs')).default,wb=new ExcelJS.Workbook();wb.creator='Manufusion MEMS';
  const f=active(i),n=f.length,headers=reportColumns(i),last=headers.length,mit=8+n,res=mit+1;
- const ws=wb.addWorksheet('Task risk assessment',{views:[{state:'frozen',xSplit:2,ySplit:6,showGridLines:false}],pageSetup:{orientation:'landscape',paperSize:8,fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'5:6'}});
+ const ws=wb.addWorksheet('Task risk assessment',{views:[{state:'frozen',xSplit:2,ySplit:6,showGridLines:false}],pageSetup:{orientation:'landscape',paperSize:8 as import('exceljs').PaperSize,fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'5:6'}});
  const widths=[30,28,24,30,34,...f.map(()=>13),12,17,66,...f.map(()=>13),12,17,46];widths.forEach((w,j)=>ws.getColumn(j+1).width=w);
  [title,...metadata(i)].forEach((v,j)=>{const k=j+1;ws.mergeCells(k,1,k,last);const c=ws.getCell(k,1);c.value=v;c.alignment={vertical:'middle',wrapText:true};c.font={name:'Calibri',size:k===1?19:11,bold:k===1,color:{argb:k===1?'FFFFFFFF':'FF17384D'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:k===1?'FF17384D':'FFF1F5F9'}};ws.getRow(k).height=k===1?33:24;});
  const group=(a:number,b:number,label:string,color:string)=>{if(a!==b)ws.mergeCells(5,a,5,b);const c=ws.getCell(5,a);c.value=label;c.font={bold:true,color:{argb:'FFFFFFFF'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:color}};c.alignment={horizontal:'center',vertical:'middle',wrapText:true};};
