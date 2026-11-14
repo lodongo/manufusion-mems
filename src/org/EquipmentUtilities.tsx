@@ -103,7 +103,7 @@ function UtilityEditor({
         onSave(out,source);
     };
 
-    const saveRating=async()=>{if(!option||!determinant)return;setRatingBusy(true);setRatingError('');try{await callBackend('/api/org/ast/utilities/save',{assetTag:source,code:utility.code,capacity:Number(rating),expectedRating:option.capacity===null?null:{key:determinant.key,unit:determinant.unit,capacity:option.capacity}});setRating('');sources.reload();}catch(err){setRatingError(messageOf(err));}finally{setRatingBusy(false);}};
+    const saveRating=async()=>{if(!option||!determinant)return;setRatingBusy(true);setRatingError('');try{await callBackend('/api/org/ast/utilities/save',{assetTag:source,code:utility.code,capacity:Number(rating),expectedRating:option.rating});setRating('');sources.reload();}catch(err){setRatingError(messageOf(err));}finally{setRatingBusy(false);}};
     if(creating)return <AssetForm onCancel={()=>setCreating(false)} onDone={tag=>{setSource(tag);setCreating(false);sources.reload();}}/>;
     return (
         <Screen
@@ -145,10 +145,12 @@ function UtilityEditor({
                 {source&&!option&&!sources.loading&&<Alert tone='warn'>Supply asset is unavailable or outside your scope. Select an eligible asset.</Alert>}
                 {option&&option.assetStatus!=='active'&&<Alert tone='warn'>The source asset is not fully approved. This is a configuration record, not an authorization to operate.</Alert>}
                 {option&&determinant&&<><CapacityLine supply={option} projected={option.total-option.ownDemand+(Number.isFinite(demand)&&demand>0?demand:0)}/>
-                    {!option.capacity&&<><Field id='utility-source-rating' label={'Usable supply capacity ('+determinant.unit+') *'} inputMode='decimal' value={rating} onChange={e=>setRating(e.target.value)}/>
+                    {!option.capacity&&option.canRate&&<><Field id='utility-source-rating' label={'Usable supply capacity ('+determinant.unit+') *'} inputMode='decimal' value={rating} onChange={e=>setRating(e.target.value)}/>
                     <Button variant='secondary' busy={ratingBusy} disabled={!(Number(rating)>0)||!Number.isFinite(Number(rating))} onClick={()=>void saveRating()}>Save source capacity</Button></>}
+                    {!option.capacity&&!option.canRate&&<Alert tone='warn'>Ask an authorized asset editor to set the usable capacity.</Alert>}
                     {ratingError&&<Alert tone='error'>{ratingError}</Alert>}
                 </>}
+                {option&&determinant&&(!Number.isFinite(demand)||demand<=0)&&<Alert tone='warn'>Enter a positive equipment demand in {determinant.unit} below.</Alert>}
                 {option&&!determinant&&<p className='text-xs text-muted'>This utility has no additive capacity determinant in the catalogue. Asset linkage remains mandatory.</p>}
             </Card>
             <Card className='space-y-3'>

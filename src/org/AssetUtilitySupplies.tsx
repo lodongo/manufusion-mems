@@ -3,8 +3,8 @@ import {callBackend} from '../lib/backend';
 import {Alert,Field,SelectField} from '../components/ui';
 import {Button,Card,Spinner,useLoad} from '../admin/kit';
 type Determinant={key:string;label:string;unit:string};
-export type SupplySummary={code:string;label:string;determinant:Determinant|null;capacity:number|null;total:number;ownDemand:number;unknown:number;count:number;percent:number|null;status:string;consumers?:{name:string;code?:string;demand:number|null}[]};
-export type SourceOption=SupplySummary&{tag:string;name:string;className:string;assetStatus:string};
+export type SupplySummary={code:string;label:string;determinant:Determinant|null;capacity:number|null;rating:unknown;total:number;ownDemand:number;unknown:number;count:number;percent:number|null;status:string;consumers?:{name:string;code?:string;demand:number|null}[]};
+export type SourceOption=SupplySummary&{tag:string;name:string;className:string;assetStatus:string;canRate:boolean};
 const fmt=(n:number)=>n.toLocaleString(undefined,{maximumFractionDigits:2});
 export function CapacityLine({supply,projected}:{supply:SupplySummary;projected?:number}){
     if(!supply.determinant)return <span className='block text-xs text-muted'>Linked consumers: {supply.count} · no additive capacity metric</span>;
@@ -21,7 +21,7 @@ export default function AssetUtilitySupplies({assetTag}:{assetTag:string}){
     const [code,setCode]=useState(''),[rating,setRating]=useState(''),[busy,setBusy]=useState(false),[problem,setProblem]=useState('');
     const def=data?.catalogue.find(d=>d.code===code),existing=data?.supplies.find(s=>s.code===code);
     const select=(next:string)=>{setCode(next);const s=data?.supplies.find(s=>s.code===next);setRating(s?.capacity==null?'':String(s.capacity));setProblem('');};
-    const save=async()=>{if(!def)return;setBusy(true);setProblem('');try{await callBackend('/api/org/ast/utilities/save',{assetTag,code,capacity:def.determinant?Number(rating):null,expectedRating:existing&&(existing.capacity!==null||!existing.determinant)?{key:existing.determinant?.key??'',unit:existing.determinant?.unit??'',capacity:existing.capacity}:null});setCode('');setRating('');reload();}catch(e){setProblem(e instanceof Error?e.message:'Could not save rating.');}finally{setBusy(false);}};
+    const save=async()=>{if(!def)return;setBusy(true);setProblem('');try{await callBackend('/api/org/ast/utilities/save',{assetTag,code,capacity:def.determinant?Number(rating):null,expectedRating:existing?.rating??null});setCode('');setRating('');reload();}catch(e){setProblem(e instanceof Error?e.message:'Could not save rating.');}finally{setBusy(false);}};
     return <Card className='space-y-3'><h2 className='font-semibold text-ink'>Utilities supplied · capacity & connected equipment</h2>
     {loading&&<Spinner/>}{error&&<Alert tone='error'>{error} <Button variant='secondary' onClick={reload}>Retry</Button></Alert>}
     {data&&!data.supplies.length&&<p className='text-xs text-muted'>No supply ratings or equipment connections recorded.</p>}

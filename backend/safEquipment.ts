@@ -9,6 +9,7 @@ import {signedUrl} from './structure';
 import {scoreMaintenanceRisk,type RiskMatrix} from './maintenanceTaskRisk';
 import {configuredField,configurationIssues,validDay} from './safEnergyProfiles';
 import {statutoryProfile,mergeUtilityEnergy,utilityDefinition,candidateInspectionCodes,utilityPointId} from './safStatutoryInspections';
+import {utilityLinkIssue} from './astUtilities';
 const idRe=/^[A-Za-z0-9_-]{1,120}$/;
 const array=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const root=(ctx:OrgContext)=>`organizations/${ctx.orgId}`;
@@ -67,6 +68,7 @@ export const safEquipmentRoutes={
    const code=str(x.code),profile=context.profile(code);
    const issues=reviewIssues(profile,values,tests,today);
    if(x.linkedUtility&&!context.allowedExternal.has(code))issues.push('Existing utility is not currently adopted in Safety.');
+   if(x.linkedUtility){const issue=await utilityLinkIssue(ctx.orgId,node,context.utilityByCode.get(code)!,{attributes:context.attrs(code)});if(issue)issues.push(issue);}
    if(!str(x.tag)||!str(x.photoToken))issues.unshift('Tag and equipment photo');
    const status=issues.length?'incomplete':x.status==='documented'?'documented':'draft';
    return {...x,pointId:pointIdOf(x,i),values,tests:reports,status,issues,utilityAttrs:context.attrs(code).map(a=>({key:str(a.key),label:str(a.label),unit:str(a.unit)})),unadoptedInspections:candidateInspectionCodes(code).filter(c=>!context.adoptedTests.has(c)),url:tokenValid(ctx,id,str(x.photoToken))?await signedUrl(str(x.photoToken)):''};
@@ -91,7 +93,7 @@ export const safEquipmentRoutes={
   return {token,url:await signedUrl(token)};
  })],
  'POST /api/org/saf/equipment-energy/save':[orgRoute('org.saf.equipment_energy.save','SAF.risk.assess',async ctx=>{
-  const {id}=await equipment(ctx,true);const path=energyPath(ctx,id);const old=await getDoc(path);const version=Number(old?.data.version)||0;
+  const {id,node}=await equipment(ctx,true);const path=energyPath(ctx,id);const old=await getDoc(path);const version=Number(old?.data.version)||0;
   if(Number(ctx.body.version)!==version)throw new HttpError(409,'Energy register changed. Reload.');
   if(!Array.isArray(ctx.body.items)||ctx.body.items.length>100||array(ctx.body.items).length!==ctx.body.items.length)throw new HttpError(400,'Invalid energy register.');
   const previous=array(old?.data.items);
@@ -110,7 +112,7 @@ export const safEquipmentRoutes={
    if(linked&&(!context.utilityByCode.has(code)||pointId!==utilityPointId(context.utilityByCode.get(code)!)))throw new HttpError(400,'External connections are maintained in Utilities.');
    const current=linked?context.rows.find(y=>str(y.pointId)===pointId):null;
    const historical=linked?current:previous.find((y,j)=>pointIdOf(y,j)===pointId&&str(y.code)===code);
-   if(linked&&finalize&&!str(context.utilityByCode.get(code)?.sourceAssetTag))throw new HttpError(400,'Link this utility to a supply asset before documenting the energy register.');
+   if(linked&&finalize){const issue=await utilityLinkIssue(ctx.orgId,node,context.utilityByCode.get(code)!,{attributes:context.attrs(code)});if(issue)throw new HttpError(400,issue);}
    if(linked&&finalize&&!context.allowedExternal.has(code))throw new HttpError(400,'Adopt the existing utility in Safety before marking the register documented.');
    // Existing clients must not erase newer technical records by omitting profile data.
    if(historical&&(!isObj(x.values)||!isObj(x.tests))&&(isObj(historical.values)||isObj(historical.tests)))throw new HttpError(409,'Refresh MEMS before editing the expanded energy register.');

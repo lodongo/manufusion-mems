@@ -55,3 +55,10 @@ test('backend rejects external omissions, obsolete connection references and dup
  assert.ok(ui.includes('Utility supply values · synchronized'));
  assert.ok(ui.includes('Historical / non-adopted test evidence'));
 });
+
+test('a supply asset relink reopens hazardous energy review without losing the connection identity',()=>{
+ const a={code:'UTL-08-001',connectionId:'A',sourceAssetTag:'AST-000001',values:{flow:200}};
+ const row={...mergeUtilityEnergy([a],[])[0],status:'documented',values:{legal_review:'previous source'}};
+ const changed=mergeUtilityEnergy([{...a,sourceAssetTag:'AST-000002'}],[row])[0];
+ assert.equal(changed.pointId,row.pointId);assert.equal(changed.status,'draft');assert.equal(changed.sourceAssetTag,'AST-000002');assert.equal(changed.values.legal_review,undefined);
+});

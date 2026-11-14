@@ -129,7 +129,7 @@ export function mergeUtilityEnergy(utilities:Obj[],saved:Obj[]):Obj[]{
   const changed=old.utilityFingerprint!==fingerprint;
   const values={...(old.values&&typeof old.values==='object'?old.values as Obj:{})};
   if(changed){delete values.legal_review;}
-  return {...old,code,pointId,label:String(u.label||code),tag:old.tag||'',photoToken:old.photoToken||'',values,tests:old.tests||{},linkedUtility:true,utilityValues:u.values||{},utilityFingerprint:fingerprint,utilityConnectionId:connectionId,status:changed?'draft':old.status||'draft',utilityChanged:changed};
+  return {...old,code,pointId,label:String(u.label||code),tag:old.tag||'',photoToken:old.photoToken||'',values,tests:old.tests||{},linkedUtility:true,sourceAssetTag:String(u.sourceAssetTag||''),utilityValues:u.values||{},utilityFingerprint:fingerprint,utilityConnectionId:connectionId,status:changed?'draft':old.status||'draft',utilityChanged:changed};
  });
  return [...external,...saved.filter(x=>!String(x.code).startsWith('UTL-')&&!String(x.pointId||'').startsWith('utility-'))];
 }

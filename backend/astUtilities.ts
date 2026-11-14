@@ -68,7 +68,7 @@ function supplySummary(a: Doc, def: Obj, docs: Doc[], ownId = '') {
     const total = connections.reduce((sum,c)=>sum+(c.demand ?? 0),0);
     const ownDemand = connections.filter(c=>c.workCenterId===ownId).reduce((sum,c)=>sum+(c.demand??0),0);
     const unknown = det ? connections.filter(c=>c.demand===null).length : 0;
-    return {code:str(def.code), label:str(def.label), determinant:det, capacity, total, ownDemand, unknown, count:connections.length,
+    return {code:str(def.code), label:str(def.label), determinant:det, capacity, rating:rating??null, total, ownDemand, unknown, count:connections.length,
       ...capacityStatus(capacity,total,unknown), connections};
 }
 const publicSummary = (s: ReturnType<typeof supplySummary>) => {
@@ -87,7 +87,7 @@ async function sourceRows(ctx: OrgContext, id: string, node: Doc, def: Obj) {
     };
     const options = await Promise.all(candidates.map(async a=>await visible(a) ? {
         tag:a.id,name:str(a.data.name),assetStatus:str(a.data.status),className:str(a.data.className),
-        ...publicSummary(supplySummary(a,def,docs,id))
+        canRate:await allowedAt(ctx,ratingPermissions(a),str(a.data.nodeId),'write'),...publicSummary(supplySummary(a,def,docs,id))
     }:null));
     return options.filter(x=>x!==null);
 }
@@ -108,11 +108,12 @@ async function assetSupplies(ctx:OrgContext, defs:Obj[], adopted:Set<string>) {
         return {...publicSummary(s),consumers};
     }));
     return {supplies:summaries,catalogue:available.filter(d=>adopted.has(str(d.code))).map(d=>({code:str(d.code),label:str(d.label),determinant:capacityDeterminant(d)})),
-      canEdit:eligibleStatus(asset)&&await allowedAt(ctx,['AST.edit','AST.create'],str(asset.data.nodeId),'write')};
+      canEdit:eligibleStatus(asset)&&await allowedAt(ctx,ratingPermissions(asset),str(asset.data.nodeId),'write')};
 }
+const ratingPermissions=(a:Doc)=>['draft','rejected'].includes(str(a.data.status))?['AST.edit','AST.create']:['AST.edit'];
 async function saveRating(ctx:OrgContext, defs:Obj[], adopted:Set<string>){
     const asset=await checkedAsset(ctx,str(ctx.body.assetTag));
-    await requireAt(ctx,['AST.edit','AST.create'],str(asset.data.nodeId),'write','You cannot configure this source asset.');
+    await requireAt(ctx,ratingPermissions(asset),str(asset.data.nodeId),'write','You cannot configure this source asset.');
     if(!eligibleStatus(asset))throw new HttpError(409,'Source asset is unavailable.');
     const code=str(ctx.body.code),def=defs.find(x=>x.code===code && adopted.has(code));
     if(!def)throw new HttpError(400,'Select an adopted utility.');
@@ -125,6 +126,15 @@ async function saveRating(ctx:OrgContext, defs:Obj[], adopted:Set<string>){
     if(!await writeDoc(assetCol(ctx.orgId)+'/'+asset.id,{...asset.data,utilitySupplyRatings:next},{updateTime:asset.updateTime}))throw new HttpError(409,'Source asset changed. Reload.');
     await audited(ctx,'ast.utilities.supply_rating',asset.id,{code,before:prior??null,after:next[code]});
     return {saved:true};
+}
+export async function utilityLinkIssue(org:string,node:Doc,row:Obj,def:Obj|undefined):Promise<string>{
+    const tag=str(row.sourceAssetTag);
+    if(!TAG_RE.test(tag))return 'Link the external utility to its supply asset.';
+    const [asset,site]=await Promise.all([getDoc(assetCol(org)+'/'+tag),siteOf(org,node)]);
+    if(!asset||!site||asset.data.siteId!==site||!eligibleStatus(asset)||asset.data.workCenterId===node.id)return 'The supply asset is no longer available at this site.';
+    const det=def?capacityDeterminant(def):null,rating=ratingsOf(asset)[str(row.code)];
+    if(det&&(!positive(isObj(row.values)?row.values[det.key]:null)||!isObj(rating)||rating.key!==det.key||rating.unit!==det.unit||!positive(rating.capacity)))return 'Record valid source capacity and equipment demand in Utilities.';
+    return '';
 }
 export async function assertUtilitySourceUnlinked(org:string,tag:string){
     const docs=await listDocs('organizations/'+org+'/equipment_utilities');
@@ -190,6 +200,8 @@ export const utilityRoutes = {
                     if(!prior||stableJson(row.values)!==stableJson(prior.values)||str(row.sourceAssetTag)!==str(prior.sourceAssetTag))throw new HttpError(400,'Select an adopted utility or retain the existing historical values.');
                     return prior;
                 }
+                // An unchanged historical row is never promoted to complete by an unrelated edit.
+                if(prior&&stableJson(prior.values)===stableJson(row.values)&&str(prior.sourceAssetTag)===str(row.sourceAssetTag))return prior;
                 const values: Record<string, string | number> = {};
                 const raw = isObj(row.values) ? row.values : {};
                 for (const attr of (Array.isArray(def.attributes) ? def.attributes : []).filter(isObj)) {
