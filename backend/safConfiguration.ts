@@ -25,7 +25,7 @@ export async function safetyCatalogue(orgId:string,key:Key){
  const [master,policy]=await Promise.all([getDoc(`module_workspaces/SAF/metadata/${key}`),getDoc(`${root(orgId)}/adoption_${key}`)]);
  const fallback=SAF_DEFAULT_LISTS.find(x=>x.key===key);
  const raw=entries(Array.isArray(master?.data.items)?master?.data.items:fallback?.items);
- const items=key==='hazards'?raw.map(x=>({...x,color:categoryColor(str(x.category),isObj(master?.data.categoryColors)?master.data.categoryColors:{})})):raw;
+ const items:Obj[]=key==='hazards'?raw.map(x=>({...x,color:categoryColor(str(x.category),isObj(master?.data.categoryColors)?master.data.categoryColors:{})})):raw;
  const active=adoptedRecords(items,policy?.data.disabledCodes);
  return {key,title:str(master?.data.title)||fallback?.title||key,items,active,policy,version:Number(policy?.data.version)||0};
 }
