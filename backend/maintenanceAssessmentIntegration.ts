@@ -30,7 +30,7 @@ export async function prepareMaintenanceAssessment(ctx: OrgContext, record: Doc,
         t.assemblyId = t.assemblyId || str(record.data.assemblyId);
         const node = await getDoc(`organizations/${ctx.orgId}/structure/${t.assemblyId || t.equipmentId}`);
         const path = await nodePath(ctx.orgId, t.assemblyId || t.equipmentId);
-        if (!node || !path.includes(str(record.data.unitId)) || t.equipmentId !== record.data.unitId)
+        if (!node || str(node.data.status) === 'inactive' || (t.assemblyId && str(node.data.level) !== 'assembly') || !path.includes(str(record.data.unitId)) || t.equipmentId !== record.data.unitId)
             throw new HttpError(400, 'Choose this equipment or an assembly belonging to it.');
         for (const s of t.spares) {
             if (s.source === 'warehouse') {

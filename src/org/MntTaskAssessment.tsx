@@ -181,7 +181,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
      <Button disabled={draft.title.trim().length<3||draft.description.trim().length<3} onClick={addTask}>Save task</Button>
      <Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button>
     </div>
-    {library.data?.items.length?<details className='rounded-xl border border-line p-3'><summary className='flex min-h-9 cursor-pointer items-center text-sm text-soft'>Or reuse an approved assembly task ({library.data.items.length})</summary>
+    {library.data?.items.length?<details className='rounded-xl border border-line p-3'><summary className='flex min-h-9 cursor-pointer items-center text-sm text-soft'>Or reuse an approved equipment/assembly task ({library.data.items.length})</summary>
      <div className='mt-2 space-y-1'>{library.data.items.map(x=><button type='button' key={x.id} className='flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border border-line bg-page p-2 text-left text-sm text-ink active:bg-panel' onClick={()=>{if(tasks.some(t=>t.id===x.id)){setMessage('Task already selected.');return;}setTasks(old=>[...old,{...x.task,id:x.id,code:nextCode(),templateStatus:'existing'}]);setDraft(null);setDirty(true);}}><span className='min-w-0 break-words'>{x.task.title||x.task.description}</span><span className='shrink-0 text-xs text-muted'>v{x.version}</span></button>)}</div>
     </details>:null}
    </div>

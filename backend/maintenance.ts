@@ -272,18 +272,6 @@ async function assemblyContext(ctx: OrgContext, assemblyId: string, perm: string
     if (!node || node.id !== assemblyId || (level !== 'assembly' && !atEquipment)) throw new HttpError(400, allowEquipment ? 'Choose the equipment or the assembly.' : 'Choose an assembly.');
     if (str(node.data.status) === 'inactive') throw new HttpError(400, atEquipment ? 'This equipment is inactive.' : 'This assembly is inactive.');
     const assembly = atEquipment ? null : node;
-    // Equipment is selectable only if it contains at least one active assembly.
-    if (atEquipment) {
-        const nodes = (await listDocs(col(ctx.orgId))).filter((n) => str(n.data.status) !== 'inactive');
-        const parents = new Map(nodes.map((n) => [n.id, str(n.data.parentId)]));
-        const under = (id: string) => {
-            for (let cur = parents.get(id), depth = 0; cur && depth < 16; cur = parents.get(cur), depth++)
-                if (cur === assemblyId) return true;
-            return false;
-        };
-        if (!nodes.some((n) => str(n.data.level) === 'assembly' && under(n.id)))
-            throw new HttpError(400, 'This equipment has no assembly configured. Add an assembly in Organization Design before selecting the equipment.');
-    }
     const pathIds = docs.map((d) => d.id);
     need(ctx, perm, pathIds, scope);
     const unit = docs.find((d) => ['work_center', 'equipment'].includes(str(d.data.level))) ?? null;
@@ -877,8 +865,10 @@ export const maintenanceRoutes = {
             const visible=isOrder?woCan(ctx,doc,scope,await lists()).view:wrCan(ctx,doc,scope).view;
             if(!visible)throw new HttpError(403,'Work request/order access is required.');
             const docs=await listDocs(`organizations/${ctx.orgId}/asset_task_templates`);
-            const assemblyId=str(doc.data.assemblyId);
-            return {items:docs.filter(d=>str(d.data.assemblyId)===assemblyId&&str(d.data.status)==='approved')
+            const assemblyId=str(doc.data.assemblyId), equipmentId=str(doc.data.unitId);
+            return {items:docs.filter(d=>str(d.data.status)==='approved' && (assemblyId
+                ? str(d.data.assemblyId)===assemblyId
+                : !!equipmentId && !str(d.data.assemblyId) && str(d.data.equipmentId)===equipmentId))
                 .map(d=>({id:str(d.data.taskId),version:Number(d.data.version)||1,task:d.data.task,validatedBy:str(d.data.approvedByName)}))};
         })
     ],
@@ -910,9 +900,9 @@ export const maintenanceRoutes = {
             const docs=await listDocs(`organizations/${ctx.orgId}/asset_task_proposals`);
             const pending=[];
             for(const d of docs.filter(x=>str(x.data.status)==='pending_validation')){
-                if(canAt(ctx,'MNT.activities.edit',await nodePath(ctx.orgId,str(d.data.assemblyId)),scope))
+                if(canAt(ctx,'MNT.activities.edit',await nodePath(ctx.orgId,str(d.data.assemblyId)||str(d.data.equipmentId)),scope))
                     pending.push({id:d.id,wrCode:str(d.data.wrCode),taskId:str(d.data.taskId),
-                        description:str(d.data.description),assemblyId:str(d.data.assemblyId),
+                        description:str(d.data.description),assemblyId:str(d.data.assemblyId),equipmentId:str(d.data.equipmentId),
                         assetTag:str(d.data.assetTag),createdBy:str(d.data.createdBy),task:d.data.task});
             }
             return {items:pending,configurationNeeded:false};
@@ -944,20 +934,22 @@ export const maintenanceRoutes = {
             if(!assignments.some(a=>str(a.positionCode)===requiredRole&&(!str(a.startsOn)||str(a.startsOn)<=today)&&(!str(a.endsOn)||str(a.endsOn)>=today))&&!bypass(ctx,'mnt.gate.MNT.TASK.VALIDATE'))
                 throw new HttpError(403,'Only the configured asset-task validator may approve.');
             const scope=await scopeOf(ctx);
-            const assemblyId=str(proposal.data.assemblyId);
-            const pathIds=await nodePath(ctx.orgId,assemblyId);
+            const assemblyId=str(proposal.data.assemblyId), equipmentId=str(proposal.data.equipmentId)||str(request.data.unitId);
+            const taskLocationId=assemblyId||equipmentId;
+            if(!taskLocationId)throw new HttpError(409,'The task has no valid equipment location.');
+            const pathIds=await nodePath(ctx.orgId,taskLocationId);
             await requireMaintenanceRole(ctx,'MNT.TASK.VALIDATE',pathIds);
             if(!canAt(ctx,'MNT.activities.edit',pathIds,scope))
                 throw new HttpError(403,'Asset activity maintenance permission is also required.');
             const taskId=str(proposal.data.taskId);
-            const dest=`organizations/${ctx.orgId}/asset_task_templates/${assemblyId}_${taskId}`;
+            const dest=`organizations/${ctx.orgId}/asset_task_templates/${taskLocationId}_${taskId}`;
             const existing=await getDoc(dest);
             const version=(Number(existing?.data.version)||0)+1;
-            const writes:any[]=[{path:dest,fields:{assemblyId,taskId,task:proposal.data.task,status:'approved',version,validatedFrom:proposal.id,approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso()},...(existing?{updateTime:existing.updateTime}:{exists:false})},
+            const writes:any[]=[{path:dest,fields:{assemblyId,equipmentId,taskId,task:proposal.data.task,status:'approved',version,validatedFrom:proposal.id,approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso()},...(existing?{updateTime:existing.updateTime}:{exists:false})},
                 {path,fields:{...proposal.data,status:'approved',approvedBy:ctx.uid,approvedByName:displayName(ctx),approvedAt:nowIso(),templateVersion:version},updateTime:proposal.updateTime},
-                {path:`organizations/${ctx.orgId}/asset_task_template_revisions/${assemblyId}_${taskId}_v${version}`,fields:{task:proposal.data.task,version,validatedFrom:proposal.id,approvedBy:ctx.uid,approvedAt:nowIso()},exists:false}];
+                {path:`organizations/${ctx.orgId}/asset_task_template_revisions/${taskLocationId}_${taskId}_v${version}`,fields:{task:proposal.data.task,version,validatedFrom:proposal.id,approvedBy:ctx.uid,approvedAt:nowIso()},exists:false}];
             await commit(writes);
-            await rec(ctx,'mnt.task.validated',taskId,`Asset ${assemblyId}, revision ${version}`);
+            await rec(ctx,'mnt.task.validated',taskId,`Location ${taskLocationId}, revision ${version}`);
             return {ok:true,version};
         })
     ],
@@ -1102,8 +1094,7 @@ export const maintenanceRoutes = {
                 code: str(d.data.code),
                 name: str(d.data.name),
                 assetTag: isObj(d.data.attributes) ? str(d.data.attributes.assetTag) : '',
-                inScope: (str(d.data.level) === 'assembly' || (perm === P.WR_create && UNIT_LEVELS.includes(str(d.data.level))
-                    && docs.some((child) => str(child.data.level) === 'assembly' && pathTo(child.id).includes(d.id))))
+                inScope: (str(d.data.level) === 'assembly' || (perm === P.WR_create && UNIT_LEVELS.includes(str(d.data.level))))
                     && canAt(ctx, perm, pathTo(d.id), scope),
             }));
             const keep = new Set<string>();
@@ -1705,21 +1696,19 @@ export const maintenanceRoutes = {
                     const evaluation = str(b.technicalEvaluation).trim().slice(0, 3000);
                     if (evaluation.length < 20) throw new HttpError(400, 'Write the technical evaluation of the request (at least 20 characters).');
                     const nature = pickGrouped(l.failureModes, str(b.natureCode), 'failure mode')!;
-                    // A request may initially refer to equipment only. Resolve its assembly
-                    // when the technical assessment starts, before task assessment is possible.
-                    const selectedAssembly = str(b.assemblyId) || str(doc.data.assemblyId);
-                    if (!selectedAssembly) throw new HttpError(400, 'Choose the assembly before saving the assessment.');
+                    // Empty explicitly selects equipment; omitted retains the current assembly.
+                    const selectedAssembly = b.assemblyId === undefined ? str(doc.data.assemblyId) : str(b.assemblyId);
                     const assemblyPatch: Record<string, Plain> = {};
                     if (selectedAssembly !== str(doc.data.assemblyId)) {
                         if (objs(doc.data.assessmentTasks).length || str(doc.data.assessmentTasksAt))
                             throw new HttpError(409, 'Task assessment has started; the assembly cannot be changed.');
-                        const place = await assemblyContext(ctx, selectedAssembly, P.assessment_edit);
-                        if (!place.assembly || !place.unit || place.unit.id !== str(doc.data.unitId))
+                        const place = await assemblyContext(ctx, selectedAssembly || str(doc.data.unitId), P.assessment_edit, !selectedAssembly);
+                        if ((selectedAssembly && !place.assembly) || !place.unit || place.unit.id !== str(doc.data.unitId))
                             throw new HttpError(409, `Choose an assembly of ${str(doc.data.unitCode)} ${str(doc.data.unitName)}. The equipment of a request cannot change.`);
                         if (place.defaultAssetTag !== str(doc.data.assetTag))
                             throw new HttpError(409, 'The assembly does not match the equipment-linked asset of the work request.');
                         Object.assign(assemblyPatch, {
-                            assemblyId: place.assembly.id, assemblyCode: place.assembly.code, assemblyName: place.assembly.name,
+                            assemblyId: place.assembly?.id || '', assemblyCode: place.assembly?.code || '', assemblyName: place.assembly?.name || '',
                             path: place.path.map((x) => x.id),
                         });
                     }
@@ -1766,7 +1755,7 @@ export const maintenanceRoutes = {
                 }
                 case 'save_task_assessment': {
                     deny(can.assess, 'You cannot assess this request.');
-                    if (!str(doc.data.assemblyId)) throw new HttpError(409, 'Add the assembly in Work Assessment before assessing tasks.');
+                    if (!str(doc.data.unitId)) throw new HttpError(409, 'A valid equipment location is required before assessing tasks.');
                     let tasks;
                     try{
                         const matrixDoc=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
@@ -1795,10 +1784,10 @@ export const maintenanceRoutes = {
                     const version=(Number(doc.data.assessmentTasksVersion)||0)+1;
                     const assemblyId=str(doc.data.assemblyId);
                     for(const task of tasks){
-                        const dest=`organizations/${ctx.orgId}/asset_task_templates/${task.assemblyId||assemblyId}_${task.id}`;
+                        const dest=`organizations/${ctx.orgId}/asset_task_templates/${task.assemblyId||assemblyId||task.equipmentId||str(doc.data.unitId)}_${task.id}`;
                         const adopted=await getDoc(dest);
                         if(task.templateStatus==='existing'&&(!adopted||str(adopted.data.status)!=='approved'))
-                            throw new HttpError(400,'Selected reusable task has not been validated for this assembly.');
+                            throw new HttpError(400,'Selected reusable task has not been validated for this equipment or assembly.');
                         if(task.templateStatus==='existing'&&!sameTemplate(adopted.data.task,task))task.templateStatus='pending_validation';
                     }
                     // Snapshot each newly created task as a separate validation candidate.
@@ -1806,7 +1795,7 @@ export const maintenanceRoutes = {
                     for(const task of tasks.filter(t=>t.templateStatus!=='existing')){
                         const id=`${doc.id}_${task.id}_v${version}`;
                         await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
-                            wrCode:doc.id,assemblyId:task.assemblyId||assemblyId,assetTag:str(doc.data.assetTag),taskId:task.id,
+                            wrCode:doc.id,assemblyId:task.assemblyId||assemblyId,equipmentId:task.equipmentId||str(doc.data.unitId),assetTag:str(doc.data.assetTag),taskId:task.id,
                             description:task.description,task:task as unknown as Plain,assessmentVersion:version,
                             status:'pending_validation',createdBy:ctx.uid,createdAt:now
                         },{exists:false});
@@ -2057,15 +2046,15 @@ export const maintenanceRoutes = {
                     }
                     const version=(Number(d.assessmentTasksVersion)||0)+1;
                     for(const t of tasks){
-                        const approved=await getDoc(`organizations/${ctx.orgId}/asset_task_templates/${t.assemblyId||assemblyId}_${t.id}`);
+                        const approved=await getDoc(`organizations/${ctx.orgId}/asset_task_templates/${t.assemblyId||assemblyId||t.equipmentId||str(d.unitId)}_${t.id}`);
                         if(t.templateStatus==='existing'&&(!approved||str(approved.data.status)!=='approved'))
-                            throw new HttpError(400,'Selected task template must be validated for the assembly.');
+                            throw new HttpError(400,'Selected task template must be validated for the equipment or assembly.');
                         if(t.templateStatus==='existing'&&!sameTemplate(approved.data.task,t))t.templateStatus='pending_validation';
                     }
                     for(const t of tasks.filter(x=>x.templateStatus!=='existing')){
                         const id=`${doc.id}_${t.id}_v${version}`;
                         await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
-                            woCode:doc.id,assemblyId:t.assemblyId||assemblyId,assetTag:str(d.assetTag),taskId:t.id,description:t.description,
+                            woCode:doc.id,assemblyId:t.assemblyId||assemblyId,equipmentId:t.equipmentId||str(d.unitId),assetTag:str(d.assetTag),taskId:t.id,description:t.description,
                             task:t as unknown as Plain,assessmentVersion:version,status:'pending_validation',
                             createdBy:ctx.uid,createdAt:now
                         },{exists:false});

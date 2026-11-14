@@ -795,7 +795,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                    <Info label='Finding description' value={r.description||'Not provided'}/>
                    <Info label='Source of finding' value={r.sourceLabel||'Not provided'}/>
                    <Info label='Impacts' value={r.impacts.length?r.impacts.map(i=>i.label).join('; '):'REQUIRED: add at least one impact'}/>
-                   <Info label='Assembly' value={r.assemblyCode||'REQUIRED: select assembly before tasks'}/>
+                   <Info label='Assembly' value={r.assemblyCode||'Equipment level (no assembly selected)'}/>
                    {r.assessment.headerIssue&&<p className='rounded-xl border border-amber-700/50 p-3 text-sm text-amber-200'>{r.assessment.headerIssue}</p>}
                    {can.assess&&<Button onClick={()=>setMode('assess')}>{assessed?'Update technical assessment':'Start technical assessment'}</Button>}
                    <Button variant='secondary' onClick={()=>void goSection('tasks')}>Open assessment tasks, spares, services and safety</Button>
@@ -1120,7 +1120,6 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
     const [error, setError] = useState('');
     const missing = [
         evaluation.trim().length >= 20 ? '' : 'technical evaluation (20+ characters)',
-        assemblyId ? '' : 'assembly',
         nature ? '' : 'failure mode',
         severity ? '' : 'severity',
         solutions.length ? '' : 'solution categories',
@@ -1142,8 +1141,8 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
         <Card className='space-y-3'>
             <p className='font-medium text-white'>Work assessment</p>
             <p className='text-xs text-slate-400'>Verify the need technically and choose the solution. Add the tasks (spares, skills, people, tools, services, machine status, LOTO and permits) on the Tasks tab. A technical supervisor approves it.</p>
-            <SelectField id='as-assembly' label='Assembly to assess *' value={assemblyId} disabled={detail.assessmentTasks.length > 0} onChange={(e) => setAssemblyId(e.target.value)}>
-                <option value=''>Choose the assembly</option>
+            <SelectField id='as-assembly' label='Assembly to assess (optional)' value={assemblyId} disabled={detail.assessmentTasks.length > 0} onChange={(e) => setAssemblyId(e.target.value)}>
+                <option value=''>Equipment level — no assembly</option>
                 {detail.assemblyOptions.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
                 {detail.assemblyId && !detail.assemblyOptions.some((a) => a.id === detail.assemblyId) && <option value={detail.assemblyId}>{detail.assemblyCode} · {detail.assemblyName}</option>}
             </SelectField>

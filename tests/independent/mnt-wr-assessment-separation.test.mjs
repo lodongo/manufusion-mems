@@ -38,7 +38,7 @@ test('Work Assessment has a separate submodule and all four finding fields are r
  assert.match(ui,/What did you find\? \*/);
  assert.match(ui,/Source of the finding \*/);
  assert.doesNotMatch(ui,/Complete missing request details and impacts|function EnrichRequest|Add assembly & details/);
- assert.ok(ui.includes("label='Assembly to assess *'"));
+ assert.ok(ui.includes("label='Assembly to assess (optional)'"));
  assert.ok(ui.includes("title='2. Failure mode *'"));
  assert.match(ui,/natureCode: nature/);
  assert.match(ui,/title='Impact' required multi|title='Impact'[\s\S]*?required/);

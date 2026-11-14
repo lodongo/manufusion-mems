@@ -981,7 +981,6 @@ assert.equal(eq.assemblyId, '', 'Only the equipment is required to raise a reque
 assert.equal(eq.titleAuto, false, 'The requester now supplies a mandatory short title');
 assert.equal(eq.title, 'Gearbox knocking');
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'start_review' });
-await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'save_task_assessment', tasks: [task('x', 'Inspect', 'GEARBOX')] }), /Add the assembly/);
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'enrich', description: 'A different description from the reviewer.' }), /kept as written/);
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'enrich', assemblyId: 'OTHER_ASSEMBLY' }), /assembly of CONVEYOR/);
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'enrich' }), /Nothing new/);
@@ -1124,6 +1123,36 @@ await assert.rejects(
     }), /same equipment/,
 );
 
+// Equipment with no child assembly: modern lifecycle, task, approval and work order.
+seed(r+'/structure/NO_ASM', {code:'NO_ASM',name:'Standalone pump',level:'work_center',parentId:'LINE_CC',status:'active',attributes:{}});
+seed(r+'/assets/AST000003', {name:'Standalone pump',status:'active',workCenterId:'NO_ASM',nodeId:'NO_ASM',siteId:'SITE'});
+const noAsmLocations=await route(maintenanceRoutes,'/api/org/mnt/locations','requester',{purpose:'wr'});
+assert.ok(noAsmLocations.nodes.some(n=>n.id==='NO_ASM'&&n.inScope));
+const noAsmPlace=await route(maintenanceRoutes,'/api/org/mnt/assembly','requester',{assemblyId:'NO_ASM',purpose:'wr'});
+assert.equal(noAsmPlace.assembly,null);
+const noAsmWr=await createNewWorkRequest({assemblyId:'',equipmentId:'NO_ASM',assetTag:'AST000003',title:'Standalone pump leak',description:'Inspect and repair leak from the standalone pump.'});
+await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:noAsmWr.code,action:'start_review'});
+const noAsmLink=await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:noAsmWr.code,action:'to_assessment'});
+await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:noAsmWr.code,action:'assess',...header,assemblyId:''});
+const pumpTask={...task('pump_check','Inspect standalone pump',''),equipmentId:'NO_ASM'};
+await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:noAsmWr.code,action:'save_task_assessment',tasks:[pumpTask]});
+const pumpWr=snapshot(r+'/work_requests/'+noAsmWr.code).data;
+assert.equal(pumpWr.assemblyId,'');
+assert.equal(pumpWr.assessmentTasks[0].assemblyId,'');
+assert.equal(pumpWr.assessmentTasks[0].equipmentId,'NO_ASM');
+assert.equal(snapshot(r+'/work_assessments/'+noAsmLink.assessmentCode).data.assessmentTasks[0].equipmentId,'NO_ASM');
+const pumpProposal=r+'/asset_task_proposals/'+noAsmWr.code+'_pump_check_v1';
+assert.equal(snapshot(pumpProposal).data.equipmentId,'NO_ASM');
+await route(maintenanceRoutes,'/api/org/mnt/tasks/validate','validator',{id:noAsmWr.code+'_pump_check_v1'});
+assert.equal(snapshot(r+'/asset_task_templates/NO_ASM_pump_check').data.assemblyId,'');
+const pumpLibrary=await route(maintenanceRoutes,'/api/org/mnt/tasks/library','assessor',{code:noAsmWr.code});
+assert.ok(pumpLibrary.items.some(t=>t.id==='pump_check'));
+const otherLibrary=await route(maintenanceRoutes,'/api/org/mnt/tasks/library','assessor',{code:noReviewer.code});
+assert.ok(!otherLibrary.items.some(t=>t.id==='pump_check'));
+await route(maintenanceRoutes,'/api/org/mnt/wr/action','reviewer',{code:noAsmWr.code,action:'review_assessment',note:'Independent review verifies the standalone pump task and risk.'});
+const pumpWo=await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:noAsmWr.code,action:'convert',confirm:noAsmWr.code,scheduledStart:date,scheduledEnd:date});
+assert.equal(snapshot(r+'/work_orders/'+pumpWo.woCode).data.assemblyId,'');
+assert.equal(snapshot(r+'/work_orders/'+pumpWo.woCode).data.unitId,'NO_ASM');
 // ----- Period maintenance budget: proposed, approved under the Chart of Authority, committed by approved estimates -----
 const month = date.slice(0, 7);
 await assert.rejects(() => route(maintenancePlanningRoutes, '/api/org/mnt/budget/propose', 'planner', { ccId: 'LINE_CC', period: month, amount: -1, reason: 'Monthly maintenance budget for the line.' }), /amount/);

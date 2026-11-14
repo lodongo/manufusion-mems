@@ -19,7 +19,7 @@ test('failure mode and assembly selection belong to assessment, not request enri
  const ui=src('WorkRequests.tsx');
  assert.doesNotMatch(ui,/function EnrichRequest/);
  assert.doesNotMatch(ui,/Add assembly & details|Complete missing request details and impacts/);
- assert.match(ui,/label='Assembly to assess \*'/);
+ assert.ok(ui.includes("label='Assembly to assess (optional)'"));
  assert.match(ui,/title='2\. Failure mode \*'/);
  assert.match(ui,/assemblyId, natureCode: nature/);
 });
