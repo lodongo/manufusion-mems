@@ -109,7 +109,7 @@ export function statutoryProfile(code:string,adopted:ReadonlySet<string>,utility
   fields=[hazard,...fields.filter(f=>common.includes(f.code)||family!=='signal'&&!duplicate(f)).map(f=>f.code==='location'||f.code==='source_id'?f:{...f,whenAll:[{field:'exposure',values:['Hazardous energy present']}]})];
  }
  const tests:EnergyTest[]=candidateInspectionCodes(code).filter(x=>adopted.has(x)).map(code=>{const def=STATUTORY_INSPECTIONS.find(x=>x.code===code)!;return {code,label:def.label,critical:true,conditional:true,reference:def.reference};});
- return {fields:fields.map(f=>f.code==='source_id'?{...f,required:false}:f),tests};
+ return {fields:fields.map(f=>f.code==='source_id'?{...f,required:true}:f),tests};
 }
 export function utilityFingerprint(row:{code:string;values?:unknown;connectionId?:unknown;sourceAssetTag?:unknown;isInternalSupply?:unknown;supplyLinkRule?:unknown}):string{
  const values=row.values&&typeof row.values==='object'?row.values as Record<string,unknown>:{};

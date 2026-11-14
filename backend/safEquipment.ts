@@ -8,6 +8,7 @@ import {detectImage} from './branding';
 import {signedUrl} from './structure';
 import {scoreMaintenanceRisk,type RiskMatrix} from './maintenanceTaskRisk';
 import {configuredField,configurationIssues,validDay} from './safEnergyProfiles';
+import {readLotoProcedure,normalizeLotoProcedure,lotoProcedureRequired,lotoProcedureIssues} from './safLotoProcedure';
 import {statutoryProfile,mergeUtilityEnergy,utilityDefinition,candidateInspectionCodes,utilityPointId} from './safStatutoryInspections';
 import {utilityLinkIssue} from './astUtilities';
 import {energyColor} from './safEnergyColors';
@@ -239,13 +240,14 @@ export const safEquipmentRoutes={
     return [key,{...test,evidenceUrl:evidenceValid(ctx,id,token)?await signedUrl(token):''}];
    })));
    const code=str(x.code),profile=context.profile(code),def=context.metadata.get(code)||x;
-   const issues=reviewIssues(profile,values,tests,today);
+   const procedure=readLotoProcedure(x);
+   const issues=[...reviewIssues(profile,values,tests,today),...lotoProcedureIssues(procedure,lotoProcedureRequired(x.linkedUtility===true,values))];
    if(!x.linkedUtility&&!context.catalogue.some(s=>s.code===code))issues.push('Historical source is no longer adopted in Safety.');
    if(x.linkedUtility&&!context.allowedExternal.has(code))issues.push('Existing utility is not currently adopted in Safety.');
    if(x.linkedUtility){const issue=await utilityLinkIssue(ctx.orgId,node,context.utilityByCode.get(code)!,{attributes:context.attrs(code)});if(issue)issues.push(issue);}
    if(!str(x.tag)||!str(x.photoToken))issues.unshift('Tag and equipment photo');
    const status=issues.length?'incomplete':x.status==='documented'?'documented':'draft';
-   return {...x,pointId:pointIdOf(x,i),label:str(def.label)||str(x.label)||code,category:str(def.category)||'Unclassified',color:str(def.color)||energyColor(def),hazardCategory:str(def.hazardCategory),hazardCodes:Array.isArray(def.hazardCodes)?def.hazardCodes:[],relatedHazards:Array.isArray(def.relatedHazards)?def.relatedHazards:[],values,tests:reports,status,issues,utilityAttrs:context.attrs(code).map(a=>({key:str(a.key),label:str(a.label),unit:str(a.unit)})),unadoptedInspections:candidateInspectionCodes(code).filter(c=>!context.adoptedTests.has(c)),url:tokenValid(ctx,id,str(x.photoToken))?await signedUrl(str(x.photoToken)):''};
+   return {...x,...procedure,pointId:pointIdOf(x,i),label:str(def.label)||str(x.label)||code,category:str(def.category)||'Unclassified',color:str(def.color)||energyColor(def),hazardCategory:str(def.hazardCategory),hazardCodes:Array.isArray(def.hazardCodes)?def.hazardCodes:[],relatedHazards:Array.isArray(def.relatedHazards)?def.relatedHazards:[],values,tests:reports,status,issues,utilityAttrs:context.attrs(code).map(a=>({key:str(a.key),label:str(a.label),unit:str(a.unit)})),unadoptedInspections:candidateInspectionCodes(code).filter(c=>!context.adoptedTests.has(c)),url:tokenValid(ctx,id,str(x.photoToken))?await signedUrl(str(x.photoToken)):''};
   }));
   return {equipmentName:str(node.data.name),lotoPolicy:await lotoPolicy(ctx.orgId).then(({doc,...p})=>p),catalogue:context.catalogue,profiles:Object.fromEntries(context.rows.map(x=>[str(x.code),context.profile(str(x.code))])),items,utilityVersion:context.utilityVersion,version:Number(doc?.data.version)||0,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],
@@ -327,10 +329,12 @@ export const safEquipmentRoutes={
     }
     tests[test.code]={result,lastDate,nextDue,tester,basis,justification,evidenceToken,measurement};
    }
-   const issues=reviewIssues(profile,values,tests,today);
+   const oldProcedure=readLotoProcedure(historical||{});
+   let procedure;try{procedure=normalizeLotoProcedure(x.procedureSteps===undefined?oldProcedure.procedureSteps:x.procedureSteps,x.verification===undefined?oldProcedure.verification:x.verification);}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid LOTO instructions.');}
+   const issues=[...reviewIssues(profile,values,tests,today),...lotoProcedureIssues(procedure,lotoProcedureRequired(linked,values))];
    if(!tag||!photoToken)issues.unshift('Tag and equipment photo');
    if(finalize&&issues.length)throw new HttpError(400,(tag||str(source.label))+': '+issues.slice(0,5).join('; '));
-   return {code,pointId,tag,photoToken,label:str(source.label),values,tests,status:finalize?'documented':'draft',profileVersion:2,...(linked?{utilityFingerprint:str(current?.utilityFingerprint),utilityConnectionId:str(current?.utilityConnectionId)}:{})};
+   return {code,pointId,tag,photoToken,label:str(source.label),values,tests,...procedure,status:finalize?'documented':'draft',profileVersion:2,...(linked?{utilityFingerprint:str(current?.utilityFingerprint),utilityConnectionId:str(current?.utilityConnectionId)}:{})};
   }));
   if(finalize&&!items.length)throw new HttpError(400,'Record at least one actual energy point; an empty register does not establish zero energy.');
   // Preserve the previous register in a bounded-size separate revision document when changed.
