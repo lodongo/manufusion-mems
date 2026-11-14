@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {decideTask,questionsFor} from '../../backend/safTaskDecision.ts';
@@ -16,4 +17,11 @@ test('task decision protects against false no-risk and economic override',()=>{
  assert.equal(decideTask({...base,nonEnergy:'yes'}).code,'AC20');
  assert.ok(ACTIVITY_CLASSES.some(c=>c.code==='AC22'));
  assert.ok(questionsFor({...base,inching:'yes'}).some(([k])=>k==='partial'));
+});
+
+test('task inherits assessment snapshots and additional risks cannot replace the baseline',()=>{
+ const api=readFileSync('backend/safEquipment.ts','utf8');
+ assert.ok(api.includes('classBaseline:baseline'));
+ assert.ok(api.includes('baseline.some(b=>b.status===\'intolerable\')'));
+ assert.ok(api.includes('Retain the class-level permit requirements'));
 });

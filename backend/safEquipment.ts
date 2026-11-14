@@ -58,6 +58,10 @@ function reviewIssues(profile:ReturnType<typeof statutoryProfile>,values:Obj,tes
  if(str(values.legal_review).trim().length<20)issues.push('Document competent jurisdiction and legal applicability review.');
  return issues;
 }
+async function taskClassBaseline(ctx:OrgContext,id:string,code:string){
+ const d=await getDoc(classPath(ctx,id,code));
+ return {code,version:Number(d?.data.version)||0,status:str(d?.data.status)||'not_assessed',scope:str(d?.data.scope),screening:str(d?.data.screening),permitCodes:stringList(d?.data.permitCodes),energyTags:stringList(d?.data.energyTags),rows:array(d?.data.rows)};
+}
 const taskCollection=(ctx:OrgContext,id:string)=>root(ctx)+'/equipment_task_register/'+id+'/tasks';
 const taskCodeRe=/^TSK_\d{9}$/;
 async function taskSkills(){
@@ -94,7 +98,7 @@ export const safEquipmentRoutes={
  'POST /api/org/saf/equipment-tasks/read':[orgRoute('org.saf.equipment_tasks.read','SAF.view',async ctx=>{
   const {id,node}=await equipment(ctx);
   const [docs,classes,hazards,permits,skills,matrix,energy]=await Promise.all([listDocs(taskCollection(ctx,id)),effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'permitTypes'),taskSkills(),getDoc(root(ctx)+'/saf/risk_matrix'),currentTaskEnergy(ctx,id)]);
-  return {equipmentName:str(node.data.name),tasks:docs.map(d=>({...d.data,taskId:d.id})).sort((a,b)=>String(b.taskId).localeCompare(String(a.taskId))),classes:ACTIVITY_CLASSES.filter(c=>classes.some(x=>x.code===c.code)).map(c=>({...c,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[c.code]||[]})),hazards:hazards.map(ref),permits:permits.map(ref),skills,matrix:matrix?.data.configuration||null,energy,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
+  return {equipmentName:str(node.data.name),tasks:docs.map(d=>({...d.data,taskId:d.id})).sort((a,b)=>String(b.taskId).localeCompare(String(a.taskId))),classes:await Promise.all(ACTIVITY_CLASSES.filter(c=>classes.some(x=>x.code===c.code)).map(async c=>({...c,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[c.code]||[],baseline:await taskClassBaseline(ctx,id,c.code)}))),hazards:hazards.map(ref),permits:permits.map(ref),skills,matrix:matrix?.data.configuration||null,energy,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
  })],
  'POST /api/org/saf/equipment-tasks/save':[orgRoute('org.saf.equipment_tasks.save','SAF.risk.assess',async ctx=>{
   const {id}=await equipment(ctx,true);
@@ -128,16 +132,21 @@ export const safEquipmentRoutes={
    if(['AC05','AC22'].includes(decision.code)&&plan.some(p=>p.state==='isolate')&&!permitCodes.includes('SAF_08_01_003'))throw new HttpError(400,'LOTO permit is required for isolated energy points.');
    if(['AC05','AC22'].includes(decision.code)&&energy.length&&!plan.some(p=>p.state==='retained'))throw new HttpError(400,'Identify the technically necessary retained energy.');
   }
+  const baseline=await Promise.all(classCodes.map(c=>taskClassBaseline(ctx,id,c)));
+  const baselineComplete=baseline.every(b=>b.version>0&&b.status==='recorded');
+  const noAdditionalRisks=ctx.body.noAdditionalRisks===true;
   const raw=ctx.body.rows;
   if(!Array.isArray(raw))throw new HttpError(400,'Invalid risk rows.');
   if(decision.code==='AC01'&&(raw.length||permitCodes.length||plan.some(x=>x.state!=='not_applicable')))throw new HttpError(400,'No Risk conflicts with recorded hazards, permits or energy intervention. Re-screen.');
-  if(decision.code!=='AC01'&&!raw.length)throw new HttpError(400,'Add at least one hazard, injury and mitigation assessment.');
+  if(decision.code!=='AC01'&&!raw.length&&!(baselineComplete&&baseline.some(b=>b.rows.length>0)&&noAdditionalRisks))throw new HttpError(400,'Add a task-specific hazard assessment, or confirm no additional risks beyond the recorded class assessments.');
+  if(raw.length&&noAdditionalRisks)throw new HttpError(400,'Additional risks and no-additional-risks confirmation conflict.');
+  if(baseline.some(b=>b.permitCodes.some(c=>!permitCodes.includes(c))))throw new HttpError(400,'Retain the class-level permit requirements or correct the class assessment.');
   const rows=await scoreHazardRows(ctx,raw,matrixDoc?.data.configuration as unknown as RiskMatrix,array(old?.data.rows));
   const n=requested?0:await nextSequence('equipmentTask');
   if(!requested&&n>999999999)throw new HttpError(409,'Task sequence exhausted.');
   const taskId=requested||'TSK_'+String(n).padStart(9,'0');
-  const status=rows.some(r=>r.after.tolerability==='Intolerable')?'intolerable':(!energy.length||energy.some(e=>!e.tag))&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':'review_required';
-  const next={taskId,workCenterId:id,name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
+  const status=rows.some(r=>r.after.tolerability==='Intolerable')||baseline.some(b=>b.status==='intolerable')?'intolerable':(!energy.length||energy.some(e=>!e.tag))&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':!baselineComplete?'class_assessment_incomplete':'review_required';
+  const next={taskId,workCenterId:id,name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
   if(!(await writeDoc(col+'/'+taskId,next,old?{updateTime:old.updateTime}:{exists:false})))throw new HttpError(409,'Task changed. Reload.');
   await audited(ctx,'saf.equipment_task.save',id,{taskId,version:version+1,classCodes,status});
   return {ok:true,taskId,status};
