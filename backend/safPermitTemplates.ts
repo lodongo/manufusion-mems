@@ -1,3 +1,4 @@
+import {expandedFieldsForPermit,EXPANDED_PERMIT_FIELDS,type PermitParameter} from './safPermitExpanded';
 // SAF master permit form definitions. Definitions are not issued permits or an authorization to work.
 // Machine states retain the existing MNT codes for compatibility with stored tasks.
 export const SAF_MACHINE_STATES = [
@@ -53,7 +54,7 @@ const special:Record<string,PermitField[]>={
  traffic:[f('traffic_plan',section,'Traffic management and segregation plan','attachment',true,'Approved segregation and route controls.'),f('traffic_watch',section,'Traffic controllers, visibility and barriers','table',true,'Competent personnel and inspected arrangements.')],
  chemical:[f('sds',section,'Chemical identification and SDS','attachment',true,'Current safety data and compatibility assessment.'),f('chemical_transfer',section,'Transfer equipment, containment and exposure checks','table',true,'Competent verification and emergency provisions.')],
 };
-export function fieldsForPermit(code:string,category:string,label:string):PermitField[]{
+export function fieldsForPermit(code:string,category:string,label:string):PermitParameter[]{
  const name=label.toLowerCase();
  const groups:string[]=[];
  if(category==='Energy'||/electrical|isolation|switching/.test(name))groups.push('energy');
@@ -72,11 +73,11 @@ export function fieldsForPermit(code:string,category:string,label:string):Permit
  // Stable code guards against renamed labels and assure essential controls.
  const keyed:Record<string,string[]>={'SAF_08_01_003':['energy','loto'],'SAF_08_01_004':['energy','live'],'SAF_08_03_001':['confined']};
  groups.push(...(keyed[code]||[]));
- return [...common,...[...new Set(groups)].flatMap(g=>special[g]||[])];
+ return [...new Map([...common,...[...new Set(groups)].flatMap(g=>special[g]||[]),...expandedFieldsForPermit(code)].map(f=>[f.code,f])).values()];
 }
-export const SAF_PERMIT_PARAMETER_MASTER=[...new Map([...common,...Object.values(special).flat()].map(x=>[x.code,x])).values()].map(x=>({
+export const SAF_PERMIT_PARAMETER_MASTER=[...new Map([...common,...Object.values(special).flat(),...EXPANDED_PERMIT_FIELDS].map(x=>[x.code,x])).values()].map(x=>({
  code:x.code,label:x.label,description:x.description,category:x.section,subcategory:x.kind,active:true,selectable:true,
 }));
-export function normalizePermitFields(definitions:PermitField[],overrides:Record<string,{enabled?:boolean;required?:boolean}>){
+export function normalizePermitFields(definitions:PermitParameter[],overrides:Record<string,{enabled?:boolean;required?:boolean}>){
  return definitions.map(f=>({...f,enabled:f.mandatory||overrides[f.code]?.enabled!==false,required:f.mandatory||(overrides[f.code]?.enabled!==false&&overrides[f.code]?.required===true)}));
 }

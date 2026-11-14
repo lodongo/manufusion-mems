@@ -3,6 +3,7 @@ import {orgRoute,type OrgContext} from './guards';
 import {PERMS,holdsAnywhere,holdsDirect,audited} from './scopeGuard';
 import {SAF_DEFAULT_LISTS} from './safDefaults';
 import {fieldsForPermit,normalizePermitFields} from './safPermitTemplates';
+import {EXPANDED_PERMIT_REFERENCES} from './safPermitExpanded';
 
 export const SAF_ADOPTION_KEYS=['machineStatuses','permitTypes','hazards','impacts','hazardousEnergy','controlMeasures','ppe','riskMethods','severityLevels','likelihoodLevels','riskAcceptance','criticalRules','emergencyScenarios'] as const;
 type Key=typeof SAF_ADOPTION_KEYS[number];
@@ -71,14 +72,14 @@ export const safConfigurationRoutes={
   const c=await safetyCatalogue(ctx.orgId,'permitTypes');
   const rows=await Promise.all(c.items.filter(x=>x.selectable!==false).map(async x=>{
     const code=str(x.code);const doc=await getDoc(`${root(ctx.orgId)}/permit_template_${code}`);
-    return {...safeOption(x),adopted:c.active.some(y=>str(y.code)===code),version:Number(doc?.data.version)||0,configured:!!doc};
+    return {...safeOption(x),adopted:c.active.some(y=>str(y.code)===code),version:Number(doc?.data.version)||0,configured:!!doc,parameterCount:fieldsForPermit(code,str(x.category),str(x.label)).length};
   }));
   return {rows,canEdit:holdsDirect(ctx,PERMS.matrixConfigure)};
  })],
  'POST /api/org/saf/permits/template/read':[orgRoute('org.saf.permits.template.read',null,async ctx=>{
   assertRead(ctx);
   const c=await permitContext(ctx.orgId,validCode(ctx.body.code));
-  return {permit:c.permit,fields:c.fields,version:Number(c.doc?.data.version)||0,canEdit:holdsDirect(ctx,PERMS.matrixConfigure),
+  return {permit:c.permit,fields:c.fields,referenceBasis:['HSE HSG250',...(EXPANDED_PERMIT_REFERENCES[c.permit.code]||[])],schemaRevision:2,version:Number(c.doc?.data.version)||0,canEdit:holdsDirect(ctx,PERMS.matrixConfigure),
     policy:isObj(c.doc?.data.policy)?c.doc.data.policy:{maxHours:8,allowExtension:false,allowShiftHandover:false,requireAttachments:false},updatedAt:str(c.doc?.data.updatedAt)};
  })],
  'POST /api/org/saf/permits/template/save':[orgRoute('org.saf.permits.template.save',null,async ctx=>{
@@ -107,7 +108,7 @@ export const safConfigurationRoutes={
   // One versioned configuration document per permit type. No permit issuance takes place here.
   const oldHistory=entries(c.doc?.data.history);
   const previous=c.doc?{version:Number(c.doc.data.version)||0,overrides:c.doc.data.overrides||{},policy:c.doc.data.policy||{},updatedAt:str(c.doc.data.updatedAt),updatedBy:str(c.doc.data.updatedBy),reason:str(c.doc.data.reason)}:null;
-  const ok=await writeDoc(c.path,{code,version,overrides,policy,fields,updatedAt:nowIso(),updatedBy:ctx.uid,reason,history:previous?[...oldHistory.slice(-19),previous]:[]},c.doc?{updateTime:c.doc.updateTime}:{exists:false});
+  const ok=await writeDoc(c.path,{code,version,schemaRevision:2,overrides,policy,fields,updatedAt:nowIso(),updatedBy:ctx.uid,reason,history:previous?[...oldHistory.slice(-19),previous]:[]},c.doc?{updateTime:c.doc.updateTime}:{exists:false});
   if(!ok)throw new HttpError(409,'Permit form changed. Reload before saving.');
   await audited(ctx,'saf.permit_template.save',code,{version,reason,enabled:fields.filter(x=>x.enabled).length,policy});
   return {ok:true,version};
