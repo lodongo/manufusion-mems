@@ -1122,16 +1122,37 @@ export const maintenanceRoutes = {
                     break;
                 }
             }
-            const preferred = await getDoc(`organizations/${ctx.orgId}/mnt_wr_preferences/${ctx.uid}`);
+            const prefPath = `organizations/${ctx.orgId}/mnt_wr_preferences/${ctx.uid}`;
+            const preferred = perm === P.WR_create ? await getDoc(prefPath) : null;
+            const validSite = (id: string) => !!id && keep.has(id) && str(byId.get(id)?.data.level) === 'site';
+            const siteOf = (id: string) => pathTo(id).find(validSite) || '';
+            let lastSiteId = '';
             let lastSelectionId = str(preferred?.data.lastSelectionId);
-            if (!lastSelectionId && perm === P.WR_create) {
-                const recent = (await listDocs(wrCol(ctx.orgId)))
-                    .filter((w) => str(w.data.requestedBy) === ctx.uid)
-                    .sort((a, b) => str(b.data.requestedAt).localeCompare(str(a.data.requestedAt)))[0];
-                lastSelectionId = str(recent?.data.assemblyId) || str(recent?.data.unitId);
+            if (perm === P.WR_create) {
+                const rememberSiteId = str(ctx.body.rememberSiteId);
+                if (rememberSiteId) {
+                    if (!validSite(rememberSiteId)) throw new HttpError(403, 'Choose a site with accessible work request locations.');
+                    await writeDoc(prefPath, { ...preferred?.data, lastSiteId: rememberSiteId, selectedAt: nowIso(), selectedBy: ctx.uid });
+                    lastSiteId = rememberSiteId;
+                } else {
+                    // Migrate the previous assembly/equipment preference to its site.
+                    const savedSiteId = str(preferred?.data.lastSiteId);
+                    lastSiteId = validSite(savedSiteId) ? savedSiteId : siteOf(lastSelectionId);
+                    if (!lastSiteId) {
+                        const recent = (await listDocs(wrCol(ctx.orgId)))
+                            .filter((w) => str(w.data.requestedBy) === ctx.uid)
+                            .sort((a, b) => str(b.data.requestedAt).localeCompare(str(a.data.requestedAt)));
+                        for (const w of recent) {
+                            const site = str(w.data.siteId);
+                            lastSiteId = validSite(site) ? site : siteOf(str(w.data.assemblyId) || str(w.data.unitId));
+                            if (lastSiteId) break;
+                        }
+                    }
+                }
             }
             if (!nodes.some((n) => n.id === lastSelectionId && n.inScope)) lastSelectionId = '';
-            return { nodes: nodes.filter((n) => keep.has(n.id)), homeId, lastSelectionId };
+            // A remembered site is a browsing position, never a selected asset.
+            return { nodes: nodes.filter((n) => keep.has(n.id)), homeId, lastSiteId, lastSelectionId };
         }),
     ],
 
@@ -1143,7 +1164,7 @@ export const maintenanceRoutes = {
             const place = await assemblyContext(ctx, selected, forWr ? P.WR_create : P.WO_create, forWr);
             if (forWr && ctx.body.remember === true) {
                 await writeDoc(`organizations/${ctx.orgId}/mnt_wr_preferences/${ctx.uid}`, {
-                    lastSelectionId: selected, selectedAt: nowIso(), selectedBy: ctx.uid,
+                    lastSelectionId: selected, lastSiteId: place.site?.id || '', selectedAt: nowIso(), selectedBy: ctx.uid,
                 });
             }
             return place;

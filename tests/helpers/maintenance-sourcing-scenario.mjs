@@ -350,6 +350,12 @@ const search = (who, code, q) => route(maintenanceSourcingRoutes, '/api/org/mnt/
 
 // The location picker opens at the legal entity of the person raising the request.
 assert.equal((await route(maintenanceRoutes, '/api/org/mnt/locations', 'assessor', { purpose: 'wr' })).homeId, 'LE');
+const chosenSite = await route(maintenanceRoutes, '/api/org/mnt/locations', 'assessor', { purpose: 'wr', rememberSiteId: 'SITE' });
+assert.equal(chosenSite.lastSiteId, 'SITE', 'Remember the explicitly selected site, not an assembly');
+const reopenedLocation = await route(maintenanceRoutes, '/api/org/mnt/locations', 'assessor', { purpose: 'wr' });
+assert.equal(reopenedLocation.lastSiteId, 'SITE', 'Opening a new request restores site browsing');
+await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/locations', 'assessor', { purpose: 'wr', rememberSiteId: 'LE' }), /site with accessible/);
+
 // Raising a request: only the place is required; up to 5 impacts; no criticality from the requester here.
 const { criticalityCode: _crit, ...raised } = finding;
 const sixImpacts = l.impacts.flatMap((g) => g.items.map((i) => i.code)).slice(0, 6);

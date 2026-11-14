@@ -1,5 +1,5 @@
 import { useEffect, useState, type FocusEvent } from 'react';
-import { Check, CheckCircle2, ChevronRight, Cog, Home, Layers, Search, Wrench, X } from 'lucide-react';
+import { ArrowLeft, Check, CheckCircle2, ChevronRight, Cog, Home, Layers, Search, Wrench, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert } from '../components/ui';
 import { Card, Spinner, useLoad } from '../admin/kit';
@@ -332,17 +332,47 @@ export function GroupPicker({ title, groups, selected, onToggle, multi = false, 
 }
 
 /** Drill down the organization design to an assembly, or search assemblies directly. */
-export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipment = false }: { selected?: string; onPick: (id: string) => void; purpose?: 'wr' | 'wo'; allowEquipment?: boolean }) {
-    const { data, error, loading } = useLoad(() => callBackend<{ nodes: LocNode[]; homeId?: string }>('/api/org/mnt/locations', { purpose }), [purpose]);
+export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipment = false, initialBrowseId, onBrowseChange, onBackReady }: {
+    selected?: string; onPick: (id: string) => void; purpose?: 'wr' | 'wo'; allowEquipment?: boolean;
+    initialBrowseId?: string; onBrowseChange?: (id: string) => void; onBackReady?: (back: (() => boolean) | null) => void;
+}) {
+    const { data, error, loading } = useLoad(() => callBackend<{ nodes: LocNode[]; homeId?: string; lastSiteId?: string }>('/api/org/mnt/locations', { purpose }), [purpose]);
     const [at, setAt] = useState('root');
     const [q, setQ] = useState('');
-    // Open at the legal entity of the person raising the request; "All" still goes up to the whole organization.
     const [homed, setHomed] = useState(false);
+    const [preferenceError, setPreferenceError] = useState('');
     useEffect(() => {
         if (homed || !data) return;
-        if (data.homeId && data.nodes.some((n) => n.id === data.homeId)) setAt(data.homeId);
+        const available = (id?: string) => id === 'root' || (!!id && data.nodes.some((n) => n.id === id));
+        const start = available(initialBrowseId) ? initialBrowseId!
+            : purpose === 'wr' && available(data.lastSiteId) ? data.lastSiteId!
+            : available(data.homeId) ? data.homeId! : 'root';
+        setAt(start);
+        onBrowseChange?.(start);
         setHomed(true);
-    }, [data, homed]);
+    }, [data, homed, initialBrowseId, purpose, onBrowseChange]);
+    const moveTo = (id: string, remember = true) => {
+        setAt(id);
+        setQ('');
+        onBrowseChange?.(id);
+        if (remember && purpose === 'wr' && data?.nodes.some((n) => n.id === id && n.level === 'site')) {
+            setPreferenceError('');
+            void callBackend('/api/org/mnt/locations', { purpose, rememberSiteId: id })
+                .catch(() => setPreferenceError('The site could not be remembered. You can still select your equipment.'));
+        }
+    };
+    const back = () => {
+        if (q.trim()) { setQ(''); return true; }
+        if (at === 'root' || !data || !homed) return false;
+        const node = data.nodes.find((n) => n.id === at);
+        const parent = node && data.nodes.some((n) => n.id === node.parentId) ? node.parentId : 'root';
+        moveTo(parent);
+        return true;
+    };
+    useEffect(() => {
+        onBackReady?.(back);
+        return () => onBackReady?.(null);
+    });
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load your locations.'}</Alert>;
     const nodes = data.nodes;
@@ -375,6 +405,8 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipmen
 
     return (
         <div className='space-y-3'>
+            {!onBackReady && (at !== 'root' || q.trim()) && <button type='button' onClick={back} className='flex min-h-11 items-center gap-2 rounded-xl border border-line px-3 text-sm font-semibold text-ink'><ArrowLeft className='h-4 w-4' />Back one level</button>}
+            {preferenceError && <Alert tone='warn'>{preferenceError}</Alert>}
             <p className='text-sm text-slate-400'>{allowEquipment ? 'Choose equipment with a configured assembly, or select an assembly directly. Browse your sites or search.' : 'Open the assembly. Go through your sites and equipment units, or search.'}</p>
             <div className='relative'>
                 <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
@@ -395,19 +427,20 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipmen
             ) : (
                 <>
                     <nav aria-label='Path' className='flex flex-wrap items-center gap-1 text-sm'>
-                        <button type='button' onClick={() => setAt('root')} className='flex items-center gap-1 rounded-lg px-2 py-1 text-emerald-300'>
+                        <button type='button' onClick={() => moveTo('root')} className='flex items-center gap-1 rounded-lg px-2 py-1 text-emerald-300'>
                             <Home className='h-4 w-4' />
                             All
                         </button>
                         {trail.map((n, i) => (
                             <span key={n.id} className='flex items-center gap-1'>
                                 <ChevronRight className='h-3.5 w-3.5 text-slate-600' />
-                                <button type='button' onClick={() => setAt(n.id)} className={`rounded-lg px-2 py-1 font-mono text-xs ${i === trail.length - 1 ? 'bg-slate-800 text-white' : 'text-emerald-300'}`}>
+                                <button type='button' onClick={() => moveTo(n.id)} className={`rounded-lg px-2 py-1 font-mono text-xs ${i === trail.length - 1 ? 'bg-slate-800 text-white' : 'text-emerald-300'}`}>
                                     {n.code}
                                 </button>
                             </span>
                         ))}
                     </nav>
+                    {here && <div className='rounded-xl border border-line bg-panel px-3 py-2'><p className='text-xs text-soft'>{LEVEL_LABEL[here.level] ?? here.level}</p><p className='font-semibold text-ink'>{here.name} <span className='text-xs font-normal text-soft'>· {here.code}</span></p></div>}
                     {isUnit(here) && here!.inScope && allowEquipment && hasAssembly(here!.id) && (
                         <div className='space-y-1'>
                             <AssemblyButton node={here!} sub='This equipment · assembly not known' selected={selected === here!.id} onPick={onPick} />
@@ -424,7 +457,7 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipmen
                                 )
                             ) : (
                                 <li key={n.id}>
-                                    <button type='button' onClick={() => setAt(n.id)} className='flex w-full items-center gap-3 rounded-2xl border border-slate-800 bg-slate-900 p-3 text-left active:bg-slate-800'>
+                                    <button type='button' onClick={() => moveTo(n.id)} className='flex w-full items-center gap-3 rounded-2xl border border-slate-800 bg-slate-900 p-3 text-left active:bg-slate-800'>
                                         {n.level === 'work_center' || n.level === 'equipment' ? <Cog className='h-5 w-5 shrink-0 text-amber-400' /> : <Layers className='h-5 w-5 shrink-0 text-emerald-400' />}
                                         <span className='min-w-0 flex-1'>
                                             <span className='block truncate text-sm text-white'>{n.name}</span>

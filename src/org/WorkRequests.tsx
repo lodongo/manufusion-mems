@@ -274,6 +274,8 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     const lists = setup.lists!;
     const [step, setStep] = useState(0);
     const [place, setPlace] = useState<Place | null>(null);
+    const browseId = useRef<string | undefined>(undefined);
+    const pickerBack = useRef<(() => boolean) | null>(null);
     const [placeError, setPlaceError] = useState('');
     const [loadingPlace, setLoadingPlace] = useState(false);
     const [assetTag, setAssetTag] = useState('');
@@ -316,6 +318,9 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                 throw new Error('This Gemba observation references a different asset from the equipment link. Review the asset mapping before proceeding.');
             setPlace(p);
             setAssetTag(p.defaultAssetTag);
+            // On returning from Details, show the equipment's assembly choices.
+            // A fresh request opens at the remembered site instead.
+            browseId.current = p.assembly ? p.path[p.path.length - 2]?.id : p.unit?.id;
             if (handoff) {
                 setTitle(handoff.title.slice(0, 120));
                 setDescription((handoff.description || handoff.title).slice(0, 5000));
@@ -334,15 +339,9 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         }
     };
     useEffect(() => {
-        if (assemblyId) {
-            void choose(assemblyId);
-        } else {
-            void callBackend<{ lastSelectionId?: string }>('/api/org/mnt/locations', { purpose: 'wr' })
-                .then(({ lastSelectionId }) => {
-                    if (lastSelectionId) void choose(lastSelectionId);
-                })
-                .catch(() => undefined);
-        }
+        // Only explicit linked workflows (e.g. Gemba) preselect an assembly.
+        // A normal new request must ask the user to select a fresh location.
+        if (assemblyId) void choose(assemblyId);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [assemblyId]);
 
@@ -355,7 +354,10 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         setPhotos([]);
         setReviewerUid('');
         setError('');
-        setStep(place ? 1 : 0);
+        setPlace(null);
+        setAssetTag('');
+        browseId.current = undefined;
+        setStep(0);
     };
 
     const source = findIn(lists.sources, sourceCode);
@@ -370,6 +372,10 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
     ];
     const canNext = step === STEPS.length - 1 ? problems.every((p) => !p.length) : problems[step].length === 0;
     const screen = useFullScreen(!created);
+    const goBack = () => {
+        if (step > 0) setStep(step - 1);
+        else if (!loadingPlace && !pickerBack.current?.()) navigate('organization_admin/work_requests');
+    };
     const swipeStart = useRef<{ x: number; y: number; at: number } | null>(null);
     const startSwipe = (event: TouchEvent<HTMLDivElement>) => {
         swipeStart.current = null;
@@ -387,7 +393,10 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
         const dx = touch.clientX - start.x, dy = touch.clientY - start.y;
         if (Date.now() - start.at > 800 || Math.abs(dx) < 70 || Math.abs(dy) > 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
         if (dx < 0 && canNext && step < STEPS.length - 1) setStep(step + 1);
-        if (dx > 0 && step > 0) setStep(step - 1);
+        if (dx > 0 && (step > 0 || pickerBack.current)) {
+            if (step > 0) setStep(step - 1);
+            else pickerBack.current?.();
+        }
     };
 
     const addPhotos = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -454,7 +463,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                             Back to Gemba review
                         </Button>
                     ) : (
-                        <Button variant='secondary' onClick={again}>Raise another here</Button>
+                        <Button variant='secondary' onClick={again}>Raise another</Button>
                     )}
                     {linkError && pendingLink && (
                         <Button variant='secondary' onClick={() => { void linkToGemba(created, pendingLink).catch((e: unknown) => setLinkError(e instanceof Error ? e.message : 'Link failed.')); }}>
@@ -470,8 +479,8 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
             {/* Action bar: always visible at the top */}
             <div className='sticky top-0 z-10 shrink-0 space-y-2 border-b border-line bg-page pb-2'>
                 <div className='flex items-center gap-2'>
-                    <Button variant='secondary' onClick={() => (step === 0 ? navigate('organization_admin/work_requests') : setStep(step - 1))} aria-label='Back'>
-                        <ArrowLeft className='h-4 w-4' />
+                    <Button variant='secondary' onClick={goBack} aria-label='Back one step' disabled={loadingPlace}>
+                        <ArrowLeft className='h-4 w-4' /> Back
                     </Button>
                     <div className='min-w-0 flex-1'>
                         <p className='text-xs text-slate-500'>
@@ -517,7 +526,9 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
                 {step === 0 && (
                     <>
                         {placeError && <Alert tone='error'>{placeError}</Alert>}
-                        {loadingPlace ? <Spinner /> : <AssemblyPicker allowEquipment selected={place?.assembly?.id ?? place?.unit?.id} onPick={choose} />}
+                        {loadingPlace ? <Spinner /> : <AssemblyPicker allowEquipment selected={place?.assembly?.id ?? place?.unit?.id} onPick={choose}
+                            initialBrowseId={browseId.current} onBrowseChange={(id) => { browseId.current = id; }}
+                            onBackReady={(back) => { pickerBack.current = back; }} />}
                     </>
                 )}
 
