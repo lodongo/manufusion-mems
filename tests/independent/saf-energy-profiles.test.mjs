@@ -5,7 +5,7 @@ import {SAF_DEFAULT_LISTS} from '../../backend/safDefaults.ts';
 import {energyProfile,applies,configuredField,configurationIssues,validDay} from '../../backend/safEnergyProfiles.ts';
 test('every adopted standard source has a typed profile and critical inspections',()=>{
  const catalog=SAF_DEFAULT_LISTS.find(x=>x.key==='hazardousEnergy').items;
- assert.equal(catalog.length,76);
+ assert.equal(catalog.length,345);
  for(const x of catalog){const p=energyProfile(x.code);assert.ok(p.fields.length>=10,x.code);assert.ok(p.tests.length>=3,x.code);assert.equal(new Set(p.fields.map(z=>z.code)).size,p.fields.length);assert.equal(new Set(p.tests.map(z=>z.code)).size,p.tests.length);assert.ok(p.fields.some(z=>z.code==='isolation_ref'&&z.required));}
 });
 test('AC mains requires quantitative ratings, phase configuration, earthing and applicable leakage tests',()=>{
