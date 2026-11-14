@@ -220,6 +220,17 @@ export const safEquipmentRoutes={
  'POST /api/org/saf/equipment-energy/read':[orgRoute('org.saf.equipment_energy.read','SAF.view',async ctx=>{
   const {id,node}=await equipment(ctx);const doc=await getDoc(energyPath(ctx,id));
   const context=await energyContext(ctx,id,array(doc?.data.items));
+  if(ctx.body.programPhotoPointId!==undefined){
+   await rateLimit('saf-loto-program-photo',ctx.uid,240,3600);
+   if(Number(ctx.body.version)!==(Number(doc?.data.version)||0)||Number(ctx.body.utilityVersion)!==context.utilityVersion)throw new HttpError(409,'Energy register changed. Refresh LOTO Program before exporting.');
+   const pointId=str(ctx.body.programPhotoPointId),row=context.rows.find((x,i)=>pointIdOf(x,i)===pointId),token=str(row?.photoToken);
+   if(!idRe.test(pointId)||!row||!tokenValid(ctx,id,token))throw new HttpError(404,'Energy point photo not found.');
+   const meta=await getDoc(energyPath(ctx,id)+'/photos/'+token.slice(photoPrefix(ctx,id).length));
+   if(!meta||meta.data.purpose==='test_evidence')throw new HttpError(404,'Energy point photo not found.');
+   const bytes=await storage.read(token),image=detectImage(bytes);
+   if(!image||bytes.length>1500000)throw new HttpError(400,'Invalid energy point photo.');
+   return {data:bytes.toString('base64'),contentType:image.contentType};
+  }
   const today=nowIso().slice(0,10);
   const items=await Promise.all(context.rows.map(async (x,i)=>{
    const tests=isObj(x.tests)?x.tests:{},values=isObj(x.values)?x.values:{};

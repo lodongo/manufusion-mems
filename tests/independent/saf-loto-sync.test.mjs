@@ -24,3 +24,6 @@ test('LOTO setup reachable from both organization navigation paths and energy ta
  assert.ok(admin.includes("case 'saf_loto'"));
  assert.ok(table.includes('p.color')&&table.includes('Configure energy sources & tags'));
 });
+
+
+test('LOTO photo column and PDF share the original scoped energy point photo',()=>{const ui=readFileSync('src/org/EquipmentLoto.tsx','utf8'),api=readFileSync('backend/safEquipment.ts','utf8');assert.ok(ui.includes("'Tag / color','Photo','Technical specifications'"));assert.ok(ui.includes("photoUrl:p.url||''"));assert.ok(ui.includes('doc.addImage'));assert.ok(ui.includes('saveReportFile'));assert.ok(ui.includes('No photo recorded'));assert.ok(api.includes('programPhotoPointId'));assert.ok(api.includes("meta.data.purpose==='test_evidence'"));assert.ok(api.includes('Energy register changed. Refresh LOTO Program'));});
