@@ -75,6 +75,9 @@ interface WrCan {
 }
 interface Closure {
     causeCode: string; causeLabel: string; causeGroup: string;
+    failureModeCode?: string; failureModeLabel?: string; failureModeGroup?: string;
+    solutions?: Array<{code:string;label:string;group:string}>;
+    closedBy?: string; closedByName?: string; recordedBy?: string; recordedByName?: string; recordedAt?: string;
     solutionCode?: string; solutionLabel?: string; solutionGroup?: string;
     maintenanceTypeCode?: string; maintenanceTypeLabel?: string;
     description: string; name: string; at: string;
@@ -120,6 +123,7 @@ interface Detail extends Row {
     unitId: string;
     assemblyOptions: Array<{ id: string; code: string; name: string }>;
     closure: Closure | null;
+    closurePeople?: Array<{uid:string;name:string}>;
     closureRejections: Array<Closure & { rejectedName: string; rejectedAt: string; reason: string }>;
     assessmentReview: {status:string;version?:number;name?:string;at?:string;note?:string};
     assessmentReviewCurrent: boolean;
@@ -1188,13 +1192,15 @@ export function ClosureCard({ closure }: { closure: Closure }) {
                 <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Closed at review</p>
                 <Badge tone={closure.confirmedAt || closure.dateClosed ? 'brand' : 'warn'}>{closure.dateClosed ? 'Closed at review' : closure.confirmedAt ? 'Confirmed' : 'Awaiting confirmation'}</Badge>
             </div>
-            <Info label='Cause' value={`${closure.causeGroup} · ${closure.causeLabel}`} />
-            {closure.solutionLabel && <Info label='Solution' value={`${closure.solutionGroup} · ${closure.solutionLabel}`} />}
+            {closure.failureModeLabel && <Info label='Failure mode' value={[closure.failureModeGroup,closure.failureModeLabel].filter(Boolean).join(' · ')} />}
+            <Info label='Failure cause' value={`${closure.causeGroup} · ${closure.causeLabel}`} />
+            {closure.solutions?.length ? <Info label='Solution types' value={closure.solutions.map(s=>`${s.group} · ${s.label}`).join('; ')} /> : closure.solutionLabel && <Info label='Solution' value={`${closure.solutionGroup} · ${closure.solutionLabel}`} />}
             {closure.maintenanceTypeLabel && <Info label='Maintenance type' value={closure.maintenanceTypeLabel} />}
             {closure.dateClosed && <Info label='Date closed' value={closure.dateClosed} />}
             {closure.durationMinutes && <Info label='Actual time taken' value={`${closure.durationMinutes} minutes`} />}
             <Info label='What was done' value={closure.description} />
-            <Info label='Closed by' value={`${closure.name} · ${fmtDate(closure.at)}`} />
+            <Info label='Closed by' value={closure.closedByName || 'Not separately recorded (legacy closure)'} />
+            <Info label='Recorded by' value={`${closure.recordedByName || closure.name} · ${fmtDate(closure.recordedAt || closure.at)}`} />
             {closure.confirmedAt && <Info label='Confirmed by' value={`${closure.confirmedName} · ${fmtDate(closure.confirmedAt)}`} sub={closure.confirmNote} />}
         </Card>
     );
@@ -1203,7 +1209,12 @@ export function ClosureCard({ closure }: { closure: Closure }) {
 /** Fixed on the spot: close at review with cause, solution and maintenance type. A supervisor confirms. */
 function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; lists: MntLists; onDone: () => void; onCancel: () => void }) {
     const [cause, setCause] = useState('');
-    const [solution, setSolution] = useState('');
+    const [failureMode, setFailureMode] = useState(detail.failureModeCode || '');
+    const [solutions, setSolutions] = useState<string[]>([]);
+    const [closedByUid, setClosedByUid] = useState('');
+    const [employeeQuery,setEmployeeQuery] = useState('');
+    const people = detail.closurePeople || [];
+    const visiblePeople = people.filter(p=>p.uid===closedByUid || p.name.toLowerCase().includes(employeeQuery.trim().toLowerCase()));
     const [mtype, setMtype] = useState('');
     const [description, setDescription] = useState('');
     const [typed, setTyped] = useState('');
@@ -1213,14 +1224,12 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const screen = useFullScreen(true);
-    const missing = (direct
-        ? [!cause ? 'failure cause' : '', description.trim().length < 10 ? 'what was done (10+ characters)' : '', !closedDate ? 'date closed' : '', Number(durationMinutes) <= 0 ? 'actual time taken' : '']
-        : [cause ? '' : 'cause', solution ? '' : 'solution', mtype ? '' : 'maintenance type', description.trim().length >= 10 ? '' : 'what was done (10+ characters)', typed.trim() === detail.code ? '' : `type ${detail.code}`]).filter(Boolean);
+    const missing = [!failureMode ? 'failure mode' : '', !cause ? 'failure cause' : '', !solutions.length ? 'solution type' : '', !closedByUid ? 'closed by' : '', description.trim().length < 10 ? 'what was done (10+ characters)' : '', ...(direct ? [!closedDate ? 'date closed' : '', !Number.isFinite(Number(durationMinutes)) || Number(durationMinutes)<=0 ? 'actual time taken' : ''] : [!mtype ? 'maintenance type' : '', typed.trim() !== detail.code ? `type ${detail.code}` : ''])].filter(Boolean);
     const save = async () => {
         setBusy(true);
         setError('');
         try {
-            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'close_review', causeCode: cause, ...(direct ? { closedDate, durationMinutes: Number(durationMinutes) } : {solutionCode: solution, maintenanceTypeCode: mtype, confirm: typed.trim() }), description: description.trim() });
+            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'close_review', causeCode: cause, failureModeCode:failureMode, solutionCodes:solutions, closedByUid, ...(direct ? { closedDate, durationMinutes: Number(durationMinutes) } : {maintenanceTypeCode: mtype, confirm: typed.trim() }), description: description.trim() });
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not close the request.');
@@ -1236,8 +1245,9 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
                 <Button testOverride={detail.testModeOverride} busy={busy} disabled={missing.length > 0} onClick={save}><Check className='h-4 w-4' />Close</Button>
             </div>
             <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
-                <ChoicePicker title='Failure cause *' required groups={lists.rootCauses} selected={cause ? [cause] : []} onToggle={(c) => setCause(c === cause ? '' : c)} />
-                {!direct && <ChoicePicker title='Solution' required groups={lists.solutions} selected={solution ? [solution] : []} onToggle={(c) => setSolution(c === solution ? '' : c)} />}
+                <ChoicePicker title='Failure mode' required hint='Choose the category and specific failure mode.' groups={lists.failureModes} selected={failureMode ? [failureMode] : []} onToggle={(c) => setFailureMode(c === failureMode ? '' : c)} />
+                <ChoicePicker title='Failure cause' required hint='Choose the category and specific cause.' groups={lists.rootCauses} selected={cause ? [cause] : []} onToggle={(c) => setCause(c === cause ? '' : c)} />
+                <ChoicePicker title='Solution types' required multi max={5} hint='Choose a category, then the applicable solution subcategories (up to five).' groups={lists.solutions} selected={solutions} onToggle={(code)=>setSolutions(old=>old.includes(code)?old.filter(x=>x!==code):old.length<5?[...old,code]:old)} />
                 <TextArea id='cl-desc' label='What was done? *' rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
                 {!direct && <SelectField id='cl-mtype' label='Type of maintenance * (decides the GL account)' value={mtype} onChange={(e) => setMtype(e.target.value)}>
                     <option value=''>Select…</option>
@@ -1247,6 +1257,12 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
                     <Field id='cl-date' type='date' label='Date closed *' max={new Date().toISOString().slice(0,10)} value={closedDate} onChange={(e) => setClosedDate(e.target.value)} />
                     <Field id='cl-duration' type='number' min={1} label='Actual time taken (minutes) *' value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} />
                 </>}
+                <Card className='space-y-2'>
+                    <Field id='cl-employee-search' label='Find employee' placeholder='Search employee name…' value={employeeQuery} onChange={e=>setEmployeeQuery(e.target.value)} />
+                    <SelectField id='cl-closed-by' label='Closed by *' value={closedByUid} onChange={e=>setClosedByUid(e.target.value)}><option value=''>Select the employee who completed the work</option>{visiblePeople.map(p=><option key={p.uid} value={p.uid}>{p.name}</option>)}</SelectField>
+                    <p className='text-xs text-soft'>Select the actual employee who completed the work. MEMS separately records the signed-in reviewer and timestamp.</p>
+                    {!visiblePeople.length && <p className='text-xs text-soft'>No matching employees.</p>}
+                </Card>
                 {!direct && <Field id='cl-confirm' label={`Type ${detail.code} to confirm`} autoComplete='off' value={typed} onChange={(e) => setTyped(e.target.value)} />}
                 {missing.length > 0 && <p className='text-xs text-amber-300'>Still needed: {missing.join(', ')}.</p>}
                 {error && <MntGateHint message={error} />}

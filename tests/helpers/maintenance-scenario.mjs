@@ -993,7 +993,7 @@ assert.equal(eq.impacts.length, 1, 'Impact is present from the request stage');
 assert.equal(eq.description, 'Loud knocking noise from the drive end.', 'The requester description is kept');
 assert.ok(eq.path.includes('GEARBOX'));
 assert.ok(eq.history.some((h) => h.action === 'Details added' && /Assembly/.test(h.note)), 'Every change is logged');
-const closeBody = { code: eqWr.code, action: 'close_review', causeCode: first(l.rootCauses), solutionCode: first(l.solutions), maintenanceTypeCode: l.maintenanceTypes[0].code, description: 'Retightened the loose gearbox mounting bolts.', confirm: eqWr.code };
+const closeBody = { code: eqWr.code, action: 'close_review', causeCode: first(l.rootCauses), failureModeCode:first(l.failureModes), closedByUid:people.requester[0], solutionCode: first(l.solutions), maintenanceTypeCode: l.maintenanceTypes[0].code, description: 'Retightened the loose gearbox mounting bolts.', confirm: eqWr.code };
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'requester', closeBody), /own request/);
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { ...closeBody, description: 'short' }), /at least 10/);
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', closeBody);
@@ -1069,8 +1069,8 @@ const testAction=async(action,extra={})=>{
 };
 await testAction('start_review');
 assert.equal(snapshot(r+'/work_requests/'+overrideWr.code).data.status,'under_review');
-await assert.rejects(()=>testAction('close_review',{causeCode:first(l.rootCauses),description:'Recorded corrective work at site.',closedDate:new Date().toISOString().slice(0,10),durationMinutes:0}),/time taken/);
-await testAction('close_review',{causeCode:first(l.rootCauses),description:'Recorded corrective work at site.',closedDate:new Date().toISOString().slice(0,10),durationMinutes:15});
+await assert.rejects(()=>testAction('close_review',{causeCode:first(l.rootCauses),failureModeCode:first(l.failureModes),solutionCodes:[first(l.solutions)],closedByUid:people.assessor[0],description:'Recorded corrective work at site.',closedDate:new Date().toISOString().slice(0,10),durationMinutes:0}),/time taken/);
+await testAction('close_review',{causeCode:first(l.rootCauses),failureModeCode:first(l.failureModes),solutionCodes:[first(l.solutions)],closedByUid:people.assessor[0],description:'Recorded corrective work at site.',closedDate:new Date().toISOString().slice(0,10),durationMinutes:15});
 assert.equal(snapshot(r+'/work_requests/'+overrideWr.code).data.status,'closed');
 seed(r + '/maintenance_workflow_settings/default', { version: 1, approverRoles: {...roles, 'MNT.WR.REVIEW': 'ASSESS'} });
 const spoofed=await createNewWorkRequest({reviewerUid:people.reviewer[0],title:'Ignore requester nominated reviewer'});
@@ -1117,12 +1117,17 @@ await assert.rejects(
 const directClose = await createNewWorkRequest({ title: 'Fixed on site', description: 'Conveyor guard retightened during inspection.' });
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:directClose.code,action:'start_review'});
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
-    code: directClose.code, action: 'close_review', causeCode: first(l.rootCauses),
+    code: directClose.code, action: 'close_review', causeCode: first(l.rootCauses), failureModeCode:first(l.failureModes), solutionCodes:[first(l.solutions)],closedByUid:people.requester[0],
     description: 'Restored the conveyor guard and verified a safe condition.',
     closedDate: new Date().toISOString().slice(0,10), durationMinutes: 25,
 });
 assert.equal(snapshot(r + '/work_requests/' + directClose.code).data.status, 'closed');
 assert.equal(snapshot(r + '/work_requests/' + directClose.code).data.closure.durationMinutes, 25);
+const finalClosure=snapshot(r+'/work_requests/'+directClose.code).data.closure;
+assert.equal(finalClosure.closedBy,people.requester[0]);
+assert.equal(finalClosure.recordedBy,people.assessor[0]);
+assert.equal(finalClosure.failureModeCode,first(l.failureModes));
+assert.equal(finalClosure.solutions[0].code,first(l.solutions));
 const repeat = await createNewWorkRequest({ title:'Same conveyor fault reported twice', description:'Duplicate request on the conveyor drive.' });
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:repeat.code,action:'start_review'});
 const search = await route(maintenanceRoutes, '/api/org/mnt/wr/repeat-search', 'assessor', {

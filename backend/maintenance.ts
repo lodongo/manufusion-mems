@@ -1438,6 +1438,7 @@ export const maintenanceRoutes = {
                 unitId: str(d.unitId),
                 assemblyOptions,
                 closure: isObj(d.closure) ? d.closure : null,
+                closurePeople: can.close ? Array.from((await orgUserMap(ctx.orgId)).entries()).map(([uid,name])=>({uid,name})).sort((a,b)=>a.name.localeCompare(b.name)) : [],
                 closureRejections: objs(d.closureRejections),
                 assessmentTasks: objs(d.assessmentTasks),
                 assessmentReview: isObj(d.assessmentReview)?d.assessmentReview:{status:'pending'},
@@ -1597,6 +1598,19 @@ export const maintenanceRoutes = {
                     // Fixed on the spot: no planning needed. Recorded with cause, solution and maintenance type (the
                     // same maintenance type list Finance uses for GL account rules); another person confirms.
                     deny(can.close, can.ownRequest ? 'You cannot close your own request.' : 'You cannot close this request.');
+                    const failureMode = pickGrouped(l.failureModes,str(ctx.body.failureModeCode),'failure mode')!;
+                    const solutionCodes = [...new Set(strs(ctx.body.solutionCodes).length ? strs(ctx.body.solutionCodes) : strs([ctx.body.solutionCode]))];
+                    if (!solutionCodes.length || solutionCodes.length > 5) throw new HttpError(400,'Choose between 1 and 5 solution types.');
+                    const solutionTypes = solutionCodes.map(code=>pickGrouped(l.solutions,code,'solution type')!);
+                    const closedBy = str(ctx.body.closedByUid);
+                    const closedByName = (await orgUserMap(ctx.orgId)).get(closedBy);
+                    if (!closedByName) throw new HttpError(400,'Choose the employee who completed the work from your organization.');
+                    const classifications = {
+                        failureModeCode:failureMode.code, failureModeLabel:failureMode.label, failureModeGroup:failureMode.group,
+                        solutionCode:solutionTypes[0].code, solutionLabel:solutionTypes[0].label, solutionGroup:solutionTypes[0].group,
+                        solutions:solutionTypes.map(s=>({code:s.code,label:s.label,group:s.group})),
+                        closedBy, closedByName, recordedBy:ctx.uid, recordedByName:displayName(ctx), recordedAt:now,
+                    };
                     if (reviewNew) {
                         if (str(doc.data.status) !== 'under_review' || (!assignedReviewer && !reviewOverride))
                             throw new HttpError(403, 'Only the assigned reviewer can close this work request after starting review.');
@@ -1610,31 +1624,33 @@ export const maintenanceRoutes = {
                         const durationMinutes = Number(ctx.body.durationMinutes);
                         if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || durationMinutes > 525600)
                             throw new HttpError(400, 'Enter the actual time taken in minutes (greater than zero).');
-                        const closure = { causeCode: cause.code, causeLabel: cause.label, causeGroup: cause.group,
+                        const closure = { ...classifications, causeCode: cause.code, causeLabel: cause.label, causeGroup: cause.group,
                             description, dateClosed: closedDate, durationMinutes, by: ctx.uid,
                             name: displayName(ctx), at: now };
                         await done({ status: 'closed', reviewDecision: 'closed', closedAt: now, closure: closure as Plain,
+                            failureModeCode:failureMode.code,failureModeLabel:`${failureMode.group} · ${failureMode.label}`, solutions:classifications.solutions,
                             reviewer: ctx.uid, reviewerName: displayName(ctx), reviewCompletedAt: now },
-                            'Closed after review', 'mnt.wr.closed_at_review', `${cause.group} · ${cause.label}; ${durationMinutes} min; ${description}`);
+                            'Closed after review', 'mnt.wr.closed_at_review', `${failureMode.group} · ${failureMode.label}; ${cause.group} · ${cause.label}; ${solutionTypes.map(s=>s.group+' · '+s.label).join(', ')}; completed by ${closedByName}; ${durationMinutes} min; ${description}`);
                         return { ok: true };
                     }
                     const cause = pickGrouped(l.rootCauses, str(ctx.body.causeCode), 'cause')!;
-                    const solution = pickGrouped(l.solutions, str(ctx.body.solutionCode), 'solution')!;
+                    const solution = solutionTypes[0];
                     const mtype = pick(l.maintenanceTypes, str(ctx.body.maintenanceTypeCode), 'maintenance type')!;
                     const description = str(ctx.body.description).trim().slice(0, 2000);
                     if (description.length < 10) throw new HttpError(400, 'Describe what was done (at least 10 characters).');
                     confirmCode(ctx, doc);
                     const closure = {
+                        ...classifications,
                         causeCode: cause.code, causeLabel: cause.label, causeGroup: cause.group,
                         solutionCode: solution.code, solutionLabel: solution.label, solutionGroup: solution.group,
                         maintenanceTypeCode: mtype.code, maintenanceTypeLabel: mtype.label,
                         description, by: ctx.uid, name: displayName(ctx), at: now,
                     };
                     await done(
-                        { status: 'closure_pending', closure, maintenanceTypeCode: mtype.code, maintenanceTypeLabel: mtype.label,
+                        { status: 'closure_pending', closure, failureModeCode:failureMode.code,failureModeLabel:`${failureMode.group} · ${failureMode.label}`,solutions:classifications.solutions, maintenanceTypeCode: mtype.code, maintenanceTypeLabel: mtype.label,
                           ...(str(doc.data.reviewer) ? {} : { reviewer: ctx.uid, reviewerName: displayName(ctx), reviewStartedAt: now }) },
                         'Closed at review – awaiting confirmation', 'mnt.wr.closed_at_review',
-                        `${cause.group} · ${cause.label} / ${solution.group} · ${solution.label} / ${mtype.label} · ${description}`);
+                        `${cause.group} · ${cause.label} / ${solution.group} · ${solution.label} / ${mtype.label} · completed by ${closedByName} · ${description}`);
                     return { ok: true };
                 }
                 case 'confirm_closure':
