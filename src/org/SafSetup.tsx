@@ -4,9 +4,9 @@ import {Alert,Field,SelectField} from '../components/ui';
 import HazardControlProfile from './HazardControlProfile';
 import {Button,Card,Spinner,TextArea,useLoad,Badge} from '../admin/kit';
 
-const CATALOGUES=[['activityClasses','Task classes'],['machineStatuses','Machine status during execution'],['permitTypes','Permit types'],['hazards','Hazards'],['mitigationHierarchy','Mitigation hierarchy'],['hazardMitigations','Hazard mitigation measures'],['injuryNatures','Nature of potential injuries and illnesses'],['impacts','Potential impacts'],['hazardousEnergy','Internal / stored hazardous energy sources'],['externalEnergySources','External energy sources / utilities'],['statutoryInspections','Statutory and legal inspections'],['controlMeasures','Control measures'],['ppe','Personal protective equipment'],['riskMethods','Risk assessment methods'],['severityLevels','Severity levels'],['likelihoodLevels','Likelihood levels'],['riskAcceptance','Risk acceptance criteria'],['criticalRules','Safety critical rules'],['emergencyScenarios','Emergency scenarios']];
+const CATALOGUES=[['safetyDevices','Equipment interlocks and safety devices'],['activityClasses','Task classes'],['machineStatuses','Machine status during execution'],['permitTypes','Permit types'],['hazards','Hazards'],['mitigationHierarchy','Mitigation hierarchy'],['hazardMitigations','Hazard mitigation measures'],['injuryNatures','Nature of potential injuries and illnesses'],['impacts','Potential impacts'],['hazardousEnergy','Internal / stored hazardous energy sources'],['externalEnergySources','External energy sources / utilities'],['statutoryInspections','Statutory and legal inspections'],['controlMeasures','Control measures'],['ppe','Personal protective equipment'],['riskMethods','Risk assessment methods'],['severityLevels','Severity levels'],['likelihoodLevels','Likelihood levels'],['riskAcceptance','Risk acceptance criteria'],['criticalRules','Safety critical rules'],['emergencyScenarios','Emergency scenarios']];
 type Entry={code:string;label:string;category:string;subcategory:string;description:string;color?:string;hazardCategory?:string;hazardCodes?:string[]};
-type AdoptionRow=Entry&{enabled:boolean;masterActive:boolean};
+type AdoptionRow=Entry&{enabled:boolean;masterActive:boolean;deviceRole?:string;shortCandidate?:boolean;shortEnabled?:boolean};
 type Adoption={key:string;title:string;version:number;canEdit:boolean;rows:AdoptionRow[]};
 type PermitRow=Entry&{adopted:boolean;version:number;configured:boolean;parameterCount?:number};
 type Parameter={code:string;section:string;label:string;kind:string;mandatory:boolean;description:string;enabled:boolean;required:boolean;options?:string[];columns?:Array<{code:string;label:string;kind:string;options?:string[];unitOptions?:string[]}>;applicability?:string;source?:string};
@@ -17,18 +17,20 @@ const matches=(v:Entry,q:string)=>[v.code,v.label,v.category,v.subcategory,v.des
 
 export function SafAdoption(){
  const [key,setKey]=useState('machineStatuses'),[query,setQuery]=useState(''),[category,setCategory]=useState(''),[disabled,setDisabled]=useState<string[]>([]),[reason,setReason]=useState('');
+ const [shortCodes,setShortCodes]=useState<string[]>([]);
  const [busy,setBusy]=useState(false),[failure,setFailure]=useState(''),[success,setSuccess]=useState('');
  const {data,error,loading,reload}=useLoad(()=>callBackend<Adoption>('/api/org/saf/adoption/read',{key}),[key]);
  const current=data?.key===key?data:undefined;
- useEffect(()=>{if(current){setDisabled(current.rows.filter(x=>!x.enabled&&x.masterActive).map(x=>x.code));setReason('');}},[current]);
+ useEffect(()=>{if(current){setDisabled(current.rows.filter(x=>!x.enabled&&x.masterActive).map(x=>x.code));setShortCodes(current.rows.filter(x=>x.shortEnabled).map(x=>x.code));setReason('');}},[current]);
  const visible=(current?.rows||[]).filter(x=>(!category||x.category===category)&&matches(x,query));
  const [page,setPage]=useState(1);
  const [profile,setProfile]=useState('');
  useEffect(()=>setPage(1),[key,category,query]);
  const off=new Set(disabled);
  const change=(code:string,on:boolean)=>{setSuccess('');setDisabled(old=>on?old.filter(x=>x!==code):[...new Set([...old,code])]);};
- const dirty=!!current&&current.rows.some(x=>x.masterActive&&x.enabled===off.has(x.code));
- const save=async()=>{if(!current)return;setBusy(true);setFailure('');setSuccess('');try{await callBackend('/api/org/saf/adoption/save',{key,version:current.version,disabledCodes:disabled,reason});setSuccess('Organization adoption saved.');reload();}catch(e){setFailure(e instanceof Error?e.message:'Save failed.');}finally{setBusy(false);}};
+ const effectiveShort=shortCodes.filter(c=>!off.has(c));
+ const dirty=!!current&&current.rows.some(x=>x.masterActive&&(x.enabled===off.has(x.code)||key==='safetyDevices'&&!!x.shortEnabled!==effectiveShort.includes(x.code)));
+ const save=async()=>{if(!current)return;setBusy(true);setFailure('');setSuccess('');try{await callBackend('/api/org/saf/adoption/save',{key,version:current.version,disabledCodes:disabled,...(key==='safetyDevices'?{shortDeviceCodes:effectiveShort}:{}),reason});setSuccess('Organization adoption saved.');reload();}catch(e){setFailure(e instanceof Error?e.message:'Save failed.');}finally{setBusy(false);}};
  if(profile)return <div className='space-y-3'><Button variant='secondary' onClick={()=>setProfile('')}>← Back to Safety adoption</Button><HazardControlProfile code={profile} mode='adoption'/></div>;
  return <div className='space-y-3'>
   <h1 className='text-xl font-semibold text-ink'>Safety metadata adoption</h1>
@@ -45,7 +47,7 @@ export function SafAdoption(){
    </Card>
    {visible.slice(0,page*40).map(x=><div key={x.code} className='flex items-start gap-3 rounded-xl border border-line bg-panel p-3'>
     <input type='checkbox' aria-label={'Adopt '+x.label} className={check} checked={x.masterActive&&!off.has(x.code)} disabled={!current.canEdit||!x.masterActive||busy} onChange={e=>change(x.code,e.target.checked)}/>
-    <div className='min-w-0 flex-1'><p className='font-medium text-ink'>{x.color&&<span aria-label={'Category color '+x.color} className='mr-2 inline-block h-3 w-3 rounded border border-line' style={{backgroundColor:x.color}}/>}{x.label}</p><p className='text-xs text-soft'>{x.category} · {x.subcategory} · {x.code}</p>{x.hazardCategory&&<p className='text-xs text-soft'>Hazards master: {x.hazardCategory} · {x.hazardCodes?.length||0} linked references</p>}{!x.masterActive&&<p className='text-xs text-red-500'>Disabled in MEMS Admin</p>}{['hazards','hazardousEnergy','externalEnergySources'].includes(key)&&<button type='button' className='mt-2 min-h-10 text-left text-sm font-semibold text-brand underline' onClick={()=>{if(dirty){setFailure('Save or discard catalogue changes before opening the hazard profile.');return;}setProfile(x.code);}}>Injuries & mitigation hierarchy →</button>}</div>
+    <div className='min-w-0 flex-1'><p className='font-medium text-ink'>{x.color&&<span aria-label={'Category color '+x.color} className='mr-2 inline-block h-3 w-3 rounded border border-line' style={{backgroundColor:x.color}}/>}{x.label}</p><p className='text-xs text-soft'>{x.category} · {x.subcategory} · {x.code}</p>{x.hazardCategory&&<p className='text-xs text-soft'>Hazards master: {x.hazardCategory} · {x.hazardCodes?.length||0} linked references</p>}{key==='safetyDevices'&&<div className='mt-2 space-y-1'><p className='text-xs text-soft'>{x.description}</p>{x.shortCandidate&&x.masterActive&&!off.has(x.code)?<label className='flex items-start gap-2 text-sm'><input type='checkbox' className={check} checked={shortCodes.includes(x.code)} disabled={!current.canEdit||busy} onChange={e=>setShortCodes(old=>e.target.checked?[...new Set([...old,x.code])]:old.filter(c=>c!==x.code))}/>Enable as a Short Intervention candidate (task-specific validation required)</label>:<p className='text-xs text-soft'>Not available for Short Intervention selection.</p>}</div>}{!x.masterActive&&<p className='text-xs text-red-500'>Disabled in MEMS Admin</p>}{['hazards','hazardousEnergy','externalEnergySources'].includes(key)&&<button type='button' className='mt-2 min-h-10 text-left text-sm font-semibold text-brand underline' onClick={()=>{if(dirty){setFailure('Save or discard catalogue changes before opening the hazard profile.');return;}setProfile(x.code);}}>Injuries & mitigation hierarchy →</button>}</div>
    </div>)}
    {!visible.length&&<p className='text-sm text-soft'>No matching entries.</p>}
    {visible.length>page*40&&<Button variant='secondary' onClick={()=>setPage(p=>p+1)}>Show more ({visible.length-page*40} remaining)</Button>}

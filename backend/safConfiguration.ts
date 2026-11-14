@@ -1,6 +1,7 @@
 import {HttpError,getDoc,isObj,nowIso,str,writeDoc,type Obj} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {PERMS,holdsAnywhere,holdsDirect,audited} from './scopeGuard';
+import {shortDeviceEligible} from './safSafetyDevices';
 import {SAF_DEFAULT_LISTS} from './safDefaults';
 import {AST_UTILITY_ITEMS} from './astUtilityDefaults';
 import {loadSafetyHazardMaster} from './safHazardMaster';
@@ -8,7 +9,7 @@ import {hazardControlProfile,profileAdoption,type ProfileSelection} from './safH
 import {fieldsForPermit,normalizePermitFields} from './safPermitTemplates';
 import {EXPANDED_PERMIT_REFERENCES} from './safPermitExpanded';
 
-export const SAF_ADOPTION_KEYS=['activityClasses','machineStatuses','permitTypes','hazards','mitigationHierarchy','hazardMitigations','injuryNatures','impacts','hazardousEnergy','externalEnergySources','statutoryInspections','controlMeasures','ppe','riskMethods','severityLevels','likelihoodLevels','riskAcceptance','criticalRules','emergencyScenarios'] as const;
+export const SAF_ADOPTION_KEYS=['safetyDevices','activityClasses','machineStatuses','permitTypes','hazards','mitigationHierarchy','hazardMitigations','injuryNatures','impacts','hazardousEnergy','externalEnergySources','statutoryInspections','controlMeasures','ppe','riskMethods','severityLevels','likelihoodLevels','riskAcceptance','criticalRules','emergencyScenarios'] as const;
 type Key=typeof SAF_ADOPTION_KEYS[number];
 const root=(orgId:string)=>`organizations/${orgId}/saf`;
 const entries=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj) as Obj[]:[];
@@ -39,6 +40,7 @@ export async function safetyCatalogue(orgId:string,key:Key){
 }
 export async function effectiveSafetyItems(orgId:string,key:Key){return (await safetyCatalogue(orgId,key)).active;}
 const safeOption=(x:Obj)=>({code:str(x.code),label:str(x.label),category:str(x.category),subcategory:str(x.subcategory),description:str(x.description),color:str(x.color),hazardCategory:str(x.hazardCategory),hazardCodes:Array.isArray(x.hazardCodes)?x.hazardCodes.map(str):[],energySourceCode:str(x.energySourceCode)});
+export async function safetyDeviceCatalogue(orgId:string){const c=await safetyCatalogue(orgId,'safetyDevices');const adopted=new Set(c.active.map(x=>str(x.code))),eligible=new Set(strings(c.policy?.data.shortDeviceCodes));return {...c,devices:c.items.map(x=>({...safeOption(x),role:str(x.deviceRole),shortCandidate:x.shortCandidate===true,adopted:adopted.has(str(x.code)),shortEligible:shortDeviceEligible(x,adopted.has(str(x.code)),eligible.has(str(x.code)))}))};}
 const validCode=(v:unknown)=>{const x=str(v);if(!/^[A-Za-z0-9_-]{1,80}$/.test(x))throw new HttpError(400,'Invalid permit type code.');return x;};
 async function permitContext(orgId:string,code:string){
  const catalogue=await safetyCatalogue(orgId,'permitTypes');
@@ -104,7 +106,7 @@ export const safConfigurationRoutes={
   const c=await safetyCatalogue(ctx.orgId,key);
   const enabled=new Set(c.active.map(x=>str(x.code)));
   return {key,title:c.title,version:c.version,canEdit:holdsDirect(ctx,PERMS.matrixConfigure),keys:SAF_ADOPTION_KEYS,
-   rows:c.items.filter(x=>x.selectable!==false).map(x=>({...safeOption(x),masterActive:x.active!==false,enabled:enabled.has(str(x.code))}))};
+   rows:c.items.filter(x=>x.selectable!==false).map(x=>({...safeOption(x),masterActive:x.active!==false,enabled:enabled.has(str(x.code)),deviceRole:str(x.deviceRole),shortCandidate:x.shortCandidate===true,shortEnabled:shortDeviceEligible(x,enabled.has(str(x.code)),strings(c.policy?.data.shortDeviceCodes).includes(str(x.code)))}))};
  })],
  'POST /api/org/saf/adoption/save':[orgRoute('org.saf.adoption.save','SAF.configure',async ctx=>{
   assertEdit(ctx);
@@ -117,10 +119,12 @@ export const safConfigurationRoutes={
   if(disabled.some(x=>!known.has(x)))throw new HttpError(400,'Use only codes from the MEMS SAF master.');
   const reason=str(ctx.body.reason).trim().slice(0,500);
   if(reason.length<10)throw new HttpError(400,'Explain the safety adoption change (at least 10 characters).');
+  const shortDeviceCodes=key==='safetyDevices'?strings(ctx.body.shortDeviceCodes):[];
+  if(key==='safetyDevices'&&(!Array.isArray(ctx.body.shortDeviceCodes)||ctx.body.shortDeviceCodes.some(x=>typeof x!=='string')||shortDeviceCodes.some(code=>!c.items.some(x=>str(x.code)===code&&shortDeviceEligible(x,x.active!==false&&x.selectable!==false&&!disabled.includes(code),true)))))throw new HttpError(400,'Short Intervention eligibility requires an adopted candidate safeguard.');
   const version=c.version+1;
-  const ok=await writeDoc(`${root(ctx.orgId)}/adoption_${key}`,{key,version,disabledCodes:disabled,updatedBy:ctx.uid,updatedAt:nowIso(),reason},c.policy?{updateTime:c.policy.updateTime}:{exists:false});
+  const ok=await writeDoc(`${root(ctx.orgId)}/adoption_${key}`,{key,version,disabledCodes:disabled,...(key==='safetyDevices'?{shortDeviceCodes}:{}),updatedBy:ctx.uid,updatedAt:nowIso(),reason},c.policy?{updateTime:c.policy.updateTime}:{exists:false});
   if(!ok)throw new HttpError(409,'Configuration changed. Reload before saving.');
-  await audited(ctx,'saf.adoption.save',key,{version,reason,disabledCount:disabled.length,disabledCodes:disabled});
+  await audited(ctx,'saf.adoption.save',key,{version,reason,disabledCount:disabled.length,disabledCodes:disabled,...(key==='safetyDevices'?{shortDeviceCodes}:{})});
   return {ok:true,version};
  })],
  'POST /api/org/saf/permits/list':[orgRoute('org.saf.permits.list','SAF.view',async ctx=>{

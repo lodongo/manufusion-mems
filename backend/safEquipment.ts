@@ -2,7 +2,7 @@ import {storage} from './platform/sdk';
 import {HttpError,getDoc,isObj,nowIso,randomId,rateLimit,str,writeDoc,listDocs,nextSequence,type Obj} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {PERMS,allowedAt,requireAt,audited} from './scopeGuard';
-import {effectiveSafetyItems,safetyCatalogue,lotoPolicy,controlContext} from './safConfiguration';
+import {effectiveSafetyItems,safetyCatalogue,lotoPolicy,controlContext,safetyDeviceCatalogue} from './safConfiguration';
 import {ACTIVITY_CLASSES,CLASS_PERMIT_ALTERNATIVES,meetsClassPermitMinimum} from './safActivityClasses';
 import {detectImage} from './branding';
 import {signedUrl} from './structure';
@@ -99,7 +99,50 @@ async function scoreHazardRows(ctx:OrgContext,raw:unknown,matrix:RiskMatrix,prio
   try{return {hazard,impact:impacts[0],impactCodes:impacts,impactLabels:impacts.map(c=>profile.injuries.find(i=>i.code===c)?.label||str(legacyImpacts.find(i=>i.code===c)?.label)||c),controls:selected,before:scoreMaintenanceRisk(matrix,r.before as Record<string,number>),after:scoreMaintenanceRisk(matrix,r.after as Record<string,number>)};}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid ratings.');}
  }));
 }
+const devicePath=(ctx:OrgContext,id:string)=>root(ctx)+'/equipment_safety_devices/'+id;
+const devicePhotoPrefix=(ctx:OrgContext,id:string)=>root(ctx)+'/saf/equipment_devices/'+id+'/';
+const devicePhotoValid=(ctx:OrgContext,id:string,token:string)=>token.startsWith(devicePhotoPrefix(ctx,id))&&/^[A-Za-z0-9_-]+\.(jpg|jpeg|png|webp)$/.test(token.slice(devicePhotoPrefix(ctx,id).length));
 export const safEquipmentRoutes={
+ 'POST /api/org/saf/equipment-devices/read':[orgRoute('org.saf.equipment_devices.read','SAF.view',async ctx=>{
+  const {id,node}=await equipment(ctx);const path=devicePath(ctx,id);
+  const [doc,master]=await Promise.all([getDoc(path),safetyDeviceCatalogue(ctx.orgId)]);
+  const items=await Promise.all(array(doc?.data.items).map(async r=>{const def=master.devices.find(d=>d.code===r.code),photoToken=str(r.photoToken),eligible=def?.shortEligible===true;return {...r,label:def?.label||str(r.label),category:def?.category||str(r.category),role:def?.role||'unknown',adopted:def?.adopted===true,shortEligible:eligible,url:devicePhotoValid(ctx,id,photoToken)?await signedUrl(photoToken):'',status:r.shortSelected===true?(eligible&&str(r.tag)&&photoToken&&str(r.procedure)?'documented_review_required':'incomplete_or_eligibility_withdrawn'):'registered'};}));
+  return {equipmentName:str(node.data.name),equipmentCode:str(node.data.code),version:Number(doc?.data.version)||0,policyVersion:master.version,catalogue:master.devices.filter(d=>d.adopted),items,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write')};
+ })],
+ 'POST /api/org/saf/equipment-devices/photo':[orgRoute('org.saf.equipment_devices.photo','SAF.risk.assess',async ctx=>{
+  const {id}=await equipment(ctx,true);await rateLimit('saf-device-photo',ctx.uid,60,3600);
+  const data=str(ctx.body.data),pointId=str(ctx.body.deviceId);
+  if(!idRe.test(pointId)||!data||data.length>2000000||!/^[A-Za-z0-9+/=]+$/.test(data))throw new HttpError(400,'Upload a compressed image.');
+  const bytes=Buffer.from(data,'base64'),detected=detectImage(bytes);
+  if(!detected||bytes.length>1500000)throw new HttpError(400,'Upload a supported image up to 1.5 MB.');
+  const token=devicePhotoPrefix(ctx,id)+randomId(16)+'.'+detected.ext;
+  if(!(await storage.write([{path:token,content:data,contentType:detected.contentType}]))[0])throw new HttpError(502,'Photo upload failed.');
+  if(!await writeDoc(devicePath(ctx,id)+'/photos/'+token.slice(devicePhotoPrefix(ctx,id).length),{token,pointId,uploadedBy:ctx.uid,uploadedAt:nowIso()},{exists:false}))throw new HttpError(409,'Photo metadata could not be recorded.');
+  return {token,url:await signedUrl(token)};
+ })],
+ 'POST /api/org/saf/equipment-devices/save':[orgRoute('org.saf.equipment_devices.save','SAF.risk.assess',async ctx=>{
+  const {id}=await equipment(ctx,true);const path=devicePath(ctx,id),[old,master]=await Promise.all([getDoc(path),safetyDeviceCatalogue(ctx.orgId)]);
+  const version=Number(old?.data.version)||0;
+  if(Number(ctx.body.version)!==version||Number(ctx.body.policyVersion)!==master.version)throw new HttpError(409,'Register or Safety adoption changed. Reload.');
+  if(!Array.isArray(ctx.body.items)||ctx.body.items.length>180||array(ctx.body.items).length!==ctx.body.items.length)throw new HttpError(400,'Invalid safety device register.');
+  const previous=array(old?.data.items),ids=new Set<string>(),tags=new Set<string>();
+  const items=await Promise.all(array(ctx.body.items).map(async r=>{
+   const deviceId=str(r.deviceId),code=str(r.code),def=master.devices.find(d=>d.code===code),prior=previous.find(p=>p.deviceId===deviceId);
+   if(!idRe.test(deviceId)||ids.has(deviceId)||prior&&prior.code!==code)throw new HttpError(400,'Invalid or duplicate device identity.');ids.add(deviceId);
+   const tag=str(r.tag).trim().slice(0,120),photoToken=str(r.photoToken),procedure=str(r.procedure).trim().slice(0,6000),location=str(r.location).trim().slice(0,300),shortSelected=r.shortSelected===true;
+   if(tag){const t=tag.toUpperCase();if(tags.has(t))throw new HttpError(400,'Device tags must be unique on this equipment.');tags.add(t);}
+   if(!def?.adopted&&(!prior||shortSelected&&prior.shortSelected!==true))throw new HttpError(400,'Select an adopted safety device type.');
+   if(!def?.adopted&&prior&&(tag!==str(prior.tag)||photoToken!==str(prior.photoToken)||procedure!==str(prior.procedure)||location!==str(prior.location)))throw new HttpError(400,'Historical device is no longer adopted.');
+   if(shortSelected&&!def?.shortEligible&&(!prior||prior.shortSelected!==true||tag!==str(prior.tag)||photoToken!==str(prior.photoToken)||procedure!==str(prior.procedure)||location!==str(prior.location)))throw new HttpError(400,'Safety must explicitly enable this candidate for Short Intervention.');
+   if(shortSelected&&(!tag||!photoToken||procedure.length<20))throw new HttpError(400,'Short Intervention requires a physical tag, photo and documented procedure.');
+   if(photoToken){const photo=devicePhotoValid(ctx,id,photoToken)?await getDoc(path+'/photos/'+photoToken.slice(devicePhotoPrefix(ctx,id).length)):null;if(!photo||photo.data.pointId!==deviceId)throw new HttpError(400,'Photo must belong to this equipment device.');}
+   return {deviceId,code,label:def?.label||str(prior?.label),category:def?.category||str(prior?.category),tag,photoToken,procedure,location,shortSelected};
+  }));
+  const next={items,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid,policyVersion:master.version};
+  if(!await writeDoc(path,next,old?{updateTime:old.updateTime}:{exists:false}))throw new HttpError(409,'Register changed. Reload.');
+  await audited(ctx,'saf.equipment_devices.save',id,{version:version+1,items:items.map(r=>({deviceId:r.deviceId,code:r.code,tag:r.tag,shortSelected:r.shortSelected})),removed:previous.filter(p=>!ids.has(str(p.deviceId))).map(p=>str(p.deviceId))});
+  return {ok:true,version:version+1};
+ })],
  'POST /api/org/saf/equipment-tasks/read':[orgRoute('org.saf.equipment_tasks.read','SAF.view',async ctx=>{
   const {id,node}=await equipment(ctx);
   const [docs,classes,hazards,permits,skills,matrix,energy]=await Promise.all([listDocs(taskCollection(ctx,id)),effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'permitTypes'),taskSkills(),getDoc(root(ctx)+'/saf/risk_matrix'),currentTaskEnergy(ctx,id)]);

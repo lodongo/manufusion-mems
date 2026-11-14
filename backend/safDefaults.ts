@@ -5,7 +5,9 @@ import {AST_UTILITY_ITEMS} from './astUtilityDefaults';
 import {STATUTORY_INSPECTIONS} from './safStatutoryInspections';
 import {EXPANDED_ENERGY,EXPANDED_HAZARDS} from './safHazardExpansion';
 import {MITIGATION_HIERARCHY_MASTER,MITIGATION_MEASURE_MASTER,INJURY_NATURE_MASTER} from './safHazardControlLibrary';
+import {SAF_SAFETY_DEVICES} from './safSafetyDevices';
 export const SAF_DEFAULT_LISTS = [
+{key:'safetyDevices',title:'Equipment interlocks and safety devices',description:'Industrial safety-device types, candidate alternative safeguards, supplemental controls and isolation devices. Device adoption never authorizes work.',version:1,items:SAF_SAFETY_DEVICES},
 {key:'mitigationHierarchy',title:'Mitigation hierarchy',description:'Five ordered levels of the hierarchy of controls, based on NIOSH. Candidate selection is not work authorization.',version:1,items:MITIGATION_HIERARCHY_MASTER},
 {key:'hazardMitigations',title:'Hazard mitigation measures',description:'Mechanism-specific mitigation options organized by hierarchy. Assess applicability and effectiveness before use.',version:2,items:MITIGATION_MEASURE_MASTER},
 {key:'injuryNatures',title:'Nature of potential injuries and illnesses',description:'Specific potential injury and illness outcomes, not pre-assigned risk severity.',version:2,items:INJURY_NATURE_MASTER},
