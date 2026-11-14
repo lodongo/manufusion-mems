@@ -22,7 +22,7 @@ function Figure({photo,label,large=false}:{photo:Photo;label:string;large?:boole
 }
 export default function DeviceReferencePhoto({code,label,admin=false}:{code:string;label:string;admin?:boolean}){
  const {anchor,photo,failure}=useReference(code,admin);
- return <span ref={el=>{anchor.current=el;}} className='block'>{photo?<Figure photo={photo} label={label}/>:failure?<span className='text-xs text-soft'>Reference photo unavailable</span>:<span className='block min-h-10 text-xs text-soft'>Example photo</span>}</span>;
+ return <div ref={el=>{anchor.current=el;}} className='block'>{photo?<Figure photo={photo} label={label}/>:failure?<span className='text-xs text-soft'>Reference photo unavailable</span>:<span className='block min-h-10 text-xs text-soft'>Example photo</span>}</div>;
 }
 // A single shared master photo. Resize locally and discard the full-resolution original.
 async function smallJpeg(file:File){

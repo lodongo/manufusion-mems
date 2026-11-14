@@ -63,7 +63,7 @@ export default function SafMetadataBrowser({ title, items, onCancel, canWrite=fa
     const colorOf=(x:Item)=>savedColors[x.hazardCategory||catOf(x)]||x.color||'';
     const columns: Array<Column<Item>> = [
         { key: 'code', label: 'Code', value: (x) => x.code, className: 'font-mono text-xs' },
-        { key: 'label', label: noun, value: (x) => x.label, className: 'font-semibold text-ink',render:x=><span>{colorOf(x)&&<span className='mr-2 inline-block h-3 w-3 rounded border border-line' style={{backgroundColor:colorOf(x)}}/>}{x.code.startsWith('SDV_')&&<DeviceReferencePhoto code={x.code} label={x.label} admin/>}{x.label}</span> },
+        { key: 'label', label: noun, value: (x) => x.label, className: 'font-semibold text-ink',render:x=><div>{colorOf(x)&&<span className='mr-2 inline-block h-3 w-3 rounded border border-line' style={{backgroundColor:colorOf(x)}}/>}{x.code.startsWith('SDV_')&&<DeviceReferencePhoto code={x.code} label={x.label} admin/>}{x.label}</div> },
         ...(hazardColors?[{key:'hazardClassification',label:'Hazard classification',value:(x:Item)=>x.hazardCategory||catOf(x)}]:[]),
         { key: 'category', label: 'Category', value: catOf, hidden: view === 'browse' },
         { key: 'subcategory', label: 'Subcategory', value: subOf, hidden: view === 'browse' },
