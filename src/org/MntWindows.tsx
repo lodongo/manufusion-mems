@@ -188,7 +188,7 @@ function Gantt({ schedule, start, onMove }: { schedule: MntData; start: string; 
                                         <p className="break-words text-sm font-medium">{t.description}</p>
                                         <p className="text-xs text-muted">
                                             {t.start.toFixed(1)}–{t.finish.toFixed(1)} h · Float {t.float.toFixed(1)} h
-                                        </p>{onMove&&<label className="block text-xs text-soft mt-1">Earliest start (h from window)<input key={t.id+':'+t.offset} type="number" min="0" step="0.25" defaultValue={t.offset} onBlur={e=>{const v=Number(e.target.value);if(Number.isFinite(v)&&v>=0&&v!==t.offset)onMove(t.id,v);}} className="w-24 max-w-full rounded border border-line bg-panel px-2 py-1"/></label>
+                                        </p>{onMove&&<label className="block text-xs text-soft mt-1">Earliest start (h from window)<input key={t.id+':'+t.offset} type="number" min="0" step="0.25" defaultValue={t.offset} onBlur={e=>{const v=Number(e.target.value);if(Number.isFinite(v)&&v>=0&&v!==t.offset)onMove(t.id,v);}} className="w-24 max-w-full rounded border border-line bg-panel px-2 py-1"/></label>}
                                     </div>
                                     <div
                                         className="relative h-9 rounded bg-panel"
