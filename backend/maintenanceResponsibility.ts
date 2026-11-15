@@ -190,7 +190,7 @@ export function responsibilityFor(data:Data,d:Obj,kind:'wr'|'wo'|'window'|'valid
   const preview=rankResponsible(data,candidates({...data,policy:saved},savedGroup,s,path)),distinctPreview=[...new Map(preview.map(p=>[p.uid,p])).values()],roles=actualRoles(data,saved,s);
   pending={role:preview[0]?.role||roles[0]||'',name:preview[0]?.name||'',additional:Math.max(0,distinctPreview.length-1),diagnostic:explain(data,saved,savedGroup,s,path,preview),masterVersion:saved.config.masterVersion,groupVersion:savedGroup.version};
  }
- return {...location,responsibility:{stage:s.label,role:principal?.role||fallback,name:principal?.name||'',uid:principal?.uid||'',additional:Math.max(0,ordered.length-1),people:ordered,source,configuredRoles,diagnostic:principal?'':diagnostic,pending,activeMasterVersion:data.policy?.config.masterVersion||0,savedMasterVersion:data.savedMasterVersion,activeGroupVersion:g?.version||0,savedGroupVersion:savedGroup?.version||0}};
+ return {...location,responsibility:{stage:s.label,role:principal?.role||fallback,name:principal?.name||'',uid:principal?.uid||'',additional:Math.max(0,ordered.length-1),people:ordered,source,configuredRoles,diagnostic:principal?'':diagnostic,...(pending?{pending}:{}),activeMasterVersion:data.policy?.config.masterVersion||0,savedMasterVersion:data.savedMasterVersion,activeGroupVersion:g?.version||0,savedGroupVersion:savedGroup?.version||0}};
 }
 
 /** Use current eligible reviewer on refresh; never silently retain a revoked or out-of-group UID. */

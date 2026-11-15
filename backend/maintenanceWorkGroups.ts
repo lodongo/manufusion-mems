@@ -48,7 +48,7 @@ export function workGroupConflicts(groups:readonly Doc[], groupId:string, costCe
 }
 export function mergedMasterTasks(master:Doc|undefined){
  const saved=mapOfStrings(master?.data.tasks);
- return Object.fromEntries(WORK_GROUP_TASKS.filter(t=>!t.external).map(t=>[t.code,Number(master?.data.defaultsVersion)===1&&Object.hasOwn(saved,t.code)?saved[t.code]:saved[t.code]?.length?saved[t.code]:DEFAULT_WORK_GROUP_TASKS[t.code]||[]]));
+ return Object.fromEntries(WORK_GROUP_TASKS.filter(t=>!t.external).map(t=>[t.code,Number(master?.data.defaultsVersion)===1&&Object.prototype.hasOwnProperty.call(saved,t.code)?saved[t.code]:saved[t.code]?.length?saved[t.code]:DEFAULT_WORK_GROUP_TASKS[t.code]||[]]));
 }
 function suggestedMaster(groups:readonly Doc[],positions:ReadonlyMap<string,Doc>){
  const roleAlignment:Record<string,string[]>={},tasks:Record<string,string[]>={};
@@ -261,7 +261,7 @@ export const maintenanceWorkGroupRoutes={
   const priorTasks=d.master?mergedMasterTasks(d.master):{};
   const same=(a:string[],b:string[])=>a.length===b.length&&a.every(x=>b.includes(x));
   for(const [gate,permission] of LINKED_WORK_GROUP_TASKS){
-   const hasGate=Object.hasOwn(tasks,gate),hasPermission=Object.hasOwn(tasks,permission);
+   const hasGate=Object.prototype.hasOwnProperty.call(tasks,gate),hasPermission=Object.prototype.hasOwnProperty.call(tasks,permission);
    const gateChanged=hasGate&&!same(tasks[gate],priorTasks[gate]||[]),permissionChanged=hasPermission&&!same(tasks[permission],priorTasks[permission]||[]);
    if(hasGate&&!hasPermission||gateChanged&&!permissionChanged)tasks[permission]=[...tasks[gate]];
    else if(hasPermission&&!hasGate||permissionChanged&&!gateChanged)tasks[gate]=[...tasks[permission]];
