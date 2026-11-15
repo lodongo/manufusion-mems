@@ -1072,12 +1072,79 @@ async function windowSave(ctx: OrgContext) {
     return { ok: true, windowId: id };
 }
 
+// Consolidate the existing independent, role-gated order sign-offs without inventing
+// safety or handover evidence. Split-window orders retain the individual closure route.
+function windowClosureSummary(w:Doc,wos:Doc[]) {
+    const members=texts(w.data.workOrderIds);
+    const orders=members.map(id=>wos.find(x=>x.id===id));
+    const eligible=w.data.model===EQUIPMENT_WINDOW&&members.length>0&&orders.every(wo=>!!wo&&tasksOf(wo).length>0&&tasksOf(wo).every(t=>rows(w.data.tasks).some(s=>s.woCode===wo.id&&s.taskId===t.id)));
+    const fully=orders.filter((wo):wo is Doc=>!!wo);
+    return {eligible,ready:eligible&&fully.every(wo=>tasksOf(wo).every(t=>{const e=object(object(wo.data.taskExecution)[str(t.id)]);return e.status==='completed'&&e.reconciled===true;})),
+        safety:fully.filter(wo=>!!object(wo.data.safetySignoff).at).length,
+        handover:fully.filter(wo=>!!object(wo.data.handover).at&&object(wo.data.handover).accepted===true).length,
+        closed:fully.filter(wo=>wo.data.status==='closed').length,total:members.length};
+}
+async function windowManagedClosure(ctx:OrgContext,wo:Doc){
+    if(isRequestClosureOrder(wo.data)||!wo.data.windowId)return false;
+    const w=await getDoc(`${root(ctx)}/maintenance_windows/${identifier(wo.data.windowId)}`);
+    if(!w)return false;
+    const members=await Promise.all(texts(w.data.workOrderIds).map(id=>internalOrder(ctx,id)));
+    return windowClosureSummary(w,members).eligible;
+}
 async function windowAction(ctx: OrgContext, action: string) {
     if (action === 'save_window' || action === 'preview_window') return windowSave(ctx);
     const w = await currentWindow(ctx, ctx.body.windowId),
         c = await windowContext(ctx, w),
         b = ctx.body,
         path = texts(w.data.path);
+    if (['window_close_safety','window_close_handover','window_close_final'].includes(action)) {
+        const summary=windowClosureSummary(w,c.wos);
+        if(!summary.ready||w.data.status!=='completed') throw new HttpError(409,'Complete and reconcile all work orders in this window first. Split-window orders use their individual closure route.');
+        const stage=action==='window_close_safety'?'safety_signoff':action==='window_close_handover'?'handover':'technical_close';
+        const permission=stage==='safety_signoff'?'MNT.WO.safety':stage==='handover'?'MNT.WO.verify':'MNT.WO.close';
+        const gate=stage==='safety_signoff'?'MNT.SAFETY.SIGNOFF':stage==='handover'?'MNT.HANDOVER':'MNT.WO.TECHNICAL_CLOSE';
+        for(const wo of c.wos)await authority(ctx,wo,permission,gate);
+        const incidents=(await listDocs(`${root(ctx)}/safety_incidents`)).filter(i=>c.wos.some(wo=>wo.id===i.data.woCode));
+        if(incidents.some(i=>i.data.status!=='cleared'))throw new HttpError(409,'Clear every incident or near miss recorded against the window work orders first.');
+        if(stage==='safety_signoff'){
+            requiredText(b.note,'Safety clearance notes',5);
+            if(incidents.length?b.declaration!=='reported'||b.clearanceConfirmed!==true:b.declaration!=='none'||b.noIncidentsConfirmed!==true)
+                throw new HttpError(400,'Explicitly declare the window incident history and confirm clearance of every reported incident.');
+        }else if(stage==='handover'){
+            if(summary.safety!==summary.total)throw new HttpError(409,'Complete window safety sign-off first.');
+            if(b.accepted!==true||b.ready!==true)throw new HttpError(400,'Explicitly accept the equipment and confirm readiness.');
+            requiredText(b.functionalChecks,'Operational test results',10);requiredText(b.condition,'Equipment condition',5);requiredText(b.restrictions,'Outstanding restrictions or None');
+        }else{
+            if(summary.handover!==summary.total)throw new HttpError(409,'Complete window equipment handover first.');
+            requiredText(b.note,'Technical Manager closure review',10);
+            for(const wo of c.wos){if(wo.data.status==='closed')continue;closurePrerequisites(wo.data);
+                if(b.outstandingAccepted!==true&&(tasksOf(wo).some(t=>{const f=object(object(object(wo.data.taskExecution)[str(t.id)]).feedback);return f.outstandingStatus==='reported'||[f.outstandingDefects,f.followUp].some(v=>!!str(v).trim()&&!/^none\\.?$/i.test(str(v).trim()));})||!/^none\\.?$/i.test(str(object(wo.data.handover).restrictions).trim())))throw new HttpError(409,'Review and accept outstanding issues and follow-up actions first.');
+            }
+        }
+        // Each successful order retains its original sign-off, authority, audit and costs.
+        // Retries resume only unfinished gates if an individual write fails.
+        for(const original of c.wos){
+            const wo=await internalOrder(ctx,original.id);
+            if(wo.data.status==='closed'||stage==='safety_signoff'&&object(wo.data.safetySignoff).at||stage==='handover'&&object(wo.data.handover).at)continue;
+            let body={...b,receivingParty:ctx.uid};
+            if(stage==='safety_signoff'){
+                const incident=incidents.find(i=>i.data.woCode===wo.id);
+                body={...body,declaration:incident?'reported':'none',noIncidentsConfirmed:!incident,clearanceConfirmed:!!incident,...(incident?{incidentId:incident.id,classification:incident.data.classification,narrative:incident.data.narrative,occurredAt:incident.data.occurredAt,immediateControls:incident.data.immediateControls}:{})};
+            }
+            await executeMaintenanceAction({...ctx,body} as OrgContext,wo,stage);
+        }
+        if(stage==='technical_close'){
+            const current=await currentWindow(ctx,w.id);
+            if(!object(current.data.finalClosure).at){
+                const fresh=await Promise.all(c.wos.map(wo=>internalOrder(ctx,wo.id)));
+                if(!fresh.every(wo=>wo.data.status==='closed'))throw new HttpError(409,'Every linked work order must be closed.');
+                const finalClosure={at:nowIso(),by:ctx.uid,name:name(ctx),note:str(b.note),workOrderIds:fresh.map(wo=>wo.id)};
+                await commit([{path:`${root(ctx)}/maintenance_windows/${w.id}`,fields:{finalClosure,history:history(ctx,current.data,'Maintenance window closed',str(b.note))},mask:['finalClosure','history'],updateTime:current.updateTime}]);
+                await event(ctx,'window.closed',w.id,str(b.note));
+            }
+        }
+        return {ok:true};
+    }
     if (action === 'window_report' && c.wos.every((wo) => wo.data.status === 'closed') && object(w.data.approvedReport).fingerprint) {
         const snapshot = object(w.data.approvedReport);
         return {
@@ -1371,7 +1438,8 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             if(wo.data.status!=='in_progress'||!task||e.status!=='awaiting_feedback'||object(wo.data.safetySignoff).at)throw new HttpError(409,'This retrospective feedback is not pending.');
             const source=object(wo.data.directCompletion),executor=object(source.executor),minutes=Number(source.durationMinutes);
             if(str(executor.uid)!==ctx.uid&&!bypass(ctx,'mnt.direct_completion.executor_feedback'))throw new HttpError(403,'The named employee who performed the work must confirm the execution feedback.');
-            const feedback=object(b.feedback);
+            const submitted=object(b.feedback);
+            const feedback={...submitted,workPerformed:str(source.reportedWork)};
             if(feedback.noSparesOrServicesConfirmed!==true)throw new HttpError(400,'Explicitly confirm no spare parts or external services were used.');
             if(feedback.scopeDeviation===true)throw new HttpError(409,'Record additional work or a technical deviation through a follow-up work request.');
             taskCompletion(task,feedback);
@@ -1662,10 +1730,12 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         }
         closurePrerequisites(wo.data);
         if(!isRequestClosureOrder(wo.data))for (const t of tasksOf(wo)) await requireApprovedWindow(ctx, wo, str(t.id));
+        if ((await listDocs(`${root(ctx)}/safety_incidents`)).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared'))
+            throw new HttpError(409,'Clear all recorded incidents before technical closure.');
         if (
             (tasksOf(wo).some((t) => {
                 const f = object(object(executions[str(t.id)]).feedback);
-                return !/^none\.?$/i.test(str(f.outstandingDefects).trim()) || !/^none\.?$/i.test(str(f.followUp).trim());
+                return f.outstandingStatus==='reported'||[f.outstandingDefects,f.followUp].some(v=>!!str(v).trim()&&!/^none\.?$/i.test(str(v).trim()));
             }) ||
                 !/^none\.?$/i.test(str(object(wo.data.handover).restrictions).trim())) &&
             b.outstandingAccepted !== true
@@ -1839,6 +1909,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 id: w.id,
                 ...w.data,
                 ...responsibilityFor(routing,w.data,'window'),
+                closureSummary:windowClosureSummary(w,wos),
                 liveSchedule: executionSchedule(w, wos),
                 progress: rows(w.data.tasks).length
                     ? Math.round(
@@ -1905,6 +1976,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
             wo: { code: wo.id, ...wo.data,...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
             maintenanceCycle:cycle,
+            windowClosureManaged:await windowManagedClosure(ctx,wo),
             statusReview:summarizeWorkOrderReview(d,nowIso(),dueAt),
             readiness: readinessData,
             checklist: retrospective?null:await planChecklist(ctx, wo, readinessData),
@@ -2008,6 +2080,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 'authorize_window',
                 'safety_prerequisite',
                 'window_report',
+                'window_close_safety','window_close_handover','window_close_final',
                 'reject_window',
             ].includes(action)
         )

@@ -94,9 +94,11 @@ export function criticalPath(input: ScheduleTask[], windowHours = Infinity) {
 }
 
 export function taskCompletion(task: Obj, feedback: Obj) {
-    for (const key of ['workPerformed', 'findings', 'results', 'remarks']) requiredText(feedback[key], key);
-    if (!str(feedback.outstandingDefects).trim() || !str(feedback.followUp).trim())
-        throw new HttpError(400, 'Record outstanding defects and follow-up actions, or explicitly enter None.');
+    requiredText(feedback.workPerformed, 'What was done?');
+    // Detailed observations are optional unless a defect/follow-up is explicitly declared.
+    if (feedback.outstandingStatus === 'reported' &&
+        !str(feedback.outstandingDefects).trim() && !str(feedback.followUp).trim())
+        throw new HttpError(400, 'Describe the outstanding work or follow-up.');
     for (const service of rows(task.services)) {
         const f = rows(feedback.services).find((x) => x.id === service.id);
         if (!f || f.accepted !== true) throw new HttpError(400, 'Every service requires accepted execution feedback.');

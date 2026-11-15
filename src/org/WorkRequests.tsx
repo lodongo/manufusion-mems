@@ -1267,7 +1267,7 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
                     <option value=''>Select…</option>
                     {lists.maintenanceTypes.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}
                 </SelectField>
-                <label className='flex min-h-11 items-start gap-3 rounded-xl border border-line p-3 text-sm'><input type='checkbox' checked={noResources} onChange={e=>setNoResources(e.target.checked)}/><span>No spare parts or external services were used. Create a Work Order for actual work feedback, safety, handover and formal technical closure only.</span></label>
+                <label className='flex min-h-11 items-start gap-3 rounded-xl border border-line p-3 text-sm'><input type='checkbox' checked={noResources} onChange={e=>setNoResources(e.target.checked)}/><span>No spare parts or external services were used. The linked Work Order reuses these completion details.</span></label>
                 <div className='grid gap-3 sm:grid-cols-2'>
                     <Field id='cl-date' type='date' label='Closure date *' max={localToday} value={closedDate} onChange={(e) => setClosedDate(e.target.value)} />
                     <Field id='cl-duration' type='number' min={1} max={525600} step={1} label='Actual time taken (minutes) *' placeholder='e.g. 25' value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} />

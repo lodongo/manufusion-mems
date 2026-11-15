@@ -415,30 +415,35 @@ function ResourceForm({
     );
 }
 
-function FeedbackForm({ task, execution, onSubmit }: { task: MntData; execution: MntData; onSubmit: (d: MntData) => void }) {
+function FeedbackForm({ task, execution, wo, onSubmit }: { task: MntData; execution: MntData; wo:MntData; onSubmit: (d: MntData) => void }) {
     const retrospective=execution.status==='awaiting_feedback';
     const [f, setF] = useState<MntData>({ ...(retrospective?{workPerformed:execution.reportedWork,actualHours:Number(execution.actualMinutes)/60}:{}),services: (task.services || []).map((s: MntData) => ({ id: s.id, accepted: false })) });
     const patch = (k: string, v: any) => setF((old) => ({ ...old, [k]: v }));
     return (
         <div className="space-y-3">
             <p className="text-sm text-soft">
-                {retrospective?'Work already performed on '+execution.performedDate+' · '+execution.actualMinutes+' minutes.':'Started '+(execution.startedAt?new Date(execution.startedAt).toLocaleString():'—')+'.'} Complete each result explicitly.
+                {retrospective?'Verify the details already recorded on the Work Request.':'Record the work done and actual time. Add further detail only when useful.'}
             </p>
-            {(
-                [
-                    ['workPerformed', 'Work performed'],
-                    ['findings', 'Technical findings'],
-                    ['results', 'Actual work results'],
-                    ['outstandingDefects', 'Outstanding defects (enter None if clear)'],
-                    ['remarks', 'Completion remarks'],
-                    ['measurements', 'Measurements (where applicable)'],
-                    ['evidence', 'Execution evidence / reference'],
-                    ['followUp', 'Follow-up actions and references (enter None if clear)'],
-                ] as const
-            ).map(([k, l]) => (
-                <MntField key={k} label={l} value={f[k]} multiline onChange={(v) => patch(k, v)} />
-            ))}
-            {retrospective?<><p className="text-sm font-semibold">Actual time: {execution.actualMinutes} minutes (from Work Request)</p><MntCheck label="I confirm no spare parts or external services were used." value={!!f.noSparesOrServicesConfirmed} onChange={v=>patch('noSparesOrServicesConfirmed',v)}/></>:<MntField label="Actual labour hours worked" type="number" value={f.actualHours} onChange={(v) => patch('actualHours', v)} />}
+            {retrospective?<div className="space-y-2 rounded-xl border border-line p-3 text-sm">
+                <p className="font-semibold">Work Request completion details</p>
+                {[
+                    ['Failure mode',wo.directCompletion?.failureModeLabel],
+                    ['Failure cause',wo.directCompletion?.causeLabel],
+                    ['Solution types',(wo.directCompletion?.solutions||[]).map((s:MntData)=>[s.group,s.label].filter(Boolean).join(' · ')).join('; ')],
+                    ['What was done?',execution.reportedWork],
+                    ['Type of maintenance',wo.maintenanceTypeLabel],
+                    ['Closure date',execution.performedDate],
+                    ['Actual time taken (minutes)',execution.actualMinutes],
+                    ['Closed by',wo.directCompletion?.executor?.name],
+                ].map(([label,value])=><p key={label}><span className="font-semibold">{label}: </span>{value||'—'}</p>)}
+            </div>:<><MntField label="What was done? *" value={f.workPerformed} multiline onChange={v=>patch('workPerformed',v)}/>
+                <p className="text-sm text-soft">Failure mode: {wo.failureModeLabel||wo.natureLabel||'—'} · Type of maintenance: {wo.maintenanceTypeLabel||'—'}</p>
+                <details className="rounded-xl border border-line p-3"><summary className="cursor-pointer text-sm font-medium">Additional technical details (optional)</summary>
+                    {([['findings','Technical findings'],['results','Actual work results'],['measurements','Measurements'],['evidence','Execution evidence / reference']] as const).map(([k,l])=><MntField key={k} label={l} value={f[k]} multiline onChange={v=>patch(k,v)}/>)}
+                    <MntField label="Outstanding work / follow-up (if any)" value={f.followUp} multiline onChange={v=>patch('followUp',v)}/>
+                </details>
+            </>}
+            {retrospective?<><MntCheck label="I confirm no spare parts or external services were used." value={!!f.noSparesOrServicesConfirmed} onChange={v=>patch('noSparesOrServicesConfirmed',v)}/></>:<MntField label="Actual labour hours worked" type="number" value={f.actualHours} onChange={(v) => patch('actualHours', v)} />}
             <MntCheck
                 label={retrospective?'Additional work or technical deviation needs a follow-up request.':'The work deviated from the assessed technical scope.'}
                 value={!!f.scopeDeviation}
@@ -489,7 +494,7 @@ function FeedbackForm({ task, execution, onSubmit }: { task: MntData; execution:
                     />
                 </fieldset>
             ))}
-            <Button onClick={() => onSubmit({ feedback: f })}>Confirm task completion</Button>
+            <Button disabled={retrospective?!f.noSparesOrServicesConfirmed:!String(f.workPerformed||'').trim()||!(Number(f.actualHours)>0)} onClick={() => onSubmit({ feedback: f })}>{retrospective?'Confirm recorded work':'Complete task'}</Button>
         </div>
     );
 }
@@ -1112,35 +1117,33 @@ export default function MntWorkOrder({ code }: { code: string }) {
             <Card className="space-y-4">
                 <h2 className="flex items-center gap-2 text-lg font-semibold">
                     <ShieldCheck size={19} />
-                    Safety, handover and final closure
+                    {data.windowClosureManaged?'Maintenance window closure':'Closure'}
                 </h2>
-                <div className="grid gap-3 text-sm sm:grid-cols-3">
+                {data.windowClosureManaged?<div className="space-y-2"><p className="text-sm text-soft">Safety sign-off, equipment handover and Technical Manager closure are completed together in the maintenance window. Record task feedback and reconcile materials here.</p><Button variant="secondary" onClick={()=>navigate('organization_admin/maintenance_windows')}>Open maintenance windows</Button></div>:<div className="grid gap-2 text-sm sm:grid-cols-3">
                     {[
                         ['Safety sign-off', wo.safetySignoff],
                         ['Equipment handover', wo.handover],
                         ['Technical Manager closure', wo.technicalClosure],
                     ].map(([label, v]) => (
-                        <div key={label} className="rounded-xl border border-line p-3">
+                        <div key={label} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2">
                             <p className="font-semibold">{label}</p>
                             <p className="mt-1 text-soft">{v ? `${v.name} · ${new Date(v.at).toLocaleString()}` : 'Pending'}</p>
                         </div>
                     ))}
-                </div>
+                </div>}
                 <div className="flex flex-wrap gap-2">
                     {can.safety && !wo.safetySignoff && (
                         <>
-                            <Button disabled={retrospective&&wo.status!=='completed'} testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('safety_signoff')}>
-                                Safety sign-off
-                            </Button>
+                            {!data.windowClosureManaged&&(!retrospective||wo.status==='completed')&&<Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('safety_signoff')}>Safety sign-off</Button>}
                             <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('report_incident')}>
                                 Report incident / near miss
                             </Button>
                         </>
                     )}
-                    {can.handover && wo.safetySignoff && !wo.handover && (
+                    {!data.windowClosureManaged&&can.handover && wo.safetySignoff && !wo.handover && (
                         <Button testOverride={!!data.testModeOverride} onClick={() => open('handover')}>Accept equipment handover</Button>
                     )}
-                    {can.close && wo.status !== 'closed' && (
+                    {!data.windowClosureManaged&&can.close && wo.status !== 'closed' && (
                         <Button testOverride={!!data.testModeOverride} onClick={() => open('technical_close')}>Technical Manager final closure</Button>
                     )}
                 </div>
@@ -1192,6 +1195,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         <FeedbackForm
                             task={task}
                             execution={execution}
+                            wo={wo}
                             onSubmit={(body) => submitDialog('complete_task', { taskId: task.id, ...body })}
                         />
                     ) : dialog.kind === 'consumption' ? (
