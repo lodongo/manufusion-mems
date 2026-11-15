@@ -116,7 +116,7 @@ function assessmentStage(data:Data,d:Obj,path:string[]):Stage{
 }
 function wrStage(data:Data,d:Obj,path:string[]):Stage{
  const s=str(d.status);
- if(str(d.woCode)||['closed','cancelled','declined','converted'].includes(s))return {label:str(d.woCode)?'Converted to work order':'Completed'};
+ if(str(d.woCode)||['closed','cancelled','declined','converted'].includes(s))return {label:str(d.woCode)?(s==='closed'?'Closed · linked work order':'Converted to work order'):'Completed'};
  if(s==='returned')return {label:'Requester correction',fixed:str(d.requestedBy),fixedRole:'Requester'};
  if(s==='closure_pending')return {label:'Closure confirmation',permission:'MNT.WR.closeConfirm',exclude:[str(obj(d.closure).by)]};
  if(['created','submitted','under_review'].includes(s)&&!(s==='under_review'&&Number(d.reviewProcessVersion)!==2))return {label:'Work request review',gate:'MNT.WR.REVIEW',permission:'MNT.WR.review',exclude:[str(d.requestedBy)],preferred:str(d.reviewerUid)};
@@ -139,12 +139,12 @@ function woStage(data:Data,d:Obj,path:string[]):Stage{
  const pending=tasks.filter(t=>obj(execution[str(t.id)]).status!=='completed');
  if(['scheduled','in_progress'].includes(s)||s==='completed'&&pending.length){
   const allocated=[...new Set(pending.flatMap(t=>{const e=obj(execution[str(t.id)]);return ids(e.performers).length?ids(e.performers):ids(obj(obj(planning[str(t.id)]).allocation).personnel);} ))];
-  return {label:s==='scheduled'?'Execute scheduled tasks':'Task execution & feedback',gate:'MNT.TASK.FEEDBACK',permission:'MNT.WO.execute',allocated};
+  return {label:d.executionMode==='request_closure'?'Confirm completed work feedback':s==='scheduled'?'Execute scheduled tasks':'Task execution & feedback',gate:'MNT.TASK.FEEDBACK',permission:'MNT.WO.execute',allocated};
  }
  if(tasks.some(t=>obj(execution[str(t.id)]).reconciled!==true)&&!obj(d.safetySignoff).at)return {label:'Spare parts reconciliation',gate:'MNT.SPARES.RECONCILE',permission:'MNT.view'};
  if(!obj(d.safetySignoff).at)return {label:'Safety sign-off',gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Safety signatory'};
  if(!obj(d.handover).at)return {label:'Operations handover',gate:'MNT.HANDOVER',external:true,fixedRole:'Operations receiving role'};
- return {label:'Technical closure',gate:'MNT.WO.TECHNICAL_CLOSE',permission:'MNT.WO.close'};
+ return {label:'Technical closure',gate:'MNT.WO.TECHNICAL_CLOSE',permission:'MNT.WO.close',...(d.executionMode==='request_closure'?{exclude:[str(obj(obj(d.directCompletion).executor).uid),str(obj(d.directCompletion).recordedBy)]}:{})};
 }
 function windowStage(d:Obj):Stage{
  if(['completed','closed','cancelled'].includes(str(d.status)))return {label:'Completed'};

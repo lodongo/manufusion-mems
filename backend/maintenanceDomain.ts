@@ -123,6 +123,11 @@ export function safetyDeclaration(body: Obj) {
         if (body.clearanceConfirmed !== true) throw new HttpError(409, 'Incident containment and safety clearance are required.');
     } else throw new HttpError(400, 'Choose an explicit incident or no-incident declaration.');
 }
+/** Only server-created linked retrospective orders omit a prospective window. */
+export function isRequestClosureOrder(wo:Obj):boolean{
+ const source=object(wo.directCompletion);
+ return wo.executionMode==='request_closure'&&/^WR\d{8}$/.test(str(wo.wrCode))&&source.requestCode===wo.wrCode&&source.noSparesOrServices===true;
+}
 export function closurePrerequisites(wo: Obj) {
     const tasks = rows(wo.assessmentTasks),
         execution = object(wo.taskExecution);
@@ -136,5 +141,5 @@ export function closurePrerequisites(wo: Obj) {
     if (!object(wo.safetySignoff).at) throw new HttpError(409, 'Safety sign-off is required.');
     if (!object(wo.handover).at || object(wo.handover).accepted !== true)
         throw new HttpError(409, 'Accepted equipment handover is required.');
-    if (!wo.windowId) throw new HttpError(409, 'An approved maintenance window is required.');
+    if (!isRequestClosureOrder(wo)&&!wo.windowId) throw new HttpError(409, 'An approved maintenance window is required.');
 }

@@ -2,6 +2,7 @@ import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedR
 import { storage } from './platform/sdk';
 import { commit, withLock } from './finCore';
 import { enforceMaintenanceTransition, executeMaintenanceAction } from './maintenanceOperations';
+import {isRequestClosureOrder} from './maintenanceDomain';
 import { requireMaintenanceRole, configuredMaintenanceRole } from './maintenanceAccess';
 import {groupAt,groupGateRole,workGroupGateAllowed,loadWorkGroupPolicy,outsideExecutionAccess} from './maintenanceWorkGroupPolicy';
 import { prepareMaintenanceAssessment } from './maintenanceAssessmentIntegration';
@@ -638,7 +639,8 @@ function woOut(doc: Doc) {
         code: doc.id,
         title: str(d.title),
         status,
-        statusLabel: WO_STATUS[status] ?? status,
+        statusLabel: isRequestClosureOrder(d)&&status==='in_progress'?'Work completed · awaiting feedback':WO_STATUS[status] ?? status,
+        executionMode:str(d.executionMode),
         origin: str(d.wrCode) ? 'request' : 'direct',
         wrCode: str(d.wrCode),
         ...locationOut(d),
@@ -685,7 +687,7 @@ function woCan(ctx: OrgContext, doc: Doc, scope: Scope, l: Lists) {
         start: ['released', 'scheduled'].includes(s) && at(P.WO_execute),
         execute: s === 'in_progress' && at(P.WO_execute),
         verify: s === 'completed' && at(P.WO_verify) && independent(ctx, !workers.has(ctx.uid), 'mnt.wo.verify_independence'),
-        close: s === 'verified' && at(P.WO_close),
+        close: (s === 'verified'||isRequestClosureOrder(d)&&s==='completed'&&!!object(d.handover).at) && at(P.WO_close),
         cancel: ['planning', 'plan_ready', 'released', 'scheduled'].includes(s) && at(P.WO_cancel),
         reopen: ['verified', 'closed'].includes(s) && at(P.WO_reopen),
         highRisk: high,
@@ -726,6 +728,29 @@ async function createWo(ctx: OrgContext, base: Obj, wrCode: string): Promise<str
         if (created) return code;
     }
     throw new HttpError(409, 'Could not number the work order. Please try again.');
+}
+
+/** Close the request and create exactly one retrospective order in one commit. */
+async function closeRequestWithOrder(ctx:OrgContext,request:Doc,closure:Obj,patch:Obj):Promise<string>{
+ if(str(request.data.woCode))throw new HttpError(409,'A work order already exists for this request.');
+ const minutes=Number(closure.durationMinutes);
+ if(!Number.isInteger(minutes)||minutes<=0||closure.noSparesOrServices!==true||!str(closure.dateClosed)||!str(closure.closedBy))
+  throw new HttpError(409,'Record the actual completion date, duration, executor and no-spares/no-services declaration.');
+ const now=nowIso(),n=await nextOrgCounter(ctx.orgId,'woSeq');
+ if(n>99_999_999)throw new HttpError(400,'Work order numbering is exhausted.');
+ const code='WO'+String(n).padStart(8,'0'),id='DIRECT_COMPLETION';
+ const keys=['assemblyId','assemblyCode','assemblyName','unitId','unitCode','unitName','costCenterId','costCenterCode','costCenterName','siteId','siteCode','siteName','assetTag','assetName','assetClass','title','description','criticalityCode','criticalityLabel','criticalityColor','priorityCode','priorityLabel','disciplineCode','disciplineLabel','requestedBy','requestedByName','requestedAt'];
+ const base=Object.fromEntries(keys.map(k=>[k,str(request.data[k])]));
+ const path=pathOf(request),group=groupFields(ctx.workGroupPolicy,path);
+ const executor={uid:str(closure.closedBy),name:str(closure.closedByName),role:str(closure.closedByRole),positionCode:str(closure.closedByPositionCode)};
+ const task={id,title:'Work completed at request review',description:str(closure.description),assemblyId:str(request.data.assemblyId),equipmentId:str(request.data.unitId),maintenanceTypeCode:str(closure.maintenanceTypeCode),maintenanceTypeLabel:str(closure.maintenanceTypeLabel),spares:[],services:[],risk:[]};
+ const directCompletion={requestCode:request.id,performedDate:str(closure.dateClosed),durationMinutes:minutes,executor,recordedBy:str(closure.recordedBy)||str(closure.by),recordedByName:str(closure.recordedByName)||str(closure.name),recordedAt:str(closure.recordedAt)||str(closure.at),noSparesOrServices:true,reportedWork:str(closure.description),failureModeCode:str(closure.failureModeCode),failureModeLabel:str(closure.failureModeLabel),causeCode:str(closure.causeCode),causeLabel:str(closure.causeLabel),solutions:objs(closure.solutions)};
+ const wo:Obj={...base,...group,code,wrCode:request.id,path,executionMode:'request_closure',directCompletion,status:'in_progress',schemaVersion:2,maintenanceTypeCode:str(closure.maintenanceTypeCode),maintenanceTypeLabel:str(closure.maintenanceTypeLabel),failureModeCode:str(closure.failureModeCode),failureModeLabel:str(closure.failureModeLabel),solutions:objs(closure.solutions),assessmentTasks:[task],tasks:[{id,description:task.description}],taskPlanning:{},taskExecution:{[id]:{status:'awaiting_feedback',performers:[executor.uid],reportedWork:task.description,performedDate:directCompletion.performedDate,actualMinutes:minutes,reconciled:false}},spares:[],services:[],sparesUsed:[],timeLogs:[],assignees:[executor],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Retrospective work order created from '+request.id,'Work reported complete; execution feedback and formal closure pending. No planning or window created.')};
+ const {reviewRoutingChanged:_changed,reviewRoutingPreviousUid:_previous,...requestData}=request.data;
+ await commit([{path:woCol(ctx.orgId)+'/'+code,fields:wo,exists:false},{path:wrCol(ctx.orgId)+'/'+request.id,fields:{...requestData,...patch,...group,status:'closed',closedAt:now,closure:{...closure,woCode:code},woCode:code,updatedAt:now,history:history(request,ctx,'Request closed; '+code+' created','Actual work '+minutes+' minutes; formal Work Order closure pending.')},updateTime:request.updateTime}]);
+ await rec(ctx,'mnt.wr.closed_at_review',request.id,'Linked '+code+'; '+minutes+' minutes; '+executor.name);
+ await rec(ctx,'mnt.wo.created_from_closure',code,'From '+request.id+'; no spares or services declared; planning and window not applicable.');
+ return code;
 }
 
 function readTasks(raw: unknown, l: Lists): Task[] {
@@ -1632,11 +1657,14 @@ export const maintenanceRoutes = {
                     if (!Number.isInteger(durationMinutes) || durationMinutes <= 0 || durationMinutes > 525600)
                         throw new HttpError(400, 'Enter the actual time taken in whole minutes (greater than zero).');
                     const classifications = {
+                        noSparesOrServices:ctx.body.noSparesOrServices===true,
                         failureModeCode:failureMode.code, failureModeLabel:failureMode.label, failureModeGroup:failureMode.group,
                         solutionCode:solutionTypes[0].code, solutionLabel:solutionTypes[0].label, solutionGroup:solutionTypes[0].group,
                         solutions:solutionTypes.map(s=>({code:s.code,label:s.label,group:s.group})),
                         closedBy, closedByName, closedByRole:executor.role,closedByPositionCode:executor.positionCode,closedByGenericRole:executor.genericRole,recordedBy:ctx.uid, recordedByName:displayName(ctx), recordedAt:now,
                     };
+                    if (ctx.body.noSparesOrServices!==true)throw new HttpError(400,'Confirm no spare parts or external services were used. Otherwise use the assessed work order route.');
+                    const mtype=pick(l.maintenanceTypes,str(ctx.body.maintenanceTypeCode),'maintenance type')!;
                     if (reviewNew) {
                         if (str(doc.data.status) !== 'under_review' || (!assignedReviewer && !reviewOverride))
                             throw new HttpError(403, 'Only the assigned reviewer can close this work request after starting review.');
@@ -1644,17 +1672,13 @@ export const maintenanceRoutes = {
                         const description = str(ctx.body.description).trim().slice(0, 2000);
                         if (description.length < 10) throw new HttpError(400, 'Describe what was done (at least 10 characters).');
                         const closure = { ...classifications, causeCode: cause.code, causeLabel: cause.label, causeGroup: cause.group,
-                            description, dateClosed: closedDate, durationMinutes, by: ctx.uid,
+                            description, dateClosed: closedDate, durationMinutes,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label, by: ctx.uid,
                             name: displayName(ctx), at: now };
-                        await done({ status: 'closed', reviewDecision: 'closed', closedAt: now, closure: closure as Plain,
-                            failureModeCode:failureMode.code,failureModeLabel:`${failureMode.group} · ${failureMode.label}`, solutions:classifications.solutions,
-                            reviewer: ctx.uid, reviewerName: displayName(ctx), reviewCompletedAt: now },
-                            'Closed after review', 'mnt.wr.closed_at_review', `${failureMode.group} · ${failureMode.label}; ${cause.group} · ${cause.label}; ${solutionTypes.map(s=>s.group+' · '+s.label).join(', ')}; completed by ${closedByName}; ${closedDate}; ${durationMinutes} min; ${description}`);
-                        return { ok: true };
+                        const woCode=await closeRequestWithOrder(ctx,doc,closure,{reviewDecision:'closed',failureModeCode:failureMode.code,failureModeLabel:failureMode.group+' · '+failureMode.label,solutions:classifications.solutions,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label,reviewer:ctx.uid,reviewerName:displayName(ctx),reviewCompletedAt:now});
+                        return {ok:true,woCode};
                     }
                     const cause = pickGrouped(l.rootCauses, str(ctx.body.causeCode), 'cause')!;
                     const solution = solutionTypes[0];
-                    const mtype = pick(l.maintenanceTypes, str(ctx.body.maintenanceTypeCode), 'maintenance type')!;
                     const description = str(ctx.body.description).trim().slice(0, 2000);
                     if (description.length < 10) throw new HttpError(400, 'Describe what was done (at least 10 characters).');
                     confirmCode(ctx, doc);
@@ -1677,6 +1701,7 @@ export const maintenanceRoutes = {
                     deny(can.confirmClosure, str(object(doc.data.closure).by) === ctx.uid ? 'You closed this request, so another person must confirm it.' : 'You cannot confirm this closure.');
                     const closure = object(doc.data.closure);
                     if (action === 'confirm_closure') {
+                        if(closure.noSparesOrServices===true){const woCode=await closeRequestWithOrder(ctx,doc,{...closure,confirmedBy:ctx.uid,confirmedName:displayName(ctx),confirmedAt:now,confirmNote:note},{reviewDecision:'closed'});await rec(ctx,'mnt.wr.closure_confirmed',doc.id,note);return {ok:true,woCode};}
                         await done({ status: 'closed', closedAt: now, closure: { ...closure, confirmedBy: ctx.uid, confirmedName: displayName(ctx), confirmedAt: now, confirmNote: note } as Plain },
                             'Closure confirmed', 'mnt.wr.closure_confirmed', note);
                         return { ok: true };
@@ -1945,7 +1970,7 @@ export const maintenanceRoutes = {
     // Legacy endpoint fails closed: work orders originate from approved Work Requests only.
     'POST /api/org/mnt/wo/create': [
         orgRoute('org.mnt.wo.create',null,async()=>{
-            throw new HttpError(409,'Direct work order creation is disabled. Complete and approve a Work Request assessment first.');
+            throw new HttpError(409,'Direct work order creation is disabled. Complete and approve a Work Request assessment first, or use the controlled no-resource request closure route.');
         })
     ],
 

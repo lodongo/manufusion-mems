@@ -31,6 +31,7 @@ import { planningGroup } from './maintenanceMaterialHook';
 import { budgetStatus, costApprovalOf, estimateOf, periodOf, submitCost } from './maintenancePlanning';
 import {
     closurePrerequisites,
+    isRequestClosureOrder,
     criticalPath,
     identifier,
     object,
@@ -205,6 +206,7 @@ export async function requireApprovedWindow(ctx: OrgContext, wo: Doc, taskId?: s
     return w;
 }
 export async function enforceMaintenanceTransition(ctx: OrgContext, wo: Doc, action: string) {
+    if(isRequestClosureOrder(wo.data)&&action!=='close')throw new HttpError(409,'Use retrospective Work Order feedback, safety sign-off, handover and technical closure. Raise a follow-up request for additional work.');
     if (action === 'verify' && ctx.body.result === 'rework')
         throw new HttpError(409, 'Record a controlled follow-up work request for rework so the completed task history is preserved.');
     if (action === 'start') await requireApprovedWindow(ctx, wo);
@@ -224,7 +226,7 @@ export async function enforceMaintenanceTransition(ctx: OrgContext, wo: Doc, act
     if (action === 'close') {
         await requireMaintenanceRole(ctx, 'MNT.WO.TECHNICAL_CLOSE', recordPath(wo));
         closurePrerequisites(wo.data);
-        for (const t of tasksOf(wo)) await requireApprovedWindow(ctx, wo, str(t.id));
+        if(!isRequestClosureOrder(wo.data))for (const t of tasksOf(wo)) await requireApprovedWindow(ctx, wo, str(t.id));
     }
     if (action === 'cancel') await releaseMaintenanceReservations(ctx, wo.id);
     if (action === 'reopen')
@@ -1296,11 +1298,37 @@ function executionSchedule(window: Doc, wos: Doc[]) {
     }
 }
 
+/** No material or service transaction can be silently ignored by retrospective closure. */
+async function ensureNoDirectResources(ctx:OrgContext,wo:Doc){
+ if(!isRequestClosureOrder(wo.data))return;
+ const [issues,links]=await Promise.all([listDocs(root(ctx)+'/goods_issues'),listDocs(root(ctx)+'/mnt_supply_links')]);
+ if(issues.some(i=>i.data.workOrderId===wo.id)||links.some(i=>i.data.woCode===wo.id&&i.data.status==='active')||rows(wo.data.sparesUsed).length||rows(wo.data.spares).length||rows(wo.data.services).length||tasksOf(wo).some(t=>rows(t.spares).length||rows(t.services).length)||Object.keys(object(wo.data.taskPlanning)).length)
+  throw new HttpError(409,'This retrospective order has resource activity. Resolve the discrepancy through controlled maintenance review; do not close it as no-spares/no-services.');
+}
 export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action: string) {
     const b = ctx.body,
         executions = object(wo.data.taskExecution),
         task = tasksOf(wo).find((t) => t.id === str(b.taskId)),
         e = object(executions[str(b.taskId)]);
+    const retrospective=isRequestClosureOrder(wo.data);
+    if(retrospective){
+        if(!['complete_task','safety_signoff','report_incident','clear_incident','handover','technical_close'].includes(action))throw new HttpError(409,'No planning, scheduling, new execution or resource transactions are allowed on work already completed at request review.');
+        if(action==='complete_task'){
+            await authority(ctx,wo,'MNT.WO.execute','MNT.TASK.FEEDBACK');
+            if(wo.data.status!=='in_progress'||!task||e.status!=='awaiting_feedback'||object(wo.data.safetySignoff).at)throw new HttpError(409,'This retrospective feedback is not pending.');
+            const source=object(wo.data.directCompletion),executor=object(source.executor),minutes=Number(source.durationMinutes);
+            if(str(executor.uid)!==ctx.uid&&!bypass(ctx,'mnt.direct_completion.executor_feedback'))throw new HttpError(403,'The named employee who performed the work must confirm the execution feedback.');
+            const feedback=object(b.feedback);
+            if(feedback.noSparesOrServicesConfirmed!==true)throw new HttpError(400,'Explicitly confirm no spare parts or external services were used.');
+            if(feedback.scopeDeviation===true)throw new HttpError(409,'Record additional work or a technical deviation through a follow-up work request.');
+            taskCompletion(task,feedback);
+            if(!Number.isInteger(minutes)||minutes<=0)throw new HttpError(409,'The source request has an invalid recorded duration.');
+            await ensureNoDirectResources(ctx,wo);
+            const at=nowIso(),actualHours=minutes/60;
+            await saveWo(ctx,wo,{taskExecution:{...executions,[str(task.id)]:{...e,status:'completed',feedback:{...feedback,actualHours,actualMinutes:minutes,services:[]},completedAt:at,completedBy:str(executor.uid),feedbackRecordedBy:ctx.uid,feedbackRecordedAt:at,reconciled:true,reconciliationMode:'no_resources_confirmed',reconciledAt:at,reconciledBy:ctx.uid,consumption:[],bomUpdated:false}},status:'completed',completedBy:str(executor.uid),completedByName:str(executor.name),completedAt:at,timeLogs:[{id:'DIRECT_COMPLETION',uid:str(executor.uid),name:str(executor.name),date:str(source.performedDate),hours:actualHours,minutes,note:'Actual work reported on '+str(wo.data.wrCode)}]},'task.completed_from_request',str(task.id));
+            return {ok:true};
+        }
+    }
     if (['start_task', 'block_task', 'complete_task', 'confirm_consumption', 'reconcile_task'].includes(action)) {
         if (action === 'reconcile_task') {
             await authority(ctx, wo, 'MNT.view', 'MNT.SPARES.RECONCILE');
@@ -1449,8 +1477,10 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             const state = object(executions[str(t.id)]);
             if (state.status !== 'completed' || state.reconciled !== true)
                 throw new HttpError(409, 'Complete and reconcile every task before safety sign-off.');
-            await requireApprovedWindow(ctx, wo, str(t.id));
+            if(!retrospective)await requireApprovedWindow(ctx, wo, str(t.id));
+            else taskCompletion(t,object(state.feedback));
         }
+        if(retrospective)await ensureNoDirectResources(ctx,wo);
         if (!tasksOf(wo).length || object(wo.data.safetySignoff).at)
             throw new HttpError(409, 'Safety sign-off cannot be applied in this state.');
         safetyDeclaration(object(b));
@@ -1571,8 +1601,13 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     if (action === 'technical_close') {
         await authority(ctx, wo, 'MNT.WO.close', 'MNT.WO.TECHNICAL_CLOSE');
         if (wo.data.status === 'closed') return { ok: true, reused: true };
+        if(retrospective){
+            const source=object(wo.data.directCompletion);
+            if([str(object(source.executor).uid),str(source.recordedBy)].includes(ctx.uid)&&!bypass(ctx,'mnt.direct_completion.technical_closure_independence'))throw new HttpError(403,'An independent technical approver must close this work order.');
+            await ensureNoDirectResources(ctx,wo);
+        }
         closurePrerequisites(wo.data);
-        for (const t of tasksOf(wo)) await requireApprovedWindow(ctx, wo, str(t.id));
+        if(!isRequestClosureOrder(wo.data))for (const t of tasksOf(wo)) await requireApprovedWindow(ctx, wo, str(t.id));
         if (
             (tasksOf(wo).some((t) => {
                 const f = object(object(executions[str(t.id)]).feedback);
@@ -1620,6 +1655,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
                     labour,
                     services,
                     total: spares + labour + services,
+                    ...(retrospective?{pendingLabourValuation:tasksOf(wo).some(t=>!(Number(t.rate)>0)),actualLabourMinutes:Number(object(wo.data.directCompletion).durationMinutes)}:{}),
                     pendingMaterialValuation: Object.values(executions).some((e) =>
                         rows(object(e).consumption).some((c) => c.unitCost === null),
                     ),
@@ -1719,6 +1755,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const routing=await responsibilityData(ctx,true);
         const items: Obj[] = [];
         for (const w of wos) {
+            if(isRequestClosureOrder(w.data))continue;
             let line: Obj = {};
             try {
                 line = await productionLine(ctx, w);
@@ -1765,7 +1802,8 @@ export async function maintenanceOperations(ctx: OrgContext) {
     }
     if (action === 'read') {
         const wo = await order(ctx, b.code),
-            readinessData = await readiness(ctx, wo),
+            retrospective=isRequestClosureOrder(wo.data),
+            readinessData = retrospective?{items:[],problems:[],ready:true}:await readiness(ctx, wo),
             permissions: Obj = {};
         for (const [key, perm, gate] of [
             ['reconcile', 'MNT.view', 'MNT.SPARES.RECONCILE'],
@@ -1793,6 +1831,12 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 permissions[key] = false;
             }
         }
+        if(retrospective){
+            for(const k of ['assess','reviewAssessment','plan','reconcile'])permissions[k]=false;
+            permissions.execute=permissions.execute===true&&wo.data.status==='in_progress'&&(str(object(object(wo.data.directCompletion).executor).uid)===ctx.uid||ctx.role==='org_super_admin'&&ctx.testMode===true);
+            permissions.safety=permissions.safety===true&&!['closed','cancelled'].includes(str(wo.data.status));
+            permissions.close=permissions.close===true&&!!object(wo.data.handover).at&&(![str(object(object(wo.data.directCompletion).executor).uid),str(object(wo.data.directCompletion).recordedBy)].includes(ctx.uid)||ctx.role==='org_super_admin'&&ctx.testMode===true);
+        }
         permissions.cancel =
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
             canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));
@@ -1803,7 +1847,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         return {
             wo: { code: wo.id, ...wo.data,...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             readiness: readinessData,
-            checklist: await planChecklist(ctx, wo, readinessData),
+            checklist: retrospective?null:await planChecklist(ctx, wo, readinessData),
             currency: str(ctx.org.data.currencyCode),
             permissions,
             testModeOverride: ctx.role==='org_super_admin' && ctx.testMode===true,
@@ -1909,6 +1953,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         )
             return windowAction(ctx, action);
         const wo = await order(ctx, b.code);
+        if(isRequestClosureOrder(wo.data))return executeMaintenanceAction(ctx,wo,action);
         if (['match_spare', 'candidate', 'reserve', 'procure', 'secure_spare', 'service_sourcing', 'secure_service', 'allocate'].includes(action))
             return resourceAction(ctx, wo, action);
         if (['lock_schedule', 'review_risk', 'submit_cost', 'confirm_readiness'].includes(action)) return planningAction(ctx, wo, action);

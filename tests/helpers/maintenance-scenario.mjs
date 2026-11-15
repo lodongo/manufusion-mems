@@ -1002,7 +1002,7 @@ assert.equal(eq.impacts.length, 1, 'Impact is present from the request stage');
 assert.equal(eq.description, 'Loud knocking noise from the drive end.', 'The requester description is kept');
 assert.ok(eq.path.includes('GEARBOX'));
 assert.ok(eq.history.some((h) => h.action === 'Details added' && /Assembly/.test(h.note)), 'Every change is logged');
-const closeBody = { code: eqWr.code, action: 'close_review', causeCode: first(l.rootCauses), failureModeCode:first(l.failureModes), closedByUid:people.tech[0], solutionCode: first(l.solutions), maintenanceTypeCode: l.maintenanceTypes[0].code, description: 'Retightened the loose gearbox mounting bolts.', confirm: eqWr.code,closedDate:new Date().toISOString().slice(0,10),durationMinutes:25 };
+const closeBody = { code: eqWr.code, action: 'close_review', causeCode: first(l.rootCauses), failureModeCode:first(l.failureModes), closedByUid:people.tech[0], solutionCode: first(l.solutions), maintenanceTypeCode: l.maintenanceTypes[0].code, description: 'Retightened the loose gearbox mounting bolts.', confirm: eqWr.code,closedDate:new Date().toISOString().slice(0,10),durationMinutes:25,noSparesOrServices:true };
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'requester', closeBody), /own request/);
 await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { ...closeBody, description: 'short' }), /at least 10/);
 await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{...closeBody,closedByUid:people.requester[0]}),/maintenance execution rights/i);
@@ -1026,6 +1026,7 @@ await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: eqW
 eq = snapshot(r + '/work_requests/' + eqWr.code).data;
 assert.equal(eq.status, 'closed');
 assert.equal(eq.closure.confirmedBy, people.reviewer[0]);
+assert.ok(eq.woCode,'Supervisor-confirmed request creates linked retrospective order');
 assert.equal(eq.maintenanceTypeCode, l.maintenanceTypes[0].code, 'The closure records the GL maintenance type');
 // Equipment-only requests can choose their assembly and classify failure mode in the
 // independent assessment without any request-enrichment action.
@@ -1086,8 +1087,8 @@ const testAction=async(action,extra={})=>{
 };
 await testAction('start_review');
 assert.equal(snapshot(r+'/work_requests/'+overrideWr.code).data.status,'under_review');
-await assert.rejects(()=>testAction('close_review',{causeCode:first(l.rootCauses),failureModeCode:first(l.failureModes),solutionCodes:[first(l.solutions)],closedByUid:people.tech[0],description:'Recorded corrective work at site.',closedDate:new Date().toISOString().slice(0,10),durationMinutes:0}),/time taken/);
-await testAction('close_review',{causeCode:first(l.rootCauses),failureModeCode:first(l.failureModes),solutionCodes:[first(l.solutions)],closedByUid:people.tech[0],description:'Recorded corrective work at site.',closedDate:new Date().toISOString().slice(0,10),durationMinutes:15});
+await assert.rejects(()=>testAction('close_review',{causeCode:first(l.rootCauses),failureModeCode:first(l.failureModes),solutionCodes:[first(l.solutions)],closedByUid:people.tech[0],maintenanceTypeCode:l.maintenanceTypes[0].code,noSparesOrServices:true,description:'Recorded corrective work at site.',closedDate:new Date().toISOString().slice(0,10),durationMinutes:0}),/time taken/);
+await testAction('close_review',{causeCode:first(l.rootCauses),failureModeCode:first(l.failureModes),solutionCodes:[first(l.solutions)],closedByUid:people.tech[0],maintenanceTypeCode:l.maintenanceTypes[0].code,noSparesOrServices:true,description:'Recorded corrective work at site.',closedDate:new Date().toISOString().slice(0,10),durationMinutes:15});
 assert.equal(snapshot(r+'/work_requests/'+overrideWr.code).data.status,'closed');
 seed(r + '/maintenance_workflow_settings/default', { version: 1, approverRoles: {...roles, 'MNT.WR.REVIEW': 'ASSESS'} });
 const spoofed=await createNewWorkRequest({reviewerUid:people.reviewer[0],title:'Ignore requester nominated reviewer'});
@@ -1136,7 +1137,7 @@ await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:direc
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {
     code: directClose.code, action: 'close_review', causeCode: first(l.rootCauses), failureModeCode:first(l.failureModes), solutionCodes:[first(l.solutions)],closedByUid:people.tech[0],
     description: 'Restored the conveyor guard and verified a safe condition.',
-    closedDate: new Date().toISOString().slice(0,10), durationMinutes: 25,
+    closedDate: new Date().toISOString().slice(0,10), durationMinutes: 25, maintenanceTypeCode:l.maintenanceTypes[0].code,noSparesOrServices:true,
 });
 assert.equal(snapshot(r + '/work_requests/' + directClose.code).data.status, 'closed');
 assert.equal(snapshot(r + '/work_requests/' + directClose.code).data.closure.durationMinutes, 25);
@@ -1146,6 +1147,29 @@ assert.equal(finalClosure.closedByPositionCode,'EXEC');
 assert.equal(finalClosure.recordedBy,people.assessor[0]);
 assert.equal(finalClosure.failureModeCode,first(l.failureModes));
 assert.equal(finalClosure.solutions[0].code,first(l.solutions));
+const fastWo=snapshot(r+'/work_requests/'+directClose.code).data.woCode,fast=snapshot(r+'/work_orders/'+fastWo).data;
+assert.equal(fast.executionMode,'request_closure');
+assert.equal(fast.wrCode,directClose.code);
+assert.equal(fast.status,'in_progress');
+assert.equal(fast.directCompletion.durationMinutes,25);
+assert.equal(fast.taskExecution.DIRECT_COMPLETION.status,'awaiting_feedback');
+assert.deepEqual(fast.taskPlanning,{});
+assert.deepEqual(fast.spares,[]);
+assert.deepEqual(fast.services,[]);
+assert.ok(!fast.windowId);
+await assert.rejects(()=>op('manager','technical_close',{code:fastWo,note:'Premature retrospective closure.'}),/complete task|feedback/i);
+await assert.rejects(()=>op('planner','allocate',{code:fastWo,taskId:'DIRECT_COMPLETION'}),/no planning/i);
+const fastFeedback={workPerformed:finalClosure.description,findings:'Guard fix inspected',results:'Guard securely installed',remarks:'Completion confirmed',outstandingDefects:'None',followUp:'None',noSparesOrServicesConfirmed:true};
+await assert.rejects(()=>op('tech','start_task',{code:fastWo,taskId:'DIRECT_COMPLETION'}),/no planning/i);
+await op('tech','complete_task',{code:fastWo,taskId:'DIRECT_COMPLETION',feedback:fastFeedback});
+assert.equal(snapshot(r+'/work_orders/'+fastWo).data.taskExecution.DIRECT_COMPLETION.feedback.actualMinutes,25);
+assert.equal(snapshot(r+'/work_orders/'+fastWo).data.status,'completed');
+await op('safety','safety_signoff',{code:fastWo,declaration:'none',noIncidentsConfirmed:true,note:'Confirmed actual work incident history and safe condition.'});
+await op('ops','handover',{code:fastWo,accepted:true,ready:true,receivingParty:people.ops[0],functionalChecks:'Conveyor guard securely installed and verified.',condition:'Safe and ready',restrictions:'None'});
+await op('manager','technical_close',{code:fastWo,note:'Independently reviewed feedback, safety and equipment handover.'});
+assert.equal(snapshot(r+'/work_orders/'+fastWo).data.status,'closed');
+assert.equal(snapshot(r+'/work_orders/'+fastWo).data.finalCost.pendingLabourValuation,true);
+assert.equal(snapshot(r+'/work_requests/'+directClose.code).data.status,'closed');
 const repeat = await createNewWorkRequest({ title:'Same conveyor fault reported twice', description:'Duplicate request on the conveyor drive.' });
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:repeat.code,action:'start_review'});
 const search = await route(maintenanceRoutes, '/api/org/mnt/wr/repeat-search', 'assessor', {
