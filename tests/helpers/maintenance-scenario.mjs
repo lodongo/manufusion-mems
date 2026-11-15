@@ -1139,7 +1139,8 @@ assert.equal(finalClosure.solutions[0].code,first(l.solutions));
 const fastWo=snapshot(r+'/work_requests/'+directClose.code).data.woCode,fast=snapshot(r+'/work_orders/'+fastWo).data;
 assert.equal(fast.executionMode,'request_closure');
 assert.equal(fast.wrCode,directClose.code);
-assert.equal(fast.status,'in_progress');
+// The request already records completed work; only safety sign-off remains.
+assert.equal(fast.status,'completed');
 assert.equal(fast.directCompletion.durationMinutes,25);
 assert.equal(fast.taskExecution.DIRECT_COMPLETION.status,'completed');
 assert.deepEqual(fast.taskPlanning,{});
