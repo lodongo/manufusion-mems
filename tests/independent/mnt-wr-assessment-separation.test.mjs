@@ -31,7 +31,7 @@ test('Work Request mandatory fields are enforced on server and assessment review
  assert.match(src,/const header=WR_RE\.test\(str\(record\.code\)\)\|\|record\.executionMode==='confirmed_request'\?assessmentHeaderIssue\(record\)/);
  assert.match(src,/if\(header\)return header/);
 });
-test('Work Assessment has a separate submodule and all four finding fields are required',()=>{
+test('Work Order owns assessment and all four finding fields remain required',()=>{
  const ui=readFileSync('src/org/WorkRequests.tsx','utf8');
  assert.match(ui,/\['assessment','Work Assessment'/);
  assert.match(ui,/Short title \*/);
@@ -43,6 +43,8 @@ test('Work Assessment has a separate submodule and all four finding fields are r
  assert.match(ui,/natureCode: nature/);
  assert.match(ui,/title='Impact' required multi|title='Impact'[\s\S]*?required/);
  const home=readFileSync('src/org/OrgHomePage.tsx','utf8');
- assert.match(home,/label: 'Work assessments', path: 'work_assessments'/);
+ assert.doesNotMatch(home,/label: 'Work assessments', path: 'work_assessments'/);
+ const orders=readFileSync('src/org/WorkOrders.tsx','utf8');
+ assert.match(orders,/\['assessment',\s*'Assessment'\]/);
  assert.match(ui,/area === 'assessments'/);
 });

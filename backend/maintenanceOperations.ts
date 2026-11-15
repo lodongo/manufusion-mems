@@ -236,13 +236,7 @@ export async function enforceMaintenanceTransition(ctx: OrgContext, wo: Doc, act
         closurePrerequisites(wo.data);
         if(!isRequestClosureOrder(wo.data))for (const t of tasksOf(wo)) await requireApprovedWindow(ctx, wo, str(t.id));
     }
-    if (action === 'cancel') {
-        if(earlyExecutionStarted(wo))throw new HttpError(409,'Record actual work and use early closure after execution starts.');
-        const commitment=await earlyClosureCommitments(ctx,wo);
-        if(commitment.blocked.length)throw new HttpError(409,'Cannot cancel an order with committed purchase order(s): '+commitment.blocked.join(', '));
-        if(commitment.owned.some(r=>!['cancelled','rejected'].includes(str(r.data.status)))||commitment.associated.length)throw new HttpError(409,'Use Close work order at current stage to release linked procurement requirements safely.');
-        await releaseMaintenanceReservations(ctx, wo.id);
-    }
+    if (action === 'cancel')throw new HttpError(409,'Use the controlled cancellation handler.');
     if (action === 'reopen')
         throw new HttpError(409, 'Closed maintenance history is immutable. Raise a follow-up work request for further work.');
 }
@@ -1518,9 +1512,9 @@ async function ensureEarlyActuals(ctx:OrgContext,wo:Doc){
     }
     if((await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared'))throw new HttpError(409,'Clear all recorded incidents before early closure.');
 }
-async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false){
+async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false,cancel=false){
     if(safetyFinal)await authority(ctx,wo,'MNT.WO.safety','MNT.SAFETY.SIGNOFF');
-    else await authority(ctx,wo,'MNT.WO.close');
+    else await authority(ctx,wo,cancel?'MNT.WO.cancel':'MNT.WO.close');
     if(['closed','cancelled'].includes(str(wo.data.status)))throw new HttpError(409,'This order is already final.');
     if(isRequestClosureOrder(wo.data))throw new HttpError(409,'Use safety sign-off to close the retrospective work order.');
     return withLock(ctx.orgId,'maintenance_po_commitment',async()=>{
@@ -1528,12 +1522,13 @@ async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false)
         if(check.blocked.length)throw new HttpError(409,'Early closure is blocked by committed purchase order(s): '+check.blocked.join(', '));
         const prior=object(wo.data.earlyClosureRequest),reason=requiredText(safetyFinal?prior.reason:ctx.body.note||prior.reason,'Early closure reason',10);
         const started=earlyExecutionStarted(wo);
+        if(cancel&&started)throw new HttpError(409,'Record actual work and use early closure after execution starts.');
         if(prepare){
             if(!started)throw new HttpError(400,'Use direct early closure for work that has not started.');
             await saveWo(ctx,wo,{earlyClosureRequest:{at:nowIso(),by:ctx.uid,name:name(ctx),reason}},'work_order.early_closure_requested',reason);
             return {ok:true};
         }
-        if(!safetyFinal&&(ctx.body.confirm!==wo.id||ctx.body.noCommitmentConfirmed!==true))throw new HttpError(400,'Confirm the order number and no outstanding PO commitment.');
+        if(!safetyFinal&&(ctx.body.confirm!==wo.id||!cancel&&ctx.body.noCommitmentConfirmed!==true))throw new HttpError(400,'Confirm the order number and no outstanding PO commitment.');
         await ensureEarlyActuals(ctx,wo);
         if(started&&!object(wo.data.safetySignoff).at)throw new HttpError(409,'Complete safety sign-off for the work actually performed.');
         const at=nowIso(),execution=object(wo.data.taskExecution);
@@ -1547,13 +1542,13 @@ async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false)
         const labour=tasksOf(wo).reduce((n,t)=>n+(Number(object(object(execution[str(t.id)]).feedback).actualHours)||0)*(Number(t.rate)||0),0);
         const spares=Object.values(execution).reduce<number>((n,e)=>n+rows(object(e).consumption).reduce((v,c)=>v+(Number(c.consumed)||0)*(Number(c.unitCost)||0),0),0);
         const closure={at,by:ctx.uid,name:name(ctx),note:reason,outcome:started?'work_stopped':'not_started',skippedTaskIds:skipped,previousStatus:str(wo.data.status),noPoCommitment:true};
-        const patch={status:'closed',closedAt:at,closureMode:'early',...(object(wo.data.safetySignoff).at?{safetySignoff:object(wo.data.safetySignoff)}:{}),earlyClosure:closure,closedBy:ctx.uid,closedByName:name(ctx),finalCost:{labour,spares,services:0,total:labour+spares},updatedAt:at,history:history(ctx,wo.data,'Work order closed early',reason)};
+        const patch={status:cancel?'cancelled':'closed',...(cancel?{cancelledAt:at,cancelledBy:ctx.uid,cancelledByName:name(ctx),cancelReason:reason}:{closedAt:at}),closureMode:'early',...(object(wo.data.safetySignoff).at?{safetySignoff:object(wo.data.safetySignoff)}:{}),earlyClosure:closure,closedBy:ctx.uid,closedByName:name(ctx),finalCost:{labour,spares,services:0,total:labour+spares},updatedAt:at,history:history(ctx,wo.data,cancel?'Work order cancelled before execution':'Work order closed early',reason)};
         writes.push({path:root(ctx)+'/work_orders/'+wo.id,fields:patch,mask:Object.keys(patch),updateTime:wo.updateTime});
         if(writes.length>430)throw new HttpError(409,'Too many linked procurement records; resolve them in procurement first.');
         await releaseMaintenanceReservations(ctx,wo.id);
         await commit(writes);
-        await event(ctx,'work_order.early_closed',wo.id,reason);
-        await syncOrderAfter(ctx,wo.id,'work_order.early_closed');
+        await event(ctx,cancel?'work_order.cancelled':'work_order.early_closed',wo.id,reason);
+        await syncOrderAfter(ctx,wo.id,cancel?'work_order.cancelled':'work_order.early_closed');
         return {ok:true};
     });
 }
@@ -1632,6 +1627,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         e = object(executions[str(b.taskId)]);
     const retrospective=isRequestClosureOrder(wo.data);
     if(action==='early_close'||action==='prepare_early_close')return earlyClose(ctx,wo,action==='prepare_early_close');
+    if(action==='cancel_order_legacy')return earlyClose(ctx,wo,false,false,true);
     if(action==='handover')throw new HttpError(409,'Equipment handover is no longer a work order closure step.');
     if(action==='technical_close')throw new HttpError(409,'Technical Manager closure is no longer required. Use safety sign-off.');
     if(['closed','cancelled'].includes(str(wo.data.status))&&!(wo.data.status==='closed'&&['report_incident','clear_incident'].includes(action)))throw new HttpError(409,'A closed work order cannot be reopened or modified.');

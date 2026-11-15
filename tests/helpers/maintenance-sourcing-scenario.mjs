@@ -575,12 +575,10 @@ read = await op('planner', 'read', { code: wo });
 assert.equal(item('calibration').status, 'order_inactive');
 assert.equal(read.readiness.ready, false);
 
-// 11. Controlled reassessment does not duplicate requirements.
-await op('planner', 'reassess', { code: wo, note: 'Scope check after supplier feedback on the gearbox.' });
-await route(maintenanceRoutes, '/api/org/mnt/wo/action', 'reviewer', { code: wo, action: 'review_assessment', note: 'Re-approved the unchanged assessment after reopening.' });
-const after = await op('planner', 'secure_spare', { code: wo, taskId: 'drive', resourceId: 'belt', glCode: '610000', dateRequired: date });
-assert.equal(after.shortage, 0, 'Received stock is reserved again');
-await op('planner', 'service_sourcing', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', supplierCategory: 'VCL-001', preferredVendorId: 'VND000001' });
-assert.equal((await op('planner', 'procure', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', glCode: '610000' })).requirementId, svc.requirementId);
-assert.equal((await requirements()).length, 5, 'Reassessment re-links the open requirements');
+// 11. Committed purchase orders protect approved task scope from destructive reassessment.
+const beforeReassess=snapshot(r+'/work_orders/'+wo).data;
+await assert.rejects(()=>op('planner','reassess',{code:wo,note:'Scope check after supplier feedback on the gearbox.'}),/Committed purchase orders prevent reassessment/);
+assert.equal(snapshot(r+'/work_orders/'+wo).data.status,beforeReassess.status);
+assert.deepEqual(snapshot(r+'/work_orders/'+wo).data.taskPlanning,beforeReassess.taskPlanning);
+assert.equal((await requirements()).length,5,'Reassessment refusal preserves existing requirements');
 console.log('maintenance sourcing scenario passed: warehouse reserve, partial shortage, registered material, replenishment link, gated free text, material approval push, OEM/OCM vendors, onboarding, no duplicates, procurement progress and readiness');

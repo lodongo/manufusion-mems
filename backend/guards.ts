@@ -158,8 +158,7 @@ const LEGACY_EXPANSION: Record<string, string[]> = {
     'MNT.create': ['MNT.WR.create', 'MNT.WO.create'],
     'MNT.edit': ['MNT.WR.edit', 'MNT.WO.plan', 'MNT.WO.schedule', 'MNT.WO.execute'],
     'MNT.delete': ['MNT.WR.cancel', 'MNT.WO.cancel'],
-    'MNT.approve': ['MNT.WR.review', 'MNT.WR.return', 'MNT.WR.decline', 'MNT.WR.convert', 'MNT.WO.safety', 'MNT.WO.release', 'MNT.WO.verify', 'MNT.WO.close'],
-    'MNT.admin': ['MNT.WO.reopen'],
+    'MNT.approve': ['MNT.WR.review', 'MNT.WR.return', 'MNT.WR.decline', 'MNT.WR.convert', 'MNT.WO.safety', 'MNT.WO.release', 'MNT.WO.close'],
     // MRP was renamed Replenishment (MRP is now one of its strategies).
     'INV.mrp.view': ['INV.replenishment.view'],
     'INV.mrp.run': ['INV.replenishment.run'],

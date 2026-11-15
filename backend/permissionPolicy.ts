@@ -1,4 +1,5 @@
-import { MNT_ACTIVITIES } from './maintenanceActivities';
+import { CURRENT_MNT_ACTIVITIES as MNT_ACTIVITIES } from './maintenanceActivities';
+import {RETIRED_MAINTENANCE_KEYS} from './maintenanceWorkflowConfig';
 import { expandPermissions, hasPerm } from './guards';
 import { HttpError } from './core';
 
@@ -81,7 +82,7 @@ const warehouse = (code: string): PermDef[] => [
     p(`${code}.bin.unlink`, 'Warehouse: delink a material from a bin'),
 ];
 
-const SENSITIVE_MNT = new Set(['MNT.WO.safety', 'MNT.WO.release', 'MNT.WO.verify', 'MNT.WO.close', 'MNT.WO.cancel', 'MNT.WO.reopen', 'MNT.WR.decline', 'MNT.WR.convert', 'MNT.assessment.review', 'MNT.WR.closeConfirm', 'MNT.WO.costApprove', 'MNT.budget.manage']);
+const SENSITIVE_MNT = new Set(['MNT.WO.safety', 'MNT.WO.release', 'MNT.WO.close', 'MNT.WO.cancel', 'MNT.WR.decline', 'MNT.WR.convert', 'MNT.assessment.review', 'MNT.WO.costApprove', 'MNT.budget.manage']);
 
 /** Permissions of every module that has working screens or actions. Nothing else is ever offered. */
 export const BUILT_PERMISSIONS: Record<string, PermDef[]> = {
@@ -197,6 +198,7 @@ export function sensitiveKeys(): string[] {
 
 /** Why a stored key is no longer offered (shown in the review). */
 export function retirementReason(key: string): string {
+    if(RETIRED_MAINTENANCE_KEYS.has(key))return 'Retired maintenance workflow activity: requests close directly and work orders close through safety sign-off; no duplicate approval or reopening.';
     if (key === 'INV_ST_034') return 'Super admin self-approval contradicts segregation of duties and is not allowed anywhere.';
     if (/^INV_ST_\d+$/.test(key)) return 'No stock take action uses this permission.';
     if (/\.feature\.\d+\.view$/.test(key)) return 'Placeholder for a functional area that has no screen yet.';
@@ -265,7 +267,6 @@ export const SOD_RULES: SodRule[] = [
     { id: 'payroll-manage-verify', a: 'HRM.payroll.manage', b: 'HRM.payroll.verify', why: 'The person who enters bank details and personal pay items must not also verify them (payment-diversion and fake-deduction control).' },
     { id: 'payroll-employees-manage', a: 'HRM.payroll.manage', b: 'HRM.employees.manage', why: 'The person who adds employees must not also set what they are paid (ghost-employee control).' },
     { id: 'grades-manage-approve', a: 'HRM.grades.manage', b: 'HRM.grades.approve', why: 'The person who prepares job grades and their minimum salaries must not approve their activation.' },
-    { id: 'mnt-close-confirm', a: 'MNT.WR.close', b: 'MNT.WR.closeConfirm', why: 'The person who closes a work request at review must not confirm that closure.' },
     { id: 'mnt-plan-cost', a: 'MNT.WO.plan', b: 'MNT.WO.costApprove', why: 'The planner who estimates a work order must not approve its cost.' },
     { id: 'mnt-budget-approve', a: 'MNT.budget.manage', b: 'FIN.cc.approve', why: 'The person who proposes a maintenance budget must not approve it.' },
     { id: 'st-count-verify', a: 'INV_ST_017', b: 'INV_ST_020', why: 'The person who counts stock must not verify the same count.' },
@@ -370,11 +371,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     T('mnt_planner', 'MNT', 'Maintenance Planner', 'Reviews requests and plans, schedules and releases work orders.', ['MNT.view', 'MNT.WR.review', 'MNT.WR.return', 'MNT.WR.decline', 'MNT.WR.convert', 'MNT.WO.plan', 'MNT.WO.schedule', 'MNT.WO.release', 'MNT.activities.view', 'MNT.activities.edit']),
     T('mnt_technician', 'MNT', 'Maintenance Technician', 'Executes assigned work orders.', ['MNT.view', 'MNT.WO.execute', 'MNT.activities.view']),
     T('mnt_request_reviewer', 'MNT', 'Maintenance Request Reviewer', 'Artisan review of work requests: adds missing details, returns, or closes when no planning is needed (cause, solution, maintenance type).', ['MNT.view', 'MNT.WR.review', 'MNT.WR.return', 'MNT.WR.close']),
-    T('mnt_closure_confirmer', 'MNT', 'Maintenance Closure Confirmer', 'Supervisor confirmation of work requests closed at review; never their own closure.', ['MNT.view', 'MNT.WR.closeConfirm']),
     T('mnt_cost_approver', 'MNT', 'Maintenance Cost Approver', 'Approves work order cost estimates at their Chart of Authority level; never estimates they planned.', ['MNT.view', 'MNT.WO.costApprove']),
     T('mnt_budget_officer', 'MNT', 'Maintenance Budget Officer', 'Proposes period maintenance budgets for cost centers; Finance approves them under the Chart of Authority.', ['MNT.view', 'MNT.budget.manage']),
-    T('mnt_safety', 'MNT', 'Maintenance Safety Officer', 'Performs the safety assessment of work orders.', ['MNT.view', 'MNT.WO.safety']),
-    T('mnt_verifier', 'MNT', 'Maintenance Verifier', 'Verifies completed work and closes work orders.', ['MNT.view', 'MNT.WO.verify', 'MNT.WO.close']),
+    T('mnt_safety', 'MNT', 'Maintenance Safety Officer', 'Records incident clearance and final safety sign-off; the Work Order closes automatically.', ['MNT.view', 'MNT.WO.safety']),
+    T('mnt_early_closure', 'MNT', 'Maintenance Lead – Early Closure', 'Closes uncommitted work at its current stage and creates linked break-in orders; completed work requires safety sign-off.', ['MNT.view', 'MNT.WO.close']),
     T('ast_clerk', 'AST', 'Asset Clerk', 'Registers and edits assets. Cannot approve.', ['AST.view', 'AST.create', 'AST.edit', 'AST.catalog.view']),
     T('ast_approver', 'AST', 'Asset Approver', 'Approves asset changes. Cannot create or edit.', ['AST.view', 'AST.approve', 'AST.catalog.view']),
     T('ast_viewer', 'AST', 'Asset Viewer', 'Read-only view of assets.', ['AST.view', 'AST.catalog.view']),

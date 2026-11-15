@@ -128,7 +128,7 @@ function woStage(data:Data,d:Obj,path:string[]):Stage{
  if(['closed','cancelled'].includes(s))return {label:s==='closed'?'Closed':'Cancelled'};
  if(workflow==='WO200')return {label:label||'Safety sign-off',gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Safety signatory'};
  if(workflow==='WO010')return {...assess(),label};if(workflow==='WO020')return {...approval(d),label};
- if(['WO030','WO040','WO050','WO060','WO070','WO080','WO090','WO100','WO120'].includes(workflow))return {label,gate:'MNT.WO.PLAN',permission:'MNT.WO.plan'};
+ if(['WO030','WO040','WO050','WO060','WO070','WO080','WO090','WO100','WO120'].includes(workflow))return {label,gate:workflow==='WO120'&&groupAt(data.policy,path)?'MNT.WO.RELEASE':'MNT.WO.PLAN',permission:'MNT.WO.plan'};
  if(workflow==='WO130'||workflow==='WO140')return {label,gate:groupAt(data.policy,path)?'MNT.WINDOW.LOCK':'MNT.WO.PLAN',permission:'MNT.WO.schedule'};
  if(workflow==='WO186'||workflow==='WO180')return {label,gate:'MNT.SPARES.RECONCILE',permission:'MNT.view'};
  if(workflow==='WO185')return {label,gate:'MNT.TASK.FEEDBACK',permission:'MNT.WO.execute'};
@@ -142,7 +142,7 @@ function woStage(data:Data,d:Obj,path:string[]):Stage{
   }
   return {label:s==='plan_ready'?'Confirm readiness':'Resource planning & readiness',gate:'MNT.WO.PLAN',permission:'MNT.WO.plan'};
  }
- if(s==='released')return {label:'Schedule maintenance window',gate:'MNT.WINDOW.LOCK',permission:'MNT.WO.schedule'};
+ if(s==='released')return {label:'Schedule maintenance window',gate:groupAt(data.policy,path)?'MNT.WINDOW.LOCK':'MNT.WO.PLAN',permission:'MNT.WO.schedule'};
  const tasks=rows(d.assessmentTasks),execution=obj(d.taskExecution),planning=obj(d.taskPlanning);
  const pending=tasks.filter(t=>obj(execution[str(t.id)]).status!=='completed');
  if(['scheduled','in_progress'].includes(s)||s==='completed'&&pending.length){

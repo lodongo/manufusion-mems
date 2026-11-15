@@ -932,6 +932,36 @@ export const maintenanceRoutes = {
             };
         })
     ],
+    'POST /api/org/mnt/workflow/configuration/cleanup': [
+        orgRoute('org.mnt.workflow.configuration.cleanup','ADM.workflows',async ctx=>withLock(ctx.orgId,'maintenance_operations',()=>withLock(ctx.orgId,'maintenance_work_groups',async()=>{
+            requireMnt(ctx);
+            if(ctx.role!=='org_super_admin')throw new HttpError(403,'Organization Super Admin is required for configuration cleanup.');
+            const reason=clean(ctx.body.reason,500);
+            if(ctx.body.confirm!==true||reason.length<10)throw new HttpError(400,'Confirm the cleanup and enter a reason of at least 10 characters.');
+            const root='organizations/'+ctx.orgId,at=nowIso(),receipt='MNT_CLEAN_'+randomId(12);
+            const specs=[['maintenance_workflow_settings/default','approverRoles'],['maintenance_work_group_settings/default','tasks'],['maintenance_work_group_active/default','tasks']];
+            const writes: Array<Parameters<typeof commit>[0][number]>=[],removed:Array<{path:string;keys:string[]}>=[];
+            for(const [suffix,field] of specs){
+                const doc=await getDoc(root+'/'+suffix);if(!doc)continue;
+                const old=object(doc.data[field]),keys=Object.keys(old).filter(k=>RETIRED_MAINTENANCE_KEYS.has(k));
+                if(!keys.length)continue;
+                if(!doc.updateTime)throw new HttpError(409,'Configuration changed. Reload.');
+                const fields={ [field]:currentMaintenanceMappings(old),workflowCleanupSchema:MAINTENANCE_WORKFLOW_SCHEMA,workflowCleanedAt:at,workflowCleanedBy:ctx.uid };
+                writes.push({path:root+'/'+suffix,fields,mask:Object.keys(fields),updateTime:doc.updateTime});removed.push({path:suffix,keys});
+            }
+            for(const role of await listDocs(root+'/roles')){
+                const permissions=strs(role.data.permissions),keys=permissions.filter(k=>RETIRED_MAINTENANCE_KEYS.has(k));
+                if(!keys.length)continue;
+                if(!role.updateTime)throw new HttpError(409,'Security role changed. Reload.');
+                const fields={permissions:permissions.filter(k=>!RETIRED_MAINTENANCE_KEYS.has(k)),updatedAt:at,updatedBy:ctx.uid};
+                writes.push({path:root+'/roles/'+role.id,fields,mask:Object.keys(fields),updateTime:role.updateTime});removed.push({path:'roles/'+role.id,keys});
+            }
+            if(!writes.length)return {ok:true,removed:[],changed:0};
+            if(writes.length>440)throw new HttpError(409,'Too many security roles to clean in one atomic operation.');
+            writes.push({path:root+'/maintenance_configuration_cleanup/'+receipt,fields:{at,by:ctx.uid,name:displayName(ctx),reason,removed,schema:MAINTENANCE_WORKFLOW_SCHEMA},exists:false});
+            await commit(writes);await rec(ctx,'mnt.workflow.configuration.cleaned',receipt,reason+'; '+removed.length+' documents cleaned');
+            return {ok:true,removed,changed:removed.length,receipt};
+        })))],
     'POST /api/org/mnt/workflow/configuration/save': [
         orgRoute('org.mnt.workflow.configuration.save','ADM.workflows',async(ctx)=>{
             requireMnt(ctx);
@@ -2177,7 +2207,7 @@ export const maintenanceRoutes = {
             }
             if(['closed','cancelled'].includes(str(d.status)))throw new HttpError(409,'Closed or cancelled work orders are immutable. Create a break-in sub-order on a closed order for further work.');
             if(action==='cancel'&&(!can.cancel||note.length<5))throw new HttpError(403,'Cancellation requires permission and a reason.');
-            if(action==='cancel')confirmCode(ctx,doc);
+            if(action==='cancel'){confirmCode(ctx,doc);return executeMaintenanceAction(ctx,doc,'cancel_order_legacy');}
             if(object(d.earlyClosureRequest).at)throw new HttpError(409,'Early closure requested. Use the actual feedback, safety and early closure actions.');
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {

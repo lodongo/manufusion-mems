@@ -13,6 +13,7 @@ export default function MntWorkflowSettings(){
  const [reason,setReason]=useState('');
  const [busy,setBusy]=useState(false);
  const [message,setMessage]=useState('');
+ const [cleaned,setCleaned]=useState<number|null>(null);
  const current=useMemo(()=>roles??Object.fromEntries((data?.gates||[]).map(g=>[g.code,g.configuredRole||''])),[roles,data]);
  useEffect(()=>{setRoles(null);},[data?.revision]);
  const changed=!!data&&(!!data.retiredKeys?.length||data.gates.some(g=>(current[g.code]||'')!==(g.configuredRole||'')));
@@ -31,6 +32,7 @@ export default function MntWorkflowSettings(){
   }catch(e){setMessage(e instanceof Error?e.message:'Unable to save workflow.');}
   finally{setBusy(false);}
  };
+ const cleanup=async()=>{setBusy(true);setMessage('');setCleaned(null);try{const r=await callBackend<{changed:number;receipt?:string}>('/api/org/mnt/workflow/configuration/cleanup',{reason,confirm:true});setCleaned(r.changed);setMessage(r.changed?r.changed+' configuration documents cleaned. Receipt: '+r.receipt:'No obsolete role mappings or explicit permission grants remain.');reload();}catch(e){setMessage(e instanceof Error?e.message:'Cleanup failed');}finally{setBusy(false);}};
  return <div className='space-y-4'>
    <button type='button' onClick={()=>navigate('organization_admin/mnt_home')} className='text-sm text-emerald-400 underline'>← Maintenance</button>
    <PageTitle title='Maintenance workflows & approvals' subtitle='Operational responsibility, independent approvals and configuration'/>
@@ -89,6 +91,7 @@ export default function MntWorkflowSettings(){
         placeholder='Why are these approval role assignments appropriate?'/>
     </label>
     <div className='mt-3'><Button disabled={busy||!changed||reason.trim().length<10} onClick={save}>{busy?'Saving…':'Save workflow configuration'}</Button></div>
+    <div className='mt-3 border-t border-line pt-3'><p className='text-sm font-semibold'>Remove obsolete workflow configuration</p><p className='text-xs text-soft'>Remove retired handover, technical closure, reopening and duplicate confirmation mappings from saved workflow settings, Work Groups and explicit security roles. Active role assignments and historical audit records are retained. Organization Super Admin only.</p><Button variant='secondary' disabled={busy||reason.trim().length<10} onClick={cleanup}>Clean obsolete settings and permissions</Button>{cleaned!==null&&<p className='text-xs text-soft'>{cleaned} documents changed</p>}</div>
     {message&&<p className='mt-2 text-sm text-slate-200'>{message}</p>}
    </Card>
  </div>;
