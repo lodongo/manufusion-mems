@@ -895,7 +895,7 @@ async function ensureCurrentAssessmentApproval(ctx:OrgContext,data:Obj) {
 
 async function activeMaintenanceSnapshot(ctx:OrgContext):Promise<Obj>{
  const doc=await getDoc('organizations/'+ctx.orgId+'/maintenance_governance_settings/active');
- if(!doc)return {};
+ if(!doc)return {maintenanceGovernance:{version:0,activatedAt:nowIso(),policy:defaultMaintenanceGovernance()} as unknown as Plain};
  const snap=readMaintenancePolicySnapshot(doc.data);
  if(!snap||maintenanceActivationBlockers(snap.policy).length)throw new HttpError(409,'Active maintenance policy is not supported by this runtime.');
  return {maintenanceGovernance:snap as unknown as Plain};

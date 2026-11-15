@@ -85,3 +85,10 @@ test('numeric condition facts come from validated assessed tasks or current fina
  assert.equal(recordFacts({...d,assessmentTasks:[{...task,services:[{expectedCost:null}]}]}).estimatedCost,undefined);
  assert.equal(recordFacts({...d,costApproval:{status:'approved',version:1,amount:125}}).estimatedCost,125);
 });
+
+test('version zero is the new-record default; legacy records without snapshots remain unchanged',()=>{
+ const d={executionMode:'confirmed_request',maintenanceGovernance:{version:0,activatedAt:'2026-11-15T00:00:00Z',policy:defaultMaintenanceGovernance()}};
+ assert.equal(maintenanceAssessmentApprovalRequired(d),false);
+ assert.equal(maintenanceAssessmentApprovalRequired({executionMode:'confirmed_request'}),true);
+ assert.equal(technicalClosureApprovalRequired(d),false);
+});

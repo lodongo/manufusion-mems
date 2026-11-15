@@ -54,7 +54,7 @@ export type MaintenancePolicySnapshot={version:number;activatedAt:string;policy:
 export function readMaintenancePolicySnapshot(raw:unknown):MaintenancePolicySnapshot|null{
  if(raw===undefined||raw===null)return null;
  const d=object(raw);
- if(!Number.isSafeInteger(d.version)||Number(d.version)<1||typeof d.activatedAt!=='string'||!d.activatedAt)throw Error('Invalid maintenance governance snapshot.');
+ if(!Number.isSafeInteger(d.version)||Number(d.version)<0||typeof d.activatedAt!=='string'||!d.activatedAt)throw Error('Invalid maintenance governance snapshot.');
  return {version:Number(d.version),activatedAt:d.activatedAt,policy:validateMaintenanceGovernance(d.policy)};
 }
 export function recordFacts(d:Record<string,unknown>):Partial<Record<ConditionField,string|number|boolean>>{

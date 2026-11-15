@@ -1536,6 +1536,7 @@ async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false,
         if(check.blocked.length)throw new HttpError(409,'Early closure is blocked by committed purchase order(s): '+check.blocked.join(', '));
         const prior=object(wo.data.earlyClosureRequest),reason=requiredText(safetyFinal||technicalFinal?prior.reason:ctx.body.note||prior.reason,'Early closure reason',10);
         const started=earlyExecutionStarted(wo);
+        if(cancel&&object(wo.data.technicalClosurePending).at)throw new HttpError(409,'Resolve the pending technical closure approval before cancellation.');
         if(cancel&&started)throw new HttpError(409,'Record actual work and use early closure after execution starts.');
         if(prepare){
             if(!started)throw new HttpError(400,'Use direct early closure for work that has not started.');
