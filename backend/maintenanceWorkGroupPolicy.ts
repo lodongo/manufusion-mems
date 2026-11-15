@@ -31,7 +31,7 @@ export const activeWorkGroupPath=(orgId:string)=>'organizations/'+orgId+'/mainte
 const arr=(v:unknown):string[]=>Array.isArray(v)?v.map(str).filter(Boolean):[];
 const rows=(v:unknown):Record<string,unknown>[]=>Array.isArray(v)?v.filter(isObj):[];
 export function assignmentCovers(user:Doc,role:string,path:string[],today:string):boolean {
- if(user.data.status==='disabled')return false;
+ if(['disabled','inactive','suspended','deleted'].includes(str(user.data.status)))return false;
  return rows(user.data.assignments).slice(0,2).some((a,i)=>{
   const kind=i===0?'primary':str(a.type);
   return (kind==='primary'||(['acting','secondment','extended_function'].includes(kind)&&!!str(a.endsOn)))&&str(a.positionCode)===role&&path.includes(str(a.nodeId))&&(!str(a.startsOn)||str(a.startsOn)<=today)&&(!str(a.endsOn)||str(a.endsOn)>=today);

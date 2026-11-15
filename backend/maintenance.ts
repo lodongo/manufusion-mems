@@ -1,3 +1,4 @@
+import {responsibilityData,responsibilityFor,groupFields} from './maintenanceResponsibility';
 import { storage } from './platform/sdk';
 import { commit, withLock } from './finCore';
 import { enforceMaintenanceTransition, executeMaintenanceAction } from './maintenanceOperations';
@@ -498,6 +499,7 @@ function eligibleReview(ctx: OrgContext, doc: Doc, scope: Scope, role: string): 
 async function automaticWrReviewer(ctx: OrgContext, role: string, path: string[]) {
     if (!role) return null;
     const group=groupAt(ctx.workGroupPolicy,path);
+    if(group){const data=await responsibilityData(ctx);const route=responsibilityFor(data,{path,status:'created',requestedBy:ctx.uid},'wr');return route.responsibility.uid?data.users.get(route.responsibility.uid)||null:null;}
     const groupIds=group?new Set(Object.values(group.members).flatMap(ms=>ms.map(m=>m.uid))):null;
     const candidates = (await orgUsers(ctx.orgId)).filter(u => u.id !== ctx.uid && (groupIds?groupIds.has(u.id):holdsReviewRole(u, role, path)));
     const eligible = [];
@@ -528,7 +530,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
         resubmit: mine && status === 'returned' && !assessmentStarted && at(P.WR_edit),
         cancel: mine && ['created', 'submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_cancel),
         startReview: status === 'created' ? workflowEligible && (testing || !workflowNamed || !assigned || assigned === ctx.uid)
-            : status === 'submitted' && at(P.WR_review) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+            : status === 'submitted' && at(P.WR_review) && gate('MNT.WR.REVIEW') && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         reviewCancel: status === 'under_review' && Number(doc.data.reviewProcessVersion) === 2
             && (testing || assigned === ctx.uid) && workflowEligible,
         toAssessment: status === 'under_review' && Number(doc.data.reviewProcessVersion) === 2
@@ -698,6 +700,7 @@ async function createWo(ctx: OrgContext, base: Obj, wrCode: string): Promise<str
         const code = `WO${String(n).padStart(8, '0')}`;
         const data:Obj = {
                 ...(base as Record<string, Plain>),
+                ...groupFields(ctx.workGroupPolicy,strs(base.path)),
                 code,
                 wrCode,
                 status: 'planning',
@@ -937,11 +940,12 @@ export const maintenanceRoutes = {
             const scope=await scopeOf(ctx);
             const docs=await listDocs(`organizations/${ctx.orgId}/asset_task_proposals`);
             const pending=[];
+            const routing=await responsibilityData(ctx);
             for(const d of docs.filter(x=>str(x.data.status)==='pending_validation')){
                 const path=await nodePath(ctx.orgId,str(d.data.assemblyId)||str(d.data.equipmentId));
                 try{await requireMaintenanceRole(ctx,'MNT.TASK.VALIDATE',path);}catch{continue;}
                 if(canAt(ctx,'MNT.activities.edit',path,scope))
-                    pending.push({id:d.id,wrCode:str(d.data.wrCode),taskId:str(d.data.taskId),
+                    pending.push({...responsibilityFor(routing,d.data,'validation',path),id:d.id,wrCode:str(d.data.wrCode),taskId:str(d.data.taskId),
                         description:str(d.data.description),assemblyId:str(d.data.assemblyId),equipmentId:str(d.data.equipmentId),
                         assetTag:str(d.data.assetTag),createdBy:str(d.data.createdBy),task:d.data.task});
             }
@@ -1186,7 +1190,7 @@ export const maintenanceRoutes = {
                     lastSelectionId: selected, lastSiteId: place.site?.id || '', selectedAt: nowIso(), selectedBy: ctx.uid,
                 });
             }
-            return place;
+            return {...place,...responsibilityFor(await responsibilityData(ctx),{path:place.path.map(p=>p.id),status:'created',requestedBy:ctx.uid},'wr')};
         }),
     ],
 
@@ -1256,6 +1260,7 @@ export const maintenanceRoutes = {
                     {
                         code,
                         ...loc,
+                        ...groupFields(ctx.workGroupPolicy,loc.path),
                         ...finding,
                         titleAuto,
                         status: 'created',
@@ -1308,6 +1313,7 @@ export const maintenanceRoutes = {
             const view = str(ctx.body.view);
             const scope = await scopeOf(ctx);
             const settings = await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
+            const routing=await responsibilityData(ctx);
             const rows = (await listDocs(wrCol(ctx.orgId)))
                 .filter((d) => str(d.data.requestedBy) === ctx.uid || canAt(ctx, P.view, pathOf(d), scope))
                 .filter((d) => {
@@ -1325,7 +1331,7 @@ export const maintenanceRoutes = {
                     return true;
                 })
                 .sort((a, b) => b.id.localeCompare(a.id))
-                .map(wrOut);
+                .map(d=>({...wrOut(d),...responsibilityFor(routing,d.data,'wr')}));
             if (view === 'assessment') {
                 // Assessments are independent documents. Existing legacy assessments
                 // still appear under their WR numbers until migrated.
@@ -1336,7 +1342,7 @@ export const maintenanceRoutes = {
                     if (!wr || str(wr.data.assessmentCode) !== assm.id) return [];
                     if (str(wr.data.requestedBy) !== ctx.uid && !canAt(ctx, P.view, pathOf(wr), scope)) return [];
                     if (![P.assessment_edit, P.assessment_review, P.WR_convert].some((p) => canAt(ctx, p, pathOf(wr), scope))) return [];
-                    return [{ ...wrOut(wr), code: assm.id, workRequestCode: wr.id, assessmentCode: assm.id }];
+                    return [{ ...wrOut(wr),...responsibilityFor(routing,wr.data,'wr'), code: assm.id, workRequestCode: wr.id, assessmentCode: assm.id }];
                 });
                 return { rows: [...independent, ...rows.filter((r) => !r.assessmentCode)].sort((a, b) => b.code.localeCompare(a.code)) };
             }
@@ -1402,6 +1408,7 @@ export const maintenanceRoutes = {
             const urls = await Promise.all(photoPaths.map((p) => signedUrl(p)));
             return {
                 ...wrOut(doc),
+                ...responsibilityFor(await responsibilityData(ctx),doc.data,'wr'),
                 description: str(d.description),
                 sourceCode: str(d.sourceCode),
                 criticalityOriginalLabel: str(d.criticalityOriginalLabel),
@@ -1478,7 +1485,8 @@ export const maintenanceRoutes = {
             const ref = `${wrCol(ctx.orgId)}/${doc.id}`;
             const now = nowIso();
             const done = async (fields: Record<string, Plain>, label: string, auditAction: string, details = note) => {
-                await updateFields(ref, { ...fields, history: history(doc, ctx, label, details), updatedAt: now });
+                const group=groupFields(ctx.workGroupPolicy,strs(fields.path||doc.data.path));
+                await updateFields(ref, { ...fields,...group, history: history(doc, ctx, label, details), updatedAt: now });
                 const linked = str(fields.assessmentCode) || str(doc.data.assessmentCode);
                 if (linked && ASSM_RE.test(linked)) {
                     const assessmentPath = `${assessmentCol(ctx.orgId)}/${linked}`;
@@ -1488,7 +1496,7 @@ export const maintenanceRoutes = {
                             : auditAction === 'mnt.assessment.returned' ? 'changes_requested'
                             : auditAction === 'mnt.wr.converted' ? 'converted'
                             : auditAction === 'mnt.wr.assessed' || auditAction === 'mnt.wr.task_assessments' ? 'in_progress' : 'created';
-                        await updateFields(assessmentPath, { ...assessmentFields, status: assessmentStatus,
+                        await updateFields(assessmentPath, { ...assessmentFields,...group, status: assessmentStatus,
                             updatedAt: now, lastAction: label, lastActionBy: ctx.uid });
                     }
                 }
@@ -1706,6 +1714,7 @@ export const maintenanceRoutes = {
                         const candidate = `ASSM_${String(number).padStart(8,'0')}`;
                         const created = await writeDoc(`${assessmentCol(ctx.orgId)}/${candidate}`, {
                             code: candidate, workRequestCode: doc.id,
+                            ...groupFields(ctx.workGroupPolicy,pathOf(doc)),path:pathOf(doc),costCenterId:str(doc.data.costCenterId),
                             sourceRequest: { code: doc.id, title: str(doc.data.title), description: str(doc.data.description),
                                 unitId: str(doc.data.unitId), unitCode: str(doc.data.unitCode),
                                 assemblyId: str(doc.data.assemblyId), assetTag: str(doc.data.assetTag),
@@ -1936,11 +1945,12 @@ export const maintenanceRoutes = {
                 verification: ['completed', 'verified'],
                 closed: ['closed', 'cancelled'],
             };
+            const routing=await responsibilityData(ctx,true);
             const rows = (await listDocs(woCol(ctx.orgId)))
                 .filter((d) => canAt(ctx, P.view, pathOf(d), scope)||outsideExecutionAccess(ctx.workGroupPolicy,d))
                 .filter((d) => (groups[view] ? groups[view].includes(str(d.data.status)) : view === 'mine' ? objs(d.data.assignees).some((a) => str(a.uid) === ctx.uid) || str(d.data.plannedBy) === ctx.uid : true))
                 .sort((a, b) => b.id.localeCompare(a.id))
-                .map(woOut);
+                .map(d=>({...woOut(d),...responsibilityFor(routing,d.data,'wo')}));
             return { rows };
         }),
     ],
@@ -1958,6 +1968,7 @@ export const maintenanceRoutes = {
             const completion = isObj(d.completion) ? d.completion : {};
             return {
                 ...woOut(doc),
+                ...responsibilityFor(await responsibilityData(ctx,true),doc.data,'wo'),
                 description: str(d.description),
                 failureModeLabel: str(d.failureModeLabel),
                 maintenanceTypeCode: str(d.maintenanceTypeCode),
@@ -2050,7 +2061,7 @@ export const maintenanceRoutes = {
             const ref = `${woCol(ctx.orgId)}/${doc.id}`;
             const now = nowIso();
             const done = async (fields: Record<string, Plain>, label: string, auditAction: string, details = note) => {
-                await updateFields(ref, { ...fields, history: history(doc, ctx, label, details), updatedAt: now });
+                await updateFields(ref, { ...fields,...groupFields(ctx.workGroupPolicy,strs(fields.path||doc.data.path)), history: history(doc, ctx, label, details), updatedAt: now });
                 await rec(ctx, auditAction, doc.id, details);
             };
             const deny = (allowed: boolean, why: string) => {

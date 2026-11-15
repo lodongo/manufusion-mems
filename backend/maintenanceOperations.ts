@@ -1,3 +1,4 @@
+import {responsibilityData,responsibilityFor,groupFields} from './maintenanceResponsibility';
 import { createHash } from 'node:crypto';
 import { bypass } from './testModeCore';
 import { stableJson } from './scopeGuard';
@@ -68,7 +69,7 @@ async function saveWo(ctx: OrgContext, wo: Doc, patch: Obj, action: string, note
     await commit([
         {
             path: `${root(ctx)}/work_orders/${wo.id}`,
-            fields: { ...wo.data, ...patch, updatedAt: nowIso(), history: history(ctx, wo.data, action, note) },
+            fields: { ...wo.data, ...patch,...groupFields(ctx.workGroupPolicy,recordPath(wo)), updatedAt: nowIso(), history: history(ctx, wo.data, action, note) },
             updateTime: wo.updateTime,
         },
     ]);
@@ -967,6 +968,7 @@ async function windowSave(ctx: OrgContext) {
         equipmentId, equipmentCode: str(equipment.data.code), equipmentName: str(equipment.data.name),
         lineId: equipmentId, lineName: str(equipment.data.name),
         siteId: wos[0].data.siteId,
+        ...groupFields(ctx.workGroupPolicy,recordPath(wos[0])),
         path: await nodePath(ctx.orgId, equipmentId),
         date, startTime, durationHours, start, end, timeZone, isoWeek, isoWeekYear, rangeType: 'equipment',
         workOrderIds: ids,
@@ -1714,6 +1716,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const windows = (await listDocs(`${root(ctx)}/maintenance_windows`)).filter((w) =>
             canAt(ctx, 'MNT.view', texts(w.data.path), scope),
         );
+        const routing=await responsibilityData(ctx,true);
         const items: Obj[] = [];
         for (const w of wos) {
             let line: Obj = {};
@@ -1722,6 +1725,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
             } catch {}
             items.push({
                 code: w.id,
+                ...responsibilityFor(routing,w.data,'wo'),
                 title: w.data.title,
                 status: w.data.status,
                 unitId: str(w.data.unitId),
@@ -1743,6 +1747,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
             windows: windows.map((w) => ({
                 id: w.id,
                 ...w.data,
+                ...responsibilityFor(routing,w.data,'window'),
                 liveSchedule: executionSchedule(w, wos),
                 progress: rows(w.data.tasks).length
                     ? Math.round(
@@ -1796,7 +1801,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const workflow=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
         const reviewRole=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),workflow?.data.approverRoles);
         return {
-            wo: { code: wo.id, ...wo.data, assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
+            wo: { code: wo.id, ...wo.data,...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             readiness: readinessData,
             checklist: await planChecklist(ctx, wo, readinessData),
             currency: str(ctx.org.data.currencyCode),

@@ -28,3 +28,6 @@ The authenticated organization super admin can activate incomplete, saved Work G
 
 ### Inherited organizational roles in group staffing
 The Named employees tab renders every aligned organizational role directly from the saved master configuration, including multiple roles under the same generic title. Role alignment is read-only in group setup. Each inherited role has its own employee picker, filtered to eligible holders at the group's scope and excluding employees already assigned to another group. Changes to master alignment require a reload before saving the group; existing server-side assignment, duplicate and version checks are unchanged.
+
+## Current responsibility
+Requests, assessments, orders, windows and task validation derive current group and responsible candidates on read. New records and regular updates snapshot active group metadata. Candidate names are calculated from current HR assignments, active group task mappings and independence checks. Existing assigned request reviewer is retained; otherwise highest position in reporting hierarchy appears first, followed by generic-role seniority and name. Finance, safety and handover retain separate authority. Draft or unassigned locations do not grant authority.
