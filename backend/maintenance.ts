@@ -1,3 +1,4 @@
+import {testDeletionEnabled,listTestMaintenanceDeletion,purgeTestMaintenance} from './maintenanceTestDeletion';
 import {shortWorkOrderStatus} from './maintenanceWorkflowState';
 import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
@@ -891,6 +892,18 @@ async function ensureCurrentAssessmentApproval(ctx:OrgContext,data:Obj) {
 import { maintenanceWorkGroupRoutes } from './maintenanceWorkGroups';
 export const maintenanceRoutes = {
     ...maintenanceWorkGroupRoutes,
+    'POST /api/org/mnt/test_deletion/list': [
+        orgRoute('org.mnt.test_deletion.list',null,async ctx=>{requireMnt(ctx);return listTestMaintenanceDeletion(ctx);}),
+    ],
+    'POST /api/org/mnt/test_deletion/purge': [
+        orgRoute('org.mnt.test_deletion.purge',null,async ctx=>{
+            requireMnt(ctx);
+            const result=await purgeTestMaintenance(ctx);
+            // The immutable deletion record already exists atomically; mirror it to general audit.
+            try{await rec(ctx,'mnt.test.permanent_delete',result.code,str(ctx.body.reason));}catch(e){console.error('Maintenance deletion audit mirror failed',result.auditId,e);}
+            return result;
+        }),
+    ],
     'POST /api/org/mnt/workflow/configuration': [
         orgRoute('org.mnt.workflow.configuration', null, async (ctx) => {
             requireMnt(ctx);
@@ -1396,9 +1409,9 @@ export const maintenanceRoutes = {
                 });
                 const pendingOrders=(await listDocs(woCol(ctx.orgId))).filter(w=>w.data.executionMode==='confirmed_request'&&['planning','plan_ready'].includes(str(w.data.status))&&canAt(ctx,P.view,pathOf(w),scope)&&[P.assessment_edit,P.assessment_review].some(p=>canAt(ctx,p,pathOf(w),scope)));
                 const orderRows=[];for(const pending of pendingOrders){const w=await syncWorkOrderState(ctx,pending);if(!['WO010','WO020'].includes(str(w.data.workflowCode)))continue;const wr=wrs.get(str(w.data.wrCode));if(wr)orderRows.push({...wrOut(wr),...responsibilityFor(routing,w.data,'wo'),code:w.id,woCode:w.id,workRequestCode:wr.id,statusLabel:str(w.data.workflowLabel),status:'under_review'});}
-                return { rows: [...orderRows,...independent, ...rows.filter((r) => !r.assessmentCode)].sort((a, b) => b.code.localeCompare(a.code)) };
+                return { rows: [...orderRows,...independent, ...rows.filter((r) => !r.assessmentCode)].sort((a, b) => b.code.localeCompare(a.code)),testDeletionEnabled:testDeletionEnabled(ctx) };
             }
-            return { rows };
+            return { rows,testDeletionEnabled:testDeletionEnabled(ctx) };
         }),
     ],
 
@@ -2010,7 +2023,7 @@ export const maintenanceRoutes = {
                 .filter((d) => (groups[view] ? groups[view].includes(str(d.data.status)) : view === 'mine' ? objs(d.data.assignees).some((a) => str(a.uid) === ctx.uid) || str(d.data.plannedBy) === ctx.uid : true))
                 .sort((a, b) => b.id.localeCompare(a.id));
             const rows=[];for(let i=0;i<visible.length;i+=8){const batch=await Promise.all(visible.slice(i,i+8).map(d=>syncWorkOrderState(ctx,d)));rows.push(...batch.map(d=>({...woOut(d),...responsibilityFor(routing,d.data,'wo')})));}
-            return { rows };
+            return { rows,testDeletionEnabled:testDeletionEnabled(ctx) };
         }),
     ],
 
@@ -2137,7 +2150,8 @@ export const maintenanceRoutes = {
                 if(!/^WO\d{8}$/.test(rootCode))throw new HttpError(409,'Original work order number is invalid.');
                 const family=(await listDocs(woCol(ctx.orgId))).filter(x=>x.data.rootWoCode===rootCode||x.data.parentWoCode===rootCode||x.id.startsWith(rootCode+'_'));
                 // Existing legacy children retain their identifiers and count in the sequence. No number is reused.
-                const sequence=Math.max(family.length,0,...family.map(x=>Number(x.data.subOrderSequence)||Number(x.id.startsWith(rootCode+'_')?x.id.slice(rootCode.length+1):0)||0))+1;
+                const deleted=(await listDocs('organizations/'+ctx.orgId+'/maintenance_deletion_audit')).filter(x=>x.data.kind==='order'&&(x.data.rootWoCode===rootCode||str(x.data.code).startsWith(rootCode+'_')));
+                const sequence=Math.max(family.length+deleted.length,0,...family.map(x=>Number(x.data.subOrderSequence)||Number(x.id.startsWith(rootCode+'_')?x.id.slice(rootCode.length+1):0)||0),...deleted.map(x=>Number(x.data.subOrderSequence)||Number(str(x.data.code).startsWith(rootCode+'_')?str(x.data.code).slice(rootCode.length+1):0)||0))+1;
                 if(sequence>999999999)throw new HttpError(409,'Sub-order numbering is exhausted.');
                 const code=rootCode+'_'+sequence,path=pathOf(doc);
                 const keys=['assemblyId','assemblyCode','assemblyName','unitId','unitCode','unitName','costCenterId','costCenterCode','costCenterName','siteId','siteCode','siteName','assetTag','assetName','assetClass','criticalityCode','criticalityLabel','criticalityColor','priorityCode','priorityLabel','disciplineCode','disciplineLabel','requestedBy','requestedByName','requestedAt'];

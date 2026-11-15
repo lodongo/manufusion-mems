@@ -1,3 +1,4 @@
+import MntTestDeletion from './MntTestDeletion';
 import {workGroupText,responsibleText,type MaintenanceRouting} from './mntShared';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Ban, CalendarClock, Check, CheckCircle2, ClipboardCheck, Clock, Cog, HardHat, Lock, PackagePlus, Play, Plus, RotateCcw, Search, Send, ShieldCheck, Trash2, Wrench, X } from 'lucide-react';
@@ -163,7 +164,7 @@ export default function WorkOrders({ id, sub }: { id?: string; sub?: string }) {
 function OrderList({ setup }: { setup: MntSetup }) {
     type Tab = 'planning' | 'execution' | 'verification' | 'mine' | 'closed' | 'all';
     const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['planning', 'execution', 'verification', 'mine', 'closed', 'all'], 'planning'));
-    const { data, error, loading } = useLoad(() => callBackend<{ rows: Row[] }>('/api/org/mnt/wo/list', { view: tab }), [tab]);
+    const { data, error, loading, reload } = useLoad(() => callBackend<{ rows: Row[];testDeletionEnabled?:boolean }>('/api/org/mnt/wo/list', { view: tab }), [tab]);
     const cur = setup.currency;
     const columns = useMemo<Array<Column<Row>>>(
         () => [
@@ -226,6 +227,7 @@ function OrderList({ setup }: { setup: MntSetup }) {
                     </button>
                 ))}
             </div>
+            {data?.testDeletionEnabled&&<MntTestDeletion kind="order" onDeleted={reload}/>}
             {error && <Alert tone='error'>{error}</Alert>}
             {loading && !data ? (
                 <Spinner />

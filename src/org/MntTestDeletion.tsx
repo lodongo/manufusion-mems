@@ -1,0 +1,20 @@
+import {useState} from 'react';
+import {Button,Card} from '../admin/kit';
+import {Alert} from '../components/ui';
+import {callBackend} from '../lib/backend';
+type Kind='order'|'assessment'|'request';
+type RecordRow={kind:Kind;code:string;title:string;status:string;wrCode?:string;parentWoCode?:string;unitCode?:string};
+type Trail=RecordRow&{deletedAt:string;deletedByName:string;reason:string;unlinked?:string[]};
+const labels:Record<Kind,string>={order:'Work Order',assessment:'Work Assessment',request:'Work Request'};
+const input='w-full rounded-lg border border-line bg-panel p-2 text-ink';
+export default function MntTestDeletion({kind,code,onDeleted}:{kind:Kind;code?:string;onDeleted?:()=>void}){
+ const [open,setOpen]=useState(false),[records,setRecords]=useState<RecordRow[]>([]),[trail,setTrail]=useState<Trail[]>([]),[selected,setSelected]=useState(code||''),[reason,setReason]=useState(''),[confirm,setConfirm]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const load=async()=>{setBusy(true);setError('');try{const d=await callBackend<{records:RecordRow[];trail:Trail[]}>('/api/org/mnt/test_deletion/list',{});setRecords(d.records.filter(r=>r.kind===kind));setTrail(d.trail.filter(r=>r.kind===kind));}catch(e){setError(e instanceof Error?e.message:'Unable to load test records');}finally{setBusy(false);}};
+ const purge=async()=>{setBusy(true);setError('');setNotice('');try{const target=selected;await callBackend('/api/org/mnt/test_deletion/purge',{kind,code:target,confirm,reason:reason.trim()});setNotice(target+' permanently deleted. Audit trail retained.');setConfirm('');setReason('');setSelected('');if(onDeleted){onDeleted();if(code)return;}await load();}catch(e){setError(e instanceof Error?e.message:'Deletion failed');}finally{setBusy(false);}};
+ return <Card className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">Test Mode · database cleanup</p><p className="text-xs text-soft">Super Admin only · permanent deletion · audit retained</p></div><Button variant="secondary" onClick={()=>{if(!open){setOpen(true);void load();}else setOpen(false);}}>{open?'Hide':code?'Permanent delete':'Open cleanup / audit'}</Button></div>
+ {open&&<div className="space-y-3"><Alert tone="warn">This physically removes the selected database record. It cannot be restored. Linked financial, stock, procurement, safety and scheduling records are protected. Delete dependent maintenance records first.</Alert>
+ {!code&&<label className="block text-sm">{labels[kind]}<select className={input} value={selected} onChange={e=>{setSelected(e.target.value);setConfirm('');setReason('');}}><option value="">Select a record…</option>{records.map(r=><option key={r.code} value={r.code}>{r.code} · {r.status} · {r.title}</option>)}</select></label>}
+ {selected&&<><p className="text-sm font-medium">{labels[kind]}: {selected}</p><label className="block text-sm">Reason for deletion<textarea rows={2} className={input} maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label><label className="block text-sm">Type {selected} to confirm<input className={input} value={confirm} onChange={e=>setConfirm(e.target.value)}/></label><Button variant="danger" busy={busy} disabled={confirm!==selected||reason.trim().length<10} onClick={purge}>Delete permanently</Button></>}
+ {error&&<Alert tone="error">{error}</Alert>}{notice&&<Alert tone="info">{notice}</Alert>}
+ <details><summary className="cursor-pointer font-medium text-sm">Permanent deletion audit ({trail.length})</summary><div className="mt-2 space-y-2">{trail.map(t=><div key={t.code} className="rounded-lg border border-line p-2 text-sm"><b>{t.code}</b> · {t.status}<p>{t.deletedByName} · {new Date(t.deletedAt).toLocaleString()}</p><p>{t.reason}</p>{t.unlinked?.length?<p className="text-xs text-soft">Unlinked: {t.unlinked.join(', ')}</p>:null}</div>)}{!trail.length&&<p className="text-xs text-soft">No permanent deletions recorded.</p>}</div></details></div>}</Card>;
+}

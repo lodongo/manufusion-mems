@@ -1,3 +1,4 @@
+import MntTestDeletion from './MntTestDeletion';
 import {MaintenanceResponsibility,workGroupText,responsibleText,type MaintenanceRouting} from './mntShared';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type TouchEvent } from 'react';
 import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, ClipboardList, ImagePlus, MapPin, Pencil, Send, Trash2, Undo2, Wrench, X } from 'lucide-react';
@@ -222,7 +223,7 @@ function RequestList({ setup, area }: { setup: MntSetup; area: 'requests' | 'ass
         return (['all', 'open', 'mine', 'review'].includes(requested) && (requested !== 'review' || can.WR_review || can.WR_close || can.WR_closeConfirm)
             ? requested : (can.WR_review || can.WR_close || can.WR_closeConfirm ? 'review' : 'all')) as Tab;
     });
-    const { data, error, loading } = useLoad(() => callBackend<{ rows: Row[] }>('/api/org/mnt/wr/list', { view: area === 'assessments' ? 'assessment' : tab }), [tab, area]);
+    const { data, error, loading, reload } = useLoad(() => callBackend<{ rows: Row[];testDeletionEnabled?:boolean }>('/api/org/mnt/wr/list', { view: area === 'assessments' ? 'assessment' : tab }), [tab, area]);
     const columns = useColumns();
     const tabs: Array<[Tab, string]> = [...((can.WR_review || can.WR_close || can.WR_closeConfirm) ? ([['review', 'To review']] as Array<[Tab, string]>) : []), ['open', 'Open'], ['mine', 'Mine'], ['all', 'All']];
     return (
@@ -234,6 +235,7 @@ function RequestList({ setup, area }: { setup: MntSetup; area: 'requests' | 'ass
                     </button>
                 ))}
             </div>}
+            {data?.testDeletionEnabled&&<MntTestDeletion kind={area==='assessments'?'assessment':'request'} onDeleted={reload}/>}
             {area === 'assessments' && <p className='text-sm text-soft'>Work Orders awaiting assessment or assessment approval. Previously created standalone assessments remain available.</p>}
             {error && <Alert tone='error'>{error}</Alert>}
             {loading && !data ? (
@@ -771,6 +773,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
 
             </div>
 
+            {r.testModeOverride&&(!code.startsWith('ASSM_')||area==='assessments')&&<div className="shrink-0"><MntTestDeletion kind={code.startsWith('ASSM_')?'assessment':'request'} code={code} onDeleted={()=>navigate(area==='assessments'?'organization_admin/work_assessments':'organization_admin/work_requests')}/></div>}
             <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
               <nav aria-label='Work request menu' className='flex shrink-0 gap-1 overflow-x-auto border-b border-slate-800 py-2'>
                 {([

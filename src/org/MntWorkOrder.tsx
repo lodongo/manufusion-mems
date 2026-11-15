@@ -1,3 +1,4 @@
+import MntTestDeletion from './MntTestDeletion';
 import MntStatusReview from './MntStatusReview';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, Package, ShieldCheck, Wrench, CalendarClock, CheckCircle2, ChevronDown } from 'lucide-react';
@@ -800,6 +801,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     Maintenance windows
                 </Button>}
             </div>
+            {data.testModeOverride&&<MntTestDeletion kind="order" code={code} onDeleted={()=>navigate('organization_admin/work_orders')}/>}
             {wo.parentWoCode&&<Card className="space-y-2"><p className="font-semibold">Break-in Maintenance · sub-order</p><Button variant="secondary" onClick={()=>navigate('organization_admin/work_orders/'+wo.parentWoCode)}>Parent {wo.parentWoCode}</Button>{wo.rootWoCode&&wo.rootWoCode!==wo.parentWoCode&&<Button variant="secondary" onClick={()=>navigate('organization_admin/work_orders/'+wo.rootWoCode)}>Original {wo.rootWoCode}</Button>}</Card>}
             {(can.createBreakIn||data.subOrders?.length>0)&&<Card className="space-y-2"><h2 className="font-semibold">Break-in sub-orders</h2>{(data.subOrders||[]).map((x:MntData)=><Button key={x.code} variant="secondary" onClick={()=>navigate('organization_admin/work_orders/'+x.code)}>{x.code} · {x.title} · {x.status}</Button>)}{can.createBreakIn&&<Button onClick={()=>{open('create_break_in');const today=data.maintenanceCycle?.today||new Date().toISOString().slice(0,10);setForm({scheduledStart:today,scheduledEnd:today});}}>Create break-in sub-order</Button>}</Card>}
             <MaintenanceResponsibility record={wo}/>

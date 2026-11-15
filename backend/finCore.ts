@@ -231,6 +231,8 @@ export async function nextCounter(orgId: string, doc: string, field: string): Pr
 
 export interface Write {
     path: string;
+    /** Physical deletion uses the same atomic precondition as the companion audit write. */
+    delete?: boolean;
     fields?: Obj;
     mask?: string[];
     increments?: Record<string, number>;
@@ -242,7 +244,10 @@ export async function commit(writes: Write[]): Promise<void> {
     if (!writes.length) return;
     if (writes.length > 480) throw new HttpError(400, 'Too many changes in one posting. Split it.');
     const body = writes.map((w) => {
-        const x: Record<string, unknown> = { update: { name: `${DOCUMENT_NAME_ROOT}/${w.path}`, fields: encodeFields((w.fields ?? {}) as unknown as Fields) } };
+        const x: Record<string, unknown> = w.delete
+            ? { delete: `${DOCUMENT_NAME_ROOT}/${w.path}` }
+            : { update: { name: `${DOCUMENT_NAME_ROOT}/${w.path}`, fields: encodeFields((w.fields ?? {}) as unknown as Fields) } };
+        if(w.delete&&(!w.updateTime||w.fields||w.mask||w.increments))throw new HttpError(400,'A permanent deletion requires the current document version and no update fields.');
         if (w.mask) x.updateMask = { fieldPaths: w.mask };
         if (w.increments && Object.keys(w.increments).length) x.updateTransforms = Object.entries(w.increments).map(([k, v]) => ({ fieldPath: k, increment: Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v } }));
         if (w.updateTime) x.currentDocument = { updateTime: w.updateTime };
