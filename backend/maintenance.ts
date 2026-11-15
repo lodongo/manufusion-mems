@@ -1,4 +1,4 @@
-import {testDeletionEnabled,listTestMaintenanceDeletion,purgeTestMaintenance} from './maintenanceTestDeletion';
+import {testDeletionEnabled,listTestMaintenanceDeletion,purgeTestMaintenance,previewBulkTestMaintenance,purgeBulkTestMaintenance} from './maintenanceTestDeletion';
 import {shortWorkOrderStatus} from './maintenanceWorkflowState';
 import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
@@ -894,6 +894,12 @@ export const maintenanceRoutes = {
     ...maintenanceWorkGroupRoutes,
     'POST /api/org/mnt/test_deletion/list': [
         orgRoute('org.mnt.test_deletion.list',null,async ctx=>{requireMnt(ctx);return listTestMaintenanceDeletion(ctx);}),
+    ],
+    'POST /api/org/mnt/test_deletion/bulk_preview': [
+        orgRoute('org.mnt.test_deletion.bulk_preview',null,async ctx=>{requireMnt(ctx);return previewBulkTestMaintenance(ctx);}),
+    ],
+    'POST /api/org/mnt/test_deletion/bulk_purge': [
+        orgRoute('org.mnt.test_deletion.bulk_purge',null,async ctx=>{requireMnt(ctx);const result=await purgeBulkTestMaintenance(ctx);await rec(ctx,'mnt.test.bulk_cleanup',result.batchId,str(ctx.body.reason));return result;}),
     ],
     'POST /api/org/mnt/test_deletion/purge': [
         orgRoute('org.mnt.test_deletion.purge',null,async ctx=>{

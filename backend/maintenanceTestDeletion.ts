@@ -1,5 +1,6 @@
 /** Development-only maintenance record purge. The tombstone is committed with the physical deletion. */
-import {HttpError,getDoc,listDocs,nowIso,str,isObj,type Obj,type Doc} from './core';
+import {createHash,randomUUID} from 'node:crypto';
+import {HttpError,getDoc,listDocs,runQuery,fieldEq,nowIso,str,isObj,type Obj,type Doc} from './core';
 import {commit,withLock,type Write} from './finCore';
 import {testModeEnvironmentAllowed,testModeActiveFor,clearTestModeCache} from './testModeCore';
 import type {OrgContext} from './guards';
@@ -25,8 +26,8 @@ const assertVersion=(doc:Doc)=>{if(!doc.updateTime)throw new HttpError(409,'Reco
 const minimal=(d:Doc,kind:Kind)=>({kind,code:d.id,title:str(d.data.title)||str(row(d.data.sourceRequest).title),status:str(d.data.status),wrCode:str(d.data.wrCode)||str(d.data.workRequestCode),parentWoCode:str(d.data.parentWoCode),rootWoCode:str(d.data.rootWoCode),createdAt:str(d.data.createdAt),unitCode:str(d.data.unitCode)||str(row(d.data.sourceRequest).unitCode)});
 export async function listTestMaintenanceDeletion(ctx:OrgContext){
  requireMode(ctx);
- const [orders,assessments,requests,trail]=await Promise.all([...Object.values(TEST_MAINTENANCE_COLLECTIONS).map(c=>listDocs(root(ctx)+'/'+c)),listDocs(root(ctx)+'/maintenance_deletion_audit')]);
- return {records:[...orders.filter(d=>patterns.order.test(d.id)).map(d=>minimal(d,'order')),...assessments.filter(d=>patterns.assessment.test(d.id)).map(d=>minimal(d,'assessment')),...requests.filter(d=>patterns.request.test(d.id)).map(d=>minimal(d,'request'))],trail:trail.map(d=>({id:d.id,...d.data})).sort((a,b)=>str((b as Obj).deletedAt).localeCompare(str((a as Obj).deletedAt)))};
+ const [orders,assessments,requests,trail,batches]=await Promise.all([...Object.values(TEST_MAINTENANCE_COLLECTIONS).map(c=>listDocs(root(ctx)+'/'+c)),listDocs(root(ctx)+'/maintenance_deletion_audit'),listDocs(root(ctx)+'/maintenance_cleanup_batches')]);
+ return {batches:batches.map(d=>({id:d.id,...d.data})),records:[...orders.filter(d=>patterns.order.test(d.id)).map(d=>minimal(d,'order')),...assessments.filter(d=>patterns.assessment.test(d.id)).map(d=>minimal(d,'assessment')),...requests.filter(d=>patterns.request.test(d.id)).map(d=>minimal(d,'request'))],trail:trail.map(d=>({id:d.id,...d.data})).sort((a,b)=>str((b as Obj).deletedAt).localeCompare(str((a as Obj).deletedAt)))};
 }
 const dependentCollections=['maintenance_windows','goods_issues','inventory_reservations','material_journal','mnt_supply_links','procurement_requirements','procurement_requisitions','procurement_quotations','procurement_orders','fin_requests','fin_journal','safety_incidents','maintenance_material_reconciliations','maintenance_assessment_revisions','bom_revisions','asset_task_proposals','asset_task_template_revisions','material_creation_candidates','vendor_onboarding_requests','stores_issue_vouchers'];
 export async function purgeTestMaintenance(ctx:OrgContext){
@@ -86,5 +87,99 @@ export async function purgeTestMaintenance(ctx:OrgContext){
   if(!await testModeActiveFor(ctx.orgId))throw new HttpError(403,'Test Mode expired before deletion.');
   await commit(writes);
   return {ok:true,auditId,code,kind,unlinked};
+ })));
+}
+
+
+// Bulk cleanup expands only explicit maintenance ownership and dependencies.
+// It never silently deletes shared master data or a posted financial/physical movement.
+type BulkDoc={collection:string;doc:Doc;kind?:Kind};
+const rootCollections=Object.entries(TEST_MAINTENANCE_COLLECTIONS) as [Kind,string][];
+const casualCollections=['maintenance_windows','asset_task_proposals','maintenance_assessment_revisions','maintenance_material_reconciliations','inventory_reservations','mnt_supply_links','procurement_requirements','procurement_requisitions','procurement_quotations','procurement_orders','fin_requests','safety_incidents','material_creation_candidates','vendor_onboarding_requests','stores_issue_vouchers','material_journal','asset_task_template_revisions','asset_task_templates','bom_revisions','goods_issues','fin_journal'];
+const keyOf=(r:BulkDoc)=>r.collection+'/'+r.doc.id;
+const refs=(d:Obj,ids:Set<string>)=>[...ids].some(id=>hasMaintenanceReference(d,id));
+const hasForeign=(d:Obj,all:Set<string>,selected:Set<string>)=>[...all].some(id=>!selected.has(id)&&hasMaintenanceReference(d,id));
+const isReservation=(d:Obj)=>['MAINTENANCE_RESERVATION','MAINTENANCE_RESERVATION_RELEASE'].includes(str(d.type));
+function procurementDraft(d:Obj){return ['draft','validated','cancelled','rejected','returned','pending_approval'].includes(str(d.status))&&!d.postedAt&&!d.journalId&&!d.openedAt&&!d.approvedAt&&!asRows(d.lines).some(l=>Number(l.receivedQty)>0||Number(l.acceptedQty)>0)&&!asRows(d.deliveries).length&&!asRows(d.receipts).length;}
+function ownedKind(d:Obj){return str(d.source)==='maintenance'||!!str(row(d.maintenanceSource).woCode);}
+async function bulkPlan(ctx:OrgContext){
+ requireMode(ctx);
+ clearTestModeCache();if(!await testModeActiveFor(ctx.orgId))throw new HttpError(403,'Test Mode is no longer active.');
+ const base=root(ctx),body=ctx.body;
+ const selected=Array.isArray(body.records)?body.records.map(row):[];
+ if(!selected.length||selected.length>400)throw new HttpError(400,'Choose 1–400 maintenance records.');
+ const requested=new Set(selected.map(s=>deletionCode(deletionKind(s.kind),s.code)));
+ const primary=(await Promise.all(rootCollections.map(async ([kind,collection])=>(await listDocs(base+'/'+collection)).filter(d=>patterns[kind].test(d.id)).map(doc=>({collection,doc,kind}))))).flat();
+ const allPrimary=new Set(primary.map(x=>x.doc.id));
+ for(const id of requested)if(!allPrimary.has(id))throw new HttpError(409,'Record no longer exists: '+id+'. Refresh the selection.');
+ const family=new Set(requested);
+ // Parent, child, original request and assessment comprise a single test case.
+ let changed=true;
+ while(changed){changed=false;for(const x of primary){
+   const d=x.doc.data,linked=[str(d.wrCode),str(d.workRequestCode),str(d.woCode),str(d.assessmentCode),str(d.parentWoCode),str(d.rootWoCode),str(row(d.closure).woCode),x.kind==='order'&&x.doc.id.includes('_')?x.doc.id.split('_')[0]:''].filter(id=>allPrimary.has(id));
+   if(family.has(x.doc.id)||linked.some(id=>family.has(id)))for(const id of [x.doc.id,...linked])if(!family.has(id)){family.add(id);changed=true;}
+ }}
+ const chosen=primary.filter(x=>family.has(x.doc.id)), remove=new Map(chosen.map(x=>[keyOf(x),x]));
+ const blockers=new Set<string>(),retained=new Set<string>();
+ for(const x of chosen)if(x.kind==='request'&&(x.doc.data.gembaId||x.doc.data.gembaObservationId))blockers.add('Gemba origin: '+x.doc.id);
+ const secondary=(await Promise.all(casualCollections.map(async collection=>(await listDocs(base+'/'+collection)).map(doc=>({collection,doc}))))).flat();
+ const ids=new Set(family),allReq=new Set(secondary.filter(x=>x.collection==='procurement_requirements').map(x=>x.doc.id)),allSecondary=new Set(secondary.map(x=>x.doc.id));
+ // Forward traversal: only related records are considered; a shared replenishment's requirement is never followed backwards.
+ for(let pass=0;pass<12;pass++){
+   let added=false;
+   for(const x of secondary){
+     const k=keyOf(x),d=x.doc.data,c=x.collection;
+     if(remove.has(k)||!refs(d,ids))continue;
+     if(hasForeign(d,allPrimary,family)){blockers.add('Shared maintenance record: '+k);continue;}
+     if(['goods_issues','fin_journal','bom_revisions'].includes(c)||c==='material_journal'&&!isReservation(d)){blockers.add('Posted inventory, BOM or accounting record: '+k);continue;}
+     if(c==='asset_task_templates'||c==='asset_task_template_revisions'){
+       // Approved reusable master data may have been consumed by a different job.
+       retained.add(k);continue;
+     }
+     if(c==='asset_task_proposals'&&str(d.status)==='approved'){retained.add(k);continue;}
+     if(c==='procurement_requirements'&&!ownedKind(d)){retained.add(k);continue;}
+     if(c==='procurement_orders'&&!procurementDraft(d)){blockers.add('Committed/posted purchase order: '+k);continue;}
+     if(['procurement_orders','procurement_requisitions','procurement_quotations'].includes(c)&&hasForeign(d,allReq,ids)){blockers.add('Shared procurement record: '+k);continue;}
+     if(c==='fin_requests'&&str(d.type)!=='mnt.wo.cost'){blockers.add('Financial transaction: '+k);continue;}
+     if(c==='stores_issue_vouchers'&&(['partial','issued'].includes(str(d.status))||asRows(d.lines).some(l=>Number(l.issuedQty)>0))){blockers.add('Posted stores issue voucher: '+k);continue;}
+     if(c==='maintenance_material_reconciliations'&&asRows(d.consumption).length){blockers.add('Material consumption reconciliation: '+k);continue;}
+     if(['material_creation_candidates','vendor_onboarding_requests'].includes(c)&&!['draft','created','pending','pending_validation','rejected','cancelled','submitted','open'].includes(str(d.status))){retained.add(k);continue;}
+     // A window may have historical safety records; all its work orders must be included.
+     if(c==='safety_incidents'&&d.status==='open'){retained.add(k);continue;}
+     remove.set(k,x);ids.add(x.doc.id);added=true;
+   }
+   if(!added)break;
+   if(pass===11)blockers.add('Dependency chain is too deep; choose a smaller test case.');
+ }
+ // Shared requirements cannot be erased if an outside supply link uses them.
+ for(const x of secondary.filter(x=>x.collection==='mnt_supply_links'))if(!remove.has(keyOf(x))&&ids.has(str(x.doc.data.requirementId)))blockers.add('Shared replenishment or requirement: '+x.doc.id);
+ // A retained approved task proposal is intentionally preserved as provenance for the task master.
+ // Remove ordinary record-specific audit copies, not authentication, security or permanent-cleanup receipts.
+ const [tenantAudit,platformAudit]=await Promise.all([listDocs(base+'/audit_events'),runQuery({from:[{collectionId:'audit_events'}],where:fieldEq('orgId',ctx.orgId)})]);
+ const isOrdinary=(d:Obj)=>d.orgId===ctx.orgId&&d.category==='maintenance'&&!/permanent_delete|test_deletion|bulk_cleanup|testmode/i.test(str(d.action))&&(ids.has(str(d.targetId))||ids.has(str(d.targetLabel)));
+ const auditDocs=[...tenantAudit.filter(x=>isOrdinary(x.data)).map(doc=>({collection:'audit_events',doc})),...platformAudit.filter(x=>isOrdinary(x.data)).map(doc=>({collection:'@platform/audit_events',doc}))];
+ for(const x of auditDocs)remove.set(keyOf(x),x);
+ const entries=[...remove.values()].sort((a,b)=>keyOf(a).localeCompare(keyOf(b)));
+ const counts:Record<string,number>={};for(const x of entries)counts[x.collection]=(counts[x.collection]||0)+1;
+ // Single atomic commit: documents plus numbered tombstones, one batch receipt.
+ const writeCount=entries.length+chosen.length+1;if(writeCount>470)blockers.add('Cleanup requires '+writeCount+' database writes. Select a smaller group (maximum 470 writes per batch).');
+ // Avoid throwing away attached service reports separately; they are private storage objects.
+ const fingerprint=createHash('sha256').update(JSON.stringify({entries:entries.map(x=>[keyOf(x),x.doc.updateTime]),blockers:[...blockers].sort(),retained:[...retained].sort()})).digest('hex');
+ return {entries,chosen,counts,fingerprint,blockers:[...blockers].sort(),retained:[...retained].sort(),requestedCount:requested.size};
+}
+const bulkView=(p:Awaited<ReturnType<typeof bulkPlan>>)=>({fingerprint:p.fingerprint,counts:p.counts,records:p.chosen.map(x=>minimal(x.doc,x.kind!)),total:p.entries.length,blockers:p.blockers,retained:p.retained,requestedCount:p.requestedCount});
+export async function previewBulkTestMaintenance(ctx:OrgContext){return bulkView(await bulkPlan(ctx));}
+export async function purgeBulkTestMaintenance(ctx:OrgContext){
+ requireMode(ctx);
+ const reason=str(ctx.body.reason).trim();if(ctx.body.confirm!=='DELETE TEST DATA'||reason.length<10||reason.length>500)throw new HttpError(400,'Type DELETE TEST DATA and enter a reason of 10–500 characters.');
+ return withLock(ctx.orgId,'maintenance_operations',()=>withLock(ctx.orgId,'maintenance_po_commitment',()=>withLock(ctx.orgId,'inventory_movements',async()=>{
+  const plan=await bulkPlan(ctx);if(plan.fingerprint!==ctx.body.fingerprint)throw new HttpError(409,'Records changed since preview. Preview the cleanup again.');
+  if(plan.blockers.length)throw new HttpError(409,'Cleanup blocked: '+plan.blockers.slice(0,12).join('; '));
+  const base=root(ctx),at=nowIso(),batchId='BULK_'+randomUUID(),name=[str(ctx.me.data.firstName),str(ctx.me.data.lastName)].filter(Boolean).join(' ')||ctx.actor.email;
+  const tombstones:Write[]=plan.chosen.map(x=>({path:base+'/maintenance_deletion_audit/'+x.kind+'_'+x.doc.id,fields:{...minimal(x.doc,x.kind!),action:'permanent_delete',deletedAt:at,deletedBy:ctx.uid,deletedByName:name,reason,orgId:ctx.orgId,testMode:true,environment:'development',batchId,subOrderSequence:Number(x.doc.data.subOrderSequence)||0,recordVersion:assertVersion(x.doc),unlinked:[]},exists:false}));
+  const writes:Write[]=plan.entries.map(x=>({path:x.collection==='@platform/audit_events'?'audit_events/'+x.doc.id:base+'/'+keyOf(x),delete:true,updateTime:assertVersion(x.doc)}));
+  writes.push(...tombstones,{path:base+'/maintenance_cleanup_batches/'+batchId,fields:{batchId,action:'bulk_cleanup',orgId:ctx.orgId,testMode:true,environment:'development',deletedAt:at,deletedBy:ctx.uid,deletedByName:name,reason,counts:plan.counts,deleted:plan.entries.map(x=>keyOf(x)),retained:plan.retained},exists:false});
+  clearTestModeCache();if(!await testModeActiveFor(ctx.orgId))throw new HttpError(403,'Test Mode expired before deletion.');
+  await commit(writes);return {ok:true,batchId,...bulkView(plan)};
  })));
 }
