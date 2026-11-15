@@ -1623,6 +1623,14 @@ export const maintenanceRoutes = {
                     const executor=closurePool.people.find(p=>p.uid===closedBy);
                     if(!executor)throw new HttpError(403,closurePool.diagnostic||'Closed by must be an eligible employee assigned maintenance execution rights (MNT.WO.execute) in this Work Group.');
                     const closedByName=executor.name;
+                    const closedDate = str(ctx.body.closedDate);
+                    if (!/^\d{4}-\d{2}-\d{2}$/.test(closedDate) || !Number.isFinite(Date.parse(closedDate))
+                        || new Date(closedDate).toISOString().slice(0,10)!==closedDate
+                        || closedDate > new Date(Date.now() + 14 * 3600_000).toISOString().slice(0, 10) || closedDate < str(doc.data.requestedAt).slice(0, 10))
+                        throw new HttpError(400, 'Choose a closure date from the request date up to today.');
+                    const durationMinutes = Number(ctx.body.durationMinutes);
+                    if (!Number.isInteger(durationMinutes) || durationMinutes <= 0 || durationMinutes > 525600)
+                        throw new HttpError(400, 'Enter the actual time taken in whole minutes (greater than zero).');
                     const classifications = {
                         failureModeCode:failureMode.code, failureModeLabel:failureMode.label, failureModeGroup:failureMode.group,
                         solutionCode:solutionTypes[0].code, solutionLabel:solutionTypes[0].label, solutionGroup:solutionTypes[0].group,
@@ -1635,20 +1643,13 @@ export const maintenanceRoutes = {
                         const cause = pickGrouped(l.rootCauses, str(ctx.body.causeCode), 'failure cause')!;
                         const description = str(ctx.body.description).trim().slice(0, 2000);
                         if (description.length < 10) throw new HttpError(400, 'Describe what was done (at least 10 characters).');
-                        const closedDate = str(ctx.body.closedDate);
-                        if (!/^\d{4}-\d{2}-\d{2}$/.test(closedDate) || !Number.isFinite(Date.parse(closedDate))
-                            || closedDate > new Date(Date.now() + 14 * 3600_000).toISOString().slice(0, 10) || closedDate < str(doc.data.requestedAt).slice(0, 10))
-                            throw new HttpError(400, 'Choose a closure date from the request date up to today.');
-                        const durationMinutes = Number(ctx.body.durationMinutes);
-                        if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || durationMinutes > 525600)
-                            throw new HttpError(400, 'Enter the actual time taken in minutes (greater than zero).');
                         const closure = { ...classifications, causeCode: cause.code, causeLabel: cause.label, causeGroup: cause.group,
                             description, dateClosed: closedDate, durationMinutes, by: ctx.uid,
                             name: displayName(ctx), at: now };
                         await done({ status: 'closed', reviewDecision: 'closed', closedAt: now, closure: closure as Plain,
                             failureModeCode:failureMode.code,failureModeLabel:`${failureMode.group} · ${failureMode.label}`, solutions:classifications.solutions,
                             reviewer: ctx.uid, reviewerName: displayName(ctx), reviewCompletedAt: now },
-                            'Closed after review', 'mnt.wr.closed_at_review', `${failureMode.group} · ${failureMode.label}; ${cause.group} · ${cause.label}; ${solutionTypes.map(s=>s.group+' · '+s.label).join(', ')}; completed by ${closedByName}; ${durationMinutes} min; ${description}`);
+                            'Closed after review', 'mnt.wr.closed_at_review', `${failureMode.group} · ${failureMode.label}; ${cause.group} · ${cause.label}; ${solutionTypes.map(s=>s.group+' · '+s.label).join(', ')}; completed by ${closedByName}; ${closedDate}; ${durationMinutes} min; ${description}`);
                         return { ok: true };
                     }
                     const cause = pickGrouped(l.rootCauses, str(ctx.body.causeCode), 'cause')!;
@@ -1662,13 +1663,13 @@ export const maintenanceRoutes = {
                         causeCode: cause.code, causeLabel: cause.label, causeGroup: cause.group,
                         solutionCode: solution.code, solutionLabel: solution.label, solutionGroup: solution.group,
                         maintenanceTypeCode: mtype.code, maintenanceTypeLabel: mtype.label,
-                        description, by: ctx.uid, name: displayName(ctx), at: now,
+                        description, dateClosed:closedDate,durationMinutes, by: ctx.uid, name: displayName(ctx), at: now,
                     };
                     await done(
                         { status: 'closure_pending', closure, failureModeCode:failureMode.code,failureModeLabel:`${failureMode.group} · ${failureMode.label}`,solutions:classifications.solutions, maintenanceTypeCode: mtype.code, maintenanceTypeLabel: mtype.label,
                           ...(str(doc.data.reviewer) ? {} : { reviewer: ctx.uid, reviewerName: displayName(ctx), reviewStartedAt: now }) },
                         'Closed at review – awaiting confirmation', 'mnt.wr.closed_at_review',
-                        `${cause.group} · ${cause.label} / ${solution.group} · ${solution.label} / ${mtype.label} · completed by ${closedByName} · ${description}`);
+                        `${cause.group} · ${cause.label} / ${solution.group} · ${solution.label} / ${mtype.label} · completed by ${closedByName} · ${closedDate} · ${durationMinutes} min · ${description}`);
                     return { ok: true };
                 }
                 case 'confirm_closure':

@@ -41,3 +41,5 @@ One-to-one task gate and security activity allocations are linked on explicit ed
 
 ### Work request direct closure attribution
 The Closed by picker lists only named, currently eligible members of the active Work Group mapped to MNT.WO.execute. The same resolver rechecks the submitted employee on the server under the maintenance mutation lock. The credited employee's actual job-title snapshot and the separate signed-in reviewer identity are saved; Test Mode never broadens employee attribution. When an organization has Work Groups setup but no active group at that location, activation is required. Pre-Work-Group installations retain only the independently configured legacy executor role at the record location, not the full employee directory.
+
+Both direct closure flows (including legacy supervisor-confirmed requests) require an actual completion date and positive whole-minute duration. These are stored in the closure and retained through confirmation or rejection history, separately from the automatic recording/approval timestamps. Existing historical records are not rewritten.

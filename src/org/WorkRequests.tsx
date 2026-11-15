@@ -1192,12 +1192,12 @@ function AssessPanel({ detail, lists, onDone, onCancel }: { detail: Detail; list
     );
 }
 
-export function ClosureCard({ closure }: { closure: Closure }) {
+export function ClosureCard({ closure, pending = false }: { closure: Closure; pending?: boolean }) {
     return (
         <Card className='space-y-2 text-sm'>
             <div className='flex flex-wrap items-center justify-between gap-2'>
                 <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>Closed at review</p>
-                <Badge tone={closure.confirmedAt || closure.dateClosed ? 'brand' : 'warn'}>{closure.dateClosed ? 'Closed at review' : closure.confirmedAt ? 'Confirmed' : 'Awaiting confirmation'}</Badge>
+                <Badge tone={pending?'warn':'brand'}>{pending?'Awaiting confirmation':closure.confirmedAt?'Confirmed':'Closed at review'}</Badge>
             </div>
             {closure.failureModeLabel && <Info label='Failure mode' value={[closure.failureModeGroup,closure.failureModeLabel].filter(Boolean).join(' · ')} />}
             <Info label='Failure cause' value={`${closure.causeGroup} · ${closure.causeLabel}`} />
@@ -1225,18 +1225,19 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
     const [mtype, setMtype] = useState('');
     const [description, setDescription] = useState('');
     const [typed, setTyped] = useState('');
-    const [closedDate, setClosedDate] = useState(() => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,10));
+    const localToday = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,10);
+    const [closedDate, setClosedDate] = useState(localToday);
     const [durationMinutes, setDurationMinutes] = useState('');
     const direct = detail.reviewProcessVersion === 2;
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const screen = useFullScreen(true);
-    const missing = [!failureMode ? 'failure mode' : '', !cause ? 'failure cause' : '', !solutions.length ? 'solution type' : '', !people.some(p=>p.uid===closedByUid) ? 'closed by' : '', description.trim().length < 10 ? 'what was done (10+ characters)' : '', ...(direct ? [!closedDate ? 'date closed' : '', !Number.isFinite(Number(durationMinutes)) || Number(durationMinutes)<=0 ? 'actual time taken' : ''] : [!mtype ? 'maintenance type' : '', typed.trim() !== detail.code ? `type ${detail.code}` : ''])].filter(Boolean);
+    const missing = [!failureMode ? 'failure mode' : '', !cause ? 'failure cause' : '', !solutions.length ? 'solution type' : '', !people.some(p=>p.uid===closedByUid) ? 'closed by' : '', description.trim().length < 10 ? 'what was done (10+ characters)' : '', !closedDate || closedDate>localToday ? 'closure date' : '', !Number.isInteger(Number(durationMinutes)) || Number(durationMinutes)<=0 || Number(durationMinutes)>525600 ? 'actual time taken (minutes)' : '', ...(!direct ? [!mtype ? 'maintenance type' : '', typed.trim() !== detail.code ? `type ${detail.code}` : ''] : [])].filter(Boolean);
     const save = async () => {
         setBusy(true);
         setError('');
         try {
-            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'close_review', causeCode: cause, failureModeCode:failureMode, solutionCodes:solutions, closedByUid, ...(direct ? { closedDate, durationMinutes: Number(durationMinutes) } : {maintenanceTypeCode: mtype, confirm: typed.trim() }), description: description.trim() });
+            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'close_review', causeCode: cause, failureModeCode:failureMode, solutionCodes:solutions, closedByUid, closedDate, durationMinutes: Number(durationMinutes), ...(!direct ? {maintenanceTypeCode: mtype, confirm: typed.trim()} : {}), description: description.trim() });
             onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not close the request.');
@@ -1260,10 +1261,10 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
                     <option value=''>Select…</option>
                     {lists.maintenanceTypes.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}
                 </SelectField>}
-                {direct && <>
-                    <Field id='cl-date' type='date' label='Date closed *' max={new Date().toISOString().slice(0,10)} value={closedDate} onChange={(e) => setClosedDate(e.target.value)} />
-                    <Field id='cl-duration' type='number' min={1} label='Actual time taken (minutes) *' value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} />
-                </>}
+                <div className='grid gap-3 sm:grid-cols-2'>
+                    <Field id='cl-date' type='date' label='Closure date *' max={localToday} value={closedDate} onChange={(e) => setClosedDate(e.target.value)} />
+                    <Field id='cl-duration' type='number' min={1} max={525600} step={1} label='Actual time taken (minutes) *' placeholder='e.g. 25' value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} />
+                </div>
                 <Card className='space-y-2'>
                     <Field id='cl-employee-search' label='Find employee' placeholder='Search employee name…' value={employeeQuery} onChange={e=>setEmployeeQuery(e.target.value)} />
                     <SelectField id='cl-closed-by' label='Closed by *' value={closedByUid} disabled={!people.length} onChange={e=>setClosedByUid(e.target.value)}><option value=''>Select the employee who completed the work</option>{visiblePeople.map(p=><option key={p.uid} value={p.uid}>{p.name}</option>)}</SelectField>
