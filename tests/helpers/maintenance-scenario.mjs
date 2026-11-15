@@ -1274,9 +1274,25 @@ assert.ok(lineBudget.committed > 0, 'Approved work order estimates commit the pe
 assert.equal(lineBudget.available, 50000 - lineBudget.committed);
 await assert.rejects(() => route(maintenancePlanningRoutes, '/api/org/mnt/budget/propose', 'planner', { ccId: 'LINE_CC', period: month, amount: 1, reason: 'Cut the budget below what is committed.' }), /cannot be lower/);
 
+// Configuration cleanup is tenant-scoped, retains active assignments and is idempotent.
+const configPath=r+'/maintenance_workflow_settings/default';
+const beforeCleanup=snapshot(configPath).data;
+seed(configPath,{...beforeCleanup,approverRoles:{...beforeCleanup.approverRoles,'MNT.WO.TECHNICAL_CLOSE':'TM','MNT.HANDOVER':'OPS'}});
+seed(r+'/roles/CLEAN_FIXTURE',{name:'Fixture',permissions:['MNT.view','MNT.WO.verify','MNT.WO.close','FIN.view']});
+const cleanup=await route(maintenanceRoutes,'/api/org/mnt/workflow/configuration/cleanup','manager',{confirm:true,reason:'Retire redundant maintenance workflow permissions'});
+assert.equal(cleanup.ok,true);
+assert.ok(cleanup.changed>=2);
+assert.ok(cleanup.receipt);
+assert.equal(snapshot(configPath).data.version,beforeCleanup.version);
+assert.equal(snapshot(configPath).data.approverRoles['MNT.SAFETY.SIGNOFF'],beforeCleanup.approverRoles['MNT.SAFETY.SIGNOFF']);
+assert.equal(snapshot(configPath).data.approverRoles['MNT.WO.TECHNICAL_CLOSE'],undefined);
+assert.deepEqual(snapshot(r+'/roles/CLEAN_FIXTURE').data.permissions,['MNT.view','MNT.WO.close','FIN.view']);
+assert.ok(snapshot(r+'/maintenance_configuration_cleanup/'+cleanup.receipt).data);
+assert.equal((await route(maintenanceRoutes,'/api/org/mnt/workflow/configuration/cleanup','manager',{confirm:true,reason:'Check idempotent configuration cleanup'})).changed,0);
+
 // The no-incident confirmation also has a separate successful, explicit path.
 import { safetyDeclaration } from '../../backend/maintenanceDomain.ts';
 safetyDeclaration({ declaration: 'none', noIncidentsConfirmed: true });
 console.log(
-    'maintenance scenario passed: request, task assessment, conversion, shortages, reservation, material creation/approval, procurement, planner readiness, Chart of Authority cost approval, equipment windows and revisions, feedback, partial consumption, returns, BOM, incident, handover, Technical Manager closure and denial paths',
+    'maintenance scenario passed: request, task assessment, conversion, shortages, reservation, material creation/approval, procurement, planner readiness, Chart of Authority cost approval, equipment windows and revisions, feedback, partial consumption, returns, BOM, incident, safety closure, configuration cleanup and denial paths',
 );

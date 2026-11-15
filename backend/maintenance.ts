@@ -33,13 +33,13 @@ import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} 
 // Work request  organizations/{orgId}/work_requests/{WR00000001}   (counter organizations/{orgId}.wrSeq)
 //   created -> assigned review -> closed (work completed at review, cause, time, date)
 //                              -> cancelled (reason, optional same-equipment repeat reference)
-//                              -> to_be_assessed (independent ASSM_######## document)
-//   to_be_assessed remains the final request outcome while the linked assessment is planned and converted.
+//                              -> confirmed (linked Work Order, assessed in place)
+//   Historical standalone assessments remain accessible for completion only.
 //   Legacy submitted / under_review / closure_pending records remain readable and actionable.
 //
 // Work order    organizations/{orgId}/work_orders/{WO00000001}     (counter organizations/{orgId}.woSeq)
-//   planning -> plan_ready -> released -> scheduled -> in_progress -> completed -> verified -> closed
-//   planning..scheduled -> cancelled ; verified | closed -> in_progress (reopen, restricted)
+//   planning (assessment, approval, resources) -> released -> scheduled -> in_progress -> completed -> closed
+//   Eligible uncommitted orders can close early; final records cannot reopen.
 //
 // Every activity is a permission (MNT.WR.review, MNT.WO.plan, ...) checked at the record's location, so a
 // person only acts where their job role (or direct security role) applies. Segregation of duties:

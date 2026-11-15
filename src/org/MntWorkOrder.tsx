@@ -812,10 +812,10 @@ export default function MntWorkOrder({ code }: { code: string }) {
             {retrospective&&<Card className="space-y-2"><h2 className="font-semibold">Work completed at request review</h2><p className="text-sm text-soft">Planning, resource preparation and maintenance window are not applicable. This record does not certify prior safety authorization.</p><p className="text-sm">Actual completion: {wo.directCompletion?.performedDate} · {wo.directCompletion?.durationMinutes} minutes</p><p className="text-sm">Performed by: {wo.directCompletion?.executor?.name} · {wo.directCompletion?.executor?.role}</p><p className="text-sm">Work performed: {wo.directCompletion?.reportedWork}</p><p className="text-sm">Maintenance type: {wo.maintenanceTypeLabel}</p><p className="text-sm">Failure mode: {wo.directCompletion?.failureModeLabel} · Cause: {wo.directCompletion?.causeLabel}</p><p className="text-sm">Solution: {(wo.directCompletion?.solutions||[]).map((s:MntData)=>s.label).join('; ')}</p><p className="text-sm text-soft">No spare parts or services declared. Labour valuation is separate from recorded time.{wo.finalCost?.pendingLabourValuation?' Labour valuation pending approved rate.':''}</p></Card>}
             {failure && <MntGateHint message={failure} />}
             {message && <Alert tone="info">{message}</Alert>}
-            {can.earlyClose&&data.earlyClosure&&<Card className="space-y-2"><h2 className="font-semibold">Close work order at current stage</h2>{data.earlyClosure.blocked.length?<p className="text-sm text-soft">Committed PO: {data.earlyClosure.blocked.join(', ')}. Complete procurement and normal closure.</p>:<><p className="text-sm text-soft">{data.earlyClosure.started?'Record and reconcile actual work, then obtain safety sign-off. Unstarted tasks will remain unperformed.':'Unstarted scope will remain unperformed. Uncommitted maintenance purchase requirements and reservations will be released.'}</p>{data.earlyClosure.started&&!data.earlyClosure.requested?<Button variant="secondary" onClick={()=>open('prepare_early_close')}>Request early closure</Button>:<Button variant="secondary" onClick={()=>open('early_close')}>Close work order early</Button>}</>}</Card>}
+            {can.earlyClose&&data.earlyClosure&&<Card className="space-y-2"><h2 className="font-semibold">Close work order at current stage</h2>{data.earlyClosure.blocked.length?<p className="text-sm text-soft">Committed PO: {data.earlyClosure.blocked.join(', ')}. Complete procurement and normal closure.</p>:<><p className="text-sm text-soft">{data.earlyClosure.started?'Record and reconcile actual work, then obtain safety sign-off. Unstarted tasks will remain unperformed.':'Unstarted scope will remain unperformed. Uncommitted maintenance purchase requirements and reservations will be released.'}</p>{data.earlyClosure.started?(data.earlyClosure.requested?<p className="text-sm font-medium">Early closure requested. Complete actual feedback, reconciliation and safety sign-off below.</p>:<Button variant="secondary" onClick={()=>open('prepare_early_close')}>Request early closure</Button>):<Button variant="secondary" onClick={()=>open('early_close')}>Close work order early</Button>}</>}</Card>}
             {wo.closureMode==='early'&&<Card className="space-y-1"><p className="font-semibold">Closed early · {wo.earlyClosure?.outcome==='not_started'?'Work not started':'Work stopped'}</p><p className="text-sm">{wo.earlyClosure?.note}</p><p className="text-xs text-soft">Unperformed tasks: {wo.earlyClosure?.skippedTaskIds?.length||0}</p></Card>}
             <div className="flex flex-wrap gap-2">
-                {can.cancel && (
+                {can.cancel && !can.earlyClose && (
                     <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('cancel_order')}>
                         Cancel work order
                     </Button>
@@ -1142,14 +1142,14 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     ].map(([label, v]) => (
                         <div key={label} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2">
                             <p className="font-semibold">{label}</p>
-                            <p className="mt-1 text-soft">{v ? `${v.name} · ${new Date(v.at).toLocaleString()}` : 'Pending'}</p>
+                            <p className="mt-1 text-soft">{v ? `${v.name} · ${new Date(v.at).toLocaleString()}` : ['closed','cancelled'].includes(wo.status)&&wo.earlyClosure?.outcome==='not_started'?'Not applicable — no work performed':'Pending'}</p>
                         </div>
                     ))}
                 </div>}
                 <div className="flex flex-wrap gap-2">
                     {can.safety && wo.status!=='closed' && (
                         <>
-                            {!data.windowClosureManaged&&(!retrospective||wo.directCompletion?.reportedWork)&&<Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => wo.safetySignoff?run('safety_signoff',{}):open('safety_signoff')}>{wo.safetySignoff?'Close work order':'Safety sign-off & close'}</Button>}
+                            {can.signoff&&!data.windowClosureManaged&&(!retrospective||wo.directCompletion?.reportedWork)&&<Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => wo.safetySignoff?run('safety_signoff',{}):open('safety_signoff')}>{wo.safetySignoff?'Close work order':'Safety sign-off & close'}</Button>}
                             <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('report_incident')}>
                                 Report incident / near miss
                             </Button>

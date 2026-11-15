@@ -2076,6 +2076,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         if(['closed','cancelled'].includes(str(wo.data.status)))for(const k of ['reconcile','assess','reviewAssessment','plan','execute','safety','close'])permissions[k]=false;
         if(str(wo.data.status)!=='planning'||object(wo.data.assessmentReview).status==='approved'||Object.keys(object(wo.data.taskPlanning)).length)permissions.assess=false;
         if(object(wo.data.assessmentReview).status==='approved')permissions.reviewAssessment=false;
+        permissions.signoff=permissions.safety===true&&wo.data.workflowCode==='WO200';
         permissions.cancel =
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
             !object(wo.data.earlyClosureRequest).at&&!earlyExecutionStarted(wo)&&!earlyCheck?.blocked.length&&canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));

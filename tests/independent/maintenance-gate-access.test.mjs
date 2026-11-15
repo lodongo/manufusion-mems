@@ -10,11 +10,12 @@ const route = (path, permission = 'MNT.view') => ({ method: 'POST', path, name: 
 test('maintenance steps run through shared action routes are live with the permission each step enforces', () => {
   const rows = transactionCatalogue([], [route('/api/org/mnt/wr/action'), route('/api/org/mnt/wo/action'), route('/api/org/mnt/operations'), route('/api/org/mnt/siv/issue', 'INV.issue')]);
   const by = new Map(rows.map((r) => [r.code, r]));
-  for (const [code, perm] of [['MNT-WRQ-CL', 'MNT.WR.close'], ['MNT-WRQ-AP', 'MNT.WR.closeConfirm'], ['MNT-WOR-SB', 'MNT.WO.plan'], ['MNT-WIN-CR', 'MNT.WO.schedule'], ['MNT-WRQ-AP', 'MNT.WR.convert'], ['MNT-WRQ-RJ', 'MNT.WR.decline'], ['MNT-WRQ-RT', 'MNT.WR.return'], ['MNT-ASS-AP', 'MNT.assessment.review'], ['MNT-WOR-CL', 'MNT.WO.close'], ['MNT-WOR-CN', 'MNT.WO.cancel'], ['MNT-WOR-RV', 'MNT.WO.reopen'], ['MNT-WOR-PS', 'INV.issue']]) {
+  for (const [code, perm] of [['MNT-WRQ-CL', 'MNT.WR.close'], ['MNT-WRQ-AP', 'MNT.WR.review'], ['MNT-WOR-SB', 'MNT.WO.plan'], ['MNT-WIN-CR', 'MNT.WO.schedule'], ['MNT-WRQ-AP', 'MNT.WR.convert'], ['MNT-WRQ-RJ', 'MNT.WR.decline'], ['MNT-WRQ-RT', 'MNT.WR.return'], ['MNT-ASS-AP', 'MNT.assessment.review'], ['MNT-WOR-CL', 'MNT.WO.close'], ['MNT-WOR-CL', 'MNT.WO.safety'], ['MNT-WOR-CN', 'MNT.WO.cancel'], ['MNT-WOR-PS', 'INV.issue']]) {
     assert.equal(by.get(code).state, 'live', code);
     assert.ok(by.get(code).permissions.includes(perm), `${code} carries ${perm}`);
     assert.ok(!by.get(code).permissions.includes('MNT.view'), `${code}: opening the shared route is not the step's right`);
   }
+  assert.ok(!rows.some(r => r.state === 'live' && r.permissions.some(p => ['MNT.WR.closeConfirm','MNT.WO.reopen','MNT.WO.verify'].includes(p))));
   // A step whose route is not installed stays reserved.
   assert.equal(by.get('MNT-WRQ-CR').state, 'reserved');
   for (const links of Object.values(ACTION_LINKS)) for (const l of links) assert.match(l.route, /^POST \/api\/org\//);
