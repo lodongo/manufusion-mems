@@ -453,6 +453,8 @@ function FeedbackForm({ task, execution, wo, onSubmit }: { task: MntData; execut
                 <details className="rounded-xl border border-line p-3"><summary className="cursor-pointer text-sm font-medium">Additional technical details (optional)</summary>
                     {([['findings','Technical findings'],['results','Actual work results'],['measurements','Measurements'],['evidence','Execution evidence / reference']] as const).map(([k,l])=><MntField key={k} label={l} value={f[k]} multiline onChange={v=>patch(k,v)}/>)}
                     <MntField label="Outstanding work / follow-up (if any)" value={f.followUp} multiline onChange={v=>patch('followUp',v)}/>
+                    <label className="block text-sm">Execution quality (optional)<select className={mntInput} value={f.qualityOutcome||'not_assessed'} onChange={e=>patch('qualityOutcome',e.target.value)}><option value="not_assessed">Not assessed</option><option value="first_pass">Accepted first pass</option><option value="rework_completed">Rework completed</option><option value="follow_up">Follow-up required</option></select></label>
+                    {['rework_completed','follow_up'].includes(f.qualityOutcome)&&<MntField label="Rework / follow-up description" value={f.qualityNote} multiline onChange={v=>patch('qualityNote',v)}/>}
                 </details>
             </>}
             {retrospective?<><MntCheck label="I confirm no spare parts or external services were used." value={!!f.noSparesOrServicesConfirmed} onChange={v=>patch('noSparesOrServicesConfirmed',v)}/></>:null}

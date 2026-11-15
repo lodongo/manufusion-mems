@@ -11,6 +11,7 @@ import {bookedHours,type TimeBooking} from './maintenanceTimeCore';
 import {maintenanceStandardHistoryRoutes} from './maintenanceStandardHistory';
 import {maintenanceWorkforceCalendarRoutes} from './maintenanceWorkforceCalendar';
 import {maintenanceTimesheetRoutes,toSheetEntry} from './maintenanceTimesheet';
+import {maintenanceWorkforceReportRoutes} from './maintenanceWorkforceReports';
 import {reconcileDay} from './maintenanceTimesheetCore';
 import {dateAdd} from './maintenanceAnalyticsCore';
 const rows=(v:unknown)=>Array.isArray(v)?v.filter(isObj):[];
@@ -65,6 +66,7 @@ export const maintenanceCapacityRoutes={
  ...maintenanceStandardHistoryRoutes,
  ...maintenanceWorkforceCalendarRoutes,
  ...maintenanceTimesheetRoutes,
+ ...maintenanceWorkforceReportRoutes,
  'POST /api/org/mnt/workforce/recommend':[orgRoute('org.mnt.workforce.recommend','MNT.view',async ctx=>{
  enabled(ctx);const code=str(ctx.body.code),taskId=str(ctx.body.taskId),start=Date.parse(str(ctx.body.start)),end=Date.parse(str(ctx.body.end));if(!/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(code)||!Number.isFinite(start)||!Number.isFinite(end)||end<=start||end-start>72*3600000)throw new HttpError(400,'Select a work order and proposed interval of up to 72 hours.');
  const wo=await getDoc(root(ctx)+'/work_orders/'+code);if(!wo||!canAt(ctx,'MNT.WO.plan',texts(wo.data.path),await scopeOf(ctx)))throw new HttpError(403,'Scoped planning authority is required.');const t=rows(wo.data.assessmentTasks).find(t=>t.id===taskId);if(!t)throw new HttpError(404,'Activity not found.');
