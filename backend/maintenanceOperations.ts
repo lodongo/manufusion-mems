@@ -1494,6 +1494,8 @@ async function ensureClosureResources(ctx:OrgContext,wo:Doc){
         for(const service of rows(task.services)){
             const f=rows(object(e.feedback).services).find(x=>x.id===service.id),report=object(reports[str(service.id)]);
             if(!f||f.accepted!==true||!str(report.path).startsWith(root(ctx)+'/mnt/service_reports/'+wo.id+'/'))throw new HttpError(409,'Complete service feedback and attach the service report: '+str(service.description));
+            const servicePlan=object(plan[str(service.id)]),po=orders.find(x=>x.id===servicePlan.poId);
+            if(!po||!rows(po.data.receipts).some(receipt=>receipt.status==='accepted'))throw new HttpError(409,'Complete procurement service acceptance for '+str(service.description)+'.');
         }
     }
 }
@@ -1512,7 +1514,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     if(wo.data.status==='closed'&&!['technical_close','report_incident','clear_incident'].includes(action))throw new HttpError(409,'A closed work order cannot be reopened or modified.');
     if(action==='upload_service_report'){
         await authority(ctx,wo,'MNT.WO.execute','MNT.TASK.FEEDBACK');
-        if(!task||!['in_progress','blocked','completed'].includes(str(e.status))||!texts(e.performers).includes(ctx.uid)&&!bypass(ctx,'mnt.task.execution_team'))throw new HttpError(403,'Only the allocated execution team can upload the completed service report.');
+        if(!task||!['in_progress','blocked','awaiting_feedback','completed'].includes(str(e.status))||!texts(e.performers).includes(ctx.uid)&&!bypass(ctx,'mnt.task.execution_team'))throw new HttpError(403,'Only the allocated execution team can upload the completed service report.');
         const service=rows(task.services).find(s=>s.id===b.serviceId);
         if(!service)throw new HttpError(400,'Choose a service on this task.');
         const data=str(b.data);if(data.length>2_000_000)throw new HttpError(400,'Service report exceeds 1.5 MB.');const buffer=Buffer.from(data,'base64');
@@ -1543,7 +1545,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             return {ok:true};
         }
     }
-    if (['start_task', 'block_task', 'complete_task', 'confirm_consumption', 'reconcile_task'].includes(action)) {
+    if (['start_task', 'block_task','finish_task_execution', 'complete_task', 'confirm_consumption', 'reconcile_task'].includes(action)) {
         if (action === 'reconcile_task') {
             await authority(ctx, wo, 'MNT.view', 'MNT.SPARES.RECONCILE');
         } else if(!outsideExecutionAccess(ctx.workGroupPolicy,wo,str(b.taskId)))await authority(ctx, wo, 'MNT.WO.execute', 'MNT.TASK.FEEDBACK');
@@ -1558,6 +1560,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         }
         if (e.status === 'completed') throw new HttpError(409, 'Completed task history is immutable.');
         if (action === 'start_task') {
+            if(e.status==='awaiting_feedback'||e.status==='in_progress')throw new HttpError(409,'This task is already started or physically finished.');
             const selected = rows(w.data.tasks).find((t) => t.woCode === wo.id && t.taskId === task.id)!;
             for (const dependency of texts(selected.dependencies)) {
                 const s = rows(w.data.tasks).find((s) => s.id === dependency)!;
@@ -1615,10 +1618,15 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             ]);
             return { ok: true };
         }
-        if (!['in_progress', 'blocked'].includes(str(e.status)))
+        if (!['in_progress', 'blocked','awaiting_feedback'].includes(str(e.status)))
             throw new HttpError(409, 'Start the task before recording execution results.');
         if (!texts(e.performers).includes(ctx.uid) && !bypass(ctx, 'mnt.task.execution_team')) throw new HttpError(403, 'Only this task execution team may record feedback.');
+        if(action==='finish_task_execution'){
+            if(e.status!=='in_progress')throw new HttpError(409,'Only an active task can be marked physically complete.');
+            await saveWo(ctx,wo,{taskExecution:{...executions,[str(task.id)]:{...e,status:'awaiting_feedback',physicalFinishedAt:nowIso(),physicalFinishedBy:ctx.uid}}},'task.physical_execution_finished',str(task.id));return {ok:true};
+        }
         if (action === 'block_task') {
+            if(e.status==='awaiting_feedback')throw new HttpError(409,'Physical execution has finished; record feedback instead.');
             await saveWo(
                 ctx,
                 wo,
@@ -1902,6 +1910,12 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
                 ]);
         }
         return { ok: true };
+    }
+    if(action==='return_to_planning'){
+        await authority(ctx,wo,'MNT.WO.plan','MNT.WO.PLAN');
+        if(wo.data.status!=='released'||Object.values(executions).some(x=>object(x).startedAt)||Object.keys(object(wo.data.taskWindows)).length)throw new HttpError(409,'Remove unstarted work from its window before returning to planning.');
+        const reason=requiredText(b.note,'Reason for returning to planning',10);
+        await saveWo(ctx,wo,{status:'planning',readiness:null,scheduleLock:null},'plan.returned_for_update',reason);return {ok:true};
     }
     if (action === 'reassess') {
         await authority(ctx, wo, 'MNT.WO.plan', 'MNT.WO.PLAN');

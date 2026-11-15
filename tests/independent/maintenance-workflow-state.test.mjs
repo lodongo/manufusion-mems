@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {stateOf,transitionPatch,WO_STATES} from '../../backend/maintenanceWorkflowState.ts';
+import test from 'node:test';import assert from 'node:assert/strict';import {stateOf,transitionPatch,WO_STATES,shortWorkOrderStatus} from '../../backend/maintenanceWorkflowState.ts';
 const task={id:'T',persons:2,externalResource:{type:'OEM'}},d={status:'planning',assessmentTasks:[task],assessmentTasksVersion:1,assessmentTasksAt:'2026-01-01',taskPlanning:{}};
 test('order-first and priority-driven blocker sequence',()=>{
 assert.equal(stateOf({status:'planning'},{}).code,'WO010');
@@ -19,3 +19,5 @@ assert.equal(closed.workflowTransitions.length,2);assert.equal(closed.workflowTr
 assert.equal(stateOf({status:'in_progress',executionMode:'request_closure',wrCode:'WR00000001',directCompletion:{requestCode:'WR00000001',noSparesOrServices:true},assessmentTasks:[{id:'T'}]},{}).code,'WO170');
 assert.equal(new Set(WO_STATES.map(x=>x[0])).size,WO_STATES.length);
 });
+
+test('mnemonic state codes are unique and closure blockers precede final sign-off',()=>{assert.equal(shortWorkOrderStatus('WO010'),'DWA');assert.equal(new Set(WO_STATES.map(x=>shortWorkOrderStatus(x[0]))).size,WO_STATES.length);const task={id:'T'},record={status:'completed',assessmentTasks:[task],taskExecution:{T:{status:'completed',reconciled:true}}};assert.equal(stateOf(record,{closureResource:{code:'WO186',reason:'Spare not posted'}}).code,'WO186');assert.equal(stateOf(record,{closureResource:{code:'WO187',reason:'Service acceptance pending'}}).code,'WO187');assert.equal(stateOf({...record,status:'in_progress',taskExecution:{T:{status:'awaiting_feedback'}}},{}).code,'WO170');});

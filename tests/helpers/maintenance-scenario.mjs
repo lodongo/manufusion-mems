@@ -765,6 +765,8 @@ await op('ops', 'handover', {
     restrictions: 'None',
 });
 await assert.rejects(() => op('planner', 'technical_close', { code: wo, note: 'Attempt unauthorized closure.' }), /configured/);
+await assert.rejects(()=>op('manager','technical_close',{code:wo,note:'All tasks, material reconciliation, BOM, safety and handover reviewed.'}),/service acceptance/i);
+const servicePoPath=r+'/procurement_orders/PO00000001-V1';seed(servicePoPath,{...snapshot(servicePoPath).data,receipts:[{status:'accepted'}]});
 await op('manager', 'technical_close', { code: wo, note: 'All tasks, material reconciliation, BOM, safety and handover reviewed.' });
 assert.equal(snapshot(r + '/work_orders/' + wo).data.status, 'closed');
 assert.equal(snapshot(r + '/work_orders/' + wo).data.technicalClosure.by, people.manager[0]);
@@ -1183,6 +1185,9 @@ assert.equal(snapshot(r+'/work_requests/'+directClose.code).data.status,'closed'
 const parentBefore=structuredClone(snapshot(r+'/work_orders/'+fastWo).data);
 const sub=await route(maintenanceRoutes,'/api/org/mnt/wo/action','manager',{code:fastWo,action:'create_break_in',title:'Additional guard work',description:'Investigate additional mounting concern.',scheduledStart:date,scheduledEnd:date});
 const subData=snapshot(r+'/work_orders/'+sub.woCode).data;
+assert.equal(sub.woCode,fastWo+'_1');assert.equal(subData.subOrderSequence,1);
+const sub2=await route(maintenanceRoutes,'/api/org/mnt/wo/action','manager',{code:fastWo,action:'create_break_in',title:'Second follow-up',description:'Additional maintenance scope found.',scheduledStart:date,scheduledEnd:date});
+assert.equal(sub2.woCode,fastWo+'_2');
 assert.equal(subData.parentWoCode,fastWo);assert.equal(subData.wrCode,directClose.code);assert.equal(subData.maintenanceTypeCode,'MAI-016');assert.equal(subData.status,'planning');assert.deepEqual(snapshot(r+'/work_orders/'+fastWo).data,parentBefore);
 const repeat = await createNewWorkRequest({ title:'Same conveyor fault reported twice', description:'Duplicate request on the conveyor drive.' });
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:repeat.code,action:'start_review'});

@@ -828,6 +828,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     </Button>
                 )}
 
+                {can.plan&&wo.status==='released'&&<Button variant="secondary" onClick={()=>open('return_to_planning')}>Return to planning / change dates</Button>}
                 {can.plan &&
                     tasks.length > 0 &&
                     ['planning','plan_ready','released'].includes(wo.status) &&
@@ -1066,19 +1067,18 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                 {can.execute && !wo.safetySignoff && !['closed', 'cancelled'].includes(wo.status) && (
                                     <div className="flex flex-wrap gap-2">
                                         {retrospective&&execution.status==='awaiting_feedback'&&<Button testOverride={!!data.testModeOverride} onClick={()=>open('feedback')}>Confirm actual work feedback</Button>}
-                                        {!retrospective&&execution.status !== 'completed' && (
+                                        {!retrospective&&(!execution.status||execution.status==='blocked') && (
                                             <Button testOverride={!!data.testModeOverride} busy={busy} onClick={() => run('start_task', { taskId: task.id })}>
                                                 {execution.status === 'blocked' ? 'Resume task' : 'Start task'}
                                             </Button>
                                         )}
-                                        {['in_progress', 'blocked'].includes(execution.status) && (
+                                        {!retrospective&&execution.status==='in_progress'&&<Button testOverride={!!data.testModeOverride} variant="secondary" busy={busy} onClick={()=>run('finish_task_execution',{taskId:task.id})}>Physical work complete</Button>}
+                                        {!retrospective&&['in_progress', 'blocked','awaiting_feedback'].includes(execution.status) && (
                                             <>
                                                 <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('feedback')}>
                                                     Record completion feedback
                                                 </Button>
-                                                <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('block_task')}>
-                                                    Mark blocked
-                                                </Button>
+                                                {execution.status!=='awaiting_feedback'&&<Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('block_task')}>Mark blocked</Button>}
                                             </>
                                         )}
                                         {execution.status === 'completed' && !execution.reconciled && (

@@ -11,10 +11,10 @@ export const WO_STATES=[
  ['WO130','Awaiting scheduling'],['WO140','Awaiting window authorization / safety prerequisites'],
  ['WO150','Awaiting execution'],['WO160','Execution in progress'],['WO165','Execution blocked'],
  ['WO170','Awaiting execution feedback'],['WO180','Awaiting spares reconciliation'],
- ['WO190','Awaiting incident clearance'],['WO200','Awaiting safety sign-off'],['WO210','Awaiting operations handover'],
- ['WO185','Awaiting service feedback / report'],['WO186','Awaiting outstanding spare receipt / posting'],['WO187','Awaiting service acceptance'],['WO220','Awaiting technical closure'],['WO900','Technically closed'],['WO990','Cancelled']
+ ['WO186','Awaiting outstanding spare receipt / posting'],['WO185','Awaiting service feedback / report'],['WO187','Awaiting service acceptance'],
+ ['WO190','Awaiting incident clearance'],['WO200','Awaiting safety sign-off'],['WO210','Awaiting operations handover'],['WO220','Awaiting technical closure'],['WO900','Technically closed'],['WO990','Cancelled']
 ] as const;
-export const WO_STATUS_SHORT:Record<string,string>={WO010:'DWA',WO020:'DAA',WO030:'DWS',WO040:'DSE',WO050:'DXS',WO060:'DIL',WO070:'DTC',WO080:'DRR',WO090:'DPD',WO100:'DCS',WO110:'DCA',WO120:'DRC',WO130:'DWSCH',WO140:'DWP',WO150:'DWE',WO160:'EXE',WO165:'DEB',WO170:'DWF',WO180:'DSR',WO185:'DSF',WO186:'DGR',WO187:'DSA',WO190:'DIC',WO200:'DSS',WO210:'DOH',WO220:'DWC',WO900:'CLSD',WO990:'CANC'};
+export const WO_STATUS_SHORT:Record<string,string>={WO010:'DWA',WO020:'DAA',WO030:'DWS',WO040:'DSE',WO050:'DXS',WO060:'DIL',WO070:'DTC',WO080:'DRR',WO090:'DPD',WO100:'DCS',WO110:'DCA',WO120:'DRC',WO130:'DSH',WO140:'DWP',WO150:'DWE',WO160:'EXE',WO165:'DEB',WO170:'DWF',WO180:'DSR',WO185:'DSF',WO186:'DGR',WO187:'DSA',WO190:'DIC',WO200:'DSS',WO210:'DOH',WO220:'DWC',WO900:'CLSD',WO990:'CANC'};
 export const shortWorkOrderStatus=(code:string)=>WO_STATUS_SHORT[code]||code;
 export type StateCode=typeof WO_STATES[number][0];
 export type FactSet={approved?:boolean;items?:Obj[];checklist?:Obj[];costStatus?:string;windowStatus?:'missing'|'blocked'|'ready';openIncident?:boolean;closureResource?:{code:'WO185'|'WO186'|'WO187'|'WO180';reason:string}};
@@ -44,6 +44,7 @@ export function stateOf(d:Obj,f:FactSet):{code:StateCode;label:string;reason:str
  if(pending.length){
   if(pending.some(t=>object(exec[str(t.id)]).status==='in_progress'))return make('WO160');
   if(pending.some(t=>object(exec[str(t.id)]).status==='blocked'))return make('WO165','Resolve recorded task block');
+  if(pending.some(t=>object(exec[str(t.id)]).status==='awaiting_feedback'&&rows(t.services).some(s=>!str(object(object(object(d.serviceReports)[str(t.id)])[str(s.id)]).path))))return make('WO185','Attach outstanding external service reports');
   if(pending.some(t=>object(exec[str(t.id)]).status==='awaiting_feedback'))return make('WO170','Record completed work feedback');
   if(f.windowStatus==='missing')return make('WO130','Schedule remaining tasks');
   if(f.windowStatus==='blocked')return make('WO140');
