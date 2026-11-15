@@ -1905,7 +1905,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
                 throw new HttpError(409, 'Link a cleared safety incident for this work order.');
         }
         const signoff=previousSignoff.at?previousSignoff:{declaration:str(b.declaration),noIncidentsConfirmed:b.noIncidentsConfirmed===true,statement:b.declaration==='none'?'No safety incidents or near misses occurred during this maintenance activity.':str(b.narrative),incidentId:str(b.incidentId),note:str(b.note).trim(),by:ctx.uid,name:name(ctx),at:nowIso()};
-        const signed={...wo,data:{...wo.data,safetySignoff:signoff}};
+        const signed:Doc={...wo,data:{...wo.data,safetySignoff:signoff}};
         if(object(wo.data.earlyClosureRequest).at)return earlyClose(ctx,signed,false,true);
         closurePrerequisites(signed.data);await ensureClosureResources(ctx,signed);
         if(technicalClosureApprovalRequired(signed.data)||object(signed.data.technicalClosurePending).at){
