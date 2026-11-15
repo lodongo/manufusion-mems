@@ -1511,7 +1511,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         task = tasksOf(wo).find((t) => t.id === str(b.taskId)),
         e = object(executions[str(b.taskId)]);
     const retrospective=isRequestClosureOrder(wo.data);
-    if(wo.data.status==='closed'&&!['technical_close','report_incident','clear_incident'].includes(action))throw new HttpError(409,'A closed work order cannot be reopened or modified.');
+    if(['closed','cancelled'].includes(str(wo.data.status))&&!(wo.data.status==='closed'&&['technical_close','report_incident','clear_incident'].includes(action)))throw new HttpError(409,'A closed work order cannot be reopened or modified.');
     if(action==='upload_service_report'){
         await authority(ctx,wo,'MNT.WO.execute','MNT.TASK.FEEDBACK');
         if(!task||!['in_progress','blocked','awaiting_feedback','completed'].includes(str(e.status))||!texts(e.performers).includes(ctx.uid)&&!bypass(ctx,'mnt.task.execution_team'))throw new HttpError(403,'Only the allocated execution team can upload the completed service report.');
@@ -2077,7 +2077,8 @@ export async function maintenanceOperations(ctx: OrgContext) {
         permissions.createBreakIn=permissions.close===true&&['completed','verified','closed'].includes(str(wo.data.status));
         if(retrospective&&['completed','closed'].includes(str(wo.data.status))){try{await authority(ctx,wo,'MNT.WO.close','MNT.WO.TECHNICAL_CLOSE');permissions.createBreakIn=true;}catch{/* restricted */}}
         if(['closed','cancelled'].includes(str(wo.data.status)))for(const k of ['reconcile','assess','reviewAssessment','plan','execute','safety','handover','close'])permissions[k]=false;
-        if(object(wo.data.assessmentReview).status==='approved'||Object.keys(object(wo.data.taskPlanning)).length)permissions.assess=false;
+        if(str(wo.data.status)!=='planning'||object(wo.data.assessmentReview).status==='approved'||Object.keys(object(wo.data.taskPlanning)).length)permissions.assess=false;
+        if(object(wo.data.assessmentReview).status==='approved')permissions.reviewAssessment=false;
         permissions.cancel =
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
             canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));

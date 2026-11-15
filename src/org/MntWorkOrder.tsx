@@ -418,7 +418,7 @@ function ResourceForm({
 function FeedbackForm({ task, execution, wo, onSubmit }: { task: MntData; execution: MntData; wo:MntData; onSubmit: (d: MntData) => void }) {
     const [reportNames,setReportNames]=useState<MntData>(wo.serviceReports?.[task.id]||{}),[uploadError,setUploadError]=useState(''),[uploading,setUploading]=useState(false);
     const upload=async(serviceId:string,file:File)=>{setUploading(true);setUploadError('');try{if(file.size>1500000)throw Error('PDF report must be at most 1.5 MB.');const data=await new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});await mntApi({code:wo.code,action:'upload_service_report',taskId:task.id,serviceId,data,filename:file.name});setReportNames(old=>({...old,[serviceId]:{filename:file.name}}));}catch(e){setUploadError(e instanceof Error?e.message:'Upload failed');}finally{setUploading(false);}};
-    const retrospective=execution.status==='awaiting_feedback';
+    const retrospective=wo.executionMode==='request_closure';
     const setup=useLoad(()=>retrospective?Promise.resolve(null):callBackend<MntSetup>('/api/org/mnt/setup',{}),[retrospective]);
     const today=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
     const [f, setF] = useState<MntData>({ ...(retrospective?{workPerformed:execution.reportedWork,actualHours:Number(execution.actualMinutes)/60}:{closureFieldsVersion:1,failureModeCode:wo.failureModeCode||wo.natureCode||'',causeCode:wo.causeCode||'',solutionCodes:(wo.solutions||[]).map((s:MntData)=>s.code),dateClosed:today,durationMinutes:''}),services: (task.services || []).map((s: MntData) => ({ id: s.id, accepted: false })) });

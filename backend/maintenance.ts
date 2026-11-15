@@ -2231,6 +2231,7 @@ export const maintenanceRoutes = {
                 }
                 case 'review_assessment':
                 case 'return_assessment': {
+                    if(object(d.assessmentReview).status==='approved')throw new HttpError(409,'Approved assessment is locked. Open controlled reassessment for changes.');
                     if(str(d.status)!=='planning')throw new HttpError(409,'Assessment review must occur before planning submission.');
                     need(ctx,P.assessment_review,pathOf(doc),scope);
                     const role=await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));

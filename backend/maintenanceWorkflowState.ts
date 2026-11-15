@@ -51,9 +51,9 @@ export function stateOf(d:Obj,f:FactSet):{code:StateCode;label:string;reason:str
   return make('WO150');
  }
  if(tasks.some(t=>object(exec[str(t.id)]).reconciled!==true))return make('WO180');
+ if(f.openIncident)return make('WO190');
  if(f.closureResource)return make(f.closureResource.code,f.closureResource.reason);
  if(tasks.some(t=>rows(t.services).some(s=>!rows(object(object(exec[str(t.id)]).feedback).services).some(v=>v.id===s.id&&v.accepted===true)||!str(object(object(object(d.serviceReports)[str(t.id)])[str(s.id)]).path))))return make('WO185','Complete service feedback and attach reports');
- if(f.openIncident)return make('WO190');
  if(!object(d.safetySignoff).at)return make('WO200');
  if(!object(d.handover).at||object(d.handover).accepted!==true)return make('WO210');
  return make('WO220');
