@@ -59,3 +59,5 @@ test('initial request review is assigned by the operational workflow and securit
  assert.equal(gate?.ready,false);
  assert.equal(maintenanceGateReadiness({'MNT.WR.REVIEW':'ASSESS'}).find(g=>g.code==='MNT.WR.REVIEW')?.ready,true);
 });
+
+test('obsolete role mappings can be removed without deleting active or legacy conversion configuration',async()=>{const {currentMaintenanceMappings}=await import('../../backend/maintenanceWorkflowConfig.ts');assert.deepEqual(currentMaintenanceMappings({'MNT.HANDOVER':'O','MNT.WO.TECHNICAL_CLOSE':'T','MNT.SAFETY.SIGNOFF':'S','MNT.WR.CONVERT':'P'}),{'MNT.SAFETY.SIGNOFF':'S','MNT.WR.CONVERT':'P'});});

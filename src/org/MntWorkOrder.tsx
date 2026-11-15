@@ -1295,7 +1295,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                     onChange={(v) => setForm({ ...form, confirm: v })}
                                 />
                             )}
-                            {dialog.kind !== 'report_incident' && dialog.kind !== 'handover' && (
+                            {dialog.kind !== 'report_incident' && (
                                 <MntField
                                     label="Review notes / reason"
                                     value={form.note}

@@ -1,18 +1,18 @@
 import {getDoc,listDocs,isObj,str,nowIso,type Doc} from './core';
-import {MNT_ACTIVITIES} from './maintenanceActivities';
-import {MAINTENANCE_GATES} from './maintenanceWorkflowConfig';
+import {CURRENT_MNT_ACTIVITIES as MNT_ACTIVITIES} from './maintenanceActivities';
+import {MAINTENANCE_GATES,currentMaintenanceMappings} from './maintenanceWorkflowConfig';
 
 export const WORK_GROUP_TITLES=['Maintenance Lead','Maintenance Planner','Maintenance Clerk','Maintenance Specialist','Maintenance Technician','Operator'] as const;
 const [L,P,C,S,T,O]=WORK_GROUP_TITLES;
-export const externalGates=new Set(['MNT.MAT.CREATE','MNT.SPARES.RESERVE','MNT.SHORTAGE.SOURCE','MNT.WO.COST','MNT.SAFETY.SIGNOFF','MNT.HANDOVER']);
-export const externalPermissions=new Set(['MNT.admin','MNT.WO.costApprove','MNT.WO.safety','MNT.WO.verify','MNT.view','MNT.activities.view']);
+export const externalGates=new Set(['MNT.MAT.CREATE','MNT.SPARES.RESERVE','MNT.SHORTAGE.SOURCE','MNT.WO.COST','MNT.SAFETY.SIGNOFF']);
+export const externalPermissions=new Set(['MNT.admin','MNT.WO.costApprove','MNT.WO.safety','MNT.view','MNT.activities.view']);
 const sharedRequestRights=new Set(['MNT.WR.create','MNT.WR.edit','MNT.WR.cancel']);
 export const managedPermissions=new Set(MNT_ACTIVITIES.map(a=>a.key).filter(k=>!externalPermissions.has(k)&&!sharedRequestRights.has(k)));
 const managedGates=new Set(MAINTENANCE_GATES.filter(g=>g.status==='existing'&&!externalGates.has(g.code)&&g.mode!=='automated').map(g=>g.code));
 export const DEFAULT_WORK_GROUP_TASKS:Record<string,string[]>={
  'MNT.WR.CREATE':[L,P,C,S,T,O],'MNT.WR.create':[L,P,C,S,T,O],'MNT.WR.edit':[L,P,C,S,T,O],'MNT.WR.cancel':[L,P,C,S,T,O],
  'MNT.WR.REVIEW':[L,S,T],'MNT.WR.review':[L,S,T],'MNT.WR.CLOSE':[L,S,T],'MNT.WR.close':[L,S,T],
- 'MNT.WR.return':[L,S,T],'MNT.WR.decline':[L,S,T],'MNT.WR.closeConfirm':[L],
+ 'MNT.WR.return':[L,S,T],'MNT.WR.decline':[L,S,T],
  'MNT.WR.ASSESS':[S,T],'MNT.assessment.edit':[S,T],'MNT.ASSESS.REVIEW':[L],'MNT.assessment.review':[L],
  'MNT.TASK.VALIDATE':[L],'MNT.activities.edit':[L,S,T],
  'MNT.WR.CONVERT':[P],'MNT.WR.convert':[P],
@@ -21,7 +21,7 @@ export const DEFAULT_WORK_GROUP_TASKS:Record<string,string[]>={
  'MNT.WINDOW.LOCK':[P],'MNT.WO.schedule':[P],
  'MNT.TASK.FEEDBACK':[S,T,O],'MNT.WO.execute':[S,T,O],
  'MNT.SPARES.RECONCILE':[P,C,S,T],
- 'MNT.WO.close':[L],'MNT.WO.cancel':[L],'MNT.WO.reopen':[L],'MNT.budget.manage':[L,P]
+ 'MNT.WO.close':[L],'MNT.WO.cancel':[L],'MNT.budget.manage':[L,P]
 };
 type Member={uid:string;positionCode:string};
 export type ActiveGroup={id:string;code:string;name:string;siteId:string;version:number;costCenterIds:string[];members:Record<string,Member[]>};
@@ -47,7 +47,8 @@ export function ancestry(nodes:ReadonlyMap<string,Doc>,id:string):string[]{
 }
 export async function loadWorkGroupPolicy(orgId:string,user:Doc):Promise<WorkGroupPolicy|undefined>{
  const doc=await getDoc(activeWorkGroupPath(orgId));if(!doc||!Number(doc.data.version))return undefined;
- const config=doc.data as unknown as ActiveWorkGroups;
+ const stored=doc.data as unknown as ActiveWorkGroups;
+ const config={...stored,tasks:currentMaintenanceMappings(stored.tasks||{})};
  if(!Array.isArray(config.groups)||!config.tasks||!config.roleAlignment)throw Error('Invalid active maintenance work group policy');
  const [positions,nodes]=await Promise.all([listDocs('organizations/'+orgId+'/positions'),listDocs('organizations/'+orgId+'/structure')]);
  const byNode=new Map(nodes.map(n=>[n.id,n]));

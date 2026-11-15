@@ -214,8 +214,9 @@ export async function requireApprovedWindow(ctx: OrgContext, wo: Doc, taskId?: s
 }
 export async function enforceMaintenanceTransition(ctx: OrgContext, wo: Doc, action: string) {
     if(isRequestClosureOrder(wo.data)&&action!=='close')throw new HttpError(409,'Use safety sign-off to close the linked work order. Create a break-in sub-order for additional work.');
-    if (action === 'verify' && ctx.body.result === 'rework')
-        throw new HttpError(409, 'Record a controlled follow-up work request for rework so the completed task history is preserved.');
+    // The task-based engine is authoritative. Old flat-order mutation endpoints cannot bypass it.
+    if(['save_plan','save_safety','start','complete','verify','reopen'].includes(action))
+        throw new HttpError(409,'Use the Work Order task assessment, readiness, execution feedback and safety sign-off. Additional work uses a break-in sub-order.');
     if (action === 'start') await requireApprovedWindow(ctx, wo);
     if (action === 'schedule') throw new HttpError(409, 'Schedule assessed tasks through Maintenance Windows.');
     if (action === 'log_time') throw new HttpError(409, 'Record actual labour hours with the individual task execution feedback.');
@@ -235,7 +236,13 @@ export async function enforceMaintenanceTransition(ctx: OrgContext, wo: Doc, act
         closurePrerequisites(wo.data);
         if(!isRequestClosureOrder(wo.data))for (const t of tasksOf(wo)) await requireApprovedWindow(ctx, wo, str(t.id));
     }
-    if (action === 'cancel') await releaseMaintenanceReservations(ctx, wo.id);
+    if (action === 'cancel') {
+        if(earlyExecutionStarted(wo))throw new HttpError(409,'Record actual work and use early closure after execution starts.');
+        const commitment=await earlyClosureCommitments(ctx,wo);
+        if(commitment.blocked.length)throw new HttpError(409,'Cannot cancel an order with committed purchase order(s): '+commitment.blocked.join(', '));
+        if(commitment.owned.some(r=>!['cancelled','rejected'].includes(str(r.data.status)))||commitment.associated.length)throw new HttpError(409,'Use Close work order at current stage to release linked procurement requirements safely.');
+        await releaseMaintenanceReservations(ctx, wo.id);
+    }
     if (action === 'reopen')
         throw new HttpError(409, 'Closed maintenance history is immutable. Raise a follow-up work request for further work.');
 }
@@ -414,14 +421,15 @@ export async function syncWorkOrderState(ctx:OrgContext,doc:Doc,source='refresh'
     facts.windowStatus='ready';
     for(const t of pending){const tid=str(t.id),win=str(object(object(d.taskExecution)[tid]).windowId)||str(object(d.taskWindows)[tid])||str(d.windowId);if(!win){facts.windowStatus='missing';break;}try{await requireApprovedWindow(ctx,wo,tid);}catch{facts.windowStatus='blocked';}}
   }
-  if(['completed','verified','in_progress'].includes(status)&&tasksOf(wo).length&&tasksOf(wo).every(t=>object(object(d.taskExecution)[str(t.id)]).status==='completed')){
+  if(object(d.earlyClosureRequest).at&&!['closed','cancelled'].includes(status))facts.openIncident=(await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared');
+  if(!object(d.earlyClosureRequest).at&&['completed','verified','in_progress'].includes(status)&&tasksOf(wo).length&&tasksOf(wo).every(t=>object(object(d.taskExecution)[str(t.id)]).status==='completed')){
     facts.openIncident=(await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared');
     if(!isRequestClosureOrder(d)&&tasksOf(wo).every(t=>object(object(d.taskExecution)[str(t.id)]).reconciled===true)){
         try{await ensureClosureResources(ctx,wo);}catch(e){if(!(e instanceof HttpError))throw e;const reason=e.message;facts.closureResource={code:/service report|service feedback/i.test(reason)?'WO185':/service acceptance|service receipt/i.test(reason)?'WO187':/reconcil/i.test(reason)?'WO180':'WO186',reason};}
     }
   }
   const state=stateOf(d,facts),patch=transitionPatch(d,state,nowIso(),source==='refresh'?'SYSTEM':ctx.uid,source==='refresh'?'System observation':name(ctx),source);
-  if(d.workflowCode===patch.workflowCode&&d.workflowReason===patch.workflowReason&&d.workflowSince===patch.workflowSince&&(d.workflowStatusCode===patch.workflowStatusCode||['closed','cancelled'].includes(status)))return wo;
+  if(d.workflowCode===patch.workflowCode&&d.workflowReason===patch.workflowReason&&d.workflowLabel===patch.workflowLabel&&d.workflowSince===patch.workflowSince&&(d.workflowStatusCode===patch.workflowStatusCode||['closed','cancelled'].includes(status)))return wo;
   try{await commit([{path:root(ctx)+'/work_orders/'+wo.id,fields:patch,mask:Object.keys(patch),updateTime:wo.updateTime}]);return {...wo,data:{...d,...patch}};}
   catch(e){const latest=await getDoc(root(ctx)+'/work_orders/'+wo.id);if(!latest||attempt===2)throw e;wo=latest;}
  }
@@ -1082,7 +1090,7 @@ async function windowSave(ctx: OrgContext) {
 }
 
 // Consolidate the existing independent, role-gated order sign-offs without inventing
-// safety or handover evidence. Split-window orders retain the individual closure route.
+// safety evidence. Split-window orders retain the individual closure route.
 function windowClosureSummary(w:Doc,wos:Doc[]) {
     const members=texts(w.data.workOrderIds);
     const orders=members.map(id=>wos.find(x=>x.id===id));
@@ -1090,7 +1098,6 @@ function windowClosureSummary(w:Doc,wos:Doc[]) {
     const fully=orders.filter((wo):wo is Doc=>!!wo);
     return {eligible,ready:eligible&&fully.every(wo=>wo.data.status==='closed'&&wo.data.closureMode==='early'||tasksOf(wo).every(t=>{const e=object(object(wo.data.taskExecution)[str(t.id)]);return e.status==='completed'&&e.reconciled===true;})),
         safety:fully.filter(wo=>wo.data.status==='closed'&&wo.data.closureMode==='early'||!!object(wo.data.safetySignoff).at).length,
-        handover:fully.filter(wo=>wo.data.status==='closed'&&wo.data.closureMode==='early'||!!object(wo.data.handover).at&&object(wo.data.handover).accepted===true).length,
         closed:fully.filter(wo=>wo.data.status==='closed').length,total:members.length};
 }
 async function windowManagedClosure(ctx:OrgContext,wo:Doc){
@@ -1627,7 +1634,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     if(action==='early_close'||action==='prepare_early_close')return earlyClose(ctx,wo,action==='prepare_early_close');
     if(action==='handover')throw new HttpError(409,'Equipment handover is no longer a work order closure step.');
     if(action==='technical_close')throw new HttpError(409,'Technical Manager closure is no longer required. Use safety sign-off.');
-    if(['closed','cancelled'].includes(str(wo.data.status))&&!(wo.data.status==='closed'&&['technical_close','report_incident','clear_incident'].includes(action)))throw new HttpError(409,'A closed work order cannot be reopened or modified.');
+    if(['closed','cancelled'].includes(str(wo.data.status))&&!(wo.data.status==='closed'&&['report_incident','clear_incident'].includes(action)))throw new HttpError(409,'A closed work order cannot be reopened or modified.');
     if(action==='upload_service_report'){
         await authority(ctx,wo,'MNT.WO.execute','MNT.TASK.FEEDBACK');
         if(!task||!['in_progress','blocked','awaiting_feedback','completed'].includes(str(e.status))||!texts(e.performers).includes(ctx.uid)&&!bypass(ctx,'mnt.task.execution_team'))throw new HttpError(403,'Only the allocated execution team can upload the completed service report.');
@@ -1643,7 +1650,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         return {ok:true,filename};
     }
     if(retrospective){
-        if(!['complete_task','safety_signoff','report_incident','clear_incident','handover','technical_close'].includes(action))throw new HttpError(409,'No planning, scheduling, new execution or resource transactions are allowed on work already completed at request review.');
+        if(!['complete_task','safety_signoff','report_incident','clear_incident'].includes(action))throw new HttpError(409,'No planning, scheduling, new execution or resource transactions are allowed on work already completed at request review.');
         if(action==='complete_task'){
             await authority(ctx,wo,'MNT.WO.execute','MNT.TASK.FEEDBACK');
             if(wo.data.status!=='in_progress'||!task||e.status!=='awaiting_feedback'||object(wo.data.safetySignoff).at)throw new HttpError(409,'This retrospective feedback is not pending.');
@@ -1909,7 +1916,11 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     if (action === 'reassess') {
         await authority(ctx, wo, 'MNT.WO.plan', 'MNT.WO.PLAN');
         if (Object.values(executions).some((e) => object(e).startedAt) || !['planning','plan_ready','released'].includes(str(wo.data.status)))
-            throw new HttpError(409, 'Executed history is immutable. Raise a follow-up request to change technical scope.');
+            throw new HttpError(409, 'Executed history is immutable. Create a break-in sub-order for additional scope.');
+        if(Object.keys(object(wo.data.taskWindows)).length||str(wo.data.windowId))throw new HttpError(409,'Remove work from its maintenance window before reassessment.');
+        const currentCommitments=await earlyClosureCommitments(ctx,wo);
+        if(currentCommitments.blocked.length)throw new HttpError(409,'Committed purchase orders prevent reassessment: '+currentCommitments.blocked.join(', '));
+        if(currentCommitments.associated.length||currentCommitments.owned.some(x=>!['cancelled','rejected'].includes(str(x.data.status))))throw new HttpError(409,'Resolve existing purchase requirements before reassessment.');
         const reason = requiredText(b.note, 'Controlled reassessment reason', 10);
         await releaseMaintenanceReservations(ctx, wo.id);
         const revision = Number(wo.data.assessmentTasksVersion) || 1;
@@ -2060,19 +2071,18 @@ export async function maintenanceOperations(ctx: OrgContext) {
             for(const k of ['assess','reviewAssessment','plan','reconcile'])permissions[k]=false;
             permissions.execute=false;
             permissions.safety=permissions.safety===true&&!['closed','cancelled'].includes(str(wo.data.status));
-            permissions.handover=false;
         }
         permissions.earlyClose=permissions.close===true&&!retrospective&&!['closed','cancelled'].includes(str(wo.data.status));
         const earlyCheck=permissions.earlyClose?await earlyClosureCommitments(ctx,wo):null;
         if(object(wo.data.earlyClosureRequest).at){permissions.assess=false;permissions.plan=false;permissions.reviewAssessment=false;permissions.cancel=false;}
         permissions.createBreakIn=permissions.close===true&&['completed','verified','closed'].includes(str(wo.data.status));
         if(retrospective&&['completed','closed'].includes(str(wo.data.status))){try{await authority(ctx,wo,'MNT.WO.close');permissions.createBreakIn=true;}catch{/* restricted */}}
-        if(['closed','cancelled'].includes(str(wo.data.status)))for(const k of ['reconcile','assess','reviewAssessment','plan','execute','safety','handover','close'])permissions[k]=false;
+        if(['closed','cancelled'].includes(str(wo.data.status)))for(const k of ['reconcile','assess','reviewAssessment','plan','execute','safety','close'])permissions[k]=false;
         if(str(wo.data.status)!=='planning'||object(wo.data.assessmentReview).status==='approved'||Object.keys(object(wo.data.taskPlanning)).length)permissions.assess=false;
         if(object(wo.data.assessmentReview).status==='approved')permissions.reviewAssessment=false;
         permissions.cancel =
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
-            canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));
+            !object(wo.data.earlyClosureRequest).at&&!earlyExecutionStarted(wo)&&!earlyCheck?.blocked.length&&canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));
         const users = await runQuery({ from: [{ collectionId: 'users' }], where: fieldEq('orgId', ctx.orgId) });
         const pool=await workGroupResourcePool(ctx.orgId,wo,users);
         const workflow=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
@@ -2191,7 +2201,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 'authorize_window',
                 'safety_prerequisite',
                 'window_report',
-                'window_close_safety','window_close_handover','window_close_final',
+                'window_close_safety',
                 'reject_window',
             ].includes(action)
         )

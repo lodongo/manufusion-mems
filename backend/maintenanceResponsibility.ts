@@ -125,28 +125,29 @@ function wrStage(data:Data,d:Obj,path:string[]):Stage{
 }
 function woStage(data:Data,d:Obj,path:string[]):Stage{
  const s=str(d.status),workflow=str(d.workflowCode),label=str(d.workflowLabel);
+ if(['closed','cancelled'].includes(s))return {label:s==='closed'?'Closed':'Cancelled'};
+ if(workflow==='WO200')return {label:label||'Safety sign-off',gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Safety signatory'};
  if(workflow==='WO010')return {...assess(),label};if(workflow==='WO020')return {...approval(d),label};
- if(['WO030','WO040','WO050','WO060','WO070','WO080','WO090','WO100','WO120'].includes(workflow))return {label,gate:workflow==='WO120'?'MNT.WO.RELEASE':'MNT.WO.PLAN',permission:'MNT.WO.plan'};
- if(workflow==='WO130'||workflow==='WO140')return {label,gate:'MNT.WINDOW.LOCK',permission:'MNT.WO.schedule'};
+ if(['WO030','WO040','WO050','WO060','WO070','WO080','WO090','WO100','WO120'].includes(workflow))return {label,gate:'MNT.WO.PLAN',permission:'MNT.WO.plan'};
+ if(workflow==='WO130'||workflow==='WO140')return {label,gate:groupAt(data.policy,path)?'MNT.WINDOW.LOCK':'MNT.WO.PLAN',permission:'MNT.WO.schedule'};
  if(workflow==='WO186'||workflow==='WO180')return {label,gate:'MNT.SPARES.RECONCILE',permission:'MNT.view'};
  if(workflow==='WO185')return {label,gate:'MNT.TASK.FEEDBACK',permission:'MNT.WO.execute'};
  if(workflow==='WO187')return {label,gate:'MNT.WO.PLAN',permission:'MNT.WO.plan'};
  if(workflow==='WO190')return {label,gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Independent safety clearance'};
- if(['closed','cancelled'].includes(s))return {label:'Completed'};
  if(['planning','plan_ready'].includes(s)){
   if(!currentAssessment(data,d,path))return assessmentStage(data,d,path);
   if(workflow==='WO110'||obj(d.costApproval).status==='pending'){
    const req=data.finance.get(str(obj(d.costApproval).requestId)),step=rows(req?.data.steps).find(x=>x.status==='pending');
    return {label:(label||'Cost approval')+(step?' · '+str(step.level):''),external:true,gate:'MNT.WO.COST',fixedRole:str(step?.positionTitle)||'Finance · Chart of Authority',externalPosition:str(step?.positionCode),exclude:[str(req?.data.makerUid),...rows(req?.data.steps).map(x=>str(x.by))]};
   }
-  return {label:s==='plan_ready'?'Confirm readiness':'Resource planning & readiness',gate:s==='plan_ready'?'MNT.WO.RELEASE':'MNT.WO.PLAN',permission:'MNT.WO.plan'};
+  return {label:s==='plan_ready'?'Confirm readiness':'Resource planning & readiness',gate:'MNT.WO.PLAN',permission:'MNT.WO.plan'};
  }
  if(s==='released')return {label:'Schedule maintenance window',gate:'MNT.WINDOW.LOCK',permission:'MNT.WO.schedule'};
  const tasks=rows(d.assessmentTasks),execution=obj(d.taskExecution),planning=obj(d.taskPlanning);
  const pending=tasks.filter(t=>obj(execution[str(t.id)]).status!=='completed');
  if(['scheduled','in_progress'].includes(s)||s==='completed'&&pending.length){
   const allocated=[...new Set(pending.flatMap(t=>{const e=obj(execution[str(t.id)]);return ids(e.performers).length?ids(e.performers):ids(obj(obj(planning[str(t.id)]).allocation).personnel);} ))];
-  return {label:label||(d.executionMode==='request_closure'?'Confirm completed work feedback':s==='scheduled'?'Execute scheduled tasks':'Task execution & feedback'),gate:'MNT.TASK.FEEDBACK',permission:'MNT.WO.execute',allocated};
+  return {label:label||(d.executionMode==='request_closure'?'Safety sign-off':s==='scheduled'?'Execute scheduled tasks':'Task execution & feedback'),gate:'MNT.TASK.FEEDBACK',permission:'MNT.WO.execute',allocated};
  }
  if(tasks.some(t=>obj(execution[str(t.id)]).reconciled!==true)&&!obj(d.safetySignoff).at)return {label:'Spare parts reconciliation',gate:'MNT.SPARES.RECONCILE',permission:'MNT.view'};
  if(!obj(d.safetySignoff).at)return {label:'Safety sign-off',gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Safety signatory'};

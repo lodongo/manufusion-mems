@@ -4,8 +4,8 @@ import {Alert} from '../components/ui';
 import {Button,Card,PageTitle,Spinner,useLoad} from '../admin/kit';
 import {workspaceNavigate as navigate} from '../lib/route';
 import {suggestGateRoles} from './mntGateSuggest';
-type Gate={code:string;stage:string;label:string;owner:string;permission?:string|null;status:'existing'|'pending_implementation';requires:string[];configuredRole:string;roleRequired:boolean;ready:boolean};
-type Response={gates:Gate[];jobRoles:{id:string;label:string}[];revision:number;configuredAt:string;note:string};
+type Gate={code:string;stage:string;label:string;owner:string;permission?:string|null;status:'existing'|'pending_implementation';requires:string[];configuredRole:string;roleRequired:boolean;ready:boolean;legacyOnly?:boolean};
+type Response={gates:Gate[];jobRoles:{id:string;label:string}[];revision:number;configuredAt:string;note:string;workflowSchema?:number;retiredKeys?:string[]};
 const stages=['request','assessment','conversion','planning','scheduling','execution','closure'];
 export default function MntWorkflowSettings(){
  const {data,error,loading,reload}=useLoad(()=>callBackend<Response>('/api/org/mnt/workflow/configuration'));
@@ -15,7 +15,7 @@ export default function MntWorkflowSettings(){
  const [message,setMessage]=useState('');
  const current=useMemo(()=>roles??Object.fromEntries((data?.gates||[]).map(g=>[g.code,g.configuredRole||''])),[roles,data]);
  useEffect(()=>{setRoles(null);},[data?.revision]);
- const changed=!!data&&data.gates.some(g=>(current[g.code]||'')!==(g.configuredRole||''));
+ const changed=!!data&&(!!data.retiredKeys?.length||data.gates.some(g=>(current[g.code]||'')!==(g.configuredRole||'')));
  const [suggested,setSuggested]=useState<string[]>([]);
  useEffect(()=>{setSuggested([]);},[data?.revision]);
  if(loading&&!data)return <Spinner/>;
@@ -33,10 +33,11 @@ export default function MntWorkflowSettings(){
  };
  return <div className='space-y-4'>
    <button type='button' onClick={()=>navigate('organization_admin/mnt_home')} className='text-sm text-emerald-400 underline'>← Maintenance</button>
-   <PageTitle title='Maintenance workflows & approvals' subtitle='Assign accountable job roles to the operational maintenance workflow'/>
-   <Alert tone='info'>Each stage is enforced by its business handler. Required roles must be configured and assigned at the maintenance location. Changes invalidate earlier window approvals.</Alert>
+   <PageTitle title='Maintenance workflows & approvals' subtitle='Operational responsibility, independent approvals and configuration'/>
+   <Alert tone='info'>Active Work Groups govern maintenance duties at covered cost centers. This screen assigns independent Safety authority and fallback job roles for locations without active groups; Finance cost approvals follow the Chart of Authority. There is no Technical Manager closure or equipment handover approval.</Alert>
+   {!!data.retiredKeys?.length&&<Alert tone='warn'>Obsolete role mappings detected: {data.retiredKeys.join(', ')}. Save with a reason to remove these dormant mappings from the database.</Alert>}
    {(()=>{
-    const required=data.gates.filter(g=>g.roleRequired);
+    const required=data.gates.filter(g=>g.roleRequired&&!g.legacyOnly);
     const missing=required.filter(g=>!current[g.code]);
     const label=(id:string)=>data.jobRoles.find(r=>r.id===id)?.label||id;
     const suggest=()=>{
@@ -48,8 +49,8 @@ export default function MntWorkflowSettings(){
     };
     return <Card>
      <div className='flex flex-wrap items-center justify-between gap-2'>
-      <div><p className='text-sm font-semibold text-white'>{missing.length?`${missing.length} of ${required.length} approval gates have no job role`:`All ${required.length} approval gates have a job role`}</p>
-       <p className='text-xs text-slate-400'>An unconfigured gate blocks that step for everyone, including administrators and test mode.</p></div>
+      <div><p className='text-sm font-semibold text-white'>{missing.length?`${missing.length} of ${required.length} fallback / independent roles are not configured`:`All ${required.length} fallback / independent roles are configured`}</p>
+       <p className='text-xs text-slate-400'>For uncovered locations or independent Safety approval, required roles must be configured. Active Work Group allocations are maintained in Work Groups.</p></div>
       {missing.length>0&&data.jobRoles.length>0&&<Button variant='secondary' onClick={suggest}>Suggest job roles</Button>}
      </div>
      {missing.length>0&&<ul className='mt-2 flex flex-wrap gap-1.5'>{missing.map(g=><li key={g.code}><a href={'#gate-'+g.code.replace(/\./g,'-')} className='inline-flex min-h-9 items-center rounded-full border border-amber-500/50 px-3 text-xs text-amber-200'>{g.code}</a></li>)}</ul>}
@@ -62,7 +63,7 @@ export default function MntWorkflowSettings(){
     const gates=data.gates.filter(g=>g.stage===stage);
     if(!gates.length)return null;
     return <Card key={stage}>
-      <h2 className='mb-3 text-base font-semibold capitalize text-white'>{stage}</h2>
+      <h2 className='mb-3 text-base font-semibold capitalize text-white'>{stage==='conversion'?'Historical compatibility only':stage}</h2>
       <div className='space-y-3'>{gates.map(g=><div key={g.code} id={'gate-'+g.code.replace(/\./g,'-')} className={'scroll-mt-24 rounded-xl border p-3 '+(g.roleRequired&&!current[g.code]?'border-amber-500/60':suggested.includes(g.code)?'border-emerald-500/60':'border-slate-700')}>
         <div className='flex flex-wrap items-start justify-between gap-2'>
           <div><p className='text-sm font-semibold text-white'>{g.label}</p><p className='text-xs text-slate-400'>{g.code} · {g.owner}{g.permission?` · Security activity: ${g.permission}`:''}</p></div>
@@ -76,7 +77,7 @@ export default function MntWorkflowSettings(){
           </select>
           {suggested.includes(g.code)&&<span className='mt-1 block text-xs text-emerald-400'>Suggested from the job role title. Check it before saving.</span>}
         </label>}
-        <p className='mt-2 text-xs text-slate-400'>Prerequisites: {g.requires.length?g.requires.join(' · '):'None'}</p>
+        <p className='mt-2 text-xs text-slate-400'>Prerequisites: {g.requires.length?g.requires.map(x=>x.replaceAll('_',' ')).join(' · '):'None'}</p>
       </div>)}</div>
     </Card>;
    })}

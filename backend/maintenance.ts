@@ -23,7 +23,7 @@ import { effectiveSafetyItems } from './safConfiguration';
 import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
 import { searchCatalog,serviceCatalogHierarchy } from './procurement';
-import {MAINTENANCE_GATES,maintenanceGateReadiness} from './maintenanceWorkflowConfig';
+import {MAINTENANCE_GATES,maintenanceGateReadiness,MAINTENANCE_WORKFLOW_SCHEMA,RETIRED_MAINTENANCE_KEYS,currentMaintenanceMappings} from './maintenanceWorkflowConfig';
 import {validateAssessmentTasks,summarizeAssessmentTasks,assessmentTaskSummaries,type AssessedTask} from './maintenanceTaskAssessment';
 import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} from './maintenanceTaskRisk';
 
@@ -552,7 +552,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
             && independent(ctx, !mine, 'mnt.wr.reviewer_independence')
             && (Number(doc.data.reviewProcessVersion) < 2 || (['under_review','returned'].includes(status) && (testing || assigned === ctx.uid || status==='returned'&&!assigned) && workflowEligible))
             && !assessmentReviewCurrent(doc.data),
-        confirmClosure: status === 'closure_pending' && (at(P.WR_close)||at(P.WR_review)||at(P.WR_closeConfirm)),
+        confirmClosure: status === 'closure_pending' && (at(P.WR_close)||at(P.WR_review)),
         reviewAssessment: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) < 2)
             && !str(doc.data.woCode) && at(P.assessment_review) && gate('MNT.ASSESS.REVIEW') && independent(ctx, !mine && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid), 'mnt.assessment.review_independence'),
         convert: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) < 2)
@@ -692,7 +692,7 @@ function woCan(ctx: OrgContext, doc: Doc, scope: Scope, l: Lists) {
         schedule: ['released', 'scheduled'].includes(s) && at(P.WO_schedule),
         start: ['released', 'scheduled'].includes(s) && at(P.WO_execute),
         execute: s === 'in_progress' && at(P.WO_execute),
-        verify: s === 'completed' && at(P.WO_verify) && independent(ctx, !workers.has(ctx.uid), 'mnt.wo.verify_independence'),
+        verify: false,
         close: !['closed','cancelled'].includes(s) && at(P.WO_close),
         cancel: ['planning', 'plan_ready', 'released', 'scheduled'].includes(s) && at(P.WO_cancel),
         reopen: false,
@@ -920,10 +920,12 @@ export const maintenanceRoutes = {
                 listDocs(`organizations/${ctx.orgId}/positions`)
             ]);
             const selected=isObj(saved?.data.approverRoles)?saved.data.approverRoles:{};
-            const roles=Object.fromEntries(Object.entries(selected).map(([k,v])=>[k,str(v)]));
+            const allRoles=Object.fromEntries(Object.entries(selected).map(([k,v])=>[k,str(v)]));
+            const roles=currentMaintenanceMappings(allRoles);
             return {
                 gates:maintenanceGateReadiness(roles),
-                jobRoles:positions.map(p=>({id:p.id,label:str(p.data.title)||str(p.data.name)||p.id})),
+                workflowSchema:MAINTENANCE_WORKFLOW_SCHEMA,retiredKeys:Object.keys(allRoles).filter(k=>RETIRED_MAINTENANCE_KEYS.has(k)),
+                jobRoles:positions.filter(p=>p.data.status!=='inactive').map(p=>({id:p.id,label:str(p.data.title)||str(p.data.name)||p.id})),
                 revision:Number(saved?.data.version)||0,
                 configuredAt:str(saved?.data.updatedAt),
                 note:'Operational handlers enforce these role mappings and their prerequisites; changed approval responsibilities require window revalidation.'
@@ -936,11 +938,12 @@ export const maintenanceRoutes = {
             const raw=ctx.body.approverRoles;
             if(!isObj(raw))throw new HttpError(400,'Approver role mappings are required.');
             const eligible=new Set(MAINTENANCE_GATES.map(g=>g.code));
-            if(Object.keys(raw).some(k=>!eligible.has(k)))throw new HttpError(400,'Unknown maintenance workflow gate.');
+            if(Object.keys(raw).some(k=>!eligible.has(k)&&!RETIRED_MAINTENANCE_KEYS.has(k)))throw new HttpError(400,'Unknown maintenance workflow gate.');
             const positions=await listDocs(`organizations/${ctx.orgId}/positions`);
-            const ids=new Set(positions.map(p=>p.id));
+            const ids=new Set(positions.filter(p=>p.data.status!=='inactive').map(p=>p.id));
             const roles:Record<string,string>={};
             for(const [key,val] of Object.entries(raw)){
+                if(RETIRED_MAINTENANCE_KEYS.has(key))continue;
                 const id=str(val);
                 if(id&&!ids.has(id))throw new HttpError(400,`Unknown organizational job role for ${key}.`);
                 if(id)roles[key]=id;
@@ -953,10 +956,13 @@ export const maintenanceRoutes = {
                 throw new HttpError(409,'Workflow configuration changed. Reload before saving.');
             const reason=clean(ctx.body.reason,500);
             if(reason.length<10)throw new HttpError(400,'Explain the configuration change (10 characters minimum).');
-            await writeDoc(path,{
-                version:version+1,approverRoles:roles,
-                updatedAt:nowIso(),updatedBy:ctx.uid,reason,
-            });
+            const previous=isObj(prior?.data.approverRoles)?prior.data.approverRoles:{};
+            const removed=Object.keys(previous).filter(k=>RETIRED_MAINTENANCE_KEYS.has(k));
+            const saved=await writeDoc(path,{
+                version:version+1,workflowSchema:MAINTENANCE_WORKFLOW_SCHEMA,approverRoles:roles,
+                retiredKeys:removed,updatedAt:nowIso(),updatedBy:ctx.uid,reason,
+            },prior?{updateTime:prior.updateTime}:{exists:false});
+            if(!saved)throw new HttpError(409,'Workflow configuration changed. Reload and try again.');
             await rec(ctx,'mnt.workflow.configuration.updated','Maintenance approval configuration',reason);
             return {ok:true,version:version+1,configured:roles};
         })
@@ -1678,7 +1684,7 @@ export const maintenanceRoutes = {
                     throw new HttpError(403, 'Reviewer assignment is controlled by Maintenance Workflows, not by the requester or another employee.');
                 case 'close_review': {
                     // Fixed on the spot: no planning needed. Recorded with cause, solution and maintenance type (the
-                    // same maintenance type list Finance uses for GL account rules); another person confirms.
+                    // same maintenance type list Finance uses for GL account rules); closure is immediate.
                     deny(can.close, can.ownRequest ? 'You cannot close your own request.' : 'You cannot close this request.');
                     const failureMode = pickGrouped(l.failureModes,str(ctx.body.failureModeCode),'failure mode')!;
                     const solutionCodes = [...new Set(strs(ctx.body.solutionCodes).length ? strs(ctx.body.solutionCodes) : strs([ctx.body.solutionCode]))];
@@ -2150,7 +2156,7 @@ export const maintenanceRoutes = {
                 if (!allowed) throw new HttpError(403, why);
             };
             if(action==='create_break_in'){
-                if(!can.view||!canAt(ctx,P.WO_close,pathOf(doc),scope))throw new HttpError(403,'Only authorized technical closure employees may create a break-in sub-order.');
+                if(!can.view||!canAt(ctx,P.WO_close,pathOf(doc),scope))throw new HttpError(403,'Only employees authorized for early closure and break-in orders may create a sub-order.');
                 if(!['completed','verified','closed'].includes(str(d.status)))throw new HttpError(409,'Create a break-in sub-order at closure or after the original work order is closed.');
                 const description=str(b.description).trim().slice(0,2000),title=str(b.title).trim().slice(0,150),start=str(b.scheduledStart),end=str(b.scheduledEnd);
                 if(title.length<3||description.length<10)throw new HttpError(400,'Provide a title and describe the additional work.');

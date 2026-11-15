@@ -5,8 +5,8 @@ import { orgUsers } from './org';
 import { audit,buildAudit } from './audit';
 import {bypass} from './testModeCore';
 import { commit, withLock } from './finCore';
-import { MNT_ACTIVITIES } from './maintenanceActivities';
-import { MAINTENANCE_GATES } from './maintenanceWorkflowConfig';
+import { CURRENT_MNT_ACTIVITIES as MNT_ACTIVITIES } from './maintenanceActivities';
+import { MAINTENANCE_GATES,RETIRED_MAINTENANCE_KEYS } from './maintenanceWorkflowConfig';
 
 import {WORK_GROUP_TITLES,externalGates,externalPermissions,DEFAULT_WORK_GROUP_TASKS,activeWorkGroupPath,type ActiveWorkGroups,type ActiveGroup} from './maintenanceWorkGroupPolicy';
 export {WORK_GROUP_TITLES} from './maintenanceWorkGroupPolicy';
@@ -264,6 +264,7 @@ export const maintenanceWorkGroupRoutes={
   }
   const tasks:Record<string,string[]>={};
   for(const [k,v] of Object.entries(body.tasks)){
+   if(RETIRED_MAINTENANCE_KEYS.has(k))continue;
    const task=WORK_GROUP_TASKS.find(t=>t.code===k);if(!task)throw new HttpError(400,'Unknown maintenance task '+k+'.');
    const titles=strings(v);if(titles.some(x=>!title(x))||task.external&&titles.length)throw new HttpError(400,'Invalid generic role allocation or externally governed task.');
    if(!task.external)tasks[k]=titles;
