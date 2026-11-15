@@ -1,3 +1,4 @@
+import {getMaintenanceCycle,validateCycleDates,localDate} from './maintenanceCycle';
 import {stateOf,transitionPatch,type FactSet} from './maintenanceWorkflowState';
 import {responsibilityData,responsibilityFor,groupFields} from './maintenanceResponsibility';
 import { createHash } from 'node:crypto';
@@ -442,7 +443,8 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end)))
             throw new HttpError(400, 'Enter the scheduled dates as YYYY-MM-DD.');
         if (end < start) throw new HttpError(400, 'The scheduled end cannot be before the start.');
-        if (start < nowIso().slice(0, 10)) throw new HttpError(400, 'The scheduled start cannot be in the past.');
+        if(wo.data.executionMode==='confirmed_request'||start!==str(wo.data.scheduledStart))validateCycleDates(str(wo.data.maintenanceTypeCode),start,end,await getMaintenanceCycle(ctx),wo.data);
+        else if(start<nowIso().slice(0,10))throw new HttpError(400,'The scheduled start cannot be in the past.');
         const changed = start !== wo.data.scheduledStart || end !== wo.data.scheduledEnd;
         const reason = str(b.note).trim().slice(0, 300);
         if (changed && reason.length < 10) throw new HttpError(400, 'Explain why the dates change (at least 10 characters).');
@@ -451,6 +453,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
         const periodMoved = periodOf(start) !== periodOf(str(wo.data.scheduledStart));
         await saveWo(ctx, wo, {
             scheduledStart: start, scheduledEnd: end,
+            dateChanges:changed?[...rows(wo.data.dateChanges),{at:nowIso(),by:ctx.uid,name:name(ctx),fromStart:str(wo.data.scheduledStart),fromEnd:str(wo.data.scheduledEnd),toStart:start,toEnd:end,reason}]:rows(wo.data.dateChanges),
             scheduleLock: { start, end, at: nowIso(), by: ctx.uid, name: name(ctx) },
             ...(periodMoved && str(ca.status) ? { costApproval: { ...ca, status: 'superseded' } } : {}),
         }, 'plan.schedule_locked', `${start} to ${end}${changed ? ' · ' + reason : ''}${periodMoved && str(ca.status) ? ' · cost approval superseded (period changed)' : ''}`);
@@ -970,6 +973,8 @@ async function windowSave(ctx: OrgContext) {
     if (!selected.length) throw new HttpError(409, 'Every task of these work orders has already started.');
     const schedule = criticalPath(selected);
     const needed = Math.max(...schedule.tasks.map((t) => t.finish));
+    const cycle=await getMaintenanceCycle(ctx);
+    for(const t of schedule.tasks){const w=wos.find(x=>x.id===t.woCode);if(!w||w.data.executionMode!=='confirmed_request')continue;const a=localDate(new Date(Date.parse(start)+t.start*3600000),cycle.timeZone),z=localDate(new Date(Date.parse(start)+t.finish*3600000-1),cycle.timeZone);if(a<str(w.data.scheduledStart)||z>str(w.data.scheduledEnd))throw new HttpError(409,w.id+': the task falls outside the Work Order start/end dates. Change and reconfirm the plan before scheduling.');}
     if (b.action === 'preview_window') return { schedule, neededHours: needed, start, end };
     if (schedule.conflicts.length) throw new HttpError(409, schedule.conflicts.join(' '));
     if (needed > durationHours + 1e-6)
@@ -1894,6 +1899,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         return {
             wo: { code: wo.id, ...wo.data,...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
+            maintenanceCycle:await getMaintenanceCycle(ctx),
             readiness: readinessData,
             checklist: retrospective?null:await planChecklist(ctx, wo, readinessData),
             currency: str(ctx.org.data.currencyCode),

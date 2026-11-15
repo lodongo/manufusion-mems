@@ -685,6 +685,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
     const [zoom, setZoom] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
+    const [confirmationType,setConfirmationType]=useState('');
     const [section,setSection]=useState<'request'|'assessment'|'tasks'|'summary'>(area === 'assessments' ? 'assessment' : 'request');
     const [tasksDirty,setTasksDirty]=useState(false);
     const goSection=async (next:'request'|'assessment'|'tasks'|'summary')=>{
@@ -812,9 +813,12 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                 {mode === 'to_assess' && <Card className='space-y-3'>
                     <h2 className='text-lg font-semibold text-ink'>Confirm Work Request</h2>
                     <p className='text-sm text-soft'>MEMS will create the numbered Work Order immediately. Assessment is its first step. The confirmed request remains linked and read-only.</p>
+                    <SelectField id='confirm-maintenance-type' label='Maintenance type *' value={confirmationType} onChange={e=>{setConfirmationType(e.target.value);setStartDate('');setEndDate('');}}><option value=''>Choose maintenance type</option>{lists.maintenanceTypes.map(t=><option key={t.code} value={t.code}>{t.label}</option>)}</SelectField>
+                    <p className='text-sm text-soft'>{setup.maintenanceCycle?.restrictedTypes.includes(confirmationType)?'Earliest start: next cycle '+setup.maintenanceCycle.nextStart:confirmationType?'Same-cycle work is allowed.':''} {setup.maintenanceCycle?.timeZone}</p>
+                    <div className='grid grid-cols-2 gap-2'><label className='block text-sm'>Start date *<input type='date' className='mt-1 w-full rounded-xl border border-line bg-panel p-3' min={setup.maintenanceCycle?.restrictedTypes.includes(confirmationType)?setup.maintenanceCycle.nextStart:setup.maintenanceCycle?.today} value={startDate} onChange={e=>{setStartDate(e.target.value);if(endDate<e.target.value)setEndDate('');}} required/></label><label className='block text-sm'>End date *<input type='date' className='mt-1 w-full rounded-xl border border-line bg-panel p-3' min={startDate} value={endDate} onChange={e=>setEndDate(e.target.value)} required/></label></div>
                     {actionError && <Alert tone='error'>{actionError}</Alert>}
                     <div className='flex gap-2'>
-                        <Button testOverride={r.testModeOverride} busy={busy} onClick={() => run('confirm_review')}>Confirm &amp; create Work Order</Button>
+                        <Button testOverride={r.testModeOverride} busy={busy} disabled={!confirmationType||!startDate||!endDate||endDate<startDate||startDate<(setup.maintenanceCycle?.restrictedTypes.includes(confirmationType)?setup.maintenanceCycle.nextStart:setup.maintenanceCycle?.today||'')} onClick={() => run('confirm_review',{maintenanceTypeCode:confirmationType,scheduledStart:startDate,scheduledEnd:endDate})}>Confirm &amp; create Work Order</Button>
                         <Button variant='secondary' onClick={() => setMode('')}>Back</Button>
                     </div>
                 </Card>}

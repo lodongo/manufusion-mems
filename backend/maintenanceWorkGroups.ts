@@ -1,3 +1,4 @@
+import {cyclePath,getMaintenanceCycle,validZone} from './maintenanceCycle';
 import { HttpError, getDoc, isObj, listDocs, nowIso, str, randomId, type Doc } from './core';
 import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { orgUsers } from './org';
@@ -238,8 +239,18 @@ export const maintenanceWorkGroupRoutes={
    }
    return {id:g.id,code:str(g.data.code),name:str(g.data.name),siteId:str(g.data.siteId),version:Number(g.data.version)||0,costCenterIds,members,...assessment,issues,ready:issues.length===0,activeVersion:live?.groups.find(a=>a.id===g.id)?.version||0,updatedBy:str(g.data.updatedBy)};
   });
-  return {titles:WORK_GROUP_TITLES,tasks:WORK_GROUP_TASKS,sites,costCenters:cc.map(({path,...x})=>x),positions:[...d.positions.values()].map(p=>({id:p.id,label:nameOf(p)})),staff,groups,master:{...master,updatedBy:str(d.master?.data.updatedBy)},defaults:DEFAULT_WORK_GROUP_TASKS,linkedTasks:LINKED_WORK_GROUP_TASKS,active:{version:live?.version||0,masterVersion:live?.masterVersion||0,groupIds:live?.groups.map(g=>g.id)||[]},currentUserId:ctx.uid,testModeOverride:ctx.role==='org_super_admin'&&ctx.testMode===true,authorizationMode:live?.version?'work_groups':'legacy'};
+  return {maintenanceCycle:await getMaintenanceCycle(ctx),titles:WORK_GROUP_TITLES,tasks:WORK_GROUP_TASKS,sites,costCenters:cc.map(({path,...x})=>x),positions:[...d.positions.values()].map(p=>({id:p.id,label:nameOf(p)})),staff,groups,master:{...master,updatedBy:str(d.master?.data.updatedBy)},defaults:DEFAULT_WORK_GROUP_TASKS,linkedTasks:LINKED_WORK_GROUP_TASKS,active:{version:live?.version||0,masterVersion:live?.masterVersion||0,groupIds:live?.groups.map(g=>g.id)||[]},currentUserId:ctx.uid,testModeOverride:ctx.role==='org_super_admin'&&ctx.testMode===true,authorizationMode:live?.version?'work_groups':'legacy'};
  })],
+ 'POST /api/org/mnt/work-groups/cycle/save': [orgRoute('org.mnt.workGroups.cycle.save','ADM.workflows',async ctx=>withLock(ctx.orgId,'maintenance_work_groups',async()=>{
+  assertAdmin(ctx);const path=cyclePath(ctx.orgId),old=await getDoc(path),prior=await getMaintenanceCycle(ctx),day=Number(ctx.body.startDay),timeZone=str(ctx.body.timeZone);
+  if(ctx.body.startDay===undefined||!Number.isInteger(day)||day<0||day>6||!validZone(timeZone))throw new HttpError(400,'Choose a valid cycle start day and IANA timezone.');
+  if(Number(ctx.body.expectedVersion)!==prior.version)throw new HttpError(409,'Cycle settings changed. Reload before saving.');
+  const reason=str(ctx.body.reason).trim().slice(0,500);if(reason.length<5)throw new HttpError(400,'Enter the reason for changing the maintenance cycle.');
+  const fields={startDay:day,timeZone,version:prior.version+1,reason,updatedAt:nowIso(),updatedBy:ctx.uid};
+  await commit([{path,fields,...(old?{updateTime:old.updateTime}:{exists:false})},{path:path+'/revisions/'+String(fields.version),fields,exists:false}]);
+  await audit([{category:'maintenance',action:'mnt.work_group.cycle_saved',actor:ctx.actor,meta:ctx.meta,target:{label:'Weekly maintenance cycle'},orgId:ctx.orgId,details:'Start day '+prior.startDay+' → '+day+'; '+prior.timeZone+' → '+timeZone+'; '+reason}]);
+  return await getMaintenanceCycle(ctx);
+ }))],
  'POST /api/org/mnt/work-groups/master/save': [orgRoute('org.mnt.workGroups.master.save','ADM.workflows',async ctx=>withLock(ctx.orgId,'maintenance_work_groups',async()=>{
   assertAdmin(ctx);const d=await setup(ctx),body=ctx.body;
   const version=Number(d.master?.data.version)||0;

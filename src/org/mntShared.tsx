@@ -38,6 +38,7 @@ export interface MntLists {
 
 /** What the user may do somewhere in the organization (exact checks happen per record on the server). */
 export interface MntSetup {
+    maintenanceCycle?:{version:number;startDay:number;timeZone:string;today:string;nextStart:string;restrictedTypes:string[]};
     enabled: boolean;
     can: Record<string, boolean>;
     lists: MntLists | null;
