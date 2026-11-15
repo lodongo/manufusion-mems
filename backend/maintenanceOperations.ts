@@ -1,5 +1,6 @@
 import {summarizeWorkOrderReview} from './maintenanceStatusReview';
-import {capacityForWindow,capacityContext} from './maintenanceCapacity';
+import {capacityForWindow,capacityContext,windowTeamAvailability} from './maintenanceCapacity';
+import {levelResources} from './maintenanceResourceLeveling';
 import {getMaintenanceCycle,validateCycleDates,localDate,validateStartDateMove,startDateMoves} from './maintenanceCycle';
 import {stateOf,transitionPatch,shortWorkOrderStatus,type FactSet} from './maintenanceWorkflowState';
 import {responsibilityData,responsibilityFor,groupFields,approvalPreviewFor} from './maintenanceResponsibility';
@@ -955,7 +956,7 @@ async function windowSave(ctx: OrgContext) {
     }
     // Tasks: every not-started task of the chosen work orders. People allocated to several tasks do them in turn.
     const selected: ScheduleTask[] = [];
-    const busyUntil = new Map<string, number>();
+    const offsets=object(b.manualOffsets);
     const superseded = new Map<string, Doc>();
     // Optionally only some tasks of a work order (the rest go to a later window); by default all of them.
     const chosen = new Set(rows(b.tasks).map((x) => `${str(x.woCode)}_${str(x.taskId)}`));
@@ -976,8 +977,7 @@ async function windowSave(ctx: OrgContext) {
             }
             const personnel = texts(object(object(object(wo.data.taskPlanning)[str(t.id)]).allocation).personnel);
             const hours = Number(t.hours) || 0.25;
-            const offset = Math.max(0, ...personnel.map((p) => busyUntil.get(p) ?? 0));
-            for (const p of personnel) busyUntil.set(p, offset + hours);
+            const taskKey=wo.id+'_'+str(t.id),offset=offsets[taskKey]===undefined?0:Number(offsets[taskKey]);if(!Number.isFinite(offset)||offset<0||offset>durationHours||Math.abs(offset*4-Math.round(offset*4))>1e-6)throw new HttpError(400,'Choose a valid quarter-hour earliest start inside the window.');
             selected.push({
                 id: `${wo.id}_${str(t.id)}`, woCode: wo.id, taskId: str(t.id), description: str(t.title) || str(t.description),
                 hours, offset, dependencies: [], personnel, tools: [], safety: false, executionPriority: 50,
@@ -995,7 +995,9 @@ async function windowSave(ctx: OrgContext) {
         delete sTask._deps;
     }
     if (!selected.length) throw new HttpError(409, 'Every task of these work orders has already started.');
-    const schedule = criticalPath(selected);
+    const constraints=await windowTeamAvailability(ctx,start,durationHours,selected.map(t=>({...t,path:recordPath(wos.find(w=>w.id===t.woCode)!)})) as unknown as Obj[],existing?.id||'');
+    const levelled=levelResources(selected,durationHours,constraints),schedule=levelled.schedule;
+    selected.splice(0,selected.length,...levelled.tasks);
     const needed = Math.max(...schedule.tasks.map((t) => t.finish));
     const cycle=await getMaintenanceCycle(ctx);
     for(const t of schedule.tasks){const w=wos.find(x=>x.id===t.woCode);if(!w||!w.data.cycleAdmission)continue;const zone=str(object(w.data.currentCycleAdmission).timeZone)||str(object(w.data.cycleAdmission).timeZone)||cycle.timeZone,a=localDate(new Date(Date.parse(start)+t.start*3600000),zone),z=localDate(new Date(Date.parse(start)+t.finish*3600000-1),zone);if(a<str(w.data.scheduledStart)||z>str(w.data.scheduledEnd))throw new HttpError(409,w.id+': the task falls outside the Work Order start/end dates. Change and reconfirm the plan before scheduling.');}
@@ -1060,6 +1062,8 @@ async function windowSave(ctx: OrgContext) {
         plannedByName: name(ctx),
         scheduledAt: nowIso(),
         capacityWarnings:capacity.warnings,
+        manualOffsets:offsets,
+        capacityOverride:capacity.warnings.length?{by:ctx.uid,at:nowIso(),reason:str(b.capacityOverrideReason).trim().slice(0,500),warnings:capacity.warnings}:null,
         updatedAt: nowIso(),
         history: history(ctx, existing?.data || {}, revision === 1 ? 'Window scheduled' : 'Window revised (revision ' + revision + ')', str(b.reason)),
     };

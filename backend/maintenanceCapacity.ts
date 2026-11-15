@@ -5,7 +5,7 @@ import {orgUsers} from './org';
 import {audit} from './audit';
 import {activeWorkGroupPath,assignmentCovers,ancestry,type ActiveWorkGroups} from './maintenanceWorkGroupPolicy';
 import {withLock} from './finCore';
-import {availability,validateCapacity,validDay,ruleAt,overlap,covered,spanHours,percent,inZoneDay,type CapacityRule,type Span,type CalendarAdjustment} from './maintenanceCapacityCore';
+import {availability,validateCapacity,validDay,ruleAt,overlap,covered,spanHours,percent,inZoneDay,type CapacityRule,type Span,type CalendarAdjustment,mergeSpans,subtractSpans} from './maintenanceCapacityCore';
 import {localDay,midnight} from './maintenanceAnalyticsCalendar';
 import {bookedHours,type TimeBooking} from './maintenanceTimeCore';
 import {maintenanceStandardHistoryRoutes} from './maintenanceStandardHistory';
@@ -39,15 +39,22 @@ export async function capacityContext(ctx:OrgContext,day=nowIso().slice(0,10)){
  const adjustments:CalendarAdjustment[]=calendar.flatMap(d=>{const kind=str(d.data.kind);return kind==='holiday'||kind==='unavailable'||kind==='overtime'?[{scope:str(d.data.scope),kind,start:str(d.data.start),end:str(d.data.end),status:str(d.data.status)}]:[];});
  return {artisans:unique,rules,approvedLeave,bookings,configuration,nodes,adjustments,active:!!cfg};
 }
+export async function windowTeamAvailability(ctx:OrgContext,start:string,durationHours:number,tasks:Obj[],excludeWindow:string){
+ const base=Date.parse(start),end=base+durationHours*3600000,c=await capacityContext(ctx,new Date(base).toISOString().slice(0,10)),constraints=new Map<string,Span[]>();
+ for(const task of tasks){let available:Span[]=[{start:base,end}];for(const uid of texts(task.personnel)){const a=c.artisans.find(p=>p.id===uid);const path=texts(task.path),keys=a?[...new Set([...a.scopeKeys.filter(k=>!k.startsWith('group:')&&!k.startsWith('employee:')),...path.filter(id=>c.nodes.some(n=>n.id===id&&n.data.level==='work_center')).map(id=>'node:'+id),...(a.groupId?['group:'+a.groupId]:[]),'employee:'+uid])]:['employee:'+uid],r=ruleAt(c.rules,keys,new Date(base).toISOString().slice(0,10));let net:Span[]=[{start:base,end}];if(r){const zone=r.values.zone,from=inZoneDay(base,zone),through=inZoneDay(end-1,zone);net=availability(c.rules,keys,from,through,c.approvedLeave.filter(l=>l.uid===uid),[],c.adjustments).net;}else{const absent=c.approvedLeave.filter(l=>l.uid===uid).map(l=>({start:Date.parse(l.start+'T00:00:00Z')-14*3600000,end:Date.parse(dateAdd(l.end,1)+'T00:00:00Z')+12*3600000}));net=subtractSpans(net,absent);}
+ const free=subtractSpans(net,c.bookings.filter(b=>b.uid===uid&&!b.final&&b.windowId!==excludeWindow));available=mergeSpans(available.flatMap(x=>free.map(y=>({start:Math.max(x.start,y.start),end:Math.min(x.end,y.end)}))));}
+ constraints.set(str(task.id),available.map(s=>({start:(s.start-base)/3600000,end:(s.end-base)/3600000})));}
+ return constraints;
+}
 export async function capacityForWindow(ctx:OrgContext,start:string,tasks:Obj[],excludeWindow:string){
- const c=await capacityContext(ctx),base=Date.parse(start),warnings:string[]=[],blockers:string[]=[];
+ const base=Date.parse(start),c=await capacityContext(ctx,new Date(base).toISOString().slice(0,10)),warnings:string[]=[],blockers:string[]=[];
  const seen:Array<Span&{uid:string;taskId:string}>=[];
  for(const t of tasks){const span={start:base+Number(t.start)*3600000,end:base+Number(t.finish)*3600000};if(!Number.isFinite(span.start)||!Number.isFinite(span.end)||span.end<=span.start)continue;
  for(const uid of texts(t.personnel)){const person=c.artisans.find(a=>a.id===uid),key=str(t.woCode)+' / '+str(t.taskId),label=person?.name||uid;
  if(c.bookings.some(b=>b.uid===uid&&!b.final&&b.windowId!==excludeWindow&&overlap(b,span))||seen.some(b=>b.uid===uid&&overlap(b,span)))blockers.push(key+': '+label+' has a conflicting scheduled activity.');
  seen.push({...span,uid,taskId:key});
  if(!person){(c.active?blockers:warnings).push(key+': no active maintenance execution role for '+label+'.');continue;}
- const wc=texts(t.path).filter(id=>c.nodes.some(n=>n.id===id&&n.data.level==='work_center'));const keys=[...new Set([...person.scopeKeys.filter(x=>!x.startsWith('employee:')&&!x.startsWith('group:')),...wc.map(id=>'node:'+id),...(person.groupId?['group:'+person.groupId]:[]),'employee:'+uid])];const first=ruleAt(c.rules,keys,new Date(span.start).toISOString().slice(0,10));if(!first){warnings.push(key+': '+label+' has no effective capacity configuration.');continue;}
+ const wc=texts(t.path).filter(id=>c.nodes.some(n=>n.id===id&&n.data.level==='work_center'));const keys=[...new Set([...person.scopeKeys.filter(x=>!x.startsWith('employee:')&&!x.startsWith('group:')),...wc.map(id=>'node:'+id),...(person.groupId?['group:'+person.groupId]:[]),'employee:'+uid])];const first=ruleAt(c.rules,keys,new Date(span.start).toISOString().slice(0,10));if(!first){if(c.approvedLeave.some(l=>l.uid===uid&&l.start<=new Date(span.end-1+14*3600000).toISOString().slice(0,10)&&l.end>=new Date(span.start-12*3600000).toISOString().slice(0,10)))blockers.push(key+': '+label+' has approved leave near this slot. Configure employee timezone before scheduling.');warnings.push(key+': '+label+' has no effective capacity configuration.');continue;}
  const zone=first.values.zone,from=inZoneDay(span.start,zone),through=inZoneDay(span.end-1,zone),av=availability(c.rules,keys,dateAdd(from,-1),through,c.approvedLeave.filter(l=>l.uid===uid),[],c.adjustments);
  if(!covered(span,av.net))blockers.push(key+': '+label+' is outside configured working hours or on approved leave.');const range={start:midnight(from,zone),end:midnight(dateAdd(through,1),zone)},target=availability(c.rules,keys,from,through,c.approvedLeave.filter(l=>l.uid===uid),[],c.adjustments).loadableHours;const scheduled=[...c.bookings.filter(b=>b.uid===uid&&!b.final&&b.windowId!==excludeWindow),...seen.filter(b=>b.uid===uid)].reduce((n,b)=>n+Math.max(0,Math.min(b.end,range.end)-Math.max(b.start,range.start))/3600000,0);if(scheduled>target+1e-6)warnings.push(key+': '+label+' exceeds configured loading target for the affected date(s).');
  }
