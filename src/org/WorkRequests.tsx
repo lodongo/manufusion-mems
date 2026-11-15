@@ -825,7 +825,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                         <p className='font-medium text-white'>
                             {mode === 'confirm_closure' ? 'Confirm the closure made at review' : mode === 'reject_closure' ? 'Not fixed: send back to review' : mode === 'review_assessment' ? 'Approve the independently reviewed work assessment' : mode === 'return_assessment' ? 'Return assessment to the assessor for correction' : mode === 'return' ? 'Return to the requester for more information' : mode === 'decline' ? 'Decline this request' : mode === 'convert' ? 'Convert to a work order' : 'Cancel this request'}
                         </p>
-                        {(mode === 'confirm_closure' || mode === 'reject_closure') && r.closure && <ClosureCard closure={r.closure} />}
+                        {(mode === 'confirm_closure' || mode === 'reject_closure') && r.closure && <ClosureCard closure={r.closure} pending={r.status==='closure_pending'} />}
                         {mode === 'convert' && (
                             <p className='text-sm text-slate-300'>
                                 {r.assessmentReviewCurrent
@@ -901,7 +901,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                         <p className='mt-1 text-sm text-slate-200'>{r.returnNote}</p>
                     </Card>
                 )}
-                {r.closure && <ClosureCard closure={r.closure} />}
+                {r.closure && <ClosureCard closure={r.closure} pending={r.status==='closure_pending'} />}
                 {r.closureRejections.length > 0 && r.status === 'under_review' && (
                     <Card>
                         <p className='text-xs font-semibold uppercase tracking-wider text-red-300'>Closure not accepted</p>
