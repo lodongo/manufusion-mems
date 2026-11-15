@@ -40,7 +40,7 @@ export function stateOf(d:Obj,f:FactSet):{code:StateCode;label:string;reason:str
   return make('WO150');
  }
  const pending=tasks.filter(t=>object(exec[str(t.id)]).status!=='completed');
- if(retrospective&&pending.length)return make('WO170','Named performer confirms completed work');
+ if(retrospective&&pending.length)return make('WO200','Work feedback recorded on the original request; safety sign-off required');
  if(pending.length){
   if(pending.some(t=>object(exec[str(t.id)]).status==='in_progress'))return make('WO160');
   if(pending.some(t=>object(exec[str(t.id)]).status==='blocked'))return make('WO165','Resolve recorded task block');

@@ -16,7 +16,7 @@ const repeated=transitionPatch(first,stateOf({status:'planning'},{}),'2026-01-02
 assert.equal(repeated.workflowSince,'2026-01-01');assert.equal(repeated.workflowTransitions.length,1);
 const closed=transitionPatch(repeated,stateOf({status:'closed'},{}),'2026-01-03','u','User','close');
 assert.equal(closed.workflowTransitions.length,2);assert.equal(closed.workflowTransitions[1].from,'WO010');
-assert.equal(stateOf({status:'in_progress',executionMode:'request_closure',wrCode:'WR00000001',directCompletion:{requestCode:'WR00000001',noSparesOrServices:true},assessmentTasks:[{id:'T'}]},{}).code,'WO170');
+assert.equal(stateOf({status:'in_progress',executionMode:'request_closure',wrCode:'WR00000001',directCompletion:{requestCode:'WR00000001',noSparesOrServices:true},assessmentTasks:[{id:'T'}]},{}).code,'WO200');
 assert.equal(new Set(WO_STATES.map(x=>x[0])).size,WO_STATES.length);
 });
 

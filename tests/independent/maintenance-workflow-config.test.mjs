@@ -26,13 +26,10 @@ test('independent assessment review gate is assignable and permission-linked',()
  assert.equal(gate?.ready,false);
  assert.ok(gate?.requires.includes('current_assessment_version'));
 });
-test('closure requires explicit Technical Manager configuration',()=>{
- const gate=maintenanceGateReadiness({}).find(g=>g.code==='MNT.WO.TECHNICAL_CLOSE');
- assert.ok(gate);
- assert.equal(gate.roleRequired,true);
- assert.equal(gate.ready,false);
- assert.ok(gate.requires.includes('safety_signed_off'));
- assert.ok(gate.requires.includes('equipment_handed_over'));
+test('closure requires only configured safety signatory, not handover or Technical Manager',()=>{
+ const gates=maintenanceGateReadiness({});
+ assert.ok(!gates.some(g=>['MNT.HANDOVER','MNT.WO.TECHNICAL_CLOSE'].includes(g.code)));
+ const gate=gates.find(g=>g.code==='MNT.SAFETY.SIGNOFF');assert.equal(gate.roleRequired,true);assert.equal(gate.ready,false);
 });
 test('safety near-miss gate requires explicit declaration and incident record where applicable',()=>{
  const gate=MAINTENANCE_GATES.find(g=>g.code==='MNT.SAFETY.SIGNOFF');

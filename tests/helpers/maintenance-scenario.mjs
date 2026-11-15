@@ -423,7 +423,7 @@ const wo = (await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor',
 assert.equal(snapshot(r + '/work_orders/' + wo).data.scheduledStart, date);
 assert.ok(wo);
 assert.equal(snapshot(r + '/work_orders/' + wo).data.assessmentTasks[1].spares[0].qty, 4);
-await assert.rejects(() => op('planner', 'technical_close', { code: wo, note: 'Attempt premature closure' }), /configured|task|handover/i);
+await assert.rejects(() => op('planner', 'technical_close', { code: wo, note: 'Attempt premature closure' }), /no longer required/i);
 await assert.rejects(
     () => route(maintenanceRoutes, '/api/org/mnt/wo/action', 'manager', { code: wo, action: 'close', confirm: wo }),
     /task|Safety|handover|cannot close/i,
@@ -709,9 +709,12 @@ await assert.rejects(
             condition: 'Good condition',
             restrictions: 'None',
         }),
-    /Safety sign-off/,
+    /no longer/i,
 );
 await assert.rejects(() => op('safety', 'safety_signoff', { code: wo, note: 'Safety verification completed' }), /explicit/);
+const servicePoPath=r+'/procurement_orders/PO00000001-V1';
+await assert.rejects(()=>op('safety','safety_signoff',{code:wo,declaration:'none',noIncidentsConfirmed:true,note:'Safety review complete.'}),/service acceptance/i);
+seed(servicePoPath,{...snapshot(servicePoPath).data,receipts:[{status:'accepted'}]});
 const beforeNoIncident = snapshot(r + '/work_orders/' + wo);
 await op('safety', 'safety_signoff', {
     code: wo,
@@ -755,21 +758,8 @@ await op('safety2', 'safety_signoff', {
     clearanceConfirmed: true,
     note: 'All task results, returns and incident controls reviewed.',
 });
-await op('ops', 'handover', {
-    code: wo,
-    accepted: true,
-    ready: true,
-    receivingParty: people.ops[0],
-    functionalChecks: 'Conveyor operated under load; no abnormal vibration or leakage.',
-    condition: 'Equipment is operational and safe.',
-    restrictions: 'None',
-});
-await assert.rejects(() => op('planner', 'technical_close', { code: wo, note: 'Attempt unauthorized closure.' }), /configured/);
-await assert.rejects(()=>op('manager','technical_close',{code:wo,note:'All tasks, material reconciliation, BOM, safety and handover reviewed.'}),/service acceptance/i);
-const servicePoPath=r+'/procurement_orders/PO00000001-V1';seed(servicePoPath,{...snapshot(servicePoPath).data,receipts:[{status:'accepted'}]});
-await op('manager', 'technical_close', { code: wo, note: 'All tasks, material reconciliation, BOM, safety and handover reviewed.' });
 assert.equal(snapshot(r + '/work_orders/' + wo).data.status, 'closed');
-assert.equal(snapshot(r + '/work_orders/' + wo).data.technicalClosure.by, people.manager[0]);
+assert.equal(snapshot(r + '/work_orders/' + wo).data.safetySignoff.by, people.safety2[0]);
 assert.ok(snapshot(r + '/work_orders/' + wo).data.history.length > 15);
 // Direct creation is forbidden; every additional work order must be converted
 // from a reviewed Work Request. Exercise that API boundary explicitly.
@@ -1020,21 +1010,11 @@ await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wr/action','asses
 await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{...closeBody,durationMinutes:0}),/time taken/i);
 await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{...closeBody,durationMinutes:1.5}),/whole minutes/i);
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', closeBody);
-assert.equal(snapshot(r + '/work_requests/' + eqWr.code).data.status, 'closure_pending');
+assert.equal(snapshot(r + '/work_requests/' + eqWr.code).data.status, 'closed');
 assert.equal(snapshot(r+'/work_requests/'+eqWr.code).data.closure.dateClosed,closeBody.closedDate);
 assert.equal(snapshot(r+'/work_requests/'+eqWr.code).data.closure.durationMinutes,25);
-await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: eqWr.code, action: 'confirm_closure' }), /another person/);
-await assert.rejects(() => route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: eqWr.code, action: 'reject_closure', note: 'short' }), /10 characters/);
-await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: eqWr.code, action: 'reject_closure', note: 'The knocking persists after the bolts were tightened.' });
 eq = snapshot(r + '/work_requests/' + eqWr.code).data;
-assert.equal(eq.status, 'under_review');
-assert.equal(eq.closureRejections.length, 1);
-await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', closeBody);
-await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: eqWr.code, action: 'confirm_closure', note: 'Verified quiet running.' });
-eq = snapshot(r + '/work_requests/' + eqWr.code).data;
-assert.equal(eq.status, 'closed');
-assert.equal(eq.closure.confirmedBy, people.reviewer[0]);
-assert.ok(eq.woCode,'Supervisor-confirmed request creates linked retrospective order');
+assert.equal(eq.status,'closed');assert.ok(eq.woCode);
 assert.equal(eq.maintenanceTypeCode, l.maintenanceTypes[0].code, 'The closure records the GL maintenance type');
 // Equipment-only requests can choose their assembly and classify failure mode in the
 // independent assessment without any request-enrichment action.
@@ -1161,24 +1141,17 @@ assert.equal(fast.executionMode,'request_closure');
 assert.equal(fast.wrCode,directClose.code);
 assert.equal(fast.status,'in_progress');
 assert.equal(fast.directCompletion.durationMinutes,25);
-assert.equal(fast.taskExecution.DIRECT_COMPLETION.status,'awaiting_feedback');
+assert.equal(fast.taskExecution.DIRECT_COMPLETION.status,'completed');
 assert.deepEqual(fast.taskPlanning,{});
 assert.deepEqual(fast.spares,[]);
 assert.deepEqual(fast.services,[]);
 assert.ok(!fast.windowId);
-await assert.rejects(()=>op('manager','technical_close',{code:fastWo,note:'Premature retrospective closure.'}),/complete task|feedback/i);
+await assert.rejects(()=>op('manager','technical_close',{code:fastWo}),/no longer required/i);
 await assert.rejects(()=>op('planner','allocate',{code:fastWo,taskId:'DIRECT_COMPLETION'}),/no planning/i);
-const fastFeedback={noSparesOrServicesConfirmed:true};
-await assert.rejects(()=>op('tech','start_task',{code:fastWo,taskId:'DIRECT_COMPLETION'}),/no planning/i);
-await assert.rejects(()=>op('tech','complete_task',{code:fastWo,taskId:'DIRECT_COMPLETION',feedback:{...fastFeedback,noSparesOrServicesConfirmed:false}}),/confirm no spare/i);
-await assert.rejects(()=>op('manager','handover',{code:fastWo}),/configured|safety sign-off/i);
-await op('tech','complete_task',{code:fastWo,taskId:'DIRECT_COMPLETION',feedback:fastFeedback});
 assert.equal(snapshot(r+'/work_orders/'+fastWo).data.taskExecution.DIRECT_COMPLETION.feedback.actualMinutes,25);
 assert.equal(snapshot(r+'/work_orders/'+fastWo).data.taskExecution.DIRECT_COMPLETION.feedback.workPerformed,finalClosure.description);
 assert.equal(snapshot(r+'/work_orders/'+fastWo).data.status,'completed');
 await op('safety','safety_signoff',{code:fastWo,declaration:'none',noIncidentsConfirmed:true,note:'Confirmed actual work incident history and safe condition.'});
-await op('ops','handover',{code:fastWo,accepted:true,ready:true,receivingParty:people.ops[0],functionalChecks:'Conveyor guard securely installed and verified.',condition:'Safe and ready',restrictions:'None'});
-await op('manager','technical_close',{code:fastWo,note:'Independently reviewed feedback, safety and equipment handover.'});
 assert.equal(snapshot(r+'/work_orders/'+fastWo).data.status,'closed');
 assert.equal(snapshot(r+'/work_orders/'+fastWo).data.finalCost.pendingLabourValuation,true);
 assert.equal(snapshot(r+'/work_requests/'+directClose.code).data.status,'closed');

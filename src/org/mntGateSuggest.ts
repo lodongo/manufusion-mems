@@ -9,8 +9,6 @@ export const GATE_KEYWORDS: Record<string, string[]> = {
     'MNT.TASK.FEEDBACK': ['artisan', 'technician', 'fitter', 'electrician', 'mechanic'],
     'MNT.SPARES.RECONCILE': ['stores', 'storekeeper', 'store', 'warehouse'],
     'MNT.SAFETY.SIGNOFF': ['safety', 'sheq', 'hse'],
-    'MNT.HANDOVER': ['production', 'operations', 'operator', 'shift'],
-    'MNT.WO.TECHNICAL_CLOSE': ['technical manager', 'maintenance manager', 'engineering manager', 'manager'],
 };
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

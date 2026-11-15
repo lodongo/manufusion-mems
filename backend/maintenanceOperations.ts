@@ -1519,7 +1519,7 @@ async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false)
     return withLock(ctx.orgId,'maintenance_po_commitment',async()=>{
         const check=await earlyClosureCommitments(ctx,wo);
         if(check.blocked.length)throw new HttpError(409,'Early closure is blocked by committed purchase order(s): '+check.blocked.join(', '));
-        const prior=object(wo.data.earlyClosureRequest),reason=requiredText(ctx.body.note||prior.reason,'Early closure reason',10);
+        const prior=object(wo.data.earlyClosureRequest),reason=requiredText(safetyFinal?prior.reason:ctx.body.note||prior.reason,'Early closure reason',10);
         const started=earlyExecutionStarted(wo);
         if(prepare){
             if(!started)throw new HttpError(400,'Use direct early closure for work that has not started.');
@@ -1809,6 +1809,17 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     }
     if (action === 'safety_signoff') {
         await authority(ctx, wo, 'MNT.WO.safety', 'MNT.SAFETY.SIGNOFF');
+        if(retrospective){
+            await ensureNoDirectResources(ctx,wo);
+            const source=object(wo.data.directCompletion),executor=object(source.executor),minutes=Number(source.durationMinutes);
+            const direct=object(executions.DIRECT_COMPLETION);
+            if(direct.status==='awaiting_feedback'){
+                if(!Number.isInteger(minutes)||minutes<=0||!str(executor.uid)||!str(source.reportedWork))throw new HttpError(409,'The original work request is missing actual work feedback.');
+                const at=nowIso(),feedback={workPerformed:str(source.reportedWork),actualHours:minutes/60,actualMinutes:minutes,services:[],noSparesOrServicesConfirmed:true,source:'work_request'};
+                executions.DIRECT_COMPLETION={...direct,status:'completed',feedback,completedAt:at,completedBy:str(executor.uid),feedbackRecordedBy:str(source.recordedBy),feedbackRecordedAt:str(source.recordedAt),reconciled:true,reconciliationMode:'no_resources_confirmed',reconciledAt:at,reconciledBy:ctx.uid,consumption:[],bomUpdated:false};
+                wo={...wo,data:{...wo.data,taskExecution:executions,completedAt:at,completedBy:str(executor.uid),completedByName:str(executor.name),timeLogs:[{id:'DIRECT_COMPLETION',uid:str(executor.uid),name:str(executor.name),date:str(source.performedDate),hours:minutes/60,minutes,note:'Actual work reported on '+str(wo.data.wrCode)}]}};
+            }
+        }
         if(object(wo.data.earlyClosureRequest).at)await ensureEarlyActuals(ctx,wo);
         for (const t of tasksOf(wo)) {
             const state = object(executions[str(t.id)]);
@@ -2047,7 +2058,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         }
         if(retrospective){
             for(const k of ['assess','reviewAssessment','plan','reconcile'])permissions[k]=false;
-            permissions.execute=permissions.execute===true&&wo.data.status==='in_progress'&&(str(object(object(wo.data.directCompletion).executor).uid)===ctx.uid||ctx.role==='org_super_admin'&&ctx.testMode===true);
+            permissions.execute=false;
             permissions.safety=permissions.safety===true&&!['closed','cancelled'].includes(str(wo.data.status));
             permissions.handover=false;
         }

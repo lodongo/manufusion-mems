@@ -44,7 +44,7 @@ test('gate suggestions fill only unconfigured, role-required gates, from job rol
   assert.equal(picks['MNT.WR.CONVERT'], 'P1');
   assert.equal(picks['MNT.WO.PLAN'], undefined, 'configured gates are left alone');
   assert.equal(picks['MNT.SAFETY.SIGNOFF'], 'P3');
-  assert.equal(picks['MNT.WO.TECHNICAL_CLOSE'], 'P4');
+  assert.equal(picks['MNT.WO.TECHNICAL_CLOSE'], undefined);
   assert.ok(!Object.values(picks).includes('P5'));
   assert.equal(picks['MNT.WR.CREATE'], undefined);
   for (const code of Object.keys(GATE_KEYWORDS)) assert.ok(MAINTENANCE_GATES.some((g) => g.code === code), code);
