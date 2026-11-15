@@ -1062,10 +1062,11 @@ await assert.rejects(
 );
 
 // ----- New WR lifecycle: created → named reviewer → Closed / Canceled / To Be Assessed -----
-const createNewWorkRequest = (body) => maintenanceRoutes['POST /api/org/mnt/wr/create'][0](context('requester', {
+const createCurrentWorkRequest = (body) => maintenanceRoutes['POST /api/org/mnt/wr/create'][0](context('requester', {
     ...finding, title: 'Conveyor defect needing review', description: 'New conveyor drive condition requires review.',
     ...body,
 }));
+const createNewWorkRequest=async body=>{const result=await createCurrentWorkRequest(body);const key=r+'/work_requests/'+result.code;seed(key,{...snapshot(key).data,reviewProcessVersion:2});return result;};
 const noReviewer = await createNewWorkRequest({ reviewerUid: '', title: 'Unassigned conveyor defect' });
 assert.equal(snapshot(r + '/work_requests/' + noReviewer.code).data.status, 'created');
 await assert.rejects(
@@ -1227,6 +1228,15 @@ await route(maintenanceRoutes,'/api/org/mnt/wr/action','reviewer',{code:noAsmWr.
 const pumpWo=await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:noAsmWr.code,action:'convert',confirm:noAsmWr.code,scheduledStart:date,scheduledEnd:date});
 assert.equal(snapshot(r+'/work_orders/'+pumpWo.woCode).data.assemblyId,'');
 assert.equal(snapshot(r+'/work_orders/'+pumpWo.woCode).data.unitId,'NO_ASM');
+// Current flow confirms directly to WO, with no standalone assessment or schedule.
+const confirmedWR=await createCurrentWorkRequest({title:'Current order-first request',description:'Perform current order-first testing.'});
+assert.equal(snapshot(r+'/work_requests/'+confirmedWR.code).data.reviewProcessVersion,3);
+await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:confirmedWR.code,action:'start_review'});
+const confirmedWO=await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:confirmedWR.code,action:'confirm_review'});
+assert.equal(snapshot(r+'/work_requests/'+confirmedWR.code).data.status,'confirmed');
+assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.workflowCode,'WO010');
+assert.deepEqual(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.assessmentTasks,[]);
+assert.equal((await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:confirmedWR.code,action:'confirm_review'})).woCode,confirmedWO.woCode);
 // ----- Period maintenance budget: proposed, approved under the Chart of Authority, committed by approved estimates -----
 const month = date.slice(0, 7);
 await assert.rejects(() => route(maintenancePlanningRoutes, '/api/org/mnt/budget/propose', 'planner', { ccId: 'LINE_CC', period: month, amount: -1, reason: 'Monthly maintenance budget for the line.' }), /amount/);

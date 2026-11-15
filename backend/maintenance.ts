@@ -348,6 +348,7 @@ const WR_STATUS: Record<string, string> = {
     returned: 'Returned for information',
     declined: 'Declined',
     cancelled: 'Cancelled',
+    confirmed: 'Confirmed · Work Order created',
     converted: 'Converted to work order',
     closure_pending: 'Closed at review – to confirm',
     closed: 'Closed at review',
@@ -529,29 +530,29 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
     const gate=(code:string)=>workGroupGateAllowed(ctx.workGroupPolicy,code,path)!==false||(testing&&bypass(ctx,'mnt.work_group.gate.'+code));
     return {
         view: mine || at(P.view),
-        edit: mine && ['created', 'submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_edit),
+        edit: !str(doc.data.woCode)&&!assessmentStarted&&((mine&&['created','submitted','under_review','returned'].includes(status)&&at(P.WR_edit))||(status==='under_review'&&Number(doc.data.reviewProcessVersion)>=2&&workflowEligible&&(testing||assigned===ctx.uid))),
         resubmit: mine && status === 'returned' && !assessmentStarted && at(P.WR_edit),
         cancel: mine && ['created', 'submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_cancel),
         startReview: status === 'created' ? workflowEligible && (testing || !workflowNamed || !assigned || assigned === ctx.uid)
             : status === 'submitted' && at(P.WR_review) && gate('MNT.WR.REVIEW') && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         reviewCancel: status === 'under_review' && Number(doc.data.reviewProcessVersion) === 2
             && (testing || assigned === ctx.uid) && workflowEligible,
-        toAssessment: status === 'under_review' && Number(doc.data.reviewProcessVersion) === 2
+        toAssessment: status === 'under_review' && Number(doc.data.reviewProcessVersion) >= 2
             && (testing || assigned === ctx.uid) && workflowEligible,
-        assess: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
+        assess: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) < 2)
             && at(P.assessment_edit) && gate('MNT.WR.ASSESS') && (workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',path)!==true||(testing&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))) && !str(doc.data.woCode) && !approved,
-        return: status === 'under_review' && Number(doc.data.reviewProcessVersion) !== 2 && !assessmentStarted && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
-        decline: status === 'under_review' && Number(doc.data.reviewProcessVersion) !== 2 && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+        return: status === 'under_review' && Number(doc.data.reviewProcessVersion) < 2 && !assessmentStarted && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+        decline: status === 'under_review' && Number(doc.data.reviewProcessVersion) < 2 && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         // Legacy compatibility only for records created before the dedicated assessment flow.
-        enrich: Number(doc.data.reviewProcessVersion) !== 2 && ['submitted', 'under_review'].includes(status) && (at(P.WR_review) || at(P.assessment_edit)) && !assessmentReviewCurrent(doc.data),
-        close: ['submitted', 'under_review'].includes(status) && gate('MNT.WR.CLOSE') && (Number(doc.data.reviewProcessVersion) === 2 ? at(P.WR_review) : at(P.WR_close))
+        enrich: Number(doc.data.reviewProcessVersion) < 2 && ['submitted', 'under_review'].includes(status) && (at(P.WR_review) || at(P.assessment_edit)) && !assessmentReviewCurrent(doc.data),
+        close: ['submitted', 'under_review'].includes(status) && gate('MNT.WR.CLOSE') && (Number(doc.data.reviewProcessVersion) >= 2 ? at(P.WR_review) : at(P.WR_close))
             && independent(ctx, !mine, 'mnt.wr.reviewer_independence')
-            && (Number(doc.data.reviewProcessVersion) !== 2 || (status === 'under_review' && (testing || assigned === ctx.uid) && workflowEligible))
+            && (Number(doc.data.reviewProcessVersion) < 2 || (status === 'under_review' && (testing || assigned === ctx.uid) && workflowEligible))
             && !assessmentReviewCurrent(doc.data),
         confirmClosure: status === 'closure_pending' && at(P.WR_closeConfirm) && independent(ctx, str(object(doc.data.closure).by) !== ctx.uid, 'mnt.wr.closure_independence'),
-        reviewAssessment: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
+        reviewAssessment: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) < 2)
             && !str(doc.data.woCode) && at(P.assessment_review) && gate('MNT.ASSESS.REVIEW') && independent(ctx, !mine && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid), 'mnt.assessment.review_independence'),
-        convert: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
+        convert: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) < 2)
             && !str(doc.data.woCode) && at(P.WR_convert) && gate('MNT.WR.CONVERT') && approved && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         ownRequest: mine,
     };
@@ -753,6 +754,19 @@ async function closeRequestWithOrder(ctx:OrgContext,request:Doc,closure:Obj,patc
  return code;
 }
 
+/** Confirmation creates the order before any assessment or planning. */
+async function confirmRequestWithOrder(ctx:OrgContext,request:Doc,note:string):Promise<string>{
+ const now=nowIso(),n=await nextOrgCounter(ctx.orgId,'woSeq');
+ if(n>99_999_999)throw new HttpError(400,'Work order numbering is exhausted.');
+ const code='WO'+String(n).padStart(8,'0'),path=pathOf(request),group=groupFields(ctx.workGroupPolicy,path);
+ const keys=['assemblyId','assemblyCode','assemblyName','unitId','unitCode','unitName','costCenterId','costCenterCode','costCenterName','siteId','siteCode','siteName','assetTag','assetName','assetClass','title','description','criticalityCode','criticalityLabel','criticalityColor','priorityCode','priorityLabel','disciplineCode','disciplineLabel','requestedBy','requestedByName','requestedAt','sourceCode','sourceLabel','sourceGroup'];
+ const base=Object.fromEntries(keys.map(k=>[k,str(request.data[k])]));
+ const wo:Obj={...base,...group,code,wrCode:request.id,path,executionMode:'confirmed_request',status:'planning',schemaVersion:2,requestConfirmation:{by:ctx.uid,name:displayName(ctx),at:now,note},impacts:objs(request.data.impacts),assessmentTasks:[],assessmentTasksVersion:0,tasks:[],taskPlanning:{},taskExecution:{},spares:[],services:[],sparesUsed:[],timeLogs:[],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Created by confirmation of '+request.id,note),workflowCode:'WO010',workflowLabel:'Awaiting assessment',workflowSince:now,workflowTransitions:[{from:'',to:'WO010',label:'Awaiting assessment',at:now,by:ctx.uid,byName:displayName(ctx),source:'request_confirmation'}]};
+ const {reviewRoutingChanged:_changed,reviewRoutingPreviousUid:_previous,...requestData}=request.data;
+ await commit([{path:woCol(ctx.orgId)+'/'+code,fields:wo,exists:false},{path:wrCol(ctx.orgId)+'/'+request.id,fields:{...requestData,...group,status:'confirmed',reviewDecision:'confirmed',woCode:code,reviewCompletedAt:now,reviewer:ctx.uid,reviewerName:displayName(ctx),updatedAt:now,history:history(request,ctx,'Confirmed; '+code+' created',note)},updateTime:request.updateTime}]);
+ await rec(ctx,'mnt.wr.confirmed',request.id,code);await rec(ctx,'mnt.wo.created',code,'Confirmed '+request.id);
+ return code;
+}
 function readTasks(raw: unknown, l: Lists): Task[] {
     const rows = objs(raw);
     if (rows.length > 40) throw new HttpError(400, 'Up to 40 tasks per work order.');
@@ -1294,7 +1308,7 @@ export const maintenanceRoutes = {
                         ...finding,
                         titleAuto,
                         status: 'created',
-                        reviewProcessVersion: 2,
+                        reviewProcessVersion: 3,
                         reviewerUid: selectedReviewer, reviewAssignedName: reviewerName,
                         reviewerAssignedAt: selectedReviewer ? now : '',
                         reviewerAssignedBy: selectedReviewer ? 'workflow' : '',
@@ -1351,12 +1365,12 @@ export const maintenanceRoutes = {
                     const reviewRole=reviewRoleOf(ctx,settings,pathOf(d));
                     const s = wrStatus(d);
                     const mine = str(d.data.requestedBy) === ctx.uid;
-                    if (view === 'assessment') return (s === 'under_review' && Number(d.data.reviewProcessVersion) !== 2 || s === 'to_be_assessed') && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
+                    if (view === 'assessment') return (s === 'under_review' && Number(d.data.reviewProcessVersion) < 2 || s === 'to_be_assessed') && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
                     if (view === 'mine') return mine;
                     if (view === 'review') return (s === 'closure_pending' && canAt(ctx, P.WR_closeConfirm, pathOf(d), scope) && (str(object(d.data.closure).by) !== ctx.uid || (ctx.role === 'org_super_admin' && ctx.testMode === true)))
                         || (s === 'created' && wrCan(ctx,d,scope,reviewRole).startReview)
                         || ((!mine || ctx.testMode === true) && ['submitted', 'under_review'].includes(s)
-                            && (Number(d.data.reviewProcessVersion) !== 2 || wrCan(ctx,d,scope,reviewRole).toAssessment)
+                            && (Number(d.data.reviewProcessVersion) < 2 || wrCan(ctx,d,scope,reviewRole).toAssessment)
                             && (canAt(ctx, P.WR_review, pathOf(d), scope) || canAt(ctx, P.WR_close, pathOf(d), scope)));
                     if (view === 'open') return ['created', 'submitted', 'under_review', 'returned', 'closure_pending'].includes(s);
                     return true;
@@ -1545,15 +1559,15 @@ export const maintenanceRoutes = {
             const l = await lists();
             const assignedReviewer = str(doc.data.reviewerUid) === ctx.uid;
             const reviewOverride = ctx.role === 'org_super_admin' && ctx.testMode === true;
-            if (reviewOverride && ['start_review','close_review','cancel_review','to_assessment'].includes(action) && Number(doc.data.reviewProcessVersion) === 2) {
+            if (reviewOverride && ['start_review','close_review','cancel_review','to_assessment','confirm_review','edit'].includes(action) && Number(doc.data.reviewProcessVersion) >= 2) {
                 if (!reviewRole) bypass(ctx,'mnt.wr.review_role_unconfigured');
                 if (!eligibleReview(ctx,doc,scope,reviewRole)) bypass(ctx,'mnt.wr.workflow_reviewer');
                 if (!assignedReviewer && str(doc.data.reviewerUid)) bypass(ctx,'mnt.wr.assigned_reviewer');
             }
-            const reviewNew = Number(doc.data.reviewProcessVersion) === 2;
+            const reviewNew = Number(doc.data.reviewProcessVersion) >= 2;
             switch (action) {
                 case 'edit': {
-                    deny(can.edit, 'Only the requester can edit before technical assessment is saved.');
+                    deny(can.edit, 'Only the requester or assigned reviewer can edit before technical assessment is saved.');
                     const finding = await readFinding(l, ctx.body);
                     if (finding.title.length < 3 || finding.description.length < 10 || !finding.sourceCode || !finding.impacts.length)
                         throw new HttpError(400, 'Short title, finding description, source of finding and at least one impact are required.');
@@ -1562,7 +1576,7 @@ export const maintenanceRoutes = {
                     const existing = objs(doc.data.photos).map((p) => str(p.path));
                     const photos = readPhotos(ctx, ctx.body.photos, existing);
                     // A work request can be edited and submitted without any photo.
-                    await done({ ...finding, titleAuto, photos: photos.map((p) => ({ path: p, addedAt: now })) }, 'Edited by requester', 'mnt.wr.edited', finding.title);
+                    await done({ ...finding, titleAuto, photos: photos.map((p) => ({ path: p, addedAt: now })) }, ctx.uid===str(doc.data.requestedBy)?'Edited by requester':'Edited by assigned reviewer', 'mnt.wr.edited', finding.title);
                     return { ok: true };
                 }
                 case 'resubmit':
@@ -1743,7 +1757,14 @@ export const maintenanceRoutes = {
                         `${category}${repeatRequestCode ? ' · repeat of '+repeatRequestCode : ''}: ${reason}`);
                     return { ok: true };
                 }
+                case 'confirm_review':
                 case 'to_assessment': {
+                    if(action==='confirm_review'||Number(doc.data.reviewProcessVersion)>=3){
+                        if(str(doc.data.woCode)){if(!can.view)throw new HttpError(403,'Work request is outside your access.');return {ok:true,woCode:str(doc.data.woCode)};}
+                        deny(can.toAssessment,'Only the assigned reviewer can confirm this request.');
+                        if(str(doc.data.title).length<3||doc.data.titleAuto===true||str(doc.data.description).length<10||!str(doc.data.sourceCode)||!objs(doc.data.impacts).length)throw new HttpError(400,'Complete the request title, finding, source and impacts before confirmation.');
+                        const woCode=await confirmRequestWithOrder(ctx,doc,note);return {ok:true,woCode};
+                    }
                     if (str(doc.data.assessmentCode) && str(doc.data.status) === 'to_be_assessed')
                         return { ok: true, assessmentCode: str(doc.data.assessmentCode) };
                     deny(can.toAssessment, 'Only the assigned reviewer can send this request to assessment.');

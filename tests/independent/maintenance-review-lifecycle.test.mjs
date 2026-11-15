@@ -7,7 +7,7 @@ const ui = readFileSync('src/org/WorkRequests.tsx', 'utf8');
 
 test('new work requests are Created, reviewer assignment is explicit, and the review has three final outcomes', () => {
     assert.ok(backend.includes("status: 'created'"));
-    assert.ok(backend.includes("reviewProcessVersion: 2"));
+    assert.ok(backend.includes("reviewProcessVersion: 3"));
     assert.ok(backend.includes("case 'assign_review'"));
     assert.ok(backend.includes("case 'close_review'"));
     assert.ok(backend.includes("case 'cancel_review'"));
@@ -20,8 +20,8 @@ test('new work requests are Created, reviewer assignment is explicit, and the re
     assert.ok(backend.includes('eligibleReview'));
     assert.ok(backend.includes("reviewAssignmentSource: 'workflow'"));
     assert.ok(ui.includes('Close (no assessment)'));
-    assert.ok(ui.includes('Cancel (review)'));
-    assert.ok(ui.includes('To Be Assessed'));
+    assert.ok(ui.includes('Confirm &amp; create Work Order'));
+    assert.ok(backend.includes('confirmRequestWithOrder'));
 });
 test('assessment numbering is database-managed and records are separately stored', () => {
     assert.ok(backend.includes("nextOrgCounter(ctx.orgId, 'assessmentSeq')"));

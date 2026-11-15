@@ -136,7 +136,7 @@ interface Detail extends Row {
     can: WrCan;
 }
 
-export const WR_TONE: Record<string, 'brand' | 'muted' | 'danger' | 'warn'> = { created: 'warn', to_be_assessed: 'brand', submitted: 'warn', under_review: 'warn', returned: 'danger', declined: 'muted', cancelled: 'muted', converted: 'brand', closure_pending: 'warn', closed: 'brand' };
+export const WR_TONE: Record<string, 'brand' | 'muted' | 'danger' | 'warn'> = { created: 'warn', to_be_assessed: 'brand', confirmed:'brand', submitted: 'warn', under_review: 'warn', returned: 'danger', declined: 'muted', cancelled: 'muted', converted: 'brand', closure_pending: 'warn', closed: 'brand' };
 
 export function useMntSetup() {
     return useLoad(() => callBackend<MntSetup>('/api/org/mnt/setup'));
@@ -730,9 +730,9 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
         buttons.push({ key: 'rejectClosure', label: 'Not fixed – reopen', icon: <Undo2 className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('reject_closure') });
     }
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
-    if (can.close) buttons.push({ key: 'close', label: r.reviewProcessVersion === 2 ? 'Close (no assessment)' : 'Close – no planning needed', icon: <Check className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('close') });
-    if (can.reviewCancel) buttons.push({ key: 'reviewCancel', label: 'Cancel (review)', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('review_cancel') });
-    if (can.toAssessment) buttons.push({ key: 'toAssessment', label: 'To Be Assessed', icon: <ClipboardList className='h-4 w-4' />, onClick: () => setMode('to_assess') });
+    if (can.close) buttons.push({ key: 'close', label: Number(r.reviewProcessVersion) >= 2 ? 'Close (no assessment)' : 'Close – no planning needed', icon: <Check className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('close') });
+    if (can.reviewCancel && Number(r.reviewProcessVersion)<2) buttons.push({ key: 'reviewCancel', label: 'Cancel (review)', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('review_cancel') });
+    if (can.toAssessment) buttons.push({ key: 'toAssessment', label: 'Confirm', icon: <ClipboardList className='h-4 w-4' />, onClick: () => setMode('to_assess') });
     if (can.assess && !can.reviewAssessment) buttons.push({ key: 'assess', label: assessed ? 'Update work assessment' : 'Start work assessment', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => {setSection('assessment');setMode('assess');} });
     if (can.reviewAssessment && assessed && r.assessmentTasks.length>0) buttons.push({ key: 'reviewAssessment', label: 'Approve assessment', icon: <CheckCircle2 className='h-4 w-4' />, variant: 'primary', onClick: () => {setSection('summary');setMode('review_assessment');} });
     if (can.convert) buttons.push({ key: 'convert', label: 'Convert to work order', icon: <Wrench className='h-4 w-4' />, variant: assessed ? 'primary' : 'secondary', onClick: () => setMode('convert') });
@@ -810,11 +810,11 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                 )}
 
                 {mode === 'to_assess' && <Card className='space-y-3'>
-                    <h2 className='text-lg font-semibold text-ink'>Send to Work Assessment</h2>
-                    <p className='text-sm text-soft'>This is the final request-review decision. MEMS will issue a separate ASSM_######## assessment number from the organization's database counter. The request remains linked and read-only; the assessor works in Work Assessments.</p>
+                    <h2 className='text-lg font-semibold text-ink'>Confirm Work Request</h2>
+                    <p className='text-sm text-soft'>MEMS will create the numbered Work Order immediately. Assessment is its first step. The confirmed request remains linked and read-only.</p>
                     {actionError && <Alert tone='error'>{actionError}</Alert>}
                     <div className='flex gap-2'>
-                        <Button testOverride={r.testModeOverride} busy={busy} onClick={() => run('to_assessment')}>Create assessment</Button>
+                        <Button testOverride={r.testModeOverride} busy={busy} onClick={() => run('confirm_review')}>Confirm &amp; create Work Order</Button>
                         <Button variant='secondary' onClick={() => setMode('')}>Back</Button>
                     </div>
                 </Card>}
@@ -1229,7 +1229,7 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
     const localToday = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,10);
     const [closedDate, setClosedDate] = useState(localToday);
     const [durationMinutes, setDurationMinutes] = useState('');
-    const direct = detail.reviewProcessVersion === 2;
+    const direct = Number(detail.reviewProcessVersion) >= 2;
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const screen = useFullScreen(true);

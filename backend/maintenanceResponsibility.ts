@@ -109,17 +109,17 @@ function currentAssessment(data:Data,d:Obj,path:string[]){
  return !!role&&assessmentReviewCurrent(d,role);
 }
 const assess=():Stage=>({label:'Technical work assessment',gate:'MNT.WR.ASSESS',permission:'MNT.assessment.edit'});
-const approval=(d:Obj):Stage=>({label:'Assessment approval',gate:'MNT.ASSESS.REVIEW',permission:'MNT.assessment.review',exclude:[str(d.requestedBy),str(d.createdBy),str(d.assessedBy),str(d.assessmentTasksBy)].filter(Boolean)});
+const approval=(d:Obj):Stage=>({label:'Assessment approval',gate:'MNT.ASSESS.REVIEW',permission:'MNT.assessment.review',exclude:[str(d.requestedBy),d.executionMode==='confirmed_request'?'':str(d.createdBy),str(d.assessedBy),str(d.assessmentTasksBy)].filter(Boolean)});
 function assessmentStage(data:Data,d:Obj,path:string[]):Stage{
  if(obj(d.assessmentReview).status==='changes_requested'||reviewAssessmentPrerequisites(d,'__routing__')||(/^WR\d/.test(str(d.code))&&(!str(d.title)||str(d.description).length<10||!str(d.sourceCode)||!rows(d.impacts).length)))return assess();
  return approval(d);
 }
 function wrStage(data:Data,d:Obj,path:string[]):Stage{
  const s=str(d.status);
- if(str(d.woCode)||['closed','cancelled','declined','converted'].includes(s))return {label:str(d.woCode)?(s==='closed'?'Closed · linked work order':'Converted to work order'):'Completed'};
+ if(str(d.woCode)||['closed','cancelled','declined','converted','confirmed'].includes(s))return {label:str(d.woCode)?(s==='closed'?'Closed · linked work order':s==='confirmed'?'Confirmed · Work Order created':'Converted to work order'):'Completed'};
  if(s==='returned')return {label:'Requester correction',fixed:str(d.requestedBy),fixedRole:'Requester'};
  if(s==='closure_pending')return {label:'Closure confirmation',permission:'MNT.WR.closeConfirm',exclude:[str(obj(d.closure).by)]};
- if(['created','submitted','under_review'].includes(s)&&!(s==='under_review'&&Number(d.reviewProcessVersion)!==2))return {label:'Work request review',gate:'MNT.WR.REVIEW',permission:'MNT.WR.review',exclude:[str(d.requestedBy)],preferred:str(d.reviewerUid)};
+ if(['created','submitted','under_review'].includes(s)&&!(s==='under_review'&&Number(d.reviewProcessVersion)<2))return {label:'Work request review',gate:'MNT.WR.REVIEW',permission:'MNT.WR.review',exclude:[str(d.requestedBy)],preferred:str(d.reviewerUid)};
  if(s==='to_be_assessed'||s==='under_review')return currentAssessment(data,d,path)?{label:'Convert to work order',gate:'MNT.WR.CONVERT',permission:'MNT.WR.convert',exclude:[str(d.requestedBy)]}:assessmentStage(data,d,path);
  return {label:'Awaiting workflow stage'};
 }
@@ -192,7 +192,7 @@ export function responsibilityFor(data:Data,d:Obj,kind:'wr'|'wo'|'window'|'valid
 /** Use current eligible reviewer on refresh; never silently retain a revoked or out-of-group UID. */
 export function resolvedReviewDoc(data:Data,doc:Doc):Doc{
  const d=doc.data,path=ids(d.path);
- if(!groupAt(data.policy,path)||!['created','submitted','under_review'].includes(str(d.status))||str(d.status)==='under_review'&&Number(d.reviewProcessVersion)!==2)return doc;
+ if(!groupAt(data.policy,path)||!['created','submitted','under_review'].includes(str(d.status))||str(d.status)==='under_review'&&Number(d.reviewProcessVersion)<2)return doc;
  const route=responsibilityFor(data,d,'wr'),a=route.responsibility,role=groupGateRole(data.policy,'MNT.WR.REVIEW',path)||'';
  if(a.stage!=='Work request review')return doc;
  if(str(d.reviewerUid)===a.uid&&str(d.reviewRoleCode)===role)return doc;

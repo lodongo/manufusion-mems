@@ -2,14 +2,14 @@
 export interface AssessmentRecord {
  assessmentTasks?: unknown; assessmentTasksVersion?: unknown; assessmentTasksAt?: unknown;
  assessedAt?: unknown; assessmentReview?: unknown; requestedBy?: unknown;
- createdBy?: unknown; assessedBy?: unknown; assessmentTasksBy?: unknown;
+ createdBy?: unknown; assessedBy?: unknown; assessmentTasksBy?: unknown; executionMode?:unknown;
 }
 type Fields = Record<string,unknown>;
 const item=(v:unknown):Fields=>v!==null&&typeof v==='object'&&!Array.isArray(v)?v as Fields:{};
 const value=(v:unknown)=>typeof v==='string'?v:'';
 export function reviewAssessmentPrerequisites(record:AssessmentRecord,reviewerId:string):string {
  if(!reviewerId)return 'A signed-in reviewer is required.';
- if([record.requestedBy,record.createdBy,record.assessedBy,record.assessmentTasksBy].some(id=>value(id)===reviewerId))
+ if([record.requestedBy,record.executionMode==='confirmed_request'?undefined:record.createdBy,record.assessedBy,record.assessmentTasksBy].some(id=>value(id)===reviewerId))
   return 'The requester, work order creator or assessment author cannot approve their own assessment.';
  if(!Array.isArray(record.assessmentTasks)||record.assessmentTasks.length===0)
   return 'Complete the task-by-task work assessment before review.';
