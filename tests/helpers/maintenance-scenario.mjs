@@ -453,6 +453,7 @@ const req = await op('planner', 'procure', { code: wo, taskId: 'sensors', resour
 assert.equal(snapshot(r + '/procurement_requirements/' + req.requirementId).data.status, 'pending_approval');
 assert.equal(snapshot(r + '/procurement_requirements/' + req.requirementId).data.lines[0].quantity, 2);
 // The existing procurement process supplies the shortage; posted receipt is read from the same stock journal.
+seed(r+'/procurement_orders/PO_SENSOR_RECEIPT',{status:'full',lines:[{no:10,type:'material',requirementId:req.requirementId,quantity:2,receivedQty:2}],deliveries:[{status:'posted',lines:[{no:10,qty:2}]}]});
 seed(r + '/material_journal/RECEIPT_SENSOR', {
     materialId: 'SENSOR',
     warehouseId: 'WAREHOUSE',
@@ -653,6 +654,11 @@ for (const [index, t] of tasks.entries()) {
                 outstandingIssues: 'None',
             },
         ];
+    }
+    if(t.services.length){
+        await assert.rejects(()=>op('tech','complete_task',{code:wo,taskId:t.id,feedback}),/attach the service report/i);
+        const path=r+'/work_orders/'+wo,record=snapshot(path).data;
+        seed(path,{...record,serviceReports:{[t.id]:{rewind:{path:r+'/mnt/service_reports/'+wo+'/'+t.id+'/rewind/test.pdf',filename:'test.pdf',by:people.tech[0],at:now}}}});
     }
     await op('tech', 'complete_task', { code: wo, taskId: t.id, feedback });
     const actual = t.id === 'sensors' ? 3 : s.qty,
@@ -1174,6 +1180,10 @@ await op('manager','technical_close',{code:fastWo,note:'Independently reviewed f
 assert.equal(snapshot(r+'/work_orders/'+fastWo).data.status,'closed');
 assert.equal(snapshot(r+'/work_orders/'+fastWo).data.finalCost.pendingLabourValuation,true);
 assert.equal(snapshot(r+'/work_requests/'+directClose.code).data.status,'closed');
+const parentBefore=structuredClone(snapshot(r+'/work_orders/'+fastWo).data);
+const sub=await route(maintenanceRoutes,'/api/org/mnt/wo/action','manager',{code:fastWo,action:'create_break_in',title:'Additional guard work',description:'Investigate additional mounting concern.',scheduledStart:date,scheduledEnd:date});
+const subData=snapshot(r+'/work_orders/'+sub.woCode).data;
+assert.equal(subData.parentWoCode,fastWo);assert.equal(subData.wrCode,directClose.code);assert.equal(subData.maintenanceTypeCode,'MAI-016');assert.equal(subData.status,'planning');assert.deepEqual(snapshot(r+'/work_orders/'+fastWo).data,parentBefore);
 const repeat = await createNewWorkRequest({ title:'Same conveyor fault reported twice', description:'Duplicate request on the conveyor drive.' });
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', {code:repeat.code,action:'start_review'});
 const search = await route(maintenanceRoutes, '/api/org/mnt/wr/repeat-search', 'assessor', {

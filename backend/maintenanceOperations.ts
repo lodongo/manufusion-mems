@@ -521,7 +521,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
     if(action==='confirm_external_specialist'){
         const ext=object(task.externalResource);if(!ext.type)throw new HttpError(400,'This task does not require an external specialist.');
         const persons=Number(b.persons);if(!Number.isInteger(persons)||persons<Number(ext.persons)||persons>50)throw new HttpError(400,'Confirm sufficient specialist personnel.');
-        const date=requiredText(b.availableDate,'Confirmed availability date',10,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date)))throw new HttpError(400,'Choose a valid availability date.');
+        const date=requiredText(b.availableDate,'Confirmed availability date',10,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date)throw new HttpError(400,'Choose a valid availability date.');
         const externalSpecialist={provider:requiredText(b.provider,'Specialist provider'),reference:requiredText(b.reference,'Booking / contract / order reference'),persons,availableDate:date,note:requiredText(b.note,'Confirmation evidence',5),at:nowIso(),by:ctx.uid,name:name(ctx)};
         await saveWo(ctx,wo,{taskPlanning:{...planning,[str(task.id)]:{...p,externalSpecialist}}},'task.external_specialist.confirmed',str(task.id));return {ok:true};
     }
@@ -906,7 +906,7 @@ async function windowSave(ctx: OrgContext) {
     const equipment = await getDoc(`${root(ctx)}/structure/${equipmentId}`);
     if (!equipment || !['work_center', 'equipment'].includes(str(equipment.data.level))) throw new HttpError(400, 'Choose the equipment.');
     const date = str(b.date), startTime = str(b.startTime);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) throw new HttpError(400, 'Choose the window date.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date) throw new HttpError(400, 'Choose a valid window date.');
     if (!TIME_RE.test(startTime)) throw new HttpError(400, 'Choose the start time (HH:MM).');
     const durationHours = Number(b.durationHours);
     if (!Number.isFinite(durationHours) || durationHours < 0.25 || durationHours > 72 || Math.round(durationHours * 4) !== durationHours * 4)
@@ -1120,7 +1120,7 @@ async function windowAction(ctx: OrgContext, action: string) {
         }else{
             if(summary.handover!==summary.total)throw new HttpError(409,'Complete window equipment handover first.');
             requiredText(b.note,'Technical Manager closure review',10);
-            for(const wo of c.wos){if(wo.data.status==='closed')continue;closurePrerequisites(wo.data);
+            for(const wo of c.wos){if(wo.data.status==='closed')continue;closurePrerequisites(wo.data);await ensureClosureResources(ctx,wo);
                 if(b.outstandingAccepted!==true&&(tasksOf(wo).some(t=>{const f=object(object(object(wo.data.taskExecution)[str(t.id)]).feedback);return f.outstandingStatus==='reported'||[f.outstandingDefects,f.followUp].some(v=>!!str(v).trim()&&!/^none\.?$/i.test(str(v).trim()));})||!/^none\.?$/i.test(str(object(wo.data.handover).restrictions).trim())))throw new HttpError(409,'Review and accept outstanding issues and follow-up actions first.');
             }
         }
@@ -1448,9 +1448,20 @@ async function ensureClosureResources(ctx:OrgContext,wo:Doc){
     const issues=(await listDocs(root(ctx)+'/goods_issues')).filter(x=>x.data.workOrderId===wo.id);
     const links=(await listDocs(root(ctx)+'/mnt_supply_links')).filter(x=>x.data.woCode===wo.id&&x.data.status==='active');
     const trace=await procurementTrace(ctx.orgId,links.map(x=>str(x.data.requirementId)));
+    const orders=await listDocs(root(ctx)+'/procurement_orders');
+    const requirePostedReceipt=(req:string)=>{
+        for(const po of orders.filter(x=>['open','sent','partial','full'].includes(str(x.data.status)))){
+            for(const line of rows(po.data.lines).filter(x=>x.requirementId===req&&x.type!=='service')){
+                if((Number(line.receivedQty)||0)+1e-6<Number(line.quantity))throw new HttpError(409,'Purchase order '+po.id+' is not fully received.');
+                const posted=rows(po.data.deliveries).filter(x=>x.status==='posted').flatMap(x=>rows(x.lines)).filter(x=>Number(x.no)===Number(line.no)).reduce((n,x)=>n+Number(x.qty||x.quantity||0),0);
+                if(posted+1e-6<Number(line.quantity))throw new HttpError(409,'Post the goods receipt for '+po.id+' line '+line.no+'.');
+            }
+        }
+    };
     for(const link of links){
         const p=trace.get(str(link.data.requirementId));
         if(!p||p.open===false||p.stage!=='received'&&p.stage!=='service_accepted')throw new HttpError(409,'Receive and post every linked procurement requirement before closure: '+str(link.data.requirementId));
+        if(p.stage==='received')requirePostedReceipt(str(link.data.requirementId));
     }
     for(const issue of issues){
         if(issue.data.finance==='live'&&!str(issue.data.journalId))throw new HttpError(409,'Goods issue '+issue.id+' has not been financially posted.');
@@ -1469,14 +1480,15 @@ async function ensureClosureResources(ctx:OrgContext,wo:Doc){
             if(req&&!links.some(l=>l.data.requirementId===req)){
                 const t=(await procurementTrace(ctx.orgId,[req])).get(req);
                 if(!t||t.stage!=='received')throw new HttpError(409,'Receive and post spare '+str(spare.description)+' before closure.');
+                requirePostedReceipt(req);
             }
             const issued=rows(e.consumption).filter(c=>c.plannedSpareId===spare.id).reduce((n,c)=>n+Number(c.issued),0);
-            // A planned spare explicitly dispositioned as not used still needs its linked procurement fully received.
-            if(issued+1e-6<Number(spare.qty)&&!rows(e.unusedPlannedSpares).some(x=>x.spareId===spare.id))throw new HttpError(409,'Receive, issue and reconcile the full planned quantity of '+str(spare.description)+'.');
+            // Unused received material must be returned and reconciled; a note alone cannot satisfy the quantity gate.
+            if(issued+1e-6<Number(spare.qty))throw new HttpError(409,'Receive, issue and reconcile the full planned quantity of '+str(spare.description)+'.');
         }
         for(const service of rows(task.services)){
             const f=rows(object(e.feedback).services).find(x=>x.id===service.id),report=object(reports[str(service.id)]);
-            if(!f||f.accepted!==true||!str(report.path))throw new HttpError(409,'Complete service feedback and attach the service report: '+str(service.description));
+            if(!f||f.accepted!==true||!str(report.path).startsWith(root(ctx)+'/mnt/service_reports/'+wo.id+'/'))throw new HttpError(409,'Complete service feedback and attach the service report: '+str(service.description));
         }
     }
 }
@@ -1498,7 +1510,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         if(!task||!['in_progress','blocked','completed'].includes(str(e.status))||!texts(e.performers).includes(ctx.uid)&&!bypass(ctx,'mnt.task.execution_team'))throw new HttpError(403,'Only the allocated execution team can upload the completed service report.');
         const service=rows(task.services).find(s=>s.id===b.serviceId);
         if(!service)throw new HttpError(400,'Choose a service on this task.');
-        const data=str(b.data),buffer=Buffer.from(data,'base64');
+        const data=str(b.data);if(data.length>2_000_000)throw new HttpError(400,'Service report exceeds 1.5 MB.');const buffer=Buffer.from(data,'base64');
         if(!data||data.length>2_000_000||!/^[A-Za-z0-9+/=]+$/.test(data)||buffer.length>1_500_000||buffer.subarray(0,5).toString('latin1')!=='%PDF-'||/\/(JavaScript|JS|Launch|EmbeddedFile|OpenAction)\b/.test(buffer.toString('latin1')))throw new HttpError(400,'Upload a PDF service report without active content, maximum 1.5 MB.');
         const filename=str(b.filename).slice(0,150)||'service-report.pdf';
         const path=root(ctx)+'/mnt/service_reports/'+wo.id+'/'+identifier(task.id)+'/'+identifier(service.id)+'/'+maintenanceKey(nowIso(),ctx.uid,data).slice(0,24)+'.pdf';

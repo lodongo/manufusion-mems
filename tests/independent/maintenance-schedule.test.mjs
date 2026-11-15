@@ -35,5 +35,5 @@ test('safety declaration and task feedback cannot be assumed', () => {
     assert.throws(() => safetyDeclaration({}), /explicit/);
     assert.throws(() => safetyDeclaration({ declaration: 'none' }), /Explicitly confirm/);
     safetyDeclaration({ declaration: 'none', noIncidentsConfirmed: true });
-    assert.throws(() => taskCompletion({ services: [] }, {}), /workPerformed/);
+    assert.throws(() => taskCompletion({ services: [] }, {}), /What was done/);
 });
