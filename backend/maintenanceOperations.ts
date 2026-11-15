@@ -79,7 +79,11 @@ function history(ctx: OrgContext, d: Obj, action: string, note = '') {
     return [...rows(d.history), { at: nowIso(), uid: ctx.uid, name: name(ctx), action, note }];
 }
 async function saveWo(ctx: OrgContext, wo: Doc, patch: Obj, action: string, note = '') {
+    const at=nowIso(),stopping=Object.entries(object(patch.taskExecution)).filter(([id,value])=>['blocked','awaiting_feedback','completed'].includes(str(object(value).status))&&object(object(wo.data.taskExecution)[id]).status!==object(value).status).map(([id])=>id);
+    const timed:Write[]=[];
+    if(stopping.length){const entries=await runQuery({from:[{collectionId:'maintenance_time_bookings'}],where:fieldEq('woCode',wo.id)},root(ctx));for(const d of entries){if(d.data.status!=='running'||!stopping.includes(str(d.data.taskId)))continue;const start=Date.parse(str(d.data.start)),end=Date.parse(at),valid=Number.isFinite(start)&&end>start&&end-start<=36*3600000;timed.push({path:root(ctx)+'/maintenance_time_bookings/'+d.id,fields:{...d.data,end:at,status:valid?(d.data.approvalRequired===true?'pending_approval':'recorded'):'needs_review',stopReason:'physical_activity_state_changed',stoppedAt:at,systemStopped:true,stopNote:action},updateTime:d.updateTime});}}
     await commit([
+        ...timed,
         {
             path: `${root(ctx)}/work_orders/${wo.id}`,
             fields: { ...wo.data, ...patch,...groupFields(ctx.workGroupPolicy,recordPath(wo)), updatedAt: nowIso(), history: history(ctx, wo.data, action, note) },
@@ -1004,6 +1008,7 @@ async function windowSave(ctx: OrgContext) {
     const capacity=await capacityForWindow(ctx,start,schedule.tasks.map(t=>({...t,path:texts(wos.find(w=>w.id===t.woCode)?.data.path)})) as unknown as Obj[],existing?.id||'');
     if (b.action === 'preview_window') return { schedule:{...schedule,conflicts:[...schedule.conflicts,...capacity.blockers]}, neededHours: needed, start, end,capacityWarnings:capacity.warnings };
     if(capacity.blockers.length)throw new HttpError(409,capacity.blockers.slice(0,8).join(' '));
+    const overrideReason=str(b.capacityOverrideReason).trim().slice(0,500);if(capacity.warnings.length&&overrideReason.length<10)throw new HttpError(409,'Acknowledge capacity warnings with a documented planning reason (10+ characters).');
     if (schedule.conflicts.length) throw new HttpError(409, schedule.conflicts.join(' '));
     if (needed > durationHours + 1e-6)
         throw new HttpError(409, `The work needs ${Math.round(needed * 100) / 100} h but the window is ${durationHours} h. Lengthen the window or remove a work order.`);
@@ -1063,7 +1068,7 @@ async function windowSave(ctx: OrgContext) {
         scheduledAt: nowIso(),
         capacityWarnings:capacity.warnings,
         manualOffsets:offsets,
-        capacityOverride:capacity.warnings.length?{by:ctx.uid,at:nowIso(),reason:str(b.capacityOverrideReason).trim().slice(0,500),warnings:capacity.warnings}:null,
+        capacityOverride:capacity.warnings.length?{by:ctx.uid,at:nowIso(),reason:overrideReason,warnings:capacity.warnings}:null,
         updatedAt: nowIso(),
         history: history(ctx, existing?.data || {}, revision === 1 ? 'Window scheduled' : 'Window revised (revision ' + revision + ')', str(b.reason)),
     };

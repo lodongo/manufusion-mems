@@ -163,13 +163,13 @@ function RiskReport({ report, onClose }: { report: MntData; onClose: () => void 
     );
 }
 
-function Gantt({ schedule, start, onMove }: { schedule: MntData; start: string; onMove: (id: string, offset: number) => void }) {
+function Gantt({ schedule, start, onMove }: { schedule: MntData; start: string; onMove?: (id: string, offset: number) => void }) {
     const scale = Math.max(1, Number(schedule.duration) || 1),
         groups = [...new Set((schedule.tasks || []).map((t: MntData) => t.woCode))] as string[];
     return (
-        <div className="overflow-x-auto rounded-xl border border-line">
-            <div className="min-w-[720px]">
-                <div className="grid grid-cols-[240px_1fr] border-b border-line bg-panel p-3 text-xs text-soft">
+        <div className="min-w-0 w-full rounded-xl border border-line">
+            <div className="min-w-0">
+                <div className="grid grid-cols-1 gap-1 md:grid-cols-[minmax(0,240px)_minmax(0,1fr)] border-b border-line bg-panel p-3 text-xs text-soft">
                     <p>Work order / task</p>
                     <div className="flex justify-between">
                         {Array.from({ length: 5 }, (_, i) => (
@@ -183,12 +183,12 @@ function Gantt({ schedule, start, onMove }: { schedule: MntData; start: string; 
                         {(schedule.tasks || [])
                             .filter((t: MntData) => t.woCode === wo)
                             .map((t: MntData) => (
-                                <div key={t.id} className="grid grid-cols-[240px_1fr] items-center gap-2 border-b border-line px-3 py-3">
+                                <div key={t.id} className="grid grid-cols-1 md:grid-cols-[minmax(0,240px)_minmax(0,1fr)] items-center gap-2 border-b border-line px-3 py-3">
                                     <div>
-                                        <p className="truncate text-sm font-medium">{t.description}</p>
+                                        <p className="break-words text-sm font-medium">{t.description}</p>
                                         <p className="text-xs text-muted">
                                             {t.start.toFixed(1)}–{t.finish.toFixed(1)} h · Float {t.float.toFixed(1)} h
-                                        </p>
+                                        </p>{onMove&&<label className="block text-xs text-soft mt-1">Earliest start (h from window)<input key={t.id+':'+t.offset} type="number" min="0" step="0.25" defaultValue={t.offset} onBlur={e=>{const v=Number(e.target.value);if(Number.isFinite(v)&&v>=0&&v!==t.offset)onMove(t.id,v);}} className="w-24 max-w-full rounded border border-line bg-panel px-2 py-1"/></label>
                                     </div>
                                     <div
                                         className="relative h-9 rounded bg-panel"
@@ -198,18 +198,18 @@ function Gantt({ schedule, start, onMove }: { schedule: MntData; start: string; 
                                             const id = e.dataTransfer.getData('text/plain');
                                             if (id) {
                                                 const rect = e.currentTarget.getBoundingClientRect();
-                                                onMove(id, Math.max(0, Math.round(((e.clientX - rect.left) / rect.width) * scale * 4) / 4));
+                                                onMove?.(id, Math.max(0, Math.round(((e.clientX - rect.left) / rect.width) * scale * 4) / 4));
                                             }
                                         }}
                                     >
                                         <button
-                                            draggable
+                                            draggable={!!onMove}
                                             onDragStart={(e) => e.dataTransfer.setData('text/plain', t.id)}
                                             title={`${t.description}: ${t.critical ? 'Critical path' : 'Parallel / float available'}. Drag to reschedule.`}
-                                            className={`absolute top-0 h-11 min-w-5 cursor-grab truncate rounded px-2 text-left text-xs text-white text-onbrand ${t.critical ? 'bg-red-600' : 'bg-emerald-600'}`}
+                                            className={`absolute top-0 h-11 min-w-0 cursor-grab truncate rounded px-1 text-left text-xs text-white text-onbrand ${t.critical ? 'bg-red-600' : 'bg-emerald-600'}`}
                                             style={{
                                                 left: (100 * t.start) / scale + '%',
-                                                width: Math.max(2, (100 * t.hours) / scale) + '%',
+                                                width: (100 * t.hours) / scale + '%',
                                             }}
                                         >
                                             {t.hours} h
@@ -245,6 +245,8 @@ interface Draft {
     workOrderIds: string[];
     reason: string;
     timeZone: string;
+    manualOffsets?: Record<string,number>;
+    capacityOverrideReason?: string;
 }
 const ZONE = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; } })();
 const today = () => new Date().toISOString().slice(0, 10);
@@ -332,7 +334,7 @@ export default function MntWindows() {
         setPreviewError('');
         setDraft(
             w
-                ? { windowId: w.id, title: w.title, equipmentId: w.equipmentId, date: w.date, startTime: w.startTime, durationHours: Number(w.durationHours) || 1, workOrderIds: w.workOrderIds || [], reason: '', timeZone: w.timeZone || ZONE }
+                ? { windowId: w.id, title: w.title, equipmentId: w.equipmentId, date: w.date, startTime: w.startTime, durationHours: Number(w.durationHours) || 1, workOrderIds: w.workOrderIds || [], reason: '', timeZone: w.timeZone || ZONE,manualOffsets:w.manualOffsets||{},capacityOverrideReason:'' }
                 : { title: '', equipmentId: '', date: today(), startTime: '07:00', durationHours: 8, workOrderIds: [], reason: '', timeZone: ZONE },
         );
     };
@@ -411,7 +413,9 @@ export default function MntWindows() {
                             </p>
                             {!!preview.capacityWarnings?.length&&<Alert tone='warn'><div className='space-y-1 text-xs'>{preview.capacityWarnings.map((w:string)=><p key={w}>{w}</p>)}</div></Alert>}
                             {!!preview.schedule?.conflicts?.length&&<Alert tone='error'><div className='space-y-1 text-xs'>{preview.schedule.conflicts.map((w:string)=><p key={w}>{w}</p>)}</div></Alert>}
-                            <Gantt schedule={preview.schedule} start={preview.start} onMove={() => {}} />
+                            {!!preview.capacityWarnings?.length&&<MntField label="Capacity warning acknowledgement *" value={draft.capacityOverrideReason||''} multiline onChange={v=>patch({capacityOverrideReason:v})}/>}
+                            <div className='flex flex-wrap gap-2 text-xs'><span>Automatically levelled plan · move earliest starts as needed.</span><button type='button' className='text-teal-500 underline' onClick={()=>patch({manualOffsets:{}})}>Reset offsets</button></div>
+                            <Gantt schedule={preview.schedule} start={preview.start} onMove={(id,offset)=>patch({manualOffsets:{...draft.manualOffsets,[id]:Math.round(offset*4)/4}})} />
                         </div>
                     )}
                     {previewError && <Alert tone="error">{previewError}</Alert>}
@@ -419,7 +423,7 @@ export default function MntWindows() {
                     <div className="flex gap-2">
                         <Button
                             busy={busy}
-                            disabled={!valid || !preview || needed > draft.durationHours || (preview.schedule?.conflicts?.length ?? 0) > 0 || (!!draft.windowId && draft.reason.trim().length < 10)}
+                            disabled={!valid || !preview || needed > draft.durationHours || (preview.schedule?.conflicts?.length ?? 0) > 0 || (!!draft.windowId && draft.reason.trim().length < 10)|| (!!preview.capacityWarnings?.length&&(draft.capacityOverrideReason||'').trim().length<10)}
                             onClick={() => action('save_window', draft)}
                         >
                             {draft.windowId ? 'Save changes' : 'Schedule window'}
@@ -452,7 +456,7 @@ export default function MntWindows() {
                          {selected.model !== 'equipment_v2' && ['draft', 'awaiting_approval'].includes(selected.status) && (
                             <Alert tone="info">This older production-line window was never authorized. Create an equipment window for its work orders; this one is then replaced.</Alert>
                         )}
-                        <Gantt schedule={selected.liveSchedule || selected.schedule} start={selected.start} onMove={() => {}} />
+                        <Gantt schedule={selected.liveSchedule || selected.schedule} start={selected.start} />
                         <div className="flex flex-wrap gap-2">
                             {selected.model === 'equipment_v2' && ['scheduled', 'draft'].includes(selected.status) && (
                                 <Button testOverride={!!data?.testModeOverride} variant="secondary" onClick={() => edit(selected)}>

@@ -56,7 +56,7 @@ async function timeRoute(ctx:OrgContext){
  }
  if(!person)throw new HttpError(403,'An active maintenance execution role is required.');
  const correcting=action==='correct',manual=action==='manual'||correcting;
- if(correcting&&(!supervisor||!existing||!['recorded','running','approved','returned','pending_approval'].includes(str(existing.data.status))||note.length<10))throw new HttpError(403,'A scoped supervisor must correct an existing entry with a reason.');
+ if(correcting&&(!supervisor||!existing||!['recorded','running','approved','returned','pending_approval','needs_review'].includes(str(existing.data.status))||note.length<10))throw new HttpError(403,'A scoped supervisor must correct an existing entry with a reason.');
  const classCode=woCode?'DIRECT':correcting?str(existing?.data.classCode):str(b.classCode),cls=correcting?{code:classCode,label:str(existing?.data.classification),productive:existing?.data.productive===true,requiresOrder:!!woCode,delayOwner:str(existing?.data.delayOwner),deductible:existing?.data.deductible===true}:policy.classes.find(x=>x.code===classCode);
  if(!cls||cls.requiresOrder!==!!woCode)throw new HttpError(400,'Choose a valid time classification.');
  if(!woCode&&note.length<5)throw new HttpError(400,'Describe the non-work-order booking.');
