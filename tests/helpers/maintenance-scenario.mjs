@@ -1259,10 +1259,13 @@ await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirme
 assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.assessedBy,people.assessor[0]);
 const currentTask={...task('current_check','Inspect and repair conveyor condition',''),equipmentId:'CONVEYOR'};
 await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'save_task_assessment',tasks:[currentTask]});
-assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.workflowCode,'WO020');
-await route(maintenanceRoutes,'/api/org/mnt/wo/action','reviewer',{code:confirmedWO.woCode,action:'review_assessment',note:'Independently approved technical classification and task scope.'});
-assert.ok(['WO030','WO040','WO050','WO060','WO070','WO080'].includes(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.workflowCode));
-assert.deepEqual(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.workflowTransitions.slice(0,2).map(e=>e.to),['WO010','WO020']);
+// New orders snapshot the organization default with optional approvals disabled.
+const currentOrder=snapshot(r+'/work_orders/'+confirmedWO.woCode).data;
+assert.equal(currentOrder.maintenanceGovernance.policy.workOrder.enabled,false);
+assert.ok(['WO030','WO040','WO050','WO060','WO070','WO080'].includes(currentOrder.workflowCode));
+await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wo/action','reviewer',{code:confirmedWO.woCode,action:'review_assessment',note:'Independent approval is not required for this snapshot.'}),/not required/i);
+assert.equal(currentOrder.workflowTransitions[0].to,'WO010');
+assert.ok(!currentOrder.workflowTransitions.some(e=>e.to==='WO020'));
 // ----- Period maintenance budget: proposed, approved under the Chart of Authority, committed by approved estimates -----
 const month = date.slice(0, 7);
 await assert.rejects(() => route(maintenancePlanningRoutes, '/api/org/mnt/budget/propose', 'planner', { ccId: 'LINE_CC', period: month, amount: -1, reason: 'Monthly maintenance budget for the line.' }), /amount/);
