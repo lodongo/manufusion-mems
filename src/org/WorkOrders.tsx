@@ -12,7 +12,7 @@ import { restoredTableTab } from '../lib/tableTabs';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { AssemblyPicker, GroupPicker, Info, critColor, money, type MntLists, type MntSetup, type Place } from './mntShared';
-import { HistoryCard, NotEnabled, useMntSetup } from './WorkRequests';
+import WorkRequests,{ HistoryCard, NotEnabled, useMntSetup } from './WorkRequests';
 
 // Maintenance (MNT): work orders. Created from a converted work request or directly (breakdown, preventive),
 // numbered WO + 8 digits. Lifecycle: planning -> plan ready (tasks, people, spares, services, safety assessment)
@@ -152,7 +152,8 @@ export default function WorkOrders({ id, sub }: { id?: string; sub?: string }) {
     if (setup.error || !setup.data) return <Alert tone='error'>{setup.error || 'Could not load maintenance.'}</Alert>;
     const s = setup.data;
     if (!s.enabled) return <NotEnabled />;
-    if (id === 'new') return <Alert tone='info'>Work orders are created only from approved work request assessments. Open Work Requests to begin.</Alert>;
+    if (id === 'new') return <Alert tone='info'>Confirm a Work Request to create a Work Order. Assessment is the first step inside the order.</Alert>;
+    if(id==='legacy_assessments')return <div className="space-y-3"><Button variant="secondary" onClick={()=>navigate('organization_admin/work_orders')}><ArrowLeft size={16}/> Work orders</Button><WorkRequests area="assessments"/></div>;
     if (id && /^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(id)) return <OrderDetail key={id} code={id} setup={s} />;
     return <OrderList setup={s} />;
 }
@@ -162,9 +163,9 @@ export default function WorkOrders({ id, sub }: { id?: string; sub?: string }) {
 // ---------------------------------------------------------------------------
 
 function OrderList({ setup }: { setup: MntSetup }) {
-    type Tab = 'planning' | 'execution' | 'verification' | 'mine' | 'closed' | 'all';
-    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['planning', 'execution', 'verification', 'mine', 'closed', 'all'], 'planning'));
-    const { data, error, loading, reload } = useLoad(() => callBackend<{ rows: Row[];testDeletionEnabled?:boolean }>('/api/org/mnt/wo/list', { view: tab }), [tab]);
+    type Tab = 'assessment' | 'planning' | 'execution' | 'verification' | 'mine' | 'closed' | 'all';
+    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['assessment', 'planning', 'execution', 'verification', 'mine', 'closed', 'all'], 'assessment'));
+    const { data, error, loading, reload } = useLoad(() => callBackend<{ rows: Row[];testDeletionEnabled?:boolean;legacyAssessmentCount?:number }>('/api/org/mnt/wo/list', { view: tab }), [tab]);
     const cur = setup.currency;
     const columns = useMemo<Array<Column<Row>>>(
         () => [
@@ -211,6 +212,7 @@ function OrderList({ setup }: { setup: MntSetup }) {
         [cur]
     );
     const tabs: Array<[Tab, string]> = [
+        ['assessment', 'Assessment'],
         ['planning', 'Planning'],
         ['execution', 'Execution'],
         ['verification', 'Verify & close'],
@@ -227,6 +229,7 @@ function OrderList({ setup }: { setup: MntSetup }) {
                     </button>
                 ))}
             </div>
+            {!!data?.legacyAssessmentCount&&<Button variant="secondary" onClick={()=>navigate('organization_admin/work_orders/legacy_assessments')}>Legacy assessments ({data.legacyAssessmentCount})</Button>}
             {data?.testDeletionEnabled&&<MntTestDeletion kind="order" onDeleted={reload}/>}
             {error && <Alert tone='error'>{error}</Alert>}
             {loading && !data ? (
@@ -241,7 +244,7 @@ function OrderList({ setup }: { setup: MntSetup }) {
                     rows={data?.rows ?? []}
                     rowKey={(r) => r.code}
                     onRowClick={(r) => navigate(`organization_admin/work_orders/${r.code}`)}
-                    empty='No work orders here.'
+                    empty={tab==='assessment'?'No work orders awaiting assessment or assessment approval.':'No work orders here.'}
                     height='h-[calc(100dvh-12rem)]'
 
                 />

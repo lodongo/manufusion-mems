@@ -223,7 +223,7 @@ function RequestList({ setup, area }: { setup: MntSetup; area: 'requests' | 'ass
         return (['all', 'open', 'mine', 'review'].includes(requested) && (requested !== 'review' || can.WR_review || can.WR_close || can.WR_closeConfirm)
             ? requested : (can.WR_review || can.WR_close || can.WR_closeConfirm ? 'review' : 'all')) as Tab;
     });
-    const { data, error, loading, reload } = useLoad(() => callBackend<{ rows: Row[];testDeletionEnabled?:boolean }>('/api/org/mnt/wr/list', { view: area === 'assessments' ? 'assessment' : tab }), [tab, area]);
+    const { data, error, loading, reload } = useLoad(() => callBackend<{ rows: Row[];testDeletionEnabled?:boolean }>('/api/org/mnt/wr/list', { view: area === 'assessments' ? 'legacy_assessment' : tab }), [tab, area]);
     const columns = useColumns();
     const tabs: Array<[Tab, string]> = [...((can.WR_review || can.WR_close || can.WR_closeConfirm) ? ([['review', 'To review']] as Array<[Tab, string]>) : []), ['open', 'Open'], ['mine', 'Mine'], ['all', 'All']];
     return (
@@ -236,7 +236,7 @@ function RequestList({ setup, area }: { setup: MntSetup; area: 'requests' | 'ass
                 ))}
             </div>}
             {data?.testDeletionEnabled&&<MntTestDeletion kind={area==='assessments'?'assessment':'request'} onDeleted={reload}/>}
-            {area === 'assessments' && <p className='text-sm text-soft'>Work Orders awaiting assessment or assessment approval. Previously created standalone assessments remain available.</p>}
+            {area === 'assessments' && <p className='text-sm text-soft'>Previously created standalone assessments only. New assessments are completed inside Work Orders.</p>}
             {error && <Alert tone='error'>{error}</Alert>}
             {loading && !data ? (
                 <Spinner />
@@ -244,7 +244,7 @@ function RequestList({ setup, area }: { setup: MntSetup; area: 'requests' | 'ass
                 <RichTable
                     id={area === 'assessments' ? 'mnt.assessments' : `mnt.wr.${tab}`}
                     tabKey={tab}
-                    title={area === 'assessments' ? 'Work assessments' : 'Work requests'}
+                    title={area === 'assessments' ? 'Legacy assessments' : 'Work requests'}
                     fileName={area === 'assessments' ? 'work_assessments' : `work_requests_${tab}`}
                     columns={columns}
                     rows={data?.rows ?? []}
@@ -756,7 +756,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
             {/* Action bar on top */}
             <div className='shrink-0 space-y-2 border-b border-line bg-page pb-2'>
                 <div className='flex items-center gap-2'>
-                    <Button variant='secondary' aria-label='Back' onClick={async () => { if(tasksDirty&&!(await appConfirm('You have unsaved task changes. Leave without saving?')))return; navigate(area === 'assessments' ? 'organization_admin/work_assessments' : 'organization_admin/work_requests'); }}>
+                    <Button variant='secondary' aria-label='Back' onClick={async () => { if(tasksDirty&&!(await appConfirm('You have unsaved task changes. Leave without saving?')))return; navigate(area === 'assessments' ? 'organization_admin/work_orders/legacy_assessments' : 'organization_admin/work_requests'); }}>
                         <ArrowLeft className='h-4 w-4' />
                     </Button>
                     <div className='min-w-0 flex-1'>
@@ -773,7 +773,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
 
             </div>
 
-            {r.testModeOverride&&(!code.startsWith('ASSM_')||area==='assessments')&&<div className="shrink-0"><MntTestDeletion kind={code.startsWith('ASSM_')?'assessment':'request'} code={code} onDeleted={()=>navigate(area==='assessments'?'organization_admin/work_assessments':'organization_admin/work_requests')}/></div>}
+            {r.testModeOverride&&(!code.startsWith('ASSM_')||area==='assessments')&&<div className="shrink-0"><MntTestDeletion kind={code.startsWith('ASSM_')?'assessment':'request'} code={code} onDeleted={()=>navigate(area==='assessments'?'organization_admin/work_orders/legacy_assessments':'organization_admin/work_requests')}/></div>}
             <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
               <nav aria-label='Work request menu' className='flex shrink-0 gap-1 overflow-x-auto border-b border-slate-800 py-2'>
                 {([

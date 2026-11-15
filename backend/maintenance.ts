@@ -1389,7 +1389,7 @@ export const maintenanceRoutes = {
                     const reviewRole=reviewRoleOf(ctx,settings,pathOf(d));
                     const s = wrStatus(d);
                     const mine = str(d.data.requestedBy) === ctx.uid;
-                    if (view === 'assessment') return (s === 'under_review' && Number(d.data.reviewProcessVersion) < 2 || s === 'to_be_assessed') && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
+                    if (view === 'assessment'||view==='legacy_assessment') return (view!=='legacy_assessment'||!str(d.data.woCode)) && (s === 'under_review' && Number(d.data.reviewProcessVersion) < 2 || s === 'to_be_assessed') && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
                     if (view === 'mine') return mine;
                     if (view === 'review') return (s==='closure_pending'&&wrCan(ctx,d,scope,reviewRole).confirmClosure)
                         || (s === 'created' && wrCan(ctx,d,scope,reviewRole).startReview)
@@ -1401,18 +1401,19 @@ export const maintenanceRoutes = {
                 })
                 .sort((a, b) => b.id.localeCompare(a.id))
                 .map(d=>({...wrOut(d),...responsibilityFor(routing,d.data,'wr')}));
-            if (view === 'assessment') {
+            if (view === 'assessment'||view==='legacy_assessment') {
                 // Assessments are independent documents. Existing legacy assessments
                 // still appear under their WR numbers until migrated.
                 const documents = await listDocs(assessmentCol(ctx.orgId));
                 const wrs = new Map((await listDocs(wrCol(ctx.orgId))).map((d) => [d.id, d]));
                 const independent = documents.flatMap((assm) => {
                     const wr = wrs.get(str(assm.data.workRequestCode));
-                    if (!wr || str(wr.data.assessmentCode) !== assm.id) return [];
+                    if (!wr || str(wr.data.assessmentCode) !== assm.id || (view==='legacy_assessment'&&str(wr.data.woCode))) return [];
                     if (str(wr.data.requestedBy) !== ctx.uid && !canAt(ctx, P.view, pathOf(wr), scope)) return [];
                     if (![P.assessment_edit, P.assessment_review, P.WR_convert].some((p) => canAt(ctx, p, pathOf(wr), scope))) return [];
                     return [{ ...wrOut(wr),...responsibilityFor(routing,wr.data,'wr'), code: assm.id, workRequestCode: wr.id, assessmentCode: assm.id }];
                 });
+                if(view==='legacy_assessment')return {rows:[...independent,...rows.filter(r=>!r.assessmentCode)].sort((a,b)=>b.code.localeCompare(a.code)),testDeletionEnabled:testDeletionEnabled(ctx)};
                 const pendingOrders=(await listDocs(woCol(ctx.orgId))).filter(w=>w.data.executionMode==='confirmed_request'&&['planning','plan_ready'].includes(str(w.data.status))&&canAt(ctx,P.view,pathOf(w),scope)&&[P.assessment_edit,P.assessment_review].some(p=>canAt(ctx,p,pathOf(w),scope)));
                 const orderRows=[];for(const pending of pendingOrders){const w=await syncWorkOrderState(ctx,pending);if(!['WO010','WO020'].includes(str(w.data.workflowCode)))continue;const wr=wrs.get(str(w.data.wrCode));if(wr)orderRows.push({...wrOut(wr),...responsibilityFor(routing,w.data,'wo'),code:w.id,woCode:w.id,workRequestCode:wr.id,statusLabel:str(w.data.workflowLabel),status:'under_review'});}
                 return { rows: [...orderRows,...independent, ...rows.filter((r) => !r.assessmentCode)].sort((a, b) => b.code.localeCompare(a.code)),testDeletionEnabled:testDeletionEnabled(ctx) };
@@ -2018,6 +2019,7 @@ export const maintenanceRoutes = {
             const view = str(ctx.body.view);
             const scope = await scopeOf(ctx);
             const groups: Record<string, string[]> = {
+                assessment: ['planning','plan_ready'],
                 planning: ['planning', 'plan_ready'],
                 execution: ['released', 'scheduled', 'in_progress'],
                 verification: ['completed', 'verified'],
@@ -2028,8 +2030,9 @@ export const maintenanceRoutes = {
                 .filter((d) => canAt(ctx, P.view, pathOf(d), scope)||outsideExecutionAccess(ctx.workGroupPolicy,d))
                 .filter((d) => (groups[view] ? groups[view].includes(str(d.data.status)) : view === 'mine' ? objs(d.data.assignees).some((a) => str(a.uid) === ctx.uid) || str(d.data.plannedBy) === ctx.uid : true))
                 .sort((a, b) => b.id.localeCompare(a.id));
-            const rows=[];for(let i=0;i<visible.length;i+=8){const batch=await Promise.all(visible.slice(i,i+8).map(d=>syncWorkOrderState(ctx,d)));rows.push(...batch.map(d=>({...woOut(d),...responsibilityFor(routing,d.data,'wo')})));}
-            return { rows,testDeletionEnabled:testDeletionEnabled(ctx) };
+            const rows=[];for(let i=0;i<visible.length;i+=8){const batch=await Promise.all(visible.slice(i,i+8).map(d=>syncWorkOrderState(ctx,d)));rows.push(...batch.filter(d=>view==='assessment'?['WO010','WO020'].includes(str(d.data.workflowCode)):view==='planning'?!['WO010','WO020'].includes(str(d.data.workflowCode)):true).map(d=>({...woOut(d),...responsibilityFor(routing,d.data,'wo')})));}
+            const legacyAssessmentCount=(await listDocs(wrCol(ctx.orgId))).filter(d=>!str(d.data.woCode)&&(str(d.data.status)==='to_be_assessed'||wrStatus(d)==='under_review'&&Number(d.data.reviewProcessVersion)<2)&&canAt(ctx,P.view,pathOf(d),scope)&&[P.assessment_edit,P.assessment_review,P.WR_convert].some(p=>canAt(ctx,p,pathOf(d),scope))).length;
+            return { rows,testDeletionEnabled:testDeletionEnabled(ctx),legacyAssessmentCount };
         }),
     ],
 

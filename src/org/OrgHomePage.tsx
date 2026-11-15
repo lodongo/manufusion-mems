@@ -123,12 +123,11 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
     MNT: [
         { label: 'Maintenance workspace', path: 'mnt', prefix: 'MNT.' },
         { label: 'Work requests', path: 'work_requests', prefix: 'MNT.WR.' },
-        { label: 'Work assessments', path: 'work_assessments', prefix: 'MNT.assessment.' },
         { label: 'Work orders', path: 'work_orders', prefix: 'MNT.WO.' },
         { label: 'Maintenance windows', path: 'maintenance_windows', prefix: 'MNT.' },
         { label: 'Budgets & cost approvals', path: 'mnt_budgets', prefix: 'MNT.' },
         { label: 'Work Groups', path: 'mnt_work_groups', permission: 'ADM.workflows' },
-        { label: 'Workflows and approval roles (current)', path: 'mnt_workflows', permission: 'ADM.workflows' },
+        { label: 'Workflows and approval roles', path: 'mnt_workflows', permission: 'ADM.workflows' },
         { label: 'Validate new asset tasks', path: 'mnt_task_validation', permission: 'MNT.activities.edit' },
     ],
     AST: [
@@ -176,6 +175,7 @@ function hasAny(permissions: string[], code: string): boolean {
 
 function canOpen(permissions: string[], link: LinkItem): boolean {
     if (link.everyone) return true;
+    if(link.path==='work_orders'&&(hasPerm(permissions,'MNT.view')||permissions.some(p=>p.startsWith('MNT.assessment.'))))return true;
     if (link.permission) return hasPerm(permissions, link.permission);
     if (link.prefix) {
         return permissions.includes('*') || hasPerm(permissions, link.prefix!.slice(0,-1)+'.view')
@@ -405,6 +405,7 @@ export default function OrgHomePage({
     const activeMenu = menus.find((m) =>
         currentPath === `module/${m.module.code}`
         || currentPath.startsWith(`module/${m.module.code}/`)
+        || (m.module.code==='MNT'&&section==='work_assessments'&&(canOpen(data.permissions,{label:'Legacy assessment',path:'work_assessments',prefix:'MNT.assessment.'})||canOpen(data.permissions,{label:'Work orders',path:'work_orders',prefix:'MNT.WO.'})))
         || [...m.links,...m.capabilities].some((link) => !link.path.startsWith('organization_admin') && (currentPath === link.path || currentPath.startsWith(`${link.path}/`)))
     );
     const activeModule = currentPath.startsWith('module/') ? menus.find((m) => m.module.code === currentPath.split('/')[1]) : activeMenu;
@@ -476,7 +477,8 @@ export default function OrgHomePage({
     else if (activeMenu && section === 'mnt_budgets') content = <MntBudgets />;
     else if (activeMenu && section === 'mnt_task_validation') content = <MntTaskValidation />;
     else if (activeMenu && section === 'work_requests') content = <WorkRequests id={id} sub={sub} />;
-    else if (activeMenu && section === 'work_assessments') content = <WorkRequests id={id} sub={sub} area='assessments' />;
+    // Old detail links remain valid; the former list is reachable only as a legacy queue within Work Orders.
+    else if (activeMenu?.module.code==='MNT' && section === 'work_assessments') content = id&&/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(id)?<WorkOrders id={id} sub={sub}/>:id?<WorkRequests id={id} sub={sub} area='assessments' />:<WorkOrders id='legacy_assessments'/>;
     else if (activeMenu && section === 'work_orders') content = <WorkOrders id={id} sub={sub} />;
     else if (activeMenu && section === 'assets') content = <AssetRegister view='register' id={id} />;
     else if (activeMenu && section === 'asset_approvals') content = <AssetRegister view='approvals' id={id} />;
