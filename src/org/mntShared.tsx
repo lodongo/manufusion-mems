@@ -60,7 +60,17 @@ export interface LocNode {
     assetTag: string;
     inScope: boolean;
 }
-export interface Place {
+export interface MaintenanceRouting {
+    workGroupId?:string;workGroupCode?:string;workGroupName?:string;workGroupStatus?:string;workGroupVersion?:number;
+    responsibility?:{stage:string;role:string;name:string;uid?:string;additional?:number;source?:string;people?:Array<{uid:string;name:string;role:string;genericRole?:string}>};
+}
+export const workGroupText=(r:MaintenanceRouting)=>r.workGroupCode?[r.workGroupCode,r.workGroupName].filter(Boolean).join(' · ')+(r.workGroupStatus==='draft'?' (Draft)':''):'Not assigned';
+export const responsibleText=(r:MaintenanceRouting)=>{const a=r.responsibility;return a?[a.name||(!a.role?'':'Unassigned'),a.role].filter(Boolean).join(' · ')+(a.additional?' (+'+a.additional+')':''):'';};
+export function MaintenanceResponsibility({record}:{record:MaintenanceRouting}){
+ const a=record.responsibility;
+ return <div className='rounded-xl border border-line bg-panel p-3 text-sm'><div className='flex flex-wrap items-center justify-between gap-2'><span className='text-xs font-semibold uppercase tracking-wide text-soft'>Work group</span><span className='font-semibold text-ink'>{workGroupText(record)}</span></div>{a&&<div className='mt-2 border-t border-line pt-2'><p className='text-xs text-soft'>Current action · {a.stage}</p><p className='mt-1 font-semibold text-ink'>{responsibleText(record)||'No pending action'}</p>{a.additional? <details className='mt-1 text-xs text-soft'><summary>{a.additional} other eligible employee{a.additional===1?'':'s'}</summary>{a.people?.map(p=><p key={p.uid}>{p.name} · {p.role}</p>)}</details>:null}{a.source==='independent_authority'&&<p className='mt-1 text-xs text-soft'>Independent approval authority</p>}{record.workGroupStatus==='draft'&&<p className='mt-1 text-xs text-amber-500'>Group is not activated; draft mappings are not authorization.</p>}</div>}</div>;
+}
+export interface Place extends MaintenanceRouting {
     /** Null when the request is placed on the equipment and the assembly is added at review. */
     assembly: { id: string; code: string; name: string } | null;
     unit: { id: string; code: string; name: string; equipmentClass: string; equipmentClassName: string } | null;

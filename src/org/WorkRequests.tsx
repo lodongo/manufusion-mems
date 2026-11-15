@@ -1,3 +1,4 @@
+import {MaintenanceResponsibility,workGroupText,responsibleText,type MaintenanceRouting} from './mntShared';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type TouchEvent } from 'react';
 import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, ClipboardList, ImagePlus, MapPin, Pencil, Send, Trash2, Undo2, Wrench, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
@@ -18,7 +19,7 @@ import MntGateHint from './MntGateHint';
 // technical supervisor and converted to a work order by a planner. The requester can never review their own request.
 // Mobile first: one decision per screen, big touch targets, action bar on top, content scrolls underneath.
 
-interface Row {
+interface Row extends MaintenanceRouting {
     code: string;
     title: string;
     status: string;
@@ -175,6 +176,9 @@ function useColumns(): Array<Column<Row>> {
         () => [
             { key: 'code', label: 'WR number', value: (r) => r.code, className: 'font-mono whitespace-nowrap' },
             { key: 'title', label: 'Title', value: (r) => r.title },
+            {key:'workGroup',label:'Work group',value:workGroupText},
+            {key:'waitingStage',label:'Current action',value:r=>r.responsibility?.stage||''},
+            {key:'waitingFor',label:'Waiting for (role & name)',value:responsibleText},
             {
                 key: 'criticality',
                 label: 'Criticality',
@@ -537,6 +541,7 @@ function NewRequest({ setup, assemblyId }: { setup: MntSetup; assemblyId?: strin
 
                 {step === 1 && (
                     <>
+                        {place&&<MaintenanceResponsibility record={place}/>}
                         <Field id='wr-title' label='Short title *' maxLength={120} placeholder='e.g. Oil leak at gearbox output seal' value={title} onChange={(e) => setTitle(e.target.value)} />
                         <TextArea id='wr-desc' label='What did you find? *' rows={3} maxLength={2000} placeholder='What, where exactly, since when, anything already done.' value={description} onChange={(e) => setDescription(e.target.value)} />
                         <p className='text-right text-xs text-slate-500'>{description.length}/2000</p>
@@ -779,7 +784,8 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                   {icon}<span>{title}</span></button>)}
               </nav>
               <div className='min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-1 py-3 sm:px-4'>
-                {actionError && !mode && <MntGateHint message={actionError} />}
+                <MaintenanceResponsibility record={r}/>
+                {actionError && !mode && <MntGateHint message={actionError}/>}
                 {section==='assessment' && !mode && <Card className='space-y-3'>
                    <p className='text-xs font-semibold uppercase tracking-wider text-emerald-300'>Separate stage · Work Assessment</p>
                    <h2 className='text-lg font-semibold text-white'>Technical work assessment</h2>

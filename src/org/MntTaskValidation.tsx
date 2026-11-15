@@ -1,10 +1,11 @@
+import {MaintenanceResponsibility,type MaintenanceRouting} from './mntShared';
 import {useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert} from '../components/ui';
 import {Button,Card,PageTitle,Spinner,useLoad} from '../admin/kit';
 import {workspaceNavigate as navigate} from '../lib/route';
 type Task={description:string;tools:string;spares:Array<{description:string;qty:number;source:string}>;services:Array<{description:string}>;risk:Array<{hazard:string;impact:string;controls:string;before:string;after:string}>};
-type Item={id:string;wrCode:string;taskId:string;description:string;assemblyId:string;equipmentId?:string;assetTag:string;createdBy:string;task:Task};
+type Item=MaintenanceRouting&{id:string;wrCode:string;taskId:string;description:string;assemblyId:string;equipmentId?:string;assetTag:string;createdBy:string;task:Task};
 export default function MntTaskValidation(){
  const {data,error,loading,reload}=useLoad(()=>callBackend<{items:Item[];configurationNeeded:boolean;testModeOverride?:boolean}>('/api/org/mnt/tasks/pending'));
  const [busy,setBusy]=useState(''),[message,setMessage]=useState('');
@@ -21,6 +22,7 @@ export default function MntTaskValidation(){
    {(data?.items||[]).map(item=><Card key={item.id} className='space-y-3'>
     <p className='text-xs text-emerald-300'>{item.wrCode} · {item.assemblyId ? 'Assembly '+item.assemblyId : 'Equipment '+(item.equipmentId||'')} · {item.assetTag}</p>
     <h3 className='font-semibold text-white'>{item.task.description}</h3>
+    <MaintenanceResponsibility record={item}/>
     <p className='text-sm text-slate-300'>Tools: {item.task.tools||'Not specified'}</p>
     <p className='text-sm text-slate-300'>Spares: {item.task.spares?.length||0} · Services: {item.task.services?.length||0} · Risk items: {item.task.risk?.length||0}</p>
     {(item.task.risk||[]).map((r,i)=><div key={i} className='rounded-lg border border-slate-700 p-2 text-sm'>

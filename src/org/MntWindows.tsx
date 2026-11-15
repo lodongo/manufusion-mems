@@ -1,3 +1,4 @@
+import {MaintenanceResponsibility,workGroupText,responsibleText} from './mntShared';
 import { useEffect, useRef, useState } from 'react';
 import { CalendarClock, Printer, ShieldCheck, Plus, ArrowLeft, RefreshCw } from 'lucide-react';
 import { Alert } from '../components/ui';
@@ -20,6 +21,9 @@ const windowColumns: Array<Column<MntData>> = [
             </span>
         ),
     },
+    {key:'workGroup',label:'Work group',value:workGroupText},
+    {key:'waitingStage',label:'Current action',value:w=>w.responsibility?.stage||''},
+    {key:'waitingFor',label:'Waiting for (role & name)',value:responsibleText},
     { key: 'equipment', label: 'Equipment', value: (w) => (w.equipmentCode ? `${w.equipmentCode} ${w.equipmentName}` : w.lineName) },
     { key: 'start', label: 'Start', type: 'date', value: (w) => w.start, render: (w) => new Date(w.start).toLocaleString() },
     { key: 'duration', label: 'Duration (h)', type: 'number', value: (w) => w.durationHours ?? (Date.parse(w.end) - Date.parse(w.start)) / 3600000 },
@@ -441,7 +445,8 @@ export default function MntWindows() {
                                 {statusLabel(selected)} · {selected.progress || 0}% of tasks completed · planned by {selected.plannedByName}
                             </p>
                         </div>
-                        {selected.model !== 'equipment_v2' && ['draft', 'awaiting_approval'].includes(selected.status) && (
+                        <MaintenanceResponsibility record={selected}/>
+                         {selected.model !== 'equipment_v2' && ['draft', 'awaiting_approval'].includes(selected.status) && (
                             <Alert tone="info">This older production-line window was never authorized. Create an equipment window for its work orders; this one is then replaced.</Alert>
                         )}
                         <Gantt schedule={selected.liveSchedule || selected.schedule} start={selected.start} onMove={() => {}} />

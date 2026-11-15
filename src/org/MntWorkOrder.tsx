@@ -7,7 +7,7 @@ import { Button, Card, Spinner, useLoad } from '../admin/kit';
 import { WorkOrderVouchers } from './StoresIssueVouchers';
 import MntTaskAssessment, { WarehouseSparePicker, CatalogPicker } from './MntTaskAssessment';
 import { FulfilmentTrack, ResourceStatus, SOURCE_LABEL, useVendors } from './mntSourcing';
-import { useFullScreen } from './mntShared';
+import { useFullScreen,MaintenanceResponsibility } from './mntShared';
 import MntGateHint from './MntGateHint';
 import MntReadiness from './MntReadiness';
 
@@ -769,6 +769,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     Maintenance windows
                 </Button>
             </div>
+            <MaintenanceResponsibility record={wo}/>
             {failure && <MntGateHint message={failure} />}
             {message && <Alert tone="info">{message}</Alert>}
             <div className="flex flex-wrap gap-2">

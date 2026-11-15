@@ -1,3 +1,4 @@
+import {workGroupText,responsibleText,type MaintenanceRouting} from './mntShared';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Ban, CalendarClock, Check, CheckCircle2, ClipboardCheck, Clock, Cog, HardHat, Lock, PackagePlus, Play, Plus, RotateCcw, Search, Send, ShieldCheck, Trash2, Wrench, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
@@ -24,7 +25,7 @@ interface Est {
     services: number;
     total: number;
 }
-interface Row {
+interface Row extends MaintenanceRouting {
     code: string;
     title: string;
     status: string;
@@ -164,6 +165,9 @@ function OrderList({ setup }: { setup: MntSetup }) {
         () => [
             { key: 'code', label: 'WO number', value: (r) => r.code, className: 'font-mono whitespace-nowrap' },
             { key: 'title', label: 'Title', value: (r) => r.title },
+            {key:'workGroup',label:'Work group',value:workGroupText},
+            {key:'waitingStage',label:'Current action',value:r=>r.responsibility?.stage||''},
+            {key:'waitingFor',label:'Waiting for (role & name)',value:responsibleText},
             { key: 'status', label: 'Status', value: (r) => r.statusLabel, render: (r) => <Badge tone={TONE[r.status] ?? 'muted'}>{r.statusLabel}</Badge> },
             { key: 'priority', label: 'Priority', value: (r) => r.priorityLabel },
             {
