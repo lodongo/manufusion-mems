@@ -24,7 +24,7 @@ export type Point={at:number;state:string;observed:boolean};
 export type Timeline={created:number;points:Point[];coverageStart:number|null;current:string;terminalAt:number|null;kind:Kind;id:string;data:RecordData};
 export function timeline(r:RecordInput,now:number):Timeline{
  const d=r.data,kind=r.kind,created=ms(d.createdAt||d.requestedAt),raw=kind==='wr'?arr(d.analyticsTransitions):arr(d.workflowTransitions);
- const current=kind==='wr'?normalize(kind,str(d.status)):d.status==='closed'?'WO900':d.status==='cancelled'?'WO990':str(d.workflowCode)||'UNKNOWN';
+ const current=kind==='wr'?(d.status==='to_be_assessed'&&str(d.woCode)?'converted':normalize(kind,str(d.status))):d.status==='closed'?'WO900':d.status==='cancelled'?'WO990':str(d.workflowCode)||'UNKNOWN';
  const points:Point[]=raw.flatMap(t=>{
   const at=ms(t.at),state=normalize(kind,str(t.to));
   return Number.isFinite(at)&&at<=now&&(!Number.isFinite(created)||at>=created)&&state?[{at,state,observed:true}]:[];
