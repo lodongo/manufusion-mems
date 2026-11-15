@@ -718,7 +718,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
     };
 
     if (mode === 'edit') return <EditRequest detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
-    if (mode === 'close') return <CloseAtReview detail={r} lists={lists} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
+    if (mode === 'close') return <CloseAtReview detail={r} lists={lists} onDone={(woCode) => {setMode('');if(woCode)navigate(`organization_admin/work_orders/${woCode}`);else reload();}} onCancel={() => setMode('')} />;
     if (mode === 'review_cancel') return <CancelAtReview detail={r} onDone={() => (setMode(''), reload())} onCancel={() => setMode('')} />;
 
     const assessed = !!r.assessment.maintenanceTypeCode && !r.assessment.headerIssue;
@@ -1214,7 +1214,7 @@ export function ClosureCard({ closure, pending = false }: { closure: Closure; pe
 }
 
 /** Fixed on the spot: close at review with cause, solution and maintenance type. A supervisor confirms. */
-function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; lists: MntLists; onDone: () => void; onCancel: () => void }) {
+function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; lists: MntLists; onDone: (woCode?:string) => void; onCancel: () => void }) {
     const [cause, setCause] = useState('');
     const [failureMode, setFailureMode] = useState(detail.failureModeCode || '');
     const [solutions, setSolutions] = useState<string[]>([]);
@@ -1222,7 +1222,8 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
     const [employeeQuery,setEmployeeQuery] = useState('');
     const people = detail.closurePeople || [];
     const visiblePeople = people.filter(p=>p.uid===closedByUid || p.name.toLowerCase().includes(employeeQuery.trim().toLowerCase()));
-    const [mtype, setMtype] = useState('');
+    const [mtype, setMtype] = useState(detail.assessment.maintenanceTypeCode||'');
+    const [noResources,setNoResources]=useState(false);
     const [description, setDescription] = useState('');
     const [typed, setTyped] = useState('');
     const localToday = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,10);
@@ -1232,13 +1233,13 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const screen = useFullScreen(true);
-    const missing = [!failureMode ? 'failure mode' : '', !cause ? 'failure cause' : '', !solutions.length ? 'solution type' : '', !people.some(p=>p.uid===closedByUid) ? 'closed by' : '', description.trim().length < 10 ? 'what was done (10+ characters)' : '', !closedDate || closedDate>localToday ? 'closure date' : '', !Number.isInteger(Number(durationMinutes)) || Number(durationMinutes)<=0 || Number(durationMinutes)>525600 ? 'actual time taken (minutes)' : '', ...(!direct ? [!mtype ? 'maintenance type' : '', typed.trim() !== detail.code ? `type ${detail.code}` : ''] : [])].filter(Boolean);
+    const missing = [!failureMode ? 'failure mode' : '', !cause ? 'failure cause' : '', !solutions.length ? 'solution type' : '', !people.some(p=>p.uid===closedByUid) ? 'closed by' : '', description.trim().length < 10 ? 'what was done (10+ characters)' : '', !closedDate || closedDate>localToday ? 'closure date' : '', !Number.isInteger(Number(durationMinutes)) || Number(durationMinutes)<=0 || Number(durationMinutes)>525600 ? 'actual time taken (minutes)' : '', !mtype?'maintenance type':'',!noResources?'confirm no spares or services':'',...(!direct ? [typed.trim() !== detail.code ? `type ${detail.code}` : ''] : [])].filter(Boolean);
     const save = async () => {
         setBusy(true);
         setError('');
         try {
-            await callBackend('/api/org/mnt/wr/action', { code: detail.code, action: 'close_review', causeCode: cause, failureModeCode:failureMode, solutionCodes:solutions, closedByUid, closedDate, durationMinutes: Number(durationMinutes), ...(!direct ? {maintenanceTypeCode: mtype, confirm: typed.trim()} : {}), description: description.trim() });
-            onDone();
+            const result=await callBackend<{woCode?:string}>('/api/org/mnt/wr/action', { code: detail.code, action: 'close_review', causeCode: cause, failureModeCode:failureMode, solutionCodes:solutions, closedByUid, closedDate, durationMinutes: Number(durationMinutes), maintenanceTypeCode:mtype,noSparesOrServices:noResources,...(!direct ? {confirm: typed.trim()} : {}), description: description.trim() });
+            onDone(result.woCode);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not close the request.');
         } finally {
@@ -1249,7 +1250,7 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
         <div className={screen.className} onFocusCapture={screen.keepInView}>
             <div className='flex shrink-0 items-center gap-2 border-b border-line bg-page pb-3'>
                 <Button variant='secondary' aria-label='Back' onClick={onCancel}><ArrowLeft className='h-4 w-4' /></Button>
-                <div className='min-w-0 flex-1'><p className='truncate font-semibold text-white'>Close {detail.code}</p><p className='truncate text-xs text-slate-400'>{direct ? 'Final review outcome · no assessment required' : 'No planning needed · a supervisor confirms'}</p></div>
+                <div className='min-w-0 flex-1'><p className='truncate font-semibold text-white'>Close {detail.code}</p><p className='truncate text-xs text-slate-400'>{direct ? 'Close request · create retrospective work order' : 'No planning · supervisor confirms, then work order opens'}</p></div>
                 <Button testOverride={detail.testModeOverride} busy={busy} disabled={missing.length > 0} onClick={save}><Check className='h-4 w-4' />Close</Button>
             </div>
             <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3'>
@@ -1257,10 +1258,11 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
                 <ChoicePicker title='Failure cause' required hint='Choose the category and specific cause.' groups={lists.rootCauses} selected={cause ? [cause] : []} onToggle={(c) => setCause(c === cause ? '' : c)} />
                 <ChoicePicker title='Solution types' required multi max={5} hint='Choose a category, then the applicable solution subcategories (up to five).' groups={lists.solutions} selected={solutions} onToggle={(code)=>setSolutions(old=>old.includes(code)?old.filter(x=>x!==code):old.length<5?[...old,code]:old)} />
                 <TextArea id='cl-desc' label='What was done? *' rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
-                {!direct && <SelectField id='cl-mtype' label='Type of maintenance * (decides the GL account)' value={mtype} onChange={(e) => setMtype(e.target.value)}>
+                <SelectField id='cl-mtype' label='Type of maintenance * (decides the GL account)' value={mtype} onChange={(e) => setMtype(e.target.value)}>
                     <option value=''>Select…</option>
                     {lists.maintenanceTypes.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}
-                </SelectField>}
+                </SelectField>
+                <label className='flex min-h-11 items-start gap-3 rounded-xl border border-line p-3 text-sm'><input type='checkbox' checked={noResources} onChange={e=>setNoResources(e.target.checked)}/><span>No spare parts or external services were used. Create a Work Order for actual work feedback, safety, handover and formal technical closure only.</span></label>
                 <div className='grid gap-3 sm:grid-cols-2'>
                     <Field id='cl-date' type='date' label='Closure date *' max={localToday} value={closedDate} onChange={(e) => setClosedDate(e.target.value)} />
                     <Field id='cl-duration' type='number' min={1} max={525600} step={1} label='Actual time taken (minutes) *' placeholder='e.g. 25' value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} />

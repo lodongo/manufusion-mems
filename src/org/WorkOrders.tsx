@@ -31,6 +31,7 @@ interface Row extends MaintenanceRouting {
     status: string;
     statusLabel: string;
     origin: string;
+    executionMode?:string;
     wrCode: string;
     assemblyCode: string;
     assemblyName: string;
@@ -189,6 +190,7 @@ function OrderList({ setup }: { setup: MntSetup }) {
             { key: 'wtype', label: 'Work type', value: (r) => r.workTypeLabel, hidden: true },
             { key: 'disc', label: 'Discipline', value: (r) => r.disciplineLabel, hidden: true },
             { key: 'origin', label: 'From request', value: (r) => r.wrCode || 'Direct', className: 'font-mono whitespace-nowrap' },
+            {key:'executionMode',label:'Work order route',value:r=>r.executionMode==='request_closure'?'Completed at request review':'Assessed / planned'},
             { key: 'planner', label: 'Planner', value: (r) => r.plannerName, hidden: true },
             { key: 'start', label: 'Scheduled start', type: 'date', value: (r) => r.scheduledStart, render: (r) => (r.scheduledStart ? fmtDate(r.scheduledStart) : '') },
             { key: 'team', label: 'Assigned', value: (r) => r.assigneeNames.join(', '), hidden: true },

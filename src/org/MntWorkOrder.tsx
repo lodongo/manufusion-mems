@@ -415,12 +415,13 @@ function ResourceForm({
 }
 
 function FeedbackForm({ task, execution, onSubmit }: { task: MntData; execution: MntData; onSubmit: (d: MntData) => void }) {
-    const [f, setF] = useState<MntData>({ services: (task.services || []).map((s: MntData) => ({ id: s.id, accepted: false })) });
+    const retrospective=execution.status==='awaiting_feedback';
+    const [f, setF] = useState<MntData>({ ...(retrospective?{workPerformed:execution.reportedWork,actualHours:Number(execution.actualMinutes)/60}:{}),services: (task.services || []).map((s: MntData) => ({ id: s.id, accepted: false })) });
     const patch = (k: string, v: any) => setF((old) => ({ ...old, [k]: v }));
     return (
         <div className="space-y-3">
             <p className="text-sm text-soft">
-                Started {execution.startedAt ? new Date(execution.startedAt).toLocaleString() : '—'}. Complete each result explicitly.
+                {retrospective?'Work already performed on '+execution.performedDate+' · '+execution.actualMinutes+' minutes.':'Started '+(execution.startedAt?new Date(execution.startedAt).toLocaleString():'—')+'.'} Complete each result explicitly.
             </p>
             {(
                 [
@@ -436,9 +437,9 @@ function FeedbackForm({ task, execution, onSubmit }: { task: MntData; execution:
             ).map(([k, l]) => (
                 <MntField key={k} label={l} value={f[k]} multiline onChange={(v) => patch(k, v)} />
             ))}
-            <MntField label="Actual labour hours worked" type="number" value={f.actualHours} onChange={(v) => patch('actualHours', v)} />
+            {retrospective?<><p className="text-sm font-semibold">Actual time: {execution.actualMinutes} minutes (from Work Request)</p><MntCheck label="I confirm no spare parts or external services were used." value={!!f.noSparesOrServicesConfirmed} onChange={v=>patch('noSparesOrServicesConfirmed',v)}/></>:<MntField label="Actual labour hours worked" type="number" value={f.actualHours} onChange={(v) => patch('actualHours', v)} />}
             <MntCheck
-                label="The work deviated from the assessed technical scope."
+                label={retrospective?'Additional work or technical deviation needs a follow-up request.':'The work deviated from the assessed technical scope.'}
                 value={!!f.scopeDeviation}
                 onChange={(v) => patch('scopeDeviation', v)}
             />
@@ -666,6 +667,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone="error">{error || 'Work order unavailable.'}</Alert>;
     const wo = data.wo,
+        retrospective=wo.executionMode==='request_closure',
         tasks: MntData[] = wo.assessmentTasks || [],
         task = tasks.find((t) => t.id === selected) || tasks[0],
         execution = wo.taskExecution?.[task?.id] || {},
@@ -757,19 +759,20 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         Work orders
                     </button>
                     <p className="font-mono text-xs text-muted">
-                        {wo.code} · {wo.status.replaceAll('_', ' ')}
+                        {wo.code} · {retrospective&&wo.status==='in_progress'?'Awaiting actual work feedback':wo.status.replaceAll('_', ' ')}
                     </p>
                     <h1 className="mt-1 text-2xl font-semibold">{wo.title}</h1>
                     <p className="mt-1 text-sm text-soft">
                         {wo.unitName} · {wo.assemblyName} · {wo.assetTag}
                     </p>
                 </div>
-                <Button variant="secondary" onClick={() => navigate('organization_admin/maintenance_windows')}>
+                {retrospective?<Button variant="secondary" onClick={()=>navigate('organization_admin/work_requests/'+wo.wrCode)}>{wo.wrCode}</Button>:<Button variant="secondary" onClick={() => navigate('organization_admin/maintenance_windows')}>
                     <CalendarClock size={17} />
                     Maintenance windows
-                </Button>
+                </Button>}
             </div>
             <MaintenanceResponsibility record={wo}/>
+            {retrospective&&<Card className="space-y-2"><h2 className="font-semibold">Work completed at request review</h2><p className="text-sm text-soft">Planning, resource preparation and maintenance window are not applicable. This record does not certify prior safety authorization.</p><p className="text-sm">Actual completion: {wo.directCompletion?.performedDate} · {wo.directCompletion?.durationMinutes} minutes</p><p className="text-sm">Performed by: {wo.directCompletion?.executor?.name} · {wo.directCompletion?.executor?.role}</p><p className="text-sm">Work performed: {wo.directCompletion?.reportedWork}</p><p className="text-sm">Maintenance type: {wo.maintenanceTypeLabel}</p><p className="text-sm">Failure mode: {wo.directCompletion?.failureModeLabel} · Cause: {wo.directCompletion?.causeLabel}</p><p className="text-sm">Solution: {(wo.directCompletion?.solutions||[]).map((s:MntData)=>s.label).join('; ')}</p><p className="text-sm text-soft">No spare parts or services declared. Labour valuation is separate from recorded time.</p>{can.execute&&execution.status==='awaiting_feedback'&&<Button testOverride={!!data.testModeOverride} onClick={()=>open('feedback')}>Confirm actual work feedback</Button>}</Card>}
             {failure && <MntGateHint message={failure} />}
             {message && <Alert tone="info">{message}</Alert>}
             <div className="flex flex-wrap gap-2">
@@ -797,7 +800,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
             {tasks.length > 0 && wo.assessmentReviewCurrent && data.checklist && (
                 <MntReadiness code={code} wo={wo} checklist={data.checklist} canPlan={!!can.plan} testModeOverride={!!data.testModeOverride} currency={data.currency || ''} onDone={reload} />
             )}
-            {tasks.length>0&&<Card className="space-y-3">
+            {!retrospective&&tasks.length>0&&<Card className="space-y-3">
                 <p className="font-semibold">Independent work assessment review</p>
                 <p className="text-sm">{wo.assessmentReviewCurrent?'Approved by '+(wo.assessmentReview.name||'reviewer'):'Awaiting approval of current task assessment'}</p>
                 {wo.assessmentReview?.note&&<p className="text-sm text-soft">Review notes: {wo.assessmentReview.note}</p>}
@@ -839,11 +842,11 @@ export default function MntWorkOrder({ code }: { code: string }) {
                             <p className="font-mono text-xs font-semibold text-brandsoft">{task.code || 'ASSMTASK_' + (tasks.indexOf(task) + 1)}</p>
                             <h2 className="text-lg font-semibold">{task.title || task.description}</h2>
                             <p className="text-xs text-soft">
-                                {task.priority || 'normal'} priority · {task.hours} estimated hours
+                                {retrospective?'Actual work · no prospective plan':`${task.priority || 'normal'} priority · ${task.hours} estimated hours`}
                             </p>
                         </div>
                         <nav aria-label="Task sections" className="flex gap-2 overflow-auto pb-1">
-                            {['Details', 'Spares', 'Services', 'Personnel & tools', 'Risk assessment', 'Execution'].map((s) => (
+                            {(retrospective?['Details','Execution']:['Details', 'Spares', 'Services', 'Personnel & tools', 'Risk assessment', 'Execution']).map((s) => (
                                 <button
                                     key={s}
                                     className={`shrink-0 rounded-xl px-3 py-2 text-sm ${tab === s ? 'bg-brand text-onbrand' : 'border border-line text-soft'}`}
@@ -853,7 +856,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                 </button>
                             ))}
                         </nav>
-                        {tab === 'Details' && <Details task={task} />}
+                        {tab === 'Details' && (retrospective?<p className="whitespace-pre-wrap">{task.description}</p>:<Details task={task}/>)}
                         {tab === 'Risk assessment' && <MntRiskTable risks={task.risk || []} />}
                         {tab === 'Spares' && (
                             <div className="space-y-3">
@@ -1018,11 +1021,12 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                     {execution.blockReason ? ' · ' + execution.blockReason : ''}
                                 </p>
                                 <p className="text-xs text-soft">
-                                    Actual start: {execution.startedAt || 'Pending'} · Completion: {execution.completedAt || 'Pending'}
+                                    {retrospective?'Actual work date: '+execution.performedDate+' · '+execution.actualMinutes+' minutes':`Actual start: ${execution.startedAt || 'Pending'} · Completion: ${execution.completedAt || 'Pending'}`}
                                 </p>
                                 {can.execute && !wo.safetySignoff && !['closed', 'cancelled'].includes(wo.status) && (
                                     <div className="flex flex-wrap gap-2">
-                                        {execution.status !== 'completed' && (
+                                        {retrospective&&execution.status==='awaiting_feedback'&&<Button testOverride={!!data.testModeOverride} onClick={()=>open('feedback')}>Confirm actual work feedback</Button>}
+                                        {!retrospective&&execution.status !== 'completed' && (
                                             <Button testOverride={!!data.testModeOverride} busy={busy} onClick={() => run('start_task', { taskId: task.id })}>
                                                 {execution.status === 'blocked' ? 'Resume task' : 'Start task'}
                                             </Button>
@@ -1061,7 +1065,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                         )}
                                     </div>
                                 )}
-                                <WorkOrderVouchers code={code} />
+                                {!retrospective&&<WorkOrderVouchers code={code} />}
                                 {execution.feedback && (
                                     <div className="space-y-2 rounded-xl border border-line p-3">
                                         {Object.entries(execution.feedback)
@@ -1076,7 +1080,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                 )}
                                 {execution.reconciled && (
                                     <p className="text-sm text-emerald-500">
-                                        Actual spares reconciled ·{' '}
+                                        {retrospective?'No spare parts or external services confirmed · ': 'Actual spares reconciled · '}
                                         {execution.bomUpdated
                                             ? 'Installed materials mapped to BOM'
                                             : 'BOM reviewed; no installed component changes'}
@@ -1107,7 +1111,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 <div className="flex flex-wrap gap-2">
                     {can.safety && !wo.safetySignoff && (
                         <>
-                            <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('safety_signoff')}>
+                            <Button disabled={retrospective&&wo.status!=='completed'} testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('safety_signoff')}>
                                 Safety sign-off
                             </Button>
                             <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('report_incident')}>
