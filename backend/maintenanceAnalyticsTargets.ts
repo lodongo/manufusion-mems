@@ -6,7 +6,7 @@ export type TargetRule={scope:string;values:TargetValues};
 const obj=(v:unknown):Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:{};
 export function validateTargetValues(v:unknown):TargetValues{
  const o=obj(v),out:TargetValues={};
- for(const [k,n] of Object.entries(o)){if(!(k in KPI_TARGETS))throw Error('Unknown KPI target.');const key=k as TargetKey,type=KPI_TARGETS[key];if(typeof n!=='number'||!Number.isFinite(n)||n<0||type==='percent'&&n>100||type==='count'&&!Number.isSafeInteger(n)||n>1000000000)throw Error('Invalid '+k+' target.');out[key]=n;}
+ for(const [k,n] of Object.entries(o)){if(!(k in KPI_TARGETS))throw Error('Unknown KPI target.');const key=k as TargetKey,type=KPI_TARGETS[key];if(typeof n!=='number'||!Number.isFinite(n)||n<0||type==='percent'&&n>100||type==='count'&&!Number.isSafeInteger(n)||n>1000000000)throw Error('Invalid '+k+' target.');if(key==='woMaxOverdueDays'&&n>7)throw Error('Maximum overdue age cannot exceed seven days.');out[key]=n;}
  return out;
 }
 export function resolveTargets(rules:TargetRule[],scopeChain:string[]){

@@ -56,7 +56,21 @@ async function analytics(ctx:OrgContext){
  if(group)scopeChain.push('group:'+group);else if((asset||employee)&&selected.length&&selected.every(r=>r.data.workGroupId===selected[0].data.workGroupId)&&str(selected[0].data.workGroupId))scopeChain.push('group:'+str(selected[0].data.workGroupId));
  if(asset)scopeChain.push('asset:'+asset);if(employee)scopeChain.push('employee:'+employee);
  const targets={woMaxOverdueDays:{value:7,source:'org'},...resolveTargets(targetRules,scopeChain)};
- const base={options,groups,people,assets,countries,targets,canManageTargets,targetScope:explicitScope,targetVersion:Number(targetDoc?.data.version)||0,legalEntities:leIds.map(id=>({id,label:nodeMap.has(id)?name(nodeMap.get(id)!):id})),stateLabels:labels,asOf:new Date(now).toISOString()};
+ // Cascading options use only authorized records and hierarchy, not the date window or drill filter.
+ const entityCountry=(id:string)=>str(obj(nodeMap.get(id)?.data.attributes).countryCode)||str(nodeMap.get(id)?.data.countryCode);
+ const eligibleLE=leIds.filter(id=>!country||entityCountry(id)===country);
+ const leaves=all.filter(r=>(!country||countryOf(r.data)===country)&&(!legal||legalId(r.data)===legal)&&(!node||texts(r.data.path).includes(node)));
+ const groupRecords=leaves.filter(r=>!group||str(r.data.workGroupId)===group);
+ const assetRecords=groupRecords.filter(r=>!asset||(str(r.data.assetTag)||str(r.data.unitId))===asset);
+ const groupIds=new Set(leaves.map(r=>str(r.data.workGroupId)));
+ const assetIds=new Set(groupRecords.map(r=>str(r.data.assetTag)||str(r.data.unitId)));
+ const personIds=new Set(assetRecords.flatMap(r=>employeeIds(r.data,r.kind)));
+ const related=(id:string,le:string)=>nodePath(id).includes(le)||nodePath(le).includes(id);
+ const visibleOptions=options.filter(n=>(!legal||related(n.id,legal))&&(!country||eligibleLE.some(id=>related(n.id,id))));
+ const base={options:visibleOptions,groups:groups.filter(g=>groupIds.has(g.id)),people:people.filter(p=>personIds.has(p.id)),assets:assets.filter(a=>assetIds.has(a.id)),countries,targets,canManageTargets,targetScope:explicitScope,targetVersion:Number(targetDoc?.data.version)||0,legalEntities:eligibleLE.map(id=>({id,label:nodeMap.has(id)?name(nodeMap.get(id)!):id})),stateLabels:labels,asOf:new Date(now).toISOString()};
+ const localDay=(d:RecordData,at:number)=>{const z=str(obj(d.currentCycleAdmission).timeZone)||str(obj(d.cycleAdmission).timeZone)||calendars.find(c=>c.id===legalId(d))?.zone||zone;const p=new Intl.DateTimeFormat('en-CA',{timeZone:validZone(z)?z:zone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(at));return ['year','month','day'].map(k=>p.find(x=>x.type===k)?.value).join('-');};
+ const {records:healthRecords,...woHealth}=liveWorkOrderHealth(selected.filter(r=>r.kind==='wo').map(r=>timeline(r,now)),now,localDay);
+ const healthById=new Map(healthRecords.map(r=>[r.t.id,r]));
  let window:ReturnType<typeof periodBounds>,calendar=calendars[0]||general,alignment='';
  try{
   if(choice==='custom'){calendar=general;window=periodBounds(choice,calendar,now,customStart,customEnd);alignment='Common explicit date interval in organization timezone; event times are UTC.';}
@@ -68,16 +82,13 @@ async function analytics(ctx:OrgContext){
    if(bounds.some(w=>w.start!==window.start||w.plannedEnd!==window.plannedEnd))throw Error('Selected Legal Entities have different period or timezone boundaries. Choose one Legal Entity or a common Custom interval.');
    alignment=calendars.length>1?'Consolidated Legal Entities have identical interval boundaries.':calendar.name;
   }
- }catch(e){return {...base,blocked:e instanceof Error?e.message:'Invalid period',calendars:calendars.map(c=>({id:c.id,name:c.name,zone:c.zone})),alignment:''};}
+ }catch(e){return {...base,woHealth,blocked:e instanceof Error?e.message:'Invalid period',calendars:calendars.map(c=>({id:c.id,name:c.name,zone:c.zone})),alignment:''};}
  if(b.sliceStart||b.sliceEnd){const a=Date.parse(str(b.sliceStart)),z=Date.parse(str(b.sliceEnd));if(!Number.isFinite(a)||!Number.isFinite(z)||a<window.start||z>window.end||a>=z)throw new HttpError(400,'Selected trend bucket is outside the reporting period.');window={...window,start:a,end:z};}
  if(b.asOf){const t=Date.parse(str(b.asOf));if(!Number.isFinite(t)||t<window.start||t>=window.end)throw new HttpError(400,'As-of timestamp must be inside the reporting interval.');window={...window,end:t+1};}
  const due=(d:RecordData)=>{const date=str(d.scheduledEnd)||str(d.dueDate);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return NaN;try{const z=str(obj(d.cycleAdmission).timeZone)||calendars.find(c=>c.id===legalId(d))?.zone||zone;return midnight(new Date(Date.parse(date+'T00:00:00Z')+86400000).toISOString().slice(0,10),validZone(z)?z:zone);}catch{return NaN;}};
  // Reconcile against record history, never run mutating workflow refresh in reporting.
  const orderByCode=new Map(all.filter(r=>r.kind==='wo').map(r=>[r.id,r]));
  const ts=selected.map(r=>{if(r.kind==='wr'&&!r.data.analyticsConvertedAt&&['confirmed','converted','to_be_assessed'].includes(str(r.data.status))){const linked=orderByCode.get(str(r.data.woCode));if(linked&&linked.data.executionMode!=='request_closure'&&str(linked.data.createdAt))return timeline({...r,data:{...r.data,analyticsConvertedAt:linked.data.createdAt}},now);}return timeline(r,now);}),w={start:window.start,end:window.end};
- const localDay=(d:RecordData,at:number)=>{const z=str(obj(d.currentCycleAdmission).timeZone)||str(obj(d.cycleAdmission).timeZone)||calendars.find(c=>c.id===legalId(d))?.zone||zone;const p=new Intl.DateTimeFormat('en-CA',{timeZone:validZone(z)?z:zone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(at));return ['year','month','day'].map(k=>p.find(x=>x.type===k)?.value).join('-');};
- const {records:healthRecords,...woHealth}=liveWorkOrderHealth(ts,now,localDay);
- const healthById=new Map(healthRecords.map(r=>[r.t.id,r]));
  const request=summarize(ts.filter(x=>x.kind==='wr'),w,now,due),order=summarize(ts.filter(x=>x.kind==='wo'),w,now,due);
  const pack=(s:typeof request)=>({metrics:s.metrics,coverage:s.coverage,states:s.states,liveStates:s.liveStates,age:s.age,dwell:s.dwell});
  let previous={start:w.start-(w.end-w.start),end:w.start};let basis='Equal elapsed interval immediately preceding selected start';
@@ -122,7 +133,7 @@ export const maintenanceAnalyticsRoutes={
  })],
  'POST /api/org/mnt/analytics/shared-layouts':[orgRoute('org.mnt.analytics.shared_layouts','MNT.view',async ctx=>{
   enabled(ctx);const path='organizations/'+ctx.orgId+'/maintenance_analytics_settings/shared_layouts',prior=await getDoc(path),version=Number(prior?.data.version)||0,canManage=ctx.role==='org_super_admin';let layouts=rows(prior?.data.layouts).flatMap(v=>{try{return [validateSharedLayout(v)];}catch{return [];}});
-  if(ctx.body.action==='save'){if(!canManage)throw new HttpError(403,'Organization Super Admin required.');if(ctx.body.expectedVersion!==version)throw new HttpError(409,'Shared layouts changed. Reload.');const raw=ctx.body.layouts;if(!Array.isArray(raw)||raw.length>30)throw new HttpError(400,'Up to 30 shared layouts.');try{layouts=raw.map(validateSharedLayout);}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid shared layout');}const keys=new Set<string>();for(const l of layouts.filter(l=>l.isDefault)){if(keys.has(l.role))throw new HttpError(400,'Only one default layout for each role.');keys.add(l.role);}if(!await writeDoc(path,{layouts,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid},prior?{updateTime:prior.updateTime}:{exists:false}))throw new HttpError(409,'Layouts changed.');return {layouts,version:version+1,canManage,role:ctx.role};}
+  if(ctx.body.action==='save'){if(!canManage)throw new HttpError(403,'Organization Super Admin required.');if(ctx.body.expectedVersion!==version)throw new HttpError(409,'Shared layouts changed. Reload.');const raw=ctx.body.layouts;if(!Array.isArray(raw)||raw.length>30)throw new HttpError(400,'Up to 30 shared layouts.');try{layouts=raw.map(validateSharedLayout);}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid shared layout');}const keys=new Set<string>();for(const l of layouts.filter(l=>l.isDefault)){if(keys.has(l.role))throw new HttpError(400,'Only one default layout for each role.');keys.add(l.role);}if(!await writeDoc(path,{layouts,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid},prior?{updateTime:prior.updateTime}:{exists:false}))throw new HttpError(409,'Layouts changed.');return {layouts,version:version+1,canManage,role:ctx.role,defaultLayout:layouts.find(l=>l.isDefault&&l.role===ctx.role)||layouts.find(l=>l.isDefault&&l.role==='*')||null};}
   const visible=layouts.filter(l=>l.role==='*'||l.role===ctx.role);return {layouts:canManage?layouts:visible,defaultLayout:visible.find(l=>l.isDefault&&l.role===ctx.role)||visible.find(l=>l.isDefault&&l.role==='*')||null,version,canManage,role:ctx.role};
  })],
  'POST /api/org/mnt/analytics':[orgRoute('org.mnt.analytics','MNT.view',analytics)],

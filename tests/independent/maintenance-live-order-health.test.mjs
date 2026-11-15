@@ -7,3 +7,6 @@ const h=liveWorkOrderHealth([order('A',{assessmentTasks:[{spares:[{}]},{spares:[
 assert.equal(h.open,5);assert.equal(h.overdue,2);assert.equal(h.over7,1);assert.equal(h.maxOverdueDays,8);assert.equal(h.withSpares,2);assert.equal(h.missingSchedule,1);assert.equal(h.openStates.reduce((n,x)=>n+x.value,0),h.open);assert.equal(h.records.filter(r=>matchLiveWorkOrder(r,'live_spares_status','WO030')).length,1);assert.equal(h.records.filter(r=>matchLiveWorkOrder(r,'live_over7')).length,1);
 });
 test('unknown schedule is not zero overdue age; no dated work yields N/A',()=>{const h=liveWorkOrderHealth([order('A',{scheduledEnd:'2026-02-30'})],now,day);assert.equal(h.maxOverdueDays,null);assert.equal(h.missingSchedule,1);});
+
+import {validateTargetValues} from '../../backend/maintenanceAnalyticsTargets.ts';
+test('seven days is the upper bound for configured overdue age targets',()=>{assert.deepEqual(validateTargetValues({woMaxOverdueDays:7}),{woMaxOverdueDays:7});assert.deepEqual(validateTargetValues({woMaxOverdueDays:3}),{woMaxOverdueDays:3});assert.throws(()=>validateTargetValues({woMaxOverdueDays:8}),/seven days/);});
