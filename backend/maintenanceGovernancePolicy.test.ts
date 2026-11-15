@@ -39,5 +39,17 @@ test('legacy records keep independent approval; all-off snapshot removes only ap
 });
 test('unsupported approval paths cannot be activated',()=>{
  const p=defaultMaintenanceGovernance();p.workRequest.enabled=true;p.technicalClosure.enabled=true;p.workOrder.enabled=true;p.workOrderStage='before_assessment';
- assert.equal(maintenanceActivationBlockers(p).length,3);
+ assert.equal(maintenanceActivationBlockers(p).length,2);
+});
+
+import {configuredOrderApprovalStage} from './maintenanceGovernancePolicy';
+test('all four work-order stages are configurable without requiring duplicate assessment approval',()=>{
+ const p=defaultMaintenanceGovernance();p.workOrder.enabled=true;
+ for(const stage of ['before_assessment','after_assessment','after_readiness','before_execution'] as const){
+  p.workOrderStage=stage;
+  const record={executionMode:'confirmed_request',maintenanceGovernance:{version:1,activatedAt:'2026-11-15',policy:p}};
+  assert.equal(maintenanceActivationBlockers(p).length,0);
+  assert.equal(maintenanceAssessmentApprovalRequired(record),stage==='after_assessment');
+  assert.equal(configuredOrderApprovalStage(record),stage==='after_assessment'?null:stage);
+ }
 });

@@ -54,7 +54,6 @@ export function maintenanceActivationBlockers(p:GovernancePolicy):string[]{
  if(p.workRequest.enabled)blockers.push('Separate work request approval is not yet connected to the workflow engine.');
  if(p.technicalClosure.enabled)blockers.push('Technical closure approval is not yet connected to the closure engine.');
  if(p.workOrder.enabled){
-  if(p.workOrderStage!=='after_assessment')blockers.push('Only the after-assessment work order approval stage is currently wired.');
   if(p.workOrder.conditions.some(c=>c.field==='estimatedCost'||c.field==='riskScore'))blockers.push('Cost and risk threshold conditions require a verified fact adapter before activation.');
  }
  return blockers;
@@ -85,6 +84,14 @@ export function maintenanceAssessmentApprovalRequired(d:Record<string,unknown>):
  try{
   const snap=readMaintenancePolicySnapshot(d.maintenanceGovernance);
   if(!snap||maintenanceActivationBlockers(snap.policy).length)return true;
-  return approvalRequirement(snap.policy.workOrder,recordFacts(d))!=='not_required';
+  return snap.policy.workOrderStage==='after_assessment'&&approvalRequirement(snap.policy.workOrder,recordFacts(d))!=='not_required';
  }catch{return true;}
+}
+
+/** Later/earlier WO approval is independent of the technical assessment review. */
+export function configuredOrderApprovalStage(d:Record<string,unknown>):Exclude<WOApprovalStage,'after_assessment'>|null{
+ if(d.executionMode!=='confirmed_request')return null;
+ const snap=readMaintenancePolicySnapshot(d.maintenanceGovernance);
+ if(!snap||maintenanceActivationBlockers(snap.policy).length||snap.policy.workOrderStage==='after_assessment')return null;
+ return approvalRequirement(snap.policy.workOrder,recordFacts(d))==='not_required'?null:snap.policy.workOrderStage;
 }

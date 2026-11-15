@@ -128,6 +128,7 @@ function woStage(data:Data,d:Obj,path:string[]):Stage{
  const s=str(d.status),workflow=str(d.workflowCode),label=str(d.workflowLabel);
  if(['closed','cancelled'].includes(s))return {label:s==='closed'?'Closed':'Cancelled'};
  if(workflow==='WO200')return {label:label||'Safety sign-off',gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Safety signatory'};
+ if(['WO015','WO125','WO145'].includes(workflow))return {label,gate:'MNT.ASSESS.REVIEW',permission:'MNT.assessment.review',exclude:[str(d.requestedBy),str(d.createdBy),...(workflow==='WO015'?[]:[str(d.assessedBy),str(d.assessmentTasksBy),str(d.plannedBy),str(obj(d.readiness).by)])].filter(Boolean)};
  if(workflow==='WO010')return {...assess(),label,requireIndependentAssessor:maintenanceAssessmentApprovalRequired(d)};if(workflow==='WO020')return {...approval(d),label};
  if(['WO030','WO040','WO050','WO060','WO070','WO080','WO090','WO100','WO120'].includes(workflow))return {label,gate:workflow==='WO120'&&groupAt(data.policy,path)?'MNT.WO.RELEASE':'MNT.WO.PLAN',permission:'MNT.WO.plan'};
  if(workflow==='WO130'||workflow==='WO140')return {label,gate:groupAt(data.policy,path)?'MNT.WINDOW.LOCK':'MNT.WO.PLAN',permission:'MNT.WO.schedule'};

@@ -2,13 +2,14 @@
 import {str,type Obj} from './core';
 import {object,rows,texts,isRequestClosureOrder} from './maintenanceDomain';
 import {reviewAssessmentPrerequisites} from './maintenanceAssessmentReview';
+import {stageApprovalPending} from './maintenanceStageApproval';
 export const WO_STATES=[
- ['WO010','Awaiting assessment'],['WO020','Awaiting assessment approval'],
+ ['WO015','Awaiting work order approval before assessment'],['WO010','Awaiting assessment'],['WO020','Awaiting assessment approval'],
  ['WO030','Awaiting spares'],['WO040','Awaiting external services'],['WO050','Awaiting external specialist'],
  ['WO060','Awaiting internal labour'],['WO070','Awaiting tools / competency confirmation'],
  ['WO080','Awaiting risk review'],['WO090','Awaiting planning dates'],
  ['WO100','Awaiting cost submission'],['WO110','Awaiting cost approval'],['WO120','Awaiting readiness confirmation'],
- ['WO130','Awaiting scheduling'],['WO140','Awaiting window authorization / safety prerequisites'],
+ ['WO125','Awaiting work order approval after readiness'],['WO130','Awaiting scheduling'],['WO140','Awaiting window authorization / safety prerequisites'],['WO145','Awaiting work order approval before execution'],
  ['WO150','Awaiting execution'],['WO160','Execution in progress'],['WO165','Execution blocked'],
  ['WO170','Awaiting execution feedback'],['WO180','Awaiting spares reconciliation'],
  ['WO186','Awaiting outstanding spare receipt / posting'],['WO185','Awaiting service feedback / report'],['WO187','Awaiting service acceptance'],
@@ -33,6 +34,7 @@ export function stateOf(d:Obj,f:FactSet):{code:StateCode;label:string;reason:str
    return make('WO200','Safety sign-off for actual work; unstarted scope will be skipped');
  }
  if(!retrospective&&['planning','plan_ready','released','scheduled'].includes(status)){
+  if(stageApprovalPending(d,'before_assessment'))return make('WO015');
   if(!f.approved){if(!tasks.length||reviewAssessmentPrerequisites(d,'__workflow__')||object(d.assessmentReview).status==='changes_requested')return make('WO010','Complete or correct assessment');return make('WO020','Independent approval of current assessment');}
   const items=f.items||[],openSpare=items.find(i=>i.spareId&&i.status!=='reserved'),openService=items.find(i=>i.kind==='service'&&i.status!=='secured');
   if(openSpare)return make('WO030',str(openSpare.description)||str(openSpare.status));
@@ -44,8 +46,10 @@ export function stateOf(d:Obj,f:FactSet):{code:StateCode;label:string;reason:str
   if(!done('risk'))return make('WO080');if(!done('schedule'))return make('WO090');
   if(!done('cost'))return make(f.costStatus==='pending'?'WO110':'WO100',f.costStatus||'');
   if(['planning','plan_ready'].includes(status))return make('WO120');
+  if(stageApprovalPending(d,'after_readiness'))return make('WO125');
   if(status==='released'||f.windowStatus==='missing')return make('WO130');
   if(f.windowStatus==='blocked')return make('WO140');
+  if(stageApprovalPending(d,'before_execution'))return make('WO145');
   return make('WO150');
  }
  const pending=tasks.filter(t=>object(exec[str(t.id)]).status!=='completed');

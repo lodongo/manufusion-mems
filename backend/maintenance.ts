@@ -2,6 +2,7 @@ import {testDeletionEnabled,listTestMaintenanceDeletion,purgeTestMaintenance,pre
 import {cleanupAuthorizationStatus,setCleanupAuthorization} from './maintenanceCleanupAuthorization';
 import {defaultMaintenanceGovernance,validateMaintenanceGovernance,MAINTENANCE_APPROVAL_TRANSACTION_CODES,maintenanceActivationBlockers,maintenanceAssessmentApprovalRequired,readMaintenancePolicySnapshot} from './maintenanceGovernancePolicy';
 import {shortWorkOrderStatus} from './maintenanceWorkflowState';
+import {requireStageApproval} from './maintenanceStageApproval';
 import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
 import { storage } from './platform/sdk';
@@ -2275,6 +2276,7 @@ export const maintenanceRoutes = {
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
                 case 'assess_header': {
+                    await requireStageApproval(ctx,doc,'before_assessment');
                     if(d.executionMode!=='confirmed_request'||str(d.status)!=='planning')throw new HttpError(409,'Technical classification belongs to the assessment step of a confirmed Work Order.');
                     need(ctx,P.assessment_edit,pathOf(doc),scope);if(groupAt(ctx.workGroupPolicy,pathOf(doc)))await requireConfiguredMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
                     if(maintenanceAssessmentApprovalRequired(d)&&workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true&&!bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))throw new HttpError(403,'Assessment reviewer cannot create the assessment.');
@@ -2292,6 +2294,7 @@ export const maintenanceRoutes = {
                     await done({...assemblyPatch,...datePatch,technicalEvaluation:evaluation,natureCode:nature.code,natureLabel:nature.group+' · '+nature.label,failureModeCode:nature.code,failureModeLabel:nature.group+' · '+nature.label,solutions,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label,criticalityCode:crit.code,criticalityLabel:crit.label,criticalityColor:crit.color,severitySetBy:ctx.uid,...(prio?{priorityCode:prio.code,priorityLabel:prio.label}:{}),assessmentNote:note,assessedBy:ctx.uid,assessedByName:displayName(ctx),assessedAt:now,assessmentReview:null},'Technical assessment classification saved','mnt.wo.assessed',note);return {ok:true};
                 }
                 case 'save_task_assessment': {
+                    await requireStageApproval(ctx,doc,'before_assessment');
                     if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning'||((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',pathOf(doc))===false||(maintenanceAssessmentApprovalRequired(d)&&workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true))&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))))
                         throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
                     if(object(d.assessmentReview).status==='approved'||Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Approved task requirements are locked. Open controlled reassessment before editing.');

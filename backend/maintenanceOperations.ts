@@ -19,7 +19,8 @@ import { maintenancePermission, requireMaintenanceRole, configuredMaintenanceRol
 import {groupAt,groupGateRole,outsideExecutionAccess,loadWorkGroupPolicy,workGroupGateAllowed} from './maintenanceWorkGroupPolicy';
 import { workGroupResourcePool, requireOutsideGroupOptIn } from './maintenanceWorkGroups';
 import { assessmentReviewCurrent,maintenanceAssessmentReady } from './maintenanceAssessmentReview';
-import {maintenanceAssessmentApprovalRequired} from './maintenanceGovernancePolicy';
+import {maintenanceAssessmentApprovalRequired,configuredOrderApprovalStage} from './maintenanceGovernancePolicy';
+import {approveStage,requireStageApproval,stageApprovalCurrent,stageApprovalPending,stageReached,STAGE_LABELS} from './maintenanceStageApproval';
 import { maintenanceKey, reserveTaskSpare, releaseMaintenanceReservations, verifyMaintenanceStockLedger } from './maintenanceInventory';
 import {
     equipmentMake,
@@ -444,6 +445,7 @@ export async function syncProcurementOrderStates(ctx:OrgContext,ids:string[],sou
 async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
     if (!['planning', 'plan_ready'].includes(str(wo.data.status))) throw new HttpError(409, 'The work order is no longer in planning.');
     await authority(ctx, wo, 'MNT.WO.plan', 'MNT.WO.PLAN');
+    await requireStageApproval(ctx,wo,'before_assessment');
     const settings = await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
     const jobRole = configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),settings?.data.approverRoles);
     if (!maintenanceAssessmentReady(wo.data, jobRole))
@@ -507,6 +509,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
     throw new HttpError(400, 'Unknown planning action.');
 }
 async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
+     await requireStageApproval(ctx,wo,'before_assessment');
      const settings=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
      const jobRole=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),settings?.data.approverRoles);
      if(!maintenanceAssessmentReady(wo.data,jobRole))
@@ -940,6 +943,8 @@ async function windowSave(ctx: OrgContext) {
         if (!(str(wo.data.status) === 'released' || (inThis && str(wo.data.status) === 'scheduled')))
             throw new HttpError(409, `${id}: the planner must confirm readiness on the work order first.`);
         if(object(wo.data.earlyClosureRequest).at)throw new HttpError(409,'Work order is pending early closure.');
+        await requireStageApproval(ctx,wo,'before_assessment');
+        await requireStageApproval(ctx,wo,'after_readiness');
         const ready = await readiness(ctx, wo);
         if (!ready.ready) throw new HttpError(409, `${id} is no longer ready: ${ready.problems.slice(0, 3).join(' ')}`);
         wos.push(wo);
@@ -1627,6 +1632,10 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         task = tasksOf(wo).find((t) => t.id === str(b.taskId)),
         e = object(executions[str(b.taskId)]);
     const retrospective=isRequestClosureOrder(wo.data);
+    if(action==='approve_order_stage'){
+        const approval=await approveStage(ctx,wo);
+        await saveWo(ctx,wo,{stageApproval:approval,stageApprovalHistory:[...rows(wo.data.stageApprovalHistory),approval]},'work_order.stage_approved',str(approval.note));return {ok:true};
+    }
     if(action==='early_close'||action==='prepare_early_close')return earlyClose(ctx,wo,action==='prepare_early_close');
     if(action==='cancel_order_legacy')return earlyClose(ctx,wo,false,false,true);
     if(action==='handover')throw new HttpError(409,'Equipment handover is no longer a work order closure step.');
@@ -1680,6 +1689,9 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         }
         if (e.status === 'completed') throw new HttpError(409, 'Completed task history is immutable.');
         if (action === 'start_task') {
+            await requireStageApproval(ctx,wo,'before_assessment');
+            await requireStageApproval(ctx,wo,'after_readiness');
+            await requireStageApproval(ctx,wo,'before_execution');
             if(object(wo.data.earlyClosureRequest).at)throw new HttpError(409,'Early closure requested. Do not start new work.');
             if(e.status==='awaiting_feedback'||e.status==='in_progress')throw new HttpError(409,'This task is already started or physically finished.');
             const selected = rows(w.data.tasks).find((t) => t.woCode === wo.id && t.taskId === task.id)!;
@@ -2078,6 +2090,12 @@ export async function maintenanceOperations(ctx: OrgContext) {
         if(['closed','cancelled'].includes(str(wo.data.status)))for(const k of ['reconcile','assess','reviewAssessment','plan','execute','safety','close'])permissions[k]=false;
         if(str(wo.data.status)!=='planning'||object(wo.data.assessmentReview).status==='approved'||Object.keys(object(wo.data.taskPlanning)).length)permissions.assess=false;
         if(object(wo.data.assessmentReview).status==='approved')permissions.reviewAssessment=false;
+        const approvalStage=configuredOrderApprovalStage(wo.data);
+        permissions.approveOrderStage=false;
+        if(approvalStage&&stageReached(wo.data,approvalStage)&&stageApprovalPending(wo.data,approvalStage)){
+            try{await maintenancePermission(ctx,'MNT.assessment.review',recordPath(wo));await requireMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo));const excluded=[wo.data.requestedBy,wo.data.createdBy,...(approvalStage==='before_assessment'?[]:[wo.data.assessedBy,wo.data.assessmentTasksBy,wo.data.plannedBy,object(wo.data.readiness).by])];permissions.approveOrderStage=!excluded.includes(ctx.uid)||ctx.testMode===true;}catch{/* unauthorized */}
+        }
+        if(stageApprovalPending(wo.data,'before_assessment'))permissions.assess=false;
         permissions.signoff=permissions.safety===true&&wo.data.workflowCode==='WO200';
         permissions.cancel =
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
@@ -2089,7 +2107,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const cycle=await getMaintenanceCycle(ctx),d=wo.data,zone=str(object(d.currentCycleAdmission).timeZone)||str(object(d.cycleAdmission).timeZone)||cycle.timeZone;
         let dueAt:string|null=null;const dueDate=str(d.scheduledEnd);if(!retrospective&&/^\d{4}-\d{2}-\d{2}$/.test(dueDate)){try{const day=new Date(dueDate+'T00:00:00Z');day.setUTCDate(day.getUTCDate()+1);dueAt=zonedInstant(day.toISOString().slice(0,10),'00:00',zone);}catch{/* Invalid historical dates stay unclassified. */}}
         return {
-            wo: { code: wo.id, ...wo.data,workflowStatusCode:shortWorkOrderStatus(str(wo.data.workflowCode)),...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole),assessmentReady:maintenanceAssessmentReady(wo.data,reviewRole),assessmentApprovalRequired:maintenanceAssessmentApprovalRequired(wo.data) },
+            wo: { code: wo.id, ...wo.data,workflowStatusCode:shortWorkOrderStatus(str(wo.data.workflowCode)),...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole),assessmentReady:maintenanceAssessmentReady(wo.data,reviewRole),assessmentApprovalRequired:maintenanceAssessmentApprovalRequired(wo.data),orderApprovalStage:approvalStage,orderApprovalLabel:approvalStage?STAGE_LABELS[approvalStage]:'',orderStageApprovalPending:!!approvalStage&&stageApprovalPending(wo.data,approvalStage),orderStageApprovalReached:!!approvalStage&&stageReached(wo.data,approvalStage) },
             assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
             earlyClosure:earlyCheck?{blocked:earlyCheck.blocked,started:earlyExecutionStarted(wo),requested:!!object(wo.data.earlyClosureRequest).at}:null,
             maintenanceCycle:cycle,
