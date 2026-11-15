@@ -26,8 +26,8 @@ const nameOf=(d:Doc)=>str(d.data.name)||str(d.data.title)||d.id;
 const sequencePath=(orgId:string)=>'organizations/'+orgId+'/maintenance_work_group_sequences/default';
 const masterPath=(orgId:string)=>'organizations/'+orgId+'/maintenance_work_group_settings/default';
 const memberIds=(value:unknown):string[]=>isObj(value)?[...new Set(Object.values(value).flatMap(ms=>objects(ms).map(m=>str(m.uid)).filter(Boolean)))]:[];
-const mapOfStrings=(value:unknown):Record<string,string[]>=>isObj(value)?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,strings(v)])):{};
-function memberMap(value:unknown):Record<string,Member[]>{
+export const mapOfStrings=(value:unknown):Record<string,string[]>=>isObj(value)?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,strings(v)])):{};
+export function memberMap(value:unknown):Record<string,Member[]>{
  return Object.fromEntries(WORK_GROUP_TITLES.map(t=>[t,objects(isObj(value)?value[t]:null).map(m=>({uid:str(m.uid),positionCode:str(m.positionCode)})).filter(m=>m.uid&&m.positionCode)]));
 }
 export function workGroupConflicts(groups:readonly Doc[], groupId:string, costCenterIds:readonly string[], members:unknown):string[]{
@@ -39,7 +39,7 @@ export function workGroupConflicts(groups:readonly Doc[], groupId:string, costCe
  }
  return issues;
 }
-function mergedMasterTasks(master:Doc|undefined){
+export function mergedMasterTasks(master:Doc|undefined){
  const saved=mapOfStrings(master?.data.tasks);
  return Object.fromEntries(WORK_GROUP_TASKS.filter(t=>!t.external).map(t=>[t.code,Number(master?.data.defaultsVersion)===1&&Object.hasOwn(saved,t.code)?saved[t.code]:saved[t.code]?.length?saved[t.code]:DEFAULT_WORK_GROUP_TASKS[t.code]||[]]));
 }
