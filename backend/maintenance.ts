@@ -1,4 +1,5 @@
 import {maintenanceAnalyticsRoutes} from './maintenanceAnalytics';
+import {maintenanceCostRoutes} from './maintenanceCost';
 import {maintenanceCapacityRoutes} from './maintenanceCapacity';
 import {maintenanceTimeRoutes} from './maintenanceTime';
 import {requestTransition,requestTransitionInitial} from './maintenanceAnalyticsCore';
@@ -921,6 +922,7 @@ import { maintenanceWorkGroupRoutes } from './maintenanceWorkGroups';
 export const maintenanceRoutes = {
     ...maintenanceWorkGroupRoutes,
     ...maintenanceAnalyticsRoutes,
+    ...maintenanceCostRoutes,
     ...maintenanceCapacityRoutes,
     ...maintenanceTimeRoutes,
     'POST /api/org/mnt/setup/governance': [orgRoute('org.mnt.setup.governance','ADM.workflows',async ctx=>{
