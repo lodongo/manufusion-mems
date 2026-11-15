@@ -22,6 +22,7 @@ const ProcurementCatalog = lazy(() => import('./ProcurementCatalog'));
 const WorkRequests = lazy(() => import('./WorkRequests'));
 const WorkOrders = lazy(() => import('./WorkOrders'));
 const MntHome = lazy(() => import('./MntHome'));
+const MntWorkGroups = lazy(() => import('./MntWorkGroups'));
 const MntWindows = lazy(() => import('./MntWindows'));
 const MntBudgets = lazy(() => import('./MntBudgets'));
 const SafConfiguration = lazy(() => import('./SafConfiguration'));
@@ -86,6 +87,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
             { key: 'work_requests', label: 'Work requests', Icon: Wrench, perm: 'MNT.', module: 'MNT' },
             { key: 'work_orders', label: 'Work orders', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
             { key: 'maintenance_windows', label: 'Maintenance windows', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
+            { key: 'mnt_work_groups', label: 'Work Groups', Icon: Briefcase, perm: 'ADM.workflows', module: 'MNT' },
             { key: 'mnt_budgets', label: 'Budgets & cost approvals', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
         ],
     },
@@ -266,6 +268,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             break;
         case 'saf_configuration':
             content = <SafConfiguration />;
+            break;
+        case 'mnt_work_groups':
+            content = <MntWorkGroups />;
             break;
         case 'maintenance_windows':
             content = <MntWindows />;

@@ -835,7 +835,9 @@ async function ensureCurrentAssessmentApproval(ctx:OrgContext,data:Obj) {
 
 // ----- Routes -----
 
+import { maintenanceWorkGroupRoutes } from './maintenanceWorkGroups';
 export const maintenanceRoutes = {
+    ...maintenanceWorkGroupRoutes,
     'POST /api/org/mnt/workflow/configuration': [
         orgRoute('org.mnt.workflow.configuration', null, async (ctx) => {
             requireMnt(ctx);
