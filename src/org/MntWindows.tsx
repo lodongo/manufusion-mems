@@ -1,3 +1,4 @@
+import MntSelect from './MntSelect';
 import {MaintenanceResponsibility,workGroupText,responsibleText} from './mntShared';
 import { useEffect, useRef, useState } from 'react';
 import { CalendarClock, Printer, ShieldCheck, Plus, ArrowLeft, RefreshCw } from 'lucide-react';
@@ -367,14 +368,11 @@ export default function MntWindows() {
             {draft ? (
                 <Card className="space-y-4">
                     <h2 className="font-semibold">{draft.windowId ? 'Change maintenance window' : 'New maintenance window'}</h2>
-                    <label className="block text-sm text-soft">
-                        Equipment *
-                        <select data-native-select="true" className={mntInput} value={draft.equipmentId} disabled={!!draft.windowId} onChange={(e) => patch({ equipmentId: e.target.value, workOrderIds: [] })}>
+                    <div className="block text-sm text-soft"><MntSelect label="Equipment" className={mntInput} value={draft.equipmentId} disabled={!!draft.windowId} onChange={(e) => patch({ equipmentId: e.target.value, workOrderIds: [] })}>
                             <option value="">Choose the equipment…</option>
                             {equipmentOptions(draft).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                             {draft.windowId && !equipmentOptions(draft).some(([id]) => id === draft.equipmentId) && <option value={draft.equipmentId}>{draft.equipmentId}</option>}
-                        </select>
-                    </label>
+                        </MntSelect></div>
                     {!equipmentOptions(draft).length && <Alert tone="info">No work order is ready yet. Confirm readiness on a work order (Plan: spares, services, people, dates, risk review and cost approval) first.</Alert>}
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                         <MntField label="Date *" type="date" value={draft.date} onChange={(v) => patch({ date: v })} />
@@ -524,7 +522,7 @@ export default function MntWindows() {
             )}
             {dialog.startsWith('window_close_')&&<MntDialog title="Window safety sign-off & closure" onClose={()=>setDialog('')}>
                 <div className="space-y-3">
-                    {dialog==='window_close_safety'&&<><label className="block text-sm">Incident / near-miss declaration<select className={mntInput} value={closureForm.declaration||''} onChange={e=>setClosureForm({...closureForm,declaration:e.target.value,noIncidentsConfirmed:false,clearanceConfirmed:false})}><option value="">Choose explicitly</option><option value="none">No incidents or near misses</option><option value="reported">All incidents / near misses reported and cleared</option></select></label>
+                    {dialog==='window_close_safety'&&<><div className="block text-sm"><MntSelect label="Incident / near-miss declaration" className={mntInput} value={closureForm.declaration||''} onChange={e=>setClosureForm({...closureForm,declaration:e.target.value,noIncidentsConfirmed:false,clearanceConfirmed:false})}><option value="">Choose explicitly</option><option value="none">No incidents or near misses</option><option value="reported">All incidents / near misses reported and cleared</option></MntSelect></div>
                     {closureForm.declaration&&<label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={closureForm.declaration==='none'?!!closureForm.noIncidentsConfirmed:!!closureForm.clearanceConfirmed} onChange={e=>setClosureForm({...closureForm,[closureForm.declaration==='none'?'noIncidentsConfirmed':'clearanceConfirmed']:e.target.checked})}/>I confirm the window incident declaration.</label>}</>}
                     <MntField label="Safety notes (optional)" value={closureForm.note} multiline onChange={v=>setClosureForm({...closureForm,note:v})}/>
                     <Button testOverride={!!data?.testModeOverride} busy={busy} onClick={()=>action(dialog,closureForm)}>Confirm</Button>

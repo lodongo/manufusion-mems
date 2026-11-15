@@ -1,3 +1,4 @@
+import MntSelect from './MntSelect';
 import MntTestDeletion from './MntTestDeletion';
 import MntStatusReview from './MntStatusReview';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -20,7 +21,7 @@ export const mntApi = (body: MntData) => {
     if (['save_window', 'preview_window'].includes(body.action)) {
         for (const key of ['start', 'end'])
             if (body[key] && Number.isFinite(Date.parse(body[key]))) next[key] = new Date(body[key]).toISOString();
-        next.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        next.timeZone = body.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
     }
     return callBackend<MntData>('/api/org/mnt/operations', next);
 };
@@ -311,26 +312,20 @@ function ResourceForm({
                               : 'Only the shortage is requested. An open replenishment that covers it is linked instead of buying twice.'}
                     </p>
                     {needsWarehouse && (
-                        <label className="block text-sm text-soft">
-                            Warehouse that will receive and issue it
-                            <select data-native-select="true" className={mntInput} value={data.warehouseId} onChange={(e) => patch('warehouseId', e.target.value)}>
+                        <div className="block text-sm text-soft"><MntSelect label="Receive/issue warehouse" className={mntInput} value={data.warehouseId} onChange={(e) => patch('warehouseId', e.target.value)}>
                                 <option value="">Choose warehouse</option>
                                 {warehouses.map((w) => (
                                     <option key={w.id} value={w.id}>{w.name}</option>
                                 ))}
-                            </select>
-                        </label>
+                            </MntSelect></div>
                     )}
                     <MntField label="Date required" type="date" value={data.dateRequired} onChange={(v) => patch('dateRequired', v)} />
                     <MntField label={kind === 'secure_spare' ? 'GL account (used only if a purchase is needed)' : 'Approved GL account for this purchase'} value={data.glCode} onChange={(v) => patch('glCode', v)} />
-                    <label className="block text-sm text-soft">
-                        Urgency
-                        <select data-native-select="true" className={mntInput} value={data.urgency} onChange={(e) => patch('urgency', e.target.value)}>
+                    <div className="block text-sm text-soft"><MntSelect label="Urgency" className={mntInput} value={data.urgency} onChange={(e) => patch('urgency', e.target.value)}>
                             <option value="low">Low</option>
                             <option value="medium">Medium</option>
                             <option value="high">High</option>
-                        </select>
-                    </label>
+                        </MntSelect></div>
                     <MntField label="Indicative budget (optional)" type="number" value={data.budget} onChange={(v) => patch('budget', v)} />
                 </>
             )}
@@ -339,15 +334,12 @@ function ResourceForm({
                     <p className="text-sm text-soft">
                         Choose the supplier category, then an approved vendor qualified for this service. For OEM and OCM, vendors representing the equipment make are listed. If none is suitable, request supplier onboarding.
                     </p>
-                    <label className="block text-sm text-soft">
-                        Supplier category
-                        <select data-native-select="true" className={mntInput} value={data.supplierCategory} onChange={(e) => setData((o) => ({ ...o, supplierCategory: e.target.value, preferredVendorId: '' }))}>
+                    <div className="block text-sm text-soft"><MntSelect label="Supplier category" className={mntInput} value={data.supplierCategory} onChange={(e) => setData((o) => ({ ...o, supplierCategory: e.target.value, preferredVendorId: '' }))}>
                             <option value="">Choose</option>
                             {vendors.categories.map((c) => (
                                 <option key={c.code} value={c.code}>{c.label}</option>
                             ))}
-                        </select>
-                    </label>
+                        </MntSelect></div>
                     {vendors.error && <Alert tone="error">{vendors.error}</Alert>}
                     {data.supplierCategory && !vendors.loading && (
                         <fieldset className="space-y-2">
@@ -453,7 +445,7 @@ function FeedbackForm({ task, execution, wo, onSubmit }: { task: MntData; execut
                 <details className="rounded-xl border border-line p-3"><summary className="cursor-pointer text-sm font-medium">Additional technical details (optional)</summary>
                     {([['findings','Technical findings'],['results','Actual work results'],['measurements','Measurements'],['evidence','Execution evidence / reference']] as const).map(([k,l])=><MntField key={k} label={l} value={f[k]} multiline onChange={v=>patch(k,v)}/>)}
                     <MntField label="Outstanding work / follow-up (if any)" value={f.followUp} multiline onChange={v=>patch('followUp',v)}/>
-                    <label className="block text-sm">Execution quality (optional)<select className={mntInput} value={f.qualityOutcome||'not_assessed'} onChange={e=>patch('qualityOutcome',e.target.value)}><option value="not_assessed">Not assessed</option><option value="first_pass">Accepted first pass</option><option value="rework_completed">Rework completed</option><option value="follow_up">Follow-up required</option></select></label>
+                    <div className="block text-sm"><MntSelect label="Execution quality (optional)" className={mntInput} value={f.qualityOutcome||'not_assessed'} onChange={e=>patch('qualityOutcome',e.target.value)}><option value="not_assessed">Not assessed</option><option value="first_pass">Accepted first pass</option><option value="rework_completed">Rework completed</option><option value="follow_up">Follow-up required</option></MntSelect></div>
                     {['rework_completed','follow_up'].includes(f.qualityOutcome)&&<MntField label="Rework / follow-up description" value={f.qualityNote} multiline onChange={v=>patch('qualityNote',v)}/>}
                 </details>
             </>}
@@ -533,10 +525,8 @@ function ConsumptionForm({ task, issues, onSubmit }: { task: MntData; issues: Mn
                     <p className="text-sm">
                         Issued: {l.qty} {l.uom} · {l.issueId}
                     </p>
-                    <label className="block text-sm text-soft">
-                        Planned requirement or additional material
-                        <select
-                            data-native-select="true"
+                    <div className="block text-sm text-soft"><MntSelect label="Material requirement"
+                           
                             className={mntInput}
                             value={consumption[i].spareId}
                             onChange={(e) => patch(i, 'spareId', e.target.value)}
@@ -547,8 +537,7 @@ function ConsumptionForm({ task, issues, onSubmit }: { task: MntData; issues: Mn
                                     {s.description} · planned {s.qty} {s.uom}
                                 </option>
                             ))}
-                        </select>
-                    </label>
+                        </MntSelect></div>
                     <div className="grid gap-3 sm:grid-cols-2">
                         <MntField
                             label="Actual quantity consumed"
@@ -563,10 +552,8 @@ function ConsumptionForm({ task, issues, onSubmit }: { task: MntData; issues: Mn
                             onChange={(v) => patch(i, 'returned', v)}
                         />
                     </div>
-                    <label className="block text-sm text-soft">
-                        Installed as an equipment / assembly component?
-                        <select
-                            data-native-select="true"
+                    <div className="block text-sm text-soft"><MntSelect label="Installed as component"
+                           
                             className={mntInput}
                             value={consumption[i].installed}
                             onChange={(e) => patch(i, 'installed', e.target.value)}
@@ -574,8 +561,7 @@ function ConsumptionForm({ task, issues, onSubmit }: { task: MntData; issues: Mn
                             <option value="">Choose explicitly</option>
                             <option value="yes">Yes, update the task equipment or assembly BOM</option>
                             <option value="no">No, consumable / unused item</option>
-                        </select>
-                    </label>
+                        </MntSelect></div>
                     <MntField
                         label="Material reconciliation remarks"
                         value={consumption[i].remarks}
@@ -681,7 +667,7 @@ function OrderAssessmentHeader({wo,options,can,onDone,testOverride,cycle}:{wo:Mn
  if(!can)return <Card className="space-y-2"><p className="font-semibold">Technical assessment classification</p><p className="text-sm">{wo.technicalEvaluation||'Awaiting assessor'}</p><p className="text-sm text-soft">{[wo.natureLabel,wo.criticalityLabel,wo.maintenanceTypeLabel].filter(Boolean).join(' · ')}</p></Card>;
  if(!l)return <Card><p className="text-sm">{setup.error||'Loading assessment metadata…'}</p></Card>;
  const save=async()=>{setBusy(true);setErr('');try{await callBackend('/api/org/mnt/wo/action',{code:wo.code,action:'assess_header',...form});onDone();}catch(e){setErr(e instanceof Error?e.message:'Unable to save');}finally{setBusy(false);}};
- return <Card className="space-y-3"><p className="font-semibold">1. Technical assessment classification</p><label className="block text-sm">Assembly (optional)<select className={mntInput} disabled={!!wo.assessmentTasks?.length} value={form.assemblyId} onChange={e=>set('assemblyId',e.target.value)}><option value="">Equipment level</option>{options.map(a=><option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}{form.assemblyId&&!options.some(a=>a.id===form.assemblyId)&&<option value={form.assemblyId}>{wo.assemblyName}</option>}</select></label><MntField label="Technical evaluation *" value={form.technicalEvaluation} multiline onChange={v=>set('technicalEvaluation',v)}/><ChoicePicker title="Failure mode" required groups={l.failureModes} selected={form.natureCode?[form.natureCode]:[]} onToggle={v=>set('natureCode',form.natureCode===v?'':v)}/><ChoicePicker title="Solution categories" required multi max={5} groups={l.solutions} selected={form.solutionCodes} onToggle={v=>set('solutionCodes',form.solutionCodes.includes(v)?form.solutionCodes.filter((x:string)=>x!==v):form.solutionCodes.length<5?[...form.solutionCodes,v]:form.solutionCodes)}/>{[['severityCode','Severity *',l.criticality],['maintenanceTypeCode','Maintenance type *',l.maintenanceTypes],['priorityCode','Priority',l.priorities]].map(([key,label,items])=><label key={String(key)} className="block text-sm">{String(label)}<select className={mntInput} disabled={String(key)==='maintenanceTypeCode'&&!!wo.breakIn} value={form[String(key)]} onChange={e=>set(String(key),e.target.value)}><option value="">Select…</option>{String(key)==='maintenanceTypeCode'&&wo.breakIn?<option value="MAI-016">Break-in Maintenance</option>:(items as MntLists['criticality']).map(x=><option key={x.code} value={x.code}>{x.label}</option>)}</select></label>)}<div className="grid grid-cols-2 gap-2"><label className="block text-sm">Start date *<input className={mntInput} type="date" disabled={moves>=2} min={minDate} value={form.scheduledStart} onChange={e=>set('scheduledStart',e.target.value)}/></label><label className="block text-sm">End date *<input className={mntInput} type="date" min={form.scheduledStart} value={form.scheduledEnd} onChange={e=>set('scheduledEnd',e.target.value)}/></label></div><p className="text-xs text-soft">Scheduled start date changes: {moves}/2 {moves>=2?'· locked':''}</p>{minDate&&<p className="text-xs text-soft">Earliest new start: {minDate}</p>}{dateChanged&&<MntField label="Reason for date change *" value={form.dateChangeReason} onChange={v=>set('dateChangeReason',v)}/>}<MntField label="Assessment note" value={form.note} multiline onChange={v=>set('note',v)}/>{err&&<Alert tone="error">{err}</Alert>}<Button testOverride={testOverride} busy={busy} disabled={form.technicalEvaluation.trim().length<20||!form.natureCode||!form.severityCode||!form.solutionCodes.length||!form.maintenanceTypeCode||dateInvalid} onClick={save}>Save technical classification</Button></Card>;
+ return <Card className="space-y-3"><p className="font-semibold">1. Technical assessment classification</p><div className="block text-sm"><MntSelect label="Assembly (optional)" className={mntInput} disabled={!!wo.assessmentTasks?.length} value={form.assemblyId} onChange={e=>set('assemblyId',e.target.value)}><option value="">Equipment level</option>{options.map(a=><option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}{form.assemblyId&&!options.some(a=>a.id===form.assemblyId)&&<option value={form.assemblyId}>{wo.assemblyName}</option>}</MntSelect></div><MntField label="Technical evaluation *" value={form.technicalEvaluation} multiline onChange={v=>set('technicalEvaluation',v)}/><ChoicePicker title="Failure mode" required groups={l.failureModes} selected={form.natureCode?[form.natureCode]:[]} onToggle={v=>set('natureCode',form.natureCode===v?'':v)}/><ChoicePicker title="Solution categories" required multi max={5} groups={l.solutions} selected={form.solutionCodes} onToggle={v=>set('solutionCodes',form.solutionCodes.includes(v)?form.solutionCodes.filter((x:string)=>x!==v):form.solutionCodes.length<5?[...form.solutionCodes,v]:form.solutionCodes)}/>{[['severityCode','Severity *',l.criticality],['maintenanceTypeCode','Maintenance type *',l.maintenanceTypes],['priorityCode','Priority',l.priorities]].map(([key,label,items])=><div key={String(key)} className="block text-sm"><MntSelect label={String(label)} className={mntInput} disabled={String(key)==='maintenanceTypeCode'&&!!wo.breakIn} value={form[String(key)]} onChange={e=>set(String(key),e.target.value)}><option value="">Select…</option>{String(key)==='maintenanceTypeCode'&&wo.breakIn?<option value="MAI-016">Break-in Maintenance</option>:(items as MntLists['criticality']).map(x=><option key={x.code} value={x.code}>{x.label}</option>)}</MntSelect></div>)}<div className="grid grid-cols-2 gap-2"><label className="block text-sm">Start date *<input className={mntInput} type="date" disabled={moves>=2} min={minDate} value={form.scheduledStart} onChange={e=>set('scheduledStart',e.target.value)}/></label><label className="block text-sm">End date *<input className={mntInput} type="date" min={form.scheduledStart} value={form.scheduledEnd} onChange={e=>set('scheduledEnd',e.target.value)}/></label></div><p className="text-xs text-soft">Scheduled start date changes: {moves}/2 {moves>=2?'· locked':''}</p>{minDate&&<p className="text-xs text-soft">Earliest new start: {minDate}</p>}{dateChanged&&<MntField label="Reason for date change *" value={form.dateChangeReason} onChange={v=>set('dateChangeReason',v)}/>}<MntField label="Assessment note" value={form.note} multiline onChange={v=>set('note',v)}/>{err&&<Alert tone="error">{err}</Alert>}<Button testOverride={testOverride} busy={busy} disabled={form.technicalEvaluation.trim().length<20||!form.natureCode||!form.severityCode||!form.solutionCodes.length||!form.maintenanceTypeCode||dateInvalid} onClick={save}>Save technical classification</Button></Card>;
 }
 import MntApprovalProgress from './MntApprovalProgress';
 import MntPersonalTime from './MntPersonalTime';
@@ -1233,10 +1219,8 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         <div className="space-y-3">
                             {dialog.kind === 'safety_signoff' && (
                                 <>
-                                    <label className="block text-sm">
-                                        Incident and near-miss declaration
-                                        <select
-                                            data-native-select="true"
+                                    <div className="block text-sm"><MntSelect label="Incident and near-miss declaration"
+                                           
                                             className={mntInput}
                                             value={form.declaration || ''}
                                             onChange={(e) => setForm({ ...form, declaration: e.target.value })}
@@ -1244,8 +1228,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                             <option value="">Choose explicitly</option>
                                             <option value="none">No incidents or near misses</option>
                                             <option value="reported">Incident / near miss reported</option>
-                                        </select>
-                                    </label>
+                                        </MntSelect></div>
                                     {form.declaration === 'none' && (
                                         <MntCheck
                                             label="No safety incidents or near misses occurred during this maintenance activity."
@@ -1275,11 +1258,9 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                     />
                                     {dialog.kind === 'safety_signoff' && (
                                         <>
-                                            <label className="block text-sm">
-                                                Cleared incident reference
-                                                <select
+                                            <div className="block text-sm"><MntSelect label="Cleared incident reference"
                                                     className={mntInput}
-                                                    data-native-select="true"
+                                                   
                                                     value={form.incidentId || ''}
                                                     onChange={(e) => setForm({ ...form, incidentId: e.target.value })}
                                                 >
@@ -1291,8 +1272,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                                                 {i.id} · {i.classification}
                                                             </option>
                                                         ))}
-                                                </select>
-                                            </label>
+                                                </MntSelect></div>
                                             <MntCheck
                                                 label="Incident containment and safety clearance are confirmed."
                                                 value={!!form.clearanceConfirmed}

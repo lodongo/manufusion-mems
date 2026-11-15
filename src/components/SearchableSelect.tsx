@@ -1,4 +1,4 @@
-import { Children, isValidElement, useEffect, useMemo, useState, type ChangeEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { Children, Fragment, isValidElement, useEffect, useMemo, useState, type ChangeEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 
@@ -30,6 +30,7 @@ function extractOptions(children: ReactNode, group = ''): Option[] {
             value: p.value === undefined ? textOf(p.children) : String(p.value),
             label: p.label ?? textOf(p.children), disabled: !!p.disabled, group,
         });
+        else if (child.type === Fragment) values.push(...extractOptions(p.children, group));
         else if (child.type === 'optgroup') values.push(...extractOptions(p.children, p.label ?? group));
     });
     return values;
