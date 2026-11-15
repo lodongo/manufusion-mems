@@ -484,14 +484,12 @@ export default function MntWindows() {
                     {selected.closureSummary?.eligible&&<Card className="space-y-3">
                         <h2 className="flex items-center gap-2 font-semibold"><ShieldCheck size={18}/>Maintenance window closure</h2>
                         {selected.finalClosure?.at?<p className="text-sm">Closed by {selected.finalClosure.name} · {new Date(selected.finalClosure.at).toLocaleString()}</p>:<>
-                            <p className="text-sm text-soft">Complete safety, handover and technical closure once for the work orders in this window. Report and clear individual incidents on their work orders.</p>
+                            <p className="text-sm text-soft">Safety sign-off closes the work orders in this window. Report and clear individual incidents on their work orders.</p>
                             { !selected.closureSummary.ready&&<Alert tone="info">Complete and reconcile the tasks of every work order before closing this window.</Alert>}
                             {[
                                 ['Safety sign-off','safety','window_close_safety'],
-                                ['Equipment handover','handover','window_close_handover'],
-                                ['Technical Manager closure','closed','window_close_final'],
                             ].map(([label,key,kind])=><div key={key} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line p-3"><span className="text-sm font-semibold">{label} · {selected.closureSummary[key]}/{selected.closureSummary.total}</span>
-                                {(key==='closed'||selected.closureSummary[key]<selected.closureSummary.total)&&<Button variant="secondary" disabled={!selected.closureSummary.ready||key==='handover'&&selected.closureSummary.safety!==selected.closureSummary.total||key==='closed'&&selected.closureSummary.handover!==selected.closureSummary.total} onClick={()=>{setClosureForm({});setDialog(kind);}}>Record</Button>}</div>)}
+                                {(selected.closureSummary.closed<selected.closureSummary.total||!selected.finalClosure?.at)&&<Button variant="secondary" disabled={!selected.closureSummary.ready} onClick={()=>{setClosureForm({});setDialog(kind);}}>Record</Button>}</div>)}
                         </>}
                     </Card>}
                     {selected.status==='completed'&&!selected.closureSummary?.eligible&&<Alert tone="info">This window contains split work orders or older records. Complete their individual sign-offs on the work orders.</Alert>}
@@ -518,13 +516,11 @@ export default function MntWindows() {
                     empty="No maintenance windows yet. Confirm readiness on a work order, then schedule a window."
                 />
             )}
-            {dialog.startsWith('window_close_')&&<MntDialog title={dialog==='window_close_safety'?'Window safety sign-off':dialog==='window_close_handover'?'Equipment handover':'Technical Manager window closure'} onClose={()=>setDialog('')}>
+            {dialog.startsWith('window_close_')&&<MntDialog title="Window safety sign-off & closure" onClose={()=>setDialog('')}>
                 <div className="space-y-3">
                     {dialog==='window_close_safety'&&<><label className="block text-sm">Incident / near-miss declaration<select className={mntInput} value={closureForm.declaration||''} onChange={e=>setClosureForm({...closureForm,declaration:e.target.value,noIncidentsConfirmed:false,clearanceConfirmed:false})}><option value="">Choose explicitly</option><option value="none">No incidents or near misses</option><option value="reported">All incidents / near misses reported and cleared</option></select></label>
                     {closureForm.declaration&&<label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={closureForm.declaration==='none'?!!closureForm.noIncidentsConfirmed:!!closureForm.clearanceConfirmed} onChange={e=>setClosureForm({...closureForm,[closureForm.declaration==='none'?'noIncidentsConfirmed':'clearanceConfirmed']:e.target.checked})}/>I confirm the window incident declaration.</label>}</>}
-                    {dialog==='window_close_handover'&&<>{[['functionalChecks','Operational testing and functional checks'],['condition','Equipment condition'],['restrictions','Outstanding restrictions (enter None if clear)']].map(([key,label])=><MntField key={key} label={label} value={closureForm[key]} multiline onChange={v=>setClosureForm({...closureForm,[key]:v})}/>)}{[['ready','Equipment is ready for operation'],['accepted','I accept the equipment as authorized receiver']].map(([key,label])=><label key={key} className="flex items-start gap-2 text-sm"><input type="checkbox" checked={!!closureForm[key]} onChange={e=>setClosureForm({...closureForm,[key]:e.target.checked})}/>{label}</label>)}</>}
-                    {dialog==='window_close_final'&&<label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={!!closureForm.outstandingAccepted} onChange={e=>setClosureForm({...closureForm,outstandingAccepted:e.target.checked})}/>Outstanding work and linked actions reviewed and accepted, where applicable.</label>}
-                    {dialog!=='window_close_handover'&&<MntField label="Review notes / evidence" value={closureForm.note} multiline onChange={v=>setClosureForm({...closureForm,note:v})}/>}
+                    <MntField label="Safety notes (optional)" value={closureForm.note} multiline onChange={v=>setClosureForm({...closureForm,note:v})}/>
                     <Button testOverride={!!data?.testModeOverride} busy={busy} onClick={()=>action(dialog,closureForm)}>Confirm</Button>
                     {failure&&<MntGateHint message={failure}/>}
                 </div>

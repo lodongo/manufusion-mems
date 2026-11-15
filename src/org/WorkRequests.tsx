@@ -727,10 +727,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
     const conversionMin=setup.maintenanceCycle?.restrictedTypes.includes(r.assessment.maintenanceTypeCode)?setup.maintenanceCycle.nextStart:setup.maintenanceCycle?.today||today;
     const datesOk = !!startDate && !!endDate && startDate >= conversionMin && endDate >= startDate;
     const buttons: Array<{ key: string; label: string; icon: ReactNode; variant?: 'primary' | 'secondary' | 'danger'; onClick: () => void }> = [];
-    if (can.confirmClosure) {
-        buttons.push({ key: 'confirmClosure', label: 'Confirm closure', icon: <CheckCircle2 className='h-4 w-4' />, onClick: () => setMode('confirm_closure') });
-        buttons.push({ key: 'rejectClosure', label: 'Not fixed – reopen', icon: <Undo2 className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('reject_closure') });
-    }
+    if(can.confirmClosure)buttons.push({key:'close',label:'Close request',icon:<Check className='h-4 w-4'/>,onClick:()=>run('close_pending_request')});
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
     if (can.close) buttons.push({ key: 'close', label: r.status==='returned'?'Close returned request':Number(r.reviewProcessVersion) >= 2 ? 'Close (no assessment)' : 'Close – no planning needed', icon: <Check className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('close') });
     if (can.reviewCancel && Number(r.reviewProcessVersion)<2) buttons.push({ key: 'reviewCancel', label: 'Cancel (review)', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('review_cancel') });
@@ -1234,7 +1231,7 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
     const localToday = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,10);
     const [closedDate, setClosedDate] = useState(localToday);
     const [durationMinutes, setDurationMinutes] = useState('');
-    const direct = Number(detail.reviewProcessVersion) >= 2;
+    const direct = true;
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const screen = useFullScreen(true);

@@ -551,7 +551,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
             && independent(ctx, !mine, 'mnt.wr.reviewer_independence')
             && (Number(doc.data.reviewProcessVersion) < 2 || (['under_review','returned'].includes(status) && (testing || assigned === ctx.uid || status==='returned'&&!assigned) && workflowEligible))
             && !assessmentReviewCurrent(doc.data),
-        confirmClosure: status === 'closure_pending' && at(P.WR_closeConfirm) && independent(ctx, str(object(doc.data.closure).by) !== ctx.uid, 'mnt.wr.closure_independence'),
+        confirmClosure: status === 'closure_pending' && (at(P.WR_close)||at(P.WR_review)||at(P.WR_closeConfirm)),
         reviewAssessment: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) < 2)
             && !str(doc.data.woCode) && at(P.assessment_review) && gate('MNT.ASSESS.REVIEW') && independent(ctx, !mine && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid), 'mnt.assessment.review_independence'),
         convert: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) < 2)
@@ -692,7 +692,7 @@ function woCan(ctx: OrgContext, doc: Doc, scope: Scope, l: Lists) {
         start: ['released', 'scheduled'].includes(s) && at(P.WO_execute),
         execute: s === 'in_progress' && at(P.WO_execute),
         verify: s === 'completed' && at(P.WO_verify) && independent(ctx, !workers.has(ctx.uid), 'mnt.wo.verify_independence'),
-        close: (s === 'verified'||isRequestClosureOrder(d)&&s==='completed'&&!!object(d.handover).at) && at(P.WO_close),
+        close: !['closed','cancelled'].includes(s) && at(P.WO_close),
         cancel: ['planning', 'plan_ready', 'released', 'scheduled'].includes(s) && at(P.WO_cancel),
         reopen: false,
         highRisk: high,
@@ -1372,7 +1372,7 @@ export const maintenanceRoutes = {
                     const mine = str(d.data.requestedBy) === ctx.uid;
                     if (view === 'assessment') return (s === 'under_review' && Number(d.data.reviewProcessVersion) < 2 || s === 'to_be_assessed') && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
                     if (view === 'mine') return mine;
-                    if (view === 'review') return (s === 'closure_pending' && canAt(ctx, P.WR_closeConfirm, pathOf(d), scope) && (str(object(d.data.closure).by) !== ctx.uid || (ctx.role === 'org_super_admin' && ctx.testMode === true)))
+                    if (view === 'review') return (s==='closure_pending'&&wrCan(ctx,d,scope,reviewRole).confirmClosure)
                         || (s === 'created' && wrCan(ctx,d,scope,reviewRole).startReview)
                         || ((!mine || ctx.testMode === true) && ['submitted', 'under_review'].includes(s)
                             && (Number(d.data.reviewProcessVersion) < 2 || wrCan(ctx,d,scope,reviewRole).toAssessment)
@@ -1702,7 +1702,6 @@ export const maintenanceRoutes = {
                     const solution = solutionTypes[0];
                     const description = str(ctx.body.description).trim().slice(0, 2000);
                     if (description.length < 10) throw new HttpError(400, 'Describe what was done (at least 10 characters).');
-                    confirmCode(ctx, doc);
                     const closure = {
                         ...classifications,
                         causeCode: cause.code, causeLabel: cause.label, causeGroup: cause.group,
@@ -1710,28 +1709,17 @@ export const maintenanceRoutes = {
                         maintenanceTypeCode: mtype.code, maintenanceTypeLabel: mtype.label,
                         description, dateClosed:closedDate,durationMinutes, by: ctx.uid, name: displayName(ctx), at: now,
                     };
-                    await done(
-                        { status: 'closure_pending', closure, failureModeCode:failureMode.code,failureModeLabel:`${failureMode.group} · ${failureMode.label}`,solutions:classifications.solutions, maintenanceTypeCode: mtype.code, maintenanceTypeLabel: mtype.label,
-                          ...(str(doc.data.reviewer) ? {} : { reviewer: ctx.uid, reviewerName: displayName(ctx), reviewStartedAt: now }) },
-                        'Closed at review – awaiting confirmation', 'mnt.wr.closed_at_review',
-                        `${cause.group} · ${cause.label} / ${solution.group} · ${solution.label} / ${mtype.label} · completed by ${closedByName} · ${closedDate} · ${durationMinutes} min · ${description}`);
-                    return { ok: true };
+                    const woCode=await closeRequestWithOrder(ctx,doc,closure,{reviewDecision:'closed',failureModeCode:failureMode.code,failureModeLabel:failureMode.group+' · '+failureMode.label,solutions:classifications.solutions,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label,reviewer:ctx.uid,reviewerName:displayName(ctx),reviewCompletedAt:now});
+                    return {ok:true,woCode};
+                }
+                case 'close_pending_request':{
+                    deny(can.confirmClosure,'You cannot close this historical request.');
+                    const closure=object(doc.data.closure);
+                    if(closure.noSparesOrServices===true){const woCode=await closeRequestWithOrder(ctx,doc,closure,{reviewDecision:'closed'});return {ok:true,woCode};}
+                    await done({status:'closed',closedAt:now,reviewDecision:'closed'},'Work request closed','mnt.wr.closed_at_review');return {ok:true};
                 }
                 case 'confirm_closure':
-                case 'reject_closure': {
-                    deny(can.confirmClosure, str(object(doc.data.closure).by) === ctx.uid ? 'You closed this request, so another person must confirm it.' : 'You cannot confirm this closure.');
-                    const closure = object(doc.data.closure);
-                    if (action === 'confirm_closure') {
-                        if(closure.noSparesOrServices===true){const woCode=await closeRequestWithOrder(ctx,doc,{...closure,confirmedBy:ctx.uid,confirmedName:displayName(ctx),confirmedAt:now,confirmNote:note},{reviewDecision:'closed'});await rec(ctx,'mnt.wr.closure_confirmed',doc.id,note);return {ok:true,woCode};}
-                        await done({ status: 'closed', closedAt: now, closure: { ...closure, confirmedBy: ctx.uid, confirmedName: displayName(ctx), confirmedAt: now, confirmNote: note } as Plain },
-                            'Closure confirmed', 'mnt.wr.closure_confirmed', note);
-                        return { ok: true };
-                    }
-                    if (note.length < 10) throw new HttpError(400, 'Say why the closure is not accepted (at least 10 characters).');
-                    const rejected = [...objs(doc.data.closureRejections), { ...closure, rejectedBy: ctx.uid, rejectedName: displayName(ctx), rejectedAt: now, reason: note }];
-                    await done({ status: 'under_review', closure: null, closureRejections: rejected as unknown as Plain }, 'Closure not accepted – back to review', 'mnt.wr.closure_rejected', note);
-                    return { ok: true };
-                }
+                case 'reject_closure':throw new HttpError(409,'Closure confirmation is no longer required. Use Close request.');
                 case 'start_review':
                     if (wrStatus(doc) === 'created' && !reviewRole && !reviewOverride)
                         throw new HttpError(409, 'Configure MNT.WR.REVIEW in Maintenance Workflows before proceeding.');
@@ -2141,7 +2129,6 @@ export const maintenanceRoutes = {
             };
             if(action==='create_break_in'){
                 if(!can.view||!canAt(ctx,P.WO_close,pathOf(doc),scope))throw new HttpError(403,'Only authorized technical closure employees may create a break-in sub-order.');
-                await requireMaintenanceRole(ctx,'MNT.WO.TECHNICAL_CLOSE',pathOf(doc));
                 if(!['completed','verified','closed'].includes(str(d.status)))throw new HttpError(409,'Create a break-in sub-order at closure or after the original work order is closed.');
                 const description=str(b.description).trim().slice(0,2000),title=str(b.title).trim().slice(0,150),start=str(b.scheduledStart),end=str(b.scheduledEnd);
                 if(title.length<3||description.length<10)throw new HttpError(400,'Provide a title and describe the additional work.');

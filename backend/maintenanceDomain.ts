@@ -141,7 +141,5 @@ export function closurePrerequisites(wo: Obj) {
         if (e.reconciled !== true) throw new HttpError(409, 'Reconcile actual spares and BOM for every task.');
     }
     if (!object(wo.safetySignoff).at) throw new HttpError(409, 'Safety sign-off is required.');
-    if (!object(wo.handover).at || object(wo.handover).accepted !== true)
-        throw new HttpError(409, 'Accepted equipment handover is required.');
     if (!isRequestClosureOrder(wo)&&!wo.windowId) throw new HttpError(409, 'An approved maintenance window is required.');
 }

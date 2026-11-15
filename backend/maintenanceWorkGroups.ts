@@ -23,7 +23,7 @@ export const LINKED_WORK_GROUP_TASKS:readonly (readonly [string,string])[]=[
  ['MNT.WR.CREATE','MNT.WR.create'],['MNT.WR.REVIEW','MNT.WR.review'],
  ['MNT.WR.ASSESS','MNT.assessment.edit'],['MNT.ASSESS.REVIEW','MNT.assessment.review'],
  ['MNT.WR.CONVERT','MNT.WR.convert'],['MNT.WINDOW.LOCK','MNT.WO.schedule'],
- ['MNT.TASK.FEEDBACK','MNT.WO.execute'],['MNT.WO.TECHNICAL_CLOSE','MNT.WO.close']
+ ['MNT.TASK.FEEDBACK','MNT.WO.execute']
 ];
 const objects=(v:unknown):Record<string,unknown>[]=>Array.isArray(v)?v.filter(isObj):[];
 const strings=(v:unknown):string[]=>Array.isArray(v)?[...new Set(v.map(str).filter(Boolean))]:[];
@@ -177,7 +177,7 @@ async function publishWorkGroups(ctx:OrgContext){
   for(const t of WORK_GROUP_TITLES)for(const m of members[t])if(!d.positions.has(m.positionCode)||!(roleAlignment[t]||[]).includes(m.positionCode)||!paths.some(p=>{const u=d.users.get(m.uid);return !!u&&workGroupHolder(u,m.positionCode,p,today);}))issues.push('Invalid current employee alignment '+m.uid+' / '+t+'.');
   const conflicts=workGroupConflicts(d.groups,g.id,costCenterIds,members);
   if(conflicts.length)throw new HttpError(409,conflicts[0]);
-  for(const pair of [['MNT.WR.REVIEW','MNT.WR.review'],['MNT.ASSESS.REVIEW','MNT.assessment.review'],['MNT.WR.ASSESS','MNT.assessment.edit'],['MNT.WR.CONVERT','MNT.WR.convert'],['MNT.WO.PLAN','MNT.WO.plan'],['MNT.WO.RELEASE','MNT.WO.plan'],['MNT.WINDOW.LOCK','MNT.WO.schedule'],['MNT.TASK.FEEDBACK','MNT.WO.execute'],['MNT.TASK.VALIDATE','MNT.activities.edit'],['MNT.WO.TECHNICAL_CLOSE','MNT.WO.close'],['MNT.WR.CLOSE','MNT.WR.review']]){
+  for(const pair of [['MNT.WR.REVIEW','MNT.WR.review'],['MNT.ASSESS.REVIEW','MNT.assessment.review'],['MNT.WR.ASSESS','MNT.assessment.edit'],['MNT.WR.CONVERT','MNT.WR.convert'],['MNT.WO.PLAN','MNT.WO.plan'],['MNT.WO.RELEASE','MNT.WO.plan'],['MNT.WINDOW.LOCK','MNT.WO.schedule'],['MNT.TASK.FEEDBACK','MNT.WO.execute'],['MNT.TASK.VALIDATE','MNT.activities.edit'],['MNT.WR.CLOSE','MNT.WR.review']]){
    const holders=(tasks[pair[0]]||[]).filter(t=>(tasks[pair[1]]||[]).includes(t)).flatMap(t=>members[t]||[]);
    if(!holders.length)issues.push('No named holder has both '+pair[0]+' and '+pair[1]+'.');
   }

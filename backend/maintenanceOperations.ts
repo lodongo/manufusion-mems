@@ -213,7 +213,7 @@ export async function requireApprovedWindow(ctx: OrgContext, wo: Doc, taskId?: s
     return w;
 }
 export async function enforceMaintenanceTransition(ctx: OrgContext, wo: Doc, action: string) {
-    if(isRequestClosureOrder(wo.data)&&action!=='close')throw new HttpError(409,'Use retrospective Work Order feedback, safety sign-off, handover and technical closure. Raise a follow-up request for additional work.');
+    if(isRequestClosureOrder(wo.data)&&action!=='close')throw new HttpError(409,'Use safety sign-off to close the linked work order. Create a break-in sub-order for additional work.');
     if (action === 'verify' && ctx.body.result === 'rework')
         throw new HttpError(409, 'Record a controlled follow-up work request for rework so the completed task history is preserved.');
     if (action === 'start') await requireApprovedWindow(ctx, wo);
@@ -231,7 +231,7 @@ export async function enforceMaintenanceTransition(ctx: OrgContext, wo: Doc, act
         if (!tasksOf(wo).length) throw new HttpError(409, 'Assess and execute the individual tasks first.');
     }
     if (action === 'close') {
-        await requireMaintenanceRole(ctx, 'MNT.WO.TECHNICAL_CLOSE', recordPath(wo));
+        await requireMaintenanceRole(ctx, 'MNT.SAFETY.SIGNOFF', recordPath(wo));
         closurePrerequisites(wo.data);
         if(!isRequestClosureOrder(wo.data))for (const t of tasksOf(wo)) await requireApprovedWindow(ctx, wo, str(t.id));
     }
@@ -1106,51 +1106,28 @@ async function windowAction(ctx: OrgContext, action: string) {
         c = await windowContext(ctx, w),
         b = ctx.body,
         path = texts(w.data.path);
-    if (['window_close_safety','window_close_handover','window_close_final'].includes(action)) {
+    if(['window_close_handover','window_close_final'].includes(action))throw new HttpError(409,'Only window safety sign-off is needed for closure.');
+    if(action==='window_close_safety'){
         const summary=windowClosureSummary(w,c.wos);
-        if(!summary.ready||w.data.status!=='completed') throw new HttpError(409,'Complete and reconcile all work orders in this window first. Split-window orders use their individual closure route.');
-        const stage=action==='window_close_safety'?'safety_signoff':action==='window_close_handover'?'handover':'technical_close';
-        const permission=stage==='safety_signoff'?'MNT.WO.safety':stage==='handover'?'MNT.WO.verify':'MNT.WO.close';
-        const gate=stage==='safety_signoff'?'MNT.SAFETY.SIGNOFF':stage==='handover'?'MNT.HANDOVER':'MNT.WO.TECHNICAL_CLOSE';
-        for(const wo of c.wos)await authority(ctx,wo,permission,gate);
-        const incidents=(await listDocs(`${root(ctx)}/safety_incidents`)).filter(i=>c.wos.some(wo=>wo.id===i.data.woCode));
-        if(incidents.some(i=>i.data.status!=='cleared'))throw new HttpError(409,'Clear every incident or near miss recorded against the window work orders first.');
-        if(stage==='safety_signoff'){
-            requiredText(b.note,'Safety clearance notes',5);
-            if(incidents.length?b.declaration!=='reported'||b.clearanceConfirmed!==true:b.declaration!=='none'||b.noIncidentsConfirmed!==true)
-                throw new HttpError(400,'Explicitly declare the window incident history and confirm clearance of every reported incident.');
-        }else if(stage==='handover'){
-            if(summary.safety!==summary.total)throw new HttpError(409,'Complete window safety sign-off first.');
-            if(b.accepted!==true||b.ready!==true)throw new HttpError(400,'Explicitly accept the equipment and confirm readiness.');
-            requiredText(b.functionalChecks,'Operational test results',10);requiredText(b.condition,'Equipment condition',5);requiredText(b.restrictions,'Outstanding restrictions or None');
-        }else{
-            if(summary.handover!==summary.total)throw new HttpError(409,'Complete window equipment handover first.');
-            requiredText(b.note,'Technical Manager closure review',10);
-            for(const wo of c.wos){if(wo.data.status==='closed')continue;closurePrerequisites(wo.data);await ensureClosureResources(ctx,wo);
-                if(b.outstandingAccepted!==true&&(tasksOf(wo).some(t=>{const f=object(object(object(wo.data.taskExecution)[str(t.id)]).feedback);return f.outstandingStatus==='reported'||[f.outstandingDefects,f.followUp].some(v=>!!str(v).trim()&&!/^none\.?$/i.test(str(v).trim()));})||!/^none\.?$/i.test(str(object(wo.data.handover).restrictions).trim())))throw new HttpError(409,'Review and accept outstanding issues and follow-up actions first.');
-            }
+        if(!summary.ready||w.data.status!=='completed')throw new HttpError(409,'Complete and reconcile all work orders before window safety sign-off.');
+        const active=c.wos.filter(wo=>wo.data.status!=='closed');
+        for(const wo of active){await authority(ctx,wo,'MNT.WO.safety','MNT.SAFETY.SIGNOFF');await ensureClosureResources(ctx,wo);}
+        const incidents=(await listDocs(root(ctx)+'/safety_incidents')).filter(i=>c.wos.some(wo=>wo.id===i.data.woCode));
+        if(incidents.some(i=>i.data.status!=='cleared'))throw new HttpError(409,'Clear every recorded incident or near miss first.');
+        if(active.length&&(incidents.length?b.declaration!=='reported'||b.clearanceConfirmed!==true:b.declaration!=='none'||b.noIncidentsConfirmed!==true))throw new HttpError(400,'Explicitly declare the window incident history.');
+        if(!active.length)for(const wo of c.wos)await authority(ctx,wo,'MNT.WO.safety','MNT.SAFETY.SIGNOFF');
+        for(const original of active){
+            const wo=await internalOrder(ctx,original.id),incident=incidents.find(i=>i.data.woCode===wo.id);
+            const body={...b,declaration:incident?'reported':'none',noIncidentsConfirmed:!incident,clearanceConfirmed:!!incident,...(incident?{incidentId:incident.id,classification:incident.data.classification,narrative:incident.data.narrative,occurredAt:incident.data.occurredAt,immediateControls:incident.data.immediateControls}:{})};
+            await executeMaintenanceAction({...ctx,body} as OrgContext,wo,'safety_signoff');
         }
-        // Each successful order retains its original sign-off, authority, audit and costs.
-        // Retries resume only unfinished gates if an individual write fails.
-        for(const original of c.wos){
-            const wo=await internalOrder(ctx,original.id);
-            if(wo.data.status==='closed'||stage==='safety_signoff'&&object(wo.data.safetySignoff).at||stage==='handover'&&object(wo.data.handover).at)continue;
-            let body:Record<string,unknown>={...b,receivingParty:ctx.uid};
-            if(stage==='safety_signoff'){
-                const incident=incidents.find(i=>i.data.woCode===wo.id);
-                body={...body,declaration:incident?'reported':'none',noIncidentsConfirmed:!incident,clearanceConfirmed:!!incident,...(incident?{incidentId:incident.id,classification:incident.data.classification,narrative:incident.data.narrative,occurredAt:incident.data.occurredAt,immediateControls:incident.data.immediateControls}:{})};
-            }
-            await executeMaintenanceAction({...ctx,body} as OrgContext,wo,stage);
-        }
-        if(stage==='technical_close'){
-            const current=await currentWindow(ctx,w.id);
-            if(!object(current.data.finalClosure).at){
-                const fresh=await Promise.all(c.wos.map(wo=>internalOrder(ctx,wo.id)));
-                if(!fresh.every(wo=>wo.data.status==='closed'))throw new HttpError(409,'Every linked work order must be closed.');
-                const finalClosure={at:nowIso(),by:ctx.uid,name:name(ctx),note:str(b.note),workOrderIds:fresh.map(wo=>wo.id)};
-                await commit([{path:`${root(ctx)}/maintenance_windows/${w.id}`,fields:{finalClosure,history:history(ctx,current.data,'Maintenance window closed',str(b.note))},mask:['finalClosure','history'],updateTime:current.updateTime}]);
-                await event(ctx,'window.closed',w.id,str(b.note));
-            }
+        const current=await currentWindow(ctx,w.id);
+        if(!object(current.data.finalClosure).at){
+            const fresh=await Promise.all(c.wos.map(wo=>internalOrder(ctx,wo.id)));
+            if(!fresh.every(wo=>wo.data.status==='closed'))throw new HttpError(409,'Every linked work order must be closed.');
+            const finalClosure={at:nowIso(),by:ctx.uid,name:name(ctx),note:str(b.note),workOrderIds:fresh.map(wo=>wo.id)};
+            await commit([{path:root(ctx)+'/maintenance_windows/'+w.id,fields:{finalClosure,history:history(ctx,current.data,'Maintenance window closed',str(b.note))},mask:['finalClosure','history'],updateTime:current.updateTime}]);
+            await event(ctx,'window.closed',w.id,str(b.note));
         }
         return {ok:true};
     }
@@ -1534,10 +1511,11 @@ async function ensureEarlyActuals(ctx:OrgContext,wo:Doc){
     }
     if((await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared'))throw new HttpError(409,'Clear all recorded incidents before early closure.');
 }
-async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false){
-    await authority(ctx,wo,'MNT.WO.close','MNT.WO.TECHNICAL_CLOSE');
+async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false){
+    if(safetyFinal)await authority(ctx,wo,'MNT.WO.safety','MNT.SAFETY.SIGNOFF');
+    else await authority(ctx,wo,'MNT.WO.close');
     if(['closed','cancelled'].includes(str(wo.data.status)))throw new HttpError(409,'This order is already final.');
-    if(isRequestClosureOrder(wo.data))throw new HttpError(409,'Confirm the retrospective work feedback and use technical closure.');
+    if(isRequestClosureOrder(wo.data))throw new HttpError(409,'Use safety sign-off to close the retrospective work order.');
     return withLock(ctx.orgId,'maintenance_po_commitment',async()=>{
         const check=await earlyClosureCommitments(ctx,wo);
         if(check.blocked.length)throw new HttpError(409,'Early closure is blocked by committed purchase order(s): '+check.blocked.join(', '));
@@ -1548,9 +1526,9 @@ async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false){
             await saveWo(ctx,wo,{earlyClosureRequest:{at:nowIso(),by:ctx.uid,name:name(ctx),reason}},'work_order.early_closure_requested',reason);
             return {ok:true};
         }
-        if(ctx.body.confirm!==wo.id||ctx.body.noCommitmentConfirmed!==true)throw new HttpError(400,'Confirm the order number and no outstanding PO commitment.');
+        if(!safetyFinal&&(ctx.body.confirm!==wo.id||ctx.body.noCommitmentConfirmed!==true))throw new HttpError(400,'Confirm the order number and no outstanding PO commitment.');
         await ensureEarlyActuals(ctx,wo);
-        if(started&&(!object(wo.data.safetySignoff).at||!object(wo.data.handover).at||object(wo.data.handover).accepted!==true))throw new HttpError(409,'Complete safety sign-off and equipment handover for the work actually performed.');
+        if(started&&!object(wo.data.safetySignoff).at)throw new HttpError(409,'Complete safety sign-off for the work actually performed.');
         const at=nowIso(),execution=object(wo.data.taskExecution);
         const skipped=tasksOf(wo).filter(t=>object(execution[str(t.id)]).status!=='completed').map(t=>str(t.id));
         const writes:Write[]=[];
@@ -1562,12 +1540,13 @@ async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false){
         const labour=tasksOf(wo).reduce((n,t)=>n+(Number(object(object(execution[str(t.id)]).feedback).actualHours)||0)*(Number(t.rate)||0),0);
         const spares=Object.values(execution).reduce<number>((n,e)=>n+rows(object(e).consumption).reduce((v,c)=>v+(Number(c.consumed)||0)*(Number(c.unitCost)||0),0),0);
         const closure={at,by:ctx.uid,name:name(ctx),note:reason,outcome:started?'work_stopped':'not_started',skippedTaskIds:skipped,previousStatus:str(wo.data.status),noPoCommitment:true};
-        const patch={status:'closed',closedAt:at,closureMode:'early',earlyClosure:closure,technicalClosure:closure,finalCost:{labour,spares,services:0,total:labour+spares},updatedAt:at,history:history(ctx,wo.data,'Work order closed early',reason)};
+        const patch={status:'closed',closedAt:at,closureMode:'early',...(object(wo.data.safetySignoff).at?{safetySignoff:object(wo.data.safetySignoff)}:{}),earlyClosure:closure,closedBy:ctx.uid,closedByName:name(ctx),finalCost:{labour,spares,services:0,total:labour+spares},updatedAt:at,history:history(ctx,wo.data,'Work order closed early',reason)};
         writes.push({path:root(ctx)+'/work_orders/'+wo.id,fields:patch,mask:Object.keys(patch),updateTime:wo.updateTime});
         if(writes.length>430)throw new HttpError(409,'Too many linked procurement records; resolve them in procurement first.');
         await releaseMaintenanceReservations(ctx,wo.id);
         await commit(writes);
         await event(ctx,'work_order.early_closed',wo.id,reason);
+        await syncOrderAfter(ctx,wo.id,'work_order.early_closed');
         return {ok:true};
     });
 }
@@ -1577,6 +1556,68 @@ async function ensureNoDirectResources(ctx:OrgContext,wo:Doc){
  if(issues.some(i=>i.data.workOrderId===wo.id)||links.some(i=>i.data.woCode===wo.id&&i.data.status==='active')||rows(wo.data.sparesUsed).length||rows(wo.data.spares).length||rows(wo.data.services).length||tasksOf(wo).some(t=>rows(t.spares).length||rows(t.services).length)||Object.keys(object(wo.data.taskPlanning)).length)
   throw new HttpError(409,'This retrospective order has resource activity. Resolve the discrepancy through controlled maintenance review; do not close it as no-spares/no-services.');
 }
+async function finalizeSafetyClosure(ctx:OrgContext,wo:Doc){
+    const executions=object(wo.data.taskExecution),retrospective=isRequestClosureOrder(wo.data);
+        const at = nowIso(),
+            spares = Object.values(executions).reduce<number>(
+                (sum, e) => sum + rows(object(e).consumption).reduce((n, c) => n + Number(c.consumed) * Number(c.unitCost || 0), 0),
+                0,
+            ),
+            labour = tasksOf(wo).reduce(
+                (n, t) => n + Number(object(object(executions[str(t.id)]).feedback).actualHours) * Number(t.rate || 0),
+                0,
+            );
+        const services = tasksOf(wo).reduce(
+            (n, t) =>
+                n +
+                rows(t.services).reduce(
+                    (sum, s) => sum + Number(object(object(object(wo.data.taskPlanning)[str(t.id)])[str(s.id)]).cost || 0),
+                    0,
+                ),
+            0,
+        );
+        await saveWo(
+            ctx,
+            wo,
+            {
+                status: 'closed',
+                closedBy: ctx.uid,
+                closedByName: name(ctx),
+                closedAt: at,
+                safetySignoff:object(wo.data.safetySignoff),closureMode:'safety',
+                finalCost: {
+                    spares,
+                    labour,
+                    services,
+                    total: spares + labour + services,
+                    ...(retrospective?{pendingLabourValuation:tasksOf(wo).some(t=>!(Number(t.rate)>0)),actualLabourMinutes:Number(object(wo.data.directCompletion).durationMinutes)}:{}),
+                    pendingMaterialValuation: Object.values(executions).some((e) =>
+                        rows(object(e).consumption).some((c) => c.unitCost === null),
+                    ),
+                },
+            },
+            'work_order.safety_closed',
+        );
+        await releaseMaintenanceReservations(ctx, wo.id);
+        for (const id of texts(wo.data.windowIds)) {
+            const window = (await getDoc(`${root(ctx)}/maintenance_windows/${identifier(id)}`))!;
+            let complete = true;
+            for (const s of rows(window.data.tasks)) {
+                const other = await internalOrder(ctx, s.woCode);
+                if (!(other.data.status==='closed'&&other.data.closureMode==='early')&&object(object(other.data.taskExecution)[str(s.taskId)]).status !== 'completed') complete = false;
+            }
+            if (complete)
+                await commit([
+                    {
+                        path: `${root(ctx)}/maintenance_windows/${id}`,
+                        fields: { status: 'completed', completedAt: at },
+                        mask: ['status', 'completedAt'],
+                        updateTime: window.updateTime,
+                    },
+                ]);
+        }
+        return { ok: true };
+    }
 export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action: string) {
     const b = ctx.body,
         executions = object(wo.data.taskExecution),
@@ -1584,6 +1625,8 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         e = object(executions[str(b.taskId)]);
     const retrospective=isRequestClosureOrder(wo.data);
     if(action==='early_close'||action==='prepare_early_close')return earlyClose(ctx,wo,action==='prepare_early_close');
+    if(action==='handover')throw new HttpError(409,'Equipment handover is no longer a work order closure step.');
+    if(action==='technical_close')throw new HttpError(409,'Technical Manager closure is no longer required. Use safety sign-off.');
     if(['closed','cancelled'].includes(str(wo.data.status))&&!(wo.data.status==='closed'&&['technical_close','report_incident','clear_incident'].includes(action)))throw new HttpError(409,'A closed work order cannot be reopened or modified.');
     if(action==='upload_service_report'){
         await authority(ctx,wo,'MNT.WO.execute','MNT.TASK.FEEDBACK');
@@ -1609,7 +1652,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             const submitted=object(b.feedback);
             const feedback:Obj={...submitted,workPerformed:str(source.reportedWork)};
             if(feedback.noSparesOrServicesConfirmed!==true)throw new HttpError(400,'Explicitly confirm no spare parts or external services were used.');
-            if(feedback.scopeDeviation===true)throw new HttpError(409,'Record additional work or a technical deviation through a follow-up work request.');
+            
             taskCompletion(task,feedback);
             if(!Number.isInteger(minutes)||minutes<=0)throw new HttpError(409,'The source request has an invalid recorded duration.');
             await ensureNoDirectResources(ctx,wo);
@@ -1723,11 +1766,6 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         if(feedback.closureFieldsVersion===1&&str(e.startedAt)&&str(feedback.dateClosed)<str(e.startedAt).slice(0,10))throw new HttpError(400,'Actual completion date cannot precede task execution.');
         taskCompletion(task, feedback);
         for(const service of rows(task.services))if(!str(object(object(object(wo.data.serviceReports)[str(task.id)])[str(service.id)]).path))throw new HttpError(409,'Attach the service report for '+str(service.description)+'.');
-        if (feedback.scopeDeviation === true)
-            throw new HttpError(
-                409,
-                'A technical deviation requires reassessment in a follow-up work order; do not certify this task complete.',
-            );
         const hours = quantity(feedback.actualHours),
             next = {
                 ...executions,
@@ -1781,44 +1819,27 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             else taskCompletion(t,object(state.feedback));
         }
         if(retrospective)await ensureNoDirectResources(ctx,wo);
-        if (!tasksOf(wo).length || object(wo.data.safetySignoff).at)
-            throw new HttpError(409, 'Safety sign-off cannot be applied in this state.');
-        safetyDeclaration(object(b));
+        if (!tasksOf(wo).length)throw new HttpError(409,'Safety sign-off cannot be applied before the work is recorded.');
+        const previousSignoff=object(wo.data.safetySignoff);
+        if(!previousSignoff.at)safetyDeclaration(object(b));
         const incidentRecords = (await listDocs(`${root(ctx)}/safety_incidents`)).filter((i) => i.data.woCode === wo.id);
-        if (b.declaration === 'none' && incidentRecords.length)
+        if (!previousSignoff.at&&b.declaration === 'none' && incidentRecords.length)
             throw new HttpError(
                 409,
                 'An incident or near miss is already recorded for this work order. Use the reported-incident declaration.',
             );
         if (incidentRecords.some((i) => i.data.status !== 'cleared'))
             throw new HttpError(409, 'Every recorded incident requires containment and independent safety clearance before sign-off.');
-        if (b.declaration === 'reported') {
+        if (!previousSignoff.at&&b.declaration === 'reported') {
             const incident = await getDoc(`${root(ctx)}/safety_incidents/${identifier(b.incidentId)}`);
             if (!incident || incident.data.woCode !== wo.id || incident.data.status !== 'cleared')
                 throw new HttpError(409, 'Link a cleared safety incident for this work order.');
         }
-        await saveWo(
-            ctx,
-            wo,
-            {
-                safetySignoff: {
-                    declaration: str(b.declaration),
-                    noIncidentsConfirmed: b.noIncidentsConfirmed === true,
-                    statement:
-                        b.declaration === 'none'
-                            ? 'No safety incidents or near misses occurred during this maintenance activity.'
-                            : str(b.narrative),
-                    incidentId: str(b.incidentId),
-                    note: requiredText(b.note, 'Safety clearance notes', 5),
-                    by: ctx.uid,
-                    name: name(ctx),
-                    at: nowIso(),
-                },
-                handover: null,
-            },
-            'safety.signed_off',
-        );
-        return { ok: true };
+        const signoff=previousSignoff.at?previousSignoff:{declaration:str(b.declaration),noIncidentsConfirmed:b.noIncidentsConfirmed===true,statement:b.declaration==='none'?'No safety incidents or near misses occurred during this maintenance activity.':str(b.narrative),incidentId:str(b.incidentId),note:str(b.note).trim(),by:ctx.uid,name:name(ctx),at:nowIso()};
+        const signed={...wo,data:{...wo.data,safetySignoff:signoff}};
+        if(object(wo.data.earlyClosureRequest).at)return earlyClose(ctx,signed,false,true);
+        closurePrerequisites(signed.data);await ensureClosureResources(ctx,signed);
+        return finalizeSafetyClosure(ctx,signed);
     }
     if (action === 'report_incident') {
         await authority(ctx, wo, 'MNT.WO.safety', 'MNT.SAFETY.SIGNOFF');
@@ -1866,125 +1887,6 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             },
         ]);
         await event(ctx, 'incident.cleared', id);
-        return { ok: true };
-    }
-    if (action === 'handover') {
-        await authority(ctx, wo, 'MNT.WO.verify', 'MNT.HANDOVER');
-        if (!object(wo.data.safetySignoff).at) throw new HttpError(409, 'Safety sign-off must precede equipment handover.');
-        if (object(wo.data.handover).at) throw new HttpError(409, 'Handover is already recorded.');
-        if (b.accepted !== true || b.ready !== true) throw new HttpError(400, 'Explicitly accept handover and equipment readiness.');
-        const receivingParty = identifier(b.receivingParty),
-            person = await getDoc(`users/${receivingParty}`);
-        if (!person || person.data.orgId !== ctx.orgId || person.data.status === 'disabled' || (receivingParty !== ctx.uid && !bypass(ctx, 'mnt.handover.receiver_self_acceptance')))
-            throw new HttpError(403, 'The authorized receiving employee must record their own acceptance.');
-        await saveWo(
-            ctx,
-            wo,
-            {
-                handover: {
-                    by: ctx.uid,
-                    name: name(ctx),
-                    receivingParty,
-                    at: nowIso(),
-                    accepted: true,
-                    ready: true,
-                    functionalChecks: requiredText(b.functionalChecks, 'Operational test results', 10),
-                    condition: requiredText(b.condition, 'Equipment condition', 5),
-                    restrictions: requiredText(b.restrictions, 'Outstanding restrictions or None'),
-                    acceptedOutstanding: b.acceptedOutstanding === true,
-                },
-            },
-            'equipment.handed_over',
-        );
-        return { ok: true };
-    }
-    if (action === 'technical_close') {
-        await authority(ctx, wo, 'MNT.WO.close', 'MNT.WO.TECHNICAL_CLOSE');
-        if (wo.data.status === 'closed') return { ok: true, reused: true };
-        if(retrospective){
-            const source=object(wo.data.directCompletion);
-            const feedbackActors=Object.values(executions).map(e=>str(object(e).feedbackRecordedBy));
-            if([str(object(source.executor).uid),str(source.recordedBy),...feedbackActors].includes(ctx.uid)&&!bypass(ctx,'mnt.direct_completion.technical_closure_independence'))throw new HttpError(403,'An independent technical approver must close this work order.');
-            await ensureNoDirectResources(ctx,wo);
-        }
-        closurePrerequisites(wo.data);
-        await ensureClosureResources(ctx,wo);
-        if(!isRequestClosureOrder(wo.data))for (const t of tasksOf(wo)) await requireApprovedWindow(ctx, wo, str(t.id));
-        if ((await listDocs(`${root(ctx)}/safety_incidents`)).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared'))
-            throw new HttpError(409,'Clear all recorded incidents before technical closure.');
-        if (
-            (tasksOf(wo).some((t) => {
-                const f = object(object(executions[str(t.id)]).feedback);
-                return f.outstandingStatus==='reported'||[f.outstandingDefects,f.followUp].some(v=>!!str(v).trim()&&!/^none\.?$/i.test(str(v).trim()));
-            }) ||
-                !/^none\.?$/i.test(str(object(wo.data.handover).restrictions).trim())) &&
-            b.outstandingAccepted !== true
-        )
-            throw new HttpError(409, 'Explicitly accept outstanding issues and linked follow-up actions before closure.');
-        const at = nowIso(),
-            spares = Object.values(executions).reduce<number>(
-                (sum, e) => sum + rows(object(e).consumption).reduce((n, c) => n + Number(c.consumed) * Number(c.unitCost || 0), 0),
-                0,
-            ),
-            labour = tasksOf(wo).reduce(
-                (n, t) => n + Number(object(object(executions[str(t.id)]).feedback).actualHours) * Number(t.rate || 0),
-                0,
-            );
-        const services = tasksOf(wo).reduce(
-            (n, t) =>
-                n +
-                rows(t.services).reduce(
-                    (sum, s) => sum + Number(object(object(object(wo.data.taskPlanning)[str(t.id)])[str(s.id)]).cost || 0),
-                    0,
-                ),
-            0,
-        );
-        await saveWo(
-            ctx,
-            wo,
-            {
-                status: 'closed',
-                closedBy: ctx.uid,
-                closedByName: name(ctx),
-                closedAt: at,
-                technicalClosure: {
-                    by: ctx.uid,
-                    name: name(ctx),
-                    at,
-                    note: requiredText(b.note, 'Technical Manager closure review', 10),
-                    outstandingAccepted: b.outstandingAccepted === true,
-                },
-                finalCost: {
-                    spares,
-                    labour,
-                    services,
-                    total: spares + labour + services,
-                    ...(retrospective?{pendingLabourValuation:tasksOf(wo).some(t=>!(Number(t.rate)>0)),actualLabourMinutes:Number(object(wo.data.directCompletion).durationMinutes)}:{}),
-                    pendingMaterialValuation: Object.values(executions).some((e) =>
-                        rows(object(e).consumption).some((c) => c.unitCost === null),
-                    ),
-                },
-            },
-            'work_order.technical_closed',
-        );
-        await releaseMaintenanceReservations(ctx, wo.id);
-        for (const id of texts(wo.data.windowIds)) {
-            const window = (await getDoc(`${root(ctx)}/maintenance_windows/${identifier(id)}`))!;
-            let complete = true;
-            for (const s of rows(window.data.tasks)) {
-                const other = await internalOrder(ctx, s.woCode);
-                if (!(other.data.status==='closed'&&other.data.closureMode==='early')&&object(object(other.data.taskExecution)[str(s.taskId)]).status !== 'completed') complete = false;
-            }
-            if (complete)
-                await commit([
-                    {
-                        path: `${root(ctx)}/maintenance_windows/${id}`,
-                        fields: { status: 'completed', completedAt: at },
-                        mask: ['status', 'completedAt'],
-                        updateTime: window.updateTime,
-                    },
-                ]);
-        }
         return { ok: true };
     }
     if(action==='return_to_planning'){
@@ -2124,8 +2026,8 @@ export async function maintenanceOperations(ctx: OrgContext) {
             ['plan', 'MNT.WO.plan', 'MNT.WO.PLAN'],
             ['execute', 'MNT.WO.execute', 'MNT.TASK.FEEDBACK'],
             ['safety', 'MNT.WO.safety', 'MNT.SAFETY.SIGNOFF'],
-            ['handover', 'MNT.WO.verify', 'MNT.HANDOVER'],
-            ['close', 'MNT.WO.close', 'MNT.WO.TECHNICAL_CLOSE'],
+            
+            ['close', 'MNT.WO.close', ''],
         ]) {
             try {
                 // Assessment is intentionally open to employees who can view the
@@ -2144,17 +2046,16 @@ export async function maintenanceOperations(ctx: OrgContext) {
             }
         }
         if(retrospective){
-            const feedbackActors=Object.values(object(wo.data.taskExecution)).map(e=>str(object(e).feedbackRecordedBy));
             for(const k of ['assess','reviewAssessment','plan','reconcile'])permissions[k]=false;
             permissions.execute=permissions.execute===true&&wo.data.status==='in_progress'&&(str(object(object(wo.data.directCompletion).executor).uid)===ctx.uid||ctx.role==='org_super_admin'&&ctx.testMode===true);
             permissions.safety=permissions.safety===true&&!['closed','cancelled'].includes(str(wo.data.status));
-            permissions.close=permissions.close===true&&!!object(wo.data.handover).at&&(![str(object(object(wo.data.directCompletion).executor).uid),str(object(wo.data.directCompletion).recordedBy),...feedbackActors].includes(ctx.uid)||ctx.role==='org_super_admin'&&ctx.testMode===true);
+            permissions.handover=false;
         }
         permissions.earlyClose=permissions.close===true&&!retrospective&&!['closed','cancelled'].includes(str(wo.data.status));
         const earlyCheck=permissions.earlyClose?await earlyClosureCommitments(ctx,wo):null;
         if(object(wo.data.earlyClosureRequest).at){permissions.assess=false;permissions.plan=false;permissions.reviewAssessment=false;permissions.cancel=false;}
         permissions.createBreakIn=permissions.close===true&&['completed','verified','closed'].includes(str(wo.data.status));
-        if(retrospective&&['completed','closed'].includes(str(wo.data.status))){try{await authority(ctx,wo,'MNT.WO.close','MNT.WO.TECHNICAL_CLOSE');permissions.createBreakIn=true;}catch{/* restricted */}}
+        if(retrospective&&['completed','closed'].includes(str(wo.data.status))){try{await authority(ctx,wo,'MNT.WO.close');permissions.createBreakIn=true;}catch{/* restricted */}}
         if(['closed','cancelled'].includes(str(wo.data.status)))for(const k of ['reconcile','assess','reviewAssessment','plan','execute','safety','handover','close'])permissions[k]=false;
         if(str(wo.data.status)!=='planning'||object(wo.data.assessmentReview).status==='approved'||Object.keys(object(wo.data.taskPlanning)).length)permissions.assess=false;
         if(object(wo.data.assessmentReview).status==='approved')permissions.reviewAssessment=false;

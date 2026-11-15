@@ -118,7 +118,7 @@ function wrStage(data:Data,d:Obj,path:string[]):Stage{
  const s=str(d.status);
  if(str(d.woCode)||['closed','cancelled','declined','converted','confirmed'].includes(s))return {label:str(d.woCode)?(s==='closed'?'Closed · linked work order':s==='confirmed'?'Confirmed · Work Order created':'Converted to work order'):'Completed'};
  if(s==='returned')return {label:'Requester correction',fixed:str(d.requestedBy),fixedRole:'Requester'};
- if(s==='closure_pending')return {label:'Closure confirmation',permission:'MNT.WR.closeConfirm',exclude:[str(obj(d.closure).by)]};
+ if(s==='closure_pending')return {label:'Close historical request',permission:'MNT.WR.close'};
  if(['created','submitted','under_review'].includes(s)&&!(s==='under_review'&&Number(d.reviewProcessVersion)<2))return {label:'Work request review',gate:'MNT.WR.REVIEW',permission:'MNT.WR.review',exclude:[str(d.requestedBy)],preferred:str(d.reviewerUid)};
  if(s==='to_be_assessed'||s==='under_review')return currentAssessment(data,d,path)?{label:'Convert to work order',gate:'MNT.WR.CONVERT',permission:'MNT.WR.convert',exclude:[str(d.requestedBy)]}:assessmentStage(data,d,path);
  return {label:'Awaiting workflow stage'};
@@ -150,8 +150,7 @@ function woStage(data:Data,d:Obj,path:string[]):Stage{
  }
  if(tasks.some(t=>obj(execution[str(t.id)]).reconciled!==true)&&!obj(d.safetySignoff).at)return {label:'Spare parts reconciliation',gate:'MNT.SPARES.RECONCILE',permission:'MNT.view'};
  if(!obj(d.safetySignoff).at)return {label:'Safety sign-off',gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Safety signatory'};
- if(!obj(d.handover).at)return {label:'Operations handover',gate:'MNT.HANDOVER',external:true,fixedRole:'Operations receiving role'};
- return {label:'Technical closure',gate:'MNT.WO.TECHNICAL_CLOSE',permission:'MNT.WO.close',...(d.executionMode==='request_closure'?{exclude:[str(obj(obj(d.directCompletion).executor).uid),str(obj(d.directCompletion).recordedBy)]}:{})};
+ return {label:'Safety sign-off / closure',gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Safety signatory'};
 }
 function windowStage(d:Obj):Stage{
  if(['completed','closed','cancelled'].includes(str(d.status)))return {label:'Completed'};
