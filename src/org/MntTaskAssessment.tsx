@@ -1,3 +1,4 @@
+import MntSelect from './MntSelect';
 import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert} from '../components/ui';
@@ -40,9 +41,9 @@ export function WarehouseSparePicker({onSelect}:{onSelect:(item:{materialId:stri
  return()=>{alive=false;clearTimeout(timer);};},[warehouse,query]);
  return <div className='space-y-2 rounded-xl border border-line p-3'>
   <p className='text-sm font-semibold text-ink'>1. Choose warehouse, then a material</p>
-  <label className={label}>Warehouse<select data-native-select='true' className={input} value={warehouse} onChange={e=>{setWarehouse(e.target.value);setQuery('');setItems([]);}}>
+  <div className={label}>Warehouse<MntSelect label={'Warehouse'} hideLabel className={input} value={warehouse} onChange={e=>{setWarehouse(e.target.value);setQuery('');setItems([]);}}>
    <option value=''>Select warehouse first</option>{warehouseData?.warehouses?.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}
-  </select></label>
+  </MntSelect></div>
   {warehouseError&&<Alert tone='error'>{warehouseError}</Alert>}
   {warehouse&&<label className={label}>Search the selected warehouse<input type='search' className={input} value={query} placeholder='Material number or name' onChange={e=>setQuery(e.target.value)}/></label>}
   {busy&&<p className='text-xs text-muted'>Checking available stock…</p>}
@@ -238,16 +239,16 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     <div className='space-y-3'>
      <label className={label}>Task name<input className={input} value={task.title||''} onChange={e=>patch({title:e.target.value})}/></label>
      <label className={label}>Describe the work<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='What is required?'/></label>
-     <label className={label}>Maintenance strategy for this task (Finance reporting)
-       <select data-native-select='true' className={input} disabled={breakIn} value={breakIn?'':task.maintenanceTypeCode||''} onChange={e=>{
+     <div className={label}>Maintenance strategy for this task (Finance reporting)
+       <MntSelect label={'Maintenance strategy for this task'} hideLabel className={input} disabled={breakIn} value={breakIn?'':task.maintenanceTypeCode||''} onChange={e=>{
          const type=options.data?.maintenanceTypes?.find(t=>t.code===e.target.value);
          patch({maintenanceTypeCode:type?.code||'',maintenanceTypeLabel:type?.label||''});
        }}>
          <option value=''>{breakIn?'Break-in Maintenance (inherited)':'Inherit the Work Order maintenance type'}</option>
          {!breakIn&&options.data?.maintenanceTypes?.map(t=><option key={t.code} value={t.code}>{t.code} · {t.label}</option>)}
-       </select>
+       </MntSelect>
        <span className='mt-1 block text-xs text-muted'>Override only when this task follows a different maintenance strategy. Changes require the existing assessment review.</span>
-     </label>
+     </div>
      {context&&<dl className='grid gap-2 rounded-xl border border-line bg-page p-3 text-sm sm:grid-cols-3'>
       {([['Asset',context.asset],['Assembly',context.assembly],['Equipment',context.equipment]] as const).map(([k,v])=><div key={k} className='min-w-0'><dt className='text-xs text-muted'>{k}</dt><dd className='break-words text-ink'>{v||'—'}</dd></div>)}
       <p className='text-xs text-muted sm:col-span-3'>Adopted from the work assessment.</p>
@@ -256,8 +257,8 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    </StepSection>}
    {step===1&&<StepSection title='Spares for this task' hint='Choose the warehouse, then add each spare from stock, the material catalogue or as free text, with its quantity.'>
     <div className='space-y-3'>
-     <label className={label}>Warehouse (select first) *<select data-native-select='true' className={input} value={spareWarehouse} onChange={e=>{setSpareWarehouse(e.target.value);setAdding(false);}}>
-      <option value=''>Choose the warehouse</option>{warehouses.data?.warehouses.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
+     <div className={label}>Warehouse (select first) *<MntSelect label={'Warehouse for task spares'} hideLabel className={input} value={spareWarehouse} onChange={e=>{setSpareWarehouse(e.target.value);setAdding(false);}}>
+      <option value=''>Choose the warehouse</option>{warehouses.data?.warehouses.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</MntSelect></div>
      {task.spares.map((sp,i)=>{const problems=sp.source==='description'?freeTextProblems(sp):[];return <div key={sp.id} className='min-w-0 space-y-2 rounded-xl border border-line bg-page p-3'>
        <div className='flex items-start justify-between gap-2'>
         <p className='min-w-0 text-xs text-muted'><span className='mr-1 rounded bg-panel px-1.5 py-0.5 font-mono text-[10px] text-brand'>{i+1}</span>{SOURCE_LABEL[sp.source]||sp.source}</p>
@@ -309,8 +310,8 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
        <label className={label}>Number of internal people<input type='number' inputMode='decimal' min={0} max={50} className={input} value={task.persons} onChange={e=>patch({persons:Number(e.target.value)})}/></label>
        <label className={label}>Time required (hours)<input type='number' inputMode='decimal' min={0.25} step={0.25} className={input} value={task.hours} onChange={e=>patch({hours:Number(e.target.value)})}/></label>
       </div>
-      <label className={label}>External resources required<select data-native-select='true' className={input} value={task.externalResource?.type||''} onChange={e=>patch({externalResource:e.target.value?{type:e.target.value,persons:task.externalResource?.persons||1,notes:task.externalResource?.notes||''}:undefined})}>
-        <option value=''>None</option>{externals.map(([code,name])=><option key={code} value={code}>{name}</option>)}</select></label>
+      <div className={label}>External resources required<MntSelect label={'External resources required'} hideLabel className={input} value={task.externalResource?.type||''} onChange={e=>patch({externalResource:e.target.value?{type:e.target.value,persons:task.externalResource?.persons||1,notes:task.externalResource?.notes||''}:undefined})}>
+        <option value=''>None</option>{externals.map(([code,name])=><option key={code} value={code}>{name}</option>)}</MntSelect></div>
       {task.externalResource?.type&&<div className='space-y-2 rounded-xl border border-line bg-page p-3'>
         <label className={label}>How many external people?<input type='number' inputMode='decimal' min={1} max={50} className={input} value={task.externalResource.persons} onChange={e=>patch({externalResource:{...task.externalResource!,persons:Number(e.target.value)}})}/></label>
         <label className={label}>External scope / qualification<textarea className={input} rows={2} value={task.externalResource.notes} onChange={e=>patch({externalResource:{...task.externalResource!,notes:e.target.value}})}/></label>
@@ -360,9 +361,9 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
         <label className={label}>Mitigations<textarea rows={2} className={input} value={risk.controls} onChange={e=>patch({risk:task.risk.map((x,j)=>i===j?{...x,controls:e.target.value}:x)})}/></label>
         {(['beforeRatings','afterRatings'] as const).map(kind=><div key={kind}>
          <p className='text-xs font-semibold text-ink'>{kind==='beforeRatings'?'Before mitigation':'After mitigation'}</p>
-         <div className='grid grid-cols-2 gap-2'>{options.data?.riskMatrix?.factors.filter(x=>x.enabled).map(f=><label key={f.code} className={label}>{f.label}
-          <select data-native-select='true' className={input} value={risk[kind]?.[f.code]||''} onChange={e=>patch({risk:task.risk.map((x,j)=>i===j?{...x,[kind]:{...(x[kind]||{}),[f.code]:Number(e.target.value)||0}}:x)})}>
-           <option value=''>Choose</option>{Array.from({length:f.max},(_,n)=><option key={n+1} value={n+1}>{n+1}</option>)}</select></label>)}</div></div>)}
+         <div className='grid grid-cols-2 gap-2'>{options.data?.riskMatrix?.factors.filter(x=>x.enabled).map(f=><div key={f.code} className={label}>{f.label}
+          <MntSelect label={f.label} hideLabel className={input} value={risk[kind]?.[f.code]||''} onChange={e=>patch({risk:task.risk.map((x,j)=>i===j?{...x,[kind]:{...(x[kind]||{}),[f.code]:Number(e.target.value)||0}}:x)})}>
+           <option value=''>Choose</option>{Array.from({length:f.max},(_,n)=><option key={n+1} value={n+1}>{n+1}</option>)}</MntSelect></div>)}</div></div>)}
         {!risk.energyCode&&task.risk.length>1&&<button type='button' className='min-h-9 text-xs text-red-400' onClick={()=>patch({risk:task.risk.filter((_,j)=>j!==i)})}>Remove hazard</button>}
        </div>)}
       <Button variant='secondary' onClick={()=>patch({risk:[...task.risk,newRisk()]})}>+ Add activity hazard</Button>

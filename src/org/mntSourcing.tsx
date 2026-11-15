@@ -1,3 +1,4 @@
+import MntSelect from './MntSelect';
 import CatalogueAttributeForm from '../components/CatalogueAttributeForm';
 import type { AttrDef, CatalogueGuidance } from '../components/AssetDictionaryBrowser';
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
@@ -229,15 +230,15 @@ function FromCatalogue({ code, warehouseId, onAdd }: { code: string; warehouseId
         }
     };
     const select = (label: string, value: string, set: (v: string) => void, list: Array<{ code: string; name: string }>, disabled = false) => (
-        <label className={fieldLabel}>
+        <div className={fieldLabel}>
             {label}
-            <select data-native-select='true' className={field} value={value} disabled={disabled} onChange={(e) => set(e.target.value)}>
+            <MntSelect label={label} hideLabel className={field} value={value} disabled={disabled} onChange={(e) => set(e.target.value)}>
                 <option value=''>Choose</option>
                 {list.map((o) => (
                     <option key={o.code} value={o.code}>{o.name}</option>
                 ))}
-            </select>
-        </label>
+            </MntSelect>
+        </div>
     );
     const attrPatch = (k: string, v: string) => {
         setAttrs((o) => ({ ...o, [k]: v }));
@@ -572,27 +573,27 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls }
     return (
         <div className='space-y-3'>
             <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
-                <label className={fieldLabel}>
+                <div className={fieldLabel}>
                     Service category
-                    <select data-native-select='true' className={field} value={value.categoryCode} onChange={(e) => set({ categoryCode: e.target.value, subcategoryCode: '', classCode: '', proposedVendorIds: [] })}>
+                    <MntSelect label={'Service category'} hideLabel className={field} value={value.categoryCode} onChange={(e) => set({ categoryCode: e.target.value, subcategoryCode: '', classCode: '', proposedVendorIds: [] })}>
                         <option value=''>Choose</option>
                         {hierarchy?.categories.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
-                    </select>
-                </label>
-                <label className={fieldLabel}>
+                    </MntSelect>
+                </div>
+                <div className={fieldLabel}>
                     Subcategory
-                    <select data-native-select='true' className={field} value={value.subcategoryCode} disabled={!value.categoryCode} onChange={(e) => set({ subcategoryCode: e.target.value, classCode: '', proposedVendorIds: [] })}>
+                    <MntSelect label={'Subcategory'} hideLabel className={field} value={value.subcategoryCode} disabled={!value.categoryCode} onChange={(e) => set({ subcategoryCode: e.target.value, classCode: '', proposedVendorIds: [] })}>
                         <option value=''>Choose</option>
                         {subs.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
-                    </select>
-                </label>
-                <label className={fieldLabel}>
+                    </MntSelect>
+                </div>
+                <div className={fieldLabel}>
                     Class
-                    <select data-native-select='true' className={field} value={value.classCode} disabled={!value.subcategoryCode} onChange={(e) => set({ classCode: e.target.value })}>
+                    <MntSelect label={'Class'} hideLabel className={field} value={value.classCode} disabled={!value.subcategoryCode} onChange={(e) => set({ classCode: e.target.value })}>
                         <option value=''>Choose</option>
                         {fams.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
-                    </select>
-                </label>
+                    </MntSelect>
+                </div>
             </div>
             {text('description', 'Service name', 0, 'e.g. Rewind 37 kW 4-pole motor')}
             {text('scope', 'Detailed technical scope', 3, 'What the provider must do, step by step, e.g. strip, rewind with class F wire, varnish, replace both bearings, test')}
@@ -620,13 +621,13 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls }
                     <ShieldCheck className='h-4 w-4 text-brandsoft' />
                     Supplier category and vendors
                 </p>
-                <label className={fieldLabel}>
+                <div className={fieldLabel}>
                     Supplier category (required)
-                    <select data-native-select='true' className={field} value={value.supplierCategory} onChange={(e) => set({ supplierCategory: e.target.value, proposedVendorIds: [] })}>
+                    <MntSelect label={'Supplier category'} hideLabel className={field} value={value.supplierCategory} onChange={(e) => set({ supplierCategory: e.target.value, proposedVendorIds: [] })}>
                         <option value=''>Choose OEM, OCM, approved third party…</option>
                         {v.categories.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
-                    </select>
-                </label>
+                    </MntSelect>
+                </div>
                 {category && <p className='text-xs text-muted'>{category.description}</p>}
                 {category && category.kind !== 'other' && (
                     <p className='text-xs text-soft'>

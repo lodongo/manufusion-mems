@@ -1,3 +1,4 @@
+import MntSelect from './MntSelect';
 import {useEffect,useMemo,useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert} from '../components/ui';
@@ -71,14 +72,14 @@ export default function MntWorkflowSettings(){
           <div><p className='text-sm font-semibold text-white'>{g.label}</p><p className='text-xs text-slate-400'>{g.code} · {g.owner}{g.permission?` · Security activity: ${g.permission}`:''}</p></div>
           <span className={g.status==='existing'?'text-xs text-emerald-400':'text-xs text-amber-400'}>{g.status==='existing'?'Operational handler':'Pending implementation'}</span>
         </div>
-        {g.roleRequired&&<label className='mt-2 block text-sm text-slate-300'>Assigned organizational job role
-          <select data-native-select='true' value={current[g.code]||''} onChange={e=>setRoles({...current,[g.code]:e.target.value})}
+        {g.roleRequired&&<div className='mt-2 block text-sm text-soft'>Assigned organizational job role
+          <MntSelect label={'Assigned organizational job role'} hideLabel value={current[g.code]||''} onChange={e=>setRoles({...current,[g.code]:e.target.value})}
             className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-base text-white'>
             <option value=''>Not configured</option>
             {data.jobRoles.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}
-          </select>
+          </MntSelect>
           {suggested.includes(g.code)&&<span className='mt-1 block text-xs text-emerald-400'>Suggested from the job role title. Check it before saving.</span>}
-        </label>}
+        </div>}
         <p className='mt-2 text-xs text-slate-400'>Prerequisites: {g.requires.length?g.requires.map(x=>x.replaceAll('_',' ')).join(' · '):'None'}</p>
       </div>)}</div>
     </Card>;

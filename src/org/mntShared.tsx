@@ -1,3 +1,4 @@
+import MntSelect from './MntSelect';
 import { useEffect, useState, type FocusEvent } from 'react';
 import { ArrowLeft, Check, CheckCircle2, ChevronRight, Cog, Home, Layers, Search, Wrench, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
@@ -187,9 +188,9 @@ export function ChoicePicker({ title, groups, selected, onToggle, multi = false,
                     ))}
                 </ul>
             )}
-            <label className='block text-xs text-soft'>
+            <div className='block text-xs text-soft'>
                 Category
-                <select data-native-select='true' value={group} onChange={(e) => setGroup(e.target.value)} className='mt-1 block h-12 w-full rounded-xl border border-line bg-page px-3 text-base text-ink'>
+                <MntSelect label={'Category'} hideLabel value={group} onChange={(e) => setGroup(e.target.value)} className='mt-1 block h-12 w-full rounded-xl border border-line bg-page px-3 text-base text-ink'>
                     <option value=''>Choose a category…</option>
                     {groups.map((g) => {
                         const count = g.items.filter((i) => selected.includes(i.code)).length;
@@ -200,8 +201,8 @@ export function ChoicePicker({ title, groups, selected, onToggle, multi = false,
                             </option>
                         );
                     })}
-                </select>
-            </label>
+                </MntSelect>
+            </div>
             {current && (
                 <div className='grid grid-cols-1 gap-2 sm:grid-cols-2' role={multi ? 'group' : 'radiogroup'} aria-label={current.label}>
                     {current.items.map((i) => {

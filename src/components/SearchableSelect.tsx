@@ -1,4 +1,4 @@
-import { Children, Fragment, isValidElement, useEffect, useMemo, useState, type ChangeEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { Children, Fragment, isValidElement, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 
@@ -43,6 +43,8 @@ export default function SearchableSelect({ label, id, hint, error, children, val
     const [query, setQuery] = useState('');
     const [searchVisible, setSearchVisible] = useState(false);
     const [pending, setPending] = useState<string | null>(null);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const closeRef = useRef<HTMLButtonElement>(null);
     const [internal, setInternal] = useState(defaultValue === undefined ? '' : String(defaultValue));
     const selectedValue = value === undefined ? internal : String(value);
     const current = options.find((o) => o.value === selectedValue);
@@ -55,12 +57,15 @@ export default function SearchableSelect({ label, id, hint, error, children, val
         if (!open) return;
         const old = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
+        const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        closeRef.current?.focus();
         const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
         document.addEventListener('keydown', escape);
-        return () => { document.body.style.overflow = old; document.removeEventListener('keydown', escape); };
+        return () => { document.body.style.overflow = old; document.removeEventListener('keydown', escape); if(previous?.isConnected) previous.focus(); };
     }, [open]);
 
     const choose = (v: string) => {
+        if (!options.some(o => o.value === v && !o.disabled)) return;
         if (value === undefined) setInternal(v);
         // All existing MEMS SelectField callers consume e.target.value. Keep that contract intact.
         onChange?.({ target: { value: v, name, id }, currentTarget: { value: v, name, id } } as unknown as ChangeEvent<HTMLSelectElement>);
@@ -74,23 +79,23 @@ export default function SearchableSelect({ label, id, hint, error, children, val
         <div className='block min-w-0'>
             <label htmlFor={id} className={hideLabel ? 'sr-only' : 'mb-1 block text-sm text-soft'}>{label}{required ? ' *' : ''}</label>
             <input type='hidden' name={name} value={selectedValue} />
-            <button type='button' id={id} disabled={disabled} aria-required={required} aria-invalid={!!error}
+            <button ref={buttonRef} type='button' id={id} disabled={disabled} aria-required={required} aria-invalid={!!error}
                 aria-haspopup='listbox' aria-expanded={open} aria-describedby={error || hint ? `${id}-note` : undefined}
-                onClick={() => { setPending(null); setQuery(''); setSearchVisible(false); setOpen(true); }}
+                onClick={() => { setPending(current && !current.disabled ? selectedValue : null); setQuery(''); setSearchVisible(false); setOpen(true); }}
                 className={`flex min-h-12 w-full items-center gap-2 rounded-xl border bg-panel px-3 text-left text-base text-ink focus:outline-none disabled:opacity-50 ${error ? 'border-red-500/70' : 'border-line focus:border-brand'}`}>
-                <span className={`min-w-0 flex-1 truncate ${!selectedValue ? 'text-muted' : ''}`}>{current?.label || options.find((o) => !o.value)?.label || 'Choose...'}</span>
+                <span className={`min-w-0 flex-1 truncate ${!selectedValue ? 'text-muted' : ''}`}>{current?.label || (selectedValue ? 'Selection unavailable — choose again' : options.find((o) => !o.value)?.label || 'Choose...')}</span>
                 <ChevronDown className='h-5 w-5 shrink-0 text-muted' />
             </button>
             {(error || hint) && <span id={`${id}-note`} className={`mt-1 block text-xs ${error ? 'text-red-500' : 'text-muted'}`}>{error || hint}</span>}
             {open && typeof document !== 'undefined' && createPortal(
-                <div className='fixed inset-0 z-[1100] flex items-start justify-center bg-black/60 px-2 pb-3 pt-[max(5dvh,16px)] sm:p-5 sm:items-start'
+                <div className='fixed inset-0 z-[2200] flex items-start justify-center bg-black/60 px-2 pb-3 pt-[max(5dvh,16px)] sm:p-5 sm:items-start'
                     role='presentation' onClick={() => setOpen(false)}>
                     <div role='dialog' aria-label={label} aria-modal='true'
                         onClick={(e) => e.stopPropagation()}
                         className='flex max-h-[88dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-line bg-page shadow-2xl'>
                         <div className='flex items-center justify-between border-b border-line p-4'>
                             <h2 className='min-w-0 truncate text-lg font-semibold text-ink'>{label}</h2>
-                            <button type='button' aria-label='Close' className='flex h-11 w-11 items-center justify-center rounded-xl border border-line text-ink'
+                            <button ref={closeRef} type='button' aria-label='Close' className='flex h-11 w-11 items-center justify-center rounded-xl border border-line text-ink'
                                 onClick={() => setOpen(false)}><X className='h-5 w-5' /></button>
                         </div>
                         <div className='p-3'>
@@ -128,7 +133,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
                         </div>
                         <div className='flex shrink-0 items-center justify-between gap-2 border-t border-line bg-page p-3'>
                             <span className='min-w-0 flex-1 truncate text-xs text-muted'>{staged ? staged.label : 'Choose an option, then confirm'}</span>
-                            <button type='button' disabled={pending === null || staged?.disabled} onClick={() => { if (pending !== null) choose(pending); }} className='min-h-12 shrink-0 rounded-xl bg-brand px-5 font-semibold text-onbrand disabled:opacity-40'>Confirm</button>
+                            <button type='button' disabled={pending === null || !staged || staged.disabled} onClick={() => { if (pending !== null) choose(pending); }} className='min-h-12 shrink-0 rounded-xl bg-brand px-5 font-semibold text-onbrand disabled:opacity-40'>Confirm</button>
                         </div>
                     </div>
                 </div>, document.body
