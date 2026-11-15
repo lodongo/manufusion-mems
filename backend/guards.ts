@@ -1,3 +1,4 @@
+import {loadWorkGroupPolicy,workGroupMenuPermissions,type WorkGroupPolicy} from './maintenanceWorkGroupPolicy';
 import { notifyMaterialChanges, withChangeTracking } from './changeTracker';
 import { json, error } from './platform/sdk';
 import { assertHealthAccess } from './healthPolicy';
@@ -268,7 +269,8 @@ export function directRoleIds(user: Doc | { data: Record<string, unknown> }): st
 /** Everything a member may do: direct security roles (unless expired) plus job-role grants. */
 export async function effectiveAccess(orgId: string, role: string, user: Doc, adoptedModules?: unknown) {
     const loaded = await loadRole(orgId, role);
-    if (role === 'org_super_admin') return { roleName: loaded.name, directPermissions: loaded.permissions, grants: [] as Grant[], permissions: loaded.permissions, expired: false, roleIds: [role] };
+    const workGroupPolicy = adoptedModules && typeof adoptedModules==='object' && (adoptedModules as Record<string,unknown>).MNT===true ? await loadWorkGroupPolicy(orgId,user):undefined;
+    if (role === 'org_super_admin') return { workGroupPolicy, roleName: loaded.name, directPermissions: loaded.permissions, grants: [] as Grant[], permissions: loaded.permissions, expired: false, roleIds: [role] };
     const expired = roleExpired(user);
     // A person may hold several security roles directly (e.g. Asset Clerk and Document Author): their rights add up.
     const extraIds = additionalRoleIds(user);
@@ -281,11 +283,11 @@ export async function effectiveAccess(orgId: string, role: string, user: Doc, ad
         ? adoptedModules as Record<string, unknown> : {};
     const hrSelfService = modules.HRM === true || modules.HRM === 'enabled';
     const permissions = Array.from(new Set([
-        ...directPermissions, ...grants.flatMap((g) => g.permissions),
+        ...directPermissions, ...grants.flatMap((g) => g.permissions), ...workGroupMenuPermissions(workGroupPolicy),
         ...(hrSelfService ? ['HRM.shell.view'] : []),
     ]));
     const name = extras.length ? `${loaded.name} + ${extras.map((x) => x.name).join(', ')}` : loaded.name;
-    return { roleName: expired ? `${name} (expired)` : name, directPermissions, grants, permissions, expired, roleIds: [role, ...extraIds] };
+    return { workGroupPolicy, roleName: expired ? `${name} (expired)` : name, directPermissions, grants, permissions, expired, roleIds: [role, ...extraIds] };
 }
 
 export async function loadRole(orgId: string, role: string): Promise<{ name: string; permissions: string[] }> {
@@ -452,6 +454,7 @@ export interface OrgContext extends SecureContext {
     directPermissions: string[];
     /** Location-bound permissions from job roles. Records are checked with access.canAt(). */
     grants: Grant[];
+    workGroupPolicy?: WorkGroupPolicy;
     domain: string;
     /**
      * Development-only platform testing override is in force for this organization super admin: maker-checker,
@@ -527,7 +530,7 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         let tracked: Awaited<ReturnType<typeof withChangeTracking>> | null = null;
         try {
             // Material changes made by this request are collected and handed to MRP once it has succeeded.
-            tracked = await withChangeTracking(() => fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, domain, testMode, bypassed }));
+            tracked = await withChangeTracking(() => fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, workGroupPolicy:access.workGroupPolicy, domain, testMode, bypassed }));
             result = tracked.result;
         } catch (err) {
             try { await finishApproval?.(false); }

@@ -11,7 +11,8 @@ import { catalogItemSpec } from './procurement';
 import { createMaintenanceRequirement } from './purchaseRequirements';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { postMaintenanceReturn } from './finOps';
-import { maintenancePermission, requireMaintenanceRole } from './maintenanceAccess';
+import { maintenancePermission, requireMaintenanceRole, configuredMaintenanceRole } from './maintenanceAccess';
+import {groupAt,groupGateRole,outsideExecutionAccess,loadWorkGroupPolicy,workGroupGateAllowed} from './maintenanceWorkGroupPolicy';
 import { workGroupResourcePool, requireOutsideGroupOptIn } from './maintenanceWorkGroups';
 import { assessmentReviewCurrent } from './maintenanceAssessmentReview';
 import { maintenanceKey, reserveTaskSpare, releaseMaintenanceReservations, verifyMaintenanceStockLedger } from './maintenanceInventory';
@@ -78,7 +79,7 @@ async function order(ctx: OrgContext, code: unknown) {
     if (!/^WO\d{8}$/.test(id)) throw new HttpError(400, 'Choose a work order.');
     const wo = await getDoc(`${root(ctx)}/work_orders/${id}`);
     if (!wo) throw new HttpError(404, 'Work order not found.');
-    await maintenancePermission(ctx, 'MNT.view', recordPath(wo));
+    if(!outsideExecutionAccess(ctx.workGroupPolicy,wo))await maintenancePermission(ctx, 'MNT.view', recordPath(wo));
     return wo;
 }
 async function authority(ctx: OrgContext, wo: Doc, permission: string, gate?: string) {
@@ -169,6 +170,7 @@ async function windowContext(ctx: OrgContext, window: Doc, internal = false) {
         })),
         equipment,
         configurationVersion: settings?.data.version || 0,
+        ...(wos.some(w=>groupAt(ctx.workGroupPolicy,recordPath(w)))?{workGroupRevision:ctx.workGroupPolicy?.config.version}:{}),
     });
     return { wos, equipment, fingerprint, configurationVersion: Number(settings?.data.version) || 0 };
 }
@@ -390,7 +392,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
     if (!['planning', 'plan_ready'].includes(str(wo.data.status))) throw new HttpError(409, 'The work order is no longer in planning.');
     await authority(ctx, wo, 'MNT.WO.plan', 'MNT.WO.PLAN');
     const settings = await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
-    const jobRole = str(object(settings?.data.approverRoles)['MNT.ASSESS.REVIEW']);
+    const jobRole = configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),settings?.data.approverRoles);
     if (!jobRole || !assessmentReviewCurrent(wo.data, jobRole))
         throw new HttpError(409, 'Approve the latest work assessment through the configured reviewer before planning.');
     const b = ctx.body;
@@ -435,6 +437,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
         return { ok: true, requestId: out.requestId };
     }
     if (action === 'confirm_readiness') {
+        if(groupAt(ctx.workGroupPolicy,recordPath(wo)))await requireMaintenanceRole(ctx,'MNT.WO.RELEASE',recordPath(wo));
         const check = await planChecklist(ctx, wo);
         if (!check.ready) {
             const open = check.items.filter((i) => !i.done).map((i) => i.label);
@@ -448,7 +451,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
 }
 async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
      const settings=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
-     const jobRole=str(object(settings?.data.approverRoles)['MNT.ASSESS.REVIEW']);
+     const jobRole=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),settings?.data.approverRoles);
      if(!jobRole||!assessmentReviewCurrent(wo.data,jobRole))
          throw new HttpError(409,'Approve the latest work assessment through the configured reviewer before allocating or sourcing resources.');
     await authority(ctx, wo, 'MNT.WO.plan', 'MNT.WO.PLAN');
@@ -867,7 +870,7 @@ async function windowSave(ctx: OrgContext) {
     const wos: Doc[] = [];
     for (const id of ids) {
         const wo = await order(ctx, id);
-        await authority(ctx, wo, 'MNT.WO.schedule', 'MNT.WO.PLAN');
+        await authority(ctx, wo, 'MNT.WO.schedule', groupGateRole(ctx.workGroupPolicy,'MNT.WINDOW.LOCK',recordPath(wo))!==null?'MNT.WINDOW.LOCK':'MNT.WO.PLAN');
         if (str(wo.data.unitId) !== equipmentId) throw new HttpError(400, `${id} is on other equipment (${str(wo.data.unitCode)}).`);
         const inThis = !!existing && texts(existing.data.workOrderIds).includes(id);
         if (!(str(wo.data.status) === 'released' || (inThis && str(wo.data.status) === 'scheduled')))
@@ -1299,7 +1302,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     if (['start_task', 'block_task', 'complete_task', 'confirm_consumption', 'reconcile_task'].includes(action)) {
         if (action === 'reconcile_task') {
             await authority(ctx, wo, 'MNT.view', 'MNT.SPARES.RECONCILE');
-        } else await authority(ctx, wo, 'MNT.WO.execute', 'MNT.TASK.FEEDBACK');
+        } else if(!outsideExecutionAccess(ctx.workGroupPolicy,wo,str(b.taskId)))await authority(ctx, wo, 'MNT.WO.execute', 'MNT.TASK.FEEDBACK');
         if (!task) throw new HttpError(400, 'Select a maintenance task.');
         if (['closed', 'cancelled'].includes(str(wo.data.status)) || object(wo.data.safetySignoff).at)
             throw new HttpError(409, 'Task execution is locked after safety sign-off or closure.');
@@ -1707,7 +1710,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
     }
     if (action === 'workspace') {
         const scope = await scopeOf(ctx),
-            wos = (await listDocs(`${root(ctx)}/work_orders`)).filter((w) => canAt(ctx, 'MNT.view', recordPath(w), scope));
+            wos = (await listDocs(`${root(ctx)}/work_orders`)).filter((w) => canAt(ctx, 'MNT.view', recordPath(w), scope)||outsideExecutionAccess(ctx.workGroupPolicy,w));
         const windows = (await listDocs(`${root(ctx)}/maintenance_windows`)).filter((w) =>
             canAt(ctx, 'MNT.view', texts(w.data.path), scope),
         );
@@ -1773,13 +1776,13 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 // Assessment is intentionally open to employees who can view the
                 // work order at their organizational scope. Conversion, planning,
                 // execution, approvals and closure remain role-gated.
-                if (key === 'assess') await maintenancePermission(ctx, 'MNT.assessment.edit', recordPath(wo));
+                if (key === 'assess') {await maintenancePermission(ctx, 'MNT.assessment.edit', recordPath(wo));if(workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',recordPath(wo))===false||workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',recordPath(wo))===true)throw Error('Not an independent assessor');}
                 else if (key === 'reviewAssessment') {
                     if(str(wo.data.status)!=='planning'||([str(wo.data.createdBy),str(wo.data.assessmentTasksBy)].includes(ctx.uid)&&!bypass(ctx,'mnt.assessment.review_independence')))throw new Error('Not independently reviewable');
                     await maintenancePermission(ctx, 'MNT.assessment.review', recordPath(wo));
                     await requireMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo));
                 }
-                else await authority(ctx, wo, perm, gate);
+                else if(key!=='execute'||!outsideExecutionAccess(ctx.workGroupPolicy,wo))await authority(ctx, wo, perm, gate);
                 permissions[key] = true;
             } catch {
                 permissions[key] = false;
@@ -1791,7 +1794,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const users = await runQuery({ from: [{ collectionId: 'users' }], where: fieldEq('orgId', ctx.orgId) });
         const pool=await workGroupResourcePool(ctx.orgId,wo,users);
         const workflow=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
-        const reviewRole=str(object(workflow?.data.approverRoles)['MNT.ASSESS.REVIEW']);
+        const reviewRole=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),workflow?.data.approverRoles);
         return {
             wo: { code: wo.id, ...wo.data, assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             readiness: readinessData,
@@ -1812,6 +1815,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
     }
     // Serializes the read/validate/write sequence across task, window and closure mutations.
     return withLock(ctx.orgId, 'maintenance_operations', async () => {
+        ctx.workGroupPolicy=await loadWorkGroupPolicy(ctx.orgId,ctx.me);
         if (action === 'map_line') {
             const equipmentId = identifier(b.equipmentId),
                 lineId = identifier(b.lineId),

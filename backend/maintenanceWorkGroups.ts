@@ -6,12 +6,11 @@ import { commit, withLock } from './finCore';
 import { MNT_ACTIVITIES } from './maintenanceActivities';
 import { MAINTENANCE_GATES } from './maintenanceWorkflowConfig';
 
-export const WORK_GROUP_TITLES = ['Maintenance Lead','Maintenance Planner','Maintenance Clerk','Maintenance Specialist','Maintenance Technician'] as const;
+import {WORK_GROUP_TITLES,externalGates,externalPermissions,DEFAULT_WORK_GROUP_TASKS,activeWorkGroupPath,type ActiveWorkGroups,type ActiveGroup} from './maintenanceWorkGroupPolicy';
+export {WORK_GROUP_TITLES} from './maintenanceWorkGroupPolicy';
 type Title = typeof WORK_GROUP_TITLES[number];
 type Member = { positionCode:string; uid:string };
 type Task = { code:string; label:string; permission:string|null; mode:string; owner:string; separation:string; external:boolean; requires:readonly string[] };
-const externalGates = new Set(['MNT.MAT.CREATE','MNT.SPARES.RESERVE','MNT.SHORTAGE.SOURCE','MNT.WO.COST','MNT.SAFETY.SIGNOFF','MNT.HANDOVER']);
-const externalPermissions = new Set(['MNT.admin','MNT.WO.costApprove','MNT.WO.safety','MNT.WR.create','MNT.WR.edit','MNT.WR.cancel','MNT.view','MNT.activities.view']);
 /** The shipped registries, not a second hand-maintained list. Gates with the same permission remain distinct. */
 export const WORK_GROUP_TASKS: Task[] = [
  ...MAINTENANCE_GATES.filter(g=>g.status==='existing').map(g=>({...g,external:externalGates.has(g.code)||g.mode==='automated'})),
@@ -42,7 +41,7 @@ export function workGroupConflicts(groups:readonly Doc[], groupId:string, costCe
 function suggestedMaster(groups:readonly Doc[],positions:ReadonlyMap<string,Doc>){
  const roleAlignment:Record<string,string[]>={},tasks:Record<string,string[]>={};
  for(const t of WORK_GROUP_TITLES)roleAlignment[t]=[...new Set(groups.flatMap(g=>memberMap(g.data.members)[t].map(m=>m.positionCode)).filter(id=>positions.has(id)))];
- for(const task of WORK_GROUP_TASKS.filter(t=>!t.external))tasks[task.code]=[...new Set(groups.flatMap(g=>mapOfStrings(g.data.tasks||g.data.legacyTasks)[task.code]||[]).filter(title))];
+ for(const task of WORK_GROUP_TASKS.filter(t=>!t.external)){const prior=[...new Set(groups.flatMap(g=>mapOfStrings(g.data.tasks||g.data.legacyTasks)[task.code]||[]).filter(title))];tasks[task.code]=prior.length?prior:[...(DEFAULT_WORK_GROUP_TASKS[task.code]||[])];}
  return {roleAlignment,tasks};
 }
 export function nextWorkGroupNumber(prior:unknown, groups:readonly Doc[]):number {
@@ -73,7 +72,10 @@ export function workGroupHolder(user:Doc, positionCode:string, costCenterPath:st
  * staff resource pool across its own cost centers; it is not an authorization grant. */
 export async function workGroupResourcePool(orgId:string, record:Doc, suppliedUsers?:Doc[]){
  const root='organizations/'+orgId;
- const [groups,nodes,positions,users,master]=await Promise.all([listDocs(groupCol(orgId)),listDocs(root+'/structure'),listDocs(root+'/positions'),suppliedUsers?Promise.resolve(suppliedUsers):orgUsers(orgId),getDoc(masterPath(orgId))]);
+ const [draftGroups,nodes,positions,users,master,active]=await Promise.all([listDocs(groupCol(orgId)),listDocs(root+'/structure'),listDocs(root+'/positions'),suppliedUsers?Promise.resolve(suppliedUsers):orgUsers(orgId),getDoc(masterPath(orgId)),getDoc(activeWorkGroupPath(orgId))]);
+ const live=active?.data as unknown as ActiveWorkGroups|undefined;
+ const liveGroups=(live?.groups||[]).map(g=>({id:g.id,data:g,updateTime:''} as unknown as Doc));
+ const groups=[...liveGroups,...draftGroups.filter(g=>!liveGroups.some(a=>a.id===g.id)).filter(g=>!liveGroups.some(a=>strings(a.data.costCenterIds).some(cc=>strings(g.data.costCenterIds).includes(cc))))];
  const byNode=new Map(nodes.map(n=>[n.id,n]));
  const recordNode=str(record.data.assemblyId)||str(record.data.unitId)||strings(record.data.path).at(-1)||'';
  const path=workGroupAncestry(byNode,recordNode);
@@ -89,7 +91,7 @@ export async function workGroupResourcePool(orgId:string, record:Doc, suppliedUs
  if(group){
   const costPaths=strings(group.data.costCenterIds).map(id=>workGroupAncestry(byNode,id)).filter(p=>p.includes(siteId!)&&str(byNode.get(p.at(-1)||'')?.data.level)==='cost_center');
   const configured=isObj(group.data.members)?group.data.members:{};
-  const alignment=mapOfStrings(master?.data.roleAlignment);
+  const alignment=liveGroups.some(g=>g.id===group.id)?mapOfStrings(live?.roleAlignment):mapOfStrings(master?.data.roleAlignment);
   const otherMembers=new Set(groups.filter(g=>g.id!==group.id).flatMap(g=>memberIds(g.data.members)));
   for(const t of WORK_GROUP_TITLES)for(const m of objects(configured[t])){
    const uid=str(m.uid),role=str(m.positionCode),u=byUser.get(uid);
@@ -114,15 +116,14 @@ function assertAdmin(ctx:OrgContext){
  if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'ADM.workflows'))throw new HttpError(403,'Workflow administration is required.');
 }
 async function setup(ctx:OrgContext){
- const [nodes,positions,users,groups,master]=await Promise.all([listDocs('organizations/'+ctx.orgId+'/structure'),listDocs('organizations/'+ctx.orgId+'/positions'),orgUsers(ctx.orgId),listDocs(groupCol(ctx.orgId)),getDoc(masterPath(ctx.orgId))]);
- return {nodes:new Map(nodes.map(n=>[n.id,n])),positions:new Map(positions.filter(p=>str(p.data.status)!=='inactive').map(p=>[p.id,p])),users:new Map(users.filter(u=>str(u.data.status)!=='disabled').map(u=>[u.id,u])),groups,master};
+ const [nodes,positions,users,groups,master,active]=await Promise.all([listDocs('organizations/'+ctx.orgId+'/structure'),listDocs('organizations/'+ctx.orgId+'/positions'),orgUsers(ctx.orgId),listDocs(groupCol(ctx.orgId)),getDoc(masterPath(ctx.orgId)),getDoc(activeWorkGroupPath(ctx.orgId))]);
+ return {nodes:new Map(nodes.map(n=>[n.id,n])),positions:new Map(positions.filter(p=>str(p.data.status)!=='inactive').map(p=>[p.id,p])),users:new Map(users.filter(u=>str(u.data.status)!=='disabled').map(u=>[u.id,u])),groups,master,active};
 }
 export function assessWorkGroup(members:Record<string,Member[]>, tasks:Record<string,string[]>, ccPaths:string[][], users:ReadonlyMap<string,Doc>, today:string){
  const issues:string[]=[];
  for(const t of WORK_GROUP_TITLES){
   if(!(members[t]||[]).length)issues.push('Assign at least one named employee to '+t+'.');
-  for(const path of ccPaths)if(!(members[t]||[]).some(m=>{const u=users.get(m.uid);return !!u&&workGroupHolder(u,m.positionCode,path,today);}))
-   issues.push(t+' has no eligible holder for cost center '+path[path.length-1]+'.');
+  else if(!ccPaths.some(path=>(members[t]||[]).some(m=>{const u=users.get(m.uid);return !!u&&workGroupHolder(u,m.positionCode,path,today);})))issues.push(t+' has no current eligible holder within the group.');
  }
  for(const task of WORK_GROUP_TASKS.filter(t=>!t.external))if(!(tasks[task.code]||[]).length)issues.push('Allocate '+task.code+' to a generic role.');
  // Avoid treating distinct titles as distinct people. Warn if all assessment makers and checkers overlap.
@@ -132,7 +133,56 @@ export function assessWorkGroup(members:Record<string,Member[]>, tasks:Record<st
  const effective=WORK_GROUP_TASKS.filter(t=>!t.external).map(t=>({code:t.code,permission:t.permission,positions:[...new Set((tasks[t.code]||[]).flatMap(k=>(members[k]||[]).map(m=>m.positionCode)))],employees:[...who(t.code)]}));
  return {issues,effective,ready:issues.length===0};
 }
+/** Publish only saved revisions. An independent checker approves all selected groups under one identical master snapshot. */
+async function publishWorkGroups(ctx:OrgContext){
+ assertAdmin(ctx);const d=await setup(ctx),b=ctx.body;
+ const old=d.active?.data as unknown as ActiveWorkGroups|undefined;
+ const version=Number(old?.version)||0,masterVersion=Number(d.master?.data.version)||0;
+ if(Number(b.expectedActiveVersion)!==version||Number(b.expectedMasterVersion)!==masterVersion||!masterVersion)throw new HttpError(409,'Save or reload master and active configuration.');
+ const ids=strings(b.groupIds);
+ if(!ids.length||ids.length>150)throw new HttpError(400,'Select 1–150 saved work groups.');
+ if((old?.groups||[]).some(g=>!ids.includes(g.id)))throw new HttpError(409,'Existing active groups must be included; transfer their staffing or cost centers using saved drafts.');
+ if(!isObj(b.groupVersions))throw new HttpError(400,'Group revision confirmation is required.');
+ const reason=str(b.reason).trim().slice(0,500);if(reason.length<10)throw new HttpError(400,'Enter approval notes (at least 10 characters).');
+ if(str(d.master?.data.updatedBy)===ctx.uid&&old?.masterVersion!==masterVersion)throw new HttpError(403,'A different workflow administrator must approve the master revision.');
+ const roleAlignment=mapOfStrings(d.master?.data.roleAlignment),tasks={...DEFAULT_WORK_GROUP_TASKS,...mapOfStrings(d.master?.data.tasks)};
+ const selected:ActiveGroup[]=[];
+ const today=nowIso().slice(0,10);
+ for(const id of ids){
+  const g=d.groups.find(x=>x.id===id);if(!g||Number(b.groupVersions[id])!==Number(g.data.version))throw new HttpError(409,'A selected group changed. Reload before approving.');
+  if(str(g.data.updatedBy)===ctx.uid&&!(old?.groups||[]).some(a=>a.id===id&&a.version===Number(g.data.version)))throw new HttpError(403,'A different workflow administrator must approve '+str(g.data.code)+'.');
+  const members=memberMap(g.data.members),costCenterIds=strings(g.data.costCenterIds),siteId=str(g.data.siteId);
+  const paths=costCenterIds.map(cc=>workGroupAncestry(d.nodes,cc));
+  if(!paths.length||paths.some(p=>!p.includes(siteId)||str(d.nodes.get(p.at(-1)||'')?.data.level)!=='cost_center'))throw new HttpError(409,'Configure valid cost centers for '+str(g.data.code)+'.');
+  const issues=assessWorkGroup(members,tasks,paths,d.users,today).issues;
+  for(const t of WORK_GROUP_TITLES)for(const m of members[t])if(!d.positions.has(m.positionCode)||!(roleAlignment[t]||[]).includes(m.positionCode)||!paths.some(p=>{const u=d.users.get(m.uid);return !!u&&workGroupHolder(u,m.positionCode,p,today);}))issues.push('Invalid current employee alignment '+m.uid+' / '+t+'.');
+  issues.push(...workGroupConflicts(d.groups,g.id,costCenterIds,members));
+  for(const pair of [['MNT.WR.REVIEW','MNT.WR.review'],['MNT.ASSESS.REVIEW','MNT.assessment.review'],['MNT.WR.ASSESS','MNT.assessment.edit'],['MNT.WR.CONVERT','MNT.WR.convert'],['MNT.WO.PLAN','MNT.WO.plan'],['MNT.WO.RELEASE','MNT.WO.plan'],['MNT.WINDOW.LOCK','MNT.WO.schedule'],['MNT.TASK.FEEDBACK','MNT.WO.execute'],['MNT.TASK.VALIDATE','MNT.activities.edit'],['MNT.WO.TECHNICAL_CLOSE','MNT.WO.close'],['MNT.WR.CLOSE','MNT.WR.review']]){
+   const holders=(tasks[pair[0]]||[]).filter(t=>(tasks[pair[1]]||[]).includes(t)).flatMap(t=>members[t]||[]);
+   if(!holders.length)issues.push('No named holder has both '+pair[0]+' and '+pair[1]+'.');
+  }
+  if(issues.length)throw new HttpError(409,str(g.data.code)+': '+issues[0]);
+  selected.push({id,code:str(g.data.code),name:str(g.data.name),siteId,version:Number(g.data.version),costCenterIds,members});
+ }
+ // Do not invalidate a prior approval, named reviewer or approved maintenance window in place.
+ // New/changed authorization revisions are applied only across drained affected locations.
+ const changed=new Set([...selected.flatMap(g=>g.costCenterIds),...(old?.groups||[]).flatMap(g=>g.costCenterIds)]);
+ const root='organizations/'+ctx.orgId;
+ const [requests,orders]=await Promise.all([listDocs(root+'/work_requests'),listDocs(root+'/work_orders')]);
+ const inAffected=(d:Doc)=>strings(d.data.path).some(id=>changed.has(id))||changed.has(str(d.data.costCenterId));
+ const openOrders=orders.filter(d=>inAffected(d)&&!['closed','cancelled'].includes(str(d.data.status)));
+ const terminal=new Set(['closed','cancelled','declined','converted']);
+ const openRequests=requests.filter(d=>inAffected(d)&&!terminal.has(str(d.data.status))&&!str(d.data.woCode));
+ if(openOrders.length||openRequests.length)throw new HttpError(409,'Complete or cancel open maintenance transactions before cutover: '+[...openRequests,...openOrders].slice(0,8).map(d=>d.id).join(', ')+'. No transaction was changed.');
+ const config:ActiveWorkGroups={version:version+1,masterVersion,roleAlignment,tasks,groups:selected};
+ if(JSON.stringify(config).length>650000)throw new HttpError(409,'Active configuration exceeds safe database document size.');
+ const fields={...config,approvedBy:ctx.uid,approvedAt:nowIso(),reason};
+ await commit([{path:activeWorkGroupPath(ctx.orgId),fields,...(d.active?{updateTime:d.active.updateTime}:{exists:false})},{path:activeWorkGroupPath(ctx.orgId)+'/revisions/'+String(version+1),fields,exists:false}]);
+ await audit([{category:'maintenance',action:'mnt.work_group.published',actor:ctx.actor,meta:ctx.meta,target:{label:'Work group workflow revision '+(version+1)},orgId:ctx.orgId,details:reason+'; '+selected.map(g=>g.code).join(', ')}]);
+ return {version:version+1,masterVersion,groupIds:ids};
+}
 export const maintenanceWorkGroupRoutes={
+ 'POST /api/org/mnt/work-groups/publish': [orgRoute('org.mnt.workGroups.publish','ADM.workflows',async ctx=>withLock(ctx.orgId,'maintenance_work_groups',()=>withLock(ctx.orgId,'maintenance_operations',()=>publishWorkGroups(ctx))))],
  'POST /api/org/mnt/work-groups': [orgRoute('org.mnt.workGroups.list','ADM.workflows',async ctx=>{
   assertAdmin(ctx);const d=await setup(ctx);
   const sites=[...d.nodes.values()].filter(n=>str(n.data.level)==='site'&&workGroupAncestry(d.nodes,n.id).length).map(n=>({id:n.id,label:nameOf(n),code:str(n.data.code)}));
@@ -147,7 +197,8 @@ export const maintenanceWorkGroupRoutes={
    return costCenterIds.length?[{uid:u.id,positionCode:role,name:(str(u.data.firstName)+' '+str(u.data.lastName)).trim()||str(u.data.displayName)||str(u.data.email)||u.id,costCenterIds}]:[];
   }));
   const suggestion=suggestedMaster(d.groups,d.positions);
-  const master={version:Number(d.master?.data.version)||0,roleAlignment:d.master?mapOfStrings(d.master.data.roleAlignment):suggestion.roleAlignment,tasks:d.master?mapOfStrings(d.master.data.tasks):suggestion.tasks,importSuggestion:!d.master&&d.groups.some(g=>Object.keys(memberMap(g.data.members)).some(t=>memberMap(g.data.members)[t].length)||Object.keys(mapOfStrings(g.data.tasks)).length)};
+  const live=d.active?.data as unknown as ActiveWorkGroups|undefined;
+  const master={version:Number(d.master?.data.version)||0,roleAlignment:d.master?mapOfStrings(d.master.data.roleAlignment):suggestion.roleAlignment,tasks:d.master?{...DEFAULT_WORK_GROUP_TASKS,...mapOfStrings(d.master.data.tasks)}:suggestion.tasks,importSuggestion:!d.master&&d.groups.some(g=>Object.keys(memberMap(g.data.members)).some(t=>memberMap(g.data.members)[t].length)||Object.keys(mapOfStrings(g.data.tasks)).length)};
   const groups=d.groups.map(g=>{
    const members=memberMap(g.data.members),costCenterIds=strings(g.data.costCenterIds);
    const paths=costCenterIds.map(id=>workGroupAncestry(d.nodes,id)).filter(p=>p.length);
@@ -160,9 +211,9 @@ export const maintenanceWorkGroupRoutes={
     const u=d.users.get(m.uid);
     if(!u||!paths.some(p=>workGroupHolder(u,m.positionCode,p,today)))issues.push('Employee '+m.uid+' no longer holds the assigned role within the group.');
    }
-   return {id:g.id,code:str(g.data.code),name:str(g.data.name),siteId:str(g.data.siteId),version:Number(g.data.version)||0,costCenterIds,members,...assessment,issues,ready:issues.length===0};
+   return {id:g.id,code:str(g.data.code),name:str(g.data.name),siteId:str(g.data.siteId),version:Number(g.data.version)||0,costCenterIds,members,...assessment,issues,ready:issues.length===0,activeVersion:live?.groups.find(a=>a.id===g.id)?.version||0,updatedBy:str(g.data.updatedBy)};
   });
-  return {titles:WORK_GROUP_TITLES,tasks:WORK_GROUP_TASKS,sites,costCenters:cc.map(({path,...x})=>x),positions:[...d.positions.values()].map(p=>({id:p.id,label:nameOf(p)})),staff,groups,master,authorizationMode:'legacy'};
+  return {titles:WORK_GROUP_TITLES,tasks:WORK_GROUP_TASKS,sites,costCenters:cc.map(({path,...x})=>x),positions:[...d.positions.values()].map(p=>({id:p.id,label:nameOf(p)})),staff,groups,master:{...master,updatedBy:str(d.master?.data.updatedBy)},defaults:DEFAULT_WORK_GROUP_TASKS,active:{version:live?.version||0,masterVersion:live?.masterVersion||0,groupIds:live?.groups.map(g=>g.id)||[]},currentUserId:ctx.uid,authorizationMode:live?.version?'work_groups':'legacy'};
  })],
  'POST /api/org/mnt/work-groups/master/save': [orgRoute('org.mnt.workGroups.master.save','ADM.workflows',async ctx=>withLock(ctx.orgId,'maintenance_work_groups',async()=>{
   assertAdmin(ctx);const d=await setup(ctx),body=ctx.body;
@@ -186,7 +237,7 @@ export const maintenanceWorkGroupRoutes={
   if(d.master)for(const g of d.groups)for(const t of WORK_GROUP_TITLES)for(const m of memberMap(g.data.members)[t]){
    if((priorAlignment[t]||[]).includes(m.positionCode)&&!(roleAlignment[t]||[]).includes(m.positionCode))throw new HttpError(409,'Remove or transfer the named employee in '+str(g.data.code)+' before removing '+m.positionCode+' from '+t+'.');
   }
-  const reason=str(body.reason).trim().slice(0,500);if(reason.length<10)throw new HttpError(400,'Enter a reason of at least 10 characters.');
+  const reason=str(body.reason).trim().slice(0,500)||'Partial draft saved';
   const fields={roleAlignment,tasks,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid,reason};
   await commit([{path:masterPath(ctx.orgId),fields,...(d.master?{updateTime:d.master.updateTime}:{exists:false})},{path:'organizations/'+ctx.orgId+'/maintenance_work_group_settings/default/revisions/'+String(version+1),fields,exists:false}]);
   await audit([{category:'maintenance',action:'mnt.work_group.master_saved',actor:ctx.actor,meta:ctx.meta,target:{label:'Work Groups master setup'},orgId:ctx.orgId,details:reason+'; revision '+(version+1)}]);
@@ -212,14 +263,14 @@ export const maintenanceWorkGroupRoutes={
   const prior=d.groups.find(g=>g.id===id);if(!prior)throw new HttpError(404,'Work group not found.');
   const version=Number(prior.data.version)||0,masterVersion=Number(d.master?.data.version)||0;
   if(Number(body.expectedVersion)!==version)throw new HttpError(409,'Work group has changed. Reload first.');
-  if(!masterVersion||Number(body.expectedMasterVersion)!==masterVersion)throw new HttpError(409,'Save or reload the current Work Groups master setup first.');
+  if(Number(body.expectedMasterVersion)!==masterVersion)throw new HttpError(409,'Save or reload the current Work Groups master setup first.');
   const siteId=str(prior.data.siteId),code=str(prior.data.code),costCenterIds=strings(body.costCenterIds);
   if(body.tasks!==undefined||body.roleAlignment!==undefined)throw new HttpError(400,'Role alignment and task assignment are maintained only in Master setup.');
   if(str(d.nodes.get(siteId)?.data.level)!=='site'||!workGroupAncestry(d.nodes,siteId).length)throw new HttpError(400,'The work group site is inactive.');
   if(costCenterIds.length>150)throw new HttpError(400,'Maximum 150 cost centers per work group.');
   const paths=costCenterIds.map(cc=>{const p=workGroupAncestry(d.nodes,cc);if(str(d.nodes.get(cc)?.data.level)!=='cost_center'||!p.includes(siteId))throw new HttpError(400,'All cost centers must belong to the selected site.');return p;});
   if(!isObj(body.members)||Object.keys(body.members).some(k=>!title(k)))throw new HttpError(400,'Valid named assignments are required.');
-  const alignment=mapOfStrings(d.master?.data.roleAlignment),tasks=mapOfStrings(d.master?.data.tasks);
+  const alignment=d.master?mapOfStrings(d.master.data.roleAlignment):suggestedMaster(d.groups,d.positions).roleAlignment,tasks=d.master?{...DEFAULT_WORK_GROUP_TASKS,...mapOfStrings(d.master.data.tasks)}:DEFAULT_WORK_GROUP_TASKS;
   const members:Record<string,Member[]>={},today=nowIso().slice(0,10);
   for(const t of WORK_GROUP_TITLES){
    const raw=objects(body.members[t]);if(raw.length>100)throw new HttpError(400,'Maximum 100 members per generic title.');
@@ -227,13 +278,13 @@ export const maintenanceWorkGroupRoutes={
    for(const m of raw){
     const uid=str(m.uid),positionCode=str(m.positionCode),u=d.users.get(uid);
     if(!(alignment[t]||[]).includes(positionCode)||!d.positions.has(positionCode))throw new HttpError(400,'The organizational role must be aligned to '+t+' in Master setup.');
-    if(!u||!paths.some(p=>workGroupHolder(u,positionCode,p,today)))throw new HttpError(400,'A named employee must currently hold the selected organization role within the work group.');
+    if(!u||!(paths.length?paths:[workGroupAncestry(d.nodes,siteId)]).some(p=>workGroupHolder(u,positionCode,p,today)))throw new HttpError(400,'A named employee must currently hold the selected organization role within the group scope.');
     const key=positionCode+'|'+uid;if(!seen.has(key)){seen.add(key);members[t].push({uid,positionCode});}
    }
   }
   const conflicts=workGroupConflicts(d.groups,id,costCenterIds,members);
   if(conflicts.length)throw new HttpError(409,conflicts[0]);
-  const reason=str(body.reason).trim().slice(0,500);if(reason.length<10)throw new HttpError(400,'Enter a reason of at least 10 characters.');
+  const reason=str(body.reason).trim().slice(0,500)||'Partial group draft saved';
   const assessment=assessWorkGroup(members,tasks,paths,d.users,today);
   if(!costCenterIds.length){assessment.issues.unshift('Assign at least one cost center.');assessment.ready=false;}
   const {tasks:oldTasks,...oldFields}=prior.data;

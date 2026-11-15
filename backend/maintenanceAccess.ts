@@ -3,8 +3,18 @@ import { canAt, scopeOf } from './access';
 import type { OrgContext } from './guards';
 import { object, rows, texts } from './maintenanceDomain';
 import { bypass } from './testModeCore';
+import {groupGateRole,workGroupGateAllowed} from './maintenanceWorkGroupPolicy';
+export function configuredMaintenanceRole(ctx:OrgContext,gate:string,path:string[],legacy:unknown):string {
+ const group=groupGateRole(ctx.workGroupPolicy,gate,path);return group===null?str(object(legacy)[gate]):group;
+}
 
 export async function requireMaintenanceRole(ctx: OrgContext, gate: string, path: string[]) {
+    const groupRole=groupGateRole(ctx.workGroupPolicy,gate,path);
+    if(groupRole!==null){
+      if(!groupRole)throw new HttpError(409,'Configure '+gate+' in active Work Groups master setup.');
+      if(!workGroupGateAllowed(ctx.workGroupPolicy,gate,path))throw new HttpError(403,'The named Work Group employee assigned to '+gate+' is required at this location.');
+      return {role:groupRole,version:ctx.workGroupPolicy!.config.version};
+    }
     const settings = await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
     const role = str(object(settings?.data.approverRoles)[gate]);
     // Configuration is never relaxed. The platform testing override only relaxes HOLDING the configured job role.
