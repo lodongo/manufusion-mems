@@ -39,7 +39,7 @@ test('legacy records keep independent approval; all-off snapshot removes only ap
 });
 test('unsupported approval paths cannot be activated',()=>{
  const p=defaultMaintenanceGovernance();p.workRequest.enabled=true;p.technicalClosure.enabled=true;p.workOrder.enabled=true;p.workOrderStage='before_assessment';
- assert.equal(maintenanceActivationBlockers(p).length,2);
+ assert.equal(maintenanceActivationBlockers(p).length,1);
 });
 
 import {configuredOrderApprovalStage} from './maintenanceGovernancePolicy';
@@ -52,4 +52,15 @@ test('all four work-order stages are configurable without requiring duplicate as
   assert.equal(maintenanceAssessmentApprovalRequired(record),stage==='after_assessment');
   assert.equal(configuredOrderApprovalStage(record),stage==='after_assessment'?null:stage);
  }
+});
+
+import {workRequestApprovalRequired} from './maintenanceGovernancePolicy';
+test('request policy uses confirmation type, and unknown facts fail conservatively',()=>{
+ const p=defaultMaintenanceGovernance();p.workRequest.enabled=true;p.workRequest.conditions=[{field:'maintenanceType',op:'eq',value:'PM'}];
+ const d={maintenanceGovernance:{version:1,activatedAt:'2026-11-15',policy:p}};
+ assert.equal(workRequestApprovalRequired({},'PM'),false);
+ assert.equal(workRequestApprovalRequired(d,'PM'),true);
+ assert.equal(workRequestApprovalRequired(d,'CM'),false);
+ p.workRequest.conditions=[{field:'requiresSpares',op:'eq',value:true}];
+ assert.equal(workRequestApprovalRequired(d,'CM'),true);
 });

@@ -51,7 +51,6 @@ export function approvalRequirement(r:ApprovalRule,facts:Partial<Record<Conditio
 
 export function maintenanceActivationBlockers(p:GovernancePolicy):string[]{
  const blockers:string[]=[];
- if(p.workRequest.enabled)blockers.push('Separate work request approval is not yet connected to the workflow engine.');
  if(p.technicalClosure.enabled)blockers.push('Technical closure approval is not yet connected to the closure engine.');
  if(p.workOrder.enabled){
   if(p.workOrder.conditions.some(c=>c.field==='estimatedCost'||c.field==='riskScore'))blockers.push('Cost and risk threshold conditions require a verified fact adapter before activation.');
@@ -94,4 +93,11 @@ export function configuredOrderApprovalStage(d:Record<string,unknown>):Exclude<W
  const snap=readMaintenancePolicySnapshot(d.maintenanceGovernance);
  if(!snap||maintenanceActivationBlockers(snap.policy).length||snap.policy.workOrderStage==='after_assessment')return null;
  return approvalRequirement(snap.policy.workOrder,recordFacts(d))==='not_required'?null:snap.policy.workOrderStage;
+}
+
+/** Request approval uses facts known at confirmation. Missing facts require approval, never bypass it. */
+export function workRequestApprovalRequired(d:Record<string,unknown>,maintenanceTypeCode:string):boolean{
+ const snap=readMaintenancePolicySnapshot(d.maintenanceGovernance);
+ if(!snap)return false;
+ return approvalRequirement(snap.policy.workRequest,recordFacts({...d,maintenanceTypeCode}))!=='not_required';
 }

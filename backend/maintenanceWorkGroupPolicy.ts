@@ -11,7 +11,7 @@ export const managedPermissions=new Set(MNT_ACTIVITIES.map(a=>a.key).filter(k=>!
 const managedGates=new Set(MAINTENANCE_GATES.filter(g=>g.status==='existing'&&!externalGates.has(g.code)&&g.mode!=='automated').map(g=>g.code));
 export const DEFAULT_WORK_GROUP_TASKS:Record<string,string[]>={
  'MNT.WR.CREATE':[L,P,C,S,T,O],'MNT.WR.create':[L,P,C,S,T,O],'MNT.WR.edit':[L,P,C,S,T,O],'MNT.WR.cancel':[L,P,C,S,T,O],
- 'MNT.WR.REVIEW':[L,S,T],'MNT.WR.review':[L,S,T],'MNT.WR.CLOSE':[L,S,T],'MNT.WR.close':[L,S,T],
+ 'MNT.WR.REVIEW':[L,S,T],'MNT.WR.review':[L,S,T],'MNT.WR.APPROVAL':[L],'MNT.WR.approve':[L],'MNT.WR.CLOSE':[L,S,T],'MNT.WR.close':[L,S,T],
  'MNT.WR.return':[L,S,T],'MNT.WR.decline':[L,S,T],
  'MNT.WR.ASSESS':[S,T],'MNT.assessment.edit':[S,T],'MNT.ASSESS.REVIEW':[L],'MNT.assessment.review':[L],
  'MNT.TASK.VALIDATE':[L],'MNT.activities.edit':[L,S,T],

@@ -8,6 +8,7 @@ export const RETIRED_MAINTENANCE_KEYS=new Set(['MNT.WR.closeConfirm','MNT.WO.ver
 export function currentMaintenanceMappings<T>(roles:Record<string,T>):Record<string,T>{return Object.fromEntries(Object.entries(roles).filter(([k])=>!RETIRED_MAINTENANCE_KEYS.has(k)));}
 export type MntStage = 'request'|'assessment'|'conversion'|'planning'|'scheduling'|'execution'|'closure';
 export interface MntGate {
+ optionalPolicy?:boolean;
  code:string;stage:MntStage;label:string;mode:'permission'|'approval'|'verification'|'automated';
  permission:string|null;status:'existing'|'pending_implementation';
  requires:string[];owner:string;separation:string;legacyOnly?:boolean;
@@ -16,6 +17,7 @@ export const MAINTENANCE_GATES:readonly MntGate[] = [
  {code:'MNT.WO.PLAN',stage:'planning',label:'Secure assessed task resources and schedule work',mode:'permission',permission:'MNT.WO.plan',status:'existing',requires:['work_assessment_completed'],owner:'Configured maintenance planner',separation:'Technical scope changes require controlled reassessment'},
  {code:'MNT.WR.CREATE',stage:'request',label:'Create a work request',mode:'permission',permission:'MNT.WR.create',status:'existing',requires:[],owner:'Any permitted employee',separation:'No maker/checker'},
  {code:'MNT.WR.REVIEW',stage:'request',label:'Review work request: close or confirm into a Work Order',mode:'permission',permission:'MNT.WR.review',status:'existing',requires:['configured_job_role','location_scoped_security_permission','independent_reviewer'],owner:'Configured work request reviewer',separation:'Requester cannot assign or review their own request'},
+ {code:'MNT.WR.APPROVAL',stage:'request',label:'Optional independent Work Request approval before conversion',mode:'approval',permission:'MNT.WR.approve',status:'existing',requires:['request_review_completed','independent_approver','activated_policy'],owner:'Configured Maintenance Lead or alternative role',separation:'Requester and reviewing employee cannot approve the same confirmation',optionalPolicy:true},
  {code:'MNT.WR.CLOSE',stage:'request',label:'Close a request at review when no planning is needed (cause, solution, maintenance type)',mode:'approval',permission:'MNT.WR.close',status:'existing',requires:['cause','solution','maintenance_type','description'],owner:'Authorized work request reviewer',separation:'Direct closure; no secondary confirmation'},
  {code:'MNT.WR.ASSESS',stage:'assessment',label:'Assess tasks inside the Work Order',mode:'permission',permission:'MNT.assessment.edit',status:'existing',requires:['work_order_present','tasks_and_resources_captured','task_risk_assessment_completed'],owner:'Authorized assessor at the equipment (Work Group where active)',separation:'Assessment author is independent of the assessment approver'},
  {code:'MNT.ASSESS.REVIEW',stage:'assessment',label:'Independently approve completed task work assessment',mode:'approval',permission:'MNT.assessment.review',status:'existing',requires:['assessment_details_complete','all_tasks_risk_assessed','independent_reviewer','current_assessment_version'],owner:'Configured Maintenance Supervisor or Engineer reviewer',separation:'Reviewer must not be requester, creator or assessor; changes invalidate approval'},
@@ -37,7 +39,7 @@ export function maintenanceGateReadiness(configuredRoles:Readonly<Record<string,
  return gates.map(g=>({
   ...g,
   configuredRole:configuredRoles[g.code]||'',
-  roleRequired:ownerRoles.includes(g.code),
+  roleRequired:ownerRoles.includes(g.code)||g.optionalPolicy===true,
   ready:g.status==='existing'&&(!ownerRoles.includes(g.code)||!!configuredRoles[g.code])
  }));
 }

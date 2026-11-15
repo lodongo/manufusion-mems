@@ -1,6 +1,6 @@
 import {testDeletionEnabled,listTestMaintenanceDeletion,purgeTestMaintenance,previewBulkTestMaintenance,purgeBulkTestMaintenance} from './maintenanceTestDeletion';
 import {cleanupAuthorizationStatus,setCleanupAuthorization} from './maintenanceCleanupAuthorization';
-import {defaultMaintenanceGovernance,validateMaintenanceGovernance,MAINTENANCE_APPROVAL_TRANSACTION_CODES,maintenanceActivationBlockers,maintenanceAssessmentApprovalRequired,readMaintenancePolicySnapshot} from './maintenanceGovernancePolicy';
+import {defaultMaintenanceGovernance,validateMaintenanceGovernance,MAINTENANCE_APPROVAL_TRANSACTION_CODES,maintenanceActivationBlockers,maintenanceAssessmentApprovalRequired,readMaintenancePolicySnapshot,workRequestApprovalRequired} from './maintenanceGovernancePolicy';
 import {shortWorkOrderStatus} from './maintenanceWorkflowState';
 import {requireStageApproval} from './maintenanceStageApproval';
 import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
@@ -351,6 +351,7 @@ const WR_STATUS: Record<string, string> = {
     to_be_assessed: 'To Be Assessed',
     submitted: 'Submitted',
     under_review: 'Under review',
+    approval_pending: 'Awaiting work request approval',
     returned: 'Returned for information',
     declined: 'Declined',
     cancelled: 'Cancelled',
@@ -560,6 +561,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
             && !str(doc.data.woCode) && at(P.assessment_review) && gate('MNT.ASSESS.REVIEW') && independent(ctx, !mine && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid), 'mnt.assessment.review_independence'),
         convert: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) < 2)
             && !str(doc.data.woCode) && at(P.WR_convert) && gate('MNT.WR.CONVERT') && approved && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+        approveRequest: status==='approval_pending'&&!str(doc.data.woCode)&&at('MNT.WR.approve')&&gate('MNT.WR.APPROVAL')&&(testing||![str(doc.data.requestedBy),str(object(doc.data.requestApproval).submittedBy)].includes(ctx.uid)),
         ownRequest: mine,
     };
 }
@@ -764,6 +766,7 @@ async function closeRequestWithOrder(ctx:OrgContext,request:Doc,closure:Obj,patc
 
 /** Confirmation creates the order before any assessment or planning. */
 async function confirmRequestWithOrder(ctx:OrgContext,request:Doc,note:string,maintenanceType:ListItem,start:string,end:string):Promise<string>{
+ if(workRequestApprovalRequired(request.data,maintenanceType.code)&&object(request.data.requestApproval).status!=='approved')throw new HttpError(409,'Independent Work Request approval is required before conversion.');
  const cycle=await getMaintenanceCycle(ctx);validateCycleDates(maintenanceType.code,start,end,cycle);
  const now=nowIso(),n=await nextOrgCounter(ctx.orgId,'woSeq');
  if(n>99_999_999)throw new HttpError(400,'Work order numbering is exhausted.');
@@ -942,10 +945,14 @@ export const maintenanceRoutes = {
         if(!draft?.updateTime||ctx.body.expectedVersion!==v||ctx.body.expectedActiveVersion!==av||active&&!active.updateTime)throw new HttpError(409,'Configuration changed. Reload before activation.');
         const policy=validateMaintenanceGovernance(draft.data.policy),blockers=maintenanceActivationBlockers(policy);
         if(blockers.length)throw new HttpError(409,blockers.join(' '));
-        if(policy.workOrder.enabled){
+        if(policy.workOrder.enabled||policy.workRequest.enabled){
             const [legacy,group]=await Promise.all([getDoc(base+'/maintenance_workflow_settings/default'),getDoc(base+'/maintenance_work_group_active/default')]);
-            const legacyRole=str(object(legacy?.data.approverRoles)['MNT.ASSESS.REVIEW']),taskRoles=strs(object(group?.data.tasks)['MNT.ASSESS.REVIEW']);
-            if(!legacyRole&&!taskRoles.length)throw new HttpError(409,'Configure the existing maintenance assessment approval role before activation.');
+            const required=[...(policy.workOrder.enabled?['MNT.ASSESS.REVIEW']:[]),...(policy.workRequest.enabled?['MNT.WR.APPROVAL']:[])];
+            for(const gate of required){
+                const legacyRole=str(object(legacy?.data.approverRoles)[gate]),taskRoles=strs(object(group?.data.tasks)[gate]);
+                if(group&&!taskRoles.length)throw new HttpError(409,'Configure '+gate+' in the active Work Groups master before activation.');
+                if(!group&&!legacyRole)throw new HttpError(409,'Configure '+gate+' in Maintenance Workflows before activation.');
+            }
         }
         const activatedAt=nowIso(),fields={version:av+1,draftVersion:v,activatedAt,activatedBy:ctx.uid,policy,reason,transition:'new_transactions_only'};
         await commit([{path:dp,fields:{lastActivatedAt:activatedAt},mask:['lastActivatedAt'],updateTime:draft.updateTime},{path:ap,fields,...(active?{updateTime:active.updateTime}:{exists:false})},{path:base+'/maintenance_governance_activations/'+String(av+1),fields,exists:false}]);
@@ -1491,12 +1498,12 @@ export const maintenanceRoutes = {
                     const mine = str(d.data.requestedBy) === ctx.uid;
                     if (view === 'assessment'||view==='legacy_assessment') return (view!=='legacy_assessment'||!str(d.data.woCode)) && (s === 'under_review' && Number(d.data.reviewProcessVersion) < 2 || s === 'to_be_assessed') && (canAt(ctx, P.assessment_edit, pathOf(d), scope) || canAt(ctx, P.assessment_review, pathOf(d), scope) || canAt(ctx, P.WR_convert, pathOf(d), scope));
                     if (view === 'mine') return mine;
-                    if (view === 'review') return (s==='closure_pending'&&wrCan(ctx,d,scope,reviewRole).confirmClosure)
+                    if (view === 'review') return (s==='approval_pending'&&wrCan(ctx,d,scope,reviewRole).approveRequest)||(s==='closure_pending'&&wrCan(ctx,d,scope,reviewRole).confirmClosure)
                         || (s === 'created' && wrCan(ctx,d,scope,reviewRole).startReview)
                         || ((!mine || ctx.testMode === true) && ['submitted', 'under_review'].includes(s)
                             && (Number(d.data.reviewProcessVersion) < 2 || wrCan(ctx,d,scope,reviewRole).toAssessment)
                             && (canAt(ctx, P.WR_review, pathOf(d), scope) || canAt(ctx, P.WR_close, pathOf(d), scope)));
-                    if (view === 'open') return ['created', 'submitted', 'under_review', 'returned', 'closure_pending'].includes(s);
+                    if (view === 'open') return ['created', 'submitted', 'under_review','approval_pending', 'returned', 'closure_pending'].includes(s);
                     return true;
                 })
                 .sort((a, b) => b.id.localeCompare(a.id))
@@ -1626,6 +1633,8 @@ export const maintenanceRoutes = {
                 reviewRoleCode: reviewRole,
                 reviewRoleName: reviewRole.startsWith('WG:') ? (groupAt(ctx.workGroupPolicy,pathOf(doc))?.name||'Work Group')+' · Assigned reviewer' : reviewRole ? str((await getDoc(`organizations/${ctx.orgId}/positions/${reviewRole}`))?.data.title) || reviewRole : '',
                 reviewWorkflowConfigured: !!reviewRole,
+                requestApproval: isObj(d.requestApproval)?d.requestApproval:null,
+                requestApprovalEnabled: readMaintenancePolicySnapshot(d.maintenanceGovernance)?.policy.workRequest.enabled===true,
                 reviewDecision: str(d.reviewDecision),
                 reviewCancellationCategory: str(d.reviewCancellationCategory),
                 repeatRequestCode: str(d.repeatRequestCode),
@@ -1692,6 +1701,7 @@ export const maintenanceRoutes = {
                 if (!assignedReviewer && str(doc.data.reviewerUid)) bypass(ctx,'mnt.wr.assigned_reviewer');
             }
             const reviewNew = Number(doc.data.reviewProcessVersion) >= 2;
+            if(doc.data.status==='approval_pending'&&!['approve_request','return_request_approval'].includes(action))throw new HttpError(409,'Work request confirmation is pending independent approval. Approve or return it before any change.');
             switch (action) {
                 case 'edit': {
                     deny(can.edit, 'Only the requester or assigned reviewer can edit before technical assessment is saved.');
@@ -1872,6 +1882,24 @@ export const maintenanceRoutes = {
                         `${category}${repeatRequestCode ? ' · repeat of '+repeatRequestCode : ''}: ${reason}`);
                     return { ok: true };
                 }
+                case 'approve_request':
+                case 'return_request_approval': {
+                    deny(can.approveRequest,'Only an independent, authorized Work Request approver can decide.');
+                    const pending=object(doc.data.requestApproval);
+                    if(pending.status!=='pending'||!str(pending.submittedBy)||!str(pending.maintenanceTypeCode)||!Number(doc.data.reviewProcessVersion)||!workRequestApprovalRequired(doc.data,str(pending.maintenanceTypeCode)))throw new HttpError(409,'No valid pending Work Request approval.');
+                    const role=await requireConfiguredMaintenanceRole(ctx,'MNT.WR.APPROVAL',pathOf(doc));
+                    if([str(doc.data.requestedBy),str(pending.submittedBy)].includes(ctx.uid)&&!bypass(ctx,'mnt.wr.approval_independence'))throw new HttpError(403,'The request and review authors cannot approve their own confirmation.');
+                    if(note.length<10)throw new HttpError(400,'Enter decision notes (at least 10 characters).');
+                    const decision={...pending,status:action==='approve_request'?'approved':'returned',decidedBy:ctx.uid,decidedByName:displayName(ctx),decidedAt:now,jobRole:role.role,decisionNote:note};
+                    const requestApprovalHistory=[...objs(doc.data.requestApprovalHistory),decision];
+                    if(action==='return_request_approval'){
+                        await done({status:'under_review',requestApproval:decision,requestApprovalHistory},'Confirmation returned by approver','mnt.wr.approval_returned',note);return {ok:true};
+                    }
+                    const type=pick(l.maintenanceTypes,str(pending.maintenanceTypeCode),'maintenance type')!;
+                    const approvedDoc={...doc,data:{...doc.data,requestApproval:decision,requestApprovalHistory}};
+                    const woCode=await confirmRequestWithOrder(ctx,approvedDoc,str(pending.note),type,str(pending.scheduledStart),str(pending.scheduledEnd));
+                    await rec(ctx,'mnt.wr.approved',doc.id,note);return {ok:true,woCode};
+                }
                 case 'confirm_review':
                 case 'to_assessment': {
                     if(action==='confirm_review'||Number(doc.data.reviewProcessVersion)>=3){
@@ -1879,7 +1907,14 @@ export const maintenanceRoutes = {
                         deny(can.toAssessment,'Only the assigned reviewer can confirm this request.');
                         if(str(doc.data.title).length<3||doc.data.titleAuto===true||str(doc.data.description).length<10||!str(doc.data.sourceCode)||!objs(doc.data.impacts).length)throw new HttpError(400,'Complete the request title, finding, source and impacts before confirmation.');
                         const type=pick(l.maintenanceTypes,str(ctx.body.maintenanceTypeCode),'maintenance type')!;
-                        const woCode=await confirmRequestWithOrder(ctx,doc,note,type,str(ctx.body.scheduledStart),str(ctx.body.scheduledEnd));return {ok:true,woCode};
+                        const start=str(ctx.body.scheduledStart),end=str(ctx.body.scheduledEnd);
+                        if(workRequestApprovalRequired(doc.data,type.code)){
+                            const cycle=await getMaintenanceCycle(ctx);validateCycleDates(type.code,start,end,cycle);
+                            const pending={status:'pending',submittedBy:ctx.uid,submittedByName:displayName(ctx),submittedAt:now,maintenanceTypeCode:type.code,maintenanceTypeLabel:type.label,scheduledStart:start,scheduledEnd:end,note,policyVersion:readMaintenancePolicySnapshot(doc.data.maintenanceGovernance)!.version};
+                            await done({status:'approval_pending',requestApproval:pending,requestApprovalHistory:[...objs(doc.data.requestApprovalHistory),pending]},'Confirmation submitted for approval','mnt.wr.approval_submitted',note);
+                            return {ok:true,pendingApproval:true};
+                        }
+                        const woCode=await confirmRequestWithOrder(ctx,doc,note,type,start,end);return {ok:true,woCode};
                     }
                     if (str(doc.data.assessmentCode) && str(doc.data.status) === 'to_be_assessed')
                         return { ok: true, assessmentCode: str(doc.data.assessmentCode) };

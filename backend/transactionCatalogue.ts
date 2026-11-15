@@ -311,7 +311,7 @@ export const ACTION_LINKS: Record<string, Array<{ route: string; permission: str
     'MNT-WRQ-CR': [{ route: 'POST /api/org/mnt/wr/create', permission: 'MNT.WR.create' }],
     'MNT-WRQ-SB': [{ route: 'POST /api/org/mnt/wr/create', permission: 'MNT.WR.create' }],
     'MNT-WRQ-ED': [{ route: WR, permission: 'MNT.WR.edit' }, { route: WR, permission: 'MNT.WR.review' }],
-    'MNT-WRQ-AP': [{ route: WR, permission: 'MNT.WR.review' }, { route: WR, permission: 'MNT.WR.convert' }],
+    'MNT-WRQ-AP': [{ route: WR, permission: 'MNT.WR.review' }, { route: WR, permission: 'MNT.WR.convert' },{route:WR,permission:'MNT.WR.approve'}],
     'MNT-WRQ-CL': [{ route: WR, permission: 'MNT.WR.close' }],
     'MNT-WRQ-RJ': [{ route: WR, permission: 'MNT.WR.decline' }],
     'MNT-WRQ-RT': [{ route: WR, permission: 'MNT.WR.return' }],

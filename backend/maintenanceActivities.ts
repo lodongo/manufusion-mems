@@ -6,6 +6,7 @@ export const MNT_ACTIVITIES: Array<{ key: string; label: string }> = [
     { key: 'MNT.WR.edit', label: 'Work request: edit own (before saved assessment) and resubmit' },
     { key: 'MNT.WR.cancel', label: 'Work request: cancel own (before saved assessment)' },
     { key: 'MNT.WR.review', label: 'Work request: review and confirm into a Work Order' },
+    { key: 'MNT.WR.approve', label: 'Work request: optional independent approval before conversion' },
     { key: 'MNT.WR.return', label: 'Work request: return to requester for information' },
     { key: 'MNT.WR.decline', label: 'Work request: decline' },
     { key: 'MNT.WR.close', label: 'Work request: close at review when no planning is needed (cause, solution, type)' },

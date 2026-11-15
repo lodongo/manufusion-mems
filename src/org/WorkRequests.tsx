@@ -74,6 +74,7 @@ interface WrCan {
     close: boolean;
     confirmClosure: boolean;
     ownRequest: boolean;
+    approveRequest?: boolean;
 }
 interface Closure {
     causeCode: string; causeLabel: string; causeGroup: string;
@@ -95,6 +96,8 @@ interface Detail extends Row {
     reviewWorkflowConfigured?: boolean;
     testModeOverride?: boolean;
     reviewDecision?: string;
+    requestApprovalEnabled?:boolean;
+    requestApproval?:{status:string;submittedByName?:string;maintenanceTypeLabel?:string;scheduledStart?:string;scheduledEnd?:string;decisionNote?:string;decidedByName?:string};
     reviewCancellationCategory?: string;
     repeatRequestCode?: string;
     criticalityOriginalLabel: string;
@@ -137,7 +140,7 @@ interface Detail extends Row {
     can: WrCan;
 }
 
-export const WR_TONE: Record<string, 'brand' | 'muted' | 'danger' | 'warn'> = { created: 'warn', to_be_assessed: 'brand', confirmed:'brand', submitted: 'warn', under_review: 'warn', returned: 'danger', declined: 'muted', cancelled: 'muted', converted: 'brand', closure_pending: 'warn', closed: 'brand' };
+export const WR_TONE: Record<string, 'brand' | 'muted' | 'danger' | 'warn'> = { created: 'warn', to_be_assessed: 'brand', confirmed:'brand', submitted: 'warn', under_review: 'warn', approval_pending:'warn', returned: 'danger', declined: 'muted', cancelled: 'muted', converted: 'brand', closure_pending: 'warn', closed: 'brand' };
 
 export function useMntSetup() {
     return useLoad(() => callBackend<MntSetup>('/api/org/mnt/setup'));
@@ -788,6 +791,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
               </nav>
               <div className='min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-1 py-3 sm:px-4'>
                 <MaintenanceResponsibility record={r}/>
+                {r.requestApproval&&<Card className='space-y-2'><p className='font-semibold'>Work Request approval · {r.requestApproval.status}</p><p className='text-sm text-soft'>Submitted by {r.requestApproval.submittedByName||'reviewer'} · {r.requestApproval.maintenanceTypeLabel} · {r.requestApproval.scheduledStart} to {r.requestApproval.scheduledEnd}</p>{r.requestApproval.decisionNote&&<p className='text-sm text-soft'>{r.requestApproval.decidedByName}: {r.requestApproval.decisionNote}</p>}{can.approveRequest&&<><textarea className='w-full rounded-lg border border-line bg-panel p-3 text-ink' rows={3} placeholder='Decision notes (minimum 10 characters)' value={note} onChange={e=>setNote(e.target.value)}/><div className='flex flex-wrap gap-2'><Button busy={busy} disabled={note.trim().length<10} onClick={()=>void run('approve_request')}>Approve and create Work Order</Button><Button variant='secondary' disabled={busy||note.trim().length<10} onClick={()=>void run('return_request_approval')}>Return for correction</Button></div></>}</Card>}
                 {actionError && !mode && <MntGateHint message={actionError}/>}
                 {section==='assessment' && !mode && <Card className='space-y-3'>
                    <p className='text-xs font-semibold uppercase tracking-wider text-emerald-300'>Separate stage · Work Assessment</p>
@@ -813,13 +817,13 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
 
                 {mode === 'to_assess' && <Card className='space-y-3'>
                     <h2 className='text-lg font-semibold text-ink'>Confirm Work Request</h2>
-                    <p className='text-sm text-soft'>MEMS will create the numbered Work Order immediately. Assessment is its first step. The confirmed request remains linked and read-only.</p>
+                    <p className='text-sm text-soft'>{r.requestApprovalEnabled?'If the configured approval rule applies, MEMS submits the confirmation to an independent approver before creating the Work Order.':'MEMS will create the numbered Work Order immediately.'} Assessment is its first step. The confirmed request remains linked and read-only.</p>
                     <SelectField id='confirm-maintenance-type' label='Maintenance type *' value={confirmationType} onChange={e=>{setConfirmationType(e.target.value);setStartDate('');setEndDate('');}}><option value=''>Choose maintenance type</option>{lists.maintenanceTypes.map(t=><option key={t.code} value={t.code}>{t.label}</option>)}</SelectField>
                     <p className='text-sm text-soft'>{setup.maintenanceCycle?.restrictedTypes.includes(confirmationType)?'Earliest start: next cycle '+setup.maintenanceCycle.nextStart:confirmationType?'Same-cycle work is allowed.':''} {setup.maintenanceCycle?.timeZone}</p>
                     <div className='grid grid-cols-2 gap-2'><label className='block text-sm'>Start date *<input type='date' className='mt-1 w-full rounded-xl border border-line bg-panel p-3' min={setup.maintenanceCycle?.restrictedTypes.includes(confirmationType)?setup.maintenanceCycle.nextStart:setup.maintenanceCycle?.today} value={startDate} onChange={e=>{setStartDate(e.target.value);if(endDate<e.target.value)setEndDate('');}} required/></label><label className='block text-sm'>End date *<input type='date' className='mt-1 w-full rounded-xl border border-line bg-panel p-3' min={startDate} value={endDate} onChange={e=>setEndDate(e.target.value)} required/></label></div>
                     {actionError && <Alert tone='error'>{actionError}</Alert>}
                     <div className='flex gap-2'>
-                        <Button testOverride={r.testModeOverride} busy={busy} disabled={!confirmationType||!startDate||!endDate||endDate<startDate||startDate<(setup.maintenanceCycle?.restrictedTypes.includes(confirmationType)?setup.maintenanceCycle.nextStart:setup.maintenanceCycle?.today||'')} onClick={() => run('confirm_review',{maintenanceTypeCode:confirmationType,scheduledStart:startDate,scheduledEnd:endDate})}>Confirm &amp; create Work Order</Button>
+                        <Button testOverride={r.testModeOverride} busy={busy} disabled={!confirmationType||!startDate||!endDate||endDate<startDate||startDate<(setup.maintenanceCycle?.restrictedTypes.includes(confirmationType)?setup.maintenanceCycle.nextStart:setup.maintenanceCycle?.today||'')} onClick={() => run('confirm_review',{maintenanceTypeCode:confirmationType,scheduledStart:startDate,scheduledEnd:endDate})}>{r.requestApprovalEnabled?'Confirm / submit for approval':'Confirm & create Work Order'}</Button>
                         <Button variant='secondary' onClick={() => setMode('')}>Back</Button>
                     </div>
                 </Card>}
