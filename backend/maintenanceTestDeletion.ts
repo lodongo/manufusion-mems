@@ -119,7 +119,7 @@ async function bulkPlan(ctx:OrgContext){
    const d=x.doc.data,linked=[str(d.wrCode),str(d.workRequestCode),str(d.woCode),str(d.assessmentCode),str(d.parentWoCode),str(d.rootWoCode),str(row(d.closure).woCode),x.kind==='order'&&x.doc.id.includes('_')?x.doc.id.split('_')[0]:''].filter(id=>allPrimary.has(id));
    if(family.has(x.doc.id)||linked.some(id=>family.has(id)))for(const id of [x.doc.id,...linked])if(!family.has(id)){family.add(id);changed=true;}
  }}
- const chosen=primary.filter(x=>family.has(x.doc.id)), remove=new Map(chosen.map(x=>[keyOf(x),x]));
+ const chosen=primary.filter(x=>family.has(x.doc.id)), remove=new Map<string,BulkDoc>(chosen.map(x=>[keyOf(x),x]));
  const blockers=new Set<string>(),retained=new Set<string>();
  for(const x of chosen)if(x.kind==='request'&&(x.doc.data.gembaId||x.doc.data.gembaObservationId))blockers.add('Gemba origin: '+x.doc.id);
  const secondary=(await Promise.all(casualCollections.map(async collection=>(await listDocs(base+'/'+collection)).map(doc=>({collection,doc}))))).flat();
