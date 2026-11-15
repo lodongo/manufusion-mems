@@ -12,6 +12,7 @@ import { createMaintenanceRequirement } from './purchaseRequirements';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { postMaintenanceReturn } from './finOps';
 import { maintenancePermission, requireMaintenanceRole } from './maintenanceAccess';
+import { workGroupResourcePool, requireOutsideGroupOptIn } from './maintenanceWorkGroups';
 import { assessmentReviewCurrent } from './maintenanceAssessmentReview';
 import { maintenanceKey, reserveTaskSpare, releaseMaintenanceReservations, verifyMaintenanceStockLedger } from './maintenanceInventory';
 import {
@@ -468,11 +469,9 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
     if (action === 'allocate') {
         const ids = [...new Set(texts(b.personnel))];
         if (ids.length < Number(task.persons) || ids.length > 50) throw new HttpError(400, 'Allocate enough personnel for this task.');
-        for (const id of ids) {
-            const u = await getDoc(`users/${identifier(id)}`);
-            if (!u || u.data.orgId !== ctx.orgId || u.data.status === 'disabled')
-                throw new HttpError(400, 'Choose active employees in this organization.');
-        }
+        const pool = await workGroupResourcePool(ctx.orgId, wo);
+        const outside = requireOutsideGroupOptIn(ids, pool.people, b.includeOutsideGroup);
+        for (const id of ids) identifier(id);
         const coveredSkills = new Set<string>();
         for (const id of ids) {
             const employee = await getDoc(`users/${id}`);
@@ -492,6 +491,11 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                         ...p,
                         allocation: {
                             personnel: ids,
+                            workGroupId: pool.group?.id || '',
+                            workGroupCode: pool.group?.code || '',
+                            workGroupVersion: pool.group?.version || 0,
+                            outsideGroupPersonnel: outside,
+                            outsideGroupOptIn: outside.length > 0,
                             toolsReady: true,
                             competenciesConfirmed: true,
                             notes: requiredText(b.note, 'Allocation evidence'),
@@ -504,6 +508,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                 plannedByName: name(ctx),
             },
             'task.resources.allocated',
+            (pool.group?.code || 'No work group configured') + (outside.length ? ' · Outside group (explicitly selected): ' + outside.join(', ') : ' · Work group team only'),
         );
         return { ok: true };
     }
@@ -1784,6 +1789,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
             canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));
         const users = await runQuery({ from: [{ collectionId: 'users' }], where: fieldEq('orgId', ctx.orgId) });
+        const pool=await workGroupResourcePool(ctx.orgId,wo,users);
         const workflow=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
         const reviewRole=str(object(workflow?.data.approverRoles)['MNT.ASSESS.REVIEW']);
         return {
@@ -1794,9 +1800,8 @@ export async function maintenanceOperations(ctx: OrgContext) {
             permissions,
             testModeOverride: ctx.role==='org_super_admin' && ctx.testMode===true,
             currentUserId: ctx.uid,
-            people: users
-                .filter((u) => u.data.orgId === ctx.orgId && u.data.status !== 'disabled')
-                .map((u) => ({ id: u.id, name: [str(u.data.firstName), str(u.data.lastName)].join(' ') })),
+            workGroup: pool.group,
+            people: pool.people,
             issues: (await listDocs(`${root(ctx)}/goods_issues`))
                 .filter((i) => i.data.workOrderId === wo.id)
                 .map((i) => ({ id: i.id, ...i.data })),

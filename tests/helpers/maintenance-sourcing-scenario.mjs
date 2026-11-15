@@ -565,7 +565,7 @@ for (const [id, po] of [['overhaul', 'PO00000102-V1'], ['calibration', 'PO000001
 read = await op('planner', 'read', { code: wo });
 assert.equal(read.readiness.ready, false, 'People and tools are still outstanding');
 for (const t of ['drive', 'gearbox'])
-    await op('planner', 'allocate', { code: wo, taskId: t, personnel: [people.tech[0]], toolsReady: true, competenciesConfirmed: true, note: 'Qualified technician and tools confirmed.' });
+    await op('planner', 'allocate', { code: wo, taskId: t, includeOutsideGroup: true, personnel: [people.tech[0]], toolsReady: true, competenciesConfirmed: true, note: 'Qualified technician and tools confirmed.' });
 read = await op('planner', 'read', { code: wo });
 assert.deepEqual(read.readiness.problems, []);
 assert.equal(read.readiness.ready, true);

@@ -11,3 +11,6 @@ The work group is a site-level operational team, not a new cost center or financ
 - Test tenant/site separation, concurrent edits, repeated roles/titles, staffing vacancies, stale approvals, exact gate permission, and independent external authorities.
 
 The Work Groups screen clearly marks saved records as drafts. Current workflow configuration remains authoritative. No migration or activation is performed in this change.
+
+## Planner resource pool and numbering
+New groups receive an immutable tenant-wide WG_0001-style sequence from a database counter committed atomically with the group. Existing codes are retained; the next number is above any existing sequence. Saved groups (including draft role mappings) identify planning resources but grant no security authority. The planner sees the work order cost center’s group by default. The server independently requires an explicit per-allocation outside-group opt-in; when no group is configured every employee is outside the group. The allocation records the group revision and outside employee IDs. Existing competency, scope, maker/checker and execution gates remain in force.

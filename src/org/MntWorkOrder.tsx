@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, Package, ShieldCheck, Wrench, CalendarClock, CheckCircle2, ChevronDown } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { workspaceNavigate as navigate } from '../lib/route';
-import { Alert } from '../components/ui';
+import { Alert, SelectField } from '../components/ui';
 import { Button, Card, Spinner, useLoad } from '../admin/kit';
 import { WorkOrderVouchers } from './StoresIssueVouchers';
 import MntTaskAssessment, { WarehouseSparePicker, CatalogPicker } from './MntTaskAssessment';
@@ -154,6 +154,7 @@ function ResourceForm({
     resource,
     previous,
     people,
+    workGroup,
     item = {},
     onRun,
     onClose,
@@ -164,10 +165,12 @@ function ResourceForm({
     resource: MntData;
     previous: MntData;
     people: MntData[];
+    workGroup?: MntData | null;
     item?: MntData;
     onRun: (action: string, b?: MntData) => Promise<boolean>;
     onClose: () => void;
 }) {
+    const [includeOutsideGroup, setIncludeOutsideGroup] = useState(false);
     const [data, setData] = useState<MntData>({
         personnel: previous.personnel || [],
         materialId: '',
@@ -182,6 +185,11 @@ function ResourceForm({
         lineNo: item.orderReady?.lineNo || '',
         readyAt: resource.executionDate || '',
     });
+    const isGroupMember = (id:string) => people.some(p=>p.id===id && p.inWorkGroup===true);
+    const outsideSelected=(data.personnel as string[]).filter(id=>!isGroupMember(id));
+    const availablePeople=people.filter(p=>p.inWorkGroup===true||includeOutsideGroup);
+    // Refreshing the allocation context (or reopening the dialog) never retains the opt-in.
+    useEffect(()=>{setIncludeOutsideGroup(false);},[code,task.id,people,workGroup]);
     const isService = !!resource.scope || 'acceptanceCriteria' in resource;
     const vendors = useVendors(kind === 'service_sourcing' ? code : '', data.supplierCategory, resource.categoryCode || '', resource.subcategoryCode || '');
     const [warehouses, setWarehouses] = useState<Array<{ id: string; name: string }>>([]);
@@ -210,10 +218,11 @@ function ResourceForm({
         if (kind === 'service_sourcing' && !data.supplierCategory) return setError('Choose the supplier category.');
         if (kind === 'service_sourcing' && !data.preferredVendorId && (String(data.suggestedVendor || '').trim().length < 3 || String(data.onboardingReason || '').trim().length < (vendors.vendors.length ? 20 : 10)))
             return setError('Give the suggested supplier and the reason for onboarding.');
+        if (kind === 'allocate' && outsideSelected.length && !includeOutsideGroup) return setError('Enable outside-work-group selection to keep the selected outside employees, or remove them.');
         if (kind === 'secure_spare' && needsWarehouse && !data.warehouseId) return setError('Choose the warehouse.');
         if (kind === 'procure' && (!data.glCode || !data.dateRequired)) return setError('Enter the GL account and the date required.');
         setBusy(true);
-        if (await onRun(kind, { taskId: task.id, resourceId: resource.id, ...data })) onClose();
+        if (await onRun(kind, { taskId: task.id, resourceId: resource.id, ...data, ...(kind==='allocate'?{includeOutsideGroup}: {}) })) onClose();
         setBusy(false);
     };
     return (
@@ -223,19 +232,18 @@ function ResourceForm({
                     <p className="text-sm text-soft">
                         Required: {task.persons} people · {task.skills}. Tools: {task.tools || 'None'}.
                     </p>
-                    <fieldset className="grid gap-2 sm:grid-cols-2">
-                        <legend>Allocate execution personnel</legend>
-                        {people.map((p) => (
-                            <MntCheck
-                                key={p.id}
-                                label={p.name}
-                                value={data.personnel.includes(p.id)}
-                                onChange={(v) =>
-                                    patch('personnel', v ? [...data.personnel, p.id] : data.personnel.filter((id: string) => id !== p.id))
-                                }
-                            />
-                        ))}
-                    </fieldset>
+                    <div className="rounded-xl border border-line p-3">
+                        <p className="font-semibold">{workGroup ? workGroup.code+' · '+workGroup.name : 'No work group configured for this cost center'}</p>
+                        <p className="mt-1 text-xs text-soft">{people.filter(p=>p.inWorkGroup===true).length} eligible work group members. Outside-group selection is off by default.</p>
+                        <div className="mt-3"><MntCheck label="Include employees outside the work group" value={includeOutsideGroup} onChange={setIncludeOutsideGroup}/></div>
+                        {!includeOutsideGroup&&outsideSelected.length>0&&<Alert tone="warn">Previously selected outside-group employees are retained for review only. To save them, explicitly enable outside-group selection again, or remove them below.</Alert>}
+                        <div className="mt-3 space-y-2">{(data.personnel as string[]).map(id=>{const p=people.find(x=>x.id===id);return <div key={id} className="flex items-center justify-between gap-2 rounded-lg border border-line p-2 text-sm"><span>{p?.name||id}{!isGroupMember(id)?' · Outside group':''}</span><button type="button" className="min-h-10 px-2 text-rose-400" onClick={()=>patch('personnel',(data.personnel as string[]).filter(x=>x!==id))}>Remove</button></div>;})}</div>
+                        <div className="mt-3"><SelectField id="mnt-allocate-person" label="Add execution personnel" value="" disabled={!availablePeople.some(p=>!data.personnel.includes(p.id))} onChange={e=>{if(e.target.value&&!data.personnel.includes(e.target.value))patch('personnel',[...data.personnel,e.target.value]);}}>
+                            <option value="">Choose employee</option>
+                            <optgroup label="Work group team">{availablePeople.filter(p=>p.inWorkGroup===true&&!data.personnel.includes(p.id)).map(p=><option key={p.id} value={p.id}>{p.name}{p.genericTitles?.length?' · '+p.genericTitles.join(', '):''}</option>)}</optgroup>
+                            {includeOutsideGroup&&<optgroup label="Outside work group">{availablePeople.filter(p=>p.inWorkGroup!==true&&!data.personnel.includes(p.id)).map(p=><option key={p.id} value={p.id}>{p.name} · Outside group</option>)}</optgroup>}
+                        </SelectField></div>
+                    </div>
                     <MntCheck
                         label="The allocated personnel have the required skills and competencies."
                         value={!!data.competenciesConfirmed}
@@ -1153,6 +1161,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                             previous={dialog.previous}
                             item={dialog.previous?.item || data.readiness.items.find((x: MntData) => x.taskId === task.id && (x.spareId === dialog.resource?.id || x.serviceId === dialog.resource?.id)) || {}}
                             people={data.people}
+                            workGroup={data.workGroup}
                             onRun={run}
                             onClose={() => setDialog(null)}
                         />

@@ -128,6 +128,7 @@ for (const [key, [uid, rs]] of Object.entries(people))
         email: key + '@example.test',
         assignments: rs.map((positionCode) => ({ positionCode, nodeId: 'SITE', type: 'primary', startsOn: '2020-01-01', endsOn: '' })),
     });
+seed(r+'/maintenance_work_groups/TEAM', {code:'WG_0001',name:'Line team',siteId:'SITE',costCenterIds:['LINE_CC'],members:{'Maintenance Technician':[{uid:people.tech[0],positionCode:'EXEC'}]},version:1,status:'draft'});
 const context = (who, body = {}) => {
     const uid = people[who][0];
     return {
@@ -427,6 +428,14 @@ await assert.rejects(
     () => route(maintenanceRoutes, '/api/org/mnt/wo/action', 'manager', { code: wo, action: 'close', confirm: wo }),
     /task|Safety|handover|cannot close/i,
 );
+const poolRead=await op('planner','read',{code:wo});
+assert.equal(poolRead.workGroup.code,'WG_0001');
+assert.equal(poolRead.people.find(p=>p.id===people.tech[0]).inWorkGroup,true);
+assert.equal(poolRead.people.find(p=>p.id===people.manager[0]).inWorkGroup,false);
+const externalAllocation={code:wo,taskId:tasks[0].id,personnel:[people.manager[0]],toolsReady:true,competenciesConfirmed:true,note:'External employee deliberately requested for the task.'};
+await assert.rejects(()=>op('planner','allocate',externalAllocation),/outside the work group/i);
+await op('planner','allocate',{...externalAllocation,includeOutsideGroup:true});
+assert.deepEqual(snapshot(r+'/work_orders/'+wo).data.taskPlanning[tasks[0].id].allocation.outsideGroupPersonnel,[people.manager[0]]);
 for (const t of tasks)
     await op('planner', 'allocate', {
         code: wo,
