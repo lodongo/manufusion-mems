@@ -1,3 +1,4 @@
+import {stateOf,transitionPatch,type FactSet} from './maintenanceWorkflowState';
 import {responsibilityData,responsibilityFor,groupFields} from './maintenanceResponsibility';
 import { createHash } from 'node:crypto';
 import { bypass } from './testModeCore';
@@ -75,6 +76,7 @@ async function saveWo(ctx: OrgContext, wo: Doc, patch: Obj, action: string, note
         },
     ]);
     await event(ctx, action, wo.id, note);
+    await syncOrderAfter(ctx,wo.id,action);
 }
 async function order(ctx: OrgContext, code: unknown) {
     const id = identifier(code);
@@ -327,6 +329,7 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
             if (shortage > 0) problems.push(`${str(t.description)}: secure ${shortage} ${str(spare.uom)} of ${str(spare.description)}.`);
             if (status === 'supply_closed') problems.push(`${str(t.description)}: requirement ${requirementId} for ${str(spare.description)} was cancelled or rejected; secure the spare again.`);
         }
+        if(object(t.externalResource).type&&!object(planning.externalSpecialist).at)problems.push(`${str(t.description)}: secure external specialist and record availability evidence.`);
         for (const s of rows(t.services)) {
             const p = object(planning[str(s.id)]);
             const procurement = str(p.requirementId) ? trace.get(str(p.requirementId)) : undefined;
@@ -352,7 +355,7 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
                           : object(p.sourcing).supplierCategory
                             ? 'sourcing_confirmed'
                             : 'awaiting_sourcing';
-            items.push({ taskId: t.id, serviceId: s.id, kind: 'service', ...p, status, procurement: procurement ?? null, orderReady });
+            items.push({ taskId: t.id, serviceId: s.id, kind: 'service', ...p, description:str(s.description), status, procurement: procurement ?? null, orderReady });
             if (!ready)
                 problems.push(
                     status === 'order_inactive'
@@ -382,6 +385,7 @@ async function planChecklist(ctx: OrgContext, wo: Doc, ready?: Awaited<ReturnTyp
     const items = [
         { key: 'spares', label: 'Spares available and reserved', done: spares.every((i) => i.status === 'reserved'), detail: `${spares.filter((i) => i.status === 'reserved').length} of ${spares.length} reserved` },
         { key: 'services', label: 'Services engaged with procurement and secured', done: services.every((i) => i.status === 'secured'), detail: `${services.filter((i) => i.status === 'secured').length} of ${services.length} secured` },
+        {key:'external_specialist',label:'External specialists secured',done:!r.problems.some(p=>p.includes('secure external specialist')),detail:''},
         { key: 'people', label: 'People and tools allocated', done: !r.problems.some((p) => p.includes('allocate qualified personnel')), detail: '' },
         { key: 'schedule', label: 'Schedule dates reviewed and locked', done: !!lock.at && lock.start === wo.data.scheduledStart && lock.end === wo.data.scheduledEnd, detail: `${str(wo.data.scheduledStart) || 'no start'} to ${str(wo.data.scheduledEnd) || 'no end'}` },
         { key: 'risk', label: 'Risk assessment reviewed from the assessment', done: !!riskReview.at && Number(riskReview.version) === version, detail: str(riskReview.note) },
@@ -390,6 +394,33 @@ async function planChecklist(ctx: OrgContext, wo: Doc, ready?: Awaited<ReturnTyp
     return { items, estimate: est, cost, budget, problems: r.problems, ready: items.every((i) => i.done) && r.ready };
 }
 
+/** Evaluate on each successful maintenance mutation and on read. External changes are observed from live source records. */
+export async function syncWorkOrderState(ctx:OrgContext,doc:Doc,source='refresh'):Promise<Doc>{
+ let wo=doc;
+ for(let attempt=0;attempt<3;attempt++){
+  const d=wo.data,status=str(d.status),facts:FactSet={};
+  if(!isRequestClosureOrder(d)&&['planning','plan_ready','released','scheduled'].includes(status)){
+    const settings=await getDoc(root(ctx)+'/maintenance_workflow_settings/default'),token=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),settings?.data.approverRoles);
+    facts.approved=!!token&&assessmentReviewCurrent(d,token);
+    if(facts.approved){const ready=await readiness(ctx,wo),check=await planChecklist(ctx,wo,ready);facts.items=ready.items;facts.checklist=check.items;facts.costStatus=check.cost.status;}
+  }
+  if(!isRequestClosureOrder(d)&&['scheduled','in_progress'].includes(status)){
+    const pending=tasksOf(wo).filter(t=>object(object(d.taskExecution)[str(t.id)]).status!=='completed');
+    facts.windowStatus='ready';
+    for(const t of pending){const tid=str(t.id),win=str(object(object(d.taskExecution)[tid]).windowId)||str(object(d.taskWindows)[tid])||str(d.windowId);if(!win){facts.windowStatus='missing';break;}try{await requireApprovedWindow(ctx,wo,tid);}catch{facts.windowStatus='blocked';}}
+  }
+  if(['completed','verified','in_progress'].includes(status)&&tasksOf(wo).every(t=>object(object(d.taskExecution)[str(t.id)]).status==='completed'))facts.openIncident=(await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared');
+  const state=stateOf(d,facts),patch=transitionPatch(d,state,nowIso(),source==='refresh'?'SYSTEM':ctx.uid,source==='refresh'?'System observation':name(ctx),source);
+  if(d.workflowCode===patch.workflowCode&&d.workflowReason===patch.workflowReason&&d.workflowSince===patch.workflowSince)return wo;
+  try{await commit([{path:root(ctx)+'/work_orders/'+wo.id,fields:patch,mask:Object.keys(patch),updateTime:wo.updateTime}]);return {...wo,data:{...d,...patch}};}
+  catch(e){const latest=await getDoc(root(ctx)+'/work_orders/'+wo.id);if(!latest||attempt===2)throw e;wo=latest;}
+ }
+ return wo;
+}
+async function syncOrderAfter(ctx:OrgContext,id:string,source:string){
+ const fresh=await getDoc(root(ctx)+'/work_orders/'+id);if(!fresh)return;
+ try{await syncWorkOrderState(ctx,fresh,source);}catch(e){console.error('Maintenance status refresh failed',id,source,e);}
+}
 /** Planner actions on the readiness checklist. */
 async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
     if (!['planning', 'plan_ready'].includes(str(wo.data.status))) throw new HttpError(409, 'The work order is no longer in planning.');
@@ -472,6 +503,13 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
         previous = object(p[str(b.resourceId)]);
     let state: Obj = { ...previous },
         result: Obj = {};
+    if(action==='confirm_external_specialist'){
+        const ext=object(task.externalResource);if(!ext.type)throw new HttpError(400,'This task does not require an external specialist.');
+        const persons=Number(b.persons);if(!Number.isInteger(persons)||persons<Number(ext.persons)||persons>50)throw new HttpError(400,'Confirm sufficient specialist personnel.');
+        const date=requiredText(b.availableDate,'Confirmed availability date',10,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date)))throw new HttpError(400,'Choose a valid availability date.');
+        const externalSpecialist={provider:requiredText(b.provider,'Specialist provider'),reference:requiredText(b.reference,'Booking / contract / order reference'),persons,availableDate:date,note:requiredText(b.note,'Confirmation evidence',5),at:nowIso(),by:ctx.uid,name:name(ctx)};
+        await saveWo(ctx,wo,{taskPlanning:{...planning,[str(task.id)]:{...p,externalSpecialist}}},'task.external_specialist.confirmed',str(task.id));return {ok:true};
+    }
     if (action === 'allocate') {
         const ids = [...new Set(texts(b.personnel))];
         if (ids.length < Number(task.persons) || ids.length > 50) throw new HttpError(400, 'Allocate enough personnel for this task.');
@@ -1015,6 +1053,7 @@ async function windowSave(ctx: OrgContext) {
     for (const old of superseded.values())
         writes.push({ path: `${root(ctx)}/maintenance_windows/${old.id}`, fields: { status: 'superseded', supersededBy: id, history: history(ctx, old.data, 'Replaced by equipment window ' + id) }, mask: ['status', 'supersededBy', 'history'], updateTime: old.updateTime });
     await commit(writes);
+    for(const woId of touched.keys())await syncOrderAfter(ctx,woId,'window.scheduled');
     await event(ctx, 'window.scheduled', id, `${str(equipment.data.code)} ${date} ${startTime} ${durationHours} h · ${ids.join(', ')}${existing ? ' · ' + str(b.reason) : ''}`);
     return { ok: true, windowId: id };
 }
@@ -1802,7 +1841,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         };
     }
     if (action === 'read') {
-        const wo = await order(ctx, b.code),
+        const wo = await syncWorkOrderState(ctx,await order(ctx,b.code)),
             retrospective=isRequestClosureOrder(wo.data),
             readinessData = retrospective?{items:[],problems:[],ready:true}:await readiness(ctx, wo),
             permissions: Obj = {};
@@ -1955,11 +1994,12 @@ export async function maintenanceOperations(ctx: OrgContext) {
         )
             return windowAction(ctx, action);
         const wo = await order(ctx, b.code);
-        if(isRequestClosureOrder(wo.data))return executeMaintenanceAction(ctx,wo,action);
-        if (['match_spare', 'candidate', 'reserve', 'procure', 'secure_spare', 'service_sourcing', 'secure_service', 'allocate'].includes(action))
-            return resourceAction(ctx, wo, action);
-        if (['lock_schedule', 'review_risk', 'submit_cost', 'confirm_readiness'].includes(action)) return planningAction(ctx, wo, action);
-        return executeMaintenanceAction(ctx, wo, action);
+        let result;
+        if(isRequestClosureOrder(wo.data))result=await executeMaintenanceAction(ctx,wo,action);
+        else if (['match_spare', 'candidate', 'reserve', 'procure', 'secure_spare', 'service_sourcing', 'secure_service', 'allocate','confirm_external_specialist'].includes(action))result=await resourceAction(ctx, wo, action);
+        else if (['lock_schedule', 'review_risk', 'submit_cost', 'confirm_readiness'].includes(action))result=await planningAction(ctx, wo, action);
+        else result=await executeMaintenanceAction(ctx, wo, action);
+        await syncOrderAfter(ctx,wo.id,action);return result;
     });
 }
 export const maintenanceOperationRoutes = {

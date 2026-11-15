@@ -759,7 +759,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         Work orders
                     </button>
                     <p className="font-mono text-xs text-muted">
-                        {wo.code} · {retrospective&&wo.status==='in_progress'?'Awaiting actual work feedback':wo.status.replaceAll('_', ' ')}
+                        {wo.code} · {wo.workflowCode||''} · {wo.workflowLabel||(retrospective&&wo.status==='in_progress'?'Awaiting actual work feedback':wo.status.replaceAll('_', ' '))}
                     </p>
                     <h1 className="mt-1 text-2xl font-semibold">{wo.title}</h1>
                     <p className="mt-1 text-sm text-soft">
@@ -772,6 +772,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 </Button>}
             </div>
             <MaintenanceResponsibility record={wo}/>
+            {wo.workflowCode&&<Card className="space-y-2"><p className="text-xs text-soft">Operational state · {wo.workflowCode}</p><p className="font-semibold">{wo.workflowLabel}</p><p className="text-sm text-soft">Since {wo.workflowSince?new Date(wo.workflowSince).toLocaleString():'—'}</p>{wo.workflowReason&&<p className="text-sm">{wo.workflowReason}</p>}<details open><summary className="cursor-pointer text-sm font-semibold">State transition history ({(wo.workflowTransitions||[]).length})</summary><ol className="mt-2 space-y-2">{[...(wo.workflowTransitions||[])].reverse().map((e:MntData,i:number)=><li key={i} className="border-l-2 border-line pl-3 text-sm"><p className="font-medium">{e.from?e.from+' → ':''}{e.to} · {e.label}</p><p className="text-xs text-soft">{new Date(e.at).toLocaleString()} · {e.byName||e.by} · {e.source}</p>{e.reason&&<p className="text-xs text-soft">{e.reason}</p>}</li>)}</ol></details></Card>}
             {retrospective&&<Card className="space-y-2"><h2 className="font-semibold">Work completed at request review</h2><p className="text-sm text-soft">Planning, resource preparation and maintenance window are not applicable. This record does not certify prior safety authorization.</p><p className="text-sm">Actual completion: {wo.directCompletion?.performedDate} · {wo.directCompletion?.durationMinutes} minutes</p><p className="text-sm">Performed by: {wo.directCompletion?.executor?.name} · {wo.directCompletion?.executor?.role}</p><p className="text-sm">Work performed: {wo.directCompletion?.reportedWork}</p><p className="text-sm">Maintenance type: {wo.maintenanceTypeLabel}</p><p className="text-sm">Failure mode: {wo.directCompletion?.failureModeLabel} · Cause: {wo.directCompletion?.causeLabel}</p><p className="text-sm">Solution: {(wo.directCompletion?.solutions||[]).map((s:MntData)=>s.label).join('; ')}</p><p className="text-sm text-soft">No spare parts or services declared. Labour valuation is separate from recorded time.{wo.finalCost?.pendingLabourValuation?' Labour valuation pending approved rate.':''}</p>{can.execute&&execution.status==='awaiting_feedback'&&<Button testOverride={!!data.testModeOverride} onClick={()=>open('feedback')}>Confirm actual work feedback</Button>}</Card>}
             {failure && <MntGateHint message={failure} />}
             {message && <Alert tone="info">{message}</Alert>}

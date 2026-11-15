@@ -30,6 +30,7 @@ interface Row extends MaintenanceRouting {
     title: string;
     status: string;
     statusLabel: string;
+    workflowCode?:string;workflowSince?:string;workflowReason?:string;
     origin: string;
     executionMode?:string;
     wrCode: string;
@@ -169,6 +170,9 @@ function OrderList({ setup }: { setup: MntSetup }) {
             {key:'workGroup',label:'Work group',value:workGroupText},
             {key:'waitingStage',label:'Current action',value:r=>r.responsibility?.stage||''},
             {key:'waitingFor',label:'Waiting for (role & name)',value:responsibleText},
+            {key:'workflowCode',label:'State code',value:r=>r.workflowCode||''},
+            {key:'workflowSince',label:'State since',value:r=>r.workflowSince||'',render:r=>r.workflowSince?new Date(r.workflowSince).toLocaleString():'—'},
+            {key:'workflowReason',label:'Current blocker',value:r=>r.workflowReason||'',hidden:true},
             { key: 'status', label: 'Status', value: (r) => r.statusLabel, render: (r) => <Badge tone={TONE[r.status] ?? 'muted'}>{r.statusLabel}</Badge> },
             { key: 'priority', label: 'Priority', value: (r) => r.priorityLabel },
             {

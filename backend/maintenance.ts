@@ -1,7 +1,7 @@
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
 import { storage } from './platform/sdk';
 import { commit, withLock } from './finCore';
-import { enforceMaintenanceTransition, executeMaintenanceAction } from './maintenanceOperations';
+import { enforceMaintenanceTransition, executeMaintenanceAction,syncWorkOrderState } from './maintenanceOperations';
 import {isRequestClosureOrder} from './maintenanceDomain';
 import { requireMaintenanceRole, configuredMaintenanceRole } from './maintenanceAccess';
 import {groupAt,groupGateRole,workGroupGateAllowed,loadWorkGroupPolicy,outsideExecutionAccess} from './maintenanceWorkGroupPolicy';
@@ -640,7 +640,8 @@ function woOut(doc: Doc) {
         code: doc.id,
         title: str(d.title),
         status,
-        statusLabel: isRequestClosureOrder(d)&&status==='in_progress'?'Work completed · awaiting feedback':WO_STATUS[status] ?? status,
+        statusLabel: str(d.workflowLabel)||(isRequestClosureOrder(d)&&status==='in_progress'?'Work completed · awaiting feedback':WO_STATUS[status] ?? status),
+        workflowCode:str(d.workflowCode),workflowSince:str(d.workflowSince),workflowReason:str(d.workflowReason),
         executionMode:str(d.executionMode),
         origin: str(d.wrCode) ? 'request' : 'direct',
         wrCode: str(d.wrCode),
@@ -746,7 +747,7 @@ async function closeRequestWithOrder(ctx:OrgContext,request:Doc,closure:Obj,patc
  const executor={uid:str(closure.closedBy),name:str(closure.closedByName),role:str(closure.closedByRole),positionCode:str(closure.closedByPositionCode)};
  const task={id,title:'Work completed at request review',description:str(closure.description),assemblyId:str(request.data.assemblyId),equipmentId:str(request.data.unitId),maintenanceTypeCode:str(closure.maintenanceTypeCode),maintenanceTypeLabel:str(closure.maintenanceTypeLabel),spares:[],services:[],risk:[]};
  const directCompletion={requestCode:request.id,performedDate:str(closure.dateClosed),durationMinutes:minutes,executor,recordedBy:str(closure.recordedBy)||str(closure.by),recordedByName:str(closure.recordedByName)||str(closure.name),recordedAt:str(closure.recordedAt)||str(closure.at),noSparesOrServices:true,reportedWork:str(closure.description),failureModeCode:str(closure.failureModeCode),failureModeLabel:str(closure.failureModeLabel),causeCode:str(closure.causeCode),causeLabel:str(closure.causeLabel),solutions:objs(closure.solutions)};
- const wo:Obj={...base,...group,code,wrCode:request.id,path,executionMode:'request_closure',directCompletion,status:'in_progress',schemaVersion:2,maintenanceTypeCode:str(closure.maintenanceTypeCode),maintenanceTypeLabel:str(closure.maintenanceTypeLabel),failureModeCode:str(closure.failureModeCode),failureModeLabel:str(closure.failureModeLabel),solutions:objs(closure.solutions),assessmentTasks:[task],tasks:[{id,description:task.description}],taskPlanning:{},taskExecution:{[id]:{status:'awaiting_feedback',performers:[executor.uid],reportedWork:task.description,performedDate:directCompletion.performedDate,actualMinutes:minutes,reconciled:false}},spares:[],services:[],sparesUsed:[],timeLogs:[],assignees:[executor],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Retrospective work order created from '+request.id,'Work reported complete; execution feedback and formal closure pending. No planning or window created.')};
+ const wo:Obj={...base,...group,code,wrCode:request.id,path,executionMode:'request_closure',directCompletion,status:'in_progress',workflowCode:'WO170',workflowLabel:'Awaiting execution feedback',workflowSince:now,workflowTransitions:[{from:'',to:'WO170',label:'Awaiting execution feedback',at:now,by:ctx.uid,byName:displayName(ctx),source:'request_closure'}],schemaVersion:2,maintenanceTypeCode:str(closure.maintenanceTypeCode),maintenanceTypeLabel:str(closure.maintenanceTypeLabel),failureModeCode:str(closure.failureModeCode),failureModeLabel:str(closure.failureModeLabel),solutions:objs(closure.solutions),assessmentTasks:[task],tasks:[{id,description:task.description}],taskPlanning:{},taskExecution:{[id]:{status:'awaiting_feedback',performers:[executor.uid],reportedWork:task.description,performedDate:directCompletion.performedDate,actualMinutes:minutes,reconciled:false}},spares:[],services:[],sparesUsed:[],timeLogs:[],assignees:[executor],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Retrospective work order created from '+request.id,'Work reported complete; execution feedback and formal closure pending. No planning or window created.')};
  const {reviewRoutingChanged:_changed,reviewRoutingPreviousUid:_previous,...requestData}=request.data;
  await commit([{path:woCol(ctx.orgId)+'/'+code,fields:wo,exists:false},{path:wrCol(ctx.orgId)+'/'+request.id,fields:{...requestData,...patch,...group,status:'closed',closedAt:now,closure:{...closure,woCode:code},woCode:code,updatedAt:now,history:history(request,ctx,'Request closed; '+code+' created','Actual work '+minutes+' minutes; formal Work Order closure pending.')},updateTime:request.updateTime}]);
  await rec(ctx,'mnt.wr.closed_at_review',request.id,'Linked '+code+'; '+minutes+' minutes; '+executor.name);
@@ -2007,11 +2008,11 @@ export const maintenanceRoutes = {
                 closed: ['closed', 'cancelled'],
             };
             const routing=await responsibilityData(ctx,true);
-            const rows = (await listDocs(woCol(ctx.orgId)))
+            const visible = (await listDocs(woCol(ctx.orgId)))
                 .filter((d) => canAt(ctx, P.view, pathOf(d), scope)||outsideExecutionAccess(ctx.workGroupPolicy,d))
                 .filter((d) => (groups[view] ? groups[view].includes(str(d.data.status)) : view === 'mine' ? objs(d.data.assignees).some((a) => str(a.uid) === ctx.uid) || str(d.data.plannedBy) === ctx.uid : true))
-                .sort((a, b) => b.id.localeCompare(a.id))
-                .map(d=>({...woOut(d),...responsibilityFor(routing,d.data,'wo')}));
+                .sort((a, b) => b.id.localeCompare(a.id));
+            const rows=[];for(let i=0;i<visible.length;i+=8){const batch=await Promise.all(visible.slice(i,i+8).map(d=>syncWorkOrderState(ctx,d)));rows.push(...batch.map(d=>({...woOut(d),...responsibilityFor(routing,d.data,'wo')})));}
             return { rows };
         }),
     ],
@@ -2024,12 +2025,12 @@ export const maintenanceRoutes = {
             const l = await lists();
             const can = woCan(ctx, doc, scope, l);
             if (!can.view) throw new HttpError(403, 'This work order is outside your access.');
-            const d = doc.data;
+            const d = (await syncWorkOrderState(ctx,doc)).data;
             const safety = isObj(d.safety) ? d.safety : {};
             const completion = isObj(d.completion) ? d.completion : {};
             return {
-                ...woOut(doc),
-                ...responsibilityFor(await responsibilityData(ctx,true),doc.data,'wo'),
+                ...woOut({...doc,data:d}),
+                ...responsibilityFor(await responsibilityData(ctx,true),d,'wo'),workflowTransitions:objs(d.workflowTransitions),
                 description: str(d.description),
                 failureModeLabel: str(d.failureModeLabel),
                 maintenanceTypeCode: str(d.maintenanceTypeCode),
@@ -2124,6 +2125,7 @@ export const maintenanceRoutes = {
             const done = async (fields: Record<string, Plain>, label: string, auditAction: string, details = note) => {
                 await updateFields(ref, { ...fields,...groupFields(ctx.workGroupPolicy,strs(fields.path||doc.data.path)), history: history(doc, ctx, label, details), updatedAt: now });
                 await rec(ctx, auditAction, doc.id, details);
+                const fresh=await getDoc(ref);if(fresh)try{await syncWorkOrderState(ctx,fresh,auditAction);}catch(e){console.error('Maintenance status refresh failed',doc.id,e);}
             };
             const deny = (allowed: boolean, why: string) => {
                 if (!allowed) throw new HttpError(403, why);

@@ -15,6 +15,7 @@ const money = (n: number, currency: string) => `${currency} ${Number(n || 0).toL
 const COST_LABEL: Record<string, string> = { none: 'Not submitted', pending: 'Waiting for approval', approved: 'Approved', stale: 'Changed since approval: submit again', rejected: 'Rejected: submit again', withdrawn: 'Withdrawn', superseded: 'Dates moved to another period: submit again' };
 
 export default function MntReadiness({ code, wo, checklist, canPlan, currency, onDone, testModeOverride = false }: { code: string; wo: MntData; checklist: MntData; canPlan: boolean; currency: string; onDone: () => void; testModeOverride?: boolean }) {
+    const [specialist,setSpecialist]=useState<Record<string,MntData>>({});
     const [start, setStart] = useState<string>(wo.scheduledStart || '');
     const [end, setEnd] = useState<string>(wo.scheduledEnd || '');
     const [dateNote, setDateNote] = useState('');
@@ -87,6 +88,7 @@ export default function MntReadiness({ code, wo, checklist, canPlan, currency, o
 
             {editable && (
                 <>
+                    {(wo.assessmentTasks||[]).filter((t:MntData)=>t.externalResource?.type).map((t:MntData)=>{const saved=wo.taskPlanning?.[t.id]?.externalSpecialist,form=specialist[t.id]||{};const set=(key:string,value:string)=>setSpecialist(old=>({...old,[t.id]:{...old[t.id],[key]:value}}));return <section key={t.id} className='space-y-2 rounded-xl border border-line p-3'><p className='font-semibold'>External specialist · {t.title||t.description}</p><p className='text-sm text-soft'>{t.externalResource.type} · {t.externalResource.persons} required</p>{saved?.at&&<p className='text-sm'>Confirmed: {saved.provider} · {saved.availableDate} · {saved.reference}</p>}{[['provider','Provider','text'],['reference','Booking / contract / order reference','text'],['persons','Number of specialists','number'],['availableDate','Confirmed availability','date'],['note','Confirmation evidence','text']].map(([key,label,type])=><label key={key} className='block text-sm'>{label}<input type={type} className='mt-1 w-full rounded-lg border border-line bg-panel p-2' value={form[key]||''} onChange={e=>set(key,e.target.value)}/></label>)}<Button testOverride={testModeOverride} variant='secondary' busy={busy==='confirm_external_specialist'} disabled={!form.provider||!form.reference||!form.persons||!form.availableDate||!form.note} onClick={()=>act('confirm_external_specialist',{taskId:t.id,...form},'External specialist confirmed')}>Confirm external specialist</Button></section>;})}
                     <section className='space-y-2 rounded-xl border border-line p-3'>
                         <p className='flex items-center gap-2 text-sm font-semibold text-ink'><Lock className='h-4 w-4' />Schedule dates {done('schedule') && <Badge tone='brand'>Locked</Badge>}</p>
                         <div className='grid grid-cols-2 gap-2'>
