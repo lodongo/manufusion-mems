@@ -152,7 +152,7 @@ registerHandler(COST_REQUEST, {
     apply: async (ctx, req) => {
         const p = obj(req.payload);
         const code = str(p.woCode);
-        if (!/^WO\d{8}$/.test(code)) throw new HttpError(409, 'The cost request is invalid.');
+        if (!/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(code)) throw new HttpError(409, 'The cost request is invalid.');
         const wo = await getDoc(`${root(ctx.orgId)}/work_orders/${code}`);
         if (!wo) throw new HttpError(409, 'The work order no longer exists.');
         if (!['planning', 'plan_ready'].includes(str(wo.data.status))) throw new HttpError(409, 'The work order has left planning; its cost can no longer be approved here.');

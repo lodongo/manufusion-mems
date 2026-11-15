@@ -1,3 +1,4 @@
+import {shortWorkOrderStatus} from './maintenanceWorkflowState';
 import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
 import { storage } from './platform/sdk';
@@ -57,7 +58,7 @@ const WR_RE = /^WR\d{8}$/;
 const ASSM_RE = /^ASSM_\d{8}$/;
 const assessmentCol = (orgId: string) => `organizations/${orgId}/work_assessments`;
 const REVIEW_CANCELLATION_REASONS = ['repeat', 'not_required', 'already_resolved', 'invalid_request', 'other'] as const;
-const WO_RE = /^WO\d{8}$/;
+const WO_RE = /^WO\d{8}(?:_[1-9]\d{0,8})?$/;
 const PHOTO_RE = /^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/wr_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png)$/;
 const ASSESSMENT_PHOTO_RE=/^organizations\/[A-Za-z0-9_-]{1,120}\/mnt\/assessment_photos\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9]{12}\.(jpg|png|pdf)$/;
 /** A reused library task is unchanged when it equals the approved template, ignoring its ASSMTASK reference. */
@@ -642,7 +643,7 @@ function woOut(doc: Doc) {
         title: str(d.title),
         status,
         statusLabel: str(d.workflowLabel)||(isRequestClosureOrder(d)&&status==='in_progress'?'Work completed · awaiting feedback':WO_STATUS[status] ?? status),
-        workflowCode:str(d.workflowCode),workflowSince:str(d.workflowSince),workflowReason:str(d.workflowReason),
+        workflowCode:str(d.workflowCode),workflowStatusCode:shortWorkOrderStatus(str(d.workflowCode)),workflowSince:str(d.workflowSince),workflowReason:str(d.workflowReason),
         executionMode:str(d.executionMode),
         origin: str(d.parentWoCode)?'break_in':str(d.wrCode) ? 'request' : 'direct',
         parentWoCode:str(d.parentWoCode),rootWoCode:str(d.rootWoCode),
@@ -2145,22 +2146,29 @@ export const maintenanceRoutes = {
                 const description=str(b.description).trim().slice(0,2000),title=str(b.title).trim().slice(0,150),start=str(b.scheduledStart),end=str(b.scheduledEnd);
                 if(title.length<3||description.length<10)throw new HttpError(400,'Provide a title and describe the additional work.');
                 const cycle=await getMaintenanceCycle(ctx);validateCycleDates(BREAK_IN_TYPE.code,start,end,cycle);
-                const n=await nextOrgCounter(ctx.orgId,'woSeq');if(n>99_999_999)throw new HttpError(400,'Work order numbering is exhausted.');
-                const code='WO'+String(n).padStart(8,'0'),path=pathOf(doc);
+                const rootCode=str(d.rootWoCode)||doc.id.split('_')[0];
+                if(!/^WO\d{8}$/.test(rootCode))throw new HttpError(409,'Original work order number is invalid.');
+                const family=(await listDocs(woCol(ctx.orgId))).filter(x=>x.data.rootWoCode===rootCode||x.data.parentWoCode===rootCode||x.id.startsWith(rootCode+'_'));
+                // Existing legacy children retain their identifiers and count in the sequence. No number is reused.
+                const sequence=Math.max(family.length,0,...family.map(x=>Number(x.data.subOrderSequence)||Number(x.id.startsWith(rootCode+'_')?x.id.slice(rootCode.length+1):0)||0))+1;
+                if(sequence>999999999)throw new HttpError(409,'Sub-order numbering is exhausted.');
+                const code=rootCode+'_'+sequence,path=pathOf(doc);
                 const keys=['assemblyId','assemblyCode','assemblyName','unitId','unitCode','unitName','costCenterId','costCenterCode','costCenterName','siteId','siteCode','siteName','assetTag','assetName','assetClass','criticalityCode','criticalityLabel','criticalityColor','priorityCode','priorityLabel','disciplineCode','disciplineLabel','requestedBy','requestedByName','requestedAt'];
                 const base=Object.fromEntries(keys.map(k=>[k,str(d[k])]));
-                const child:Obj={...base,...groupFields(ctx.workGroupPolicy,path),code,title,description,path,wrCode:str(d.wrCode),parentWoCode:doc.id,rootWoCode:str(d.rootWoCode)||doc.id,executionMode:'confirmed_request',breakIn:true,status:'planning',schemaVersion:2,maintenanceTypeCode:BREAK_IN_TYPE.code,maintenanceTypeLabel:BREAK_IN_TYPE.label,scheduledStart:start,scheduledEnd:end,initialScheduledStart:start,initialScheduledEnd:end,startDateMoves:0,cycleAdmission:{startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycle.today,at:now,version:cycle.version},assessmentTasks:[],assessmentTasksVersion:0,tasks:[],taskPlanning:{},taskExecution:{},spares:[],services:[],sparesUsed:[],timeLogs:[],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Break-in sub-order created from '+doc.id,description),workflowCode:'WO010',workflowLabel:'Awaiting assessment',workflowSince:now,workflowTransitions:[{from:'',to:'WO010',label:'Awaiting assessment',at:now,by:ctx.uid,byName:displayName(ctx),source:'break_in'}]};
+                const child:Obj={...base,...groupFields(ctx.workGroupPolicy,path),code,title,description,path,wrCode:str(d.wrCode),parentWoCode:doc.id,rootWoCode:rootCode,subOrderSequence:sequence,executionMode:'confirmed_request',breakIn:true,status:'planning',schemaVersion:2,maintenanceTypeCode:BREAK_IN_TYPE.code,maintenanceTypeLabel:BREAK_IN_TYPE.label,scheduledStart:start,scheduledEnd:end,initialScheduledStart:start,initialScheduledEnd:end,startDateMoves:0,cycleAdmission:{startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycle.today,at:now,version:cycle.version},assessmentTasks:[],assessmentTasksVersion:0,tasks:[],taskPlanning:{},taskExecution:{},spares:[],services:[],sparesUsed:[],timeLogs:[],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Break-in sub-order created from '+doc.id,description),workflowCode:'WO010',workflowLabel:'Awaiting assessment',workflowSince:now,workflowTransitions:[{from:'',to:'WO010',label:'Awaiting assessment',at:now,by:ctx.uid,byName:displayName(ctx),source:'break_in'}]};
                 // The parent (including a closed parent) is never rewritten.
                 await commit([{path:woCol(ctx.orgId)+'/'+code,fields:child,exists:false}]);await rec(ctx,'mnt.wo.break_in_created',code,'Parent '+doc.id+' · '+description);return {ok:true,woCode:code};
             }
-            if(str(d.status)==='closed')throw new HttpError(409,'Closed work orders are immutable. Create a break-in sub-order for further work.');
+            if(['closed','cancelled'].includes(str(d.status)))throw new HttpError(409,'Closed or cancelled work orders are immutable. Create a break-in sub-order on a closed order for further work.');
+            if(action==='cancel'&&(!can.cancel||note.length<5))throw new HttpError(403,'Cancellation requires permission and a reason.');
+            if(action==='cancel')confirmCode(ctx,doc);
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
                 case 'assess_header': {
                     if(d.executionMode!=='confirmed_request'||str(d.status)!=='planning')throw new HttpError(409,'Technical classification belongs to the assessment step of a confirmed Work Order.');
                     need(ctx,P.assessment_edit,pathOf(doc),scope);if(groupAt(ctx.workGroupPolicy,pathOf(doc)))await requireConfiguredMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
                     if(workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true&&!bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))throw new HttpError(403,'Assessment reviewer cannot create the assessment.');
-                    if(Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Open controlled reassessment before changing planned scope.');
+                    if(object(d.assessmentReview).status==='approved'||Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Approved technical scope is locked. Open controlled reassessment before editing.');
                     const evaluation=str(b.technicalEvaluation).trim().slice(0,3000);if(evaluation.length<20)throw new HttpError(400,'Write at least 20 characters of technical evaluation.');
                     const nature=pickGrouped(l.failureModes,str(b.natureCode),'failure mode')!,crit=pick(l.criticality,str(b.severityCode),'severity')!,mtype=d.breakIn===true&&str(d.parentWoCode)?BREAK_IN_TYPE:pick(l.maintenanceTypes,str(b.maintenanceTypeCode),'maintenance type')!,prio=pick(l.priorities,str(b.priorityCode),'priority',false);
                     const start=b.scheduledStart===undefined?str(d.scheduledStart):str(b.scheduledStart),end=b.scheduledEnd===undefined?str(d.scheduledEnd):str(b.scheduledEnd),dateChanged=start!==str(d.scheduledStart)||end!==str(d.scheduledEnd),typeChanged=mtype.code!==str(d.maintenanceTypeCode),cycle=await getMaintenanceCycle(ctx);
@@ -2176,7 +2184,7 @@ export const maintenanceRoutes = {
                 case 'save_task_assessment': {
                     if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning'||((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',pathOf(doc))===false||workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true)&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))))
                         throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
-                    if(isObj(d.taskPlanning)&&Object.keys(d.taskPlanning).length)throw new HttpError(409,'Open controlled reassessment before editing a task whose resources have already been planned.');
+                    if(object(d.assessmentReview).status==='approved'||Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Approved task requirements are locked. Open controlled reassessment before editing.');
                     let tasks;
                     try{
                         const m=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);

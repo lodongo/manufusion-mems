@@ -35,7 +35,7 @@ import { object, rows, texts } from './maintenanceDomain';
 
 const root = (orgId: string) => `organizations/${orgId}`;
 const WR_RE = /^WR\d{8}$/;
-const WO_RE = /^WO\d{8}$/;
+const WO_RE = /^WO\d{8}(?:_[1-9]\d{0,8})?$/;
 const RECEIPT_RE = /^[a-f0-9]{40}$/;
 const RECEIPT_HOURS = 72;
 const APPROVED_MATERIAL = ['approved', 'active'];

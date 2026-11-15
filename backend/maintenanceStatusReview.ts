@@ -1,4 +1,5 @@
 import {str,type Obj} from './core';
+import {shortWorkOrderStatus} from './maintenanceWorkflowState';
 import {object,rows,isRequestClosureOrder} from './maintenanceDomain';
 const hours=(ms:number)=>Math.max(0,ms)/3600000;
 const numeric=(v:unknown):number|null=>typeof v==='number'&&Number.isFinite(v)?v:null;
@@ -8,8 +9,8 @@ export function summarizeWorkOrderReview(d:Obj,now:string,dueAt:string|null){
  const nowMs=Date.parse(now),terminal=['closed','cancelled'].includes(str(d.status)),terminalAt=Date.parse(str(d.status==='closed'?d.closedAt:d.cancelledAt)),finish=terminal&&Number.isFinite(terminalAt)?Math.min(nowMs,terminalAt):nowMs;
  const created=Date.parse(str(d.createdAt)),due=dueAt?Date.parse(dueAt):NaN;
  const transitions=rows(d.workflowTransitions).map(e=>({to:str(e.to),label:str(e.label),ms:Date.parse(str(e.at))})).filter(e=>Number.isFinite(e.ms)&&e.ms<=finish).sort((a,b)=>a.ms-b.ms);
- const byState=new Map<string,{code:string;label:string;hours:number;overdueHours:number;waiting:boolean}>();
- const add=(code:string,label:string,start:number,end:number)=>{if(end<=start)return;const a=byState.get(code)||{code,label,hours:0,overdueHours:0,waiting:waiting(code)};a.hours+=hours(end-start);if(Number.isFinite(due))a.overdueHours+=hours(end-Math.max(start,due));byState.set(code,a);};
+ const byState=new Map<string,{code:string;statusCode:string;label:string;hours:number;overdueHours:number;waiting:boolean}>();
+ const add=(code:string,label:string,start:number,end:number)=>{if(end<=start)return;const a=byState.get(code)||{code,statusCode:shortWorkOrderStatus(code),label,hours:0,overdueHours:0,waiting:waiting(code)};a.hours+=hours(end-start);if(Number.isFinite(due))a.overdueHours+=hours(end-Math.max(start,due));byState.set(code,a);};
  if(Number.isFinite(created)&&(!transitions.length||created<transitions[0].ms))add('UNKNOWN','Before recorded state history',created,transitions[0]?.ms??finish);
  transitions.forEach((e,i)=>{const code=str(e.to);if(!['WO900','WO990'].includes(code))add(code,str(e.label)||code,e.ms,Math.min(finish,transitions[i+1]?.ms??finish));});
  const tasks=rows(d.assessmentTasks),executions=object(d.taskExecution),plan=object(d.taskPlanning);

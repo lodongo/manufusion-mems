@@ -1,6 +1,6 @@
 import {summarizeWorkOrderReview} from './maintenanceStatusReview';
 import {getMaintenanceCycle,validateCycleDates,localDate,validateStartDateMove,startDateMoves} from './maintenanceCycle';
-import {stateOf,transitionPatch,type FactSet} from './maintenanceWorkflowState';
+import {stateOf,transitionPatch,shortWorkOrderStatus,type FactSet} from './maintenanceWorkflowState';
 import {responsibilityData,responsibilityFor,groupFields} from './maintenanceResponsibility';
 import { createHash } from 'node:crypto';
 import { bypass } from './testModeCore';
@@ -85,7 +85,7 @@ async function saveWo(ctx: OrgContext, wo: Doc, patch: Obj, action: string, note
 }
 async function order(ctx: OrgContext, code: unknown) {
     const id = identifier(code);
-    if (!/^WO\d{8}$/.test(id)) throw new HttpError(400, 'Choose a work order.');
+    if (!/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(id)) throw new HttpError(400, 'Choose a work order.');
     const wo = await getDoc(`${root(ctx)}/work_orders/${id}`);
     if (!wo) throw new HttpError(404, 'Work order not found.');
     if(!outsideExecutionAccess(ctx.workGroupPolicy,wo))await maintenancePermission(ctx, 'MNT.view', recordPath(wo));
@@ -141,7 +141,7 @@ async function currentWindow(ctx: OrgContext, id: unknown) {
 }
 async function internalOrder(ctx: OrgContext, code: unknown) {
     const id = identifier(code);
-    if (!/^WO\d{8}$/.test(id)) throw new HttpError(409, 'Invalid window work order.');
+    if (!/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(id)) throw new HttpError(409, 'Invalid window work order.');
     const doc = await getDoc(`${root(ctx)}/work_orders/${id}`);
     if (!doc) throw new HttpError(409, 'Window work order no longer exists.');
     return doc;
@@ -414,16 +414,21 @@ export async function syncWorkOrderState(ctx:OrgContext,doc:Doc,source='refresh'
     facts.windowStatus='ready';
     for(const t of pending){const tid=str(t.id),win=str(object(object(d.taskExecution)[tid]).windowId)||str(object(d.taskWindows)[tid])||str(d.windowId);if(!win){facts.windowStatus='missing';break;}try{await requireApprovedWindow(ctx,wo,tid);}catch{facts.windowStatus='blocked';}}
   }
-  if(['completed','verified','in_progress'].includes(status)&&tasksOf(wo).every(t=>object(object(d.taskExecution)[str(t.id)]).status==='completed'))facts.openIncident=(await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared');
+  if(['completed','verified','in_progress'].includes(status)&&tasksOf(wo).length&&tasksOf(wo).every(t=>object(object(d.taskExecution)[str(t.id)]).status==='completed')){
+    facts.openIncident=(await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared');
+    if(!isRequestClosureOrder(d)&&tasksOf(wo).every(t=>object(object(d.taskExecution)[str(t.id)]).reconciled===true)){
+        try{await ensureClosureResources(ctx,wo);}catch(e){if(!(e instanceof HttpError))throw e;const reason=e.message;facts.closureResource={code:/service report|service feedback/i.test(reason)?'WO185':/service acceptance|service receipt/i.test(reason)?'WO187':/reconcil/i.test(reason)?'WO180':'WO186',reason};}
+    }
+  }
   const state=stateOf(d,facts),patch=transitionPatch(d,state,nowIso(),source==='refresh'?'SYSTEM':ctx.uid,source==='refresh'?'System observation':name(ctx),source);
-  if(d.workflowCode===patch.workflowCode&&d.workflowReason===patch.workflowReason&&d.workflowSince===patch.workflowSince)return wo;
+  if(d.workflowCode===patch.workflowCode&&d.workflowReason===patch.workflowReason&&d.workflowSince===patch.workflowSince&&(d.workflowStatusCode===patch.workflowStatusCode||['closed','cancelled'].includes(status)))return wo;
   try{await commit([{path:root(ctx)+'/work_orders/'+wo.id,fields:patch,mask:Object.keys(patch),updateTime:wo.updateTime}]);return {...wo,data:{...d,...patch}};}
   catch(e){const latest=await getDoc(root(ctx)+'/work_orders/'+wo.id);if(!latest||attempt===2)throw e;wo=latest;}
  }
  return wo;
 }
 export async function syncOrderAfter(ctx:OrgContext,id:string,source:string){
- if(!/^WO\d{8}$/.test(id))return;
+ if(!/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(id))return;
  try{const fresh=await getDoc(root(ctx)+'/work_orders/'+id);if(!fresh)return;const policy=ctx.workGroupPolicy||await loadWorkGroupPolicy(ctx.orgId,ctx.me);await syncWorkOrderState({...ctx,workGroupPolicy:policy},fresh,source);}catch(e){console.error('Maintenance status refresh failed',id,source,e);}
 }
 export async function syncProcurementOrderStates(ctx:OrgContext,ids:string[],source:string){
@@ -1900,7 +1905,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     }
     if (action === 'reassess') {
         await authority(ctx, wo, 'MNT.WO.plan', 'MNT.WO.PLAN');
-        if (Object.values(executions).some((e) => object(e).startedAt) || ['closed', 'cancelled'].includes(str(wo.data.status)))
+        if (Object.values(executions).some((e) => object(e).startedAt) || !['planning','plan_ready','released'].includes(str(wo.data.status)))
             throw new HttpError(409, 'Executed history is immutable. Raise a follow-up request to change technical scope.');
         const reason = requiredText(b.note, 'Controlled reassessment reason', 10);
         await releaseMaintenanceReservations(ctx, wo.id);
@@ -1918,6 +1923,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
                     status: 'planning',
                     taskPlanning: {},
                     assessmentReview: null,
+                    readiness:null,riskReview:null,scheduleLock:null,costApproval:null,costPlan:null,
                     safety: null,
                     safetySignoff: null,
                     handover: null,
@@ -2056,6 +2062,8 @@ export async function maintenanceOperations(ctx: OrgContext) {
         }
         permissions.createBreakIn=permissions.close===true&&['completed','verified','closed'].includes(str(wo.data.status));
         if(retrospective&&['completed','closed'].includes(str(wo.data.status))){try{await authority(ctx,wo,'MNT.WO.close','MNT.WO.TECHNICAL_CLOSE');permissions.createBreakIn=true;}catch{/* restricted */}}
+        if(['closed','cancelled'].includes(str(wo.data.status)))for(const k of ['reconcile','assess','reviewAssessment','plan','execute','safety','handover','close'])permissions[k]=false;
+        if(object(wo.data.assessmentReview).status==='approved'||Object.keys(object(wo.data.taskPlanning)).length)permissions.assess=false;
         permissions.cancel =
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
             canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));
@@ -2066,7 +2074,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const cycle=await getMaintenanceCycle(ctx),d=wo.data,zone=str(object(d.currentCycleAdmission).timeZone)||str(object(d.cycleAdmission).timeZone)||cycle.timeZone;
         let dueAt:string|null=null;const dueDate=str(d.scheduledEnd);if(!retrospective&&/^\d{4}-\d{2}-\d{2}$/.test(dueDate)){try{const day=new Date(dueDate+'T00:00:00Z');day.setUTCDate(day.getUTCDate()+1);dueAt=zonedInstant(day.toISOString().slice(0,10),'00:00',zone);}catch{/* Invalid historical dates stay unclassified. */}}
         return {
-            wo: { code: wo.id, ...wo.data,...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
+            wo: { code: wo.id, ...wo.data,workflowStatusCode:shortWorkOrderStatus(str(wo.data.workflowCode)),...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
             maintenanceCycle:cycle,
             windowClosureManaged:await windowManagedClosure(ctx,wo),

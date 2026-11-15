@@ -243,7 +243,7 @@ async function maintenanceServiceProvenance(orgId:string,poLine:Obj,amount:numbe
     const prior=objs(requirement.data.lines).find(l=>Number(l.no)===lineNo);
     const reference=o(prior?.maintenanceSource || requirement.data.maintenanceSource);
     const woId=str(reference.woCode),taskId=str(reference.taskId);
-    if(!/^WO\d{8}$/.test(woId)||!taskId)return null;
+    if(!/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(woId)||!taskId)return null;
     const wo=await getDoc(`organizations/${orgId}/work_orders/${woId}`);
     const strategy=wo?mroFinancialContext(wo.data,taskId,{}):null;
     return {
@@ -426,7 +426,7 @@ export async function postGoodsIssue(ctx: OrgContext, body: Record<string, unkno
         let ccId = str(body.ccId);
         let wo: Doc | null = null;
         if (woId) {
-            if (!/^WO\d{8}$/.test(woId)) throw new HttpError(400, 'Choose the work order.');
+            if (!/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(woId)) throw new HttpError(400, 'Choose the work order.');
             wo = await getDoc(`organizations/${ctx.orgId}/work_orders/${woId}`);
             if (!wo || !ISSUE_STATUSES.includes(str(wo.data.status))) throw new HttpError(409, 'The work order is not released, scheduled or in progress.');
             ccId = str(wo.data.costCenterId);

@@ -30,7 +30,7 @@ interface Row extends MaintenanceRouting {
     title: string;
     status: string;
     statusLabel: string;
-    workflowCode?:string;workflowSince?:string;workflowReason?:string;
+    workflowCode?:string;workflowStatusCode?:string;workflowSince?:string;workflowReason?:string;
     origin: string;
     executionMode?:string;
     wrCode: string;
@@ -152,7 +152,7 @@ export default function WorkOrders({ id, sub }: { id?: string; sub?: string }) {
     const s = setup.data;
     if (!s.enabled) return <NotEnabled />;
     if (id === 'new') return <Alert tone='info'>Work orders are created only from approved work request assessments. Open Work Requests to begin.</Alert>;
-    if (id && /^WO\d{8}$/.test(id)) return <OrderDetail key={id} code={id} setup={s} />;
+    if (id && /^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(id)) return <OrderDetail key={id} code={id} setup={s} />;
     return <OrderList setup={s} />;
 }
 
@@ -172,7 +172,7 @@ function OrderList({ setup }: { setup: MntSetup }) {
             {key:'workGroup',label:'Work group',value:workGroupText},
             {key:'waitingStage',label:'Current action',value:r=>r.responsibility?.stage||''},
             {key:'waitingFor',label:'Waiting for (role & name)',value:responsibleText},
-            {key:'workflowCode',label:'State code',value:r=>r.workflowCode||''},
+            {key:'workflowCode',label:'State code',value:r=>r.workflowStatusCode||r.workflowCode||''},
             {key:'workflowSince',label:'State since',value:r=>r.workflowSince||'',render:r=>r.workflowSince?new Date(r.workflowSince).toLocaleString():'—'},
             {key:'workflowReason',label:'Current blocker',value:r=>r.workflowReason||'',hidden:true},
             { key: 'status', label: 'Status', value: (r) => r.statusLabel, render: (r) => <Badge tone={TONE[r.status] ?? 'muted'}>{r.statusLabel}</Badge> },

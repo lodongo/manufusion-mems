@@ -22,7 +22,7 @@ import { canAt, scopeOf } from './access';
  */
 
 const ID = /^SIV\d{8}$/;
-const WO_ID = /^WO\d{8}$/;
+const WO_ID = /^WO\d{8}(?:_[1-9]\d{0,8})?$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ISSUABLE = ['released', 'scheduled', 'in_progress'];
 const OPEN = ['open', 'partial'];
