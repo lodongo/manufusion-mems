@@ -239,6 +239,7 @@ function ResourceForm({
                         <p className="mt-1 text-xs text-soft">{people.filter(p=>p.inWorkGroup===true).length} eligible work group members. Outside-group selection is off by default.</p>
                         <div className="mt-3"><MntCheck label="Include employees outside the work group" value={includeOutsideGroup} onChange={setIncludeOutsideGroup}/></div>
                         {!includeOutsideGroup&&outsideSelected.length>0&&<Alert tone="warn">Previously selected outside-group employees are retained for review only. To save them, explicitly enable outside-group selection again, or remove them below.</Alert>}
+                        <MntResourceRecommendations code={code} taskId={task.id} hours={Number(task.hours)||1} outside={includeOutsideGroup} existing={data.personnel} onPick={id=>patch('personnel',[...new Set([...data.personnel,id])])}/>
                         <div className="mt-3 space-y-2">{(data.personnel as string[]).map(id=>{const p=people.find(x=>x.id===id);return <div key={id} className="flex items-center justify-between gap-2 rounded-lg border border-line p-2 text-sm"><span>{p?.name||id}{!isGroupMember(id)?' · Outside group':''}</span><button type="button" className="min-h-10 px-2 text-rose-400" onClick={()=>patch('personnel',(data.personnel as string[]).filter(x=>x!==id))}>Remove</button></div>;})}</div>
                         <div className="mt-3"><SelectField id="mnt-allocate-person" label="Add execution personnel" value="" disabled={!availablePeople.some(p=>!data.personnel.includes(p.id))} onChange={e=>{if(e.target.value&&!data.personnel.includes(e.target.value))patch('personnel',[...data.personnel,e.target.value]);}}>
                             <option value="">Choose employee</option>
@@ -682,6 +683,7 @@ function OrderAssessmentHeader({wo,options,can,onDone,testOverride,cycle}:{wo:Mn
 }
 import MntApprovalProgress from './MntApprovalProgress';
 import MntPersonalTime from './MntPersonalTime';
+import MntResourceRecommendations from './MntResourceRecommendations';
 export default function MntWorkOrder({ code }: { code: string }) {
     const { data, error, loading, reload } = useLoad(() => mntApi({ action: 'read', code }), [code]);
     const [reviewTab,setReviewTab]=useState<'status'|'details'>('status');
@@ -1047,6 +1049,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                     {task.persons} people · Skills: {task.skills}
                                 </p>
                                 <p>Tools: {task.tools || 'None'}</p>
+                                {wo.taskStandardSnapshots?.[task.id]&&<div className='rounded-lg border border-line p-2 text-sm'><b>Approved activity standard · v{wo.taskStandardSnapshots[task.id].version}</b><p>{wo.taskStandardSnapshots[task.id].durationHours} h duration · {wo.taskStandardSnapshots[task.id].persons} people · {wo.taskStandardSnapshots[task.id].standardManHours} man-hours</p></div>}
                                 <p>
                                     Allocated:{' '}
                                     {(planning.allocation?.personnel || [])

@@ -2373,12 +2373,14 @@ export const maintenanceRoutes = {
                             ||!hierarchy.families.some(x=>x.code===svc.classCode&&x.subcategoryCode===svc.subcategoryCode))
                             throw new HttpError(400,'Select a valid service category, subcategory and class.');
                     }
-                    const version=(Number(d.assessmentTasksVersion)||0)+1;
+                    const version=(Number(d.assessmentTasksVersion)||0)+1,taskStandardSnapshots:Obj={};
                     for(const t of tasks){
-                        const approved=await getDoc(`organizations/${ctx.orgId}/asset_task_templates/${t.assemblyId||assemblyId||t.equipmentId||str(d.unitId)}_${t.id}`);
+                        const templateId=`${t.assemblyId||assemblyId||t.equipmentId||str(d.unitId)}_${t.id}`;
+                        const approved=await getDoc(`organizations/${ctx.orgId}/asset_task_templates/${templateId}`);
                         if(t.templateStatus==='existing'&&(!approved||str(approved.data.status)!=='approved'))
                             throw new HttpError(400,'Selected task template must be validated for the equipment or assembly.');
                         if(t.templateStatus==='existing'&&!sameTemplate(approved.data.task,t))t.templateStatus='pending_validation';
+                        if(t.templateStatus==='existing'&&approved&&Number(approved.data.version)>0&&Number(t.hours)>0&&Number(t.persons)>0)taskStandardSnapshots[t.id]={templateId,version:Number(approved.data.version),durationHours:Number(t.hours),persons:Number(t.persons),standardManHours:Number(t.hours)*Number(t.persons),skills:t.skillCodes||[],approvedAt:str(approved.data.approvedAt),capturedAt:now,assessmentVersion:version};
                     }
                     for(const t of tasks.filter(x=>x.templateStatus!=='existing')){
                         const id=`${doc.id}_${t.id}_v${version}`;
@@ -2388,7 +2390,7 @@ export const maintenanceRoutes = {
                             createdBy:ctx.uid,createdAt:now
                         },{exists:false});
                     }
-                    await done({assessmentTasks:tasks as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
+                    await done({assessmentTasks:tasks as unknown as Plain,taskStandardSnapshots:taskStandardSnapshots as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
                         spares:[],services:[],tools:'',assessmentTasksBy:ctx.uid,assessmentTasksAt:now,
                         assessmentTasksVersion:version,assessmentReview:null,safety:null},
                         'Task assessments completed','mnt.wo.task_assessments',

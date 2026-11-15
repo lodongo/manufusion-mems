@@ -21,7 +21,7 @@ async function timeRoute(ctx:OrgContext){
  const manages=(a:Artisan)=>a.paths.some(p=>canAt(ctx,'MNT.WO.plan',p,s)||canAt(ctx,'MNT.WO.close',p,s));
  if(uid!==ctx.uid&&(!person||!manages(person)))throw new HttpError(403,'Scoped maintenance supervisor required.');
  const all=await listDocs(col),mine=all.filter(d=>d.data.uid===uid),id=str(b.id),existing=id&&validId(id)?mine.find(d=>d.id===id):undefined;
- const woCode=str(existing?.data.woCode)||str(b.woCode),taskId=str(existing?.data.taskId)||str(b.taskId);
+ const woCode=existing?str(existing.data.woCode):str(b.woCode),taskId=existing?str(existing.data.taskId):str(b.taskId);
  let wo:Doc|undefined;
  if(woCode){
   if(!/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(woCode)||!validId(taskId))throw new HttpError(400,'Choose a work order activity.');
@@ -40,8 +40,8 @@ async function timeRoute(ctx:OrgContext){
  const at=nowIso(),now=Date.parse(at);
  if(action==='pause'||action==='complete'){
   if(!existing||existing.data.status!=='running')throw new HttpError(409,'Choose the running time booking.');
-  if(now<=instant(existing.data.start)||now-instant(existing.data.start)>36*3600000)throw new HttpError(409,'Invalid or overlong timer. Ask a supervisor to correct the interval.');
-  if(!await writeDoc(col+'/'+existing.id,{...existing.data,end:at,status:'recorded',stopReason:action==='pause'?'paused':'completed',stoppedBy:ctx.uid,stoppedAt:at,stopNote:note},{updateTime:existing.updateTime}))throw new HttpError(409,'Timer changed. Reload.');
+  const ex=obj(obj(wo?.data.taskExecution)[taskId]),finished=Date.parse(str(ex.physicalFinishedAt||ex.completedAt)),actualEnd=Number.isFinite(finished)?Math.min(now,finished):now;if(actualEnd<=instant(existing.data.start)||actualEnd-instant(existing.data.start)>36*3600000)throw new HttpError(409,'Invalid or overlong timer. Ask a supervisor to correct the interval.');
+  if(!await writeDoc(col+'/'+existing.id,{...existing.data,end:new Date(actualEnd).toISOString(),status:'recorded',stopReason:action==='pause'?'paused':'completed',stoppedBy:ctx.uid,stoppedAt:at,stopNote:note},{updateTime:existing.updateTime}))throw new HttpError(409,'Timer changed. Reload.');
   await audit([{category:'maintenance',action:'mnt.time.'+action,actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:existing.id},details:note}]);return {ok:true};
  }
  if(!person)throw new HttpError(403,'An active maintenance execution role is required.');

@@ -1,5 +1,5 @@
 import {summarizeWorkOrderReview} from './maintenanceStatusReview';
-import {capacityForWindow} from './maintenanceCapacity';
+import {capacityForWindow,capacityContext} from './maintenanceCapacity';
 import {getMaintenanceCycle,validateCycleDates,localDate,validateStartDateMove,startDateMoves} from './maintenanceCycle';
 import {stateOf,transitionPatch,shortWorkOrderStatus,type FactSet} from './maintenanceWorkflowState';
 import {responsibilityData,responsibilityFor,groupFields,approvalPreviewFor} from './maintenanceResponsibility';
@@ -544,6 +544,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
         if (ids.length < Number(task.persons) || ids.length > 50) throw new HttpError(400, 'Allocate enough personnel for this task.');
         const pool = await workGroupResourcePool(ctx.orgId, wo);
         const outside = requireOutsideGroupOptIn(ids, pool.people, b.includeOutsideGroup);
+        const executionPool=await capacityContext(ctx);if(executionPool.active&&ids.some(id=>!executionPool.artisans.some(a=>a.id===id)))throw new HttpError(409,'All assigned employees must hold an active maintenance execution role.');
         for (const id of ids) identifier(id);
         const coveredSkills = new Set<string>();
         for (const id of ids) {
@@ -998,7 +999,7 @@ async function windowSave(ctx: OrgContext) {
     const needed = Math.max(...schedule.tasks.map((t) => t.finish));
     const cycle=await getMaintenanceCycle(ctx);
     for(const t of schedule.tasks){const w=wos.find(x=>x.id===t.woCode);if(!w||!w.data.cycleAdmission)continue;const zone=str(object(w.data.currentCycleAdmission).timeZone)||str(object(w.data.cycleAdmission).timeZone)||cycle.timeZone,a=localDate(new Date(Date.parse(start)+t.start*3600000),zone),z=localDate(new Date(Date.parse(start)+t.finish*3600000-1),zone);if(a<str(w.data.scheduledStart)||z>str(w.data.scheduledEnd))throw new HttpError(409,w.id+': the task falls outside the Work Order start/end dates. Change and reconfirm the plan before scheduling.');}
-    const capacity=await capacityForWindow(ctx,start,schedule.tasks as unknown as Obj[],existing?.id||'');
+    const capacity=await capacityForWindow(ctx,start,schedule.tasks.map(t=>({...t,path:texts(wos.find(w=>w.id===t.woCode)?.data.path)})) as unknown as Obj[],existing?.id||'');
     if (b.action === 'preview_window') return { schedule:{...schedule,conflicts:[...schedule.conflicts,...capacity.blockers]}, neededHours: needed, start, end,capacityWarnings:capacity.warnings };
     if(capacity.blockers.length)throw new HttpError(409,capacity.blockers.slice(0,8).join(' '));
     if (schedule.conflicts.length) throw new HttpError(409, schedule.conflicts.join(' '));

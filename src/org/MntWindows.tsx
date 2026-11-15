@@ -409,6 +409,8 @@ export default function MntWindows() {
                             <p className={`text-xs ${needed > draft.durationHours ? 'text-danger' : 'text-soft'}`}>
                                 The work needs {needed.toFixed(2)} h of the {draft.durationHours} h window{needed > draft.durationHours ? ': lengthen the window or remove a work order.' : '.'}
                             </p>
+                            {!!preview.capacityWarnings?.length&&<Alert tone='warn'><div className='space-y-1 text-xs'>{preview.capacityWarnings.map((w:string)=><p key={w}>{w}</p>)}</div></Alert>}
+                            {!!preview.schedule?.conflicts?.length&&<Alert tone='error'><div className='space-y-1 text-xs'>{preview.schedule.conflicts.map((w:string)=><p key={w}>{w}</p>)}</div></Alert>}
                             <Gantt schedule={preview.schedule} start={preview.start} onMove={() => {}} />
                         </div>
                     )}
