@@ -123,7 +123,7 @@ async function bulkPlan(ctx:OrgContext){
  const blockers=new Set<string>(),retained=new Set<string>();
  for(const x of chosen)if(x.kind==='request'&&(x.doc.data.gembaId||x.doc.data.gembaObservationId))blockers.add('Gemba origin: '+x.doc.id);
  const secondary=(await Promise.all(casualCollections.map(async collection=>(await listDocs(base+'/'+collection)).map(doc=>({collection,doc}))))).flat();
- const ids=new Set(family),allReq=new Set(secondary.filter(x=>x.collection==='procurement_requirements').map(x=>x.doc.id)),allSecondary=new Set(secondary.map(x=>x.doc.id));
+ const ids=new Set(family),allReq=new Set(secondary.filter(x=>x.collection==='procurement_requirements').map(x=>x.doc.id));
  // Forward traversal: only related records are considered; a shared replenishment's requirement is never followed backwards.
  for(let pass=0;pass<12;pass++){
    let added=false;
@@ -136,21 +136,22 @@ async function bulkPlan(ctx:OrgContext){
        // Approved reusable master data may have been consumed by a different job.
        retained.add(k);continue;
      }
-     if(c==='asset_task_proposals'&&str(d.status)==='approved'){retained.add(k);continue;}
+     if(c==='asset_task_proposals'&&str(d.status)==='approved'&&secondary.some(y=>['asset_task_templates','asset_task_template_revisions'].includes(y.collection)&&hasMaintenanceReference(y.doc.data,x.doc.id))){retained.add(k);continue;}
      if(c==='procurement_requirements'&&!ownedKind(d)){retained.add(k);continue;}
      if(c==='procurement_orders'&&!procurementDraft(d)){blockers.add('Committed/posted purchase order: '+k);continue;}
-     if(['procurement_orders','procurement_requisitions','procurement_quotations'].includes(c)&&hasForeign(d,allReq,ids)){blockers.add('Shared procurement record: '+k);continue;}
+     if(['procurement_orders','procurement_requisitions','procurement_quotations'].includes(c)&&hasForeign(d,allReq,ids))continue;
      if(c==='fin_requests'&&str(d.type)!=='mnt.wo.cost'){blockers.add('Financial transaction: '+k);continue;}
      if(c==='stores_issue_vouchers'&&(['partial','issued'].includes(str(d.status))||asRows(d.lines).some(l=>Number(l.issuedQty)>0))){blockers.add('Posted stores issue voucher: '+k);continue;}
      if(c==='maintenance_material_reconciliations'&&asRows(d.consumption).length){blockers.add('Material consumption reconciliation: '+k);continue;}
      if(['material_creation_candidates','vendor_onboarding_requests'].includes(c)&&!['draft','created','pending','pending_validation','rejected','cancelled','submitted','open'].includes(str(d.status))){retained.add(k);continue;}
      // A window may have historical safety records; all its work orders must be included.
-     if(c==='safety_incidents'&&d.status==='open'){retained.add(k);continue;}
+     // Open or closed isolated development incident records are included in this test cleanup.
      remove.set(k,x);ids.add(x.doc.id);added=true;
    }
    if(!added)break;
    if(pass===11)blockers.add('Dependency chain is too deep; choose a smaller test case.');
  }
+ for(const x of secondary.filter(x=>['procurement_orders','procurement_requisitions','procurement_quotations'].includes(x.collection)))if(!remove.has(keyOf(x))&&refs(x.doc.data,ids)&&hasForeign(x.doc.data,allReq,ids))blockers.add('Shared procurement record: '+keyOf(x));
  // Shared requirements cannot be erased if an outside supply link uses them.
  for(const x of secondary.filter(x=>x.collection==='mnt_supply_links'))if(!remove.has(keyOf(x))&&ids.has(str(x.doc.data.requirementId)))blockers.add('Shared replenishment or requirement: '+x.doc.id);
  // A retained approved task proposal is intentionally preserved as provenance for the task master.
