@@ -17,6 +17,13 @@ export const WORK_GROUP_TASKS: Task[] = [
  ...MAINTENANCE_GATES.filter(g=>g.status==='existing').map(g=>({...g,external:externalGates.has(g.code)||g.mode==='automated'})),
  ...MNT_ACTIVITIES.map(a=>({code:a.key,label:a.label,permission:a.key,mode:'security activity',owner:'Security activity registry',separation:'Existing operational and maker-checker controls continue to apply.',external:externalPermissions.has(a.key),requires:[]}))
 ];
+// One-to-one task gates and security activities are one allocation, not two independent settings.
+export const LINKED_WORK_GROUP_TASKS:readonly (readonly [string,string])[]=[
+ ['MNT.WR.CREATE','MNT.WR.create'],['MNT.WR.REVIEW','MNT.WR.review'],
+ ['MNT.WR.ASSESS','MNT.assessment.edit'],['MNT.ASSESS.REVIEW','MNT.assessment.review'],
+ ['MNT.WR.CONVERT','MNT.WR.convert'],['MNT.WINDOW.LOCK','MNT.WO.schedule'],
+ ['MNT.TASK.FEEDBACK','MNT.WO.execute'],['MNT.WO.TECHNICAL_CLOSE','MNT.WO.close']
+];
 const objects=(v:unknown):Record<string,unknown>[]=>Array.isArray(v)?v.filter(isObj):[];
 const strings=(v:unknown):string[]=>Array.isArray(v)?[...new Set(v.map(str).filter(Boolean))]:[];
 const uidPattern=/^[A-Za-z0-9_-]{1,128}$/;
@@ -231,7 +238,7 @@ export const maintenanceWorkGroupRoutes={
    }
    return {id:g.id,code:str(g.data.code),name:str(g.data.name),siteId:str(g.data.siteId),version:Number(g.data.version)||0,costCenterIds,members,...assessment,issues,ready:issues.length===0,activeVersion:live?.groups.find(a=>a.id===g.id)?.version||0,updatedBy:str(g.data.updatedBy)};
   });
-  return {titles:WORK_GROUP_TITLES,tasks:WORK_GROUP_TASKS,sites,costCenters:cc.map(({path,...x})=>x),positions:[...d.positions.values()].map(p=>({id:p.id,label:nameOf(p)})),staff,groups,master:{...master,updatedBy:str(d.master?.data.updatedBy)},defaults:DEFAULT_WORK_GROUP_TASKS,active:{version:live?.version||0,masterVersion:live?.masterVersion||0,groupIds:live?.groups.map(g=>g.id)||[]},currentUserId:ctx.uid,testModeOverride:ctx.role==='org_super_admin'&&ctx.testMode===true,authorizationMode:live?.version?'work_groups':'legacy'};
+  return {titles:WORK_GROUP_TITLES,tasks:WORK_GROUP_TASKS,sites,costCenters:cc.map(({path,...x})=>x),positions:[...d.positions.values()].map(p=>({id:p.id,label:nameOf(p)})),staff,groups,master:{...master,updatedBy:str(d.master?.data.updatedBy)},defaults:DEFAULT_WORK_GROUP_TASKS,linkedTasks:LINKED_WORK_GROUP_TASKS,active:{version:live?.version||0,masterVersion:live?.masterVersion||0,groupIds:live?.groups.map(g=>g.id)||[]},currentUserId:ctx.uid,testModeOverride:ctx.role==='org_super_admin'&&ctx.testMode===true,authorizationMode:live?.version?'work_groups':'legacy'};
  })],
  'POST /api/org/mnt/work-groups/master/save': [orgRoute('org.mnt.workGroups.master.save','ADM.workflows',async ctx=>withLock(ctx.orgId,'maintenance_work_groups',async()=>{
   assertAdmin(ctx);const d=await setup(ctx),body=ctx.body;
@@ -250,6 +257,15 @@ export const maintenanceWorkGroupRoutes={
    const titles=strings(v);if(titles.some(x=>!title(x))||task.external&&titles.length)throw new HttpError(400,'Invalid generic role allocation or externally governed task.');
    if(!task.external)tasks[k]=titles;
   }
+  // Editing either end of a one-to-one pair updates its linked end. Preserve an old mismatch until explicitly edited; never silently expand live authority.
+  const priorTasks=d.master?mergedMasterTasks(d.master):{};
+  const same=(a:string[],b:string[])=>a.length===b.length&&a.every(x=>b.includes(x));
+  for(const [gate,permission] of LINKED_WORK_GROUP_TASKS){
+   const hasGate=Object.hasOwn(tasks,gate),hasPermission=Object.hasOwn(tasks,permission);
+   const gateChanged=hasGate&&!same(tasks[gate],priorTasks[gate]||[]),permissionChanged=hasPermission&&!same(tasks[permission],priorTasks[permission]||[]);
+   if(hasGate&&!hasPermission||gateChanged&&!permissionChanged)tasks[permission]=[...tasks[gate]];
+   else if(hasPermission&&!hasGate||permissionChanged&&!gateChanged)tasks[gate]=[...tasks[permission]];
+  }
   // A published alignment cannot be removed from under an existing named member.
   const priorAlignment=mapOfStrings(d.master?.data.roleAlignment);
   if(d.master)for(const g of d.groups)for(const t of WORK_GROUP_TITLES)for(const m of memberMap(g.data.members)[t]){
@@ -259,7 +275,7 @@ export const maintenanceWorkGroupRoutes={
   const fields={roleAlignment,tasks,defaultsVersion:1,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid,reason};
   await commit([{path:masterPath(ctx.orgId),fields,...(d.master?{updateTime:d.master.updateTime}:{exists:false})},{path:'organizations/'+ctx.orgId+'/maintenance_work_group_settings/default/revisions/'+String(version+1),fields,exists:false}]);
   await audit([{category:'maintenance',action:'mnt.work_group.master_saved',actor:ctx.actor,meta:ctx.meta,target:{label:'Work Groups master setup'},orgId:ctx.orgId,details:reason+'; revision '+(version+1)}]);
-  return {version:version+1,authorizationMode:'legacy'};
+  return {version:version+1,tasks,authorizationMode:'legacy'};
  }))],
  'POST /api/org/mnt/work-groups/create': [orgRoute('org.mnt.workGroups.create','ADM.workflows',async ctx=>withLock(ctx.orgId,'maintenance_work_groups',async()=>{
   assertAdmin(ctx);const d=await setup(ctx),body=ctx.body;

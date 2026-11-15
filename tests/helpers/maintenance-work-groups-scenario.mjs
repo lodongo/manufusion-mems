@@ -19,6 +19,7 @@ assert.equal(a.code,'WG_0001');assert.equal(b.code,'WG_0002');
 assert.deepEqual(snapshot(r+'/maintenance_work_groups/'+a.id).data.costCenterIds,[]);
 const master=await call('/master/save',{expectedVersion:0,roleAlignment:{[title]:['TECH'],[specialist]:['TECH']},tasks:{'MNT.assessment.edit':[title]},reason});
 assert.equal(master.version,1);
+assert.deepEqual(master.tasks['MNT.WR.ASSESS'],[title],'Editing security activity synchronizes its linked task gate');
 const assign=(g,cc,members,extra={})=>call('/save',{id:g.id,expectedVersion:g.version,expectedMasterVersion:1,costCenterIds:cc,members,reason,...extra});
 const member={uid:'EMP_A',positionCode:'TECH'};
 const saved=await assign(a,['CC_A'],{[title]:[member],[specialist]:[member]});

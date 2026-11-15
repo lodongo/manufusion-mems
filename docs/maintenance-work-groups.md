@@ -36,3 +36,5 @@ New work requests cannot be submitted at an unassigned cost center once the orga
 
 ### Responsibility diagnostics and actual titles
 Responsibility display resolves actual organizational job titles from the active alignment even when no employee is eligible. It explains missing role alignment, named assignments, maker-checker conflicts, invalid scope, and conflicting gate/security activity allocations rather than displaying generic unassigned roles. When saved master or group revisions differ, it displays a clearly marked read-only preview of the saved job title and employee, without granting new rights. The existing independently approved activation remains authoritative. Work Group Master Setup shows the actual titles for each task and configuration overlap warnings.
+
+One-to-one task gate and security activity allocations are linked on explicit edits in Master Setup, including server-side synchronization for API clients. Existing inconsistent pairs remain visible for intentional resolution, avoiding unapproved live authorization changes. Shared permissions and independent authorities are not automatically merged.
