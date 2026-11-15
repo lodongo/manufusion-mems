@@ -22,8 +22,11 @@ async function analytics(ctx:OrgContext){
  const all:RecordInput[]=[...wr.filter(d=>str(d.data.requestedBy)===ctx.uid||canAt(ctx,'MNT.view',texts(d.data.path),scope)).map(d=>({kind:'wr' as const,id:d.id,data:d.data})),...wo.filter(d=>canAt(ctx,'MNT.view',texts(d.data.path),scope)||outsideExecutionAccess(ctx.workGroupPolicy,d)).map(d=>({kind:'wo' as const,id:d.id,data:d.data}))];
  const nodeMap=new Map(nodes.map(n=>[n.id,n]));
  const allowedNodes=new Set(all.flatMap(r=>texts(r.data.path)));
+ // Derive authorized empty locations too, using actual scope checks on their master hierarchy.
+ const nodePath=(id:string)=>{const p:string[]=[],seen=new Set<string>();let next=id;while(next&&next!=='root'&&p.length<30&&!seen.has(next)){const n=nodeMap.get(next);if(!n)break;seen.add(next);p.unshift(next);next=str(n.data.parentId);}return p;};
+ for(const n of nodes){const p=nodePath(n.id);if(p.length&&canAt(ctx,'MNT.view',p,scope))for(const id of p)allowedNodes.add(id);}
  const legalId=(d:RecordData)=>texts(d.path).find(id=>nodeMap.get(id)?.data.level==='legal_entity')||'';
- const leIds=[...new Set(all.map(r=>legalId(r.data)).filter(Boolean))];
+ const leIds=[...new Set([...all.map(r=>legalId(r.data)).filter(Boolean),...nodes.filter(n=>allowedNodes.has(n.id)&&n.data.level==='legal_entity').map(n=>n.id)])];
  const options=nodes.filter(n=>allowedNodes.has(n.id)).map(n=>({id:n.id,label:name(n),level:str(n.data.level),parentId:str(n.data.parentId),code:str(n.data.code)}));
  const groups=[...new Map(all.filter(r=>str(r.data.workGroupId)).map(r=>[str(r.data.workGroupId),{id:str(r.data.workGroupId),label:str(r.data.workGroupName)||str(r.data.workGroupCode)}])).values()];
  const peopleIds=new Set(all.flatMap(r=>employeeIds(r.data,r.kind)));
@@ -33,22 +36,27 @@ async function analytics(ctx:OrgContext){
  const b=ctx.body,choice=(str(b.period)||'today') as PeriodChoice;if(!PERIODS.includes(choice))throw new HttpError(400,'Unknown reporting period.');
  const node=str(b.node),group=str(b.group),employee=str(b.employee),legal=str(b.legalEntity),asset=str(b.asset),country=str(b.country);
  const countryOf=(d:RecordData)=>{const n=nodeMap.get(legalId(d));return str(obj(n?.data.attributes).countryCode)||str(n?.data.countryCode);};
- const countries=[...new Set(all.map(r=>countryOf(r.data)).filter(Boolean))].map(id=>({id,label:id}));
+ const countries=[...new Set([...all.map(r=>countryOf(r.data)),...leIds.map(id=>str(obj(nodeMap.get(id)?.data.attributes).countryCode)||str(nodeMap.get(id)?.data.countryCode))].filter(Boolean))].map(id=>({id,label:id}));
  const assets=[...new Map(all.filter(r=>str(r.data.assetTag)||str(r.data.unitId)).map(r=>{const id=str(r.data.assetTag)||str(r.data.unitId);return [id,{id,label:str(r.data.assetName)||str(r.data.unitName)||id}];})).values()];
  if(node&&!allowedNodes.has(node)||group&&!groups.some(g=>g.id===group)||employee&&!peopleIds.has(employee)||legal&&!leIds.includes(legal)||asset&&!assets.some(a=>a.id===asset)||country&&!countries.some(c=>c.id===country))throw new HttpError(403,'Reporting scope is outside your accessible maintenance records.');
  const selected=all.filter(r=>(!node||texts(r.data.path).includes(node))&&(!group||r.data.workGroupId===group)&&(!employee||employeeIds(r.data,r.kind).includes(employee))&&(!legal||legalId(r.data)===legal)&&(!asset||(str(r.data.assetTag)||str(r.data.unitId))===asset)&&(!country||countryOf(r.data)===country));
- const selectedLE=[...new Set(selected.map(r=>legalId(r.data)).filter(Boolean))];
+ const selectedLE=[...new Set(legal?[legal]:selected.length?selected.map(r=>legalId(r.data)).filter(Boolean):leIds.filter(id=>(!node||nodePath(id).includes(node)||nodePath(node).includes(id))&&(!country||(str(obj(nodeMap.get(id)?.data.attributes).countryCode)||str(nodeMap.get(id)?.data.countryCode))===country)))];
  const baseZone=str(ctx.org.data.timeZone)||str(ctx.org.data.timezone)||'UTC',zone=validZone(baseZone)?baseZone:'UTC';
  const now=Date.now(),customStart=str(b.start),customEnd=str(b.end);
  const calendars:Calendar[]=await Promise.all(selectedLE.map(async id=>{const [entity,years]=await Promise.all([entityOf(ctx.orgId,id),yearsOf(ctx.orgId,id)]);const n=nodeMap.get(id),z=str(obj(n?.data.attributes).timeZone)||str(n?.data.timeZone)||zone;return {id,name:n?name(n):id,zone:validZone(z)?z:zone,weekEndDay:entity.settings?.weekEndDay??-1,years:years.filter(y=>y.status==='active'||y.status==='closed').map(y=>({fy:y.fy,label:y.label,start:y.start,end:y.end,periods:y.periods.map(p=>({no:p.no,name:p.name,start:p.start,end:p.end,special:p.special}))}))};}));
  const general:Calendar={id:'',name:'Organization reporting timezone',zone,weekEndDay:6,years:[]};
  const canManageTargets=ctx.role==='org_super_admin';
  const targetRules=rows(targetDoc?.data.rules).flatMap(r=>{try{return [{scope:str(r.scope),values:validateTargetValues(r.values)}];}catch{return [];}});
- const scopeChain:string[]=[];if(country)scopeChain.push('country:'+country);
- const explicitNode=node||legal;const ancestors:string[]=[];let ancestor=explicitNode;for(let i=0;i<20&&ancestor;i++){ancestors.unshift('node:'+ancestor);ancestor=str(nodeMap.get(ancestor)?.data.parentId);if(ancestor==='root')break;}
- scopeChain.push(...ancestors);if(group)scopeChain.push('group:'+group);if(asset)scopeChain.push('asset:'+asset);if(employee)scopeChain.push('employee:'+employee);
+ const scopeChain:string[]=[],explicitScope=employee?'employee:'+employee:asset?'asset:'+asset:group?'group:'+group:node?'node:'+node:legal?'node:'+legal:country?'country:'+country:'org';
+ const common=(paths:string[][])=>paths.length?paths[0].filter((id,i)=>paths.every(p=>p[i]===id)):[];
+ const scopedPaths=selected.map(r=>texts(r.data.path));
+ const inferred=(asset||group||employee)&&scopedPaths.length?common(scopedPaths):nodePath(node||legal);
+ const targetCountry=country||((node||legal||asset||group||employee)&&selectedLE.length===1?(str(obj(nodeMap.get(selectedLE[0])?.data.attributes).countryCode)||str(nodeMap.get(selectedLE[0])?.data.countryCode)):'');
+ if(targetCountry)scopeChain.push('country:'+targetCountry);scopeChain.push(...inferred.map(id=>'node:'+id));
+ if(group)scopeChain.push('group:'+group);else if((asset||employee)&&selected.length&&selected.every(r=>r.data.workGroupId===selected[0].data.workGroupId)&&str(selected[0].data.workGroupId))scopeChain.push('group:'+str(selected[0].data.workGroupId));
+ if(asset)scopeChain.push('asset:'+asset);if(employee)scopeChain.push('employee:'+employee);
  const targets=resolveTargets(targetRules,scopeChain);
- const base={options,groups,people,assets,countries,targets,canManageTargets,targetScope:scopeChain.at(-1)||'org',targetVersion:Number(targetDoc?.data.version)||0,legalEntities:leIds.map(id=>({id,label:nodeMap.has(id)?name(nodeMap.get(id)!):id})),stateLabels:labels,asOf:new Date(now).toISOString()};
+ const base={options,groups,people,assets,countries,targets,canManageTargets,targetScope:explicitScope,targetVersion:Number(targetDoc?.data.version)||0,legalEntities:leIds.map(id=>({id,label:nodeMap.has(id)?name(nodeMap.get(id)!):id})),stateLabels:labels,asOf:new Date(now).toISOString()};
  let window:ReturnType<typeof periodBounds>,calendar=calendars[0]||general,alignment='';
  try{
   if(choice==='custom'){calendar=general;window=periodBounds(choice,calendar,now,customStart,customEnd);alignment='Common explicit date interval in organization timezone; event times are UTC.';}

@@ -32,13 +32,13 @@ export function periodBounds(choice:PeriodChoice,calendar:Calendar,now:number,cu
 export function trendBuckets(w:ReturnType<typeof periodBounds>,choice:PeriodChoice,calendar:Calendar){
  const out:{start:number;end:number;label:string}[]=[];
  const days=(Date.parse(w.endDate)-Date.parse(w.startDate))/86400000+1;
- if(days<=2){for(let t=w.start;t<w.end;t+=3600000)out.push({start:t,end:Math.min(w.end,t+3600000),label:new Intl.DateTimeFormat('en-GB',{timeZone:w.zone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(t))});return out;}
+ if(days<=2||w.end-w.start<=2*86400000){for(let t=w.start;t<w.end;t+=3600000)out.push({start:t,end:Math.min(w.end,t+3600000),label:new Intl.DateTimeFormat('en-GB',{timeZone:w.zone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(t))});return out;}
  if(choice==='current_year'||choice==='last_year'){
   for(const p of calendar.years.flatMap(y=>y.periods.filter(p=>!p.special)).sort((a,b)=>a.start.localeCompare(b.start))){
    const a=Math.max(w.start,midnight(p.start,w.zone)),b=Math.min(w.end,midnight(dateAdd(p.end,1),w.zone));if(a<b)out.push({start:a,end:b,label:p.name});
   }if(out.length)return out;
  }
  const step=days>14?7:1;let d=w.startDate;
- while(midnight(d,w.zone)<w.end){const a=midnight(d,w.zone),b=Math.min(w.end,midnight(dateAdd(d,step),w.zone));out.push({start:a,end:b,label:d.slice(5)});d=dateAdd(d,step);}
+ while(midnight(d,w.zone)<w.end){const a=Math.max(w.start,midnight(d,w.zone)),b=Math.min(w.end,midnight(dateAdd(d,step),w.zone));if(a<b)out.push({start:a,end:b,label:d.slice(5)});d=dateAdd(d,step);}
  return out;
 }

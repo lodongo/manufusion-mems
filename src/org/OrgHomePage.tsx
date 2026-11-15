@@ -26,6 +26,8 @@ const MyActivity = lazy(() => import('./MyActivity'));
 const WorkRequests = lazy(() => import('./WorkRequests'));
 const WorkOrders = lazy(() => import('./WorkOrders'));
 const MntHome = lazy(() => import('./MntHome'));
+const MntDashboard = lazy(() => import('./MntDashboard'));
+const MntSetup = lazy(() => import('./MntSetup'));
 const MntWindows = lazy(() => import('./MntWindows'));
 const MntMaterialCandidates = lazy(() => import('./MntMaterialCandidates'));
 const MntWorkflowSettings = lazy(() => import('./MntWorkflowSettings'));
@@ -121,7 +123,9 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
     ],
     SAF: [{label:'Risk Assessments',path:'saf_risk_assessments',permission:'SAF.view'},{label:'Safety metadata adoption',path:'saf_adoption',prefix:'SAF.'},{label:'Permits',path:'saf_permits',prefix:'SAF.'},{label:'LOTO',path:'saf_loto',prefix:'SAF.'},{ label: 'Risk matrix', path: 'saf_configuration', prefix: 'SAF.' }],
     MNT: [
+        { label: 'Dashboard', path: 'mnt_dashboard', permission: 'MNT.view' },
         { label: 'Maintenance workspace', path: 'mnt', prefix: 'MNT.' },
+        { label: 'Maintenance Setup', path: 'mnt_setup', permission: 'ADM.workflows' },
         { label: 'Work requests', path: 'work_requests', prefix: 'MNT.WR.' },
         { label: 'Work orders', path: 'work_orders', prefix: 'MNT.WO.' },
         { label: 'Maintenance windows', path: 'maintenance_windows', prefix: 'MNT.' },
@@ -471,6 +475,8 @@ export default function OrgHomePage({
     else if(activeMenu?.module.code==='SAF'&&section==='saf_loto') content=<LotoSetup/>;
     else if (activeMenu && section === 'maintenance_windows') content = <MntWindows />;
     else if (activeMenu && section === 'mnt_material_candidates') content = <MntMaterialCandidates />;
+    else if (activeMenu && section === 'mnt_dashboard') content = <MntDashboard sessionKey={(session.organization?.id||'unknown')+'.'+session.user.uid} />;
+    else if (activeMenu && section === 'mnt_setup') content = <MntSetup />;
     else if (activeMenu && section === 'mnt') content = <MntHome />;
     else if (activeMenu && section === 'mnt_work_groups') content = <MntWorkGroups />;
     else if (activeMenu && section === 'mnt_workflows') content = <MntWorkflowSettings />;
