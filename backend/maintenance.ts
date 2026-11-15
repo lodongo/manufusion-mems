@@ -2136,7 +2136,7 @@ export const maintenanceRoutes = {
             switch (action) {
                 case 'assess_header': {
                     if(d.executionMode!=='confirmed_request'||str(d.status)!=='planning')throw new HttpError(409,'Technical classification belongs to the assessment step of a confirmed Work Order.');
-                    need(ctx,P.assessment_edit,pathOf(doc),scope);await requireConfiguredMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
+                    need(ctx,P.assessment_edit,pathOf(doc),scope);if(groupAt(ctx.workGroupPolicy,pathOf(doc)))await requireConfiguredMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
                     if(workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true&&!bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))throw new HttpError(403,'Assessment reviewer cannot create the assessment.');
                     if(Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Open controlled reassessment before changing planned scope.');
                     const evaluation=str(b.technicalEvaluation).trim().slice(0,3000);if(evaluation.length<20)throw new HttpError(400,'Write at least 20 characters of technical evaluation.');
