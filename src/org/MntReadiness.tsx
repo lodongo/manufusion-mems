@@ -33,7 +33,8 @@ export default function MntReadiness({ code, wo, cycle, checklist, canPlan, curr
     const budget = checklist.budget || {};
     const datesChanged = start !== (wo.scheduledStart || '') || end !== (wo.scheduledEnd || '');
     const minNewStart=cycle?.restrictedTypes?.includes(wo.maintenanceTypeCode)?cycle.nextStart:cycle?.today;
-    const invalidNewStart=start!==wo.scheduledStart&&!!minNewStart&&start<minNewStart;
+    const moves=Math.max(Number(wo.startDateMoves)||0,(wo.dateChanges||[]).filter((x:MntData)=>x.fromStart&&x.fromStart!==x.toStart).length);
+    const invalidNewStart=start!==wo.scheduledStart&&(moves>=2||!!minNewStart&&start<minNewStart);
     const allowanceNum = Number(allowance) || 0;
     const total = Number(est.total || 0) - Number(est.allowance || 0) + allowanceNum;
     const overBudget = budget.available === null || budget.available === undefined || total > Number(budget.available);
@@ -94,10 +95,11 @@ export default function MntReadiness({ code, wo, cycle, checklist, canPlan, curr
                     <section className='space-y-2 rounded-xl border border-line p-3'>
                         <p className='flex items-center gap-2 text-sm font-semibold text-ink'><Lock className='h-4 w-4' />Schedule dates {done('schedule') && <Badge tone='brand'>Locked</Badge>}</p>
                         <div className='grid grid-cols-2 gap-2'>
-                            <label className='text-sm text-soft'>Start<input type='date' className={mntInput} min={start===wo.scheduledStart?undefined:minNewStart} value={start} onChange={(e) => setStart(e.target.value)} /></label>
+                            <label className='text-sm text-soft'>Start<input type='date' className={mntInput} disabled={moves>=2} min={start===wo.scheduledStart?undefined:minNewStart} value={start} onChange={(e) => setStart(e.target.value)} /></label>
                             <label className='text-sm text-soft'>End<input type='date' className={mntInput} min={start} value={end} onChange={(e) => setEnd(e.target.value)} /></label>
                         </div>
                         {cycle?.restrictedTypes?.includes(wo.maintenanceTypeCode)&&<p className='text-xs text-soft'>New start dates must be in the next weekly cycle or later ({minNewStart}). Previously accepted start dates remain valid.</p>}
+                        <p className="text-xs text-soft">Scheduled start date changes: {moves}/2 {moves>=2?'· locked':''}</p>
                         {datesChanged && <label className='block text-sm text-soft'>Why do the dates change? *<input className={mntInput} value={dateNote} onChange={(e) => setDateNote(e.target.value)} /></label>}
                         <Button testOverride={testModeOverride} variant='secondary' busy={busy === 'lock_schedule'} disabled={!start || !end || end < start || invalidNewStart || (datesChanged && dateNote.trim().length < 10)}
                             onClick={() => act('lock_schedule', { scheduledStart: start, scheduledEnd: end, note: dateNote.trim() }, 'Dates locked')}>{done('schedule') && !datesChanged ? 'Locked' : 'Lock dates'}</Button>

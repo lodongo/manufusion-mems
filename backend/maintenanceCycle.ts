@@ -30,3 +30,16 @@ export function validateCycleDates(type:string,start:string,end:string,cycle:{to
  if(newAdmission&&start<cycle.today)throw new HttpError(400,'Start date cannot be in the past.');
  if(newAdmission&&cycleRestricted(type)&&start<cycle.nextStart)throw new HttpError(400,'This maintenance type must start in the next maintenance cycle or later: '+cycle.nextStart+'.');
 }
+
+// Count only actual changes of the scheduled starting date, across all edit routes.
+export function startDateMoves(existing:Obj){
+ const history=Array.isArray(existing.dateChanges)?existing.dateChanges: scenarioEmpty();
+ const count=history.filter(x=>x!==null&&typeof x==='object'&&!Array.isArray(x)&&str(x.fromStart)&&str(x.fromStart)!==str(x.toStart)).length;
+ return Math.max(count,Math.max(0,Number(existing.startDateMoves)||0));
+}
+function scenarioEmpty():never[]{return [];}
+export function validateStartDateMove(existing:Obj,start:string){
+ const count=startDateMoves(existing),changed=!!str(existing.scheduledStart)&&start!==str(existing.scheduledStart);
+ if(changed&&count>=2)throw new HttpError(409,'Scheduled start date has already been moved twice. Its date is locked; create a break-in sub-order for additional work where applicable.');
+ return count+(changed?1:0);
+}

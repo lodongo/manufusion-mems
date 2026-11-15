@@ -1182,7 +1182,12 @@ export const handler = router(recordWiredRoutes({
             if (!/^[A-Z]{3}$/.test(code)) throw new HttpError(400, 'Invalid module code.');
             const workspace = await getDoc(`module_workspaces/${code}`);
             if (!workspace) return { workspace: null, files: [], metadata: [] };
-            if (code === 'AST' || code === 'DOC' || code === 'SAF') await seedModuleMetadata(code);
+            if (code === 'AST' || code === 'DOC' || code === 'SAF' || code==='MNT') await seedModuleMetadata(code);
+            if(code==='MNT'){
+                const entry=await getDoc('module_workspaces/MNT/metadata/maintenanceTypes');
+                const item={code:'MAI-016',label:'Break-in Maintenance',category:'',selectable:false,active:true,color:'#B45309'};
+                if(entry){const items=(Array.isArray(entry.data.items)?entry.data.items:[]).filter(isObj);const prior=items.find(x=>x.code===item.code);if(!prior||prior.selectable!==false||prior.active!==true||prior.label!==item.label)await writeDoc('module_workspaces/MNT/metadata/maintenanceTypes',{...entry.data,items:[...items.filter(x=>x.code!==item.code),item]},{updateTime:entry.updateTime});}
+            }
             if(code==='SAF')await seedModuleMetadata('AST');
             const unified=code==='SAF'||code==='AST'?await loadSafetyHazardMaster():null;
             const [files, metadata] = await Promise.all([listDocs(`module_workspaces/${code}/files`), listDocs(`module_workspaces/${code}/metadata`)]);

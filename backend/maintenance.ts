@@ -1,4 +1,4 @@
-import {getMaintenanceCycle,validateCycleDates,cycleRestricted} from './maintenanceCycle';
+import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
 import { storage } from './platform/sdk';
 import { commit, withLock } from './finCore';
@@ -16,7 +16,7 @@ import { effectiveAccess, orgRoute, type OrgContext } from './guards';
 import { bypass } from './testModeCore';
 import { nextOrgCounter } from './positions';
 import { detectImage } from './branding';
-import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
+import { DEFAULT_MODULE_METADATA, BREAK_IN_TYPE } from './moduleDefaults';
 import { effectiveSafetyItems } from './safConfiguration';
 import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
@@ -169,7 +169,7 @@ function flat(items: Obj[]): ListItem[] {
 
 /** Only a registered active maintenance type may override the WO's primary strategy. */
 async function verifiedTaskMaintenanceTypes(tasks:AssessedTask[]):Promise<AssessedTask[]>{
-    const available=new Map(flat(await rawList('maintenanceTypes')).map(v=>[v.code,v.label]));
+    const available=new Map(flat(await rawList('maintenanceTypes')).filter(v=>v.code!==BREAK_IN_TYPE.code).map(v=>[v.code,v.label]));
     return tasks.map(task=>{
         const code=str(task.maintenanceTypeCode);
         if(!code)return task;
@@ -205,7 +205,7 @@ async function lists() {
         criticality: flat(risk),
         impacts: grouped(impacts),
         failureModes: grouped(failure),
-        maintenanceTypes: flat(mtypes),
+        maintenanceTypes: flat(mtypes).filter(x=>x.code!==BREAK_IN_TYPE.code),
         workTypes: flat(wtypes),
         priorities: flat(prio),
         disciplines: flat(disc),
@@ -644,7 +644,8 @@ function woOut(doc: Doc) {
         statusLabel: str(d.workflowLabel)||(isRequestClosureOrder(d)&&status==='in_progress'?'Work completed · awaiting feedback':WO_STATUS[status] ?? status),
         workflowCode:str(d.workflowCode),workflowSince:str(d.workflowSince),workflowReason:str(d.workflowReason),
         executionMode:str(d.executionMode),
-        origin: str(d.wrCode) ? 'request' : 'direct',
+        origin: str(d.parentWoCode)?'break_in':str(d.wrCode) ? 'request' : 'direct',
+        parentWoCode:str(d.parentWoCode),rootWoCode:str(d.rootWoCode),
         wrCode: str(d.wrCode),
         ...locationOut(d),
         criticalityCode: str(d.criticalityCode),
@@ -692,7 +693,7 @@ function woCan(ctx: OrgContext, doc: Doc, scope: Scope, l: Lists) {
         verify: s === 'completed' && at(P.WO_verify) && independent(ctx, !workers.has(ctx.uid), 'mnt.wo.verify_independence'),
         close: (s === 'verified'||isRequestClosureOrder(d)&&s==='completed'&&!!object(d.handover).at) && at(P.WO_close),
         cancel: ['planning', 'plan_ready', 'released', 'scheduled'].includes(s) && at(P.WO_cancel),
-        reopen: ['verified', 'closed'].includes(s) && at(P.WO_reopen),
+        reopen: false,
         highRisk: high,
         isPlanner: planner === ctx.uid,
         didWork: workers.has(ctx.uid),
@@ -1130,7 +1131,7 @@ export const maintenanceRoutes = {
                     photos[path]=await signedUrl(path);
             }
             return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),photos,serviceHierarchy,
-                maintenanceTypes:flat(await rawList('maintenanceTypes')),vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
+                maintenanceTypes:flat(await rawList('maintenanceTypes')).filter(x=>x.code!==BREAK_IN_TYPE.code),vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
                 hazardousEnergy:safetyOptions(energy),
                 safetyPermits:safetyOptions(permits),
                 machineStatuses:safetyOptions(machineStates),safetyHazards:safetyOptions(hazards),safetyImpacts:safetyOptions(impacts),safetyControls:safetyOptions(controls),
@@ -2137,6 +2138,22 @@ export const maintenanceRoutes = {
             const deny = (allowed: boolean, why: string) => {
                 if (!allowed) throw new HttpError(403, why);
             };
+            if(action==='create_break_in'){
+                if(!can.view||!canAt(ctx,P.WO_close,pathOf(doc),scope))throw new HttpError(403,'Only authorized technical closure employees may create a break-in sub-order.');
+                await requireMaintenanceRole(ctx,'MNT.WO.TECHNICAL_CLOSE',pathOf(doc));
+                if(!['completed','verified','closed'].includes(str(d.status)))throw new HttpError(409,'Create a break-in sub-order at closure or after the original work order is closed.');
+                const description=str(b.description).trim().slice(0,2000),title=str(b.title).trim().slice(0,150),start=str(b.scheduledStart),end=str(b.scheduledEnd);
+                if(title.length<3||description.length<10)throw new HttpError(400,'Provide a title and describe the additional work.');
+                const cycle=await getMaintenanceCycle(ctx);validateCycleDates(BREAK_IN_TYPE.code,start,end,cycle);
+                const n=await nextOrgCounter(ctx.orgId,'woSeq');if(n>99_999_999)throw new HttpError(400,'Work order numbering is exhausted.');
+                const code='WO'+String(n).padStart(8,'0'),path=pathOf(doc);
+                const keys=['assemblyId','assemblyCode','assemblyName','unitId','unitCode','unitName','costCenterId','costCenterCode','costCenterName','siteId','siteCode','siteName','assetTag','assetName','assetClass','criticalityCode','criticalityLabel','criticalityColor','priorityCode','priorityLabel','disciplineCode','disciplineLabel','requestedBy','requestedByName','requestedAt'];
+                const base=Object.fromEntries(keys.map(k=>[k,str(d[k])]));
+                const child:Obj={...base,...groupFields(ctx.workGroupPolicy,path),code,title,description,path,wrCode:str(d.wrCode),parentWoCode:doc.id,rootWoCode:str(d.rootWoCode)||doc.id,executionMode:'confirmed_request',breakIn:true,status:'planning',schemaVersion:2,maintenanceTypeCode:BREAK_IN_TYPE.code,maintenanceTypeLabel:BREAK_IN_TYPE.label,scheduledStart:start,scheduledEnd:end,initialScheduledStart:start,initialScheduledEnd:end,startDateMoves:0,cycleAdmission:{startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycle.today,at:now,version:cycle.version},assessmentTasks:[],assessmentTasksVersion:0,tasks:[],taskPlanning:{},taskExecution:{},spares:[],services:[],sparesUsed:[],timeLogs:[],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Break-in sub-order created from '+doc.id,description),workflowCode:'WO010',workflowLabel:'Awaiting assessment',workflowSince:now,workflowTransitions:[{from:'',to:'WO010',label:'Awaiting assessment',at:now,by:ctx.uid,byName:displayName(ctx),source:'break_in'}]};
+                // The parent (including a closed parent) is never rewritten.
+                await commit([{path:woCol(ctx.orgId)+'/'+code,fields:child,exists:false}]);await rec(ctx,'mnt.wo.break_in_created',code,'Parent '+doc.id+' · '+description);return {ok:true,woCode:code};
+            }
+            if(str(d.status)==='closed')throw new HttpError(409,'Closed work orders are immutable. Create a break-in sub-order for further work.');
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
                 case 'assess_header': {
@@ -2145,11 +2162,12 @@ export const maintenanceRoutes = {
                     if(workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true&&!bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))throw new HttpError(403,'Assessment reviewer cannot create the assessment.');
                     if(Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Open controlled reassessment before changing planned scope.');
                     const evaluation=str(b.technicalEvaluation).trim().slice(0,3000);if(evaluation.length<20)throw new HttpError(400,'Write at least 20 characters of technical evaluation.');
-                    const nature=pickGrouped(l.failureModes,str(b.natureCode),'failure mode')!,crit=pick(l.criticality,str(b.severityCode),'severity')!,mtype=pick(l.maintenanceTypes,str(b.maintenanceTypeCode),'maintenance type')!,prio=pick(l.priorities,str(b.priorityCode),'priority',false);
+                    const nature=pickGrouped(l.failureModes,str(b.natureCode),'failure mode')!,crit=pick(l.criticality,str(b.severityCode),'severity')!,mtype=d.breakIn===true&&str(d.parentWoCode)?BREAK_IN_TYPE:pick(l.maintenanceTypes,str(b.maintenanceTypeCode),'maintenance type')!,prio=pick(l.priorities,str(b.priorityCode),'priority',false);
                     const start=b.scheduledStart===undefined?str(d.scheduledStart):str(b.scheduledStart),end=b.scheduledEnd===undefined?str(d.scheduledEnd):str(b.scheduledEnd),dateChanged=start!==str(d.scheduledStart)||end!==str(d.scheduledEnd),typeChanged=mtype.code!==str(d.maintenanceTypeCode),cycle=await getMaintenanceCycle(ctx);
-                    if(typeChanged||dateChanged)validateCycleDates(mtype.code,start,end,cycle,d);
+                    validateCycleDates(mtype.code,start,end,cycle,d);
+                    const startMoves=validateStartDateMove(d,start);
                     const dateReason=str(b.dateChangeReason).trim().slice(0,500);if(dateChanged&&dateReason.length<10)throw new HttpError(400,'Explain the changed dates during assessment (at least 10 characters).');
-                    const datePatch:Obj=dateChanged?{scheduledStart:start,scheduledEnd:end,dateChanges:[...objs(d.dateChanges),{at:now,by:ctx.uid,name:displayName(ctx),fromStart:str(d.scheduledStart),fromEnd:str(d.scheduledEnd),toStart:start,toEnd:end,reason:dateReason,source:'assessment'}],scheduleLock:null}:{};
+                    const datePatch:Obj=dateChanged?{scheduledStart:start,scheduledEnd:end,startDateMoves:startMoves,dateChanges:[...objs(d.dateChanges),{at:now,by:ctx.uid,name:displayName(ctx),fromStart:str(d.scheduledStart),fromEnd:str(d.scheduledEnd),toStart:start,toEnd:end,reason:dateReason,source:'assessment'}],scheduleLock:null}:{};
                     if(typeChanged||start!==str(d.scheduledStart))datePatch.currentCycleAdmission={startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycleRestricted(mtype.code)?cycle.nextStart:cycle.today,at:now,version:cycle.version};
                     const codes=[...new Set(strs(b.solutionCodes))];if(!codes.length||codes.length>5)throw new HttpError(400,'Choose one to five solution categories.');const solutions=codes.map(c=>pickGrouped(l.solutions,c,'solution category')!).map(x=>({code:x.code,label:x.label,group:x.group}));
                     const assemblyPatch:Record<string,Plain>={};const assembly=b.assemblyId===undefined?str(d.assemblyId):str(b.assemblyId);if(assembly!==str(d.assemblyId)){if(objs(d.assessmentTasks).length)throw new HttpError(409,'The assembly cannot change after tasks are assessed.');const place=await assemblyContext(ctx,assembly||str(d.unitId),P.assessment_edit,!assembly);if((assembly&&!place.assembly)||place.unit?.id!==str(d.unitId)||place.defaultAssetTag!==str(d.assetTag))throw new HttpError(409,'Choose an assembly of the original equipment and asset.');Object.assign(assemblyPatch,{assemblyId:place.assembly?.id||'',assemblyCode:place.assembly?.code||'',assemblyName:place.assembly?.name||'',path:place.path.map(x=>x.id)});}
@@ -2166,6 +2184,7 @@ export const maintenanceRoutes = {
                             (m?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix);
                     }catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid task work assessment.');}
                     tasks=await verifiedTaskMaintenanceTypes(tasks);
+                    if(d.breakIn===true)tasks=tasks.map(t=>({...t,maintenanceTypeCode:BREAK_IN_TYPE.code,maintenanceTypeLabel:BREAK_IN_TYPE.label}));
                     await verifyAssessedTaskChoices(ctx,doc,tasks);
                     tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(v=>v.proposedVendorIds));

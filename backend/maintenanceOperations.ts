@@ -1,5 +1,5 @@
 import {summarizeWorkOrderReview} from './maintenanceStatusReview';
-import {getMaintenanceCycle,validateCycleDates,localDate} from './maintenanceCycle';
+import {getMaintenanceCycle,validateCycleDates,localDate,validateStartDateMove,startDateMoves} from './maintenanceCycle';
 import {stateOf,transitionPatch,type FactSet} from './maintenanceWorkflowState';
 import {responsibilityData,responsibilityFor,groupFields} from './maintenanceResponsibility';
 import { createHash } from 'node:crypto';
@@ -32,6 +32,8 @@ import {
 } from './maintenanceSourcing';
 import { planningGroup } from './maintenanceMaterialHook';
 import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
+import { storage } from './platform/sdk';
+import { signedUrl } from './structure';
 import { budgetStatus, costApprovalOf, estimateOf, periodOf, submitCost } from './maintenancePlanning';
 import {
     closurePrerequisites,
@@ -446,8 +448,8 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
             throw new HttpError(400, 'Enter the scheduled dates as YYYY-MM-DD.');
         if (end < start) throw new HttpError(400, 'The scheduled end cannot be before the start.');
         const cycle=await getMaintenanceCycle(ctx);
-        if(wo.data.cycleAdmission||wo.data.executionMode==='confirmed_request'||start!==str(wo.data.scheduledStart))validateCycleDates(str(wo.data.maintenanceTypeCode),start,end,cycle,wo.data);
-        else if(start<nowIso().slice(0,10))throw new HttpError(400,'The scheduled start cannot be in the past.');
+        validateCycleDates(str(wo.data.maintenanceTypeCode),start,end,cycle,wo.data);
+        const moves=validateStartDateMove(wo.data,start);
         const changed = start !== wo.data.scheduledStart || end !== wo.data.scheduledEnd;
         const reason = str(b.note).trim().slice(0, 300);
         if (changed && reason.length < 10) throw new HttpError(400, 'Explain why the dates change (at least 10 characters).');
@@ -455,7 +457,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
         // A move to another budget period needs a new cost approval against that period's budget.
         const periodMoved = periodOf(start) !== periodOf(str(wo.data.scheduledStart));
         await saveWo(ctx, wo, {
-            scheduledStart: start, scheduledEnd: end,
+            scheduledStart: start, scheduledEnd: end,startDateMoves:moves,
             ...(start!==str(wo.data.scheduledStart)?{currentCycleAdmission:{startDay:cycle.startDay,timeZone:cycle.timeZone,version:cycle.version,at:nowIso()}}:{}),
             dateChanges:changed?[...rows(wo.data.dateChanges),{at:nowIso(),by:ctx.uid,name:name(ctx),fromStart:str(wo.data.scheduledStart),fromEnd:str(wo.data.scheduledEnd),toStart:start,toEnd:end,reason}]:rows(wo.data.dateChanges),
             scheduleLock: { start, end, at: nowIso(), by: ctx.uid, name: name(ctx) },
@@ -1441,6 +1443,43 @@ async function normalClosureFeedback(ctx:OrgContext,wo:Doc,task:Obj,feedback:Obj
     return {...feedback,failureModeCode:failure.code,failureModeLabel:failure.label,failureModeGroup:failure.group,causeCode:cause.code,causeLabel:cause.label,causeGroup:cause.group,solutions,maintenanceTypeCode:str(task.maintenanceTypeCode)||str(wo.data.maintenanceTypeCode),maintenanceTypeLabel:str(task.maintenanceTypeLabel)||str(wo.data.maintenanceTypeLabel),actualHours:minutes/60,actualMinutes:minutes,dateClosed:date,closedBy:ctx.uid,closedByName:name(ctx)};
 }
 /** No material or service transaction can be silently ignored by retrospective closure. */
+async function ensureClosureResources(ctx:OrgContext,wo:Doc){
+    const executions=object(wo.data.taskExecution),planning=object(wo.data.taskPlanning);
+    const issues=(await listDocs(root(ctx)+'/goods_issues')).filter(x=>x.data.workOrderId===wo.id);
+    const links=(await listDocs(root(ctx)+'/mnt_supply_links')).filter(x=>x.data.woCode===wo.id&&x.data.status==='active');
+    const trace=await procurementTrace(ctx.orgId,links.map(x=>str(x.data.requirementId)));
+    for(const link of links){
+        const p=trace.get(str(link.data.requirementId));
+        if(!p||p.open===false||p.stage!=='received'&&p.stage!=='service_accepted')throw new HttpError(409,'Receive and post every linked procurement requirement before closure: '+str(link.data.requirementId));
+    }
+    for(const issue of issues){
+        if(issue.data.finance==='live'&&!str(issue.data.journalId))throw new HttpError(409,'Goods issue '+issue.id+' has not been financially posted.');
+        const e=object(executions[str(issue.data.taskId)]);
+        if(e.reconciled!==true)throw new HttpError(409,'Reconcile every goods issue before closure.');
+        for(const line of rows(issue.data.lines)){
+            const c=rows(e.consumption).find(x=>x.issueLineId===issue.id+'_'+line.no);
+            if(!c||Math.abs(Number(c.consumed)+Number(c.returned)-Number(line.qty))>1e-6)throw new HttpError(409,'Reconcile all issued and returned quantities: '+issue.id);
+            await verifyMaintenanceStockLedger(ctx.orgId,str(issue.data.warehouseId),str(line.materialId));
+        }
+    }
+    for(const task of tasksOf(wo)){
+        const e=object(executions[str(task.id)]),plan=object(planning[str(task.id)]),reports=object(object(wo.data.serviceReports)[str(task.id)]);
+        for(const spare of rows(task.spares)){
+            const p=object(plan[str(spare.id)]),req=str(p.requirementId);
+            if(req&&!links.some(l=>l.data.requirementId===req)){
+                const t=(await procurementTrace(ctx.orgId,[req])).get(req);
+                if(!t||t.stage!=='received')throw new HttpError(409,'Receive and post spare '+str(spare.description)+' before closure.');
+            }
+            const issued=rows(e.consumption).filter(c=>c.plannedSpareId===spare.id).reduce((n,c)=>n+Number(c.issued),0);
+            // A planned spare explicitly dispositioned as not used still needs its linked procurement fully received.
+            if(issued+1e-6<Number(spare.qty)&&!rows(e.unusedPlannedSpares).some(x=>x.spareId===spare.id))throw new HttpError(409,'Receive, issue and reconcile the full planned quantity of '+str(spare.description)+'.');
+        }
+        for(const service of rows(task.services)){
+            const f=rows(object(e.feedback).services).find(x=>x.id===service.id),report=object(reports[str(service.id)]);
+            if(!f||f.accepted!==true||!str(report.path))throw new HttpError(409,'Complete service feedback and attach the service report: '+str(service.description));
+        }
+    }
+}
 async function ensureNoDirectResources(ctx:OrgContext,wo:Doc){
  if(!isRequestClosureOrder(wo.data))return;
  const [issues,links]=await Promise.all([listDocs(root(ctx)+'/goods_issues'),listDocs(root(ctx)+'/mnt_supply_links')]);
@@ -1453,6 +1492,21 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         task = tasksOf(wo).find((t) => t.id === str(b.taskId)),
         e = object(executions[str(b.taskId)]);
     const retrospective=isRequestClosureOrder(wo.data);
+    if(wo.data.status==='closed'&&!['technical_close','report_incident','clear_incident'].includes(action))throw new HttpError(409,'A closed work order cannot be reopened or modified.');
+    if(action==='upload_service_report'){
+        await authority(ctx,wo,'MNT.WO.execute','MNT.TASK.FEEDBACK');
+        if(!task||!['in_progress','blocked','completed'].includes(str(e.status))||!texts(e.performers).includes(ctx.uid)&&!bypass(ctx,'mnt.task.execution_team'))throw new HttpError(403,'Only the allocated execution team can upload the completed service report.');
+        const service=rows(task.services).find(s=>s.id===b.serviceId);
+        if(!service)throw new HttpError(400,'Choose a service on this task.');
+        const data=str(b.data),buffer=Buffer.from(data,'base64');
+        if(!data||data.length>2_000_000||!/^[A-Za-z0-9+/=]+$/.test(data)||buffer.length>1_500_000||buffer.subarray(0,5).toString('latin1')!=='%PDF-'||/\/(JavaScript|JS|Launch|EmbeddedFile|OpenAction)\b/.test(buffer.toString('latin1')))throw new HttpError(400,'Upload a PDF service report without active content, maximum 1.5 MB.');
+        const filename=str(b.filename).slice(0,150)||'service-report.pdf';
+        const path=root(ctx)+'/mnt/service_reports/'+wo.id+'/'+identifier(task.id)+'/'+identifier(service.id)+'/'+maintenanceKey(nowIso(),ctx.uid,data).slice(0,24)+'.pdf';
+        const [ok]=await storage.write([{path,content:data,contentType:'application/pdf'}]);if(!ok)throw new HttpError(502,'Service report upload failed.');
+        const all=object(wo.data.serviceReports),reports=object(all[str(task.id)]);
+        await saveWo(ctx,wo,{serviceReports:{...all,[str(task.id)]:{...reports,[str(service.id)]:{path,filename,by:ctx.uid,at:nowIso()}}}},'service.report_attached',filename);
+        return {ok:true,filename};
+    }
     if(retrospective){
         if(!['complete_task','safety_signoff','report_incident','clear_incident','handover','technical_close'].includes(action))throw new HttpError(409,'No planning, scheduling, new execution or resource transactions are allowed on work already completed at request review.');
         if(action==='complete_task'){
@@ -1568,6 +1622,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         }
         const feedback = await normalClosureFeedback(ctx,wo,task,object(b.feedback));
         taskCompletion(task, feedback);
+        for(const service of rows(task.services))if(!str(object(object(object(wo.data.serviceReports)[str(task.id)])[str(service.id)]).path))throw new HttpError(409,'Attach the service report for '+str(service.description)+'.');
         if (feedback.scopeDeviation === true)
             throw new HttpError(
                 409,
@@ -1751,6 +1806,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             await ensureNoDirectResources(ctx,wo);
         }
         closurePrerequisites(wo.data);
+        await ensureClosureResources(ctx,wo);
         if(!isRequestClosureOrder(wo.data))for (const t of tasksOf(wo)) await requireApprovedWindow(ctx, wo, str(t.id));
         if ((await listDocs(`${root(ctx)}/safety_incidents`)).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared'))
             throw new HttpError(409,'Clear all recorded incidents before technical closure.');
@@ -1985,6 +2041,8 @@ export async function maintenanceOperations(ctx: OrgContext) {
             permissions.safety=permissions.safety===true&&!['closed','cancelled'].includes(str(wo.data.status));
             permissions.close=permissions.close===true&&!!object(wo.data.handover).at&&(![str(object(object(wo.data.directCompletion).executor).uid),str(object(wo.data.directCompletion).recordedBy),...feedbackActors].includes(ctx.uid)||ctx.role==='org_super_admin'&&ctx.testMode===true);
         }
+        permissions.createBreakIn=permissions.close===true&&['completed','verified','closed'].includes(str(wo.data.status));
+        if(retrospective&&['completed','closed'].includes(str(wo.data.status))){try{await authority(ctx,wo,'MNT.WO.close','MNT.WO.TECHNICAL_CLOSE');permissions.createBreakIn=true;}catch{/* restricted */}}
         permissions.cancel =
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
             canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));
@@ -1999,6 +2057,9 @@ export async function maintenanceOperations(ctx: OrgContext) {
             assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
             maintenanceCycle:cycle,
             windowClosureManaged:await windowManagedClosure(ctx,wo),
+            startDateMoves:startDateMoves(wo.data),
+            subOrders:(await listDocs(root(ctx)+'/work_orders')).filter(x=>x.data.parentWoCode===wo.id).map(x=>({code:x.id,title:str(x.data.title),status:str(x.data.status)})),
+            serviceReportUrls:Object.fromEntries(await Promise.all(Object.values(object(wo.data.serviceReports)).flatMap(v=>Object.values(object(v))).map(object).filter(v=>str(v.path)).map(async v=>[str(v.path),await signedUrl(str(v.path))]))),
             statusReview:summarizeWorkOrderReview(d,nowIso(),dueAt),
             readiness: readinessData,
             checklist: retrospective?null:await planChecklist(ctx, wo, readinessData),
