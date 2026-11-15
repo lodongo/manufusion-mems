@@ -1,5 +1,6 @@
 import {testDeletionEnabled,listTestMaintenanceDeletion,purgeTestMaintenance,previewBulkTestMaintenance,purgeBulkTestMaintenance} from './maintenanceTestDeletion';
 import {cleanupAuthorizationStatus,setCleanupAuthorization} from './maintenanceCleanupAuthorization';
+import {defaultMaintenanceGovernance,validateMaintenanceGovernance,MAINTENANCE_APPROVAL_TRANSACTION_CODES} from './maintenanceGovernancePolicy';
 import {shortWorkOrderStatus} from './maintenanceWorkflowState';
 import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
@@ -893,6 +894,26 @@ async function ensureCurrentAssessmentApproval(ctx:OrgContext,data:Obj) {
 import { maintenanceWorkGroupRoutes } from './maintenanceWorkGroups';
 export const maintenanceRoutes = {
     ...maintenanceWorkGroupRoutes,
+    'POST /api/org/mnt/setup/governance': [orgRoute('org.mnt.setup.governance','ADM.workflows',async ctx=>{
+        requireMnt(ctx);
+        if(ctx.role!=='org_super_admin')throw new HttpError(403,'Organization Super Admin is required for organization-wide maintenance setup.');
+        const d=await getDoc('organizations/'+ctx.orgId+'/maintenance_governance_settings/draft');
+        return {policy:d?validateMaintenanceGovernance(d.data.policy):defaultMaintenanceGovernance(),version:Number(d?.data.version)||0,updatedAt:str(d?.data.updatedAt),transactionCodes:MAINTENANCE_APPROVAL_TRANSACTION_CODES,activationReady:false};
+    })],
+    'POST /api/org/mnt/setup/governance/save': [orgRoute('org.mnt.setup.governance.save','ADM.workflows',async ctx=>{
+        requireMnt(ctx);
+        if(ctx.role!=='org_super_admin')throw new HttpError(403,'Organization Super Admin is required for organization-wide maintenance setup.');
+        let policy;try{policy=validateMaintenanceGovernance(ctx.body.policy);}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid maintenance policy.');}
+        const reason=clean(ctx.body.reason,500);
+        if(reason.length<10)throw new HttpError(400,'Explain the proposed configuration change (at least 10 characters).');
+        const base='organizations/'+ctx.orgId,path=base+'/maintenance_governance_settings/draft';
+        const prior=await getDoc(path),version=Number(prior?.data.version)||0;
+        if(!Number.isInteger(ctx.body.expectedVersion)||Number(ctx.body.expectedVersion)!==version||prior&&!prior.updateTime)throw new HttpError(409,'Configuration changed. Reload before saving.');
+        const updatedAt=nowIso(),fields={policy,version:version+1,status:'draft',updatedAt,updatedBy:ctx.uid,reason};
+        await commit([{path,fields,...(prior?{updateTime:prior.updateTime}:{exists:false})},{path:base+'/maintenance_governance_revisions/'+randomId(16),fields,exists:false}]);
+        await rec(ctx,'mnt.governance.draft_saved','v'+(version+1),reason);
+        return {policy,version:version+1,updatedAt,transactionCodes:MAINTENANCE_APPROVAL_TRANSACTION_CODES,activationReady:false};
+    })],
     'POST /api/org/mnt/test_deletion/authorization': [orgRoute('org.mnt.test_deletion.authorization',null,async ctx=>{requireMnt(ctx);return cleanupAuthorizationStatus(ctx);})],
     'POST /api/org/mnt/test_deletion/authorization/set': [orgRoute('org.mnt.test_deletion.authorization.set',null,async ctx=>{requireMnt(ctx);return setCleanupAuthorization(ctx);})],
     'POST /api/org/mnt/test_deletion/list': [

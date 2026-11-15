@@ -23,6 +23,7 @@ const WorkRequests = lazy(() => import('./WorkRequests'));
 const WorkOrders = lazy(() => import('./WorkOrders'));
 const MntHome = lazy(() => import('./MntHome'));
 const MntWorkGroups = lazy(() => import('./MntWorkGroups'));
+const MntSetup = lazy(() => import('./MntSetup'));
 const MntWindows = lazy(() => import('./MntWindows'));
 const MntBudgets = lazy(() => import('./MntBudgets'));
 const SafConfiguration = lazy(() => import('./SafConfiguration'));
@@ -88,6 +89,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
             { key: 'work_orders', label: 'Work orders', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
             { key: 'maintenance_windows', label: 'Maintenance windows', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
             { key: 'mnt_work_groups', label: 'Work Groups', Icon: Briefcase, perm: 'ADM.workflows', module: 'MNT' },
+            { key: 'mnt_setup', label: 'Setup', Icon: Settings, perm: 'ADM.workflows', module: 'MNT' },
             { key: 'mnt_budgets', label: 'Budgets & cost approvals', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
         ],
     },
@@ -175,6 +177,7 @@ const TITLES: Record<string, string> = {
     material_catalog: 'Material catalog',
     service_catalog: 'Service catalog',
     gl_accounts: 'GL account master',
+    mnt_setup: 'Maintenance Setup',
     work_requests: 'Work requests',
     work_orders: 'Work orders',
 };
@@ -268,6 +271,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             break;
         case 'saf_configuration':
             content = <SafConfiguration />;
+            break;
+        case 'mnt_setup':
+            content = <MntSetup />;
             break;
         case 'mnt_work_groups':
             content = <MntWorkGroups />;
