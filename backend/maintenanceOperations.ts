@@ -1776,7 +1776,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 // Assessment is intentionally open to employees who can view the
                 // work order at their organizational scope. Conversion, planning,
                 // execution, approvals and closure remain role-gated.
-                if (key === 'assess') {await maintenancePermission(ctx, 'MNT.assessment.edit', recordPath(wo));if(workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',recordPath(wo))===false||workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',recordPath(wo))===true)throw Error('Not an independent assessor');}
+                if (key === 'assess') {await maintenancePermission(ctx, 'MNT.assessment.edit', recordPath(wo));if((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',recordPath(wo))===false||workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',recordPath(wo))===true)&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation')))throw Error('Not an independent assessor');}
                 else if (key === 'reviewAssessment') {
                     if(str(wo.data.status)!=='planning'||([str(wo.data.createdBy),str(wo.data.assessmentTasksBy)].includes(ctx.uid)&&!bypass(ctx,'mnt.assessment.review_independence')))throw new Error('Not independently reviewable');
                     await maintenancePermission(ctx, 'MNT.assessment.review', recordPath(wo));

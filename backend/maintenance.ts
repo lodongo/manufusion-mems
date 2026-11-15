@@ -516,12 +516,12 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
     const path = pathOf(doc);
     const mine = str(doc.data.requestedBy) === ctx.uid;
     const assessmentStarted = assessmentHasStarted(doc.data);
-    const testing = !groupAt(ctx.workGroupPolicy,path) && ctx.role === 'org_super_admin' && ctx.testMode === true;
+    const testing = ctx.role === 'org_super_admin' && ctx.testMode === true;
     const workflowEligible = eligibleReview(ctx, doc, scope, reviewRole) || testing;
     const assigned = str(doc.data.reviewerUid);
     const workflowNamed = doc.data.reviewAssignmentSource === 'workflow' && str(doc.data.reviewRoleCode) === reviewRole;
     const at = (perm: string) => canAt(ctx, perm, path, scope);
-    const gate=(code:string)=>workGroupGateAllowed(ctx.workGroupPolicy,code,path)!==false;
+    const gate=(code:string)=>workGroupGateAllowed(ctx.workGroupPolicy,code,path)!==false||(testing&&bypass(ctx,'mnt.work_group.gate.'+code));
     return {
         view: mine || at(P.view),
         edit: mine && ['created', 'submitted', 'under_review', 'returned'].includes(status) && !assessmentStarted && at(P.WR_edit),
@@ -534,7 +534,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
         toAssessment: status === 'under_review' && Number(doc.data.reviewProcessVersion) === 2
             && (testing || assigned === ctx.uid) && workflowEligible,
         assess: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
-            && at(P.assessment_edit) && gate('MNT.WR.ASSESS') && workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',path)!==true && !assessmentReviewCurrent(doc.data),
+            && at(P.assessment_edit) && gate('MNT.WR.ASSESS') && (workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',path)!==true||(testing&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))) && !assessmentReviewCurrent(doc.data),
         return: status === 'under_review' && Number(doc.data.reviewProcessVersion) !== 2 && !assessmentStarted && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         decline: status === 'under_review' && Number(doc.data.reviewProcessVersion) !== 2 && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         // Legacy compatibility only for records created before the dedicated assessment flow.
@@ -1499,7 +1499,7 @@ export const maintenanceRoutes = {
             };
             const l = await lists();
             const assignedReviewer = str(doc.data.reviewerUid) === ctx.uid;
-            const reviewOverride = !groupAt(ctx.workGroupPolicy,pathOf(doc))&&ctx.role === 'org_super_admin' && ctx.testMode === true;
+            const reviewOverride = ctx.role === 'org_super_admin' && ctx.testMode === true;
             if (reviewOverride && ['start_review','close_review','cancel_review','to_assessment'].includes(action) && Number(doc.data.reviewProcessVersion) === 2) {
                 if (!reviewRole) bypass(ctx,'mnt.wr.review_role_unconfigured');
                 if (!eligibleReview(ctx,doc,scope,reviewRole)) bypass(ctx,'mnt.wr.workflow_reviewer');
@@ -2059,7 +2059,7 @@ export const maintenanceRoutes = {
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
                 case 'save_task_assessment': {
-                    if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning'||workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',pathOf(doc))===false||workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true)
+                    if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning'||((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',pathOf(doc))===false||workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true)&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))))
                         throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
                     if(isObj(d.taskPlanning)&&Object.keys(d.taskPlanning).length)throw new HttpError(409,'Open controlled reassessment before editing a task whose resources have already been planned.');
                     let tasks;

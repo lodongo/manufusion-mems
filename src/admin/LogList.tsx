@@ -8,6 +8,9 @@ export interface LogEntry {
     category: string;
     action: string;
     outcome: string;
+    priority?: string;
+    controls?: string[];
+    actorUid?: string;
     source: string;
     actorEmail: string;
     actorRole: string;
@@ -47,6 +50,7 @@ export default function LogList({ logs }: { logs: LogEntry[] }) {
                                 <p className='shrink-0 text-xs text-slate-500'>{fmtDate(log.at)}</p>
                             </div>
                             <div className='mt-1 flex flex-wrap items-center gap-1'>
+                                {(log.priority==='high'||log.action.startsWith('testmode.'))&&<Badge tone='danger'>HIGH PRIORITY · Test override</Badge>}
                                 <Badge>{CATEGORY_LABELS[log.category] ?? (log.category || 'event')}</Badge>
                                 {log.outcome && log.outcome !== 'success' && <Badge tone={OUTCOME_TONE[log.outcome] ?? 'muted'}>{log.outcome}</Badge>}
                                 <span className='truncate text-xs text-slate-400'>{log.actorEmail}</span>
@@ -63,6 +67,9 @@ export default function LogList({ logs }: { logs: LogEntry[] }) {
                                 {[
                                     ['Action', log.action],
                                     ['Role', log.actorRole],
+                                    ['Actor ID', log.actorUid],
+                                    ['Priority', log.priority|| (log.action.startsWith('testmode.')?'high':'normal')],
+                                    ['Relaxed controls', log.controls?.join('\n')],
                                     ['Route', log.route],
                                     ['IP address', log.ip],
                                     ['Country', log.country],

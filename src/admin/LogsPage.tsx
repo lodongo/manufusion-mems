@@ -10,15 +10,17 @@ export function AuditBrowser({ logs }: { logs: LogEntry[] }) {
     const [search, setSearch] = useState('');
     const [category, setCategory] = useState('');
     const [outcome, setOutcome] = useState('');
+    const [priority,setPriority]=useState('');
     const filtered = useMemo(() => {
         const q = search.trim().toLowerCase();
         return logs.filter(
             (l) =>
                 (!category || l.category === category) &&
                 (!outcome || l.outcome === outcome) &&
+                (!priority || (priority==='high'?(l.priority==='high'||l.action.startsWith('testmode.')):(l.priority!=='high'&&!l.action.startsWith('testmode.')))) &&
                 (!q || `${l.action} ${l.target} ${l.details} ${l.actorEmail} ${l.ip} ${l.route}`.toLowerCase().includes(q))
         );
-    }, [logs, search, category, outcome]);
+    }, [logs, search, category, outcome,priority]);
 
     return (
         <div>
@@ -45,6 +47,7 @@ export function AuditBrowser({ logs }: { logs: LogEntry[] }) {
                     <option value='denied'>Denied</option>
                     <option value='blocked'>Blocked</option>
                 </select>
+                <select aria-label='Filter by priority' value={priority} onChange={e=>setPriority(e.target.value)} className='h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base text-white'><option value=''>All priorities</option><option value='high'>High priority</option><option value='normal'>Normal priority</option></select>
             </div>
             <p className='mb-2 text-xs text-slate-500'>{filtered.length} events · tap an event for full details</p>
             <Card>

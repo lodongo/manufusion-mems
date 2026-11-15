@@ -5,11 +5,16 @@ import { object, rows, texts } from './maintenanceDomain';
 import { bypass } from './testModeCore';
 import {groupGateRole,workGroupGateAllowed} from './maintenanceWorkGroupPolicy';
 export function configuredMaintenanceRole(ctx:OrgContext,gate:string,path:string[],legacy:unknown):string {
- const group=groupGateRole(ctx.workGroupPolicy,gate,path);return group===null?str(object(legacy)[gate]):group;
+ const group=groupGateRole(ctx.workGroupPolicy,gate,path,ctx.role==='org_super_admin'&&ctx.testMode===true);return group===null?str(object(legacy)[gate]):group;
 }
 
 export async function requireMaintenanceRole(ctx: OrgContext, gate: string, path: string[]) {
     const groupRole=groupGateRole(ctx.workGroupPolicy,gate,path);
+    const testing=ctx.role==='org_super_admin'&&ctx.testMode===true;
+    if(groupRole!==null&&testing){
+      const token=groupGateRole(ctx.workGroupPolicy,gate,path,true);
+      if(token&&!workGroupGateAllowed(ctx.workGroupPolicy,gate,path)&&bypass(ctx,'mnt.work_group.gate.'+gate))return {role:token,version:ctx.workGroupPolicy!.config.version};
+    }
     if(groupRole!==null){
       if(!groupRole)throw new HttpError(409,'Configure '+gate+' in active Work Groups master setup.');
       if(!workGroupGateAllowed(ctx.workGroupPolicy,gate,path))throw new HttpError(403,'The named Work Group employee assigned to '+gate+' is required at this location.');

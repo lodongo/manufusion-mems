@@ -27,7 +27,7 @@ export default function TestModeBanner({ status }: { status?: Status }) {
                     </div>
                     <p className='mt-1'>
                         {status.appliesToYou
-                            ? 'As organization super admin you can complete workflow steps alone: maker-checker and job-role checks are relaxed for you. Every relaxed check is recorded in the audit trail.'
+                            ? 'As organization super admin you can complete workflow steps alone: maker-checker and job-role checks are relaxed for you. Blue-outlined workflow buttons indicate an available test override. Every relaxed check is recorded as a high-priority audit event. Data integrity and status checks still apply.'
                             : 'Your organization super admin can complete workflow steps alone for development testing. Your own access is unchanged.'}
                     </p>
                     {status.reason && <p className='mt-1 opacity-80'>Reason: {status.reason}</p>}

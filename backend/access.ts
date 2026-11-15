@@ -3,6 +3,7 @@ import { hasPerm, type OrgContext } from './guards';
 import { allowedNodeIds } from './positions';
 import { col } from './structure';
 import {workGroupPermission} from './maintenanceWorkGroupPolicy';
+import {bypass} from './testModeCore';
 
 // ---------------------------------------------------------------------------
 // Access model
@@ -39,7 +40,7 @@ export async function nodePath(orgId: string, id: string): Promise<string[]> {
 /** May the user perform `perm` on a record located at the end of `path`? */
 export function canAt(ctx: OrgContext, perm: string, path: string[], scope: Scope): boolean {
     const workGroup=workGroupPermission(ctx.workGroupPolicy,perm,path);
-    if(workGroup!==null)return workGroup;
+    if(workGroup!==null)return workGroup||(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.work_group.permission.'+perm));
     if (ctx.role === 'org_super_admin') return true;
     const target = path[path.length - 1] ?? '';
     if (hasPerm(ctx.directPermissions, perm) && (scope === 'all' || scope.has(target))) return true;

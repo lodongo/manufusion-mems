@@ -17,6 +17,8 @@ export interface AuditInput {
     category: string;
     action: string;
     outcome?: Outcome;
+    priority?: 'normal' | 'high';
+    controls?: string[];
     actor?: Actor | null;
     target?: { type?: string; id?: string; label?: string };
     details?: string;
@@ -38,6 +40,8 @@ export function buildAudit(input: AuditInput): { orgId: string; data: Fields } {
             category: input.category.slice(0, 40),
             action: input.action.slice(0, 100),
             outcome: input.outcome ?? 'success',
+            priority: input.priority ?? (input.action.startsWith('testmode.') ? 'high' : 'normal'),
+            controls: (input.controls ?? []).slice(0,150).map(x=>x.slice(0,200)),
             source: input.source ?? 'server',
             actorUid: input.actor?.uid ?? '',
             actorEmail: input.actor?.email || 'anonymous',
@@ -90,6 +94,9 @@ export function auditOut(doc: Doc) {
         category: str(d.category),
         action: str(d.action),
         outcome: str(d.outcome),
+        priority: str(d.priority)||(str(d.action).startsWith('testmode.')?'high':'normal'),
+        controls: Array.isArray(d.controls)?d.controls.map(str):[],
+        actorUid: str(d.actorUid),
         source: str(d.source),
         actorEmail: str(d.actorEmail),
         actorRole: str(d.actorRole),

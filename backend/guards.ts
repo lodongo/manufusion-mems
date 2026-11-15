@@ -525,6 +525,12 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         // only until it expires and only on a development server (see testModeCore).
         const testMode = role === 'org_super_admin' && await testModeActiveFor(orgId);
         const bypassed: string[] = [];
+        const auditTestOverride=async(outcome:'success'|'failure')=>{
+            if(!bypassed.length)return;
+            const action=str(ctx.body.action);
+            const record=str(ctx.body.code)||str(ctx.body.id)||str(ctx.body.requestId)||str(ctx.body.windowId);
+            await audit([{category:'security',action:'testmode.controls_bypassed',priority:'high',controls:bypassed,outcome,actor:ctx.actor,orgId,meta:ctx.meta,target:{type:'transaction',id:record,label:name+(action?' · '+action:'')},route:name,details:'Platform testing override relaxed: '+bypassed.join(', ')}]);
+        };
         const finishApproval = await enforceOrgTransactionGovernance({ orgId, name, permission, effectivePermissionGranted: granted, org, uid: ctx.uid, body:ctx.body });
         let result: unknown;
         let tracked: Awaited<ReturnType<typeof withChangeTracking>> | null = null;
@@ -535,6 +541,7 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         } catch (err) {
             try { await finishApproval?.(false); }
             catch (finalError) { console.error('Could not reconcile failed governance execution', finalError instanceof Error ? finalError.message : 'unknown'); }
+            await auditTestOverride('failure');
             throw err;
         }
         // Never mark an already-successful business transaction as failed just because
@@ -546,11 +553,7 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
                 target:{type:'transaction',label:name},outcome:'blocked',
                 details:'Business handler succeeded but approval completion write failed'}]);
         }
-        if (bypassed.length) {
-            await audit([{ category: 'security', action: 'testmode.controls_bypassed', actor: ctx.actor, meta: ctx.meta,
-                target: { type: 'transaction', label: name }, route: name,
-                details: `Platform testing override relaxed: ${bypassed.join(', ')}` }]);
-        }
+        await auditTestOverride('success');
         if (tracked && (tracked.changes.length || tracked.unresolved.length)) {
             await notifyMaterialChanges({ orgId, uid: ctx.uid, actorName: str(me.data.email), route: name, changes: tracked.changes.filter((c) => c.orgId === orgId), unresolved: tracked.unresolved });
         }
