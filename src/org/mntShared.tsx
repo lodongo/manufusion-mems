@@ -51,7 +51,7 @@ export function findIn(groups: ListGroup[], code: string) {
     return null;
 }
 
-export interface LocNode {
+export interface LocNode extends MaintenanceRouting {
     id: string;
     parentId: string;
     level: string;
@@ -448,7 +448,7 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipmen
                             </span>
                         ))}
                     </nav>
-                    {here && <div className='rounded-xl border border-line bg-panel px-3 py-2'><p className='text-xs text-soft'>{LEVEL_LABEL[here.level] ?? here.level}</p><p className='font-semibold text-ink'>{here.name} <span className='text-xs font-normal text-soft'>· {here.code}</span></p></div>}
+                    {here && <div className='rounded-xl border border-line bg-panel px-3 py-2'><p className='text-xs text-soft'>{LEVEL_LABEL[here.level] ?? here.level}</p><p className='font-semibold text-ink'>{here.name} <span className='text-xs font-normal text-soft'>· {here.code}</span></p>{(here.workGroupCode||here.level==='cost_center')&&<p className='mt-1 text-xs text-soft'>Work group: <strong>{workGroupText(here)}</strong></p>}</div>}
                     {isUnit(here) && here!.inScope && allowEquipment && (
                         <div className='space-y-1'>
                             <AssemblyButton node={here!} sub='This equipment · no assembly required' selected={selected === here!.id} onPick={onPick} />
@@ -471,7 +471,7 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipmen
                                             <span className='block truncate text-sm text-white'>{n.name}</span>
                                             <span className='block truncate text-xs text-slate-500'>
                                                 <span className='font-mono'>{n.code}</span> · {LEVEL_LABEL[n.level] ?? n.level} · {countAssemblies(n.id)} assemblies
-                                            </span>
+                                            </span>{n.level==='cost_center'&&<span className='block text-xs text-soft'>{workGroupText(n)}</span>}
                                         </span>
                                         <ChevronRight className='h-4 w-4 shrink-0 text-slate-500' />
                                     </button>

@@ -1,3 +1,4 @@
+import {responsibilityData,responsibilityFor,resolvedReviewDoc} from '../../backend/maintenanceResponsibility.ts';
 import assert from 'node:assert/strict';
 import {seed,snapshot} from './maintenance-fixture.ts';
 import {maintenanceWorkGroupRoutes,workGroupResourcePool} from '../../backend/maintenanceWorkGroups.ts';
@@ -76,11 +77,31 @@ assert.equal(workGroupPermission(operator.workGroupPolicy,'MNT.WO.safety',path),
 assert.equal(workGroupGateAllowed(lead.workGroupPolicy,'MNT.ASSESS.REVIEW',path),true);
 await assert.rejects(()=>requireMaintenanceRole(operator,'MNT.ASSESS.REVIEW',path),/named Work Group employee/i);
 const approval=await requireMaintenanceRole(lead,'MNT.ASSESS.REVIEW',path);assert.match(approval.role,/^WG:/);
+// Current responsibility follows live named holders, stage and actual organization seniority.
+const routeData=await responsibilityData(lead);
+const review=responsibilityFor(routeData,{path,status:'created',requestedBy:'ACTIVE_5'},'wr');
+assert.equal(review.workGroupCode,'WG_0002');
+assert.equal(review.responsibility.uid,'ACTIVE_0');
+assert.equal(review.responsibility.role,'Maintenance Lead');
+assert.ok(review.responsibility.additional>=1);
+const assessment={path,code:'WR00000001',status:'to_be_assessed',requestedBy:'ACTIVE_5',assessedBy:'ACTIVE_3',assessmentTasksBy:'ACTIVE_3',assessmentTasks:[{id:'t1'}],assessmentTasksVersion:1,assessmentTasksAt:'2026-01-01',assessedAt:'2026-01-01',title:'Example',description:'Complete request description',sourceCode:'TEST',impacts:[{}]};
+const routed=responsibilityFor(routeData,assessment,'wr');
+assert.equal(routed.responsibility.stage,'Assessment approval');
+assert.equal(routed.responsibility.uid,'ACTIVE_0');
+const own=responsibilityFor(routeData,{...assessment,requestedBy:'ACTIVE_0'},'wr');
+assert.equal(own.responsibility.uid,'','Maker cannot be identified as the pending approver');
+const converted=responsibilityFor(routeData,{...assessment,assessmentReview:{status:'approved',version:1,assessmentTasksAt:assessment.assessmentTasksAt,assessedAt:assessment.assessedAt,by:'ACTIVE_0',jobRole:approval.role}},'wr');
+assert.equal(converted.responsibility.uid,'ACTIVE_1');
+assert.equal(converted.responsibility.stage,'Convert to work order');
+const stale=resolvedReviewDoc(routeData,{id:'WR00000001',data:{path,status:'created',requestedBy:'ACTIVE_5',reviewerUid:'ADMIN'},updateTime:''});
+assert.equal(stale.data.reviewerUid,'ACTIVE_0');
 const partial=await call('/save',{id:b.id,expectedVersion:final.version,expectedMasterVersion:2,costCenterIds:['CC_A','CC_B'],members:{},reason:''});
 assert.equal(partial.ready,false);
 assert.equal(canAt(await principal('ACTIVE_1'),'MNT.WO.plan',path,'all'),true,'Partial draft never changes live permissions');
 seed('users/ACTIVE_1',{orgId:org,status:'disabled',assignments:[{positionCode:'POS_1',nodeId:'SITE'}]});
 assert.equal(canAt(await principal('ACTIVE_1'),'MNT.WO.plan',path,'all'),false,'Revoked employee cannot retain live authority');
+const refreshed=await responsibilityData(await principal('ADMIN'));
+assert.notEqual(responsibilityFor(refreshed,{...assessment,assessmentReview:{status:'approved',version:1,assessmentTasksAt:assessment.assessmentTasksAt,assessedAt:assessment.assessedAt,by:'ACTIVE_0',jobRole:approval.role}},'wr').responsibility.uid,'ACTIVE_1');
 // Development override can approve incomplete group drafts and bypass cutover without deleting work.
 const testCtx=ctx('ADMIN',{expectedActiveVersion:1,expectedMasterVersion:2,groupIds:[b.id,next.id],groupVersions:{[b.id]:partial.version,[next.id]:next.version},reason:''});
 testCtx.testMode=true;testCtx.bypassed=[];

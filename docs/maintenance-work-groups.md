@@ -31,3 +31,5 @@ The Named employees tab renders every aligned organizational role directly from 
 
 ## Current responsibility
 Requests, assessments, orders, windows and task validation derive current group and responsible candidates on read. New records and regular updates snapshot active group metadata. Candidate names are calculated from current HR assignments, active group task mappings and independence checks. Existing assigned request reviewer is retained; otherwise highest position in reporting hierarchy appears first, followed by generic-role seniority and name. Finance, safety and handover retain separate authority. Draft or unassigned locations do not grant authority.
+
+New work requests cannot be submitted at an unassigned cost center once the organization has activated Work Groups, except through the audited development test override. Existing ungrouped transactions retain transitional legacy permissions; no incomplete group draft grants rights. Revoked request reviewer assignments resolve to a current eligible named holder on refresh; the next successful workflow mutation persists the reassignment and audit record.

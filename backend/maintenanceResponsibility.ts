@@ -16,6 +16,11 @@ export async function responsibilityData(ctx:OrgContext,includeFinance=false):Pr
  const [users,positions,drafts,legacy,finance]=await Promise.all([orgUsers(ctx.orgId),listDocs(root+'/positions'),listDocs(root+'/maintenance_work_groups'),getDoc(root+'/maintenance_workflow_settings/default'),includeFinance?listDocs(root+'/fin_requests'):Promise.resolve([])]);
  return {policy:ctx.workGroupPolicy,users:new Map(users.filter(u=>!['disabled','inactive','suspended','deleted'].includes(str(u.data.status))).map(u=>[u.id,u])),positions:new Map(positions.filter(p=>p.data.status!=='inactive').map(p=>[p.id,p])),drafts,legacy:obj(legacy?.data.approverRoles),today:nowIso().slice(0,10),finance:new Map(finance.map(d=>[d.id,d])),orgId:ctx.orgId};
 }
+export function locationGroup(data:Data,path:string[]){
+ const g=groupAt(data.policy,path),drafts=data.drafts.filter(x=>x.data.status!=='inactive'&&ids(x.data.costCenterIds).some(cc=>path.includes(cc)));
+ const draft=!g&&drafts.length===1?drafts[0]:undefined;
+ return {workGroupId:g?.id||draft?.id||'',workGroupCode:g?.code||str(draft?.data.code),workGroupName:g?.name||str(draft?.data.name),workGroupStatus:g?'active':draft?'draft':'unassigned',workGroupVersion:g?.version||Number(draft?.data.version)||0};
+}
 export function groupFields(policy:WorkGroupPolicy|undefined,path:string[]){
  const g=groupAt(policy,path);return {workGroupId:g?.id||'',workGroupCode:g?.code||'',workGroupName:g?.name||'',workGroupVersion:g?.version||0};
 }
@@ -58,7 +63,7 @@ function currentAssessment(data:Data,d:Obj,path:string[]){
 const assess=():Stage=>({label:'Technical work assessment',gate:'MNT.WR.ASSESS',permission:'MNT.assessment.edit'});
 const approval=(d:Obj):Stage=>({label:'Assessment approval',gate:'MNT.ASSESS.REVIEW',permission:'MNT.assessment.review',exclude:[str(d.requestedBy),str(d.createdBy),str(d.assessedBy),str(d.assessmentTasksBy)].filter(Boolean)});
 function assessmentStage(data:Data,d:Obj,path:string[]):Stage{
- if(obj(d.assessmentReview).status==='changes_requested'||reviewAssessmentPrerequisites(d,'__routing__'))return assess();
+ if(obj(d.assessmentReview).status==='changes_requested'||reviewAssessmentPrerequisites(d,'__routing__')||(/^WR\d/.test(str(d.code))&&(!str(d.title)||str(d.description).length<10||!str(d.sourceCode)||!rows(d.impacts).length)))return assess();
  return approval(d);
 }
 function wrStage(data:Data,d:Obj,path:string[]):Stage{
@@ -79,7 +84,7 @@ function woStage(data:Data,d:Obj,path:string[]):Stage{
    const req=data.finance.get(str(obj(d.costApproval).requestId)),step=rows(req?.data.steps).find(x=>x.status==='pending');
    return {label:'Cost approval'+(step?' · '+str(step.level):''),external:true,gate:'MNT.WO.COST',fixedRole:str(step?.positionTitle)||'Finance · Chart of Authority',externalPosition:str(step?.positionCode),exclude:[str(req?.data.makerUid),...rows(req?.data.steps).map(x=>str(x.by))]};
   }
-  return {label:s==='plan_ready'?'Confirm readiness':'Resource planning & readiness',gate:'MNT.WO.PLAN',permission:'MNT.WO.plan'};
+  return {label:s==='plan_ready'?'Confirm readiness':'Resource planning & readiness',gate:s==='plan_ready'?'MNT.WO.RELEASE':'MNT.WO.PLAN',permission:'MNT.WO.plan'};
  }
  if(s==='released')return {label:'Schedule maintenance window',gate:'MNT.WINDOW.LOCK',permission:'MNT.WO.schedule'};
  const tasks=rows(d.assessmentTasks),execution=obj(d.taskExecution),planning=obj(d.taskPlanning);
@@ -103,8 +108,7 @@ function windowStage(d:Obj):Stage{
 }
 export function responsibilityFor(data:Data,d:Obj,kind:'wr'|'wo'|'window'|'validation',overridePath?:string[]){
  const path=overridePath||[...new Set([...ids(d.path),str(d.costCenterId)].filter(Boolean))],g=groupAt(data.policy,path);
- const drafts=data.drafts.filter(x=>x.data.status!=='inactive'&&ids(x.data.costCenterIds).some(cc=>path.includes(cc)));
- const draft=!g&&drafts.length===1?drafts[0]:undefined;
+ const location=locationGroup(data,path);
  const s=kind==='wr'?wrStage(data,d,path):kind==='wo'?woStage(data,d,path):kind==='window'?windowStage(d):{label:'Asset task validation',gate:'MNT.TASK.VALIDATE',permission:'MNT.activities.edit',exclude:[str(d.createdBy)]};
  let people:Responsible[]=[],source='unassigned',fallback=s.fixedRole||'';
  if(s.fixed){const u=data.users.get(s.fixed);if(u)people=[entry(data,u,'',s.fixedRole)];source='record';}
@@ -119,11 +123,21 @@ export function responsibilityFor(data:Data,d:Obj,kind:'wr'|'wo'|'window'|'valid
      for(const t of roles)for(const p of data.policy.config.roleAlignment[t]||[])if(data.positions.has(p)&&rows(u.data.assignments).some(a=>str(a.positionCode)===p&&assignmentCovers(u,p,[str(a.nodeId)],data.today)))people.push(entry(data,u,p,t));
     }
    }
-  }else{const role=str(data.legacy[s.gate||'']);people=legacyPeople(data,role,path,s.exclude);fallback=positionLabel(data,role)||'Work Group configuration required';source=draft?'draft_group':'legacy';}
+  }else{const role=str(data.legacy[s.gate||'']);people=legacyPeople(data,role,path,s.exclude);fallback=positionLabel(data,role)||'Work Group configuration required';source=location.workGroupStatus==='draft'?'draft_group':'legacy';}
  }
  const ranked=rankResponsible(data,people),seen=new Set<string>();
  const distinct=ranked.filter(p=>{if(seen.has(p.uid))return false;seen.add(p.uid);return true;});
  const principal=(s.preferred&&distinct.find(p=>p.uid===s.preferred))||distinct[0];
  const ordered=principal?[principal,...distinct.filter(p=>p.uid!==principal.uid)]:[];
- return {workGroupId:g?.id||draft?.id||'',workGroupCode:g?.code||str(draft?.data.code),workGroupName:g?.name||str(draft?.data.name),workGroupStatus:g?'active':draft?'draft':'unassigned',workGroupVersion:g?.version||Number(draft?.data.version)||0,responsibility:{stage:s.label,role:principal?.role||fallback,name:principal?.name||'',uid:principal?.uid||'',additional:Math.max(0,ordered.length-1),people:ordered,source}};
+ return {...location,responsibility:{stage:s.label,role:principal?.role||fallback,name:principal?.name||'',uid:principal?.uid||'',additional:Math.max(0,ordered.length-1),people:ordered,source}};
+}
+
+/** Use current eligible reviewer on refresh; never silently retain a revoked or out-of-group UID. */
+export function resolvedReviewDoc(data:Data,doc:Doc):Doc{
+ const d=doc.data,path=ids(d.path);
+ if(!groupAt(data.policy,path)||!['created','submitted','under_review'].includes(str(d.status))||str(d.status)==='under_review'&&Number(d.reviewProcessVersion)!==2)return doc;
+ const route=responsibilityFor(data,d,'wr'),a=route.responsibility,role=groupGateRole(data.policy,'MNT.WR.REVIEW',path)||'';
+ if(a.stage!=='Work request review')return doc;
+ if(str(d.reviewerUid)===a.uid&&str(d.reviewRoleCode)===role)return doc;
+ return {...doc,data:{...d,reviewRoutingPreviousUid:str(d.reviewerUid),reviewRoutingChanged:true,reviewerUid:a.uid,reviewAssignedName:a.name,reviewRoleCode:role,reviewAssignmentSource:'workflow'}};
 }

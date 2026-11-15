@@ -1,4 +1,4 @@
-import {responsibilityData,responsibilityFor,groupFields} from './maintenanceResponsibility';
+import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc} from './maintenanceResponsibility';
 import { storage } from './platform/sdk';
 import { commit, withLock } from './finCore';
 import { enforceMaintenanceTransition, executeMaintenanceAction } from './maintenanceOperations';
@@ -520,6 +520,8 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
     const assessmentStarted = assessmentHasStarted(doc.data);
     const testing = ctx.role === 'org_super_admin' && ctx.testMode === true;
     const workflowEligible = eligibleReview(ctx, doc, scope, reviewRole) || testing;
+    const liveAssessmentRole=groupGateRole(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',path);
+    const approved=liveAssessmentRole===null?assessmentReviewCurrent(doc.data):!!liveAssessmentRole&&assessmentReviewCurrent(doc.data,liveAssessmentRole);
     const assigned = str(doc.data.reviewerUid);
     const workflowNamed = doc.data.reviewAssignmentSource === 'workflow' && str(doc.data.reviewRoleCode) === reviewRole;
     const at = (perm: string) => canAt(ctx, perm, path, scope);
@@ -536,7 +538,7 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
         toAssessment: status === 'under_review' && Number(doc.data.reviewProcessVersion) === 2
             && (testing || assigned === ctx.uid) && workflowEligible,
         assess: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
-            && at(P.assessment_edit) && gate('MNT.WR.ASSESS') && (workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',path)!==true||(testing&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))) && !assessmentReviewCurrent(doc.data),
+            && at(P.assessment_edit) && gate('MNT.WR.ASSESS') && (workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',path)!==true||(testing&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))) && !str(doc.data.woCode) && !approved,
         return: status === 'under_review' && Number(doc.data.reviewProcessVersion) !== 2 && !assessmentStarted && at(P.WR_return) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         decline: status === 'under_review' && Number(doc.data.reviewProcessVersion) !== 2 && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         // Legacy compatibility only for records created before the dedicated assessment flow.
@@ -547,9 +549,9 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
             && !assessmentReviewCurrent(doc.data),
         confirmClosure: status === 'closure_pending' && at(P.WR_closeConfirm) && independent(ctx, str(object(doc.data.closure).by) !== ctx.uid, 'mnt.wr.closure_independence'),
         reviewAssessment: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
-            && at(P.assessment_review) && gate('MNT.ASSESS.REVIEW') && independent(ctx, !mine && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid), 'mnt.assessment.review_independence'),
+            && !str(doc.data.woCode) && at(P.assessment_review) && gate('MNT.ASSESS.REVIEW') && independent(ctx, !mine && ![doc.data.assessedBy,doc.data.assessmentTasksBy].includes(ctx.uid), 'mnt.assessment.review_independence'),
         convert: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) !== 2)
-            && at(P.WR_convert) && gate('MNT.WR.CONVERT') && assessmentReviewCurrent(doc.data) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
+            && !str(doc.data.woCode) && at(P.WR_convert) && gate('MNT.WR.CONVERT') && approved && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         ownRequest: mine,
     };
 }
@@ -1119,7 +1121,9 @@ export const maintenanceRoutes = {
                 pathCache.set(id, p);
                 return p;
             };
+            const routing=await responsibilityData(ctx);
             const nodes = docs.map((d) => ({
+                ...locationGroup(routing,pathTo(d.id)),
                 id: d.id,
                 parentId: str(d.data.parentId),
                 level: str(d.data.level),
@@ -1222,6 +1226,7 @@ export const maintenanceRoutes = {
             // The defect must be placed at least at equipment level (assembly preferred), within the person's scope.
             const place = await assemblyContext(ctx, str(b.assemblyId) || str(b.equipmentId), P.WR_create, true);
             const loc = placeFields(place, str(b.assetTag));
+            if(ctx.workGroupPolicy&&!groupAt(ctx.workGroupPolicy,loc.path)&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.work_group.new_request.unassigned_cost_center')))throw new HttpError(409,'Activate a Work Group for this cost center before raising new requests.');
             const finding = await readFinding(await lists(), b);
             if (finding.title.length < 3 || finding.description.length < 10 || !finding.sourceCode || !finding.impacts.length)
                 throw new HttpError(400, 'Short title (3+ characters), finding description (10+ characters), source of finding and at least one impact are required.');
@@ -1293,7 +1298,7 @@ export const maintenanceRoutes = {
     'POST /api/org/mnt/wr/repeat-search': [
         orgRoute('org.mnt.wr.repeat_search', null, async (ctx) => {
             requireMnt(ctx);
-            const doc = await getWr(ctx, str(ctx.body.code));
+            const doc = resolvedReviewDoc(await responsibilityData(ctx),await getWr(ctx, str(ctx.body.code)));
             const scope = await scopeOf(ctx);
             need(ctx, P.WR_review, pathOf(doc), scope);
             if ((str(doc.data.reviewerUid) !== ctx.uid || !eligibleReview(ctx,doc,scope,reviewRoleOf(ctx,await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`),pathOf(doc)))) && !(ctx.role === 'org_super_admin' && ctx.testMode === true && bypass(ctx,'mnt.wr.workflow_reviewer')))
@@ -1316,6 +1321,7 @@ export const maintenanceRoutes = {
             const routing=await responsibilityData(ctx);
             const rows = (await listDocs(wrCol(ctx.orgId)))
                 .filter((d) => str(d.data.requestedBy) === ctx.uid || canAt(ctx, P.view, pathOf(d), scope))
+                .map(d=>resolvedReviewDoc(routing,d))
                 .filter((d) => {
                     const reviewRole=reviewRoleOf(ctx,settings,pathOf(d));
                     const s = wrStatus(d);
@@ -1357,7 +1363,8 @@ export const maintenanceRoutes = {
             const selectedCode = str(ctx.body.code);
             const assessmentRecord = ASSM_RE.test(selectedCode) ? await getDoc(`${assessmentCol(ctx.orgId)}/${selectedCode}`) : null;
             if (ASSM_RE.test(selectedCode) && !assessmentRecord) throw new HttpError(404, 'Work assessment not found.');
-            const doc = await getWr(ctx, assessmentRecord ? str(assessmentRecord.data.workRequestCode) : selectedCode);
+            const routing=await responsibilityData(ctx);
+            const doc = resolvedReviewDoc(routing,await getWr(ctx, assessmentRecord ? str(assessmentRecord.data.workRequestCode) : selectedCode));
             if (assessmentRecord && str(doc.data.assessmentCode) !== selectedCode)
                 throw new HttpError(409, 'The assessment is not linked to this work request.');
             const workflowConfig=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
@@ -1390,7 +1397,7 @@ export const maintenanceRoutes = {
                 reviewBlockers.push('The technical assessor must save at least one fully assessed task.');
             else if (!Number(doc.data.assessmentTasksVersion)||!str(doc.data.assessmentTasksAt))
                 reviewBlockers.push('The technical assessor must save the latest task assessment revision.');
-            can.reviewAssessment = reviewBlockers.length===0 && !currentReview;
+            can.reviewAssessment = reviewBlockers.length===0 && !currentReview && !str(doc.data.woCode);
             if (currentReview) can.reviewAssessment = false;
             if (!can.view) throw new HttpError(403, 'This work request is outside your access.');
             const d = doc.data;
@@ -1408,7 +1415,7 @@ export const maintenanceRoutes = {
             const urls = await Promise.all(photoPaths.map((p) => signedUrl(p)));
             return {
                 ...wrOut(doc),
-                ...responsibilityFor(await responsibilityData(ctx),doc.data,'wr'),
+                ...responsibilityFor(routing,doc.data,'wr'),
                 description: str(d.description),
                 sourceCode: str(d.sourceCode),
                 criticalityOriginalLabel: str(d.criticalityOriginalLabel),
@@ -1470,7 +1477,7 @@ export const maintenanceRoutes = {
             const action = str(ctx.body.action);
             const note = str(ctx.body.note).trim().slice(0, 500);
             const scope = await scopeOf(ctx);
-            const doc = await getWr(ctx, str(ctx.body.code));
+            const doc = resolvedReviewDoc(await responsibilityData(ctx),await getWr(ctx, str(ctx.body.code)));
             const workflowSettings = await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
             const reviewRole = reviewRoleOf(ctx,workflowSettings,pathOf(doc));
             const can = wrCan(ctx, doc, scope, reviewRole);
@@ -1486,7 +1493,9 @@ export const maintenanceRoutes = {
             const now = nowIso();
             const done = async (fields: Record<string, Plain>, label: string, auditAction: string, details = note) => {
                 const group=groupFields(ctx.workGroupPolicy,strs(fields.path||doc.data.path));
-                await updateFields(ref, { ...fields,...group, history: history(doc, ctx, label, details), updatedAt: now });
+                const reassignment=doc.data.reviewRoutingChanged===true?{reviewerUid:str(doc.data.reviewerUid),reviewAssignedName:str(doc.data.reviewAssignedName),reviewRoleCode:str(doc.data.reviewRoleCode),reviewAssignmentSource:'workflow',reviewerAssignedBy:'workflow_refresh',reviewerAssignedAt:now}:{};
+                if(doc.data.reviewRoutingChanged===true)await rec(ctx,'mnt.wr.reviewer_rerouted',doc.id,'Previous reviewer '+str(doc.data.reviewRoutingPreviousUid)+'; current reviewer '+str(doc.data.reviewerUid));
+                await updateFields(ref, { ...reassignment,...fields,...group, history: history(doc, ctx, label, details), updatedAt: now });
                 const linked = str(fields.assessmentCode) || str(doc.data.assessmentCode);
                 if (linked && ASSM_RE.test(linked)) {
                     const assessmentPath = `${assessmentCol(ctx.orgId)}/${linked}`;
@@ -1856,7 +1865,7 @@ export const maintenanceRoutes = {
                 }
                 case 'review_assessment':
                 case 'return_assessment': {
-                    if(!['under_review','to_be_assessed'].includes(str(doc.data.status)))throw new HttpError(409,'The work request is not in assessment.');
+                    if(str(doc.data.woCode)||!['under_review','to_be_assessed'].includes(str(doc.data.status)))throw new HttpError(409,'The work request is not in assessment or has already been converted.');
                     need(ctx,P.assessment_review,pathOf(doc),scope);
                     const role=await requireConfiguredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',pathOf(doc));
                     const issue=reviewIssue(ctx,doc.data);
