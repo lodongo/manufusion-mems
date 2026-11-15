@@ -84,7 +84,7 @@ export function groupGateRole(policy:WorkGroupPolicy|undefined,gate:string,path:
  const g=groupAt(policy,path);
  if(!policy||!g||!managedGates.has(gate))return null;
  if(!validLocation(policy,g,path)||!(policy.config.tasks[gate]||[]).length)return '';
- return 'WG:'+g.id+':'+policy.config.version+':'+g.version+':'+gate;
+ return 'WG:'+g.id+':'+policy.config.masterVersion+':'+g.version+':'+gate;
 }
 export function workGroupGateAllowed(policy:WorkGroupPolicy|undefined,gate:string,path:string[]):boolean|null{
  const token=groupGateRole(policy,gate,path);

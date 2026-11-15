@@ -170,7 +170,7 @@ async function windowContext(ctx: OrgContext, window: Doc, internal = false) {
         })),
         equipment,
         configurationVersion: settings?.data.version || 0,
-        ...(wos.some(w=>groupAt(ctx.workGroupPolicy,recordPath(w)))?{workGroupRevision:ctx.workGroupPolicy?.config.version}:{}),
+        ...(wos.some(w=>groupAt(ctx.workGroupPolicy,recordPath(w)))?{workGroupRevisions:wos.map(w=>groupGateRole(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',recordPath(w)))}:{}),
     });
     return { wos, equipment, fingerprint, configurationVersion: Number(settings?.data.version) || 0 };
 }

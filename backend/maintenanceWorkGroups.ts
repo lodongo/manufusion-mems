@@ -38,6 +38,10 @@ export function workGroupConflicts(groups:readonly Doc[], groupId:string, costCe
  }
  return issues;
 }
+function mergedMasterTasks(master:Doc|undefined){
+ const saved=mapOfStrings(master?.data.tasks);
+ return Object.fromEntries(WORK_GROUP_TASKS.filter(t=>!t.external).map(t=>[t.code,Number(master?.data.defaultsVersion)===1&&Object.hasOwn(saved,t.code)?saved[t.code]:saved[t.code]?.length?saved[t.code]:DEFAULT_WORK_GROUP_TASKS[t.code]||[]]));
+}
 function suggestedMaster(groups:readonly Doc[],positions:ReadonlyMap<string,Doc>){
  const roleAlignment:Record<string,string[]>={},tasks:Record<string,string[]>={};
  for(const t of WORK_GROUP_TITLES)roleAlignment[t]=[...new Set(groups.flatMap(g=>memberMap(g.data.members)[t].map(m=>m.positionCode)).filter(id=>positions.has(id)))];
@@ -145,7 +149,7 @@ async function publishWorkGroups(ctx:OrgContext){
  if(!isObj(b.groupVersions))throw new HttpError(400,'Group revision confirmation is required.');
  const reason=str(b.reason).trim().slice(0,500);if(reason.length<10)throw new HttpError(400,'Enter approval notes (at least 10 characters).');
  if(str(d.master?.data.updatedBy)===ctx.uid&&old?.masterVersion!==masterVersion)throw new HttpError(403,'A different workflow administrator must approve the master revision.');
- const roleAlignment=mapOfStrings(d.master?.data.roleAlignment),tasks={...DEFAULT_WORK_GROUP_TASKS,...mapOfStrings(d.master?.data.tasks)};
+ const roleAlignment=mapOfStrings(d.master?.data.roleAlignment),tasks=mergedMasterTasks(d.master||undefined);
  const selected:ActiveGroup[]=[];
  const today=nowIso().slice(0,10);
  for(const id of ids){
@@ -166,7 +170,9 @@ async function publishWorkGroups(ctx:OrgContext){
  }
  // Do not invalidate a prior approval, named reviewer or approved maintenance window in place.
  // New/changed authorization revisions are applied only across drained affected locations.
- const changed=new Set([...selected.flatMap(g=>g.costCenterIds),...(old?.groups||[]).flatMap(g=>g.costCenterIds)]);
+ const masterChanged=old?.masterVersion!==masterVersion;
+ const changedGroups=selected.filter(g=>masterChanged||!old?.groups.some(a=>a.id===g.id&&a.version===g.version));
+ const changed=new Set([...changedGroups.flatMap(g=>g.costCenterIds),...(old?.groups||[]).filter(g=>changedGroups.some(a=>a.id===g.id)).flatMap(g=>g.costCenterIds)]);
  const root='organizations/'+ctx.orgId;
  const [requests,orders]=await Promise.all([listDocs(root+'/work_requests'),listDocs(root+'/work_orders')]);
  const inAffected=(d:Doc)=>strings(d.data.path).some(id=>changed.has(id))||changed.has(str(d.data.costCenterId));
@@ -198,7 +204,7 @@ export const maintenanceWorkGroupRoutes={
   }));
   const suggestion=suggestedMaster(d.groups,d.positions);
   const live=d.active?.data as unknown as ActiveWorkGroups|undefined;
-  const master={version:Number(d.master?.data.version)||0,roleAlignment:d.master?mapOfStrings(d.master.data.roleAlignment):suggestion.roleAlignment,tasks:d.master?{...DEFAULT_WORK_GROUP_TASKS,...mapOfStrings(d.master.data.tasks)}:suggestion.tasks,importSuggestion:!d.master&&d.groups.some(g=>Object.keys(memberMap(g.data.members)).some(t=>memberMap(g.data.members)[t].length)||Object.keys(mapOfStrings(g.data.tasks)).length)};
+  const master={version:Number(d.master?.data.version)||0,roleAlignment:d.master?mapOfStrings(d.master.data.roleAlignment):suggestion.roleAlignment,tasks:d.master?mergedMasterTasks(d.master||undefined):suggestion.tasks,importSuggestion:!d.master&&d.groups.some(g=>Object.keys(memberMap(g.data.members)).some(t=>memberMap(g.data.members)[t].length)||Object.keys(mapOfStrings(g.data.tasks)).length)};
   const groups=d.groups.map(g=>{
    const members=memberMap(g.data.members),costCenterIds=strings(g.data.costCenterIds);
    const paths=costCenterIds.map(id=>workGroupAncestry(d.nodes,id)).filter(p=>p.length);
@@ -238,7 +244,7 @@ export const maintenanceWorkGroupRoutes={
    if((priorAlignment[t]||[]).includes(m.positionCode)&&!(roleAlignment[t]||[]).includes(m.positionCode))throw new HttpError(409,'Remove or transfer the named employee in '+str(g.data.code)+' before removing '+m.positionCode+' from '+t+'.');
   }
   const reason=str(body.reason).trim().slice(0,500)||'Partial draft saved';
-  const fields={roleAlignment,tasks,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid,reason};
+  const fields={roleAlignment,tasks,defaultsVersion:1,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid,reason};
   await commit([{path:masterPath(ctx.orgId),fields,...(d.master?{updateTime:d.master.updateTime}:{exists:false})},{path:'organizations/'+ctx.orgId+'/maintenance_work_group_settings/default/revisions/'+String(version+1),fields,exists:false}]);
   await audit([{category:'maintenance',action:'mnt.work_group.master_saved',actor:ctx.actor,meta:ctx.meta,target:{label:'Work Groups master setup'},orgId:ctx.orgId,details:reason+'; revision '+(version+1)}]);
   return {version:version+1,authorizationMode:'legacy'};
@@ -269,8 +275,9 @@ export const maintenanceWorkGroupRoutes={
   if(str(d.nodes.get(siteId)?.data.level)!=='site'||!workGroupAncestry(d.nodes,siteId).length)throw new HttpError(400,'The work group site is inactive.');
   if(costCenterIds.length>150)throw new HttpError(400,'Maximum 150 cost centers per work group.');
   const paths=costCenterIds.map(cc=>{const p=workGroupAncestry(d.nodes,cc);if(str(d.nodes.get(cc)?.data.level)!=='cost_center'||!p.includes(siteId))throw new HttpError(400,'All cost centers must belong to the selected site.');return p;});
+  const eligiblePaths=paths.length?paths:[...d.nodes.values()].filter(n=>str(n.data.level)==='cost_center').map(n=>workGroupAncestry(d.nodes,n.id)).filter(p=>p.includes(siteId));
   if(!isObj(body.members)||Object.keys(body.members).some(k=>!title(k)))throw new HttpError(400,'Valid named assignments are required.');
-  const alignment=d.master?mapOfStrings(d.master.data.roleAlignment):suggestedMaster(d.groups,d.positions).roleAlignment,tasks=d.master?{...DEFAULT_WORK_GROUP_TASKS,...mapOfStrings(d.master.data.tasks)}:DEFAULT_WORK_GROUP_TASKS;
+  const alignment=d.master?mapOfStrings(d.master.data.roleAlignment):suggestedMaster(d.groups,d.positions).roleAlignment,tasks=d.master?mergedMasterTasks(d.master||undefined):DEFAULT_WORK_GROUP_TASKS;
   const members:Record<string,Member[]>={},today=nowIso().slice(0,10);
   for(const t of WORK_GROUP_TITLES){
    const raw=objects(body.members[t]);if(raw.length>100)throw new HttpError(400,'Maximum 100 members per generic title.');
@@ -278,7 +285,7 @@ export const maintenanceWorkGroupRoutes={
    for(const m of raw){
     const uid=str(m.uid),positionCode=str(m.positionCode),u=d.users.get(uid);
     if(!(alignment[t]||[]).includes(positionCode)||!d.positions.has(positionCode))throw new HttpError(400,'The organizational role must be aligned to '+t+' in Master setup.');
-    if(!u||!(paths.length?paths:[workGroupAncestry(d.nodes,siteId)]).some(p=>workGroupHolder(u,positionCode,p,today)))throw new HttpError(400,'A named employee must currently hold the selected organization role within the group scope.');
+    if(!u||!eligiblePaths.some(p=>workGroupHolder(u,positionCode,p,today)))throw new HttpError(400,'A named employee must currently hold the selected organization role within the group scope.');
     const key=positionCode+'|'+uid;if(!seen.has(key)){seen.add(key);members[t].push({uid,positionCode});}
    }
   }

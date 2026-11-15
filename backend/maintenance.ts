@@ -497,7 +497,9 @@ function eligibleReview(ctx: OrgContext, doc: Doc, scope: Scope, role: string): 
  * eligible role queue is claimed atomically by its first reviewer. */
 async function automaticWrReviewer(ctx: OrgContext, role: string, path: string[]) {
     if (!role) return null;
-    const candidates = (await orgUsers(ctx.orgId)).filter(u => u.id !== ctx.uid && (groupGateRole(ctx.workGroupPolicy,WR_REVIEW_GATE,path)!==null||holdsReviewRole(u, role, path)));
+    const group=groupAt(ctx.workGroupPolicy,path);
+    const groupIds=group?new Set(Object.values(group.members).flatMap(ms=>ms.map(m=>m.uid))):null;
+    const candidates = (await orgUsers(ctx.orgId)).filter(u => u.id !== ctx.uid && (groupIds?groupIds.has(u.id):holdsReviewRole(u, role, path)));
     const eligible = [];
     for (const user of candidates) {
         const storedRole = str(user.data.role);
@@ -670,7 +672,7 @@ function woCan(ctx: OrgContext, doc: Doc, scope: Scope, l: Lists) {
     const workers = new Set([...objs(d.timeLogs).map((t) => str(t.uid)), str(d.completedBy)]);
     const high = isHighRisk(d, l);
     return {
-        view: at(P.view),
+        view: at(P.view)||outsideExecutionAccess(ctx.workGroupPolicy,doc),
         plan: ['planning', 'plan_ready'].includes(s) && at(P.WO_plan),
         safety: ['planning', 'plan_ready'].includes(s) && at(P.WO_safety) && independent(ctx, !(high && planner === ctx.uid), 'mnt.wo.safety_independence'),
         submitPlan: s === 'planning' && at(P.WO_plan),
@@ -1262,7 +1264,7 @@ export const maintenanceRoutes = {
                         reviewerAssignedAt: selectedReviewer ? now : '',
                         reviewerAssignedBy: selectedReviewer ? 'workflow' : '',
                         reviewRoleCode: reviewRole, reviewAssignmentSource: 'workflow',
-                        reviewWorkflowVersion: Number(settings?.data.version) || 0,
+                        reviewWorkflowVersion: groupAt(ctx.workGroupPolicy,loc.path)?ctx.workGroupPolicy!.config.version:Number(settings?.data.version) || 0,
                         photos: photos.map((p) => ({ path: p, addedAt: now })),
                         gembaId, gembaObservationId: observationId, gembaTypeCode, gembaTypeName,
                         requestedBy: ctx.uid,
@@ -1668,7 +1670,7 @@ export const maintenanceRoutes = {
                     await done({ status: 'under_review', reviewer: ctx.uid, reviewerUid: ctx.uid, reviewerName: displayName(ctx),
                         reviewAssignedName: displayName(ctx), reviewStartedAt: now,
                         ...(reviewNew ? {reviewRoleCode: reviewRole, reviewAssignmentSource: 'workflow', reviewerAssignedBy:reviewOverride && (!eligibleReview(ctx,doc,scope,reviewRole) || (str(doc.data.reviewerUid) && !assignedReviewer)) ? 'test_override' : 'workflow', reviewerAssignedAt: str(doc.data.reviewerAssignedAt) || now,
-                            reviewWorkflowVersion:Number(workflowSettings?.data.version)||0} : {}) }, 'Review started', 'mnt.wr.review_started', '');
+                            reviewWorkflowVersion:groupAt(ctx.workGroupPolicy,pathOf(doc))?ctx.workGroupPolicy!.config.version:Number(workflowSettings?.data.version)||0} : {}) }, 'Review started', 'mnt.wr.review_started', '');
                     return { ok: true };
                 case 'cancel_review': {
                     deny(can.reviewCancel, 'Only the assigned reviewer can cancel during review.');
