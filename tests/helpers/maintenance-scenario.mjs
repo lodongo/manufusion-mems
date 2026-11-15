@@ -1237,6 +1237,14 @@ assert.equal(snapshot(r+'/work_requests/'+confirmedWR.code).data.status,'confirm
 assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.workflowCode,'WO010');
 assert.deepEqual(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.assessmentTasks,[]);
 assert.equal((await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:confirmedWR.code,action:'confirm_review'})).woCode,confirmedWO.woCode);
+await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'assess_header',...header});
+assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.assessedBy,people.assessor[0]);
+const currentTask={...task('current_check','Inspect and repair conveyor condition',''),equipmentId:'CONVEYOR'};
+await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'save_task_assessment',tasks:[currentTask]});
+assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.workflowCode,'WO020');
+await route(maintenanceRoutes,'/api/org/mnt/wo/action','reviewer',{code:confirmedWO.woCode,action:'review_assessment',note:'Independently approved technical classification and task scope.'});
+assert.ok(['WO030','WO040','WO050','WO060','WO070','WO080'].includes(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.workflowCode));
+assert.deepEqual(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.workflowTransitions.slice(0,2).map(e=>e.to),['WO010','WO020']);
 // ----- Period maintenance budget: proposed, approved under the Chart of Authority, committed by approved estimates -----
 const month = date.slice(0, 7);
 await assert.rejects(() => route(maintenancePlanningRoutes, '/api/org/mnt/budget/propose', 'planner', { ccId: 'LINE_CC', period: month, amount: -1, reason: 'Monthly maintenance budget for the line.' }), /amount/);

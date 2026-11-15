@@ -656,7 +656,7 @@ function OrderAssessmentHeader({wo,options,can,onDone,testOverride}:{wo:MntData;
  const setup=useLoad(()=>callBackend<MntSetup>('/api/org/mnt/setup',{}),[]);
  const [form,setForm]=useState<MntData>({technicalEvaluation:wo.technicalEvaluation||'',natureCode:wo.natureCode||'',severityCode:wo.severitySetBy?wo.criticalityCode:'',solutionCodes:(wo.solutions||[]).map((s:MntData)=>s.code),maintenanceTypeCode:wo.maintenanceTypeCode||'',priorityCode:wo.priorityCode||'',assemblyId:wo.assemblyId||'',note:wo.assessmentNote||''});
  const [busy,setBusy]=useState(false),[err,setErr]=useState('');const set=(k:string,v:any)=>setForm(old=>({...old,[k]:v}));
- const l: MntLists|undefined=setup.data?.lists;
+ const l: MntLists|null|undefined=setup.data?.lists;
  if(!can)return <Card className="space-y-2"><p className="font-semibold">Technical assessment classification</p><p className="text-sm">{wo.technicalEvaluation||'Awaiting assessor'}</p><p className="text-sm text-soft">{[wo.natureLabel,wo.criticalityLabel,wo.maintenanceTypeLabel].filter(Boolean).join(' · ')}</p></Card>;
  if(!l)return <Card><p className="text-sm">{setup.error||'Loading assessment metadata…'}</p></Card>;
  const save=async()=>{setBusy(true);setErr('');try{await callBackend('/api/org/mnt/wo/action',{code:wo.code,action:'assess_header',...form});onDone();}catch(e){setErr(e instanceof Error?e.message:'Unable to save');}finally{setBusy(false);}};

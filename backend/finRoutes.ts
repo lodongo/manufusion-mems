@@ -5,7 +5,7 @@ import {buildGlTransactionVariants} from './finTransactionVariants';
 import {registerGlContracts} from './finTransactionContracts';
 import { postingRoles, suggestRoleAccounts } from './finPostingCatalogue';
 import { ccTransactionChoices } from './glTransactionService';
-import { HttpError, deleteDoc, fieldEq, getDoc, listDocs, nowIso, runQuery, str, updateFields, writeDoc, type Fields } from './core';
+import { HttpError, deleteDoc, fieldEq, getDoc, isObj, listDocs, nowIso, runQuery, str, updateFields, writeDoc, type Fields } from './core';
 import { directRoleIds, hasPerm, orgRoute, type OrgContext } from './guards';
 import { canGrant, orgUsers, record } from './org';
 import { ROLE_TEMPLATES } from './permissionPolicy';
