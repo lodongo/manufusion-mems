@@ -1,3 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {timeConflict,bookedHours} from './maintenanceTimeCore';
 const now=Date.parse('2026-11-16T18:00:00Z'),span={start:Date.parse('2026-11-16T10:00:00Z'),end:Date.parse('2026-11-16T12:00:00Z')},entry={uid:'a',start:'2026-11-16T09:00:00Z',end:'2026-11-16T11:00:00Z',status:'recorded'};
 test('individual overlap is forbidden and different artisans may work concurrently',()=>{assert.equal(timeConflict([entry],'a',span,now),true);assert.equal(timeConflict([entry],'b',span,now),false);assert.equal(timeConflict([{...entry,status:'superseded'}],'a',span,now),false);assert.equal(bookedHours([entry],span,now),1);});
+
+import {defaultTimePolicy,validateTimePolicy,completedStatus} from './maintenanceTimePolicy';
+test('time-policy defaults to approval off and preserves mandatory direct classification',()=>{const p=defaultTimePolicy();assert.equal(p.approvalEnabled,false);assert.equal(completedStatus(false),'recorded');assert.equal(completedStatus(true),'pending_approval');assert.throws(()=>validateTimePolicy({...p,classes:p.classes.filter(c=>c.code!=='DIRECT')}));assert.equal(validateTimePolicy({...p,classes:p.classes.map(c=>({...c,productive:false}))}).classes.find(c=>c.code==='DIRECT')?.productive,true);});
+test('pending and returned intervals block duplicate time but do not contribute to measured hours',()=>{for(const status of ['pending_approval','returned']){assert.equal(timeConflict([{...entry,status}],'a',span,now),true);assert.equal(bookedHours([{...entry,status}],span,now),0);}});
