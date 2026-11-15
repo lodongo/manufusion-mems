@@ -684,6 +684,7 @@ function OrderAssessmentHeader({wo,options,can,onDone,testOverride,cycle}:{wo:Mn
 import MntApprovalProgress from './MntApprovalProgress';
 import MntPersonalTime from './MntPersonalTime';
 import MntResourceRecommendations from './MntResourceRecommendations';
+import MntStandardHistory from './MntStandardHistory';
 export default function MntWorkOrder({ code }: { code: string }) {
     const { data, error, loading, reload } = useLoad(() => mntApi({ action: 'read', code }), [code]);
     const [reviewTab,setReviewTab]=useState<'status'|'details'>('status');
@@ -1049,7 +1050,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                     {task.persons} people · Skills: {task.skills}
                                 </p>
                                 <p>Tools: {task.tools || 'None'}</p>
-                                {wo.taskStandardSnapshots?.[task.id]&&<div className='rounded-lg border border-line p-2 text-sm'><b>Approved activity standard · v{wo.taskStandardSnapshots[task.id].version}</b><p>{wo.taskStandardSnapshots[task.id].durationHours} h duration · {wo.taskStandardSnapshots[task.id].persons} people · {wo.taskStandardSnapshots[task.id].standardManHours} man-hours</p></div>}
+                                {wo.taskStandardSnapshots?.[task.id]&&<MntStandardHistory key={wo.code+':'+task.id} code={wo.code} taskId={task.id} standard={wo.taskStandardSnapshots[task.id]}/>}
                                 <p>
                                     Allocated:{' '}
                                     {(planning.allocation?.personnel || [])
