@@ -1,3 +1,4 @@
+import {summarizeWorkOrderReview} from './maintenanceStatusReview';
 import {getMaintenanceCycle,validateCycleDates,localDate} from './maintenanceCycle';
 import {stateOf,transitionPatch,type FactSet} from './maintenanceWorkflowState';
 import {responsibilityData,responsibilityFor,groupFields} from './maintenanceResponsibility';
@@ -1896,10 +1897,13 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const pool=await workGroupResourcePool(ctx.orgId,wo,users);
         const workflow=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
         const reviewRole=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),workflow?.data.approverRoles);
+        const cycle=await getMaintenanceCycle(ctx),d=wo.data,zone= str(object(d.cycleAdmission).timeZone)||cycle.timeZone;
+        let dueAt:string|null=null;const dueDate=str(d.scheduledEnd);if(!retrospective&&/^\d{4}-\d{2}-\d{2}$/.test(dueDate)){try{const day=new Date(dueDate+'T00:00:00Z');day.setUTCDate(day.getUTCDate()+1);dueAt=zonedInstant(day.toISOString().slice(0,10),'00:00',zone);}catch{/* Invalid historical dates stay unclassified. */}}
         return {
             wo: { code: wo.id, ...wo.data,...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
-            maintenanceCycle:await getMaintenanceCycle(ctx),
+            maintenanceCycle:cycle,
+            statusReview:summarizeWorkOrderReview(d,nowIso(),dueAt),
             readiness: readinessData,
             checklist: retrospective?null:await planChecklist(ctx, wo, readinessData),
             currency: str(ctx.org.data.currencyCode),

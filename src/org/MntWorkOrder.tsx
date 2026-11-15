@@ -1,3 +1,4 @@
+import MntStatusReview from './MntStatusReview';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, Package, ShieldCheck, Wrench, CalendarClock, CheckCircle2, ChevronDown } from 'lucide-react';
 import { callBackend } from '../lib/backend';
@@ -664,6 +665,7 @@ function OrderAssessmentHeader({wo,options,can,onDone,testOverride}:{wo:MntData;
 }
 export default function MntWorkOrder({ code }: { code: string }) {
     const { data, error, loading, reload } = useLoad(() => mntApi({ action: 'read', code }), [code]);
+    const [reviewTab,setReviewTab]=useState<'status'|'details'>('status');
     const [selected, setSelected] = useState(''),
         [tab, setTab] = useState('Details'),
         [assessing, setAssessing] = useState(false),
@@ -782,6 +784,8 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 </Button>}
             </div>
             <MaintenanceResponsibility record={wo}/>
+            <div className="flex gap-2 rounded-xl border border-line p-1"><Button variant={reviewTab==='status'?'primary':'secondary'} onClick={()=>setReviewTab('status')}>Status review</Button><Button variant={reviewTab==='details'?'primary':'secondary'} onClick={()=>setReviewTab('details')}>Work Order details</Button></div>
+            {reviewTab==='status'?<MntStatusReview data={data} onRefresh={reload}/>:<>
             {wo.executionMode==='confirmed_request'&&<OrderAssessmentHeader key={wo.code+':'+(wo.assessedAt||'new')} wo={wo} options={data.assemblyOptions||[]} can={wo.status==='planning'&&!!can.assess&&!Object.keys(wo.taskPlanning||{}).length} testOverride={!!data.testModeOverride} onDone={reload}/>}
             {wo.workflowCode&&<Card className="space-y-2"><p className="text-xs text-soft">Operational state · {wo.workflowCode}</p><p className="font-semibold">{wo.workflowLabel}</p><p className="text-sm text-soft">Since {wo.workflowSince?new Date(wo.workflowSince).toLocaleString():'—'}</p>{wo.workflowReason&&<p className="text-sm">{wo.workflowReason}</p>}<details open><summary className="cursor-pointer text-sm font-semibold">State transition history ({(wo.workflowTransitions||[]).length})</summary><ol className="mt-2 space-y-2">{[...(wo.workflowTransitions||[])].reverse().map((e:MntData,i:number)=><li key={i} className="border-l-2 border-line pl-3 text-sm"><p className="font-medium">{e.from?e.from+' → ':''}{e.to} · {e.label}</p><p className="text-xs text-soft">{new Date(e.at).toLocaleString()} · {e.byName||e.by} · {e.source}</p>{e.reason&&<p className="text-xs text-soft">{e.reason}</p>}</li>)}</ol></details></Card>}
             {retrospective&&<Card className="space-y-2"><h2 className="font-semibold">Work completed at request review</h2><p className="text-sm text-soft">Planning, resource preparation and maintenance window are not applicable. This record does not certify prior safety authorization.</p><p className="text-sm">Actual completion: {wo.directCompletion?.performedDate} · {wo.directCompletion?.durationMinutes} minutes</p><p className="text-sm">Performed by: {wo.directCompletion?.executor?.name} · {wo.directCompletion?.executor?.role}</p><p className="text-sm">Work performed: {wo.directCompletion?.reportedWork}</p><p className="text-sm">Maintenance type: {wo.maintenanceTypeLabel}</p><p className="text-sm">Failure mode: {wo.directCompletion?.failureModeLabel} · Cause: {wo.directCompletion?.causeLabel}</p><p className="text-sm">Solution: {(wo.directCompletion?.solutions||[]).map((s:MntData)=>s.label).join('; ')}</p><p className="text-sm text-soft">No spare parts or services declared. Labour valuation is separate from recorded time.{wo.finalCost?.pendingLabourValuation?' Labour valuation pending approved rate.':''}</p>{can.execute&&execution.status==='awaiting_feedback'&&<Button testOverride={!!data.testModeOverride} onClick={()=>open('feedback')}>Confirm actual work feedback</Button>}</Card>}
@@ -810,7 +814,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     )}
             </div>
             {tasks.length > 0 && wo.assessmentReviewCurrent && data.checklist && (
-                <MntReadiness code={code} wo={wo} checklist={data.checklist} canPlan={!!can.plan} testModeOverride={!!data.testModeOverride} currency={data.currency || ''} onDone={reload} />
+                <MntReadiness code={code} wo={wo} cycle={data.maintenanceCycle} checklist={data.checklist} canPlan={!!can.plan} testModeOverride={!!data.testModeOverride} currency={data.currency || ''} onDone={reload} />
             )}
             {!retrospective&&tasks.length>0&&<Card className="space-y-3">
                 <p className="font-semibold">Independent work assessment review</p>
@@ -1338,6 +1342,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     )}
                 </MntDialog>
             )}
+            </>}
         </div>
     );
 }
