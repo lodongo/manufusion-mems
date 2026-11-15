@@ -957,7 +957,10 @@ await assert.rejects(
     () => op('planner', 'save_window', { title: 'Forbidden mixed equipment', equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8, workOrderIds: [other] }),
     /other equipment/,
 );
-const otherWindow = await op('planner', 'save_window', { capacityOverrideReason:'Legacy fixture capacity has not been adopted; planner documents the warning.', title: 'Other line equipment', equipmentId: 'OTHER_LINE', date, startTime: '09:00', durationHours: 2, workOrderIds: [other] });
+// Cross-equipment windows do not waive an individual's scheduling conflict.
+const otherWindowBody={capacityOverrideReason:'Legacy fixture capacity has not been adopted; planner documents the warning.', title:'Other line equipment',equipmentId:'OTHER_LINE',date,startTime:'09:00',durationHours:2,workOrderIds:[other]};
+await assert.rejects(()=>op('planner','save_window',otherWindowBody),/conflicting scheduled activity/);
+const otherWindow=await op('planner','save_window',{...otherWindowBody,startTime:'18:00'});
 const sameLine = await op('planner', 'save_window', {
     windowId: subset.windowId,
     capacityOverrideReason:'Legacy fixture capacity has not been adopted; planner documents the warning.', reason: 'Schedule every remaining task of the follow-up work order together.',
