@@ -1,7 +1,7 @@
 import {summarizeWorkOrderReview} from './maintenanceStatusReview';
 import {getMaintenanceCycle,validateCycleDates,localDate,validateStartDateMove,startDateMoves} from './maintenanceCycle';
 import {stateOf,transitionPatch,shortWorkOrderStatus,type FactSet} from './maintenanceWorkflowState';
-import {responsibilityData,responsibilityFor,groupFields} from './maintenanceResponsibility';
+import {responsibilityData,responsibilityFor,groupFields,approvalPreviewFor} from './maintenanceResponsibility';
 import { createHash } from 'node:crypto';
 import { bypass } from './testModeCore';
 import { stableJson } from './scopeGuard';
@@ -22,6 +22,7 @@ import { assessmentReviewCurrent,maintenanceAssessmentReady } from './maintenanc
 import {maintenanceAssessmentApprovalRequired,configuredOrderApprovalStage,technicalClosureApprovalRequired,readMaintenancePolicySnapshot} from './maintenanceGovernancePolicy';
 import {approveStage,requireStageApproval,stageApprovalCurrent,stageApprovalPending,stageReached,STAGE_LABELS} from './maintenanceStageApproval';
 import {decideMaintenanceFlow,flowPlain} from './maintenanceApprovalFlow';
+import {approvalInput} from './maintenanceApprovalFlowCore';
 import { maintenanceKey, reserveTaskSpare, releaseMaintenanceReservations, verifyMaintenanceStockLedger } from './maintenanceInventory';
 import {
     equipmentMake,
@@ -1664,7 +1665,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         const excluded=new Set([str(pending.by),str(object(wo.data.safetySignoff).by),...Object.values(executions).flatMap(e=>texts(object(e).performers)),...rows(wo.data.timeLogs).map(e=>str(e.uid))].filter(Boolean));
         if(excluded.has(ctx.uid)&&!bypass(ctx,'mnt.wo.technical_closure.independence'))throw new HttpError(403,'An independent technical closure approver is required.');
         const note=requiredText(b.note,'Technical closure approval notes',10);
-        const flow=await decideMaintenanceFlow(ctx,wo,'technicalClosure',{policyVersion:pending.policyVersion,at:pending.at,mode:pending.mode,safetySignoff:wo.data.safetySignoff,taskExecution:wo.data.taskExecution,serviceReports:wo.data.serviceReports,earlyClosureRequest:wo.data.earlyClosureRequest},str(pending.at),pending.flow,[...excluded],'approve',note);
+        const input=approvalInput(wo.data,'technicalClosure'),flow=await decideMaintenanceFlow(ctx,wo,'technicalClosure',input.payload,input.startedAt,input.previous,input.exclude,'approve',note);
         if(flow?.status==='pending'){await saveWo(ctx,wo,{technicalClosurePending:{...pending,flow:flowPlain(flow)},technicalClosureVoteHistory:[...rows(wo.data.technicalClosureVoteHistory),flowPlain(flow)]},'work_order.technical_closure_vote',note);return {ok:true,pendingTechnicalApproval:true};}
         const approved:Doc={...wo,data:{...wo.data,technicalClosure:{at:nowIso(),by:ctx.uid,name:name(ctx),note,policyVersion:pending.policyVersion,...(flow?{flow:flowPlain(flow)}:{})}}};
         if(pending.mode==='early')return earlyClose(ctx,approved,false,false,false,true);
@@ -2161,10 +2162,13 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const pool=await workGroupResourcePool(ctx.orgId,wo,users);
         const workflow=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
         const reviewRole=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),workflow?.data.approverRoles);
+        const routing=await responsibilityData(ctx,true),approvalKey=object(wo.data.technicalClosurePending).at?'technicalClosure':approvalStage&&stageReached(wo.data,approvalStage)&&stageApprovalPending(wo.data,approvalStage)||wo.data.workflowCode==='WO020'?'workOrder':null;
+        const approvalPreview=approvalKey&&!['closed','cancelled'].includes(str(wo.data.status))?approvalPreviewFor(routing,wo.data,approvalKey,recordPath(wo)):null;
+        if(approvalPreview&&!approvalPreview.actions.some(a=>a.actorUid===ctx.uid)){if(approvalKey==='technicalClosure')permissions.technicalApprove=false;else if(approvalStage)permissions.approveOrderStage=false;else permissions.reviewAssessment=false;}
         const cycle=await getMaintenanceCycle(ctx),d=wo.data,zone=str(object(d.currentCycleAdmission).timeZone)||str(object(d.cycleAdmission).timeZone)||cycle.timeZone;
         let dueAt:string|null=null;const dueDate=str(d.scheduledEnd);if(!retrospective&&/^\d{4}-\d{2}-\d{2}$/.test(dueDate)){try{const day=new Date(dueDate+'T00:00:00Z');day.setUTCDate(day.getUTCDate()+1);dueAt=zonedInstant(day.toISOString().slice(0,10),'00:00',zone);}catch{/* Invalid historical dates stay unclassified. */}}
         return {
-            wo: { code: wo.id, ...wo.data,workflowStatusCode:shortWorkOrderStatus(str(wo.data.workflowCode)),...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole),assessmentReady:maintenanceAssessmentReady(wo.data,reviewRole),assessmentApprovalRequired:maintenanceAssessmentApprovalRequired(wo.data),orderApprovalStage:approvalStage,orderApprovalLabel:approvalStage?STAGE_LABELS[approvalStage]:'',orderStageApprovalPending:!!approvalStage&&stageApprovalPending(wo.data,approvalStage),orderStageApprovalReached:!!approvalStage&&stageReached(wo.data,approvalStage),technicalClosureApprovalRequired:technicalClosureApprovalRequired(wo.data) },
+            wo: { code: wo.id, ...wo.data,workflowStatusCode:shortWorkOrderStatus(str(wo.data.workflowCode)),...responsibilityFor(routing,wo.data,'wo'),approvalPreview, assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole),assessmentReady:maintenanceAssessmentReady(wo.data,reviewRole),assessmentApprovalRequired:maintenanceAssessmentApprovalRequired(wo.data),orderApprovalStage:approvalStage,orderApprovalLabel:approvalStage?STAGE_LABELS[approvalStage]:'',orderStageApprovalPending:!!approvalStage&&stageApprovalPending(wo.data,approvalStage),orderStageApprovalReached:!!approvalStage&&stageReached(wo.data,approvalStage),technicalClosureApprovalRequired:technicalClosureApprovalRequired(wo.data) },
             assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
             earlyClosure:earlyCheck?{blocked:earlyCheck.blocked,started:earlyExecutionStarted(wo),requested:!!object(wo.data.earlyClosureRequest).at}:null,
             maintenanceCycle:cycle,

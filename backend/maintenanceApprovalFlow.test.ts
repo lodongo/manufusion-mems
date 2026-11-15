@@ -29,3 +29,16 @@ test('invalid configurations and impossible scoped quorums fail closed',()=>{
  const flow=validateApprovalFlow({steps:[{stream:'main',level:1,quorum:{mode:'count',value:2},approverUids:['a','b']}],alternates:[]});
  assert.throws(()=>flowSteps(flow,['a']));
 });
+
+import {pendingFlowPreview,evidenceFor} from './maintenanceApprovalFlowCore';
+test('read-time routing follows the shared quorum engine and overdue alternate eligibility',()=>{
+ const flow=validateApprovalFlow({steps:[{stream:'main',level:1,quorum:{mode:'all'},approverUids:['a','b']},{stream:'main',level:2,quorum:{mode:'any'},approverUids:['c']}],alternates:[{principalUid:'a',alternateUid:'x',mode:'escalation',afterHours:2,startsAt:'',endsAt:''}]});
+ const pool=['a','b','c','x'];const e=base(flowSteps(flow,pool));
+ assert.deepEqual(pendingFlowPreview(flow,e,pool,at).actions.map(a=>a.actorUid),['a','b']);
+ const overdue=pendingFlowPreview(flow,e,pool,'2026-11-15T02:00:00Z');
+ assert.equal(overdue.actions.find(a=>a.actorUid==='x')?.mode,'escalation');
+ const vote=flowVote(e,flow,'x',pool,'approve','2026-11-15T02:00:00Z','alternate');
+ assert.deepEqual(pendingFlowPreview(flow,vote,pool,'2026-11-15T02:00:00Z').actions.map(a=>a.actorUid),['b']);
+ const stale=evidenceFor(flow,'org','WO00000001','workOrder',{version:2},at,vote,['maker'],pool,at);
+ assert.equal(stale.votes.length,0);
+});

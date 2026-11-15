@@ -2,7 +2,8 @@
 import {HttpError,str,nowIso,type Obj,type Doc} from './core';
 import {object,texts} from './maintenanceDomain';
 import {configuredOrderApprovalStage,readMaintenancePolicySnapshot} from './maintenanceGovernancePolicy';
-import {transactionPayloadHash} from './unifiedApprovalProof';
+import {approvalInput,stageApprovalFingerprint} from './maintenanceApprovalFlowCore';
+export {stageApprovalFingerprint} from './maintenanceApprovalFlowCore';
 import {decideMaintenanceFlow,flowPlain} from './maintenanceApprovalFlow';
 import {maintenancePermission,requireMaintenanceRole} from './maintenanceAccess';
 import {bypass} from './testModeCore';
@@ -11,11 +12,6 @@ import type {OrgContext} from './guards';
 export type Stage=NonNullable<ReturnType<typeof configuredOrderApprovalStage>>;
 export const STAGE_LABELS:Record<Stage,string>={before_assessment:'Before assessment',after_readiness:'After resource readiness',before_execution:'Before execution'};
 export const STAGE_CODES:Record<Stage,string>={before_assessment:'WO015',after_readiness:'WO125',before_execution:'WO145'};
-export function stageApprovalFingerprint(d:Obj,stage:Stage,schema=2):string{
- const base={policyVersion:readMaintenancePolicySnapshot(d.maintenanceGovernance)?.version,code:d.code,unitId:d.unitId,wrCode:d.wrCode,stage};
- if(stage==='before_assessment')return transactionPayloadHash({...base,requestConfirmation:d.requestConfirmation,initialScheduledStart:d.initialScheduledStart,initialScheduledEnd:d.initialScheduledEnd,...(schema>=2?{initialApprovalFacts:d.initialApprovalFacts}:{})});
- return transactionPayloadHash({...base,assessmentTasksVersion:d.assessmentTasksVersion,assessmentTasksAt:d.assessmentTasksAt,assessedAt:d.assessedAt,readiness:d.readiness,estimatedCost:d.costPlan,costApproval:d.costApproval,scheduledStart:d.scheduledStart,scheduledEnd:d.scheduledEnd,taskPlanning:d.taskPlanning,...(stage==='before_execution'?{taskWindows:d.taskWindows,windowId:d.windowId,...(schema>=2?{windowStart:d.windowStart,windowEnd:d.windowEnd,windowApprovalRevision:d.windowApprovalRevision}: {})}: {})});
-}
 export function stageApprovalCurrent(d:Obj,stage:Stage):boolean{
  const a=object(d.stageApproval);
  return a.status==='approved'&&a.stage===stage&&!!str(a.by)&&!!str(a.jobRole)&&a.fingerprint===stageApprovalFingerprint(d,stage,Number(a.fingerprintSchema)||1);
@@ -44,6 +40,6 @@ export async function approveStage(ctx:OrgContext,wo:Doc):Promise<Obj>{
  if(excluded.includes(ctx.uid)&&!bypass(ctx,'mnt.wo.stage_approval.independence'))throw new HttpError(403,'An independent authorized approver is required.');
  const note=str(ctx.body.note).trim().slice(0,500);
  if(note.length<10)throw new HttpError(400,'Enter approval notes (at least 10 characters).');
- const fingerprint=stageApprovalFingerprint(d,stage),flow=await decideMaintenanceFlow(ctx,wo,'workOrder',{fingerprint},str(d.workflowSince)||str(d.createdAt),object(d.stageApproval).flow,excluded,'approve',note);
+ const input=approvalInput(d,'workOrder'),flow=await decideMaintenanceFlow(ctx,wo,'workOrder',input.payload,input.startedAt,input.previous,input.exclude,'approve',note);
  return {status:flow?flow.status:'approved',...(flow?{flow:flowPlain(flow)}:{}),stage,by:ctx.uid,name:[str(ctx.me.data.firstName),str(ctx.me.data.lastName)].filter(Boolean).join(' ')||ctx.uid,jobRole:role.role,at:nowIso(),note,fingerprint:stageApprovalFingerprint(d,stage),fingerprintSchema:2,policyVersion:readMaintenancePolicySnapshot(d.maintenanceGovernance)!.version};
 }

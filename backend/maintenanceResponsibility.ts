@@ -4,7 +4,8 @@ import type {OrgContext} from './guards';
 import {orgUsers} from './org';
 import {WORK_GROUP_TITLES,groupAt,groupGateRole,workGroupPermission,workGroupGateAllowed,assignmentCovers,memberTitles,outsideExecutionAccess,ancestry,type WorkGroupPolicy,type ActiveGroup} from './maintenanceWorkGroupPolicy';
 import {reviewAssessmentPrerequisites,maintenanceAssessmentReady} from './maintenanceAssessmentReview';
-import {maintenanceAssessmentApprovalRequired} from './maintenanceGovernancePolicy';
+import {maintenanceAssessmentApprovalRequired,type ApprovalKey} from './maintenanceGovernancePolicy';
+import {approvalFlowOf,approvalInput,evidenceFor,pendingFlowPreview,GATES,type FlowEvidence} from './maintenanceApprovalFlowCore';
 import {mergedMasterTasks,memberMap,mapOfStrings} from './maintenanceWorkGroups';
 const obj=(v:unknown):Obj=>isObj(v)?v:{};
 const rows=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
@@ -186,6 +187,11 @@ export function responsibilityFor(data:Data,d:Obj,kind:'wr'|'wo'|'window'|'valid
    }
   }else{const role=str(data.legacy[s.gate||'']);people=legacyPeople(data,role,path,s.exclude);fallback=positionLabel(data,role);source=location.workGroupStatus==='draft'?'draft_group':'legacy';diagnostic=location.workGroupStatus==='draft'?'Work Group is saved but not activated.':'No active Work Group for this cost center.';}
  }
+ const approvalKey:ApprovalKey|null=kind==='wr'&&d.status==='approval_pending'?'workRequest':kind==='wo'&&d.workflowCode==='WO210'?'technicalClosure':kind==='wo'&&['WO015','WO020','WO125','WO145'].includes(str(d.workflowCode))?'workOrder':null;
+ if(approvalKey){
+  const preview=approvalPreviewFor(data,d,approvalKey,path);
+  if(preview){people=people.filter(p=>preview.actions.some(a=>a.actorUid===p.uid));diagnostic=preview.diagnostic||diagnostic;}
+ }
  const ranked=rankResponsible(data,people),seen=new Set<string>();
  const distinct=ranked.filter(p=>{if(seen.has(p.uid))return false;seen.add(p.uid);return true;});
  const principal=(s.preferred&&distinct.find(p=>p.uid===s.preferred))||distinct[0];
@@ -215,4 +221,20 @@ export function scopedApprovalCandidates(data:Data,path:string[],gate:string,per
  const g=groupAt(data.policy,path),s:Stage={label:'Approval',gate,permission,exclude};
  const people=g&&data.policy?candidates(data,g,s,path):legacyPeople(data,str(data.legacy[gate]),path,exclude);
  return [...new Set(people.map(p=>p.uid))];
+}
+
+/** Display routing is advisory, using the same immutable step/alternate policy and current role assignments.
+ * The write handler additionally revalidates the actual actor's effective security and scope.
+ */
+export function approvalPreviewFor(data:Data,d:Obj,key:ApprovalKey,path:string[]){
+ const flow=approvalFlowOf(d,key);if(!flow)return null;
+ const input=approvalInput(d,key),[gate,permission]=GATES[key];
+ const eligible=scopedApprovalCandidates(data,path,gate,permission,input.exclude);
+ try{
+  const now=nowIso(),e=evidenceFor(flow,data.orgId,str(d.code),key,input.payload,input.startedAt,input.previous,input.exclude,eligible,now);
+  const preview=pendingFlowPreview(flow,e,eligible,now);
+  return {...preview,diagnostic:preview.actions.length?'':'No scoped approver currently eligible for the outstanding approval level.'};
+ }catch(e){
+  return {evidence:null as FlowEvidence|null,actions:[] as ReturnType<typeof pendingFlowPreview>['actions'],escalationDue:[] as ReturnType<typeof pendingFlowPreview>['escalationDue'],diagnostic:e instanceof Error?e.message:'Approval configuration cannot be resolved.'};
+ }
 }

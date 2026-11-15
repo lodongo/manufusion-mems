@@ -98,6 +98,7 @@ interface Detail extends Row {
     testModeOverride?: boolean;
     reviewDecision?: string;
     requestApprovalEnabled?:boolean;
+    approvalPreview?:Parameters<typeof MntApprovalProgress>[0]['preview'];
     requestApproval?:{flow?:Parameters<typeof MntApprovalProgress>[0]['evidence'];status:string;submittedByName?:string;maintenanceTypeLabel?:string;scheduledStart?:string;scheduledEnd?:string;decisionNote?:string;decidedByName?:string};
     reviewCancellationCategory?: string;
     repeatRequestCode?: string;
@@ -792,7 +793,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
               </nav>
               <div className='min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain px-1 py-3 sm:px-4'>
                 <MaintenanceResponsibility record={r}/>
-                <MntApprovalProgress evidence={r.requestApproval?.flow}/>
+                <MntApprovalProgress preview={r.approvalPreview} evidence={r.requestApproval?.flow}/>
                 {r.requestApproval&&<Card className='space-y-2'><p className='font-semibold'>Work Request approval · {r.requestApproval.status}</p><p className='text-sm text-soft'>Submitted by {r.requestApproval.submittedByName||'reviewer'} · {r.requestApproval.maintenanceTypeLabel} · {r.requestApproval.scheduledStart} to {r.requestApproval.scheduledEnd}</p>{r.requestApproval.decisionNote&&<p className='text-sm text-soft'>{r.requestApproval.decidedByName}: {r.requestApproval.decisionNote}</p>}{can.approveRequest&&<><textarea className='w-full rounded-lg border border-line bg-panel p-3 text-ink' rows={3} placeholder='Decision notes (minimum 10 characters)' value={note} onChange={e=>setNote(e.target.value)}/><div className='flex flex-wrap gap-2'><Button busy={busy} disabled={note.trim().length<10} onClick={()=>void run('approve_request')}>Approve and create Work Order</Button><Button variant='secondary' disabled={busy||note.trim().length<10} onClick={()=>void run('return_request_approval')}>Return for correction</Button></div></>}</Card>}
                 {actionError && !mode && <MntGateHint message={actionError}/>}
                 {section==='assessment' && !mode && <Card className='space-y-3'>
