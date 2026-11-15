@@ -1338,6 +1338,7 @@ export const finRoutes = {
                 if (str(d.data.status) !== 'pending') throw new HttpError(409, 'Only a pending request can be withdrawn.');
                 await writeDoc(P(ctx.orgId).request(id), { ...d.data, status: 'withdrawn', decidedAt: nowIso(), history: [...objs(d.data.history), { at: nowIso(), by: ctx.uid, byName: nameOf(ctx.me), action: 'withdrawn', note: reason }] } as unknown as Fields);
                 await record(ctx, 'org.fin.request.withdraw', id, reason);
+            if(d.data.type==='mnt.wo.cost')try{const {syncOrderAfter}=await import('./maintenanceOperations');await syncOrderAfter(ctx,str((isObj(d.data.payload)?d.data.payload:{}).woCode),'finance.cost.withdraw');}catch(e){console.error('Maintenance status observation failed',id,e);}
                 return { ok: true };
             });
         }),
@@ -1365,12 +1366,14 @@ export async function decideRequest(ctx: OrgContext, id: string, decision: 'appr
         if (decision === 'reject') {
             await writeDoc(P(ctx.orgId).request(id), { ...d.data, status: 'rejected', decidedAt: at, decidedBy: ctx.uid, history } as unknown as Fields);
             await record(ctx, 'org.fin.request.reject', id, `${str(d.data.typeLabel)}: ${note}`.slice(0, 400));
+            if(d.data.type==='mnt.wo.cost')try{const {syncOrderAfter}=await import('./maintenanceOperations');await syncOrderAfter(ctx,str((isObj(d.data.payload)?d.data.payload:{}).woCode),'finance.cost.reject');}catch(e){console.error('Maintenance status observation failed',id,e);}
             return { ok: true, status: 'rejected' };
         }
         const nextSteps = steps.map((s, i) => (i === idx ? { ...s, status: 'approved', by: ctx.uid, byName: nameOf(ctx.me), at, note } : s));
         if (nextSteps.some((s) => s.status === 'pending')) {
             await writeDoc(P(ctx.orgId).request(id), { ...d.data, steps: nextSteps as unknown as Fields[keyof Fields], history } as unknown as Fields);
             await record(ctx, 'org.fin.request.approve_level', id, `${steps[idx].level} approved`);
+            if(d.data.type==='mnt.wo.cost')try{const {syncOrderAfter}=await import('./maintenanceOperations');await syncOrderAfter(ctx,str((isObj(d.data.payload)?d.data.payload:{}).woCode),'finance.cost.approve_level');}catch(e){console.error('Maintenance status observation failed',id,e);}
             return { ok: true, status: 'pending' };
         }
         const h = HANDLERS[str(d.data.type)];
@@ -1393,6 +1396,7 @@ export async function decideRequest(ctx: OrgContext, id: string, decision: 'appr
         }
         await writeDoc(P(ctx.orgId).request(id), { ...d.data, steps: nextSteps as unknown as Fields[keyof Fields], status: 'approved', decidedAt: at, decidedBy: ctx.uid, result: result as unknown as Fields[keyof Fields], history } as unknown as Fields);
         await record(ctx, 'org.fin.request.approve', id, `${str(d.data.typeLabel)}: ${str(d.data.title)}. ${JSON.stringify(result).slice(0, 200)}`.slice(0, 400));
+        if(d.data.type==='mnt.wo.cost')try{const {syncOrderAfter}=await import('./maintenanceOperations');await syncOrderAfter(ctx,str((isObj(d.data.payload)?d.data.payload:{}).woCode),'finance.cost.approve');}catch(e){console.error('Maintenance status observation failed',id,e);}
         return { ok: true, status: 'approved', result };
     });
 }

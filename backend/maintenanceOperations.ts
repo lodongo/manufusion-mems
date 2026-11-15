@@ -400,7 +400,7 @@ export async function syncWorkOrderState(ctx:OrgContext,doc:Doc,source='refresh'
  for(let attempt=0;attempt<3;attempt++){
   const d=wo.data,status=str(d.status),facts:FactSet={};
   if(!isRequestClosureOrder(d)&&['planning','plan_ready','released','scheduled'].includes(status)){
-    const settings=await getDoc(root(ctx)+'/maintenance_workflow_settings/default'),token=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),settings?.data.approverRoles);
+    const settings=await getDoc(root(ctx)+'/maintenance_workflow_settings/default'),token=configuredMaintenanceRole({...ctx,testMode:false},'MNT.ASSESS.REVIEW',recordPath(wo),settings?.data.approverRoles);
     facts.approved=!!token&&assessmentReviewCurrent(d,token);
     if(facts.approved){const ready=await readiness(ctx,wo),check=await planChecklist(ctx,wo,ready);facts.items=ready.items;facts.checklist=check.items;facts.costStatus=check.cost.status;}
   }
@@ -417,9 +417,15 @@ export async function syncWorkOrderState(ctx:OrgContext,doc:Doc,source='refresh'
  }
  return wo;
 }
-async function syncOrderAfter(ctx:OrgContext,id:string,source:string){
- const fresh=await getDoc(root(ctx)+'/work_orders/'+id);if(!fresh)return;
- try{await syncWorkOrderState(ctx,fresh,source);}catch(e){console.error('Maintenance status refresh failed',id,source,e);}
+export async function syncOrderAfter(ctx:OrgContext,id:string,source:string){
+ if(!/^WO\d{8}$/.test(id))return;
+ try{const fresh=await getDoc(root(ctx)+'/work_orders/'+id);if(!fresh)return;const policy=ctx.workGroupPolicy||await loadWorkGroupPolicy(ctx.orgId,ctx.me);await syncWorkOrderState({...ctx,workGroupPolicy:policy},fresh,source);}catch(e){console.error('Maintenance status refresh failed',id,source,e);}
+}
+export async function syncProcurementOrderStates(ctx:OrgContext,ids:string[],source:string){
+ const reqs=new Set(ids.filter(id=>/^REQ\d{9}$/.test(id)));if(!reqs.size)return;
+ try{const whos=new Set<string>();for(const l of await listDocs(root(ctx)+'/mnt_supply_links'))if(reqs.has(str(l.data.requirementId)))whos.add(str(l.data.woCode));
+ for(const wo of await listDocs(root(ctx)+'/work_orders'))if(!['closed','cancelled'].includes(str(wo.data.status))&&Object.values(object(wo.data.taskPlanning)).some(t=>Object.values(object(t)).some(r=>reqs.has(str(object(r).requirementId)))))whos.add(wo.id);
+ for(const id of whos)await syncOrderAfter(ctx,id,source);}catch(e){console.error('Maintenance procurement status observation failed',source,e);}
 }
 /** Planner actions on the readiness checklist. */
 async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
@@ -1887,6 +1893,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const reviewRole=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),workflow?.data.approverRoles);
         return {
             wo: { code: wo.id, ...wo.data,...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
+            assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
             readiness: readinessData,
             checklist: retrospective?null:await planChecklist(ctx, wo, readinessData),
             currency: str(ctx.org.data.currencyCode),
@@ -1992,7 +1999,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 'reject_window',
             ].includes(action)
         )
-            return windowAction(ctx, action);
+            {const result=await windowAction(ctx,action);if(action!=='preview_window'&&action!=='save_window'&&b.windowId){const w=await getDoc(root(ctx)+'/maintenance_windows/'+str(b.windowId));for(const id of texts(w?.data.workOrderIds))await syncOrderAfter(ctx,id,'window.'+action);}return result;}
         const wo = await order(ctx, b.code);
         let result;
         if(isRequestClosureOrder(wo.data))result=await executeMaintenanceAction(ctx,wo,action);

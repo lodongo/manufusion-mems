@@ -578,6 +578,7 @@ async function transition(ctx: OrgContext, body: Obj, action: string, run: (d: O
         const next: Obj = { ...d, ...patch, history: [...history(d), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action, note, from: str(d.status), to: str(patch.status ?? d.status) }], updatedAt: at, version: (Number(d.version) || 1) + 1 };
         await writeDoc(path, next);
         await record(ctx, `org.procurement.req.${action}`, id, `${label}${note ? `. ${note}` : ''}`.slice(0, 400));
+        try{const {syncProcurementOrderStates}=await import('./maintenanceOperations');await syncProcurementOrderStates(ctx,[id],'procurement.requirement.'+action);}catch(e){console.error('Maintenance status observation failed',id,e);}
         return { ok: true, status: str(next.status) };
     });
 }
@@ -607,6 +608,7 @@ async function mutate(ctx: OrgContext, body: Obj, action: string, statuses: stri
         if (c.event) next.history = [...history(d), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: c.event, note: c.note ?? '', from: str(d.status), to: str(next.status) }];
         await writeDoc(path, next);
         await record(ctx, `org.procurement.req.${action}`, id, `${c.label}${c.note ? `. ${c.note}` : ''}`.slice(0, 400));
+        try{const {syncProcurementOrderStates}=await import('./maintenanceOperations');await syncProcurementOrderStates(ctx,[id],'procurement.requirement.'+action);}catch(e){console.error('Maintenance status observation failed',id,e);}
         return { ok: true, id, status: str(next.status), version: Number(next.version), ...(c.result ?? {}) };
     });
 }

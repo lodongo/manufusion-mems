@@ -7,7 +7,7 @@ import { Button, Card, Spinner, useLoad } from '../admin/kit';
 import { WorkOrderVouchers } from './StoresIssueVouchers';
 import MntTaskAssessment, { WarehouseSparePicker, CatalogPicker } from './MntTaskAssessment';
 import { FulfilmentTrack, ResourceStatus, SOURCE_LABEL, useVendors } from './mntSourcing';
-import { useFullScreen,MaintenanceResponsibility } from './mntShared';
+import { useFullScreen,MaintenanceResponsibility,ChoicePicker,type MntLists,type MntSetup } from './mntShared';
 import MntGateHint from './MntGateHint';
 import MntReadiness from './MntReadiness';
 
@@ -652,6 +652,16 @@ function TaskMenu({ tasks, current, executions, onPick }: { tasks: MntData[]; cu
     );
 }
 
+function OrderAssessmentHeader({wo,options,can,onDone,testOverride}:{wo:MntData;options:MntData[];can:boolean;onDone:()=>void;testOverride:boolean}){
+ const setup=useLoad(()=>callBackend<MntSetup>('/api/org/mnt/setup',{}),[]);
+ const [form,setForm]=useState<MntData>({technicalEvaluation:wo.technicalEvaluation||'',natureCode:wo.natureCode||'',severityCode:wo.severitySetBy?wo.criticalityCode:'',solutionCodes:(wo.solutions||[]).map((s:MntData)=>s.code),maintenanceTypeCode:wo.maintenanceTypeCode||'',priorityCode:wo.priorityCode||'',assemblyId:wo.assemblyId||'',note:wo.assessmentNote||''});
+ const [busy,setBusy]=useState(false),[err,setErr]=useState('');const set=(k:string,v:any)=>setForm(old=>({...old,[k]:v}));
+ const l: MntLists|undefined=setup.data?.lists;
+ if(!can)return <Card className="space-y-2"><p className="font-semibold">Technical assessment classification</p><p className="text-sm">{wo.technicalEvaluation||'Awaiting assessor'}</p><p className="text-sm text-soft">{[wo.natureLabel,wo.criticalityLabel,wo.maintenanceTypeLabel].filter(Boolean).join(' · ')}</p></Card>;
+ if(!l)return <Card><p className="text-sm">{setup.error||'Loading assessment metadata…'}</p></Card>;
+ const save=async()=>{setBusy(true);setErr('');try{await callBackend('/api/org/mnt/wo/action',{code:wo.code,action:'assess_header',...form});onDone();}catch(e){setErr(e instanceof Error?e.message:'Unable to save');}finally{setBusy(false);}};
+ return <Card className="space-y-3"><p className="font-semibold">1. Technical assessment classification</p><label className="block text-sm">Assembly (optional)<select className={mntInput} disabled={!!wo.assessmentTasks?.length} value={form.assemblyId} onChange={e=>set('assemblyId',e.target.value)}><option value="">Equipment level</option>{options.map(a=><option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}{form.assemblyId&&!options.some(a=>a.id===form.assemblyId)&&<option value={form.assemblyId}>{wo.assemblyName}</option>}</select></label><MntField label="Technical evaluation *" value={form.technicalEvaluation} multiline onChange={v=>set('technicalEvaluation',v)}/><ChoicePicker title="Failure mode" required groups={l.failureModes} selected={form.natureCode?[form.natureCode]:[]} onToggle={v=>set('natureCode',form.natureCode===v?'':v)}/><ChoicePicker title="Solution categories" required multi max={5} groups={l.solutions} selected={form.solutionCodes} onToggle={v=>set('solutionCodes',form.solutionCodes.includes(v)?form.solutionCodes.filter((x:string)=>x!==v):form.solutionCodes.length<5?[...form.solutionCodes,v]:form.solutionCodes)}/>{[['severityCode','Severity *',l.criticality],['maintenanceTypeCode','Maintenance type *',l.maintenanceTypes],['priorityCode','Priority',l.priorities]].map(([key,label,items])=><label key={String(key)} className="block text-sm">{String(label)}<select className={mntInput} value={form[String(key)]} onChange={e=>set(String(key),e.target.value)}><option value="">Select…</option>{(items as MntLists['criticality']).map(x=><option key={x.code} value={x.code}>{x.label}</option>)}</select></label>)}<MntField label="Assessment note" value={form.note} multiline onChange={v=>set('note',v)}/>{err&&<Alert tone="error">{err}</Alert>}<Button testOverride={testOverride} busy={busy} disabled={form.technicalEvaluation.trim().length<20||!form.natureCode||!form.severityCode||!form.solutionCodes.length||!form.maintenanceTypeCode} onClick={save}>Save technical classification</Button></Card>;
+}
 export default function MntWorkOrder({ code }: { code: string }) {
     const { data, error, loading, reload } = useLoad(() => mntApi({ action: 'read', code }), [code]);
     const [selected, setSelected] = useState(''),
@@ -766,12 +776,13 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         {wo.unitName} · {wo.assemblyName} · {wo.assetTag}
                     </p>
                 </div>
-                {retrospective?<Button variant="secondary" onClick={()=>navigate('organization_admin/work_requests/'+wo.wrCode)}>{wo.wrCode}</Button>:<Button variant="secondary" onClick={() => navigate('organization_admin/maintenance_windows')}>
+                {wo.wrCode&&<Button variant="secondary" onClick={()=>navigate('organization_admin/work_requests/'+wo.wrCode)}>{wo.wrCode}</Button>}{!retrospective&&<Button variant="secondary" onClick={() => navigate('organization_admin/maintenance_windows')}>
                     <CalendarClock size={17} />
                     Maintenance windows
                 </Button>}
             </div>
             <MaintenanceResponsibility record={wo}/>
+            {wo.executionMode==='confirmed_request'&&<OrderAssessmentHeader key={wo.code+':'+(wo.assessedAt||'new')} wo={wo} options={data.assemblyOptions||[]} can={wo.status==='planning'&&!!can.assess&&!Object.keys(wo.taskPlanning||{}).length} testOverride={!!data.testModeOverride} onDone={reload}/>}
             {wo.workflowCode&&<Card className="space-y-2"><p className="text-xs text-soft">Operational state · {wo.workflowCode}</p><p className="font-semibold">{wo.workflowLabel}</p><p className="text-sm text-soft">Since {wo.workflowSince?new Date(wo.workflowSince).toLocaleString():'—'}</p>{wo.workflowReason&&<p className="text-sm">{wo.workflowReason}</p>}<details open><summary className="cursor-pointer text-sm font-semibold">State transition history ({(wo.workflowTransitions||[]).length})</summary><ol className="mt-2 space-y-2">{[...(wo.workflowTransitions||[])].reverse().map((e:MntData,i:number)=><li key={i} className="border-l-2 border-line pl-3 text-sm"><p className="font-medium">{e.from?e.from+' → ':''}{e.to} · {e.label}</p><p className="text-xs text-soft">{new Date(e.at).toLocaleString()} · {e.byName||e.by} · {e.source}</p>{e.reason&&<p className="text-xs text-soft">{e.reason}</p>}</li>)}</ol></details></Card>}
             {retrospective&&<Card className="space-y-2"><h2 className="font-semibold">Work completed at request review</h2><p className="text-sm text-soft">Planning, resource preparation and maintenance window are not applicable. This record does not certify prior safety authorization.</p><p className="text-sm">Actual completion: {wo.directCompletion?.performedDate} · {wo.directCompletion?.durationMinutes} minutes</p><p className="text-sm">Performed by: {wo.directCompletion?.executor?.name} · {wo.directCompletion?.executor?.role}</p><p className="text-sm">Work performed: {wo.directCompletion?.reportedWork}</p><p className="text-sm">Maintenance type: {wo.maintenanceTypeLabel}</p><p className="text-sm">Failure mode: {wo.directCompletion?.failureModeLabel} · Cause: {wo.directCompletion?.causeLabel}</p><p className="text-sm">Solution: {(wo.directCompletion?.solutions||[]).map((s:MntData)=>s.label).join('; ')}</p><p className="text-sm text-soft">No spare parts or services declared. Labour valuation is separate from recorded time.{wo.finalCost?.pendingLabourValuation?' Labour valuation pending approved rate.':''}</p>{can.execute&&execution.status==='awaiting_feedback'&&<Button testOverride={!!data.testModeOverride} onClick={()=>open('feedback')}>Confirm actual work feedback</Button>}</Card>}
             {failure && <MntGateHint message={failure} />}

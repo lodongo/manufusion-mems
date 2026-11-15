@@ -234,7 +234,7 @@ function RequestList({ setup, area }: { setup: MntSetup; area: 'requests' | 'ass
                     </button>
                 ))}
             </div>}
-            {area === 'assessments' && <p className='text-sm text-soft'>Independent technical assessments of work requests under review. Open a request to assess activities, resources, safety and approval.</p>}
+            {area === 'assessments' && <p className='text-sm text-soft'>Work Orders awaiting assessment or assessment approval. Previously created standalone assessments remain available.</p>}
             {error && <Alert tone='error'>{error}</Alert>}
             {loading && !data ? (
                 <Spinner />
@@ -247,7 +247,7 @@ function RequestList({ setup, area }: { setup: MntSetup; area: 'requests' | 'ass
                     columns={columns}
                     rows={data?.rows ?? []}
                     rowKey={(r) => r.code}
-                    onRowClick={(r) => navigate(`organization_admin/${area === 'assessments' ? 'work_assessments' : 'work_requests'}/${r.code}`)}
+                    onRowClick={(r) => navigate(`organization_admin/${area === 'assessments' ? (r.code.startsWith('WO')?'work_orders':'work_assessments') : 'work_requests'}/${r.code}`)}
                     empty={area === 'assessments' ? 'No work requests are ready for technical assessment.' : tab === 'review' ? 'Nothing is waiting for your review.' : 'No work requests here.'}
                     height='h-[calc(100dvh-12rem)]'
                     actions={

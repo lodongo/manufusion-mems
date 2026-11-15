@@ -2,7 +2,7 @@
 export interface AssessmentRecord {
  assessmentTasks?: unknown; assessmentTasksVersion?: unknown; assessmentTasksAt?: unknown;
  assessedAt?: unknown; assessmentReview?: unknown; requestedBy?: unknown;
- createdBy?: unknown; assessedBy?: unknown; assessmentTasksBy?: unknown; executionMode?:unknown;
+ createdBy?: unknown; assessedBy?: unknown; assessmentTasksBy?: unknown; executionMode?:unknown; technicalEvaluation?:unknown;natureCode?:unknown;criticalityCode?:unknown;severitySetBy?:unknown;solutions?:unknown;maintenanceTypeCode?:unknown;
 }
 type Fields = Record<string,unknown>;
 const item=(v:unknown):Fields=>v!==null&&typeof v==='object'&&!Array.isArray(v)?v as Fields:{};
@@ -11,6 +11,7 @@ export function reviewAssessmentPrerequisites(record:AssessmentRecord,reviewerId
  if(!reviewerId)return 'A signed-in reviewer is required.';
  if([record.requestedBy,record.executionMode==='confirmed_request'?undefined:record.createdBy,record.assessedBy,record.assessmentTasksBy].some(id=>value(id)===reviewerId))
   return 'The requester, work order creator or assessment author cannot approve their own assessment.';
+ if(record.executionMode==='confirmed_request'&&(!value(record.technicalEvaluation)||value(record.technicalEvaluation).length<20||!value(record.natureCode)||!value(record.criticalityCode)||!value(record.severitySetBy)||!Array.isArray(record.solutions)||!record.solutions.length||!value(record.maintenanceTypeCode)))return 'Complete the technical assessment classification before review.';
  if(!Array.isArray(record.assessmentTasks)||record.assessmentTasks.length===0)
   return 'Complete the task-by-task work assessment before review.';
  if(!Number.isInteger(Number(record.assessmentTasksVersion))||Number(record.assessmentTasksVersion)<1||!value(record.assessmentTasksAt))

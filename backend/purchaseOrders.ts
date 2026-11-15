@@ -404,6 +404,8 @@ export async function mutate(ctx: OrgContext, col: 'req' | 'po', id: string, act
             if(!c.atomicJournal)throw e;
             console.error('Atomic PO+GL operation committed; separate audit record failed and must be reconciled',id,e instanceof Error?e.message:'unknown');
         }
+        const linked=[str(next.requirementId),...objs(next.lines).map(l=>str(l.requirementId)),...objs(d.lines).map(l=>str(l.requirementId))].filter(Boolean);
+        if(linked.length)try{const {syncProcurementOrderStates}=await import('./maintenanceOperations');await syncProcurementOrderStates(ctx,linked,'procurement.'+col+'.'+action);}catch(e){console.error('Maintenance status observation failed',id,e);}
         return { ok: true, id, status: str(next.status), ...(c.result ?? {}) } as { ok: boolean; id: string; status: string; done?: boolean; [k: string]: unknown };
     });
 }

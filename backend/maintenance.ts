@@ -120,7 +120,7 @@ const independent = (ctx: OrgContext, holds: boolean, rule: string) => holds || 
 /** Assessment review prerequisites; the testing override relaxes only the reviewer-independence part. */
 function reviewIssue(ctx: OrgContext, record: Obj): string {
     // Apply request-field completeness to WR approval; direct WO re-assessments retain their own gates.
-    const header=WR_RE.test(str(record.code))?assessmentHeaderIssue(record):'';
+    const header=WR_RE.test(str(record.code))||record.executionMode==='confirmed_request'?assessmentHeaderIssue(record):'';
     if(header)return header;
     const issue = reviewAssessmentPrerequisites(record as never, ctx.uid);
     if (!issue || ctx.testMode !== true) return issue;
@@ -1390,7 +1390,9 @@ export const maintenanceRoutes = {
                     if (![P.assessment_edit, P.assessment_review, P.WR_convert].some((p) => canAt(ctx, p, pathOf(wr), scope))) return [];
                     return [{ ...wrOut(wr),...responsibilityFor(routing,wr.data,'wr'), code: assm.id, workRequestCode: wr.id, assessmentCode: assm.id }];
                 });
-                return { rows: [...independent, ...rows.filter((r) => !r.assessmentCode)].sort((a, b) => b.code.localeCompare(a.code)) };
+                const pendingOrders=(await listDocs(woCol(ctx.orgId))).filter(w=>w.data.executionMode==='confirmed_request'&&['planning','plan_ready'].includes(str(w.data.status))&&canAt(ctx,P.view,pathOf(w),scope)&&[P.assessment_edit,P.assessment_review].some(p=>canAt(ctx,p,pathOf(w),scope)));
+                const orderRows=[];for(const pending of pendingOrders){const w=await syncWorkOrderState(ctx,pending);if(!['WO010','WO020'].includes(str(w.data.workflowCode)))continue;const wr=wrs.get(str(w.data.wrCode));if(wr)orderRows.push({...wrOut(wr),...responsibilityFor(routing,w.data,'wo'),code:w.id,woCode:w.id,workRequestCode:wr.id,statusLabel:str(w.data.workflowLabel),status:'under_review'});}
+                return { rows: [...orderRows,...independent, ...rows.filter((r) => !r.assessmentCode)].sort((a, b) => b.code.localeCompare(a.code)) };
             }
             return { rows };
         }),
@@ -1761,7 +1763,7 @@ export const maintenanceRoutes = {
                 case 'confirm_review':
                 case 'to_assessment': {
                     if(action==='confirm_review'||Number(doc.data.reviewProcessVersion)>=3){
-                        if(str(doc.data.woCode)){if(!can.view)throw new HttpError(403,'Work request is outside your access.');return {ok:true,woCode:str(doc.data.woCode)};}
+                        if(str(doc.data.woCode)){if(!can.view)throw new HttpError(403,'Work request is outside your access.');if(str(doc.data.status)!=='confirmed')throw new HttpError(409,'This request already has a different review outcome.');return {ok:true,woCode:str(doc.data.woCode)};}
                         deny(can.toAssessment,'Only the assigned reviewer can confirm this request.');
                         if(str(doc.data.title).length<3||doc.data.titleAuto===true||str(doc.data.description).length<10||!str(doc.data.sourceCode)||!objs(doc.data.impacts).length)throw new HttpError(400,'Complete the request title, finding, source and impacts before confirmation.');
                         const woCode=await confirmRequestWithOrder(ctx,doc,note);return {ok:true,woCode};
@@ -2132,6 +2134,17 @@ export const maintenanceRoutes = {
             };
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
+                case 'assess_header': {
+                    if(d.executionMode!=='confirmed_request'||str(d.status)!=='planning')throw new HttpError(409,'Technical classification belongs to the assessment step of a confirmed Work Order.');
+                    need(ctx,P.assessment_edit,pathOf(doc),scope);await requireConfiguredMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
+                    if(workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true&&!bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))throw new HttpError(403,'Assessment reviewer cannot create the assessment.');
+                    if(Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Open controlled reassessment before changing planned scope.');
+                    const evaluation=str(b.technicalEvaluation).trim().slice(0,3000);if(evaluation.length<20)throw new HttpError(400,'Write at least 20 characters of technical evaluation.');
+                    const nature=pickGrouped(l.failureModes,str(b.natureCode),'failure mode')!,crit=pick(l.criticality,str(b.severityCode),'severity')!,mtype=pick(l.maintenanceTypes,str(b.maintenanceTypeCode),'maintenance type')!,prio=pick(l.priorities,str(b.priorityCode),'priority',false);
+                    const codes=[...new Set(strs(b.solutionCodes))];if(!codes.length||codes.length>5)throw new HttpError(400,'Choose one to five solution categories.');const solutions=codes.map(c=>pickGrouped(l.solutions,c,'solution category')!).map(x=>({code:x.code,label:x.label,group:x.group}));
+                    const assemblyPatch:Record<string,Plain>={};const assembly=b.assemblyId===undefined?str(d.assemblyId):str(b.assemblyId);if(assembly!==str(d.assemblyId)){if(objs(d.assessmentTasks).length)throw new HttpError(409,'The assembly cannot change after tasks are assessed.');const place=await assemblyContext(ctx,assembly||str(d.unitId),P.assessment_edit,!assembly);if((assembly&&!place.assembly)||place.unit?.id!==str(d.unitId)||place.defaultAssetTag!==str(d.assetTag))throw new HttpError(409,'Choose an assembly of the original equipment and asset.');Object.assign(assemblyPatch,{assemblyId:place.assembly?.id||'',assemblyCode:place.assembly?.code||'',assemblyName:place.assembly?.name||'',path:place.path.map(x=>x.id)});}
+                    await done({...assemblyPatch,technicalEvaluation:evaluation,natureCode:nature.code,natureLabel:nature.group+' · '+nature.label,failureModeCode:nature.code,failureModeLabel:nature.group+' · '+nature.label,solutions,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label,criticalityCode:crit.code,criticalityLabel:crit.label,criticalityColor:crit.color,severitySetBy:ctx.uid,...(prio?{priorityCode:prio.code,priorityLabel:prio.label}:{}),assessmentNote:note,assessedBy:ctx.uid,assessedByName:displayName(ctx),assessedAt:now,assessmentReview:null},'Technical assessment classification saved','mnt.wo.assessed',note);return {ok:true};
+                }
                 case 'save_task_assessment': {
                     if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning'||((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',pathOf(doc))===false||workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true)&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))))
                         throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
