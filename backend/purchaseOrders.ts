@@ -387,7 +387,7 @@ export async function mutate(ctx: OrgContext, col: 'req' | 'po', id: string, act
         if (!fresh) throw new HttpError(404, col === 'req' ? 'Requisition not found.' : 'Purchase order not found.');
         const d = fresh.data;
         if(col==='po'&&['confirm','approve'].includes(action)){
-            const ids=[...new Set([str(d.requirementId),...objs(d.lines).map(l=>str(l.requirementId))].filter(Boolean))];
+            const ids=[...new Set([str(d.requirementId),...(Array.isArray(d.requirementIds)?d.requirementIds.map(str):[]),...objs(d.lines).map(l=>str(l.requirementId))].filter(Boolean))];
             for(const reqId of ids){
                 const req=await getDoc(requirementsPath(ctx.orgId)+'/'+reqId);
                 const woId=str(o(req?.data.maintenanceSource).woCode);

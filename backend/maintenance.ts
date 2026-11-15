@@ -2162,6 +2162,7 @@ export const maintenanceRoutes = {
             if(['closed','cancelled'].includes(str(d.status)))throw new HttpError(409,'Closed or cancelled work orders are immutable. Create a break-in sub-order on a closed order for further work.');
             if(action==='cancel'&&(!can.cancel||note.length<5))throw new HttpError(403,'Cancellation requires permission and a reason.');
             if(action==='cancel')confirmCode(ctx,doc);
+            if(object(d.earlyClosureRequest).at)throw new HttpError(409,'Early closure requested. Use the actual feedback, safety and early closure actions.');
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
                 case 'assess_header': {

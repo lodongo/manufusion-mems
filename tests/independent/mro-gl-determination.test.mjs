@@ -106,7 +106,7 @@ test('Service acceptance retains WO/task strategy provenance without replacing t
  const provenance=source.slice(begin,end);
  assert.match(provenance,/procurement_requirements/);
  assert.match(provenance,/maintenanceSource/);
- assert.match(provenance,/\/\^WO\\d\{8\}\$\//);
+ assert.ok(provenance.includes('/^WO\\d{8}(?:_[1-9]\\d{0,8})?$/'),'Parent and sub-order identifiers are accepted');
  assert.match(provenance,/mroFinancialContext\(wo\.data,taskId,\{\}\)/);
  const service=source.slice(end,source.indexOf('// ===== Stock take =====',end));
  assert.match(service,/maintenanceServiceLines\.push\(maintenanceSource\)/);

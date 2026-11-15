@@ -936,6 +936,7 @@ async function windowSave(ctx: OrgContext) {
         const inThis = !!existing && texts(existing.data.workOrderIds).includes(id);
         if (!(str(wo.data.status) === 'released' || (inThis && str(wo.data.status) === 'scheduled')))
             throw new HttpError(409, `${id}: the planner must confirm readiness on the work order first.`);
+        if(object(wo.data.earlyClosureRequest).at)throw new HttpError(409,'Work order is pending early closure.');
         const ready = await readiness(ctx, wo);
         if (!ready.ready) throw new HttpError(409, `${id} is no longer ready: ${ready.problems.slice(0, 3).join(' ')}`);
         wos.push(wo);
@@ -1507,7 +1508,7 @@ async function earlyClosureCommitments(ctx:OrgContext,wo:Doc){
     const ids=new Set([...owned.map(x=>x.id),...associated.map(x=>str(x.data.requirementId)),...items.map(x=>str(x.requirementId))].filter(Boolean));
     const poIds=new Set(items.map(x=>str(x.poId)).filter(Boolean));
     const blocked=orders.filter(p=>{
-        const linked=poIds.has(p.id)||ids.has(str(p.data.requirementId))||rows(p.data.lines).some(l=>ids.has(str(l.requirementId))||l.workOrderId===wo.id||l.woCode===wo.id);
+        const linked=poIds.has(p.id)||ids.has(str(p.data.requirementId))||texts(p.data.requirementIds).some(id=>ids.has(id))||rows(p.data.lines).some(l=>ids.has(str(l.requirementId))||l.workOrderId===wo.id||l.woCode===wo.id);
         return linked&&(['open','sent','partial','full'].includes(str(p.data.status))||rows(p.data.lines).some(l=>(Number(l.receivedQty)||0)>0)||rows(p.data.deliveries).some(l=>l.status==='posted')||rows(p.data.receipts).some(l=>l.status==='accepted'));
     }).map(p=>p.id);
     return {owned,associated,blocked};
