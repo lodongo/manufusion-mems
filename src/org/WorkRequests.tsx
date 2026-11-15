@@ -78,7 +78,7 @@ interface Closure {
     causeCode: string; causeLabel: string; causeGroup: string;
     failureModeCode?: string; failureModeLabel?: string; failureModeGroup?: string;
     solutions?: Array<{code:string;label:string;group:string}>;
-    closedBy?: string; closedByName?: string; recordedBy?: string; recordedByName?: string; recordedAt?: string;
+    closedBy?: string; closedByName?: string; closedByRole?:string; recordedBy?: string; recordedByName?: string; recordedAt?: string;
     solutionCode?: string; solutionLabel?: string; solutionGroup?: string;
     maintenanceTypeCode?: string; maintenanceTypeLabel?: string;
     description: string; name: string; at: string;
@@ -124,7 +124,8 @@ interface Detail extends Row {
     unitId: string;
     assemblyOptions: Array<{ id: string; code: string; name: string }>;
     closure: Closure | null;
-    closurePeople?: Array<{uid:string;name:string}>;
+    closurePeople?: Array<{uid:string;name:string;role?:string}>;
+    closurePeopleDiagnostic?:string;
     closureRejections: Array<Closure & { rejectedName: string; rejectedAt: string; reason: string }>;
     assessmentReview: {status:string;version?:number;name?:string;at?:string;note?:string};
     assessmentReviewCurrent: boolean;
@@ -1205,7 +1206,7 @@ export function ClosureCard({ closure }: { closure: Closure }) {
             {closure.dateClosed && <Info label='Date closed' value={closure.dateClosed} />}
             {closure.durationMinutes && <Info label='Actual time taken' value={`${closure.durationMinutes} minutes`} />}
             <Info label='What was done' value={closure.description} />
-            <Info label='Closed by' value={closure.closedByName || 'Not separately recorded (legacy closure)'} />
+            <Info label='Closed by' value={closure.closedByName || 'Not separately recorded (legacy closure)'} sub={closure.closedByRole} />
             <Info label='Recorded by' value={`${closure.recordedByName || closure.name} · ${fmtDate(closure.recordedAt || closure.at)}`} />
             {closure.confirmedAt && <Info label='Confirmed by' value={`${closure.confirmedName} · ${fmtDate(closure.confirmedAt)}`} sub={closure.confirmNote} />}
         </Card>
@@ -1230,7 +1231,7 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const screen = useFullScreen(true);
-    const missing = [!failureMode ? 'failure mode' : '', !cause ? 'failure cause' : '', !solutions.length ? 'solution type' : '', !closedByUid ? 'closed by' : '', description.trim().length < 10 ? 'what was done (10+ characters)' : '', ...(direct ? [!closedDate ? 'date closed' : '', !Number.isFinite(Number(durationMinutes)) || Number(durationMinutes)<=0 ? 'actual time taken' : ''] : [!mtype ? 'maintenance type' : '', typed.trim() !== detail.code ? `type ${detail.code}` : ''])].filter(Boolean);
+    const missing = [!failureMode ? 'failure mode' : '', !cause ? 'failure cause' : '', !solutions.length ? 'solution type' : '', !people.some(p=>p.uid===closedByUid) ? 'closed by' : '', description.trim().length < 10 ? 'what was done (10+ characters)' : '', ...(direct ? [!closedDate ? 'date closed' : '', !Number.isFinite(Number(durationMinutes)) || Number(durationMinutes)<=0 ? 'actual time taken' : ''] : [!mtype ? 'maintenance type' : '', typed.trim() !== detail.code ? `type ${detail.code}` : ''])].filter(Boolean);
     const save = async () => {
         setBusy(true);
         setError('');
@@ -1265,9 +1266,10 @@ function CloseAtReview({ detail, lists, onDone, onCancel }: { detail: Detail; li
                 </>}
                 <Card className='space-y-2'>
                     <Field id='cl-employee-search' label='Find employee' placeholder='Search employee name…' value={employeeQuery} onChange={e=>setEmployeeQuery(e.target.value)} />
-                    <SelectField id='cl-closed-by' label='Closed by *' value={closedByUid} onChange={e=>setClosedByUid(e.target.value)}><option value=''>Select the employee who completed the work</option>{visiblePeople.map(p=><option key={p.uid} value={p.uid}>{p.name}</option>)}</SelectField>
-                    <p className='text-xs text-soft'>Select the actual employee who completed the work. MEMS separately records the signed-in reviewer and timestamp.</p>
-                    {!visiblePeople.length && <p className='text-xs text-soft'>No matching employees.</p>}
+                    <SelectField id='cl-closed-by' label='Closed by *' value={closedByUid} disabled={!people.length} onChange={e=>setClosedByUid(e.target.value)}><option value=''>Select the employee who completed the work</option>{visiblePeople.map(p=><option key={p.uid} value={p.uid}>{p.name}</option>)}</SelectField>
+                    <p className='text-xs text-soft'>Only employees with maintenance execution rights (MNT.WO.execute) in the active Work Group are eligible. Select the actual person who completed the work. MEMS separately records the signed-in reviewer and timestamp.</p>
+                    {!people.length?<Alert tone='warn'>{detail.closurePeopleDiagnostic||'No eligible maintenance execution employees are configured.'}</Alert>:!visiblePeople.length&&<p className='text-xs text-soft'>No matching eligible employees.</p>}
+                    {people.find(p=>p.uid===closedByUid)?.role&&<p className='text-xs text-soft'>Organizational title: {people.find(p=>p.uid===closedByUid)?.role}</p>}
                 </Card>
                 {!direct && <Field id='cl-confirm' label={`Type ${detail.code} to confirm`} autoComplete='off' value={typed} onChange={(e) => setTyped(e.target.value)} />}
                 {missing.length > 0 && <p className='text-xs text-amber-300'>Still needed: {missing.join(', ')}.</p>}

@@ -1,4 +1,4 @@
-import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc} from './maintenanceResponsibility';
+import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
 import { storage } from './platform/sdk';
 import { commit, withLock } from './finCore';
 import { enforceMaintenanceTransition, executeMaintenanceAction } from './maintenanceOperations';
@@ -1411,6 +1411,7 @@ export const maintenanceRoutes = {
                     .map((n) => ({ id: n.id, code: str(n.data.code), name: str(n.data.name) }))
                     .sort((a, b) => a.code.localeCompare(b.code));
             }
+            const closurePool=can.close?closureExecutionPeople(routing,pathOf(doc)):{people:[],diagnostic:''};
             const photoPaths = objs(d.photos).map((p) => str(p.path));
             const urls = await Promise.all(photoPaths.map((p) => signedUrl(p)));
             return {
@@ -1447,7 +1448,8 @@ export const maintenanceRoutes = {
                 unitId: str(d.unitId),
                 assemblyOptions,
                 closure: isObj(d.closure) ? d.closure : null,
-                closurePeople: can.close ? Array.from((await orgUserMap(ctx.orgId)).entries()).map(([uid,name])=>({uid,name})).sort((a,b)=>a.name.localeCompare(b.name)) : [],
+                closurePeople: closurePool.people,
+                closurePeopleDiagnostic:closurePool.diagnostic,
                 closureRejections: objs(d.closureRejections),
                 assessmentTasks: objs(d.assessmentTasks),
                 assessmentReview: isObj(d.assessmentReview)?d.assessmentReview:{status:'pending'},
@@ -1477,7 +1479,8 @@ export const maintenanceRoutes = {
             const action = str(ctx.body.action);
             const note = str(ctx.body.note).trim().slice(0, 500);
             const scope = await scopeOf(ctx);
-            const doc = resolvedReviewDoc(await responsibilityData(ctx),await getWr(ctx, str(ctx.body.code)));
+            const routing=await responsibilityData(ctx);
+            const doc = resolvedReviewDoc(routing,await getWr(ctx, str(ctx.body.code)));
             const workflowSettings = await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
             const reviewRole = reviewRoleOf(ctx,workflowSettings,pathOf(doc));
             const can = wrCan(ctx, doc, scope, reviewRole);
@@ -1616,13 +1619,15 @@ export const maintenanceRoutes = {
                     if (!solutionCodes.length || solutionCodes.length > 5) throw new HttpError(400,'Choose between 1 and 5 solution types.');
                     const solutionTypes = solutionCodes.map(code=>pickGrouped(l.solutions,code,'solution type')!);
                     const closedBy = str(ctx.body.closedByUid);
-                    const closedByName = (await orgUserMap(ctx.orgId)).get(closedBy);
-                    if (!closedByName) throw new HttpError(400,'Choose the employee who completed the work from your organization.');
+                    const closurePool=closureExecutionPeople(routing,pathOf(doc));
+                    const executor=closurePool.people.find(p=>p.uid===closedBy);
+                    if(!executor)throw new HttpError(403,closurePool.diagnostic||'Closed by must be an eligible employee assigned maintenance execution rights (MNT.WO.execute) in this Work Group.');
+                    const closedByName=executor.name;
                     const classifications = {
                         failureModeCode:failureMode.code, failureModeLabel:failureMode.label, failureModeGroup:failureMode.group,
                         solutionCode:solutionTypes[0].code, solutionLabel:solutionTypes[0].label, solutionGroup:solutionTypes[0].group,
                         solutions:solutionTypes.map(s=>({code:s.code,label:s.label,group:s.group})),
-                        closedBy, closedByName, recordedBy:ctx.uid, recordedByName:displayName(ctx), recordedAt:now,
+                        closedBy, closedByName, closedByRole:executor.role,closedByPositionCode:executor.positionCode,closedByGenericRole:executor.genericRole,recordedBy:ctx.uid, recordedByName:displayName(ctx), recordedAt:now,
                     };
                     if (reviewNew) {
                         if (str(doc.data.status) !== 'under_review' || (!assignedReviewer && !reviewOverride))

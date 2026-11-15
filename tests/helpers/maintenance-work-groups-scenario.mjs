@@ -1,4 +1,4 @@
-import {responsibilityData,responsibilityFor,resolvedReviewDoc} from '../../backend/maintenanceResponsibility.ts';
+import {responsibilityData,responsibilityFor,resolvedReviewDoc,closureExecutionPeople} from '../../backend/maintenanceResponsibility.ts';
 import assert from 'node:assert/strict';
 import {seed,snapshot} from './maintenance-fixture.ts';
 import {maintenanceWorkGroupRoutes,workGroupResourcePool} from '../../backend/maintenanceWorkGroups.ts';
@@ -80,6 +80,13 @@ await assert.rejects(()=>requireMaintenanceRole(operator,'MNT.ASSESS.REVIEW',pat
 const approval=await requireMaintenanceRole(lead,'MNT.ASSESS.REVIEW',path);assert.match(approval.role,/^WG:/);
 // Current responsibility follows live named holders, stage and actual organization seniority.
 const routeData=await responsibilityData(lead);
+const closers=closureExecutionPeople(routeData,path);
+assert.deepEqual(closers.people.map(p=>p.uid).sort(),['ACTIVE_3','ACTIVE_4','ACTIVE_5']);
+assert.ok(!closers.people.some(p=>p.uid==='ADMIN'||p.uid==='ACTIVE_0'||p.uid==='ACTIVE_1'));
+assert.deepEqual(closureExecutionPeople(routeData,other).people,[]);
+assert.match(closureExecutionPeople(routeData,other).diagnostic,/Activate the Work Group/i);
+const onlyTechnicians={...routeData,policy:{...routeData.policy,config:{...routeData.policy.config,tasks:{...routeData.policy.config.tasks,'MNT.WO.execute':['Maintenance Technician']}}}};
+assert.deepEqual(closureExecutionPeople(onlyTechnicians,path).people.map(p=>p.uid),['ACTIVE_4'],'Use current configured activity, not hardcoded titles');
 const review=responsibilityFor(routeData,{path,status:'created',requestedBy:'ACTIVE_5'},'wr');
 assert.equal(review.workGroupCode,'WG_0002');
 assert.equal(review.responsibility.uid,'ACTIVE_0');
@@ -104,6 +111,7 @@ const pendingRoute=responsibilityFor(await responsibilityData(await principal('A
 assert.equal(pendingRoute.responsibility.uid,'ACTIVE_0','saved staffing does not override active authorization');
 assert.equal(pendingRoute.responsibility.pending.groupVersion,partial.version);
 assert.equal(pendingRoute.responsibility.pending.name,'');
+assert.equal(closureExecutionPeople(await responsibilityData(await principal('ADMIN')),path).people.length,3,'Saved draft never grants or removes live execution attribution');
 assert.equal(pendingRoute.responsibility.pending.role,'Maintenance Lead');
 assert.match(pendingRoute.responsibility.pending.diagnostic,/no named employee/i);
 assert.equal(canAt(await principal('ACTIVE_1'),'MNT.WO.plan',path,'all'),true,'Partial draft never changes live permissions');
@@ -132,4 +140,5 @@ await requireMaintenanceRole(adminTest,'MNT.ASSESS.REVIEW',path);
 assert.ok(adminTest.bypassed.includes('mnt.work_group.permission.MNT.WO.plan'));
 assert.ok(adminTest.bypassed.includes('mnt.work_group.gate.MNT.ASSESS.REVIEW'));
 assert.equal(canAt(await principal('ADMIN'),'MNT.WO.plan',path,'all'),false,'normal mode still enforces approved mapping');
+assert.deepEqual(closureExecutionPeople(await responsibilityData(adminTest),path).people,[],'Test override does not fabricate execution attribution');
 console.log('work groups master and assignment scenario passed');

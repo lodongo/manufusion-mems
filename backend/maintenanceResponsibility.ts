@@ -82,6 +82,27 @@ function candidates(data:Data,g:ActiveGroup,s:Stage,path:string[]){
 function legacyPeople(data:Data,role:string,path:string[],exclude:string[]=[]){
  return role?[...data.users.values()].filter(u=>!exclude.includes(u.id)&&assignmentCovers(u,role,path,data.today)).map(u=>entry(data,u,role)):[];
 }
+/** The employee credited with completing a request must hold actual execution authority.
+ * No test-mode or wildcard-admin bypass applies to attribution, and draft membership never grants rights. */
+export function closureExecutionPeople(data:Data,path:string[]){
+ const group=groupAt(data.policy,path);
+ const stage:Stage={label:'Complete work',permission:'MNT.WO.execute'};
+ let people:Responsible[]=[],diagnostic='';
+ if(group&&data.policy){
+  people=candidates(data,group,stage,path);
+  if(!people.length)diagnostic=explain(data,data.policy,group,stage,path,people);
+ }else if(data.policy||data.savedMasterVersion){
+  diagnostic='Activate the Work Group for this cost center with named employees allocated to MNT.WO.execute.';
+ }else{
+  // Existing installations with no Work Groups master retain the configured legacy executor role.
+  const role=str(data.legacy['MNT.TASK.FEEDBACK']);
+  people=legacyPeople(data,role,path);
+  if(!people.length)diagnostic='No eligible employee holds the configured legacy maintenance execution role at this location.';
+ }
+ const seen=new Set<string>();
+ const eligible=rankResponsible(data,people).filter(p=>{if(seen.has(p.uid))return false;seen.add(p.uid);return true;});
+ return {people:eligible.sort((a,b)=>a.name.localeCompare(b.name)||a.uid.localeCompare(b.uid)),diagnostic};
+}
 function currentAssessment(data:Data,d:Obj,path:string[]){
  const token=groupGateRole(data.policy,'MNT.ASSESS.REVIEW',path);
  const role=token===null?str(data.legacy['MNT.ASSESS.REVIEW']):token;
