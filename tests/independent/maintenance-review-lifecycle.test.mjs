@@ -42,5 +42,7 @@ test('review closure records cause, what was done, closed date and elapsed time'
     assert.ok(backend.includes('dateClosed: closedDate'));
     assert.ok(backend.includes('failure cause'));
     assert.ok(ui.includes("label='Actual time taken (minutes) *'"));
-    assert.ok(ui.includes("label='Date closed *'"));
+    assert.ok(ui.includes("label='Closure date *'"));
+    assert.ok(backend.includes('closeRequestWithOrder'));
+    assert.ok(backend.includes("executionMode:'request_closure'"));
 });

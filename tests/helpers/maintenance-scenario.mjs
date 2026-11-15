@@ -1161,6 +1161,8 @@ await assert.rejects(()=>op('manager','technical_close',{code:fastWo,note:'Prema
 await assert.rejects(()=>op('planner','allocate',{code:fastWo,taskId:'DIRECT_COMPLETION'}),/no planning/i);
 const fastFeedback={workPerformed:finalClosure.description,findings:'Guard fix inspected',results:'Guard securely installed',remarks:'Completion confirmed',outstandingDefects:'None',followUp:'None',noSparesOrServicesConfirmed:true};
 await assert.rejects(()=>op('tech','start_task',{code:fastWo,taskId:'DIRECT_COMPLETION'}),/no planning/i);
+await assert.rejects(()=>op('tech','complete_task',{code:fastWo,taskId:'DIRECT_COMPLETION',feedback:{...fastFeedback,noSparesOrServicesConfirmed:false}}),/confirm no spare/i);
+await assert.rejects(()=>op('manager','handover',{code:fastWo}),/configured|safety sign-off/i);
 await op('tech','complete_task',{code:fastWo,taskId:'DIRECT_COMPLETION',feedback:fastFeedback});
 assert.equal(snapshot(r+'/work_orders/'+fastWo).data.taskExecution.DIRECT_COMPLETION.feedback.actualMinutes,25);
 assert.equal(snapshot(r+'/work_orders/'+fastWo).data.status,'completed');

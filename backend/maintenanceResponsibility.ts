@@ -86,7 +86,7 @@ function legacyPeople(data:Data,role:string,path:string[],exclude:string[]=[]){
  * No test-mode or wildcard-admin bypass applies to attribution, and draft membership never grants rights. */
 export function closureExecutionPeople(data:Data,path:string[]){
  const group=groupAt(data.policy,path);
- const stage:Stage={label:'Complete work',permission:'MNT.WO.execute'};
+ const stage:Stage={label:'Complete work',gate:'MNT.TASK.FEEDBACK',permission:'MNT.WO.execute'};
  let people:Responsible[]=[],diagnostic='';
  if(group&&data.policy){
   people=candidates(data,group,stage,path);

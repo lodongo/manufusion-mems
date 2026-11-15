@@ -1603,7 +1603,8 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         if (wo.data.status === 'closed') return { ok: true, reused: true };
         if(retrospective){
             const source=object(wo.data.directCompletion);
-            if([str(object(source.executor).uid),str(source.recordedBy)].includes(ctx.uid)&&!bypass(ctx,'mnt.direct_completion.technical_closure_independence'))throw new HttpError(403,'An independent technical approver must close this work order.');
+            const feedbackActors=Object.values(executions).map(e=>str(object(e).feedbackRecordedBy));
+            if([str(object(source.executor).uid),str(source.recordedBy),...feedbackActors].includes(ctx.uid)&&!bypass(ctx,'mnt.direct_completion.technical_closure_independence'))throw new HttpError(403,'An independent technical approver must close this work order.');
             await ensureNoDirectResources(ctx,wo);
         }
         closurePrerequisites(wo.data);
@@ -1832,10 +1833,11 @@ export async function maintenanceOperations(ctx: OrgContext) {
             }
         }
         if(retrospective){
+            const feedbackActors=Object.values(object(wo.data.taskExecution)).map(e=>str(object(e).feedbackRecordedBy));
             for(const k of ['assess','reviewAssessment','plan','reconcile'])permissions[k]=false;
             permissions.execute=permissions.execute===true&&wo.data.status==='in_progress'&&(str(object(object(wo.data.directCompletion).executor).uid)===ctx.uid||ctx.role==='org_super_admin'&&ctx.testMode===true);
             permissions.safety=permissions.safety===true&&!['closed','cancelled'].includes(str(wo.data.status));
-            permissions.close=permissions.close===true&&!!object(wo.data.handover).at&&(![str(object(object(wo.data.directCompletion).executor).uid),str(object(wo.data.directCompletion).recordedBy)].includes(ctx.uid)||ctx.role==='org_super_admin'&&ctx.testMode===true);
+            permissions.close=permissions.close===true&&!!object(wo.data.handover).at&&(![str(object(object(wo.data.directCompletion).executor).uid),str(object(wo.data.directCompletion).recordedBy),...feedbackActors].includes(ctx.uid)||ctx.role==='org_super_admin'&&ctx.testMode===true);
         }
         permissions.cancel =
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
