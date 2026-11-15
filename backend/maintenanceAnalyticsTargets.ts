@@ -1,5 +1,5 @@
 /** Organization defaults and scoped overrides; no invented KPI targets. */
-export const KPI_TARGETS={wrCohortRate:'percent',wrThroughputRate:'ratio',wrTurnaroundHours:'hours',woScheduleCompliance:'percent',woTurnaroundHours:'hours',woOverdue:'count',woBacklog:'count'} as const;
+export const KPI_TARGETS={wrCohortRate:'percent',wrThroughputRate:'ratio',wrTurnaroundHours:'hours',woScheduleCompliance:'percent',woTurnaroundHours:'hours',woOverdue:'count',woBacklog:'count',woMaxOverdueDays:'count'} as const;
 export type TargetKey=keyof typeof KPI_TARGETS;
 export type TargetValues=Partial<Record<TargetKey,number>>;
 export type TargetRule={scope:string;values:TargetValues};

@@ -1,6 +1,6 @@
 import {useState,useEffect} from 'react';
 import {Button,Card} from '../admin/kit';import {Alert} from '../components/ui';import {callBackend} from '../lib/backend';
-const fields=[['wrCohortRate','WR cohort conversion (%)'],['wrThroughputRate','WR throughput (%)'],['wrTurnaroundHours','WR turnaround (hours)'],['woScheduleCompliance','WO schedule compliance (%)'],['woTurnaroundHours','WO turnaround (hours)'],['woOverdue','WO overdue (count)'],['woBacklog','WO backlog (count)']];
+const fields=[['wrCohortRate','WR cohort conversion (%)'],['wrThroughputRate','WR throughput (%)'],['wrTurnaroundHours','WR turnaround (hours)'],['woScheduleCompliance','WO schedule compliance (%)'],['woTurnaroundHours','WO turnaround (hours)'],['woOverdue','WO overdue (count)'],['woBacklog','WO backlog (count)'],['woMaxOverdueDays','Maximum WO overdue age (days)']];
 type Rule={scope:string;values:Record<string,number>};
 export default function MntDashboardTargets({scope,targets,onSaved}:{scope:string;targets:Record<string,{value:number;source:string}>;onSaved:()=>void}){
  const [rules,setRules]=useState<Rule[]>([]),[version,setVersion]=useState(0),[draft,setDraft]=useState<Record<string,string>>({}),[reason,setReason]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(true);

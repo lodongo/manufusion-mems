@@ -99,3 +99,46 @@ export function selectMetric(row:ReturnType<typeof summarize>['rows'][number],me
  return (metric==='all'||row.e[metric]===true)&&(!state||row.e.end===state);
 }
 export function dateAdd(date:string,days:number){const at=Date.parse(date+'T00:00:00Z');return new Date(at+days*86400000).toISOString().slice(0,10);}
+
+/** Current operational backlog. Dates are calendar days in each order's configured timezone.
+ * Current spare requirements and schedule dates are not backdated into historical reports. */
+export const LIVE_WO_METRICS=['live_open','live_overdue','live_over7','live_spares','live_due_bucket','live_age_bucket','live_spares_status','live_past_start'] as const;
+export type LiveWoMetric=typeof LIVE_WO_METRICS[number];
+function calendarDay(v:unknown):number{
+ const s=str(v);if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return NaN;
+ const n=Date.parse(s+'T00:00:00Z');return Number.isFinite(n)&&new Date(n).toISOString().slice(0,10)===s?n/86400000:NaN;
+}
+export function liveWorkOrderHealth(ts:Timeline[],now:number,localDay:(d:RecordData,at:number)=>string){
+ const count=(keys:string[])=>new Map(keys.map(k=>[k,0]));
+ const due=count(['Future scheduled','Due today','1–3 days overdue','4–7 days overdue','8–14 days overdue','15–30 days overdue','31+ days overdue','No scheduled end']);
+ const age=count(['0–7 days','8–14 days','15–30 days','31–60 days','61+ days','Unknown creation date']);
+ const states=count([]),sparesStates=count([]);
+ const inc=(m:Map<string,number>,k:string)=>m.set(k,(m.get(k)||0)+1);
+ const records=ts.filter(t=>t.kind==='wo'&&!terminal('wo',t.current)&&!['closed','cancelled'].includes(str(t.data.status))&&(!Number.isFinite(t.created)||t.created<=now)).map(t=>{
+  const today=calendarDay(localDay(t.data,now)),end=calendarDay(t.data.scheduledEnd),start=calendarDay(t.data.scheduledStart);
+  const days=Number.isFinite(end)&&Number.isFinite(today)?today-end:null;
+  const ageDays=Number.isFinite(t.created)&&Number.isFinite(today)?Math.max(0,today-calendarDay(localDay(t.data,t.created))):null;
+  const spareCount=Math.max(arr(t.data.spares).length,arr(t.data.assessmentTasks).reduce((n,x)=>n+arr(x.spares).length,0),arr(t.data.tasks).reduce((n,x)=>n+arr(x.spares).length,0));
+  const dueBucket=days===null?'No scheduled end':days<0?'Future scheduled':days===0?'Due today':days<=3?'1–3 days overdue':days<=7?'4–7 days overdue':days<=14?'8–14 days overdue':days<=30?'15–30 days overdue':'31+ days overdue';
+  const ageBucket=ageDays===null||!Number.isFinite(ageDays)?'Unknown creation date':ageDays<=7?'0–7 days':ageDays<=14?'8–14 days':ageDays<=30?'15–30 days':ageDays<=60?'31–60 days':'61+ days';
+  const overdueDays=days===null?null:Math.max(0,days),pastStart=Number.isFinite(start)&&Number.isFinite(today)&&start<today;
+  inc(due,dueBucket);inc(age,ageBucket);inc(states,t.current);if(spareCount)inc(sparesStates,t.current);
+  return {t,overdueDays,ageDays:Number.isFinite(ageDays)?ageDays:null,spareCount,dueBucket,ageBucket,pastStart};
+ });
+ const dated=records.filter(r=>r.overdueDays!==null),aged=records.filter(r=>r.ageDays!==null);
+ const list=(m:Map<string,number>)=>[...m].map(([key,value])=>({key,value}));
+ return {records,open:records.length,overdue:dated.filter(r=>r.overdueDays!>0).length,over7:dated.filter(r=>r.overdueDays!>7).length,maxOverdueDays:dated.length?Math.max(...dated.map(r=>r.overdueDays!)):null,averageAgeDays:aged.length?aged.reduce((a,r)=>a+r.ageDays!,0)/aged.length:null,withSpares:records.filter(r=>r.spareCount>0).length,pastStart:records.filter(r=>r.pastStart).length,missingSchedule:records.length-dated.length,dueBuckets:list(due),ageBuckets:list(age),openStates:list(states),sparesStates:list(sparesStates)};
+}
+export function matchLiveWorkOrder(r:ReturnType<typeof liveWorkOrderHealth>['records'][number],metric:string,state=''){
+ switch(metric){
+ case 'live_open':return !state||r.t.current===state;
+ case 'live_overdue':return (r.overdueDays??0)>0;
+ case 'live_over7':return (r.overdueDays??0)>7;
+ case 'live_spares':return r.spareCount>0;
+ case 'live_past_start':return r.pastStart;
+ case 'live_due_bucket':return r.dueBucket===state;
+ case 'live_age_bucket':return r.ageBucket===state;
+ case 'live_spares_status':return r.spareCount>0&&r.t.current===state;
+ default:return false;
+ }
+}
