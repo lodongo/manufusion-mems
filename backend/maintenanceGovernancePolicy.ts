@@ -49,13 +49,7 @@ export function approvalRequirement(r:ApprovalRule,facts:Partial<Record<Conditio
  return matches.includes(null)?'undetermined':'not_required';
 }
 
-export function maintenanceActivationBlockers(p:GovernancePolicy):string[]{
- const blockers:string[]=[];
- if(p.workOrder.enabled){
-  if(p.workOrder.conditions.some(c=>c.field==='estimatedCost'||c.field==='riskScore'))blockers.push('Cost and risk threshold conditions require a verified fact adapter before activation.');
- }
- return blockers;
-}
+export function maintenanceActivationBlockers(_p:GovernancePolicy):string[]{return [];}
 export type MaintenancePolicySnapshot={version:number;activatedAt:string;policy:GovernancePolicy};
 export function readMaintenancePolicySnapshot(raw:unknown):MaintenancePolicySnapshot|null{
  if(raw===undefined||raw===null)return null;
@@ -63,7 +57,7 @@ export function readMaintenancePolicySnapshot(raw:unknown):MaintenancePolicySnap
  if(!Number.isSafeInteger(d.version)||Number(d.version)<1||typeof d.activatedAt!=='string'||!d.activatedAt)throw Error('Invalid maintenance governance snapshot.');
  return {version:Number(d.version),activatedAt:d.activatedAt,policy:validateMaintenanceGovernance(d.policy)};
 }
-function recordFacts(d:Record<string,unknown>):Partial<Record<ConditionField,string|number|boolean>>{
+export function recordFacts(d:Record<string,unknown>):Partial<Record<ConditionField,string|number|boolean>>{
  const facts:Partial<Record<ConditionField,string|number|boolean>>={};
  for(const [k,f] of [['maintenanceType','maintenanceTypeCode'],['priority','priorityCode'],['criticality','criticalityCode']] as const){
   if(typeof d[f]==='string'&&d[f])facts[k]=d[f] as string;
@@ -73,6 +67,33 @@ function recordFacts(d:Record<string,unknown>):Partial<Record<ConditionField,str
   facts.requiresSpares=tasks.some(t=>Array.isArray(t.spares)&&t.spares.length>0);
   facts.requiresExternalService=tasks.some(t=>Array.isArray(t.services)&&t.services.length>0);
   facts.requiresExternalSpecialist=tasks.some(t=>!!object(t.externalResource).type);
+  // The persisted before-mitigation scores are server-calculated using the adopted risk matrix.
+  const hazards=tasks.flatMap(t=>Array.isArray(t.risk)?t.risk.map(object):[]);
+  const scores=hazards.map(h=>object(h.beforeScore).score);
+  if(scores.length&&scores.every(v=>typeof v==='number'&&Number.isFinite(v)&&v>=0))facts.riskScore=Math.max(...scores as number[]);
+  // Prefer a persisted current finance-submitted estimate including approved allowances.
+  const ca=object(d.costApproval);
+  if(['pending','approved'].includes(String(ca.status))&&Number(ca.version)===Number(d.assessmentTasksVersion)&&typeof ca.amount==='number'&&Number.isFinite(ca.amount)&&ca.amount>=0){
+   facts.estimatedCost=ca.amount;
+  }else{
+   let total=0,known=true;
+   const amount=(v:unknown):number|null=>typeof v==='number'&&Number.isFinite(v)&&v>=0?v:null;
+   for(const task of tasks){
+    const persons=amount(task.persons),hours=amount(task.hours),rate=amount(task.rate);
+    if(persons===null||hours===null||(persons*hours>0&&(rate===null||rate===0)))known=false;
+    else total+=persons*hours*(rate??0);
+    if(object(task.externalResource).type)known=false;
+    for(const spare of (Array.isArray(task.spares)?task.spares.map(object):[])){
+     const unitCost=amount(spare.unitCost),qty=amount(spare.qty);
+     if(unitCost===null||unitCost===0||qty===null)known=false;else total+=unitCost*qty;
+    }
+    for(const service of (Array.isArray(task.services)?task.services.map(object):[])){
+     const cost=amount(service.expectedCost);if(cost===null)known=false;else total+=cost;
+    }
+   }
+   const allowance=amount(object(d.costPlan).allowance)??0;
+   if(known&&Number.isFinite(total+allowance))facts.estimatedCost=Math.round((total+allowance+Number.EPSILON)*100)/100;
+  }
  }
  return facts;
 }
@@ -91,7 +112,9 @@ export function configuredOrderApprovalStage(d:Record<string,unknown>):Exclude<W
  if(d.executionMode!=='confirmed_request')return null;
  const snap=readMaintenancePolicySnapshot(d.maintenanceGovernance);
  if(!snap||maintenanceActivationBlockers(snap.policy).length||snap.policy.workOrderStage==='after_assessment')return null;
- return approvalRequirement(snap.policy.workOrder,recordFacts(d))==='not_required'?null:snap.policy.workOrderStage;
+ const initial=object(d.initialApprovalFacts);
+ const facts=snap.policy.workOrderStage==='before_assessment'&&d.initialApprovalFacts!==undefined?Object.fromEntries(Object.entries(initial).filter(([k,v])=>CONDITION_FIELDS.includes(k as ConditionField)&&['string','number','boolean'].includes(typeof v)&&v!=='')) as Partial<Record<ConditionField,string|number|boolean>>:recordFacts(d);
+ return approvalRequirement(snap.policy.workOrder,facts)==='not_required'?null:snap.policy.workOrderStage;
 }
 
 /** Request approval uses facts known at confirmation. Missing facts require approval, never bypass it. */

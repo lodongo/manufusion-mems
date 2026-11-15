@@ -1066,7 +1066,7 @@ async function windowSave(ctx: OrgContext) {
         const assignments = { ...object(wo.data.taskWindows) };
         for (const [key, value] of Object.entries(assignments)) if (value === id || superseded.has(str(value))) delete assignments[key];
         for (const sTask of selected.filter((x) => x.woCode === wo.id)) assignments[sTask.taskId] = id;
-        patches.set(wo.id, { status: str(wo.data.status) === 'in_progress' ? 'in_progress' : 'scheduled', taskWindows: assignments, windowId: id, windowIds: [...new Set([...texts(wo.data.windowIds), id])], windowStart: start, windowEnd: end });
+        patches.set(wo.id, { status: str(wo.data.status) === 'in_progress' ? 'in_progress' : 'scheduled', taskWindows: assignments, windowId: id, windowIds: [...new Set([...texts(wo.data.windowIds), id])], windowStart: start, windowEnd: end,windowApprovalRevision:revision });
     }
     // Work orders taken out of this window, or left in a replaced older window, go back to ready.
     const released = [...(existing ? texts(existing.data.workOrderIds).filter((x) => !ids.includes(x)) : []), ...[...superseded.values()].flatMap((w) => texts(w.data.workOrderIds).filter((x) => !ids.includes(x)))];
@@ -1132,7 +1132,11 @@ async function windowAction(ctx: OrgContext, action: string) {
         if(!object(current.data.finalClosure).at){
             const fresh=await Promise.all(c.wos.map(wo=>internalOrder(ctx,wo.id)));
             if(!fresh.every(wo=>wo.data.status==='closed')){
-                if(fresh.every(wo=>wo.data.status==='closed'||!!object(wo.data.technicalClosurePending).at))return {ok:true,pendingTechnicalApproval:fresh.filter(wo=>wo.data.status!=='closed').map(wo=>wo.id)};
+                if(fresh.every(wo=>wo.data.status==='closed'||!!object(wo.data.technicalClosurePending).at)){
+                    const safetyClosure=object(current.data.safetyClosure).at?object(current.data.safetyClosure):{at:nowIso(),by:ctx.uid,name:name(ctx),note:str(b.note),workOrderIds:fresh.map(wo=>wo.id)};
+                    await commit([{path:root(ctx)+'/maintenance_windows/'+w.id,fields:{safetyClosure},mask:['safetyClosure'],updateTime:current.updateTime}]);
+                    return {ok:true,pendingTechnicalApproval:fresh.filter(wo=>wo.data.status!=='closed').map(wo=>wo.id)};
+                }
                 throw new HttpError(409,'Every linked work order must be closed.');
             }
             const finalClosure={at:nowIso(),by:ctx.uid,name:name(ctx),note:str(b.note),workOrderIds:fresh.map(wo=>wo.id)};
@@ -1665,7 +1669,17 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         if(retrospective)await ensureNoDirectResources(ctx,wo);
         else for(const t of tasksOf(wo))await requireApprovedWindow(ctx,wo,str(t.id));
         closurePrerequisites(wo.data);await ensureClosureResources(ctx,wo);
-        return finalizeSafetyClosure(ctx,approved);
+        const result=await finalizeSafetyClosure(ctx,approved);
+        for(const id of texts(wo.data.windowIds)){
+            const window=await getDoc(root(ctx)+'/maintenance_windows/'+identifier(id));
+            if(!window||!object(window.data.safetyClosure).at||object(window.data.finalClosure).at)continue;
+            const all=await Promise.all(texts(window.data.workOrderIds).map(id=>internalOrder(ctx,id)));
+            if(!all.length||!all.every(order=>order.data.status==='closed'))continue;
+            const finalClosure={at:nowIso(),by:ctx.uid,name:name(ctx),note:'All required work order technical closure approvals completed.',workOrderIds:all.map(order=>order.id)};
+            await commit([{path:root(ctx)+'/maintenance_windows/'+window.id,fields:{finalClosure,history:history(ctx,window.data,'Maintenance window closed after technical approvals','')},mask:['finalClosure','history'],updateTime:window.updateTime}]);
+            await event(ctx,'window.closed',window.id,'Work order technical approvals completed');
+        }
+        return result;
     }
     if(['closed','cancelled'].includes(str(wo.data.status))&&!(wo.data.status==='closed'&&['report_incident','clear_incident'].includes(action)))throw new HttpError(409,'A closed work order cannot be reopened or modified.');
     if(action==='upload_service_report'){

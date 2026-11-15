@@ -75,3 +75,13 @@ test('technical closure is optional and independent of work request and WO appro
  assert.equal(technicalClosureApprovalRequired({...d,priorityCode:'LOW'}),false);
  assert.equal(technicalClosureApprovalRequired(d),true);
 });
+
+import {recordFacts} from './maintenanceGovernancePolicy';
+test('numeric condition facts come from validated assessed tasks or current finance estimates',()=>{
+ const task={persons:2,hours:3,rate:10,spares:[{qty:2,unitCost:5}],services:[{expectedCost:30}],risk:[{beforeScore:{score:12}}]};
+ const d={assessmentTasks:[task],assessmentTasksAt:'2026-11-15',assessmentTasksVersion:1};
+ assert.deepEqual(recordFacts(d).estimatedCost,100);
+ assert.deepEqual(recordFacts(d).riskScore,12);
+ assert.equal(recordFacts({...d,assessmentTasks:[{...task,services:[{expectedCost:null}]}]}).estimatedCost,undefined);
+ assert.equal(recordFacts({...d,costApproval:{status:'approved',version:1,amount:125}}).estimatedCost,125);
+});
