@@ -444,7 +444,8 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end)))
             throw new HttpError(400, 'Enter the scheduled dates as YYYY-MM-DD.');
         if (end < start) throw new HttpError(400, 'The scheduled end cannot be before the start.');
-        if(wo.data.executionMode==='confirmed_request'||start!==str(wo.data.scheduledStart))validateCycleDates(str(wo.data.maintenanceTypeCode),start,end,await getMaintenanceCycle(ctx),wo.data);
+        const cycle=await getMaintenanceCycle(ctx);
+        if(wo.data.cycleAdmission||wo.data.executionMode==='confirmed_request'||start!==str(wo.data.scheduledStart))validateCycleDates(str(wo.data.maintenanceTypeCode),start,end,cycle,wo.data);
         else if(start<nowIso().slice(0,10))throw new HttpError(400,'The scheduled start cannot be in the past.');
         const changed = start !== wo.data.scheduledStart || end !== wo.data.scheduledEnd;
         const reason = str(b.note).trim().slice(0, 300);
@@ -454,6 +455,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
         const periodMoved = periodOf(start) !== periodOf(str(wo.data.scheduledStart));
         await saveWo(ctx, wo, {
             scheduledStart: start, scheduledEnd: end,
+            ...(start!==str(wo.data.scheduledStart)?{currentCycleAdmission:{startDay:cycle.startDay,timeZone:cycle.timeZone,version:cycle.version,at:nowIso()}}:{}),
             dateChanges:changed?[...rows(wo.data.dateChanges),{at:nowIso(),by:ctx.uid,name:name(ctx),fromStart:str(wo.data.scheduledStart),fromEnd:str(wo.data.scheduledEnd),toStart:start,toEnd:end,reason}]:rows(wo.data.dateChanges),
             scheduleLock: { start, end, at: nowIso(), by: ctx.uid, name: name(ctx) },
             ...(periodMoved && str(ca.status) ? { costApproval: { ...ca, status: 'superseded' } } : {}),
@@ -975,7 +977,7 @@ async function windowSave(ctx: OrgContext) {
     const schedule = criticalPath(selected);
     const needed = Math.max(...schedule.tasks.map((t) => t.finish));
     const cycle=await getMaintenanceCycle(ctx);
-    for(const t of schedule.tasks){const w=wos.find(x=>x.id===t.woCode);if(!w||!w.data.cycleAdmission)continue;const zone=str(object(w.data.cycleAdmission).timeZone)||cycle.timeZone,a=localDate(new Date(Date.parse(start)+t.start*3600000),zone),z=localDate(new Date(Date.parse(start)+t.finish*3600000-1),zone);if(a<str(w.data.scheduledStart)||z>str(w.data.scheduledEnd))throw new HttpError(409,w.id+': the task falls outside the Work Order start/end dates. Change and reconfirm the plan before scheduling.');}
+    for(const t of schedule.tasks){const w=wos.find(x=>x.id===t.woCode);if(!w||!w.data.cycleAdmission)continue;const zone=str(object(w.data.currentCycleAdmission).timeZone)||str(object(w.data.cycleAdmission).timeZone)||cycle.timeZone,a=localDate(new Date(Date.parse(start)+t.start*3600000),zone),z=localDate(new Date(Date.parse(start)+t.finish*3600000-1),zone);if(a<str(w.data.scheduledStart)||z>str(w.data.scheduledEnd))throw new HttpError(409,w.id+': the task falls outside the Work Order start/end dates. Change and reconfirm the plan before scheduling.');}
     if (b.action === 'preview_window') return { schedule, neededHours: needed, start, end };
     if (schedule.conflicts.length) throw new HttpError(409, schedule.conflicts.join(' '));
     if (needed > durationHours + 1e-6)
@@ -1897,7 +1899,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const pool=await workGroupResourcePool(ctx.orgId,wo,users);
         const workflow=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
         const reviewRole=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),workflow?.data.approverRoles);
-        const cycle=await getMaintenanceCycle(ctx),d=wo.data,zone= str(object(d.cycleAdmission).timeZone)||cycle.timeZone;
+        const cycle=await getMaintenanceCycle(ctx),d=wo.data,zone=str(object(d.currentCycleAdmission).timeZone)||str(object(d.cycleAdmission).timeZone)||cycle.timeZone;
         let dueAt:string|null=null;const dueDate=str(d.scheduledEnd);if(!retrospective&&/^\d{4}-\d{2}-\d{2}$/.test(dueDate)){try{const day=new Date(dueDate+'T00:00:00Z');day.setUTCDate(day.getUTCDate()+1);dueAt=zonedInstant(day.toISOString().slice(0,10),'00:00',zone);}catch{/* Invalid historical dates stay unclassified. */}}
         return {
             wo: { code: wo.id, ...wo.data,...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
