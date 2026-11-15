@@ -409,7 +409,9 @@ registerHandler('coa.change', {
 async function maintenanceFinancialTypes():Promise<Array<{code:string;label:string}>>{
     const configured=await getDoc('module_workspaces/MNT/metadata/maintenanceTypes');
     const fallback=DEFAULT_MODULE_METADATA.MNT.find(x=>x.key==='maintenanceTypes')?.items??[];
-    const items:unknown[]=Array.isArray(configured?.data.items)?configured.data.items:fallback;
+    // The system-only break-in type is not a work-order picker option, but it is a valid accounting strategy.
+    const source:unknown[]=Array.isArray(configured?.data.items)?configured.data.items:fallback;
+    const items:unknown[]=[...source.filter(x=>!x||typeof x!=='object'||Array.isArray(x)||str((x as Record<string,unknown>).code)!=='MAI-016'),{code:'MAI-016',label:'Break-in Maintenance',active:true,selectable:true}];
     return items.filter((x):x is Record<string,unknown>=>!!x&&typeof x==='object'&&!Array.isArray(x))
         .map(x=>({code:str(x.code),label:str(x.label),enabled:x.active!==false&&x.selectable!==false}))
         .filter(x=>x.code&&x.enabled)
