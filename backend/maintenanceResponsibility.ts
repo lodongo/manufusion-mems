@@ -128,6 +128,7 @@ function wrStage(data:Data,d:Obj,path:string[]):Stage{
 function woStage(data:Data,d:Obj,path:string[]):Stage{
  const s=str(d.status),workflow=str(d.workflowCode),label=str(d.workflowLabel);
  if(['closed','cancelled'].includes(s))return {label:s==='closed'?'Closed':'Cancelled'};
+ if(workflow==='WO210')return {label:'Technical closure approval',gate:'MNT.WO.CLOSE_APPROVAL',permission:'MNT.WO.technicalApprove',exclude:[str(obj(d.technicalClosurePending).by),str(obj(d.safetySignoff).by),...Object.values(obj(d.taskExecution)).flatMap(e=>ids(obj(e).performers)),...rows(d.timeLogs).map(e=>str(e.uid))].filter(Boolean)};
  if(workflow==='WO200')return {label:label||'Safety sign-off',gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Safety signatory'};
  if(['WO015','WO125','WO145'].includes(workflow))return {label,gate:'MNT.ASSESS.REVIEW',permission:'MNT.assessment.review',exclude:[str(d.requestedBy),str(d.createdBy),...(workflow==='WO015'?[]:[str(d.assessedBy),str(d.assessmentTasksBy),str(d.plannedBy),str(obj(d.readiness).by)])].filter(Boolean)};
  if(workflow==='WO010')return {...assess(),label,requireIndependentAssessor:maintenanceAssessmentApprovalRequired(d)};if(workflow==='WO020')return {...approval(d),label};

@@ -13,9 +13,9 @@ export const WO_STATES=[
  ['WO150','Awaiting execution'],['WO160','Execution in progress'],['WO165','Execution blocked'],
  ['WO170','Awaiting execution feedback'],['WO180','Awaiting spares reconciliation'],
  ['WO186','Awaiting outstanding spare receipt / posting'],['WO185','Awaiting service feedback / report'],['WO187','Awaiting service acceptance'],
- ['WO190','Awaiting incident clearance'],['WO200','Awaiting safety sign-off'],['WO900','Closed'],['WO990','Cancelled']
+ ['WO190','Awaiting incident clearance'],['WO200','Awaiting safety sign-off'],['WO210','Awaiting technical closure approval'],['WO900','Closed'],['WO990','Cancelled']
 ] as const;
-export const WO_STATUS_SHORT:Record<string,string>={WO010:'DWA',WO020:'DAA',WO030:'DWS',WO040:'DSE',WO050:'DXS',WO060:'DIL',WO070:'DTC',WO080:'DRR',WO090:'DPD',WO100:'DCS',WO110:'DCA',WO120:'DRC',WO130:'DSH',WO140:'DWP',WO150:'DWE',WO160:'EXE',WO165:'DEB',WO170:'DWF',WO180:'DSR',WO185:'DSF',WO186:'DGR',WO187:'DSA',WO190:'DIC',WO200:'DSS',WO210:'DOH',WO220:'DWC',WO900:'CLSD',WO990:'CANC'};
+export const WO_STATUS_SHORT:Record<string,string>={WO015:'DWAU',WO010:'DWA',WO020:'DAA',WO030:'DWS',WO040:'DSE',WO050:'DXS',WO060:'DIL',WO070:'DTC',WO080:'DRR',WO090:'DPD',WO100:'DCS',WO110:'DCA',WO120:'DRC',WO125:'DRA',WO130:'DSH',WO140:'DWP',WO145:'DEA',WO150:'DWE',WO160:'EXE',WO165:'DEB',WO170:'DWF',WO180:'DSR',WO185:'DSF',WO186:'DGR',WO187:'DSA',WO190:'DIC',WO200:'DSS',WO210:'DOH',WO220:'DWC',WO900:'CLSD',WO990:'CANC'};
 export const shortWorkOrderStatus=(code:string)=>WO_STATUS_SHORT[code]||code;
 export type StateCode=typeof WO_STATES[number][0];
 export type FactSet={approved?:boolean;items?:Obj[];checklist?:Obj[];costStatus?:string;windowStatus?:'missing'|'blocked'|'ready';openIncident?:boolean;closureResource?:{code:'WO185'|'WO186'|'WO187'|'WO180';reason:string}};
@@ -24,6 +24,7 @@ export function stateOf(d:Obj,f:FactSet):{code:StateCode;label:string;reason:str
  const status=str(d.status),tasks=rows(d.assessmentTasks),exec=object(d.taskExecution),plan=object(d.taskPlanning);
  if(status==='closed')return make('WO900',d.closureMode==='early'?'Closed early; unfinished work was not certified complete':'');if(status==='cancelled')return make('WO990');
  const retrospective=isRequestClosureOrder(d);
+ if(object(d.technicalClosurePending).at){if(f.openIncident)return make('WO190');if(f.closureResource)return make(f.closureResource.code,f.closureResource.reason);return make('WO210');}
  if(!retrospective&&object(d.earlyClosureRequest).at){
    const started=tasks.filter(t=>{const e=object(exec[str(t.id)]);return !!e.startedAt||['in_progress','blocked','awaiting_feedback','completed'].includes(str(e.status));});
    if(started.some(t=>object(exec[str(t.id)]).status==='in_progress'))return make('WO160','Complete actual work before early closure');

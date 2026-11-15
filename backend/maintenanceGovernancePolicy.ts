@@ -51,7 +51,6 @@ export function approvalRequirement(r:ApprovalRule,facts:Partial<Record<Conditio
 
 export function maintenanceActivationBlockers(p:GovernancePolicy):string[]{
  const blockers:string[]=[];
- if(p.technicalClosure.enabled)blockers.push('Technical closure approval is not yet connected to the closure engine.');
  if(p.workOrder.enabled){
   if(p.workOrder.conditions.some(c=>c.field==='estimatedCost'||c.field==='riskScore'))blockers.push('Cost and risk threshold conditions require a verified fact adapter before activation.');
  }
@@ -100,4 +99,11 @@ export function workRequestApprovalRequired(d:Record<string,unknown>,maintenance
  const snap=readMaintenancePolicySnapshot(d.maintenanceGovernance);
  if(!snap)return false;
  return approvalRequirement(snap.policy.workRequest,recordFacts({...d,maintenanceTypeCode}))!=='not_required';
+}
+
+/** Existing transactions without a snapshot retain safety-only closure. */
+export function technicalClosureApprovalRequired(d:Record<string,unknown>):boolean{
+ const snap=readMaintenancePolicySnapshot(d.maintenanceGovernance);
+ if(!snap)return false;
+ return approvalRequirement(snap.policy.technicalClosure,recordFacts(d))!=='not_required';
 }

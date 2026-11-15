@@ -21,7 +21,7 @@ export const DEFAULT_WORK_GROUP_TASKS:Record<string,string[]>={
  'MNT.WINDOW.LOCK':[P],'MNT.WO.schedule':[P],
  'MNT.TASK.FEEDBACK':[S,T,O],'MNT.WO.execute':[S,T,O],
  'MNT.SPARES.RECONCILE':[P,C,S,T],
- 'MNT.WO.close':[L],'MNT.WO.cancel':[L],'MNT.budget.manage':[L,P]
+ 'MNT.WO.close':[L],'MNT.WO.CLOSE_APPROVAL':[L],'MNT.WO.technicalApprove':[L],'MNT.WO.cancel':[L],'MNT.budget.manage':[L,P]
 };
 type Member={uid:string;positionCode:string};
 export type ActiveGroup={id:string;code:string;name:string;siteId:string;version:number;costCenterIds:string[];members:Record<string,Member[]>};

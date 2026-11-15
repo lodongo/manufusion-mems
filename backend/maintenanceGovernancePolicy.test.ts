@@ -37,9 +37,9 @@ test('legacy records keep independent approval; all-off snapshot removes only ap
  assert.equal(maintenanceAssessmentReady({...complete,maintenanceGovernance:{version:2,activatedAt:'2026-11-16',policy:later}}),false);
  assert.equal(maintenanceAssessmentReady(complete),true);
 });
-test('unsupported approval paths cannot be activated',()=>{
+test('all three independent approval switches and work order stages can be configured',()=>{
  const p=defaultMaintenanceGovernance();p.workRequest.enabled=true;p.technicalClosure.enabled=true;p.workOrder.enabled=true;p.workOrderStage='before_assessment';
- assert.equal(maintenanceActivationBlockers(p).length,1);
+ assert.equal(maintenanceActivationBlockers(p).length,0);
 });
 
 import {configuredOrderApprovalStage} from './maintenanceGovernancePolicy';
@@ -63,4 +63,15 @@ test('request policy uses confirmation type, and unknown facts fail conservative
  assert.equal(workRequestApprovalRequired(d,'CM'),false);
  p.workRequest.conditions=[{field:'requiresSpares',op:'eq',value:true}];
  assert.equal(workRequestApprovalRequired(d,'CM'),true);
+});
+
+import {technicalClosureApprovalRequired} from './maintenanceGovernancePolicy';
+test('technical closure is optional and independent of work request and WO approval',()=>{
+ const p=defaultMaintenanceGovernance();p.technicalClosure.enabled=true;
+ const d={maintenanceGovernance:{version:1,activatedAt:'2026-11-15',policy:p}};
+ assert.equal(technicalClosureApprovalRequired({}),false);
+ assert.equal(technicalClosureApprovalRequired(d),true);
+ p.technicalClosure.conditions=[{field:'priority',op:'eq',value:'HIGH'}];
+ assert.equal(technicalClosureApprovalRequired({...d,priorityCode:'LOW'}),false);
+ assert.equal(technicalClosureApprovalRequired(d),true);
 });

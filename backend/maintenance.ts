@@ -945,9 +945,9 @@ export const maintenanceRoutes = {
         if(!draft?.updateTime||ctx.body.expectedVersion!==v||ctx.body.expectedActiveVersion!==av||active&&!active.updateTime)throw new HttpError(409,'Configuration changed. Reload before activation.');
         const policy=validateMaintenanceGovernance(draft.data.policy),blockers=maintenanceActivationBlockers(policy);
         if(blockers.length)throw new HttpError(409,blockers.join(' '));
-        if(policy.workOrder.enabled||policy.workRequest.enabled){
+        if(policy.workOrder.enabled||policy.workRequest.enabled||policy.technicalClosure.enabled){
             const [legacy,group]=await Promise.all([getDoc(base+'/maintenance_workflow_settings/default'),getDoc(base+'/maintenance_work_group_active/default')]);
-            const required=[...(policy.workOrder.enabled?['MNT.ASSESS.REVIEW']:[]),...(policy.workRequest.enabled?['MNT.WR.APPROVAL']:[])];
+            const required=[...(policy.workOrder.enabled?['MNT.ASSESS.REVIEW']:[]),...(policy.workRequest.enabled?['MNT.WR.APPROVAL']:[]),...(policy.technicalClosure.enabled?['MNT.WO.CLOSE_APPROVAL']:[])];
             for(const gate of required){
                 const legacyRole=str(object(legacy?.data.approverRoles)[gate]),taskRoles=strs(object(group?.data.tasks)[gate]);
                 if(group&&!taskRoles.length)throw new HttpError(409,'Configure '+gate+' in the active Work Groups master before activation.');

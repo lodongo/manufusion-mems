@@ -20,7 +20,7 @@ export const WORK_GROUP_TASKS: Task[] = [
 ];
 // One-to-one task gates and security activities are one allocation, not two independent settings.
 export const LINKED_WORK_GROUP_TASKS:readonly (readonly [string,string])[]=[
- ['MNT.WR.CREATE','MNT.WR.create'],['MNT.WR.REVIEW','MNT.WR.review'],['MNT.WR.APPROVAL','MNT.WR.approve'],
+ ['MNT.WR.CREATE','MNT.WR.create'],['MNT.WR.REVIEW','MNT.WR.review'],['MNT.WR.APPROVAL','MNT.WR.approve'],['MNT.WO.CLOSE_APPROVAL','MNT.WO.technicalApprove'],
  ['MNT.WR.ASSESS','MNT.assessment.edit'],['MNT.ASSESS.REVIEW','MNT.assessment.review'],
  ['MNT.WR.CONVERT','MNT.WR.convert'],['MNT.WINDOW.LOCK','MNT.WO.schedule'],
  ['MNT.TASK.FEEDBACK','MNT.WO.execute']
@@ -138,7 +138,7 @@ export function assessWorkGroup(members:Record<string,Member[]>, tasks:Record<st
   if(!(members[t]||[]).length)issues.push('Assign at least one named employee to '+t+'.');
   else if(!ccPaths.some(path=>(members[t]||[]).some(m=>{const u=users.get(m.uid);return !!u&&workGroupHolder(u,m.positionCode,path,today);})))issues.push(t+' has no current eligible holder within the group.');
  }
- for(const task of WORK_GROUP_TASKS.filter(t=>!t.external&&!['MNT.WR.APPROVAL','MNT.WR.approve'].includes(t.code)))if(!(tasks[task.code]||[]).length)issues.push('Allocate '+task.code+' to a generic role.');
+ for(const task of WORK_GROUP_TASKS.filter(t=>!t.external&&!['MNT.WR.APPROVAL','MNT.WR.approve','MNT.WO.CLOSE_APPROVAL','MNT.WO.technicalApprove'].includes(t.code)))if(!(tasks[task.code]||[]).length)issues.push('Allocate '+task.code+' to a generic role.');
  // Avoid treating distinct titles as distinct people. Warn if all assessment makers and checkers overlap.
  const who=(code:string)=>new Set((tasks[code]||[]).flatMap(t=>(members[t]||[]).map(m=>m.uid)));
  const makers=who('MNT.assessment.edit'),checkers=who('MNT.ASSESS.REVIEW');

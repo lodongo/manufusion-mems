@@ -327,7 +327,7 @@ export const ACTION_LINKS: Record<string, Array<{ route: string; permission: str
     'MNT-WIN-VW': [{ route: OPS, permission: 'MNT.view' }],
     'MNT-BUD-AP': [{ route: 'POST /api/org/mnt/cost/decide', permission: 'MNT.WO.costApprove' }, { route: 'POST /api/org/fin/requests/decide', permission: 'FIN.cc.approve' }],
     'MNT-WOR-AP': [{ route: OPS, permission: 'MNT.WO.plan' }, { route: WO, permission: 'MNT.assessment.review' }],
-    'MNT-WOR-CL': [{ route: OPS, permission: 'MNT.WO.close' }, { route: OPS, permission: 'MNT.WO.safety' }],
+    'MNT-WOR-CL': [{ route: OPS, permission: 'MNT.WO.close' }, { route: OPS, permission: 'MNT.WO.safety' },{route:OPS,permission:'MNT.WO.technicalApprove'}],
     'MNT-WOR-CN': [{ route: WO, permission: 'MNT.WO.cancel' }],
     'MNT-WOR-PS': [{ route: 'POST /api/org/mnt/siv/issue', permission: 'INV.issue' }, { route: 'POST /api/org/inv/issue/post', permission: 'INV.issue' }],
 };

@@ -19,7 +19,7 @@ import { maintenancePermission, requireMaintenanceRole, configuredMaintenanceRol
 import {groupAt,groupGateRole,outsideExecutionAccess,loadWorkGroupPolicy,workGroupGateAllowed} from './maintenanceWorkGroupPolicy';
 import { workGroupResourcePool, requireOutsideGroupOptIn } from './maintenanceWorkGroups';
 import { assessmentReviewCurrent,maintenanceAssessmentReady } from './maintenanceAssessmentReview';
-import {maintenanceAssessmentApprovalRequired,configuredOrderApprovalStage} from './maintenanceGovernancePolicy';
+import {maintenanceAssessmentApprovalRequired,configuredOrderApprovalStage,technicalClosureApprovalRequired,readMaintenancePolicySnapshot} from './maintenanceGovernancePolicy';
 import {approveStage,requireStageApproval,stageApprovalCurrent,stageApprovalPending,stageReached,STAGE_LABELS} from './maintenanceStageApproval';
 import { maintenanceKey, reserveTaskSpare, releaseMaintenanceReservations, verifyMaintenanceStockLedger } from './maintenanceInventory';
 import {
@@ -1131,7 +1131,10 @@ async function windowAction(ctx: OrgContext, action: string) {
         const current=await currentWindow(ctx,w.id);
         if(!object(current.data.finalClosure).at){
             const fresh=await Promise.all(c.wos.map(wo=>internalOrder(ctx,wo.id)));
-            if(!fresh.every(wo=>wo.data.status==='closed'))throw new HttpError(409,'Every linked work order must be closed.');
+            if(!fresh.every(wo=>wo.data.status==='closed')){
+                if(fresh.every(wo=>wo.data.status==='closed'||!!object(wo.data.technicalClosurePending).at))return {ok:true,pendingTechnicalApproval:fresh.filter(wo=>wo.data.status!=='closed').map(wo=>wo.id)};
+                throw new HttpError(409,'Every linked work order must be closed.');
+            }
             const finalClosure={at:nowIso(),by:ctx.uid,name:name(ctx),note:str(b.note),workOrderIds:fresh.map(wo=>wo.id)};
             await commit([{path:root(ctx)+'/maintenance_windows/'+w.id,fields:{finalClosure,history:history(ctx,current.data,'Maintenance window closed',str(b.note))},mask:['finalClosure','history'],updateTime:current.updateTime}]);
             await event(ctx,'window.closed',w.id,str(b.note));
@@ -1518,15 +1521,16 @@ async function ensureEarlyActuals(ctx:OrgContext,wo:Doc){
     }
     if((await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared'))throw new HttpError(409,'Clear all recorded incidents before early closure.');
 }
-async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false,cancel=false){
-    if(safetyFinal)await authority(ctx,wo,'MNT.WO.safety','MNT.SAFETY.SIGNOFF');
+async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false,cancel=false,technicalFinal=false){
+    if(technicalFinal)await authority(ctx,wo,'MNT.WO.technicalApprove','MNT.WO.CLOSE_APPROVAL');
+    else if(safetyFinal)await authority(ctx,wo,'MNT.WO.safety','MNT.SAFETY.SIGNOFF');
     else await authority(ctx,wo,cancel?'MNT.WO.cancel':'MNT.WO.close');
     if(['closed','cancelled'].includes(str(wo.data.status)))throw new HttpError(409,'This order is already final.');
     if(isRequestClosureOrder(wo.data))throw new HttpError(409,'Use safety sign-off to close the retrospective work order.');
     return withLock(ctx.orgId,'maintenance_po_commitment',async()=>{
         const check=await earlyClosureCommitments(ctx,wo);
         if(check.blocked.length)throw new HttpError(409,'Early closure is blocked by committed purchase order(s): '+check.blocked.join(', '));
-        const prior=object(wo.data.earlyClosureRequest),reason=requiredText(safetyFinal?prior.reason:ctx.body.note||prior.reason,'Early closure reason',10);
+        const prior=object(wo.data.earlyClosureRequest),reason=requiredText(safetyFinal||technicalFinal?prior.reason:ctx.body.note||prior.reason,'Early closure reason',10);
         const started=earlyExecutionStarted(wo);
         if(cancel&&started)throw new HttpError(409,'Record actual work and use early closure after execution starts.');
         if(prepare){
@@ -1534,9 +1538,16 @@ async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false,
             await saveWo(ctx,wo,{earlyClosureRequest:{at:nowIso(),by:ctx.uid,name:name(ctx),reason}},'work_order.early_closure_requested',reason);
             return {ok:true};
         }
-        if(!safetyFinal&&(ctx.body.confirm!==wo.id||!cancel&&ctx.body.noCommitmentConfirmed!==true))throw new HttpError(400,'Confirm the order number and no outstanding PO commitment.');
+        if(!safetyFinal&&!technicalFinal&&(ctx.body.confirm!==wo.id||!cancel&&ctx.body.noCommitmentConfirmed!==true))throw new HttpError(400,'Confirm the order number and no outstanding PO commitment.');
         await ensureEarlyActuals(ctx,wo);
         if(started&&!object(wo.data.safetySignoff).at)throw new HttpError(409,'Complete safety sign-off for the work actually performed.');
+        if(!cancel&&!technicalFinal&&(technicalClosureApprovalRequired(wo.data)||object(wo.data.technicalClosurePending).at)){
+            const pending=object(wo.data.technicalClosurePending);
+            if(pending.at)return {ok:true,pendingTechnicalApproval:true};
+            const at=nowIso(),earlyClosureRequest=prior.at?prior:{at,by:ctx.uid,name:name(ctx),reason};
+            await saveWo(ctx,wo,{earlyClosureRequest,technicalClosurePending:{at,by:ctx.uid,name:name(ctx),mode:'early',policyVersion:readMaintenancePolicySnapshot(wo.data.maintenanceGovernance)!.version}},'work_order.technical_closure_requested',reason);
+            return {ok:true,pendingTechnicalApproval:true};
+        }
         const at=nowIso(),execution=object(wo.data.taskExecution);
         const skipped=tasksOf(wo).filter(t=>object(execution[str(t.id)]).status!=='completed').map(t=>str(t.id));
         const writes:Write[]=[];
@@ -1548,7 +1559,7 @@ async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false,safetyFinal=false,
         const labour=tasksOf(wo).reduce((n,t)=>n+(Number(object(object(execution[str(t.id)]).feedback).actualHours)||0)*(Number(t.rate)||0),0);
         const spares=Object.values(execution).reduce<number>((n,e)=>n+rows(object(e).consumption).reduce((v,c)=>v+(Number(c.consumed)||0)*(Number(c.unitCost)||0),0),0);
         const closure={at,by:ctx.uid,name:name(ctx),note:reason,outcome:started?'work_stopped':'not_started',skippedTaskIds:skipped,previousStatus:str(wo.data.status),noPoCommitment:true};
-        const patch={status:cancel?'cancelled':'closed',...(cancel?{cancelledAt:at,cancelledBy:ctx.uid,cancelledByName:name(ctx),cancelReason:reason}:{closedAt:at}),closureMode:'early',...(object(wo.data.safetySignoff).at?{safetySignoff:object(wo.data.safetySignoff)}:{}),earlyClosure:closure,closedBy:ctx.uid,closedByName:name(ctx),finalCost:{labour,spares,services:0,total:labour+spares},updatedAt:at,history:history(ctx,wo.data,cancel?'Work order cancelled before execution':'Work order closed early',reason)};
+        const patch={...(technicalFinal?{technicalClosure:object(wo.data.technicalClosure),technicalClosurePending:null}:{}),status:cancel?'cancelled':'closed',...(cancel?{cancelledAt:at,cancelledBy:ctx.uid,cancelledByName:name(ctx),cancelReason:reason}:{closedAt:at}),closureMode:'early',...(object(wo.data.safetySignoff).at?{safetySignoff:object(wo.data.safetySignoff)}:{}),earlyClosure:closure,closedBy:ctx.uid,closedByName:name(ctx),finalCost:{labour,spares,services:0,total:labour+spares},updatedAt:at,history:history(ctx,wo.data,cancel?'Work order cancelled before execution':'Work order closed early',reason)};
         writes.push({path:root(ctx)+'/work_orders/'+wo.id,fields:patch,mask:Object.keys(patch),updateTime:wo.updateTime});
         if(writes.length>430)throw new HttpError(409,'Too many linked procurement records; resolve them in procurement first.');
         await releaseMaintenanceReservations(ctx,wo.id);
@@ -1593,6 +1604,7 @@ async function finalizeSafetyClosure(ctx:OrgContext,wo:Doc){
                 closedByName: name(ctx),
                 closedAt: at,
                 safetySignoff:object(wo.data.safetySignoff),closureMode:'safety',
+                ...(object(wo.data.technicalClosure).at?{technicalClosure:object(wo.data.technicalClosure),technicalClosurePending:null}:{}),
                 finalCost: {
                     spares,
                     labour,
@@ -1604,7 +1616,7 @@ async function finalizeSafetyClosure(ctx:OrgContext,wo:Doc){
                     ),
                 },
             },
-            'work_order.safety_closed',
+            object(wo.data.technicalClosure).at?'work_order.technical_closed':'work_order.safety_closed',
         );
         await releaseMaintenanceReservations(ctx, wo.id);
         for (const id of texts(wo.data.windowIds)) {
@@ -1639,7 +1651,22 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     if(action==='early_close'||action==='prepare_early_close')return earlyClose(ctx,wo,action==='prepare_early_close');
     if(action==='cancel_order_legacy')return earlyClose(ctx,wo,false,false,true);
     if(action==='handover')throw new HttpError(409,'Equipment handover is no longer a work order closure step.');
-    if(action==='technical_close')throw new HttpError(409,'Technical Manager closure is no longer required. Use safety sign-off.');
+    if(action==='technical_close'){
+        const pending=object(wo.data.technicalClosurePending);
+        if(!pending.at||['closed','cancelled'].includes(str(wo.data.status)))throw new HttpError(409,'Technical closure approval is not pending.');
+        await authority(ctx,wo,'MNT.WO.technicalApprove','MNT.WO.CLOSE_APPROVAL');
+        const excluded=new Set([str(pending.by),str(object(wo.data.safetySignoff).by),...Object.values(executions).flatMap(e=>texts(object(e).performers)),...rows(wo.data.timeLogs).map(e=>str(e.uid))].filter(Boolean));
+        if(excluded.has(ctx.uid)&&!bypass(ctx,'mnt.wo.technical_closure.independence'))throw new HttpError(403,'An independent technical closure approver is required.');
+        const note=requiredText(b.note,'Technical closure approval notes',10);
+        const approved={...wo,data:{...wo.data,technicalClosure:{at:nowIso(),by:ctx.uid,name:name(ctx),note,policyVersion:pending.policyVersion}}};
+        if(pending.mode==='early')return earlyClose(ctx,approved,false,false,false,true);
+        if(!object(wo.data.safetySignoff).at)throw new HttpError(409,'Complete safety sign-off first.');
+        if((await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared'))throw new HttpError(409,'Clear every recorded incident or near miss before technical closure.');
+        if(retrospective)await ensureNoDirectResources(ctx,wo);
+        else for(const t of tasksOf(wo))await requireApprovedWindow(ctx,wo,str(t.id));
+        closurePrerequisites(wo.data);await ensureClosureResources(ctx,wo);
+        return finalizeSafetyClosure(ctx,approved);
+    }
     if(['closed','cancelled'].includes(str(wo.data.status))&&!(wo.data.status==='closed'&&['report_incident','clear_incident'].includes(action)))throw new HttpError(409,'A closed work order cannot be reopened or modified.');
     if(action==='upload_service_report'){
         await authority(ctx,wo,'MNT.WO.execute','MNT.TASK.FEEDBACK');
@@ -1866,6 +1893,10 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         const signed={...wo,data:{...wo.data,safetySignoff:signoff}};
         if(object(wo.data.earlyClosureRequest).at)return earlyClose(ctx,signed,false,true);
         closurePrerequisites(signed.data);await ensureClosureResources(ctx,signed);
+        if(technicalClosureApprovalRequired(signed.data)||object(signed.data.technicalClosurePending).at){
+            if(!object(signed.data.technicalClosurePending).at)await saveWo(ctx,signed,{safetySignoff:signoff,technicalClosurePending:{at:nowIso(),by:ctx.uid,name:name(ctx),mode:'normal',policyVersion:readMaintenancePolicySnapshot(signed.data.maintenanceGovernance)!.version}},'work_order.safety_signed_technical_pending',str(signoff.note));
+            return {ok:true,pendingTechnicalApproval:true};
+        }
         return finalizeSafetyClosure(ctx,signed);
     }
     if (action === 'report_incident') {
@@ -2096,7 +2127,15 @@ export async function maintenanceOperations(ctx: OrgContext) {
             try{await maintenancePermission(ctx,'MNT.assessment.review',recordPath(wo));await requireMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo));const excluded=[wo.data.requestedBy,wo.data.createdBy,...(approvalStage==='before_assessment'?[]:[wo.data.assessedBy,wo.data.assessmentTasksBy,wo.data.plannedBy,object(wo.data.readiness).by])];permissions.approveOrderStage=!excluded.includes(ctx.uid)||ctx.testMode===true;}catch{/* unauthorized */}
         }
         if(stageApprovalPending(wo.data,'before_assessment'))permissions.assess=false;
-        permissions.signoff=permissions.safety===true&&wo.data.workflowCode==='WO200';
+        permissions.technicalApprove=false;
+        if(object(wo.data.technicalClosurePending).at&&!['closed','cancelled'].includes(str(wo.data.status))){
+            try{
+                await authority(ctx,wo,'MNT.WO.technicalApprove','MNT.WO.CLOSE_APPROVAL');
+                const excluded=[str(object(wo.data.technicalClosurePending).by),str(object(wo.data.safetySignoff).by),...Object.values(object(wo.data.taskExecution)).flatMap(e=>texts(object(e).performers)),...rows(wo.data.timeLogs).map(e=>str(e.uid))];
+                permissions.technicalApprove=!excluded.includes(ctx.uid)||ctx.testMode===true;
+            }catch{/* no approval authority */}
+        }
+        permissions.signoff=permissions.safety===true&&wo.data.workflowCode==='WO200'&&!object(wo.data.technicalClosurePending).at;
         permissions.cancel =
             ['planning', 'plan_ready', 'released', 'scheduled'].includes(str(wo.data.status)) &&
             !object(wo.data.earlyClosureRequest).at&&!earlyExecutionStarted(wo)&&!earlyCheck?.blocked.length&&canAt(ctx, 'MNT.WO.cancel', recordPath(wo), await scopeOf(ctx));
@@ -2107,7 +2146,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const cycle=await getMaintenanceCycle(ctx),d=wo.data,zone=str(object(d.currentCycleAdmission).timeZone)||str(object(d.cycleAdmission).timeZone)||cycle.timeZone;
         let dueAt:string|null=null;const dueDate=str(d.scheduledEnd);if(!retrospective&&/^\d{4}-\d{2}-\d{2}$/.test(dueDate)){try{const day=new Date(dueDate+'T00:00:00Z');day.setUTCDate(day.getUTCDate()+1);dueAt=zonedInstant(day.toISOString().slice(0,10),'00:00',zone);}catch{/* Invalid historical dates stay unclassified. */}}
         return {
-            wo: { code: wo.id, ...wo.data,workflowStatusCode:shortWorkOrderStatus(str(wo.data.workflowCode)),...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole),assessmentReady:maintenanceAssessmentReady(wo.data,reviewRole),assessmentApprovalRequired:maintenanceAssessmentApprovalRequired(wo.data),orderApprovalStage:approvalStage,orderApprovalLabel:approvalStage?STAGE_LABELS[approvalStage]:'',orderStageApprovalPending:!!approvalStage&&stageApprovalPending(wo.data,approvalStage),orderStageApprovalReached:!!approvalStage&&stageReached(wo.data,approvalStage) },
+            wo: { code: wo.id, ...wo.data,workflowStatusCode:shortWorkOrderStatus(str(wo.data.workflowCode)),...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole),assessmentReady:maintenanceAssessmentReady(wo.data,reviewRole),assessmentApprovalRequired:maintenanceAssessmentApprovalRequired(wo.data),orderApprovalStage:approvalStage,orderApprovalLabel:approvalStage?STAGE_LABELS[approvalStage]:'',orderStageApprovalPending:!!approvalStage&&stageApprovalPending(wo.data,approvalStage),orderStageApprovalReached:!!approvalStage&&stageReached(wo.data,approvalStage),technicalClosureApprovalRequired:technicalClosureApprovalRequired(wo.data) },
             assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
             earlyClosure:earlyCheck?{blocked:earlyCheck.blocked,started:earlyExecutionStarted(wo),requested:!!object(wo.data.earlyClosureRequest).at}:null,
             maintenanceCycle:cycle,
