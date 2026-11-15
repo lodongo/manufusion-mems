@@ -209,3 +209,10 @@ export function resolvedReviewDoc(data:Data,doc:Doc):Doc{
  if(str(d.reviewerUid)===a.uid&&str(d.reviewRoleCode)===role)return doc;
  return {...doc,data:{...d,reviewRoutingPreviousUid:str(d.reviewerUid),reviewRoutingChanged:true,reviewerUid:a.uid,reviewAssignedName:a.name,reviewRoleCode:role,reviewAssignmentSource:'workflow'}};
 }
+
+/** Use the same current Work Group assignment/position resolver as the responsibility view. */
+export function scopedApprovalCandidates(data:Data,path:string[],gate:string,permission:string,exclude:string[]){
+ const g=groupAt(data.policy,path),s:Stage={label:'Approval',gate,permission,exclude};
+ const people=g&&data.policy?candidates(data,g,s,path):legacyPeople(data,str(data.legacy[gate]),path,exclude);
+ return [...new Set(people.map(p=>p.uid))];
+}

@@ -1,0 +1,6 @@
+import {Card} from '../admin/kit';
+type Evidence={status?:string;steps?:{stream:string;level:number;quorum:{mode:string;value?:number};eligibleUserIds:string[]}[];votes?:{stream:string;level:number;decision:string}[];actors?:{actorUid:string;principalUid:string;mode:string;stream:string;level:number;at:string;note:string}[]};
+export default function MntApprovalProgress({evidence}:{evidence?:Evidence|null}){
+ if(!evidence?.steps?.length)return null;
+ return <Card className="space-y-2"><p className="font-semibold">Approval progress · {evidence.status}</p>{evidence.steps.map(s=>{const n=s.eligibleUserIds.length,required=s.quorum.mode==='all'?n:s.quorum.mode==='count'?Number(s.quorum.value):s.quorum.mode==='percent'?Math.ceil(n*Number(s.quorum.value)/100):1,approved=evidence.votes?.filter(v=>v.stream===s.stream&&v.level===s.level&&v.decision==='approve').length||0;return <div className="text-sm space-y-1" key={s.stream+':'+s.level}><p>{s.stream} · Level {s.level} · {approved}/{required} approved</p><progress className="w-full" max={required} value={approved}/></div>;})}{!!evidence.actors?.length&&<p className="text-xs text-soft">{evidence.actors.length} recorded decisions · {evidence.actors.filter(v=>v.mode!=='direct').length} alternate decisions</p>}</Card>;
+}

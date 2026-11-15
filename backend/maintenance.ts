@@ -3,6 +3,7 @@ import {cleanupAuthorizationStatus,setCleanupAuthorization} from './maintenanceC
 import {defaultMaintenanceGovernance,validateMaintenanceGovernance,MAINTENANCE_APPROVAL_TRANSACTION_CODES,maintenanceActivationBlockers,maintenanceAssessmentApprovalRequired,readMaintenancePolicySnapshot,workRequestApprovalRequired} from './maintenanceGovernancePolicy';
 import {shortWorkOrderStatus} from './maintenanceWorkflowState';
 import {requireStageApproval} from './maintenanceStageApproval';
+import {decideMaintenanceFlow,flowPlain} from './maintenanceApprovalFlow';
 import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
 import { storage } from './platform/sdk';
@@ -905,7 +906,8 @@ async function maintenanceSetupView(ctx:OrgContext){
  const [draft,active]=await Promise.all([getDoc(base+'draft'),getDoc(base+'active')]);
  const policy=draft?validateMaintenanceGovernance(draft.data.policy):defaultMaintenanceGovernance();
  const blockers=maintenanceActivationBlockers(policy);
- return {policy,version:Number(draft?.data.version)||0,updatedAt:str(draft?.data.updatedAt),transactionCodes:MAINTENANCE_APPROVAL_TRANSACTION_CODES,activationReady:!!draft&&!blockers.length,activationBlockers:blockers,active:active?readMaintenancePolicySnapshot(active.data):null};
+ const employees=(await orgUsers(ctx.orgId)).filter(u=>!['disabled','inactive','suspended','deleted'].includes(str(u.data.status))).map(u=>({uid:u.id,name:displayName({me:u} as OrgContext)}));
+ return {employees,policy,version:Number(draft?.data.version)||0,updatedAt:str(draft?.data.updatedAt),transactionCodes:MAINTENANCE_APPROVAL_TRANSACTION_CODES,activationReady:!!draft&&!blockers.length,activationBlockers:blockers,active:active?readMaintenancePolicySnapshot(active.data):null};
 }
 
 // ----- Routes -----
@@ -954,6 +956,8 @@ export const maintenanceRoutes = {
                 if(!group&&!legacyRole)throw new HttpError(409,'Configure '+gate+' in Maintenance Workflows before activation.');
             }
         }
+        const activeEmployees=new Set((await orgUsers(ctx.orgId)).filter(u=>!['disabled','inactive','suspended','deleted'].includes(str(u.data.status))).map(u=>u.id));
+        for(const rule of [policy.workRequest,policy.workOrder,policy.technicalClosure])if(rule.enabled&&rule.flow){for(const uid of [...rule.flow.steps.flatMap(s=>s.approverUids),...rule.flow.alternates.flatMap(a=>[a.principalUid,a.alternateUid])])if(!activeEmployees.has(uid))throw new HttpError(409,'A configured approval employee is inactive or outside the organization.');}
         const activatedAt=nowIso(),fields={version:av+1,draftVersion:v,activatedAt,activatedBy:ctx.uid,policy,reason,transition:'new_transactions_only'};
         await commit([{path:dp,fields:{lastActivatedAt:activatedAt},mask:['lastActivatedAt'],updateTime:draft.updateTime},{path:ap,fields,...(active?{updateTime:active.updateTime}:{exists:false})},{path:base+'/maintenance_governance_activations/'+String(av+1),fields,exists:false}]);
         await rec(ctx,'mnt.governance.activated','v'+(av+1),reason);
@@ -1891,8 +1895,10 @@ export const maintenanceRoutes = {
                     const role=await requireConfiguredMaintenanceRole(ctx,'MNT.WR.APPROVAL',pathOf(doc));
                     if([str(doc.data.requestedBy),str(pending.submittedBy)].includes(ctx.uid)&&!bypass(ctx,'mnt.wr.approval_independence'))throw new HttpError(403,'The request and review authors cannot approve their own confirmation.');
                     if(note.length<10)throw new HttpError(400,'Enter decision notes (at least 10 characters).');
-                    const decision={...pending,status:action==='approve_request'?'approved':'returned',decidedBy:ctx.uid,decidedByName:displayName(ctx),decidedAt:now,jobRole:role.role,decisionNote:note};
+                    const flow=await decideMaintenanceFlow(ctx,doc,'workRequest',{policyVersion:pending.policyVersion,submittedAt:pending.submittedAt,submittedBy:pending.submittedBy,maintenanceTypeCode:pending.maintenanceTypeCode,scheduledStart:pending.scheduledStart,scheduledEnd:pending.scheduledEnd,title:doc.data.title,description:doc.data.description},str(pending.submittedAt),pending.flow,[str(doc.data.requestedBy),str(pending.submittedBy)],action==='approve_request'?'approve':'return',note);
+                    const decision={...pending,status:flow?flow.status:action==='approve_request'?'approved':'returned',...(flow?{flow:flowPlain(flow)}:{}),decidedBy:ctx.uid,decidedByName:displayName(ctx),decidedAt:now,jobRole:role.role,decisionNote:note};
                     const requestApprovalHistory=[...objs(doc.data.requestApprovalHistory),decision];
+                    if(decision.status==='pending'){await done({requestApproval:decision,requestApprovalHistory},'Work Request approval vote recorded','mnt.wr.approval_vote',note);return {ok:true,pendingApproval:true};}
                     if(action==='return_request_approval'){
                         await done({status:'under_review',requestApproval:decision,requestApprovalHistory},'Confirmation returned by approver','mnt.wr.approval_returned',note);return {ok:true};
                     }
@@ -2388,10 +2394,13 @@ export const maintenanceRoutes = {
                     const issue=reviewIssue(ctx,d);
                     if(issue)throw new HttpError(409,issue);
                     if(note.length<10)throw new HttpError(400,'Write technical review notes (at least 10 characters).');
-                    const approval=action==='return_assessment'
+                    const flow=await decideMaintenanceFlow(ctx,doc,'workOrder',{policyVersion:readMaintenancePolicySnapshot(d.maintenanceGovernance)?.version,assessmentTasksVersion:d.assessmentTasksVersion,assessmentTasksAt:d.assessmentTasksAt,assessedAt:d.assessedAt},str(d.assessmentTasksAt),object(d.assessmentReview).flow,[str(d.requestedBy),str(d.assessedBy),str(d.assessmentTasksBy),...(d.executionMode==='confirmed_request'?[]:[str(d.createdBy)])],action==='return_assessment'?'return':'approve',note);
+                    const approval:Obj=action==='return_assessment'
                         ?{status:'changes_requested',version:Number(d.assessmentTasksVersion)||0,by:ctx.uid,name:displayName(ctx),at:now,note,jobRole:role.role}
-                        :approvedAssessmentSnapshot(d,ctx.uid,displayName(ctx),role.role,now,note,ctx.role==='org_super_admin' && ctx.testMode===true);
-                    await done({assessmentReview:approval},action==='return_assessment'?'Assessment returned for correction':'Work assessment approved',
+                        :flow&&flow.status==='pending'?{status:'pending',version:Number(d.assessmentTasksVersion)||0,by:ctx.uid,name:displayName(ctx),at:now,note,jobRole:role.role}:approvedAssessmentSnapshot(d,ctx.uid,displayName(ctx),role.role,now,note,ctx.role==='org_super_admin' && ctx.testMode===true);
+                    if(flow)approval.flow=flowPlain(flow);
+                    if(flow?.status==='pending'){await done({assessmentReview:approval,assessmentReviewHistory:[...objs(d.assessmentReviewHistory),approval]},'Assessment approval vote recorded','mnt.assessment.approval_vote',note);return {ok:true,pendingApproval:true};}
+                    await done({assessmentReview:approval,...(flow?{assessmentReviewHistory:[...objs(d.assessmentReviewHistory),approval]}:{})},action==='return_assessment'?'Assessment returned for correction':'Work assessment approved',
                         action==='return_assessment'?'mnt.assessment.returned':'mnt.assessment.approved',note);
                     return {ok:true};
                 }

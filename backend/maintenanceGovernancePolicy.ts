@@ -1,4 +1,5 @@
 /** Organization-level maintenance policy. Only explicitly activated, supported policies may be snapshotted. */
+import {validateApprovalFlow,type ApprovalFlow} from './maintenanceApprovalFlowPolicy';
 export const MAINTENANCE_APPROVALS=['workRequest','workOrder','technicalClosure'] as const;
 export type ApprovalKey=typeof MAINTENANCE_APPROVALS[number];
 export const WO_APPROVAL_STAGES=['before_assessment','after_assessment','after_readiness','before_execution'] as const;
@@ -6,7 +7,7 @@ export type WOApprovalStage=typeof WO_APPROVAL_STAGES[number];
 export const CONDITION_FIELDS=['maintenanceType','priority','criticality','estimatedCost','riskScore','requiresSpares','requiresExternalService','requiresExternalSpecialist'] as const;
 export type ConditionField=typeof CONDITION_FIELDS[number];
 export type Condition={field:ConditionField;op:'eq'|'gte'|'lte';value:string|number|boolean};
-export type ApprovalRule={enabled:boolean;match:'all'|'any';conditions:Condition[]};
+export type ApprovalRule={enabled:boolean;match:'all'|'any';conditions:Condition[];flow?:ApprovalFlow};
 export type GovernancePolicy={workRequest:ApprovalRule;workOrder:ApprovalRule;technicalClosure:ApprovalRule;workOrderStage:WOApprovalStage};
 const object=(x:unknown):Record<string,unknown>=>x!==null&&typeof x==='object'&&!Array.isArray(x)?x as Record<string,unknown>:{};
 const rule=():ApprovalRule=>({enabled:false,match:'all',conditions:[]});
@@ -29,7 +30,7 @@ export function validateMaintenanceGovernance(raw:unknown):GovernancePolicy{
  for(const k of MAINTENANCE_APPROVALS){
   const r=object(data[k]);
   if(typeof r.enabled!=='boolean'||(r.match!=='all'&&r.match!=='any')||!Array.isArray(r.conditions)||r.conditions.length>20)throw Error('Each approval must specify enablement, a condition matching method and up to 20 conditions.');
-  out[k]={enabled:r.enabled,match:r.match,conditions:r.conditions.map(validateCondition)};
+  out[k]={enabled:r.enabled,match:r.match,conditions:r.conditions.map(validateCondition),...(r.flow!==undefined&&r.flow!==null?{flow:validateApprovalFlow(r.flow)}:{})};
  }
  return out;
 }

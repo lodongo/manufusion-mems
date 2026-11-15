@@ -3,6 +3,7 @@ import {HttpError,str,nowIso,type Obj,type Doc} from './core';
 import {object,texts} from './maintenanceDomain';
 import {configuredOrderApprovalStage,readMaintenancePolicySnapshot} from './maintenanceGovernancePolicy';
 import {transactionPayloadHash} from './unifiedApprovalProof';
+import {decideMaintenanceFlow,flowPlain} from './maintenanceApprovalFlow';
 import {maintenancePermission,requireMaintenanceRole} from './maintenanceAccess';
 import {bypass} from './testModeCore';
 import type {OrgContext} from './guards';
@@ -43,5 +44,6 @@ export async function approveStage(ctx:OrgContext,wo:Doc):Promise<Obj>{
  if(excluded.includes(ctx.uid)&&!bypass(ctx,'mnt.wo.stage_approval.independence'))throw new HttpError(403,'An independent authorized approver is required.');
  const note=str(ctx.body.note).trim().slice(0,500);
  if(note.length<10)throw new HttpError(400,'Enter approval notes (at least 10 characters).');
- return {status:'approved',stage,by:ctx.uid,name:[str(ctx.me.data.firstName),str(ctx.me.data.lastName)].filter(Boolean).join(' ')||ctx.uid,jobRole:role.role,at:nowIso(),note,fingerprint:stageApprovalFingerprint(d,stage),fingerprintSchema:2,policyVersion:readMaintenancePolicySnapshot(d.maintenanceGovernance)!.version};
+ const fingerprint=stageApprovalFingerprint(d,stage),flow=await decideMaintenanceFlow(ctx,wo,'workOrder',{fingerprint},str(d.workflowSince)||str(d.createdAt),object(d.stageApproval).flow,excluded,'approve',note);
+ return {status:flow?flow.status:'approved',...(flow?{flow:flowPlain(flow)}:{}),stage,by:ctx.uid,name:[str(ctx.me.data.firstName),str(ctx.me.data.lastName)].filter(Boolean).join(' ')||ctx.uid,jobRole:role.role,at:nowIso(),note,fingerprint:stageApprovalFingerprint(d,stage),fingerprintSchema:2,policyVersion:readMaintenancePolicySnapshot(d.maintenanceGovernance)!.version};
 }

@@ -21,6 +21,7 @@ import { workGroupResourcePool, requireOutsideGroupOptIn } from './maintenanceWo
 import { assessmentReviewCurrent,maintenanceAssessmentReady } from './maintenanceAssessmentReview';
 import {maintenanceAssessmentApprovalRequired,configuredOrderApprovalStage,technicalClosureApprovalRequired,readMaintenancePolicySnapshot} from './maintenanceGovernancePolicy';
 import {approveStage,requireStageApproval,stageApprovalCurrent,stageApprovalPending,stageReached,STAGE_LABELS} from './maintenanceStageApproval';
+import {decideMaintenanceFlow,flowPlain} from './maintenanceApprovalFlow';
 import { maintenanceKey, reserveTaskSpare, releaseMaintenanceReservations, verifyMaintenanceStockLedger } from './maintenanceInventory';
 import {
     equipmentMake,
@@ -1651,7 +1652,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     const retrospective=isRequestClosureOrder(wo.data);
     if(action==='approve_order_stage'){
         const approval=await approveStage(ctx,wo);
-        await saveWo(ctx,wo,{stageApproval:approval,stageApprovalHistory:[...rows(wo.data.stageApprovalHistory),approval]},'work_order.stage_approved',str(approval.note));return {ok:true};
+        await saveWo(ctx,wo,{stageApproval:approval,stageApprovalHistory:[...rows(wo.data.stageApprovalHistory),approval]},approval.status==='approved'?'work_order.stage_approved':'work_order.stage_approval_vote',str(approval.note));return {ok:true,pendingApproval:approval.status==='pending'};
     }
     if(action==='early_close'||action==='prepare_early_close')return earlyClose(ctx,wo,action==='prepare_early_close');
     if(action==='cancel_order_legacy')return earlyClose(ctx,wo,false,false,true);
@@ -1663,7 +1664,9 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         const excluded=new Set([str(pending.by),str(object(wo.data.safetySignoff).by),...Object.values(executions).flatMap(e=>texts(object(e).performers)),...rows(wo.data.timeLogs).map(e=>str(e.uid))].filter(Boolean));
         if(excluded.has(ctx.uid)&&!bypass(ctx,'mnt.wo.technical_closure.independence'))throw new HttpError(403,'An independent technical closure approver is required.');
         const note=requiredText(b.note,'Technical closure approval notes',10);
-        const approved={...wo,data:{...wo.data,technicalClosure:{at:nowIso(),by:ctx.uid,name:name(ctx),note,policyVersion:pending.policyVersion}}};
+        const flow=await decideMaintenanceFlow(ctx,wo,'technicalClosure',{policyVersion:pending.policyVersion,at:pending.at,mode:pending.mode,safetySignoff:wo.data.safetySignoff,taskExecution:wo.data.taskExecution,serviceReports:wo.data.serviceReports,earlyClosureRequest:wo.data.earlyClosureRequest},str(pending.at),pending.flow,[...excluded],'approve',note);
+        if(flow?.status==='pending'){await saveWo(ctx,wo,{technicalClosurePending:{...pending,flow:flowPlain(flow)},technicalClosureVoteHistory:[...rows(wo.data.technicalClosureVoteHistory),flowPlain(flow)]},'work_order.technical_closure_vote',note);return {ok:true,pendingTechnicalApproval:true};}
+        const approved:Doc={...wo,data:{...wo.data,technicalClosure:{at:nowIso(),by:ctx.uid,name:name(ctx),note,policyVersion:pending.policyVersion,...(flow?{flow:flowPlain(flow)}:{})}}};
         if(pending.mode==='early')return earlyClose(ctx,approved,false,false,false,true);
         if(!object(wo.data.safetySignoff).at)throw new HttpError(409,'Complete safety sign-off first.');
         if((await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared'))throw new HttpError(409,'Clear every recorded incident or near miss before technical closure.');
