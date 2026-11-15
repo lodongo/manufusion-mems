@@ -166,6 +166,7 @@ export interface TokenClaims {
     email: string;
     signInProvider: string;
     iat: number;
+    authTime?: number;
     emailVerified: boolean;
 }
 
@@ -234,6 +235,7 @@ export async function verifyIdToken(token: unknown): Promise<TokenClaims> {
         email: str(claims.email).toLowerCase(),
         signInProvider: str(firebaseClaim.sign_in_provider),
         iat,
+        authTime: typeof claims.auth_time === 'number' ? claims.auth_time : undefined,
         emailVerified: claims.email_verified === true,
     };
 }

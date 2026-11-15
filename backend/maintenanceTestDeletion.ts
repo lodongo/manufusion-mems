@@ -2,7 +2,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {HttpError,getDoc,listDocs,runQuery,fieldEq,nowIso,str,isObj,type Obj,type Doc} from './core';
 import {commit,withLock,type Write} from './finCore';
-import {testModeEnvironmentAllowed,testModeActiveFor,clearTestModeCache} from './testModeCore';
+import {cleanupEligible,requireCleanupAuthorization,cleanupUseWrite} from './maintenanceCleanupAuthorization';
 import type {OrgContext} from './guards';
 
 export const TEST_MAINTENANCE_COLLECTIONS={order:'work_orders',assessment:'work_assessments',request:'work_requests'} as const;
@@ -11,7 +11,7 @@ const patterns:Record<Kind,RegExp>={order:/^WO\d{8}(?:_[1-9]\d{0,8})?$/,assessme
 const row=(v:unknown):Obj=>isObj(v)?v:{};
 const asRows=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const root=(ctx:OrgContext)=>'organizations/'+ctx.orgId;
-export function testDeletionEnabled(ctx:Pick<OrgContext,'role'|'testMode'>){return ctx.role==='org_super_admin'&&ctx.testMode===true&&testModeEnvironmentAllowed();}
+export function testDeletionEnabled(ctx:Pick<OrgContext,'role'|'testMode'>){return cleanupEligible(ctx);}
 export function deletionKind(v:unknown):Kind {if(v==='order'||v==='assessment'||v==='request')return v;throw new HttpError(400,'Choose a maintenance record type.');}
 export function deletionCode(kind:Kind,v:unknown){const code=str(v);if(!patterns[kind].test(code))throw new HttpError(400,'Choose a valid maintenance record number.');return code;}
 /** Exact reference matching, not substring matching; audit text and attachments are excluded. */
@@ -21,23 +21,22 @@ export function hasMaintenanceReference(v:unknown,code:string):boolean{
  if(isObj(v))return Object.entries(v).some(([k,x])=>!['history','workflowTransitions','description','note','reason','title','narrative','photos','attachments'].includes(k)&&(k===code||hasMaintenanceReference(x,code)));
  return false;
 }
-function requireMode(ctx:OrgContext){if(!testDeletionEnabled(ctx))throw new HttpError(403,'Permanent deletion requires active development Test Mode and Organization Super Admin access.');}
+async function requireMode(ctx:OrgContext){return requireCleanupAuthorization(ctx);}
 const assertVersion=(doc:Doc)=>{if(!doc.updateTime)throw new HttpError(409,'Record version is missing. Refresh and try again.');return doc.updateTime;};
 const minimal=(d:Doc,kind:Kind)=>({kind,code:d.id,title:str(d.data.title)||str(row(d.data.sourceRequest).title),status:str(d.data.status),wrCode:str(d.data.wrCode)||str(d.data.workRequestCode),parentWoCode:str(d.data.parentWoCode),rootWoCode:str(d.data.rootWoCode),createdAt:str(d.data.createdAt),unitCode:str(d.data.unitCode)||str(row(d.data.sourceRequest).unitCode)});
 export async function listTestMaintenanceDeletion(ctx:OrgContext){
- requireMode(ctx);
+ await requireMode(ctx);
  const [orders,assessments,requests,trail,batches]=await Promise.all([...Object.values(TEST_MAINTENANCE_COLLECTIONS).map(c=>listDocs(root(ctx)+'/'+c)),listDocs(root(ctx)+'/maintenance_deletion_audit'),listDocs(root(ctx)+'/maintenance_cleanup_batches')]);
  return {batches:batches.map(d=>({id:d.id,...d.data})),records:[...orders.filter(d=>patterns.order.test(d.id)).map(d=>minimal(d,'order')),...assessments.filter(d=>patterns.assessment.test(d.id)).map(d=>minimal(d,'assessment')),...requests.filter(d=>patterns.request.test(d.id)).map(d=>minimal(d,'request'))],trail:trail.map(d=>({id:d.id,...d.data})).sort((a,b)=>str((b as Obj).deletedAt).localeCompare(str((a as Obj).deletedAt)))};
 }
 const dependentCollections=['maintenance_windows','goods_issues','inventory_reservations','material_journal','mnt_supply_links','procurement_requirements','procurement_requisitions','procurement_quotations','procurement_orders','fin_requests','fin_journal','safety_incidents','maintenance_material_reconciliations','maintenance_assessment_revisions','bom_revisions','asset_task_proposals','asset_task_template_revisions','material_creation_candidates','vendor_onboarding_requests','stores_issue_vouchers'];
 export async function purgeTestMaintenance(ctx:OrgContext){
- requireMode(ctx);
+ await requireMode(ctx);
  const kind=deletionKind(ctx.body.kind),code=deletionCode(kind,ctx.body.code),reason=str(ctx.body.reason).trim();
  if(ctx.body.confirm!==code||reason.length<10||reason.length>500)throw new HttpError(400,'Type the exact record number and enter a reason of 10–500 characters.');
  // Same lock order as early closure and financial stock issue; no mutation may bypass these guards.
  return withLock(ctx.orgId,'maintenance_operations',()=>withLock(ctx.orgId,'maintenance_po_commitment',()=>withLock(ctx.orgId,'inventory_movements',async()=>{
-  clearTestModeCache();
-  if(!await testModeActiveFor(ctx.orgId))throw new HttpError(403,'Test Mode is no longer active.');
+  await requireMode(ctx);
   const base=root(ctx),collection=TEST_MAINTENANCE_COLLECTIONS[kind],path=base+'/'+collection+'/'+code;
   const [target,orders,assessments,requests]=await Promise.all([getDoc(path),listDocs(base+'/work_orders'),listDocs(base+'/work_assessments'),listDocs(base+'/work_requests')]);
   if(!target)throw new HttpError(404,'The maintenance record does not exist.');
@@ -83,8 +82,7 @@ export async function purgeTestMaintenance(ctx:OrgContext){
   const at=nowIso(),auditId=kind+'_'+code;
   const trail={...minimal(target,kind),action:'permanent_delete',deletedAt:at,deletedBy:ctx.uid,deletedByName:[str(ctx.me.data.firstName),str(ctx.me.data.lastName)].filter(Boolean).join(' ')||ctx.actor.email,reason,orgId:ctx.orgId,testMode:true,environment:'development',unlinked,subOrderSequence:Number(d.subOrderSequence)||0,recordVersion:assertVersion(target)};
   writes.push({path:base+'/maintenance_deletion_audit/'+auditId,fields:trail,exists:false},{path,delete:true,updateTime:assertVersion(target)});
-  clearTestModeCache();
-  if(!await testModeActiveFor(ctx.orgId))throw new HttpError(403,'Test Mode expired before deletion.');
+  writes.push(cleanupUseWrite(ctx,await requireMode(ctx)));
   await commit(writes);
   return {ok:true,auditId,code,kind,unlinked};
  })));
@@ -103,8 +101,7 @@ const isReservation=(d:Obj)=>['MAINTENANCE_RESERVATION','MAINTENANCE_RESERVATION
 function procurementDraft(d:Obj){return ['draft','validated','cancelled','rejected','returned','pending_approval'].includes(str(d.status))&&!d.postedAt&&!d.journalId&&!d.openedAt&&!d.approvedAt&&!asRows(d.lines).some(l=>Number(l.receivedQty)>0||Number(l.acceptedQty)>0)&&!asRows(d.deliveries).length&&!asRows(d.receipts).length;}
 function ownedKind(d:Obj){return str(d.source)==='maintenance'||!!str(row(d.maintenanceSource).woCode);}
 async function bulkPlan(ctx:OrgContext){
- requireMode(ctx);
- clearTestModeCache();if(!await testModeActiveFor(ctx.orgId))throw new HttpError(403,'Test Mode is no longer active.');
+ const grant=await requireMode(ctx);
  const base=root(ctx),body=ctx.body;
  const selected=Array.isArray(body.records)?body.records.map(row):[];
  if(!selected.length||selected.length>400)throw new HttpError(400,'Choose 1–400 maintenance records.');
@@ -165,13 +162,13 @@ async function bulkPlan(ctx:OrgContext){
  // Single atomic commit: documents plus numbered tombstones, one batch receipt.
  const writeCount=entries.length+chosen.length+1;if(writeCount>470)blockers.add('Cleanup requires '+writeCount+' database writes. Select a smaller group (maximum 470 writes per batch).');
  // Avoid throwing away attached service reports separately; they are private storage objects.
- const fingerprint=createHash('sha256').update(JSON.stringify({entries:entries.map(x=>[keyOf(x),x.doc.updateTime]),blockers:[...blockers].sort(),retained:[...retained].sort()})).digest('hex');
+ const fingerprint=createHash('sha256').update(JSON.stringify({authorization:str(grant.data.tokenHash),entries:entries.map(x=>[keyOf(x),x.doc.updateTime]),blockers:[...blockers].sort(),retained:[...retained].sort()})).digest('hex');
  return {entries,chosen,counts,fingerprint,blockers:[...blockers].sort(),retained:[...retained].sort(),requestedCount:requested.size};
 }
 const bulkView=(p:Awaited<ReturnType<typeof bulkPlan>>)=>({fingerprint:p.fingerprint,counts:p.counts,records:p.chosen.map(x=>minimal(x.doc,x.kind!)),total:p.entries.length,blockers:p.blockers,retained:p.retained,requestedCount:p.requestedCount});
 export async function previewBulkTestMaintenance(ctx:OrgContext){return bulkView(await bulkPlan(ctx));}
 export async function purgeBulkTestMaintenance(ctx:OrgContext){
- requireMode(ctx);
+ await requireMode(ctx);
  const reason=str(ctx.body.reason).trim();if(ctx.body.confirm!=='DELETE TEST DATA'||reason.length<10||reason.length>500)throw new HttpError(400,'Type DELETE TEST DATA and enter a reason of 10–500 characters.');
  return withLock(ctx.orgId,'maintenance_operations',()=>withLock(ctx.orgId,'maintenance_po_commitment',()=>withLock(ctx.orgId,'inventory_movements',async()=>{
   const plan=await bulkPlan(ctx);if(plan.fingerprint!==ctx.body.fingerprint)throw new HttpError(409,'Records changed since preview. Preview the cleanup again.');
@@ -180,7 +177,7 @@ export async function purgeBulkTestMaintenance(ctx:OrgContext){
   const tombstones:Write[]=plan.chosen.map(x=>({path:base+'/maintenance_deletion_audit/'+x.kind+'_'+x.doc.id,fields:{...minimal(x.doc,x.kind!),action:'permanent_delete',deletedAt:at,deletedBy:ctx.uid,deletedByName:name,reason,orgId:ctx.orgId,testMode:true,environment:'development',batchId,subOrderSequence:Number(x.doc.data.subOrderSequence)||0,recordVersion:assertVersion(x.doc),unlinked:[]},exists:false}));
   const writes:Write[]=plan.entries.map(x=>({path:x.collection==='@platform/audit_events'?'audit_events/'+x.doc.id:base+'/'+keyOf(x),delete:true,updateTime:assertVersion(x.doc)}));
   writes.push(...tombstones,{path:base+'/maintenance_cleanup_batches/'+batchId,fields:{batchId,action:'bulk_cleanup',orgId:ctx.orgId,testMode:true,environment:'development',deletedAt:at,deletedBy:ctx.uid,deletedByName:name,reason,counts:plan.counts,deleted:plan.entries.map(x=>keyOf(x)),retained:plan.retained},exists:false});
-  clearTestModeCache();if(!await testModeActiveFor(ctx.orgId))throw new HttpError(403,'Test Mode expired before deletion.');
+  writes.push(cleanupUseWrite(ctx,await requireMode(ctx)));
   await commit(writes);return {ok:true,batchId,...bulkView(plan)};
  })));
 }

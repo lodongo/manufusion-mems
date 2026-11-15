@@ -3,7 +3,7 @@ import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { Loader2 } from 'lucide-react';
 import { firebaseAuth } from './firebase';
 import { flush, installAuditTracking, track } from './lib/audit';
-import { callBackend, publicGet } from './lib/backend';
+import { callBackend, publicGet, revokeCleanupOnLogout, storeCleanupToken } from './lib/backend';
 import { navigate, useHashRoute } from './lib/route';
 import { EMPTY_LOCKED, SITE_DEFAULTS, SiteContext, applyTheme, fetchSite, type SiteConfig, type SiteLocked } from './lib/site';
 import { effectivePersonalTheme } from './lib/personalTheme';
@@ -99,7 +99,7 @@ function App() {
             setNotice('');
             setSession(null);
             navigate('');
-            void signOut(firebaseAuth);
+            void revokeCleanupOnLogout().finally(()=>signOut(firebaseAuth));
         };
         window.addEventListener('mems-health-lock', locked);
         return () => window.removeEventListener('mems-health-lock', locked);
@@ -160,7 +160,7 @@ function App() {
         void checkSetup();
     }, [checkSetup]);
 
-    useEffect(() => onAuthStateChanged(firebaseAuth, (user) => setAuthUser(user)), []);
+    useEffect(() => onAuthStateChanged(firebaseAuth, (user) => {if(!user)storeCleanupToken('');setAuthUser(user);}), []);
 
     useEffect(() => {
         if (setup !== 'done' || !authUser) {
@@ -222,7 +222,7 @@ function App() {
 
     const handleSignOut = useCallback(() => {
         track('auth', 'logout');
-        void flush().finally(() => {
+        void Promise.allSettled([flush(),revokeCleanupOnLogout()]).finally(() => {
             setNotice('');
             navigate('');
             void signOut(firebaseAuth);

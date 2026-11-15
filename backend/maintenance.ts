@@ -1,4 +1,5 @@
 import {testDeletionEnabled,listTestMaintenanceDeletion,purgeTestMaintenance,previewBulkTestMaintenance,purgeBulkTestMaintenance} from './maintenanceTestDeletion';
+import {cleanupAuthorizationStatus,setCleanupAuthorization} from './maintenanceCleanupAuthorization';
 import {shortWorkOrderStatus} from './maintenanceWorkflowState';
 import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
@@ -892,6 +893,8 @@ async function ensureCurrentAssessmentApproval(ctx:OrgContext,data:Obj) {
 import { maintenanceWorkGroupRoutes } from './maintenanceWorkGroups';
 export const maintenanceRoutes = {
     ...maintenanceWorkGroupRoutes,
+    'POST /api/org/mnt/test_deletion/authorization': [orgRoute('org.mnt.test_deletion.authorization',null,async ctx=>{requireMnt(ctx);return cleanupAuthorizationStatus(ctx);})],
+    'POST /api/org/mnt/test_deletion/authorization/set': [orgRoute('org.mnt.test_deletion.authorization.set',null,async ctx=>{requireMnt(ctx);return setCleanupAuthorization(ctx);})],
     'POST /api/org/mnt/test_deletion/list': [
         orgRoute('org.mnt.test_deletion.list',null,async ctx=>{requireMnt(ctx);return listTestMaintenanceDeletion(ctx);}),
     ],
