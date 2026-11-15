@@ -57,7 +57,7 @@ async function timeRoute(ctx:OrgContext){
  if(!person)throw new HttpError(403,'An active maintenance execution role is required.');
  const correcting=action==='correct',manual=action==='manual'||correcting;
  if(correcting&&(!supervisor||!existing||!['recorded','running','approved','returned','pending_approval'].includes(str(existing.data.status))||note.length<10))throw new HttpError(403,'A scoped supervisor must correct an existing entry with a reason.');
- const classCode=woCode?'DIRECT':correcting?str(existing?.data.classCode):str(b.classCode),cls=correcting?{code:classCode,label:str(existing?.data.classification),productive:existing?.data.productive===true,requiresOrder:!!woCode,delayOwner:str(existing?.data.delayOwner)}:policy.classes.find(x=>x.code===classCode);
+ const classCode=woCode?'DIRECT':correcting?str(existing?.data.classCode):str(b.classCode),cls=correcting?{code:classCode,label:str(existing?.data.classification),productive:existing?.data.productive===true,requiresOrder:!!woCode,delayOwner:str(existing?.data.delayOwner),deductible:existing?.data.deductible===true}:policy.classes.find(x=>x.code===classCode);
  if(!cls||cls.requiresOrder!==!!woCode)throw new HttpError(400,'Choose a valid time classification.');
  if(!woCode&&note.length<5)throw new HttpError(400,'Describe the non-work-order booking.');
  if(wo){
@@ -76,7 +76,7 @@ async function timeRoute(ctx:OrgContext){
  const others=mine.filter(d=>!correcting||d.id!==existing!.id).map(record);
  if(others.some(d=>d.status==='running')||timeConflict(others,uid,{start,end},now))throw new HttpError(409,'Another personal timer or overlapping booking exists.');
  const approvalRequired=correcting?existing!.data.approvalRequired===true:policy.approvalEnabled;
- const docId=randomUUID().replaceAll('-',''),entry:Obj={uid,name:person.name,groupId:person.groupId,groupName:person.groupName,woCode,taskId,classCode,classification:cls.label,productive:cls.productive,delayOwner:cls.delayOwner,approvalRequired,policyVersion:correcting?Number(existing!.data.policyVersion)||0:policy.version,start:new Date(start).toISOString(),end:manual?new Date(end).toISOString():'',status:manual?completedStatus(approvalRequired):'running',source:supervisor?'supervisor':manual?'manual':'live',createdAt:at,createdBy:ctx.uid,note,...(correcting?{supersedes:existing!.id}:{})};
+ const docId=randomUUID().replaceAll('-',''),entry:Obj={uid,name:person.name,groupId:person.groupId,groupName:person.groupName,woCode,taskId,classCode,classification:cls.label,productive:cls.productive,delayOwner:cls.delayOwner,deductible:cls.deductible===true,approvalRequired,policyVersion:correcting?Number(existing!.data.policyVersion)||0:policy.version,start:new Date(start).toISOString(),end:manual?new Date(end).toISOString():'',status:manual?completedStatus(approvalRequired):'running',source:supervisor?'supervisor':manual?'manual':'live',createdAt:at,createdBy:ctx.uid,note,...(correcting?{supersedes:existing!.id}:{})};
  if(correcting)await commit([{path:col+'/'+existing!.id,fields:{...existing!.data,status:'superseded',supersededBy:docId,correctionReason:note,correctedBy:ctx.uid,correctedAt:at},updateTime:existing!.updateTime},{path:col+'/'+docId,fields:entry,exists:false}]);else if(!await writeDoc(col+'/'+docId,entry,{exists:false}))throw new HttpError(409,'Booking could not be created.');
  await audit([{category:'maintenance',action:'mnt.time.'+action,actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:docId},details:note}]);return {ok:true,id:docId};
 }
