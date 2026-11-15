@@ -15,7 +15,7 @@ export default function MntStatusReview({data,onRefresh}:{data:MntData;onRefresh
  const wo=data.wo||{},review=data.statusReview||{},check=data.checklist,retro=wo.executionMode==='request_closure',tasks=rows(wo.assessmentTasks),states=rows(review.states),items=rows(data.readiness?.items),[chart,setChart]=useState<'waiting'|'overdue'>('overdue');
  const completed=Number(review.completedTasks)||0,reconciled=Number(review.reconciledTasks)||0,requirements=rows(check?.items),readyCount=requirements.filter(x=>x.done).length;
  const money=(v:any)=>v===null||v===undefined?'—':(data.currency?data.currency+' ':'')+Number(v).toLocaleString(undefined,{maximumFractionDigits:2});
- const costs=check?.estimate,final=wo.finalCost;
+ const costs=tasks.length&&!retro?check?.estimate:undefined,final=wo.finalCost;
  const approvals=[['Assessment',tasks.length>0],['Assessment approval',!!wo.assessmentReviewCurrent],['Planning readiness',!!wo.readiness?.at],['Scheduling',!!wo.windowId],['Execution',tasks.length>0&&completed===tasks.length],['Reconciliation',tasks.length>0&&reconciled===tasks.length],['Safety sign-off',!!wo.safetySignoff?.at],['Operations handover',!!wo.handover?.at],['Technical closure',wo.status==='closed']] as const;
  const applicable=retro?approvals.slice(4):approvals;const passed=applicable.filter(x=>x[1]).length;
  return <div className="space-y-4">

@@ -724,7 +724,8 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
 
     const assessed = !!r.assessment.maintenanceTypeCode && !r.assessment.headerIssue;
     const today = new Date().toISOString().slice(0, 10);
-    const datesOk = !!startDate && !!endDate && startDate >= today && endDate >= startDate;
+    const conversionMin=setup.maintenanceCycle?.restrictedTypes.includes(r.assessment.maintenanceTypeCode)?setup.maintenanceCycle.nextStart:setup.maintenanceCycle?.today||today;
+    const datesOk = !!startDate && !!endDate && startDate >= conversionMin && endDate >= startDate;
     const buttons: Array<{ key: string; label: string; icon: ReactNode; variant?: 'primary' | 'secondary' | 'danger'; onClick: () => void }> = [];
     if (can.confirmClosure) {
         buttons.push({ key: 'confirmClosure', label: 'Confirm closure', icon: <CheckCircle2 className='h-4 w-4' />, onClick: () => setMode('confirm_closure') });
@@ -839,9 +840,9 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
                         )}
                         {mode === 'convert' && (
                             <div className='grid grid-cols-2 gap-2'>
-                                <Field id='wr-start' type='date' label='Scheduled start *' min={today} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                                <Field id='wr-end' type='date' label='Scheduled end *' min={startDate || today} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                                {startDate && endDate && !datesOk && <p className='col-span-2 text-xs text-amber-300'>The start cannot be in the past and the end cannot be before the start.</p>}
+                                <Field id='wr-start' type='date' label='Start date *' min={conversionMin} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                                <Field id='wr-end' type='date' label='End date *' min={startDate || conversionMin} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                                {startDate && endDate && !datesOk && <p className='col-span-2 text-xs text-amber-300'>The earliest permitted start is {conversionMin}. End date cannot be before start date.</p>}
                             </div>
                         )}
                         {(noteNeeded || mode === 'convert' || mode === 'confirm_closure') && (

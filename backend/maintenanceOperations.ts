@@ -975,7 +975,7 @@ async function windowSave(ctx: OrgContext) {
     const schedule = criticalPath(selected);
     const needed = Math.max(...schedule.tasks.map((t) => t.finish));
     const cycle=await getMaintenanceCycle(ctx);
-    for(const t of schedule.tasks){const w=wos.find(x=>x.id===t.woCode);if(!w||w.data.executionMode!=='confirmed_request')continue;const a=localDate(new Date(Date.parse(start)+t.start*3600000),cycle.timeZone),z=localDate(new Date(Date.parse(start)+t.finish*3600000-1),cycle.timeZone);if(a<str(w.data.scheduledStart)||z>str(w.data.scheduledEnd))throw new HttpError(409,w.id+': the task falls outside the Work Order start/end dates. Change and reconfirm the plan before scheduling.');}
+    for(const t of schedule.tasks){const w=wos.find(x=>x.id===t.woCode);if(!w||!w.data.cycleAdmission)continue;const zone=str(object(w.data.cycleAdmission).timeZone)||cycle.timeZone,a=localDate(new Date(Date.parse(start)+t.start*3600000),zone),z=localDate(new Date(Date.parse(start)+t.finish*3600000-1),zone);if(a<str(w.data.scheduledStart)||z>str(w.data.scheduledEnd))throw new HttpError(409,w.id+': the task falls outside the Work Order start/end dates. Change and reconfirm the plan before scheduling.');}
     if (b.action === 'preview_window') return { schedule, neededHours: needed, start, end };
     if (schedule.conflicts.length) throw new HttpError(409, schedule.conflicts.join(' '));
     if (needed > durationHours + 1e-6)

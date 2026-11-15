@@ -325,7 +325,7 @@ const header = {
     natureCode: first(l.failureModes),
     severityCode: l.criticality[0].code,
     solutionCodes: [first(l.solutions)],
-    maintenanceTypeCode: l.maintenanceTypes[0].code,
+    maintenanceTypeCode: l.maintenanceTypes.find(x=>x.code==='MAI-006')?.code||l.maintenanceTypes[0].code,
 };
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'assess', ...header });
 const risk = [
@@ -1233,14 +1233,16 @@ const confirmedWR=await createCurrentWorkRequest({title:'Current order-first req
 assert.equal(snapshot(r+'/work_requests/'+confirmedWR.code).data.reviewProcessVersion,3);
 await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:confirmedWR.code,action:'start_review'});
 await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:confirmedWR.code,action:'confirm_review'}),/maintenance type/i);
-const futureDate=new Date(Date.now()+14*86400000).toISOString().slice(0,10);
-const confirmedWO=await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:confirmedWR.code,action:'confirm_review',maintenanceTypeCode:header.maintenanceTypeCode,scheduledStart:futureDate,scheduledEnd:futureDate});
+const futureDate=new Date(Date.now()+14*86400000).toISOString().slice(0,10),plannedHeader={...header,maintenanceTypeCode:l.maintenanceTypes[0].code};
+const currentDate=new Date().toISOString().slice(0,10);
+await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:confirmedWR.code,action:'confirm_review',maintenanceTypeCode:plannedHeader.maintenanceTypeCode,scheduledStart:currentDate,scheduledEnd:currentDate}),/next maintenance cycle/i);
+const confirmedWO=await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:confirmedWR.code,action:'confirm_review',maintenanceTypeCode:plannedHeader.maintenanceTypeCode,scheduledStart:futureDate,scheduledEnd:futureDate});
 assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.scheduledStart,futureDate);
 assert.equal(snapshot(r+'/work_requests/'+confirmedWR.code).data.status,'confirmed');
 assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.workflowCode,'WO010');
 assert.deepEqual(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.assessmentTasks,[]);
 assert.equal((await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',{code:confirmedWR.code,action:'confirm_review'})).woCode,confirmedWO.woCode);
-await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'assess_header',...header});
+await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'assess_header',...plannedHeader});
 assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.assessedBy,people.assessor[0]);
 const currentTask={...task('current_check','Inspect and repair conveyor condition',''),equipmentId:'CONVEYOR'};
 await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'save_task_assessment',tasks:[currentTask]});

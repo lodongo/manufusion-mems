@@ -1962,6 +1962,7 @@ export const maintenanceRoutes = {
                     if (scheduledEnd < scheduledStart) throw new HttpError(400, 'The scheduled end date cannot be before the start date.');
                     if (scheduledStart < now.slice(0, 10)) throw new HttpError(400, 'The scheduled start date cannot be in the past.');
                     if (Date.parse(scheduledEnd) - Date.parse(scheduledStart) > 366 * 86400_000) throw new HttpError(400, 'A work order can be scheduled over at most one year.');
+                    const cycle=await getMaintenanceCycle(ctx);validateCycleDates(str(d.maintenanceTypeCode),scheduledStart,scheduledEnd,cycle);
                     if(!objs(d.assessmentTasks).length) throw new HttpError(409,'Complete the task-by-task work assessment, including spares, services and each task risk assessment, before conversion.');
                     await ensureCurrentAssessmentApproval(ctx,d);
                     await requireConfiguredMaintenanceRole(ctx,'MNT.WR.CONVERT',pathOf(doc));
@@ -1980,6 +1981,7 @@ export const maintenanceRoutes = {
                     base.solutions = objs(d.solutions) as unknown as Plain;
                     base.scheduledStart = scheduledStart;
                     base.scheduledEnd = scheduledEnd;
+                    base.initialScheduledStart=scheduledStart;base.initialScheduledEnd=scheduledEnd;base.cycleAdmission={startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycleRestricted(str(d.maintenanceTypeCode))?cycle.nextStart:cycle.today,at:now,version:cycle.version};
                     base.convertedBy = ctx.uid;
                     const woCode = await createWo(ctx, base, doc.id);
                     await done({ ...(str(d.status)==='to_be_assessed'?{}:{status:'converted'}), woCode, convertedBy: ctx.uid, convertedByName: displayName(ctx), convertedAt: now }, `Converted to ${woCode}`, 'mnt.wr.converted', woCode);
@@ -2276,6 +2278,7 @@ export const maintenanceRoutes = {
                     const start = readDate(b.scheduledStart, 'start');
                     const end = readDate(b.scheduledEnd, 'finish');
                     if (Date.parse(end) < Date.parse(start)) throw new HttpError(400, 'The finish must be after the start.');
+                    validateCycleDates(str(d.maintenanceTypeCode),start,end,await getMaintenanceCycle(ctx),d);
                     const users = await orgUserMap(ctx.orgId);
                     const ids = [...new Set(strs(b.assignees))];
                     if (!ids.length || ids.length > 20) throw new HttpError(400, 'Assign between 1 and 20 people.');
