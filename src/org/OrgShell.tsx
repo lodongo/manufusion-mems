@@ -23,6 +23,7 @@ const WorkRequests = lazy(() => import('./WorkRequests'));
 const WorkOrders = lazy(() => import('./WorkOrders'));
 const MntHome = lazy(() => import('./MntHome'));
 const MntDashboard = lazy(() => import('./MntDashboard'));
+const MntWorkforce = lazy(() => import('./MntWorkforce'));
 const MntWorkGroups = lazy(() => import('./MntWorkGroups'));
 const MntSetup = lazy(() => import('./MntSetup'));
 const MntWindows = lazy(() => import('./MntWindows'));
@@ -86,6 +87,7 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
         title: 'Maintenance (MNT)',
         items: [
             { key: 'mnt_dashboard', label: 'Dashboard', Icon: LayoutDashboard, perm: 'MNT.view', module: 'MNT' },
+            { key: 'mnt_workforce', label: 'Artisan capacity & time', Icon: ClipboardList, perm: 'MNT.view', module: 'MNT' },
             { key: 'mnt', label: 'Maintenance workspace', Icon: Wrench, perm: 'MNT.', module: 'MNT' },
             { key: 'work_requests', label: 'Work requests', Icon: Wrench, perm: 'MNT.', module: 'MNT' },
             { key: 'work_orders', label: 'Work orders', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
@@ -180,6 +182,7 @@ const TITLES: Record<string, string> = {
     service_catalog: 'Service catalog',
     gl_accounts: 'GL account master',
     mnt_dashboard: 'Maintenance Dashboard',
+    mnt_workforce: 'Artisan capacity & time',
     mnt_setup: 'Maintenance Setup',
     work_requests: 'Work requests',
     work_orders: 'Work orders',
@@ -286,6 +289,9 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             break;
         case 'mnt_budgets':
             content = <MntBudgets />;
+            break;
+        case 'mnt_workforce':
+            content = <MntWorkforce />;
             break;
         case 'mnt_dashboard':
             content = <MntDashboard sessionKey={(session.organization?.id||'unknown')+'.'+session.user.uid} />;
