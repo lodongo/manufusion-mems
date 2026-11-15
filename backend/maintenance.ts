@@ -1,6 +1,6 @@
 import {testDeletionEnabled,listTestMaintenanceDeletion,purgeTestMaintenance,previewBulkTestMaintenance,purgeBulkTestMaintenance} from './maintenanceTestDeletion';
 import {cleanupAuthorizationStatus,setCleanupAuthorization} from './maintenanceCleanupAuthorization';
-import {defaultMaintenanceGovernance,validateMaintenanceGovernance,MAINTENANCE_APPROVAL_TRANSACTION_CODES} from './maintenanceGovernancePolicy';
+import {defaultMaintenanceGovernance,validateMaintenanceGovernance,MAINTENANCE_APPROVAL_TRANSACTION_CODES,maintenanceActivationBlockers,maintenanceAssessmentApprovalRequired,readMaintenancePolicySnapshot} from './maintenanceGovernancePolicy';
 import {shortWorkOrderStatus} from './maintenanceWorkflowState';
 import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople} from './maintenanceResponsibility';
@@ -12,7 +12,7 @@ import { requireMaintenanceRole, configuredMaintenanceRole } from './maintenance
 import {groupAt,groupGateRole,workGroupGateAllowed,loadWorkGroupPolicy,outsideExecutionAccess} from './maintenanceWorkGroupPolicy';
 import { prepareMaintenanceAssessment } from './maintenanceAssessmentIntegration';
 import { resolveMaintenanceEquipmentAsset } from './maintenanceAssetLink';
-import { assessmentReviewCurrent, approvedAssessmentSnapshot, reviewAssessmentPrerequisites } from './maintenanceAssessmentReview';
+import { assessmentReviewCurrent, approvedAssessmentSnapshot, reviewAssessmentPrerequisites, maintenanceAssessmentReady } from './maintenanceAssessmentReview';
 import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, randomId, rateLimit, runQuery, fieldEq, str, updateFields, writeDoc, type Doc, type Obj, type Plain } from './core';
 import { audit } from './audit';
 import { orgUsers } from './org';
@@ -753,7 +753,7 @@ async function closeRequestWithOrder(ctx:OrgContext,request:Doc,closure:Obj,patc
  const executor={uid:str(closure.closedBy),name:str(closure.closedByName),role:str(closure.closedByRole),positionCode:str(closure.closedByPositionCode)};
  const task={id,title:'Work completed at request review',description:str(closure.description),assemblyId:str(request.data.assemblyId),equipmentId:str(request.data.unitId),maintenanceTypeCode:str(closure.maintenanceTypeCode),maintenanceTypeLabel:str(closure.maintenanceTypeLabel),spares:[],services:[],risk:[]};
  const directCompletion={requestCode:request.id,performedDate:str(closure.dateClosed),durationMinutes:minutes,executor,recordedBy:str(closure.recordedBy)||str(closure.by),recordedByName:str(closure.recordedByName)||str(closure.name),recordedAt:str(closure.recordedAt)||str(closure.at),noSparesOrServices:true,reportedWork:str(closure.description),failureModeCode:str(closure.failureModeCode),failureModeLabel:str(closure.failureModeLabel),causeCode:str(closure.causeCode),causeLabel:str(closure.causeLabel),solutions:objs(closure.solutions)};
- const wo:Obj={...base,...group,code,wrCode:request.id,path,executionMode:'request_closure',directCompletion,scheduledStart:str(closure.dateClosed),scheduledEnd:str(closure.dateClosed),status:'completed',completedAt:now,completedBy:executor.uid,completedByName:executor.name,workflowCode:'WO200',workflowLabel:'Awaiting safety sign-off',workflowSince:now,workflowTransitions:[{from:'',to:'WO200',label:'Awaiting safety sign-off',at:now,by:ctx.uid,byName:displayName(ctx),source:'request_closure'}],schemaVersion:2,maintenanceTypeCode:str(closure.maintenanceTypeCode),maintenanceTypeLabel:str(closure.maintenanceTypeLabel),failureModeCode:str(closure.failureModeCode),failureModeLabel:str(closure.failureModeLabel),solutions:objs(closure.solutions),assessmentTasks:[task],tasks:[{id,description:task.description}],taskPlanning:{},taskExecution:{[id]:{status:'completed',performers:[executor.uid],reportedWork:task.description,performedDate:directCompletion.performedDate,actualMinutes:minutes,feedback:{workPerformed:task.description,actualHours:minutes/60,actualMinutes:minutes,services:[],noSparesOrServicesConfirmed:true,source:'work_request'},completedAt:now,completedBy:executor.uid,feedbackRecordedBy:directCompletion.recordedBy,feedbackRecordedAt:directCompletion.recordedAt,reconciled:true,reconciliationMode:'no_resources_confirmed',reconciledAt:now,reconciledBy:ctx.uid,consumption:[],bomUpdated:false}},spares:[],services:[],sparesUsed:[],timeLogs:[{id,uid:executor.uid,name:executor.name,date:directCompletion.performedDate,hours:minutes/60,minutes,note:'Actual work reported on '+request.id}],assignees:[executor],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Retrospective work order created from '+request.id,'Work feedback inherited from request; safety sign-off pending. No planning or window created.')};
+ const wo:Obj={...base,...group,...await activeMaintenanceSnapshot(ctx),code,wrCode:request.id,path,executionMode:'request_closure',directCompletion,scheduledStart:str(closure.dateClosed),scheduledEnd:str(closure.dateClosed),status:'completed',completedAt:now,completedBy:executor.uid,completedByName:executor.name,workflowCode:'WO200',workflowLabel:'Awaiting safety sign-off',workflowSince:now,workflowTransitions:[{from:'',to:'WO200',label:'Awaiting safety sign-off',at:now,by:ctx.uid,byName:displayName(ctx),source:'request_closure'}],schemaVersion:2,maintenanceTypeCode:str(closure.maintenanceTypeCode),maintenanceTypeLabel:str(closure.maintenanceTypeLabel),failureModeCode:str(closure.failureModeCode),failureModeLabel:str(closure.failureModeLabel),solutions:objs(closure.solutions),assessmentTasks:[task],tasks:[{id,description:task.description}],taskPlanning:{},taskExecution:{[id]:{status:'completed',performers:[executor.uid],reportedWork:task.description,performedDate:directCompletion.performedDate,actualMinutes:minutes,feedback:{workPerformed:task.description,actualHours:minutes/60,actualMinutes:minutes,services:[],noSparesOrServicesConfirmed:true,source:'work_request'},completedAt:now,completedBy:executor.uid,feedbackRecordedBy:directCompletion.recordedBy,feedbackRecordedAt:directCompletion.recordedAt,reconciled:true,reconciliationMode:'no_resources_confirmed',reconciledAt:now,reconciledBy:ctx.uid,consumption:[],bomUpdated:false}},spares:[],services:[],sparesUsed:[],timeLogs:[{id,uid:executor.uid,name:executor.name,date:directCompletion.performedDate,hours:minutes/60,minutes,note:'Actual work reported on '+request.id}],assignees:[executor],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Retrospective work order created from '+request.id,'Work feedback inherited from request; safety sign-off pending. No planning or window created.')};
  const {reviewRoutingChanged:_changed,reviewRoutingPreviousUid:_previous,...requestData}=request.data;
  await commit([{path:woCol(ctx.orgId)+'/'+code,fields:wo,exists:false},{path:wrCol(ctx.orgId)+'/'+request.id,fields:{...requestData,...patch,...group,status:'closed',closedAt:now,closure:{...closure,woCode:code},woCode:code,updatedAt:now,history:history(request,ctx,'Request closed; '+code+' created','Actual work '+minutes+' minutes; formal Work Order closure pending.')},updateTime:request.updateTime}]);
  await rec(ctx,'mnt.wr.closed_at_review',request.id,'Linked '+code+'; '+minutes+' minutes; '+executor.name);
@@ -769,7 +769,7 @@ async function confirmRequestWithOrder(ctx:OrgContext,request:Doc,note:string,ma
  const code='WO'+String(n).padStart(8,'0'),path=pathOf(request),group=groupFields(ctx.workGroupPolicy,path);
  const keys=['assemblyId','assemblyCode','assemblyName','unitId','unitCode','unitName','costCenterId','costCenterCode','costCenterName','siteId','siteCode','siteName','assetTag','assetName','assetClass','title','description','criticalityCode','criticalityLabel','criticalityColor','priorityCode','priorityLabel','disciplineCode','disciplineLabel','requestedBy','requestedByName','requestedAt','sourceCode','sourceLabel','sourceGroup'];
  const base=Object.fromEntries(keys.map(k=>[k,str(request.data[k])]));
- const wo:Obj={...base,...group,code,wrCode:request.id,path,executionMode:'confirmed_request',status:'planning',schemaVersion:2,maintenanceTypeCode:maintenanceType.code,maintenanceTypeLabel:maintenanceType.label,scheduledStart:start,scheduledEnd:end,initialScheduledStart:start,initialScheduledEnd:end,cycleAdmission:{startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycleRestricted(maintenanceType.code)?cycle.nextStart:cycle.today,at:now,version:cycle.version},requestConfirmation:{by:ctx.uid,name:displayName(ctx),at:now,note},impacts:objs(request.data.impacts),assessmentTasks:[],assessmentTasksVersion:0,tasks:[],taskPlanning:{},taskExecution:{},spares:[],services:[],sparesUsed:[],timeLogs:[],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Created by confirmation of '+request.id,note),workflowCode:'WO010',workflowLabel:'Awaiting assessment',workflowSince:now,workflowTransitions:[{from:'',to:'WO010',label:'Awaiting assessment',at:now,by:ctx.uid,byName:displayName(ctx),source:'request_confirmation'}]};
+ const wo:Obj={...base,...group,...await activeMaintenanceSnapshot(ctx),code,wrCode:request.id,path,executionMode:'confirmed_request',status:'planning',schemaVersion:2,maintenanceTypeCode:maintenanceType.code,maintenanceTypeLabel:maintenanceType.label,scheduledStart:start,scheduledEnd:end,initialScheduledStart:start,initialScheduledEnd:end,cycleAdmission:{startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycleRestricted(maintenanceType.code)?cycle.nextStart:cycle.today,at:now,version:cycle.version},requestConfirmation:{by:ctx.uid,name:displayName(ctx),at:now,note},impacts:objs(request.data.impacts),assessmentTasks:[],assessmentTasksVersion:0,tasks:[],taskPlanning:{},taskExecution:{},spares:[],services:[],sparesUsed:[],timeLogs:[],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Created by confirmation of '+request.id,note),workflowCode:'WO010',workflowLabel:'Awaiting assessment',workflowSince:now,workflowTransitions:[{from:'',to:'WO010',label:'Awaiting assessment',at:now,by:ctx.uid,byName:displayName(ctx),source:'request_confirmation'}]};
  const {reviewRoutingChanged:_changed,reviewRoutingPreviousUid:_previous,...requestData}=request.data;
  await commit([{path:woCol(ctx.orgId)+'/'+code,fields:wo,exists:false},{path:wrCol(ctx.orgId)+'/'+request.id,fields:{...requestData,...group,status:'confirmed',reviewDecision:'confirmed',woCode:code,maintenanceTypeCode:maintenanceType.code,maintenanceTypeLabel:maintenanceType.label,reviewCompletedAt:now,reviewer:ctx.uid,reviewerName:displayName(ctx),updatedAt:now,history:history(request,ctx,'Confirmed; '+code+' created',note)},updateTime:request.updateTime}]);
  await rec(ctx,'mnt.wr.confirmed',request.id,code);await rec(ctx,'mnt.wo.created',code,'Confirmed '+request.id);
@@ -885,8 +885,23 @@ async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:Assesse
 async function ensureCurrentAssessmentApproval(ctx:OrgContext,data:Obj) {
     const settings=await getDoc(`organizations/${ctx.orgId}/maintenance_workflow_settings/default`);
     const reviewerRole=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',strs(data.path),settings?.data.approverRoles);
-    if(!reviewerRole||!assessmentReviewCurrent(data,reviewerRole))
+    if(!maintenanceAssessmentReady(data,reviewerRole))
         throw new HttpError(409,'Assessment approval is missing or outdated. Assign a reviewer and approve the latest assessment before planning.');
+}
+
+async function activeMaintenanceSnapshot(ctx:OrgContext):Promise<Obj>{
+ const doc=await getDoc('organizations/'+ctx.orgId+'/maintenance_governance_settings/active');
+ if(!doc)return {};
+ const snap=readMaintenancePolicySnapshot(doc.data);
+ if(!snap||maintenanceActivationBlockers(snap.policy).length)throw new HttpError(409,'Active maintenance policy is not supported by this runtime.');
+ return {maintenanceGovernance:snap as unknown as Plain};
+}
+async function maintenanceSetupView(ctx:OrgContext){
+ const base='organizations/'+ctx.orgId+'/maintenance_governance_settings/';
+ const [draft,active]=await Promise.all([getDoc(base+'draft'),getDoc(base+'active')]);
+ const policy=draft?validateMaintenanceGovernance(draft.data.policy):defaultMaintenanceGovernance();
+ const blockers=maintenanceActivationBlockers(policy);
+ return {policy,version:Number(draft?.data.version)||0,updatedAt:str(draft?.data.updatedAt),transactionCodes:MAINTENANCE_APPROVAL_TRANSACTION_CODES,activationReady:!!draft&&!blockers.length,activationBlockers:blockers,active:active?readMaintenancePolicySnapshot(active.data):null};
 }
 
 // ----- Routes -----
@@ -897,8 +912,7 @@ export const maintenanceRoutes = {
     'POST /api/org/mnt/setup/governance': [orgRoute('org.mnt.setup.governance','ADM.workflows',async ctx=>{
         requireMnt(ctx);
         if(ctx.role!=='org_super_admin')throw new HttpError(403,'Organization Super Admin is required for organization-wide maintenance setup.');
-        const d=await getDoc('organizations/'+ctx.orgId+'/maintenance_governance_settings/draft');
-        return {policy:d?validateMaintenanceGovernance(d.data.policy):defaultMaintenanceGovernance(),version:Number(d?.data.version)||0,updatedAt:str(d?.data.updatedAt),transactionCodes:MAINTENANCE_APPROVAL_TRANSACTION_CODES,activationReady:false};
+        return maintenanceSetupView(ctx);
     })],
     'POST /api/org/mnt/setup/governance/save': [orgRoute('org.mnt.setup.governance.save','ADM.workflows',async ctx=>{
         requireMnt(ctx);
@@ -912,8 +926,31 @@ export const maintenanceRoutes = {
         const updatedAt=nowIso(),fields={policy,version:version+1,status:'draft',updatedAt,updatedBy:ctx.uid,reason};
         await commit([{path,fields,...(prior?{updateTime:prior.updateTime}:{exists:false})},{path:base+'/maintenance_governance_revisions/'+randomId(16),fields,exists:false}]);
         await rec(ctx,'mnt.governance.draft_saved','v'+(version+1),reason);
-        return {policy,version:version+1,updatedAt,transactionCodes:MAINTENANCE_APPROVAL_TRANSACTION_CODES,activationReady:false};
+        return maintenanceSetupView(ctx);
     })],
+    'POST /api/org/mnt/setup/governance/activate': [orgRoute('org.mnt.setup.governance.activate','ADM.workflows',async ctx=>withLock(ctx.orgId,'maintenance_operations',async()=>{
+        requireMnt(ctx);
+        if(ctx.role!=='org_super_admin')throw new HttpError(403,'Organization Super Admin is required for organization-wide maintenance setup.');
+        if(ctx.body.confirm!=='ACTIVATE FOR NEW TRANSACTIONS')throw new HttpError(400,'Confirm activation for new transactions only.');
+        const reason=clean(ctx.body.reason,500);
+        if(reason.length<10)throw new HttpError(400,'Enter an activation reason (minimum 10 characters).');
+        const base='organizations/'+ctx.orgId,dp=base+'/maintenance_governance_settings/draft',ap=base+'/maintenance_governance_settings/active';
+        const [draft,active]=await Promise.all([getDoc(dp),getDoc(ap)]);
+        const v=Number(draft?.data.version)||0;
+        const av=Number(active?.data.version)||0;
+        if(!draft?.updateTime||ctx.body.expectedVersion!==v||ctx.body.expectedActiveVersion!==av||active&&!active.updateTime)throw new HttpError(409,'Configuration changed. Reload before activation.');
+        const policy=validateMaintenanceGovernance(draft.data.policy),blockers=maintenanceActivationBlockers(policy);
+        if(blockers.length)throw new HttpError(409,blockers.join(' '));
+        if(policy.workOrder.enabled){
+            const [legacy,group]=await Promise.all([getDoc(base+'/maintenance_workflow_settings/default'),getDoc(base+'/maintenance_work_group_active/default')]);
+            const legacyRole=str(object(legacy?.data.approverRoles)['MNT.ASSESS.REVIEW']),taskRoles=strs(object(group?.data.tasks)['MNT.ASSESS.REVIEW']);
+            if(!legacyRole&&!taskRoles.length)throw new HttpError(409,'Configure the existing maintenance assessment approval role before activation.');
+        }
+        const activatedAt=nowIso(),fields={version:av+1,draftVersion:v,activatedAt,activatedBy:ctx.uid,policy,reason,transition:'new_transactions_only'};
+        await commit([{path:dp,fields:{lastActivatedAt:activatedAt},mask:['lastActivatedAt'],updateTime:draft.updateTime},{path:ap,fields,...(active?{updateTime:active.updateTime}:{exists:false})},{path:base+'/maintenance_governance_activations/'+String(av+1),fields,exists:false}]);
+        await rec(ctx,'mnt.governance.activated','v'+(av+1),reason);
+        return maintenanceSetupView(ctx);
+    }))],
     'POST /api/org/mnt/test_deletion/authorization': [orgRoute('org.mnt.test_deletion.authorization',null,async ctx=>{requireMnt(ctx);return cleanupAuthorizationStatus(ctx);})],
     'POST /api/org/mnt/test_deletion/authorization/set': [orgRoute('org.mnt.test_deletion.authorization.set',null,async ctx=>{requireMnt(ctx);return setCleanupAuthorization(ctx);})],
     'POST /api/org/mnt/test_deletion/list': [
@@ -1379,6 +1416,7 @@ export const maintenanceRoutes = {
             const selectedReviewer = reviewer?.id || '';
             const reviewerName = reviewer ? [str(reviewer.data.firstName), str(reviewer.data.lastName)].filter(Boolean).join(' ') || str(reviewer.data.email) : '';
             const now = nowIso();
+            const governanceSnapshot=await activeMaintenanceSnapshot(ctx);
             for (let attempt = 0; attempt < 3; attempt++) {
                 const n = await nextOrgCounter(ctx.orgId, 'wrSeq');
                 if (n > 99_999_999) throw new HttpError(400, 'Work request numbering is exhausted.');
@@ -1390,6 +1428,7 @@ export const maintenanceRoutes = {
                         ...loc,
                         ...groupFields(ctx.workGroupPolicy,loc.path),
                         ...finding,
+                        ...governanceSnapshot,
                         titleAuto,
                         status: 'created',
                         reviewProcessVersion: 3,
@@ -2225,7 +2264,7 @@ export const maintenanceRoutes = {
                 const code=rootCode+'_'+sequence,path=pathOf(doc);
                 const keys=['assemblyId','assemblyCode','assemblyName','unitId','unitCode','unitName','costCenterId','costCenterCode','costCenterName','siteId','siteCode','siteName','assetTag','assetName','assetClass','criticalityCode','criticalityLabel','criticalityColor','priorityCode','priorityLabel','disciplineCode','disciplineLabel','requestedBy','requestedByName','requestedAt'];
                 const base=Object.fromEntries(keys.map(k=>[k,str(d[k])]));
-                const child:Obj={...base,...groupFields(ctx.workGroupPolicy,path),code,title,description,path,wrCode:str(d.wrCode),parentWoCode:doc.id,rootWoCode:rootCode,subOrderSequence:sequence,executionMode:'confirmed_request',breakIn:true,status:'planning',schemaVersion:2,maintenanceTypeCode:BREAK_IN_TYPE.code,maintenanceTypeLabel:BREAK_IN_TYPE.label,scheduledStart:start,scheduledEnd:end,initialScheduledStart:start,initialScheduledEnd:end,startDateMoves:0,cycleAdmission:{startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycle.today,at:now,version:cycle.version},assessmentTasks:[],assessmentTasksVersion:0,tasks:[],taskPlanning:{},taskExecution:{},spares:[],services:[],sparesUsed:[],timeLogs:[],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Break-in sub-order created from '+doc.id,description),workflowCode:'WO010',workflowLabel:'Awaiting assessment',workflowSince:now,workflowTransitions:[{from:'',to:'WO010',label:'Awaiting assessment',at:now,by:ctx.uid,byName:displayName(ctx),source:'break_in'}]};
+                const child:Obj={...base,...groupFields(ctx.workGroupPolicy,path),...await activeMaintenanceSnapshot(ctx),code,title,description,path,wrCode:str(d.wrCode),parentWoCode:doc.id,rootWoCode:rootCode,subOrderSequence:sequence,executionMode:'confirmed_request',breakIn:true,status:'planning',schemaVersion:2,maintenanceTypeCode:BREAK_IN_TYPE.code,maintenanceTypeLabel:BREAK_IN_TYPE.label,scheduledStart:start,scheduledEnd:end,initialScheduledStart:start,initialScheduledEnd:end,startDateMoves:0,cycleAdmission:{startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycle.today,at:now,version:cycle.version},assessmentTasks:[],assessmentTasksVersion:0,tasks:[],taskPlanning:{},taskExecution:{},spares:[],services:[],sparesUsed:[],timeLogs:[],createdBy:ctx.uid,createdByName:displayName(ctx),createdAt:now,updatedAt:now,history:history(null,ctx,'Break-in sub-order created from '+doc.id,description),workflowCode:'WO010',workflowLabel:'Awaiting assessment',workflowSince:now,workflowTransitions:[{from:'',to:'WO010',label:'Awaiting assessment',at:now,by:ctx.uid,byName:displayName(ctx),source:'break_in'}]};
                 // The parent (including a closed parent) is never rewritten.
                 await commit([{path:woCol(ctx.orgId)+'/'+code,fields:child,exists:false}]);await rec(ctx,'mnt.wo.break_in_created',code,'Parent '+doc.id+' · '+description);return {ok:true,woCode:code};
             }
@@ -2238,7 +2277,7 @@ export const maintenanceRoutes = {
                 case 'assess_header': {
                     if(d.executionMode!=='confirmed_request'||str(d.status)!=='planning')throw new HttpError(409,'Technical classification belongs to the assessment step of a confirmed Work Order.');
                     need(ctx,P.assessment_edit,pathOf(doc),scope);if(groupAt(ctx.workGroupPolicy,pathOf(doc)))await requireConfiguredMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
-                    if(workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true&&!bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))throw new HttpError(403,'Assessment reviewer cannot create the assessment.');
+                    if(maintenanceAssessmentApprovalRequired(d)&&workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true&&!bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))throw new HttpError(403,'Assessment reviewer cannot create the assessment.');
                     if(object(d.assessmentReview).status==='approved'||Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Approved technical scope is locked. Open controlled reassessment before editing.');
                     const evaluation=str(b.technicalEvaluation).trim().slice(0,3000);if(evaluation.length<20)throw new HttpError(400,'Write at least 20 characters of technical evaluation.');
                     const nature=pickGrouped(l.failureModes,str(b.natureCode),'failure mode')!,crit=pick(l.criticality,str(b.severityCode),'severity')!,mtype=d.breakIn===true&&str(d.parentWoCode)?BREAK_IN_TYPE:pick(l.maintenanceTypes,str(b.maintenanceTypeCode),'maintenance type')!,prio=pick(l.priorities,str(b.priorityCode),'priority',false);
@@ -2253,7 +2292,7 @@ export const maintenanceRoutes = {
                     await done({...assemblyPatch,...datePatch,technicalEvaluation:evaluation,natureCode:nature.code,natureLabel:nature.group+' · '+nature.label,failureModeCode:nature.code,failureModeLabel:nature.group+' · '+nature.label,solutions,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label,criticalityCode:crit.code,criticalityLabel:crit.label,criticalityColor:crit.color,severitySetBy:ctx.uid,...(prio?{priorityCode:prio.code,priorityLabel:prio.label}:{}),assessmentNote:note,assessedBy:ctx.uid,assessedByName:displayName(ctx),assessedAt:now,assessmentReview:null},'Technical assessment classification saved','mnt.wo.assessed',note);return {ok:true};
                 }
                 case 'save_task_assessment': {
-                    if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning'||((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',pathOf(doc))===false||workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true)&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))))
+                    if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning'||((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',pathOf(doc))===false||(maintenanceAssessmentApprovalRequired(d)&&workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true))&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))))
                         throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
                     if(object(d.assessmentReview).status==='approved'||Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Approved task requirements are locked. Open controlled reassessment before editing.');
                     let tasks;
@@ -2302,6 +2341,7 @@ export const maintenanceRoutes = {
                 }
                 case 'review_assessment':
                 case 'return_assessment': {
+                    if(!maintenanceAssessmentApprovalRequired(d))throw new HttpError(409,'Independent assessment approval is not required for this work order policy.');
                     if(object(d.assessmentReview).status==='approved')throw new HttpError(409,'Approved assessment is locked. Open controlled reassessment for changes.');
                     if(str(d.status)!=='planning')throw new HttpError(409,'Assessment review must occur before planning submission.');
                     need(ctx,P.assessment_review,pathOf(doc),scope);

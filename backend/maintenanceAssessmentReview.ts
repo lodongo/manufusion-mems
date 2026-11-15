@@ -1,4 +1,5 @@
 /** Independent approval snapshot tied to the exact assessment revision. */
+import {maintenanceAssessmentApprovalRequired} from './maintenanceGovernancePolicy';
 export interface AssessmentRecord {
  assessmentTasks?: unknown; assessmentTasksVersion?: unknown; assessmentTasksAt?: unknown;
  assessedAt?: unknown; assessmentReview?: unknown; requestedBy?: unknown;
@@ -34,4 +35,10 @@ export function approvedAssessmentSnapshot(record:AssessmentRecord,by:string,nam
  if(note.trim().length<10)throw new Error('Write review notes of at least 10 characters.');
  return {status:'approved',version:Number(record.assessmentTasksVersion),assessmentTasksAt:value(record.assessmentTasksAt),
   assessedAt:value(record.assessedAt),by,name,jobRole,at,note:note.trim().slice(0,500),...(testOverride?{approvalMode:'development_test_override'}:{})};
+}
+
+/** Completion and approval are separate; never waive the validated assessment. */
+export function maintenanceAssessmentReady(record:Record<string,unknown>,assignedJobRole?:string):boolean{
+ if(!maintenanceAssessmentApprovalRequired(record))return !reviewAssessmentPrerequisites(record,'__maintenance_readiness__');
+ return !!assignedJobRole&&assessmentReviewCurrent(record,assignedJobRole);
 }

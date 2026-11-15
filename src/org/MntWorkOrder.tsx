@@ -837,10 +837,10 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         </Button>
                     )}
             </div>
-            {tasks.length > 0 && wo.assessmentReviewCurrent && data.checklist && (
+            {tasks.length > 0 && (wo.assessmentReady??wo.assessmentReviewCurrent) && data.checklist && (
                 <MntReadiness code={code} wo={wo} cycle={data.maintenanceCycle} checklist={data.checklist} canPlan={!!can.plan} testModeOverride={!!data.testModeOverride} currency={data.currency || ''} onDone={reload} />
             )}
-            {!retrospective&&tasks.length>0&&<Card className="space-y-3">
+            {!retrospective&&tasks.length>0&&wo.assessmentApprovalRequired!==false&&<Card className="space-y-3">
                 <p className="font-semibold">Independent work assessment review</p>
                 <p className="text-sm">{wo.assessmentReviewCurrent?'Approved by '+(wo.assessmentReview.name||'reviewer'):'Awaiting approval of current task assessment'}</p>
                 {wo.assessmentReview?.note&&<p className="text-sm text-soft">Review notes: {wo.assessmentReview.note}</p>}
@@ -854,6 +854,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     </div>
                 </div>}
             </Card>}
+            {!retrospective&&tasks.length>0&&wo.assessmentApprovalRequired===false&&<p className="text-sm text-soft">Independent assessment approval is not required by this work order's governance policy.</p>}
             {!tasks.length ? (
                 <Card>
                     <p>Technical task assessment is required before planning and execution.</p>

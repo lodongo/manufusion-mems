@@ -1,6 +1,4 @@
-/** Organization-level maintenance governance policy. Drafts are NOT runtime authority.
- * Activation must be connected to the existing approval engine and transaction version snapshots.
- */
+/** Organization-level maintenance policy. Only explicitly activated, supported policies may be snapshotted. */
 export const MAINTENANCE_APPROVALS=['workRequest','workOrder','technicalClosure'] as const;
 export type ApprovalKey=typeof MAINTENANCE_APPROVALS[number];
 export const WO_APPROVAL_STAGES=['before_assessment','after_assessment','after_readiness','before_execution'] as const;
@@ -49,4 +47,44 @@ export function approvalRequirement(r:ApprovalRule,facts:Partial<Record<Conditio
  if(r.match==='all'){if(matches.includes(false))return 'not_required';return matches.includes(null)?'undetermined':'required';}
  if(matches.includes(true))return 'required';
  return matches.includes(null)?'undetermined':'not_required';
+}
+
+export function maintenanceActivationBlockers(p:GovernancePolicy):string[]{
+ const blockers:string[]=[];
+ if(p.workRequest.enabled)blockers.push('Separate work request approval is not yet connected to the workflow engine.');
+ if(p.technicalClosure.enabled)blockers.push('Technical closure approval is not yet connected to the closure engine.');
+ if(p.workOrder.enabled){
+  if(p.workOrderStage!=='after_assessment')blockers.push('Only the after-assessment work order approval stage is currently wired.');
+  if(p.workOrder.conditions.some(c=>c.field==='estimatedCost'||c.field==='riskScore'))blockers.push('Cost and risk threshold conditions require a verified fact adapter before activation.');
+ }
+ return blockers;
+}
+export type MaintenancePolicySnapshot={version:number;activatedAt:string;policy:GovernancePolicy};
+export function readMaintenancePolicySnapshot(raw:unknown):MaintenancePolicySnapshot|null{
+ if(raw===undefined||raw===null)return null;
+ const d=object(raw);
+ if(!Number.isSafeInteger(d.version)||Number(d.version)<1||typeof d.activatedAt!=='string'||!d.activatedAt)throw Error('Invalid maintenance governance snapshot.');
+ return {version:Number(d.version),activatedAt:d.activatedAt,policy:validateMaintenanceGovernance(d.policy)};
+}
+function recordFacts(d:Record<string,unknown>):Partial<Record<ConditionField,string|number|boolean>>{
+ const facts:Partial<Record<ConditionField,string|number|boolean>>={};
+ for(const [k,f] of [['maintenanceType','maintenanceTypeCode'],['priority','priorityCode'],['criticality','criticalityCode']] as const){
+  if(typeof d[f]==='string'&&d[f])facts[k]=d[f] as string;
+ }
+ const tasks=Array.isArray(d.assessmentTasks)?d.assessmentTasks.map(object):[];
+ if(tasks.length&&Number(d.assessmentTasksVersion)>0&&d.assessmentTasksAt){
+  facts.requiresSpares=tasks.some(t=>Array.isArray(t.spares)&&t.spares.length>0);
+  facts.requiresExternalService=tasks.some(t=>Array.isArray(t.services)&&t.services.length>0);
+  facts.requiresExternalSpecialist=tasks.some(t=>!!object(t.externalResource).type);
+ }
+ return facts;
+}
+/** Legacy records retain their review path. Unknown facts or invalid snapshots never bypass review. */
+export function maintenanceAssessmentApprovalRequired(d:Record<string,unknown>):boolean{
+ if(d.executionMode!=='confirmed_request')return true;
+ try{
+  const snap=readMaintenancePolicySnapshot(d.maintenanceGovernance);
+  if(!snap||maintenanceActivationBlockers(snap.policy).length)return true;
+  return approvalRequirement(snap.policy.workOrder,recordFacts(d))!=='not_required';
+ }catch{return true;}
 }

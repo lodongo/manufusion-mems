@@ -18,7 +18,8 @@ import { postMaintenanceReturn } from './finOps';
 import { maintenancePermission, requireMaintenanceRole, configuredMaintenanceRole } from './maintenanceAccess';
 import {groupAt,groupGateRole,outsideExecutionAccess,loadWorkGroupPolicy,workGroupGateAllowed} from './maintenanceWorkGroupPolicy';
 import { workGroupResourcePool, requireOutsideGroupOptIn } from './maintenanceWorkGroups';
-import { assessmentReviewCurrent } from './maintenanceAssessmentReview';
+import { assessmentReviewCurrent,maintenanceAssessmentReady } from './maintenanceAssessmentReview';
+import {maintenanceAssessmentApprovalRequired} from './maintenanceGovernancePolicy';
 import { maintenanceKey, reserveTaskSpare, releaseMaintenanceReservations, verifyMaintenanceStockLedger } from './maintenanceInventory';
 import {
     equipmentMake,
@@ -407,7 +408,7 @@ export async function syncWorkOrderState(ctx:OrgContext,doc:Doc,source='refresh'
   const d=wo.data,status=str(d.status),facts:FactSet={};
   if(!isRequestClosureOrder(d)&&['planning','plan_ready','released','scheduled'].includes(status)){
     const settings=await getDoc(root(ctx)+'/maintenance_workflow_settings/default'),token=configuredMaintenanceRole({...ctx,testMode:false},'MNT.ASSESS.REVIEW',recordPath(wo),settings?.data.approverRoles);
-    facts.approved=!!token&&assessmentReviewCurrent(d,token);
+    facts.approved=maintenanceAssessmentReady(d,token);
     if(facts.approved){const ready=await readiness(ctx,wo),check=await planChecklist(ctx,wo,ready);facts.items=ready.items;facts.checklist=check.items;facts.costStatus=check.cost.status;}
   }
   if(!isRequestClosureOrder(d)&&['scheduled','in_progress'].includes(status)){
@@ -445,7 +446,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
     await authority(ctx, wo, 'MNT.WO.plan', 'MNT.WO.PLAN');
     const settings = await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
     const jobRole = configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),settings?.data.approverRoles);
-    if (!jobRole || !assessmentReviewCurrent(wo.data, jobRole))
+    if (!maintenanceAssessmentReady(wo.data, jobRole))
         throw new HttpError(409, 'Approve the latest work assessment through the configured reviewer before planning.');
     const b = ctx.body;
     if (action === 'lock_schedule') {
@@ -508,7 +509,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
 async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
      const settings=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
      const jobRole=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo),settings?.data.approverRoles);
-     if(!jobRole||!assessmentReviewCurrent(wo.data,jobRole))
+     if(!maintenanceAssessmentReady(wo.data,jobRole))
          throw new HttpError(409,'Approve the latest work assessment through the configured reviewer before allocating or sourcing resources.');
     await authority(ctx, wo, 'MNT.WO.plan', 'MNT.WO.PLAN');
     if (!['planning', 'plan_ready', 'released', 'scheduled', 'in_progress'].includes(str(wo.data.status)))
@@ -2051,8 +2052,9 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 // Assessment is intentionally open to employees who can view the
                 // work order at their organizational scope. Conversion, planning,
                 // execution, approvals and closure remain role-gated.
-                if (key === 'assess') {await maintenancePermission(ctx, 'MNT.assessment.edit', recordPath(wo));if((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',recordPath(wo))===false||workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',recordPath(wo))===true)&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation')))throw Error('Not an independent assessor');}
+                if (key === 'assess') {await maintenancePermission(ctx, 'MNT.assessment.edit', recordPath(wo));if((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',recordPath(wo))===false||(maintenanceAssessmentApprovalRequired(wo.data)&&workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',recordPath(wo))===true))&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation')))throw Error('Not an independent assessor');}
                 else if (key === 'reviewAssessment') {
+                    if(!maintenanceAssessmentApprovalRequired(wo.data))throw Error('Approval not required');
                     if(str(wo.data.status)!=='planning'||([str(wo.data.requestedBy),wo.data.executionMode==='confirmed_request'?'':str(wo.data.createdBy),str(wo.data.assessedBy),str(wo.data.assessmentTasksBy)].includes(ctx.uid)&&!bypass(ctx,'mnt.assessment.review_independence')))throw new Error('Not independently reviewable');
                     await maintenancePermission(ctx, 'MNT.assessment.review', recordPath(wo));
                     await requireMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo));
@@ -2087,7 +2089,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         const cycle=await getMaintenanceCycle(ctx),d=wo.data,zone=str(object(d.currentCycleAdmission).timeZone)||str(object(d.cycleAdmission).timeZone)||cycle.timeZone;
         let dueAt:string|null=null;const dueDate=str(d.scheduledEnd);if(!retrospective&&/^\d{4}-\d{2}-\d{2}$/.test(dueDate)){try{const day=new Date(dueDate+'T00:00:00Z');day.setUTCDate(day.getUTCDate()+1);dueAt=zonedInstant(day.toISOString().slice(0,10),'00:00',zone);}catch{/* Invalid historical dates stay unclassified. */}}
         return {
-            wo: { code: wo.id, ...wo.data,workflowStatusCode:shortWorkOrderStatus(str(wo.data.workflowCode)),...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
+            wo: { code: wo.id, ...wo.data,workflowStatusCode:shortWorkOrderStatus(str(wo.data.workflowCode)),...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole),assessmentReady:maintenanceAssessmentReady(wo.data,reviewRole),assessmentApprovalRequired:maintenanceAssessmentApprovalRequired(wo.data) },
             assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
             earlyClosure:earlyCheck?{blocked:earlyCheck.blocked,started:earlyExecutionStarted(wo),requested:!!object(wo.data.earlyClosureRequest).at}:null,
             maintenanceCycle:cycle,

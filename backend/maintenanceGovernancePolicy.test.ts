@@ -21,3 +21,23 @@ test('invalid stage and conditions rejected',()=>{
  assert.throws(()=>validateMaintenanceGovernance({...p,workOrderStage:'after_close'}));
  assert.throws(()=>validateMaintenanceGovernance({...p,workOrder:{enabled:true,match:'all',conditions:[{field:'estimatedCost',op:'gte',value:'5000'}]}}));
 });
+
+import {maintenanceActivationBlockers,maintenanceAssessmentApprovalRequired} from './maintenanceGovernancePolicy';
+import {maintenanceAssessmentReady} from './maintenanceAssessmentReview';
+test('legacy records keep independent approval; all-off snapshot removes only approval, not completion',()=>{
+ const p=defaultMaintenanceGovernance(),d={executionMode:'confirmed_request',maintenanceGovernance:{version:1,activatedAt:'2026-11-15T00:00:00Z',policy:p}};
+ assert.equal(maintenanceAssessmentApprovalRequired({executionMode:'confirmed_request'}),true);
+ assert.equal(maintenanceActivationBlockers(p).length,0);
+ assert.equal(maintenanceAssessmentApprovalRequired(d),false);
+ assert.equal(maintenanceAssessmentReady(d),false);
+ const complete={...d,technicalEvaluation:'Adequate technical evaluation',natureCode:'F',criticalityCode:'C',severitySetBy:'u',solutions:[{}],maintenanceTypeCode:'PM',assessmentTasks:[{spares:[],services:[]}],assessmentTasksVersion:1,assessmentTasksAt:'2026-11-15'};
+ assert.equal(maintenanceAssessmentReady(complete),true);
+ const later=defaultMaintenanceGovernance();later.workOrder.enabled=true;
+ assert.equal(maintenanceAssessmentApprovalRequired({...complete,maintenanceGovernance:{version:2,activatedAt:'2026-11-16',policy:later}}),true);
+ assert.equal(maintenanceAssessmentReady({...complete,maintenanceGovernance:{version:2,activatedAt:'2026-11-16',policy:later}}),false);
+ assert.equal(maintenanceAssessmentReady(complete),true);
+});
+test('unsupported approval paths cannot be activated',()=>{
+ const p=defaultMaintenanceGovernance();p.workRequest.enabled=true;p.technicalClosure.enabled=true;p.workOrder.enabled=true;p.workOrderStage='before_assessment';
+ assert.equal(maintenanceActivationBlockers(p).length,3);
+});

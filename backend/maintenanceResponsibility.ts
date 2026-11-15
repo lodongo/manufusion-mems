@@ -3,14 +3,15 @@ import {getDoc,listDocs,isObj,str,nowIso,type Doc,type Obj} from './core';
 import type {OrgContext} from './guards';
 import {orgUsers} from './org';
 import {WORK_GROUP_TITLES,groupAt,groupGateRole,workGroupPermission,workGroupGateAllowed,assignmentCovers,memberTitles,outsideExecutionAccess,ancestry,type WorkGroupPolicy,type ActiveGroup} from './maintenanceWorkGroupPolicy';
-import {assessmentReviewCurrent,reviewAssessmentPrerequisites} from './maintenanceAssessmentReview';
+import {reviewAssessmentPrerequisites,maintenanceAssessmentReady} from './maintenanceAssessmentReview';
+import {maintenanceAssessmentApprovalRequired} from './maintenanceGovernancePolicy';
 import {mergedMasterTasks,memberMap,mapOfStrings} from './maintenanceWorkGroups';
 const obj=(v:unknown):Obj=>isObj(v)?v:{};
 const rows=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const ids=(v:unknown):string[]=>Array.isArray(v)?v.map(str).filter(Boolean):[];
 const fullName=(u:Doc)=>[str(u.data.firstName),str(u.data.lastName)].filter(Boolean).join(' ')||str(u.data.displayName)||str(u.data.email)||u.id;
 type Responsible={uid:string;name:string;role:string;genericRole:string;positionCode:string};
-type Stage={label:string;gate?:string;permission?:string;exclude?:string[];preferred?:string;allocated?:string[];external?:boolean;fixed?:string;fixedRole?:string;externalPosition?:string};
+type Stage={requireIndependentAssessor?:boolean;label:string;gate?:string;permission?:string;exclude?:string[];preferred?:string;allocated?:string[];external?:boolean;fixed?:string;fixedRole?:string;externalPosition?:string};
 type Data={policy:WorkGroupPolicy|undefined;users:Map<string,Doc>;positions:Map<string,Doc>;drafts:Doc[];legacy:Obj;today:string;finance:Map<string,Doc>;orgId:string;savedPolicy?:WorkGroupPolicy;savedMasterVersion:number};
 export async function responsibilityData(ctx:OrgContext,includeFinance=false):Promise<Data>{
  const root='organizations/'+ctx.orgId;
@@ -73,7 +74,7 @@ function candidates(data:Data,g:ActiveGroup,s:Stage,path:string[]){
    if(!memberTitles(p,g).includes(t)||!policy.activePositions.has(m.positionCode)||!(policy.config.roleAlignment[t]||[]).includes(m.positionCode)||!g.costCenterIds.some(cc=>{const path=policy.paths.get(cc);return !!path&&assignmentCovers(u,m.positionCode,path,policy.today);}))continue;
    if(s.gate&&workGroupGateAllowed(p,s.gate,path)!==true)continue;
    if(s.permission&&workGroupPermission(p,s.permission,path)===false)continue;
-   if(s.gate==='MNT.WR.ASSESS'&&workGroupGateAllowed(p,'MNT.ASSESS.REVIEW',path)===true)continue;
+   if(s.gate==='MNT.WR.ASSESS'&&s.requireIndependentAssessor!==false&&workGroupGateAllowed(p,'MNT.ASSESS.REVIEW',path)===true)continue;
    out.push(entry(data,u,m.positionCode,t));
   }
  }
@@ -106,13 +107,13 @@ export function closureExecutionPeople(data:Data,path:string[]){
 function currentAssessment(data:Data,d:Obj,path:string[]){
  const token=groupGateRole(data.policy,'MNT.ASSESS.REVIEW',path);
  const role=token===null?str(data.legacy['MNT.ASSESS.REVIEW']):token;
- return !!role&&assessmentReviewCurrent(d,role);
+ return maintenanceAssessmentReady(d,role);
 }
 const assess=():Stage=>({label:'Technical work assessment',gate:'MNT.WR.ASSESS',permission:'MNT.assessment.edit'});
 const approval=(d:Obj):Stage=>({label:'Assessment approval',gate:'MNT.ASSESS.REVIEW',permission:'MNT.assessment.review',exclude:[str(d.requestedBy),d.executionMode==='confirmed_request'?'':str(d.createdBy),str(d.assessedBy),str(d.assessmentTasksBy)].filter(Boolean)});
 function assessmentStage(data:Data,d:Obj,path:string[]):Stage{
- if(obj(d.assessmentReview).status==='changes_requested'||reviewAssessmentPrerequisites(d,'__routing__')||(/^WR\d/.test(str(d.code))&&(!str(d.title)||str(d.description).length<10||!str(d.sourceCode)||!rows(d.impacts).length)))return assess();
- return approval(d);
+ if(obj(d.assessmentReview).status==='changes_requested'||reviewAssessmentPrerequisites(d,'__routing__')||(/^WR\d/.test(str(d.code))&&(!str(d.title)||str(d.description).length<10||!str(d.sourceCode)||!rows(d.impacts).length)))return {...assess(),requireIndependentAssessor:maintenanceAssessmentApprovalRequired(d)};
+ return maintenanceAssessmentApprovalRequired(d)?approval(d):{...assess(),requireIndependentAssessor:false};
 }
 function wrStage(data:Data,d:Obj,path:string[]):Stage{
  const s=str(d.status);
@@ -127,7 +128,7 @@ function woStage(data:Data,d:Obj,path:string[]):Stage{
  const s=str(d.status),workflow=str(d.workflowCode),label=str(d.workflowLabel);
  if(['closed','cancelled'].includes(s))return {label:s==='closed'?'Closed':'Cancelled'};
  if(workflow==='WO200')return {label:label||'Safety sign-off',gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Safety signatory'};
- if(workflow==='WO010')return {...assess(),label};if(workflow==='WO020')return {...approval(d),label};
+ if(workflow==='WO010')return {...assess(),label,requireIndependentAssessor:maintenanceAssessmentApprovalRequired(d)};if(workflow==='WO020')return {...approval(d),label};
  if(['WO030','WO040','WO050','WO060','WO070','WO080','WO090','WO100','WO120'].includes(workflow))return {label,gate:workflow==='WO120'&&groupAt(data.policy,path)?'MNT.WO.RELEASE':'MNT.WO.PLAN',permission:'MNT.WO.plan'};
  if(workflow==='WO130'||workflow==='WO140')return {label,gate:groupAt(data.policy,path)?'MNT.WINDOW.LOCK':'MNT.WO.PLAN',permission:'MNT.WO.schedule'};
  if(workflow==='WO186'||workflow==='WO180')return {label,gate:'MNT.SPARES.RECONCILE',permission:'MNT.view'};
