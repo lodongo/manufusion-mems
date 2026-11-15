@@ -770,6 +770,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 code={code}
                 context={{ asset: `${wo.assetTag} · ${wo.assetName || ''}`, assembly: wo.assemblyName, equipment: wo.unitName }}
                 recordType="wo"
+                breakIn={!!wo.breakIn}
                 initial={tasks as any}
                 editable
                 onSaved={() => {

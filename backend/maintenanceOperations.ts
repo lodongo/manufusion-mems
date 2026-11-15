@@ -1633,6 +1633,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             return { ok: true };
         }
         const feedback = await normalClosureFeedback(ctx,wo,task,object(b.feedback));
+        if(feedback.closureFieldsVersion===1&&str(e.startedAt)&&str(feedback.dateClosed)<str(e.startedAt).slice(0,10))throw new HttpError(400,'Actual completion date cannot precede task execution.');
         taskCompletion(task, feedback);
         for(const service of rows(task.services))if(!str(object(object(object(wo.data.serviceReports)[str(task.id)])[str(service.id)]).path))throw new HttpError(409,'Attach the service report for '+str(service.description)+'.');
         if (feedback.scopeDeviation === true)
@@ -2071,7 +2072,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
             windowClosureManaged:await windowManagedClosure(ctx,wo),
             startDateMoves:startDateMoves(wo.data),
             subOrders:(await listDocs(root(ctx)+'/work_orders')).filter(x=>x.data.parentWoCode===wo.id).map(x=>({code:x.id,title:str(x.data.title),status:str(x.data.status)})),
-            serviceReportUrls:Object.fromEntries(await Promise.all(Object.values(object(wo.data.serviceReports)).flatMap(v=>Object.values(object(v))).map(object).filter(v=>str(v.path)).map(async v=>[str(v.path),await signedUrl(str(v.path))]))),
+            serviceReportUrls:Object.fromEntries(await Promise.all(Object.values(object(wo.data.serviceReports)).flatMap(v=>Object.values(object(v))).map(object).filter(v=>str(v.path)).map(async v=>[str(v.path),await signedUrl(str(v.path)).catch(()=> '')]))),
             statusReview:summarizeWorkOrderReview(d,nowIso(),dueAt),
             readiness: readinessData,
             checklist: retrospective?null:await planChecklist(ctx, wo, readinessData),

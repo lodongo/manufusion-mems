@@ -98,7 +98,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
   </section>)}
  </Card>;
 }
-export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context}:{context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
+export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context,breakIn=false}:{breakIn?:boolean;context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial);
  const [dirty,setDirty]=useState(false);
  const options=useLoad(()=>callBackend<Options>('/api/org/mnt/assessment/options',{code}),[code]);
@@ -239,12 +239,12 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
      <label className={label}>Task name<input className={input} value={task.title||''} onChange={e=>patch({title:e.target.value})}/></label>
      <label className={label}>Describe the work<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='What is required?'/></label>
      <label className={label}>Maintenance strategy for this task (Finance reporting)
-       <select data-native-select='true' className={input} value={task.maintenanceTypeCode||''} onChange={e=>{
+       <select data-native-select='true' className={input} disabled={breakIn} value={breakIn?'':task.maintenanceTypeCode||''} onChange={e=>{
          const type=options.data?.maintenanceTypes?.find(t=>t.code===e.target.value);
          patch({maintenanceTypeCode:type?.code||'',maintenanceTypeLabel:type?.label||''});
        }}>
-         <option value=''>Inherit the Work Order maintenance type</option>
-         {options.data?.maintenanceTypes?.map(t=><option key={t.code} value={t.code}>{t.code} · {t.label}</option>)}
+         <option value=''>{breakIn?'Break-in Maintenance (inherited)':'Inherit the Work Order maintenance type'}</option>
+         {!breakIn&&options.data?.maintenanceTypes?.map(t=><option key={t.code} value={t.code}>{t.code} · {t.label}</option>)}
        </select>
        <span className='mt-1 block text-xs text-muted'>Override only when this task follows a different maintenance strategy. Changes require the existing assessment review.</span>
      </label>

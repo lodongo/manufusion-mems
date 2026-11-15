@@ -34,6 +34,8 @@ interface Row extends MaintenanceRouting {
     origin: string;
     executionMode?:string;
     wrCode: string;
+    parentWoCode?:string;
+    rootWoCode?:string;
     assemblyCode: string;
     assemblyName: string;
     unitCode: string;
@@ -194,9 +196,12 @@ function OrderList({ setup }: { setup: MntSetup }) {
             { key: 'wtype', label: 'Work type', value: (r) => r.workTypeLabel, hidden: true },
             { key: 'disc', label: 'Discipline', value: (r) => r.disciplineLabel, hidden: true },
             { key: 'origin', label: 'From request', value: (r) => r.wrCode || 'Direct', className: 'font-mono whitespace-nowrap' },
-            {key:'executionMode',label:'Work order route',value:r=>r.executionMode==='request_closure'?'Completed at request review':'Assessed / planned'},
+            {key:'executionMode',label:'Work order route',value:r=>r.parentWoCode?'Break-in sub-order':r.executionMode==='request_closure'?'Completed at request review':'Assessed / planned'},
+            {key:'parentWoCode',label:'Parent work order',value:r=>r.parentWoCode||''},
+            {key:'rootWoCode',label:'Original work order',value:r=>r.rootWoCode||'',hidden:true},
             { key: 'planner', label: 'Planner', value: (r) => r.plannerName, hidden: true },
             { key: 'start', label: 'Scheduled start', type: 'date', value: (r) => r.scheduledStart, render: (r) => (r.scheduledStart ? fmtDate(r.scheduledStart) : '') },
+            {key:'finish',label:'Scheduled finish',type:'date',value:r=>r.scheduledEnd,render:r=>r.scheduledEnd?fmtDate(r.scheduledEnd):''},
             { key: 'team', label: 'Assigned', value: (r) => r.assigneeNames.join(', '), hidden: true },
             { key: 'hours', label: 'Planned hours', type: 'number', value: (r) => r.estimate.labourHours, hidden: true },
             { key: 'est', label: `Estimate${cur ? ` (${cur})` : ''}`, type: 'number', value: (r) => r.estimate.total },

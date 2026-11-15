@@ -2183,8 +2183,7 @@ export const maintenanceRoutes = {
                         tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(b.tasks),
                             (m?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix);
                     }catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid task work assessment.');}
-                    tasks=await verifiedTaskMaintenanceTypes(tasks);
-                    if(d.breakIn===true)tasks=tasks.map(t=>({...t,maintenanceTypeCode:BREAK_IN_TYPE.code,maintenanceTypeLabel:BREAK_IN_TYPE.label}));
+                    tasks=d.breakIn===true?tasks.map(t=>({...t,maintenanceTypeCode:'',maintenanceTypeLabel:''})):await verifiedTaskMaintenanceTypes(tasks);
                     await verifyAssessedTaskChoices(ctx,doc,tasks);
                     tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(v=>v.proposedVendorIds));
