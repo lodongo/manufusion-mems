@@ -1,4 +1,5 @@
 import {maintenanceAnalyticsRoutes} from './maintenanceAnalytics';
+import {maintenanceCapacityRoutes} from './maintenanceCapacity';
 import {requestTransition,requestTransitionInitial} from './maintenanceAnalyticsCore';
 import {testDeletionEnabled,listTestMaintenanceDeletion,purgeTestMaintenance,previewBulkTestMaintenance,purgeBulkTestMaintenance} from './maintenanceTestDeletion';
 import {cleanupAuthorizationStatus,setCleanupAuthorization} from './maintenanceCleanupAuthorization';
@@ -919,6 +920,7 @@ import { maintenanceWorkGroupRoutes } from './maintenanceWorkGroups';
 export const maintenanceRoutes = {
     ...maintenanceWorkGroupRoutes,
     ...maintenanceAnalyticsRoutes,
+    ...maintenanceCapacityRoutes,
     'POST /api/org/mnt/setup/governance': [orgRoute('org.mnt.setup.governance','ADM.workflows',async ctx=>{
         requireMnt(ctx);
         if(ctx.role!=='org_super_admin')throw new HttpError(403,'Organization Super Admin is required for organization-wide maintenance setup.');
