@@ -34,8 +34,9 @@ async function reliability(ctx:OrgContext){
  const note=str(b.note).trim().slice(0,500);if(note.length<10)throw new HttpError(400,'Provide a reason or evidence note (10+ characters).');
  if(action==='request'){
   const e=selected.find(x=>x.id===b.equipmentId);if(!e||!e.canRequest)throw new HttpError(403,'Scoped maintenance planning authority required.');
-  const from=str(b.from),through=str(b.through),start=midnight(from,e.zone),end=midnight(dateAdd(through,1),e.zone);
-  if(!validDay(from)||!validDay(through)||from>through||Date.parse(through)-Date.parse(from)>92*86400000||end>Date.now())throw new HttpError(400,'Choose up to 93 completed reporting days.');
+  const from=str(b.from),through=str(b.through);
+  if(!validDay(from)||!validDay(through)||from>through||Date.parse(through)-Date.parse(from)>92*86400000)throw new HttpError(400,'Choose up to 93 completed reporting days.');
+  const start=midnight(from,e.zone),end=midnight(dateAdd(through,1),e.zone);if(end>Date.now())throw new HttpError(400,'Choose completed reporting days.');
   const reference=str(b.reference).trim().slice(0,300);if(reference.length<3)throw new HttpError(400,'Enter the production or equipment runtime evidence reference.');
   const failures:Failure[]=arr(b.failures).map(f=>{const w=ordersVisible.find(w=>w.id===f.orderCode&&w.data.unitId===e.id&&w.data.assetTag===e.tag);if(!w)throw new HttpError(400,'Each failure must link to an accessible work order on this equipment.');const id=str(w.data.wrCode)||str(w.data.rootWoCode)||w.id;const mode=str(w.data.failureModeLabel)||str(obj(w.data.directCompletion).failureModeLabel)||str(w.data.natureLabel)||'Unclassified';return {id,orderCode:w.id,startedAt:str(f.startedAt),restoredAt:str(f.restoredAt),repairHours:f.repairHours===null?null:typeof f.repairHours==='number'?f.repairHours:NaN,mode,strategy:str(w.data.maintenanceTypeLabel)||'Unclassified'};});
   if(failures.length>100)throw new HttpError(400,'Maximum 100 failure events per observation.');
@@ -43,7 +44,7 @@ async function reliability(ctx:OrgContext){
   try{validateObservation(o,start,end);}catch(error){throw new HttpError(400,error instanceof Error?error.message:'Invalid operating observation');}
   if(all.some(d=>d.data.assetTag===e.tag&&['pending','approved'].includes(str(d.data.status))&&str(d.data.from)<=through&&str(d.data.through)>=from))throw new HttpError(409,'Existing pending or approved observation overlaps this interval.');
   if(all.some(d=>d.data.assetTag===e.tag&&['pending','approved'].includes(str(d.data.status))&&obs(d).failures.some(f=>failures.some(x=>x.id===f.id))))throw new HttpError(409,'A linked failure has already been recorded.');
-  const id=randomUUID().replaceAll('-','');await writeDoc(col+'/'+id,{...o,equipmentId:e.id,assetTag:e.tag,path:e.path,zone:e.zone,reference,note,createdAt:nowIso(),createdBy:ctx.uid},{exists:false});await audit([{category:'maintenance',action:'mnt.reliability.requested',actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:id},details:reference}]);return {ok:true};
+  const id=randomUUID().replaceAll('-','');if(!await writeDoc(col+'/'+id,{...o,equipmentId:e.id,assetTag:e.tag,path:e.path,zone:e.zone,reference,note,createdAt:nowIso(),createdBy:ctx.uid},{exists:false}))throw new HttpError(409,'Observation could not be created.');await audit([{category:'maintenance',action:'mnt.reliability.requested',actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:id},details:reference}]);return {ok:true};
  }
  if(!['approve','reject'].includes(action)||!idValid(str(b.id)))throw new HttpError(400,'Choose a pending observation.');
  const d=all.find(x=>x.id===b.id),e=equipment.find(x=>x.id===d?.data.equipmentId&&x.tag===d?.data.assetTag);

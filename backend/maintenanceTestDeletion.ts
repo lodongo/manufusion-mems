@@ -29,7 +29,7 @@ export async function listTestMaintenanceDeletion(ctx:OrgContext){
  const [orders,assessments,requests,trail,batches]=await Promise.all([...Object.values(TEST_MAINTENANCE_COLLECTIONS).map(c=>listDocs(root(ctx)+'/'+c)),listDocs(root(ctx)+'/maintenance_deletion_audit'),listDocs(root(ctx)+'/maintenance_cleanup_batches')]);
  return {batches:batches.map(d=>({id:d.id,...d.data})),records:[...orders.filter(d=>patterns.order.test(d.id)).map(d=>minimal(d,'order')),...assessments.filter(d=>patterns.assessment.test(d.id)).map(d=>minimal(d,'assessment')),...requests.filter(d=>patterns.request.test(d.id)).map(d=>minimal(d,'request'))],trail:trail.map(d=>({id:d.id,...d.data})).sort((a,b)=>str((b as Obj).deletedAt).localeCompare(str((a as Obj).deletedAt)))};
 }
-const dependentCollections=['maintenance_windows','goods_issues','inventory_reservations','material_journal','mnt_supply_links','procurement_requirements','procurement_requisitions','procurement_quotations','procurement_orders','fin_requests','fin_journal','safety_incidents','maintenance_material_reconciliations','maintenance_assessment_revisions','bom_revisions','asset_task_proposals','asset_task_template_revisions','material_creation_candidates','vendor_onboarding_requests','stores_issue_vouchers'];
+const dependentCollections=['maintenance_time_bookings','maintenance_reliability_observations','drkms_documents','maintenance_windows','goods_issues','inventory_reservations','material_journal','mnt_supply_links','procurement_requirements','procurement_requisitions','procurement_quotations','procurement_orders','fin_requests','fin_journal','safety_incidents','maintenance_material_reconciliations','maintenance_assessment_revisions','bom_revisions','asset_task_proposals','asset_task_template_revisions','material_creation_candidates','vendor_onboarding_requests','stores_issue_vouchers'];
 export async function purgeTestMaintenance(ctx:OrgContext){
  await requireMode(ctx);
  const kind=deletionKind(ctx.body.kind),code=deletionCode(kind,ctx.body.code),reason=str(ctx.body.reason).trim();
@@ -93,7 +93,7 @@ export async function purgeTestMaintenance(ctx:OrgContext){
 // It never silently deletes shared master data or a posted financial/physical movement.
 type BulkDoc={collection:string;doc:Doc;kind?:Kind};
 const rootCollections=Object.entries(TEST_MAINTENANCE_COLLECTIONS) as [Kind,string][];
-const casualCollections=['maintenance_time_bookings','maintenance_windows','asset_task_proposals','maintenance_assessment_revisions','maintenance_material_reconciliations','inventory_reservations','mnt_supply_links','procurement_requirements','procurement_requisitions','procurement_quotations','procurement_orders','fin_requests','safety_incidents','material_creation_candidates','vendor_onboarding_requests','stores_issue_vouchers','material_journal','asset_task_template_revisions','asset_task_templates','bom_revisions','goods_issues','fin_journal'];
+const casualCollections=['maintenance_reliability_observations','drkms_documents','maintenance_time_bookings','maintenance_windows','asset_task_proposals','maintenance_assessment_revisions','maintenance_material_reconciliations','inventory_reservations','mnt_supply_links','procurement_requirements','procurement_requisitions','procurement_quotations','procurement_orders','fin_requests','safety_incidents','material_creation_candidates','vendor_onboarding_requests','stores_issue_vouchers','material_journal','asset_task_template_revisions','asset_task_templates','bom_revisions','goods_issues','fin_journal'];
 const keyOf=(r:BulkDoc)=>r.collection+'/'+r.doc.id;
 const refs=(d:Obj,ids:Set<string>)=>[...ids].some(id=>hasMaintenanceReference(d,id));
 const hasForeign=(d:Obj,all:Set<string>,selected:Set<string>)=>[...all].some(id=>!selected.has(id)&&hasMaintenanceReference(d,id));
@@ -128,6 +128,7 @@ async function bulkPlan(ctx:OrgContext){
      const k=keyOf(x),d=x.doc.data,c=x.collection;
      if(remove.has(k)||!refs(d,ids))continue;
      if(hasForeign(d,allPrimary,family)){blockers.add('Shared maintenance record: '+k);continue;}
+     if(c==='drkms_documents'||c==='maintenance_reliability_observations'&&str(d.status)==='approved'){blockers.add('Verified reliability or RCA evidence: '+k);continue;}
      if(['goods_issues','fin_journal','bom_revisions'].includes(c)||c==='material_journal'&&!isReservation(d)){blockers.add('Posted inventory, BOM or accounting record: '+k);continue;}
      if(c==='asset_task_templates'||c==='asset_task_template_revisions'){
        // Approved reusable master data may have been consumed by a different job.

@@ -66,7 +66,14 @@ console.log('test mode scenario passed: fail-closed environment gate, expiry, te
 const {purgeTestMaintenance,listTestMaintenanceDeletion}=await import('../../backend/maintenanceTestDeletion.ts');
 const base='organizations/'+org,order='WO00000801',request='WR00000801',assessment='ASSM_00000801';
 const actor={uid:'ADMIN_01',email:'admin@example.test'};
-const ctx=(kind,code,extra={})=>({...admin(true),actor,body:{kind,code,confirm:code,reason:'Remove end-to-end test fixture'},...extra});
+const {setCleanupAuthorization}=await import('../../backend/maintenanceCleanupAuthorization.ts');
+let cleanupToken='';const authTime=Math.floor(Date.now()/1000);
+const ctx=(kind,code,extra={})=>({...admin(true),actor,claims:{authTime},...extra,body:{kind,code,confirm:code,reason:'Remove end-to-end test fixture',cleanupToken,...extra.body}});
+await assert.rejects(()=>setCleanupAuthorization(ctx('order','',{body:{enabled:true,confirm:'wrong'}})),/ENABLE CLEANUP/);
+await assert.rejects(()=>purgeTestMaintenance(ctx('order','WO00000001')),/Enable Database Cleanup separately/);
+cleanupToken=(await setCleanupAuthorization(ctx('order','',{body:{enabled:true,confirm:'ENABLE CLEANUP'}}))).cleanupToken;
+assert.match(cleanupToken,/^[a-f0-9]{64}$/);
+await assert.rejects(()=>purgeTestMaintenance(ctx('order','WO00000001',{claims:{authTime:authTime+1}})),/Enable Database Cleanup separately/);
 seed(base+'/work_orders/'+order,{code:order,title:'Test WO',status:'closed',wrCode:request});
 seed(base+'/work_requests/'+request,{code:request,title:'Test WR',status:'closed',woCode:order,assessmentCode:assessment});
 seed(base+'/work_assessments/'+assessment,{code:assessment,workRequestCode:request,status:'converted',woCode:order});
@@ -75,7 +82,7 @@ await assert.rejects(()=>purgeTestMaintenance(ctx('order',order,{role:'org_user'
 process.env.MEMS_ENVIRONMENT='production';
 await assert.rejects(()=>purgeTestMaintenance(ctx('order',order)),/active development Test Mode/i);
 process.env.MEMS_ENVIRONMENT='development';
-await assert.rejects(()=>purgeTestMaintenance(ctx('order',order,{orgId:'wrong_org'})),/no longer active/i);
+await assert.rejects(()=>purgeTestMaintenance(ctx('order',order,{orgId:'wrong_org'})),/Enable Database Cleanup separately/i);
 await assert.rejects(()=>purgeTestMaintenance(ctx('order',order,{body:{kind:'order',code:order,confirm:'wrong',reason:'Remove test record'}})),/exact record number/i);
 await assert.rejects(()=>purgeTestMaintenance(ctx('request',request)),/linked records/i);
 const child=order+'_1';
@@ -125,7 +132,7 @@ seed('audit_events/A2',{category:'maintenance',action:'mnt.wo.created',orgId:org
 seed('audit_events/A3',{category:'maintenance',action:'mnt.wo.created',orgId:'different_org',targetLabel:w1});
 seed(base+'/audit_events/A4',{category:'maintenance',action:'mnt.test.permanent_delete',orgId:org,targetLabel:w1});
 seed(base+'/audit_events/A5',{category:'auth',action:'login',orgId:org,targetLabel:w1});
-const bulkCtx=(records,extra={})=>({...admin(true),actor,body:{records,reason:'Clean up end to end test cases',confirm:'DELETE TEST DATA',...extra}});
+const bulkCtx=(records,extra={})=>({...admin(true),actor,claims:{authTime},body:{records,reason:'Clean up end to end test cases',confirm:'DELETE TEST DATA',cleanupToken,...extra}});
 const roots=[{kind:'order',code:w1},{kind:'order',code:w2}];
 const shared=await previewBulkTestMaintenance(bulkCtx([roots[0]]));assert.ok(shared.blockers.some(x=>x.includes('Shared maintenance record')));
 seed(base+'/goods_issues/GI_TEST',{workOrderId:w1});

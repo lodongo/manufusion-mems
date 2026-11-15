@@ -11,7 +11,7 @@ test('implemented maintenance gates become ready only with their required organi
  const configured=maintenanceGateReadiness(roles);
  assert.ok(configured.every(g=>g.status==='existing'));
  assert.ok(configured.every(g=>g.ready));
- for(const gate of maintenanceGateReadiness({}).filter(g=>g.roleRequired))assert.equal(gate.ready,false,gate.code);
+ for(const gate of maintenanceGateReadiness({}).filter(g=>g.roleRequired))assert.equal(gate.ready,gate.optionalPolicy===true,gate.code);
 });
 test('assessment author is open but independent reviewer must be configured',()=>{
  const assess=maintenanceGateReadiness({}).find(g=>g.code==='MNT.WR.ASSESS');

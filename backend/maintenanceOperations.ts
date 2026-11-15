@@ -1007,11 +1007,11 @@ async function windowSave(ctx: OrgContext) {
     for(const t of schedule.tasks){const w=wos.find(x=>x.id===t.woCode);if(!w||!w.data.cycleAdmission)continue;const zone=str(object(w.data.currentCycleAdmission).timeZone)||str(object(w.data.cycleAdmission).timeZone)||cycle.timeZone,a=localDate(new Date(Date.parse(start)+t.start*3600000),zone),z=localDate(new Date(Date.parse(start)+t.finish*3600000-1),zone);if(a<str(w.data.scheduledStart)||z>str(w.data.scheduledEnd))throw new HttpError(409,w.id+': the task falls outside the Work Order start/end dates. Change and reconfirm the plan before scheduling.');}
     const capacity=await capacityForWindow(ctx,start,schedule.tasks.map(t=>({...t,path:texts(wos.find(w=>w.id===t.woCode)?.data.path)})) as unknown as Obj[],existing?.id||'');
     if (b.action === 'preview_window') return { schedule:{...schedule,conflicts:[...schedule.conflicts,...capacity.blockers]}, neededHours: needed, start, end,capacityWarnings:capacity.warnings };
-    if(capacity.blockers.length)throw new HttpError(409,capacity.blockers.slice(0,8).join(' '));
-    const overrideReason=str(b.capacityOverrideReason).trim().slice(0,500);if(capacity.warnings.length&&overrideReason.length<10)throw new HttpError(409,'Acknowledge capacity warnings with a documented planning reason (10+ characters).');
-    if (schedule.conflicts.length) throw new HttpError(409, schedule.conflicts.join(' '));
     if (needed > durationHours + 1e-6)
         throw new HttpError(409, `The work needs ${Math.round(needed * 100) / 100} h but the window is ${durationHours} h. Lengthen the window or remove a work order.`);
+    if(capacity.blockers.length)throw new HttpError(409,capacity.blockers.slice(0,8).join(' '));
+    if (schedule.conflicts.length) throw new HttpError(409, schedule.conflicts.join(' '));
+    const overrideReason=str(b.capacityOverrideReason).trim().slice(0,500);if(capacity.warnings.length&&overrideReason.length<10)throw new HttpError(409,'Acknowledge capacity warnings with a documented planning reason (10+ characters).');
     // Safety prerequisites to verify before physical work starts (isolation and permits).
     const steps: Obj[] = [],
         catalogue = await safetyCatalogue();
@@ -1675,7 +1675,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     if(action==='handover')throw new HttpError(409,'Equipment handover is no longer a work order closure step.');
     if(action==='technical_close'){
         const pending=object(wo.data.technicalClosurePending);
-        if(!pending.at||['closed','cancelled'].includes(str(wo.data.status)))throw new HttpError(409,'Technical closure approval is not pending.');
+        if(!pending.at||['closed','cancelled'].includes(str(wo.data.status)))throw new HttpError(409,technicalClosureApprovalRequired(wo.data)?'Technical closure approval is not pending.':'Technical closure approval is no longer required under this work order policy.');
         await authority(ctx,wo,'MNT.WO.technicalApprove','MNT.WO.CLOSE_APPROVAL');
         const excluded=new Set([str(pending.by),str(object(wo.data.safetySignoff).by),...Object.values(executions).flatMap(e=>texts(object(e).performers)),...rows(wo.data.timeLogs).map(e=>str(e.uid))].filter(Boolean));
         if(excluded.has(ctx.uid)&&!bypass(ctx,'mnt.wo.technical_closure.independence'))throw new HttpError(403,'An independent technical closure approver is required.');

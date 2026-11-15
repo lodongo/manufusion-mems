@@ -235,6 +235,10 @@ async function lists() {
     };
 }
 type Lists = Awaited<ReturnType<typeof lists>>;
+async function validateAdoptedGovernanceConditions(policy:ReturnType<typeof validateMaintenanceGovernance>){
+ const master=await lists(),codes={maintenanceType:new Set(master.maintenanceTypes.map(x=>x.code)),priority:new Set(master.priorities.map(x=>x.code)),criticality:new Set(master.criticality.map(x=>x.code))};
+ for(const rule of [policy.workRequest,policy.workOrder,policy.technicalClosure])if(rule.enabled)for(const condition of rule.conditions)if(condition.field==='maintenanceType'||condition.field==='priority'||condition.field==='criticality'){if(!codes[condition.field].has(String(condition.value)))throw new HttpError(400,'Select an active adopted '+condition.field+' code: '+String(condition.value));}
+}
 
 function findIn(groups: ListGroup[], code: string): (ListItem & { group: string }) | null {
     for (const g of groups) for (const i of g.items) if (i.code === code) return { ...i, group: g.label };
@@ -936,6 +940,7 @@ export const maintenanceRoutes = {
         requireMnt(ctx);
         if(ctx.role!=='org_super_admin')throw new HttpError(403,'Organization Super Admin is required for organization-wide maintenance setup.');
         let policy;try{policy=validateMaintenanceGovernance(ctx.body.policy);}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid maintenance policy.');}
+        await validateAdoptedGovernanceConditions(policy);
         const reason=clean(ctx.body.reason,500);
         if(reason.length<10)throw new HttpError(400,'Explain the proposed configuration change (at least 10 characters).');
         const base='organizations/'+ctx.orgId,path=base+'/maintenance_governance_settings/draft';
@@ -958,6 +963,7 @@ export const maintenanceRoutes = {
         const av=Number(active?.data.version)||0;
         if(!draft?.updateTime||ctx.body.expectedVersion!==v||ctx.body.expectedActiveVersion!==av||active&&!active.updateTime)throw new HttpError(409,'Configuration changed. Reload before activation.');
         const policy=validateMaintenanceGovernance(draft.data.policy),blockers=maintenanceActivationBlockers(policy);
+        await validateAdoptedGovernanceConditions(policy);
         if(blockers.length)throw new HttpError(409,blockers.join(' '));
         if(policy.workOrder.enabled||policy.workRequest.enabled||policy.technicalClosure.enabled){
             const [legacy,group]=await Promise.all([getDoc(base+'/maintenance_workflow_settings/default'),getDoc(base+'/maintenance_work_group_active/default')]);

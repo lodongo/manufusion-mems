@@ -50,6 +50,7 @@ export async function setCleanupAuthorization(ctx:OrgContext){
  });
 }
 export async function requireCleanupAuthorization(ctx:OrgContext):Promise<Doc>{
+ if(ctx.role!=='org_super_admin')throw new HttpError(403,'Organization Super Admin is required for permanent cleanup.');
  const grant=await currentGrant(ctx);
  if(!grant||!grant.updateTime)throw new HttpError(403,'Enable Database Cleanup separately in active development Test Mode. Authorization expires after 60 minutes or logout.');
  return grant;

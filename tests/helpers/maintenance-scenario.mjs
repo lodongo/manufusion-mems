@@ -517,7 +517,7 @@ await op('planner', 'confirm_readiness', { code: wo });
 assert.equal(snapshot(r + '/work_orders/' + wo).data.status, 'released');
 await assert.rejects(() => op('planner', 'save_window', { equipmentId: 'OTHER_LINE', date, startTime: '08:00', durationHours: 8, workOrderIds: [wo] }), /other equipment/);
 await assert.rejects(() => op('planner', 'save_window', { equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 1, workOrderIds: [wo] }), /needs 3 h/);
-const windowBody = { title: 'Conveyor planned maintenance', equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8, timeZone: 'UTC', workOrderIds: [wo] };
+const windowBody = { capacityOverrideReason:'Legacy fixture capacity has not been adopted; planner documents the warning.', title: 'Conveyor planned maintenance', equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8, timeZone: 'UTC', workOrderIds: [wo] };
 const win = await op('planner', 'save_window', windowBody),
     windowId = win.windowId;
 assert.equal(snapshot(r + '/maintenance_windows/' + windowId).data.status, 'scheduled');
@@ -939,7 +939,7 @@ await op('planner', 'allocate', {
 await op('planner', 'allocate', { code: direct, taskId: 'hidden_task', personnel: [people.tech[0]], toolsReady: true, competenciesConfirmed: true, note: 'Qualified technician and tools checked.' });
 await makeReady(direct);
 const subset = await op('planner', 'save_window', {
-    title: 'Selected coupling task only',
+    capacityOverrideReason:'Legacy fixture capacity has not been adopted; planner documents the warning.', title: 'Selected coupling task only',
     equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8,
     workOrderIds: [direct],
     tasks: [{ woCode: direct, taskId: 'coupling' }],
@@ -957,10 +957,10 @@ await assert.rejects(
     () => op('planner', 'save_window', { title: 'Forbidden mixed equipment', equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8, workOrderIds: [other] }),
     /other equipment/,
 );
-const otherWindow = await op('planner', 'save_window', { title: 'Other line equipment', equipmentId: 'OTHER_LINE', date, startTime: '09:00', durationHours: 2, workOrderIds: [other] });
+const otherWindow = await op('planner', 'save_window', { capacityOverrideReason:'Legacy fixture capacity has not been adopted; planner documents the warning.', title: 'Other line equipment', equipmentId: 'OTHER_LINE', date, startTime: '09:00', durationHours: 2, workOrderIds: [other] });
 const sameLine = await op('planner', 'save_window', {
     windowId: subset.windowId,
-    reason: 'Schedule every remaining task of the follow-up work order together.',
+    capacityOverrideReason:'Legacy fixture capacity has not been adopted; planner documents the warning.', reason: 'Schedule every remaining task of the follow-up work order together.',
     equipmentId: 'CONVEYOR', date, startTime: '08:00', durationHours: 8,
     workOrderIds: [direct],
 });

@@ -20,7 +20,7 @@ test('new work requests are Created, reviewer assignment is explicit, and the re
     assert.ok(backend.includes('eligibleReview'));
     assert.ok(backend.includes("reviewAssignmentSource: 'workflow'"));
     assert.ok(ui.includes('Close (no assessment)'));
-    assert.ok(ui.includes('Confirm &amp; create Work Order'));
+    assert.ok(ui.includes('Confirm & create Work Order'));assert.ok(ui.includes('Confirm / submit for approval'));
     assert.ok(backend.includes('confirmRequestWithOrder'));
 });
 test('assessment numbering is database-managed and records are separately stored', () => {
