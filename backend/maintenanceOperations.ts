@@ -31,6 +31,7 @@ import {
     supplierCategories,
 } from './maintenanceSourcing';
 import { planningGroup } from './maintenanceMaterialHook';
+import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
 import { budgetStatus, costApprovalOf, estimateOf, periodOf, submitCost } from './maintenancePlanning';
 import {
     closurePrerequisites,
@@ -1118,7 +1119,7 @@ async function windowAction(ctx: OrgContext, action: string) {
             if(summary.handover!==summary.total)throw new HttpError(409,'Complete window equipment handover first.');
             requiredText(b.note,'Technical Manager closure review',10);
             for(const wo of c.wos){if(wo.data.status==='closed')continue;closurePrerequisites(wo.data);
-                if(b.outstandingAccepted!==true&&(tasksOf(wo).some(t=>{const f=object(object(object(wo.data.taskExecution)[str(t.id)]).feedback);return f.outstandingStatus==='reported'||[f.outstandingDefects,f.followUp].some(v=>!!str(v).trim()&&!/^none\\.?$/i.test(str(v).trim()));})||!/^none\\.?$/i.test(str(object(wo.data.handover).restrictions).trim())))throw new HttpError(409,'Review and accept outstanding issues and follow-up actions first.');
+                if(b.outstandingAccepted!==true&&(tasksOf(wo).some(t=>{const f=object(object(object(wo.data.taskExecution)[str(t.id)]).feedback);return f.outstandingStatus==='reported'||[f.outstandingDefects,f.followUp].some(v=>!!str(v).trim()&&!/^none\.?$/i.test(str(v).trim()));})||!/^none\.?$/i.test(str(object(wo.data.handover).restrictions).trim())))throw new HttpError(409,'Review and accept outstanding issues and follow-up actions first.');
             }
         }
         // Each successful order retains its original sign-off, authority, audit and costs.
@@ -1126,7 +1127,7 @@ async function windowAction(ctx: OrgContext, action: string) {
         for(const original of c.wos){
             const wo=await internalOrder(ctx,original.id);
             if(wo.data.status==='closed'||stage==='safety_signoff'&&object(wo.data.safetySignoff).at||stage==='handover'&&object(wo.data.handover).at)continue;
-            let body={...b,receivingParty:ctx.uid};
+            let body:Record<string,unknown>={...b,receivingParty:ctx.uid};
             if(stage==='safety_signoff'){
                 const incident=incidents.find(i=>i.data.woCode===wo.id);
                 body={...body,declaration:incident?'reported':'none',noIncidentsConfirmed:!incident,clearanceConfirmed:!!incident,...(incident?{incidentId:incident.id,classification:incident.data.classification,narrative:incident.data.narrative,occurredAt:incident.data.occurredAt,immediateControls:incident.data.immediateControls}:{})};
@@ -1418,6 +1419,27 @@ function executionSchedule(window: Doc, wos: Doc[]) {
     }
 }
 
+// Same reference registry as Work Request closure.
+async function actualClosureChoice(key:string,code:unknown,label:string){
+    const db=rows((await getDoc('module_workspaces/MNT/metadata/'+key))?.data.items);
+    const items=(db.length?db:rows((DEFAULT_MODULE_METADATA.MNT??[]).find(x=>x.key===key)?.items)).filter(x=>x.active!==false);
+    const item=items.find(x=>x.code===code);
+    if(!item||item.selectable===false&&items.some(x=>x.category===item.code&&x.selectable!==false))throw new HttpError(400,'Choose the '+label+' from the maintenance reference list.');
+    const group=items.find(x=>x.code===item.category);
+    return {code:str(item.code),label:str(item.label),group:str(group?.label)||str(item.label)};
+}
+async function normalClosureFeedback(ctx:OrgContext,wo:Doc,task:Obj,feedback:Obj):Promise<Obj>{
+    if(feedback.closureFieldsVersion!==1)return feedback;
+    const failure=await actualClosureChoice('failureModes',feedback.failureModeCode,'failure mode');
+    const cause=await actualClosureChoice('rootCauses',feedback.causeCode,'failure cause');
+    const codes=[...new Set(texts(feedback.solutionCodes))];
+    if(!codes.length||codes.length>5)throw new HttpError(400,'Choose one to five solution types.');
+    const solutions=await Promise.all(codes.map(code=>actualClosureChoice('solutionTypes',code,'solution type')));
+    const minutes=Number(feedback.durationMinutes),date=str(feedback.dateClosed);
+    if(!Number.isInteger(minutes)||minutes<=0||minutes>525600)throw new HttpError(400,'Enter actual time in whole minutes.');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date||date>new Date(Date.now()+14*3600000).toISOString().slice(0,10)||date<str(wo.data.createdAt).slice(0,10))throw new HttpError(400,'Enter an actual closure date from work order creation up to today.');
+    return {...feedback,failureModeCode:failure.code,failureModeLabel:failure.label,failureModeGroup:failure.group,causeCode:cause.code,causeLabel:cause.label,causeGroup:cause.group,solutions,maintenanceTypeCode:str(task.maintenanceTypeCode)||str(wo.data.maintenanceTypeCode),maintenanceTypeLabel:str(task.maintenanceTypeLabel)||str(wo.data.maintenanceTypeLabel),actualHours:minutes/60,actualMinutes:minutes,dateClosed:date,closedBy:ctx.uid,closedByName:name(ctx)};
+}
 /** No material or service transaction can be silently ignored by retrospective closure. */
 async function ensureNoDirectResources(ctx:OrgContext,wo:Doc){
  if(!isRequestClosureOrder(wo.data))return;
@@ -1439,7 +1461,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             const source=object(wo.data.directCompletion),executor=object(source.executor),minutes=Number(source.durationMinutes);
             if(str(executor.uid)!==ctx.uid&&!bypass(ctx,'mnt.direct_completion.executor_feedback'))throw new HttpError(403,'The named employee who performed the work must confirm the execution feedback.');
             const submitted=object(b.feedback);
-            const feedback={...submitted,workPerformed:str(source.reportedWork)};
+            const feedback:Obj={...submitted,workPerformed:str(source.reportedWork)};
             if(feedback.noSparesOrServicesConfirmed!==true)throw new HttpError(400,'Explicitly confirm no spare parts or external services were used.');
             if(feedback.scopeDeviation===true)throw new HttpError(409,'Record additional work or a technical deviation through a follow-up work request.');
             taskCompletion(task,feedback);
@@ -1544,7 +1566,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             );
             return { ok: true };
         }
-        const feedback = object(b.feedback);
+        const feedback = await normalClosureFeedback(ctx,wo,task,object(b.feedback));
         taskCompletion(task, feedback);
         if (feedback.scopeDeviation === true)
             throw new HttpError(

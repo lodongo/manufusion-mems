@@ -417,7 +417,9 @@ function ResourceForm({
 
 function FeedbackForm({ task, execution, wo, onSubmit }: { task: MntData; execution: MntData; wo:MntData; onSubmit: (d: MntData) => void }) {
     const retrospective=execution.status==='awaiting_feedback';
-    const [f, setF] = useState<MntData>({ ...(retrospective?{workPerformed:execution.reportedWork,actualHours:Number(execution.actualMinutes)/60}:{}),services: (task.services || []).map((s: MntData) => ({ id: s.id, accepted: false })) });
+    const setup=useLoad(()=>retrospective?Promise.resolve(null):callBackend<MntSetup>('/api/org/mnt/setup',{}),[retrospective]);
+    const today=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+    const [f, setF] = useState<MntData>({ ...(retrospective?{workPerformed:execution.reportedWork,actualHours:Number(execution.actualMinutes)/60}:{closureFieldsVersion:1,failureModeCode:wo.failureModeCode||wo.natureCode||'',causeCode:wo.causeCode||'',solutionCodes:(wo.solutions||[]).map((s:MntData)=>s.code),dateClosed:today,durationMinutes:''}),services: (task.services || []).map((s: MntData) => ({ id: s.id, accepted: false })) });
     const patch = (k: string, v: any) => setF((old) => ({ ...old, [k]: v }));
     return (
         <div className="space-y-3">
@@ -436,14 +438,20 @@ function FeedbackForm({ task, execution, wo, onSubmit }: { task: MntData; execut
                     ['Actual time taken (minutes)',execution.actualMinutes],
                     ['Closed by',wo.directCompletion?.executor?.name],
                 ].map(([label,value])=><p key={label}><span className="font-semibold">{label}: </span>{value||'—'}</p>)}
-            </div>:<><MntField label="What was done? *" value={f.workPerformed} multiline onChange={v=>patch('workPerformed',v)}/>
-                <p className="text-sm text-soft">Failure mode: {wo.failureModeLabel||wo.natureLabel||'—'} · Type of maintenance: {wo.maintenanceTypeLabel||'—'}</p>
+            </div>:<>{setup.data?.lists?<><ChoicePicker title="Failure mode" required groups={setup.data.lists.failureModes} selected={f.failureModeCode?[f.failureModeCode]:[]} onToggle={v=>patch('failureModeCode',f.failureModeCode===v?'':v)}/>
+                <ChoicePicker title="Failure cause" required groups={setup.data.lists.rootCauses} selected={f.causeCode?[f.causeCode]:[]} onToggle={v=>patch('causeCode',f.causeCode===v?'':v)}/>
+                <ChoicePicker title="Solution types" required multi max={5} groups={setup.data.lists.solutions} selected={f.solutionCodes} onToggle={v=>patch('solutionCodes',f.solutionCodes.includes(v)?f.solutionCodes.filter((x:string)=>x!==v):f.solutionCodes.length<5?[...f.solutionCodes,v]:f.solutionCodes)}/></>:<p className="text-sm text-soft">{setup.error||'Loading maintenance closure classifications…'}</p>}
+                <MntField label="What was done? *" value={f.workPerformed} multiline onChange={v=>patch('workPerformed',v)}/>
+                <p className="text-sm"><span className="font-semibold">Type of maintenance: </span>{task.maintenanceTypeLabel||wo.maintenanceTypeLabel||'—'}</p>
+                <MntField label="Closure date *" type="date" value={f.dateClosed} onChange={v=>patch('dateClosed',v)}/>
+                <MntField label="Actual time taken (minutes) *" type="number" value={f.durationMinutes} onChange={v=>patch('durationMinutes',v)}/>
+                <p className="text-sm"><span className="font-semibold">Closed by: </span>Signed-in employee (recorded automatically)</p>
                 <details className="rounded-xl border border-line p-3"><summary className="cursor-pointer text-sm font-medium">Additional technical details (optional)</summary>
                     {([['findings','Technical findings'],['results','Actual work results'],['measurements','Measurements'],['evidence','Execution evidence / reference']] as const).map(([k,l])=><MntField key={k} label={l} value={f[k]} multiline onChange={v=>patch(k,v)}/>)}
                     <MntField label="Outstanding work / follow-up (if any)" value={f.followUp} multiline onChange={v=>patch('followUp',v)}/>
                 </details>
             </>}
-            {retrospective?<><MntCheck label="I confirm no spare parts or external services were used." value={!!f.noSparesOrServicesConfirmed} onChange={v=>patch('noSparesOrServicesConfirmed',v)}/></>:<MntField label="Actual labour hours worked" type="number" value={f.actualHours} onChange={(v) => patch('actualHours', v)} />}
+            {retrospective?<><MntCheck label="I confirm no spare parts or external services were used." value={!!f.noSparesOrServicesConfirmed} onChange={v=>patch('noSparesOrServicesConfirmed',v)}/></>:null}
             <MntCheck
                 label={retrospective?'Additional work or technical deviation needs a follow-up request.':'The work deviated from the assessed technical scope.'}
                 value={!!f.scopeDeviation}
@@ -494,7 +502,7 @@ function FeedbackForm({ task, execution, wo, onSubmit }: { task: MntData; execut
                     />
                 </fieldset>
             ))}
-            <Button disabled={retrospective?!f.noSparesOrServicesConfirmed:!String(f.workPerformed||'').trim()||!(Number(f.actualHours)>0)} onClick={() => onSubmit({ feedback: f })}>{retrospective?'Confirm recorded work':'Complete task'}</Button>
+            <Button disabled={retrospective?!f.noSparesOrServicesConfirmed:!setup.data?.lists||!f.failureModeCode||!f.causeCode||!f.solutionCodes.length||!f.dateClosed||!String(f.workPerformed||'').trim()||!Number.isInteger(Number(f.durationMinutes))||!(Number(f.durationMinutes)>0)} onClick={() => onSubmit({ feedback: f })}>{retrospective?'Confirm recorded work':'Complete task'}</Button>
         </div>
     );
 }
