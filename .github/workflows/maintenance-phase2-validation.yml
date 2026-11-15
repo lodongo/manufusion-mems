@@ -35,7 +35,7 @@ jobs:
       - run: npm ci
       - run: npm run check
       - name: Maintenance governance and access regression tests
-        run: node --import tsx --test backend/maintenanceCostCore.test.ts backend/maintenanceResourceLeveling.test.ts backend/maintenanceTimesheetCore.test.ts backend/maintenanceStandardHistory.test.ts backend/maintenanceTimeCore.test.ts backend/maintenanceCapacity.test.ts backend/maintenanceAnalytics.test.ts backend/maintenanceApprovalFlow.test.ts backend/maintenanceGovernancePolicy.test.ts backend/maintenanceCleanupAuthorization.test.ts tests/independent/maintenance-gate-access.test.mjs
+        run: node --import tsx --test backend/maintenanceReliabilityCore.test.ts backend/maintenanceCostCore.test.ts backend/maintenanceResourceLeveling.test.ts backend/maintenanceTimesheetCore.test.ts backend/maintenanceStandardHistory.test.ts backend/maintenanceTimeCore.test.ts backend/maintenanceCapacity.test.ts backend/maintenanceAnalytics.test.ts backend/maintenanceApprovalFlow.test.ts backend/maintenanceGovernancePolicy.test.ts backend/maintenanceCleanupAuthorization.test.ts tests/independent/maintenance-gate-access.test.mjs
       - name: Shared approval-engine regression tests
         run: npm run test:governance
       - run: npm run build
