@@ -1,7 +1,7 @@
 /** Development-only maintenance record purge. The tombstone is committed with the physical deletion. */
 import {HttpError,getDoc,listDocs,nowIso,str,isObj,type Obj,type Doc} from './core';
 import {commit,withLock,type Write} from './finCore';
-import {testModeEnvironmentAllowed,testModeActiveFor} from './testModeCore';
+import {testModeEnvironmentAllowed,testModeActiveFor,clearTestModeCache} from './testModeCore';
 import type {OrgContext} from './guards';
 
 export const TEST_MAINTENANCE_COLLECTIONS={order:'work_orders',assessment:'work_assessments',request:'work_requests'} as const;
@@ -17,7 +17,7 @@ export function deletionCode(kind:Kind,v:unknown){const code=str(v);if(!patterns
 export function hasMaintenanceReference(v:unknown,code:string):boolean{
  if(typeof v==='string')return v===code;
  if(Array.isArray(v))return v.some(x=>hasMaintenanceReference(x,code));
- if(isObj(v))return Object.entries(v).some(([k,x])=>!['history','workflowTransitions','description','note','reason','title','narrative','photos','attachments'].includes(k)&&hasMaintenanceReference(x,code));
+ if(isObj(v))return Object.entries(v).some(([k,x])=>!['history','workflowTransitions','description','note','reason','title','narrative','photos','attachments'].includes(k)&&(k===code||hasMaintenanceReference(x,code)));
  return false;
 }
 function requireMode(ctx:OrgContext){if(!testDeletionEnabled(ctx))throw new HttpError(403,'Permanent deletion requires active development Test Mode and Organization Super Admin access.');}
@@ -35,6 +35,7 @@ export async function purgeTestMaintenance(ctx:OrgContext){
  if(ctx.body.confirm!==code||reason.length<10||reason.length>500)throw new HttpError(400,'Type the exact record number and enter a reason of 10–500 characters.');
  // Same lock order as early closure and financial stock issue; no mutation may bypass these guards.
  return withLock(ctx.orgId,'maintenance_operations',()=>withLock(ctx.orgId,'maintenance_po_commitment',()=>withLock(ctx.orgId,'inventory_movements',async()=>{
+  clearTestModeCache();
   if(!await testModeActiveFor(ctx.orgId))throw new HttpError(403,'Test Mode is no longer active.');
   const base=root(ctx),collection=TEST_MAINTENANCE_COLLECTIONS[kind],path=base+'/'+collection+'/'+code;
   const [target,orders,assessments,requests]=await Promise.all([getDoc(path),listDocs(base+'/work_orders'),listDocs(base+'/work_assessments'),listDocs(base+'/work_requests')]);
@@ -81,6 +82,7 @@ export async function purgeTestMaintenance(ctx:OrgContext){
   const at=nowIso(),auditId=kind+'_'+code;
   const trail={...minimal(target,kind),action:'permanent_delete',deletedAt:at,deletedBy:ctx.uid,deletedByName:[str(ctx.me.data.firstName),str(ctx.me.data.lastName)].filter(Boolean).join(' ')||ctx.actor.email,reason,orgId:ctx.orgId,testMode:true,environment:'development',unlinked,subOrderSequence:Number(d.subOrderSequence)||0,recordVersion:assertVersion(target)};
   writes.push({path:base+'/maintenance_deletion_audit/'+auditId,fields:trail,exists:false},{path,delete:true,updateTime:assertVersion(target)});
+  clearTestModeCache();
   if(!await testModeActiveFor(ctx.orgId))throw new HttpError(403,'Test Mode expired before deletion.');
   await commit(writes);
   return {ok:true,auditId,code,kind,unlinked};

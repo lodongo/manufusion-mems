@@ -60,3 +60,45 @@ assert.equal(check.testMode, true);
 assert.equal(approverCheck(admin(true), { ...po, status: 'open' }).ok, false, 'status is never relaxed');
 
 console.log('test mode scenario passed: fail-closed environment gate, expiry, tenant scope, audited bypass, job-role gates and chart-of-authority identity checks');
+
+
+// Permanent maintenance deletions: production, tenant, role, typed ID, linked records and durable audit.
+const {purgeTestMaintenance,listTestMaintenanceDeletion}=await import('../../backend/maintenanceTestDeletion.ts');
+const base='organizations/'+org,order='WO00000801',request='WR00000801',assessment='ASSM_00000801';
+const actor={uid:'ADMIN_01',email:'admin@example.test'};
+const ctx=(kind,code,extra={})=>({...admin(true),actor,body:{kind,code,confirm:code,reason:'Remove end-to-end test fixture'},...extra});
+seed(base+'/work_orders/'+order,{code:order,title:'Test WO',status:'closed',wrCode:request});
+seed(base+'/work_requests/'+request,{code:request,title:'Test WR',status:'closed',woCode:order,assessmentCode:assessment});
+seed(base+'/work_assessments/'+assessment,{code:assessment,workRequestCode:request,status:'converted',woCode:order});
+await assert.rejects(()=>purgeTestMaintenance(ctx('order',order,{testMode:false})),/active development Test Mode/i);
+await assert.rejects(()=>purgeTestMaintenance(ctx('order',order,{role:'org_user'})),/Super Admin/i);
+process.env.MEMS_ENVIRONMENT='production';
+await assert.rejects(()=>purgeTestMaintenance(ctx('order',order)),/active development Test Mode/i);
+process.env.MEMS_ENVIRONMENT='development';
+await assert.rejects(()=>purgeTestMaintenance(ctx('order',order,{orgId:'wrong_org'})),/no longer active/i);
+await assert.rejects(()=>purgeTestMaintenance(ctx('order',order,{body:{kind:'order',code:order,confirm:'wrong',reason:'Remove test record'}})),/exact record number/i);
+await assert.rejects(()=>purgeTestMaintenance(ctx('request',request)),/linked records/i);
+const child=order+'_1';
+seed(base+'/work_orders/'+child,{code:child,parentWoCode:order,rootWoCode:order,status:'planning'});
+await assert.rejects(()=>purgeTestMaintenance(ctx('order',order)),/linked records/i);
+await purgeTestMaintenance(ctx('order',child));
+assert.equal(snapshot(base+'/work_orders/'+child),null);
+seed(base+'/goods_issues/GI00000001',{workOrderId:order});
+await assert.rejects(()=>purgeTestMaintenance(ctx('order',order)),/goods_issues/i);
+assert.ok(snapshot(base+'/work_orders/'+order));
+assert.equal(snapshot(base+'/maintenance_deletion_audit/order_'+order),null);
+const {deleteDoc}=await import('./maintenance-fixture.ts');await deleteDoc(base+'/goods_issues/GI00000001');
+await purgeTestMaintenance(ctx('order',order));
+assert.equal(snapshot(base+'/work_orders/'+order),null);
+assert.equal(snapshot(base+'/work_requests/'+request).data.woCode,'');
+assert.equal(snapshot(base+'/work_assessments/'+assessment).data.woCode,'');
+const audit=snapshot(base+'/maintenance_deletion_audit/order_'+order).data;
+assert.equal(audit.deletedBy,'ADMIN_01');assert.equal(audit.reason,'Remove end-to-end test fixture');assert.equal(audit.status,'closed');assert.equal(audit.testMode,true);
+await purgeTestMaintenance(ctx('assessment',assessment));
+assert.equal(snapshot(base+'/work_assessments/'+assessment),null);
+assert.equal(snapshot(base+'/work_requests/'+request).data.assessmentCode,'');
+await purgeTestMaintenance(ctx('request',request));
+assert.equal(snapshot(base+'/work_requests/'+request),null);
+assert.equal((await listTestMaintenanceDeletion(ctx('request',request))).trail.length,4);
+await assert.rejects(()=>purgeTestMaintenance(ctx('request',request)),/does not exist/i);
+console.log('permanent maintenance deletion scenario passed');

@@ -77,7 +77,7 @@ export async function googleRequest(url: string, method: string, body: any) {
         const changes: Array<[string, any]> = [],
             results: any[] = [];
         for (const w of body.writes) {
-            const path = (w.update?.name || w.transform?.document || '').split('/documents/')[1];
+            const path = (w.update?.name || w.transform?.document || w.delete || '').split('/documents/')[1];
             if (!path) throw Error('Invalid test write');
             const current = documents.get(path),
                 condition = w.currentDocument;
@@ -86,6 +86,7 @@ export async function googleRequest(url: string, method: string, body: any) {
                 (condition?.updateTime && condition.updateTime !== current?.updateTime)
             )
                 return response({ error: { status: 'ABORTED', message: 'Fixture precondition failed' } }, 409);
+            if(w.delete){changes.push([path,null]);results.push({});continue;}
             let data: any = w.update ? toDoc({ fields: w.update.fields || {} }).data : { ...(current?.data || {}) };
             if (w.updateMask) data = { ...(current?.data || {}), ...data };
             const transforms = w.transform?.fieldTransforms || w.updateTransforms || [],
@@ -98,7 +99,7 @@ export async function googleRequest(url: string, method: string, body: any) {
             changes.push([path, data]);
             results.push({ transformResults: values });
         }
-        for (const [path, data] of changes) seed(path, data);
+        for (const [path, data] of changes) {if(data===null)documents.delete(path);else seed(path, data);}
         return response({ writeResults: results });
     }
     throw Error('Unexpected network request in maintenance integration test: ' + method + ' ' + url);
