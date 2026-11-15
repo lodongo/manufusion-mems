@@ -40,7 +40,7 @@ export function timeline(r:RecordInput,now:number):Timeline{
  const coverageStart=uniq.length?uniq[0].at:null;
  // Live snapshots may be displayed but do not retroactively fill historical intervals.
  const last=uniq.at(-1);
- if(current!=='UNKNOWN'&&last?.state!==current)uniq.push({at:now,state:current,observed:false});
+ if(current!=='UNKNOWN'&&last?.state!==current){if(last&&last.at+1<now)uniq.push({at:last.at+1,state:'UNKNOWN',observed:false});uniq.push({at:now,state:current,observed:false});}
  const end=uniq.filter(p=>p.observed&&terminal(kind,p.state)).at(-1)?.at??null;
  return {created,points:uniq,coverageStart,current,terminalAt:end,kind,id:r.id,data:d};
 }
@@ -67,7 +67,7 @@ export function events(t:Timeline,w:Interval){
 export function dwell(t:Timeline,w:Interval):Array<{state:string;hours:number}>{
  if(!Number.isFinite(t.created)||t.created>=w.end)return [];
  const result=new Map<string,number>();
- const boundaries=[...new Set([Math.max(w.start,t.created),...t.points.filter(p=>p.observed&&p.at>=w.start&&p.at<w.end).map(p=>p.at),w.end])].sort((a,b)=>a-b);
+ const boundaries=[...new Set([Math.max(w.start,t.created),...t.points.filter(p=>p.at>=w.start&&p.at<w.end).map(p=>p.at),w.end])].sort((a,b)=>a-b);
  for(let i=0;i<boundaries.length-1;i++){
   const start=boundaries[i],end=boundaries[i+1],state=stateAt(t,start);
   if(state&&!terminal(t.kind,state))result.set(state,(result.get(state)||0)+(end-start)/3600000);

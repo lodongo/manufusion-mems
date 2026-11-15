@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import {Button,Card,PageTitle,Spinner} from '../admin/kit';
 import {Alert} from '../components/ui';
 import {callBackend} from '../lib/backend';
+import {workspaceNavigate} from '../lib/route';
 type Key='workRequest'|'workOrder'|'technicalClosure';
 type Field='maintenanceType'|'priority'|'criticality'|'estimatedCost'|'riskScore'|'requiresSpares'|'requiresExternalService'|'requiresExternalSpecialist';
 type Condition={field:Field;op:'eq'|'gte'|'lte';value:string|number|boolean};
@@ -28,7 +29,7 @@ export default function MntSetup(){
  const dirty=!!data&&!!policy&&JSON.stringify(data.policy)!==JSON.stringify(policy);
  const activate=async()=>{if(!data||dirty||!data.activationReady)return;setBusy(true);setError('');setNotice('');try{const d=await callBackend<Data>('/api/org/mnt/setup/governance/activate',{expectedVersion:data.version,expectedActiveVersion:data.active?.version||0,confirm:activationText,reason});setData(d);setPolicy(d.policy);setReason('');setActivationText('');setNotice('Active version '+d.active?.version+' will apply only to newly created transactions.');}catch(e){setError(e instanceof Error?e.message:'Activation failed');}finally{setBusy(false);}};
  const save=async()=>{if(!policy||!data)return;setBusy(true);setError('');setNotice('');try{const d=await callBackend<Data>('/api/org/mnt/setup/governance/save',{policy,reason,expectedVersion:data.version});setData(d);setPolicy(d.policy);setReason('');setNotice('Draft revision '+d.version+' saved. No runtime workflow changes have been applied.');}catch(e){setError(e instanceof Error?e.message:'Save failed');}finally{setBusy(false);}};
- return <div className="space-y-4"><PageTitle title="Maintenance Management · Setup" subtitle="Organization-wide governance"/>
+ return <div className="space-y-4"><PageTitle title="Maintenance Management · Setup" subtitle="Organization-wide governance" action={<Button variant='secondary' onClick={()=>workspaceNavigate('organization_admin/mnt_dashboard')}>Dashboard & KPI targets</Button>}/>
  {error&&<Alert tone="error">{error}</Alert>}{notice&&<Alert tone="info">{notice}</Alert>}
  {!policy||!data?(busy?<Spinner/>:<Button onClick={()=>void load()}>Reload</Button>):<>
  <Alert tone="info">Existing work requests and work orders retain their original governance. Newly activated policies apply only to new transactions. If a condition cannot be evaluated from trusted facts at its approval stage, approval is required conservatively.</Alert>
