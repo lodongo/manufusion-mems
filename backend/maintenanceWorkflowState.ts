@@ -21,7 +21,7 @@ export type FactSet={approved?:boolean;items?:Obj[];checklist?:Obj[];costStatus?
 export function stateOf(d:Obj,f:FactSet):{code:StateCode;label:string;reason:string}{
  const make=(code:StateCode,reason='')=>({code,label:WO_STATES.find(x=>x[0]===code)![1],reason});
  const status=str(d.status),tasks=rows(d.assessmentTasks),exec=object(d.taskExecution),plan=object(d.taskPlanning);
- if(status==='closed')return make('WO900');if(status==='cancelled')return make('WO990');
+ if(status==='closed')return make('WO900',d.closureMode==='early'?'Closed early; unfinished work was not certified complete':'');if(status==='cancelled')return make('WO990');
  const retrospective=isRequestClosureOrder(d);
  if(!retrospective&&['planning','plan_ready','released','scheduled'].includes(status)){
   if(!f.approved){if(!tasks.length||reviewAssessmentPrerequisites(d,'__workflow__')||object(d.assessmentReview).status==='changes_requested')return make('WO010','Complete or correct assessment');return make('WO020','Independent approval of current assessment');}

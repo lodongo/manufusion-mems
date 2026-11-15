@@ -815,6 +815,8 @@ export default function MntWorkOrder({ code }: { code: string }) {
             {retrospective&&<Card className="space-y-2"><h2 className="font-semibold">Work completed at request review</h2><p className="text-sm text-soft">Planning, resource preparation and maintenance window are not applicable. This record does not certify prior safety authorization.</p><p className="text-sm">Actual completion: {wo.directCompletion?.performedDate} · {wo.directCompletion?.durationMinutes} minutes</p><p className="text-sm">Performed by: {wo.directCompletion?.executor?.name} · {wo.directCompletion?.executor?.role}</p><p className="text-sm">Work performed: {wo.directCompletion?.reportedWork}</p><p className="text-sm">Maintenance type: {wo.maintenanceTypeLabel}</p><p className="text-sm">Failure mode: {wo.directCompletion?.failureModeLabel} · Cause: {wo.directCompletion?.causeLabel}</p><p className="text-sm">Solution: {(wo.directCompletion?.solutions||[]).map((s:MntData)=>s.label).join('; ')}</p><p className="text-sm text-soft">No spare parts or services declared. Labour valuation is separate from recorded time.{wo.finalCost?.pendingLabourValuation?' Labour valuation pending approved rate.':''}</p>{can.execute&&execution.status==='awaiting_feedback'&&<Button testOverride={!!data.testModeOverride} onClick={()=>open('feedback')}>Confirm actual work feedback</Button>}</Card>}
             {failure && <MntGateHint message={failure} />}
             {message && <Alert tone="info">{message}</Alert>}
+            {can.earlyClose&&data.earlyClosure&&<Card className="space-y-2"><h2 className="font-semibold">Close work order at current stage</h2>{data.earlyClosure.blocked.length?<p className="text-sm text-soft">Committed PO: {data.earlyClosure.blocked.join(', ')}. Complete procurement and normal closure.</p>:<><p className="text-sm text-soft">{data.earlyClosure.started?'Record and reconcile actual work, then obtain safety sign-off and handover. Unstarted tasks will remain unperformed.':'Unstarted scope will remain unperformed. Uncommitted maintenance purchase requirements and reservations will be released.'}</p>{data.earlyClosure.started&&!data.earlyClosure.requested?<Button variant="secondary" onClick={()=>open('prepare_early_close')}>Request early closure</Button>:<Button variant="secondary" onClick={()=>open('early_close')}>Close work order early</Button>}</>}</Card>}
+            {wo.closureMode==='early'&&<Card className="space-y-1"><p className="font-semibold">Closed early · {wo.earlyClosure?.outcome==='not_started'?'Work not started':'Work stopped'}</p><p className="text-sm">{wo.earlyClosure?.note}</p><p className="text-xs text-soft">Unperformed tasks: {wo.earlyClosure?.skippedTaskIds?.length||0}</p></Card>}
             <div className="flex flex-wrap gap-2">
                 {can.cancel && (
                     <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('cancel_order')}>
@@ -1067,7 +1069,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                 {can.execute && !wo.safetySignoff && !['closed', 'cancelled'].includes(wo.status) && (
                                     <div className="flex flex-wrap gap-2">
                                         {retrospective&&execution.status==='awaiting_feedback'&&<Button testOverride={!!data.testModeOverride} onClick={()=>open('feedback')}>Confirm actual work feedback</Button>}
-                                        {!retrospective&&(!execution.status||execution.status==='blocked') && (
+                                        {!retrospective&&!wo.earlyClosureRequest&&(!execution.status||execution.status==='blocked') && (
                                             <Button testOverride={!!data.testModeOverride} busy={busy} onClick={() => run('start_task', { taskId: task.id })}>
                                                 {execution.status === 'blocked' ? 'Resume task' : 'Start task'}
                                             </Button>
@@ -1161,7 +1163,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     {!data.windowClosureManaged&&can.handover && wo.safetySignoff && !wo.handover && (
                         <Button testOverride={!!data.testModeOverride} onClick={() => open('handover')}>Accept equipment handover</Button>
                     )}
-                    {!data.windowClosureManaged&&can.close && wo.status !== 'closed' && (
+                    {!data.windowClosureManaged&&can.close && !wo.earlyClosureRequest&&wo.status !== 'closed' && (
                         <Button testOverride={!!data.testModeOverride} onClick={() => open('technical_close')}>Technical Manager final closure</Button>
                     )}
                 </div>
@@ -1323,6 +1325,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                     />
                                 </>
                             )}
+                            {dialog.kind==='early_close'&&<><MntField label={'Confirm order '+code} value={form.confirm} onChange={v=>setForm({...form,confirm:v})}/><MntCheck label="I confirm this is early closure, no PO commitment remains, and unfinished work is not certified complete." value={!!form.noCommitmentConfirmed} onChange={v=>setForm({...form,noCommitmentConfirmed:v})}/></>}
                             {dialog.kind === 'cancel_order' && (
                                 <MntField
                                     label={'Type ' + code + ' to confirm cancellation'}

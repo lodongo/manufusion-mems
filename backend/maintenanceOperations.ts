@@ -1087,13 +1087,13 @@ function windowClosureSummary(w:Doc,wos:Doc[]) {
     const orders=members.map(id=>wos.find(x=>x.id===id));
     const eligible=w.data.model===EQUIPMENT_WINDOW&&members.length>0&&orders.every(wo=>!!wo&&tasksOf(wo).length>0&&tasksOf(wo).every(t=>rows(w.data.tasks).some(s=>s.woCode===wo.id&&s.taskId===t.id)));
     const fully=orders.filter((wo):wo is Doc=>!!wo);
-    return {eligible,ready:eligible&&fully.every(wo=>tasksOf(wo).every(t=>{const e=object(object(wo.data.taskExecution)[str(t.id)]);return e.status==='completed'&&e.reconciled===true;})),
-        safety:fully.filter(wo=>!!object(wo.data.safetySignoff).at).length,
-        handover:fully.filter(wo=>!!object(wo.data.handover).at&&object(wo.data.handover).accepted===true).length,
+    return {eligible,ready:eligible&&fully.every(wo=>wo.data.status==='closed'&&wo.data.closureMode==='early'||tasksOf(wo).every(t=>{const e=object(object(wo.data.taskExecution)[str(t.id)]);return e.status==='completed'&&e.reconciled===true;})),
+        safety:fully.filter(wo=>wo.data.status==='closed'&&wo.data.closureMode==='early'||!!object(wo.data.safetySignoff).at).length,
+        handover:fully.filter(wo=>wo.data.status==='closed'&&wo.data.closureMode==='early'||!!object(wo.data.handover).at&&object(wo.data.handover).accepted===true).length,
         closed:fully.filter(wo=>wo.data.status==='closed').length,total:members.length};
 }
 async function windowManagedClosure(ctx:OrgContext,wo:Doc){
-    if(isRequestClosureOrder(wo.data)||!wo.data.windowId)return false;
+    if(isRequestClosureOrder(wo.data)||object(wo.data.earlyClosureRequest).at||wo.data.closureMode==='early'||!wo.data.windowId)return false;
     const w=await getDoc(`${root(ctx)}/maintenance_windows/${identifier(wo.data.windowId)}`);
     if(!w)return false;
     const members=await Promise.all(texts(w.data.workOrderIds).map(id=>internalOrder(ctx,id)));
@@ -1499,6 +1499,77 @@ async function ensureClosureResources(ctx:OrgContext,wo:Doc){
         }
     }
 }
+async function earlyClosureCommitments(ctx:OrgContext,wo:Doc){
+    const [requirements,links,orders]=await Promise.all([listDocs(root(ctx)+'/procurement_requirements'),listDocs(root(ctx)+'/mnt_supply_links'),listDocs(root(ctx)+'/procurement_orders')]);
+    const owned=requirements.filter(x=>x.data.source==='maintenance'&&object(x.data.maintenanceSource).woCode===wo.id);
+    const associated=links.filter(x=>x.data.woCode===wo.id&&x.data.status==='active');
+    const plan=object(wo.data.taskPlanning),items=Object.values(plan).flatMap(v=>Object.values(object(v))).map(object);
+    const ids=new Set([...owned.map(x=>x.id),...associated.map(x=>str(x.data.requirementId)),...items.map(x=>str(x.requirementId))].filter(Boolean));
+    const poIds=new Set(items.map(x=>str(x.poId)).filter(Boolean));
+    const blocked=orders.filter(p=>{
+        const linked=poIds.has(p.id)||ids.has(str(p.data.requirementId))||rows(p.data.lines).some(l=>ids.has(str(l.requirementId))||l.workOrderId===wo.id||l.woCode===wo.id);
+        return linked&&(['open','sent','partial','full'].includes(str(p.data.status))||rows(p.data.lines).some(l=>(Number(l.receivedQty)||0)>0)||rows(p.data.deliveries).some(l=>l.status==='posted')||rows(p.data.receipts).some(l=>l.status==='accepted'));
+    }).map(p=>p.id);
+    return {owned,associated,blocked};
+}
+function earlyExecutionStarted(wo:Doc){return !!wo.data.startedAt||Object.values(object(wo.data.taskExecution)).some(v=>!!object(v).startedAt||['in_progress','blocked','awaiting_feedback','completed'].includes(str(object(v).status)));}
+async function ensureEarlyActuals(ctx:OrgContext,wo:Doc){
+    const executions=object(wo.data.taskExecution);
+    for(const task of tasksOf(wo)){
+        const e=object(executions[str(task.id)]);
+        if(e.startedAt||['in_progress','blocked','awaiting_feedback','completed'].includes(str(e.status))){
+            if(e.status!=='completed'||e.reconciled!==true)throw new HttpError(409,'Record actual feedback and reconcile every started task before early closure.');
+            taskCompletion(task,object(e.feedback));
+        }
+    }
+    for(const issue of (await listDocs(root(ctx)+'/goods_issues')).filter(x=>x.data.workOrderId===wo.id)){
+        const e=object(executions[str(issue.data.taskId)]);
+        if(e.reconciled!==true||issue.data.finance==='live'&&!str(issue.data.journalId))throw new HttpError(409,'Post and reconcile all actual goods issues before early closure.');
+        for(const l of rows(issue.data.lines)){
+            const c=rows(e.consumption).find(v=>v.issueLineId===issue.id+'_'+l.no);
+            if(!c||Math.abs(Number(c.consumed)+Number(c.returned)-Number(l.qty))>1e-6)throw new HttpError(409,'Reconcile the issued and returned quantities for '+issue.id+'.');
+            await verifyMaintenanceStockLedger(ctx.orgId,str(issue.data.warehouseId),str(l.materialId));
+        }
+    }
+    if((await listDocs(root(ctx)+'/safety_incidents')).some(i=>i.data.woCode===wo.id&&i.data.status!=='cleared'))throw new HttpError(409,'Clear all recorded incidents before early closure.');
+}
+async function earlyClose(ctx:OrgContext,wo:Doc,prepare=false){
+    await authority(ctx,wo,'MNT.WO.close','MNT.WO.TECHNICAL_CLOSE');
+    if(['closed','cancelled'].includes(str(wo.data.status)))throw new HttpError(409,'This order is already final.');
+    if(isRequestClosureOrder(wo.data))throw new HttpError(409,'Confirm the retrospective work feedback and use technical closure.');
+    return withLock(ctx.orgId,'maintenance_po_commitment',async()=>{
+        const check=await earlyClosureCommitments(ctx,wo);
+        if(check.blocked.length)throw new HttpError(409,'Early closure is blocked by committed purchase order(s): '+check.blocked.join(', '));
+        const prior=object(wo.data.earlyClosureRequest),reason=requiredText(ctx.body.note||prior.reason,'Early closure reason',10);
+        const started=earlyExecutionStarted(wo);
+        if(prepare){
+            if(!started)throw new HttpError(400,'Use direct early closure for work that has not started.');
+            await saveWo(ctx,wo,{earlyClosureRequest:{at:nowIso(),by:ctx.uid,name:name(ctx),reason}},'work_order.early_closure_requested',reason);
+            return {ok:true};
+        }
+        if(ctx.body.confirm!==wo.id||ctx.body.noCommitmentConfirmed!==true)throw new HttpError(400,'Confirm the order number and no outstanding PO commitment.');
+        await ensureEarlyActuals(ctx,wo);
+        if(started&&(!object(wo.data.safetySignoff).at||!object(wo.data.handover).at||object(wo.data.handover).accepted!==true))throw new HttpError(409,'Complete safety sign-off and equipment handover for the work actually performed.');
+        const at=nowIso(),execution=object(wo.data.taskExecution);
+        const skipped=tasksOf(wo).filter(t=>object(execution[str(t.id)]).status!=='completed').map(t=>str(t.id));
+        const writes:Write[]=[];
+        // Cancel only requirements owned by this work order, never shared replenishment demand.
+        for(const req of check.owned.filter(x=>!['cancelled','rejected'].includes(str(x.data.status)))){
+            writes.push({path:root(ctx)+'/procurement_requirements/'+req.id,fields:{status:'cancelled',cancelReason:'Work order early closure: '+reason,updatedAt:at,version:(Number(req.data.version)||0)+1,history:[...rows(req.data.history),{at,by:ctx.uid,byName:name(ctx),action:'cancelled',note:reason,from:str(req.data.status),to:'cancelled'}]},mask:['status','cancelReason','updatedAt','version','history'],updateTime:req.updateTime});
+        }
+        for(const link of check.associated)writes.push({path:root(ctx)+'/mnt_supply_links/'+link.id,fields:{status:'released',releasedAt:at,releasedBy:ctx.uid},mask:['status','releasedAt','releasedBy'],updateTime:link.updateTime});
+        const labour=tasksOf(wo).reduce((n,t)=>n+(Number(object(object(execution[str(t.id)]).feedback).actualHours)||0)*(Number(t.rate)||0),0);
+        const spares=Object.values(execution).reduce<number>((n,e)=>n+rows(object(e).consumption).reduce((v,c)=>v+(Number(c.consumed)||0)*(Number(c.unitCost)||0),0),0);
+        const closure={at,by:ctx.uid,name:name(ctx),note:reason,outcome:started?'work_stopped':'not_started',skippedTaskIds:skipped,previousStatus:str(wo.data.status),noPoCommitment:true};
+        const patch={status:'closed',closedAt:at,closureMode:'early',earlyClosure:closure,technicalClosure:closure,finalCost:{labour,spares,services:0,total:labour+spares},updatedAt:at,history:history(ctx,wo.data,'Work order closed early',reason)};
+        writes.push({path:root(ctx)+'/work_orders/'+wo.id,fields:patch,mask:Object.keys(patch),updateTime:wo.updateTime});
+        if(writes.length>430)throw new HttpError(409,'Too many linked procurement records; resolve them in procurement first.');
+        await releaseMaintenanceReservations(ctx,wo.id);
+        await commit(writes);
+        await event(ctx,'work_order.early_closed',wo.id,reason);
+        return {ok:true};
+    });
+}
 async function ensureNoDirectResources(ctx:OrgContext,wo:Doc){
  if(!isRequestClosureOrder(wo.data))return;
  const [issues,links]=await Promise.all([listDocs(root(ctx)+'/goods_issues'),listDocs(root(ctx)+'/mnt_supply_links')]);
@@ -1511,6 +1582,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         task = tasksOf(wo).find((t) => t.id === str(b.taskId)),
         e = object(executions[str(b.taskId)]);
     const retrospective=isRequestClosureOrder(wo.data);
+    if(action==='early_close'||action==='prepare_early_close')return earlyClose(ctx,wo,action==='prepare_early_close');
     if(['closed','cancelled'].includes(str(wo.data.status))&&!(wo.data.status==='closed'&&['technical_close','report_incident','clear_incident'].includes(action)))throw new HttpError(409,'A closed work order cannot be reopened or modified.');
     if(action==='upload_service_report'){
         await authority(ctx,wo,'MNT.WO.execute','MNT.TASK.FEEDBACK');
@@ -1560,6 +1632,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         }
         if (e.status === 'completed') throw new HttpError(409, 'Completed task history is immutable.');
         if (action === 'start_task') {
+            if(object(wo.data.earlyClosureRequest).at)throw new HttpError(409,'Early closure requested. Do not start new work.');
             if(e.status==='awaiting_feedback'||e.status==='in_progress')throw new HttpError(409,'This task is already started or physically finished.');
             const selected = rows(w.data.tasks).find((t) => t.woCode === wo.id && t.taskId === task.id)!;
             for (const dependency of texts(selected.dependencies)) {
@@ -1682,7 +1755,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         let windowComplete = true;
         for (const scheduled of rows(current.data.tasks)) {
             const related = await internalOrder(ctx, scheduled.woCode);
-            if (object(object(related.data.taskExecution)[str(scheduled.taskId)]).status !== 'completed') windowComplete = false;
+            if (!(related.data.status==='closed'&&related.data.closureMode==='early')&&object(object(related.data.taskExecution)[str(scheduled.taskId)]).status !== 'completed') windowComplete = false;
         }
         if (windowComplete)
             await commit([
@@ -1697,8 +1770,10 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     }
     if (action === 'safety_signoff') {
         await authority(ctx, wo, 'MNT.WO.safety', 'MNT.SAFETY.SIGNOFF');
+        if(object(wo.data.earlyClosureRequest).at)await ensureEarlyActuals(ctx,wo);
         for (const t of tasksOf(wo)) {
             const state = object(executions[str(t.id)]);
+            if(object(wo.data.earlyClosureRequest).at&&!state.startedAt&&!['completed','in_progress','blocked','awaiting_feedback'].includes(str(state.status)))continue;
             if (state.status !== 'completed' || state.reconciled !== true)
                 throw new HttpError(409, 'Complete and reconcile every task before safety sign-off.');
             if(!retrospective)await requireApprovedWindow(ctx, wo, str(t.id));
@@ -1897,7 +1972,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             let complete = true;
             for (const s of rows(window.data.tasks)) {
                 const other = await internalOrder(ctx, s.woCode);
-                if (object(object(other.data.taskExecution)[str(s.taskId)]).status !== 'completed') complete = false;
+                if (!(other.data.status==='closed'&&other.data.closureMode==='early')&&object(object(other.data.taskExecution)[str(s.taskId)]).status !== 'completed') complete = false;
             }
             if (complete)
                 await commit([
@@ -2074,6 +2149,9 @@ export async function maintenanceOperations(ctx: OrgContext) {
             permissions.safety=permissions.safety===true&&!['closed','cancelled'].includes(str(wo.data.status));
             permissions.close=permissions.close===true&&!!object(wo.data.handover).at&&(![str(object(object(wo.data.directCompletion).executor).uid),str(object(wo.data.directCompletion).recordedBy),...feedbackActors].includes(ctx.uid)||ctx.role==='org_super_admin'&&ctx.testMode===true);
         }
+        permissions.earlyClose=permissions.close===true&&!retrospective&&!['closed','cancelled'].includes(str(wo.data.status));
+        const earlyCheck=permissions.earlyClose?await earlyClosureCommitments(ctx,wo):null;
+        if(object(wo.data.earlyClosureRequest).at){permissions.assess=false;permissions.plan=false;permissions.reviewAssessment=false;permissions.cancel=false;}
         permissions.createBreakIn=permissions.close===true&&['completed','verified','closed'].includes(str(wo.data.status));
         if(retrospective&&['completed','closed'].includes(str(wo.data.status))){try{await authority(ctx,wo,'MNT.WO.close','MNT.WO.TECHNICAL_CLOSE');permissions.createBreakIn=true;}catch{/* restricted */}}
         if(['closed','cancelled'].includes(str(wo.data.status)))for(const k of ['reconcile','assess','reviewAssessment','plan','execute','safety','handover','close'])permissions[k]=false;
@@ -2091,6 +2169,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         return {
             wo: { code: wo.id, ...wo.data,workflowStatusCode:shortWorkOrderStatus(str(wo.data.workflowCode)),...responsibilityFor(await responsibilityData(ctx,true),wo.data,'wo'), assessmentReviewCurrent: !!reviewRole && assessmentReviewCurrent(wo.data,reviewRole) },
             assemblyOptions:wo.data.executionMode==='confirmed_request'?await (async()=>{const nodes=(await listDocs(root(ctx)+'/structure')).filter(n=>n.data.status!=='inactive'),by=new Map(nodes.map(n=>[n.id,str(n.data.parentId)]));return nodes.filter(n=>{if(n.data.level!=='assembly')return false;let p=by.get(n.id);for(let i=0;i<14&&p;i++,p=by.get(p))if(p===wo.data.unitId)return true;return false;}).map(n=>({id:n.id,code:str(n.data.code),name:str(n.data.name)}));})():[],
+            earlyClosure:earlyCheck?{blocked:earlyCheck.blocked,started:earlyExecutionStarted(wo),requested:!!object(wo.data.earlyClosureRequest).at}:null,
             maintenanceCycle:cycle,
             windowClosureManaged:await windowManagedClosure(ctx,wo),
             startDateMoves:startDateMoves(wo.data),
@@ -2205,6 +2284,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         )
             {const result=await windowAction(ctx,action);if(action!=='preview_window'&&action!=='save_window'&&b.windowId){const w=await getDoc(root(ctx)+'/maintenance_windows/'+str(b.windowId));for(const id of texts(w?.data.workOrderIds))await syncOrderAfter(ctx,id,'window.'+action);}return result;}
         const wo = await order(ctx, b.code);
+        if(object(wo.data.earlyClosureRequest).at&&['match_spare','candidate','reserve','procure','secure_spare','service_sourcing','secure_service','allocate','confirm_external_specialist','lock_schedule','review_risk','submit_cost','confirm_readiness','reassess','return_to_planning'].includes(action))throw new HttpError(409,'Work order is pending early closure. Resource and scope changes are locked.');
         let result;
         if(isRequestClosureOrder(wo.data))result=await executeMaintenanceAction(ctx,wo,action);
         else if (['match_spare', 'candidate', 'reserve', 'procure', 'secure_spare', 'service_sourcing', 'secure_service', 'allocate','confirm_external_specialist'].includes(action))result=await resourceAction(ctx, wo, action);

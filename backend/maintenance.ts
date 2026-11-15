@@ -547,9 +547,9 @@ function wrCan(ctx: OrgContext, doc: Doc, scope: Scope, reviewRole = '') {
         decline: status === 'under_review' && Number(doc.data.reviewProcessVersion) < 2 && at(P.WR_decline) && independent(ctx, !mine, 'mnt.wr.reviewer_independence'),
         // Legacy compatibility only for records created before the dedicated assessment flow.
         enrich: Number(doc.data.reviewProcessVersion) < 2 && ['submitted', 'under_review'].includes(status) && (at(P.WR_review) || at(P.assessment_edit)) && !assessmentReviewCurrent(doc.data),
-        close: ['submitted', 'under_review'].includes(status) && gate('MNT.WR.CLOSE') && (Number(doc.data.reviewProcessVersion) >= 2 ? at(P.WR_review) : at(P.WR_close))
+        close: ['submitted', 'under_review','returned'].includes(status) && !str(doc.data.woCode) && gate('MNT.WR.CLOSE') && (Number(doc.data.reviewProcessVersion) >= 2 ? at(P.WR_review) : at(P.WR_close))
             && independent(ctx, !mine, 'mnt.wr.reviewer_independence')
-            && (Number(doc.data.reviewProcessVersion) < 2 || (status === 'under_review' && (testing || assigned === ctx.uid) && workflowEligible))
+            && (Number(doc.data.reviewProcessVersion) < 2 || (['under_review','returned'].includes(status) && (testing || assigned === ctx.uid || status==='returned'&&!assigned) && workflowEligible))
             && !assessmentReviewCurrent(doc.data),
         confirmClosure: status === 'closure_pending' && at(P.WR_closeConfirm) && independent(ctx, str(object(doc.data.closure).by) !== ctx.uid, 'mnt.wr.closure_independence'),
         reviewAssessment: ['under_review', 'to_be_assessed'].includes(status) && (status !== 'under_review' || Number(doc.data.reviewProcessVersion) < 2)
@@ -1687,8 +1687,8 @@ export const maintenanceRoutes = {
                     if (ctx.body.noSparesOrServices!==true)throw new HttpError(400,'Confirm no spare parts or external services were used. Otherwise use the assessed work order route.');
                     const mtype=pick(l.maintenanceTypes,str(ctx.body.maintenanceTypeCode),'maintenance type')!;
                     if (reviewNew) {
-                        if (str(doc.data.status) !== 'under_review' || (!assignedReviewer && !reviewOverride))
-                            throw new HttpError(403, 'Only the assigned reviewer can close this work request after starting review.');
+                        if (!['under_review','returned'].includes(str(doc.data.status)) || (!assignedReviewer && !reviewOverride && !(doc.data.status==='returned'&&!str(doc.data.reviewerUid)&&eligibleReview(ctx,doc,scope,reviewRole))))
+                            throw new HttpError(403, 'Only the assigned or eligible workflow reviewer can close a returned request.');
                         const cause = pickGrouped(l.rootCauses, str(ctx.body.causeCode), 'failure cause')!;
                         const description = str(ctx.body.description).trim().slice(0, 2000);
                         if (description.length < 10) throw new HttpError(400, 'Describe what was done (at least 10 characters).');

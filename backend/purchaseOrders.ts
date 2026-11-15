@@ -10,7 +10,7 @@ import { covers, deskScope, lineKeyOf, ownersOf, type DeskScope } from './buyerG
 import { METHODS, getAuthority, resolveAuthority, type Authority } from './procurementPolicy';
 import { vendorsPath } from './vendors';
 import { receiveGoods, receiptPlan } from './finOps';
-import { checkChosenGl, commit, type Write } from './finCore';
+import { checkChosenGl, commit, withLock, type Write } from './finCore';
 import { chargesTotal, rescaleCharges, type Charge } from '../src/shared/procurementCharges';
 import {preparePoApprovalBudget,preparePoCancellationBudget,parsePoGatePolicy,PO_GATE_PATH} from './corporatePoBudget';
 
@@ -382,10 +382,21 @@ export interface Change {
 /** One change to a requisition or order under a lock, re-read, checked, added to its history and audited. */
 export async function mutate(ctx: OrgContext, col: 'req' | 'po', id: string, action: string, run: (d: Obj) => Promise<Change>) {
     const path = `${col === 'req' ? reqsPath(ctx.orgId) : ordersPath(ctx.orgId)}/${id}`;
-    return lock(ctx, id, async () => {
+    const runLocked=()=>lock(ctx, id, async () => {
         const fresh = await getDoc(path);
         if (!fresh) throw new HttpError(404, col === 'req' ? 'Requisition not found.' : 'Purchase order not found.');
         const d = fresh.data;
+        if(col==='po'&&['confirm','approve'].includes(action)){
+            const ids=[...new Set([str(d.requirementId),...objs(d.lines).map(l=>str(l.requirementId))].filter(Boolean))];
+            for(const reqId of ids){
+                const req=await getDoc(requirementsPath(ctx.orgId)+'/'+reqId);
+                const woId=str(o(req?.data.maintenanceSource).woCode);
+                if(req?.data.source==='maintenance'&&woId){
+                    const wo=await getDoc('organizations/'+ctx.orgId+'/work_orders/'+woId);
+                    if(wo&&(['closed','cancelled'].includes(str(wo.data.status))||o(wo.data.earlyClosureRequest).at))throw new HttpError(409,'Maintenance work order '+woId+' is closed or closing. Remove its requirement from the purchase order.');
+                }
+            }
+        }
         const c = await run(d);
         const at = nowIso();
         const next: Obj = { ...d, ...c.patch, updatedAt: at, version: (Number(d.version) || 1) + 1 };
@@ -408,6 +419,7 @@ export async function mutate(ctx: OrgContext, col: 'req' | 'po', id: string, act
         if(linked.length)try{const {syncProcurementOrderStates}=await import('./maintenanceOperations');await syncProcurementOrderStates(ctx,linked,'procurement.'+col+'.'+action);}catch(e){console.error('Maintenance status observation failed',id,e);}
         return { ok: true, id, status: str(next.status), ...(c.result ?? {}) } as { ok: boolean; id: string; status: string; done?: boolean; [k: string]: unknown };
     });
+    return col==='po'&&['confirm','approve'].includes(action)?withLock(ctx.orgId,'maintenance_po_commitment',runLocked):runLocked();
 }
 
 // ----- Requisitions -----

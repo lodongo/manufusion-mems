@@ -732,7 +732,7 @@ function RequestDetail({ code, setup, area }: { code: string; setup: MntSetup; a
         buttons.push({ key: 'rejectClosure', label: 'Not fixed – reopen', icon: <Undo2 className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('reject_closure') });
     }
     if (can.startReview) buttons.push({ key: 'start', label: 'Start review', icon: <ClipboardList className='h-4 w-4' />, onClick: () => run('start_review') });
-    if (can.close) buttons.push({ key: 'close', label: Number(r.reviewProcessVersion) >= 2 ? 'Close (no assessment)' : 'Close – no planning needed', icon: <Check className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('close') });
+    if (can.close) buttons.push({ key: 'close', label: r.status==='returned'?'Close returned request':Number(r.reviewProcessVersion) >= 2 ? 'Close (no assessment)' : 'Close – no planning needed', icon: <Check className='h-4 w-4' />, variant: 'secondary', onClick: () => setMode('close') });
     if (can.reviewCancel && Number(r.reviewProcessVersion)<2) buttons.push({ key: 'reviewCancel', label: 'Cancel (review)', icon: <X className='h-4 w-4' />, variant: 'danger', onClick: () => setMode('review_cancel') });
     if (can.toAssessment) buttons.push({ key: 'toAssessment', label: 'Confirm', icon: <ClipboardList className='h-4 w-4' />, onClick: () => setMode('to_assess') });
     if (can.assess && !can.reviewAssessment) buttons.push({ key: 'assess', label: assessed ? 'Update work assessment' : 'Start work assessment', icon: <ClipboardList className='h-4 w-4' />, variant: assessed ? 'secondary' : 'primary', onClick: () => {setSection('assessment');setMode('assess');} });
