@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {timeConflict,bookedHours} from './maintenanceTimeCore';
+const now=Date.parse('2026-11-16T18:00:00Z'),span={start:Date.parse('2026-11-16T10:00:00Z'),end:Date.parse('2026-11-16T12:00:00Z')},entry={uid:'a',start:'2026-11-16T09:00:00Z',end:'2026-11-16T11:00:00Z',status:'recorded'};
+test('individual overlap is forbidden and different artisans may work concurrently',()=>{assert.equal(timeConflict([entry],'a',span,now),true);assert.equal(timeConflict([entry],'b',span,now),false);assert.equal(timeConflict([{...entry,status:'superseded'}],'a',span,now),false);assert.equal(bookedHours([entry],span,now),1);});

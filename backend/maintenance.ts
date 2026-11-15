@@ -1,5 +1,6 @@
 import {maintenanceAnalyticsRoutes} from './maintenanceAnalytics';
 import {maintenanceCapacityRoutes} from './maintenanceCapacity';
+import {maintenanceTimeRoutes} from './maintenanceTime';
 import {requestTransition,requestTransitionInitial} from './maintenanceAnalyticsCore';
 import {testDeletionEnabled,listTestMaintenanceDeletion,purgeTestMaintenance,previewBulkTestMaintenance,purgeBulkTestMaintenance} from './maintenanceTestDeletion';
 import {cleanupAuthorizationStatus,setCleanupAuthorization} from './maintenanceCleanupAuthorization';
@@ -921,6 +922,7 @@ export const maintenanceRoutes = {
     ...maintenanceWorkGroupRoutes,
     ...maintenanceAnalyticsRoutes,
     ...maintenanceCapacityRoutes,
+    ...maintenanceTimeRoutes,
     'POST /api/org/mnt/setup/governance': [orgRoute('org.mnt.setup.governance','ADM.workflows',async ctx=>{
         requireMnt(ctx);
         if(ctx.role!=='org_super_admin')throw new HttpError(403,'Organization Super Admin is required for organization-wide maintenance setup.');
@@ -2500,6 +2502,7 @@ export const maintenanceRoutes = {
                     deny(can.execute, 'You cannot book time on this work order.');
                     const date = readDate(b.date, 'date');
                     const hours = numIn(b.hours, 0.25, 24, 'Hours');
+                    const precise=(await listDocs('organizations/'+ctx.orgId+'/maintenance_time_bookings')).some(x=>x.data.uid===ctx.uid&&!['superseded','void'].includes(str(x.data.status))&&str(x.data.start).slice(0,10)<=date&&(!x.data.end||str(x.data.end).slice(0,10)>=date));if(precise)throw new HttpError(409,'Precise activity time already exists on that date. Use individual time booking.');
                     const logs = [...objs(d.timeLogs), { id: randomId(4), uid: ctx.uid, name: displayName(ctx), date, hours, note: clean(note, 300), at: now }];
                     if (logs.length > 300) throw new HttpError(400, 'Too many time entries.');
                     await done({ timeLogs: logs as unknown as Plain }, `Booked ${hours} h`, 'mnt.wo.time', `${hours} h on ${date}`);

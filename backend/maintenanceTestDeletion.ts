@@ -93,7 +93,7 @@ export async function purgeTestMaintenance(ctx:OrgContext){
 // It never silently deletes shared master data or a posted financial/physical movement.
 type BulkDoc={collection:string;doc:Doc;kind?:Kind};
 const rootCollections=Object.entries(TEST_MAINTENANCE_COLLECTIONS) as [Kind,string][];
-const casualCollections=['maintenance_windows','asset_task_proposals','maintenance_assessment_revisions','maintenance_material_reconciliations','inventory_reservations','mnt_supply_links','procurement_requirements','procurement_requisitions','procurement_quotations','procurement_orders','fin_requests','safety_incidents','material_creation_candidates','vendor_onboarding_requests','stores_issue_vouchers','material_journal','asset_task_template_revisions','asset_task_templates','bom_revisions','goods_issues','fin_journal'];
+const casualCollections=['maintenance_time_bookings','maintenance_windows','asset_task_proposals','maintenance_assessment_revisions','maintenance_material_reconciliations','inventory_reservations','mnt_supply_links','procurement_requirements','procurement_requisitions','procurement_quotations','procurement_orders','fin_requests','safety_incidents','material_creation_candidates','vendor_onboarding_requests','stores_issue_vouchers','material_journal','asset_task_template_revisions','asset_task_templates','bom_revisions','goods_issues','fin_journal'];
 const keyOf=(r:BulkDoc)=>r.collection+'/'+r.doc.id;
 const refs=(d:Obj,ids:Set<string>)=>[...ids].some(id=>hasMaintenanceReference(d,id));
 const hasForeign=(d:Obj,all:Set<string>,selected:Set<string>)=>[...all].some(id=>!selected.has(id)&&hasMaintenanceReference(d,id));
