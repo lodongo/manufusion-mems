@@ -50,6 +50,12 @@ export function taskDecisionPath(a:Answers):{path:Question[];answers:Answers;nex
  const partial=ask('partial');if(!partial)return result();
  return result(partial==='yes'?{code:'AC06',reason:'Partial LOTO candidate: isolate all energy not technically required and assess retained energy. Independent authorization required.',exception:true}:{code:'AC05',reason:'Live work candidate: independently establish technical infeasibility or increased safety hazard and lawful authorization.',exception:true});
 }
+export const TASK_DECISION_REVISION=1;
+/** Auditable verdict derived exclusively from reachable configured questions and their answers. */
+export function taskClassificationVerdict(a:Answers){
+ const state=taskDecisionPath(a);
+ return {revision:TASK_DECISION_REVISION,complete:!!state.decision.code&&state.next===null,code:state.decision.code,reason:state.decision.reason,exception:state.decision.exception,questions:state.path.filter(([key])=>!!state.answers[key]).map(([key,question])=>({key,question,answer:state.answers[key]}))};
+}
 export function questionsFor(a:Answers){return taskDecisionPath(a).path;}
 export function decideTask(a:Answers){return taskDecisionPath(a).decision;}
 export function answerTaskQuestion(a:Answers,key:string,value:string):Answers{

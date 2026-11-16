@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {decideTask,questionsFor,taskDecisionPath,answerTaskQuestion,backTaskQuestion,taskRiskAssessmentPending} from '../../backend/safTaskDecision.ts';
+import {taskClassificationVerdict,decideTask,questionsFor,taskDecisionPath,answerTaskQuestion,backTaskQuestion,taskRiskAssessmentPending} from '../../backend/safTaskDecision.ts';
 import {ACTIVITY_CLASSES} from '../../backend/safActivityClasses.ts';
 const base={routine:'yes',stop:'yes',body:'no',door:'no',moving:'no',otherExposure:'no',nonEnergy:'no',inching:'no',minorProtected:'no',loss:'no',infeasible:'no',partial:'no'};
 test('task decision protects against false no-risk and economic override',()=>{
@@ -55,3 +55,5 @@ test('global class assessments are optional; task coverage remains independently
  assert.ok(api.includes('inherited.has(h)||seen.has(h)'));
  assert.ok(ui.includes('Save task (assessment pending)'));
 });
+
+test('verdict is calculated only from answered reachable configured questions; no manual class can override it',()=>{assert.equal(taskClassificationVerdict({}).complete,false);const full=taskClassificationVerdict({...base,door:'yes',loss:'yes',infeasible:'no',classCode:'AC01'});assert.equal(full.complete,true);assert.equal(full.code,'AC03');assert.ok(full.questions.some(q=>q.key==='infeasible'&&q.answer==='no'));assert.ok(!full.questions.some(q=>q.key==='partial'));const live=taskClassificationVerdict({...base,otherExposure:'yes',infeasible:'yes',partial:'no'});assert.equal(live.code,'AC05');assert.equal(live.exception,true);assert.equal(taskClassificationVerdict({...base,infeasible:'yes',partial:'yes'}).code,'AC01');});
