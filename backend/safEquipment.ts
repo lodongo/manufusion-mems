@@ -80,9 +80,32 @@ async function taskSkills(){
  const d=await getDoc('module_workspaces/HRM/metadata/skillsMaster');
  return array(d?.data.items).filter(x=>x.active!==false&&x.selectable!==false).map(ref);
 }
-async function currentTaskEnergy(ctx:OrgContext,id:string){
- const doc=await getDoc(energyPath(ctx,id)),c=await energyContext(ctx,id,array(doc?.data.items));
- return c.rows.map((x,i)=>({pointId:pointIdOf(x,i),tag:str(x.tag),code:str(x.code),label:str(c.metadata.get(str(x.code))?.label)||str(x.label)||str(x.code),color:str(c.metadata.get(str(x.code))?.color),status:str(x.status)||'incomplete'}));
+async function equipmentControlPrograms(ctx:OrgContext,id:string){
+ const [doc,deviceDoc,policy,master,node]=await Promise.all([getDoc(energyPath(ctx,id)),getDoc(devicePath(ctx,id)),lotoPolicy(ctx.orgId),safetyDeviceCatalogue(ctx.orgId),getDoc(root(ctx)+'/structure/'+id)]);
+ const c=await energyContext(ctx,id,array(doc?.data.items)),today=nowIso().slice(0,10);
+ const energy=await Promise.all(c.rows.map(async (x,i)=>{
+  const code=str(x.code),values=isObj(x.values)?x.values:{},tests=isObj(x.tests)?x.tests:{},procedure=readLotoProcedure(x),required=lotoProcedureRequired(x.linkedUtility===true,values);
+  const issues=[...reviewIssues(c.profile(code),values,tests,today),...lotoProcedureIssues(procedure,required)];
+  if(!str(x.tag)||!str(x.photoToken))issues.unshift('Tag and equipment photo');
+  if(x.linkedUtility){if(!c.allowedExternal.has(code))issues.push('Utility not adopted in Safety');const utility=c.utilityByCode.get(code);if(node&&utility){const issue=await utilityLinkIssue(ctx.orgId,node,utility,{attributes:c.attrs(code)});if(issue)issues.push(issue);}}
+  else if(!c.catalogue.some(s=>s.code===code))issues.push('Energy source not adopted in Safety');
+  return {pointId:pointIdOf(x,i),tag:str(x.tag),code,label:str(c.metadata.get(code)?.label)||str(x.label)||code,color:str(c.metadata.get(code)?.color),status:issues.length?'incomplete':x.status==='documented'?'documented':'draft',issues,required,...procedure};
+ }));
+ const categories=['B','1','2','3','4'];
+ const shortDevices=array(deviceDoc?.data.items).filter(r=>r.shortSelected===true).map(r=>{
+  const def=master.devices.find(d=>d.code===r.code),category=str(r.safetyCategory),eligible=!!def?.shortEligible&&!!def?.adopted&&categories.indexOf(category)>=categories.indexOf(policy.minimumSafetyCategory)&&!!str(r.tag)&&devicePhotoValid(ctx,id,str(r.photoToken))&&str(r.procedure).length>=20&&!!str(r.validationReference);
+  return {deviceId:str(r.deviceId),code:str(r.code),tag:str(r.tag),label:str(def?.label)||str(r.label),location:str(r.location),procedure:str(r.procedure),safetyCategory:category,eligible};
+ });
+ const versions={energyVersion:Number(doc?.data.version)||0,utilityVersion:c.utilityVersion,deviceVersion:Number(deviceDoc?.data.version)||0,policyVersion:policy.version,deviceAdoptionVersion:master.version};
+ const lotoReady=['group_box','individual_points'].includes(policy.mode)&&energy.length>0&&energy.some(e=>e.required)&&energy.every(e=>e.status==='documented');
+ return {energy,shortDevices,versions,lotoMode:policy.mode,lotoReady,minimumShortMethods:policy.minimumShortMethods,countRepeatedMethods:policy.countRepeatedMethods};
+}
+function shortProgramReady(program:Awaited<ReturnType<typeof equipmentControlPrograms>>,ids:string[]){
+ const chosen=program.shortDevices.filter(d=>ids.includes(d.deviceId)&&d.eligible);
+ return (program.countRepeatedMethods?chosen.length:new Set(chosen.map(d=>d.code)).size)>=program.minimumShortMethods;
+}
+function fullLotoPlan(energy:Awaited<ReturnType<typeof equipmentControlPrograms>>['energy']){
+ return energy.map(e=>({pointId:e.pointId,state:e.required?'isolate':'not_applicable',reason:e.required?'Inherited from equipment LOTO Program':'Equipment records no credible hazardous energy for this utility.'}));
 }
 async function adoptedHazardProfile(org:string,code:string){
  const c=await controlContext(org,code);
@@ -128,9 +151,12 @@ export async function equipmentTaskSafetySnapshot(ctx:OrgContext,equipmentId:str
  const decision=taskDecisionPath(isObj(d.answers)?d.answers as Record<string,string>:{}).decision;
  const classificationVerdict=taskClassificationVerdict(isObj(d.answers)?d.answers as Record<string,string>:{});
  if(!classificationVerdict.complete||!primary||decision.code!==primary||decision.exception)throw new HttpError(409,'Task classification requires independent Safety review.');
- const [baselines,activeClasses,energy,deviceDoc,matrixDoc,permits,hazards,controls]=await Promise.all([Promise.all(classes.map(c=>taskClassBaseline(ctx,equipmentId,c))),effectiveSafetyItems(ctx.orgId,'activityClasses'),currentTaskEnergy(ctx,equipmentId),getDoc(devicePath(ctx,equipmentId)),getDoc(root(ctx)+'/saf/risk_matrix'),effectiveSafetyItems(ctx.orgId,'permitTypes'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'controlMeasures')]);
+ const [baselines,activeClasses,program,deviceDoc,matrixDoc,permits,hazards,controls]=await Promise.all([Promise.all(classes.map(c=>taskClassBaseline(ctx,equipmentId,c))),effectiveSafetyItems(ctx.orgId,'activityClasses'),equipmentControlPrograms(ctx,equipmentId),getDoc(devicePath(ctx,equipmentId)),getDoc(root(ctx)+'/saf/risk_matrix'),effectiveSafetyItems(ctx.orgId,'permitTypes'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'controlMeasures')]);
  if(classes.some(c=>!activeClasses.some(x=>x.code===c))||baselines.some(b=>b.status==='intolerable'||!array(d.classBaseline).some(x=>x.code===b.code&&Number(x.version)===b.version)))throw new HttpError(409,'Task class assessments changed. Re-verify the equipment task.');
- const plan=array(d.energyPlan);
+ const energy=program.energy,plan=array(d.energyPlan),energyRequired=['AC03','AC05','AC06','AC22'].includes(primary);
+ const savedVersions=isObj(d.controlProgramVersions)?d.controlProgramVersions:{};
+ if(energyRequired&&(!program.lotoReady||Object.entries(program.versions).some(([k,v])=>savedVersions[k]!==v)))throw new HttpError(409,'Equipment LOTO Program incomplete or changed. Refresh the task assessment.');
+ if(primary==='AC03'&&JSON.stringify(plan.map(p=>[p.pointId,p.state]))!==JSON.stringify(fullLotoPlan(energy).map(p=>[p.pointId,p.state])))throw new HttpError(409,'Adopt the current equipment Full LOTO Program.');
  if(['AC03','AC05','AC06','AC22'].includes(primary)&&(energy.length!==plan.length||energy.some(e=>!e.tag||!plan.some(p=>p.pointId===e.pointId&&p.tag===e.tag))))throw new HttpError(409,'Equipment isolation register changed. Re-verify the equipment task.');
  if(d.devicesReviewed!==true||Number(d.deviceVersion)!==(Number(deviceDoc?.data.version)||0))throw new HttpError(409,'Review current equipment safety devices and re-verify.');
  const deviceIds=stringList(d.safetyDeviceIds),selectedDevices=array(deviceDoc?.data.items).filter(x=>deviceIds.includes(str(x.deviceId)));
@@ -142,7 +168,7 @@ export async function equipmentTaskSafetySnapshot(ctx:OrgContext,equipmentId:str
  if(rawRows.some(r=>!matrix||!isObj(r.before)||!isObj(r.after)||Number(r.before.matrixVersion)!==matrix.version||Number(r.after.matrixVersion)!==matrix.version))throw new HttpError(409,'Risk matrix changed. Re-verify applicable task and class assessments.');
  const inheritedRisks=rawRows.map(r=>({hazard:stringList(r.hazardCodes).concat(str(r.hazard)).filter((x,i,a)=>x&&a.indexOf(x)===i).map(c=>str(hazards.find(h=>h.code===c)?.label)||c).join('; '),impact:stringList(r.impactLabels).join('; ')||str(r.impact),controls:stringList(r.controls).map(c=>str(controls.find(x=>x.code===c)?.label)||c).join('; '),before:'',after:'',permit:'',beforeRatings:(r.before as Obj).ratings,afterRatings:(r.after as Obj).ratings}));
  const isolationCodes=[...new Set(energy.filter(e=>plan.some(p=>p.pointId===e.pointId&&p.state==='isolate')).map(e=>e.code))];
- return {taskId:registryId,version:Number(d.version),equipmentId,displayCode:str(d.displayCode)||str(source?.code)||registryId,classCodes:classes,classificationVerdict,permitCodes,energyPlan:plan,isolationCodes,safetyDeviceIds:deviceIds,safetyDevices:selectedDevices.map(x=>({deviceId:str(x.deviceId),tag:str(x.tag),label:str(x.label)})),deviceVersion:Number(d.deviceVersion),classBaseline:baselines,rows:array(d.rows),inheritedRisks,assessmentCompletedAt:str(d.assessmentCompletedAt)||str(d.assessmentVerifiedAt),assessmentVerifiedAt:str(d.assessmentVerifiedAt),executionAuthorized:false};
+ return {taskId:registryId,version:Number(d.version),equipmentId,displayCode:str(d.displayCode)||str(source?.code)||registryId,classCodes:classes,classificationVerdict,permitCodes,controlPrograms:{versions:program.versions,lotoMode:program.lotoMode,energy:energyRequired?energy:[],shortIntervention:primary==='AC02'?program.shortDevices.filter(x=>deviceIds.includes(x.deviceId)):[]},energyPlan:plan,isolationCodes,safetyDeviceIds:deviceIds,safetyDevices:selectedDevices.map(x=>({deviceId:str(x.deviceId),tag:str(x.tag),label:str(x.label)})),deviceVersion:Number(d.deviceVersion),classBaseline:baselines,rows:array(d.rows),inheritedRisks,assessmentCompletedAt:str(d.assessmentCompletedAt)||str(d.assessmentVerifiedAt),assessmentVerifiedAt:str(d.assessmentVerifiedAt),executionAuthorized:false};
 }
 export const safEquipmentRoutes={
  'POST /api/org/saf/equipment-devices/read':[orgRoute('org.saf.equipment_devices.read','SAF.view',async ctx=>{
@@ -219,10 +245,10 @@ export const safEquipmentRoutes={
  })],
  'POST /api/org/saf/equipment-tasks/read':[orgRoute('org.saf.equipment_tasks.read','SAF.view',async ctx=>{
   const {id,node}=await equipment(ctx);
-  const [docs,classes,hazards,permits,skills,matrix,energy]=await Promise.all([listDocs(taskCollection(ctx,id)),effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'permitTypes'),taskSkills(),getDoc(root(ctx)+'/saf/risk_matrix'),currentTaskEnergy(ctx,id)]);
+  const [docs,classes,hazards,permits,skills,matrix,program]=await Promise.all([listDocs(taskCollection(ctx,id)),effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'permitTypes'),taskSkills(),getDoc(root(ctx)+'/saf/risk_matrix'),equipmentControlPrograms(ctx,id)]);
   const reportCatalogue=ctx.body.includeRiskReport===true?await Promise.all([safetyCatalogue(ctx.orgId,'hazards'),safetyCatalogue(ctx.orgId,'injuryNatures'),safetyCatalogue(ctx.orgId,'impacts'),safetyCatalogue(ctx.orgId,'hazardMitigations'),safetyCatalogue(ctx.orgId,'controlMeasures'),safetyCatalogue(ctx.orgId,'mitigationHierarchy'),safetyCatalogue(ctx.orgId,'permitTypes')]):null;
   const reportReferences=reportCatalogue?{hazards:reportCatalogue[0].items.map(ref),injuries:[...reportCatalogue[1].items,...reportCatalogue[2].items].map(ref),controls:[...reportCatalogue[3].items,...reportCatalogue[4].items].map(x=>({...ref(x),hierarchyCode:str(x.hierarchyCode)})),hierarchy:reportCatalogue[5].items.map(x=>({...ref(x),rank:Number(x.rank)||0})),permits:reportCatalogue[6].items.map(ref)}:null;
-  return {reportReferences,equipmentName:str(node.data.name),tasks:docs.map(d=>({...d.data,taskId:d.id})).sort((a,b)=>String(b.taskId).localeCompare(String(a.taskId))),classes:await Promise.all(ACTIVITY_CLASSES.filter(c=>classes.some(x=>x.code===c.code)).map(async c=>({...c,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[c.code]||[],baseline:await taskClassBaseline(ctx,id,c.code)}))),hazards:hazards.map(ref),permits:permits.map(ref),skills,matrix:matrix?.data.configuration||null,energy,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write'),canCreate:await equipmentTaskCreationAllowed(ctx,id)&&await allowedAt(ctx,PERMS.riskAssess,id,'write'),devices:array((await getDoc(devicePath(ctx,id)))?.data.items).map(r=>({deviceId:str(r.deviceId),tag:str(r.tag),label:str(r.label)||str(r.code),shortSelected:r.shortSelected===true})),deviceVersion:Number((await getDoc(devicePath(ctx,id)))?.data.version)||0};
+  return {reportReferences,equipmentName:str(node.data.name),tasks:docs.map(d=>({...d.data,taskId:d.id})).sort((a,b)=>String(b.taskId).localeCompare(String(a.taskId))),classes:await Promise.all(ACTIVITY_CLASSES.filter(c=>classes.some(x=>x.code===c.code)).map(async c=>({...c,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[c.code]||[],baseline:await taskClassBaseline(ctx,id,c.code)}))),hazards:hazards.map(ref),permits:permits.map(ref),skills,matrix:matrix?.data.configuration||null,energy:program.energy,controlPrograms:program,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write'),canCreate:await equipmentTaskCreationAllowed(ctx,id)&&await allowedAt(ctx,PERMS.riskAssess,id,'write'),devices:array((await getDoc(devicePath(ctx,id)))?.data.items).map(r=>({deviceId:str(r.deviceId),tag:str(r.tag),label:str(r.label)||str(r.code),shortSelected:r.shortSelected===true})),deviceVersion:Number((await getDoc(devicePath(ctx,id)))?.data.version)||0};
  })],
  'POST /api/org/saf/equipment-tasks/risk-references':[orgRoute('org.saf.equipment_tasks.risk_references','SAF.view',async ctx=>{
   const {id}=await equipment(ctx),taskId=str(ctx.body.taskId);if(!taskCodeRe.test(taskId))throw new HttpError(400,'Choose an equipment task.');
@@ -257,15 +283,17 @@ export const safEquipmentRoutes={
   const additional=stringList(ctx.body.additionalClasses);
   if(additional.some(c=>!TASK_ADDITIONAL_CLASSES.includes(c)))throw new HttpError(400,'Invalid additional task class.');
   if(decision.code==='AC01'&&additional.length)throw new HttpError(400,'Additional hazards conflict with No Risk. Revisit the screening.');
-  const classCodes=[...new Set([decision.code,...additional])],permitCodes=stringList(ctx.body.permitCodes),justification=str(ctx.body.justification).trim().slice(0,3000);
-  if(justification.length<20)throw new HttpError(400,'Document screening, technical basis, safeguards and work limits.');
-  const [classes,permits,skills,matrixDoc,energy]=await Promise.all([effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'permitTypes'),taskSkills(),getDoc(root(ctx)+'/saf/risk_matrix'),currentTaskEnergy(ctx,id)]);
+  const classCodes=[...new Set([decision.code,...additional])],permitCodes=stringList(ctx.body.permitCodes),justification=str(old?.data.justification).trim().slice(0,3000);
+  const [classes,permits,skills,matrixDoc,program]=await Promise.all([effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'permitTypes'),taskSkills(),getDoc(root(ctx)+'/saf/risk_matrix'),equipmentControlPrograms(ctx,id)]);
   if(!safetyOnly&&skillCodes.some(c=>!skills.some(s=>s.code===c)))throw new HttpError(400,'Select active HR master skills.');
   if(classCodes.some(c=>!classes.some(s=>s.code===c)))throw new HttpError(400,'Adopt the applicable task class in Safety.');
   if(permitCodes.some(c=>!permits.some(s=>s.code===c))||classCodes.some(c=>!meetsClassPermitMinimum(c,permitCodes)))throw new HttpError(400,'Select the adopted required and applicable permits.');
-  const plan=array(ctx.body.energyPlan).map(x=>({pointId:str(x.pointId),state:str(x.state),reason:str(x.reason).trim().slice(0,1000)}));
+  const energy=program.energy,energyRequired=['AC03','AC05','AC06','AC22'].includes(decision.code);
+  const plan=decision.code==='AC03'?fullLotoPlan(energy):energyRequired?array(ctx.body.energyPlan).filter(x=>str(x.state)).map(x=>({pointId:str(x.pointId),state:str(x.state),reason:str(x.reason).trim().slice(0,1000)})):[];
+  const planIncomplete=energyRequired&&(!program.lotoReady||plan.length!==energy.length);
+  if(plan.some(p=>p.state==='retained'&&p.reason.length<10))throw new HttpError(400,'Document why the selected energy must remain for this task.');
   if(new Set(plan.map(x=>x.pointId)).size!==plan.length||plan.some(x=>!energy.some(e=>e.pointId===x.pointId)||!TASK_PLAN_STATES.includes(x.state)))throw new HttpError(400,'Invalid equipment energy plan.');
-  if(['AC03','AC05','AC06','AC22'].includes(decision.code)){
+  if(energyRequired&&!planIncomplete){
    if(plan.length!==energy.length||plan.some(p=>(p.state==='retained'||p.state==='not_applicable')&&p.reason.length<10))throw new HttpError(400,'Classify every equipment energy point and justify retained or non-applicable energy.');
    if(decision.code==='AC03'&&energy.length&&!plan.some(p=>p.state==='isolate'))throw new HttpError(400,'Identify at least one isolation point, or correct the classification and energy register.');
    if(decision.code==='AC03'&&plan.some(p=>p.state==='retained'))throw new HttpError(400,'Full LOTO cannot retain hazardous energy.');
@@ -305,11 +333,12 @@ export const safEquipmentRoutes={
   const n=requested?0:await nextSequence('equipmentTask');
   if(!requested&&n>999999999)throw new HttpError(409,'Task sequence exhausted.');
   const taskId=requested||'TSK_'+String(n).padStart(9,'0');
-  const status=rows.some(r=>r.after.tolerability==='Intolerable')||baseline.some(b=>b.status==='intolerable')?'intolerable':(!energy.length||energy.some(e=>!e.tag))&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':assessmentPending?'task_assessment_pending':'review_required';
+  const shortIncomplete=decision.code==='AC02'&&!shortProgramReady(program,safetyDeviceIds);
+  const status=rows.some(r=>r.after.tolerability==='Intolerable')||baseline.some(b=>b.status==='intolerable')?'intolerable':planIncomplete||shortIncomplete?'energy_register_incomplete':assessmentPending?'task_assessment_pending':'review_required';
   if(ctx.body.verifyAssessment===true&&(status!=='review_required'||decision.exception))throw new HttpError(400,'Resolve pending, incomplete or intolerable safety assessments before verification.');
   const verified=ctx.body.verifyAssessment===true&&!decision.exception;
   const completed=status==='review_required'&&!decision.exception&&ctx.body.devicesReviewed===true&&Number(ctx.body.deviceVersion)===deviceVersion;
-  const next={taskId,workCenterId:id,technicalDefinitionPending,classificationReviewed:ctx.body.classificationReviewed===true,...(catalogueFamily?{catalogueFamily,displayCode:catalogueFamily.familyCode+'-L'+taskId.slice(4)}:{}),safetyDeviceIds,deviceVersion,devicesReviewed:ctx.body.devicesReviewed===true,...(!old?.data.catalogueSource?{subtasks:manualSteps.length?manualSteps:old?.data.subtasks||[]}:{}),assessmentCompletedAt:completed?nowIso():'',assessmentCompletedBy:completed?ctx.uid:'',assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,displayCode:str(old.data.displayCode)||str((old.data.catalogueSource as Obj).code),subtasks:old.data.subtasks,expectedOutcomes:old.data.expectedOutcomes||[],requiredCertifications:old.data.requiredCertifications||[],siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,...(old?.data.catalogueSource?{referenceAnswers:old.data.referenceAnswers||old.data.answers||{},referenceClassification:old.data.referenceClassification||taskClassificationVerdict(isObj(old.data.referenceAnswers||old.data.answers)?(old.data.referenceAnswers||old.data.answers) as Record<string,string>:{})}:{}),answers,decision,classificationVerdict,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
+  const next={taskId,workCenterId:id,controlProgramVersions:program.versions,controlProgramType:decision.code==='AC02'?'short_intervention':energyRequired?'equipment_loto':'none',technicalDefinitionPending,classificationReviewed:ctx.body.classificationReviewed===true,...(catalogueFamily?{catalogueFamily,displayCode:catalogueFamily.familyCode+'-L'+taskId.slice(4)}:{}),safetyDeviceIds,deviceVersion,devicesReviewed:ctx.body.devicesReviewed===true,...(!old?.data.catalogueSource?{subtasks:manualSteps.length?manualSteps:old?.data.subtasks||[]}:{}),assessmentCompletedAt:completed?nowIso():'',assessmentCompletedBy:completed?ctx.uid:'',assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,displayCode:str(old.data.displayCode)||str((old.data.catalogueSource as Obj).code),subtasks:old.data.subtasks,expectedOutcomes:old.data.expectedOutcomes||[],requiredCertifications:old.data.requiredCertifications||[],siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,...(old?.data.catalogueSource?{referenceAnswers:old.data.referenceAnswers||old.data.answers||{},referenceClassification:old.data.referenceClassification||taskClassificationVerdict(isObj(old.data.referenceAnswers||old.data.answers)?(old.data.referenceAnswers||old.data.answers) as Record<string,string>:{})}:{}),answers,decision,classificationVerdict,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
   const source=isObj(old?.data.catalogueSource)?old.data.catalogueSource:null,key=source?'task_'+str(source.code):catalogueFamily?'family_'+str(catalogueFamily.familyCode):'';
   const writes:Array<{path:string;data:Record<string,unknown>;precondition:{exists?:boolean;updateTime?:string}}>=[{path:col+'/'+taskId,data:next,precondition:old?{updateTime:old.updateTime}:{exists:false}}];
   if(idRe.test(key)){
