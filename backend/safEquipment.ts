@@ -10,7 +10,7 @@ import {detectImage} from './branding';
 import {signedUrl} from './structure';
 import {scoreMaintenanceRisk,type RiskMatrix} from './maintenanceTaskRisk';
 import {configuredField,configurationIssues,validDay} from './safEnergyProfiles';
-import {readLotoProcedure,normalizeLotoProcedure,lotoProcedureRequired,lotoProcedureIssues} from './safLotoProcedure';
+import {readLotoProcedure,normalizeLotoProcedure,lotoProcedureRequired,lotoProcedureIssues,lotoProgramDiagnostics,lotoExposureNotice} from './safLotoProcedure';
 import {statutoryProfile,mergeUtilityEnergy,utilityDefinition,candidateInspectionCodes,utilityPointId} from './safStatutoryInspections';
 import {utilityLinkIssue} from './astUtilities';
 import {energyColor} from './safEnergyColors';
@@ -86,10 +86,11 @@ async function equipmentControlPrograms(ctx:OrgContext,id:string){
  const energy=await Promise.all(c.rows.map(async (x,i)=>{
   const code=str(x.code),values=isObj(x.values)?x.values:{},tests=isObj(x.tests)?x.tests:{},procedure=readLotoProcedure(x),required=lotoProcedureRequired(x.linkedUtility===true,values);
   const issues=[...reviewIssues(c.profile(code),values,tests,today),...lotoProcedureIssues(procedure,required)];
-  if(!str(x.tag)||!str(x.photoToken))issues.unshift('Tag and equipment photo');
+  if(!str(x.tag))issues.unshift('Enter the physical isolation tag');
+  if(!str(x.photoToken))issues.unshift('Upload an isolation-point photo');
   if(x.linkedUtility){if(!c.allowedExternal.has(code))issues.push('Utility not adopted in Safety');const utility=c.utilityByCode.get(code);if(node&&utility){const issue=await utilityLinkIssue(ctx.orgId,node,utility,{attributes:c.attrs(code)});if(issue)issues.push(issue);}}
   else if(!c.catalogue.some(s=>s.code===code))issues.push('Energy source not adopted in Safety');
-  return {pointId:pointIdOf(x,i),tag:str(x.tag),code,label:str(c.metadata.get(code)?.label)||str(x.label)||code,color:str(c.metadata.get(code)?.color),status:issues.length?'incomplete':x.status==='documented'?'documented':'draft',issues,required,...procedure};
+  return {pointId:pointIdOf(x,i),tag:str(x.tag),code,label:str(c.metadata.get(code)?.label)||str(x.label)||code,color:str(c.metadata.get(code)?.color),status:issues.length?'incomplete':x.status==='documented'?'documented':'draft',issues,required,exposure:str(values.exposure),...procedure};
  }));
  const categories=['B','1','2','3','4'];
  const shortDevices=array(deviceDoc?.data.items).filter(r=>r.shortSelected===true).map(r=>{
@@ -97,8 +98,8 @@ async function equipmentControlPrograms(ctx:OrgContext,id:string){
   return {deviceId:str(r.deviceId),code:str(r.code),tag:str(r.tag),label:str(def?.label)||str(r.label),location:str(r.location),procedure:str(r.procedure),safetyCategory:category,eligible};
  });
  const versions={energyVersion:Number(doc?.data.version)||0,utilityVersion:c.utilityVersion,deviceVersion:Number(deviceDoc?.data.version)||0,policyVersion:policy.version,deviceAdoptionVersion:master.version};
- const lotoReady=['group_box','individual_points'].includes(policy.mode)&&energy.length>0&&energy.some(e=>e.required)&&energy.every(e=>e.status==='documented');
- return {energy,shortDevices,versions,lotoMode:policy.mode,lotoReady,minimumShortMethods:policy.minimumShortMethods,countRepeatedMethods:policy.countRepeatedMethods};
+ const lotoGaps=lotoProgramDiagnostics(policy.mode,energy),lotoReady=lotoGaps.length===0;
+ return {energy:energy.map(e=>({...e,exposureNotice:lotoExposureNotice(e)})),shortDevices,versions,lotoMode:policy.mode,lotoReady,lotoGaps,minimumShortMethods:policy.minimumShortMethods,countRepeatedMethods:policy.countRepeatedMethods};
 }
 function shortProgramReady(program:Awaited<ReturnType<typeof equipmentControlPrograms>>,ids:string[]){
  const chosen=program.shortDevices.filter(d=>ids.includes(d.deviceId)&&d.eligible);
@@ -155,7 +156,8 @@ export async function equipmentTaskSafetySnapshot(ctx:OrgContext,equipmentId:str
  if(classes.some(c=>!activeClasses.some(x=>x.code===c))||baselines.some(b=>b.status==='intolerable'||!array(d.classBaseline).some(x=>x.code===b.code&&Number(x.version)===b.version)))throw new HttpError(409,'Task class assessments changed. Re-verify the equipment task.');
  const energy=program.energy,plan=array(d.energyPlan),energyRequired=['AC03','AC05','AC06','AC22'].includes(primary);
  const savedVersions=isObj(d.controlProgramVersions)?d.controlProgramVersions:{};
- if(energyRequired&&(!program.lotoReady||Object.entries(program.versions).some(([k,v])=>savedVersions[k]!==v)))throw new HttpError(409,'Equipment LOTO Program incomplete or changed. Refresh the task assessment.');
+ if(energyRequired&&!program.lotoReady)throw new HttpError(409,'Equipment LOTO Program: '+program.lotoGaps.join('; '));
+ if(energyRequired&&Object.entries(program.versions).some(([k,v])=>savedVersions[k]!==v))throw new HttpError(409,'Equipment safety program revision changed. Refresh and save the assessment to adopt the latest program.');
  if(primary==='AC03'&&JSON.stringify(plan.map(p=>[p.pointId,p.state]))!==JSON.stringify(fullLotoPlan(energy).map(p=>[p.pointId,p.state])))throw new HttpError(409,'Adopt the current equipment Full LOTO Program.');
  if(['AC03','AC05','AC06','AC22'].includes(primary)&&(energy.length!==plan.length||energy.some(e=>!e.tag||!plan.some(p=>p.pointId===e.pointId&&p.tag===e.tag))))throw new HttpError(409,'Equipment isolation register changed. Re-verify the equipment task.');
  if(d.devicesReviewed!==true||Number(d.deviceVersion)!==(Number(deviceDoc?.data.version)||0))throw new HttpError(409,'Review current equipment safety devices and re-verify.');

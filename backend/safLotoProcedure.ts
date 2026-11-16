@@ -22,3 +22,21 @@ export function lotoProcedureIssues(p:LotoProcedure,required:boolean):string[]{
 export function lotoProcedureText(p:LotoProcedure):string{
  return 'Procedure:\n'+(p.procedureSteps.length?p.procedureSteps.map((s,i)=>(i+1)+'. '+(s.trim()||'Not recorded')).join('\n'):'Not recorded')+'\n\nVerification: '+(p.verification.trim()||'Not recorded');
 }
+
+export type LotoDiagnosticPoint={label:string;tag:string;status:string;required:boolean;issues?:string[];procedureSteps?:string[];verification?:string};
+export function lotoProgramDiagnostics(mode:string,points:LotoDiagnosticPoint[]):string[]{
+ const gaps:string[]=[];
+ if(!['group_box','individual_points'].includes(mode))gaps.push('Select Group LOTO box or Individual isolation points in Safety LOTO Setup.');
+ if(!points.length)gaps.push('No hazardous energy points are registered for this equipment.');
+ if(points.length&&!points.some(p=>p.required))gaps.push('All registered points are classified as no credible hazardous energy. Full LOTO requires at least one actual hazardous energy point; review Energy / hazardous exposure classification or reclassify the task if Full LOTO is not applicable.');
+ for(const p of points){
+  const name=p.label+' — '+(p.tag||'untagged');
+  const issues=p.issues||[];
+  if(issues.length)for(const issue of issues)gaps.push(name+': '+issue);
+  else if(p.status!=='documented')gaps.push(name+': '+(p.status==='draft'?'Saved as draft. Review current utility details and use Mark register documented.':'Register status '+p.status+'; resolve and document the point.'));
+ }
+ return gaps;
+}
+export function lotoExposureNotice(point:LotoDiagnosticPoint):string{
+ return !point.required&&(point.procedureSteps?.some(s=>s.trim())||point.verification?.trim())?'This point is excluded from Full LOTO because its saved exposure classification is No credible hazardous energy, despite a recorded isolation procedure. If it supplies hazardous energy, change Energy / hazardous exposure classification to Hazardous energy present and complete any newly applicable fields. Do not change the classification merely to clear the warning.':'';
+}
