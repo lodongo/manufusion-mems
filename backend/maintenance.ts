@@ -2379,7 +2379,7 @@ export const maintenanceRoutes = {
             if(action==='cancel'&&(!can.cancel||note.length<5))throw new HttpError(403,'Cancellation requires permission and a reason.');
             if(action==='cancel'){confirmCode(ctx,doc);return executeMaintenanceAction(ctx,doc,'cancel_order_legacy');}
             if(object(d.earlyClosureRequest).at)throw new HttpError(409,'Early closure requested. Use the actual feedback, safety and early closure actions.');
-            await enforceMaintenanceTransition(ctx,doc,action);
+            await enforceMaintenanceTransition(ctx,doc,action==='commit_task_assessment'||action==='submit_committed_assessment'?'save_task_assessment':action);
             switch (action) {
                 case 'save_assessment_draft': {
                     await requireWorkOrderAssessor(ctx,doc);
@@ -2389,14 +2389,14 @@ export const maintenanceRoutes = {
                         for(const k of ['technicalEvaluation','natureCode','severityCode','maintenanceTypeCode','priorityCode','assemblyId','note','expectedStart','expectedEnd','scheduledStart','scheduledEnd','dateChangeReason'])if(raw[k]!==undefined)header[k]=str(raw[k]).slice(0,k==='technicalEvaluation'?3000:k==='note'?1000:k==='dateChangeReason'?500:120);
                         header.solutionCodes=strs(raw.solutionCodes).slice(0,5);
                         if(expectedDatesLocked(d))protectExpectedDates(d,header);
-                        next.header=header;
+                        next.header=header;delete next.commit;
                     }
                     if(b.tasks!==undefined){
                         if(!Array.isArray(b.tasks)||b.tasks.length>40||b.tasks.some(t=>!isObj(t)||!str(t.id)||!Array.isArray(t.spares)||!Array.isArray(t.services)||!Array.isArray(t.risk)))throw new HttpError(400,'Invalid draft task structure.');
                         for(const t of b.tasks as Obj[]){if(objs(t.spares).length>60||objs(t.services).length>60||objs(t.risk).length>50)throw new HttpError(400,'Draft task resource limit exceeded.');}
                         const old=new Set([...assessmentFiles(d.assessmentTasks),...assessmentFiles(previous.tasks)]);
                         for(const file of assessmentFiles(b.tasks))if(!ASSESSMENT_PHOTO_RE.test(file)||!file.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`)||!(file.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/${ctx.uid}/`)||old.has(file)))throw new HttpError(400,'Invalid assessment draft attachment.');
-                        next.tasks=b.tasks as Plain;
+                        next.tasks=b.tasks as Plain;delete next.commit;
                     }
                     if(b.header===undefined&&b.tasks===undefined)throw new HttpError(400,'Enter draft assessment details.');
                     if(JSON.stringify(next).length>240000)throw new HttpError(400,'Assessment draft is too large. Reduce notes or task count.');
@@ -2417,19 +2417,26 @@ export const maintenanceRoutes = {
                     if(typeChanged||start!==str(d.scheduledStart))datePatch.currentCycleAdmission={startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycleRestricted(mtype.code)?cycle.nextStart:cycle.today,at:now,version:cycle.version};
                     const codes=[...new Set(strs(b.solutionCodes))];if(!codes.length||codes.length>5)throw new HttpError(400,'Choose one to five solution categories.');const solutions=codes.map(c=>pickGrouped(l.solutions,c,'solution category')!).map(x=>({code:x.code,label:x.label,group:x.group}));
                     const assemblyPatch:Record<string,Plain>={};const assembly=b.assemblyId===undefined?str(d.assemblyId):str(b.assemblyId);if(assembly!==str(d.assemblyId)){if(objs(d.assessmentTasks).length)throw new HttpError(409,'The assembly cannot change after tasks are assessed.');const place=await assemblyContext(ctx,assembly||str(d.unitId),P.assessment_edit,!assembly);if((assembly&&!place.assembly)||place.unit?.id!==str(d.unitId)||place.defaultAssetTag!==str(d.assetTag))throw new HttpError(409,'Choose an assembly of the original equipment and asset.');Object.assign(assemblyPatch,{assemblyId:place.assembly?.id||'',assemblyCode:place.assembly?.code||'',assemblyName:place.assembly?.name||'',path:place.path.map(x=>x.id)});}
-                    const draftAfterHeader={...object(d.assessmentDraft)};delete draftAfterHeader.header;
+                    const draftAfterHeader={...object(d.assessmentDraft)};delete draftAfterHeader.header;delete draftAfterHeader.commit;
                     const remainingDraft=Array.isArray(draftAfterHeader.tasks)?draftAfterHeader:null;
                     const completedHeader={...d,...datePatch,assessmentDraft:remainingDraft,technicalEvaluation:evaluation,natureCode:nature.code,criticalityCode:crit.code,severitySetBy:ctx.uid,solutions,maintenanceTypeCode:mtype.code,assessedAt:now};
                     await done({...assemblyPatch,...datePatch,assessmentDraft:remainingDraft,...expectedDateCompletionPatch(completedHeader,now),technicalEvaluation:evaluation,natureCode:nature.code,natureLabel:nature.group+' · '+nature.label,failureModeCode:nature.code,failureModeLabel:nature.group+' · '+nature.label,solutions,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label,criticalityCode:crit.code,criticalityLabel:crit.label,criticalityColor:crit.color,severitySetBy:ctx.uid,...(prio?{priorityCode:prio.code,priorityLabel:prio.label}:{}),assessmentNote:note,assessedBy:ctx.uid,assessedByName:displayName(ctx),assessedAt:now,assessmentReview:null},'Technical assessment classification saved','mnt.wo.assessed',note);return {ok:true};
                 }
+                case 'commit_task_assessment':
+                case 'submit_committed_assessment':
                 case 'save_task_assessment': {
                     await requireWorkOrderAssessor(ctx,doc);
+                    const committedDraft=object(d.assessmentDraft),commitRecord=object(committedDraft.commit);
+                    if(action==='submit_committed_assessment'&&(!str(commitRecord.at)||!Array.isArray(committedDraft.tasks)))throw new HttpError(409,'Commit the complete assessment before submitting for planning.');
+                    if(action==='commit_task_assessment'&&d.executionMode==='confirmed_request'&&(!str(d.assessedAt)||isObj(committedDraft.header)))throw new HttpError(409,'Complete and save the technical classification before committing the assessment.');
+                    if(action==='commit_task_assessment'&&b.acknowledged!==true)throw new HttpError(400,'Acknowledge the reviewed assessment before committing.');
+                    const rawTasks=action==='submit_committed_assessment'?committedDraft.tasks:b.tasks;
                     let tasks;
                     try{
                         const m=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
-                        if(!Array.isArray(b.tasks)||objs(b.tasks).length!==b.tasks.length)throw new HttpError(400,'Add valid assessed tasks.');
+                        if(!Array.isArray(rawTasks)||objs(rawTasks).length!==rawTasks.length)throw new HttpError(400,'Add valid assessed tasks.');
                         const snapshots=new Map<string,Awaited<ReturnType<typeof equipmentTaskSafetySnapshot>>>();
-                        const linked=await Promise.all(objs(b.tasks).map(async raw=>{
+                        const linked=await Promise.all(objs(rawTasks).map(async raw=>{
                             const snapshot=await equipmentTaskSafetySnapshot(ctx,str(doc.data.unitId),raw);snapshots.set(str(raw.id),snapshot);
                             const primary=snapshot.classCodes[0],machineStatus=primary==='AC03'?'full_loto':primary==='AC06'?'partial_isolation':['AC05','AC22'].includes(primary)?'live':'total_shutdown';
                             const inherited=snapshot.inheritedRisks,extras=objs(raw.risk).filter(r=>r.registryInherited!==true&&(str(r.hazard)||str(r.impact)||str(r.controls)));
@@ -2464,6 +2471,11 @@ export const maintenanceRoutes = {
                         if(t.templateStatus==='existing'&&!sameTemplate(approved.data.task,t))t.templateStatus='pending_validation';
                         if(t.templateStatus==='existing'&&approved&&Number(approved.data.version)>0&&Number(t.hours)>0&&Number(t.persons)>0)taskStandardSnapshots[t.id]={templateId,version:Number(approved.data.version),durationHours:Number(t.hours),persons:Number(t.persons),standardManHours:Number(t.hours)*Number(t.persons),skills:t.skillCodes||[],approvedAt:str(approved.data.approvedAt),capturedAt:now,assessmentVersion:version};
                     }
+                    if(action==='commit_task_assessment'){
+                        const next={...object(d.assessmentDraft),tasks:rawTasks as Plain,updatedAt:now,updatedBy:ctx.uid,commit:{at:now,by:ctx.uid,name:displayName(ctx),taskCount:tasks.length}};
+                        if(JSON.stringify(next).length>240000)throw new HttpError(400,'Assessment draft is too large. Split the work scope.');
+                        await done({assessmentDraft:next},'Assessment committed for planning handoff','mnt.wo.assessment_committed','Validated assessment snapshot, not authorization for execution');return {ok:true,committedAt:now};
+                    }
                     for(const t of tasks.filter(x=>x.templateStatus!=='existing')){
                         const id=`${doc.id}_${t.id}_v${version}`;
                         await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
@@ -2472,7 +2484,7 @@ export const maintenanceRoutes = {
                             createdBy:ctx.uid,createdAt:now
                         },{exists:false});
                     }
-                    const draftAfterTasks={...object(d.assessmentDraft)};delete draftAfterTasks.tasks;
+                    const draftAfterTasks={...object(d.assessmentDraft)};delete draftAfterTasks.tasks;delete draftAfterTasks.commit;
                     const remainingDraft=isObj(draftAfterTasks.header)?draftAfterTasks:null;
                     const completedAssessment={...d,assessmentDraft:remainingDraft,assessmentTasks:tasks as unknown as Plain,assessmentTasksVersion:version,assessmentTasksAt:now};
                     await done({assessmentDraft:remainingDraft,...expectedDateCompletionPatch(completedAssessment,now),assessmentTasks:tasks as unknown as Plain,taskStandardSnapshots:taskStandardSnapshots as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
