@@ -27,8 +27,8 @@ test('tasks start as a list, with add action and individual editor with separate
  const ui=src('MntTaskAssessment.tsx');
  assert.match(ui,/useState<TaskAssessment\[]>\(/);
  assert.match(ui,/useState<number\|null>\(null\)/);
- assert.match(ui,/\+ Add Task/);
- assert.match(ui,/\['Assessment setup','Internal Task','Spares','Services','Resources','Tools','Equipment','Safety'\]/);
+ assert.match(ui,/\+ Add Internal Task/);
+ assert.match(ui,/\['Assessment setup','Internal Task','Spares','Services','Resources','Tools','Equipment','Safety','LOTO review','Short Intervention review','Review'\]/);
  assert.match(ui,/<AddSpare /,'Spares are added from the selected warehouse, the catalogue or free text');
  assert.match(ui,/Warehouse \(select first\)/);
  assert.match(ui,/Save task<\/Button>/);

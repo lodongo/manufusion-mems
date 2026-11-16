@@ -2427,7 +2427,7 @@ export const maintenanceRoutes = {
                 case 'save_task_assessment': {
                     await requireWorkOrderAssessor(ctx,doc);
                     const committedDraft=object(d.assessmentDraft),commitRecord=object(committedDraft.commit);
-                    if(action==='submit_committed_assessment'&&(!str(commitRecord.at)||!Array.isArray(committedDraft.tasks)))throw new HttpError(409,'Commit the complete assessment before submitting for planning.');
+                    if(action==='submit_committed_assessment'&&(!str(commitRecord.at)||!Array.isArray(committedDraft.tasks)||str(b.committedAt)!==str(commitRecord.at)))throw new HttpError(409,'Committed assessment is missing or has changed. Reopen and review the current commitment before submitting for planning.');
                     if(action==='commit_task_assessment'&&d.executionMode==='confirmed_request'&&(!str(d.assessedAt)||isObj(committedDraft.header)))throw new HttpError(409,'Complete and save the technical classification before committing the assessment.');
                     if(action==='commit_task_assessment'&&b.acknowledged!==true)throw new HttpError(400,'Acknowledge the reviewed assessment before committing.');
                     const rawTasks=action==='submit_committed_assessment'?committedDraft.tasks:b.tasks;

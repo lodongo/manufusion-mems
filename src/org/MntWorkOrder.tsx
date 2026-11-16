@@ -786,7 +786,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 breakIn={!!wo.breakIn}
                 initial={(wo.assessmentDraft?.tasks??tasks) as any}
                 hasSavedDraft={Array.isArray(wo.assessmentDraft?.tasks)}
-                initialCommit={!!wo.assessmentDraft?.commit?.at}
+                initialCommit={wo.assessmentDraft?.commit?.at||''}
                 editable
                 onSaved={() => {
                     setAssessing(false);setAssessmentDirty(false);
