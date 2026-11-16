@@ -42,6 +42,7 @@ import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
 import { searchCatalog,serviceCatalogHierarchy } from './procurement';
 import {MAINTENANCE_GATES,maintenanceGateReadiness,MAINTENANCE_WORKFLOW_SCHEMA,RETIRED_MAINTENANCE_KEYS,currentMaintenanceMappings} from './maintenanceWorkflowConfig';
+import {commitmentMetrics,commitmentElapsed,proposedEnd} from './maintenanceCommitment';
 import {validateAssessmentTasks,summarizeAssessmentTasks,assessmentTaskSummaries,type AssessedTask} from './maintenanceTaskAssessment';
 import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} from './maintenanceTaskRisk';
 
@@ -2472,10 +2473,25 @@ export const maintenanceRoutes = {
                         if(t.templateStatus==='existing'&&approved&&Number(approved.data.version)>0&&Number(t.hours)>0&&Number(t.persons)>0)taskStandardSnapshots[t.id]={templateId,version:Number(approved.data.version),durationHours:Number(t.hours),persons:Number(t.persons),standardManHours:Number(t.hours)*Number(t.persons),skills:t.skillCodes||[],approvedAt:str(approved.data.approvedAt),capturedAt:now,assessmentVersion:version};
                     }
                     if(action==='commit_task_assessment'){
-                        const next={...object(d.assessmentDraft),tasks:rawTasks as Plain,updatedAt:now,updatedBy:ctx.uid,commit:{at:now,by:ctx.uid,name:displayName(ctx),taskCount:tasks.length}};
+                        const input=object(b.commitment),cycle=await getMaintenanceCycle(ctx),type=str(d.maintenanceTypeCode);
+                        const metrics=commitmentMetrics(tasks,str(ctx.org.data.currencyCode)),overlap=Number(input.overlapHours),hoursPerDay=Number(input.hoursPerDay);
+                        let elapsed;try{elapsed=commitmentElapsed(metrics,overlap,hoursPerDay);}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid time estimate.');}
+                        if(JSON.stringify(input.reviewedMetrics)!==JSON.stringify(metrics))throw new HttpError(409,'Resources, durations or current cost estimates changed. Refresh the assessment and review the latest figures before committing.');
+                        const overlapBasis=str(input.overlapBasis).trim().slice(0,1000);
+                        if(overlap>0&&overlapBasis.length<10)throw new HttpError(400,'Explain the basis for concurrent work.');
+                        const start=str(input.scheduledStart),end=str(input.scheduledEnd);
+                        validateCycleDates(type,start,end,cycle,d);const moves=validateStartDateMove(d,start);
+                        const minimumEnd=proposedEnd(start,elapsed.days);if(!minimumEnd||end<minimumEnd)throw new HttpError(400,'Scheduled date range is shorter than the expected elapsed hours.');
+                        const baseline=editExpectedDates(d,input,type,cycle),changed=start!==str(d.scheduledStart)||end!==str(d.scheduledEnd),reason=str(input.dateChangeReason).trim().slice(0,500);
+                        if(changed&&reason.length<10)throw new HttpError(400,'Explain the scheduled date change (at least 10 characters).');
+                        const datePatch:Obj=changed?{...baseline,scheduledStart:start,scheduledEnd:end,startDateMoves:moves,dateChanges:[...objs(d.dateChanges),{at:now,by:ctx.uid,name:displayName(ctx),fromStart:str(d.scheduledStart),fromEnd:str(d.scheduledEnd),toStart:start,toEnd:end,reason,source:'assessment_commitment'}],scheduleLock:null}:baseline;
+                        if(start!==str(d.scheduledStart))datePatch.currentCycleAdmission={startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycleRestricted(type)?cycle.nextStart:cycle.today,at:now,version:cycle.version};
+                        const commitment={at:now,by:ctx.uid,name:displayName(ctx),taskCount:tasks.length,...baseline,scheduledStart:start,scheduledEnd:end,overlapHours:overlap,hoursPerDay,overlapBasis,elapsedHours:elapsed.elapsedHours,estimatedCalendarDays:elapsed.days,metrics};
+                        const next={...object(d.assessmentDraft),tasks:rawTasks as Plain,updatedAt:now,updatedBy:ctx.uid,commit:commitment};
                         if(JSON.stringify(next).length>240000)throw new HttpError(400,'Assessment draft is too large. Split the work scope.');
-                        await done({assessmentDraft:next},'Assessment committed for planning handoff','mnt.wo.assessment_committed','Validated assessment snapshot, not authorization for execution');return {ok:true,committedAt:now};
+                        await done({...datePatch,assessmentDraft:next},'Assessment committed for planning handoff','mnt.wo.assessment_committed','Validated assessment snapshot, not authorization for execution');return {ok:true,committedAt:now};
                     }
+                    if(action==='submit_committed_assessment'){const current=commitmentMetrics(tasks,str(ctx.org.data.currencyCode));if(!isObj(commitRecord.metrics)||JSON.stringify(current)!==JSON.stringify(commitRecord.metrics)||str(commitRecord.scheduledStart)!==str(d.scheduledStart)||str(commitRecord.scheduledEnd)!==str(d.scheduledEnd))throw new HttpError(409,'Assessment dates, resources or cost estimates changed. Reopen and recommit before submitting.');}
                     for(const t of tasks.filter(x=>x.templateStatus!=='existing')){
                         const id=`${doc.id}_${t.id}_v${version}`;
                         await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
@@ -2489,7 +2505,7 @@ export const maintenanceRoutes = {
                     const completedAssessment={...d,assessmentDraft:remainingDraft,assessmentTasks:tasks as unknown as Plain,assessmentTasksVersion:version,assessmentTasksAt:now};
                     await done({assessmentDraft:remainingDraft,...expectedDateCompletionPatch(completedAssessment,now),assessmentTasks:tasks as unknown as Plain,taskStandardSnapshots:taskStandardSnapshots as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
                         spares:[],services:[],tools:'',assessmentTasksBy:ctx.uid,assessmentTasksAt:now,
-                        assessmentTasksVersion:version,assessmentReview:null,safety:null},
+                        assessmentTasksVersion:version,assessmentReview:null,safety:null,...(action==='submit_committed_assessment'?{assessmentCommitment:commitRecord}:{})},
                         'Task assessments completed','mnt.wo.task_assessments',
                         JSON.stringify(summarizeAssessmentTasks(tasks)));
                     return {ok:true};
