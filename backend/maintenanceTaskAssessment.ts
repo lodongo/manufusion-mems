@@ -105,7 +105,7 @@ export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
   const overheadRoles=parseRoles(t.overheadRoles);
   if(subtaskRoles&&subtaskRoles.length!==(subtasks?.length||0))throw Error('Resource allocations must match subtasks.');
   const grouped=new Map<string,ResourceRole>();
-  for(const r of [...(subtaskRoles?.flat()||[]),...(overheadRoles||[])]){const p=grouped.get(r.roleCode);const persons=Math.max(p?.persons||0,r.persons);grouped.set(r.roleCode,{...r,persons,hours:((p?p.persons*p.hours:0)+r.persons*r.hours)/persons});}
+  for(const r of (subtaskRoles?.flat()||[])){const p=grouped.get(r.roleCode);const persons=Math.max(p?.persons||0,r.persons);grouped.set(r.roleCode,{...r,persons,hours:((p?p.persons*p.hours:0)+r.persons*r.hours)/persons});}
   const internalRoleRequirements=subtaskRoles?Array.from(grouped.values()):parseRoles(t.internalRoleRequirements);
   if(internalRoleRequirements&&(internalRoleRequirements.length>30||new Set(internalRoleRequirements.map(r=>r.roleCode)).size!==internalRoleRequirements.length||internalRoleRequirements.reduce((n,r)=>n+r.persons,0)>50))throw Error('Duplicate or excessive execution role requirements.');
   const internalRoles=Array.isArray(t.internalRoles)?[...new Set(t.internalRoles.map(v=>text(v,30)).filter(Boolean))]:['technician'];

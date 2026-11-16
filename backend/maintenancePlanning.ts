@@ -59,7 +59,10 @@ export function estimateOf(wo: Doc, readinessItems: Obj[], allowance = Number(ob
     const uncosted: Estimate['uncosted'] = [];
     for (const t of rows(wo.data.assessmentTasks)) {
         const task = str(t.title) || str(t.description);
-        labour += (Array.isArray(t.internalRoleRequirements)?rows(t.internalRoleRequirements).reduce((n,r)=>n+(Number(r.persons)||0)*(Number(r.hours)||0),0):(Number(t.persons)||0)*(Number(t.hours)||0))*(Number(t.rate)||0);
+        const direct=Array.isArray(t.subtaskRoles)?rows((t.subtaskRoles as unknown[]).flat()):Array.isArray(t.internalRoleRequirements)?rows(t.internalRoleRequirements):null;
+        const overhead=rows(obj(obj(obj(wo.data.taskPlanning)[str(t.id)]).allocation).overheadRoles??t.overheadRoles);
+        const hours=(rr:Obj[])=>rr.reduce((n,r)=>n+(Number(r.persons)||0)*(Number(r.hours)||0),0);
+        labour += ((direct?hours(direct):(Number(t.persons)||0)*(Number(t.hours)||0))+hours(overhead))*(Number(t.rate)||0);
         for (const s of rows(t.spares)) {
             const live = readinessItems.find((i) => i.taskId === t.id && i.spareId === s.id);
             const unit = live && typeof live.unitCost === 'number' && live.unitCost > 0 ? Number(live.unitCost) : Number(s.unitCost) > 0 ? Number(s.unitCost) : null;

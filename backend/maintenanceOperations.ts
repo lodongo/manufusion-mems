@@ -23,6 +23,7 @@ import { postMaintenanceReturn } from './finOps';
 import { maintenancePermission, requireMaintenanceRole, configuredMaintenanceRole, requireWorkOrderAssessor } from './maintenanceAccess';
 import {groupAt,groupGateRole,outsideExecutionAccess,loadWorkGroupPolicy,workGroupGateAllowed} from './maintenanceWorkGroupPolicy';
 import { workGroupResourcePool, requireOutsideGroupOptIn } from './maintenanceWorkGroups';
+import { assessmentExecutionRoles } from './maintenanceAssessmentResources';
 import { assessmentReviewCurrent,maintenanceAssessmentReady } from './maintenanceAssessmentReview';
 import {maintenanceAssessmentApprovalRequired,configuredOrderApprovalStage,technicalClosureApprovalRequired,readMaintenancePolicySnapshot} from './maintenanceGovernancePolicy';
 import {approveStage,requireStageApproval,stageApprovalCurrent,stageApprovalPending,stageReached,STAGE_LABELS} from './maintenanceStageApproval';
@@ -275,7 +276,7 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
         const planning = object(object(wo.data.taskPlanning)[str(t.id)]),
             allocation = object(planning.allocation);
         if (
-            texts(allocation.personnel).length < Number(t.persons) ||
+            texts(allocation.personnel).length < (Array.isArray(t.subtaskRoles)?[...new Map(rows((t.subtaskRoles as unknown[]).flat()).map(r=>[str(r.roleCode),Math.max(...rows((t.subtaskRoles as unknown[]).flat()).filter(x=>x.roleCode===r.roleCode).map(x=>Number(x.persons)))])).values()].reduce((n,v)=>n+v,0):Number(t.persons))+rows(allocation.overheadRoles??t.overheadRoles).reduce((n,r)=>n+Number(r.persons),0) ||
             allocation.competenciesConfirmed !== true
         )
             problems.push(`${str(t.description)}: allocate qualified personnel and confirm competencies.`);
@@ -558,7 +559,13 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
     }
     if (action === 'allocate') {
         const ids = [...new Set(texts(b.personnel))];
-        if (ids.length < Number(task.persons) || ids.length > 50) throw new HttpError(400, 'Allocate enough personnel for this task.');
+        const rawOverhead=b.overheadRoles===undefined?rows(object(p.allocation).overheadRoles??task.overheadRoles):rows(b.overheadRoles);
+        if(rawOverhead.length>30||new Set(rawOverhead.map(r=>str(r.roleCode))).size!==rawOverhead.length)throw new HttpError(400,'Duplicate or excessive overhead roles.');
+        const roles=new Map((await assessmentExecutionRoles(ctx,wo)).roles.map(r=>[r.code,r]));
+        const overheadRoles=rawOverhead.map(r=>{const role=roles.get(str(r.roleCode)),persons=Number(r.persons),hours=Number(r.hours);if(!role||!Number.isInteger(persons)||persons<1||persons>50||!Number.isFinite(hours)||hours<.25||hours>2000)throw new HttpError(400,'Choose a valid work group overhead role, headcount and hours.');return {roleCode:role.code,roleLabel:role.label,persons,hours};});
+        const directPersons=Array.isArray(task.subtaskRoles)?[...new Map(rows((task.subtaskRoles as unknown[]).flat()).map(r=>[str(r.roleCode),Math.max(...rows((task.subtaskRoles as unknown[]).flat()).filter(x=>x.roleCode===r.roleCode).map(x=>Number(x.persons)))])).values()].reduce((n,v)=>n+v,0):Number(task.persons);
+        const requiredPersons=directPersons+overheadRoles.reduce((n,r)=>n+r.persons,0);
+        if (ids.length < requiredPersons || ids.length > 50) throw new HttpError(400, 'Allocate enough personnel for this task.');
         const pool = await workGroupResourcePool(ctx.orgId, wo);
         const outside = requireOutsideGroupOptIn(ids, pool.people, b.includeOutsideGroup);
         const executionPool=await capacityContext(ctx);if(executionPool.active&&ids.some(id=>!executionPool.artisans.some(a=>a.id===id)))throw new HttpError(409,'All assigned employees must hold an active maintenance execution role.');
@@ -582,6 +589,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                         ...p,
                         allocation: {
                             personnel: ids,
+                            overheadRoles,
                             workGroupId: pool.group?.id || '',
                             workGroupCode: pool.group?.code || '',
                             workGroupVersion: pool.group?.version || 0,
@@ -595,6 +603,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                         },
                     },
                 },
+                ...(JSON.stringify(overheadRoles)!==JSON.stringify(rows(object(p.allocation).overheadRoles??task.overheadRoles))&&str(object(wo.data.costApproval).status)?{costApproval:{...object(wo.data.costApproval),status:'superseded'}}:{}),
                 plannedBy: ctx.uid,
                 plannedByName: name(ctx),
             },
@@ -2237,6 +2246,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
             currentUserId: ctx.uid,
             workGroup: pool.group,
             people: pool.people,
+            executionRoles:(await assessmentExecutionRoles(ctx,wo)).roles,
             issues: (await listDocs(`${root(ctx)}/goods_issues`))
                 .filter((i) => i.data.workOrderId === wo.id)
                 .map((i) => ({ id: i.id, ...i.data })),

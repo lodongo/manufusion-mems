@@ -183,6 +183,7 @@ function ResourceForm({
     const [includeOutsideGroup, setIncludeOutsideGroup] = useState(false);
     const [data, setData] = useState<MntData>({
         personnel: previous.personnel || [],
+        overheadRoles: previous.overheadRoles ?? task.overheadRoles ?? [],
         materialId: '',
         warehouseId: '',
         catalogCode: resource.catalogCode || '',
@@ -197,6 +198,9 @@ function ResourceForm({
         lineNo: item.orderReady?.lineNo || '',
         readyAt: resource.executionDate || '',
     });
+    const executionRoles=useLoad(()=>callBackend<{executionRoles?:Array<{code:string;label:string}>}>('/api/org/mnt/assessment/options',{code}),[code]);
+    const directRows: MntData[]=Array.isArray(task.subtaskRoles)?task.subtaskRoles.flat():task.internalRoleRequirements||[];
+    const directPeople=Array.isArray(task.subtaskRoles)?Array.from(new Set(directRows.map(r=>r.roleCode))).reduce((n,k)=>n+Math.max(...directRows.filter(r=>r.roleCode===k).map(r=>Number(r.persons)||0)),0):Number(task.persons)||0;
     const isGroupMember = (id:string) => people.some(p=>p.id===id && p.inWorkGroup===true);
     const outsideSelected=(data.personnel as string[]).filter(id=>!isGroupMember(id));
     const availablePeople=people.filter(p=>p.inWorkGroup===true||includeOutsideGroup);
@@ -242,8 +246,9 @@ function ResourceForm({
             {kind === 'allocate' && (
                 <>
                     <p className="text-sm text-soft">
-                        Required: {task.persons} people · {task.skills}.
+                        Required: {directPeople} direct + {(data.overheadRoles as MntData[]).reduce((n,r)=>n+Number(r.persons),0)} overhead people · {task.skills}.
                     </p>
+                    <section className="rounded-xl border border-line p-3 space-y-3"><h3 className="font-semibold">Additional overhead resources</h3><p className="text-xs text-soft">Planning only. Add supporting roles and time independently of assessed subtasks.</p>{(data.overheadRoles as MntData[]).map((r,i)=><div key={r.roleCode} className="rounded-lg border border-line p-3 space-y-2"><b>{r.roleLabel||r.roleCode}</b><div className="flex flex-wrap gap-3 items-end"><div><span className="block text-xs text-soft">People</span><div className="flex items-center gap-2"><button type="button" aria-label="Decrease overhead headcount" disabled={r.persons<=1} className="min-h-11 min-w-11 rounded-lg border border-line disabled:opacity-40" onClick={()=>patch('overheadRoles',data.overheadRoles.map((x:MntData,j:number)=>j===i?{...x,persons:Math.max(1,x.persons-1)}:x))}>&lt;</button><b>{r.persons}</b><button type="button" aria-label="Increase overhead headcount" disabled={r.persons>=50} className="min-h-11 min-w-11 rounded-lg border border-line disabled:opacity-40" onClick={()=>patch('overheadRoles',data.overheadRoles.map((x:MntData,j:number)=>j===i?{...x,persons:Math.min(50,x.persons+1)}:x))}>&gt;</button></div></div><label className="text-xs text-soft">Hours per person<input type="number" min=".25" max="2000" step=".25" className={mntInput+' max-w-32'} value={r.hours} onChange={e=>patch('overheadRoles',data.overheadRoles.map((x:MntData,j:number)=>j===i?{...x,hours:Number(e.target.value)}:x))}/></label></div><div className="flex items-center justify-between text-sm"><span>{(Number(r.persons)*Number(r.hours)).toFixed(1)} person-hours</span><button type="button" className="min-h-11 text-rose-400" onClick={()=>patch('overheadRoles',data.overheadRoles.filter((_:MntData,j:number)=>j!==i))}>Remove</button></div></div>)}<SelectField id="mnt-overhead-role" label="Add overhead role" value="" onChange={e=>{const role=executionRoles.data?.executionRoles?.find(r=>r.code===e.target.value);if(role)patch('overheadRoles',[...data.overheadRoles,{roleCode:role.code,roleLabel:role.label,persons:1,hours:1}]);}}><option value="">Choose work group role</option>{executionRoles.data?.executionRoles?.filter(r=>!data.overheadRoles.some((x:MntData)=>x.roleCode===r.code)).map(r=><option key={r.code} value={r.code}>{r.label}</option>)}</SelectField></section>
                     <div className="rounded-xl border border-line p-3">
                         <p className="font-semibold">{workGroup ? workGroup.code+' · '+workGroup.name : 'No work group configured for this cost center'}</p>
                         <p className="mt-1 text-xs text-soft">{people.filter(p=>p.inWorkGroup===true).length} eligible work group members. Outside-group selection is off by default.</p>
@@ -1054,9 +1059,10 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         {tab === 'Personnel' && (
                             <div className="space-y-3">
                                 <p>
-                                    {task.persons} people · Skills: {task.skills}{Array.isArray(task.internalRoleRequirements)&&task.internalRoleRequirements.map((r:MntData)=><span key={r.roleCode} className='block text-xs text-soft'>{r.roleLabel||r.roleCode} · {r.persons} people × {r.hours} hours</span>)}
+                                    {task.persons} people · Skills: {task.skills}{Array.isArray(task.internalRoleRequirements)&&task.internalRoleRequirements.map((r:MntData)=><span key={r.roleCode} className='block text-xs text-soft'>{r.roleLabel||r.roleCode} · {r.persons} people × {Number(r.hours).toFixed(1)} hours</span>)}
                                 </p>
                                 {wo.taskStandardSnapshots?.[task.id]&&<MntStandardHistory key={wo.code+':'+task.id} code={wo.code} taskId={task.id} standard={wo.taskStandardSnapshots[task.id]}/>}
+                                <section className='rounded-xl border border-line p-3 text-sm space-y-1'><b>Planning overhead</b>{(planning.allocation?.overheadRoles??task.overheadRoles??[]).map((r:MntData)=><p key={r.roleCode}>{r.roleLabel||r.roleCode} · {r.persons} × {Number(r.hours).toFixed(1)} h · {(Number(r.persons)*Number(r.hours)).toFixed(1)} person-hours</p>)}{!(planning.allocation?.overheadRoles??task.overheadRoles??[]).length&&<p className='text-soft'>No additional overhead resources.</p>}</section>
                                 <p>
                                     Allocated:{' '}
                                     {(planning.allocation?.personnel || [])
