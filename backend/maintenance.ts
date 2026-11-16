@@ -2502,7 +2502,7 @@ export const maintenanceRoutes = {
                     const sup = str(b.supervisor);
                     if (sup && !users.has(sup)) throw new HttpError(400, 'Choose the supervisor from your organization.');
                     await done(
-                        { status: 'scheduled', scheduledStart: start, scheduledEnd: end, assignees: ids.map((id) => ({ uid: id, name: users.get(id) ?? '' })), supervisor: sup, supervisorName: sup ? users.get(sup) ?? '' : '', scheduledBy: ctx.uid, scheduledByName: displayName(ctx), scheduledAt: now },
+                        { ...protectExpectedDates(d,b), status: 'scheduled', scheduledStart: start, scheduledEnd: end, assignees: ids.map((id) => ({ uid: id, name: users.get(id) ?? '' })), supervisor: sup, supervisorName: sup ? users.get(sup) ?? '' : '', scheduledBy: ctx.uid, scheduledByName: displayName(ctx), scheduledAt: now },
                         'Scheduled',
                         'mnt.wo.scheduled',
                         `${start} to ${end} · ${ids.map((id) => users.get(id)).join(', ')}`
