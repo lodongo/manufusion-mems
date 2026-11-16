@@ -21,7 +21,7 @@ export const WORK_GROUP_TASKS: Task[] = [
 // One-to-one task gates and security activities are one allocation, not two independent settings.
 export const LINKED_WORK_GROUP_TASKS:readonly (readonly [string,string])[]=[
  ['MNT.WR.CREATE','MNT.WR.create'],['MNT.WR.REVIEW','MNT.WR.review'],['MNT.WR.APPROVAL','MNT.WR.approve'],['MNT.WO.CLOSE_APPROVAL','MNT.WO.technicalApprove'],
- ['MNT.WR.ASSESS','MNT.assessment.edit'],['MNT.ASSESS.REVIEW','MNT.assessment.review'],
+ ['MNT.WR.ASSESS','MNT.assessment.edit'],['MNT.ASSESS.REVIEW','MNT.assessment.review'],['MNT.SERVICE.JUSTIFY','MNT.service.justificationApprove'],
  ['MNT.WR.CONVERT','MNT.WR.convert'],['MNT.WINDOW.LOCK','MNT.WO.schedule'],
  ['MNT.TASK.FEEDBACK','MNT.WO.execute']
 ];

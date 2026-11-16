@@ -14,6 +14,7 @@ export const DEFAULT_WORK_GROUP_TASKS:Record<string,string[]>={
  'MNT.WR.REVIEW':[L,S,T],'MNT.WR.review':[L,S,T],'MNT.WR.APPROVAL':[L],'MNT.WR.approve':[L],'MNT.WR.CLOSE':[L,S,T],'MNT.WR.close':[L,S,T],
  'MNT.WR.return':[L,S,T],'MNT.WR.decline':[L,S,T],
  'MNT.WR.ASSESS':[S,T],'MNT.assessment.edit':[S,T],'MNT.ASSESS.REVIEW':[L],'MNT.assessment.review':[L],
+ 'MNT.SERVICE.JUSTIFY':[L],'MNT.service.justificationApprove':[L],
  'MNT.TASK.VALIDATE':[L],'MNT.activities.edit':[L,S,T],
  'MNT.WR.CONVERT':[P],'MNT.WR.convert':[P],
  'MNT.WO.PLAN':[P,C],'MNT.WO.plan':[P,C],

@@ -1,3 +1,4 @@
+import {serviceJustification,validateServiceJustification,SERVICE_JUSTIFICATION_GATE,SERVICE_JUSTIFICATION_PERMISSION} from './maintenanceServiceJustification';
 import {expectedDates,protectExpectedDates,expectedDatesLocked,expectedDateCompletionPatch} from './maintenanceExpectedDates';
 import {summarizeWorkOrderReview} from './maintenanceStatusReview';
 import {capacityForWindow,capacityContext,windowTeamAvailability} from './maintenanceCapacity';
@@ -348,16 +349,17 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
         }
         if(object(t.externalResource).type&&!object(planning.externalSpecialist).at)problems.push(`${str(t.description)}: secure external specialist and record availability evidence.`);
         for (const s of rows(t.services)) {
-            const p = object(planning[str(s.id)]);
+            const p = object(planning[str(s.id)]),justification=serviceJustification(wo.data,t,s);
             const procurement = str(p.requirementId) ? trace.get(str(p.requirementId)) : undefined;
             let orderLive = false;
             if (p.status === 'secured' && str(p.poId)) {
                 const po = await getDoc(`${root(ctx)}/procurement_orders/${identifier(p.poId)}`);
                 orderLive = !!po && ['open', 'sent', 'partial', 'full'].includes(str(po.data.status));
             }
-            const ready = p.status === 'secured' && orderLive;
+            const justificationReady=!justification.required||justification.status==='approved';
+            const ready = p.status === 'secured' && orderLive&&justificationReady;
             const orderReady = procurement ? rows(procurement.orders).find((o) => o.live === true) ?? null : null;
-            const status = ready
+            const status = !justificationReady?'awaiting_justification_approval':ready
                 ? 'secured'
                 : p.status === 'secured'
                   ? 'order_inactive'
@@ -372,7 +374,7 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
                           : object(p.sourcing).supplierCategory
                             ? 'sourcing_confirmed'
                             : 'awaiting_sourcing';
-            items.push({ taskId: t.id, serviceId: s.id, kind: 'service', ...p, description:str(s.description), status, procurement: procurement ?? null, orderReady });
+            items.push({ taskId: t.id, serviceId: s.id, kind: 'service', ...p,justification, description:str(s.description), status, procurement: procurement ?? null, orderReady });
             if (!ready)
                 problems.push(
                     status === 'order_inactive'
@@ -520,6 +522,33 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
     }
     throw new HttpError(400, 'Unknown planning action.');
 }
+async function decideExternalService(ctx:OrgContext,wo:Doc,action:string){
+ const d=wo.data,b=ctx.body,path=recordPath(wo);
+ if(!['planning','plan_ready'].includes(str(d.status))||object(d.earlyClosureRequest).at||d.assessmentDraft)throw new HttpError(409,'Submit the assessment before reviewing external service justification.');
+ const task=tasksOf(wo).find(t=>str(t.id)===str(b.taskId)),service=task&&rows(task.services).find(s=>str(s.id)===str(b.resourceId));
+ if(!task||!service)throw new HttpError(400,'Choose an assessed external service.');
+ const j=serviceJustification(d,task,service),planning=object(object(object(d.taskPlanning)[str(task.id)])[str(service.id)]);
+ if(!j.required)throw new HttpError(409,'This is a historical service without the new justification policy.');
+ if(planning.requirementId||planning.sourcing||planning.status==='secured')throw new HttpError(409,'Service sourcing already exists. Use controlled reassessment to alter the approved scope.');
+ const all=object(d.externalServiceJustifications),byTask=object(all[str(task.id)]),old=object(byTask[str(service.id)]);
+ let next:Obj;
+ if(action==='revise_service_justification'){
+   await maintenancePermission(ctx,'MNT.assessment.edit',path);
+   if(groupAt(ctx.workGroupPolicy,path))await requireMaintenanceRole(ctx,'MNT.WR.ASSESS',path);
+   if(j.status==='approved')throw new HttpError(409,'Approved justification is locked. Use controlled reassessment.');
+   const revision=validateServiceJustification(b.reasons,b.explanation);
+   next={...revision,submittedBy:ctx.uid,submittedAt:nowIso(),decision:null,history:[...rows(old.history),...(j.decision?[j.decision]:[])]};
+ }else{
+   await authority(ctx,wo,SERVICE_JUSTIFICATION_PERMISSION,SERVICE_JUSTIFICATION_GATE);
+   if([j.submittedBy,str(d.assessmentTasksBy),str(d.assessedBy)].includes(ctx.uid))throw new HttpError(403,'The assessment or justification author cannot approve their own external service.');
+   if(j.status!=='pending')throw new HttpError(409,'Only a pending justification can be decided. Returned items must be revised.');
+   validateServiceJustification(j.reasons,j.explanation);
+   const note=requiredText(b.note,'Technical manager decision note',10,500);
+   const {role}=await requireMaintenanceRole(ctx,SERVICE_JUSTIFICATION_GATE,path);
+   next={...old,decision:{status:action==='approve_service_justification'?'approved':'returned',signature:j.signature,by:ctx.uid,name:name(ctx),role,at:nowIso(),note}};
+ }
+ await saveWo(ctx,wo,{externalServiceJustifications:{...all,[str(task.id)]:{...byTask,[str(service.id)]:next}}},'service.justification.'+action,str(service.description));return {ok:true};
+}
 async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
      await requireStageApproval(ctx,wo,'before_assessment');
      const settings=await getDoc(`${root(ctx)}/maintenance_workflow_settings/default`);
@@ -539,6 +568,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
     const planning = object(wo.data.taskPlanning),
         p = object(planning[str(task.id)]),
         previous = object(p[str(b.resourceId)]);
+    if(service&&['service_sourcing','procure','secure_service'].includes(action)){const j=serviceJustification(wo.data,task,service);if(j.required&&j.status!=='approved')throw new HttpError(409,'Technical manager approval of this external service justification is required before sourcing or procurement.');}
     let state: Obj = { ...previous },
         result: Obj = {};
     if(action==='confirm_external_specialist'){
@@ -2167,6 +2197,8 @@ export async function maintenanceOperations(ctx: OrgContext) {
         if(str(wo.data.status)!=='planning'||['approved','pending'].includes(str(object(wo.data.assessmentReview).status))||Object.keys(object(wo.data.taskPlanning)).length)permissions.assess=false;
         if(object(wo.data.assessmentReview).status==='approved'||wo.data.assessmentDraft)permissions.reviewAssessment=false;
         const approvalStage=configuredOrderApprovalStage(wo.data);
+        permissions.approveServiceJustification=false;permissions.reviseServiceJustification=false;
+        if(['planning','plan_ready'].includes(str(wo.data.status))&&!wo.data.assessmentDraft&&!object(wo.data.earlyClosureRequest).at){try{await authority(ctx,wo,SERVICE_JUSTIFICATION_PERMISSION,SERVICE_JUSTIFICATION_GATE);permissions.approveServiceJustification=![wo.data.assessmentTasksBy,wo.data.assessedBy].includes(ctx.uid);}catch{/* not configured or unauthorized */}try{await maintenancePermission(ctx,'MNT.assessment.edit',recordPath(wo));if(groupAt(ctx.workGroupPolicy,recordPath(wo)))await requireMaintenanceRole(ctx,'MNT.WR.ASSESS',recordPath(wo));permissions.reviseServiceJustification=true;}catch{/* unauthorized */}}
         permissions.approveOrderStage=false;
         if(approvalStage&&stageReached(wo.data,approvalStage)&&stageApprovalPending(wo.data,approvalStage)){
             try{await maintenancePermission(ctx,'MNT.assessment.review',recordPath(wo));await requireMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',recordPath(wo));const excluded=[wo.data.requestedBy,wo.data.createdBy,...(approvalStage==='before_assessment'?[]:[wo.data.assessedBy,wo.data.assessmentTasksBy,wo.data.plannedBy,object(wo.data.readiness).by])];permissions.approveOrderStage=!excluded.includes(ctx.uid)||ctx.testMode===true;}catch{/* unauthorized */}
@@ -2315,6 +2347,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         if(object(wo.data.earlyClosureRequest).at&&['match_spare','candidate','reserve','procure','secure_spare','service_sourcing','secure_service','allocate','confirm_external_specialist','lock_schedule','review_risk','submit_cost','confirm_readiness','reassess','return_to_planning'].includes(action))throw new HttpError(409,'Work order is pending early closure. Resource and scope changes are locked.');
         let result;
         if(isRequestClosureOrder(wo.data))result=await executeMaintenanceAction(ctx,wo,action);
+        else if (['approve_service_justification','return_service_justification','revise_service_justification'].includes(action))result=await decideExternalService(ctx,wo,action);
         else if (['match_spare', 'candidate', 'reserve', 'procure', 'secure_spare', 'service_sourcing', 'secure_service', 'allocate','confirm_external_specialist'].includes(action))result=await resourceAction(ctx, wo, action);
         else if (['lock_schedule', 'review_risk', 'submit_cost', 'confirm_readiness'].includes(action))result=await planningAction(ctx, wo, action);
         else result=await executeMaintenanceAction(ctx, wo, action);
