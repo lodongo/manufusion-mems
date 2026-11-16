@@ -290,7 +290,7 @@ export const safEquipmentRoutes={
   const manualSteps=Array.isArray(ctx.body.subtasks)?array(ctx.body.subtasks):[];
   if(!old?.data.catalogueSource&&(manualSteps.length>100||manualSteps.some((x,i)=>str(x.name).trim().length<3||str(x.name).length>500||Number(x.sequence)!==i+1||!Number.isFinite(Number(x.estimatedMinutes))||Number(x.estimatedMinutes)<=0)))throw new HttpError(400,'Enter valid ordered subtasks.');
   let catalogueFamily=isObj(old?.data.catalogueFamily)?old.data.catalogueFamily:null;
-  if(!old?.data.catalogueSource&&isObj(ctx.body.catalogueFamily)){
+  if(!old?.data.catalogueSource&&!catalogueFamily&&isObj(ctx.body.catalogueFamily)){
    const input=ctx.body.catalogueFamily,scope=await resolveGenericTaskScope(ctx,await catalogueSiteForEquipment(ctx,id));
    const family=array(scope.catalogue?.families).find(f=>f.code===input.familyCode&&f.categoryCode===input.categoryCode&&f.subcategoryCode===input.subcategoryCode);
    if(!family||scope.releaseId!==input.releaseId||!scope.items.some(t=>t.familyCode===family.code))throw new HttpError(400,'Choose an adopted catalogue family.');
@@ -305,10 +305,10 @@ export const safEquipmentRoutes={
   const verified=ctx.body.verifyAssessment===true&&!decision.exception;
   const next={taskId,workCenterId:id,...(catalogueFamily?{catalogueFamily,displayCode:catalogueFamily.familyCode+'-L'+taskId.slice(4)}:{}),safetyDeviceIds,deviceVersion,devicesReviewed:ctx.body.devicesReviewed===true,...(!old?.data.catalogueSource?{subtasks:manualSteps.length?manualSteps:old?.data.subtasks||[]}:{}),assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,displayCode:str(old.data.displayCode)||str((old.data.catalogueSource as Obj).code),subtasks:old.data.subtasks,expectedOutcomes:old.data.expectedOutcomes||[],requiredCertifications:old.data.requiredCertifications||[],siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
   const source=isObj(old?.data.catalogueSource)?old.data.catalogueSource:null,key=source?'task_'+str(source.code):catalogueFamily?'family_'+str(catalogueFamily.familyCode):'';
-  const writes=[{path:col+'/'+taskId,data:next,precondition:old?{updateTime:old.updateTime}:{exists:false}}];
+  const writes:Array<{path:string;data:Record<string,unknown>;precondition:{exists?:boolean;updateTime?:string}}>=[{path:col+'/'+taskId,data:next,precondition:old?{updateTime:old.updateTime}:{exists:false}}];
   if(idRe.test(key)){
    const referencePath=root(ctx)+'/equipment_task_risk_references/'+key+'/items/'+taskId,prior=await getDoc(referencePath);
-   writes.push({path:referencePath,data:{taskName:name,active:verified,updatedAt:nowIso(),rows:rows.map(r=>({hazard:r.hazard,hazardCodes:r.hazardCodes,impact:r.impact,impactCodes:r.impactCodes,impactLabels:r.impactLabels,controls:r.controls}))} as typeof next,precondition:prior?{updateTime:prior.updateTime}:{exists:false}});
+   writes.push({path:referencePath,data:{taskName:name,active:verified,updatedAt:nowIso(),rows:rows.map(r=>({hazard:r.hazard,hazardCodes:r.hazardCodes,impact:r.impact,impactCodes:r.impactCodes,impactLabels:r.impactLabels,controls:r.controls}))},precondition:prior?{updateTime:prior.updateTime}:{exists:false}});
   }
   if(!await commitChecked(writes))throw new HttpError(409,'Task changed. Reload.');
   await audited(ctx,'saf.equipment_task.save',id,{taskId,version:version+1,classCodes,status});
