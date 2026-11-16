@@ -59,7 +59,7 @@ export function estimateOf(wo: Doc, readinessItems: Obj[], allowance = Number(ob
     const uncosted: Estimate['uncosted'] = [];
     for (const t of rows(wo.data.assessmentTasks)) {
         const task = str(t.title) || str(t.description);
-        labour += (Number(t.persons) || 0) * (Number(t.hours) || 0) * (Number(t.rate) || 0);
+        labour += (Array.isArray(t.internalRoleRequirements)?rows(t.internalRoleRequirements).reduce((n,r)=>n+(Number(r.persons)||0)*(Number(r.hours)||0),0):(Number(t.persons)||0)*(Number(t.hours)||0))*(Number(t.rate)||0);
         for (const s of rows(t.spares)) {
             const live = readinessItems.find((i) => i.taskId === t.id && i.spareId === s.id);
             const unit = live && typeof live.unitCost === 'number' && live.unitCost > 0 ? Number(live.unitCost) : Number(s.unitCost) > 0 ? Number(s.unitCost) : null;

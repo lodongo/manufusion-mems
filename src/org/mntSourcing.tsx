@@ -37,7 +37,7 @@ const SOURCES: Array<[Kind, string, string]> = [
     ['description', 'Free text', 'Only when nothing suitable exists'],
 ];
 type Kind = 'warehouse' | 'catalog' | 'description';
-interface WarehouseItem { materialId: string; materialNumber: string; name: string; uom: string; physical?:number|null; available: number | null; stockVerified: boolean; warehouseName: string }
+interface WarehouseItem { materialId: string; materialNumber: string; name: string; uom: string; physical?:number|null; unitCost?:number|null; available: number | null; stockVerified: boolean; warehouseName: string }
 interface CatSummary { code: string; name: string; subcategories: Array<{ code: string; name: string }> }
 interface AttrSpec { code: string; name: string; dataType: string; unit: string; options: Array<{ code: string; label: string }>; required: boolean; description?: string; example?: string; domainName?: string; validation?: Record<string, unknown> }
 interface Spec { code: string; name: string; categoryCode: string; subcategoryCode: string; familyCode: string; attributes: AttrSpec[]; guidance?: CatalogueGuidance | null }
@@ -143,7 +143,7 @@ function FromWarehouse({ warehouseId, onAdd }: { warehouseId: string; onAdd: (sp
                 <Qty qty={qty} uom={picked.uom} onQty={setQty} onUom={() => undefined} lockUom />
 
                 <div className='flex gap-2'>
-                    <Button disabled={!qtyOk(qty)} onClick={() => onAdd({ source: 'warehouse', materialId: picked.materialId, warehouseId, description: picked.name, uom: picked.uom, qty: Number(qty) })}>
+                    <Button disabled={!qtyOk(qty)} onClick={() => onAdd({ source: 'warehouse', materialId: picked.materialId, warehouseId, description: picked.name, uom: picked.uom, unitCost:picked.unitCost??null, qty: Number(qty) })}>
                         Add spare
                     </Button>
                     <Button variant='secondary' onClick={() => setPicked(null)}>

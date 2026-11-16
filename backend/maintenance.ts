@@ -1,3 +1,4 @@
+import {assessmentExecutionRoles,assessmentSkills} from './maintenanceAssessmentResources';
 import {expectedDates,newExpectedDates,protectExpectedDates,expectedDatesLocked,editExpectedDates,expectedDateCompletionPatch,validateExpectedWindow} from './maintenanceExpectedDates';
 import {maintenanceAnalyticsRoutes} from './maintenanceAnalytics';
 import {maintenanceCostRoutes} from './maintenanceCost';
@@ -15,7 +16,7 @@ import {approvalInput} from './maintenanceApprovalFlowCore';
 import {getMaintenanceCycle,validateCycleDates,cycleRestricted,validateStartDateMove} from './maintenanceCycle';
 import {responsibilityData,responsibilityFor,groupFields,locationGroup,resolvedReviewDoc,closureExecutionPeople,approvalPreviewFor} from './maintenanceResponsibility';
 import { storage } from './platform/sdk';
-import { commit, withLock } from './finCore';
+import { commit, withLock, stockValOf, materialIn } from './finCore';
 import { enforceMaintenanceTransition, executeMaintenanceAction,syncWorkOrderState } from './maintenanceOperations';
 import {isRequestClosureOrder} from './maintenanceDomain';
 import { requireMaintenanceRole, configuredMaintenanceRole, requireWorkOrderAssessor } from './maintenanceAccess';
@@ -867,10 +868,16 @@ async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:Assesse
     const [energies,permits,states]=await Promise.all([
         effectiveSafetyItems(ctx.orgId,'hazardousEnergy'),effectiveSafetyItems(ctx.orgId,'permitTypes'),effectiveSafetyItems(ctx.orgId,'machineStatuses')
     ]);
+    const [execution,skills]=await Promise.all([assessmentExecutionRoles(ctx,record),assessmentSkills()]);
+    const roleMap=new Map(execution.roles.map(r=>[r.code,r])),skillMap=new Map(skills.map(s=>[s.code,s]));
+    const scope=await scopeOf(ctx);
     const statesSet=new Set(states.map(x=>str(x.code)));
     const energyIds=new Set(energies.map(e=>str(e.code))),permitIds=new Set(permits.map(e=>str(e.code)));
     const oldPaths=new Set([...assessmentFiles(record.data.assessmentTasks),...assessmentFiles(object(record.data.assessmentDraft).tasks)]);
     for(const task of tasks){
+        if(task.internalRoleRequirements!==undefined){for(const r of task.internalRoleRequirements){const actual=roleMap.get(r.roleCode);if(!actual)throw new HttpError(400,'Choose an actual execution job role configured in this work group.');r.roleLabel=actual.label;}if(!task.internalRoleRequirements.length&&!task.externalResource)throw new HttpError(400,'Choose internal execution roles or an external resource.');}
+        if(task.externalResource?.skillRequirements!==undefined){if(!task.externalResource.skillRequirements.length)throw new HttpError(400,'Select at least one external resource skill.');for(const r of task.externalResource.skillRequirements){const actual=skillMap.get(r.skillCode);if(!actual)throw new HttpError(400,'Choose an enabled skill from the MEMS skills catalogue.');r.skillLabel=actual.label;r.category=actual.category;r.subcategory=actual.subcategory;}}
+        for(const spare of task.spares){spare.unitCost=null;if(spare.materialId&&spare.warehouseId&&(scope==='all'||scope.has(spare.warehouseId))&&await materialIn(ctx.orgId,spare.materialId,spare.warehouseId)){const v=await stockValOf(ctx.orgId,spare.warehouseId,spare.materialId);if(v.updateTime&&v.avg>0)spare.unitCost=v.avg;}}
         if(task.machineStatus&&!statesSet.has(task.machineStatus))throw new HttpError(400,'This machine status is not enabled in organization Safety. Select an adopted status.');
         if(task.energySourceCodes?.some(code=>!energyIds.has(code)))
             throw new HttpError(400,'Choose hazardous energy sources from the active SAF list.');
@@ -1228,10 +1235,10 @@ export const maintenanceRoutes = {
                         warehouseName:str(warehouse.data.name)||warehouseId,uom:str(m.data.uom)||'EA',
                         physical:balance?.valid?balance.physical:null,
                         available:balance?.valid?Math.max(0,(balance.physical-balance.reserved-balance.blocked)):null,
-                        stockVerified:!!balance?.valid&&!!balance,unitCost:null});
+                        stockVerified:!!balance?.valid&&!!balance,unitCost:null as number|null});
                 }
             }
-            return {items:items.slice(0,selectedIds.size?100:40)};
+            const chosen=items.slice(0,selectedIds.size?100:40);await Promise.all(chosen.map(async item=>{const v=await stockValOf(ctx.orgId,item.warehouseId,item.materialId);item.unitCost=v.updateTime&&v.avg>0?v.avg:null;}));return {items:chosen,currency:str(ctx.org.data.currencyCode)};
         })
     ],
     'POST /api/org/mnt/assessment/photo': [
@@ -1275,13 +1282,13 @@ export const maintenanceRoutes = {
             const record=WO_RE.test(code)?await getWo(ctx,code):WR_RE.test(code)?await getWr(ctx,code):null;
             const equipmentOptions=[];
             if(record){need(ctx,'MNT.view',pathOf(record),await scopeOf(ctx));const nodes=await listDocs(col(ctx.orgId));for(const n of nodes){if(n.id===str(record.data.unitId)||(str(n.data.level)==='assembly'&&(await nodePath(ctx.orgId,n.id)).includes(str(record.data.unitId))))equipmentOptions.push({id:n.id,name:str(n.data.name),code:str(n.data.code)});}}
-            const skillMaster=await getDoc('module_workspaces/HRM/metadata/skillsMaster');const skills=objs(skillMaster?.data.items).filter(s=>s.active!==false).map(s=>({code:str(s.code),label:str(s.label)||str(s.name),category:str(s.category)}));
+            const [skills,execution]=await Promise.all([assessmentSkills(),record?assessmentExecutionRoles(ctx,record):Promise.resolve({configured:false,roles:[]})]);
             const photos:Record<string,string>={};
             if(record)for(const path of [...new Set([...assessmentFiles(record.data.assessmentTasks),...assessmentFiles(object(record.data.assessmentDraft).tasks)])].slice(0,200)){
                 if(ASSESSMENT_PHOTO_RE.test(path)&&path.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`))
                     photos[path]=await signedUrl(path);
             }
-            return {skills,equipmentOptions,equipmentId:str(record?.data.unitId),photos,serviceHierarchy,
+            return {skills,executionRoles:execution.roles,workGroupConfigured:execution.configured,currency:str(ctx.org.data.currencyCode),equipmentOptions,equipmentId:str(record?.data.unitId),photos,serviceHierarchy,
                 maintenanceTypes:flat(await rawList('maintenanceTypes')).filter(x=>x.code!==BREAK_IN_TYPE.code),vendors:serviceVendors.map(d=>({id:d.id,name:str(d.data.tradeName)||str(d.data.legalName)||d.id})).sort((a,b)=>a.name.localeCompare(b.name)),
                 hazardousEnergy:safetyOptions(energy),
                 safetyPermits:safetyOptions(permits),

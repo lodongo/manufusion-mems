@@ -1,3 +1,5 @@
+import MntExternalSkills from './MntExternalSkills';
+import type {ResourceRole,ResourceSkill} from '../../backend/maintenanceTaskAssessment';
 import MntSelect from './MntSelect';
 import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
@@ -12,8 +14,8 @@ type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:str
 type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;energyCode?:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;exposedPersonnel?:string;responsiblePerson?:string;precautions?:string};
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
 type SafetyOption={code:string;label:string;category:string;subcategory:string;description?:string};
-type Options={maintenanceTypes?:Array<{code:string;label:string}>;serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];machineStatuses?:SafetyOption[];safetyHazards?:SafetyOption[];safetyImpacts?:SafetyOption[];safetyControls?:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
-export type TaskAssessment={attachments?:string[];id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
+type Options={executionRoles?:{code:string;label:string;groupTitle:string}[];workGroupConfigured?:boolean;currency?:string;maintenanceTypes?:Array<{code:string;label:string}>;serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];machineStatuses?:SafetyOption[];safetyHazards?:SafetyOption[];safetyImpacts?:SafetyOption[];safetyControls?:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string;subcategory:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
+export type TaskAssessment={internalRoleRequirements?:ResourceRole[];attachments?:string[];id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string;hours?:number;skillRequirements?:ResourceSkill[]};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
 export type MachineStatus='total_shutdown'|'live'|'full_loto'|'partial_isolation';
 export const MACHINE_STATUS:Array<[MachineStatus,string,string]>=[
  ['total_shutdown','Total shutdown','Equipment is stopped. Shutdown alone is not verified hazardous energy isolation.'],
@@ -25,7 +27,7 @@ export const machineOf=(t:{machineStatus?:MachineStatus;liveEquipment?:boolean;l
 export const machineLabel=(t:{machineStatus?:MachineStatus;liveEquipment?:boolean;lotoRequired?:boolean})=>MACHINE_STATUS.find(x=>x[0]===machineOf(t))?.[1]||'';
 const id=()=>Math.random().toString(36).slice(2,10);
 const newRisk=():Risk=>({hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}});
-const seed=():TaskAssessment=>({id:'task_'+id(),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[newRisk()],templateStatus:'pending_validation',internalRoles:[],externalResource:undefined,machineStatus:'total_shutdown',lotoRequired:false,liveEquipment:false,energySourceCodes:[],permitCodes:[]});
+const seed=():TaskAssessment=>({id:'task_'+id(),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[newRisk()],templateStatus:'pending_validation',internalRoles:[],internalRoleRequirements:[],externalResource:undefined,machineStatus:'total_shutdown',lotoRequired:false,liveEquipment:false,energySourceCodes:[],permitCodes:[]});
 const input='mt-1 w-full rounded-xl border border-line bg-page p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none read-only:opacity-70';
 const label='block text-sm text-soft';
 const roles=[['operator','Operator'],['technician','Technician'],['specialist','Specialist'],['engineer','Engineer']] as const;
@@ -75,12 +77,14 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
    <p className='text-soft'>{t.description}</p>
    {!!t.attachments?.length&&<div className='grid grid-cols-2 gap-2'>{t.attachments.map((path,i)=>options?.photos?.[path]?<a key={path} href={options.photos[path]} target='_blank' rel='noreferrer' className='rounded-lg border border-line p-2 text-xs text-brand'>{/\.(jpg|png)$/i.test(path)?<img src={options.photos[path]} alt={'Assessment photo '+(i+1)} className='mb-1 aspect-video w-full rounded-md object-cover'/>:null}View assessment evidence {i+1}</a>:<p key={path} className='text-xs text-soft'>Evidence {i+1} attached</p>)}</div>}
    <p className='text-xs text-brand'>Maintenance strategy: {t.maintenanceTypeCode?((options?.maintenanceTypes||[]).find(m=>m.code===t.maintenanceTypeCode)?.label||t.maintenanceTypeLabel||t.maintenanceTypeCode):'Inherit Work Order type'}</p>
-   <p>Internal: {(t.internalRoles||[]).map(c=>roles.find(x=>x[0]===c)?.[1]||c).join(', ')||'None'} · {t.persons} people · {t.hours} hours</p>
+   <p>Internal: {t.internalRoleRequirements!==undefined?t.internalRoleRequirements.map(r=>(r.roleLabel||options?.executionRoles?.find(x=>x.code===r.roleCode)?.label||r.roleCode)+' · '+r.persons+' × '+r.hours+' h').join('; ')||'None':(t.internalRoles||[]).map(c=>roles.find(x=>x[0]===c)?.[1]||c).join(', ')||'None'}{t.internalRoleRequirements===undefined?' · '+t.persons+' people · '+t.hours+' hours':''}</p>
    {t.externalResource?.type&&<p>External: {externals.find(x=>x[0]===t.externalResource?.type)?.[1]||t.externalResource.type} · {t.externalResource.persons} people · {t.externalResource.notes}</p>}
-   <p>Special tools: {t.tools||'None declared'}</p>
+   {!!t.externalResource?.skillRequirements?.length&&<p>External skills: {t.externalResource.skillRequirements.map(r=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; ')}</p>}
+   <p>Tools: {t.tools||'Configuration pending'}</p>
    <p className='font-medium text-ink'>Spares ({t.spares?.length||0})</p>
    {t.spares?.map(sp=><div key={sp.id} className='rounded-lg bg-page p-2'>
-    {sp.description} · {sp.qty} {sp.uom} · {SOURCE_LABEL[sp.source]||sp.source}{sp.warehouseId?' · warehouse '+sp.warehouseId:''}
+    {sp.description} · {sp.qty} {unitLabel(sp.uom)} · {SOURCE_LABEL[sp.source]||sp.source}{sp.warehouseId?' · warehouse '+sp.warehouseId:''}
+    {sp.unitCost!=null&&<span className='block text-xs text-soft'>Indicative estimate: {options?.currency||''} {(sp.qty*sp.unitCost).toLocaleString(undefined,{maximumFractionDigits:2})}</span>}
     {sp.source==='description'&&<span className='block text-xs text-muted'>Function: {sp.function||'—'} · {sp.specifications||'No specification'}{sp.requiredDate?' · by '+sp.requiredDate:''}</span>}
     {sp.photoPath&&<div>{options?.photos?.[sp.photoPath]?<a href={options.photos[sp.photoPath]} target='_blank' rel='noreferrer' className='text-brand underline'>View spare photo</a>:<span>Photo attached</span>}</div>}
    </div>)}
@@ -110,19 +114,21 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const hasUnsaved=dirty||!!draft&&(!!draft.title.trim()||!!draft.description.trim());
  useEffect(()=>{onDirtyChange?.(hasUnsaved);return()=>onDirtyChange?.(false);},[hasUnsaved,onDirtyChange]);
  const task=tasks[current??0]||seed();
- const sections=['Task','Spares','Services','People & tools','Safety'];
+ const sections=['Task','Spares','Services','People','Tools','Safety'];
  const analysisSpares=tasks.flatMap(t=>t.spares||[]);
  const stockKey=JSON.stringify([...new Set(analysisSpares.filter(s=>s.materialId&&s.warehouseId).map(s=>s.warehouseId+'|'+s.materialId))].sort());
- const [stock,setStock]=useState<Record<string,{physical:number|null;available:number|null;stockVerified:boolean}>>({});
- useEffect(()=>{let alive=true;const keys:string[]=JSON.parse(stockKey),groups=new Map<string,string[]>();for(const k of keys){const [w,m]=k.split('|');groups.set(w,[...(groups.get(w)||[]),m]);}setStock({});void Promise.all([...groups].map(async ([warehouseId,materialIds])=>{try{const r=await callBackend<{items:({materialId:string;physical:number|null;available:number|null;stockVerified:boolean})[]}>('/api/org/mnt/warehouse-spares/search',{warehouseId,materialIds});if(alive)setStock(old=>({...old,...Object.fromEntries(r.items.map(x=>[warehouseId+'|'+x.materialId,x]))}));}catch{/* Unverified stock is never shown as zero. */}}));return()=>{alive=false;};},[stockKey]);
+ const [stock,setStock]=useState<Record<string,{physical:number|null;available:number|null;stockVerified:boolean;unitCost?:number|null}>>({});
+ useEffect(()=>{let alive=true;const keys:string[]=JSON.parse(stockKey),groups=new Map<string,string[]>();for(const k of keys){const [w,m]=k.split('|');groups.set(w,[...(groups.get(w)||[]),m]);}setStock({});void Promise.all([...groups].map(async ([warehouseId,materialIds])=>{try{const r=await callBackend<{items:({materialId:string;physical:number|null;available:number|null;stockVerified:boolean;unitCost?:number|null})[]}>('/api/org/mnt/warehouse-spares/search',{warehouseId,materialIds});if(alive)setStock(old=>({...old,...Object.fromEntries(r.items.map(x=>[warehouseId+'|'+x.materialId,x]))}));}catch{/* Unverified stock is never shown as zero. */}}));return()=>{alive=false;};},[stockKey]);
  const urls={...(options.data?.photos||{}),...photoUrls};
- const taskProblems=(t:TaskAssessment)=>[...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
+ const peopleIssues=(t:TaskAssessment)=>[...(t.internalRoleRequirements!==undefined&&!(t.internalRoleRequirements.length||t.externalResource)?['Select an execution job role or external resource']:[]),...(t.internalRoleRequirements||[]).filter(r=>!Number.isInteger(r.persons)||r.persons<1||!(r.hours>=.25)).map(r=>(r.roleLabel||r.roleCode)+': headcount and hours required'),...(t.externalResource?.skillRequirements!==undefined&&!t.externalResource.skillRequirements.length?['Select external skills and proficiency']:[]),...(t.externalResource?.hours!==undefined&&!(t.externalResource.hours>=.25)?['External resource hours required']:[])];
+ const taskProblems=(t:TaskAssessment)=>[...peopleIssues(t),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
  // Open items per section, shown on the section progress and before leaving the task (verification).
  const sectionIssues=(t:TaskAssessment):string[][]=>[
   [...(!(t.title||'').trim()?['Task name']:[]),...(t.description.trim().length<3?['Work description (at least 3 characters)']:[])],
   [...t.spares.filter(sp=>!(Number(sp.qty)>0)).map(sp=>(sp.description||'Spare')+': quantity above zero'),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x))],
   t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x)),
-  [...(!(Number(t.hours)>0)?['Time required (hours)']:[]),...(Number(t.persons)<0?['Number of people']:[])],
+  peopleIssues(t),
+  [], // Tools configuration is intentionally pending, not a completion gate.
   [...(t.lotoRequired&&!(t.energySourceCodes||[]).length?['Choose the hazardous energy sources to isolate']:[]),...t.risk.filter(r=>!r.hazard.trim()||!r.controls.trim()).map((r,i)=>'Hazard '+(i+1)+': hazard and mitigations')],
  ];
  const patch=(next:Partial<TaskAssessment>)=>{setDirty(true);setTasks(old=>old.map((t,i)=>i===current?{...t,...next}:t));};
@@ -294,6 +300,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
         <div className={label}>Unit of measure{sp.source==='warehouse'||sp.source==='material'?<input className={input} value={unitLabel(sp.uom)} readOnly/>:<UnitOfMeasureSelect value={sp.uom} onChange={v=>patchSpare(i,{uom:v})}/>}</div>
         {recordType!=='wo'&&<label className={label+' col-span-2 sm:col-span-1'}>Required by<input type='date' className={input} value={sp.requiredDate||''} min={new Date().toISOString().slice(0,10)} onChange={e=>patchSpare(i,{requiredDate:e.target.value})}/></label>}
        </div>
+       {(()=>{const q=stock[sp.warehouseId+'|'+sp.materialId],cost=q?.unitCost??null;return <p className='rounded-lg border border-line p-2 text-xs text-soft'>{cost!=null&&cost>0?<><span>Estimated unit cost: {options.data?.currency||''} {cost.toLocaleString(undefined,{maximumFractionDigits:2})}</span><br/><b>Estimated total: {options.data?.currency||''} {(cost*sp.qty).toLocaleString(undefined,{maximumFractionDigits:2})}</b><br/>Indicative recorded inventory valuation, not a supplier quotation.</>:'Estimated cost unavailable'}</p>;})()}
        {recordType!=='wo'&&sp.photoPath&&<a className='text-sm text-brand underline' href={urls[sp.photoPath]||'#'} target='_blank' rel='noreferrer noopener'>View attached photo</a>}
        {recordType!=='wo'&&<Attachments code={code} files={sp.attachments||[]} urls={urls} onChange={(files,u)=>{patchSpare(i,{attachments:files});setPhotoUrls(old=>({...old,...u}));}}/>}
        {problems.length>0&&<p className='text-xs text-amber-400'>Still needed: {problems.join(', ')}.</p>}
@@ -319,27 +326,25 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    {step===3&&<>
     <StepSection title='People' hint='Internal roles and any external resource the planner must secure.'>
      <div className='space-y-3'>
-      <fieldset><legend className={label}>Internal resources required</legend>
-       <div className='mt-1 grid grid-cols-2 gap-2'>{roles.map(([code,name])=><ChoiceChip key={code} checked={(task.internalRoles||[]).includes(code)} onToggle={()=>{const on=(task.internalRoles||[]).includes(code);patch({internalRoles:on?(task.internalRoles||[]).filter(x=>x!==code):[...(task.internalRoles||[]),code]});}}>{name}</ChoiceChip>)}</div>
-      </fieldset>
-      <div className='grid grid-cols-2 gap-2'>
-       <label className={label}>Number of internal people<input type='number' inputMode='decimal' min={0} max={50} className={input} value={task.persons} onChange={e=>patch({persons:Number(e.target.value)})}/></label>
-       <label className={label}>Time required (hours)<input type='number' inputMode='decimal' min={0.25} step={0.25} className={input} value={task.hours} onChange={e=>patch({hours:Number(e.target.value)})}/></label>
-      </div>
-      <div className={label}>External resources required<MntSelect label={'External resources required'} hideLabel className={input} value={task.externalResource?.type||''} onChange={e=>patch({externalResource:e.target.value?{type:e.target.value,persons:task.externalResource?.persons||1,notes:task.externalResource?.notes||''}:undefined})}>
+      <p className='text-sm font-medium'>Internal execution roles</p>
+      {options.data?.executionRoles?.length?<><MntSelect label='Add job role' value='' onChange={e=>{const role=options.data!.executionRoles!.find(r=>r.code===e.target.value);if(role)patch({internalRoles:[],internalRoleRequirements:[...(task.internalRoleRequirements||[]),{roleCode:role.code,roleLabel:role.label,persons:1,hours:1}]});}}><option value=''>Select work group job role</option>{options.data.executionRoles.filter(r=>!(task.internalRoleRequirements||[]).some(x=>x.roleCode===r.code)).map(r=><option key={r.code} value={r.code}>{r.label} · {r.groupTitle}</option>)}</MntSelect></>:<p className='text-xs text-amber-600'>No execution job roles configured for this work group.</p>}
+      {(task.internalRoleRequirements||[]).map((r,i)=><div key={r.roleCode} className='space-y-2 rounded-xl border border-line bg-page p-3'><div className='flex items-center justify-between gap-2'><b className='text-sm'>{r.roleLabel||options.data?.executionRoles?.find(x=>x.code===r.roleCode)?.label||r.roleCode}</b><button type='button' className='text-xs text-red-500' onClick={()=>patch({internalRoleRequirements:task.internalRoleRequirements!.filter((_,j)=>j!==i)})}>Remove</button></div><div className='grid grid-cols-2 gap-2'>{([['persons','People',1,1],['hours','Hours per person',.25,.25]] as const).map(([key,title,min,step])=><label key={key} className={label}>{title}<input type='number' min={min} step={step} className={input} value={r[key]} onChange={e=>patch({internalRoleRequirements:task.internalRoleRequirements!.map((x,j)=>j===i?{...x,[key]:Number(e.target.value)}:x)})}/></label>)}</div><p className='text-xs text-soft'>{r.persons*r.hours} person-hours</p></div>)}
+      {task.internalRoleRequirements===undefined&&!!task.internalRoles?.length&&<p className='text-xs text-soft'>Legacy requirements: {task.internalRoles.join(', ')}. Select actual work group job roles to replace these.</p>}
+      <p className='text-xs text-soft'>Internal labour: {(task.internalRoleRequirements||[]).reduce((n,r)=>n+r.persons*r.hours,0)} person-hours. Named personnel are allocated at planning.</p>
+      <div className={label}>External resources required<MntSelect label={'External resources required'} hideLabel className={input} value={task.externalResource?.type||''} onChange={e=>patch({externalResource:e.target.value?{type:e.target.value,persons:task.externalResource?.persons||1,notes:task.externalResource?.notes||'',hours:task.externalResource?.hours||1,skillRequirements:task.externalResource?.skillRequirements||[]}:undefined})}>
         <option value=''>None</option>{externals.map(([code,name])=><option key={code} value={code}>{name}</option>)}</MntSelect></div>
       {task.externalResource?.type&&<div className='space-y-2 rounded-xl border border-line bg-page p-3'>
         <label className={label}>How many external people?<input type='number' inputMode='decimal' min={1} max={50} className={input} value={task.externalResource.persons} onChange={e=>patch({externalResource:{...task.externalResource!,persons:Number(e.target.value)}})}/></label>
+        <label className={label}>Hours per external person<input type='number' min={.25} step={.25} className={input} value={task.externalResource.hours??1} onChange={e=>patch({externalResource:{...task.externalResource!,hours:Number(e.target.value)}})}/></label>
+        <MntExternalSkills skills={options.data?.skills||[]} selected={task.externalResource.skillRequirements||[]} onChange={skillRequirements=>patch({externalResource:{...task.externalResource!,hours:task.externalResource?.hours??1,skillRequirements}})}/>
         <label className={label}>External scope / qualification<textarea className={input} rows={2} value={task.externalResource.notes} onChange={e=>patch({externalResource:{...task.externalResource!,notes:e.target.value}})}/></label>
         <p className='text-xs text-muted'>The planner will secure the external resource through the applicable supplier and procurement process.</p>
       </div>}
      </div>
     </StepSection>
-    <StepSection title='Special tools'>
-     <label className={label}><span className='sr-only'>Special tools required</span><textarea className={input} rows={2} value={task.tools} onChange={e=>patch({tools:e.target.value})} placeholder='Tools, lifting gear, test instruments, calibration equipment…'/></label>
-    </StepSection>
    </>}
-   {step===4&&<>
+   {step===4&&<StepSection title='Tools' hint='Tool requirements and selection will be configured separately.'><p className='rounded-xl border border-dashed border-line p-3 text-sm text-soft'>Pending configuration. This tab does not block assessment completion.{task.tools&&' Existing tool notes are retained: '+task.tools}</p></StepSection>}
+   {step===5&&<>
     <StepSection title='Machine status during execution' hint='Sets isolation or live work, and adds the required permits and hazards automatically.'>
      <div role='radiogroup' aria-label='Machine status during execution' className='grid gap-2 sm:grid-cols-2'>
       {MACHINE_STATUS.filter(([value])=>!options.data?.machineStatuses||options.data.machineStatuses.some(x=>x.code===value)).map(([value,defaultTitle,defaultDetail])=>{const master=options.data?.machineStatuses?.find(x=>x.code===value);const title=master?.label||defaultTitle,detail=master?.description||defaultDetail;const on=machineOf(task)===value;return <button key={value} type='button' role='radio' aria-checked={on} onClick={()=>setMachine(value)}
@@ -389,7 +394,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    <OpenItems issues={issues[step]}/>
    <div className='flex flex-wrap gap-2'>
      <Button variant='secondary' disabled={step===0} onClick={()=>setStep(i=>Math.max(0,i-1))}>← Previous section</Button>
-     <Button variant='secondary' disabled={step===4} onClick={()=>setStep(i=>Math.min(4,i+1))}>Next section →</Button>
+     <Button variant='secondary' disabled={step===sections.length-1} onClick={()=>setStep(i=>Math.min(sections.length-1,i+1))}>Next section →</Button>
      <Button variant='danger' className='ml-auto' onClick={()=>{setDirty(true);setTasks(old=>old.filter((_,i)=>i!==current));setCurrent(null);}}>Remove task</Button>
    </div>
   </div>;
