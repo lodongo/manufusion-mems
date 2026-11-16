@@ -468,8 +468,10 @@ seed(histReq,{createdAt:new Date(Date.now()-10*86400000).toISOString()});
 seed(histPo,{status:'open',approvedAt:new Date(Date.now()-6*86400000).toISOString(),lines:[{materialId:'SENSOR',warehouseId:'WAREHOUSE',requirementId:'RISK_REQ'}]});
 seed(histInfo,{leadTimeDays:12,internalLeadTimeDays:2});
 const originalExpected=snapshot(r+'/work_orders/'+wo).data.expectedStart;
-const riskReport=await route(maintenanceSourcingRoutes,'/api/org/mnt/sourcing/analyse-spares','assessor',{code:wo,spares:[{materialId:'SENSOR',warehouseId:'WAREHOUSE',description:'Sensor',qty:2,uom:unit.code},{materialId:'SENSOR',warehouseId:'WAREHOUSE',description:'Sensor',qty:2,uom:unit.code}]});
-assert.equal(riskReport.rows.length,1);assert.equal(riskReport.rows[0].required,4);assert.equal(riskReport.rows[0].available,1);assert.equal(riskReport.rows[0].shortage,3);assert.equal(riskReport.rows[0].history.count,1);assert.equal(riskReport.rows[0].internalDays,4);assert.equal(riskReport.rows[0].supplierDays,12);assert.equal(snapshot(r+'/work_orders/'+wo).data.expectedStart,originalExpected);assert.equal(riskReport.summary.tone,'red');
+await assert.rejects(()=>route(maintenanceSourcingRoutes,'/api/org/mnt/sourcing/analyse-spares','assessor',{code:wo}),/MNT.WO.plan|job role|planning rights/i);
+const riskReport=await route(maintenanceSourcingRoutes,'/api/org/mnt/sourcing/analyse-spares','planner',{code:wo,spares:[{materialId:'SENSOR',warehouseId:'WAREHOUSE',qty:999,uom:unit.code}]});
+const sensorRisk=riskReport.rows.find(x=>x.materialId==='SENSOR');
+assert.equal(sensorRisk.required,3);assert.equal(sensorRisk.available,1);assert.equal(sensorRisk.shortage,2);assert.equal(sensorRisk.history.count,1);assert.equal(sensorRisk.internalDays,4);assert.equal(sensorRisk.supplierDays,12);assert.equal(snapshot(r+'/work_orders/'+wo).data.expectedStart,originalExpected);assert.equal(riskReport.summary.tone,'red');
 for(const p of [histReq,histPo,histInfo])await deleteRiskFixture(p);
 
 // 5. Warehouse reservation: full, and partial with a shortage requirement (never over-reserving).

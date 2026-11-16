@@ -1,5 +1,3 @@
-import MntSpareDates from './MntSpareDates';
-import MntSpareRisk from './MntSpareRisk';
 import MntSelect from './MntSelect';
 import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
@@ -102,7 +100,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
   </section>)}
  </Card>;
 }
-export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context,breakIn=false,expectedStart,hasSavedDraft=false,orderDates,cycle}:{orderDates?:Record<string,any>;cycle?:Record<string,any>;hasSavedDraft?:boolean;expectedStart?:string;breakIn?:boolean;context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
+export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context,breakIn=false,hasSavedDraft=false}:{hasSavedDraft?:boolean;breakIn?:boolean;context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial);
  const [dirty,setDirty]=useState(false),[savedDraft,setSavedDraft]=useState(hasSavedDraft);
  const options=useLoad(()=>callBackend<Options>('/api/org/mnt/assessment/options',{code}),[code]);
@@ -114,7 +112,6 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const task=tasks[current??0]||seed();
  const sections=['Task','Spares','Services','People & tools','Safety'];
  const analysisSpares=tasks.flatMap(t=>t.spares||[]);
- const [dateSnapshot,setDateSnapshot]=useState(orderDates);
  const stockKey=JSON.stringify([...new Set(analysisSpares.filter(s=>s.materialId&&s.warehouseId).map(s=>s.warehouseId+'|'+s.materialId))].sort());
  const [stock,setStock]=useState<Record<string,{physical:number|null;available:number|null;stockVerified:boolean}>>({});
  useEffect(()=>{let alive=true;const keys:string[]=JSON.parse(stockKey),groups=new Map<string,string[]>();for(const k of keys){const [w,m]=k.split('|');groups.set(w,[...(groups.get(w)||[]),m]);}setStock({});void Promise.all([...groups].map(async ([warehouseId,materialIds])=>{try{const r=await callBackend<{items:({materialId:string;physical:number|null;available:number|null;stockVerified:boolean})[]}>('/api/org/mnt/warehouse-spares/search',{warehouseId,materialIds});if(alive)setStock(old=>({...old,...Object.fromEntries(r.items.map(x=>[warehouseId+'|'+x.materialId,x]))}));}catch{/* Unverified stock is never shown as zero. */}}));return()=>{alive=false;};},[stockKey]);
@@ -186,7 +183,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    </div>
    <div className='flex shrink-0 flex-wrap gap-2'>
     {editable&&!draft&&<Button variant='secondary' onClick={()=>{setDraft({title:'',description:''});setMessage('');}}>+ Add Task</Button>}
-    {recordType==='wo'&&<MntSpareRisk code={code} spares={analysisSpares} expectedStart={expectedStart}/>} {editable&&recordType==='wo'&&<Button variant='secondary' busy={saving} disabled={saving||(!dirty&&!draft)} onClick={()=>void saveDraft()}>Save draft</Button>}{editable&&recordType==='wo'&&onCancel&&<Button variant='secondary' disabled={saving} onClick={()=>hasUnsaved?void saveDraft(true):onCancel()}>Save &amp; exit</Button>}{editable&&tasks.length>0&&<Button busy={saving} disabled={saving||(!dirty&&!savedDraft)||!!draft} onClick={save}>{recordType==='wo'?'Complete assessment':'Save assessment for review'}</Button>}
+    {editable&&recordType==='wo'&&<Button variant='secondary' busy={saving} disabled={saving||(!dirty&&!draft)} onClick={()=>void saveDraft()}>Save draft</Button>}{editable&&recordType==='wo'&&onCancel&&<Button variant='secondary' disabled={saving} onClick={()=>hasUnsaved?void saveDraft(true):onCancel()}>Save &amp; exit</Button>}{editable&&tasks.length>0&&<Button busy={saving} disabled={saving||(!dirty&&!savedDraft)||!!draft} onClick={save}>{recordType==='wo'?'Complete assessment':'Save assessment for review'}</Button>}
    </div>
    {dirty&&<p className='w-full text-xs text-amber-400'>Unsaved changes. Save a draft to continue later, or complete the assessment when ready.</p>}
   </div>
@@ -274,7 +271,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     </div>
    </StepSection>}
    {step===1&&<StepSection title='Spares for this task' hint='Choose the warehouse, then add each spare from stock, the material catalogue or as free text, with its quantity.'>
-    <div className='space-y-3'>{recordType==='wo'&&dateSnapshot?<MntSpareDates code={code} initial={dateSnapshot} cycle={cycle} spares={analysisSpares} onSaved={d=>setDateSnapshot(old=>({...old,...d}))}/>:recordType==='wo'&&<MntSpareRisk code={code} spares={analysisSpares} expectedStart={expectedStart}/>}
+    <div className='space-y-3'>{recordType==='wo'&&<p className='text-xs text-soft'>Identify the required spares and quantities. Availability risk, lead times, reservation, procurement and scheduling are handled during planning.</p>}
      <div className={label}>Warehouse (select first) *<MntSelect label={'Warehouse for task spares'} hideLabel className={input} value={spareWarehouse} onChange={e=>{setSpareWarehouse(e.target.value);setAdding(false);}}>
       <option value=''>Choose the warehouse</option>{warehouses.data?.warehouses.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</MntSelect></div>
      {task.spares.map((sp,i)=>{const problems=sp.source==='description'?freeTextProblems(sp,recordType!=='wo'):[];return <div key={sp.id} className='min-w-0 space-y-2 rounded-xl border border-line bg-page p-3'>
@@ -291,7 +288,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
         </div>
         <label className={label}>Detailed specifications and attributes<textarea className={input} rows={3} value={sp.specifications||''} placeholder='Dimensions, material, rating, part or drawing number…' onChange={e=>patchSpare(i,{specifications:e.target.value})}/></label>
        </>:<p className='break-words text-sm font-medium text-ink'>{sp.description}{sp.source==='catalog'&&sp.attributes&&Object.keys(sp.attributes).length>0&&<span className='block text-xs font-normal text-muted'>{Object.entries(sp.attributes).map(([k,v])=>k+': '+v).join(' · ')}</span>}<span className='block text-xs font-normal text-muted'>{(()=>{const wh=warehouses.data?.warehouses.find(w=>w.id===sp.warehouseId)?.name||sp.warehouseId;return sp.source==='catalog'?'Catalogue '+sp.catalogCode+' · new material, approved before purchase'+(wh?' · for '+wh:''):sp.source==='material'?'Registered material · purchased for '+(wh||'a warehouse the planner chooses'):(wh||'Warehouse')+' · reserved by the planner';})()}</span></p>}
-       {(!sp.materialId||!sp.warehouseId)&&<p className='rounded-lg border border-line p-2 text-xs text-soft'>Physical and available stock not verified for this material and warehouse.</p>}{sp.materialId&&sp.warehouseId&&(()=>{const q=stock[sp.warehouseId+'|'+sp.materialId],required=analysisSpares.filter(x=>x.materialId===sp.materialId&&x.warehouseId===sp.warehouseId).reduce((n,x)=>n+Number(x.qty||0),0);return <div className='grid grid-cols-2 gap-2 text-sm'><div className='rounded-lg border border-line p-2'><p className='text-xs text-soft'>Physical stock</p><b>{q?.stockVerified?q.physical??'—':'Unverified'}</b></div><div className={'rounded-lg border border-line p-2 '+(q?.stockVerified&&q.available!=null?(q.available>=required?'text-green-600':'text-red-600'):'text-soft')}><p className='text-xs'>Available / issuable</p><b>{q?.stockVerified?q.available??'—':'Unverified'}</b>{q?.stockVerified&&q.available!=null&&q.available<required&&<p className='text-xs'>Shortage {required-q.available}</p>}</div></div>;})()}
+       {(!sp.materialId||!sp.warehouseId)&&<p className='rounded-lg border border-line p-2 text-xs text-soft'>Stock not verified for this material and warehouse.</p>}{sp.materialId&&sp.warehouseId&&(()=>{const q=stock[sp.warehouseId+'|'+sp.materialId];return <div className='grid grid-cols-2 gap-2 text-sm'><div className='rounded-lg border border-line p-2'><p className='text-xs text-soft'>Physical stock</p><b>{q?.stockVerified?q.physical??'—':'Unverified'}</b></div><div className='rounded-lg border border-line p-2'><p className='text-xs text-soft'>Available / issuable</p><b>{q?.stockVerified?q.available??'—':'Unverified'}</b></div></div>;})()}
        <div className='grid grid-cols-2 gap-2'>
         <label className={label}>Quantity<input type='number' inputMode='decimal' min='0.001' step='any' className={input} value={sp.qty} onChange={e=>patchSpare(i,{qty:Number(e.target.value)})}/></label>
         <div className={label}>Unit of measure{sp.source==='warehouse'||sp.source==='material'?<input className={input} value={unitLabel(sp.uom)} readOnly/>:<UnitOfMeasureSelect value={sp.uom} onChange={v=>patchSpare(i,{uom:v})}/>}</div>

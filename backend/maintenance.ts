@@ -2342,17 +2342,6 @@ export const maintenanceRoutes = {
             if(object(d.earlyClosureRequest).at)throw new HttpError(409,'Early closure requested. Use the actual feedback, safety and early closure actions.');
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
-                case 'save_assessment_dates': {
-                    await requireWorkOrderAssessor(ctx,doc);
-                    const type=str(d.maintenanceTypeCode),cycle=await getMaintenanceCycle(ctx),baseline=editExpectedDates(d,b,type,cycle);
-                    const start=str(b.scheduledStart)||str(d.scheduledStart),end=str(b.scheduledEnd)||str(d.scheduledEnd),changed=start!==str(d.scheduledStart)||end!==str(d.scheduledEnd);
-                    validateCycleDates(type,start,end,cycle,d);
-                    const moves=validateStartDateMove(d,start),reason=str(b.dateChangeReason).trim().slice(0,500);
-                    if(changed&&reason.length<10)throw new HttpError(400,'Explain the scheduled date change (at least 10 characters).');
-                    const draft=object(d.assessmentDraft),header=object(draft.header),draftPatch=isObj(draft.header)?{assessmentDraft:{...draft,header:{...header,expectedStart:baseline.expectedStart,expectedEnd:baseline.expectedEnd,scheduledStart:start,scheduledEnd:end,dateChangeReason:''}}}:{};
-                    await done({...baseline,...draftPatch,scheduledStart:start,scheduledEnd:end,...(changed?{startDateMoves:moves,scheduleLock:null,dateChanges:[...objs(d.dateChanges),{at:now,by:ctx.uid,name:displayName(ctx),fromStart:str(d.scheduledStart),fromEnd:str(d.scheduledEnd),toStart:start,toEnd:end,reason,source:'assessment_dates'}]}:{})},'Assessment dates updated','mnt.wo.assessment_dates',reason);
-                    return {ok:true,...baseline,scheduledStart:start,scheduledEnd:end,startDateMoves:moves};
-                }
                 case 'save_assessment_draft': {
                     await requireWorkOrderAssessor(ctx,doc);
                     const previous=object(d.assessmentDraft),next:Obj={...previous,updatedAt:now,updatedBy:ctx.uid,updatedByName:displayName(ctx)};

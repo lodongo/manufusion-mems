@@ -772,9 +772,6 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 code={code}
                 context={{ asset: `${wo.assetTag} · ${wo.assetName || ''}`, assembly: wo.assemblyName, equipment: wo.unitName }}
                 recordType="wo"
-                expectedStart={wo.expectedStart}
-                orderDates={wo}
-                cycle={data.maintenanceCycle}
                 breakIn={!!wo.breakIn}
                 initial={(wo.assessmentDraft?.tasks??tasks) as any}
                 hasSavedDraft={Array.isArray(wo.assessmentDraft?.tasks)}

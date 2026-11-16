@@ -141,9 +141,7 @@ function FromWarehouse({ warehouseId, onAdd }: { warehouseId: string; onAdd: (sp
                     </p>
                 </div>
                 <Qty qty={qty} uom={picked.uom} onQty={setQty} onUom={() => undefined} lockUom />
-                {picked.stockVerified && picked.available !== null && Number(qty) > picked.available && (
-                    <p className='text-xs text-amber-500'>Only {picked.available} usable. The planner reserves that and procures the shortage.</p>
-                )}
+
                 <div className='flex gap-2'>
                     <Button disabled={!qtyOk(qty)} onClick={() => onAdd({ source: 'warehouse', materialId: picked.materialId, warehouseId, description: picked.name, uom: picked.uom, qty: Number(qty) })}>
                         Add spare
