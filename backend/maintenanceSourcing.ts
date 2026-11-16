@@ -483,7 +483,7 @@ async function analyzePlanningSpares(ctx:OrgContext,record:Doc){
  const role=configuredMaintenanceRole(ctx,'MNT.ASSESS.REVIEW',path,settings?.data.approverRoles);
  if(!maintenanceAssessmentReady(d,role))throw new HttpError(409,'Complete the assessment and any required approval before spare analysis.');
  const reservations=new Map((await listDocs(root(ctx.orgId)+'/inventory_reservations')).filter(r=>r.data.workOrderId===record.id).map(r=>[r.id,r.data]));
- const requested=rows(d.assessmentTasks).flatMap(t=>rows(t.spares).map(sp=>{
+ const requested:(Obj & {secured:number})[]=rows(d.assessmentTasks).flatMap(t=>rows(t.spares).map(sp=>{
   const p=object(object(object(d.taskPlanning)[str(t.id)])[str(sp.id)]),r=reservations.get(maintenanceKey(record.id,str(t.id),str(sp.id)));
   const materialId=str(p.materialId)||str(sp.materialId),warehouseId=str(p.warehouseId)||str(sp.warehouseId);
   const secured=r&&r.materialId===materialId&&r.warehouseId===warehouseId?Math.min(Number(sp.qty)||0,Math.max(0,Number(r.qty)||0)+Math.max(0,Number(r.issued)||0)):0;
