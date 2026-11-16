@@ -1,3 +1,4 @@
+import {cleanupPlatformActive,cleanupPlatformPath} from './maintenanceCleanupPlatform';
 import {createHash, randomBytes} from 'node:crypto';
 import {getDoc, HttpError, str, nowIso, type Obj, type Doc} from './core';
 import {commit, withLock, type Write} from './finCore';
@@ -12,19 +13,22 @@ const tokenOf=(ctx:OrgContext)=>str(ctx.body.cleanupToken);
 const validToken=(s:string)=>/^[a-f0-9]{64}$/.test(s);
 export function cleanupEligible(ctx:Pick<OrgContext,'role'|'testMode'>){return ctx.role==='org_super_admin'&&ctx.testMode===true&&testModeEnvironmentAllowed();}
 /** Pure policy for tests. Verified auth_time, not the refreshing ID token's iat, identifies the login. */
-export function cleanupGrantValid(g:Obj, input:{uid:string;orgId:string;authTime?:number;token:string;modeVersion:number;modeEnabledAt:string;now:number}):boolean{
- return validToken(input.token)&&Number.isInteger(input.authTime)&&g.enabled===true&&g.uid===input.uid&&g.orgId===input.orgId&&g.authTime===input.authTime&&g.tokenHash===digest(input.token)&&g.modeVersion===input.modeVersion&&g.modeEnabledAt===input.modeEnabledAt&&Number.isFinite(Date.parse(str(g.expiresAt)))&&Date.parse(str(g.expiresAt))>input.now;
+export function cleanupGrantValid(g:Obj, input:{uid:string;orgId:string;authTime?:number;token:string;modeVersion:number;modeEnabledAt:string;platformVersion:number;now:number}):boolean{
+ return validToken(input.token)&&Number.isInteger(input.authTime)&&g.enabled===true&&g.uid===input.uid&&g.orgId===input.orgId&&g.authTime===input.authTime&&g.tokenHash===digest(input.token)&&g.modeVersion===input.modeVersion&&g.modeEnabledAt===input.modeEnabledAt&&g.platformVersion===input.platformVersion&&Number.isFinite(Date.parse(str(g.expiresAt)))&&Date.parse(str(g.expiresAt))>input.now;
 }
 async function currentGrant(ctx:OrgContext):Promise<Doc|null>{
  if(!cleanupEligible(ctx)||!validToken(tokenOf(ctx)))return null;
  clearTestModeCache();const mode=await readTestMode();const now=Date.now();
  if(!overrideActiveFor(mode,ctx.orgId,now))return null;
- const grant=await getDoc(grantPath(ctx));
- return grant&&cleanupGrantValid(grant.data,{uid:ctx.uid,orgId:ctx.orgId,authTime:ctx.claims.authTime,token:tokenOf(ctx),modeVersion:mode.version,modeEnabledAt:mode.enabledAt,now:Date.now()})?grant:null;
+ const [grant,platform]=await Promise.all([getDoc(grantPath(ctx)),getDoc(cleanupPlatformPath(ctx.orgId))]);
+ if(!cleanupPlatformActive(platform?.data,mode,ctx.orgId,now))return null;
+ return grant&&cleanupGrantValid(grant.data,{uid:ctx.uid,orgId:ctx.orgId,authTime:ctx.claims.authTime,token:tokenOf(ctx),modeVersion:mode.version,modeEnabledAt:mode.enabledAt,platformVersion:Number(platform?.data.version),now:Date.now()})?grant:null;
 }
 export async function cleanupAuthorizationStatus(ctx:OrgContext){
  const grant=await currentGrant(ctx);
- return {eligible:cleanupEligible(ctx),enabled:!!grant,expiresAt:str(grant?.data.expiresAt)};
+ let platformEnabled=false,platformExpiresAt='';
+ if(cleanupEligible(ctx)){clearTestModeCache();const mode=await readTestMode();const platform=await getDoc(cleanupPlatformPath(ctx.orgId));platformEnabled=cleanupPlatformActive(platform?.data,mode,ctx.orgId);if(platformEnabled)platformExpiresAt=str(platform?.data.expiresAt);}
+ return {eligible:cleanupEligible(ctx),platformEnabled,platformExpiresAt,enabled:!!grant&&platformEnabled,expiresAt:str(grant?.data.expiresAt)};
 }
 export async function setCleanupAuthorization(ctx:OrgContext){
  if(ctx.role!=='org_super_admin'||!testModeEnvironmentAllowed())throw new HttpError(403,'Organization Super Admin in development is required.');
@@ -43,16 +47,19 @@ export async function setCleanupAuthorization(ctx:OrgContext){
   if(ctx.body.confirm!=='ENABLE CLEANUP')throw new HttpError(400,'Type ENABLE CLEANUP to authorize permanent deletion.');
   clearTestModeCache();const mode=await readTestMode();const now=Date.now();
   if(!overrideActiveFor(mode,ctx.orgId,now))throw new HttpError(403,'Test Mode is no longer active.');
-  const token=randomBytes(32).toString('hex'),expiresAt=new Date(Math.min(now+CLEANUP_LIFETIME_MS,Date.parse(mode.expiresAt))).toISOString();
+  const platform=await getDoc(cleanupPlatformPath(ctx.orgId));
+  if(!cleanupPlatformActive(platform?.data,mode,ctx.orgId,now))throw new HttpError(403,'Enable Database Cleanup Mode in MEMS Admin / Security Setup for this tenant first.');
+  const platformVersion=Number(platform?.data.version);
+  const token=randomBytes(32).toString('hex'),expiresAt=new Date(Math.min(now+CLEANUP_LIFETIME_MS,Date.parse(mode.expiresAt),Date.parse(str(platform?.data.expiresAt)))).toISOString();
   if(prior&&!prior.updateTime)throw new HttpError(409,'Refresh before enabling cleanup.');
-  await commit([{path,fields:{uid:ctx.uid,orgId:ctx.orgId,enabled:true,tokenHash:digest(token),authTime:ctx.claims.authTime!,modeVersion:mode.version,modeEnabledAt:mode.enabledAt,enabledAt:at,expiresAt},...(prior?{updateTime:prior.updateTime}:{exists:false})},{path:orgReceipt(ctx)+randomBytes(16).toString('hex'),fields:{action:'enabled',uid:ctx.uid,orgId:ctx.orgId,at,expiresAt,modeVersion:mode.version},exists:false}]);
-  return {enabled:true,expiresAt,cleanupToken:token};
+  await commit([{path,fields:{uid:ctx.uid,orgId:ctx.orgId,enabled:true,tokenHash:digest(token),authTime:ctx.claims.authTime!,modeVersion:mode.version,modeEnabledAt:mode.enabledAt,platformVersion,enabledAt:at,expiresAt},...(prior?{updateTime:prior.updateTime}:{exists:false})},{path:orgReceipt(ctx)+randomBytes(16).toString('hex'),fields:{action:'enabled',uid:ctx.uid,orgId:ctx.orgId,at,expiresAt,modeVersion:mode.version},exists:false}]);
+  return {enabled:true,expiresAt,cleanupToken:token,platformEnabled:true,platformExpiresAt:str(platform?.data.expiresAt)};
  });
 }
 export async function requireCleanupAuthorization(ctx:OrgContext):Promise<Doc>{
  if(ctx.role!=='org_super_admin')throw new HttpError(403,'Organization Super Admin is required for permanent cleanup.');
  const grant=await currentGrant(ctx);
- if(!grant||!grant.updateTime)throw new HttpError(403,'Enable Database Cleanup separately in active development Test Mode. Authorization expires after 60 minutes or logout.');
+ if(!grant||!grant.updateTime)throw new HttpError(403,'Enable Database Cleanup separately in active development Test Mode: MEMS Admin permission and Organization Super Admin session authorization are required. Authorization expires after 60 minutes or logout.');
  return grant;
 }
 /** Include the grant revision in the atomic purge so a simultaneous revoke invalidates the write. */

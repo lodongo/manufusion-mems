@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FlaskConical, Search, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { callBackend } from '../lib/backend';
-import { Alert, Field } from '../components/ui';
+import { Alert, Field, SelectField } from '../components/ui';
 import { appConfirm } from '../components/dialogs';
 import { Badge, Button, Card, PageTitle, Spinner, TextArea, useLoad } from './kit';
 
@@ -10,6 +10,8 @@ interface OverrideView {
     environment: string;
     phrase: string;
     maxHours: number;
+    cleanupPhrase:string;
+    cleanup:Array<{orgId:string;enabled:boolean;version:number;expiresAt:string;enabledByEmail:string;reason:string}>;
     override: {
         enabled: boolean;
         expired: boolean;
@@ -44,7 +46,14 @@ export default function SecuritySetupPage({ isSuper }: { isSuper: boolean }) {
     const [failure, setFailure] = useState('');
     const [done, setDone] = useState('');
 
-    const active = !!data?.override.enabled && !data.override.expired && data.environmentAllowed;
+    const [clock,setClock]=useState(Date.now());
+    useEffect(()=>{const t=window.setInterval(()=>setClock(Date.now()),1000);return()=>window.clearInterval(t);},[]);
+    const active = !!data?.override.enabled && !data.override.expired && data.environmentAllowed && Date.parse(data.override.expiresAt)>clock;
+    const [cleanupOrg,setCleanupOrg]=useState(''),[cleanupReason,setCleanupReason]=useState(''),[cleanupPhrase,setCleanupPhrase]=useState(''),[cleanupBusy,setCleanupBusy]=useState(false),[cleanupError,setCleanupError]=useState('');
+    const cleanupTenant=data?.override.tenants.find(t=>t.orgId===cleanupOrg&&t.active);
+    const cleanupState=data?.cleanup?.find(t=>t.orgId===cleanupOrg);
+    const cleanupActive=!!(active&&cleanupState?.enabled&&Date.parse(cleanupState.expiresAt)>clock);
+    const saveCleanup=async(enabled:boolean)=>{if(!data||!cleanupTenant)return;setCleanupError('');setCleanupBusy(true);try{const next=await callBackend<OverrideView>('/api/admin/security/database-cleanup/save',{orgId:cleanupOrg,enabled,reason:cleanupReason.trim(),confirmation:cleanupPhrase,expectedVersion:cleanupState?.version??0});setData(next);setClock(Date.now());setCleanupReason('');setCleanupPhrase('');}catch(e){setCleanupError(e instanceof Error?e.message:String(e));reload();}finally{setCleanupBusy(false);}};
     const list = useMemo(() => {
         const q = search.trim().toLowerCase();
         return (tenants.data?.tenants ?? []).filter((t) => t.status === 'active' && (!q || `${t.name} ${t.domain} ${t.id}`.toLowerCase().includes(q)));
@@ -122,6 +131,23 @@ export default function SecuritySetupPage({ isSuper }: { isSuper: boolean }) {
                             </dl>
                         )}
                         {data.override.enabled && data.override.expired && <p className='mt-3 text-sm text-slate-400'>The last override expired on {fmt(data.override.expiresAt)}. Controls are enforced.</p>}
+                    </Card>
+
+
+                    <Card>
+                        <div className='flex items-start gap-3'>
+                            <span className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-400'><ShieldAlert className='h-5 w-5'/></span>
+                            <div className='min-w-0 flex-1 space-y-2'>
+                                <div className='flex flex-wrap items-center gap-2'><h2 className='text-base font-semibold text-white'>Database Cleanup Mode</h2><Badge tone={active&&data.cleanup?.some(c=>c.enabled&&Date.parse(c.expiresAt)>clock)?'danger':'muted'}>{active&&data.cleanup?.some(c=>c.enabled&&Date.parse(c.expiresAt)>clock)?'Enabled for selected tenant(s)':'Off'}</Badge></div>
+                                <p className='text-sm text-slate-400'>Separate development-only permission for permanent maintenance test record deletion. Expires after a maximum of 60 minutes or when Test Mode ends. Organization Super Admin must still authorize the login and preview each deletion. Posted stock and financial records remain protected.</p>
+                                {active&&data.cleanup?.filter(c=>c.enabled&&Date.parse(c.expiresAt)>clock).map(c=><p key={c.orgId} className='break-words text-xs text-red-300'>{data.override.tenants.find(t=>t.orgId===c.orgId)?.name||c.orgId} · Enabled until {fmt(c.expiresAt)} · {c.enabledByEmail}</p>)}
+                            </div>
+                        </div>
+                        {!data.environmentAllowed?<Alert tone='info'>Unavailable outside isolated development.</Alert>:!active?<p className='mt-3 text-sm text-slate-400'>Switch Test Mode on for the intended tenant first.</p>:!isSuper?<p className='mt-3 text-sm text-slate-400'>Only a MEMS Super Admin may change this permission.</p>:<div className='mt-4 space-y-3'>
+                            <SelectField id='cleanup-tenant' label='Tenant' value={cleanupOrg} disabled={cleanupBusy} onChange={e=>{setCleanupOrg(e.target.value);setCleanupReason('');setCleanupPhrase('');setCleanupError('');}}><option value=''>Choose a tenant in Test Mode</option>{data.override.tenants.filter(t=>t.active).map(t=><option key={t.orgId} value={t.orgId}>{t.name}</option>)}</SelectField>
+                            {cleanupTenant&&<><p className='text-sm text-slate-300'>{cleanupActive?'Enabled until '+fmt(cleanupState?.expiresAt||''):'Disabled for this tenant'}</p><TextArea id='cleanup-reason' label='Reason (10–500 characters)' value={cleanupReason} onChange={e=>setCleanupReason(e.target.value)}/>{!cleanupActive&&<Field id='cleanup-confirm' label={'Type '+data.cleanupPhrase+' to confirm'} autoComplete='off' value={cleanupPhrase} onChange={e=>setCleanupPhrase(e.target.value)}/>}<Button variant='danger' busy={cleanupBusy} disabled={cleanupReason.trim().length<10||cleanupReason.trim().length>500||(!cleanupActive&&cleanupPhrase!==data.cleanupPhrase)} onClick={()=>void saveCleanup(!cleanupActive)}>{cleanupActive?'Disable Database Cleanup':'Enable Database Cleanup'}</Button></>}
+                            {cleanupError&&<Alert tone='error'>{cleanupError}</Alert>}
+                        </div>}
                     </Card>
 
                     {failure && <Alert tone='error'>{failure}</Alert>}

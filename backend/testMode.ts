@@ -1,3 +1,4 @@
+import {cleanupPlatformView,setPlatformCleanup,CLEANUP_PLATFORM_PHRASE} from './maintenanceCleanupPlatform';
 import { audit } from './audit';
 import { HttpError, getDoc, nowIso, str, writeDoc } from './core';
 import { staff } from './guards';
@@ -22,11 +23,14 @@ async function view() {
         environment: allowed ? 'development' : 'protected',
         phrase: TEST_MODE_PHRASE,
         maxHours: TEST_MODE_MAX_HOURS,
+        cleanupPhrase:CLEANUP_PLATFORM_PHRASE,
+        cleanup:await Promise.all(state.orgIds.map(id=>cleanupPlatformView(id,state))),
         override: { ...state, expired, tenants },
     };
 }
 
 export const testModeRoutes = {
+    'POST /api/admin/security/database-cleanup/save': [staff('admin.security.database_cleanup.save','super',async ctx=>{await setPlatformCleanup(ctx);return view();})],
     'POST /api/admin/security/testing-override': [
         staff('admin.security.testing_override.view', 'read', async () => view()),
     ],
