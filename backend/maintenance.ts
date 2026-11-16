@@ -1,4 +1,3 @@
-import {validateServiceJustification} from './maintenanceServiceJustification';
 import {assessmentSparePrice} from './maintenanceSparePrice';
 import {assessmentExecutionRoles,assessmentSkills} from './maintenanceAssessmentResources';
 import {expectedDates,newExpectedDates,protectExpectedDates,expectedDatesLocked,editExpectedDates,expectedDateCompletionPatch,validateExpectedWindow} from './maintenanceExpectedDates';
@@ -2077,7 +2076,7 @@ export const maintenanceRoutes = {
                     }
                     await verifyAssessedTaskChoices(ctx,doc,tasks);
                     tasks=await prepareMaintenanceAssessment(ctx,doc,tasks);
-                    for(const t of tasks){if(t.externalResource)throw new HttpError(400,'External specialists must be attached to a service.');for(const service of t.services)validateServiceJustification(service.justificationReasons,service.justification);}
+                    for(const t of tasks){if(t.externalResource)throw new HttpError(400,'External specialists must be attached to a service.');}
                     const allProposed=tasks.flatMap(t=>t.services.flatMap(x=>x.proposedVendorIds));
                     if(allProposed.length){
                         const vendors=await listDocs(`organizations/${ctx.orgId}/vendors`);
@@ -2438,7 +2437,7 @@ export const maintenanceRoutes = {
                     const draftAfterTasks={...object(d.assessmentDraft)};delete draftAfterTasks.tasks;
                     const remainingDraft=isObj(draftAfterTasks.header)?draftAfterTasks:null;
                     const completedAssessment={...d,assessmentDraft:remainingDraft,assessmentTasks:tasks as unknown as Plain,assessmentTasksVersion:version,assessmentTasksAt:now};
-                    await done({assessmentDraft:remainingDraft,externalServicePolicyVersion:1,externalServiceJustifications:{},...expectedDateCompletionPatch(completedAssessment,now),assessmentTasks:tasks as unknown as Plain,taskStandardSnapshots:taskStandardSnapshots as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
+                    await done({assessmentDraft:remainingDraft,...expectedDateCompletionPatch(completedAssessment,now),assessmentTasks:tasks as unknown as Plain,taskStandardSnapshots:taskStandardSnapshots as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
                         spares:[],services:[],tools:'',assessmentTasksBy:ctx.uid,assessmentTasksAt:now,
                         assessmentTasksVersion:version,assessmentReview:null,safety:null},
                         'Task assessments completed','mnt.wo.task_assessments',

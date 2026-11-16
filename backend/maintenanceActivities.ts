@@ -11,7 +11,6 @@ export const MNT_ACTIVITIES: Array<{ key: string; label: string }> = [
     { key: 'MNT.WR.decline', label: 'Work request: decline' },
     { key: 'MNT.WR.close', label: 'Work request: close at review when no planning is needed (cause, solution, type)' },
     { key: 'MNT.WR.closeConfirm', label: 'Work request: confirm or reject a closure made at review' },
-    { key: 'MNT.service.justificationApprove', label: 'External service: independently approve outsourcing justification only' },
     { key: 'MNT.assessment.review', label: 'Work assessment: approve or return independently' },
     { key: 'MNT.assessment.edit', label: 'Work assessment: create and edit individual task requirements' },
     { key: 'MNT.WR.convert', label: 'Legacy assessment: convert historical request to work order' },

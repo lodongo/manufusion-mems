@@ -21,7 +21,6 @@ export const MAINTENANCE_GATES:readonly MntGate[] = [
  {code:'MNT.WR.CLOSE',stage:'request',label:'Close a request at review when no planning is needed (cause, solution, maintenance type)',mode:'approval',permission:'MNT.WR.close',status:'existing',requires:['cause','solution','maintenance_type','description'],owner:'Authorized work request reviewer',separation:'Direct closure; no secondary confirmation'},
  {code:'MNT.WR.ASSESS',stage:'assessment',label:'Assess tasks inside the Work Order',mode:'permission',permission:'MNT.assessment.edit',status:'existing',requires:['work_order_present','tasks_and_resources_captured','task_risk_assessment_completed'],owner:'Authorized assessor at the equipment (Work Group where active)',separation:'Assessment author is independent of the assessment approver'},
  {code:'MNT.ASSESS.REVIEW',stage:'assessment',label:'Independently approve completed task work assessment',mode:'approval',permission:'MNT.assessment.review',status:'existing',requires:['assessment_details_complete','all_tasks_risk_assessed','independent_reviewer','current_assessment_version'],owner:'Configured Maintenance Supervisor or Engineer reviewer',separation:'Reviewer must not be requester, creator or assessor; changes invalidate approval'},
- {code:'MNT.SERVICE.JUSTIFY',stage:'assessment',label:'Approve external service justification only',mode:'approval',permission:'MNT.service.justificationApprove',status:'existing',requires:['external_service_technical_requirement','justification_categories_and_explanation','independent_technical_manager'],owner:'Assigned technical manager job role (Work Group where active)',separation:'Approves outsourcing justification only, not the entire assessment. Material changes invalidate the decision.'},
  {code:'MNT.TASK.VALIDATE',stage:'assessment',label:'Validate new reusable asset task',mode:'approval',permission:null,status:'existing',requires:['task_risk_assessment_completed'],owner:'Configured asset-task validator',separation:'Cannot validate an unassessed task'},
  {code:'MNT.WR.CONVERT',stage:'conversion',label:'Complete historical standalone assessment conversion',legacyOnly:true,mode:'permission',permission:'MNT.WR.convert',status:'existing',requires:['work_assessment_completed'],owner:'Configured conversion role',separation:'Creator cannot convert own request under legacy policy'},
  {code:'MNT.MAT.CREATE',stage:'planning',label:'Approve newly specified material',mode:'approval',permission:'PRC.materials.manage',status:'existing',requires:['material_creation_workflow_completed'],owner:'Configured material master approver',separation:'Creator does not approve own material'},
@@ -37,7 +36,7 @@ export const MAINTENANCE_GATES:readonly MntGate[] = [
 ] as const;
 
 export function maintenanceGateReadiness(configuredRoles:Readonly<Record<string,string>>,gates:readonly MntGate[]=MAINTENANCE_GATES){
- const ownerRoles=['MNT.WR.REVIEW','MNT.ASSESS.REVIEW','MNT.SERVICE.JUSTIFY','MNT.SPARES.RECONCILE','MNT.WO.PLAN','MNT.TASK.FEEDBACK','MNT.WR.CONVERT','MNT.TASK.VALIDATE','MNT.SAFETY.SIGNOFF'];
+ const ownerRoles=['MNT.WR.REVIEW','MNT.ASSESS.REVIEW','MNT.SPARES.RECONCILE','MNT.WO.PLAN','MNT.TASK.FEEDBACK','MNT.WR.CONVERT','MNT.TASK.VALIDATE','MNT.SAFETY.SIGNOFF'];
  return gates.map(g=>({
   ...g,
   configuredRole:configuredRoles[g.code]||'',
