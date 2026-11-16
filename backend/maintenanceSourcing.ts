@@ -320,7 +320,7 @@ export async function enforceSourcingRules(ctx: OrgContext, record: Doc, tasks: 
                 if (str(s.description).length < 3) throw new HttpError(400, `${at}enter the material name and technical description.`);
                 if (str(s.function).length < 3) throw new HttpError(400, `${at}describe the intended function.`);
                 if (str(s.specifications).length < 10) throw new HttpError(400, `${at}give the detailed specifications and attributes (at least 10 characters).`);
-                if (!str(s.requiredDate) || str(s.requiredDate) < today()) throw new HttpError(400, `${at}enter the required delivery date (today or later).`);
+                if (!/^WO/.test(record.id)&&(!str(s.requiredDate) || str(s.requiredDate) < today())) throw new HttpError(400, `${at}enter the required delivery date (today or later).`);
                 s.receiptCounts = c;
             }
         }

@@ -1195,19 +1195,20 @@ export const maintenanceRoutes = {
             const scope=await scopeOf(ctx);
             const activeWarehouse=new Map(warehouses.filter(w=>(scope==='all'||scope.has(w.id))&&str(w.data.status)!=='inactive').map(w=>[w.id,w]));
             if(str(ctx.body.mode)==='warehouses')return {warehouses:[...activeWarehouse.values()].map(w=>({id:w.id,name:str(w.data.name)||w.id})).sort((a,b)=>a.name.localeCompare(b.name)),items:[]};
-            const selectedWarehouse=str(ctx.body.warehouseId);
+            const selectedWarehouse=str(ctx.body.warehouseId),selectedIds=new Set(strs(ctx.body.materialIds).slice(0,100));
             if(!selectedWarehouse||!activeWarehouse.has(selectedWarehouse))return {items:[]};
-            if(q.length<2)return {items:[]};
-            const balances=new Map<string,{physical:number;reserved:number;valid:boolean}>();
+            if(q.length<2&&!selectedIds.size)return {items:[]};
+            const balances=new Map<string,{physical:number;reserved:number;blocked:number;valid:boolean}>();
             for(const entry of journal){
                 const d=entry.data,k=str(d.materialId)+'|'+str(d.warehouseId);
                 if(!activeWarehouse.has(str(d.warehouseId)))continue;
-                const b=balances.get(k)||{physical:0,reserved:0,valid:true};
+                const b=balances.get(k)||{physical:0,reserved:0,blocked:0,valid:true};
                 if(str(d.status)!=='posted'||d.reconciled!==true)b.valid=false;
                 else {
                     const deltas=isObj(d.balancesDelta)?d.balancesDelta:{};
                     b.physical+=Number(deltas.physicalStock)||0;
                     b.reserved+=Number(deltas.reservedStock)||0;
+                    b.blocked+=['quarantinedStock','damagedStock','expiredStock','other'].reduce((n,k)=>n+(Number(deltas[k])||0),0);
                 }
                 balances.set(k,b);
             }
@@ -1215,7 +1216,7 @@ export const maintenanceRoutes = {
             for(const m of materials){
                 if(!['approved','active'].includes(str(m.data.status)))continue;
                 const number=str(m.data.materialNumber),name=str(m.data.shortText)||str(m.data.name);
-                if(!(number+' '+name).toLowerCase().includes(q))continue;
+                if(selectedIds.size?!selectedIds.has(m.id):!(number+' '+name).toLowerCase().includes(q))continue;
                 const linked=new Set(strs(m.data.warehouseIds));
                 if(str(m.data.warehouseId)&&str(m.data.pushedAt))linked.add(str(m.data.warehouseId));
                 for(const x of extensions)if(str(x.data.sourceId)===m.id&&str(x.data.status)==='approved')linked.add(str(x.data.warehouseId));
@@ -1225,11 +1226,12 @@ export const maintenanceRoutes = {
                     const balance=balances.get(m.id+'|'+warehouseId);
                     items.push({materialId:m.id,materialNumber:number,name,warehouseId,
                         warehouseName:str(warehouse.data.name)||warehouseId,uom:str(m.data.uom)||'EA',
-                        available:balance?.valid?Math.max(0,(balance.physical-balance.reserved)):null,
+                        physical:balance?.valid?balance.physical:null,
+                        available:balance?.valid?Math.max(0,(balance.physical-balance.reserved-balance.blocked)):null,
                         stockVerified:!!balance?.valid&&!!balance,unitCost:null});
                 }
             }
-            return {items:items.slice(0,40)};
+            return {items:items.slice(0,selectedIds.size?100:40)};
         })
     ],
     'POST /api/org/mnt/assessment/photo': [
@@ -2340,6 +2342,17 @@ export const maintenanceRoutes = {
             if(object(d.earlyClosureRequest).at)throw new HttpError(409,'Early closure requested. Use the actual feedback, safety and early closure actions.');
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
+                case 'save_assessment_dates': {
+                    await requireWorkOrderAssessor(ctx,doc);
+                    const type=str(d.maintenanceTypeCode),cycle=await getMaintenanceCycle(ctx),baseline=editExpectedDates(d,b,type,cycle);
+                    const start=str(b.scheduledStart)||str(d.scheduledStart),end=str(b.scheduledEnd)||str(d.scheduledEnd),changed=start!==str(d.scheduledStart)||end!==str(d.scheduledEnd);
+                    validateCycleDates(type,start,end,cycle,d);
+                    const moves=validateStartDateMove(d,start),reason=str(b.dateChangeReason).trim().slice(0,500);
+                    if(changed&&reason.length<10)throw new HttpError(400,'Explain the scheduled date change (at least 10 characters).');
+                    const draft=object(d.assessmentDraft),header=object(draft.header),draftPatch=isObj(draft.header)?{assessmentDraft:{...draft,header:{...header,expectedStart:baseline.expectedStart,expectedEnd:baseline.expectedEnd,scheduledStart:start,scheduledEnd:end,dateChangeReason:''}}}:{};
+                    await done({...baseline,...draftPatch,scheduledStart:start,scheduledEnd:end,...(changed?{startDateMoves:moves,scheduleLock:null,dateChanges:[...objs(d.dateChanges),{at:now,by:ctx.uid,name:displayName(ctx),fromStart:str(d.scheduledStart),fromEnd:str(d.scheduledEnd),toStart:start,toEnd:end,reason,source:'assessment_dates'}]}:{})},'Assessment dates updated','mnt.wo.assessment_dates',reason);
+                    return {ok:true,...baseline,scheduledStart:start,scheduledEnd:end,startDateMoves:moves};
+                }
                 case 'save_assessment_draft': {
                     await requireWorkOrderAssessor(ctx,doc);
                     const previous=object(d.assessmentDraft),next:Obj={...previous,updatedAt:now,updatedBy:ctx.uid,updatedByName:displayName(ctx)};

@@ -1,3 +1,4 @@
+import MntSpareDates from './MntSpareDates';
 import MntSpareRisk from './MntSpareRisk';
 import MntSelect from './MntSelect';
 import {useEffect,useState} from 'react';
@@ -6,7 +7,7 @@ import {Alert} from '../components/ui';
 import {ChevronRight,ClipboardList,Clock,Package,ShieldAlert,Users,Wrench} from 'lucide-react';
 import {ChoiceChip,ConfirmBox,OpenItems,StepProgress,StepSection} from './materialCreateUi';
 import {Button,Card,useLoad} from '../admin/kit';
-import {AddSpare,Attachments,ServiceEditor,SOURCE_LABEL,freeTextProblems,newService,serviceProblems,type ServiceHierarchy} from './mntSourcing';
+import {unitLabel,AddSpare,Attachments,ServiceEditor,SOURCE_LABEL,freeTextProblems,newService,serviceProblems,type ServiceHierarchy} from './mntSourcing';
 
 type Spare={id:string;source:'warehouse'|'material'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;photoPath?:string;specifications?:string;attributes?:Record<string,string>;function?:string;categoryCode?:string;subcategoryCode?:string;familyCode?:string;requiredDate?:string;attachments?:string[];searchReceiptId?:string;noMatchConfirmed?:boolean;noMatchReason?:string};
 type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;instructions?:string;certifications?:string;personnel?:number;durationHours?:number;executionDate?:string;supplierCategory?:string;attachments?:string[]};
@@ -51,7 +52,7 @@ export function WarehouseSparePicker({onSelect}:{onSelect:(item:{materialId:stri
   <div className='max-h-52 space-y-1 overflow-y-auto'>{items.map(x=><button key={x.materialId+':'+x.warehouseId} type='button'
    className='w-full rounded-lg border border-line p-3 text-left text-sm text-ink' onClick={()=>{onSelect(x);setQuery('');setItems([]);}}>
    <span className='text-xs text-brand'>{x.materialNumber}</span> · {x.name}
-   <span className='block text-xs text-muted'>{x.stockVerified?'Available '+x.available+' '+x.uom:'Quantity not verified'} · {x.warehouseName}</span>
+   <span className='block text-xs text-muted'>{x.stockVerified?'Available '+x.available+' '+unitLabel(x.uom):'Quantity not verified'} · {x.warehouseName}</span>
   </button>)}</div>
  </div>;
 }
@@ -101,7 +102,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
   </section>)}
  </Card>;
 }
-export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context,breakIn=false,expectedStart,hasSavedDraft=false}:{hasSavedDraft?:boolean;expectedStart?:string;breakIn?:boolean;context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
+export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context,breakIn=false,expectedStart,hasSavedDraft=false,orderDates,cycle}:{orderDates?:Record<string,any>;cycle?:Record<string,any>;hasSavedDraft?:boolean;expectedStart?:string;breakIn?:boolean;context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial);
  const [dirty,setDirty]=useState(false),[savedDraft,setSavedDraft]=useState(hasSavedDraft);
  const options=useLoad(()=>callBackend<Options>('/api/org/mnt/assessment/options',{code}),[code]);
@@ -113,12 +114,15 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const task=tasks[current??0]||seed();
  const sections=['Task','Spares','Services','People & tools','Safety'];
  const analysisSpares=tasks.flatMap(t=>t.spares||[]);
+ const stockKey=JSON.stringify([...new Set(analysisSpares.filter(s=>s.materialId&&s.warehouseId).map(s=>s.warehouseId+'|'+s.materialId))].sort());
+ const [stock,setStock]=useState<Record<string,{physical:number|null;available:number|null;stockVerified:boolean}>>({});
+ useEffect(()=>{let alive=true;const keys:string[]=JSON.parse(stockKey),groups=new Map<string,string[]>();for(const k of keys){const [w,m]=k.split('|');groups.set(w,[...(groups.get(w)||[]),m]);}setStock({});void Promise.all([...groups].map(async ([warehouseId,materialIds])=>{try{const r=await callBackend<{items:({materialId:string;physical:number|null;available:number|null;stockVerified:boolean})[]}>('/api/org/mnt/warehouse-spares/search',{warehouseId,materialIds});if(alive)setStock(old=>({...old,...Object.fromEntries(r.items.map(x=>[warehouseId+'|'+x.materialId,x]))}));}catch{/* Unverified stock is never shown as zero. */}}));return()=>{alive=false;};},[stockKey]);
  const urls={...(options.data?.photos||{}),...photoUrls};
- const taskProblems=(t:TaskAssessment)=>[...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp).map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
+ const taskProblems=(t:TaskAssessment)=>[...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
  // Open items per section, shown on the section progress and before leaving the task (verification).
  const sectionIssues=(t:TaskAssessment):string[][]=>[
   [...(!(t.title||'').trim()?['Task name']:[]),...(t.description.trim().length<3?['Work description (at least 3 characters)']:[])],
-  [...t.spares.filter(sp=>!(Number(sp.qty)>0)).map(sp=>(sp.description||'Spare')+': quantity above zero'),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp).map(x=>(sp.description||'New material')+': '+x))],
+  [...t.spares.filter(sp=>!(Number(sp.qty)>0)).map(sp=>(sp.description||'Spare')+': quantity above zero'),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x))],
   t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x)),
   [...(!(Number(t.hours)>0)?['Time required (hours)']:[]),...(Number(t.persons)<0?['Number of people']:[])],
   [...(t.lotoRequired&&!(t.energySourceCodes||[]).length?['Choose the hazardous energy sources to isolate']:[]),...t.risk.filter(r=>!r.hazard.trim()||!r.controls.trim()).map((r,i)=>'Hazard '+(i+1)+': hazard and mitigations')],
@@ -269,10 +273,10 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     </div>
    </StepSection>}
    {step===1&&<StepSection title='Spares for this task' hint='Choose the warehouse, then add each spare from stock, the material catalogue or as free text, with its quantity.'>
-    <div className='space-y-3'>{recordType==='wo'&&<MntSpareRisk code={code} spares={analysisSpares} expectedStart={expectedStart}/>}
+    <div className='space-y-3'>{recordType==='wo'&&orderDates?<MntSpareDates code={code} initial={orderDates} cycle={cycle} spares={analysisSpares}/>:recordType==='wo'&&<MntSpareRisk code={code} spares={analysisSpares} expectedStart={expectedStart}/>}
      <div className={label}>Warehouse (select first) *<MntSelect label={'Warehouse for task spares'} hideLabel className={input} value={spareWarehouse} onChange={e=>{setSpareWarehouse(e.target.value);setAdding(false);}}>
       <option value=''>Choose the warehouse</option>{warehouses.data?.warehouses.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</MntSelect></div>
-     {task.spares.map((sp,i)=>{const problems=sp.source==='description'?freeTextProblems(sp):[];return <div key={sp.id} className='min-w-0 space-y-2 rounded-xl border border-line bg-page p-3'>
+     {task.spares.map((sp,i)=>{const problems=sp.source==='description'?freeTextProblems(sp,recordType!=='wo'):[];return <div key={sp.id} className='min-w-0 space-y-2 rounded-xl border border-line bg-page p-3'>
        <div className='flex items-start justify-between gap-2'>
         <p className='min-w-0 text-xs text-muted'><span className='mr-1 rounded bg-panel px-1.5 py-0.5 font-mono text-[10px] text-brand'>{i+1}</span>{SOURCE_LABEL[sp.source]||sp.source}</p>
         <button type='button' className='min-h-9 shrink-0 px-2 text-xs text-red-400' onClick={()=>patch({spares:task.spares.filter((_,j)=>j!==i)})}>Remove</button>
@@ -286,13 +290,14 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
         </div>
         <label className={label}>Detailed specifications and attributes<textarea className={input} rows={3} value={sp.specifications||''} placeholder='Dimensions, material, rating, part or drawing number…' onChange={e=>patchSpare(i,{specifications:e.target.value})}/></label>
        </>:<p className='break-words text-sm font-medium text-ink'>{sp.description}{sp.source==='catalog'&&sp.attributes&&Object.keys(sp.attributes).length>0&&<span className='block text-xs font-normal text-muted'>{Object.entries(sp.attributes).map(([k,v])=>k+': '+v).join(' · ')}</span>}<span className='block text-xs font-normal text-muted'>{(()=>{const wh=warehouses.data?.warehouses.find(w=>w.id===sp.warehouseId)?.name||sp.warehouseId;return sp.source==='catalog'?'Catalogue '+sp.catalogCode+' · new material, approved before purchase'+(wh?' · for '+wh:''):sp.source==='material'?'Registered material · purchased for '+(wh||'a warehouse the planner chooses'):(wh||'Warehouse')+' · reserved by the planner';})()}</span></p>}
-       <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+       {sp.materialId&&sp.warehouseId&&(()=>{const q=stock[sp.warehouseId+'|'+sp.materialId],required=analysisSpares.filter(x=>x.materialId===sp.materialId&&x.warehouseId===sp.warehouseId).reduce((n,x)=>n+Number(x.qty||0),0);return <div className='grid grid-cols-2 gap-2 text-sm'><div className='rounded-lg border border-line p-2'><p className='text-xs text-soft'>Physical stock</p><b>{q?.stockVerified?q.physical??'—':'Unverified'}</b></div><div className={'rounded-lg border border-line p-2 '+(q?.stockVerified&&q.available!=null?(q.available>=required?'text-green-600':'text-red-600'):'text-soft')}><p className='text-xs'>Available / issuable</p><b>{q?.stockVerified?q.available??'—':'Unverified'}</b>{q?.stockVerified&&q.available!=null&&q.available<required&&<p className='text-xs'>Shortage {required-q.available}</p>}</div></div>;})()}
+       <div className='grid grid-cols-2 gap-2'>
         <label className={label}>Quantity<input type='number' inputMode='decimal' min='0.001' step='any' className={input} value={sp.qty} onChange={e=>patchSpare(i,{qty:Number(e.target.value)})}/></label>
-        <label className={label}>Unit<input className={input} value={sp.uom} readOnly={sp.source==='warehouse'||sp.source==='material'} onChange={e=>patchSpare(i,{uom:e.target.value})}/></label>
-        <label className={label+' col-span-2 sm:col-span-1'}>Required by<input type='date' className={input} value={sp.requiredDate||''} min={new Date().toISOString().slice(0,10)} onChange={e=>patchSpare(i,{requiredDate:e.target.value})}/></label>
+        <label className={label}>Unit<input className={input} value={sp.source==='warehouse'||sp.source==='material'?unitLabel(sp.uom):sp.uom} readOnly={sp.source==='warehouse'||sp.source==='material'} onChange={e=>patchSpare(i,{uom:e.target.value})}/></label>
+        {recordType!=='wo'&&<label className={label+' col-span-2 sm:col-span-1'}>Required by<input type='date' className={input} value={sp.requiredDate||''} min={new Date().toISOString().slice(0,10)} onChange={e=>patchSpare(i,{requiredDate:e.target.value})}/></label>}
        </div>
-       {sp.photoPath&&<a className='text-sm text-brand underline' href={urls[sp.photoPath]||'#'} target='_blank' rel='noreferrer noopener'>View attached photo</a>}
-       <Attachments code={code} files={sp.attachments||[]} urls={urls} onChange={(files,u)=>{patchSpare(i,{attachments:files});setPhotoUrls(old=>({...old,...u}));}}/>
+       {recordType!=='wo'&&sp.photoPath&&<a className='text-sm text-brand underline' href={urls[sp.photoPath]||'#'} target='_blank' rel='noreferrer noopener'>View attached photo</a>}
+       {recordType!=='wo'&&<Attachments code={code} files={sp.attachments||[]} urls={urls} onChange={(files,u)=>{patchSpare(i,{attachments:files});setPhotoUrls(old=>({...old,...u}));}}/>}
        {problems.length>0&&<p className='text-xs text-amber-400'>Still needed: {problems.join(', ')}.</p>}
      </div>;})}
      {adding&&spareWarehouse?<AddSpare code={code} warehouseId={spareWarehouse} warehouseName={warehouses.data?.warehouses.find(w=>w.id===spareWarehouse)?.name||spareWarehouse} onClose={()=>setAdding(false)} onAdd={x=>{addSpare({...newSpare(),...x});setAdding(false);setMessage('Spare added. Add more from the warehouse, the catalogue or free text.');}}/>

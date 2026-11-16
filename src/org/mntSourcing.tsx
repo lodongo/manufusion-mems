@@ -1,3 +1,4 @@
+import {PROCUREMENT_UNITS} from '../../backend/procurementUnits';
 import MntSelect from './MntSelect';
 import CatalogueAttributeForm from '../components/CatalogueAttributeForm';
 import type { AttrDef, CatalogueGuidance } from '../components/AssetDictionaryBrowser';
@@ -13,6 +14,7 @@ import { compressPhoto } from './mntShared';
 // fulfilment track shown on work-order tasks. The server enforces every rule again.
 
 export type Any = Record<string, any>;
+export const unitLabel=(code:string)=>{const u=PROCUREMENT_UNITS.find(x=>x.code===code||x.symbol===code);return u?u.label+(u.symbol&&u.symbol!==u.label?' ('+u.symbol+')':''):code==='EA'?'Each':code||'Not set';};
 export const field = 'mt-1 block w-full min-w-0 rounded-xl border border-line bg-panel px-3 py-3 text-base text-ink';
 export const fieldLabel = 'block min-w-0 text-sm text-soft';
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -35,7 +37,7 @@ const SOURCES: Array<[Kind, string, string]> = [
     ['description', 'Free text', 'Only when nothing suitable exists'],
 ];
 type Kind = 'warehouse' | 'catalog' | 'description';
-interface WarehouseItem { materialId: string; materialNumber: string; name: string; uom: string; available: number | null; stockVerified: boolean; warehouseName: string }
+interface WarehouseItem { materialId: string; materialNumber: string; name: string; uom: string; physical?:number|null; available: number | null; stockVerified: boolean; warehouseName: string }
 interface CatSummary { code: string; name: string; subcategories: Array<{ code: string; name: string }> }
 interface AttrSpec { code: string; name: string; dataType: string; unit: string; options: Array<{ code: string; label: string }>; required: boolean; description?: string; example?: string; domainName?: string; validation?: Record<string, unknown> }
 interface Spec { code: string; name: string; categoryCode: string; subcategoryCode: string; familyCode: string; attributes: AttrSpec[]; guidance?: CatalogueGuidance | null }
@@ -52,7 +54,7 @@ function Qty({ qty, uom, onQty, onUom, lockUom }: { qty: string; uom: string; on
             </label>
             <label className={fieldLabel}>
                 Unit
-                <input className={field} value={uom} readOnly={lockUom} onChange={(e) => onUom(e.target.value)} />
+                <input className={field} value={lockUom?unitLabel(uom):uom} readOnly={lockUom} onChange={(e) => onUom(e.target.value)} />
             </label>
         </div>
     );
@@ -134,7 +136,7 @@ function FromWarehouse({ warehouseId, onAdd }: { warehouseId: string; onAdd: (sp
                 <div className='rounded-xl bg-page p-3'>
                     <p className='break-words text-sm font-medium text-ink'>{picked.name}</p>
                     <p className='text-xs text-muted'>
-                        {picked.materialNumber} · {picked.stockVerified ? `${picked.available} ${picked.uom} usable` : 'stock not verified'}
+                        {picked.materialNumber} · {picked.stockVerified ? `Physical: ${picked.physical??'—'} · Available: ${picked.available} ${unitLabel(picked.uom)}` : 'stock not verified'}
                     </p>
                 </div>
                 <Qty qty={qty} uom={picked.uom} onQty={setQty} onUom={() => undefined} lockUom />
@@ -167,7 +169,7 @@ function FromWarehouse({ warehouseId, onAdd }: { warehouseId: string; onAdd: (sp
                         <button type='button' className='w-full rounded-xl border border-line p-3 text-left active:bg-page' onClick={() => setPicked(x)}>
                             <span className='block truncate text-sm font-medium text-ink'>{x.name}</span>
                             <span className='block text-xs text-muted'>
-                                {x.materialNumber} · {x.stockVerified ? <span className={x.available ? 'text-brandsoft' : ''}>{x.available} {x.uom} usable</span> : 'stock not verified'}
+                                {x.materialNumber} · {x.stockVerified ? <span className={x.available ? 'text-brandsoft' : ''}>Physical {x.physical??'—'} · Available {x.available} {unitLabel(x.uom)}</span> : 'stock not verified'}
                             </span>
                         </button>
                     </li>
@@ -275,7 +277,7 @@ function FromCatalogue({ code, warehouseId, onAdd }: { code: string; warehouseId
                                                 <span className='block break-words text-sm font-medium text-ink'>{m.name}</span>
                                                 <span className='block text-xs text-muted'>
                                                     {m.materialNumber} · {m.exact ? 'same specification' : `${m.matched}/${m.compared} attributes match`}
-                                                    {m.linked ? ` · ${m.available ?? '—'} ${m.uom} usable here` : ' · not stocked in this warehouse'}
+                                                    {m.linked ? ` · ${m.available ?? '—'} ${unitLabel(m.uom)} usable here` : ' · not stocked in this warehouse'}
                                                 </span>
                                             </span>
                                             <Badge tone={m.exact ? 'brand' : m.score >= 60 ? 'warn' : 'muted'}>{m.exact ? 'Match' : `${m.score}%`}</Badge>
@@ -329,7 +331,7 @@ function FreeText({ code, warehouseId, onAdd, onCatalogue }: { code: string; war
         [busy, setBusy] = useState(false),
         [error, setError] = useState('');
     const set = (patch: Any) => setS((o: Any) => ({ ...o, ...patch }));
-    const problems = freeTextProblems({ ...s, qty: Number(s.qty) });
+    const problems = freeTextProblems({ ...s, qty: Number(s.qty) },!/^WO/.test(code));
     const query = String(s.description).trim().slice(0, 80);
     const found = result ? result.counts.warehouse + result.counts.registered + result.counts.catalogue : 0;
     const stale = !!result && checked !== query;
@@ -364,11 +366,11 @@ function FreeText({ code, warehouseId, onAdd, onCatalogue }: { code: string; war
                 <textarea className={field} rows={3} value={s.specifications} onChange={(e) => set({ specifications: e.target.value })} placeholder='Dimensions, material, rating, part or drawing number…' />
             </label>
             <Qty qty={s.qty} uom={s.uom} onQty={(v) => set({ qty: v })} onUom={(v) => set({ uom: v })} />
-            <label className={fieldLabel}>
+            {!/^WO/.test(code)&&<><label className={fieldLabel}>
                 Required by *
                 <input type='date' min={todayIso()} className={field} value={s.requiredDate} onChange={(e) => set({ requiredDate: e.target.value })} />
             </label>
-            <Attachments code={code} files={s.attachments} urls={urls} onChange={(files, u) => (set({ attachments: files }), setUrls(u))} />
+            <Attachments code={code} files={s.attachments} urls={urls} onChange={(files, u) => (set({ attachments: files }), setUrls(u))} /></>}
             {problems.length > 0 && <p className='text-xs text-amber-500'>Still needed: {problems.join(', ')}.</p>}
             {(!result || stale) && (
                 <Button disabled={query.length < 3} busy={busy} onClick={check}>
@@ -387,7 +389,7 @@ function FreeText({ code, warehouseId, onAdd, onCatalogue }: { code: string; war
                                     <li key={'w' + x.materialId + x.warehouseId}>
                                         <button type='button' className='w-full rounded-lg border border-line p-2 text-left text-xs' onClick={() => onAdd({ source: 'warehouse', materialId: x.materialId, warehouseId: x.warehouseId, description: x.name, uom: x.uom, qty: Number(s.qty) || 1 })}>
                                             <span className='block truncate text-sm text-ink'>{x.name}</span>
-                                            {x.materialNumber} · {x.available} {x.uom} at {x.warehouseName}
+                                            {x.materialNumber} · {x.available} {unitLabel(x.uom)} at {x.warehouseName}
                                         </button>
                                     </li>
                                 ))}
@@ -500,13 +502,13 @@ export function Attachments({ code, files, urls, onChange }: { code: string; fil
 }
 
 /** Problems that keep a free-text spare from being saved (mirrors the server rules). */
-export function freeTextProblems(s: Any): string[] {
+export function freeTextProblems(s: Any,requireDate=true): string[] {
     const out: string[] = [];
     if (String(s.description || '').trim().length < 3) out.push('material name and technical description');
     if (String(s.function || '').trim().length < 3) out.push('intended function');
     if (String(s.specifications || '').trim().length < 10) out.push('detailed specifications (10+ characters)');
     if (!(Number(s.qty) > 0)) out.push('quantity');
-    if (!s.requiredDate || s.requiredDate < todayIso()) out.push('required delivery date');
+    if (requireDate&&(!s.requiredDate || s.requiredDate < todayIso())) out.push('required delivery date');
     return out;
 }
 
