@@ -189,6 +189,7 @@ function ResourceForm({
         urgency: 'medium',
         supplierCategory: previous.sourcing?.supplierCategory || resource.supplierCategory || '',
         preferredVendorId: previous.sourcing?.preferredVendorId || '',
+        shortlistedVendorIds:previous.sourcing?.shortlistedVendorIds||[],
         poId: item.orderReady?.id || '',
         lineNo: item.orderReady?.lineNo || '',
         readyAt: resource.executionDate || '',
@@ -339,7 +340,7 @@ function ResourceForm({
                     <p className="text-sm text-soft">
                         Choose the supplier category, then an approved vendor qualified for this service. For OEM and OCM, vendors representing the equipment make are listed. If none is suitable, request supplier onboarding.
                     </p>
-                    <div className="block text-sm text-soft"><MntSelect label="Supplier category" className={mntInput} value={data.supplierCategory} onChange={(e) => setData((o) => ({ ...o, supplierCategory: e.target.value, preferredVendorId: '' }))}>
+                    <div className="block text-sm text-soft"><MntSelect label="Supplier category" className={mntInput} value={data.supplierCategory} onChange={(e) => setData((o) => ({ ...o, supplierCategory: e.target.value, preferredVendorId: '', shortlistedVendorIds:[] }))}>
                             <option value="">Choose</option>
                             {vendors.categories.map((c) => (
                                 <option key={c.code} value={c.code}>{c.label}</option>
@@ -351,7 +352,7 @@ function ResourceForm({
                             <legend className="text-sm text-soft">Approved vendors ({vendors.vendors.length})</legend>
                             {vendors.vendors.map((v) => (
                                 <label key={v.id} className="flex items-start gap-3 rounded-xl border border-line p-3 text-sm">
-                                    <input type="radio" name="vendor" className="mt-1" checked={data.preferredVendorId === v.id} onChange={() => patch('preferredVendorId', v.id)} />
+                                    <input type="radio" name="vendor" className="mt-1" checked={data.preferredVendorId === v.id} onChange={() => setData(old=>({...old,preferredVendorId:v.id,shortlistedVendorIds:(old.shortlistedVendorIds||[]).filter((id:string)=>id!==v.id).slice(0,2)}))} />
                                     <span className="min-w-0">
                                         <span className="block truncate font-medium">{v.name}</span>
                                         <span className="block truncate text-xs text-muted">{[v.id, v.manufacturerMatch ? 'Represents ' + (vendors.make.manufacturer || vendors.make.brand) : '', v.brands.join(', ')].filter(Boolean).join(' · ')}</span>
@@ -359,12 +360,13 @@ function ResourceForm({
                                 </label>
                             ))}
                             <label className="flex items-start gap-3 rounded-xl border border-dashed border-line p-3 text-sm">
-                                <input type="radio" name="vendor" className="mt-1" checked={data.preferredVendorId === ''} onChange={() => patch('preferredVendorId', '')} />
+                                <input type="radio" name="vendor" className="mt-1" checked={data.preferredVendorId === ''} onChange={() => setData(old=>({...old,preferredVendorId:'',shortlistedVendorIds:[]}))} />
                                 <span>No suitable approved vendor — request supplier onboarding</span>
                             </label>
                             {vendors.others.length > 0 && <p className="text-xs text-muted">{vendors.others.length} other vendor(s) of this category do not represent the equipment make.</p>}
                         </fieldset>
                     )}
+                    {data.preferredVendorId&&vendors.vendors.some(v=>v.id===data.preferredVendorId)&&<fieldset className="space-y-2 rounded-xl border border-line p-3"><legend className="text-sm text-soft">Alternate qualified vendors (optional, up to two)</legend>{vendors.vendors.filter(v=>v.id!==data.preferredVendorId).map(v=><label key={v.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={data.shortlistedVendorIds.includes(v.id)} disabled={!data.shortlistedVendorIds.includes(v.id)&&data.shortlistedVendorIds.length>=2} onChange={e=>patch('shortlistedVendorIds',e.target.checked?[...data.shortlistedVendorIds,v.id]:data.shortlistedVendorIds.filter((id:string)=>id!==v.id))}/>{v.name}</label>)}<p className="text-xs text-soft">The shortlist includes the preferred vendor. Final purchase decisions remain in Procurement.</p></fieldset>}
                     {data.supplierCategory && data.preferredVendorId === '' && (
                         <div className="space-y-3 rounded-xl border border-line p-3">
                             <MntField label="Suggested supplier name" value={data.suggestedVendor} onChange={(v) => patch('suggestedVendor', v)} />

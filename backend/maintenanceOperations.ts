@@ -764,10 +764,12 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
         const at = nowIso();
         if (str(b.preferredVendorId)) {
             const vendor = await requireQualifiedVendor(ctx.orgId, identifier(b.preferredVendorId), q);
+            const shortlist=[...new Set([vendor.id,...texts(b.shortlistedVendorIds)])];if(shortlist.length>3)throw new HttpError(400,'Shortlist up to three qualified vendors, including the preferred vendor.');
+            const shortlistedVendors=await Promise.all(shortlist.map(id=>requireQualifiedVendor(ctx.orgId,identifier(id),q)));
             state = {
                 ...state,
                 status: 'sourcing_confirmed',
-                sourcing: { supplierCategory: category.code, supplierCategoryLabel: category.label, preferredVendorId: vendor.id, preferredVendorName: vendor.name, manufacturerMatch: vendor.manufacturerMatch, by: ctx.uid, at },
+                sourcing: { supplierCategory: category.code, supplierCategoryLabel: category.label, preferredVendorId: vendor.id, preferredVendorName: vendor.name, shortlistedVendorIds:shortlist,shortlistedVendors:shortlistedVendors.map(v=>({id:v.id,name:v.name})), manufacturerMatch: vendor.manufacturerMatch, by: ctx.uid, at },
             };
         } else {
             const { vendors } = await qualifiedServiceVendors(ctx.orgId, q);
@@ -843,9 +845,9 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                 planningGroup: planningGroup(wo),
                 attachments: texts(service.attachments),
                 proposedVendors: await Promise.all(
-                    (str(sourcing.preferredVendorId)?[str(sourcing.preferredVendorId)]:[]).map(async (id) => {
-                        const vendor = await getDoc(`${root(ctx)}/vendors/${id}`);
-                        return { id, name: str(vendor?.data.tradeName) || str(vendor?.data.legalName) || id };
+                    (str(sourcing.preferredVendorId)?[...new Set([str(sourcing.preferredVendorId),...texts(sourcing.shortlistedVendorIds)])]:[]).map(async (id) => {
+                        const vendor = await requireQualifiedVendor(ctx.orgId,id,{supplierCategory:str(sourcing.supplierCategory),categoryCode:str(service.categoryCode),subcategoryCode:str(service.subcategoryCode),make:await equipmentMake(ctx.orgId,wo)});
+                        return { id, name: vendor.name };
                     }),
                 ),
             },

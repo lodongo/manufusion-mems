@@ -532,6 +532,7 @@ assert.equal((await requirements()).length, 3);
 // 9. Services: sourcing confirmed with a qualified vendor before the requirement; onboarding when none is suitable.
 await assert.rejects(() => op('planner', 'procure', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', glCode: '610000' }), /supplier category/);
 await assert.rejects(() => op('planner', 'service_sourcing', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', supplierCategory: 'VCL-001', preferredVendorId: 'VND000002' }), /approved vendor/);
+await assert.rejects(()=>op('planner','service_sourcing',{code:wo,taskId:'gearbox',resourceId:'overhaul',supplierCategory:'VCL-001',preferredVendorId:'VND000001',shortlistedVendorIds:['VND000002']}),/approved vendor/);
 await op('planner', 'service_sourcing', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', supplierCategory: 'VCL-001', preferredVendorId: 'VND000001' });
 const svc = await op('planner', 'procure', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', glCode: '610000',dateRequired:date,budget:1200 });
 const svcReq = snapshot(r + '/procurement_requirements/' + svc.requirementId).data;
