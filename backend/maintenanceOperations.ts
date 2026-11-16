@@ -505,7 +505,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
     if (action === 'review_risk') {
         const note = requiredText(b.note, 'Risk review notes', 10, 1000);
         const tasks = tasksOf(wo);
-        if (!tasks.every((t) => rows(t.risk).length)) throw new HttpError(409, 'Every task needs its preliminary risk assessment before review.');
+        if (!tasks.every((t) => rows(t.risk).length||str(object(t.registrySafety).assessmentVerifiedAt))) throw new HttpError(409, 'Every task needs its preliminary risk assessment before review.');
         await saveWo(ctx, wo, { riskReview: { version: Number(wo.data.assessmentTasksVersion) || 0, at: nowIso(), by: ctx.uid, name: name(ctx), note,
             hazards: tasks.reduce((n, t) => n + rows(t.risk).length, 0), permits: [...new Set(tasks.flatMap((t) => texts(t.permitCodes)))] } }, 'plan.risk_reviewed', note);
         return { ok: true };
@@ -1084,7 +1084,7 @@ async function windowSave(ctx: OrgContext) {
     for (const sTask of selected) {
         const t = tasksOf(wos.find((w) => w.id === sTask.woCode)!).find((x) => x.id === sTask.taskId)!;
         const instructions = [
-            ...(t.lotoRequired === true ? texts(t.energySourceCodes).map((c) => `LOTO: isolate, lock, tag and prove zero ${label('hazardousEnergy', c)}`) : []),
+            ...(t.lotoRequired === true ? (rows(object(t.registrySafety).energyPlan).length?rows(object(t.registrySafety).energyPlan).filter(p=>p.state==='isolate').map(p=>'LOTO: isolate, lock, tag and prove zero '+str(p.label)+' · '+str(p.tag)):texts(t.energySourceCodes).map((c) => `LOTO: isolate, lock, tag and prove zero ${label('hazardousEnergy', c)}`)) : []),
             ...(t.liveEquipment === true ? ['Live work: authorized procedure, guarding, exclusion zone and emergency stop ready'] : []),
             str(t.isolation),
             ...rows(t.risk).filter((r) => str(r.permit)).map((r) => `${str(r.permit)}: ${str(r.controls)}`),

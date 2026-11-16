@@ -18,6 +18,7 @@ import {profileAdoption} from './safHazardControlLibrary';
 import {taskDecisionPath,TASK_ADDITIONAL_CLASSES,EXECUTOR_TYPES,TASK_PLAN_STATES,taskRiskAssessmentPending} from './safTaskDecision';
 import {injuryCodes,combinedControlCodes} from './safInjurySelection';
 import {requireWorkOrderAssessor} from './maintenanceAccess';
+import {loadWorkGroupPolicy} from './maintenanceWorkGroupPolicy';
 const idRe=/^[A-Za-z0-9_-]{1,120}$/;
 const array=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const root=(ctx:OrgContext)=>`organizations/${ctx.orgId}`;
@@ -73,7 +74,7 @@ async function equipmentTaskCreationAllowed(ctx:OrgContext,id:string){
  if(!/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(code))return false;
  const wo=await getDoc(root(ctx)+'/work_orders/'+code);
  if(!wo||str(wo.data.unitId)!==id)return false;
- try{await requireWorkOrderAssessor(ctx,wo);return true;}catch{return false;}
+ try{ctx.workGroupPolicy=await loadWorkGroupPolicy(ctx.orgId,ctx.me);await requireWorkOrderAssessor(ctx,wo);return true;}catch{return false;}
 }
 async function taskSkills(){
  const d=await getDoc('module_workspaces/HRM/metadata/skillsMaster');
@@ -114,6 +115,35 @@ async function scoreHazardRows(ctx:OrgContext,raw:unknown,matrix:RiskMatrix,prio
 const devicePath=(ctx:OrgContext,id:string)=>root(ctx)+'/equipment_safety_devices/'+id;
 const devicePhotoPrefix=(ctx:OrgContext,id:string)=>root(ctx)+'/saf/equipment_devices/'+id+'/';
 const devicePhotoValid=(ctx:OrgContext,id:string,token:string)=>token.startsWith(devicePhotoPrefix(ctx,id))&&/^[A-Za-z0-9_-]+\.(jpg|jpeg|png|webp)$/.test(token.slice(devicePhotoPrefix(ctx,id).length));
+// Authoritative snapshot at work-assessment submission. Never trust client-supplied verification.
+export async function equipmentTaskSafetySnapshot(ctx:OrgContext,equipmentId:string,task:Obj){
+ const registryId=str(task.registryTaskId);
+ if(!idRe.test(equipmentId)||!taskCodeRe.test(registryId))throw new HttpError(400,'Select an equipment task in Safety.');
+ const doc=await getDoc(taskCollection(ctx,equipmentId)+'/'+registryId),d=doc?.data;
+ if(!d||Number(d.version)!==Number(task.registryVersion)||!str(d.assessmentVerifiedAt)||d.status!=='review_required')throw new HttpError(409,'Verify the current equipment task safety assessment before completing work assessment.');
+ const steps=array(d.subtasks).map(x=>str(x.name).trim()),workSteps=Array.isArray(task.subtasks)?task.subtasks.map(x=>str(x).trim()):[];
+ if(!steps.length||JSON.stringify(steps)!==JSON.stringify(workSteps)||str(d.name).trim().toLowerCase()!==str(task.title).trim().toLowerCase())throw new HttpError(409,'Align task name and ordered subtasks with the equipment definition and repeat safety verification.');
+ const source=isObj(d.catalogueSource)?d.catalogueSource:null,reference=isObj(task.catalogueReference)?task.catalogueReference:null;
+ if(source&&(!reference||source.code!==reference.taskCode||source.releaseId!==reference.releaseId||Number(source.version)!==Number(reference.version)))throw new HttpError(409,'Catalogue task revision changed. Align the equipment definition.');
+ const classes=stringList(d.classCodes),primary=classes[0]||'';
+ const decision=taskDecisionPath(isObj(d.answers)?d.answers as Record<string,string>:{}).decision;
+ if(!primary||decision.code!==primary||decision.exception)throw new HttpError(409,'Task classification requires independent Safety review.');
+ const [baselines,activeClasses,energy,deviceDoc,matrixDoc,permits,hazards,controls]=await Promise.all([Promise.all(classes.map(c=>taskClassBaseline(ctx,equipmentId,c))),effectiveSafetyItems(ctx.orgId,'activityClasses'),currentTaskEnergy(ctx,equipmentId),getDoc(devicePath(ctx,equipmentId)),getDoc(root(ctx)+'/saf/risk_matrix'),effectiveSafetyItems(ctx.orgId,'permitTypes'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'controlMeasures')]);
+ if(classes.some(c=>!activeClasses.some(x=>x.code===c))||baselines.some(b=>b.status==='intolerable'||!array(d.classBaseline).some(x=>x.code===b.code&&Number(x.version)===b.version)))throw new HttpError(409,'Task class assessments changed. Re-verify the equipment task.');
+ const plan=array(d.energyPlan);
+ if(['AC03','AC05','AC06','AC22'].includes(primary)&&(energy.length!==plan.length||energy.some(e=>!e.tag||!plan.some(p=>p.pointId===e.pointId&&p.tag===e.tag))))throw new HttpError(409,'Equipment isolation register changed. Re-verify the equipment task.');
+ if(d.devicesReviewed!==true||Number(d.deviceVersion)!==(Number(deviceDoc?.data.version)||0))throw new HttpError(409,'Review current equipment safety devices and re-verify.');
+ const deviceIds=stringList(d.safetyDeviceIds),selectedDevices=array(deviceDoc?.data.items).filter(x=>deviceIds.includes(str(x.deviceId)));
+ if(selectedDevices.length!==deviceIds.length||selectedDevices.some(x=>!str(x.tag)))throw new HttpError(409,'Selected safety devices have changed.');
+ const permitCodes=stringList(d.permitCodes);
+ if(permitCodes.some(c=>!permits.some(p=>p.code===c))||classes.some(c=>!meetsClassPermitMinimum(c,permitCodes))||baselines.some(b=>b.permitCodes.some(c=>!permitCodes.includes(c))))throw new HttpError(409,'Permit requirements changed. Re-verify the equipment task.');
+ const rawRows=[...baselines.flatMap(b=>b.rows),...array(d.rows)],matrix=matrixDoc?.data.configuration as unknown as RiskMatrix;
+ if(primary!=='AC01'&&!rawRows.length)throw new HttpError(409,'Task risk assessment is incomplete.');
+ if(rawRows.some(r=>!matrix||!isObj(r.before)||!isObj(r.after)||Number(r.before.matrixVersion)!==matrix.version||Number(r.after.matrixVersion)!==matrix.version))throw new HttpError(409,'Risk matrix changed. Re-verify applicable task and class assessments.');
+ const inheritedRisks=rawRows.map(r=>({hazard:stringList(r.hazardCodes).concat(str(r.hazard)).filter((x,i,a)=>x&&a.indexOf(x)===i).map(c=>str(hazards.find(h=>h.code===c)?.label)||c).join('; '),impact:stringList(r.impactLabels).join('; ')||str(r.impact),controls:stringList(r.controls).map(c=>str(controls.find(x=>x.code===c)?.label)||c).join('; '),before:'',after:'',permit:'',beforeRatings:(r.before as Obj).ratings,afterRatings:(r.after as Obj).ratings}));
+ const isolationCodes=[...new Set(energy.filter(e=>plan.some(p=>p.pointId===e.pointId&&p.state==='isolate')).map(e=>e.code))];
+ return {taskId:registryId,version:Number(d.version),equipmentId,displayCode:str(d.displayCode)||str(source?.code)||registryId,classCodes:classes,permitCodes,energyPlan:plan,isolationCodes,safetyDeviceIds:deviceIds,safetyDevices:selectedDevices.map(x=>({deviceId:str(x.deviceId),tag:str(x.tag),label:str(x.label)})),deviceVersion:Number(d.deviceVersion),classBaseline:baselines,rows:array(d.rows),inheritedRisks,assessmentVerifiedAt:str(d.assessmentVerifiedAt),executionAuthorized:false};
+}
 export const safEquipmentRoutes={
  'POST /api/org/saf/equipment-devices/read':[orgRoute('org.saf.equipment_devices.read','SAF.view',async ctx=>{
   const {id,node}=await equipment(ctx);const path=devicePath(ctx,id);

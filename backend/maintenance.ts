@@ -1,3 +1,4 @@
+import {equipmentTaskSafetySnapshot} from './safEquipment';
 import {serviceRequirementLibrary,addServiceRequirement} from './maintenanceServiceRequirementLibrary';
 import {verifyCatalogueReferences,resolveGenericTaskScope,genericTaskForSite,taskCatalogueRoutes} from './maintenanceTaskCatalogue';
 import {maintenanceToolCatalogueRoutes} from './maintenanceToolCatalogue';
@@ -887,11 +888,11 @@ async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:Assesse
         for(const service of task.services){for(const r of service.skillRequirements||[]){const actual=skillMap.get(r.skillCode);if(!actual)throw new HttpError(400,'Choose an enabled service skill from the MEMS catalogue.');r.skillLabel=actual.label;r.category=actual.category;r.subcategory=actual.subcategory;}if(service.skillRequirements?.length)service.qualifications=service.skillRequirements.map(r=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; ');}
         for(const spare of task.spares){spare.unitCost=null;spare.estimateUnitPrice=null;spare.estimateCurrency='';spare.estimatePurchaseUom='';spare.estimateUomMatches=false;if(spare.materialId&&spare.warehouseId&&(scope==='all'||scope.has(spare.warehouseId))&&await materialIn(ctx.orgId,spare.materialId,spare.warehouseId)){const v=await stockValOf(ctx.orgId,spare.warehouseId,spare.materialId);if(v.updateTime&&v.avg>0)spare.unitCost=v.avg;Object.assign(spare,await assessmentSparePrice(ctx.orgId,spare.warehouseId,spare.materialId,spare.uom));}}
         if(task.machineStatus&&!statesSet.has(task.machineStatus))throw new HttpError(400,'This machine status is not enabled in organization Safety. Select an adopted status.');
-        if(task.energySourceCodes?.some(code=>!energyIds.has(code)))
+        if(!task.registrySafety&&task.energySourceCodes?.some(code=>!energyIds.has(code)))
             throw new HttpError(400,'Choose hazardous energy sources from the active SAF list.');
         if(task.permitCodes?.some(code=>!permitIds.has(code)))
             throw new HttpError(400,'Choose permits from the active SAF permit list.');
-        if(task.lotoRequired){
+        if(task.lotoRequired&&!task.registrySafety){
             if(!task.energySourceCodes?.every(code=>task.risk.some(r=>r.energyCode===code)))
                 throw new HttpError(400,'Complete risk assessment for every selected LOTO hazardous energy source.');
             const lotoPermit=permits.find(x=>str(x.code)==='SAF_08_01_003')||permits.find(x=>/loto|lock.?out/i.test(str(x.label)));
@@ -899,7 +900,7 @@ async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:Assesse
             if(!task.permitCodes?.includes(str(lotoPermit.code)))
                 throw new HttpError(400,'Add the SAF LOTO isolation permit for this task.');
         }
-        if(task.liveEquipment){
+        if(task.liveEquipment&&!task.registrySafety){
             if(!task.risk.some(r=>r.energyCode==='LIVE_EQUIPMENT'))
                 throw new HttpError(400,'Assess live-equipment hazards and mitigation for this task.');
             const livePermit=permits.find(x=>str(x.code)==='SAF_08_01_004')||permits.find(x=>/live/i.test(str(x.label)));
@@ -2426,8 +2427,17 @@ export const maintenanceRoutes = {
                     let tasks;
                     try{
                         const m=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);
-                        tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(b.tasks),
-                            (m?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix);
+                        if(!Array.isArray(b.tasks)||objs(b.tasks).length!==b.tasks.length)throw new HttpError(400,'Add valid assessed tasks.');
+                        const snapshots=new Map<string,Awaited<ReturnType<typeof equipmentTaskSafetySnapshot>>>();
+                        const linked=await Promise.all(objs(b.tasks).map(async raw=>{
+                            const snapshot=await equipmentTaskSafetySnapshot(ctx,str(doc.data.unitId),raw);snapshots.set(str(raw.id),snapshot);
+                            const primary=snapshot.classCodes[0],machineStatus=primary==='AC03'?'full_loto':primary==='AC06'?'partial_isolation':['AC05','AC22'].includes(primary)?'live':'total_shutdown';
+                            const inherited=snapshot.inheritedRisks,extras=objs(raw.risk).filter(r=>r.registryInherited!==true&&(str(r.hazard)||str(r.impact)||str(r.controls)));
+                            if(extras.some(r=>inherited.some(v=>v.hazard.toLowerCase()===str(r.hazard).toLowerCase())))throw new HttpError(400,'A work hazard duplicates the equipment task risk. Enrich the equipment safety assessment rather than repeat the hazard.');
+                            return {...raw,machineStatus,lotoRequired:snapshot.isolationCodes.length>0,liveEquipment:machineStatus==='live',energySourceCodes:snapshot.isolationCodes,permitCodes:snapshot.permitCodes,risk:[...inherited,...extras]};
+                        }));
+                        tasks=finalizeAssessedTaskRisks(validateAssessmentTasks(linked,new Set(snapshots.keys())),
+                            (m?.data?.configuration||defaultMaintenanceRiskMatrix) as RiskMatrix).map(t=>{const snapshot=snapshots.get(t.id)!;return {...t,risk:t.risk.map((r,i)=>({...r,registryInherited:i<snapshot.inheritedRisks.length})),registryTaskId:snapshot.taskId,registryVersion:snapshot.version,registrySafety:snapshot};});
                     }catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid task work assessment.');}
                     tasks=d.breakIn===true?tasks.map(t=>({...t,maintenanceTypeCode:'',maintenanceTypeLabel:''})):await verifiedTaskMaintenanceTypes(tasks);
                     await verifyAssessedTaskChoices(ctx,doc,tasks);
