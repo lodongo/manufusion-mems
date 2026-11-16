@@ -48,8 +48,8 @@ export async function prepareMaintenanceAssessment(ctx: OrgContext, record: Doc,
             }
         }
         for (const s of t.services) {
-            if (!s.scope || !s.deliverables || !s.qualifications || !s.acceptanceCriteria)
-                throw new HttpError(400, 'Every service needs scope, deliverables, qualifications and acceptance criteria.');
+            if (!s.scope || !s.deliverables || !(s.skillRequirements?.length||s.qualifications) || !s.acceptanceCriteria)
+                throw new HttpError(400, 'Every service needs scope, deliverables, required skills and acceptance criteria.');
             if (s.catalogCode) {
                 const spec = await catalogItemSpec('services', s.catalogCode);
                 if (!spec) throw new HttpError(400, 'Select a valid service catalogue entry.');

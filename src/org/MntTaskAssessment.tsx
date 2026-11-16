@@ -1,3 +1,4 @@
+import MntOrderedSteps,{legacySteps,OrderedStepReview} from './MntOrderedSteps';
 import type {ResourceRole,ResourceSkill} from '../../backend/maintenanceTaskAssessment';
 import MntSelect from './MntSelect';
 import {useEffect,useState} from 'react';
@@ -9,12 +10,12 @@ import {Button,Card,useLoad} from '../admin/kit';
 import {unitLabel,UnitOfMeasureSelect,AddSpare,Attachments,ServiceEditor,SOURCE_LABEL,freeTextProblems,newService,serviceProblems,serviceJustificationLabels,type ServiceHierarchy} from './mntSourcing';
 
 type Spare={estimateUnitPrice?:number|null;estimateCurrency?:string;estimatePurchaseUom?:string;estimateUomMatches?:boolean;id:string;source:'warehouse'|'material'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;photoPath?:string;specifications?:string;attributes?:Record<string,string>;function?:string;categoryCode?:string;subcategoryCode?:string;familyCode?:string;requiredDate?:string;attachments?:string[];searchReceiptId?:string;noMatchConfirmed?:boolean;noMatchReason?:string};
-type Service={justificationReasons?:string[];justification?:string;specialistRequired?:boolean;skillRequirements?:ResourceSkill[];id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;instructions?:string;certifications?:string;personnel?:number;durationHours?:number;executionDate?:string;supplierCategory?:string;attachments?:string[]};
+type Service={scopeSteps?:string[];missingSkillCodes?:string[];justificationReasons?:string[];justification?:string;specialistRequired?:boolean;skillRequirements?:ResourceSkill[];id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;instructions?:string;certifications?:string;personnel?:number;durationHours?:number;executionDate?:string;supplierCategory?:string;attachments?:string[]};
 type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;energyCode?:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;exposedPersonnel?:string;responsiblePerson?:string;precautions?:string};
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
 type SafetyOption={code:string;label:string;category:string;subcategory:string;description?:string};
 type Options={executionRoles?:{code:string;label:string;groupTitle:string}[];workGroupConfigured?:boolean;currency?:string;maintenanceTypes?:Array<{code:string;label:string}>;serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];machineStatuses?:SafetyOption[];safetyHazards?:SafetyOption[];safetyImpacts?:SafetyOption[];safetyControls?:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string;subcategory:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
-export type TaskAssessment={assessmentSetup?:{spares:boolean;services:boolean;tools:boolean};internalRoleRequirements?:ResourceRole[];attachments?:string[];id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string;hours?:number;skillRequirements?:ResourceSkill[]};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
+export type TaskAssessment={subtasks?:string[];assessmentSetup?:{spares:boolean;services:boolean;tools:boolean};internalRoleRequirements?:ResourceRole[];attachments?:string[];id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string;hours?:number;skillRequirements?:ResourceSkill[]};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
 export type MachineStatus='total_shutdown'|'live'|'full_loto'|'partial_isolation';
 export const MACHINE_STATUS:Array<[MachineStatus,string,string]>=[
  ['total_shutdown','Total shutdown','Equipment is stopped. Shutdown alone is not verified hazardous energy isolation.'],
@@ -26,7 +27,7 @@ export const machineOf=(t:{machineStatus?:MachineStatus;liveEquipment?:boolean;l
 export const machineLabel=(t:{machineStatus?:MachineStatus;liveEquipment?:boolean;lotoRequired?:boolean})=>MACHINE_STATUS.find(x=>x[0]===machineOf(t))?.[1]||'';
 const id=()=>Math.random().toString(36).slice(2,10);
 const newRisk=():Risk=>({hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}});
-const seed=():TaskAssessment=>({assessmentSetup:{spares:false,services:false,tools:false},id:'task_'+id(),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[newRisk()],templateStatus:'pending_validation',internalRoles:[],internalRoleRequirements:[],externalResource:undefined,machineStatus:'total_shutdown',lotoRequired:false,liveEquipment:false,energySourceCodes:[],permitCodes:[]});
+const seed=():TaskAssessment=>({assessmentSetup:{spares:false,services:false,tools:false},id:'task_'+id(),description:'',subtasks:[],disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[newRisk()],templateStatus:'pending_validation',internalRoles:[],internalRoleRequirements:[],externalResource:undefined,machineStatus:'total_shutdown',lotoRequired:false,liveEquipment:false,energySourceCodes:[],permitCodes:[]});
 const input='mt-1 w-full rounded-xl border border-line bg-page p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none read-only:opacity-70';
 const label='block text-sm text-soft';
 const roles=[['operator','Operator'],['technician','Technician'],['specialist','Specialist'],['engineer','Engineer']] as const;
@@ -73,7 +74,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
   {!tasks.length&&<p className='text-sm text-amber-400'>No tasks assessed.</p>}
   {tasks.map((t,i)=><section key={t.id} className='space-y-2 rounded-xl border border-line p-3 text-sm'>
    <h4 className='font-semibold text-ink'>Task {i+1}: {t.title||t.description}</h4>
-   <p className='text-soft'>{t.description}</p>
+   <OrderedStepReview label='Subtasks' values={legacySteps(t.subtasks,t.description)}/>
    {!!t.attachments?.length&&<div className='grid grid-cols-2 gap-2'>{t.attachments.map((path,i)=>options?.photos?.[path]?<a key={path} href={options.photos[path]} target='_blank' rel='noreferrer' className='rounded-lg border border-line p-2 text-xs text-brand'>{/\.(jpg|png)$/i.test(path)?<img src={options.photos[path]} alt={'Assessment photo '+(i+1)} className='mb-1 aspect-video w-full rounded-md object-cover'/>:null}View assessment evidence {i+1}</a>:<p key={path} className='text-xs text-soft'>Evidence {i+1} attached</p>)}</div>}
    <p className='text-xs text-brand'>Maintenance strategy: {t.maintenanceTypeCode?((options?.maintenanceTypes||[]).find(m=>m.code===t.maintenanceTypeCode)?.label||t.maintenanceTypeLabel||t.maintenanceTypeCode):'Inherit Work Order type'}</p>
    <p>Internal: {t.internalRoleRequirements!==undefined?t.internalRoleRequirements.map(r=>(r.roleLabel||options?.executionRoles?.find(x=>x.code===r.roleCode)?.label||r.roleCode)+' · '+r.persons+' × '+r.hours+' h').join('; ')||'None':(t.internalRoles||[]).map(c=>roles.find(x=>x[0]===c)?.[1]||c).join(', ')||'None'}{t.internalRoleRequirements===undefined?' · '+t.persons+' people · '+t.hours+' hours':''}</p>
@@ -90,7 +91,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
    <p className='font-medium text-ink'>External services ({t.services?.length||0})</p>
    {t.services?.map(sv=><div key={sv.id} className='rounded-lg bg-page p-2'>
     {sv.description} · {sv.personnel??'—'} people · {sv.durationHours??'—'} h
-    <span className='block text-xs text-muted'>Scope: {sv.scope} · Deliverables: {sv.deliverables} · Acceptance: {sv.acceptanceCriteria}</span>{sv.specialistRequired&&<span className='block text-xs text-soft'>External specialist support · {sv.skillRequirements?.map(r=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; ')}</span>}{sv.qualifications&&<span className='block text-xs text-soft'>Competencies: {sv.qualifications}</span>}{(sv.justification||sv.justificationReasons?.length)?<div className='mt-1 space-y-1 text-xs'><p className='font-medium'>External service justification: {serviceJustificationLabels(sv.justificationReasons)||'—'}</p><p className='whitespace-pre-wrap break-words'>{sv.justification}</p></div>:<p className='text-xs text-muted'>Justification not recorded</p>}{sv.expectedCost!=null&&<span className='block text-xs text-soft'>Previously recorded indicative cost: {options?.currency||''} {Number(sv.expectedCost).toLocaleString()}</span>}
+    <span className='block text-xs text-muted'>Deliverables: {sv.deliverables} · Acceptance: {sv.acceptanceCriteria}</span><OrderedStepReview label='Scope' values={legacySteps(sv.scopeSteps,sv.scope,sv.instructions)}/>{!!sv.skillRequirements?.length&&<span className='block text-xs text-soft'>Required skills · {sv.skillRequirements?.map(r=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; ')}</span>}{!sv.skillRequirements?.length&&sv.qualifications&&<span className='block text-xs text-soft'>Competencies: {sv.qualifications}</span>}{(sv.justification||sv.justificationReasons?.length)?<div className='mt-1 space-y-1 text-xs'><p className='font-medium'>External service justification: {serviceJustificationLabels(sv.justificationReasons)||'—'}</p><p className='whitespace-pre-wrap break-words'>{sv.justification}</p>{!!sv.missingSkillCodes?.length&&<p>Missing skills: {sv.skillRequirements?.filter(r=>sv.missingSkillCodes?.includes(r.skillCode)).map(r=>r.skillLabel||r.skillCode).join('; ')}</p>}</div>:<p className='text-xs text-muted'>Justification not recorded</p>}{sv.expectedCost!=null&&<span className='block text-xs text-soft'>Previously recorded indicative cost: {options?.currency||''} {Number(sv.expectedCost).toLocaleString()}</span>}
    </div>)}
    <p>Machine status: {machineLabel(t)}{t.lotoRequired?' · LOTO: '+(t.energySourceCodes||[]).length+' energy source(s)':''}</p>
    {!!t.energySourceCodes?.length&&<p>Hazardous energy: {t.energySourceCodes.map(code=>options?.hazardousEnergy.find(x=>x.code===code)?.label||code).join(', ')}</p>}
@@ -109,7 +110,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const options=useLoad(()=>callBackend<Options>('/api/org/mnt/assessment/options',{code}),[code]);
  const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
  const [current,setCurrent]=useState<number|null>(null),[step,setStep]=useState(0),[saving,setSaving]=useState(false),[message,setMessage]=useState(''),[photoUrls,setPhotoUrls]=useState<Record<string,string>>({});
- const [adding,setAdding]=useState(false),[draft,setDraft]=useState<{title:string;description:string}|null>(null),[spareWarehouse,setSpareWarehouse]=useState(''),[openService,setOpenService]=useState<number|null>(null),[energySearch,setEnergySearch]=useState(''),[permitSearch,setPermitSearch]=useState('');
+ const [adding,setAdding]=useState(false),[draft,setDraft]=useState<{title:string;description:string;subtasks:string[]}|null>(null),[spareWarehouse,setSpareWarehouse]=useState(''),[openService,setOpenService]=useState<number|null>(null),[energySearch,setEnergySearch]=useState(''),[permitSearch,setPermitSearch]=useState('');
  const hasUnsaved=dirty||!!draft&&(!!draft.title.trim()||!!draft.description.trim());
  useEffect(()=>{onDirtyChange?.(hasUnsaved);return()=>onDirtyChange?.(false);},[hasUnsaved,onDirtyChange]);
  const task=tasks[current??0]||seed();
@@ -123,11 +124,11 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const urls={...(options.data?.photos||{}),...photoUrls};
  const resourceIssues=(t:TaskAssessment)=>[...(t.internalRoleRequirements!==undefined&&!(t.internalRoleRequirements.length||t.externalResource||t.services.length)?['Select an execution job role or external resource']:[]),...(t.internalRoleRequirements||[]).filter(r=>!Number.isInteger(r.persons)||r.persons<1||!(r.hours>=.25)).map(r=>(r.roleLabel||r.roleCode)+': headcount and hours required'), ];
  const externalIssues=(t:TaskAssessment)=>t.externalResource?.type?[...(!t.externalResource.skillRequirements?.length?['Select external skills and proficiency']:[]),...(!Number.isInteger(t.externalResource.persons)||t.externalResource.persons<1?['External specialist headcount required']:[]),...(!(Number(t.externalResource.hours)>=.25)?['External resource hours required']:[]),...(!t.externalResource.notes.trim()?['External technical scope required']:[])]:[];
- const taskProblems=(t:TaskAssessment)=>[...(t.assessmentSetup?.spares&&!t.spares.length?['Add required spares']:[]),...(t.assessmentSetup?.services&&!t.services.length?['Add required services']:[]),...resourceIssues(t),...externalIssues(t),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
+ const taskProblems=(t:TaskAssessment)=>[...(!legacySteps(t.subtasks,t.description).length||legacySteps(t.subtasks,t.description).some(x=>x.trim().length<3||x.trim().length>500)?['Enter valid subtasks']:[]),...(t.assessmentSetup?.spares&&!t.spares.length?['Add required spares']:[]),...(t.assessmentSetup?.services&&!t.services.length?['Add required services']:[]),...resourceIssues(t),...externalIssues(t),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
  // Open items per section, shown on the section progress and before leaving the task (verification).
  const sectionIssues=(t:TaskAssessment):string[][]=>[
   [...(t.assessmentSetup?.spares&&!t.spares.length?['Add required spares']:[]),...(t.assessmentSetup?.services&&!t.services.length?['Add required services']:[])],
-  [...(!(t.title||'').trim()?['Task name']:[]),...(t.description.trim().length<3?['Work description (at least 3 characters)']:[])],
+  [...(!(t.title||'').trim()?['Task name']:[]),...((!legacySteps(t.subtasks,t.description).length||legacySteps(t.subtasks,t.description).some(x=>x.trim().length<3))?['Enter subtasks (at least 3 characters each)']:[])],
   [...t.spares.filter(sp=>!(Number(sp.qty)>0)).map(sp=>(sp.description||'Spare')+': quantity above zero'),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x))],
   [...externalIssues(t),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))],
   resourceIssues(t),
@@ -159,7 +160,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const saveDraft=async(exit=false)=>{
   if(recordType!=='wo'||saving)return;
   setSaving(true);setMessage('');try{
-   const pending=draft&&(draft.title.trim()||draft.description.trim())?[...tasks,{...seed(),code:nextCode(),title:draft.title,description:draft.description}]:tasks;
+   const pending=draft&&(draft.title.trim()||draft.description.trim())?[...tasks,{...seed(),code:nextCode(),title:draft.title,description:draft.description,subtasks:draft.subtasks}]:tasks;
    await callBackend('/api/org/mnt/wo/action',{code,action:'save_assessment_draft',tasks:pending});
    setTasks(pending);setDraft(null);setDirty(false);setSavedDraft(true);setMessage('Draft saved. You can return to this assessment later. It has not been submitted.');if(exit)onCancel?.();
   }catch(e){setMessage(e instanceof Error?e.message:'Draft could not be saved.');}finally{setSaving(false);}
@@ -180,8 +181,8 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const addTask=()=>{
    if(!editable||!draft)return;
    const title=draft.title.trim(),description=draft.description.trim();
-   if(title.length<3||description.length<3){setMessage('Enter a task name and a description (at least 3 characters each).');return;}
-   setTasks(old=>[...old,{...seed(),code:nextCode(),title,description}]);
+   if(title.length<3||!draft.subtasks.length||draft.subtasks.some(x=>x.trim().length<3)){setMessage('Enter a task name and a description (at least 3 characters each).');return;}
+   setTasks(old=>[...old,{...seed(),code:nextCode(),title,description,subtasks:draft.subtasks}]);
    setDraft(null);setDirty(true);setMessage('Task added. Open it to add spares, services, people and safety, then save the assessment.');
  };
  if(current===null)return <div className='min-w-0 space-y-3'>
@@ -191,7 +192,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     <p className='mt-0.5 text-xs text-muted'>{editable?'Open a task to set its spares, services, people, time, tools and safety.':'Open a task to inspect the saved assessment (read-only).'}</p>
    </div>
    <div className='flex shrink-0 flex-wrap gap-2'>
-    {editable&&!draft&&<Button variant='secondary' onClick={()=>{setDraft({title:'',description:''});setMessage('');}}>+ Add Task</Button>}
+    {editable&&!draft&&<Button variant='secondary' onClick={()=>{setDraft({title:'',description:'',subtasks:[]});setMessage('');}}>+ Add Task</Button>}
     {editable&&recordType==='wo'&&<Button variant='secondary' busy={saving} disabled={saving||(!dirty&&!draft)} onClick={()=>void saveDraft()}>Save draft</Button>}{editable&&recordType==='wo'&&onCancel&&<Button variant='secondary' disabled={saving} onClick={()=>hasUnsaved?void saveDraft(true):onCancel()}>Save &amp; exit</Button>}{editable&&tasks.length>0&&<Button busy={saving} disabled={saving||(!dirty&&!savedDraft)||!!draft} onClick={save}>{recordType==='wo'?'Complete assessment':'Save assessment for review'}</Button>}
    </div>
    {dirty&&<p className='w-full text-xs text-amber-400'>Unsaved changes. Save a draft to continue later, or complete the assessment when ready.</p>}
@@ -200,9 +201,9 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
   {draft&&<StepSection title={'New task · '+nextCode()} hint='Name the task and describe the work. You then open it to add the details.'>
    <div className='space-y-3'>
     <label className={label}>Task name *<input className={input} autoFocus maxLength={120} value={draft.title} onChange={e=>setDraft({...draft,title:e.target.value})} placeholder='e.g. Replace drive-end bearing'/></label>
-    <label className={label}>Description *<textarea className={input} rows={3} maxLength={300} value={draft.description} onChange={e=>setDraft({...draft,description:e.target.value})} placeholder='What work is required?'/></label>
+    <MntOrderedSteps label='Subtasks' itemLabel='subtask' values={draft.subtasks} onChange={subtasks=>setDraft({...draft,subtasks,description:subtasks.join('\n')})}/>
     <div className='flex gap-2'>
-     <Button disabled={draft.title.trim().length<3||draft.description.trim().length<3} onClick={addTask}>Save task</Button>
+     <Button disabled={draft.title.trim().length<3||!draft.subtasks.length||draft.subtasks.some(x=>x.trim().length<3)} onClick={addTask}>Save task</Button>
      <Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button>
     </div>
     {library.data?.items.length?<details className='rounded-xl border border-line p-3'><summary className='flex min-h-9 cursor-pointer items-center text-sm text-soft'>Or reuse an approved equipment/assembly task ({library.data.items.length})</summary>
@@ -264,7 +265,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    {activeSection==='Task'&&<StepSection title='Task' hint='What is done and which maintenance strategy it follows.'>
     <div className='space-y-3'>
      <label className={label}>Task name<input className={input} value={task.title||''} onChange={e=>patch({title:e.target.value})}/></label>
-     <label className={label}>Describe the work<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='What is required?'/></label><div className='rounded-xl border border-line p-2'><p className='text-xs text-soft'>Assessment photos (optional)</p><Attachments code={code} files={task.attachments||[]} urls={urls} onChange={(files,u)=>{patch({attachments:files});setPhotoUrls(old=>({...old,...u}));}}/></div>
+     <MntOrderedSteps label='Subtasks' itemLabel='subtask' values={legacySteps(task.subtasks,task.description)} onChange={subtasks=>patch({subtasks,description:subtasks.join('\n')})}/><div className='rounded-xl border border-line p-2'><p className='text-xs text-soft'>Assessment photos (optional)</p><Attachments code={code} files={task.attachments||[]} urls={urls} onChange={(files,u)=>{patch({attachments:files});setPhotoUrls(old=>({...old,...u}));}}/></div>
      <div className={label}>Maintenance strategy for this task (Finance reporting)
        <MntSelect label={'Maintenance strategy for this task'} hideLabel className={input} disabled={breakIn} value={breakIn?'':task.maintenanceTypeCode||''} onChange={e=>{
          const type=options.data?.maintenanceTypes?.find(t=>t.code===e.target.value);

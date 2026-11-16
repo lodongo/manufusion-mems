@@ -336,7 +336,8 @@ export async function enforceSourcingRules(ctx: OrgContext, record: Doc, tasks: 
             v.proposedVendorIds=texts(p?.proposedVendorIds);
             v.executionDate=str(p?.executionDate);
             v.expectedCost=p?.expectedCost??null;
-            for(const [key,label] of [['scope','technical scope'],['qualifications','required competencies'],['deliverables','deliverables'],['acceptanceCriteria','acceptance criteria']]) {
+            if(!Array.isArray(v.skillRequirements)||!v.skillRequirements.length){if(!str(v.qualifications).trim())throw new HttpError(400,at+'select required skills.');}
+            for(const [key,label] of [['scope','technical scope'],['deliverables','deliverables'],['acceptanceCriteria','acceptance criteria']]) {
                 if(!str(v[key]).trim())throw new HttpError(400,at+'enter '+label+'.');
             }
         }

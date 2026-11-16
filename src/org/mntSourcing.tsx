@@ -1,3 +1,4 @@
+import MntOrderedSteps,{legacySteps} from './MntOrderedSteps';
 import MntExternalSkills from './MntExternalSkills';
 import type {ResourceSkill} from '../../backend/maintenanceTaskAssessment';
 import {PROCUREMENT_UNITS} from '../../backend/procurementUnits';
@@ -541,7 +542,7 @@ export function serviceJustificationLabels(selected:unknown):string {
 export function newService(): Any {
     return {
         id: 'sv_' + Math.random().toString(36).slice(2, 10), description: '', categoryCode: '', subcategoryCode: '', classCode: '', catalogCode: '', attributes: {},
-        proposedVendorIds: [], scope: '', instructions: '', deliverables: '', qualifications: '', certifications: '', acceptanceCriteria: '',
+        proposedVendorIds: [], scopeSteps: [], missingSkillCodes: [], scope: '', instructions: '', deliverables: '', qualifications: '', certifications: '', acceptanceCriteria: '',
         specialistRequired:false,skillRequirements:[],justificationReasons:[],justification:'',quantity: 1, personnel: 1, durationHours: 8, executionDate: '', expectedCost: null, supplierCategory: '', attachments: [],
     };
 }
@@ -549,11 +550,12 @@ export function serviceProblems(s: Any): string[] {
     const out: string[] = [];
     if (!s.categoryCode || !s.subcategoryCode || !s.classCode) out.push('service category, subcategory and class');
     if (String(s.description || '').trim().length < 3) out.push('service name');
-    if (!String(s.scope || '').trim()) out.push('technical scope');
-    if (!String(s.qualifications || '').trim()) out.push('required competencies');
+    if (!legacySteps(s.scopeSteps,s.scope,s.instructions).length||legacySteps(s.scopeSteps,s.scope,s.instructions).some(x=>x.trim().length<3||x.trim().length>500)) out.push('scope steps');
+    if (!s.skillRequirements?.length) out.push('required catalogue skills');
     if (!String(s.deliverables || '').trim()) out.push('deliverables');
     if (!String(s.acceptanceCriteria || '').trim()) out.push('acceptance criteria');
     if(!serviceJustificationLabels(s.justificationReasons)||String(s.justification||'').trim().length<10)out.push('external service justification');
+    if(s.justificationReasons?.includes('skills')&&(!s.missingSkillCodes?.length||s.missingSkillCodes.some((code:string)=>!s.skillRequirements?.some((r:ResourceSkill)=>r.skillCode===code))))out.push('select missing required skills');
     if(s.specialistRequired&&(!s.skillRequirements?.length||!Number.isInteger(Number(s.personnel))||Number(s.personnel)<1||!(Number(s.durationHours)>=.25)))out.push('specialist competencies, headcount and hours');
     // Supplier selection, commercial estimate and execution date belong to planning.
     return out;
@@ -602,20 +604,18 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls,s
                 </div>
             </div>
             {text('description', 'Service name', 0, 'e.g. Rewind 37 kW 4-pole motor')}
-            {text('scope', 'Detailed technical scope', 3, 'What the provider must do, step by step, e.g. strip, rewind with class F wire, varnish, replace both bearings, test')}
-            {text('instructions', 'Work instructions and specifications', 2, 'Standards, drawings or manuals to follow, e.g. IEC 60034, OEM manual section 7')}
-            <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-                {text('qualifications', 'Required competencies', 2, 'e.g. Certified motor rewinder, electrician grade A')}
-                {text('certifications', 'Certifications required', 2, 'e.g. EPRA licence, ISO 9001, OEM authorisation letter')}
-            </div>
+            <MntOrderedSteps label='Scope' itemLabel='scope step' values={legacySteps(value.scopeSteps,value.scope,value.instructions)} onChange={scopeSteps=>set({scopeSteps,scope:scopeSteps.join('\n'),instructions:''})}/>
+            <MntExternalSkills skills={skills} selected={(value.skillRequirements||[]) as ResourceSkill[]} onChange={skillRequirements=>set({skillRequirements,qualifications:skillRequirements.map(r=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; '),missingSkillCodes:(value.missingSkillCodes||[]).filter((code:string)=>skillRequirements.some(r=>r.skillCode===code))})}/>
+            {!!value.qualifications&&!value.skillRequirements?.length&&<p className='text-xs text-soft'>Previous competency text: {value.qualifications}. Select matching catalogue skills above.</p>}
+            {text('certifications', 'Certifications required', 2, 'e.g. EPRA licence, ISO 9001, OEM authorisation letter')}
             <div className='grid grid-cols-3 gap-2'>
                 {num('personnel', 'People')}
                 {num('durationHours', 'Hours', 0.25)}
                 {num('quantity', 'Quantity')}
             </div>
-            <section className='space-y-2 rounded-xl border border-line p-3'><p className='font-semibold text-sm'>External specialist support</p><label className='flex items-center gap-2 text-sm'><input type='checkbox' checked={!!value.specialistRequired} onChange={e=>set({specialistRequired:e.target.checked})}/> Specialist personnel required for this service</label>{value.specialistRequired&&<MntExternalSkills skills={skills} selected={(value.skillRequirements||[]) as ResourceSkill[]} onChange={skillRequirements=>set({skillRequirements})}/>}<p className='text-xs text-soft'>Use the service people and duration fields for the specialist load.</p></section>
+            <section className='space-y-2 rounded-xl border border-line p-3'><p className='font-semibold text-sm'>External specialist support</p><label className='flex items-center gap-2 text-sm'><input type='checkbox' checked={!!value.specialistRequired} onChange={e=>set({specialistRequired:e.target.checked})}/> Specialist personnel required for this service</label><p className='text-xs text-soft'>Use the service people and duration fields for the specialist load.</p></section>
             {text('deliverables', 'Deliverables', 2, 'e.g. Repaired motor, test report with insulation resistance, warranty certificate')}
-            <section className='space-y-2 rounded-xl border border-line p-3'><p className='font-semibold text-sm'>Justification for external service</p><p className='text-xs text-soft'>Select all applicable internal capability or capacity gaps. The justification is reviewed with the normal assessment if approval is configured; there is no separate approval.</p>{SERVICE_JUSTIFICATION_REASONS.map(([k,label])=><label key={k} className='flex items-center gap-3 rounded-lg border border-line p-2 text-sm'><input type='checkbox' checked={(value.justificationReasons||[]).includes(k)} onChange={e=>set({justificationReasons:e.target.checked?[...new Set([...(value.justificationReasons||[]),k])]: (value.justificationReasons||[]).filter((x:string)=>x!==k)})}/>{label}</label>)}{text('justification','Explain what is lacking internally and why outsourcing is needed',3)}</section>
+            <section className='space-y-2 rounded-xl border border-line p-3'><p className='font-semibold text-sm'>Justification for external service</p><p className='text-xs text-soft'>Select all applicable internal capability or capacity gaps. The justification is reviewed with the normal assessment if approval is configured; there is no separate approval.</p>{SERVICE_JUSTIFICATION_REASONS.map(([k,label])=><label key={k} className='flex items-center gap-3 rounded-lg border border-line p-2 text-sm'><input type='checkbox' checked={(value.justificationReasons||[]).includes(k)} onChange={e=>set({justificationReasons:e.target.checked?[...new Set([...(value.justificationReasons||[]),k])]: (value.justificationReasons||[]).filter((x:string)=>x!==k),...(k==='skills'&&!e.target.checked?{missingSkillCodes:[]}:{})})}/>{label}</label>)}{value.justificationReasons?.includes('skills')&&<div className='space-y-2 rounded-lg bg-page p-2'><p className='text-sm font-medium'>Which required skills are missing internally? *</p>{!(value.skillRequirements||[]).length&&<p className='text-xs text-soft'>Add required skills above first.</p>}{((value.skillRequirements||[]) as ResourceSkill[]).map(r=><label key={r.skillCode} className='flex items-center gap-2 text-sm'><input type='checkbox' checked={(value.missingSkillCodes||[]).includes(r.skillCode)} onChange={e=>set({missingSkillCodes:e.target.checked?[...new Set([...(value.missingSkillCodes||[]),r.skillCode])]:(value.missingSkillCodes||[]).filter((c:string)=>c!==r.skillCode)})}/><span>{r.skillLabel||r.skillCode} · {r.level}<span className='block text-xs text-soft'>{r.category} / {r.subcategory}</span></span></label>)}</div>}{text('justification','Explain what is lacking internally and why outsourcing is needed',3)}</section>
             {text('acceptanceCriteria', 'Acceptance criteria', 2, 'How you will check the work, e.g. no-load current within 5% of nameplate, IR above 100 MΩ')}
             <p className='rounded-lg bg-page p-2 text-xs text-soft'>Supplier sourcing, execution dates and commercial estimates are handled during planning.{value.expectedCost!=null?' Previously recorded indicative cost: '+Number(value.expectedCost).toLocaleString():''}</p>
             <Attachments code={code} files={value.attachments || []} urls={urls} onChange={(files, u) => { set({ attachments: files }); onUrls(u); }} />
