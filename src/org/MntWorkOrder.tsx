@@ -787,7 +787,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 initial={(wo.assessmentDraft?.tasks??tasks) as any}
                 hasSavedDraft={Array.isArray(wo.assessmentDraft?.tasks)}
                 initialCommit={wo.assessmentDraft?.commit?.at||''}
-                commitmentDates={{expectedStart:wo.expectedStart||wo.scheduledStart||'',expectedEnd:wo.expectedEnd||wo.scheduledEnd||'',scheduledStart:wo.scheduledStart||'',scheduledEnd:wo.scheduledEnd||'',expectedDatesLocked:!!wo.expectedDatesLocked,startDateMoves:Math.max(Number(wo.startDateMoves)||0,(wo.dateChanges||[]).filter((x:MntData)=>x.fromStart&&x.fromStart!==x.toStart).length)}}
+                commitmentDates={{expectedStart:wo.expectedStart||wo.scheduledStart||'',expectedEnd:wo.expectedEnd||wo.scheduledEnd||'',scheduledStart:wo.scheduledStart||'',scheduledEnd:wo.scheduledEnd||'',expectedDatesLocked:!!wo.expectedDatesLocked,earliestStart:data.maintenanceCycle?.restrictedTypes?.includes(wo.maintenanceTypeCode)?data.maintenanceCycle?.nextStart:data.maintenanceCycle?.today,commit:wo.assessmentDraft?.commit,startDateMoves:Math.max(Number(wo.startDateMoves)||0,(wo.dateChanges||[]).filter((x:MntData)=>x.fromStart&&x.fromStart!==x.toStart).length)}}
                 editable
                 onSaved={() => {
                     setAssessing(false);setAssessmentDirty(false);
