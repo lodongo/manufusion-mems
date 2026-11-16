@@ -1,3 +1,4 @@
+import {assessmentSkills} from './maintenanceAssessmentResources';
 import {verifyToolRequirements} from './maintenanceToolCatalogue';
 import { getDoc, HttpError, str, type Doc, type Plain } from './core';
 import type { OrgContext } from './guards';
@@ -10,15 +11,12 @@ import { enforceSourcingRules } from './maintenanceSourcing';
 /** Persist canonical equipment links and catalogue specifications at assessment time. */
 export async function prepareMaintenanceAssessment(ctx: OrgContext, record: Doc, tasks: AssessedTask[]) {
     await verifyToolRequirements(ctx,record,tasks);
-    const skillMaster = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
-    const activeSkills = new Set(
-        (Array.isArray(skillMaster?.data.items) ? skillMaster.data.items : [])
-            .filter((x) => x && typeof x === 'object' && !Array.isArray(x) && x.active !== false)
-            .map((x: any) => str(x.code)),
-    );
+    // The controlled Skills Master used by HRM and the assessment options endpoint.
+    // Legacy module metadata is not the authoritative list.
+    const activeSkills = new Set((await assessmentSkills()).map(s=>s.code));
     for (const t of tasks) {
-        if ((t.skillCodes || []).some((code) => !activeSkills.has(code)))
-            throw new HttpError(400, 'Choose task competencies from the active HRM Skills Master.');
+        const unavailable=(t.skillCodes||[]).filter(code=>!activeSkills.has(code));
+        if(unavailable.length)throw new HttpError(400,'Task '+(t.catalogueReference?.taskCode||t.code||t.id)+' — '+(t.title||t.description)+': required competencies unavailable in the current HRM Skills Master ('+unavailable.join(', ')+'). Open Internal Task → Required competencies and replace or remove only inapplicable requirements; otherwise ask HR to enable the required skills.');
         // The four-step assessor UI captures task scope and the people needed.
         // Preserve the richer legacy fields without making them additional
         // mandatory form steps: derive transparent planning placeholders.

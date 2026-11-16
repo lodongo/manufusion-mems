@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
+const src=p=>readFileSync(new URL('../../'+p,import.meta.url),'utf8');
+test('maintenance commitment validates imported competencies against the current HRM reference master, not legacy metadata',()=>{const api=src('backend/maintenanceAssessmentIntegration.ts'),resources=src('backend/maintenanceAssessmentResources.ts'),ui=src('src/org/MntTaskAssessment.tsx');assert.match(api,/await assessmentSkills\(\)/);assert.doesNotMatch(api,/module_workspaces\/HRM\/metadata\/skillsMaster/);assert.match(resources,/reference\/skills_master\/items/);assert.match(api,/unavailable.join/);assert.match(ui,/competencyIssues\(t\)/);assert.match(ui,/<TaskCompetencies/);});
