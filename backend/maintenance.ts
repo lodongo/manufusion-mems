@@ -2369,7 +2369,7 @@ export const maintenanceRoutes = {
                     if(d.executionMode!=='confirmed_request'||str(d.status)!=='planning')throw new HttpError(409,'Technical classification belongs to the assessment step of a confirmed Work Order.');
                     need(ctx,P.assessment_edit,pathOf(doc),scope);if(groupAt(ctx.workGroupPolicy,pathOf(doc)))await requireConfiguredMaintenanceRole(ctx,'MNT.WR.ASSESS',pathOf(doc));
                     if(maintenanceAssessmentApprovalRequired(d)&&workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true&&!bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))throw new HttpError(403,'Assessment reviewer cannot create the assessment.');
-                    if(object(d.assessmentReview).status==='approved'||Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Approved technical scope is locked. Open controlled reassessment before editing.');
+                    if(['approved','pending'].includes(str(object(d.assessmentReview).status))||Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Submitted or planned technical scope is locked. Open controlled reassessment before editing.');
                     const evaluation=str(b.technicalEvaluation).trim().slice(0,3000);if(evaluation.length<20)throw new HttpError(400,'Write at least 20 characters of technical evaluation.');
                     const nature=pickGrouped(l.failureModes,str(b.natureCode),'failure mode')!,crit=pick(l.criticality,str(b.severityCode),'severity')!,mtype=d.breakIn===true&&str(d.parentWoCode)?BREAK_IN_TYPE:pick(l.maintenanceTypes,str(b.maintenanceTypeCode),'maintenance type')!,prio=pick(l.priorities,str(b.priorityCode),'priority',false);
                     const start=b.scheduledStart===undefined?str(d.scheduledStart):str(b.scheduledStart),end=b.scheduledEnd===undefined?str(d.scheduledEnd):str(b.scheduledEnd),dateChanged=start!==str(d.scheduledStart)||end!==str(d.scheduledEnd),typeChanged=mtype.code!==str(d.maintenanceTypeCode),cycle=await getMaintenanceCycle(ctx);
@@ -2390,7 +2390,7 @@ export const maintenanceRoutes = {
                     await requireStageApproval(ctx,doc,'before_assessment');
                     if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning'||((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',pathOf(doc))===false||(maintenanceAssessmentApprovalRequired(d)&&workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true))&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))))
                         throw new HttpError(403,'The work order must be in assessment/planning and within your scope.');
-                    if(object(d.assessmentReview).status==='approved'||Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Approved task requirements are locked. Open controlled reassessment before editing.');
+                    if(['approved','pending'].includes(str(object(d.assessmentReview).status))||Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Submitted or planned task requirements are locked. Open controlled reassessment before editing.');
                     let tasks;
                     try{
                         const m=await getDoc(`organizations/${ctx.orgId}/saf/risk_matrix`);

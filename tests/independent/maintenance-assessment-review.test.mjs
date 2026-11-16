@@ -23,3 +23,5 @@ test('approved review is bound to task and header revision and mapped job role',
  assert.equal(assessmentReviewCurrent({...b,assessmentReview:snapshot},'ROL_000456'),false);
  assert.equal(assessmentReviewCurrent({...b,assessmentReview:{status:'changes_requested'}},'ROL_000123'),false);
 });
+
+test('saved drafts are not completed or reviewable assessments',()=>{const b=base(),snapshot=approvedAssessmentSnapshot(b,'independent','Supervisor','ROL_000123','2026-10-19T10:00:00Z','Verified tasks, risk and controls');const draft={...b,assessmentDraft:{tasks:[{id:'incomplete'}]},assessmentReview:snapshot};assert.match(reviewAssessmentPrerequisites(draft,'independent'),/saved assessment draft/);assert.equal(assessmentReviewCurrent(draft,'ROL_000123'),false);});

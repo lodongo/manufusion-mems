@@ -1,3 +1,4 @@
+import {appConfirm} from '../components/dialogs';
 import MntExpectedDates,{ExpectedDateHelp} from './MntExpectedDates';
 import MntSelect from './MntSelect';
 import MntTestDeletion from './MntTestDeletion';
@@ -692,6 +693,8 @@ export default function MntWorkOrder({ code }: { code: string }) {
         [failure, setFailure] = useState(''),
         [busy, setBusy] = useState(false),
         [form, setForm] = useState<MntData>({});
+    const [assessmentDirty,setAssessmentDirty]=useState(false);
+    const leaveAssessment=async()=>{if(assessmentDirty&&!(await appConfirm('There are unsaved assessment changes. Leave without saving them?')))return;setAssessing(false);setAssessmentDirty(false);reload();};
     const screen = useFullScreen(assessing);
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone="error">{error || 'Work order unavailable.'}</Alert>;
@@ -756,7 +759,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
             <div className={screen.full ? screen.className + ' overflow-y-auto overscroll-contain' : ''} onFocusCapture={screen.keepInView}>
             {screen.full && (
                 <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-page py-2">
-                    <Button variant="secondary" aria-label="Back to work order" onClick={() => setAssessing(false)}>
+                    <Button variant="secondary" aria-label="Back to work order" onClick={()=>void leaveAssessment()}>
                         <ArrowLeft size={16} />
                     </Button>
                     <p className="min-w-0 flex-1 truncate font-semibold">{wo.code} · task assessment</p>
@@ -772,10 +775,11 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 hasSavedDraft={Array.isArray(wo.assessmentDraft?.tasks)}
                 editable
                 onSaved={() => {
-                    setAssessing(false);
+                    setAssessing(false);setAssessmentDirty(false);
                     reload();
                 }}
-                onCancel={() => {setAssessing(false);reload();}}
+                onDirtyChange={setAssessmentDirty}
+                onCancel={() => {setAssessing(false);setAssessmentDirty(false);reload();}}
             />
             </div>
         );
