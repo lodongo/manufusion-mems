@@ -138,9 +138,28 @@ export function configurationIssues(profile:EnergyProfile,values:Record<string,u
  for(const f of profile.fields.filter(f=>applies(f,values))){const v=values[f.code];if(f.required&&!configuredField(f,v))issues.push(f.label);else if(typeof v==='string'&&/unknown|not identified/i.test(v))issues.push(f.label+' — unresolved');}
  for(const test of profile.tests.filter(t=>applies(t,values))){
   const x=tests[test.code] as Record<string,unknown>|undefined;
-  if(!x){issues.push(test.label+' — missing');continue;}
-  if(x.result==='not_applicable'&&test.conditional&&typeof x.justification==='string'&&x.justification.trim().length>=20&&typeof x.tester==='string'&&x.tester.trim()&&!!x.basis&&typeof x.evidenceToken==='string'&&x.evidenceToken)continue;
-  if(x.result!=='pass'||!validDay(String(x.lastDate||''))||!validDay(String(x.nextDue||''))||String(x.lastDate)>today||String(x.nextDue)<=String(x.lastDate)||String(x.nextDue)<today||!x.tester||!x.basis||!x.measurement||!x.evidenceToken)issues.push(test.label+' — missing, failed or overdue evidence');
+  if(!x){issues.push(test.label+' — no inspection record; enter result and applicable evidence');continue;}
+  if(x.result==='not_applicable'&&test.conditional){
+   const missing:string[]=[];
+   if(typeof x.justification!=='string'||x.justification.trim().length<20)missing.push('competent-person justification (at least 20 characters)');
+   if(typeof x.tester!=='string'||!x.tester.trim())missing.push('competent person');
+   if(!x.basis)missing.push('applicability / reference basis');
+   if(typeof x.evidenceToken!=='string'||!x.evidenceToken)missing.push('supporting evidence upload');
+   if(missing.length)issues.push(test.label+' — not-applicable record requires: '+missing.join(', '));
+   continue;
+  }
+  const missing:string[]=[];
+  if(x.result!=='pass')missing.push(x.result==='fail'?'failed result — resolve defect and record satisfactory retest':x.result==='pending'?'inspection result pending':'select satisfactory result after inspection');
+  const last=String(x.lastDate||''),next=String(x.nextDue||'');
+  if(!validDay(last))missing.push('valid last inspection date');
+  else if(last>today)missing.push('last inspection date is in the future');
+  if(!validDay(next))missing.push('valid next due date');
+  else {if(validDay(last)&&next<=last)missing.push('next due date must be after last inspection');if(next<today)missing.push('inspection overdue since '+next+' — arrange applicable inspection');}
+  if(!x.tester)missing.push('inspector / examiner');
+  if(!x.basis)missing.push('inspection basis / reference');
+  if(!x.measurement)missing.push('measurement or recorded findings');
+  if(!x.evidenceToken)missing.push('inspection report upload');
+  if(missing.length)issues.push(test.label+' — '+missing.join('; '));
  }
  return issues;
 }

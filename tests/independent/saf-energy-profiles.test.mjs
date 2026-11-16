@@ -38,3 +38,5 @@ test('server keeps evidence scoped to equipment, point and individual test, and 
  assert.ok(ui.includes('Showing selected energy sources only.'));
  assert.ok(ui.includes('Configure & tag'));
 });
+
+test('inspection gaps identify the exact missing evidence and overdue date',()=>{const p={fields:[],tests:[{code:'test',label:'Electrical verification',critical:true,conditional:true}]};const problems=configurationIssues(p,{}, {test:{result:'pass',lastDate:'2026-01-01',nextDue:'2026-10-01',tester:'A',basis:'Scope',measurement:'Recorded',evidenceToken:''}},'2026-11-16');assert.match(problems.join(' '),/overdue since 2026-10-01/);assert.match(problems.join(' '),/inspection report upload/);assert.doesNotMatch(problems.join(' '),/inspector \/ examiner/);});
