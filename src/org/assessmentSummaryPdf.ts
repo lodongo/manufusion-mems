@@ -36,7 +36,7 @@ export async function buildAssessmentSummaryPdf(i:Input):Promise<Blob>{
  const photos=new Map<string,Photo>();const photoErrors=new Set<string>();
  for(const e of energyRows){if(e.photoToken)try{photos.set('e'+e.pointId,await photo('/api/org/saf/equipment-energy/read',{workCenterId:i.equipmentId,programPhotoPointId:e.pointId,version:energy!.version,utilityVersion:energy!.utilityVersion}));}catch{photoErrors.add('e'+e.pointId);}}
  for(const d of deviceRows){if(d.photoToken)try{photos.set('d'+d.deviceId,await photo('/api/org/saf/equipment-devices/program-photo',{workCenterId:i.equipmentId,deviceId:d.deviceId}));}catch{photoErrors.add('d'+d.deviceId);}}
- const pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4',compress:true});pdf.setTitle('MEMS assessment '+i.code);pdf.setCreator('Manufusion MEMS');
+ const pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4',compress:true});pdf.setProperties({title:'MEMS assessment '+i.code,creator:'Manufusion MEMS'});
  const blue:[number,number,number]=[23,56,77],teal:[number,number,number]=[15,118,110],width=pdf.internal.pageSize.getWidth(),height=pdf.internal.pageSize.getHeight();
  let y=36;
  const page=()=>{pdf.addPage();y=36;};
