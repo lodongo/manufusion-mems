@@ -121,8 +121,8 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const task=tasks[current??0]||seed();
  const taskTools=(task.toolRequirements||[]).filter(r=>r.kind==='Tools'),taskEquipment=(task.toolRequirements||[]).filter(r=>r.kind==='Equipment');
  const setup={spares:task.assessmentSetup?.spares??!!task.spares.length,services:task.assessmentSetup?.services??!!task.services.length,tools:task.assessmentSetup?.tools===true&&(!taskEquipment.length||taskTools.length>0||task.assessmentSetup?.equipment!==undefined)||!!task.tools||!!taskTools.length,equipment:task.assessmentSetup?.equipment===true||!!taskEquipment.length};
- const allSections=['Assessment setup','Task','Spares','Services','Resources','Tools','Equipment','Safety'];
- const sections=allSections.filter(n=>n==='Assessment setup'||n==='Task'||n==='Resources'||n==='Safety'||n==='Spares'&&setup.spares||n==='Services'&&setup.services||n==='Tools'&&setup.tools||n==='Equipment'&&setup.equipment);
+ const allSections=['Assessment setup','Internal Task','Spares','Services','Resources','Tools','Equipment','Safety'];
+ const sections=allSections.filter(n=>n==='Assessment setup'||n==='Internal Task'||n==='Resources'||n==='Safety'||n==='Spares'&&setup.spares||n==='Services'&&setup.services||n==='Tools'&&setup.tools||n==='Equipment'&&setup.equipment);
  const analysisSpares=tasks.flatMap(t=>t.spares||[]);
  const stockKey=JSON.stringify([...new Set(analysisSpares.filter(s=>s.materialId&&s.warehouseId).map(s=>s.warehouseId+'|'+s.materialId))].sort());
  const [stock,setStock]=useState<Record<string,{physical:number|null;available:number|null;stockVerified:boolean;unitCost?:number|null;estimateUnitPrice?:number|null;estimateCurrency?:string;estimatePurchaseUom?:string;estimateUomMatches?:boolean}>>({});
@@ -201,7 +201,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     <p className='mt-0.5 text-xs text-muted'>{editable?'Open a task to set its spares, services, people, time, tools and safety.':'Open a task to inspect the saved assessment (read-only).'}</p>
    </div>
    <div className='flex shrink-0 flex-wrap gap-2'>
-    {editable&&!draft&&<Button variant='secondary' onClick={()=>{setDraft({title:'',description:'',subtasks:[]});setMessage('');}}>+ Add Task</Button>}
+    {editable&&!draft&&<Button variant='secondary' onClick={()=>{setDraft({title:'',description:'',subtasks:[]});setMessage('');}}>+ Add Internal Task</Button>}
     {editable&&recordType==='wo'&&<Button variant='secondary' busy={saving} disabled={saving||(!dirty&&!draft)} onClick={()=>void saveDraft()}>Save draft</Button>}{editable&&recordType==='wo'&&onCancel&&<Button variant='secondary' disabled={saving} onClick={()=>hasUnsaved?void saveDraft(true):onCancel()}>Save &amp; exit</Button>}{editable&&tasks.length>0&&<Button busy={saving} disabled={saving||(!dirty&&!savedDraft)||!!draft} onClick={save}>{recordType==='wo'?'Complete assessment':'Save assessment for review'}</Button>}
    </div>
    {dirty&&<p className='w-full text-xs text-amber-400'>Unsaved changes. Save a draft to continue later, or complete the assessment when ready.</p>}
@@ -223,7 +223,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
   </StepSection>}
   {!tasks.length&&!draft&&<div className='rounded-2xl border border-dashed border-line bg-panel px-4 py-8 text-center'>
    <p className='font-semibold text-ink'>No tasks added yet</p>
-   <p className='mt-1 text-sm text-muted'>{editable?'Use + Add Task to start the work assessment.':'The assessor has not saved any tasks yet.'}</p>
+   <p className='mt-1 text-sm text-muted'>{editable?'Use + Add Internal Task to start the work assessment.':'The assessor has not saved any tasks yet.'}</p>
   </div>}
   <div className='space-y-2'>{tasks.map((t,i)=>{const open=sectionIssues(t).flat().length;return <button key={t.id} type='button' onClick={()=>openTask(i)}
    className='flex w-full min-w-0 items-start gap-3 rounded-2xl border border-line bg-panel p-3 text-left active:bg-page'>
@@ -272,7 +272,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    </div>
    {message&&<Alert tone='info'>{message}</Alert>}
    {activeSection==='Assessment setup'&&<StepSection title='Assessment setup' hint='Select what this task requires. Resources and Safety are mandatory.'><div className='space-y-2'>{([['spares','Spares',task.spares.length],['services','External services / specialists',task.services.length],['tools','Tools',taskTools.length],['equipment','Equipment',taskEquipment.length]] as const).map(([k,label,n])=><label key={k} className='flex items-center gap-3 rounded-xl border border-line p-3 text-sm'><input type='checkbox' checked={setup[k]} disabled={n>0} onChange={e=>patch({assessmentSetup:{...setup,[k]:e.target.checked},...(k==='tools'&&!e.target.checked?{toolboxSufficient:undefined}:{})})}/><span>{label}{n>0?' · '+n+' recorded':''}</span></label>)}{['Resources','Safety'].map(n=><div key={n} className='flex items-center gap-3 rounded-xl border border-line p-3 text-sm'><input type='checkbox' checked disabled readOnly/>{n} · mandatory</div>)}<p className='text-xs text-soft'>Remove existing requirements before switching a section off.</p></div></StepSection>}
-   {activeSection==='Task'&&<StepSection title='Task' hint='What is done and which maintenance strategy it follows.'>
+   {activeSection==='Internal Task'&&<StepSection title='Internal task' hint='Define work performed by internal resources and its maintenance strategy.'>
     <div className='space-y-3'>
      {editable&&<GenericTaskPicker directSelect endpoint='/api/org/mnt/tasks/generic' context={{code}} onSelect={(t,releaseId)=>{const subtasks=t.subtasks.map(s=>s.name);patch({title:t.name,subtasks,description:subtasks.join('\n'),expectedOutcomes:t.expectedOutcomes||[],catalogueReference:taskReference(t,releaseId),hours:t.durationMinutes/60,skillCodes:t.skillCodes,permitCodes:[...new Set([...(task.permitCodes||[]),...t.permitCodes])],lotoRequired:task.lotoRequired||t.classCodes.includes('AC03')});}} onNew={(f,releaseId)=>patch({catalogueReference:familyReference(f,releaseId)})}/>} {task.catalogueReference&&<p className='text-xs text-soft'>Organization-local copy · {task.catalogueReference.familyCode}{task.catalogueReference.taskCode?' / '+task.catalogueReference.taskCode:''}</p>}
      <label className={label}>Task name<input className={input} value={task.title||''} onChange={e=>patch({title:e.target.value})}/></label>
