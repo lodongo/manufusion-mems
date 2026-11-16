@@ -1,3 +1,4 @@
+import MntExpectedDates from './MntExpectedDates';
 import { useState } from 'react';
 import { CheckCircle2, Circle, ClipboardCheck, Lock, ShieldCheck, Wallet } from 'lucide-react';
 import { Alert } from '../components/ui';
@@ -31,6 +32,7 @@ export default function MntReadiness({ code, wo, cycle, checklist, canPlan, curr
     const est = checklist.estimate || {};
     const cost = checklist.cost || {};
     const budget = checklist.budget || {};
+    const expectedBudget=checklist.expectedBudget;
     const datesChanged = start !== (wo.scheduledStart || '') || end !== (wo.scheduledEnd || '');
     const minNewStart=cycle?.restrictedTypes?.includes(wo.maintenanceTypeCode)?cycle.nextStart:cycle?.today;
     const moves=Math.max(Number(wo.startDateMoves)||0,(wo.dateChanges||[]).filter((x:MntData)=>x.fromStart&&x.fromStart!==x.toStart).length);
@@ -93,10 +95,10 @@ export default function MntReadiness({ code, wo, cycle, checklist, canPlan, curr
                 <>
                     {(wo.assessmentTasks||[]).filter((t:MntData)=>t.externalResource?.type).map((t:MntData)=>{const saved=wo.taskPlanning?.[t.id]?.externalSpecialist,form=specialist[t.id]||{};const set=(key:string,value:string)=>setSpecialist(old=>({...old,[t.id]:{...old[t.id],[key]:value}}));return <section key={t.id} className='space-y-2 rounded-xl border border-line p-3'><p className='font-semibold'>External specialist · {t.title||t.description}</p><p className='text-sm text-soft'>{t.externalResource.type} · {t.externalResource.persons} required</p>{saved?.at&&<p className='text-sm'>Confirmed: {saved.provider} · {saved.availableDate} · {saved.reference}</p>}{[['provider','Provider','text'],['reference','Booking / contract / order reference','text'],['persons','Number of specialists','number'],['availableDate','Confirmed availability','date'],['note','Confirmation evidence','text']].map(([key,label,type])=><label key={key} className='block text-sm'>{label}<input type={type} className='mt-1 w-full rounded-lg border border-line bg-panel p-2' value={form[key]||''} onChange={e=>set(key,e.target.value)}/></label>)}<Button testOverride={testModeOverride} variant='secondary' busy={busy==='confirm_external_specialist'} disabled={!form.provider||!form.reference||!form.persons||!form.availableDate||!form.note} onClick={()=>act('confirm_external_specialist',{taskId:t.id,...form},'External specialist confirmed')}>Confirm external specialist</Button></section>;})}
                     <section className='space-y-2 rounded-xl border border-line p-3'>
-                        <p className='flex items-center gap-2 text-sm font-semibold text-ink'><Lock className='h-4 w-4' />Schedule dates {done('schedule') && <Badge tone='brand'>Locked</Badge>}</p>
+                        <MntExpectedDates start={wo.expectedStart} end={wo.expectedEnd} source={wo.expectedDateSource}/><p className='flex items-center gap-2 text-sm font-semibold text-ink'><Lock className='h-4 w-4' />Schedule dates {done('schedule') && <Badge tone='brand'>Locked</Badge>}</p>
                         <div className='grid grid-cols-2 gap-2'>
-                            <label className='text-sm text-soft'>Start<input type='date' className={mntInput} disabled={moves>=2} min={start===wo.scheduledStart?undefined:minNewStart} value={start} onChange={(e) => setStart(e.target.value)} /></label>
-                            <label className='text-sm text-soft'>End<input type='date' className={mntInput} min={start} value={end} onChange={(e) => setEnd(e.target.value)} /></label>
+                            <label className='text-sm text-soft'>Scheduled start<input type='date' className={mntInput} disabled={moves>=2} min={start===wo.scheduledStart?undefined:minNewStart} value={start} onChange={(e) => setStart(e.target.value)} /></label>
+                            <label className='text-sm text-soft'>Scheduled end<input type='date' className={mntInput} min={start} value={end} onChange={(e) => setEnd(e.target.value)} /></label>
                         </div>
                         {cycle?.restrictedTypes?.includes(wo.maintenanceTypeCode)&&<p className='text-xs text-soft'>New start dates must be in the next weekly cycle or later ({minNewStart}). Previously accepted start dates remain valid.</p>}
                         <p className="text-xs text-soft">Scheduled start date changes: {moves}/2 {moves>=2?'· locked':''}</p>
@@ -113,7 +115,7 @@ export default function MntReadiness({ code, wo, cycle, checklist, canPlan, curr
                     </section>
 
                     <section className='space-y-2 rounded-xl border border-line p-3'>
-                        <p className='flex items-center gap-2 text-sm font-semibold text-ink'><Wallet className='h-4 w-4' />Cost and budget <Badge tone={cost.current ? 'brand' : cost.status === 'pending' ? 'warn' : 'muted'}>{COST_LABEL[cost.status] || cost.status}</Badge></p>
+                        {expectedBudget&&<p className='rounded-lg border border-line p-2 text-xs text-soft'>Expected resource funding target · {expectedBudget.period}: {expectedBudget.budget==null?'Budget not set':money(expectedBudget.available,currency)+' available'} · {wo.expectedStart||'—'}</p>}<p className='flex items-center gap-2 text-sm font-semibold text-ink'><Wallet className='h-4 w-4' />Cost and budget <Badge tone={cost.current ? 'brand' : cost.status === 'pending' ? 'warn' : 'muted'}>{COST_LABEL[cost.status] || cost.status}</Badge></p>
                         <dl className='grid grid-cols-2 gap-x-3 gap-y-1 text-sm'>
                             <dt className='text-soft'>Labour</dt><dd className='text-right text-ink'>{money(est.labour, currency)}</dd>
                             <dt className='text-soft'>Spares</dt><dd className='text-right text-ink'>{money(est.spares, currency)}</dd>
@@ -122,7 +124,7 @@ export default function MntReadiness({ code, wo, cycle, checklist, canPlan, curr
                             <dt className='font-semibold text-ink'>Estimate</dt><dd className='text-right font-semibold text-ink'>{money(total, currency)}</dd>
                         </dl>
                         <p className='text-xs text-soft'>
-                            {wo.costCenterCode} budget for {budget.period}: {budget.budget === null || budget.budget === undefined ? 'not set' : `${money(budget.budget, currency)} · committed ${money(budget.committed, currency)} · available ${money(budget.available, currency)}`}
+                            Scheduled execution budget · {wo.costCenterCode} · {budget.period}: {budget.budget === null || budget.budget === undefined ? 'not set' : `${money(budget.budget, currency)} · committed ${money(budget.committed, currency)} · available ${money(budget.available, currency)}`}
                         </p>
                         {(est.uncosted || []).length > 0 && (
                             <p className='rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-ink'>No cost yet for: {est.uncosted.map((u: MntData) => u.item).join(', ')}. Cover them with the allowance.</p>

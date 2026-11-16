@@ -54,6 +54,8 @@ interface Row extends MaintenanceRouting {
     workTypeLabel: string;
     disciplineLabel: string;
     plannerName: string;
+    expectedStart?:string;
+    expectedEnd?:string;
     scheduledStart: string;
     scheduledEnd: string;
     assigneeNames: string[];
@@ -202,6 +204,8 @@ function OrderList({ setup }: { setup: MntSetup }) {
             {key:'parentWoCode',label:'Parent work order',value:r=>r.parentWoCode||''},
             {key:'rootWoCode',label:'Original work order',value:r=>r.rootWoCode||'',hidden:true},
             { key: 'planner', label: 'Planner', value: (r) => r.plannerName, hidden: true },
+            {key:'expectedStart',label:'Expected start',type:'date',value:r=>r.expectedStart||'',render:r=>r.expectedStart?fmtDate(r.expectedStart):''},
+            {key:'expectedEnd',label:'Expected end',type:'date',value:r=>r.expectedEnd||'',render:r=>r.expectedEnd?fmtDate(r.expectedEnd):''},
             { key: 'start', label: 'Scheduled start', type: 'date', value: (r) => r.scheduledStart, render: (r) => (r.scheduledStart ? fmtDate(r.scheduledStart) : '') },
             {key:'finish',label:'Scheduled finish',type:'date',value:r=>r.scheduledEnd,render:r=>r.scheduledEnd?fmtDate(r.scheduledEnd):''},
             { key: 'team', label: 'Assigned', value: (r) => r.assigneeNames.join(', '), hidden: true },

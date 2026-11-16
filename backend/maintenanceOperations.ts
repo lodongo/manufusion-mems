@@ -1,3 +1,4 @@
+import {expectedDates,protectExpectedDates} from './maintenanceExpectedDates';
 import {summarizeWorkOrderReview} from './maintenanceStatusReview';
 import {capacityForWindow,capacityContext,windowTeamAvailability} from './maintenanceCapacity';
 import {levelResources} from './maintenanceResourceLeveling';
@@ -393,6 +394,8 @@ async function planChecklist(ctx: OrgContext, wo: Doc, ready?: Awaited<ReturnTyp
     const cost = await costApprovalOf(ctx.orgId, wo, est);
     const period = periodOf(str(wo.data.scheduledStart));
     const budget = await budgetStatus(ctx.orgId, str(wo.data.costCenterId), period, wo.id);
+    const expected=expectedDates(wo.data),expectedPeriod=periodOf(expected.expectedStart);
+    const expectedBudget=expected.expectedStart?(expectedPeriod===period?budget:await budgetStatus(ctx.orgId,str(wo.data.costCenterId),expectedPeriod,wo.id)):null;
     const lock = object(wo.data.scheduleLock);
     const riskReview = object(wo.data.riskReview);
     const version = Number(wo.data.assessmentTasksVersion) || 0;
@@ -407,7 +410,7 @@ async function planChecklist(ctx: OrgContext, wo: Doc, ready?: Awaited<ReturnTyp
         { key: 'risk', label: 'Risk assessment reviewed from the assessment', done: !!riskReview.at && Number(riskReview.version) === version, detail: str(riskReview.note) },
         { key: 'cost', label: 'Estimated cost approved (Chart of Authority)', done: cost.current, detail: est.total === 0 ? 'Nothing to approve' : `${cost.status}` },
     ];
-    return { items, estimate: est, cost, budget, problems: r.problems, ready: items.every((i) => i.done) && r.ready };
+    return { items, estimate: est, cost, budget, expectedBudget, expectedDates:expected, problems: r.problems, ready: items.every((i) => i.done) && r.ready };
 }
 
 /** Evaluate on each successful maintenance mutation and on read. External changes are observed from live source records. */
@@ -468,6 +471,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
         const cycle=await getMaintenanceCycle(ctx);
         validateCycleDates(str(wo.data.maintenanceTypeCode),start,end,cycle,wo.data);
         const moves=validateStartDateMove(wo.data,start);
+        const baseline=protectExpectedDates(wo.data,b);
         const changed = start !== wo.data.scheduledStart || end !== wo.data.scheduledEnd;
         const reason = str(b.note).trim().slice(0, 300);
         if (changed && reason.length < 10) throw new HttpError(400, 'Explain why the dates change (at least 10 characters).');
@@ -475,7 +479,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
         // A move to another budget period needs a new cost approval against that period's budget.
         const periodMoved = periodOf(start) !== periodOf(str(wo.data.scheduledStart));
         await saveWo(ctx, wo, {
-            scheduledStart: start, scheduledEnd: end,startDateMoves:moves,
+            ...baseline,scheduledStart: start, scheduledEnd: end,startDateMoves:moves,
             ...(start!==str(wo.data.scheduledStart)?{currentCycleAdmission:{startDay:cycle.startDay,timeZone:cycle.timeZone,version:cycle.version,at:nowIso()}}:{}),
             dateChanges:changed?[...rows(wo.data.dateChanges),{at:nowIso(),by:ctx.uid,name:name(ctx),fromStart:str(wo.data.scheduledStart),fromEnd:str(wo.data.scheduledEnd),toStart:start,toEnd:end,reason}]:rows(wo.data.dateChanges),
             scheduleLock: { start, end, at: nowIso(), by: ctx.uid, name: name(ctx) },
@@ -694,7 +698,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
             requirementId = str(linkDoc.data.requirementId);
             kind = str(linkDoc.data.kind) === 'replenishment' ? 'replenishment' : 'maintenance';
             if (kind === 'maintenance' && trace.stage === 'verification')
-                await createMaintenanceRequirement(ctx, { glCode: b.glCode, dateRequired: b.dateRequired, urgency: b.urgency, budget: b.budget ?? null }, { key, woCode: wo.id, taskId: task.id, resourceId: spare.id });
+                await createMaintenanceRequirement(ctx, { glCode: b.glCode, dateRequired: b.dateRequired || str(spare.requiredDate) || expectedDates(wo.data).expectedStart, urgency: b.urgency, budget: b.budget ?? null }, { key, woCode: wo.id, taskId: task.id, resourceId: spare.id });
         } else {
             const cover = await openReplenishmentCover(ctx.orgId, materialId, warehouseId, shortage, key);
             if (cover) {
@@ -717,7 +721,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                         warehouseId,
                         quantity: shortage,
                         uomCode: uom?.code || str(b.uomCode),
-                        dateRequired: b.dateRequired || str(spare.requiredDate),
+                        dateRequired: b.dateRequired || str(spare.requiredDate) || expectedDates(wo.data).expectedStart,
                         urgency: ['low', 'medium', 'high'].includes(str(b.urgency)) ? b.urgency : 'medium',
                         costCenterId: warehouseId,
                         glCode: b.glCode,
@@ -811,7 +815,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                 itemCode: str(service.catalogCode),
                 attributes: object(service.attributes),
                 quantity: 1,
-                dateRequired: b.dateRequired || str(service.executionDate),
+                dateRequired: b.dateRequired || str(service.executionDate) || expectedDates(wo.data).expectedStart,
                 urgency: ['low', 'medium', 'high'].includes(str(b.urgency)) ? b.urgency : 'medium',
                 costCenterId: str(wo.data.costCenterId),
                 glCode: b.glCode,
