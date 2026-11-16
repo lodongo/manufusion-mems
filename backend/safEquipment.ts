@@ -224,6 +224,16 @@ export const safEquipmentRoutes={
   const reportReferences=reportCatalogue?{hazards:reportCatalogue[0].items.map(ref),injuries:[...reportCatalogue[1].items,...reportCatalogue[2].items].map(ref),controls:[...reportCatalogue[3].items,...reportCatalogue[4].items].map(x=>({...ref(x),hierarchyCode:str(x.hierarchyCode)})),hierarchy:reportCatalogue[5].items.map(x=>({...ref(x),rank:Number(x.rank)||0})),permits:reportCatalogue[6].items.map(ref)}:null;
   return {reportReferences,equipmentName:str(node.data.name),tasks:docs.map(d=>({...d.data,taskId:d.id})).sort((a,b)=>String(b.taskId).localeCompare(String(a.taskId))),classes:await Promise.all(ACTIVITY_CLASSES.filter(c=>classes.some(x=>x.code===c.code)).map(async c=>({...c,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[c.code]||[],baseline:await taskClassBaseline(ctx,id,c.code)}))),hazards:hazards.map(ref),permits:permits.map(ref),skills,matrix:matrix?.data.configuration||null,energy,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write'),canCreate:await equipmentTaskCreationAllowed(ctx,id)&&await allowedAt(ctx,PERMS.riskAssess,id,'write'),devices:array((await getDoc(devicePath(ctx,id)))?.data.items).map(r=>({deviceId:str(r.deviceId),tag:str(r.tag),label:str(r.label)||str(r.code),shortSelected:r.shortSelected===true})),deviceVersion:Number((await getDoc(devicePath(ctx,id)))?.data.version)||0};
  })],
+ 'POST /api/org/saf/equipment-tasks/risk-references':[orgRoute('org.saf.equipment_tasks.risk_references','SAF.view',async ctx=>{
+  const {id}=await equipment(ctx),taskId=str(ctx.body.taskId);if(!taskCodeRe.test(taskId))throw new HttpError(400,'Choose an equipment task.');
+  const task=await getDoc(taskCollection(ctx,id)+'/'+taskId);if(!task)throw new HttpError(404,'Task not found.');
+  const source=isObj(task.data.catalogueSource)?task.data.catalogueSource:null,family=isObj(task.data.catalogueFamily)?task.data.catalogueFamily:null;
+  const key=source?'task_'+str(source.code):family?'family_'+str(family.familyCode):'';
+  if(!idRe.test(key))return {items:[]};
+  const docs=await listDocs(root(ctx)+'/equipment_task_risk_references/'+key+'/items');
+  const items=docs.filter(d=>d.id!==taskId&&d.data.active===true).sort((a,b)=>str(b.data.updatedAt).localeCompare(str(a.data.updatedAt))).slice(0,30).flatMap(d=>array(d.data.rows).map((row,i)=>({...row,referenceId:d.id+'_'+i,label:str(d.data.taskName)}))).slice(0,100);
+  return {items};
+ })],
  'POST /api/org/saf/equipment-tasks/save':[orgRoute('org.saf.equipment_tasks.save','SAF.risk.assess',async ctx=>{
   const {id}=await equipment(ctx,true);
   const requested=str(ctx.body.taskId);
@@ -279,14 +289,28 @@ export const safEquipmentRoutes={
   if(ctx.body.verifyAssessment===true&&(ctx.body.devicesReviewed!==true||Number(ctx.body.deviceVersion)!==deviceVersion))throw new HttpError(409,'Review the current equipment safety device register before verification.');
   const manualSteps=Array.isArray(ctx.body.subtasks)?array(ctx.body.subtasks):[];
   if(!old?.data.catalogueSource&&(manualSteps.length>100||manualSteps.some((x,i)=>str(x.name).trim().length<3||str(x.name).length>500||Number(x.sequence)!==i+1||!Number.isFinite(Number(x.estimatedMinutes))||Number(x.estimatedMinutes)<=0)))throw new HttpError(400,'Enter valid ordered subtasks.');
+  let catalogueFamily=isObj(old?.data.catalogueFamily)?old.data.catalogueFamily:null;
+  if(!old?.data.catalogueSource&&isObj(ctx.body.catalogueFamily)){
+   const input=ctx.body.catalogueFamily,scope=await resolveGenericTaskScope(ctx,await catalogueSiteForEquipment(ctx,id));
+   const family=array(scope.catalogue?.families).find(f=>f.code===input.familyCode&&f.categoryCode===input.categoryCode&&f.subcategoryCode===input.subcategoryCode);
+   if(!family||scope.releaseId!==input.releaseId||!scope.items.some(t=>t.familyCode===family.code))throw new HttpError(400,'Choose an adopted catalogue family.');
+   catalogueFamily={releaseId:scope.releaseId,categoryCode:str(family.categoryCode),subcategoryCode:str(family.subcategoryCode),familyCode:str(family.code)};
+  }
+  if(!requested&&!catalogueFamily)throw new HttpError(400,'Choose category, subcategory and family for the new task.');
   const n=requested?0:await nextSequence('equipmentTask');
   if(!requested&&n>999999999)throw new HttpError(409,'Task sequence exhausted.');
   const taskId=requested||'TSK_'+String(n).padStart(9,'0');
   const status=rows.some(r=>r.after.tolerability==='Intolerable')||baseline.some(b=>b.status==='intolerable')?'intolerable':(!energy.length||energy.some(e=>!e.tag))&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':assessmentPending?'task_assessment_pending':'review_required';
   if(ctx.body.verifyAssessment===true&&(status!=='review_required'||decision.exception))throw new HttpError(400,'Resolve pending, incomplete or intolerable safety assessments before verification.');
   const verified=ctx.body.verifyAssessment===true&&!decision.exception;
-  const next={taskId,workCenterId:id,safetyDeviceIds,deviceVersion,devicesReviewed:ctx.body.devicesReviewed===true,...(!old?.data.catalogueSource?{subtasks:manualSteps.length?manualSteps:old?.data.subtasks||[]}:{}),assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,displayCode:str(old.data.displayCode)||str((old.data.catalogueSource as Obj).code),subtasks:old.data.subtasks,expectedOutcomes:old.data.expectedOutcomes||[],requiredCertifications:old.data.requiredCertifications||[],siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
-  if(!(await writeDoc(col+'/'+taskId,next,old?{updateTime:old.updateTime}:{exists:false})))throw new HttpError(409,'Task changed. Reload.');
+  const next={taskId,workCenterId:id,...(catalogueFamily?{catalogueFamily,displayCode:catalogueFamily.familyCode+'-L'+taskId.slice(4)}:{}),safetyDeviceIds,deviceVersion,devicesReviewed:ctx.body.devicesReviewed===true,...(!old?.data.catalogueSource?{subtasks:manualSteps.length?manualSteps:old?.data.subtasks||[]}:{}),assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,displayCode:str(old.data.displayCode)||str((old.data.catalogueSource as Obj).code),subtasks:old.data.subtasks,expectedOutcomes:old.data.expectedOutcomes||[],requiredCertifications:old.data.requiredCertifications||[],siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
+  const source=isObj(old?.data.catalogueSource)?old.data.catalogueSource:null,key=source?'task_'+str(source.code):catalogueFamily?'family_'+str(catalogueFamily.familyCode):'';
+  const writes=[{path:col+'/'+taskId,data:next,precondition:old?{updateTime:old.updateTime}:{exists:false}}];
+  if(idRe.test(key)){
+   const referencePath=root(ctx)+'/equipment_task_risk_references/'+key+'/items/'+taskId,prior=await getDoc(referencePath);
+   writes.push({path:referencePath,data:{taskName:name,active:verified,updatedAt:nowIso(),rows:rows.map(r=>({hazard:r.hazard,hazardCodes:r.hazardCodes,impact:r.impact,impactCodes:r.impactCodes,impactLabels:r.impactLabels,controls:r.controls}))} as typeof next,precondition:prior?{updateTime:prior.updateTime}:{exists:false}});
+  }
+  if(!await commitChecked(writes))throw new HttpError(409,'Task changed. Reload.');
   await audited(ctx,'saf.equipment_task.save',id,{taskId,version:version+1,classCodes,status});
   return {ok:true,taskId,status};
  })],
