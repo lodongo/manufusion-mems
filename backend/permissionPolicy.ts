@@ -144,6 +144,7 @@ export const BUILT_PERMISSIONS: Record<string, PermDef[]> = {
         p('SAF.admin', 'Safety: administer', true),
         p('SAF.risk.view', 'Risk assessments: view (activity and stored energy)'),
         p('SAF.risk.assess', 'Risk assessments: assess hazards, impacts and controls'),
+        p('SAF.risk.verify', 'Risk assessments: independently verify equipment safety master data'),
         p('SAF.configure', 'Risk matrix: configure for the whole organization (direct role only)', true),
     ],
     FIN: [
@@ -415,6 +416,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     T('prc_vendor_sla', 'PRC', 'Vendor SLA Officer', 'Records and ends service level agreements with approved suppliers. Cannot prepare orders.', ['PRC.view', 'PRC.vendors.view', 'PRC.vendors.sla']),
     T('prc_req_auditor', 'PRC', 'Requirements Auditor', 'Read-only view of every purchase requirement and the chart of authority.', ['PRC.view', 'PRC.req.viewall', 'PRC.setup.view']),
     T('saf_assessor', 'SAF', 'Risk Assessor', 'Assesses hazards, impacts and controls.', ['SAF.view', 'SAF.risk.view', 'SAF.risk.assess']),
+    T('saf_verifier', 'SAF', 'Safety Risk Verifier', 'Independently verifies saved equipment task safety master data.', ['SAF.view', 'SAF.risk.view', 'SAF.risk.verify']),
     T('saf_matrix', 'SAF', 'Risk Matrix Owner', 'Configures the organization risk matrix. Must be given as a direct role.', ['SAF.view', 'SAF.risk.view', 'SAF.configure']),
     T('fin_gl_viewer', 'FIN', 'GL Account Viewer', 'Read-only view of the GL account master.', ['FIN.view', 'FIN.gl.view']),
     T('fin_viewer', 'FIN', 'Finance Viewer', 'Reads finance setup, calendar, chart, mapping, taxes, cost centers and the journal of their legal entities.', ['FIN.view', 'FIN.gl.view', 'FIN.journal.view']),

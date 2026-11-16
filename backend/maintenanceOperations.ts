@@ -9,7 +9,8 @@ import {stateOf,transitionPatch,shortWorkOrderStatus,type FactSet} from './maint
 import {responsibilityData,responsibilityFor,groupFields,approvalPreviewFor} from './maintenanceResponsibility';
 import { createHash } from 'node:crypto';
 import { bypass } from './testModeCore';
-import { stableJson } from './scopeGuard';
+import { stableJson,requireAt,PERMS } from './scopeGuard';
+import {equipmentTaskSafetySnapshot} from './safEquipment';
 import { defaultMaintenanceRiskMatrix, scoreMaintenanceRisk, finalizeAssessedTaskRisks, type RiskMatrix } from './maintenanceTaskRisk';
 import { HttpError, getDoc, listDocs, nowIso, str, writeDoc, runQuery, fieldEq, type Doc, type Obj } from './core';
 import { orgRoute, hasPerm, type OrgContext } from './guards';
@@ -1083,13 +1084,15 @@ async function windowSave(ctx: OrgContext) {
     }
     for (const sTask of selected) {
         const t = tasksOf(wos.find((w) => w.id === sTask.woCode)!).find((x) => x.id === sTask.taskId)!;
+        const exceptional=object(object(t.registrySafety).classificationVerdict).exception===true;
         const instructions = [
+            ...(exceptional?['Independent Safety authorization: confirm task-specific protective measures, permits and conditions before execution']:[]),
             ...(t.lotoRequired === true ? (rows(object(t.registrySafety).energyPlan).length?rows(object(t.registrySafety).energyPlan).filter(p=>p.state==='isolate').map(p=>'LOTO: isolate, lock, tag and prove zero '+str(p.label)+' · '+str(p.tag)):texts(t.energySourceCodes).map((c) => `LOTO: isolate, lock, tag and prove zero ${label('hazardousEnergy', c)}`)) : []),
             ...(t.liveEquipment === true ? ['Live work: authorized procedure, guarding, exclusion zone and emergency stop ready'] : []),
             str(t.isolation),
             ...rows(t.risk).filter((r) => str(r.permit)).map((r) => `${str(r.permit)}: ${str(r.controls)}`),
         ].filter(Boolean);
-        for (const instruction of instructions) steps.push({ id: maintenanceKey(sTask.id, instruction), taskId: sTask.id, instruction, completedAt: '', completedBy: '' });
+        for (const instruction of instructions) steps.push({ id: maintenanceKey(sTask.id, instruction), taskId: sTask.id, instruction, ...(instruction.startsWith('Independent Safety authorization:')?{independentSafety:true,equipmentId:str(wos.find(w=>w.id===sTask.woCode)?.data.unitId)}:{}), completedAt: '', completedBy: '' });
     }
     // Keep verifications already done for unchanged prerequisites.
     const previous = new Map(rows(existing?.data.safetySteps).map((x) => [str(x.id), x]));
@@ -1254,7 +1257,8 @@ async function windowAction(ctx: OrgContext, action: string) {
             await maintenancePermission(ctx, 'MNT.WO.execute', path);
         }
         const id = str(b.stepId);
-        if (!rows(w.data.safetySteps).some((s) => s.id === id)) throw new HttpError(400, 'Choose a safety prerequisite.');
+        const target=rows(w.data.safetySteps).find(s=>s.id===id);if(!target)throw new HttpError(400,'Choose a safety prerequisite.');
+        if(target.independentSafety===true)await requireAt(ctx,PERMS.riskVerify,str(target.equipmentId),'write','Independent Safety authorization requires a Safety verifier at this equipment.');
         const steps = rows(w.data.safetySteps).map((s) =>
             s.id === id
                 ? { ...s, completedAt: nowIso(), completedBy: ctx.uid, evidence: requiredText(b.note, 'Safety verification evidence', 5) }
@@ -1805,6 +1809,10 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
         }
         if (e.status === 'completed') throw new HttpError(409, 'Completed task history is immutable.');
         if (action === 'start_task') {
+            if(str(task.registryTaskId)){
+                const current=await equipmentTaskSafetySnapshot(ctx,str(wo.data.unitId),task);
+                if(current.classificationVerdict.exception&&!rows(w.data.safetySteps).some(s=>s.independentSafety===true&&s.taskId===rows(w.data.tasks).find(t=>t.woCode===wo.id&&t.taskId===task.id)?.id&&str(s.completedAt)))throw new HttpError(409,'Independent task-specific Safety authorization is required before starting exceptional work.');
+            }
             await requireStageApproval(ctx,wo,'before_assessment');
             await requireStageApproval(ctx,wo,'after_readiness');
             await requireStageApproval(ctx,wo,'before_execution');

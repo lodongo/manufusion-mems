@@ -17,6 +17,7 @@ import { record } from './structure';
 export const PERMS = {
     riskView: ['SAF.risk.view', 'SAF.risk.assess', 'SAF.view'],
     riskAssess: ['SAF.risk.assess', 'SAF.edit'],
+    riskVerify: ['SAF.risk.verify', 'SAF.admin'],
     utilitiesView: ['AST.utilities.view', 'AST.utilities.edit', 'AST.view'],
     utilitiesEdit: ['AST.utilities.edit', 'AST.edit'],
     activitiesView: ['MNT.activities.view', 'MNT.activities.edit', 'MNT.view'],
