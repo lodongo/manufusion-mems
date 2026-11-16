@@ -84,3 +84,14 @@ export const TASK_PLAN_STATES=['isolate','retained','not_applicable'];
 export function taskRiskAssessmentPending(code:string,ownRows:number,hasGlobalRisks:boolean,noAdditionalRisks:boolean):boolean{
  return !!code&&code!=='AC01'&&ownRows===0&&!(hasGlobalRisks&&noAdditionalRisks);
 }
+
+/** Completion of task safety data, independent of Safety's later verification. */
+export function taskSafetyOutstanding(input:{code:string;ownRows:number;hasGlobalRisks:boolean;noAdditionalRisks:boolean;devicesReviewed:boolean;programGaps?:string[];intolerable?:boolean}):string[]{
+ const gaps:string[]=[];
+ if(!input.code)gaps.push('Complete the task classification decision tree.');
+ if(taskRiskAssessmentPending(input.code,input.ownRows,input.hasGlobalRisks,input.noAdditionalRisks))gaps.push(input.hasGlobalRisks?'Review inherited task-class risks; either confirm no additional activity-specific risks or add the applicable task hazards.':'No risk assessment is recorded for this risk-bearing task. Under Add hazard / injury, record applicable task hazards, injuries, mitigations, initial and residual risk ratings.');
+ if(!input.devicesReviewed&&input.code)gaps.push('Under Safety equipment and safeguards, review the applicable devices and confirm the safeguard review.');
+ gaps.push(...(input.programGaps||[]));
+ if(input.intolerable)gaps.push('Residual risk is intolerable. Review and strengthen controls; do not execute.');
+ return [...new Set(gaps)];
+}
