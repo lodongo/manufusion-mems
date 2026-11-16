@@ -861,8 +861,8 @@ export default function MntWorkOrder({ code }: { code: string }) {
             {tasks.length > 0 && (wo.assessmentReady??wo.assessmentReviewCurrent) && data.checklist && (
                 <MntReadiness code={code} wo={wo} cycle={data.maintenanceCycle} checklist={data.checklist} canPlan={!!can.plan} testModeOverride={!!data.testModeOverride} currency={data.currency || ''} onDone={reload} />
             )}
-            {!retrospective&&tasks.length>0&&wo.assessmentApprovalRequired!==false&&<Card className="space-y-3">
-                <p className="font-semibold">Independent work assessment review</p>
+            {!retrospective&&tasks.length>0&&wo.assessmentApprovalRequired!==false&&<Card className={'space-y-3 '+(wo.assessmentReviewCurrent?'border-emerald-500 bg-emerald-500/10':'border-amber-500 bg-amber-500/10')}>
+                <p className="font-semibold">Independent work assessment review · {wo.assessmentReviewCurrent?'Approved':'Action required'}</p>
                 <p className="text-sm">{wo.assessmentReviewCurrent?'Approved by '+(wo.assessmentReview.name||'reviewer'):'Awaiting approval of current task assessment'}</p>
                 {wo.assessmentReview?.note&&<p className="text-sm text-soft">Review notes: {wo.assessmentReview.note}</p>}
                 {wo.status==='planning'&&can.reviewAssessment&&<div className="space-y-2">
