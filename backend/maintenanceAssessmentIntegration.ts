@@ -1,3 +1,4 @@
+import {verifyToolRequirements} from './maintenanceToolCatalogue';
 import { getDoc, HttpError, str, type Doc, type Plain } from './core';
 import type { OrgContext } from './guards';
 import { nodePath } from './access';
@@ -8,6 +9,7 @@ import { enforceSourcingRules } from './maintenanceSourcing';
 
 /** Persist canonical equipment links and catalogue specifications at assessment time. */
 export async function prepareMaintenanceAssessment(ctx: OrgContext, record: Doc, tasks: AssessedTask[]) {
+    await verifyToolRequirements(ctx,record,tasks);
     const skillMaster = await getDoc('module_workspaces/HRM/metadata/skillsMaster');
     const activeSkills = new Set(
         (Array.isArray(skillMaster?.data.items) ? skillMaster.data.items : [])

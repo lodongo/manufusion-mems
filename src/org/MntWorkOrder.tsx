@@ -1,3 +1,4 @@
+import {ToolRequirementReview} from './MntToolCatalogue';
 import {legacySteps,OrderedStepReview} from './MntOrderedSteps';
 import {appConfirm} from '../components/dialogs';
 import MntExpectedDates,{ExpectedDateHelp} from './MntExpectedDates';
@@ -83,7 +84,7 @@ export function MntDialog({ title, children, onClose }: { title: string; childre
 function Details({ task }: { task: MntData }) {
     return (
         <div className="space-y-4">
-            <OrderedStepReview label='Subtasks' values={legacySteps(task.subtasks,task.description)}/>
+            <OrderedStepReview label='Subtasks' values={legacySteps(task.subtasks,task.description)}/><ToolRequirementReview values={task.toolRequirements} legacyNotes={task.tools}/>
             <div className="grid gap-3 sm:grid-cols-2">
                 {[
                     ['Work instructions', task.instructions],
@@ -93,7 +94,7 @@ function Details({ task }: { task: MntData }) {
                         'People / estimated labour',
                         `${task.persons} people · ${task.hours} hours · ${Array.isArray(task.internalRoleRequirements)?task.internalRoleRequirements.reduce((n:number,r:MntData)=>n+Number(r.persons)*Number(r.hours),0):Number(task.persons)*Number(task.hours)} labour hours`,
                     ],
-                    ['Tools and special equipment', task.tools],
+                    
                     ['Safety equipment', task.safetyEquipment],
                     ['Isolation', task.isolation],
                     ['Technical documentation', task.documentation],
@@ -240,7 +241,7 @@ function ResourceForm({
             {kind === 'allocate' && (
                 <>
                     <p className="text-sm text-soft">
-                        Required: {task.persons} people · {task.skills}. Tools: {task.tools || 'Configuration pending'}.
+                        Required: {task.persons} people · {task.skills}.
                     </p>
                     <div className="rounded-xl border border-line p-3">
                         <p className="font-semibold">{workGroup ? workGroup.code+' · '+workGroup.name : 'No work group configured for this cost center'}</p>
@@ -1054,7 +1055,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                 <p>
                                     {task.persons} people · Skills: {task.skills}{Array.isArray(task.internalRoleRequirements)&&task.internalRoleRequirements.map((r:MntData)=><span key={r.roleCode} className='block text-xs text-soft'>{r.roleLabel||r.roleCode} · {r.persons} people × {r.hours} hours</span>)}
                                 </p>
-                                <p>Tools: {task.tools || 'None'}</p>
+                                <ToolRequirementReview values={task.toolRequirements} legacyNotes={task.tools}/>
                                 {wo.taskStandardSnapshots?.[task.id]&&<MntStandardHistory key={wo.code+':'+task.id} code={wo.code} taskId={task.id} standard={wo.taskStandardSnapshots[task.id]}/>}
                                 <p>
                                     Allocated:{' '}

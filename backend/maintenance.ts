@@ -1,3 +1,4 @@
+import {maintenanceToolCatalogueRoutes} from './maintenanceToolCatalogue';
 import {assessmentSparePrice} from './maintenanceSparePrice';
 import {assessmentExecutionRoles,assessmentSkills} from './maintenanceAssessmentResources';
 import {expectedDates,newExpectedDates,protectExpectedDates,expectedDatesLocked,editExpectedDates,expectedDateCompletionPatch,validateExpectedWindow} from './maintenanceExpectedDates';
@@ -936,6 +937,7 @@ async function maintenanceSetupView(ctx:OrgContext){
 
 import { maintenanceWorkGroupRoutes } from './maintenanceWorkGroups';
 export const maintenanceRoutes = {
+    ...maintenanceToolCatalogueRoutes,
     ...maintenanceWorkGroupRoutes,
     ...maintenanceAnalyticsRoutes,
     ...maintenanceCostRoutes,

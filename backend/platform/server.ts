@@ -1,4 +1,5 @@
 /** Independent Cloud Run / local HTTP entrypoint for MEMS. */
+import {ensureToolCatalogue} from '../maintenanceToolCatalogue';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
@@ -89,5 +90,9 @@ const server = createServer(async (req, res) => {
     }
 });
 server.requestTimeout = 90000;
-server.listen(port, '0.0.0.0', () => console.log('Independent MEMS HTTP service listening on :' + port));
+async function start(){
+ if(process.env.MEMS_ENVIRONMENT==='development'){try{const c=await ensureToolCatalogue();console.log('Maintenance tool catalogue published: '+c.count+' entries, '+c.version);}catch(e){console.error('Maintenance tool catalogue import failed; retry from MEMS Admin.',e);}}
+ server.listen(port, '0.0.0.0', () => console.log('Independent MEMS HTTP service listening on :' + port));
+}
+void start();
 

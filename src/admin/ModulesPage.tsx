@@ -6,6 +6,7 @@ import { Alert, Field, SelectField } from '../components/ui';
 import { fmtDate, fmtKes, fmtUsdFromKes } from './format';
 import { Badge, Button, Card, Empty, PageTitle, Spinner, SubTabs, TextArea, Toggle, useLoad } from './kit';
 import DefaultLists from './DefaultLists';
+import {MntToolCatalogueAdmin} from '../org/MntToolCatalogue';
 import SafMetadataBrowser from './SafMetadataBrowser';
 import UtilityBrowser, { type Utility } from './UtilityBrowser';
 import AssetDictionaryAdmin from './AssetDictionaryAdmin';
@@ -145,7 +146,7 @@ export default function ModulesPage({ code, tab, canWrite, isSuper = false }: { 
     );
 }
 
-type Tab = 'overview' | 'setup' | 'metadata' | 'files' | 'dictionary';
+type Tab = 'overview' | 'setup' | 'metadata' | 'files' | 'dictionary' | 'tools';
 
 function ModuleDetail({
     module,
@@ -169,7 +170,7 @@ function ModuleDetail({
     onSaved: (code?: string) => void;
 }) {
     const isNew = !module;
-    const active: Tab = isNew ? 'setup' : tab === 'setup' || tab === 'metadata' || tab === 'files' || (tab === 'dictionary' && module?.code === 'PRC') ? tab : 'overview';
+    const active: Tab = isNew ? 'setup' : tab === 'setup' || tab === 'metadata' || tab === 'files' || (tab === 'dictionary' && module?.code === 'PRC') || (tab === 'tools' && module?.code === 'MNT') ? tab : 'overview';
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
 
@@ -217,6 +218,7 @@ function ModuleDetail({
                         { key: 'overview', label: 'Overview' },
                         { key: 'setup', label: 'Setup' },
                         { key: 'metadata', label: 'Metadata' },
+                        ...(module.code === 'MNT' ? [{key:'tools' as Tab,label:'Tools & equipment'}] : []),
                         ...(module.code === 'PRC' ? [{ key: 'dictionary' as Tab, label: 'Asset catalog' }] : []),
                         { key: 'files', label: 'Files' },
                     ]}
@@ -226,6 +228,7 @@ function ModuleDetail({
             {active === 'overview' && module?.code === 'DOC' && <div className='mt-4'><DocScanningCard isSuper={isSuper} /></div>}
             {active === 'setup' && <ModuleForm module={module} all={all} categories={categories} kesPerUsd={kesPerUsd} canWrite={canWrite} onSaved={onSaved} />}
             {(active === 'metadata' || active === 'files') && module && <Workspace module={module} view={active} canWrite={canWrite} isSuper={isSuper} />}
+            {active === 'tools' && module?.code === 'MNT' && <MntToolCatalogueAdmin canWrite={canWrite}/>}
             {active === 'dictionary' && module?.code === 'PRC' && (module.initialized ? <AssetDictionaryAdmin canWrite={canWrite} isSuper={isSuper} /> : <Card tone='danger'><p className='text-sm text-slate-300'>Initialise PRC first.</p></Card>)}
         </div>
     );
