@@ -1,7 +1,7 @@
 /** Independent approval snapshot tied to the exact assessment revision. */
 import {maintenanceAssessmentApprovalRequired} from './maintenanceGovernancePolicy';
 export interface AssessmentRecord {
- assessmentTasks?: unknown; assessmentTasksVersion?: unknown; assessmentTasksAt?: unknown;
+ assessmentDraft?:unknown; assessmentTasks?: unknown; assessmentTasksVersion?: unknown; assessmentTasksAt?: unknown;
  assessedAt?: unknown; assessmentReview?: unknown; requestedBy?: unknown;
  createdBy?: unknown; assessedBy?: unknown; assessmentTasksBy?: unknown; executionMode?:unknown; technicalEvaluation?:unknown;natureCode?:unknown;criticalityCode?:unknown;severitySetBy?:unknown;solutions?:unknown;maintenanceTypeCode?:unknown;
 }
@@ -9,6 +9,7 @@ type Fields = Record<string,unknown>;
 const item=(v:unknown):Fields=>v!==null&&typeof v==='object'&&!Array.isArray(v)?v as Fields:{};
 const value=(v:unknown)=>typeof v==='string'?v:'';
 export function reviewAssessmentPrerequisites(record:AssessmentRecord,reviewerId:string):string {
+ if(record.assessmentDraft&&typeof record.assessmentDraft==='object'&&!Array.isArray(record.assessmentDraft))return 'Complete and submit the saved assessment draft before review.';
  if(!reviewerId)return 'A signed-in reviewer is required.';
  if([record.requestedBy,record.executionMode==='confirmed_request'?undefined:record.createdBy,record.assessedBy,record.assessmentTasksBy].some(id=>value(id)===reviewerId))
   return 'The requester, work order creator or assessment author cannot approve their own assessment.';
@@ -21,7 +22,7 @@ export function reviewAssessmentPrerequisites(record:AssessmentRecord,reviewerId
 }
 export function assessmentReviewCurrent(record:AssessmentRecord,assignedJobRole?:string):boolean {
  const review=item(record.assessmentReview);
- return review.status==='approved' && Number(review.version)>0
+ return !record.assessmentDraft&&review.status==='approved' && Number(review.version)>0
   && Number(review.version)===Number(record.assessmentTasksVersion)
   && value(review.assessmentTasksAt)===value(record.assessmentTasksAt)
   && value(review.assessedAt)===value(record.assessedAt)

@@ -101,9 +101,9 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
   </section>)}
  </Card>;
 }
-export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context,breakIn=false,expectedStart}:{expectedStart?:string;breakIn?:boolean;context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
+export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context,breakIn=false,expectedStart,hasSavedDraft=false}:{hasSavedDraft?:boolean;expectedStart?:string;breakIn?:boolean;context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial);
- const [dirty,setDirty]=useState(false);
+ const [dirty,setDirty]=useState(false),[savedDraft,setSavedDraft]=useState(hasSavedDraft);
  const options=useLoad(()=>callBackend<Options>('/api/org/mnt/assessment/options',{code}),[code]);
  const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
  const [current,setCurrent]=useState<number|null>(null),[step,setStep]=useState(0),[saving,setSaving]=useState(false),[message,setMessage]=useState(''),[photoUrls,setPhotoUrls]=useState<Record<string,string>>({});
@@ -144,12 +144,20 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    if(live)risk=[...risk.filter(x=>x.hazard||x.impact||x.controls),newEnergyRisk('LIVE_EQUIPMENT')];
    patch({machineStatus:ms,lotoRequired:loto,liveEquipment:live,permitCodes,risk:risk.length?risk:[newRisk()],...(loto?{}:{energySourceCodes:[]})});
  };
+ const saveDraft=async()=>{
+  if(recordType!=='wo'||saving)return;
+  setSaving(true);setMessage('');try{
+   const pending=draft&&(draft.title.trim()||draft.description.trim())?[...tasks,{...seed(),code:nextCode(),title:draft.title,description:draft.description}]:tasks;
+   await callBackend('/api/org/mnt/wo/action',{code,action:'save_assessment_draft',tasks:pending});
+   setTasks(pending);setDraft(null);setDirty(false);setSavedDraft(true);setMessage('Draft saved. You can return to this assessment later. It has not been submitted.');
+  }catch(e){setMessage(e instanceof Error?e.message:'Draft could not be saved.');}finally{setSaving(false);}
+ };
  const save=async()=>{
   const problems=tasks.flatMap((t,i)=>taskProblems(t).map(x=>'Task '+(i+1)+' — '+x));
   if(problems.length){setMessage('Complete before saving: '+problems.slice(0,4).join('; ')+(problems.length>4?' …':''));return;}
   setSaving(true);setMessage('');try{
    await callBackend(recordType==='wo'?'/api/org/mnt/wo/action':'/api/org/mnt/wr/action',{code,action:'save_task_assessment',tasks});
-   setDirty(false);setCurrent(null);setMessage('Assessment saved. Independent review is required before conversion.');onSaved();
+   setDirty(false);setSavedDraft(false);setCurrent(null);setMessage('Assessment submitted.');onSaved();
   }catch(e){setMessage(e instanceof Error?e.message:'Assessment could not be saved.');}finally{setSaving(false);}
  };
  const openTask=(i:number)=>{setCurrent(i);setStep(0);setMessage('');setAdding(false);setOpenService(null);setSpareWarehouse(tasks[i]?.spares.find(sp=>sp.warehouseId)?.warehouseId||'');};
@@ -172,9 +180,9 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    </div>
    <div className='flex shrink-0 flex-wrap gap-2'>
     {editable&&!draft&&<Button variant='secondary' onClick={()=>{setDraft({title:'',description:''});setMessage('');}}>+ Add Task</Button>}
-    {recordType==='wo'&&<MntSpareRisk code={code} spares={analysisSpares} expectedStart={expectedStart}/>} {editable&&tasks.length>0&&<Button busy={saving} disabled={saving||!dirty} onClick={save}>Save assessment for review</Button>}
+    {recordType==='wo'&&<MntSpareRisk code={code} spares={analysisSpares} expectedStart={expectedStart}/>} {editable&&recordType==='wo'&&<Button variant='secondary' busy={saving} disabled={saving||(!dirty&&!draft)} onClick={()=>void saveDraft()}>Save draft</Button>}{editable&&tasks.length>0&&<Button busy={saving} disabled={saving||(!dirty&&!savedDraft)||!!draft} onClick={save}>{recordType==='wo'?'Complete assessment':'Save assessment for review'}</Button>}
    </div>
-   {dirty&&<p className='w-full text-xs text-amber-400'>Unsaved task changes. Save the assessment before leaving this section.</p>}
+   {dirty&&<p className='w-full text-xs text-amber-400'>Unsaved changes. Save a draft to continue later, or complete the assessment when ready.</p>}
   </div>
   {message&&<Alert tone='info'>{message}</Alert>}
   {draft&&<StepSection title={'New task · '+nextCode()} hint='Name the task and describe the work. You then open it to add the details.'>
@@ -234,6 +242,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
       setMessage('');setCurrent(null);
      }}><span className='sm:hidden'>Done</span><span className='hidden sm:inline'>Done — back to tasks</span></Button>
     </div>
+    {recordType==='wo'&&<Button variant='secondary' busy={saving} disabled={!dirty||saving} onClick={()=>void saveDraft()}>Save draft</Button>}
     <StepProgress steps={sections.map((name,i)=>({label:name,open:issues[i].length}))} stage={step+1} onStep={n=>setStep(n-1)}/>
     <div className='flex gap-1 overflow-x-auto sm:hidden' role='tablist' aria-label='Task sections'>{sections.map((name,i)=><button type='button' role='tab' aria-selected={step===i} key={name} onClick={()=>setStep(i)} className={'min-h-9 shrink-0 rounded-lg px-3 text-xs '+(step===i?'bg-brand text-onbrand':'bg-page text-soft')}>{name}{issues[i].length?' •':''}</button>)}</div>
    </div>

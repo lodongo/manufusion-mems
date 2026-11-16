@@ -1262,10 +1262,13 @@ await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wo/action','asses
 await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'assess_header',...plannedHeader});
 assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.assessedBy,people.assessor[0]);
 const currentTask={...task('current_check','Inspect and repair conveyor condition',''),equipmentId:'CONVEYOR'};
+await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'save_assessment_draft',tasks:[{...currentTask,risk:[{hazard:'',impact:'',controls:''}]}]});
+const savedDraftOrder=snapshot(r+'/work_orders/'+confirmedWO.woCode).data;
+assert.equal(savedDraftOrder.workflowCode,'WO010');assert.equal(savedDraftOrder.assessmentDraft.tasks.length,1);assert.equal(savedDraftOrder.assessmentTasks.length,0);assert.ok(!savedDraftOrder.expectedDatesLockedAt);
 await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'save_task_assessment',tasks:[currentTask]});
 // New orders snapshot the organization default with optional approvals disabled.
 const currentOrder=snapshot(r+'/work_orders/'+confirmedWO.woCode).data;
-assert.ok(currentOrder.expectedDatesLockedAt,'Expected dates lock when the task assessment is complete');
+assert.ok(currentOrder.expectedDatesLockedAt,'Expected dates lock when the task assessment is complete');assert.equal(currentOrder.assessmentDraft,null);
 assert.equal(currentOrder.maintenanceGovernance.policy.workOrder.enabled,false);
 assert.ok(['WO030','WO040','WO050','WO060','WO070','WO080'].includes(currentOrder.workflowCode));
 await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wo/action','reviewer',{code:confirmedWO.woCode,action:'review_assessment',note:'Independent approval is not required for this snapshot.'}),/not required/i);

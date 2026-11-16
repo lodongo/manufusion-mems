@@ -869,7 +869,7 @@ async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:Assesse
     ]);
     const statesSet=new Set(states.map(x=>str(x.code)));
     const energyIds=new Set(energies.map(e=>str(e.code))),permitIds=new Set(permits.map(e=>str(e.code)));
-    const oldPaths=new Set(assessmentFiles(record.data.assessmentTasks));
+    const oldPaths=new Set([...assessmentFiles(record.data.assessmentTasks),...assessmentFiles(object(record.data.assessmentDraft).tasks)]);
     for(const task of tasks){
         if(task.machineStatus&&!statesSet.has(task.machineStatus))throw new HttpError(400,'This machine status is not enabled in organization Safety. Select an adopted status.');
         if(task.energySourceCodes?.some(code=>!energyIds.has(code)))
@@ -1275,7 +1275,7 @@ export const maintenanceRoutes = {
             if(record){need(ctx,'MNT.view',pathOf(record),await scopeOf(ctx));const nodes=await listDocs(col(ctx.orgId));for(const n of nodes){if(n.id===str(record.data.unitId)||(str(n.data.level)==='assembly'&&(await nodePath(ctx.orgId,n.id)).includes(str(record.data.unitId))))equipmentOptions.push({id:n.id,name:str(n.data.name),code:str(n.data.code)});}}
             const skillMaster=await getDoc('module_workspaces/HRM/metadata/skillsMaster');const skills=objs(skillMaster?.data.items).filter(s=>s.active!==false).map(s=>({code:str(s.code),label:str(s.label)||str(s.name),category:str(s.category)}));
             const photos:Record<string,string>={};
-            if(record)for(const path of assessmentFiles(record.data.assessmentTasks).slice(0,200)){
+            if(record)for(const path of [...new Set([...assessmentFiles(record.data.assessmentTasks),...assessmentFiles(object(record.data.assessmentDraft).tasks)])].slice(0,200)){
                 if(ASSESSMENT_PHOTO_RE.test(path)&&path.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`))
                     photos[path]=await signedUrl(path);
             }
@@ -2340,6 +2340,30 @@ export const maintenanceRoutes = {
             if(object(d.earlyClosureRequest).at)throw new HttpError(409,'Early closure requested. Use the actual feedback, safety and early closure actions.');
             await enforceMaintenanceTransition(ctx,doc,action);
             switch (action) {
+                case 'save_assessment_draft': {
+                    await requireStageApproval(ctx,doc,'before_assessment');
+                    if(!canAt(ctx,P.assessment_edit,pathOf(doc),scope)||str(d.status)!=='planning'||((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',pathOf(doc))===false||(maintenanceAssessmentApprovalRequired(d)&&workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',pathOf(doc))===true))&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation'))))throw new HttpError(403,'Assessment editing rights are required at this location.');
+                    if(['approved','pending'].includes(str(object(d.assessmentReview).status))||Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Submitted approval or planned scope is locked. Use controlled reassessment.');
+                    const previous=object(d.assessmentDraft),next:Obj={...previous,updatedAt:now,updatedBy:ctx.uid,updatedByName:displayName(ctx)};
+                    if(b.header!==undefined){
+                        const raw=object(b.header),header:Obj={};
+                        for(const k of ['technicalEvaluation','natureCode','severityCode','maintenanceTypeCode','priorityCode','assemblyId','note','expectedStart','expectedEnd','scheduledStart','scheduledEnd','dateChangeReason'])if(raw[k]!==undefined)header[k]=str(raw[k]).slice(0,k==='technicalEvaluation'?3000:k==='note'?1000:k==='dateChangeReason'?500:120);
+                        header.solutionCodes=strs(raw.solutionCodes).slice(0,5);
+                        if(expectedDatesLocked(d))protectExpectedDates(d,header);
+                        next.header=header;
+                    }
+                    if(b.tasks!==undefined){
+                        if(!Array.isArray(b.tasks)||b.tasks.length>40||b.tasks.some(t=>!isObj(t)||!str(t.id)||!Array.isArray(t.spares)||!Array.isArray(t.services)||!Array.isArray(t.risk)))throw new HttpError(400,'Invalid draft task structure.');
+                        for(const t of b.tasks as Obj[]){if(objs(t.spares).length>60||objs(t.services).length>60||objs(t.risk).length>50)throw new HttpError(400,'Draft task resource limit exceeded.');}
+                        const old=new Set([...assessmentFiles(d.assessmentTasks),...assessmentFiles(previous.tasks)]);
+                        for(const file of assessmentFiles(b.tasks))if(!ASSESSMENT_PHOTO_RE.test(file)||!file.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/`)||!(file.startsWith(`organizations/${ctx.orgId}/mnt/assessment_photos/${ctx.uid}/`)||old.has(file)))throw new HttpError(400,'Invalid assessment draft attachment.');
+                        next.tasks=b.tasks as Plain;
+                    }
+                    if(b.header===undefined&&b.tasks===undefined)throw new HttpError(400,'Enter draft assessment details.');
+                    if(JSON.stringify(next).length>240000)throw new HttpError(400,'Assessment draft is too large. Reduce notes or task count.');
+                    await done({...expectedDateCompletionPatch(d,now),assessmentDraft:next},'Assessment draft saved','mnt.wo.assessment_draft_saved','Incomplete assessment saved without submission');
+                    return {ok:true,updatedAt:now};
+                }
                 case 'assess_header': {
                     await requireStageApproval(ctx,doc,'before_assessment');
                     if(d.executionMode!=='confirmed_request'||str(d.status)!=='planning')throw new HttpError(409,'Technical classification belongs to the assessment step of a confirmed Work Order.');
@@ -2357,8 +2381,10 @@ export const maintenanceRoutes = {
                     if(typeChanged||start!==str(d.scheduledStart))datePatch.currentCycleAdmission={startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycleRestricted(mtype.code)?cycle.nextStart:cycle.today,at:now,version:cycle.version};
                     const codes=[...new Set(strs(b.solutionCodes))];if(!codes.length||codes.length>5)throw new HttpError(400,'Choose one to five solution categories.');const solutions=codes.map(c=>pickGrouped(l.solutions,c,'solution category')!).map(x=>({code:x.code,label:x.label,group:x.group}));
                     const assemblyPatch:Record<string,Plain>={};const assembly=b.assemblyId===undefined?str(d.assemblyId):str(b.assemblyId);if(assembly!==str(d.assemblyId)){if(objs(d.assessmentTasks).length)throw new HttpError(409,'The assembly cannot change after tasks are assessed.');const place=await assemblyContext(ctx,assembly||str(d.unitId),P.assessment_edit,!assembly);if((assembly&&!place.assembly)||place.unit?.id!==str(d.unitId)||place.defaultAssetTag!==str(d.assetTag))throw new HttpError(409,'Choose an assembly of the original equipment and asset.');Object.assign(assemblyPatch,{assemblyId:place.assembly?.id||'',assemblyCode:place.assembly?.code||'',assemblyName:place.assembly?.name||'',path:place.path.map(x=>x.id)});}
-                    const completedHeader={...d,...datePatch,technicalEvaluation:evaluation,natureCode:nature.code,criticalityCode:crit.code,severitySetBy:ctx.uid,solutions,maintenanceTypeCode:mtype.code,assessedAt:now};
-                    await done({...assemblyPatch,...datePatch,...expectedDateCompletionPatch(completedHeader,now),technicalEvaluation:evaluation,natureCode:nature.code,natureLabel:nature.group+' · '+nature.label,failureModeCode:nature.code,failureModeLabel:nature.group+' · '+nature.label,solutions,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label,criticalityCode:crit.code,criticalityLabel:crit.label,criticalityColor:crit.color,severitySetBy:ctx.uid,...(prio?{priorityCode:prio.code,priorityLabel:prio.label}:{}),assessmentNote:note,assessedBy:ctx.uid,assessedByName:displayName(ctx),assessedAt:now,assessmentReview:null},'Technical assessment classification saved','mnt.wo.assessed',note);return {ok:true};
+                    const draftAfterHeader={...object(d.assessmentDraft)};delete draftAfterHeader.header;
+                    const remainingDraft=Array.isArray(draftAfterHeader.tasks)?draftAfterHeader:null;
+                    const completedHeader={...d,...datePatch,assessmentDraft:remainingDraft,technicalEvaluation:evaluation,natureCode:nature.code,criticalityCode:crit.code,severitySetBy:ctx.uid,solutions,maintenanceTypeCode:mtype.code,assessedAt:now};
+                    await done({...assemblyPatch,...datePatch,assessmentDraft:remainingDraft,...expectedDateCompletionPatch(completedHeader,now),technicalEvaluation:evaluation,natureCode:nature.code,natureLabel:nature.group+' · '+nature.label,failureModeCode:nature.code,failureModeLabel:nature.group+' · '+nature.label,solutions,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label,criticalityCode:crit.code,criticalityLabel:crit.label,criticalityColor:crit.color,severitySetBy:ctx.uid,...(prio?{priorityCode:prio.code,priorityLabel:prio.label}:{}),assessmentNote:note,assessedBy:ctx.uid,assessedByName:displayName(ctx),assessedAt:now,assessmentReview:null},'Technical assessment classification saved','mnt.wo.assessed',note);return {ok:true};
                 }
                 case 'save_task_assessment': {
                     await requireStageApproval(ctx,doc,'before_assessment');
@@ -2404,8 +2430,10 @@ export const maintenanceRoutes = {
                             createdBy:ctx.uid,createdAt:now
                         },{exists:false});
                     }
-                    const completedAssessment={...d,assessmentTasks:tasks as unknown as Plain,assessmentTasksVersion:version,assessmentTasksAt:now};
-                    await done({...expectedDateCompletionPatch(completedAssessment,now),assessmentTasks:tasks as unknown as Plain,taskStandardSnapshots:taskStandardSnapshots as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
+                    const draftAfterTasks={...object(d.assessmentDraft)};delete draftAfterTasks.tasks;
+                    const remainingDraft=isObj(draftAfterTasks.header)?draftAfterTasks:null;
+                    const completedAssessment={...d,assessmentDraft:remainingDraft,assessmentTasks:tasks as unknown as Plain,assessmentTasksVersion:version,assessmentTasksAt:now};
+                    await done({assessmentDraft:remainingDraft,...expectedDateCompletionPatch(completedAssessment,now),assessmentTasks:tasks as unknown as Plain,taskStandardSnapshots:taskStandardSnapshots as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
                         spares:[],services:[],tools:'',assessmentTasksBy:ctx.uid,assessmentTasksAt:now,
                         assessmentTasksVersion:version,assessmentReview:null,safety:null},
                         'Task assessments completed','mnt.wo.task_assessments',

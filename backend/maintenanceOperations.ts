@@ -2157,8 +2157,8 @@ export async function maintenanceOperations(ctx: OrgContext) {
         permissions.createBreakIn=permissions.close===true&&['completed','verified','closed'].includes(str(wo.data.status));
         if(retrospective&&['completed','closed'].includes(str(wo.data.status))){try{await authority(ctx,wo,'MNT.WO.close');permissions.createBreakIn=true;}catch{/* restricted */}}
         if(['closed','cancelled'].includes(str(wo.data.status)))for(const k of ['reconcile','assess','reviewAssessment','plan','execute','safety','close'])permissions[k]=false;
-        if(str(wo.data.status)!=='planning'||object(wo.data.assessmentReview).status==='approved'||Object.keys(object(wo.data.taskPlanning)).length)permissions.assess=false;
-        if(object(wo.data.assessmentReview).status==='approved')permissions.reviewAssessment=false;
+        if(str(wo.data.status)!=='planning'||['approved','pending'].includes(str(object(wo.data.assessmentReview).status))||Object.keys(object(wo.data.taskPlanning)).length)permissions.assess=false;
+        if(object(wo.data.assessmentReview).status==='approved'||wo.data.assessmentDraft)permissions.reviewAssessment=false;
         const approvalStage=configuredOrderApprovalStage(wo.data);
         permissions.approveOrderStage=false;
         if(approvalStage&&stageReached(wo.data,approvalStage)&&stageApprovalPending(wo.data,approvalStage)){
