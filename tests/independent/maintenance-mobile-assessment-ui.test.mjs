@@ -23,12 +23,12 @@ test('failure mode and assembly selection belong to assessment, not request enri
  assert.match(ui,/title='2\. Failure mode \*'/);
  assert.match(ui,/assemblyId, natureCode: nature/);
 });
-test('tasks start as a list, with add action and individual 5-part editor (services per addendum)',()=>{
+test('tasks start as a list, with add action and individual 6-part editor (services per addendum)',()=>{
  const ui=src('MntTaskAssessment.tsx');
  assert.match(ui,/useState<TaskAssessment\[]>\(initial\)/);
  assert.match(ui,/useState<number\|null>\(null\)/);
  assert.match(ui,/\+ Add Task/);
- assert.match(ui,/\['Task','Spares','Services','People & tools','Safety'\]/);
+ assert.match(ui,/\['Task','Spares','Services','People','Tools','Safety'\]/);
  assert.match(ui,/<AddSpare /,'Spares are added from the selected warehouse, the catalogue or free text');
  assert.match(ui,/Warehouse \(select first\)/);
  assert.match(ui,/Save task<\/Button>/);

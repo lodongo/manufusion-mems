@@ -90,7 +90,7 @@ function Details({ task }: { task: MntData }) {
                     ['Required skills', task.skills],
                     [
                         'People / estimated labour',
-                        `${task.persons} people · ${task.hours} hours · ${Number(task.persons) * Number(task.hours)} labour hours`,
+                        `${task.persons} people · ${task.hours} hours · ${Array.isArray(task.internalRoleRequirements)?task.internalRoleRequirements.reduce((n:number,r:MntData)=>n+Number(r.persons)*Number(r.hours),0):Number(task.persons)*Number(task.hours)} labour hours`,
                     ],
                     ['Tools and special equipment', task.tools],
                     ['Safety equipment', task.safetyEquipment],
@@ -237,7 +237,7 @@ function ResourceForm({
             {kind === 'allocate' && (
                 <>
                     <p className="text-sm text-soft">
-                        Required: {task.persons} people · {task.skills}. Tools: {task.tools || 'None'}.
+                        Required: {task.persons} people · {task.skills}. Tools: {task.tools || 'Configuration pending'}.
                     </p>
                     <div className="rounded-xl border border-line p-3">
                         <p className="font-semibold">{workGroup ? workGroup.code+' · '+workGroup.name : 'No work group configured for this cost center'}</p>
@@ -1046,7 +1046,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         {tab === 'Personnel & tools' && (
                             <div className="space-y-3">
                                 <p>
-                                    {task.persons} people · Skills: {task.skills}
+                                    {task.persons} people · Skills: {task.skills}{Array.isArray(task.internalRoleRequirements)&&task.internalRoleRequirements.map((r:MntData)=><span key={r.roleCode} className='block text-xs text-soft'>{r.roleLabel||r.roleCode} · {r.persons} people × {r.hours} hours</span>)}{task.externalResource?.skillRequirements?.map((r:MntData)=><span key={r.skillCode} className='block text-xs text-soft'>External: {r.skillLabel||r.skillCode} · {r.level}</span>)}
                                 </p>
                                 <p>Tools: {task.tools || 'None'}</p>
                                 {wo.taskStandardSnapshots?.[task.id]&&<MntStandardHistory key={wo.code+':'+task.id} code={wo.code} taskId={task.id} standard={wo.taskStandardSnapshots[task.id]}/>}

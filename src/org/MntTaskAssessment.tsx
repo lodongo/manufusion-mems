@@ -131,7 +131,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
   [], // Tools configuration is intentionally pending, not a completion gate.
   [...(t.lotoRequired&&!(t.energySourceCodes||[]).length?['Choose the hazardous energy sources to isolate']:[]),...t.risk.filter(r=>!r.hazard.trim()||!r.controls.trim()).map((r,i)=>'Hazard '+(i+1)+': hazard and mitigations')],
  ];
- const patch=(next:Partial<TaskAssessment>)=>{setDirty(true);setTasks(old=>old.map((t,i)=>i===current?{...t,...next}:t));};
+ const patch=(next:Partial<TaskAssessment>)=>{setDirty(true);setTasks(old=>old.map((t,i)=>{if(i!==current)return t;const x={...t,...next};if(x.internalRoleRequirements!==undefined){x.persons=x.internalRoleRequirements.reduce((n,r)=>n+r.persons,0);x.hours=Math.max(.25,...x.internalRoleRequirements.map(r=>r.hours),x.externalResource?.hours||0);}return x;}));};
  const patchSpare=(i:number,next:Partial<Spare>)=>patch({spares:task.spares.map((sp,j)=>i===j?{...sp,...next}:sp)});
  const addSpare=(sp:Spare)=>patch({spares:[...task.spares,sp]});
  const permitFor=(pattern:RegExp)=>options.data?.safetyPermits.find(x=>pattern.test(x.label))?.code;
