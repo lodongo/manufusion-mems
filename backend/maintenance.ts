@@ -1,4 +1,4 @@
-import {taskCatalogueRoutes} from './maintenanceTaskCatalogue';
+import {resolveGenericTaskScope,genericTaskForSite,taskCatalogueRoutes} from './maintenanceTaskCatalogue';
 import {maintenanceToolCatalogueRoutes} from './maintenanceToolCatalogue';
 import {assessmentSparePrice} from './maintenanceSparePrice';
 import {assessmentExecutionRoles,assessmentSkills} from './maintenanceAssessmentResources';
@@ -1104,6 +1104,16 @@ export const maintenanceRoutes = {
         })
     ],
 
+    'POST /api/org/mnt/tasks/generic': [
+        orgRoute('org.mnt.tasks.generic',null,async ctx=>{
+            requireMnt(ctx);
+            const code=str(ctx.body.code),isOrder=WO_RE.test(code),doc=isOrder?await getWo(ctx,code):await getWr(ctx,code),scope=await scopeOf(ctx);
+            const visible=isOrder?woCan(ctx,doc,scope,await lists()).view:wrCan(ctx,doc,scope).view;
+            if(!visible)throw new HttpError(403,'Work request/order access is required.');
+            const siteId=str(doc.data.siteId);
+            return ctx.body.taskCode?genericTaskForSite(ctx,siteId,str(ctx.body.releaseId),str(ctx.body.taskCode)):resolveGenericTaskScope(ctx,siteId);
+        })
+    ],
     'POST /api/org/mnt/tasks/library': [
         orgRoute('org.mnt.tasks.library',null,async(ctx)=>{
             requireMnt(ctx);

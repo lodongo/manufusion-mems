@@ -3,6 +3,7 @@ import {MntToolRequirements,ToolRequirementReview,toolRequirementProblems} from 
 import type {ToolRequirement} from '../../backend/maintenanceToolRequirements';
 import MntOrderedSteps,{legacySteps,OrderedStepReview} from './MntOrderedSteps';
 import type {ResourceRole,ResourceSkill} from '../../backend/maintenanceTaskAssessment';
+import GenericTaskPicker from './MntGenericTaskPicker';
 import MntSelect from './MntSelect';
 import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
@@ -205,6 +206,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    {dirty&&<p className='w-full text-xs text-amber-400'>Unsaved changes. Save a draft to continue later, or complete the assessment when ready.</p>}
   </div>
   {message&&<Alert tone='info'>{message}</Alert>}
+  {editable&&!draft&&<GenericTaskPicker endpoint='/api/org/mnt/tasks/generic' context={{code}} onSelect={(t)=>{const subtasks=t.subtasks.map(s=>s.name);setTasks(old=>[...old,{...seed(),code:nextCode(),title:t.name,description:subtasks.join('\n'),subtasks,hours:t.durationMinutes/60,skillCodes:t.skillCodes,maintenanceTypeCode:t.primaryMaintenanceTypeCode,permitCodes:t.permitCodes,lotoRequired:t.classCodes.includes('AC03'),instructions:'Generic reference '+t.code+' v'+t.version+'; verify source and situational assessment.'}]);setDirty(true);setMessage('Generic task copied. Confirm roles, safety and applicable checkpoints before submission.')}} onNew={family=>{setDraft({title:'',description:'',subtasks:[]});setMessage('New local task under '+family.name+' ('+family.code+').')}}/>}
   {draft&&<StepSection title={'New task · '+nextCode()} hint='Name the task and describe the work. You then open it to add the details.'>
    <div className='space-y-3'>
     <label className={label}>Task name *<input className={input} autoFocus maxLength={120} value={draft.title} onChange={e=>setDraft({...draft,title:e.target.value})} placeholder='e.g. Replace drive-end bearing'/></label>
