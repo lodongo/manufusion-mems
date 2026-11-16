@@ -17,6 +17,7 @@ import {energyColor} from './safEnergyColors';
 import {profileAdoption} from './safHazardControlLibrary';
 import {taskDecisionPath,TASK_ADDITIONAL_CLASSES,EXECUTOR_TYPES,TASK_PLAN_STATES,taskRiskAssessmentPending} from './safTaskDecision';
 import {injuryCodes,combinedControlCodes} from './safInjurySelection';
+import {requireWorkOrderAssessor} from './maintenanceAccess';
 const idRe=/^[A-Za-z0-9_-]{1,120}$/;
 const array=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const root=(ctx:OrgContext)=>`organizations/${ctx.orgId}`;
@@ -66,6 +67,14 @@ async function taskClassBaseline(ctx:OrgContext,id:string,code:string){
 }
 const taskCollection=(ctx:OrgContext,id:string)=>root(ctx)+'/equipment_task_register/'+id+'/tasks';
 const taskCodeRe=/^TSK_\d{9}$/;
+async function equipmentTaskCreationAllowed(ctx:OrgContext,id:string){
+ if(holdsDirect(ctx,['ADM.structure']))return true;
+ const code=str(ctx.body.assessmentCode);
+ if(!/^WO\d{8}(?:_[1-9]\d{0,8})?$/.test(code))return false;
+ const wo=await getDoc(root(ctx)+'/work_orders/'+code);
+ if(!wo||str(wo.data.unitId)!==id)return false;
+ try{await requireWorkOrderAssessor(ctx,wo);return true;}catch{return false;}
+}
 async function taskSkills(){
  const d=await getDoc('module_workspaces/HRM/metadata/skillsMaster');
  return array(d?.data.items).filter(x=>x.active!==false&&x.selectable!==false).map(ref);
@@ -159,7 +168,7 @@ export const safEquipmentRoutes={
   const {id}=await equipment(ctx);const siteId=await catalogueSiteForEquipment(ctx,id);return ctx.body.taskCode?genericTaskForSite(ctx,siteId,str(ctx.body.releaseId),str(ctx.body.taskCode)):resolveGenericTaskScope(ctx,siteId);
  })],
  'POST /api/org/saf/equipment-tasks/adopt':[orgRoute('org.saf.equipment_tasks.adopt','SAF.risk.assess',async ctx=>{
-  const {id}=await equipment(ctx,true);if(!holdsDirect(ctx,['ADM.structure']))throw new HttpError(403,'Equipment task adoption requires Organization Design rights.');
+  const {id}=await equipment(ctx,true);if(!await equipmentTaskCreationAllowed(ctx,id))throw new HttpError(403,'Equipment task adoption requires Organization Design or authorized work-order assessment rights.');
   const siteId=await catalogueSiteForEquipment(ctx,id),releaseId=str(ctx.body.releaseId),codes=ctx.body.taskCodes===undefined?[str(ctx.body.taskCode)]:stringList(ctx.body.taskCodes);
   if(!codes.length||codes.length>100)throw new HttpError(400,'Choose between 1 and 100 tasks per adoption batch.');
   const scope=await resolveGenericTaskScope(ctx,siteId);
@@ -183,14 +192,14 @@ export const safEquipmentRoutes={
   const [docs,classes,hazards,permits,skills,matrix,energy]=await Promise.all([listDocs(taskCollection(ctx,id)),effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'hazards'),effectiveSafetyItems(ctx.orgId,'permitTypes'),taskSkills(),getDoc(root(ctx)+'/saf/risk_matrix'),currentTaskEnergy(ctx,id)]);
   const reportCatalogue=ctx.body.includeRiskReport===true?await Promise.all([safetyCatalogue(ctx.orgId,'hazards'),safetyCatalogue(ctx.orgId,'injuryNatures'),safetyCatalogue(ctx.orgId,'impacts'),safetyCatalogue(ctx.orgId,'hazardMitigations'),safetyCatalogue(ctx.orgId,'controlMeasures'),safetyCatalogue(ctx.orgId,'mitigationHierarchy'),safetyCatalogue(ctx.orgId,'permitTypes')]):null;
   const reportReferences=reportCatalogue?{hazards:reportCatalogue[0].items.map(ref),injuries:[...reportCatalogue[1].items,...reportCatalogue[2].items].map(ref),controls:[...reportCatalogue[3].items,...reportCatalogue[4].items].map(x=>({...ref(x),hierarchyCode:str(x.hierarchyCode)})),hierarchy:reportCatalogue[5].items.map(x=>({...ref(x),rank:Number(x.rank)||0})),permits:reportCatalogue[6].items.map(ref)}:null;
-  return {reportReferences,equipmentName:str(node.data.name),tasks:docs.map(d=>({...d.data,taskId:d.id})).sort((a,b)=>String(b.taskId).localeCompare(String(a.taskId))),classes:await Promise.all(ACTIVITY_CLASSES.filter(c=>classes.some(x=>x.code===c.code)).map(async c=>({...c,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[c.code]||[],baseline:await taskClassBaseline(ctx,id,c.code)}))),hazards:hazards.map(ref),permits:permits.map(ref),skills,matrix:matrix?.data.configuration||null,energy,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write'),canCreate:holdsDirect(ctx,['ADM.structure'])&&await allowedAt(ctx,PERMS.riskAssess,id,'write')};
+  return {reportReferences,equipmentName:str(node.data.name),tasks:docs.map(d=>({...d.data,taskId:d.id})).sort((a,b)=>String(b.taskId).localeCompare(String(a.taskId))),classes:await Promise.all(ACTIVITY_CLASSES.filter(c=>classes.some(x=>x.code===c.code)).map(async c=>({...c,permitAlternatives:CLASS_PERMIT_ALTERNATIVES[c.code]||[],baseline:await taskClassBaseline(ctx,id,c.code)}))),hazards:hazards.map(ref),permits:permits.map(ref),skills,matrix:matrix?.data.configuration||null,energy,canEdit:await allowedAt(ctx,PERMS.riskAssess,id,'write'),canCreate:await equipmentTaskCreationAllowed(ctx,id)&&await allowedAt(ctx,PERMS.riskAssess,id,'write'),devices:array((await getDoc(devicePath(ctx,id)))?.data.items).map(r=>({deviceId:str(r.deviceId),tag:str(r.tag),label:str(r.label)||str(r.code),shortSelected:r.shortSelected===true})),deviceVersion:Number((await getDoc(devicePath(ctx,id)))?.data.version)||0};
  })],
  'POST /api/org/saf/equipment-tasks/save':[orgRoute('org.saf.equipment_tasks.save','SAF.risk.assess',async ctx=>{
   const {id}=await equipment(ctx,true);
   const requested=str(ctx.body.taskId);
   // Safety can update existing risk records but may not allocate new task IDs.
   // A source label is not a permission: creation additionally needs direct design rights.
-  if(!requested&&(ctx.body.source==='safety'||!holdsDirect(ctx,['ADM.structure'])))throw new HttpError(403,'Create tasks in Organization Design with authorized design rights.');
+  if(!requested&&(ctx.body.source==='safety'||!await equipmentTaskCreationAllowed(ctx,id)))throw new HttpError(403,'Create tasks in Organization Design with authorized design rights.');
   if(requested&&!taskCodeRe.test(requested))throw new HttpError(400,'Invalid task ID.');
   const col=taskCollection(ctx,id),old=requested?await getDoc(col+'/'+requested):null;
   if(requested&&!old)throw new HttpError(404,'Task not found on this equipment.');
@@ -234,13 +243,19 @@ export const safEquipmentRoutes={
   const seen=new Set<string>();
   for(const r of array(raw))for(const h of r.hazardCodes===undefined?[str(r.hazard)]:stringList(r.hazardCodes)){if(inherited.has(h)||seen.has(h))throw new HttpError(400,'Hazard already covered by a task class or another additional row. Review the inherited assessment instead.');seen.add(h);}
   const rows=await scoreHazardRows(ctx,raw,matrixDoc?.data.configuration as unknown as RiskMatrix,array(old?.data.rows));
+  const deviceDoc=await getDoc(devicePath(ctx,id)),deviceVersion=Number(deviceDoc?.data.version)||0,safetyDeviceIds=stringList(ctx.body.safetyDeviceIds);
+  const deviceItems=array(deviceDoc?.data.items);
+  if(safetyDeviceIds.some(d=>!deviceItems.some(x=>x.deviceId===d&&str(x.tag))))throw new HttpError(400,'Select registered, tagged safety devices for this equipment.');
+  if(ctx.body.verifyAssessment===true&&(ctx.body.devicesReviewed!==true||Number(ctx.body.deviceVersion)!==deviceVersion))throw new HttpError(409,'Review the current equipment safety device register before verification.');
+  const manualSteps=Array.isArray(ctx.body.subtasks)?array(ctx.body.subtasks):[];
+  if(!old?.data.catalogueSource&&(manualSteps.length>100||manualSteps.some((x,i)=>str(x.name).trim().length<3||str(x.name).length>500||Number(x.sequence)!==i+1||!Number.isFinite(Number(x.estimatedMinutes))||Number(x.estimatedMinutes)<=0)))throw new HttpError(400,'Enter valid ordered subtasks.');
   const n=requested?0:await nextSequence('equipmentTask');
   if(!requested&&n>999999999)throw new HttpError(409,'Task sequence exhausted.');
   const taskId=requested||'TSK_'+String(n).padStart(9,'0');
   const status=rows.some(r=>r.after.tolerability==='Intolerable')||baseline.some(b=>b.status==='intolerable')?'intolerable':(!energy.length||energy.some(e=>!e.tag))&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':assessmentPending?'task_assessment_pending':'review_required';
   if(ctx.body.verifyAssessment===true&&(status!=='review_required'||decision.exception))throw new HttpError(400,'Resolve pending, incomplete or intolerable safety assessments before verification.');
   const verified=ctx.body.verifyAssessment===true&&!decision.exception;
-  const next={taskId,workCenterId:id,assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,displayCode:str(old.data.displayCode)||str((old.data.catalogueSource as Obj).code),subtasks:old.data.subtasks,expectedOutcomes:old.data.expectedOutcomes||[],requiredCertifications:old.data.requiredCertifications||[],siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
+  const next={taskId,workCenterId:id,safetyDeviceIds,deviceVersion,devicesReviewed:ctx.body.devicesReviewed===true,...(!old?.data.catalogueSource?{subtasks:manualSteps.length?manualSteps:old?.data.subtasks||[]}:{}),assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,displayCode:str(old.data.displayCode)||str((old.data.catalogueSource as Obj).code),subtasks:old.data.subtasks,expectedOutcomes:old.data.expectedOutcomes||[],requiredCertifications:old.data.requiredCertifications||[],siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
   if(!(await writeDoc(col+'/'+taskId,next,old?{updateTime:old.updateTime}:{exists:false})))throw new HttpError(409,'Task changed. Reload.');
   await audited(ctx,'saf.equipment_task.save',id,{taskId,version:version+1,classCodes,status});
   return {ok:true,taskId,status};
