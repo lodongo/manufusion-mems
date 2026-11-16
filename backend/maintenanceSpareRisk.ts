@@ -19,3 +19,20 @@ export function combineSpareRisk(rows:{tone:RiskTone;proposedStart:string|null;d
  const proposedStart=unknown?null:knownStart;
  return {unknown,worstDelivery,knownStart,proposedStart,delayDays:proposedStart&&expectedStart?Math.max(0,daysBetween(expectedStart,proposedStart)):null,tone:(rows.some(r=>r.tone==='red')?'red':rows.some(r=>r.tone==='yellow')?'yellow':'green') as RiskTone};
 }
+
+/** Schedule recommendation is intentionally distinct from risk target; preserve configured execution duration. */
+export function recommendSpareSchedule(summary:ReturnType<typeof combineSpareRisk>,cfg:{today:string;nextStart:string;restricted:boolean;expectedStart:string;expectedEnd:string;scheduledStart:string;scheduledEnd:string;urgent:boolean;windows?:{id:string;start:string;end:string}[]}){
+ const {today,nextStart,restricted,expectedStart,expectedEnd,scheduledStart,scheduledEnd,urgent}=cfg;
+ const duration=scheduledStart&&scheduledEnd?Math.max(0,daysBetween(scheduledStart,scheduledEnd)):expectedStart&&expectedEnd?Math.max(0,daysBetween(expectedStart,expectedEnd)):0;
+ const earliest=[today,restricted?nextStart:today,summary.worstDelivery?addCalendarDays(summary.worstDelivery,1):today].sort().at(-1)!;
+ if(summary.unknown||!expectedStart)return {...summary,proposedStart:null,proposedEnd:null,earliestStart:null,windowId:null,windowNote:'Unverified supply or risk target; cannot recommend dates.',delayDays:null,finishDelayDays:null};
+ // Urgent work may advance only within the applicable maintenance-type eligibility.
+ let start=urgent?earliest:[earliest,expectedStart].sort().at(-1)!;
+ const preferredEnd=summary.worstDelivery?addCalendarDays(summary.worstDelivery,7):null;
+ // An existing candidate window is advisory, not confirmation of labour, safety or capacity.
+ const candidate=restricted?(cfg.windows||[]).filter(w=>w.start>=earliest&&w.start>=start&&w.end>=addCalendarDays(w.start,duration)&&(!preferredEnd||w.start<=preferredEnd)).sort((a,b)=>a.start.localeCompare(b.start))[0]:undefined;
+ if(candidate)start=candidate.start;
+ const end=addCalendarDays(start,duration),delayDays=Math.max(0,daysBetween(expectedStart,start)),finishDelayDays=expectedEnd?Math.max(0,daysBetween(expectedEnd,end)):null;
+ const overDeliveryAllowance=!!preferredEnd&&start>preferredEnd&&!!summary.worstDelivery&&summary.worstDelivery>=expectedStart;
+ return {...summary,proposedStart:start,proposedEnd:end,earliestStart:earliest,delayDays,finishDelayDays,tone:(delayDays>0||(finishDelayDays??0)>0||overDeliveryAllowance?'red':summary.tone) as RiskTone,windowId:candidate?.id||null,windowNote:candidate?'Compatible existing maintenance window (subject to capacity and approvals).':restricted?'Next eligible maintenance cycle; confirm or create an equipment maintenance window.':'Maintenance type permits execution without waiting for next cycle.',advanced:start<expectedStart,overDeliveryAllowance};
+}

@@ -1,6 +1,7 @@
+import {PROCUREMENT_UNITS} from './procurementUnits';
 import {expectedDates} from './maintenanceExpectedDates';
-import {getMaintenanceCycle} from './maintenanceCycle';
-import {configuredDays,leadStats,spareRisk,combineSpareRisk,addCalendarDays} from './maintenanceSpareRisk';
+import {getMaintenanceCycle,cycleRestricted} from './maintenanceCycle';
+import {configuredDays,leadStats,spareRisk,combineSpareRisk,addCalendarDays,recommendSpareSchedule} from './maintenanceSpareRisk';
 /**
  * Maintenance sourcing (maintenance addendum, MNT-02 / MNT-03 / MNT-04).
  *
@@ -472,7 +473,7 @@ export async function raiseSupplierOnboarding(ctx: OrgContext, wo: Doc, task: Ob
 /** Read-only, scoped estimate of shortage delivery following internal approval and configured supplier lead time. */
 async function analyzeAssessmentSpares(ctx:OrgContext,record:Doc,raw:unknown){
  const requested=Array.isArray(raw)?raw.filter(isObj):[];if(requested.length>200)throw new HttpError(400,'Analyse up to 200 spare lines at a time.');
- const warehouses=await reachableWarehouses(ctx),cycle=await getMaintenanceCycle(ctx),expected=expectedDates(record.data).expectedStart,base=root(ctx.orgId);
+ const warehouses=await reachableWarehouses(ctx),cycle=await getMaintenanceCycle(ctx),dates=expectedDates(record.data),expected=dates.expectedStart,base=root(ctx.orgId);
  const groups=new Map<string,{materialId:string;warehouseId:string;description:string;required:number;uom:string;lines:number}>();
  for(const sp of requested){
   const qty=Number(sp.qty),materialId=str(sp.materialId),warehouseId=str(sp.warehouseId);
@@ -497,14 +498,14 @@ async function analyzeAssessmentSpares(ctx:OrgContext,record:Doc,raw:unknown){
    const itemSignature=signature+'|'+mat;if(mat&&!seen.has(itemSignature)){seen.add(itemSignature);const key=mat+'|'+wh;exact.set(key,[...(exact.get(key)||[]),duration]);}
   }
  }
- const results:({materialId:string;warehouseId:string;description:string;required:number;uom:string;lines:number;warehouseName:string;available:number|null;supplierDays:number|null;configuredInternal:number|null;internalDays:number|null;history:ReturnType<typeof leadStats>;historySource:string;baseCase:ReturnType<typeof spareRisk>;worstObserved:ReturnType<typeof spareRisk>;conservativeCase:ReturnType<typeof spareRisk>}&ReturnType<typeof spareRisk>)[]=[];
+ const results:({materialId:string;warehouseId:string;description:string;required:number;uom:string;lines:number;warehouseName:string;physical:number|null;available:number|null;supplierDays:number|null;configuredInternal:number|null;internalDays:number|null;history:ReturnType<typeof leadStats>;historySource:string;baseCase:ReturnType<typeof spareRisk>;worstObserved:ReturnType<typeof spareRisk>;conservativeCase:ReturnType<typeof spareRisk>}&ReturnType<typeof spareRisk>)[]=[];
  for(const g of groups.values()){
-  const wh=g.warehouseId,mat=g.materialId;let available:number|null=null,supplierDays:number|null=null,configuredInternal:number|null=null;
+  const wh=g.warehouseId,mat=g.materialId;let physical:number|null=null,available:number|null=null,supplierDays:number|null=null,configuredInternal:number|null=null;
   if(mat&&wh){
    const material=await materialIn(ctx.orgId,mat,wh);
    if(material&&['approved','active'].includes(str(material.data.status))){
     const [stock,inventory,proc]=await Promise.all([usable(ctx.orgId,wh,mat),getDoc(base+'/inventory_material_info/'+mat+'_'+wh),getDoc(base+'/procurement_material_info/'+mat+'_'+wh)]);
-    available=stock;supplierDays=configuredDays(inventory?.data.leadTimeDays)??configuredDays(proc?.data.leadTimeDays);configuredInternal=configuredDays(inventory?.data.internalLeadTimeDays);
+    available=stock;if(stock!==null)physical=(await physicalOf(ctx.orgId,wh,mat)).physical;supplierDays=configuredDays(inventory?.data.leadTimeDays)??configuredDays(proc?.data.leadTimeDays);configuredInternal=configuredDays(inventory?.data.internalLeadTimeDays);
    }
   }
   const itemStats=leadStats(exact.get(mat+'|'+wh)||[]),whStats=leadStats(warehouseSamples.get(wh)||[]);
@@ -514,10 +515,14 @@ async function analyzeAssessmentSpares(ctx:OrgContext,record:Doc,raw:unknown){
   const risk=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays});
   const conservativeCase=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays:stats.p90??configuredInternal});
   const worstObserved=risk;
-  results.push({...g,warehouseName:str(warehouses.get(wh)?.data.name)||wh,available,supplierDays,configuredInternal,internalDays,history:stats,historySource:stats.count?source:configuredInternal===null?'no evidence':source,baseCase,conservativeCase,worstObserved,...risk});
+  results.push({...g,warehouseName:str(warehouses.get(wh)?.data.name)||wh,uom:PROCUREMENT_UNITS.find(u=>u.code===g.uom)?.label||g.uom,physical,available,supplierDays,configuredInternal,internalDays,history:stats,historySource:stats.count?source:configuredInternal===null?'no evidence':source,baseCase,conservativeCase,worstObserved,...risk});
  }
- const worst=combineSpareRisk(results,expected);
- return {expectedStart:expected,analysedOn:cycle.today,historyFrom:addCalendarDays(cycle.today,-91),historyTo:cycle.today,rows:results,summary:worst,meanScenario:combineSpareRisk(results.map(r=>r.baseCase),expected),conservativeScenario:combineSpareRisk(results.map(r=>r.conservativeCase),expected),worstObservedScenario:worst,method:'Calendar days; internal requirement creation to supplier acknowledgement or final PO approval. Same item/warehouse first, warehouse fallback, then configured internal time. Proposed dates use the worst observed internal duration plus configured supplier days, across every spare. Average and P90 scenarios are shown for comparison. If delivery meets the expected target, no date move is needed; when delivery is late, the advisory start is the next day (within seven days after delivery). No records or work order dates are changed.'};
+ const d=record.data,restricted=cycleRestricted(str(d.maintenanceTypeCode)),urgent=['WOR-001','WOR-002','WOR-003'].includes(str(d.priorityCode))&&['RIS-001','RIS-002'].includes(str(d.criticalityCode));
+ const windows=restricted?(await listDocs(base+'/maintenance_windows')).filter(w=>['scheduled','approved','released'].includes(str(w.data.status))&&str(w.data.equipmentId)===str(d.unitId)&&str(w.data.siteId)===str(d.siteId)).map(w=>({id:w.id,start:str(w.data.date)||str(w.data.start).slice(0,10),end:str(w.data.end).slice(0,10)})).filter(w=>/^\d{4}-\d{2}-\d{2}$/.test(w.start)&&/^\d{4}-\d{2}-\d{2}$/.test(w.end)):[];
+ const config={today:cycle.today,nextStart:cycle.nextStart,restricted,expectedStart:expected,expectedEnd:dates.expectedEnd,scheduledStart:str(d.scheduledStart),scheduledEnd:str(d.scheduledEnd),urgent,windows};
+ const scenario=(rows:Parameters<typeof combineSpareRisk>[0])=>recommendSpareSchedule(combineSpareRisk(rows,expected),config);
+ const worst=scenario(results);
+ return {expectedStart:expected,expectedEnd:dates.expectedEnd,scheduledStart:str(d.scheduledStart),scheduledEnd:str(d.scheduledEnd),urgent,restricted,nextCycleStart:cycle.nextStart,analysedOn:cycle.today,historyFrom:addCalendarDays(cycle.today,-91),historyTo:cycle.today,rows:results,summary:worst,meanScenario:scenario(results.map(r=>r.baseCase)),conservativeScenario:scenario(results.map(r=>r.conservativeCase)),worstObservedScenario:worst,method:'Calendar days; internal requirement creation to supplier acknowledgement or final PO approval. Same item/warehouse first, warehouse fallback, then configured internal time. Proposed dates use the worst observed internal duration plus configured supplier days, across every spare. Average and P90 scenarios are shown for comparison. High or greater priority with high or extreme severity may advance the proposed schedule, subject to maintenance type and stock readiness. Planned types respect the next eligible cycle; compatible windows are suggestions only. The original scheduled duration is preserved. Expected dates are never modified. No records or work order dates are changed.'};
 }
 
 export const maintenanceSourcingRoutes = {
