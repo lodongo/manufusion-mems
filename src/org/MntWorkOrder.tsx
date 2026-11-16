@@ -1,3 +1,4 @@
+import MntResourceBooking from './MntResourceBooking';
 import {ToolRequirementReview} from './MntToolCatalogue';
 import {legacySteps,OrderedStepReview} from './MntOrderedSteps';
 import {appConfirm} from '../components/dialogs';
@@ -261,11 +262,11 @@ function ResourceForm({
                         value={!!data.competenciesConfirmed}
                         onChange={(v) => patch('competenciesConfirmed', v)}
                     />
-                    <MntCheck
-                        label="Required tools, special equipment, documentation and safety equipment are available."
+                    {(task.assessmentSetup?.equipment===undefined||task.toolboxSufficient===true)&&<MntCheck
+                        label="Assigned toolbox / legacy tool availability confirmed (where applicable)."
                         value={!!data.toolsReady}
                         onChange={(v) => patch('toolsReady', v)}
-                    />
+                    />}
                 </>
             )}
             {kind === 'match_spare' && (
@@ -825,7 +826,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
             <MaintenanceResponsibility record={wo}/>
             <div className="flex gap-2 rounded-xl border border-line p-1"><Button variant={reviewTab==='status'?'primary':'secondary'} onClick={()=>setReviewTab('status')}>Status review</Button><Button variant={reviewTab==='details'?'primary':'secondary'} onClick={()=>setReviewTab('details')}>Work Order details</Button></div>
             {!retrospective&&(wo.workflowCode==='WO010'||wo.workflowCode==='WO015'||wo.status==='planning'&&can.assess)&&<Card className="space-y-2"><p className="font-semibold">Assessment {wo.assessmentDraft?'· Draft saved':wo.assessedAt&&!wo.assessmentReady?'· In progress':''}</p>{wo.assessmentDraft?.updatedAt?<p className="text-xs text-soft">Last saved {new Date(wo.assessmentDraft.updatedAt).toLocaleString()}</p>:!wo.assessmentReady&&<p className="text-sm text-soft">No saved draft is required. You can start or restart this assessment.</p>}<div className="flex flex-wrap gap-2"><Button testOverride={!!data.testModeOverride} disabled={!can.assess} onClick={openAssessment}><Wrench size={16}/>{wo.assessmentReady?'Edit assessment':'Continue assessment'}</Button></div>{!can.assess&&<p role="status" className="rounded-lg border border-line bg-page p-2 text-sm text-soft">{data.assessmentBlockReason||'Assessment editing requires the configured Work Group assessor at this location. Check your assigned job role and scope.'}</p>}</Card>}
-            {!retrospective&&tasks.some(t=>(t.services||[]).length)&&((wo.assessmentApprovalRequired!==false&&!wo.assessmentReviewCurrent)||wo.orderStageApprovalPending)&&<Card className="space-y-3"><h3 className="font-semibold">External services · assessment review</h3><p className="text-sm text-soft">Review these technical requirements and outsourcing justification as part of the configured approval. Supplier selection and commercial planning follow the assessment.</p>{tasks.filter(t=>(t.services||[]).length).map(t=><section key={t.id} className="space-y-2"><p className="text-sm font-medium">{t.title||t.description}</p>{(t.services||[]).map((s:MntData)=><div key={s.id} className="space-y-1 rounded-lg border border-line p-3 text-sm"><p className="font-medium">{s.description}</p><OrderedStepReview label='Scope' values={legacySteps(s.scopeSteps,s.scope,s.instructions)}/>{s.deliverables&&<p>Deliverables: {s.deliverables}</p>}{s.acceptanceCriteria&&<p>Acceptance: {s.acceptanceCriteria}</p>}{!!s.skillRequirements?.length?<p>Required skills: {s.skillRequirements.map((r:MntData)=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; ')}</p>:s.qualifications&&<p>Previous competencies: {s.qualifications}</p>}<div className="rounded-lg bg-page p-2"><p className="font-medium">External service justification</p><p>{serviceJustificationLabels(s.justificationReasons)||'Not recorded'}</p>{s.justification&&<p className="whitespace-pre-wrap break-words">{s.justification}</p>}{!!s.missingSkillCodes?.length&&<p>Missing skills: {(s.skillRequirements||[]).filter((r:MntData)=>s.missingSkillCodes.includes(r.skillCode)).map((r:MntData)=>r.skillLabel||r.skillCode).join('; ')}</p>}</div><p>{s.quantity??1} required · {s.personnel??'—'} people · {s.durationHours??'—'} h</p>{s.specialistRequired&&<p>External specialist support: {(s.skillRequirements||[]).map((r:MntData)=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; ')}</p>}</div>)}</section>)}</Card>}
+            {!retrospective&&tasks.some(t=>(t.services||[]).length)&&((wo.assessmentApprovalRequired!==false&&!wo.assessmentReviewCurrent)||wo.orderStageApprovalPending)&&<Card className="space-y-3"><h3 className="font-semibold">External services · assessment review</h3><p className="text-sm text-soft">Review these technical requirements and outsourcing justification as part of the configured approval. Supplier selection and commercial planning follow the assessment.</p>{tasks.filter(t=>(t.services||[]).length).map(t=><section key={t.id} className="space-y-2"><p className="text-sm font-medium">{t.title||t.description}</p>{(t.services||[]).map((s:MntData)=><div key={s.id} className="space-y-1 rounded-lg border border-line p-3 text-sm"><p className="font-medium">{s.description}</p><OrderedStepReview label='Scope' values={legacySteps(s.scopeSteps,s.scope,s.instructions)}/>{s.deliverables&&<p>Deliverables: {s.deliverables}</p>}{s.acceptanceCriteria&&<p>Acceptance: {s.acceptanceCriteria}</p>}{!!s.skillRequirements?.length?<p>Required skills: {s.skillRequirements.map((r:MntData)=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; ')}</p>:s.qualifications&&<p>Previous competencies: {s.qualifications}</p>}<div className="rounded-lg bg-page p-2"><p className="font-medium">External service justification</p><p>{serviceJustificationLabels(s.justificationReasons)||'Not recorded'}</p>{s.justification&&<p className="whitespace-pre-wrap break-words">{s.justification}</p>}{!!s.missingToolRequirements?.length&&<ToolRequirementReview values={s.missingToolRequirements}/>}{!!s.missingSkillCodes?.length&&<p>Missing skills: {(s.skillRequirements||[]).filter((r:MntData)=>s.missingSkillCodes.includes(r.skillCode)).map((r:MntData)=>r.skillLabel||r.skillCode).join('; ')}</p>}</div><p>{s.quantity??1} required · {s.personnel??'—'} people · {s.durationHours??'—'} h</p>{s.specialistRequired&&<p>External specialist support: {(s.skillRequirements||[]).map((r:MntData)=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; ')}</p>}</div>)}</section>)}</Card>}
             {reviewTab==='status'?<MntStatusReview data={data} onRefresh={reload}/>:<>
             {wo.executionMode==='confirmed_request'&&<OrderAssessmentHeader key={wo.code+':'+(wo.assessedAt||'new')} wo={wo} cycle={data.maintenanceCycle} options={data.assemblyOptions||[]} can={wo.status==='planning'&&!!can.assess&&!Object.keys(wo.taskPlanning||{}).length} testOverride={!!data.testModeOverride} onDone={reload}/>}
             {wo.workflowCode&&<Card className="space-y-2"><p className="text-xs text-soft">Operational state · {wo.workflowStatusCode||wo.workflowCode}</p><p className="font-semibold">{wo.workflowLabel}</p><p className="text-sm text-soft">Since {wo.workflowSince?new Date(wo.workflowSince).toLocaleString():'—'}</p>{wo.workflowReason&&<p className="text-sm">{wo.workflowReason}</p>}<details open><summary className="cursor-pointer text-sm font-semibold">State transition history ({(wo.workflowTransitions||[]).length})</summary><ol className="mt-2 space-y-2">{[...(wo.workflowTransitions||[])].reverse().map((e:MntData,i:number)=><li key={i} className="border-l-2 border-line pl-3 text-sm"><p className="font-medium">{e.from?(e.fromStatusCode||e.from)+' → ':''}{e.toStatusCode||e.to} · {e.label}</p><p className="text-xs text-soft">{new Date(e.at).toLocaleString()} · {e.byName||e.by} · {e.source}</p>{e.reason&&<p className="text-xs text-soft">{e.reason}</p>}</li>)}</ol></details></Card>}
@@ -902,7 +903,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                             </p>
                         </div>
                         <nav aria-label="Task sections" className="flex gap-2 overflow-auto pb-1">
-                            {(retrospective?['Details','Execution']:['Details', 'Spares', 'Services', 'Personnel & tools', 'Risk assessment', 'Execution']).map((s) => (
+                            {(retrospective?['Details','Execution']:['Details', 'Spares', 'Services', 'Personnel', 'Tools', 'Equipment', 'Risk assessment', 'Execution']).map((s) => (
                                 <button
                                     key={s}
                                     className={`shrink-0 rounded-xl px-3 py-2 text-sm ${tab === s ? 'bg-brand text-onbrand' : 'border border-line text-soft'}`}
@@ -1050,12 +1051,11 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                 {task.externalResource?.type&&<section className="rounded-xl border border-line p-3 space-y-2"><h3 className="font-semibold">External specialist support</h3><p className="text-sm">{task.externalResource.persons} people · {task.externalResource.hours??'—'} hours per person</p><p className="text-sm text-soft">{task.externalResource.notes}</p>{task.externalResource.skillRequirements?.map((r:MntData)=><p key={r.skillCode} className="text-sm">{r.skillLabel||r.skillCode} · {r.level}</p>)}<p className="text-xs text-soft">Confirm provider, availability and booking evidence in the Planning Readiness Checklist.</p></section>}{!task.services?.length&&!task.externalResource?.type && <p>No external services for this task.</p>}
                             </div>
                         )}
-                        {tab === 'Personnel & tools' && (
+                        {tab === 'Personnel' && (
                             <div className="space-y-3">
                                 <p>
                                     {task.persons} people · Skills: {task.skills}{Array.isArray(task.internalRoleRequirements)&&task.internalRoleRequirements.map((r:MntData)=><span key={r.roleCode} className='block text-xs text-soft'>{r.roleLabel||r.roleCode} · {r.persons} people × {r.hours} hours</span>)}
                                 </p>
-                                <ToolRequirementReview values={task.toolRequirements} legacyNotes={task.tools}/>
                                 {wo.taskStandardSnapshots?.[task.id]&&<MntStandardHistory key={wo.code+':'+task.id} code={wo.code} taskId={task.id} standard={wo.taskStandardSnapshots[task.id]}/>}
                                 <p>
                                     Allocated:{' '}
@@ -1067,11 +1067,12 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                     ['planning', 'plan_ready', 'released', 'scheduled', 'in_progress'].includes(wo.status) &&
                                     !execution.startedAt && (
                                         <Button testOverride={!!data.testModeOverride} variant="secondary" onClick={() => open('allocate', {}, planning.allocation || {})}>
-                                            Allocate personnel and confirm tools
+                                            Allocate personnel
                                         </Button>
                                     )}
                             </div>
                         )}
+                        {(tab==='Tools'||tab==='Equipment')&&<MntResourceBooking key={task.id+':'+tab} code={code} kind={tab} task={task as any} planning={planning} canPlan={!!can.plan&&!execution.startedAt&&['planning','plan_ready','released','scheduled','in_progress'].includes(wo.status)} onRun={run}/>}
                         {tab === 'Execution' && (
                             <div className="space-y-4">
                                 {!retrospective&&<MntPersonalTime key={wo.code+':'+task.id} woCode={wo.code} taskId={task.id}/>}

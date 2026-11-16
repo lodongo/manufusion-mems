@@ -1,3 +1,5 @@
+import {resourceWindow,bookingConflict,resourceAvailability} from './maintenanceResourceBooking';
+import {assetUsable} from './maintenanceToolCatalogue';
 import {expectedDates,protectExpectedDates,expectedDatesLocked,expectedDateCompletionPatch} from './maintenanceExpectedDates';
 import {summarizeWorkOrderReview} from './maintenanceStatusReview';
 import {capacityForWindow,capacityContext,windowTeamAvailability} from './maintenanceCapacity';
@@ -274,10 +276,14 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
             allocation = object(planning.allocation);
         if (
             texts(allocation.personnel).length < Number(t.persons) ||
-            allocation.toolsReady !== true ||
             allocation.competenciesConfirmed !== true
         )
-            problems.push(`${str(t.description)}: allocate qualified personnel and confirm tools.`);
+            problems.push(`${str(t.description)}: allocate qualified personnel and confirm competencies.`);
+        const resourceState=resourceAvailability(wo.data,t,planning);
+        if(!resourceState.tools)problems.push(str(t.description)+': confirm tools availability.');
+        if(!resourceState.equipment)problems.push(str(t.description)+': confirm equipment availability.');
+        const window=resourceWindow(wo.data);
+        if(window){for(const r of rows(t.toolRequirements)){const b=object(object(planning.resourceBookings)[str(r.id)]);if(b.source!=='registered')continue;for(const tag of texts(b.assetTags)){const a=await getDoc(root(ctx)+'/assets/'+tag);if(!a||a.data.siteId!==wo.data.siteId||a.data.classCode!==r.assetClassCode||!(await assetUsable(a)))problems.push(str(t.description)+': confirm '+(r.kind==='Equipment'?'equipment':'tools')+' availability. '+tag+' is no longer eligible.');}}}
         for (const spare of rows(t.spares)) {
             const key = maintenanceKey(wo.id, str(t.id), str(spare.id));
             const p = object(planning[str(spare.id)]),
@@ -405,7 +411,9 @@ async function planChecklist(ctx: OrgContext, wo: Doc, ready?: Awaited<ReturnTyp
         { key: 'spares', label: 'Spares available and reserved', done: spares.every((i) => i.status === 'reserved'), detail: `${spares.filter((i) => i.status === 'reserved').length} of ${spares.length} reserved` },
         { key: 'services', label: 'Services engaged with procurement and secured', done: services.every((i) => i.status === 'secured'), detail: `${services.filter((i) => i.status === 'secured').length} of ${services.length} secured` },
         {key:'external_specialist',label:'External specialists secured',done:!r.problems.some(p=>p.includes('secure external specialist')),detail:''},
-        { key: 'people', label: 'People and tools allocated', done: !r.problems.some((p) => p.includes('allocate qualified personnel')), detail: '' },
+        { key: 'people', label: 'Qualified personnel allocated', done: !r.problems.some((p) => p.includes('allocate qualified personnel')), detail: '' },
+        {key:'tools',label:'Tools availability',done:!r.problems.some(p=>p.includes('confirm tools availability')),detail:''},
+        {key:'equipment',label:'Equipment availability',done:!r.problems.some(p=>p.includes('confirm equipment availability')),detail:''},
         { key: 'schedule', label: 'Schedule dates reviewed and locked', done: !!lock.at && lock.start === wo.data.scheduledStart && lock.end === wo.data.scheduledEnd, detail: `${str(wo.data.scheduledStart) || 'no start'} to ${str(wo.data.scheduledEnd) || 'no end'}` },
         { key: 'risk', label: 'Risk assessment reviewed from the assessment', done: !!riskReview.at && Number(riskReview.version) === version, detail: str(riskReview.note) },
         { key: 'cost', label: 'Estimated cost approved (Chart of Authority)', done: cost.current, detail: est.total === 0 ? 'Nothing to approve' : `${cost.status}` },
@@ -562,7 +570,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
         }
         if (texts(task.skillCodes).some((code) => !coveredSkills.has(code)))
             throw new HttpError(409, 'Allocated employees do not collectively cover the task HRM competencies.');
-        if (b.toolsReady !== true || b.competenciesConfirmed !== true)
+        if ((typeof object(task.assessmentSetup).equipment!=='boolean'||task.toolboxSufficient===true)&&b.toolsReady!==true||b.competenciesConfirmed!==true)
             throw new HttpError(400, 'Confirm tool availability and personnel competencies.');
         await saveWo(
             ctx,
@@ -579,7 +587,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                             workGroupVersion: pool.group?.version || 0,
                             outsideGroupPersonnel: outside,
                             outsideGroupOptIn: outside.length > 0,
-                            toolsReady: true,
+                            toolsReady: b.toolsReady===true,
                             competenciesConfirmed: true,
                             notes: requiredText(b.note, 'Allocation evidence'),
                             by: ctx.uid,
@@ -594,6 +602,23 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
             (pool.group?.code || 'No work group configured') + (outside.length ? ' · Outside group (explicitly selected): ' + outside.join(', ') : ' · Work group team only'),
         );
         return { ok: true };
+    }
+    if(action==='book_task_resource'||action==='release_task_resource'){
+        const r=rows(task.toolRequirements).find(x=>x.id===str(b.resourceId));if(!r)throw new HttpError(400,'Select an assessed tool or equipment requirement.');
+        const resourceBookings={...object(p.resourceBookings)};
+        if(action==='release_task_resource'){delete resourceBookings[str(r.id)];}
+        else{
+            const window=resourceWindow(wo.data);if(!window)throw new HttpError(400,'Set work-order dates before booking resources.');
+            const source=str(b.source),qty=Number(r.quantity),assetTags=[...new Set(texts(b.assetTags))];
+            if(source==='registered'){
+                if(!r.assetClassCode||assetTags.length!==qty)throw new HttpError(400,'Select enough distinct class-matched registered assets.');
+                const orders=await listDocs(root(ctx)+'/work_orders');
+                for(const tag of assetTags){if(!/^AST-\\d{6}$/.test(tag))throw new HttpError(400,'Invalid asset tag.');const a=await getDoc(root(ctx)+'/assets/'+tag);if(!a||a.data.classCode!==r.assetClassCode||a.data.siteId!==wo.data.siteId||!(await assetUsable(a)))throw new HttpError(400,'Asset '+tag+' is not eligible.');const clash=bookingConflict(orders,wo.id,str(task.id),str(r.id),tag,window.start,window.end);if(clash)throw new HttpError(409,tag+' is already booked for '+clash+' during these dates.');}
+            }else if(source!=='external'&&(source!=='legacy'||r.assetClassCode))throw new HttpError(400,'Choose registered asset or confirmed external supply.');
+            const reference=source==='registered'?'':requiredText(b.reference,'Confirmed availability reference',5);
+            resourceBookings[str(r.id)]={source,assetTags:source==='registered'?assetTags:[],quantity:qty,reference,...window,at:nowIso(),by:ctx.uid};
+        }
+        await saveWo(ctx,wo,{taskPlanning:{...planning,[str(task.id)]:{...p,resourceBookings}}},action==='book_task_resource'?'task.resource.booked':'task.resource.released',str(r.id));return {ok:true};
     }
     if (!spare && !service) throw new HttpError(400, 'Select an assessed spare or service.');
     if (action === 'match_spare') {
@@ -2315,7 +2340,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
         if(object(wo.data.earlyClosureRequest).at&&['match_spare','candidate','reserve','procure','secure_spare','service_sourcing','secure_service','allocate','confirm_external_specialist','lock_schedule','review_risk','submit_cost','confirm_readiness','reassess','return_to_planning'].includes(action))throw new HttpError(409,'Work order is pending early closure. Resource and scope changes are locked.');
         let result;
         if(isRequestClosureOrder(wo.data))result=await executeMaintenanceAction(ctx,wo,action);
-        else if (['match_spare', 'candidate', 'reserve', 'procure', 'secure_spare', 'service_sourcing', 'secure_service', 'allocate','confirm_external_specialist'].includes(action))result=await resourceAction(ctx, wo, action);
+        else if (['match_spare', 'candidate', 'reserve', 'procure', 'secure_spare', 'service_sourcing', 'secure_service', 'allocate','confirm_external_specialist','book_task_resource','release_task_resource'].includes(action))result=await resourceAction(ctx, wo, action);
         else if (['lock_schedule', 'review_risk', 'submit_cost', 'confirm_readiness'].includes(action))result=await planningAction(ctx, wo, action);
         else result=await executeMaintenanceAction(ctx, wo, action);
         await syncOrderAfter(ctx,wo.id,action);return result;

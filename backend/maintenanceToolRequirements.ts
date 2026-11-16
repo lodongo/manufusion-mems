@@ -12,7 +12,7 @@ export function normalizeToolRequirements(raw:unknown):ToolRequirement[]|undefin
   ids.add(id);
   if(!v.attributes||typeof v.attributes!=='object'||Array.isArray(v.attributes)||Object.keys(v.attributes).length>30)throw Error('Enter required technical attributes.');
   const attributes=Object.fromEntries(Object.entries(v.attributes).map(([k,val])=>[k,text(val,240)]));
-  if(Object.values(attributes).some(x=>!x))throw Error('Complete all required technical attributes.');
+  if(!v.assetClassCode&&Object.values(attributes).some(x=>!x))throw Error('Complete all required technical attributes.');
   const assetClassCode=text(v.assetClassCode,80),requestedAssetTags=Array.isArray(v.requestedAssetTags)?[...new Set(v.requestedAssetTags.map(x=>text(x,80)))]:[];if(requestedAssetTags.length>quantity||requestedAssetTags.some(x=>!/^AST-\\d{6}$/.test(x))||requestedAssetTags.length&&!assetClassCode)throw Error('Choose valid registered assets for the requirement.');
   return {id,catalogueCode,...(assetClassCode?{assetClassCode,requestedAssetTags}:{}),quantity,availability,attributes,name:text(v.name),kind:v.kind==='Equipment'?'Equipment':'Tools',familyCode:text(v.familyCode,240),discipline:text(v.discipline),category:text(v.category),family:text(v.family),attributeDefinitions:[]};
  });

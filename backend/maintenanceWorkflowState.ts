@@ -42,8 +42,8 @@ export function stateOf(d:Obj,f:FactSet):{code:StateCode;label:string;reason:str
   if(openService)return make('WO040',str(openService.description)||str(openService.status));
   if(tasks.some(t=>object(t.externalResource).type&&!object(object(plan[str(t.id)]).externalSpecialist).at))return make('WO050','Secure each assessed external specialist requirement');
   if(tasks.some(t=>texts(object(object(plan[str(t.id)]).allocation).personnel).length<Number(t.persons)))return make('WO060','Allocate qualified internal personnel');
-  if(tasks.some(t=>object(object(plan[str(t.id)]).allocation).competenciesConfirmed!==true))return make('WO060','Confirm allocated personnel competency coverage');
- if(f.checklist?.some(x=>x.key==='tools'&&x.done!==true)||tasks.some(t=>{const a=object(object(plan[str(t.id)]).allocation);return t.assessmentSetup===undefined&&a.toolsReady!==true;}))return make('WO070','Confirm toolbox and secure additional tools');
+  if(tasks.some(t=>typeof object(t.assessmentSetup).equipment==='boolean'&&object(object(plan[str(t.id)]).allocation).competenciesConfirmed!==true))return make('WO060','Confirm allocated personnel competency coverage');
+ if(f.checklist?.some(x=>x.key==='tools'&&x.done!==true)||tasks.some(t=>{const a=object(object(plan[str(t.id)]).allocation);return typeof object(t.assessmentSetup).equipment!=='boolean'&&(a.toolsReady!==true||a.competenciesConfirmed!==true);}))return make('WO070','Confirm toolbox and secure additional tools');
  if(f.checklist?.some(x=>x.key==='equipment'&&x.done!==true))return make('WO075','Secure required equipment');
   const done=(key:string)=>f.checklist?.some(x=>x.key===key&&x.done===true);
   if(!done('risk'))return make('WO080');if(!done('schedule'))return make('WO090');
