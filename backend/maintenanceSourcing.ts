@@ -497,7 +497,7 @@ async function analyzeAssessmentSpares(ctx:OrgContext,record:Doc,raw:unknown){
    const itemSignature=signature+'|'+mat;if(mat&&!seen.has(itemSignature)){seen.add(itemSignature);const key=mat+'|'+wh;exact.set(key,[...(exact.get(key)||[]),duration]);}
   }
  }
- const results=[];
+ const results:({materialId:string;warehouseId:string;description:string;required:number;uom:string;lines:number;warehouseName:string;available:number|null;supplierDays:number|null;configuredInternal:number|null;internalDays:number|null;history:ReturnType<typeof leadStats>;historySource:string;baseCase:ReturnType<typeof spareRisk>;worstObserved:ReturnType<typeof spareRisk>}&ReturnType<typeof spareRisk>)[]=[];
  for(const g of groups.values()){
   const wh=g.warehouseId,mat=g.materialId;let available:number|null=null,supplierDays:number|null=null,configuredInternal:number|null=null;
   if(mat&&wh){
