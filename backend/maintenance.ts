@@ -1,3 +1,4 @@
+import {serviceRequirementLibrary,addServiceRequirement} from './maintenanceServiceRequirementLibrary';
 import {verifyCatalogueReferences,resolveGenericTaskScope,genericTaskForSite,taskCatalogueRoutes} from './maintenanceTaskCatalogue';
 import {maintenanceToolCatalogueRoutes} from './maintenanceToolCatalogue';
 import {assessmentSparePrice} from './maintenanceSparePrice';
@@ -1107,6 +1108,16 @@ export const maintenanceRoutes = {
         })
     ],
 
+    'POST /api/org/mnt/service-requirements/library': [orgRoute('org.mnt.service_requirements.library',null,async ctx=>{
+        requireMnt(ctx);const code=str(ctx.body.code),isOrder=WO_RE.test(code),doc=isOrder?await getWo(ctx,code):await getWr(ctx,code),scope=await scopeOf(ctx);
+        if(!(isOrder?woCan(ctx,doc,scope,await lists()).view:wrCan(ctx,doc,scope).view))throw new HttpError(403,'Work request/order access required.');
+        return serviceRequirementLibrary(ctx,str(doc.data.siteId),ctx.body);
+    })],
+    'POST /api/org/mnt/service-requirements/add': [orgRoute('org.mnt.service_requirements.add',null,async ctx=>{
+        requireMnt(ctx);const code=str(ctx.body.code),isOrder=WO_RE.test(code),doc=isOrder?await getWo(ctx,code):await getWr(ctx,code);
+        if(isOrder)await requireWorkOrderAssessor(ctx,doc);else if(!wrCan(ctx,doc,await scopeOf(ctx)).assess)throw new HttpError(403,'Assessment editing required.');
+        return addServiceRequirement(ctx,str(doc.data.siteId),ctx.body);
+    })],
     'POST /api/org/mnt/tasks/generic': [
         orgRoute('org.mnt.tasks.generic',null,async ctx=>{
             requireMnt(ctx);
