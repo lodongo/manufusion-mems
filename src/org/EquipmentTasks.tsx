@@ -8,7 +8,7 @@ import {taskDecisionPath,taskClassificationVerdict,adoptedTaskAnswers,answerTask
 import {ACTIVITY_CLASSES} from '../../backend/safActivityClasses';
 import {HazardRows,emptyRisk,type TaskRiskRow,type TaskRiskMatrix} from './TaskRiskRows';
 type Ref={code:string;label:string;category:string;subcategory:string;color?:string};
-type Baseline={code:string;version:number;status:string;scope:string;screening:string;permitCodes:string[];energyTags:string[];rows:{hazard:string;hazardCodes?:string[];impact:string;impactCodes?:string[];impactLabels?:string[];controls:string[]}[]};
+type Baseline={code:string;version:number;status:string;scope:string;screening:string;permitCodes:string[];energyTags:string[];rows:{hazard:string;hazardCodes?:string[];impact:string;impactCodes?:string[];impactLabels?:string[];controls:string[];before?:unknown;after?:unknown}[]};
 type Cl={code:string;label:string;requiredPermits:string[];permitAlternatives:string[];description:string;baseline:Baseline};
 type Energy={pointId:string;tag:string;label:string;color:string;status:string;required:boolean;procedureSteps:string[];verification:string;issues:string[];exposureNotice?:string;exposure?:string};
 type ControlPrograms={lotoMode:string;lotoReady:boolean;lotoGaps?:string[];versions:Record<string,number>;shortDevices:{deviceId:string;code:string;tag:string;label:string;location:string;procedure:string;safetyCategory:string;eligible:boolean}[];minimumShortMethods:number;countRepeatedMethods:boolean};
