@@ -497,7 +497,7 @@ async function analyzeAssessmentSpares(ctx:OrgContext,record:Doc,raw:unknown){
    const itemSignature=signature+'|'+mat;if(mat&&!seen.has(itemSignature)){seen.add(itemSignature);const key=mat+'|'+wh;exact.set(key,[...(exact.get(key)||[]),duration]);}
   }
  }
- const results:({materialId:string;warehouseId:string;description:string;required:number;uom:string;lines:number;warehouseName:string;available:number|null;supplierDays:number|null;configuredInternal:number|null;internalDays:number|null;history:ReturnType<typeof leadStats>;historySource:string;baseCase:ReturnType<typeof spareRisk>;worstObserved:ReturnType<typeof spareRisk>}&ReturnType<typeof spareRisk>)[]=[];
+ const results:({materialId:string;warehouseId:string;description:string;required:number;uom:string;lines:number;warehouseName:string;available:number|null;supplierDays:number|null;configuredInternal:number|null;internalDays:number|null;history:ReturnType<typeof leadStats>;historySource:string;baseCase:ReturnType<typeof spareRisk>;worstObserved:ReturnType<typeof spareRisk>;conservativeCase:ReturnType<typeof spareRisk>}&ReturnType<typeof spareRisk>)[]=[];
  for(const g of groups.values()){
   const wh=g.warehouseId,mat=g.materialId;let available:number|null=null,supplierDays:number|null=null,configuredInternal:number|null=null;
   if(mat&&wh){
@@ -509,14 +509,15 @@ async function analyzeAssessmentSpares(ctx:OrgContext,record:Doc,raw:unknown){
   }
   const itemStats=leadStats(exact.get(mat+'|'+wh)||[]),whStats=leadStats(warehouseSamples.get(wh)||[]);
   const stats=itemStats.count?itemStats:whStats,source=itemStats.count?'material and warehouse':whStats.count?'warehouse':'configured internal lead time';
-  const internalDays=stats.p90===null?configuredInternal:stats.p90;
+  const internalDays=stats.max??configuredInternal;
   const baseCase=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays:stats.mean??configuredInternal});
   const risk=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays});
-  const worstObserved=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays:stats.max??configuredInternal});
-  results.push({...g,warehouseName:str(warehouses.get(wh)?.data.name)||wh,available,supplierDays,configuredInternal,internalDays,history:stats,historySource:stats.count?source:configuredInternal===null?'no evidence':source,baseCase,worstObserved,...risk});
+  const conservativeCase=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays:stats.p90??configuredInternal});
+  const worstObserved=risk;
+  results.push({...g,warehouseName:str(warehouses.get(wh)?.data.name)||wh,available,supplierDays,configuredInternal,internalDays,history:stats,historySource:stats.count?source:configuredInternal===null?'no evidence':source,baseCase,conservativeCase,worstObserved,...risk});
  }
  const worst=combineSpareRisk(results,expected);
- return {expectedStart:expected,analysedOn:cycle.today,historyFrom:addCalendarDays(cycle.today,-91),historyTo:cycle.today,rows:results,summary:worst,meanScenario:combineSpareRisk(results.map(r=>r.baseCase),expected),worstObservedScenario:combineSpareRisk(results.map(r=>r.worstObserved),expected),method:'Calendar days; internal requirement creation to supplier acknowledgement or final PO approval. Same item/warehouse first, warehouse fallback, then configured internal time. Conservative scenario uses observed P90 plus configured supplier days. No records or work order dates are changed.'};
+ return {expectedStart:expected,analysedOn:cycle.today,historyFrom:addCalendarDays(cycle.today,-91),historyTo:cycle.today,rows:results,summary:worst,meanScenario:combineSpareRisk(results.map(r=>r.baseCase),expected),conservativeScenario:combineSpareRisk(results.map(r=>r.conservativeCase),expected),worstObservedScenario:worst,method:'Calendar days; internal requirement creation to supplier acknowledgement or final PO approval. Same item/warehouse first, warehouse fallback, then configured internal time. Proposed dates use the worst observed internal duration plus configured supplier days, across every spare. Average and P90 scenarios are shown for comparison. If delivery meets the expected target, no date move is needed; when delivery is late, the advisory start is the next day (within seven days after delivery). No records or work order dates are changed.'};
 }
 
 export const maintenanceSourcingRoutes = {
