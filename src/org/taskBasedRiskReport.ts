@@ -43,7 +43,7 @@ export function assembleTaskRiskReport(data:ReportData):ReportRow[]{
    if(matrix&&matrix.severityOverride>0&&matrix.factors.some(f=>f.code==='S'&&f.enabled)&&[initial,residual].some(x=>(x?.ratings.S||0)>=matrix.severityOverride))warnings.push('Severity escalation required.');
    if(residual?.tolerability==='Intolerable')warnings.push('Stop work; further controls and reassessment required.');
    if(t.status==='task_assessment_pending')warnings.push('Activity assessment pending.');
-   const mitigation=(r.controls||[]).map(code=>{const c=refs.controls.find(x=>x.code===code),layer=refs.hierarchy.find(x=>x.code===c?.hierarchyCode),rank=layer?.rank||Number(c?.hierarchyCode?.slice(2))||99;return {rank,label:(layer?.label||c?.category||'Recorded control')+' — '+(c?.label||code)};}).sort((a,b)=>a.rank-b.rank||a.label.localeCompare(b.label)).map(x=>x.label);
+   const mitigation=(r.controls||[]).map(code=>{const c=refs.controls.find(x=>x.code===code),layer=refs.hierarchy.find(x=>x.code===c?.hierarchyCode),rank=layer?.rank||Number(c?.hierarchyCode?.slice(2))||99;return {rank,label:(layer?.label||c?.category||'Recorded control')+' — '+(c?.label||'Control description unavailable — review master data')};}).sort((a,b)=>a.rank-b.rank||a.label.localeCompare(b.label)).map(x=>x.label);
    return {...shared,id:t.taskId+'-'+i,source:sources.join('; '),hazards:names(refs.hazards,r.hazardCodes?.length?r.hazardCodes:[r.hazard]),injuries:r.impactLabels?.length?r.impactLabels.join('; '):names(refs.injuries,r.impactCodes?.length?r.impactCodes:[r.impact]),initial,residual,mitigation:unique(mitigation),review:unique(warnings)};
   });
  });
