@@ -15,7 +15,7 @@ export const WO_STATES=[
  ['WO186','Awaiting outstanding spare receipt / posting'],['WO185','Awaiting service feedback / report'],['WO187','Awaiting service acceptance'],
  ['WO190','Awaiting incident clearance'],['WO200','Awaiting safety sign-off'],['WO210','Awaiting technical closure approval'],['WO900','Closed'],['WO990','Cancelled']
 ] as const;
-export const WO_STATUS_SHORT:Record<string,string>={WO015:'DWAU',WO010:'DWA',WO020:'DAA',WO030:'DWS',WO040:'DSE',WO050:'DXS',WO060:'DIL',WO070:'DTC',WO075:'DEAAV',WO080:'DRR',WO090:'DPD',WO100:'DCS',WO110:'DCA',WO120:'DRC',WO125:'DRA',WO130:'DSH',WO140:'DWP',WO145:'DEA',WO150:'DWE',WO160:'EXE',WO165:'DEB',WO170:'DWF',WO180:'DSR',WO185:'DSF',WO186:'DGR',WO187:'DSA',WO190:'DIC',WO200:'DSS',WO210:'DOH',WO220:'DWC',WO900:'CLSD',WO990:'CANC'};
+export const WO_STATUS_SHORT:Record<string,string>={WO015:'DWAU',WO010:'DWA',WO020:'DAA',WO030:'DWS',WO040:'DSE',WO050:'DXS',WO060:'DIL',WO070:'DTC',WO075:'DEQ',WO080:'DRR',WO090:'DPD',WO100:'DCS',WO110:'DCA',WO120:'DRC',WO125:'DRA',WO130:'DSH',WO140:'DWP',WO145:'DEA',WO150:'DWE',WO160:'EXE',WO165:'DEB',WO170:'DWF',WO180:'DSR',WO185:'DSF',WO186:'DGR',WO187:'DSA',WO190:'DIC',WO200:'DSS',WO210:'DOH',WO220:'DWC',WO900:'CLSD',WO990:'CANC'};
 export const shortWorkOrderStatus=(code:string)=>WO_STATUS_SHORT[code]||code;
 export type StateCode=typeof WO_STATES[number][0];
 export type FactSet={approved?:boolean;items?:Obj[];checklist?:Obj[];costStatus?:string;windowStatus?:'missing'|'blocked'|'ready';openIncident?:boolean;closureResource?:{code:'WO185'|'WO186'|'WO187'|'WO180';reason:string}};
