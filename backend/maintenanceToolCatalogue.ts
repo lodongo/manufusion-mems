@@ -1,6 +1,6 @@
 import {getDoc,listDocs,writeDoc,HttpError,nowIso,str,isObj,type Doc} from './core';
 import {staff,orgRoute,type OrgContext} from './guards';
-import {canAnywhere} from './access';
+import {canAt,nodePath,canAnywhere} from './access';
 import {audit} from './audit';
 import {initialToolFamilies,expandToolFamily,TOOL_CATALOGUE_VERSION,type ToolFamily,type ToolCatalogueItem} from './maintenanceToolCatalogueSeed';
 import type {AssessedTask} from './maintenanceTaskAssessment';
@@ -55,12 +55,14 @@ function search(families:ToolFamily[],body:Record<string,unknown>){
  return {items:items.slice(offset,offset+60),total:items.length,offset};
 }
 export async function verifyToolRequirements(ctx:OrgContext,record:Doc,tasks:AssessedTask[]){
- if(!tasks.some(t=>t.toolRequirements?.length))return;
+ if(!tasks.some(t=>t.toolRequirements?.length||t.services.some(s=>s.missingToolRequirements?.length)))return;
  const [masterData,a]=await Promise.all([catalogue(),adoption(ctx.orgId)]);
  const allByCode=new Map(masterData.families.flatMap(expandToolFamily).map(i=>[i.code,i])),adoptedCodes=new Set(masterData.families.filter(f=>adopted(f,a)).flatMap(f=>f.items.map(i=>i.code)));
  const previous=new Set<string>();
  if(Array.isArray(record.data.assessmentTasks))for(const t of record.data.assessmentTasks)if(isObj(t)&&Array.isArray(t.toolRequirements))for(const r of t.toolRequirements)if(isObj(r))previous.add(str(t.id)+'|'+str(r.catalogueCode));
- for(const t of tasks)for(const r of t.toolRequirements||[]){
+ for(const t of tasks)for(const r of [...(t.toolRequirements||[]),...t.services.flatMap(s=>s.missingToolRequirements||[])]){
+  if(r.assetClassCode){const {maintenanceAssetSpecification}=await import('./assets');const item=await maintenanceAssetSpecification(r.assetClassCode);if(r.catalogueCode!==item.code||r.kind!==item.kind)throw new HttpError(400,'Tool/equipment classification does not match the asset master.');const attrs:Record<string,string>={};for(const a of item.attributes){const value=r.attributes[a.key]?.trim();if(a.required&&!value)throw new HttpError(400,item.name+': enter '+a.label);if(value){if(a.options.length&&!a.options.some(o=>o.code===value)&&a.dataType==='enum')throw new HttpError(400,'Choose a valid '+a.label);attrs[a.key]=value;}}if(!Object.keys(attrs).length&&item.attributes.length)throw new HttpError(400,item.name+': enter the applicable technical specifications.');for(const tag of r.requestedAssetTags||[]){const a=await getDoc('organizations/'+ctx.orgId+'/assets/'+tag);if(!a||a.data.classCode!==item.code||a.data.siteId!==record.data.siteId||a.data.status!=='active'||!(await assetUsable(a)))throw new HttpError(400,'Registered asset '+tag+' is not eligible for this requirement.');}Object.assign(r,{name:item.name,kind:item.kind,discipline:item.discipline,category:item.category,family:item.family,familyCode:item.familyCode,attributes:attrs,attributeDefinitions:item.attributes});continue;}
+
   const item=allByCode.get(r.catalogueCode);
   if(!item||(!adoptedCodes.has(item.code)&&!previous.has(t.id+'|'+item.code)))throw new HttpError(400,'Choose an adopted tool or equipment catalogue item.');
   const attributes:Record<string,string>={};
@@ -68,7 +70,13 @@ export async function verifyToolRequirements(ctx:OrgContext,record:Doc,tasks:Ass
   Object.assign(r,{name:item.name,kind:item.kind,familyCode:item.familyCode,discipline:item.discipline,category:item.category,family:item.family,attributes,attributeDefinitions:item.attributes});
  }
 }
+/** Registered assets must be active and in service/standby. Missing instance condition is not proof of availability. */
+export async function assetUsable(a:Doc){const v=isObj(a.data.attributes)?a.data.attributes:{};return a.data.status==='active'&&['IN_SERVICE','STANDBY','IDLE'].includes(str(v['ATT-IDN-014']||v.lifecycle_status));}
 export const maintenanceToolCatalogueRoutes={
+ 'POST /api/org/mnt/asset-resource-catalogue': [orgRoute('org.mnt.asset_resource_catalogue',null,async ctx=>{canRead(ctx);const {maintenanceAssetCatalogue}=await import('./assets');return maintenanceAssetCatalogue();})],
+ 'POST /api/org/mnt/asset-resource-spec': [orgRoute('org.mnt.asset_resource_spec',null,async ctx=>{canRead(ctx);const {maintenanceAssetSpecification}=await import('./assets');return maintenanceAssetSpecification(str(ctx.body.classCode));})],
+ 'POST /api/org/mnt/registered-resources': [orgRoute('org.mnt.registered_resources',null,async ctx=>{canRead(ctx);const root='organizations/'+ctx.orgId;const code=str(ctx.body.code);if(!/^WO\\d{8}(?:_\\d+)?$/.test(code))throw new HttpError(400,'Choose a work order.');const wo=await getDoc(root+'/work_orders/'+code);if(!wo)throw new HttpError(404,'Work order not found.');const path=await nodePath(ctx.orgId,str(wo.data.unitId));if(!['MNT.view','MNT.assessment.edit','MNT.WO.plan'].some(p=>canAt(ctx,p,path)))throw new HttpError(403,'Work order access required.');const cls=str(ctx.body.classCode),assets=await listDocs(root+'/assets'),items=[];for(const a of assets){if(a.data.classCode!==cls||a.data.siteId!==wo.data.siteId||!(await assetUsable(a)))continue;items.push({tag:a.id,name:str(a.data.name),classCode:cls});}return {items};})],
+
  'POST /api/admin/mnt/tool-catalogue': [staff('admin.mnt.tool_catalogue','read',async ctx=>{const d=await catalogue();return {version:d.version,count:d.count,families:view(d.families),...search(d.families,ctx.body)};})],
  'POST /api/admin/mnt/tool-catalogue/publish': [staff('admin.mnt.tool_catalogue.publish','write',async ctx=>{const result=await ensureToolCatalogue();await audit([{category:'maintenance',action:'tool_catalogue.publish',actor:ctx.actor,meta:ctx.meta,target:{label:result.version},details:String(result.count)+' catalogue items'}]);return result;})],
  'POST /api/org/mnt/tool-catalogue/adoption': [orgRoute('org.mnt.tool_catalogue.adoption','MNT.admin',async ctx=>{enabled(ctx);const [d,a]=await Promise.all([catalogue(),adoption(ctx.orgId)]);return {version:d.version,count:d.count,families:view(d.families),adoption:a};})],

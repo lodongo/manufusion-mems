@@ -1,5 +1,5 @@
 export const TOOL_CATALOGUE_VERSION='2026-11-v1';
-export type ToolAttribute={key:string;label:string};
+export type ToolAttribute={key:string;label:string;required?:boolean;dataType?:string;options?:{code:string;label:string}[];unit?:string};
 export type ToolCatalogueItem={code:string;kind:'Tools'|'Equipment';discipline:string;category:string;family:string;familyCode:string;name:string;attributes:ToolAttribute[]};
 export type ToolFamily={code:string;kind:'Tools'|'Equipment';discipline:string;category:string;family:string;attributes:ToolAttribute[];items:{code:string;name:string}[]};
 const source=`T|Mechanical|Hand tools|Spanners|Jaw size (mm or in);Drive/end pattern;Length (mm)|Open-ended spanner;Ring spanner;Combination spanner;Ratchet combination spanner;Adjustable spanner;Flare-nut spanner;Crowfoot spanner;Hook spanner;Pin spanner;Slogging spanner;Offset spanner;Obstruction spanner;Cone spanner;Thin service spanner;Double open-ended spanner;Double ring spanner;Box spanner;Spark plug spanner;Strap wrench;Chain wrench;Pipe wrench;Basin wrench;Oil filter wrench;Tappet spanner;Lug wrench;Fan clutch wrench

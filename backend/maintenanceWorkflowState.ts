@@ -6,7 +6,7 @@ import {stageApprovalPending} from './maintenanceStageApproval';
 export const WO_STATES=[
  ['WO015','Awaiting work order approval before assessment'],['WO010','Awaiting assessment'],['WO020','Awaiting assessment approval'],
  ['WO030','Awaiting spares'],['WO040','Awaiting external services'],['WO050','Awaiting external specialist'],
- ['WO060','Awaiting internal labour'],['WO070','Awaiting tools / competency confirmation'],
+ ['WO060','Awaiting internal labour'],['WO070','Awaiting tools availability'],['WO075','Awaiting equipment availability'],
  ['WO080','Awaiting risk review'],['WO090','Awaiting planning dates'],
  ['WO100','Awaiting cost submission'],['WO110','Awaiting cost approval'],['WO120','Awaiting readiness confirmation'],
  ['WO125','Awaiting work order approval after readiness'],['WO130','Awaiting scheduling'],['WO140','Awaiting window authorization / safety prerequisites'],['WO145','Awaiting work order approval before execution'],
@@ -15,7 +15,7 @@ export const WO_STATES=[
  ['WO186','Awaiting outstanding spare receipt / posting'],['WO185','Awaiting service feedback / report'],['WO187','Awaiting service acceptance'],
  ['WO190','Awaiting incident clearance'],['WO200','Awaiting safety sign-off'],['WO210','Awaiting technical closure approval'],['WO900','Closed'],['WO990','Cancelled']
 ] as const;
-export const WO_STATUS_SHORT:Record<string,string>={WO015:'DWAU',WO010:'DWA',WO020:'DAA',WO030:'DWS',WO040:'DSE',WO050:'DXS',WO060:'DIL',WO070:'DTC',WO080:'DRR',WO090:'DPD',WO100:'DCS',WO110:'DCA',WO120:'DRC',WO125:'DRA',WO130:'DSH',WO140:'DWP',WO145:'DEA',WO150:'DWE',WO160:'EXE',WO165:'DEB',WO170:'DWF',WO180:'DSR',WO185:'DSF',WO186:'DGR',WO187:'DSA',WO190:'DIC',WO200:'DSS',WO210:'DOH',WO220:'DWC',WO900:'CLSD',WO990:'CANC'};
+export const WO_STATUS_SHORT:Record<string,string>={WO015:'DWAU',WO010:'DWA',WO020:'DAA',WO030:'DWS',WO040:'DSE',WO050:'DXS',WO060:'DIL',WO070:'DTC',WO075:'DEAAV',WO080:'DRR',WO090:'DPD',WO100:'DCS',WO110:'DCA',WO120:'DRC',WO125:'DRA',WO130:'DSH',WO140:'DWP',WO145:'DEA',WO150:'DWE',WO160:'EXE',WO165:'DEB',WO170:'DWF',WO180:'DSR',WO185:'DSF',WO186:'DGR',WO187:'DSA',WO190:'DIC',WO200:'DSS',WO210:'DOH',WO220:'DWC',WO900:'CLSD',WO990:'CANC'};
 export const shortWorkOrderStatus=(code:string)=>WO_STATUS_SHORT[code]||code;
 export type StateCode=typeof WO_STATES[number][0];
 export type FactSet={approved?:boolean;items?:Obj[];checklist?:Obj[];costStatus?:string;windowStatus?:'missing'|'blocked'|'ready';openIncident?:boolean;closureResource?:{code:'WO185'|'WO186'|'WO187'|'WO180';reason:string}};
@@ -42,7 +42,9 @@ export function stateOf(d:Obj,f:FactSet):{code:StateCode;label:string;reason:str
   if(openService)return make('WO040',str(openService.description)||str(openService.status));
   if(tasks.some(t=>object(t.externalResource).type&&!object(object(plan[str(t.id)]).externalSpecialist).at))return make('WO050','Secure each assessed external specialist requirement');
   if(tasks.some(t=>texts(object(object(plan[str(t.id)]).allocation).personnel).length<Number(t.persons)))return make('WO060','Allocate qualified internal personnel');
-  if(tasks.some(t=>{const a=object(object(plan[str(t.id)]).allocation);return a.toolsReady!==true||a.competenciesConfirmed!==true;}))return make('WO070','Confirm tools and competency coverage');
+  if(tasks.some(t=>object(object(plan[str(t.id)]).allocation).competenciesConfirmed!==true))return make('WO060','Confirm allocated personnel competency coverage');
+ if(f.checklist?.some(x=>x.key==='tools'&&x.done!==true)||tasks.some(t=>{const a=object(object(plan[str(t.id)]).allocation);return t.assessmentSetup===undefined&&a.toolsReady!==true;}))return make('WO070','Confirm toolbox and secure additional tools');
+ if(f.checklist?.some(x=>x.key==='equipment'&&x.done!==true))return make('WO075','Secure required equipment');
   const done=(key:string)=>f.checklist?.some(x=>x.key===key&&x.done===true);
   if(!done('risk'))return make('WO080');if(!done('schedule'))return make('WO090');
   if(!done('cost'))return make(f.costStatus==='pending'?'WO110':'WO100',f.costStatus||'');

@@ -33,7 +33,7 @@ export function MntToolAdoption(){
 }
 export function toolRequirementProblems(values:ToolRequirement[]|undefined,required:boolean,legacyNotes=''):string[]{
  const rows=values||[];
- return [...(required&&!rows.length&&!legacyNotes?['Select required tools and equipment']:[]),...rows.flatMap(r=>[...(!Number.isInteger(r.quantity)||r.quantity<1||r.quantity>100000?[r.name+': enter quantity']:[]),...(!['available','not_available'].includes(r.availability)?[r.name+': select availability']:[]),...(r.attributeDefinitions||[]).filter(a=>!r.attributes?.[a.key]?.trim()).map(a=>r.name+': enter '+a.label)])];
+ return [...(required&&!rows.length&&!legacyNotes?['Select required tools and equipment']:[]),...rows.flatMap(r=>[...(!Number.isInteger(r.quantity)||r.quantity<1||r.quantity>100000?[r.name+': enter quantity']:[]),...(!['available','not_available'].includes(r.availability)?[r.name+': select availability']:[]),...(r.attributeDefinitions||[]).filter(a=>a.required!==false&&!r.attributes?.[a.key]?.trim()).map(a=>r.name+': enter '+a.label)])];
 }
 export function MntToolRequirements({values,onChange,legacyNotes}:{values:ToolRequirement[];onChange:(rows:ToolRequirement[])=>void;legacyNotes?:string}){
  const [browse,setBrowse]=useState(false);

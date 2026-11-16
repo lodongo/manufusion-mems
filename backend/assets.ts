@@ -685,6 +685,26 @@ function completeness(info: ClassInfo, attrs: Obj): number {
     return Math.round((req.filter((a) => attrs[a.code] !== undefined).length / req.length) * 100);
 }
 
+/** Maintenance view of the canonical asset master. Technical assessment fields exclude instance/accounting records. */
+export async function maintenanceAssetCatalogue(){
+ const d=await activeDictionary();
+ const groups=new Map(d.groups.map(g=>[str(g.code),str(g.name)])),cats=new Map(d.categories.map(g=>[str(g.code),str(g.name)])),subs=new Map(d.subcategories.map(g=>[str(g.code),str(g.name)]));
+ const items=Array.from(d.classes.values()).filter(c=>!['LP','IA','XX'].includes(str(c.groupCode))&&c.active!==false).map(c=>{
+ const groupCode=str(c.groupCode),categoryCode=str(c.categoryCode),subcategoryCode=str(c.subcategoryCode);
+ const kind=groupCode==='TW'&&categoryCode!=='TW-WSE'?'Tools':'Equipment';
+ return {code:str(c.code),name:str(c.name),kind,discipline:groups.get(groupCode)||groupCode,category:cats.get(categoryCode)||categoryCode,family:subs.get(subcategoryCode)||subcategoryCode,familyCode:subcategoryCode,categoryCode,groupCode,synonyms:strs(c.synonyms)};
+ });
+ return {version:d.version,items};
+}
+export async function maintenanceAssetSpecification(code:string){
+ const d=await activeDictionary(),c=d.classes.get(code);if(!c||c.active===false)throw new HttpError(400,'Choose an active asset class.');
+ const all=await maintenanceAssetCatalogue(),item=all.items.find(i=>i.code===code);if(!item)throw new HttpError(400,'Choose a physical tool or equipment class.');
+ const info=classOut(d,code),use=isObj(c.maintenanceUse)?c.maintenanceUse:{},configured=strs(use.assessmentAttributes);
+ const technical=info.attributes.filter(a=>!['IDN','FIN','MNT'].includes(a.domain)&&!['file','date','country','currency'].includes(a.dataType));
+ const selected=configured.length?technical.filter(a=>configured.includes(a.code)):technical.filter(a=>a.specific||a.required);
+ const defs=(selected.length?selected:technical.slice(0,6)).slice(0,30).map(a=>({key:a.code,label:a.name+(a.unit?' ('+a.unit+')':''),required:configured.length?a.required||configured.includes(a.code):a.required,dataType:a.dataType,options:a.options,unit:a.unit}));
+ return {...item,attributes:defs,variants:strs(use.examples)};
+}
 function unitClassification(ctx: OrgContext, classCode: string): Promise<{ classCode: string; categoryCode: string; subcategoryCode: string }> {
     return orgDictionary(ctx).then((dict) => {
         const cls = dict.classes.get(classCode);
