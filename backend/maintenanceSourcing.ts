@@ -512,10 +512,11 @@ async function analyzeAssessmentSpares(ctx:OrgContext,record:Doc,raw:unknown){
   const internalDays=stats.p90===null?configuredInternal:stats.p90;
   const baseCase=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays:stats.mean??configuredInternal});
   const risk=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays});
-  results.push({...g,warehouseName:str(warehouses.get(wh)?.data.name)||wh,available,supplierDays,configuredInternal,internalDays,history:stats,historySource:stats.count?source:configuredInternal===null?'no evidence':source,baseCase,...risk});
+  const worstObserved=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays:stats.max??configuredInternal});
+  results.push({...g,warehouseName:str(warehouses.get(wh)?.data.name)||wh,available,supplierDays,configuredInternal,internalDays,history:stats,historySource:stats.count?source:configuredInternal===null?'no evidence':source,baseCase,worstObserved,...risk});
  }
  const worst=combineSpareRisk(results,expected);
- return {expectedStart:expected,analysedOn:cycle.today,historyFrom:addCalendarDays(cycle.today,-91),historyTo:cycle.today,rows:results,summary:worst,method:'Calendar days; internal requirement creation to supplier acknowledgement or final PO approval. Same item/warehouse first, warehouse fallback, then configured internal time. Conservative scenario uses observed P90 plus configured supplier days. No records or work order dates are changed.'};
+ return {expectedStart:expected,analysedOn:cycle.today,historyFrom:addCalendarDays(cycle.today,-91),historyTo:cycle.today,rows:results,summary:worst,meanScenario:combineSpareRisk(results.map(r=>r.baseCase),expected),worstObservedScenario:combineSpareRisk(results.map(r=>r.worstObserved),expected),method:'Calendar days; internal requirement creation to supplier acknowledgement or final PO approval. Same item/warehouse first, warehouse fallback, then configured internal time. Conservative scenario uses observed P90 plus configured supplier days. No records or work order dates are changed.'};
 }
 
 export const maintenanceSourcingRoutes = {

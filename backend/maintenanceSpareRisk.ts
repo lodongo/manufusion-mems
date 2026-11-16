@@ -9,6 +9,7 @@ export function spareRisk(input:{today:string;expectedStart:string;required:numb
  if(shortage===0)return {shortage,delivery:null,proposedStart:expectedStart||null,delayDays:0,tone:'green' as RiskTone,reason:'Sufficient usable stock at analysis time'};
  if(shortage===null||supplierDays===null||internalDays===null||!expectedStart)return {shortage,delivery:null,proposedStart:null,delayDays:null,tone:'red' as RiskTone,reason:shortage===null?'Usable stock could not be verified':supplierDays===null?'Supplier lead time not configured':internalDays===null?'Internal lead time unavailable':'Expected start date unavailable'};
  const delivery=addCalendarDays(today,Math.ceil(supplierDays+internalDays)),latestStart=addCalendarDays(delivery,7);
+ // If delivery already meets the risk target, no rescheduling is proposed; otherwise use day one after delivery.
  const proposedStart=delivery<=expectedStart?expectedStart:addCalendarDays(delivery,1);
  const delayDays=Math.max(0,daysBetween(expectedStart,proposedStart)),slack=daysBetween(delivery,expectedStart);
  return {shortage,delivery,latestStart,proposedStart,delayDays,tone:(delayDays>0?'red':slack<=7?'yellow':'green') as RiskTone,reason:delayDays>0?'Delivery forecast exceeds the expected start':slack<=7?'Delivery within seven days of the expected start':'Delivery forecast before expected start'};

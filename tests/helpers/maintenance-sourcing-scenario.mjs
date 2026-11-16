@@ -461,6 +461,16 @@ assert.deepEqual(savedTasks.map((t) => t.code), ['ASSMTASK_1', 'ASSMTASK_2'], 'T
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: wr.code, action: 'review_assessment', note: 'Independent review of spares, services and risks.' });
 const wo = (await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'convert', confirm: wr.code, scheduledStart: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10), scheduledEnd: new Date(Date.now() + 15 * 86400000).toISOString().slice(0, 10) })).woCode;
 assert.equal((await requirements()).length, 0, 'Conversion from assessment creates no procurement requirement');
+// Read-only advisory analysis with duplicate demands, actual internal history and configured supplier lead.
+const {deleteDoc:deleteRiskFixture}=await import('./maintenance-fixture.ts');
+const histReq=r+'/procurement_requirements/RISK_REQ',histPo=r+'/procurement_orders/RISK_PO',histInfo=r+'/inventory_material_info/SENSOR_WAREHOUSE';
+seed(histReq,{createdAt:new Date(Date.now()-10*86400000).toISOString()});
+seed(histPo,{status:'open',approvedAt:new Date(Date.now()-6*86400000).toISOString(),lines:[{materialId:'SENSOR',warehouseId:'WAREHOUSE',requirementId:'RISK_REQ'}]});
+seed(histInfo,{leadTimeDays:12,internalLeadTimeDays:2});
+const originalExpected=snapshot(r+'/work_orders/'+wo).data.expectedStart;
+const risk=await route(maintenanceSourcingRoutes,'/api/org/mnt/sourcing/analyse-spares','assessor',{code:wo,spares:[{materialId:'SENSOR',warehouseId:'WAREHOUSE',description:'Sensor',qty:2,uom:unit.code},{materialId:'SENSOR',warehouseId:'WAREHOUSE',description:'Sensor',qty:2,uom:unit.code}]});
+assert.equal(risk.rows.length,1);assert.equal(risk.rows[0].required,4);assert.equal(risk.rows[0].available,1);assert.equal(risk.rows[0].shortage,3);assert.equal(risk.rows[0].history.count,1);assert.equal(risk.rows[0].internalDays,4);assert.equal(risk.rows[0].supplierDays,12);assert.equal(snapshot(r+'/work_orders/'+wo).data.expectedStart,originalExpected);assert.equal(risk.summary.tone,'red');
+for(const p of [histReq,histPo,histInfo])await deleteRiskFixture(p);
 
 // 5. Warehouse reservation: full, and partial with a shortage requirement (never over-reserving).
 const full = await op('planner', 'secure_spare', { code: wo, taskId: 'drive', resourceId: 'bearing' });

@@ -24,7 +24,7 @@ export function editExpectedDates(d:Obj,b:Record<string,unknown>,type:string,cyc
  if(expectedDatesLocked(d))return protectExpectedDates(d,b);
  const old=expectedDates(d),start=b.expectedStart===undefined?old.expectedStart:str(b.expectedStart),end=b.expectedEnd===undefined?old.expectedEnd:str(b.expectedEnd);
  validateExpectedWindow(type,start,end,cycle,d);
- return {...old,expectedStart:start,expectedEnd:end,expectedDateSource:'original'};
+ return {...old,expectedStart:start,expectedEnd:end,expectedDateSource:start===old.expectedStart&&end===old.expectedEnd?old.expectedDateSource:'original'};
 }
 export function expectedDateCompletionPatch(d:Obj,at:string):Obj{
  return !str(d.expectedDatesLockedAt)&&expectedDatesLocked(d)?{...expectedDates(d),expectedDatesLockedAt:at}:{};

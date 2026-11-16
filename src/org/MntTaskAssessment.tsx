@@ -74,6 +74,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
   {tasks.map((t,i)=><section key={t.id} className='space-y-2 rounded-xl border border-line p-3 text-sm'>
    <h4 className='font-semibold text-ink'>Task {i+1}: {t.title||t.description}</h4>
    <p className='text-soft'>{t.description}</p>
+   {!!t.attachments?.length&&<div className='grid grid-cols-2 gap-2'>{t.attachments.map((path,i)=>options?.photos?.[path]?<a key={path} href={options.photos[path]} target='_blank' rel='noreferrer' className='rounded-lg border border-line p-2 text-xs text-brand'>{/\.(jpg|png)$/i.test(path)?<img src={options.photos[path]} alt={'Assessment photo '+(i+1)} className='mb-1 aspect-video w-full rounded-md object-cover'/>:null}View assessment evidence {i+1}</a>:<p key={path} className='text-xs text-soft'>Evidence {i+1} attached</p>)}</div>}
    <p className='text-xs text-brand'>Maintenance strategy: {t.maintenanceTypeCode?((options?.maintenanceTypes||[]).find(m=>m.code===t.maintenanceTypeCode)?.label||t.maintenanceTypeLabel||t.maintenanceTypeCode):'Inherit Work Order type'}</p>
    <p>Internal: {(t.internalRoles||[]).map(c=>roles.find(x=>x[0]===c)?.[1]||c).join(', ')||'None'} · {t.persons} people · {t.hours} hours</p>
    {t.externalResource?.type&&<p>External: {externals.find(x=>x[0]===t.externalResource?.type)?.[1]||t.externalResource.type} · {t.externalResource.persons} people · {t.externalResource.notes}</p>}

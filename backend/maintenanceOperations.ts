@@ -1,4 +1,4 @@
-import {expectedDates,protectExpectedDates,expectedDatesLocked} from './maintenanceExpectedDates';
+import {expectedDates,protectExpectedDates,expectedDatesLocked,expectedDateCompletionPatch} from './maintenanceExpectedDates';
 import {summarizeWorkOrderReview} from './maintenanceStatusReview';
 import {capacityForWindow,capacityContext,windowTeamAvailability} from './maintenanceCapacity';
 import {levelResources} from './maintenanceResourceLeveling';
@@ -2011,7 +2011,7 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
             {
                 path: `${root(ctx)}/work_orders/${wo.id}`,
                 fields: {
-                    ...wo.data,
+                    ...wo.data,...expectedDateCompletionPatch(wo.data,nowIso()),
                     status: 'planning',
                     taskPlanning: {},
                     assessmentReview: null,
