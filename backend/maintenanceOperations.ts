@@ -18,7 +18,7 @@ import { catalogItemSpec } from './procurement';
 import { createMaintenanceRequirement } from './purchaseRequirements';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { postMaintenanceReturn } from './finOps';
-import { maintenancePermission, requireMaintenanceRole, configuredMaintenanceRole } from './maintenanceAccess';
+import { maintenancePermission, requireMaintenanceRole, configuredMaintenanceRole, requireWorkOrderAssessor } from './maintenanceAccess';
 import {groupAt,groupGateRole,outsideExecutionAccess,loadWorkGroupPolicy,workGroupGateAllowed} from './maintenanceWorkGroupPolicy';
 import { workGroupResourcePool, requireOutsideGroupOptIn } from './maintenanceWorkGroups';
 import { assessmentReviewCurrent,maintenanceAssessmentReady } from './maintenanceAssessmentReview';
@@ -2119,6 +2119,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
             retrospective=isRequestClosureOrder(wo.data),
             readinessData = retrospective?{items:[],problems:[],ready:true}:await readiness(ctx, wo),
             permissions: Obj = {};
+        let assessmentBlockReason='';
         for (const [key, perm, gate] of [
             ['reconcile', 'MNT.view', 'MNT.SPARES.RECONCILE'],
             ['assess', 'MNT.view', 'MNT.WR.ASSESS'],
@@ -2133,7 +2134,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 // Assessment is intentionally open to employees who can view the
                 // work order at their organizational scope. Conversion, planning,
                 // execution, approvals and closure remain role-gated.
-                if (key === 'assess') {await maintenancePermission(ctx, 'MNT.assessment.edit', recordPath(wo));if((workGroupGateAllowed(ctx.workGroupPolicy,'MNT.WR.ASSESS',recordPath(wo))===false||(maintenanceAssessmentApprovalRequired(wo.data)&&workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',recordPath(wo))===true))&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation')))throw Error('Not an independent assessor');}
+                if (key === 'assess') {await requireWorkOrderAssessor(ctx,wo);}
                 else if (key === 'reviewAssessment') {
                     if(!maintenanceAssessmentApprovalRequired(wo.data))throw Error('Approval not required');
                     if(str(wo.data.status)!=='planning'||([str(wo.data.requestedBy),wo.data.executionMode==='confirmed_request'?'':str(wo.data.createdBy),str(wo.data.assessedBy),str(wo.data.assessmentTasksBy)].includes(ctx.uid)&&!bypass(ctx,'mnt.assessment.review_independence')))throw new Error('Not independently reviewable');
@@ -2142,7 +2143,8 @@ export async function maintenanceOperations(ctx: OrgContext) {
                 }
                 else if(key!=='execute'||!outsideExecutionAccess(ctx.workGroupPolicy,wo))await authority(ctx, wo, perm, gate);
                 permissions[key] = true;
-            } catch {
+            } catch (e) {
+                if(key==='assess')assessmentBlockReason=e instanceof Error?e.message:'Assessment access could not be verified.';
                 permissions[key] = false;
             }
         }
@@ -2200,6 +2202,7 @@ export async function maintenanceOperations(ctx: OrgContext) {
             checklist: retrospective?null:await planChecklist(ctx, wo, readinessData),
             currency: str(ctx.org.data.currencyCode),
             permissions,
+            assessmentBlockReason,
             testModeOverride: ctx.role==='org_super_admin' && ctx.testMode===true,
             currentUserId: ctx.uid,
             workGroup: pool.group,

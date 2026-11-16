@@ -1,9 +1,9 @@
-import { HttpError, getDoc, isObj, nowIso, str } from './core';
+import { HttpError, getDoc, isObj, nowIso, str, type Doc } from './core';
 import { canAt, scopeOf } from './access';
 import type { OrgContext } from './guards';
 import { object, rows, texts } from './maintenanceDomain';
 import { bypass } from './testModeCore';
-import {groupGateRole,workGroupGateAllowed} from './maintenanceWorkGroupPolicy';
+import {groupAt,groupGateRole,workGroupGateAllowed} from './maintenanceWorkGroupPolicy';
 export function configuredMaintenanceRole(ctx:OrgContext,gate:string,path:string[],legacy:unknown):string {
  const group=groupGateRole(ctx.workGroupPolicy,gate,path,ctx.role==='org_super_admin'&&ctx.testMode===true);return group===null?str(object(legacy)[gate]):group;
 }
@@ -53,3 +53,18 @@ export async function maintenancePermission(ctx: OrgContext, permission: string,
     if (!canAt(ctx, permission, path, await scopeOf(ctx))) throw new HttpError(403, `${permission} is required at this location.`);
 }
 export const maintenancePath = (d: { path?: unknown }) => texts(d.path);
+
+import {maintenanceAssessmentApprovalRequired} from './maintenanceGovernancePolicy';
+import {stageApprovalPending} from './maintenanceStageApproval';
+/** One edit-authority check for the work order screen, draft and final submission. No saved assessment is required. */
+export async function requireWorkOrderAssessor(ctx:OrgContext,wo:Doc){
+ const d=wo.data,path=maintenancePath(d);
+ if(str(d.status)!=='planning'||d.executionMode==='request_closure')throw new HttpError(409,'This work order is not in the assessment/planning stage.');
+ if(object(d.earlyClosureRequest).at)throw new HttpError(409,'Early closure is already in progress.');
+ if(stageApprovalPending(d,'before_assessment'))throw new HttpError(409,'Work order approval is required before assessment.');
+ if(['approved','pending'].includes(str(object(d.assessmentReview).status)))throw new HttpError(409,'Assessment has been submitted for approval or approved. Use controlled reassessment where applicable.');
+ if(Object.keys(object(d.taskPlanning)).length)throw new HttpError(409,'Task planning has already been recorded. Open controlled reassessment before editing.');
+ await maintenancePermission(ctx,'MNT.assessment.edit',path);
+ if(groupAt(ctx.workGroupPolicy,path))await requireMaintenanceRole(ctx,'MNT.WR.ASSESS',path);
+ if(maintenanceAssessmentApprovalRequired(d)&&workGroupGateAllowed(ctx.workGroupPolicy,'MNT.ASSESS.REVIEW',path)===true&&!(ctx.role==='org_super_admin'&&bypass(ctx,'mnt.assessment.assessor_reviewer_separation')))throw new HttpError(403,'The independent assessment reviewer cannot also assess this work order.');
+}

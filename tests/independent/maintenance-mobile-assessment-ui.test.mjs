@@ -46,3 +46,5 @@ test('reviewer is read-only and task changes are not lost silently on navigation
  assert.match(ui,/editable=\{can.assess&&!can.reviewAssessment\}/);
  assert.match(ui,/if \(can.assess && !can.reviewAssessment\)/);
 });
+
+test('awaiting assessment action is visible without a saved draft and explains denied authority',()=>{const ui=src('MntWorkOrder.tsx');assert.match(ui,/wo\.workflowCode==='WO010'/);assert.match(ui,/Continue assessment/);assert.match(ui,/disabled=\{!can\.assess\} onClick=\{openAssessment\}/);assert.match(ui,/assessmentBlockReason/);assert.match(ui,/!wo\.assessedAt\|\|wo\.assessmentDraft\?\.header/);});

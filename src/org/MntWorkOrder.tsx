@@ -687,6 +687,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
     const [selected, setSelected] = useState(''),
         [tab, setTab] = useState('Details'),
         [assessing, setAssessing] = useState(false),
+        [assessmentSection,setAssessmentSection]=useState<'classification'|'tasks'>('classification'),
         [assessmentReviewNote,setAssessmentReviewNote]=useState(''),
         [dialog, setDialog] = useState<MntData | null>(null),
         [message, setMessage] = useState(''),
@@ -754,7 +755,8 @@ export default function MntWorkOrder({ code }: { code: string }) {
             if (await legacy('cancel', body)) setDialog(null);
         } else if (await run(action, body)) setDialog(null);
     };
-    if (assessing)
+    const openAssessment=()=>{setAssessmentSection(wo.executionMode==='confirmed_request'&&(!wo.assessedAt||wo.assessmentDraft?.header)?'classification':'tasks');setAssessing(true);};
+    if (assessing&&can.assess)
         return (
             <div className={screen.full ? screen.className + ' overflow-y-auto overscroll-contain' : ''} onFocusCapture={screen.keepInView}>
             {screen.full && (
@@ -765,7 +767,8 @@ export default function MntWorkOrder({ code }: { code: string }) {
                     <p className="min-w-0 flex-1 truncate font-semibold">{wo.code} · task assessment</p>
                 </div>
             )}
-            <MntTaskAssessment
+            {wo.executionMode==='confirmed_request'&&<div className="mb-3 flex flex-wrap gap-2"><Button variant={assessmentSection==='classification'?'primary':'secondary'} onClick={()=>{if(!assessmentDirty)setAssessmentSection('classification');else void appConfirm('Leave unsaved task changes? Save draft first if needed.').then(ok=>{if(ok){setAssessmentDirty(false);setAssessmentSection('classification');}});}}>Technical classification</Button><Button variant={assessmentSection==='tasks'?'primary':'secondary'} onClick={()=>setAssessmentSection('tasks')}>Tasks &amp; requirements</Button></div>}
+            {assessmentSection==='classification'&&wo.executionMode==='confirmed_request'?<><OrderAssessmentHeader key={wo.code+':'+(wo.assessedAt||'new')+':'+(wo.assessmentDraft?.updatedAt||'')} wo={wo} options={data.assemblyOptions||[]} cycle={data.maintenanceCycle} can={!!can.assess} testOverride={!!data.testModeOverride} onDone={reload}/><Button variant="secondary" onClick={()=>setAssessmentSection('tasks')}>Continue to tasks</Button></>:<MntTaskAssessment
                 code={code}
                 context={{ asset: `${wo.assetTag} · ${wo.assetName || ''}`, assembly: wo.assemblyName, equipment: wo.unitName }}
                 recordType="wo"
@@ -780,7 +783,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
                 }}
                 onDirtyChange={setAssessmentDirty}
                 onCancel={() => {setAssessing(false);setAssessmentDirty(false);reload();}}
-            />
+            />}
             </div>
         );
     return (
@@ -817,7 +820,7 @@ export default function MntWorkOrder({ code }: { code: string }) {
             {(can.createBreakIn||data.subOrders?.length>0)&&<Card className="space-y-2"><h2 className="font-semibold">Break-in sub-orders</h2>{(data.subOrders||[]).map((x:MntData)=><Button key={x.code} variant="secondary" onClick={()=>navigate('organization_admin/work_orders/'+x.code)}>{x.code} · {x.title} · {x.status}</Button>)}{can.createBreakIn&&<Button onClick={()=>{open('create_break_in');const today=data.maintenanceCycle?.today||new Date().toISOString().slice(0,10);setForm({scheduledStart:today,scheduledEnd:today});}}>Create break-in sub-order</Button>}</Card>}
             <MaintenanceResponsibility record={wo}/>
             <div className="flex gap-2 rounded-xl border border-line p-1"><Button variant={reviewTab==='status'?'primary':'secondary'} onClick={()=>setReviewTab('status')}>Status review</Button><Button variant={reviewTab==='details'?'primary':'secondary'} onClick={()=>setReviewTab('details')}>Work Order details</Button></div>
-            {!retrospective&&wo.status==='planning'&&can.assess&&<Card className="space-y-2"><p className="font-semibold">Assessment {wo.assessmentDraft?'· Draft saved':wo.assessedAt&&!wo.assessmentReady?'· In progress':''}</p>{wo.assessmentDraft?.updatedAt&&<p className="text-xs text-soft">Last saved {new Date(wo.assessmentDraft.updatedAt).toLocaleString()}</p>}<div className="flex flex-wrap gap-2"><Button onClick={()=>{setReviewTab('details');setAssessing(true);}}><Wrench size={16}/>{wo.assessmentDraft||wo.assessedAt||tasks.length?'Continue assessment':'Start assessment'}</Button>{wo.executionMode==='confirmed_request'&&<Button variant="secondary" onClick={()=>setReviewTab('details')}>Technical classification</Button>}</div></Card>}
+            {!retrospective&&(wo.workflowCode==='WO010'||wo.workflowCode==='WO015'||wo.status==='planning'&&can.assess)&&<Card className="space-y-2"><p className="font-semibold">Assessment {wo.assessmentDraft?'· Draft saved':wo.assessedAt&&!wo.assessmentReady?'· In progress':''}</p>{wo.assessmentDraft?.updatedAt?<p className="text-xs text-soft">Last saved {new Date(wo.assessmentDraft.updatedAt).toLocaleString()}</p>:!wo.assessmentReady&&<p className="text-sm text-soft">No saved draft is required. You can start or restart this assessment.</p>}<div className="flex flex-wrap gap-2"><Button testOverride={!!data.testModeOverride} disabled={!can.assess} onClick={openAssessment}><Wrench size={16}/>{wo.assessmentReady?'Edit assessment':'Continue assessment'}</Button></div>{!can.assess&&<p role="status" className="rounded-lg border border-line bg-page p-2 text-sm text-soft">{data.assessmentBlockReason||'Assessment editing requires the configured Work Group assessor at this location. Check your assigned job role and scope.'}</p>}</Card>}
             {reviewTab==='status'?<MntStatusReview data={data} onRefresh={reload}/>:<>
             {wo.executionMode==='confirmed_request'&&<OrderAssessmentHeader key={wo.code+':'+(wo.assessedAt||'new')} wo={wo} cycle={data.maintenanceCycle} options={data.assemblyOptions||[]} can={wo.status==='planning'&&!!can.assess&&!Object.keys(wo.taskPlanning||{}).length} testOverride={!!data.testModeOverride} onDone={reload}/>}
             {wo.workflowCode&&<Card className="space-y-2"><p className="text-xs text-soft">Operational state · {wo.workflowStatusCode||wo.workflowCode}</p><p className="font-semibold">{wo.workflowLabel}</p><p className="text-sm text-soft">Since {wo.workflowSince?new Date(wo.workflowSince).toLocaleString():'—'}</p>{wo.workflowReason&&<p className="text-sm">{wo.workflowReason}</p>}<details open><summary className="cursor-pointer text-sm font-semibold">State transition history ({(wo.workflowTransitions||[]).length})</summary><ol className="mt-2 space-y-2">{[...(wo.workflowTransitions||[])].reverse().map((e:MntData,i:number)=><li key={i} className="border-l-2 border-line pl-3 text-sm"><p className="font-medium">{e.from?(e.fromStatusCode||e.from)+' → ':''}{e.toStatusCode||e.to} · {e.label}</p><p className="text-xs text-soft">{new Date(e.at).toLocaleString()} · {e.byName||e.by} · {e.source}</p>{e.reason&&<p className="text-xs text-soft">{e.reason}</p>}</li>)}</ol></details></Card>}
