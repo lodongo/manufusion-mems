@@ -85,12 +85,17 @@ export function taskRiskAssessmentPending(code:string,ownRows:number,hasGlobalRi
  return !!code&&code!=='AC01'&&ownRows===0&&!(hasGlobalRisks&&noAdditionalRisks);
 }
 
+export function safeguardReviewGap(reviewed:boolean,savedVersion:number,currentVersion:number,selectedCount:number):string {
+ if(reviewed&&savedVersion===currentVersion)return '';
+ if(reviewed&&savedVersion!==currentVersion)return 'Safety device register changed from revision '+savedVersion+' to '+currentVersion+'. Review the current applicable safeguards and save.';
+ return selectedCount===0?'Safety equipment and safeguards: no additional devices selected. Confirm that none are applicable to this task, or select the applicable devices, then save.':'Safety equipment and safeguards: confirm the review of selected devices, then save.';
+}
 /** Completion of task safety data, independent of Safety's later verification. */
-export function taskSafetyOutstanding(input:{code:string;ownRows:number;hasGlobalRisks:boolean;noAdditionalRisks:boolean;devicesReviewed:boolean;programGaps?:string[];intolerable?:boolean}):string[]{
+export function taskSafetyOutstanding(input:{code:string;ownRows:number;hasGlobalRisks:boolean;noAdditionalRisks:boolean;devicesReviewed:boolean;safeguardGap?:string;programGaps?:string[];intolerable?:boolean}):string[]{
  const gaps:string[]=[];
  if(!input.code)gaps.push('Complete the task classification decision tree.');
  if(taskRiskAssessmentPending(input.code,input.ownRows,input.hasGlobalRisks,input.noAdditionalRisks))gaps.push(input.hasGlobalRisks?'Review inherited task-class risks; either confirm no additional activity-specific risks or add the applicable task hazards.':'No risk assessment is recorded for this risk-bearing task. Under Add hazard / injury, record applicable task hazards, injuries, mitigations, initial and residual risk ratings.');
- if(!input.devicesReviewed&&input.code)gaps.push('Under Safety equipment and safeguards, review the applicable devices and confirm the safeguard review.');
+ if(!input.devicesReviewed&&input.code)gaps.push(input.safeguardGap||'Under Safety equipment and safeguards, review the applicable devices and confirm the safeguard review.');
  gaps.push(...(input.programGaps||[]));
  if(input.intolerable)gaps.push('Residual risk is intolerable. Review and strengthen controls; do not execute.');
  return [...new Set(gaps)];

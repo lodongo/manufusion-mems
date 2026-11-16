@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {adoptedTaskAnswers,taskClassificationVerdict,decideTask,questionsFor,taskDecisionPath,answerTaskQuestion,backTaskQuestion,taskRiskAssessmentPending,taskSafetyOutstanding} from '../../backend/safTaskDecision.ts';
+import {adoptedTaskAnswers,taskClassificationVerdict,decideTask,questionsFor,taskDecisionPath,answerTaskQuestion,backTaskQuestion,taskRiskAssessmentPending,taskSafetyOutstanding,safeguardReviewGap} from '../../backend/safTaskDecision.ts';
 import {ACTIVITY_CLASSES} from '../../backend/safActivityClasses.ts';
 const base={routine:'yes',stop:'yes',body:'no',door:'no',moving:'no',otherExposure:'no',nonEnergy:'no',inching:'no',minorProtected:'no',loss:'no',infeasible:'no',partial:'no'};
 test('task decision protects against false no-risk and economic override',()=>{
@@ -65,3 +65,5 @@ test('work safety inherits equipment control programs and removes duplicate scre
 test('asset safety verification is separate from ordinary planning and saved data remains available',()=>{const api=readFileSync('backend/safEquipment.ts','utf8');assert.match(api,/equipment-tasks\/verify/);assert.match(api,/PERMS.riskVerify/);assert.match(api,/verificationStatus:'pending_verification'/);assert.match(api,/verifiedRevision:version/);assert.match(api,/active:status!=='intolerable'&&rows.length>0/);assert.doesNotMatch(api,/decision.code!==primary\|\|decision.exception/);const ops=readFileSync('backend/maintenanceOperations.ts','utf8');assert.match(ops,/Independent Safety authorization/);});
 
 test('completion diagnostics separate actual task risk coverage and device review from verification',()=>{const input={code:'AC03',ownRows:0,hasGlobalRisks:false,noAdditionalRisks:false,devicesReviewed:true};assert.match(taskSafetyOutstanding(input)[0],/No risk assessment is recorded/);assert.deepEqual(taskSafetyOutstanding({...input,ownRows:1}),[]);assert.match(taskSafetyOutstanding({...input,ownRows:1,devicesReviewed:false})[0],/safeguard review/);assert.match(taskSafetyOutstanding({...input,hasGlobalRisks:true})[0],/Review inherited/);assert.deepEqual(taskSafetyOutstanding({...input,hasGlobalRisks:true,noAdditionalRisks:true}),[]);});
+
+test('safeguard review diagnostics distinguish unconfirmed empty selections and stale register versions',()=>{assert.match(safeguardReviewGap(false,3,3,0),/no additional devices selected/);assert.match(safeguardReviewGap(true,2,3,1),/revision 2 to 3/);assert.equal(safeguardReviewGap(true,3,3,0),'');assert.match(safeguardReviewGap(false,3,3,1),/selected devices/);});
