@@ -42,6 +42,7 @@ import { ID_RE, col, signedUrl } from './structure';
 import { canAnywhere, canAt, scopeOf,nodePath, type Scope } from './access';
 import { searchCatalog,serviceCatalogHierarchy } from './procurement';
 import {MAINTENANCE_GATES,maintenanceGateReadiness,MAINTENANCE_WORKFLOW_SCHEMA,RETIRED_MAINTENANCE_KEYS,currentMaintenanceMappings} from './maintenanceWorkflowConfig';
+import {stableJson} from './scopeGuard';
 import {commitmentMetrics,commitmentElapsed,proposedEnd} from './maintenanceCommitment';
 import {validateAssessmentTasks,summarizeAssessmentTasks,assessmentTaskSummaries,type AssessedTask} from './maintenanceTaskAssessment';
 import {defaultMaintenanceRiskMatrix,finalizeAssessedTaskRisks,type RiskMatrix} from './maintenanceTaskRisk';
@@ -2476,7 +2477,7 @@ export const maintenanceRoutes = {
                         const input=object(b.commitment),cycle=await getMaintenanceCycle(ctx),type=str(d.maintenanceTypeCode);
                         const metrics=commitmentMetrics(tasks,str(ctx.org.data.currencyCode)),overlap=Number(input.overlapHours),hoursPerDay=Number(input.hoursPerDay);
                         let elapsed;try{elapsed=commitmentElapsed(metrics,overlap,hoursPerDay);}catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid time estimate.');}
-                        if(JSON.stringify(input.reviewedMetrics)!==JSON.stringify(metrics))throw new HttpError(409,'Resources, durations or current cost estimates changed. Refresh the assessment and review the latest figures before committing.');
+                        if(stableJson(input.reviewedMetrics)!==stableJson(metrics))throw new HttpError(409,'Resources, durations or current cost estimates changed. Refresh the assessment and review the latest figures before committing.');
                         const overlapBasis=str(input.overlapBasis).trim().slice(0,1000);
                         if(overlap>0&&overlapBasis.length<10)throw new HttpError(400,'Explain the basis for concurrent work.');
                         const start=str(input.scheduledStart),end=str(input.scheduledEnd);
@@ -2491,7 +2492,7 @@ export const maintenanceRoutes = {
                         if(JSON.stringify(next).length>240000)throw new HttpError(400,'Assessment draft is too large. Split the work scope.');
                         await done({...datePatch,assessmentDraft:next},'Assessment committed for planning handoff','mnt.wo.assessment_committed','Validated assessment snapshot, not authorization for execution');return {ok:true,committedAt:now};
                     }
-                    if(action==='submit_committed_assessment'){const current=commitmentMetrics(tasks,str(ctx.org.data.currencyCode));if(!isObj(commitRecord.metrics)||JSON.stringify(current)!==JSON.stringify(commitRecord.metrics)||str(commitRecord.scheduledStart)!==str(d.scheduledStart)||str(commitRecord.scheduledEnd)!==str(d.scheduledEnd))throw new HttpError(409,'Assessment dates, resources or cost estimates changed. Reopen and recommit before submitting.');}
+                    if(action==='submit_committed_assessment'){const current=commitmentMetrics(tasks,str(ctx.org.data.currencyCode));if(!isObj(commitRecord.metrics)||stableJson(current)!==stableJson(commitRecord.metrics)||str(commitRecord.scheduledStart)!==str(d.scheduledStart)||str(commitRecord.scheduledEnd)!==str(d.scheduledEnd))throw new HttpError(409,'Assessment dates, resources or cost estimates changed. Reopen and recommit before submitting.');}
                     for(const t of tasks.filter(x=>x.templateStatus!=='existing')){
                         const id=`${doc.id}_${t.id}_v${version}`;
                         await writeDoc(`organizations/${ctx.orgId}/asset_task_proposals/${id}`,{
