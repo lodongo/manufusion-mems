@@ -1,4 +1,4 @@
-import {expectedDates,newExpectedDates,protectExpectedDates} from './maintenanceExpectedDates';
+import {expectedDates,newExpectedDates,protectExpectedDates,expectedDatesLocked,editExpectedDates,expectedDateCompletionPatch,validateExpectedWindow} from './maintenanceExpectedDates';
 import {maintenanceAnalyticsRoutes} from './maintenanceAnalytics';
 import {maintenanceCostRoutes} from './maintenanceCost';
 import {maintenanceReliabilityRoutes} from './maintenanceReliability';
@@ -80,7 +80,7 @@ const sameTemplate=(template:unknown,task:unknown)=>{
     return strip(template)===strip(task);
 };
 /** Every photo or document path referenced by an assessment (spares and services). */
-const assessmentFiles=(tasks:unknown)=>objs(tasks).flatMap(t=>[...objs(t.spares).flatMap(sp=>[str(sp.photoPath),...strs(sp.attachments)]),...objs(t.services).flatMap(sv=>strs(sv.attachments))]).filter(Boolean);
+const assessmentFiles=(tasks:unknown)=>objs(tasks).flatMap(t=>[...strs(t.attachments),...objs(t.spares).flatMap(sp=>[str(sp.photoPath),...strs(sp.attachments)]),...objs(t.services).flatMap(sv=>strs(sv.attachments))]).filter(Boolean);
 const wrCol = (orgId: string) => `organizations/${orgId}/work_requests`;
 const woCol = (orgId: string) => `organizations/${orgId}/work_orders`;
 
@@ -676,7 +676,7 @@ function woOut(doc: Doc) {
         workTypeLabel: str(d.workTypeLabel),
         disciplineLabel: str(d.disciplineLabel),
         plannerName: str(d.plannedByName),
-        ...expectedDates(d),
+        ...expectedDates(d),expectedDatesLocked:expectedDatesLocked(d),
         scheduledStart: str(d.scheduledStart),
         scheduledEnd: str(d.scheduledEnd),
         assigneeNames: objs(d.assignees).map((a) => str(a.name)),
@@ -781,7 +781,7 @@ async function closeRequestWithOrder(ctx:OrgContext,request:Doc,closure:Obj,patc
 /** Confirmation creates the order before any assessment or planning. */
 async function confirmRequestWithOrder(ctx:OrgContext,request:Doc,note:string,maintenanceType:ListItem,start:string,end:string):Promise<string>{
  if(workRequestApprovalRequired(request.data,maintenanceType.code)&&object(request.data.requestApproval).status!=='approved')throw new HttpError(409,'Independent Work Request approval is required before conversion.');
- const cycle=await getMaintenanceCycle(ctx);validateCycleDates(maintenanceType.code,start,end,cycle);
+ const cycle=await getMaintenanceCycle(ctx);validateExpectedWindow(maintenanceType.code,start,end,cycle,object(request.data.requestApproval).status==='approved'?{maintenanceTypeCode:maintenanceType.code,expectedStart:start,expectedEnd:end}:undefined);
  const now=nowIso(),n=await nextOrgCounter(ctx.orgId,'woSeq');
  if(n>99_999_999)throw new HttpError(400,'Work order numbering is exhausted.');
  const code='WO'+String(n).padStart(8,'0'),path=pathOf(request),group=groupFields(ctx.workGroupPolicy,path);
@@ -1939,7 +1939,7 @@ export const maintenanceRoutes = {
                         const type=pick(l.maintenanceTypes,str(ctx.body.maintenanceTypeCode),'maintenance type')!;
                         const start=str(ctx.body.scheduledStart),end=str(ctx.body.scheduledEnd);
                         if(workRequestApprovalRequired(doc.data,type.code)){
-                            const cycle=await getMaintenanceCycle(ctx);validateCycleDates(type.code,start,end,cycle);
+                            const cycle=await getMaintenanceCycle(ctx);validateExpectedWindow(type.code,start,end,cycle);
                             const pending={status:'pending',submittedBy:ctx.uid,submittedByName:displayName(ctx),submittedAt:now,maintenanceTypeCode:type.code,maintenanceTypeLabel:type.label,scheduledStart:start,scheduledEnd:end,note,policyVersion:readMaintenancePolicySnapshot(doc.data.maintenanceGovernance)!.version};
                             await done({status:'approval_pending',requestApproval:pending,requestApprovalHistory:[...objs(doc.data.requestApprovalHistory),pending]},'Confirmation submitted for approval','mnt.wr.approval_submitted',note);
                             return {ok:true,pendingApproval:true};
@@ -2352,12 +2352,13 @@ export const maintenanceRoutes = {
                     validateCycleDates(mtype.code,start,end,cycle,d);
                     const startMoves=validateStartDateMove(d,start);
                     const dateReason=str(b.dateChangeReason).trim().slice(0,500);if(dateChanged&&dateReason.length<10)throw new HttpError(400,'Explain the changed dates during assessment (at least 10 characters).');
-                    const baseline=protectExpectedDates(d,b);
+                    const baseline=editExpectedDates(d,b,mtype.code,cycle);
                     const datePatch:Obj=dateChanged?{...baseline,scheduledStart:start,scheduledEnd:end,startDateMoves:startMoves,dateChanges:[...objs(d.dateChanges),{at:now,by:ctx.uid,name:displayName(ctx),fromStart:str(d.scheduledStart),fromEnd:str(d.scheduledEnd),toStart:start,toEnd:end,reason:dateReason,source:'assessment'}],scheduleLock:null}:baseline;
                     if(typeChanged||start!==str(d.scheduledStart))datePatch.currentCycleAdmission={startDay:cycle.startDay,timeZone:cycle.timeZone,earliest:cycleRestricted(mtype.code)?cycle.nextStart:cycle.today,at:now,version:cycle.version};
                     const codes=[...new Set(strs(b.solutionCodes))];if(!codes.length||codes.length>5)throw new HttpError(400,'Choose one to five solution categories.');const solutions=codes.map(c=>pickGrouped(l.solutions,c,'solution category')!).map(x=>({code:x.code,label:x.label,group:x.group}));
                     const assemblyPatch:Record<string,Plain>={};const assembly=b.assemblyId===undefined?str(d.assemblyId):str(b.assemblyId);if(assembly!==str(d.assemblyId)){if(objs(d.assessmentTasks).length)throw new HttpError(409,'The assembly cannot change after tasks are assessed.');const place=await assemblyContext(ctx,assembly||str(d.unitId),P.assessment_edit,!assembly);if((assembly&&!place.assembly)||place.unit?.id!==str(d.unitId)||place.defaultAssetTag!==str(d.assetTag))throw new HttpError(409,'Choose an assembly of the original equipment and asset.');Object.assign(assemblyPatch,{assemblyId:place.assembly?.id||'',assemblyCode:place.assembly?.code||'',assemblyName:place.assembly?.name||'',path:place.path.map(x=>x.id)});}
-                    await done({...assemblyPatch,...datePatch,technicalEvaluation:evaluation,natureCode:nature.code,natureLabel:nature.group+' · '+nature.label,failureModeCode:nature.code,failureModeLabel:nature.group+' · '+nature.label,solutions,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label,criticalityCode:crit.code,criticalityLabel:crit.label,criticalityColor:crit.color,severitySetBy:ctx.uid,...(prio?{priorityCode:prio.code,priorityLabel:prio.label}:{}),assessmentNote:note,assessedBy:ctx.uid,assessedByName:displayName(ctx),assessedAt:now,assessmentReview:null},'Technical assessment classification saved','mnt.wo.assessed',note);return {ok:true};
+                    const completedHeader={...d,...datePatch,technicalEvaluation:evaluation,natureCode:nature.code,criticalityCode:crit.code,severitySetBy:ctx.uid,solutions,maintenanceTypeCode:mtype.code,assessedAt:now};
+                    await done({...assemblyPatch,...datePatch,...expectedDateCompletionPatch(completedHeader,now),technicalEvaluation:evaluation,natureCode:nature.code,natureLabel:nature.group+' · '+nature.label,failureModeCode:nature.code,failureModeLabel:nature.group+' · '+nature.label,solutions,maintenanceTypeCode:mtype.code,maintenanceTypeLabel:mtype.label,criticalityCode:crit.code,criticalityLabel:crit.label,criticalityColor:crit.color,severitySetBy:ctx.uid,...(prio?{priorityCode:prio.code,priorityLabel:prio.label}:{}),assessmentNote:note,assessedBy:ctx.uid,assessedByName:displayName(ctx),assessedAt:now,assessmentReview:null},'Technical assessment classification saved','mnt.wo.assessed',note);return {ok:true};
                 }
                 case 'save_task_assessment': {
                     await requireStageApproval(ctx,doc,'before_assessment');
@@ -2403,7 +2404,8 @@ export const maintenanceRoutes = {
                             createdBy:ctx.uid,createdAt:now
                         },{exists:false});
                     }
-                    await done({assessmentTasks:tasks as unknown as Plain,taskStandardSnapshots:taskStandardSnapshots as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
+                    const completedAssessment={...d,assessmentTasks:tasks as unknown as Plain,assessmentTasksVersion:version,assessmentTasksAt:now};
+                    await done({...expectedDateCompletionPatch(completedAssessment,now),assessmentTasks:tasks as unknown as Plain,taskStandardSnapshots:taskStandardSnapshots as unknown as Plain,tasks:assessmentTaskSummaries(tasks) as unknown as Plain,
                         spares:[],services:[],tools:'',assessmentTasksBy:ctx.uid,assessmentTasksAt:now,
                         assessmentTasksVersion:version,assessmentReview:null,safety:null},
                         'Task assessments completed','mnt.wo.task_assessments',

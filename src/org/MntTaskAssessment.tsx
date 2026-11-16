@@ -13,7 +13,7 @@ type Risk={hazard:string;impact:string;controls:string;before:string;after:strin
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
 type SafetyOption={code:string;label:string;category:string;subcategory:string;description?:string};
 type Options={maintenanceTypes?:Array<{code:string;label:string}>;serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];machineStatuses?:SafetyOption[];safetyHazards?:SafetyOption[];safetyImpacts?:SafetyOption[];safetyControls?:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
-export type TaskAssessment={id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
+export type TaskAssessment={attachments?:string[];id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
 export type MachineStatus='total_shutdown'|'live'|'full_loto'|'partial_isolation';
 export const MACHINE_STATUS:Array<[MachineStatus,string,string]>=[
  ['total_shutdown','Total shutdown','Equipment is stopped. Shutdown alone is not verified hazardous energy isolation.'],
@@ -99,7 +99,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
   </section>)}
  </Card>;
 }
-export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context,breakIn=false}:{breakIn?:boolean;context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
+export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context,breakIn=false,expectedStart}:{expectedStart?:string;breakIn?:boolean;context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
  const [tasks,setTasks]=useState<TaskAssessment[]>(initial);
  const [dirty,setDirty]=useState(false);
  const options=useLoad(()=>callBackend<Options>('/api/org/mnt/assessment/options',{code}),[code]);
@@ -238,7 +238,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    {step===0&&<StepSection title='Task' hint='What is done and which maintenance strategy it follows.'>
     <div className='space-y-3'>
      <label className={label}>Task name<input className={input} value={task.title||''} onChange={e=>patch({title:e.target.value})}/></label>
-     <label className={label}>Describe the work<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='What is required?'/></label>
+     <label className={label}>Describe the work<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='What is required?'/></label><div className='rounded-xl border border-line p-2'><p className='text-xs text-soft'>Assessment photos (optional)</p><Attachments code={code} files={task.attachments||[]} urls={urls} onChange={(files,u)=>{patch({attachments:files});setPhotoUrls(old=>({...old,...u}));}}/></div>
      <div className={label}>Maintenance strategy for this task (Finance reporting)
        <MntSelect label={'Maintenance strategy for this task'} hideLabel className={input} disabled={breakIn} value={breakIn?'':task.maintenanceTypeCode||''} onChange={e=>{
          const type=options.data?.maintenanceTypes?.find(t=>t.code===e.target.value);
