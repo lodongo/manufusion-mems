@@ -1,3 +1,4 @@
+import {readWorkSkillMaster} from './hrSkillSources';
 import {resolveGenericTaskScope,genericTaskForSite,catalogueSiteForEquipment} from './maintenanceTaskCatalogue';
 import {commitChecked} from './core';
 import {storage} from './platform/sdk';
@@ -77,8 +78,7 @@ async function equipmentTaskCreationAllowed(ctx:OrgContext,id:string){
  try{ctx.workGroupPolicy=await loadWorkGroupPolicy(ctx.orgId,ctx.me);await requireWorkOrderAssessor(ctx,wo);return true;}catch{return false;}
 }
 async function taskSkills(){
- const d=await getDoc('module_workspaces/HRM/metadata/skillsMaster');
- return array(d?.data.items).filter(x=>x.active!==false&&x.selectable!==false).map(ref);
+ return (await readWorkSkillMaster()).map(s=>ref({...s}));
 }
 async function equipmentControlPrograms(ctx:OrgContext,id:string){
  const [doc,deviceDoc,policy,master,node]=await Promise.all([getDoc(energyPath(ctx,id)),getDoc(devicePath(ctx,id)),lotoPolicy(ctx.orgId),safetyDeviceCatalogue(ctx.orgId),getDoc(root(ctx)+'/structure/'+id)]);

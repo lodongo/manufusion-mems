@@ -57,6 +57,7 @@ export default function SkillsMasterPage({ isSuper = false }: { isSuper?: boolea
     const [subcategory, setSubcategory] = useState('');
     const [selectedCode, setSelectedCode] = useState('');
     const [message, setMessage] = useState('');
+    const [expandedCodes,setExpandedCodes]=useState('');
     const confirm = useConfirm();
 
     const skills = useMemo(() => data?.skills ?? [], [data]);
@@ -104,6 +105,7 @@ export default function SkillsMasterPage({ isSuper = false }: { isSuper?: boolea
         );
     };
 
+    const importExpanded=()=>{const codes=[...new Set(expandedCodes.split(/[\s,;]+/).filter(Boolean))];confirm.ask({title:'Import selected expanded competencies?',message:<div className='space-y-2'><p>{codes.join(', ')}</p><p>Only missing controlled catalogue records are added. Existing and disabled records are preserved. This does not reset HRM role competencies.</p></div>,confirmLabel:'Import selected skills'},async()=>{const r=await callBackend<{inserted:number;existing:string[];blocked:string[]}>('/api/admin/skills/import-expanded',{codes});setMessage(r.inserted+' added; '+r.existing.length+' already present.'+(r.blocked.length?' Disabled / nonselectable — review status: '+r.blocked.join(', '):''));setExpandedCodes('');reload();});};
     const freshStart = () => {
         confirm.ask(
             {
@@ -177,7 +179,7 @@ export default function SkillsMasterPage({ isSuper = false }: { isSuper?: boolea
                 </>
             }
             toolbar={
-                <div className='flex items-start gap-2'>
+                <div className='space-y-2'><div className='flex flex-wrap items-end gap-2'><label className='min-w-0 flex-1 text-xs text-muted'>Import missing expanded competency codes<input className='mt-1 w-full rounded-xl border border-line bg-panel p-2 text-sm text-ink' placeholder='HR_NSK_071_004, …' value={expandedCodes} onChange={e=>setExpandedCodes(e.target.value)}/></label><Button variant='secondary' disabled={!expandedCodes.trim()} onClick={importExpanded}>Import selected skills</Button></div><div className='flex items-start gap-2'>
                     <select
                         aria-label='Skill category'
                         className={selectClass}
@@ -206,7 +208,7 @@ export default function SkillsMasterPage({ isSuper = false }: { isSuper?: boolea
                         This page edits the MEMS reference catalogue (reference/skills_master). Import adds missing default skills only. The list organisations pick
                         skills from is managed under Modules › HRM › Metadata › Skills master.
                     </InfoTip>
-                </div>
+                </div></div>
             }
         >
             {error && <Alert tone='error'>{error}</Alert>}
