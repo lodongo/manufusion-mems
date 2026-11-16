@@ -5,7 +5,7 @@ import MntOrderedSteps,{legacySteps} from './MntOrderedSteps';
 import MntExternalSkills from './MntExternalSkills';
 import type {ResourceSkill} from '../../backend/maintenanceTaskAssessment';
 import {PROCUREMENT_UNITS} from '../../backend/procurementUnits';
-import GenericTaskPicker from './MntGenericTaskPicker';
+import GenericTaskPicker,{taskReference,familyReference} from './MntGenericTaskPicker';
 import MntSelect from './MntSelect';
 import CatalogueAttributeForm from '../components/CatalogueAttributeForm';
 import type { AttrDef, CatalogueGuidance } from '../components/AssetDictionaryBrowser';
@@ -609,7 +609,7 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls,s
                 </div>
             </div>
             {text('description', 'Service name', 0, 'e.g. Rewind 37 kW 4-pole motor')}
-            <GenericTaskPicker endpoint='/api/org/mnt/tasks/generic' context={{code}} onSelect={t=>{const scopeSteps=t.subtasks.map(s=>s.name);set({scopeSteps,scope:scopeSteps.join('\n'),instructions:'',durationHours:t.durationMinutes/60});}}/>
+            <GenericTaskPicker endpoint='/api/org/mnt/tasks/generic' context={{code}} onSelect={(t,releaseId)=>{const scopeSteps=t.subtasks.map(s=>s.name);set({scopeSteps,scope:scopeSteps.join('\n'),instructions:'',durationHours:t.durationMinutes/60,catalogueReference:taskReference(t,releaseId)});}} onNew={(f,releaseId)=>set({catalogueReference:familyReference(f,releaseId)})}/>{value.catalogueReference&&<p className='text-xs text-soft'>Organization-local scope · {value.catalogueReference.familyCode}{value.catalogueReference.taskCode?' / '+value.catalogueReference.taskCode:''}</p>}
             <MntOrderedSteps label='Scope' itemLabel='scope step' values={legacySteps(value.scopeSteps,value.scope,value.instructions)} onChange={scopeSteps=>set({scopeSteps,scope:scopeSteps.join('\n'),instructions:''})}/>
             <MntExternalSkills skills={skills} selected={(value.skillRequirements||[]) as ResourceSkill[]} onChange={skillRequirements=>set({skillRequirements,qualifications:skillRequirements.map(r=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; '),missingSkillCodes:(value.missingSkillCodes||[]).filter((code:string)=>skillRequirements.some(r=>r.skillCode===code))})}/>
             {!!value.qualifications&&!value.skillRequirements?.length&&<p className='text-xs text-soft'>Previous competency text: {value.qualifications}. Select matching catalogue skills above.</p>}

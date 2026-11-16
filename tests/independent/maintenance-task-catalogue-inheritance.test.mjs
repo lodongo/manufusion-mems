@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {adoptFilter} from '../../backend/maintenanceTaskCatalogue.ts';import {readFileSync} from 'node:fs';
+const items=[{code:'a',familyCode:'f1'},{code:'b',familyCode:'f2'}];
+test('unconfigured scope inherits, explicit empty scope excludes every task',()=>{assert.deepEqual(adoptFilter(items,undefined),items);assert.deepEqual(adoptFilter(items,{inherit:true,all:false}),items);assert.deepEqual(adoptFilter(items,{all:false,taskCodes:[],familyCodes:[]}),[]);});
+test('site selection cannot widen configured organization scope',()=>{const org=adoptFilter(items,{familyCodes:['f1']});assert.deepEqual(adoptFilter(org,{all:true}),[items[0]]);assert.deepEqual(adoptFilter(org,{taskCodes:['b']}),[]);});
+test('equipment adoption uses shared register and never authorizes execution',()=>{const s=readFileSync(new URL('../../backend/safEquipment.ts',import.meta.url),'utf8');assert.match(s,/equipment-tasks\/adopt/);assert.match(s,/status:'task_assessment_pending',executionAuthorized:false/);assert.match(s,/assessmentVerifiedAt/);});

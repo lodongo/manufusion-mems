@@ -1,4 +1,4 @@
-import {resolveGenericTaskScope,genericTaskForSite,taskCatalogueRoutes} from './maintenanceTaskCatalogue';
+import {verifyCatalogueReferences,resolveGenericTaskScope,genericTaskForSite,taskCatalogueRoutes} from './maintenanceTaskCatalogue';
 import {maintenanceToolCatalogueRoutes} from './maintenanceToolCatalogue';
 import {assessmentSparePrice} from './maintenanceSparePrice';
 import {assessmentExecutionRoles,assessmentSkills} from './maintenanceAssessmentResources';
@@ -868,6 +868,9 @@ async function orgUserMap(orgId: string) {
 }
 
 async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:AssessedTask[]){
+    const refs=tasks.flatMap(t=>[t.catalogueReference,...t.services.map(s=>s.catalogueReference)]).filter((r):r is NonNullable<AssessedTask['catalogueReference']>=>!!r);
+    const previous=objs(record.data.assessmentTasks).flatMap(t=>[t.catalogueReference,...objs(t.services).map(s=>s.catalogueReference)]).filter(isObj) as unknown as typeof refs;
+    await verifyCatalogueReferences(ctx,str(record.data.siteId),refs,previous);
     const [energies,permits,states]=await Promise.all([
         effectiveSafetyItems(ctx.orgId,'hazardousEnergy'),effectiveSafetyItems(ctx.orgId,'permitTypes'),effectiveSafetyItems(ctx.orgId,'machineStatuses')
     ]);
