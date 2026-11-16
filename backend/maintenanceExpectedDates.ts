@@ -11,7 +11,7 @@ export function expectedDates(d:Obj){
 }
 export function newExpectedDates(start:string,end:string){return {expectedStart:start,expectedEnd:end,expectedDateSource:'original'};}
 export function expectedDatesLocked(d:Obj):boolean{
- return !!str(d.expectedDatesLockedAt)||d.executionMode!=='confirmed_request'||str(d.status)!=='planning'||!reviewAssessmentPrerequisites(d,'__expected_date_lock__');
+ return !!str(d.expectedDatesLockedAt)||d.executionMode!=='confirmed_request'||str(d.status)!=='planning'||!reviewAssessmentPrerequisites(d as Parameters<typeof reviewAssessmentPrerequisites>[0],'__expected_date_lock__');
 }
 export function nextCycleEnd(start:string){return new Date(Date.parse(start+'T00:00:00Z')+6*86400000).toISOString().slice(0,10);}
 export function validateExpectedWindow(type:string,start:string,end:string,cycle:{today:string;nextStart:string},existing?:Obj){

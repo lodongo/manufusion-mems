@@ -1,3 +1,4 @@
+import MntSpareRisk from './MntSpareRisk';
 import MntSelect from './MntSelect';
 import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
@@ -109,6 +110,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  useEffect(()=>{onDirtyChange?.(dirty);return()=>onDirtyChange?.(false);},[dirty,onDirtyChange]);
  const task=tasks[current??0]||seed();
  const sections=['Task','Spares','Services','People & tools','Safety'];
+ const analysisSpares=tasks.flatMap(t=>t.spares||[]);
  const urls={...(options.data?.photos||{}),...photoUrls};
  const taskProblems=(t:TaskAssessment)=>[...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp).map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
  // Open items per section, shown on the section progress and before leaving the task (verification).
@@ -169,7 +171,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    </div>
    <div className='flex shrink-0 flex-wrap gap-2'>
     {editable&&!draft&&<Button variant='secondary' onClick={()=>{setDraft({title:'',description:''});setMessage('');}}>+ Add Task</Button>}
-    {editable&&tasks.length>0&&<Button busy={saving} disabled={saving||!dirty} onClick={save}>Save assessment for review</Button>}
+    {recordType==='wo'&&<MntSpareRisk code={code} spares={analysisSpares} expectedStart={expectedStart}/>} {editable&&tasks.length>0&&<Button busy={saving} disabled={saving||!dirty} onClick={save}>Save assessment for review</Button>}
    </div>
    {dirty&&<p className='w-full text-xs text-amber-400'>Unsaved task changes. Save the assessment before leaving this section.</p>}
   </div>
@@ -256,7 +258,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     </div>
    </StepSection>}
    {step===1&&<StepSection title='Spares for this task' hint='Choose the warehouse, then add each spare from stock, the material catalogue or as free text, with its quantity.'>
-    <div className='space-y-3'>
+    <div className='space-y-3'>{recordType==='wo'&&<MntSpareRisk code={code} spares={analysisSpares} expectedStart={expectedStart}/>}
      <div className={label}>Warehouse (select first) *<MntSelect label={'Warehouse for task spares'} hideLabel className={input} value={spareWarehouse} onChange={e=>{setSpareWarehouse(e.target.value);setAdding(false);}}>
       <option value=''>Choose the warehouse</option>{warehouses.data?.warehouses.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</MntSelect></div>
      {task.spares.map((sp,i)=>{const problems=sp.source==='description'?freeTextProblems(sp):[];return <div key={sp.id} className='min-w-0 space-y-2 rounded-xl border border-line bg-page p-3'>

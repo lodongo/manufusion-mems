@@ -1,3 +1,6 @@
+import {expectedDates} from './maintenanceExpectedDates';
+import {getMaintenanceCycle} from './maintenanceCycle';
+import {configuredDays,leadStats,spareRisk,combineSpareRisk,addCalendarDays} from './maintenanceSpareRisk';
 /**
  * Maintenance sourcing (maintenance addendum, MNT-02 / MNT-03 / MNT-04).
  *
@@ -465,7 +468,58 @@ export async function raiseSupplierOnboarding(ctx: OrgContext, wo: Doc, task: Ob
 
 // ----- Routes -----
 
+
+/** Read-only, scoped estimate of shortage delivery following internal approval and configured supplier lead time. */
+async function analyzeAssessmentSpares(ctx:OrgContext,record:Doc,raw:unknown){
+ const requested=Array.isArray(raw)?raw.filter(isObj):[];if(requested.length>200)throw new HttpError(400,'Analyse up to 200 spare lines at a time.');
+ const warehouses=await reachableWarehouses(ctx),cycle=await getMaintenanceCycle(ctx),expected=expectedDates(record.data).expectedStart,base=root(ctx.orgId);
+ const groups=new Map<string,{materialId:string;warehouseId:string;description:string;required:number;uom:string;lines:number}>();
+ for(const sp of requested){
+  const qty=Number(sp.qty),materialId=str(sp.materialId),warehouseId=str(sp.warehouseId);
+  if(!Number.isFinite(qty)||qty<=0||qty>1000000)throw new HttpError(400,'Enter a positive quantity for each spare before analysis.');
+  if(warehouseId&&!warehouses.has(warehouseId))throw new HttpError(403,'Warehouse outside your maintenance scope.');
+  if(materialId&&!/^[A-Za-z0-9_-]{1,120}$/.test(materialId))throw new HttpError(400,'Invalid material identifier.');
+  const key=materialId&&warehouseId?materialId+'|'+warehouseId:'unknown|'+groups.size,prev=groups.get(key);
+  if(prev){prev.required+=qty;prev.lines++;}else groups.set(key,{materialId,warehouseId,description:str(sp.description).slice(0,200)||'Unregistered material',required:qty,uom:str(sp.uom).slice(0,20),lines:1});
+ }
+ const now=Date.now(),since=now-91*86400000,orderDocs=await listDocs(base+'/procurement_orders'),reqDocs=await listDocs(requirementsPath(ctx.orgId));
+ const reqs=new Map(reqDocs.map(d=>[d.id,d.data])),exact=new Map<string,number[]>(),warehouseSamples=new Map<string,number[]>(),seen=new Set<string>();
+ for(const po of orderDocs){
+  const d=po.data;if(!['open','sent','partial','full'].includes(str(d.status)))continue;
+  const ack=object(d.ack),end=Date.parse(str(ack.date)||str(ack.at)||str(d.approvedAt));if(!Number.isFinite(end)||end<since||end>now)continue;
+  for(const l of rows(d.lines)){
+   const wh=str(l.warehouseId)||str(l.costCenterId)||str(l.costCenterCode),mat=str(l.materialId)||str(l.itemCode),reqId=str(l.requirementId)||str(d.requirementId);
+   if(!warehouses.has(wh)||!reqId)continue;
+   const start=Date.parse(str(reqs.get(reqId)?.createdAt)||str(reqs.get(reqId)?.submittedAt));
+   if(!Number.isFinite(start)||start>end)continue;
+   const duration=(end-start)/86400000,signature=po.id+'|'+reqId+'|'+wh;
+   if(!seen.has(signature)){seen.add(signature);warehouseSamples.set(wh,[...(warehouseSamples.get(wh)||[]),duration]);}
+   const itemSignature=signature+'|'+mat;if(mat&&!seen.has(itemSignature)){seen.add(itemSignature);const key=mat+'|'+wh;exact.set(key,[...(exact.get(key)||[]),duration]);}
+  }
+ }
+ const results=[];
+ for(const g of groups.values()){
+  const wh=g.warehouseId,mat=g.materialId;let available:number|null=null,supplierDays:number|null=null,configuredInternal:number|null=null;
+  if(mat&&wh){
+   const material=await materialIn(ctx.orgId,mat,wh);
+   if(material&&['approved','active'].includes(str(material.data.status))){
+    const [stock,inventory,proc]=await Promise.all([usable(ctx.orgId,wh,mat),getDoc(base+'/inventory_material_info/'+mat+'_'+wh),getDoc(base+'/procurement_material_info/'+mat+'_'+wh)]);
+    available=stock;supplierDays=configuredDays(inventory?.data.leadTimeDays)??configuredDays(proc?.data.leadTimeDays);configuredInternal=configuredDays(inventory?.data.internalLeadTimeDays);
+   }
+  }
+  const itemStats=leadStats(exact.get(mat+'|'+wh)||[]),whStats=leadStats(warehouseSamples.get(wh)||[]);
+  const stats=itemStats.count?itemStats:whStats,source=itemStats.count?'material and warehouse':whStats.count?'warehouse':'configured internal lead time';
+  const internalDays=stats.p90===null?configuredInternal:stats.p90;
+  const baseCase=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays:stats.mean??configuredInternal});
+  const risk=spareRisk({today:cycle.today,expectedStart:expected,required:g.required,available,supplierDays,internalDays});
+  results.push({...g,warehouseName:str(warehouses.get(wh)?.data.name)||wh,available,supplierDays,configuredInternal,internalDays,history:stats,historySource:stats.count?source:configuredInternal===null?'no evidence':source,baseCase,...risk});
+ }
+ const worst=combineSpareRisk(results,expected);
+ return {expectedStart:expected,analysedOn:cycle.today,historyFrom:addCalendarDays(cycle.today,-91),historyTo:cycle.today,rows:results,summary:worst,method:'Calendar days; internal requirement creation to supplier acknowledgement or final PO approval. Same item/warehouse first, warehouse fallback, then configured internal time. Conservative scenario uses observed P90 plus configured supplier days. No records or work order dates are changed.'};
+}
+
 export const maintenanceSourcingRoutes = {
+    'POST /api/org/mnt/sourcing/analyse-spares': [orgRoute('org.mnt.sourcing.analyse_spares','MNT.view',async ctx=>{const record=await sourcingRecord(ctx,ctx.body.code);return analyzeAssessmentSpares(ctx,record,ctx.body.spares);})],
     // Hierarchy search: warehouse stock first, then registered materials, then technical catalogue entries.
     'POST /api/org/mnt/sourcing/materials': [
         orgRoute('org.mnt.sourcing.materials', 'MNT.view', async (ctx) => {
