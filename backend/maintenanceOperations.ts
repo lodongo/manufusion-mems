@@ -505,7 +505,7 @@ async function planningAction(ctx: OrgContext, wo: Doc, action: string) {
     if (action === 'review_risk') {
         const note = requiredText(b.note, 'Risk review notes', 10, 1000);
         const tasks = tasksOf(wo);
-        if (!tasks.every((t) => rows(t.risk).length||str(object(t.registrySafety).assessmentVerifiedAt))) throw new HttpError(409, 'Every task needs its preliminary risk assessment before review.');
+        if (!tasks.every((t) => rows(t.risk).length||str(object(t.registrySafety).assessmentCompletedAt)||str(object(t.registrySafety).assessmentVerifiedAt))) throw new HttpError(409, 'Every task needs its preliminary risk assessment before review.');
         await saveWo(ctx, wo, { riskReview: { version: Number(wo.data.assessmentTasksVersion) || 0, at: nowIso(), by: ctx.uid, name: name(ctx), note,
             hazards: tasks.reduce((n, t) => n + rows(t.risk).length, 0), permits: [...new Set(tasks.flatMap((t) => texts(t.permitCodes)))] } }, 'plan.risk_reviewed', note);
         return { ok: true };

@@ -56,6 +56,12 @@ export function taskClassificationVerdict(a:Answers){
  const state=taskDecisionPath(a);
  return {revision:TASK_DECISION_REVISION,complete:!!state.decision.code&&state.next===null,code:state.decision.code,reason:state.decision.reason,exception:state.decision.exception,questions:state.path.filter(([key])=>!!state.answers[key]).map(([key,question])=>({key,question,answer:state.answers[key]}))};
 }
+// Prefer a completed local decision; otherwise start with the imported catalogue answers.
+export function adoptedTaskAnswers(local:Answers={},reference:Answers={}):Answers {
+ const saved=taskDecisionPath(local);
+ if(saved.decision.code)return saved.answers;
+ return taskDecisionPath({...reference,...saved.answers}).answers;
+}
 export function questionsFor(a:Answers){return taskDecisionPath(a).path;}
 export function decideTask(a:Answers){return taskDecisionPath(a).decision;}
 export function answerTaskQuestion(a:Answers,key:string,value:string):Answers{
