@@ -160,13 +160,23 @@ export const safEquipmentRoutes={
  })],
  'POST /api/org/saf/equipment-tasks/adopt':[orgRoute('org.saf.equipment_tasks.adopt','SAF.risk.assess',async ctx=>{
   const {id}=await equipment(ctx,true);if(!holdsDirect(ctx,['ADM.structure']))throw new HttpError(403,'Equipment task adoption requires Organization Design rights.');
-  const siteId=await catalogueSiteForEquipment(ctx,id),releaseId=str(ctx.body.releaseId),code=str(ctx.body.taskCode),t=await genericTaskForSite(ctx,siteId,releaseId,code);
-  const col=taskCollection(ctx,id),mapping=root(ctx)+'/equipment_task_register/'+id+'/catalogue_links/'+code;
-  const existing=await getDoc(mapping);if(existing)return {ok:true,taskId:existing.data.taskId};
-  const n=await nextSequence('equipmentTask');if(n>999999999)throw new HttpError(409,'Task sequence exhausted.');const taskId='TSK_'+String(n).padStart(9,'0'),now=nowIso();
-  const next={taskId,workCenterId:id,siteId,name:t.name,executor:t.executor,skillCodes:t.skillCodes,durationMinutes:t.durationMinutes,subtasks:t.subtasks,catalogueSource:{releaseId,code,version:t.version,categoryCode:t.categoryCode,subcategoryCode:t.subcategoryCode,familyCode:t.familyCode},answers:t.answers,additionalClasses:t.additionalClasses,classCodes:t.classCodes,permitCodes:t.permitCodes,justification:'',energyPlan:[],rows:[],classBaseline:[],noAdditionalRisks:false,status:'task_assessment_pending',executionAuthorized:false,version:1,createdAt:now,updatedAt:now,updatedBy:ctx.uid};
-  if(!await commitChecked([{path:col+'/'+taskId,data:next,precondition:{exists:false}},{path:mapping,data:{taskId,releaseId,code,createdAt:now},precondition:{exists:false}}]))throw new HttpError(409,'Concurrent adoption. Reload equipment tasks.');
-  await audited(ctx,'saf.equipment_task.adopt',id,{taskId,code,releaseId});return {ok:true,taskId};
+  const siteId=await catalogueSiteForEquipment(ctx,id),releaseId=str(ctx.body.releaseId),codes=ctx.body.taskCodes===undefined?[str(ctx.body.taskCode)]:stringList(ctx.body.taskCodes);
+  if(!codes.length||codes.length>100)throw new HttpError(400,'Choose between 1 and 100 tasks per adoption batch.');
+  const scope=await resolveGenericTaskScope(ctx,siteId);
+  if(scope.releaseId!==releaseId||codes.some(code=>!scope.items.some(t=>t.code===code)))throw new HttpError(403,'All tasks must belong to the adopted organization/site catalogue.');
+  const col=taskCollection(ctx,id),results:{code:string;taskId:string}[]=[];
+  for(const code of codes){
+   const mapping=root(ctx)+'/equipment_task_register/'+id+'/catalogue_links/'+code;
+   const existing=await getDoc(mapping);if(existing){results.push({code,taskId:str(existing.data.taskId)});continue;}
+   const t=await genericTaskForSite(ctx,siteId,releaseId,code);
+   const n=await nextSequence('equipmentTask');if(n>999999999)throw new HttpError(409,'Task sequence exhausted.');const taskId='TSK_'+String(n).padStart(9,'0'),now=nowIso();
+   const next={taskId,displayCode:code,workCenterId:id,siteId,name:t.name,executor:t.executor,skillCodes:t.skillCodes,durationMinutes:t.durationMinutes,subtasks:t.subtasks,expectedOutcomes:t.expectedOutcomes||[],requiredCertifications:t.requiredCertifications||[],catalogueSource:{releaseId,code,version:t.version,categoryCode:t.categoryCode,subcategoryCode:t.subcategoryCode,familyCode:t.familyCode},answers:t.answers,additionalClasses:t.additionalClasses,classCodes:t.classCodes,permitCodes:t.permitCodes,justification:'',energyPlan:[],rows:[],classBaseline:[],noAdditionalRisks:false,status:'task_assessment_pending',executionAuthorized:false,version:1,createdAt:now,updatedAt:now,updatedBy:ctx.uid};
+   if(!await commitChecked([{path:col+'/'+taskId,data:next,precondition:{exists:false}},{path:mapping,data:{taskId,releaseId,code,createdAt:now},precondition:{exists:false}}])){
+    const concurrent=await getDoc(mapping);if(concurrent){results.push({code,taskId:str(concurrent.data.taskId)});continue;}throw new HttpError(409,'Concurrent adoption. Reload equipment tasks.');
+   }
+   await audited(ctx,'saf.equipment_task.adopt',id,{taskId,code,releaseId});results.push({code,taskId});
+  }
+  return {ok:true,taskId:results[0].taskId,items:results};
  })],
  'POST /api/org/saf/equipment-tasks/read':[orgRoute('org.saf.equipment_tasks.read','SAF.view',async ctx=>{
   const {id,node}=await equipment(ctx);
@@ -230,7 +240,7 @@ export const safEquipmentRoutes={
   const status=rows.some(r=>r.after.tolerability==='Intolerable')||baseline.some(b=>b.status==='intolerable')?'intolerable':(!energy.length||energy.some(e=>!e.tag))&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':assessmentPending?'task_assessment_pending':'review_required';
   if(ctx.body.verifyAssessment===true&&(status!=='review_required'||decision.exception))throw new HttpError(400,'Resolve pending, incomplete or intolerable safety assessments before verification.');
   const verified=ctx.body.verifyAssessment===true&&!decision.exception;
-  const next={taskId,workCenterId:id,assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,subtasks:old.data.subtasks,siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
+  const next={taskId,workCenterId:id,assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,displayCode:str(old.data.displayCode)||str((old.data.catalogueSource as Obj).code),subtasks:old.data.subtasks,expectedOutcomes:old.data.expectedOutcomes||[],requiredCertifications:old.data.requiredCertifications||[],siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
   if(!(await writeDoc(col+'/'+taskId,next,old?{updateTime:old.updateTime}:{exists:false})))throw new HttpError(409,'Task changed. Reload.');
   await audited(ctx,'saf.equipment_task.save',id,{taskId,version:version+1,classCodes,status});
   return {ok:true,taskId,status};
