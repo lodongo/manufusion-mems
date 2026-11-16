@@ -1,3 +1,4 @@
+import {serviceJustification,SERVICE_JUSTIFICATION_GATE,SERVICE_JUSTIFICATION_PERMISSION} from './maintenanceServiceJustification';
 /** Current responsibility is calculated from trusted workflow state and current HR assignments. */
 import {getDoc,listDocs,isObj,str,nowIso,type Doc,type Obj} from './core';
 import type {OrgContext} from './guards';
@@ -133,6 +134,11 @@ function woStage(data:Data,d:Obj,path:string[]):Stage{
  if(workflow==='WO200')return {label:label||'Safety sign-off',gate:'MNT.SAFETY.SIGNOFF',external:true,fixedRole:'Safety signatory'};
  if(['WO015','WO125','WO145'].includes(workflow))return {label,gate:'MNT.ASSESS.REVIEW',permission:'MNT.assessment.review',exclude:[str(d.requestedBy),str(d.createdBy),...(workflow==='WO015'?[]:[str(d.assessedBy),str(d.assessmentTasksBy),str(d.plannedBy),str(obj(d.readiness).by)])].filter(Boolean)};
  if(workflow==='WO010')return {...assess(),label,requireIndependentAssessor:maintenanceAssessmentApprovalRequired(d)};if(workflow==='WO020')return {...approval(d),label};
+ if(workflow==='WO040'){
+  const pending=rows(d.assessmentTasks).flatMap(t=>rows(t.services).map(service=>serviceJustification(d,t,service))).filter(j=>j.required&&j.status!=='approved');
+  if(pending.length&&pending.some(j=>j.status==='pending'))return {label:'External service justification approval',gate:SERVICE_JUSTIFICATION_GATE,permission:SERVICE_JUSTIFICATION_PERMISSION,exclude:[str(d.assessmentTasksBy),str(d.assessedBy),...pending.filter(j=>j.status==='pending').map(j=>j.submittedBy)].filter(Boolean)};
+  if(pending.length)return {...assess(),label:'Correct external service justification'};
+ }
  if(['WO030','WO040','WO050','WO060','WO070','WO080','WO090','WO100','WO120'].includes(workflow))return {label,gate:workflow==='WO120'&&groupAt(data.policy,path)?'MNT.WO.RELEASE':'MNT.WO.PLAN',permission:'MNT.WO.plan'};
  if(workflow==='WO130'||workflow==='WO140')return {label,gate:groupAt(data.policy,path)?'MNT.WINDOW.LOCK':'MNT.WO.PLAN',permission:'MNT.WO.schedule'};
  if(workflow==='WO186'||workflow==='WO180')return {label,gate:'MNT.SPARES.RECONCILE',permission:'MNT.view'};

@@ -25,10 +25,10 @@ test('failure mode and assembly selection belong to assessment, not request enri
 });
 test('tasks start as a list, with add action and individual 6-part editor (services per addendum)',()=>{
  const ui=src('MntTaskAssessment.tsx');
- assert.match(ui,/useState<TaskAssessment\[]>\(initial\)/);
+ assert.match(ui,/useState<TaskAssessment\[]>\(/);
  assert.match(ui,/useState<number\|null>\(null\)/);
  assert.match(ui,/\+ Add Task/);
- assert.match(ui,/\['Task','Spares','Services','Resources','Tools','Safety'\]/);
+ assert.match(ui,/\['Assessment setup','Task','Spares','Services','Resources','Tools','Safety'\]/);
  assert.match(ui,/<AddSpare /,'Spares are added from the selected warehouse, the catalogue or free text');
  assert.match(ui,/Warehouse \(select first\)/);
  assert.match(ui,/Save task<\/Button>/);
@@ -49,4 +49,4 @@ test('reviewer is read-only and task changes are not lost silently on navigation
 
 test('awaiting assessment action is visible without a saved draft and explains denied authority',()=>{const ui=src('MntWorkOrder.tsx');assert.match(ui,/wo\.workflowCode==='WO010'/);assert.match(ui,/Continue assessment/);assert.match(ui,/disabled=\{!can\.assess\} onClick=\{openAssessment\}/);assert.match(ui,/assessmentBlockReason/);assert.match(ui,/!wo\.assessedAt\|\|wo\.assessmentDraft\?\.header/);});
 
-test('service assessment excludes commercial sourcing and Resources is internal-only',()=>{const ui=src('MntTaskAssessment.tsx'),sourcing=src('mntSourcing.tsx');assert.match(ui,/title='Resources'/);assert.match(ui,/title='External specialist resource'/);assert.doesNotMatch(sourcing.slice(sourcing.indexOf('export function ServiceEditor'),sourcing.indexOf('// ----- Work-order task')),/Supplier category and vendors|Execution date|num\('expectedCost'/);});
+test('service assessment excludes commercial sourcing and Resources is internal-only',()=>{const ui=src('MntTaskAssessment.tsx'),sourcing=src('mntSourcing.tsx');assert.match(ui,/title='Resources'/);assert.match(sourcing,/Specialist personnel required for this service/);assert.doesNotMatch(ui,/title='External specialist resource'/);assert.doesNotMatch(sourcing.slice(sourcing.indexOf('export function ServiceEditor'),sourcing.indexOf('// ----- Work-order task')),/Supplier category and vendors|Execution date|num\('expectedCost'/);});

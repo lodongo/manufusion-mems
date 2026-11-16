@@ -622,6 +622,7 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls,s
 // ----- Work-order task: fulfilment status -----
 
 export const STATUS_TEXT: Record<string, [string, 'brand' | 'muted' | 'warn' | 'danger']> = {
+    awaiting_justification_approval: ['Awaiting technical approval', 'warn'],
     reserved: ['Reserved', 'brand'],
     secured: ['Secured', 'brand'],
     received_reserve: ['Received — reserve now', 'warn'],
