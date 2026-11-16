@@ -1,6 +1,6 @@
 import {PROCUREMENT_UNITS} from './procurementUnits';
 import {expectedDates} from './maintenanceExpectedDates';
-import {getMaintenanceCycle,cycleRestricted} from './maintenanceCycle';
+import {getMaintenanceCycle,cycleRestricted,localDate} from './maintenanceCycle';
 import {configuredDays,leadStats,spareRisk,combineSpareRisk,addCalendarDays,recommendSpareSchedule} from './maintenanceSpareRisk';
 /**
  * Maintenance sourcing (maintenance addendum, MNT-02 / MNT-03 / MNT-04).
@@ -518,7 +518,7 @@ async function analyzeAssessmentSpares(ctx:OrgContext,record:Doc,raw:unknown){
   results.push({...g,warehouseName:str(warehouses.get(wh)?.data.name)||wh,uom:PROCUREMENT_UNITS.find(u=>u.code===g.uom)?.label||g.uom,physical,available,supplierDays,configuredInternal,internalDays,history:stats,historySource:stats.count?source:configuredInternal===null?'no evidence':source,baseCase,conservativeCase,worstObserved,...risk});
  }
  const d=record.data,restricted=cycleRestricted(str(d.maintenanceTypeCode)),urgent=['WOR-001','WOR-002','WOR-003'].includes(str(d.priorityCode))&&['RIS-001','RIS-002'].includes(str(d.criticalityCode));
- const windows=restricted?(await listDocs(base+'/maintenance_windows')).filter(w=>['scheduled','approved','released'].includes(str(w.data.status))&&str(w.data.equipmentId)===str(d.unitId)&&str(w.data.siteId)===str(d.siteId)).map(w=>({id:w.id,start:str(w.data.date)||str(w.data.start).slice(0,10),end:str(w.data.end).slice(0,10)})).filter(w=>/^\d{4}-\d{2}-\d{2}$/.test(w.start)&&/^\d{4}-\d{2}-\d{2}$/.test(w.end)):[];
+ const windows=restricted?(await listDocs(base+'/maintenance_windows')).filter(w=>['scheduled','approved','released'].includes(str(w.data.status))&&str(w.data.equipmentId)===str(d.unitId)&&str(w.data.siteId)===str(d.siteId)).map(w=>({id:w.id,start:str(w.data.date)||str(w.data.start).slice(0,10),end:Number.isFinite(Date.parse(str(w.data.end)))?localDate(new Date(str(w.data.end)),cycle.timeZone):''})).filter(w=>/^\d{4}-\d{2}-\d{2}$/.test(w.start)&&/^\d{4}-\d{2}-\d{2}$/.test(w.end)):[];
  const config={today:cycle.today,nextStart:cycle.nextStart,restricted,expectedStart:expected,expectedEnd:dates.expectedEnd,scheduledStart:str(d.scheduledStart),scheduledEnd:str(d.scheduledEnd),urgent,windows};
  const scenario=(rows:Parameters<typeof combineSpareRisk>[0])=>recommendSpareSchedule(combineSpareRisk(rows,expected),config);
  const worst=scenario(results);

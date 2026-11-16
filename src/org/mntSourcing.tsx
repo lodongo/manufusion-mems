@@ -52,13 +52,14 @@ function Qty({ qty, uom, onQty, onUom, lockUom }: { qty: string; uom: string; on
                 Quantity *
                 <input type='number' inputMode='decimal' min='0.001' step='any' className={field} value={qty} onChange={(e) => onQty(e.target.value)} />
             </label>
-            <label className={fieldLabel}>
-                Unit
-                <input className={field} value={lockUom?unitLabel(uom):uom} readOnly={lockUom} onChange={(e) => onUom(e.target.value)} />
-            </label>
+            <div className={fieldLabel}>
+                Unit of measure
+                {lockUom?<input className={field} value={unitLabel(uom)} readOnly/>:<UnitOfMeasureSelect value={uom} onChange={onUom}/>}
+            </div>
         </div>
     );
 }
+export function UnitOfMeasureSelect({value,onChange}:{value:string;onChange:(v:string)=>void}){const unit=PROCUREMENT_UNITS.find(u=>u.code===value||u.symbol===value);return <MntSelect label='Unit of measure' hideLabel className={field} value={unit?.code||value} onChange={e=>onChange(e.target.value)}><option value=''>Choose unit</option>{value&&!unit&&<option value={value}>{unitLabel(value)}</option>}{PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable).map(u=><option key={u.code} value={u.code}>{unitLabel(u.code)}</option>)}</MntSelect>;}
 const qtyOk = (q: string) => Number(q) > 0 && Number(q) <= 1_000_000;
 
 /**
