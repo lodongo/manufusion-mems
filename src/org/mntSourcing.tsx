@@ -547,7 +547,7 @@ export function serviceJustificationLabels(selected:unknown):string {
 export function newService(): Any {
     return {
         id: 'sv_' + Math.random().toString(36).slice(2, 10), description: '', categoryCode: '', subcategoryCode: '', classCode: '', catalogCode: '', attributes: {},
-        proposedVendorIds: [], scopeSteps: [], missingSkillCodes: [], missingToolRequirements:[], scope: '', instructions: '', deliverables: '', qualifications: '', certifications: '', acceptanceCriteria: '',
+        proposedVendorIds: [], scopeSteps: [], missingSkillCodes: [], missingToolRequirements:[], scope: '', instructions: '', deliverables: '', deliverableItems:[], qualifications: '', certifications:'Evidence of minimum qualification and competency for the assigned trade or role', certificationItems:['Evidence of minimum qualification and competency for the assigned trade or role'], acceptanceCriteria: '',
         specialistRequired:false,skillRequirements:[],justificationReasons:[],justification:'',quantity: 1, personnel: 1, durationHours: 8, executionDate: '', expectedCost: null, supplierCategory: '', attachments: [],
     };
 }
@@ -572,6 +572,8 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls,s
     const set = (patch: Any) => onChange({ ...value, ...patch });
     const [section,setSection]=useState(0);
     const sections=['Service details','Scope','Skills and resources','Deliverables and certifications','Outsourcing justification','Acceptance and attachments'];
+    const outstanding=serviceProblems(value);
+    const issues=[['service category, subcategory and class','service name'],['scope steps'],['required catalogue skills','specialist competencies, headcount and hours'],['deliverables'],outstanding.filter(x=>!['service category, subcategory and class','service name','scope steps','required catalogue skills','specialist competencies, headcount and hours','deliverables','acceptance criteria'].includes(x)),['acceptance criteria']];
     const deliverables=itemList(value.deliverableItems,value.deliverables),certifications=itemList(value.certificationItems,value.certifications);
     const subs = useMemo(() => hierarchy?.subcategories.filter((s) => s.categoryCode === value.categoryCode) ?? [], [hierarchy, value.categoryCode]);
     const fams = useMemo(() => hierarchy?.families.filter((f) => f.subcategoryCode === value.subcategoryCode) ?? [], [hierarchy, value.subcategoryCode]);
@@ -589,7 +591,7 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls,s
     );
     return (
         <div className='space-y-3 min-w-0'>
-            <div className='grid grid-cols-1 gap-1 sm:grid-cols-2' aria-label='Service assessment sections'>{sections.map((label,i)=><button type='button' key={label} aria-pressed={section===i} onClick={()=>setSection(i)} className={'flex w-full items-center justify-between rounded-lg border border-line px-3 py-2 text-left text-sm '+(section===i?'bg-brand text-white font-medium':'bg-panel')}><span>{i+1}. {label}</span><span>{section===i?'−':'›'}</span></button>)}</div>
+            <div className='grid grid-cols-1 gap-1 sm:grid-cols-2' aria-label='Service assessment sections'>{sections.map((label,i)=><button type='button' key={label} aria-pressed={section===i} onClick={()=>setSection(i)} className={'flex w-full items-center justify-between rounded-lg border border-line px-3 py-2 text-left text-sm '+(section===i?'bg-brand text-white font-medium':'bg-panel')}><span>{i+1}. {label}</span><span className='shrink-0 text-xs'>{outstanding.some(x=>issues[i].includes(x))?'Pending':'✓'} {section===i?'−':'›'}</span></button>)}</div>
             {section===0&&<div className='space-y-3'><div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
                 <div className={fieldLabel}>
                     Service category
