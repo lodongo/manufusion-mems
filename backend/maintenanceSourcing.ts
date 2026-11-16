@@ -263,8 +263,6 @@ function unchanged(spare: Obj, previous: Obj[]) {
  */
 export async function enforceSourcingRules(ctx: OrgContext, record: Doc, tasks: Array<{ id: string; spares: Obj[]; services: Obj[] }>) {
     const before = rows(record.data.assessmentTasks);
-    const make = await equipmentMake(ctx.orgId, record);
-    const categories = await supplierCategories();
     let warehousesCache: Map<string, Doc> | null = null;
     let materialsCache: Doc[] | null = null;
     let extensionsCache: Doc[] | null = null;
@@ -332,14 +330,15 @@ export async function enforceSourcingRules(ctx: OrgContext, record: Doc, tasks: 
         for (const [vi, v] of t.services.entries()) {
             const p = prevServices.find((x) => str(x.id) === str(v.id));
             const at = `Task ${ti + 1}, service ${vi + 1}: `;
-            const changed = !p || ['supplierCategory', 'proposedVendorIds', 'categoryCode', 'subcategoryCode', 'scope', 'executionDate'].some((k) => !same(p[k], v[k]));
-            if (!changed) continue;
-            const category = categories.find((c) => c.code === str(v.supplierCategory));
-            if (!category) throw new HttpError(400, `${at}choose the supplier category (OEM, OCM, approved third party, specialist contractor ...).`);
-            if (!str(v.executionDate) || str(v.executionDate) < today()) throw new HttpError(400, `${at}enter the required execution date (today or later).`);
-            for (const id of texts(v.proposedVendorIds))
-                await requireQualifiedVendor(ctx.orgId, id, { supplierCategory: category.code, categoryCode: str(v.categoryCode), subcategoryCode: str(v.subcategoryCode), make });
-            v.supplierCategoryLabel = category.label;
+            // Keep historical commercial values for an existing assessed service; never accept new ones from assessment.
+            v.supplierCategory=str(p?.supplierCategory);
+            v.supplierCategoryLabel=str(p?.supplierCategoryLabel);
+            v.proposedVendorIds=texts(p?.proposedVendorIds);
+            v.executionDate=str(p?.executionDate);
+            v.expectedCost=p?.expectedCost??null;
+            for(const [key,label] of [['scope','technical scope'],['qualifications','required competencies'],['deliverables','deliverables'],['acceptanceCriteria','acceptance criteria']]) {
+                if(!str(v[key]).trim())throw new HttpError(400,at+'enter '+label+'.');
+            }
         }
     }
 }

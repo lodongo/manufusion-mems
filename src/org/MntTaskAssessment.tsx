@@ -31,7 +31,7 @@ const seed=():TaskAssessment=>({id:'task_'+id(),description:'',disciplineCode:''
 const input='mt-1 w-full rounded-xl border border-line bg-page p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none read-only:opacity-70';
 const label='block text-sm text-soft';
 const roles=[['operator','Operator'],['technician','Technician'],['specialist','Specialist'],['engineer','Engineer']] as const;
-const externals=[['OEM','OEM'],['OCM','OCM'],['verified_supplier','Verified external supplier'],['other','Other external resource']] as const;
+const externals=[['external_specialist','External specialist'],['OEM','OEM'],['OCM','OCM'],['verified_supplier','Verified external supplier'],['other','Other external resource']] as const;
 const newSpare=():Spare=>({id:'sp_'+id(),source:'warehouse',materialId:'',warehouseId:'',catalogCode:'',description:'',qty:1,uom:'EA',unitCost:null});
 export function WarehouseSparePicker({onSelect}:{onSelect:(item:{materialId:string;warehouseId:string;materialNumber:string;name:string;uom:string;available:number|null;stockVerified:boolean;warehouseName:string})=>void}){
  const {data:warehouseData,error:warehouseError}=useLoad(()=>callBackend<{warehouses:Array<{id:string;name:string}>}>('/api/org/mnt/warehouse-spares/search',{mode:'warehouses'}));
@@ -90,8 +90,8 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
    </div>)}
    <p className='font-medium text-ink'>External services ({t.services?.length||0})</p>
    {t.services?.map(sv=><div key={sv.id} className='rounded-lg bg-page p-2'>
-    {sv.description} · {sv.supplierCategory||'No supplier category'} · execute {sv.executionDate||'—'}
-    <span className='block text-xs text-muted'>Scope: {sv.scope} · Acceptance: {sv.acceptanceCriteria}</span>
+    {sv.description} · {sv.personnel??'—'} people · {sv.durationHours??'—'} h
+    <span className='block text-xs text-muted'>Scope: {sv.scope} · Acceptance: {sv.acceptanceCriteria}</span>{sv.expectedCost!=null&&<span className='block text-xs text-soft'>Previously recorded indicative cost: {options?.currency||''} {Number(sv.expectedCost).toLocaleString()}</span>}
    </div>)}
    <p>Machine status: {machineLabel(t)}{t.lotoRequired?' · LOTO: '+(t.energySourceCodes||[]).length+' energy source(s)':''}</p>
    {!!t.energySourceCodes?.length&&<p>Hazardous energy: {t.energySourceCodes.map(code=>options?.hazardousEnergy.find(x=>x.code===code)?.label||code).join(', ')}</p>}
@@ -114,20 +114,21 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const hasUnsaved=dirty||!!draft&&(!!draft.title.trim()||!!draft.description.trim());
  useEffect(()=>{onDirtyChange?.(hasUnsaved);return()=>onDirtyChange?.(false);},[hasUnsaved,onDirtyChange]);
  const task=tasks[current??0]||seed();
- const sections=['Task','Spares','Services','People','Tools','Safety'];
+ const sections=['Task','Spares','Services','Resources','Tools','Safety'];
  const analysisSpares=tasks.flatMap(t=>t.spares||[]);
  const stockKey=JSON.stringify([...new Set(analysisSpares.filter(s=>s.materialId&&s.warehouseId).map(s=>s.warehouseId+'|'+s.materialId))].sort());
  const [stock,setStock]=useState<Record<string,{physical:number|null;available:number|null;stockVerified:boolean;unitCost?:number|null}>>({});
  useEffect(()=>{let alive=true;const keys:string[]=JSON.parse(stockKey),groups=new Map<string,string[]>();for(const k of keys){const [w,m]=k.split('|');groups.set(w,[...(groups.get(w)||[]),m]);}setStock({});void Promise.all([...groups].map(async ([warehouseId,materialIds])=>{try{const r=await callBackend<{items:({materialId:string;physical:number|null;available:number|null;stockVerified:boolean;unitCost?:number|null})[]}>('/api/org/mnt/warehouse-spares/search',{warehouseId,materialIds});if(alive)setStock(old=>({...old,...Object.fromEntries(r.items.map(x=>[warehouseId+'|'+x.materialId,x]))}));}catch{/* Unverified stock is never shown as zero. */}}));return()=>{alive=false;};},[stockKey]);
  const urls={...(options.data?.photos||{}),...photoUrls};
- const peopleIssues=(t:TaskAssessment)=>[...(t.internalRoleRequirements!==undefined&&!(t.internalRoleRequirements.length||t.externalResource)?['Select an execution job role or external resource']:[]),...(t.internalRoleRequirements||[]).filter(r=>!Number.isInteger(r.persons)||r.persons<1||!(r.hours>=.25)).map(r=>(r.roleLabel||r.roleCode)+': headcount and hours required'),...(t.externalResource?.skillRequirements!==undefined&&!t.externalResource.skillRequirements.length?['Select external skills and proficiency']:[]),...(t.externalResource?.hours!==undefined&&!(t.externalResource.hours>=.25)?['External resource hours required']:[])];
- const taskProblems=(t:TaskAssessment)=>[...peopleIssues(t),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
+ const resourceIssues=(t:TaskAssessment)=>[...(t.internalRoleRequirements!==undefined&&!(t.internalRoleRequirements.length||t.externalResource)?['Select an execution job role or external resource']:[]),...(t.internalRoleRequirements||[]).filter(r=>!Number.isInteger(r.persons)||r.persons<1||!(r.hours>=.25)).map(r=>(r.roleLabel||r.roleCode)+': headcount and hours required'), ];
+ const externalIssues=(t:TaskAssessment)=>t.externalResource?.type?[...(!t.externalResource.skillRequirements?.length?['Select external skills and proficiency']:[]),...(!Number.isInteger(t.externalResource.persons)||t.externalResource.persons<1?['External specialist headcount required']:[]),...(!(Number(t.externalResource.hours)>=.25)?['External resource hours required']:[]),...(!t.externalResource.notes.trim()?['External technical scope required']:[])]:[];
+ const taskProblems=(t:TaskAssessment)=>[...resourceIssues(t),...externalIssues(t),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
  // Open items per section, shown on the section progress and before leaving the task (verification).
  const sectionIssues=(t:TaskAssessment):string[][]=>[
   [...(!(t.title||'').trim()?['Task name']:[]),...(t.description.trim().length<3?['Work description (at least 3 characters)']:[])],
   [...t.spares.filter(sp=>!(Number(sp.qty)>0)).map(sp=>(sp.description||'Spare')+': quantity above zero'),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x))],
-  t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x)),
-  peopleIssues(t),
+  [...externalIssues(t),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))],
+  resourceIssues(t),
   [], // Tools configuration is intentionally pending, not a completion gate.
   [...(t.lotoRequired&&!(t.energySourceCodes||[]).length?['Choose the hazardous energy sources to isolate']:[]),...t.risk.filter(r=>!r.hazard.trim()||!r.controls.trim()).map((r,i)=>'Hazard '+(i+1)+': hazard and mitigations')],
  ];
@@ -309,12 +310,12 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
       :<Button variant='secondary' disabled={!spareWarehouse} onClick={()=>{setAdding(true);setMessage('');}}>+ Add spare</Button>}
     </div>
    </StepSection>}
-   {step===2&&<StepSection title='External services for this task' hint='Each service carries its scope, competencies, deliverables and a supplier category. Vendors come only from the approved vendor registry.'>
+   {step===2&&<><StepSection title='External services for this task' hint='Define technical scope, resource load, competencies, deliverables and acceptance. Commercial sourcing and execution dates are set in planning.'>
     <div className='space-y-2'>
      {task.services.map((sv,i)=>{const problems=serviceProblems(sv);const editing=openService===i;return <div key={sv.id} className='min-w-0 space-y-2 rounded-xl border border-line bg-page p-3'>
        <button type='button' className='flex min-h-11 w-full items-start justify-between gap-2 text-left' onClick={()=>setOpenService(editing?null:i)} aria-expanded={editing}>
         <span className='min-w-0'><span className='block break-words text-sm font-medium text-ink'>{sv.description||'New service'}</span>
-         <span className={'block text-xs '+(problems.length?'text-amber-400':'text-muted')}>{problems.length?'Incomplete: '+problems.slice(0,3).join(', '):'Complete · '+(sv.executionDate||'')}</span></span>
+         <span className={'block text-xs '+(problems.length?'text-amber-400':'text-muted')}>{problems.length?'Incomplete: '+problems.slice(0,3).join(', '):'Technical requirements complete'}</span></span>
         <span className='shrink-0 text-lg text-muted' aria-hidden='true'>{editing?'−':'+'}</span>
        </button>
        {editing&&<ServiceEditor code={code} value={sv} hierarchy={options.data?.serviceHierarchy} urls={urls} onUrls={u=>setPhotoUrls(old=>({...old,...u}))} onChange={next=>patch({services:task.services.map((x,j)=>j===i?next as Service:x)})}/>}
@@ -322,24 +323,25 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
      </div>;})}
      <Button variant='secondary' onClick={()=>{patch({services:[...task.services,newService() as Service]});setOpenService(task.services.length);}}>+ Add external service</Button>
     </div>
-   </StepSection>}
+   </StepSection><StepSection title='External specialist resource' hint='Capture competencies and labour requirement only.'><div className='space-y-3'>
+      <div className={label}>External specialist support required<MntSelect label={'External specialist support required'} hideLabel className={input} value={task.externalResource?.type?'external_specialist':''} onChange={e=>patch({externalResource:e.target.value?{type:e.target.value,persons:task.externalResource?.persons||1,notes:task.externalResource?.notes||'',hours:task.externalResource?.hours||1,skillRequirements:task.externalResource?.skillRequirements||[]}:undefined})}>
+        <option value=''>None</option><option value='external_specialist'>External specialist support</option></MntSelect></div>
+      {task.externalResource?.type&&<div className='space-y-2 rounded-xl border border-line bg-page p-3'>
+        <label className={label}>How many external people?<input type='number' inputMode='decimal' min={1} max={50} className={input} value={task.externalResource.persons} onChange={e=>patch({externalResource:{...task.externalResource!,persons:Number(e.target.value)}})}/></label>
+        <label className={label}>Hours per external person<input type='number' min={.25} step={.25} className={input} value={task.externalResource.hours??1} onChange={e=>patch({externalResource:{...task.externalResource!,hours:Number(e.target.value)}})}/></label>
+        <MntExternalSkills skills={options.data?.skills||[]} selected={task.externalResource.skillRequirements||[]} onChange={skillRequirements=>patch({externalResource:{...task.externalResource!,hours:task.externalResource?.hours??1,skillRequirements}})}/>
+        <label className={label}>External scope / qualification<textarea className={input} rows={2} value={task.externalResource.notes} onChange={e=>patch({externalResource:{...task.externalResource!,notes:e.target.value}})}/></label>
+        <p className='text-xs text-muted'>Supplier category, provider, booking, cost and availability are determined during planning.</p>
+      </div>}
+     </div></StepSection></>}
    {step===3&&<>
-    <StepSection title='People' hint='Internal roles and any external resource the planner must secure.'>
+    <StepSection title='Resources' hint='Internal work group execution job roles, headcount and time only. Named people are allocated during planning.'>
      <div className='space-y-3'>
       <p className='text-sm font-medium'>Internal execution roles</p>
       {options.data?.executionRoles?.length?<><MntSelect label='Add job role' value='' onChange={e=>{const role=options.data!.executionRoles!.find(r=>r.code===e.target.value);if(role)patch({internalRoles:[],internalRoleRequirements:[...(task.internalRoleRequirements||[]),{roleCode:role.code,roleLabel:role.label,persons:1,hours:1}]});}}><option value=''>Select work group job role</option>{options.data.executionRoles.filter(r=>!(task.internalRoleRequirements||[]).some(x=>x.roleCode===r.code)).map(r=><option key={r.code} value={r.code}>{r.label} · {r.groupTitle}</option>)}</MntSelect></>:<p className='text-xs text-amber-600'>No execution job roles configured for this work group.</p>}
       {(task.internalRoleRequirements||[]).map((r,i)=><div key={r.roleCode} className='space-y-2 rounded-xl border border-line bg-page p-3'><div className='flex items-center justify-between gap-2'><b className='text-sm'>{r.roleLabel||options.data?.executionRoles?.find(x=>x.code===r.roleCode)?.label||r.roleCode}</b><button type='button' className='text-xs text-red-500' onClick={()=>patch({internalRoleRequirements:task.internalRoleRequirements!.filter((_,j)=>j!==i)})}>Remove</button></div><div className='grid grid-cols-2 gap-2'>{([['persons','People',1,1],['hours','Hours per person',.25,.25]] as const).map(([key,title,min,step])=><label key={key} className={label}>{title}<input type='number' min={min} step={step} className={input} value={r[key]} onChange={e=>patch({internalRoleRequirements:task.internalRoleRequirements!.map((x,j)=>j===i?{...x,[key]:Number(e.target.value)}:x)})}/></label>)}</div><p className='text-xs text-soft'>{r.persons*r.hours} person-hours</p></div>)}
       {task.internalRoleRequirements===undefined&&!!task.internalRoles?.length&&<p className='text-xs text-soft'>Legacy requirements: {task.internalRoles.join(', ')}. Select actual work group job roles to replace these.</p>}
       <p className='text-xs text-soft'>Internal labour: {(task.internalRoleRequirements||[]).reduce((n,r)=>n+r.persons*r.hours,0)} person-hours. Named personnel are allocated at planning.</p>
-      <div className={label}>External resources required<MntSelect label={'External resources required'} hideLabel className={input} value={task.externalResource?.type||''} onChange={e=>patch({externalResource:e.target.value?{type:e.target.value,persons:task.externalResource?.persons||1,notes:task.externalResource?.notes||'',hours:task.externalResource?.hours||1,skillRequirements:task.externalResource?.skillRequirements||[]}:undefined})}>
-        <option value=''>None</option>{externals.map(([code,name])=><option key={code} value={code}>{name}</option>)}</MntSelect></div>
-      {task.externalResource?.type&&<div className='space-y-2 rounded-xl border border-line bg-page p-3'>
-        <label className={label}>How many external people?<input type='number' inputMode='decimal' min={1} max={50} className={input} value={task.externalResource.persons} onChange={e=>patch({externalResource:{...task.externalResource!,persons:Number(e.target.value)}})}/></label>
-        <label className={label}>Hours per external person<input type='number' min={.25} step={.25} className={input} value={task.externalResource.hours??1} onChange={e=>patch({externalResource:{...task.externalResource!,hours:Number(e.target.value)}})}/></label>
-        <MntExternalSkills skills={options.data?.skills||[]} selected={task.externalResource.skillRequirements||[]} onChange={skillRequirements=>patch({externalResource:{...task.externalResource!,hours:task.externalResource?.hours??1,skillRequirements}})}/>
-        <label className={label}>External scope / qualification<textarea className={input} rows={2} value={task.externalResource.notes} onChange={e=>patch({externalResource:{...task.externalResource!,notes:e.target.value}})}/></label>
-        <p className='text-xs text-muted'>The planner will secure the external resource through the applicable supplier and procurement process.</p>
-      </div>}
      </div>
     </StepSection>
    </>}

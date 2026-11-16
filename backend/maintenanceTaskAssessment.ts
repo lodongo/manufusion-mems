@@ -81,11 +81,12 @@ export function validateAssessmentTasks(raw:unknown):AssessedTask[]{
   if(internalRoles.some(v=>!['operator','technician','specialist','engineer'].includes(v)))throw Error('Choose a valid internal resource type.');
   const externalRaw=(t.externalResource&&typeof t.externalResource==='object'&&!Array.isArray(t.externalResource)?t.externalResource:{}) as Record<string,unknown>;
   const externalType=text(externalRaw.type,40);
-  if(externalType&&!['OEM','OCM','verified_supplier','other'].includes(externalType))throw Error('Choose a valid external resource type.');
+  if(externalType&&!['external_specialist','OEM','OCM','verified_supplier','other'].includes(externalType))throw Error('Choose a valid external resource type.');
   const skillRequirements=Array.isArray(externalRaw.skillRequirements)?externalRaw.skillRequirements.map(r=>{if(!r||typeof r!=='object'||Array.isArray(r))throw Error('Invalid external skill requirement.');const v=r as Record<string,unknown>,skillCode=text(v.skillCode,80),level=text(v.level,20);if(!skillCode||!['basic','advanced','expert'].includes(level))throw Error('Choose a skill and proficiency level.');return {skillCode,level:level as SkillProficiency,skillLabel:text(v.skillLabel,160),category:text(v.category,100),subcategory:text(v.subcategory,100)};}):undefined;
   if(skillRequirements&&(skillRequirements.length>40||new Set(skillRequirements.map(r=>r.skillCode)).size!==skillRequirements.length))throw Error('Duplicate or excessive external skills.');
   const externalResource=externalType?{type:externalType,persons:number(externalRaw.persons??1,1,50),notes:text(externalRaw.notes,1200),...(externalRaw.hours!==undefined?{hours:number(externalRaw.hours,0.25,2000)}:{}),...(skillRequirements!==undefined?{skillRequirements}:{})}:undefined;
-  if(externalType==='other'&&!externalResource?.notes)throw Error('Describe the other external resource.');
+  if((externalType==='other'||externalType==='external_specialist')&&!externalResource?.notes)throw Error('Describe the other external resource.');
+  if(externalType==='external_specialist'&&(!skillRequirements?.length||!externalResource?.hours||!Number.isInteger(externalResource.persons)))throw Error('Enter external specialist skills, headcount and time.');
   if(!(internalRoleRequirements?.length??internalRoles.length)&&!externalResource)throw Error('Choose an internal role or an external resource for this task.');
   // Machine status during execution: total shutdown, live equipment, full LOTO or partial isolation. Isolation
   // statuses require LOTO with the energy sources; live work adds the live-work hazard. Older tasks derive it.

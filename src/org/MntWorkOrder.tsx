@@ -184,10 +184,11 @@ function ResourceForm({
         warehouseId: '',
         catalogCode: resource.catalogCode || '',
         attributes: { ...resource.attributes },
-        dateRequired: resource.requiredDate || resource.executionDate || expectedStart || '',
+        dateRequired: previous.executionDate || resource.requiredDate || resource.executionDate || expectedStart || '',
+        budget:previous.expectedCost??resource.expectedCost??'',
         urgency: 'medium',
         supplierCategory: previous.sourcing?.supplierCategory || resource.supplierCategory || '',
-        preferredVendorId: previous.sourcing?.preferredVendorId || resource.proposedVendorIds?.[0] || '',
+        preferredVendorId: previous.sourcing?.preferredVendorId || '',
         poId: item.orderReady?.id || '',
         lineNo: item.orderReady?.lineNo || '',
         readyAt: resource.executionDate || '',
@@ -323,14 +324,14 @@ function ResourceForm({
                                 ))}
                             </MntSelect></div>
                     )}
-                    {expectedStart&&<p className="text-xs text-soft">Original resource availability target: {expectedStart}. A later delivery date does not change this target.</p>}<MntField label="Date required" type="date" value={data.dateRequired} onChange={(v) => patch('dateRequired', v)} />
+                    {expectedStart&&<p className="text-xs text-soft">Original resource availability target: {expectedStart}. A later delivery date does not change this target.</p>}<MntField label={isService?'Planned execution date':'Date required'} type="date" value={data.dateRequired} onChange={(v) => patch('dateRequired', v)} />
                     <MntField label={kind === 'secure_spare' ? 'GL account (used only if a purchase is needed)' : 'Approved GL account for this purchase'} value={data.glCode} onChange={(v) => patch('glCode', v)} />
                     <div className="block text-sm text-soft"><MntSelect label="Urgency" className={mntInput} value={data.urgency} onChange={(e) => patch('urgency', e.target.value)}>
                             <option value="low">Low</option>
                             <option value="medium">Medium</option>
                             <option value="high">High</option>
                         </MntSelect></div>
-                    <MntField label="Indicative budget (optional)" type="number" value={data.budget} onChange={(v) => patch('budget', v)} />
+                    <MntField label={isService?'Estimated service cost (optional)':'Indicative budget (optional)'} type="number" value={data.budget} onChange={(v) => patch('budget', v)} />
                 </>
             )}
             {kind === 'service_sourcing' && (
@@ -1009,7 +1010,8 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                                     ['Acceptance', s.acceptanceCriteria],
                                                     ['Competencies', [s.qualifications, s.certifications].filter(Boolean).join(' · ')],
                                                     ['People / duration', `${s.personnel ?? '—'} people · ${s.durationHours ?? '—'} h · qty ${s.quantity ?? 1}`],
-                                                    ['Execution date', s.executionDate],
+                                                    ['Planned execution date', p.executionDate||s.executionDate],
+                                                    ['Estimated service cost', p.expectedCost??s.expectedCost??'Not estimated'],
                                                     ['Supplier', p.sourcing ? `${p.sourcing.supplierCategoryLabel}${p.sourcing.preferredVendorName ? ' · ' + p.sourcing.preferredVendorName : ' · onboarding requested (' + (p.sourcing.suggestedVendor || '') + ')'}` : s.supplierCategoryLabel || s.supplierCategory || 'Not confirmed'],
                                                 ].map(([k, v]) => (
                                                     <div key={k} className="min-w-0 rounded-lg bg-page p-2">
@@ -1040,13 +1042,13 @@ export default function MntWorkOrder({ code }: { code: string }) {
                                         </section>
                                     );
                                 })}
-                                {!task.services?.length && <p>No external services for this task.</p>}
+                                {task.externalResource?.type&&<section className="rounded-xl border border-line p-3 space-y-2"><h3 className="font-semibold">External specialist support</h3><p className="text-sm">{task.externalResource.persons} people · {task.externalResource.hours??'—'} hours per person</p><p className="text-sm text-soft">{task.externalResource.notes}</p>{task.externalResource.skillRequirements?.map((r:MntData)=><p key={r.skillCode} className="text-sm">{r.skillLabel||r.skillCode} · {r.level}</p>)}<p className="text-xs text-soft">Confirm provider, availability and booking evidence in the Planning Readiness Checklist.</p></section>}{!task.services?.length&&!task.externalResource?.type && <p>No external services for this task.</p>}
                             </div>
                         )}
                         {tab === 'Personnel & tools' && (
                             <div className="space-y-3">
                                 <p>
-                                    {task.persons} people · Skills: {task.skills}{Array.isArray(task.internalRoleRequirements)&&task.internalRoleRequirements.map((r:MntData)=><span key={r.roleCode} className='block text-xs text-soft'>{r.roleLabel||r.roleCode} · {r.persons} people × {r.hours} hours</span>)}{task.externalResource?.skillRequirements?.map((r:MntData)=><span key={r.skillCode} className='block text-xs text-soft'>External: {r.skillLabel||r.skillCode} · {r.level}</span>)}
+                                    {task.persons} people · Skills: {task.skills}{Array.isArray(task.internalRoleRequirements)&&task.internalRoleRequirements.map((r:MntData)=><span key={r.roleCode} className='block text-xs text-soft'>{r.roleLabel||r.roleCode} · {r.persons} people × {r.hours} hours</span>)}
                                 </p>
                                 <p>Tools: {task.tools || 'None'}</p>
                                 {wo.taskStandardSnapshots?.[task.id]&&<MntStandardHistory key={wo.code+':'+task.id} code={wo.code} taskId={task.id} standard={wo.taskStandardSnapshots[task.id]}/>}

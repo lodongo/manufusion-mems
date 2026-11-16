@@ -67,7 +67,8 @@ export function estimateOf(wo: Doc, readinessItems: Obj[], allowance = Number(ob
             else spares += unit * (Number(s.qty) || 0);
         }
         for (const s of rows(t.services)) {
-            const cost = s.expectedCost === null || s.expectedCost === undefined || s.expectedCost === '' ? null : Number(s.expectedCost);
+            const p=obj(obj(obj(wo.data.taskPlanning)[str(t.id)])[str(s.id)]),raw=p.cost??p.expectedCost??s.expectedCost;
+            const cost = raw === null || raw === undefined || raw === '' ? null : Number(raw);
             if (cost === null || !Number.isFinite(cost)) uncosted.push({ task, item: str(s.description), kind: 'service' });
             else services += cost;
         }

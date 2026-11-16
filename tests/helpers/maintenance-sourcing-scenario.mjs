@@ -422,10 +422,11 @@ await assert.rejects(() => save([freeText({ searchReceiptId: othersReceipt.recei
 // 3. A stocked material must be taken from the warehouse; a registered catalogue entry must use the material.
 await assert.rejects(() => save([registeredMaterial('b2', 'BEARING', 1)]), /in stock at .*Select it from the warehouse/);
 await assert.rejects(() => save([{ id: 'c2', source: 'catalog', catalogCode: 'BEARING-CAT', description: 'Drive bearing', qty: 1, uom: unit.code }]), /already registered/);
-// 4. Services need a supplier category and qualified vendors (OEM narrowed to the equipment manufacturer).
-await assert.rejects(() => save(goodSpares(), [oemService({ supplierCategory: '' })]), /supplier category/);
-await assert.rejects(() => save(goodSpares(), [oemService({ proposedVendorIds: ['VND000002'] })]), /approved vendor of the selected supplier category/);
-await assert.rejects(() => save(goodSpares(), [oemService({ proposedVendorIds: ['VND000004'] })]), /approved vendor/);
+// 4. Assessment is technical only; commercial decisions are not required or adopted.
+await save(goodSpares(), [oemService({supplierCategory:'',proposedVendorIds:[],executionDate:'',expectedCost:null})]);
+await save(goodSpares(), [oemService({supplierCategory:'VCL-001',proposedVendorIds:['VND000002'],executionDate:date,expectedCost:999})]);
+const technicalOnly=snapshot(r+'/work_requests/'+wr.code).data.assessmentTasks.flatMap(t=>t.services).find(v=>v.id==='overhaul');
+assert.equal(technicalOnly.supplierCategory,'');assert.equal(technicalOnly.executionDate,'');assert.equal(technicalOnly.expectedCost,null);assert.deepEqual(technicalOnly.proposedVendorIds,[]);
 const vendorList = await route(maintenanceSourcingRoutes, '/api/org/mnt/sourcing/vendors', 'assessor', { code: wr.code, supplierCategory: 'VCL-001', categoryCode: 'MAT', subcategoryCode: 'SPARES' });
 assert.deepEqual(vendorList.vendors.map((v) => v.id), ['VND000001'], 'OEM vendors are filtered by the equipment manufacturer');
 assert.deepEqual(vendorList.others.map((v) => v.id), ['VND000002']);
@@ -532,11 +533,12 @@ assert.equal((await requirements()).length, 3);
 await assert.rejects(() => op('planner', 'procure', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', glCode: '610000' }), /supplier category/);
 await assert.rejects(() => op('planner', 'service_sourcing', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', supplierCategory: 'VCL-001', preferredVendorId: 'VND000002' }), /approved vendor/);
 await op('planner', 'service_sourcing', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', supplierCategory: 'VCL-001', preferredVendorId: 'VND000001' });
-const svc = await op('planner', 'procure', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', glCode: '610000' });
+const svc = await op('planner', 'procure', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', glCode: '610000',dateRequired:date,budget:1200 });
 const svcReq = snapshot(r + '/procurement_requirements/' + svc.requirementId).data;
 assert.equal(svcReq.maintenanceSource.supplierCategory, 'VCL-001');
 assert.deepEqual(svcReq.maintenanceSource.preferredVendor, { id: 'VND000001', name: 'Krones Service' });
 assert.equal(svcReq.maintenanceSource.executionDate, date);
+assert.equal(snapshot(r+'/work_orders/'+wo).data.taskPlanning.gearbox.overhaul.expectedCost,1200);
 assert.match(svcReq.lines[0].technical, /Acceptance: Vibration/);
 assert.equal(svcReq.lines[0].dateRequired, date);
 assert.equal((await op('planner', 'procure', { code: wo, taskId: 'gearbox', resourceId: 'overhaul', glCode: '610000' })).requirementId, svc.requirementId);

@@ -790,6 +790,9 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
             await requireQualifiedVendor(ctx.orgId, str(sourcing.preferredVendorId), {
                 supplierCategory: str(sourcing.supplierCategory), categoryCode: str(service.categoryCode), subcategoryCode: str(service.subcategoryCode), make: await equipmentMake(ctx.orgId, wo),
             });
+        const executionDate=str(b.dateRequired)||str(previous.executionDate)||str(service.executionDate)||str(wo.data.scheduledStart)||expectedDates(wo.data).expectedStart;
+        const plannedEstimate=b.budget===undefined||b.budget===null||b.budget===''?previous.expectedCost??service.expectedCost??null:Number(b.budget);
+        if(plannedEstimate!==null&&(!Number.isFinite(Number(plannedEstimate))||Number(plannedEstimate)<0))throw new HttpError(400,'Enter a valid non-negative service estimate.');
         const technical = [
             `Scope: ${str(service.scope)}`,
             str(service.instructions) && `Instructions: ${str(service.instructions)}`,
@@ -815,11 +818,11 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                 itemCode: str(service.catalogCode),
                 attributes: object(service.attributes),
                 quantity: 1,
-                dateRequired: b.dateRequired || str(service.executionDate) || expectedDates(wo.data).expectedStart,
+                dateRequired: executionDate,
                 urgency: ['low', 'medium', 'high'].includes(str(b.urgency)) ? b.urgency : 'medium',
                 costCenterId: str(wo.data.costCenterId),
                 glCode: b.glCode,
-                budget: b.budget ?? service.expectedCost ?? null,
+                budget: plannedEstimate,
             },
             {
                 key: maintenanceKey(wo.id, str(task.id), str(service.id)),
@@ -835,19 +838,19 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                 supplierCategoryLabel: str(sourcing.supplierCategoryLabel),
                 preferredVendor: str(sourcing.preferredVendorId) ? { id: str(sourcing.preferredVendorId), name: str(sourcing.preferredVendorName) } : null,
                 supplierOnboardingRequestId: str(sourcing.onboardingRequestId),
-                executionDate: str(service.executionDate),
+                executionDate,
                 costCenterId: str(wo.data.costCenterId),
                 planningGroup: planningGroup(wo),
                 attachments: texts(service.attachments),
                 proposedVendors: await Promise.all(
-                    texts(service.proposedVendorIds).map(async (id) => {
+                    (str(sourcing.preferredVendorId)?[str(sourcing.preferredVendorId)]:[]).map(async (id) => {
                         const vendor = await getDoc(`${root(ctx)}/vendors/${id}`);
                         return { id, name: str(vendor?.data.tradeName) || str(vendor?.data.legalName) || id };
                     }),
                 ),
             },
         );
-        state = { ...state, requirementId, status: 'awaiting_procurement' };
+        state = { ...state, requirementId, executionDate, expectedCost:plannedEstimate, status: 'awaiting_procurement' };
         result = { requirementId };
     } else if (action === 'secure_service') {
         if (!service) throw new HttpError(400, 'Select a service.');

@@ -547,8 +547,7 @@ export function serviceProblems(s: Any): string[] {
     if (!String(s.qualifications || '').trim()) out.push('required competencies');
     if (!String(s.deliverables || '').trim()) out.push('deliverables');
     if (!String(s.acceptanceCriteria || '').trim()) out.push('acceptance criteria');
-    if (!s.executionDate || s.executionDate < todayIso()) out.push('execution date');
-    if (!s.supplierCategory) out.push('supplier category');
+    // Supplier selection, commercial estimate and execution date belong to planning.
     return out;
 }
 
@@ -557,8 +556,6 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls }
     const set = (patch: Any) => onChange({ ...value, ...patch });
     const subs = useMemo(() => hierarchy?.subcategories.filter((s) => s.categoryCode === value.categoryCode) ?? [], [hierarchy, value.categoryCode]);
     const fams = useMemo(() => hierarchy?.families.filter((f) => f.subcategoryCode === value.subcategoryCode) ?? [], [hierarchy, value.subcategoryCode]);
-    const v = useVendors(code, value.supplierCategory, value.categoryCode, value.subcategoryCode);
-    const category = v.categories.find((c) => c.code === value.supplierCategory);
     const text = (key: string, label: string, rows = 0, hint = '') => (
         <label className={fieldLabel} key={key}>
             {label}
@@ -576,14 +573,14 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls }
             <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
                 <div className={fieldLabel}>
                     Service category
-                    <MntSelect label={'Service category'} hideLabel className={field} value={value.categoryCode} onChange={(e) => set({ categoryCode: e.target.value, subcategoryCode: '', classCode: '', proposedVendorIds: [] })}>
+                    <MntSelect label={'Service category'} hideLabel className={field} value={value.categoryCode} onChange={(e) => set({ categoryCode: e.target.value, subcategoryCode: '', classCode: '' })}>
                         <option value=''>Choose</option>
                         {hierarchy?.categories.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
                     </MntSelect>
                 </div>
                 <div className={fieldLabel}>
                     Subcategory
-                    <MntSelect label={'Subcategory'} hideLabel className={field} value={value.subcategoryCode} disabled={!value.categoryCode} onChange={(e) => set({ subcategoryCode: e.target.value, classCode: '', proposedVendorIds: [] })}>
+                    <MntSelect label={'Subcategory'} hideLabel className={field} value={value.subcategoryCode} disabled={!value.categoryCode} onChange={(e) => set({ subcategoryCode: e.target.value, classCode: '' })}>
                         <option value=''>Choose</option>
                         {subs.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
                     </MntSelect>
@@ -610,61 +607,7 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls }
             </div>
             {text('deliverables', 'Deliverables', 2, 'e.g. Repaired motor, test report with insulation resistance, warranty certificate')}
             {text('acceptanceCriteria', 'Acceptance criteria', 2, 'How you will check the work, e.g. no-load current within 5% of nameplate, IR above 100 MΩ')}
-            <div className='grid grid-cols-2 gap-2'>
-                <label className={fieldLabel}>
-                    Execution date
-                    <input type='date' min={todayIso()} className={field} value={value.executionDate || ''} onChange={(e) => set({ executionDate: e.target.value })} />
-                </label>
-                {num('expectedCost', 'Estimated cost')}
-            </div>
-            <section className='space-y-2 rounded-xl border border-line p-3'>
-                <p className='flex items-center gap-2 text-sm font-semibold text-ink'>
-                    <ShieldCheck className='h-4 w-4 text-brandsoft' />
-                    Supplier category and vendors
-                </p>
-                <div className={fieldLabel}>
-                    Supplier category (required)
-                    <MntSelect label={'Supplier category'} hideLabel className={field} value={value.supplierCategory} onChange={(e) => set({ supplierCategory: e.target.value, proposedVendorIds: [] })}>
-                        <option value=''>Choose OEM, OCM, approved third party…</option>
-                        {v.categories.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
-                    </MntSelect>
-                </div>
-                {category && <p className='text-xs text-muted'>{category.description}</p>}
-                {category && category.kind !== 'other' && (
-                    <p className='text-xs text-soft'>
-                        Equipment make: {[v.make.manufacturer, v.make.brand, v.make.model].filter(Boolean).join(' · ') || 'not recorded on the asset'}
-                        {v.narrowed ? ' — vendors representing it are shown.' : ''}
-                    </p>
-                )}
-                {value.supplierCategory && !(value.categoryCode && value.subcategoryCode) && <p className='text-xs text-amber-500'>Choose the service category and subcategory to list vendors.</p>}
-                {v.error && <p className='text-xs text-red-500'>{v.error}</p>}
-                {value.supplierCategory && value.categoryCode && value.subcategoryCode && !v.loading && (
-                    <>
-                        {v.vendors.length === 0 ? (
-                            <p className='rounded-lg bg-page px-3 py-2 text-xs text-soft'>No approved vendor of this category covers this service. The planner will route it to supplier onboarding; do not name an unregistered vendor.</p>
-                        ) : (
-                            <fieldset className='space-y-1'>
-                                <legend className='text-xs text-muted'>Propose up to 3 approved vendors (optional)</legend>
-                                {v.vendors.map((x) => (
-                                    <label key={x.id} className='flex items-center gap-3 rounded-lg border border-line px-3 py-2 text-sm'>
-                                        <input
-                                            type='checkbox'
-                                            checked={value.proposedVendorIds.includes(x.id)}
-                                            disabled={!value.proposedVendorIds.includes(x.id) && value.proposedVendorIds.length >= 3}
-                                            onChange={(e) => set({ proposedVendorIds: e.target.checked ? [...value.proposedVendorIds, x.id] : value.proposedVendorIds.filter((id: string) => id !== x.id) })}
-                                        />
-                                        <span className='min-w-0 flex-1'>
-                                            <span className='block truncate text-ink'>{x.name}</span>
-                                            <span className='block truncate text-xs text-muted'>{[x.id, x.manufacturerMatch ? 'represents ' + (v.make.manufacturer || v.make.brand) : '', x.brands.join(', ')].filter(Boolean).join(' · ')}</span>
-                                        </span>
-                                    </label>
-                                ))}
-                            </fieldset>
-                        )}
-                        {v.others.length > 0 && <p className='text-xs text-muted'>{v.others.length} other approved vendor(s) of this category do not represent the equipment make and cannot be proposed.</p>}
-                    </>
-                )}
-            </section>
+            <p className='rounded-lg bg-page p-2 text-xs text-soft'>Supplier sourcing, execution dates and commercial estimates are handled during planning.{value.expectedCost!=null?' Previously recorded indicative cost: '+Number(value.expectedCost).toLocaleString():''}</p>
             <Attachments code={code} files={value.attachments || []} urls={urls} onChange={(files, u) => { set({ attachments: files }); onUrls(u); }} />
         </div>
     );
