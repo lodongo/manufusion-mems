@@ -1,3 +1,4 @@
+import {assessmentSparePrice} from './maintenanceSparePrice';
 import {assessmentExecutionRoles,assessmentSkills} from './maintenanceAssessmentResources';
 import {expectedDates,newExpectedDates,protectExpectedDates,expectedDatesLocked,editExpectedDates,expectedDateCompletionPatch,validateExpectedWindow} from './maintenanceExpectedDates';
 import {maintenanceAnalyticsRoutes} from './maintenanceAnalytics';
@@ -875,9 +876,10 @@ async function verifyAssessedTaskChoices(ctx:OrgContext,record:Doc,tasks:Assesse
     const energyIds=new Set(energies.map(e=>str(e.code))),permitIds=new Set(permits.map(e=>str(e.code)));
     const oldPaths=new Set([...assessmentFiles(record.data.assessmentTasks),...assessmentFiles(object(record.data.assessmentDraft).tasks)]);
     for(const task of tasks){
-        if(task.internalRoleRequirements!==undefined){for(const r of task.internalRoleRequirements){const actual=roleMap.get(r.roleCode);if(!actual)throw new HttpError(400,'Choose an actual execution job role configured in this work group.');r.roleLabel=actual.label;}if(!task.internalRoleRequirements.length&&!task.externalResource)throw new HttpError(400,'Choose internal execution roles or an external resource.');}
+        if(task.internalRoleRequirements!==undefined){for(const r of task.internalRoleRequirements){const actual=roleMap.get(r.roleCode);if(!actual)throw new HttpError(400,'Choose an actual execution job role configured in this work group.');r.roleLabel=actual.label;}if(!task.internalRoleRequirements.length&&!task.externalResource&&!task.services.length)throw new HttpError(400,'Choose internal execution roles or an external resource.');}
         if(task.externalResource?.skillRequirements!==undefined){if(!task.externalResource.skillRequirements.length)throw new HttpError(400,'Select at least one external resource skill.');for(const r of task.externalResource.skillRequirements){const actual=skillMap.get(r.skillCode);if(!actual)throw new HttpError(400,'Choose an enabled skill from the MEMS skills catalogue.');r.skillLabel=actual.label;r.category=actual.category;r.subcategory=actual.subcategory;}}
-        for(const spare of task.spares){spare.unitCost=null;if(spare.materialId&&spare.warehouseId&&(scope==='all'||scope.has(spare.warehouseId))&&await materialIn(ctx.orgId,spare.materialId,spare.warehouseId)){const v=await stockValOf(ctx.orgId,spare.warehouseId,spare.materialId);if(v.updateTime&&v.avg>0)spare.unitCost=v.avg;}}
+        for(const service of task.services){for(const r of service.skillRequirements||[]){const actual=skillMap.get(r.skillCode);if(!actual)throw new HttpError(400,'Choose an enabled service skill from the MEMS catalogue.');r.skillLabel=actual.label;r.category=actual.category;r.subcategory=actual.subcategory;}}
+        for(const spare of task.spares){spare.unitCost=null;spare.estimateUnitPrice=null;spare.estimateCurrency='';spare.estimatePurchaseUom='';spare.estimateUomMatches=false;if(spare.materialId&&spare.warehouseId&&(scope==='all'||scope.has(spare.warehouseId))&&await materialIn(ctx.orgId,spare.materialId,spare.warehouseId)){const v=await stockValOf(ctx.orgId,spare.warehouseId,spare.materialId);if(v.updateTime&&v.avg>0)spare.unitCost=v.avg;Object.assign(spare,await assessmentSparePrice(ctx.orgId,spare.warehouseId,spare.materialId,spare.uom));}}
         if(task.machineStatus&&!statesSet.has(task.machineStatus))throw new HttpError(400,'This machine status is not enabled in organization Safety. Select an adopted status.');
         if(task.energySourceCodes?.some(code=>!energyIds.has(code)))
             throw new HttpError(400,'Choose hazardous energy sources from the active SAF list.');
@@ -1238,7 +1240,7 @@ export const maintenanceRoutes = {
                         stockVerified:!!balance?.valid&&!!balance,unitCost:null as number|null});
                 }
             }
-            const chosen=items.slice(0,selectedIds.size?100:40);await Promise.all(chosen.map(async item=>{const v=await stockValOf(ctx.orgId,item.warehouseId,item.materialId);item.unitCost=v.updateTime&&v.avg>0?v.avg:null;}));return {items:chosen,currency:str(ctx.org.data.currencyCode)};
+            const chosen=items.slice(0,selectedIds.size?100:40);const priced=await Promise.all(chosen.map(async item=>{const [v,p]=await Promise.all([stockValOf(ctx.orgId,item.warehouseId,item.materialId),assessmentSparePrice(ctx.orgId,item.warehouseId,item.materialId,item.uom)]);return {...item,...p,unitCost:v.updateTime&&v.avg>0?v.avg:null};}));return {items:priced,currency:str(ctx.org.data.currencyCode)};
         })
     ],
     'POST /api/org/mnt/assessment/photo': [

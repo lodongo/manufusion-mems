@@ -1,4 +1,3 @@
-import MntExternalSkills from './MntExternalSkills';
 import type {ResourceRole,ResourceSkill} from '../../backend/maintenanceTaskAssessment';
 import MntSelect from './MntSelect';
 import {useEffect,useState} from 'react';
@@ -9,13 +8,13 @@ import {ChoiceChip,ConfirmBox,OpenItems,StepProgress,StepSection} from './materi
 import {Button,Card,useLoad} from '../admin/kit';
 import {unitLabel,UnitOfMeasureSelect,AddSpare,Attachments,ServiceEditor,SOURCE_LABEL,freeTextProblems,newService,serviceProblems,type ServiceHierarchy} from './mntSourcing';
 
-type Spare={id:string;source:'warehouse'|'material'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;photoPath?:string;specifications?:string;attributes?:Record<string,string>;function?:string;categoryCode?:string;subcategoryCode?:string;familyCode?:string;requiredDate?:string;attachments?:string[];searchReceiptId?:string;noMatchConfirmed?:boolean;noMatchReason?:string};
-type Service={id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;instructions?:string;certifications?:string;personnel?:number;durationHours?:number;executionDate?:string;supplierCategory?:string;attachments?:string[]};
+type Spare={estimateUnitPrice?:number|null;estimateCurrency?:string;estimatePurchaseUom?:string;estimateUomMatches?:boolean;id:string;source:'warehouse'|'material'|'catalog'|'description';materialId:string;warehouseId:string;catalogCode:string;description:string;qty:number;uom:string;unitCost:number|null;photoPath?:string;specifications?:string;attributes?:Record<string,string>;function?:string;categoryCode?:string;subcategoryCode?:string;familyCode?:string;requiredDate?:string;attachments?:string[];searchReceiptId?:string;noMatchConfirmed?:boolean;noMatchReason?:string};
+type Service={specialistRequired?:boolean;skillRequirements?:ResourceSkill[];justificationReasons?:string[];justification?:string;id:string;categoryCode:string;subcategoryCode:string;classCode:string;catalogCode:string;description:string;attributes:Record<string,string>;proposedVendorIds:string[];scope?:string;deliverables?:string;quantity?:number;qualifications?:string;expectedCost?:number|null;acceptanceCriteria?:string;instructions?:string;certifications?:string;personnel?:number;durationHours?:number;executionDate?:string;supplierCategory?:string;attachments?:string[]};
 type Risk={hazard:string;impact:string;controls:string;before:string;after:string;permit:string;energyCode?:string;beforeRatings?:Record<string,number>;afterRatings?:Record<string,number>;exposedPersonnel?:string;responsiblePerson?:string;precautions?:string};
 type RiskMatrix={version:number;formula:'multiply'|'add';factors:Array<{code:string;label:string;max:number;enabled:boolean}>;bands:Array<{label:string;min:number;max:number;color:string}>};
 type SafetyOption={code:string;label:string;category:string;subcategory:string;description?:string};
 type Options={executionRoles?:{code:string;label:string;groupTitle:string}[];workGroupConfigured?:boolean;currency?:string;maintenanceTypes?:Array<{code:string;label:string}>;serviceHierarchy?:ServiceHierarchy;vendors:Array<{id:string;name:string}>;riskMatrix:RiskMatrix;hazardousEnergy:SafetyOption[];safetyPermits:SafetyOption[];machineStatuses?:SafetyOption[];safetyHazards?:SafetyOption[];safetyImpacts?:SafetyOption[];safetyControls?:SafetyOption[];photos:Record<string,string>;skills:Array<{code:string;label:string;category:string;subcategory:string}>;equipmentId:string;equipmentOptions:Array<{id:string;name:string;code:string}>};
-export type TaskAssessment={internalRoleRequirements?:ResourceRole[];attachments?:string[];id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string;hours?:number;skillRequirements?:ResourceSkill[]};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
+export type TaskAssessment={assessmentSetup?:{spares:boolean;services:boolean;tools:boolean};internalRoleRequirements?:ResourceRole[];attachments?:string[];id:string;code?:string;description:string;disciplineCode:string;resourceTypeCode:string;persons:number;hours:number;rate:number;tools:string;spares:Spare[];services:Service[];risk:Risk[];templateStatus:'pending_validation'|'existing';maintenanceTypeCode?:string;maintenanceTypeLabel?:string;skillCodes?:string[];title?:string;equipmentId?:string;assemblyId?:string;instructions?:string;skills?:string;priority?:string;dependencies?:string[];isolation?:string;completionCriteria?:string;documentation?:string;safetyEquipment?:string;internalRoles?:string[];externalResource?:{type:string;persons:number;notes:string;hours?:number;skillRequirements?:ResourceSkill[]};machineStatus?:MachineStatus;lotoRequired?:boolean;liveEquipment?:boolean;energySourceCodes?:string[];permitCodes?:string[]};
 export type MachineStatus='total_shutdown'|'live'|'full_loto'|'partial_isolation';
 export const MACHINE_STATUS:Array<[MachineStatus,string,string]>=[
  ['total_shutdown','Total shutdown','Equipment is stopped. Shutdown alone is not verified hazardous energy isolation.'],
@@ -27,7 +26,7 @@ export const machineOf=(t:{machineStatus?:MachineStatus;liveEquipment?:boolean;l
 export const machineLabel=(t:{machineStatus?:MachineStatus;liveEquipment?:boolean;lotoRequired?:boolean})=>MACHINE_STATUS.find(x=>x[0]===machineOf(t))?.[1]||'';
 const id=()=>Math.random().toString(36).slice(2,10);
 const newRisk=():Risk=>({hazard:'',impact:'',controls:'',before:'',after:'',permit:'',beforeRatings:{},afterRatings:{}});
-const seed=():TaskAssessment=>({id:'task_'+id(),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[newRisk()],templateStatus:'pending_validation',internalRoles:[],internalRoleRequirements:[],externalResource:undefined,machineStatus:'total_shutdown',lotoRequired:false,liveEquipment:false,energySourceCodes:[],permitCodes:[]});
+const seed=():TaskAssessment=>({assessmentSetup:{spares:false,services:false,tools:false},id:'task_'+id(),description:'',disciplineCode:'',resourceTypeCode:'',persons:1,hours:1,rate:0,tools:'',spares:[],services:[],risk:[newRisk()],templateStatus:'pending_validation',internalRoles:[],internalRoleRequirements:[],externalResource:undefined,machineStatus:'total_shutdown',lotoRequired:false,liveEquipment:false,energySourceCodes:[],permitCodes:[]});
 const input='mt-1 w-full rounded-xl border border-line bg-page p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none read-only:opacity-70';
 const label='block text-sm text-soft';
 const roles=[['operator','Operator'],['technician','Technician'],['specialist','Specialist'],['engineer','Engineer']] as const;
@@ -84,7 +83,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
    <p className='font-medium text-ink'>Spares ({t.spares?.length||0})</p>
    {t.spares?.map(sp=><div key={sp.id} className='rounded-lg bg-page p-2'>
     {sp.description} · {sp.qty} {unitLabel(sp.uom)} · {SOURCE_LABEL[sp.source]||sp.source}{sp.warehouseId?' · warehouse '+sp.warehouseId:''}
-    {sp.unitCost!=null&&<span className='block text-xs text-soft'>Indicative estimate: {options?.currency||''} {(sp.qty*sp.unitCost).toLocaleString(undefined,{maximumFractionDigits:2})}</span>}
+    {sp.estimateUnitPrice!=null&&<span className='block text-xs text-soft'>Configured price: {sp.estimateCurrency} {sp.estimateUnitPrice.toLocaleString()} / {unitLabel(sp.estimatePurchaseUom||'')}{sp.estimateUomMatches?' · Estimated total '+(sp.qty*sp.estimateUnitPrice).toLocaleString():''}</span>}
     {sp.source==='description'&&<span className='block text-xs text-muted'>Function: {sp.function||'—'} · {sp.specifications||'No specification'}{sp.requiredDate?' · by '+sp.requiredDate:''}</span>}
     {sp.photoPath&&<div>{options?.photos?.[sp.photoPath]?<a href={options.photos[sp.photoPath]} target='_blank' rel='noreferrer' className='text-brand underline'>View spare photo</a>:<span>Photo attached</span>}</div>}
    </div>)}
@@ -105,7 +104,7 @@ function ReviewAssessment({tasks,options}:{tasks:TaskAssessment[];options?:Optio
  </Card>;
 }
 export default function MntTaskAssessment({code,initial,onSaved,editable,recordType='wr',onCancel,onDirtyChange,context,breakIn=false,hasSavedDraft=false}:{hasSavedDraft?:boolean;breakIn?:boolean;context?:{asset:string;assembly:string;equipment:string};code:string;initial:TaskAssessment[];onSaved:()=>void;editable:boolean;recordType?:'wr'|'wo';onCancel?:()=>void;onDirtyChange?:(dirty:boolean)=>void}){
- const [tasks,setTasks]=useState<TaskAssessment[]>(initial);
+ const [tasks,setTasks]=useState<TaskAssessment[]>(()=>initial.map(t=>{if(!t.externalResource?.type)return t;const e=t.externalResource;return {...t,externalResource:undefined,assessmentSetup:{spares:!!t.spares.length,services:true,tools:!!t.tools},services:[...t.services,{...newService(),description:'External specialist support',scope:e.notes,qualifications:e.skillRequirements?.map(k=>k.skillLabel||k.skillCode).join('; ')||'',specialistRequired:true,skillRequirements:e.skillRequirements||[],personnel:e.persons,durationHours:e.hours||t.hours,justificationReasons:[],justification:''} as Service]};}));
  const [dirty,setDirty]=useState(false),[savedDraft,setSavedDraft]=useState(hasSavedDraft);
  const options=useLoad(()=>callBackend<Options>('/api/org/mnt/assessment/options',{code}),[code]);
  const library=useLoad(()=>callBackend<{items:Array<{id:string;version:number;task:TaskAssessment}>}>('/api/org/mnt/tasks/library',{code}),[code]);
@@ -114,17 +113,20 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
  const hasUnsaved=dirty||!!draft&&(!!draft.title.trim()||!!draft.description.trim());
  useEffect(()=>{onDirtyChange?.(hasUnsaved);return()=>onDirtyChange?.(false);},[hasUnsaved,onDirtyChange]);
  const task=tasks[current??0]||seed();
- const sections=['Task','Spares','Services','Resources','Tools','Safety'];
+ const setup=task.assessmentSetup||{spares:!!task.spares.length,services:!!task.services.length,tools:!!task.tools};
+ const allSections=['Assessment setup','Task','Spares','Services','Resources','Tools','Safety'];
+ const sections=allSections.filter(n=>n==='Assessment setup'||n==='Task'||n==='Resources'||n==='Safety'||n==='Spares'&&setup.spares||n==='Services'&&setup.services||n==='Tools'&&setup.tools);
  const analysisSpares=tasks.flatMap(t=>t.spares||[]);
  const stockKey=JSON.stringify([...new Set(analysisSpares.filter(s=>s.materialId&&s.warehouseId).map(s=>s.warehouseId+'|'+s.materialId))].sort());
- const [stock,setStock]=useState<Record<string,{physical:number|null;available:number|null;stockVerified:boolean;unitCost?:number|null}>>({});
- useEffect(()=>{let alive=true;const keys:string[]=JSON.parse(stockKey),groups=new Map<string,string[]>();for(const k of keys){const [w,m]=k.split('|');groups.set(w,[...(groups.get(w)||[]),m]);}setStock({});void Promise.all([...groups].map(async ([warehouseId,materialIds])=>{try{const r=await callBackend<{items:({materialId:string;physical:number|null;available:number|null;stockVerified:boolean;unitCost?:number|null})[]}>('/api/org/mnt/warehouse-spares/search',{warehouseId,materialIds});if(alive)setStock(old=>({...old,...Object.fromEntries(r.items.map(x=>[warehouseId+'|'+x.materialId,x]))}));}catch{/* Unverified stock is never shown as zero. */}}));return()=>{alive=false;};},[stockKey]);
+ const [stock,setStock]=useState<Record<string,{physical:number|null;available:number|null;stockVerified:boolean;unitCost?:number|null;estimateUnitPrice?:number|null;estimateCurrency?:string;estimatePurchaseUom?:string;estimateUomMatches?:boolean}>>({});
+ useEffect(()=>{let alive=true;const keys:string[]=JSON.parse(stockKey),groups=new Map<string,string[]>();for(const k of keys){const [w,m]=k.split('|');groups.set(w,[...(groups.get(w)||[]),m]);}setStock({});void Promise.all([...groups].map(async ([warehouseId,materialIds])=>{try{const r=await callBackend<{items:({materialId:string;physical:number|null;available:number|null;stockVerified:boolean;unitCost?:number|null;estimateUnitPrice?:number|null;estimateCurrency?:string;estimatePurchaseUom?:string;estimateUomMatches?:boolean})[]}>('/api/org/mnt/warehouse-spares/search',{warehouseId,materialIds});if(alive)setStock(old=>({...old,...Object.fromEntries(r.items.map(x=>[warehouseId+'|'+x.materialId,x]))}));}catch{/* Unverified stock is never shown as zero. */}}));return()=>{alive=false;};},[stockKey]);
  const urls={...(options.data?.photos||{}),...photoUrls};
- const resourceIssues=(t:TaskAssessment)=>[...(t.internalRoleRequirements!==undefined&&!(t.internalRoleRequirements.length||t.externalResource)?['Select an execution job role or external resource']:[]),...(t.internalRoleRequirements||[]).filter(r=>!Number.isInteger(r.persons)||r.persons<1||!(r.hours>=.25)).map(r=>(r.roleLabel||r.roleCode)+': headcount and hours required'), ];
+ const resourceIssues=(t:TaskAssessment)=>[...(t.internalRoleRequirements!==undefined&&!(t.internalRoleRequirements.length||t.externalResource||t.services.length)?['Select an execution job role or external resource']:[]),...(t.internalRoleRequirements||[]).filter(r=>!Number.isInteger(r.persons)||r.persons<1||!(r.hours>=.25)).map(r=>(r.roleLabel||r.roleCode)+': headcount and hours required'), ];
  const externalIssues=(t:TaskAssessment)=>t.externalResource?.type?[...(!t.externalResource.skillRequirements?.length?['Select external skills and proficiency']:[]),...(!Number.isInteger(t.externalResource.persons)||t.externalResource.persons<1?['External specialist headcount required']:[]),...(!(Number(t.externalResource.hours)>=.25)?['External resource hours required']:[]),...(!t.externalResource.notes.trim()?['External technical scope required']:[])]:[];
- const taskProblems=(t:TaskAssessment)=>[...resourceIssues(t),...externalIssues(t),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
+ const taskProblems=(t:TaskAssessment)=>[...(t.assessmentSetup?.spares&&!t.spares.length?['Add required spares']:[]),...(t.assessmentSetup?.services&&!t.services.length?['Add required services']:[]),...resourceIssues(t),...externalIssues(t),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x)),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))];
  // Open items per section, shown on the section progress and before leaving the task (verification).
  const sectionIssues=(t:TaskAssessment):string[][]=>[
+  [...(t.assessmentSetup?.spares&&!t.spares.length?['Add required spares']:[]),...(t.assessmentSetup?.services&&!t.services.length?['Add required services']:[])],
   [...(!(t.title||'').trim()?['Task name']:[]),...(t.description.trim().length<3?['Work description (at least 3 characters)']:[])],
   [...t.spares.filter(sp=>!(Number(sp.qty)>0)).map(sp=>(sp.description||'Spare')+': quantity above zero'),...t.spares.filter(sp=>sp.source==='description').flatMap(sp=>freeTextProblems(sp,recordType!=='wo').map(x=>(sp.description||'New material')+': '+x))],
   [...externalIssues(t),...t.services.flatMap(sv=>serviceProblems(sv).map(x=>(sv.description||'Service')+': '+x))],
@@ -236,7 +238,8 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
    <button type='button' className='flex min-h-11 items-center text-sm text-brand' onClick={()=>setCurrent(null)}>← All tasks</button>
    <ReviewAssessment tasks={[task]} options={options.data??undefined}/>
  </div>;
- const issues=sectionIssues(task);
+ const issues=sections.map(n=>sectionIssues(task)[allSections.indexOf(n)]||[]);
+ const activeSection=sections[step]||'Assessment setup';
  return <div className='min-w-0 space-y-3'>
    <div className='sticky top-0 z-10 -mx-1 space-y-2 rounded-2xl border border-line bg-panel/95 p-3 backdrop-blur'>
     <div className='flex items-center gap-2'>
@@ -246,7 +249,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
       <h3 className='truncate text-base font-semibold text-ink'>{task.title||'Configure task'}</h3>
      </div>
      <Button className='shrink-0' onClick={()=>{
-      if(!(task.title||task.description).trim()||task.description.trim().length<3){setStep(0);setMessage('Enter the task name and a work description before returning.');return;}
+      if(!(task.title||task.description).trim()||task.description.trim().length<3){setStep(sections.indexOf('Task'));setMessage('Enter the task name and a work description before returning.');return;}
       const problems=taskProblems(task);
       if(problems.length){setMessage('Complete before returning: '+problems.slice(0,4).join('; ')+(problems.length>4?' …':''));return;}
       setMessage('');setCurrent(null);
@@ -257,7 +260,8 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
     <div className='flex gap-1 overflow-x-auto sm:hidden' role='tablist' aria-label='Task sections'>{sections.map((name,i)=><button type='button' role='tab' aria-selected={step===i} key={name} onClick={()=>setStep(i)} className={'min-h-9 shrink-0 rounded-lg px-3 text-xs '+(step===i?'bg-brand text-onbrand':'bg-page text-soft')}>{name}{issues[i].length?' •':''}</button>)}</div>
    </div>
    {message&&<Alert tone='info'>{message}</Alert>}
-   {step===0&&<StepSection title='Task' hint='What is done and which maintenance strategy it follows.'>
+   {activeSection==='Assessment setup'&&<StepSection title='Assessment setup' hint='Select what this task requires. Resources and Safety are mandatory.'><div className='space-y-2'>{([['spares','Spares',task.spares.length],['services','External services / specialists',task.services.length],['tools','Tools and equipment',0]] as const).map(([k,label,n])=><label key={k} className='flex items-center gap-3 rounded-xl border border-line p-3 text-sm'><input type='checkbox' checked={setup[k]} disabled={n>0} onChange={e=>patch({assessmentSetup:{...setup,[k]:e.target.checked}})}/><span>{label}{n>0?' · '+n+' recorded':''}</span></label>)}{['Resources','Safety'].map(n=><div key={n} className='flex items-center gap-3 rounded-xl border border-line p-3 text-sm'><input type='checkbox' checked disabled readOnly/>{n} · mandatory</div>)}<p className='text-xs text-soft'>Remove existing requirements before switching a section off. Tools remain pending configuration.</p></div></StepSection>}
+   {activeSection==='Task'&&<StepSection title='Task' hint='What is done and which maintenance strategy it follows.'>
     <div className='space-y-3'>
      <label className={label}>Task name<input className={input} value={task.title||''} onChange={e=>patch({title:e.target.value})}/></label>
      <label className={label}>Describe the work<textarea className={input} rows={3} value={task.description} onChange={e=>patch({description:e.target.value})} placeholder='What is required?'/></label><div className='rounded-xl border border-line p-2'><p className='text-xs text-soft'>Assessment photos (optional)</p><Attachments code={code} files={task.attachments||[]} urls={urls} onChange={(files,u)=>{patch({attachments:files});setPhotoUrls(old=>({...old,...u}));}}/></div>
@@ -277,7 +281,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
      </dl>}
     </div>
    </StepSection>}
-   {step===1&&<StepSection title='Spares for this task' hint='Choose the warehouse, then add each spare from stock, the material catalogue or as free text, with its quantity.'>
+   {activeSection==='Spares'&&<StepSection title='Spares for this task' hint='Choose the warehouse, then add each spare from stock, the material catalogue or as free text, with its quantity.'>
     <div className='space-y-3'>{recordType==='wo'&&<p className='text-xs text-soft'>Identify the required spares and quantities. Availability risk, lead times, reservation, procurement and scheduling are handled during planning.</p>}
      <div className={label}>Warehouse (select first) *<MntSelect label={'Warehouse for task spares'} hideLabel className={input} value={spareWarehouse} onChange={e=>{setSpareWarehouse(e.target.value);setAdding(false);}}>
       <option value=''>Choose the warehouse</option>{warehouses.data?.warehouses.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</MntSelect></div>
@@ -301,7 +305,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
         <div className={label}>Unit of measure{sp.source==='warehouse'||sp.source==='material'?<input className={input} value={unitLabel(sp.uom)} readOnly/>:<UnitOfMeasureSelect value={sp.uom} onChange={v=>patchSpare(i,{uom:v})}/>}</div>
         {recordType!=='wo'&&<label className={label+' col-span-2 sm:col-span-1'}>Required by<input type='date' className={input} value={sp.requiredDate||''} min={new Date().toISOString().slice(0,10)} onChange={e=>patchSpare(i,{requiredDate:e.target.value})}/></label>}
        </div>
-       {(()=>{const q=stock[sp.warehouseId+'|'+sp.materialId],cost=q?.unitCost??null;return <p className='rounded-lg border border-line p-2 text-xs text-soft'>{cost!=null&&cost>0?<><span>Estimated unit cost: {options.data?.currency||''} {cost.toLocaleString(undefined,{maximumFractionDigits:2})}</span><br/><b>Estimated total: {options.data?.currency||''} {(cost*sp.qty).toLocaleString(undefined,{maximumFractionDigits:2})}</b><br/>Indicative recorded inventory valuation, not a supplier quotation.</>:'Estimated cost unavailable'}</p>;})()}
+       {(()=>{const q=stock[sp.warehouseId+'|'+sp.materialId],cost=q?.estimateUnitPrice;return <p className='rounded-lg border border-line p-2 text-xs text-soft'>{cost!=null?<><span>Configured unit price: {q.estimateCurrency} {cost.toLocaleString(undefined,{maximumFractionDigits:2})} / {unitLabel(q.estimatePurchaseUom||'')}</span><br/>{q.estimateUomMatches?<b>Estimated total: {q.estimateCurrency} {(cost*sp.qty).toLocaleString(undefined,{maximumFractionDigits:2})}</b>:<b>Stock and purchase units differ. Total requires a verified conversion.</b>}<br/>Indicative procurement master price; not a quotation.</>:'Configured unit price unavailable'}</p>;})()}
        {recordType!=='wo'&&sp.photoPath&&<a className='text-sm text-brand underline' href={urls[sp.photoPath]||'#'} target='_blank' rel='noreferrer noopener'>View attached photo</a>}
        {recordType!=='wo'&&<Attachments code={code} files={sp.attachments||[]} urls={urls} onChange={(files,u)=>{patchSpare(i,{attachments:files});setPhotoUrls(old=>({...old,...u}));}}/>}
        {problems.length>0&&<p className='text-xs text-amber-400'>Still needed: {problems.join(', ')}.</p>}
@@ -310,7 +314,7 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
       :<Button variant='secondary' disabled={!spareWarehouse} onClick={()=>{setAdding(true);setMessage('');}}>+ Add spare</Button>}
     </div>
    </StepSection>}
-   {step===2&&<><StepSection title='External services for this task' hint='Define technical scope, resource load, competencies, deliverables and acceptance. Commercial sourcing and execution dates are set in planning.'>
+   {activeSection==='Services'&&<><StepSection title='External services for this task' hint='Define technical scope, resource load, competencies, deliverables and acceptance. Commercial sourcing and execution dates are set in planning.'>
     <div className='space-y-2'>
      {task.services.map((sv,i)=>{const problems=serviceProblems(sv);const editing=openService===i;return <div key={sv.id} className='min-w-0 space-y-2 rounded-xl border border-line bg-page p-3'>
        <button type='button' className='flex min-h-11 w-full items-start justify-between gap-2 text-left' onClick={()=>setOpenService(editing?null:i)} aria-expanded={editing}>
@@ -318,23 +322,13 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
          <span className={'block text-xs '+(problems.length?'text-amber-400':'text-muted')}>{problems.length?'Incomplete: '+problems.slice(0,3).join(', '):'Technical requirements complete'}</span></span>
         <span className='shrink-0 text-lg text-muted' aria-hidden='true'>{editing?'−':'+'}</span>
        </button>
-       {editing&&<ServiceEditor code={code} value={sv} hierarchy={options.data?.serviceHierarchy} urls={urls} onUrls={u=>setPhotoUrls(old=>({...old,...u}))} onChange={next=>patch({services:task.services.map((x,j)=>j===i?next as Service:x)})}/>}
+       {editing&&<ServiceEditor code={code} value={sv} skills={options.data?.skills||[]} hierarchy={options.data?.serviceHierarchy} urls={urls} onUrls={u=>setPhotoUrls(old=>({...old,...u}))} onChange={next=>patch({services:task.services.map((x,j)=>j===i?next as Service:x)})}/>}
        {editing&&<button type='button' className='min-h-9 text-xs text-red-400' onClick={()=>{patch({services:task.services.filter((_,j)=>j!==i)});setOpenService(null);}}>Remove service</button>}
      </div>;})}
      <Button variant='secondary' onClick={()=>{patch({services:[...task.services,newService() as Service]});setOpenService(task.services.length);}}>+ Add external service</Button>
     </div>
-   </StepSection><StepSection title='External specialist resource' hint='Capture competencies and labour requirement only.'><div className='space-y-3'>
-      <div className={label}>External specialist support required<MntSelect label={'External specialist support required'} hideLabel className={input} value={task.externalResource?.type?'external_specialist':''} onChange={e=>patch({externalResource:e.target.value?{type:e.target.value,persons:task.externalResource?.persons||1,notes:task.externalResource?.notes||'',hours:task.externalResource?.hours||1,skillRequirements:task.externalResource?.skillRequirements||[]}:undefined})}>
-        <option value=''>None</option><option value='external_specialist'>External specialist support</option></MntSelect></div>
-      {task.externalResource?.type&&<div className='space-y-2 rounded-xl border border-line bg-page p-3'>
-        <label className={label}>How many external people?<input type='number' inputMode='decimal' min={1} max={50} className={input} value={task.externalResource.persons} onChange={e=>patch({externalResource:{...task.externalResource!,persons:Number(e.target.value)}})}/></label>
-        <label className={label}>Hours per external person<input type='number' min={.25} step={.25} className={input} value={task.externalResource.hours??1} onChange={e=>patch({externalResource:{...task.externalResource!,hours:Number(e.target.value)}})}/></label>
-        <MntExternalSkills skills={options.data?.skills||[]} selected={task.externalResource.skillRequirements||[]} onChange={skillRequirements=>patch({externalResource:{...task.externalResource!,hours:task.externalResource?.hours??1,skillRequirements}})}/>
-        <label className={label}>External scope / qualification<textarea className={input} rows={2} value={task.externalResource.notes} onChange={e=>patch({externalResource:{...task.externalResource!,notes:e.target.value}})}/></label>
-        <p className='text-xs text-muted'>Supplier category, provider, booking, cost and availability are determined during planning.</p>
-      </div>}
-     </div></StepSection></>}
-   {step===3&&<>
+   </StepSection></>}
+   {activeSection==='Resources'&&<>
     <StepSection title='Resources' hint='Internal work group execution job roles, headcount and time only. Named people are allocated during planning.'>
      <div className='space-y-3'>
       <p className='text-sm font-medium'>Internal execution roles</p>
@@ -345,8 +339,8 @@ export default function MntTaskAssessment({code,initial,onSaved,editable,recordT
      </div>
     </StepSection>
    </>}
-   {step===4&&<StepSection title='Tools' hint='Tool requirements and selection will be configured separately.'><p className='rounded-xl border border-dashed border-line p-3 text-sm text-soft'>Pending configuration. This tab does not block assessment completion.{task.tools&&' Existing tool notes are retained: '+task.tools}</p></StepSection>}
-   {step===5&&<>
+   {activeSection==='Tools'&&<StepSection title='Tools' hint='Tool requirements and selection will be configured separately.'><p className='rounded-xl border border-dashed border-line p-3 text-sm text-soft'>Pending configuration. This tab does not block assessment completion.{task.tools&&' Existing tool notes are retained: '+task.tools}</p></StepSection>}
+   {activeSection==='Safety'&&<>
     <StepSection title='Machine status during execution' hint='Sets isolation or live work, and adds the required permits and hazards automatically.'>
      <div role='radiogroup' aria-label='Machine status during execution' className='grid gap-2 sm:grid-cols-2'>
       {MACHINE_STATUS.filter(([value])=>!options.data?.machineStatuses||options.data.machineStatuses.some(x=>x.code===value)).map(([value,defaultTitle,defaultDetail])=>{const master=options.data?.machineStatuses?.find(x=>x.code===value);const title=master?.label||defaultTitle,detail=master?.description||defaultDetail;const on=machineOf(task)===value;return <button key={value} type='button' role='radio' aria-checked={on} onClick={()=>setMachine(value)}
