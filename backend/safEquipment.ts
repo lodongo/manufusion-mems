@@ -123,7 +123,7 @@ export async function equipmentTaskSafetySnapshot(ctx:OrgContext,equipmentId:str
  if(!d||Number(d.version)!==Number(task.registryVersion)||!str(d.assessmentVerifiedAt)||d.status!=='review_required')throw new HttpError(409,'Verify the current equipment task safety assessment before completing work assessment.');
  if(str(d.name).trim().toLowerCase()!==str(task.title).trim().toLowerCase())throw new HttpError(409,'Align the task name and catalogue identity with the equipment definition.');
  const source=isObj(d.catalogueSource)?d.catalogueSource:null,reference=isObj(task.catalogueReference)?task.catalogueReference:null;
- if(source&&(!reference||source.code!==reference.taskCode||source.releaseId!==reference.releaseId||Number(source.version)!==Number(reference.version)))throw new HttpError(409,'Catalogue task revision changed. Align the equipment definition.');
+ if((reference&&str(reference.taskCode)&&!source)||(source&&(!reference||source.code!==reference.taskCode||source.releaseId!==reference.releaseId||Number(source.version)!==Number(reference.version))))throw new HttpError(409,'Catalogue task revision changed. Align the equipment definition.');
  const classes=stringList(d.classCodes),primary=classes[0]||'';
  const decision=taskDecisionPath(isObj(d.answers)?d.answers as Record<string,string>:{}).decision;
  if(!primary||decision.code!==primary||decision.exception)throw new HttpError(409,'Task classification requires independent Safety review.');
@@ -244,7 +244,8 @@ export const safEquipmentRoutes={
   if(requested&&!old)throw new HttpError(404,'Task not found on this equipment.');
   const version=Number(old?.data.version)||0;
   if(Number(ctx.body.version)!==version)throw new HttpError(409,'Task changed. Reload.');
-  const safetyOnly=ctx.body.source==='safety'||ctx.body.source==='work_assessment';
+  const safetyOnly=['safety','work_assessment','organization_design_safety'].includes(str(ctx.body.source));
+  if(!safetyOnly&&!holdsDirect(ctx,['ADM.structure']))throw new HttpError(403,'Technical task definition editing requires Organization Design rights.');
   const name=str(safetyOnly&&old?old.data.name:ctx.body.name).trim().slice(0,250),executor=str(safetyOnly&&old?old.data.executor:ctx.body.executor),skillCodes=stringList(safetyOnly&&old?old.data.skillCodes:ctx.body.skillCodes),duration=Number(safetyOnly&&old?old.data.durationMinutes:ctx.body.durationMinutes)||0;
   if(name.length<3||!Number.isFinite(duration)||duration<0||duration>525600||(!safetyOnly&&(!EXECUTOR_TYPES.includes(executor)||duration<=0||!skillCodes.length))||skillCodes.length>2000)throw new HttpError(400,'Enter a valid task identity and, in task configuration, its executor, duration and HR skills.');
   const technicalDefinitionPending=!EXECUTOR_TYPES.includes(executor)||!(duration>0)||!skillCodes.length;
@@ -289,10 +290,10 @@ export const safEquipmentRoutes={
   if(safetyDeviceIds.some(d=>!deviceItems.some(x=>x.deviceId===d&&str(x.tag))))throw new HttpError(400,'Select registered, tagged safety devices for this equipment.');
   if(ctx.body.verifyAssessment===true&&ctx.body.classificationReviewed!==true)throw new HttpError(400,'Review the task classification decision tree before verification.');
   if(ctx.body.verifyAssessment===true&&(ctx.body.devicesReviewed!==true||Number(ctx.body.deviceVersion)!==deviceVersion))throw new HttpError(409,'Review the current equipment safety device register before verification.');
-  const manualSteps=Array.isArray(ctx.body.subtasks)?array(ctx.body.subtasks):[];
+  const manualSteps=!safetyOnly&&Array.isArray(ctx.body.subtasks)?array(ctx.body.subtasks):[];
   if(!old?.data.catalogueSource&&(manualSteps.length>100||manualSteps.some((x,i)=>str(x.name).trim().length<3||str(x.name).length>500||Number(x.sequence)!==i+1||!Number.isFinite(Number(x.estimatedMinutes))||Number(x.estimatedMinutes)<=0)))throw new HttpError(400,'Enter valid ordered subtasks.');
   let catalogueFamily=isObj(old?.data.catalogueFamily)?old.data.catalogueFamily:null;
-  if(!old?.data.catalogueSource&&!catalogueFamily&&isObj(ctx.body.catalogueFamily)){
+  if(!old?.data.catalogueSource&&!catalogueFamily&&(!old||!safetyOnly)&&isObj(ctx.body.catalogueFamily)){
    const input=ctx.body.catalogueFamily,scope=await resolveGenericTaskScope(ctx,await catalogueSiteForEquipment(ctx,id));
    const family=array(scope.catalogue?.families).find(f=>f.code===input.familyCode&&f.categoryCode===input.categoryCode&&f.subcategoryCode===input.subcategoryCode);
    if(!family||scope.releaseId!==input.releaseId||!scope.items.some(t=>t.familyCode===family.code))throw new HttpError(400,'Choose an adopted catalogue family.');

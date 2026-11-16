@@ -28,7 +28,7 @@ test('tasks start as a list, with add action and individual editor with separate
  assert.match(ui,/useState<TaskAssessment\[]>\(/);
  assert.match(ui,/useState<number\|null>\(null\)/);
  assert.match(ui,/\+ Add Task/);
- assert.match(ui,/\['Assessment setup','Task','Spares','Services','Resources','Tools','Equipment','Safety'\]/);
+ assert.match(ui,/\['Assessment setup','Internal Task','Spares','Services','Resources','Tools','Equipment','Safety'\]/);
  assert.match(ui,/<AddSpare /,'Spares are added from the selected warehouse, the catalogue or free text');
  assert.match(ui,/Warehouse \(select first\)/);
  assert.match(ui,/Save task<\/Button>/);
@@ -55,4 +55,4 @@ test('mobile resource role summaries drill into subtask allocations and overhead
 
 test('equipment task safety is registry-first and bulk catalogue adoption is supported',()=>{const assessment=src('MntTaskAssessment.tsx'),registry=src('EquipmentTasks.tsx'),picker=src('MntGenericTaskPicker.tsx');assert.match(assessment,/Equipment task safety/);assert.match(assessment,/registryReady\(task\)/);assert.match(assessment,/Previously recorded work risks/);assert.doesNotMatch(assessment,/Additional work-specific hazards/);assert.match(registry,/Safety equipment and safeguards/);assert.match(registry,/Organization task risk references/);assert.match(registry,/taskCodes:codes.slice/);assert.match(picker,/Adopt selected/);});
 
-test('the shared safety editor has no subtask matching requirement and reviews generic screening answers',()=>{const assessment=src('MntTaskAssessment.tsx'),registry=src('EquipmentTasks.tsx');assert.match(registry,/const safetyOnly=!!assessmentCode\|\|!allowCreate/);assert.match(registry,/Review from first question/);assert.match(registry,/classificationReviewed/);assert.match(assessment,/<EquipmentTasks key=/);assert.doesNotMatch(assessment,/initialSteps=\{legacySteps/);const api=readFileSync(new URL('../../backend/safEquipment.ts',import.meta.url),'utf8');assert.doesNotMatch(api,/JSON.stringify\(steps\)!==JSON.stringify\(workSteps\)/);});
+test('the shared safety editor has no subtask matching requirement and reviews generic screening answers',()=>{const assessment=src('MntTaskAssessment.tsx'),registry=src('EquipmentTasks.tsx');assert.match(registry,/const safetyOnly=!canEditDefinition\|\|!definitionOpen/);assert.match(registry,/Review from first question/);assert.match(registry,/classificationReviewed/);assert.match(assessment,/<EquipmentTasks key=/);assert.doesNotMatch(assessment,/initialSteps=\{legacySteps/);const api=readFileSync(new URL('../../backend/safEquipment.ts',import.meta.url),'utf8');assert.doesNotMatch(api,/JSON.stringify\(steps\)!==JSON.stringify\(workSteps\)/);});
