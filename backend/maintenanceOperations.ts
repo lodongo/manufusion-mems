@@ -259,6 +259,12 @@ export async function enforceMaintenanceTransition(ctx: OrgContext, wo: Doc, act
  * reservation and procurement records. A spare is ready only when its full quantity is reserved or issued; a
  * service only when it is secured on a placed purchase order raised from this task's requirement.
  */
+function directHeadcount(task:Obj):number {
+    if(!Array.isArray(task.subtaskRoles))return Number(task.persons)||0;
+    const peaks=new Map<string,number>();
+    for(const r of rows((task.subtaskRoles as unknown[]).flat())){const code=str(r.roleCode);peaks.set(code,Math.max(peaks.get(code)||0,Number(r.persons)||0));}
+    return [...peaks.values()].reduce((n,v)=>n+v,0);
+}
 async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
     const items: Obj[] = [],
         problems: string[] = [];
@@ -276,7 +282,7 @@ async function readiness(ctx: OrgContext, wo: Doc, selected?: Set<string>) {
         const planning = object(object(wo.data.taskPlanning)[str(t.id)]),
             allocation = object(planning.allocation);
         if (
-            texts(allocation.personnel).length < (Array.isArray(t.subtaskRoles)?[...new Map(rows((t.subtaskRoles as unknown[]).flat()).map(r=>[str(r.roleCode),Math.max(...rows((t.subtaskRoles as unknown[]).flat()).filter(x=>x.roleCode===r.roleCode).map(x=>Number(x.persons)))])).values()].reduce((n,v)=>n+v,0):Number(t.persons))+rows(allocation.overheadRoles??t.overheadRoles).reduce((n,r)=>n+Number(r.persons),0) ||
+            texts(allocation.personnel).length < directHeadcount(t)+rows(allocation.overheadRoles??t.overheadRoles).reduce((n,r)=>n+Number(r.persons),0) ||
             allocation.competenciesConfirmed !== true
         )
             problems.push(`${str(t.description)}: allocate qualified personnel and confirm competencies.`);
@@ -563,7 +569,13 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
         if(rawOverhead.length>30||new Set(rawOverhead.map(r=>str(r.roleCode))).size!==rawOverhead.length)throw new HttpError(400,'Duplicate or excessive overhead roles.');
         const roles=new Map((await assessmentExecutionRoles(ctx,wo)).roles.map(r=>[r.code,r]));
         const overheadRoles=rawOverhead.map(r=>{const role=roles.get(str(r.roleCode)),persons=Number(r.persons),hours=Number(r.hours);if(!role||!Number.isInteger(persons)||persons<1||persons>50||!Number.isFinite(hours)||hours<.25||hours>2000)throw new HttpError(400,'Choose a valid work group overhead role, headcount and hours.');return {roleCode:role.code,roleLabel:role.label,persons,hours};});
-        const directPersons=Array.isArray(task.subtaskRoles)?[...new Map(rows((task.subtaskRoles as unknown[]).flat()).map(r=>[str(r.roleCode),Math.max(...rows((task.subtaskRoles as unknown[]).flat()).filter(x=>x.roleCode===r.roleCode).map(x=>Number(x.persons)))])).values()].reduce((n,v)=>n+v,0):Number(task.persons);
+        const directPersons=directHeadcount(task);
+        const previousOverhead=rows(object(p.allocation).overheadRoles??task.overheadRoles);
+        const overheadChanged=JSON.stringify(overheadRoles)!==JSON.stringify(previousOverhead);
+        if(overheadChanged&&str(object(wo.data.costApproval).status)==='pending'){
+            const current=await costApprovalOf(ctx.orgId,wo,estimateOf(wo,[]));
+            if(current.status==='pending')throw new HttpError(409,'Resolve the pending cost approval before changing overhead resources.');
+        }
         const requiredPersons=directPersons+overheadRoles.reduce((n,r)=>n+r.persons,0);
         if (ids.length < requiredPersons || ids.length > 50) throw new HttpError(400, 'Allocate enough personnel for this task.');
         const pool = await workGroupResourcePool(ctx.orgId, wo);
@@ -603,7 +615,7 @@ async function resourceAction(ctx: OrgContext, wo: Doc, action: string) {
                         },
                     },
                 },
-                ...(JSON.stringify(overheadRoles)!==JSON.stringify(rows(object(p.allocation).overheadRoles??task.overheadRoles))&&str(object(wo.data.costApproval).status)?{costApproval:{...object(wo.data.costApproval),status:'superseded'}}:{}),
+                ...(overheadChanged&&str(object(wo.data.costApproval).status)?{costApproval:{...object(wo.data.costApproval),status:'superseded'}}:{}),
                 plannedBy: ctx.uid,
                 plannedByName: name(ctx),
             },
@@ -2246,7 +2258,6 @@ export async function maintenanceOperations(ctx: OrgContext) {
             currentUserId: ctx.uid,
             workGroup: pool.group,
             people: pool.people,
-            executionRoles:(await assessmentExecutionRoles(ctx,wo)).roles,
             issues: (await listDocs(`${root(ctx)}/goods_issues`))
                 .filter((i) => i.data.workOrderId === wo.id)
                 .map((i) => ({ id: i.id, ...i.data })),
