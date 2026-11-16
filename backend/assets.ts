@@ -1,3 +1,5 @@
+import {compareAssetTools} from './assetToolReconciliation.mjs';
+import {publishedToolCatalogueForReconciliation} from './maintenanceToolCatalogue';
 import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} from './catalogueFinanceView';
 import {integratedReleaseProblems} from './catalogueReleaseGuard';
 import { industryAdoptionRecommendation } from './industryCatalog';
@@ -1230,6 +1232,19 @@ export const assetRoutes = {
         }),
     ],
 
+    // Read-only reconciliation against the current published masters. No class creation or changes.
+    'POST /api/admin/assets/catalog/tool-reconciliation': [
+        staff('admin.assets.catalog.tool_reconciliation', 'read', async () => {
+            const d = await activeDictionary();
+            const tools = await publishedToolCatalogueForReconciliation();
+            if (!tools.version || !tools.items.length) throw new HttpError(409, 'Publish the maintenance tools and equipment catalogue before running reconciliation.');
+            const classes = Array.from(d.classes.values()).map(c=>({code:str(c.code),name:str(c.name),synonyms:strs(c.synonyms)}));
+            const rows = compareAssetTools(classes,tools.items);
+            const counts:Record<string,number>={};
+            for(const row of rows)counts[row.status]=(counts[row.status]||0)+1;
+            return {assetVersion:d.version,assetCount:classes.length,toolVersion:tools.version,toolCount:tools.items.length,counts,rows};
+        }),
+    ],
     'POST /api/admin/assets/catalog/export': [
         staff('admin.assets.catalog.export', 'read', async (ctx) => {
             const d = await activeDictionary();

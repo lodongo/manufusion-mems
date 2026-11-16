@@ -40,6 +40,11 @@ async function catalogue(){
  }
  return {version,count:Number(manifest.data.count),families:cached.families};
 }
+/** Read the published database catalogue without seeding, publishing, or changing adoption. */
+export async function publishedToolCatalogueForReconciliation(){
+ const d=await catalogue();
+ return {version:d.version,items:d.families.flatMap(expandToolFamily)};
+}
 function enabled(ctx:OrgContext){if(!isObj(ctx.org.data.modules)||ctx.org.data.modules.MNT!==true)throw new HttpError(403,'Enable Maintenance Management first.');}
 function canRead(ctx:OrgContext){enabled(ctx);if(!['MNT.view','MNT.assessment.edit','MNT.assessment.review','MNT.admin','ADM.workflows'].some(p=>canAnywhere(ctx,p)))throw new HttpError(403,'Maintenance catalogue access is required.');}
 const adopted=(f:ToolFamily,a:Adoption)=>a.all||a.familyCodes.includes(f.code);

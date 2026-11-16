@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent } from 'react';
+import AssetToolReconciliation from './AssetToolReconciliation';
 import CatalogueDraftPreview from '../components/CatalogueDraftPreview';
 import { CheckCircle2, Download, Eye, FileUp, ShieldCheck } from 'lucide-react';
 import { callBackend } from '../lib/backend';
@@ -39,6 +40,7 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
     const [uploadError, setUploadError] = useState('');
     const [result, setResult] = useState<{ ok: boolean; errors: string[]; warnings: string[]; stats: Record<string, number> } | null>(null);
     const [browse, setBrowse] = useState(false);
+    const [reconcile, setReconcile] = useState(false);
     const [busy, setBusy] = useState(false);
 
     const upload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -97,6 +99,7 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
         }
     };
 
+    if (reconcile) return <AssetToolReconciliation onBack={()=>setReconcile(false)}/>;
     if (browse) {
         return (
             <div className='space-y-3'>
@@ -161,6 +164,7 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
                         </Button>
                     )}
                 </div>
+                {data.loaded && <div className='mt-3 border-t border-line pt-3 space-y-2'><p className='font-medium text-sm'>Tools, workshop & test equipment</p><p className='text-xs text-soft'>Reconcile the maintenance catalogue against existing canonical asset classes before expanding the master. The comparison is read-only and never changes existing class codes or financial integration.</p><Button variant='secondary' onClick={()=>setReconcile(true)}>Review tools & equipment overlap</Button></div>}
                 {uploadError && <div className='mt-3'><Alert tone='error'>{uploadError}</Alert></div>}
                 {result && (
                     <div className='mt-3 space-y-2'>
