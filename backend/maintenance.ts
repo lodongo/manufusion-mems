@@ -2364,6 +2364,7 @@ export const maintenanceRoutes = {
                 }
                 case 'assess_header': {
                     await requireWorkOrderAssessor(ctx,doc);
+                    if(d.executionMode!=='confirmed_request')throw new HttpError(409,'Technical classification belongs to a confirmed Work Order.');
                     const evaluation=str(b.technicalEvaluation).trim().slice(0,3000);if(evaluation.length<20)throw new HttpError(400,'Write at least 20 characters of technical evaluation.');
                     const nature=pickGrouped(l.failureModes,str(b.natureCode),'failure mode')!,crit=pick(l.criticality,str(b.severityCode),'severity')!,mtype=d.breakIn===true&&str(d.parentWoCode)?BREAK_IN_TYPE:pick(l.maintenanceTypes,str(b.maintenanceTypeCode),'maintenance type')!,prio=pick(l.priorities,str(b.priorityCode),'priority',false);
                     const start=b.scheduledStart===undefined?str(d.scheduledStart):str(b.scheduledStart),end=b.scheduledEnd===undefined?str(d.scheduledEnd):str(b.scheduledEnd),dateChanged=start!==str(d.scheduledStart)||end!==str(d.scheduledEnd),typeChanged=mtype.code!==str(d.maintenanceTypeCode),cycle=await getMaintenanceCycle(ctx);
