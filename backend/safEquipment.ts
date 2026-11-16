@@ -121,8 +121,7 @@ export async function equipmentTaskSafetySnapshot(ctx:OrgContext,equipmentId:str
  if(!idRe.test(equipmentId)||!taskCodeRe.test(registryId))throw new HttpError(400,'Select an equipment task in Safety.');
  const doc=await getDoc(taskCollection(ctx,equipmentId)+'/'+registryId),d=doc?.data;
  if(!d||Number(d.version)!==Number(task.registryVersion)||!str(d.assessmentVerifiedAt)||d.status!=='review_required')throw new HttpError(409,'Verify the current equipment task safety assessment before completing work assessment.');
- const steps=array(d.subtasks).map(x=>str(x.name).trim()),workSteps=Array.isArray(task.subtasks)?task.subtasks.map(x=>str(x).trim()):[];
- if(!steps.length||JSON.stringify(steps)!==JSON.stringify(workSteps)||str(d.name).trim().toLowerCase()!==str(task.title).trim().toLowerCase())throw new HttpError(409,'Align task name and ordered subtasks with the equipment definition and repeat safety verification.');
+ if(str(d.name).trim().toLowerCase()!==str(task.title).trim().toLowerCase())throw new HttpError(409,'Align the task name and catalogue identity with the equipment definition.');
  const source=isObj(d.catalogueSource)?d.catalogueSource:null,reference=isObj(task.catalogueReference)?task.catalogueReference:null;
  if(source&&(!reference||source.code!==reference.taskCode||source.releaseId!==reference.releaseId||Number(source.version)!==Number(reference.version)))throw new HttpError(409,'Catalogue task revision changed. Align the equipment definition.');
  const classes=stringList(d.classCodes),primary=classes[0]||'';
@@ -245,8 +244,10 @@ export const safEquipmentRoutes={
   if(requested&&!old)throw new HttpError(404,'Task not found on this equipment.');
   const version=Number(old?.data.version)||0;
   if(Number(ctx.body.version)!==version)throw new HttpError(409,'Task changed. Reload.');
-  const name=str(ctx.body.name).trim().slice(0,250),executor=str(ctx.body.executor),skillCodes=stringList(ctx.body.skillCodes),duration=Number(ctx.body.durationMinutes);
-  if(name.length<3||!EXECUTOR_TYPES.includes(executor)||!Number.isFinite(duration)||duration<=0||duration>525600||!skillCodes.length||skillCodes.length>2000)throw new HttpError(400,'Enter task name, executor, positive duration in minutes and HR skills.');
+  const safetyOnly=ctx.body.source==='safety'||ctx.body.source==='work_assessment';
+  const name=str(safetyOnly&&old?old.data.name:ctx.body.name).trim().slice(0,250),executor=str(safetyOnly&&old?old.data.executor:ctx.body.executor),skillCodes=stringList(safetyOnly&&old?old.data.skillCodes:ctx.body.skillCodes),duration=Number(safetyOnly&&old?old.data.durationMinutes:ctx.body.durationMinutes)||0;
+  if(name.length<3||!Number.isFinite(duration)||duration<0||duration>525600||(!safetyOnly&&(!EXECUTOR_TYPES.includes(executor)||duration<=0||!skillCodes.length))||skillCodes.length>2000)throw new HttpError(400,'Enter a valid task identity and, in task configuration, its executor, duration and HR skills.');
+  const technicalDefinitionPending=!EXECUTOR_TYPES.includes(executor)||!(duration>0)||!skillCodes.length;
   const path=taskDecisionPath(isObj(ctx.body.answers)?ctx.body.answers as Record<string,string>:{});
   const {answers,decision}=path;
   if(!decision.code)throw new HttpError(400,decision.reason);
@@ -256,7 +257,7 @@ export const safEquipmentRoutes={
   const classCodes=[...new Set([decision.code,...additional])],permitCodes=stringList(ctx.body.permitCodes),justification=str(ctx.body.justification).trim().slice(0,3000);
   if(justification.length<20)throw new HttpError(400,'Document screening, technical basis, safeguards and work limits.');
   const [classes,permits,skills,matrixDoc,energy]=await Promise.all([effectiveSafetyItems(ctx.orgId,'activityClasses'),effectiveSafetyItems(ctx.orgId,'permitTypes'),taskSkills(),getDoc(root(ctx)+'/saf/risk_matrix'),currentTaskEnergy(ctx,id)]);
-  if(skillCodes.some(c=>!skills.some(s=>s.code===c)))throw new HttpError(400,'Select active HR master skills.');
+  if(!safetyOnly&&skillCodes.some(c=>!skills.some(s=>s.code===c)))throw new HttpError(400,'Select active HR master skills.');
   if(classCodes.some(c=>!classes.some(s=>s.code===c)))throw new HttpError(400,'Adopt the applicable task class in Safety.');
   if(permitCodes.some(c=>!permits.some(s=>s.code===c))||classCodes.some(c=>!meetsClassPermitMinimum(c,permitCodes)))throw new HttpError(400,'Select the adopted required and applicable permits.');
   const plan=array(ctx.body.energyPlan).map(x=>({pointId:str(x.pointId),state:str(x.state),reason:str(x.reason).trim().slice(0,1000)}));
@@ -286,6 +287,7 @@ export const safEquipmentRoutes={
   const deviceDoc=await getDoc(devicePath(ctx,id)),deviceVersion=Number(deviceDoc?.data.version)||0,safetyDeviceIds=stringList(ctx.body.safetyDeviceIds);
   const deviceItems=array(deviceDoc?.data.items);
   if(safetyDeviceIds.some(d=>!deviceItems.some(x=>x.deviceId===d&&str(x.tag))))throw new HttpError(400,'Select registered, tagged safety devices for this equipment.');
+  if(ctx.body.verifyAssessment===true&&ctx.body.classificationReviewed!==true)throw new HttpError(400,'Review the task classification decision tree before verification.');
   if(ctx.body.verifyAssessment===true&&(ctx.body.devicesReviewed!==true||Number(ctx.body.deviceVersion)!==deviceVersion))throw new HttpError(409,'Review the current equipment safety device register before verification.');
   const manualSteps=Array.isArray(ctx.body.subtasks)?array(ctx.body.subtasks):[];
   if(!old?.data.catalogueSource&&(manualSteps.length>100||manualSteps.some((x,i)=>str(x.name).trim().length<3||str(x.name).length>500||Number(x.sequence)!==i+1||!Number.isFinite(Number(x.estimatedMinutes))||Number(x.estimatedMinutes)<=0)))throw new HttpError(400,'Enter valid ordered subtasks.');
@@ -303,7 +305,7 @@ export const safEquipmentRoutes={
   const status=rows.some(r=>r.after.tolerability==='Intolerable')||baseline.some(b=>b.status==='intolerable')?'intolerable':(!energy.length||energy.some(e=>!e.tag))&&['AC03','AC05','AC06','AC22'].includes(decision.code)?'energy_register_incomplete':assessmentPending?'task_assessment_pending':'review_required';
   if(ctx.body.verifyAssessment===true&&(status!=='review_required'||decision.exception))throw new HttpError(400,'Resolve pending, incomplete or intolerable safety assessments before verification.');
   const verified=ctx.body.verifyAssessment===true&&!decision.exception;
-  const next={taskId,workCenterId:id,...(catalogueFamily?{catalogueFamily,displayCode:catalogueFamily.familyCode+'-L'+taskId.slice(4)}:{}),safetyDeviceIds,deviceVersion,devicesReviewed:ctx.body.devicesReviewed===true,...(!old?.data.catalogueSource?{subtasks:manualSteps.length?manualSteps:old?.data.subtasks||[]}:{}),assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,displayCode:str(old.data.displayCode)||str((old.data.catalogueSource as Obj).code),subtasks:old.data.subtasks,expectedOutcomes:old.data.expectedOutcomes||[],requiredCertifications:old.data.requiredCertifications||[],siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
+  const next={taskId,workCenterId:id,technicalDefinitionPending,classificationReviewed:ctx.body.classificationReviewed===true,...(catalogueFamily?{catalogueFamily,displayCode:catalogueFamily.familyCode+'-L'+taskId.slice(4)}:{}),safetyDeviceIds,deviceVersion,devicesReviewed:ctx.body.devicesReviewed===true,...(!old?.data.catalogueSource?{subtasks:manualSteps.length?manualSteps:old?.data.subtasks||[]}:{}),assessmentVerifiedAt:verified?nowIso():'',assessmentVerifiedBy:verified?ctx.uid:'',...(old?.data.catalogueSource?{catalogueSource:old.data.catalogueSource,displayCode:str(old.data.displayCode)||str((old.data.catalogueSource as Obj).code),subtasks:old.data.subtasks,expectedOutcomes:old.data.expectedOutcomes||[],requiredCertifications:old.data.requiredCertifications||[],siteId:old.data.siteId}:{}),name,executor,skillCodes,durationMinutes:duration,answers,decision,classCodes,additionalClasses:additional,permitCodes,justification,energyPlan:plan.map(p=>({...p,tag:energy.find(e=>e.pointId===p.pointId)?.tag||'',label:energy.find(e=>e.pointId===p.pointId)?.label||''})),rows,classBaseline:baseline,noAdditionalRisks,status,executionAuthorized:false,version:version+1,createdAt:str(old?.data.createdAt)||nowIso(),updatedAt:nowIso(),updatedBy:ctx.uid};
   const source=isObj(old?.data.catalogueSource)?old.data.catalogueSource:null,key=source?'task_'+str(source.code):catalogueFamily?'family_'+str(catalogueFamily.familyCode):'';
   const writes:Array<{path:string;data:Record<string,unknown>;precondition:{exists?:boolean;updateTime?:string}}>=[{path:col+'/'+taskId,data:next,precondition:old?{updateTime:old.updateTime}:{exists:false}}];
   if(idRe.test(key)){
