@@ -459,7 +459,7 @@ await save(goodSpares());
 const savedTasks = snapshot(r + '/work_requests/' + wr.code).data.assessmentTasks;
 assert.deepEqual(savedTasks.map((t) => t.code), ['ASSMTASK_1', 'ASSMTASK_2'], 'Tasks are referenced ASSMTASK_1, ASSMTASK_2 …');
 await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'reviewer', { code: wr.code, action: 'review_assessment', note: 'Independent review of spares, services and risks.' });
-const wo = (await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'convert', confirm: wr.code, scheduledStart: new Date(Date.now() + 86400000).toISOString().slice(0, 10), scheduledEnd: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10) })).woCode;
+const wo = (await route(maintenanceRoutes, '/api/org/mnt/wr/action', 'assessor', { code: wr.code, action: 'convert', confirm: wr.code, scheduledStart: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10), scheduledEnd: new Date(Date.now() + 15 * 86400000).toISOString().slice(0, 10) })).woCode;
 assert.equal((await requirements()).length, 0, 'Conversion from assessment creates no procurement requirement');
 
 // 5. Warehouse reservation: full, and partial with a shortage requirement (never over-reserving).

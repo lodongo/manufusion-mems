@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
+test('organization cleanup panel is hidden until unexpired platform permission is enabled',()=>{const s=readFileSync(new URL('../../src/org/MntTestDeletion.tsx',import.meta.url),'utf8');assert.match(s,/const platformActive=authorization\.platformEnabled&&Date\.parse\(authorization\.platformExpiresAt\)>Date\.now\(\)/);assert.match(s,/if\(!platformActive\)return null;/);assert.ok(s.indexOf('if(!platformActive)return null;')<s.indexOf('if(!active)return <Card'));});
