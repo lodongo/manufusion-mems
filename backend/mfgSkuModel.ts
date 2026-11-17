@@ -152,7 +152,10 @@ export function calculateSkuConversion(
 }
 
 export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,unknown>):Omit<SkuParameter,'id'> {
-    const name=str(raw.name).trim();
+    // Package containment has a canonical name derived from the MEMS Count unit.
+    const name=kind==='packageCounts'
+        ? String(countUnitTotal(str(raw.unitCode).trim(),Number(raw.unitCount)))
+        : str(raw.name).trim();
     if(!name||name.length>120)throw new HttpError(400,'A parameter name of up to 120 characters is required.');
     const description=str(raw.description).trim().slice(0,300);
     const base={kind,name,description,enabled:raw.enabled!==false};
