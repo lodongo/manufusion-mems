@@ -43,6 +43,9 @@ test('routing stages must be unique and refer to a manufacturing resource',()=>{
  const o={code:'FILL',name:'Filling',resourceId:'L11',setupMinutes:15,runMinutesPerUnit:0.002};
  assert.equal(normalizeMaster('routings',{...base,operations:[o]}).operations.length,1);
  assert.throws(()=>normalizeMaster('routings',{...base,operations:[o,o]}),/Duplicate operation/);
+ const parallel=[{...o,code:'PREP',dependsOn:[],producesSkuId:'WATER'}, {...o,code:'BLOW',dependsOn:[],producesSkuId:'BOTTLE'}, {...o,code:'FILL',dependsOn:['PREP','BLOW'],producesSkuId:'FILLED'}];
+ assert.equal(normalizeMaster('routings',{...base,operations:parallel}).operations.length,3);
+ assert.throws(()=>normalizeMaster('routings',{...base,operations:[{...o,dependsOn:['FUTURE']}]}),/earlier stages/);
 });
 
 test('fictional pilot includes two FG SKUs, two routing options and full upstream recipe',()=>{
@@ -50,6 +53,7 @@ test('fictional pilot includes two FG SKUs, two routing options and full upstrea
  assert.equal(d.demo,true);assert.equal(d.persisted,false);assert.equal(d.isolated,true);
  assert.equal(d.items.filter(x=>x.category==='FINISHED').length,2);
  assert.equal(d.routings.length,2);
+ assert.deepEqual(d.routings[0].operations.find(x=>x.code==='FILL').dependsOn,['PREP','BLOW']);
  assert.ok(d.boms.some(x=>x.type==='RECIPE'));
  assert.ok(d.boms.some(x=>x.parentSkuId==='DEMO-PREPARED-WATER'));
  const parents=new Set(d.boms.map(x=>x.parentSkuId));
