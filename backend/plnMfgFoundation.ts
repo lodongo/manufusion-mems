@@ -84,7 +84,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             throw new HttpError(400,'Stage dependencies must reference unique earlier stages.');
         return {code,sequence:i+1,name:REQUIRED(o.name,'Operation name',120),resourceId:VALID_ID(o.resourceId,'Resource code'),producesSkuId,dependsOn,setupMinutes:NONNEGATIVE(o.setupMinutes??0,'Setup minutes',100000),runMinutesPerUnit:NONNEGATIVE(o.runMinutesPerUnit??0,'Minutes per output unit',100000)};
     });
-    return {...base,skuId,operations:steps as unknown as Plain};
+    return {...base,skuId,operations:steps as unknown as Plain,effectiveFrom:str(raw.effectiveFrom).slice(0,10)};
 }
 
 export function detectBomCycle(boms:Array<{parentSkuId:string;components:Array<{skuId:string}>}>,parentSkuId:string,components:Array<{skuId:string}>):boolean {
@@ -101,7 +101,7 @@ export function detectBomCycle(boms:Array<{parentSkuId:string;components:Array<{
     return visit(parentSkuId);
 }
 
-async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,existingId:string) {
+export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,existingId:string) {
     const siteId=str(item.siteId);
     if(siteId){
         const site=await getNode(ctx,siteId);
@@ -253,6 +253,8 @@ export const plnMfgFoundationRoutes={
             const item=normalizeMaster(kind,ctx.body.record);
             const id=str(item.id),path=DOC(ctx.orgId,kind,id);
             const existing=await getDoc(path);
+            if(existing && ['pending_approval','active'].includes(str(existing.data.status)))
+                throw new HttpError(409,'Submitted or activated masters cannot be edited in place. Copy the master to a new version code.');
             const requiredPermission=kind==='boms'?'MFG.bom.edit':kind==='routings'?'MFG.routing.edit':'MFG.master.edit';
             if(!await recordAccess(ctx,'MFG.master.edit',str(item.siteId)) ||
                !await recordAccess(ctx,requiredPermission,str(item.siteId)) ||
