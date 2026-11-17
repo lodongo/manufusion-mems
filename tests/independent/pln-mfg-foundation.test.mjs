@@ -133,3 +133,32 @@ test('isolated fictional Line 11 seeding is denied outside authorized developmen
  assert.doesNotMatch(src,/\\/material_journal\\/|\\/purchase_orders\\/|\\/financial_journal\\//);
  assert.match(index,/\\.\\.\\.plnMfgPilotRoutes/);
 });
+
+test('effective dates are validated, not merely sliced',()=>{
+ const valid={id:'BOM-DATED',name:'Dated BOM',type:'BOM',parentSkuId:'FG-WATER',outputQty:1,outputUom:'CASE',
+    components:[{skuId:'CAP-2622',quantity:12,uom:'EA'}]};
+ assert.equal(normalizeMaster('boms',{...valid,effectiveFrom:'2027-01-01'}).effectiveFrom,'2027-01-01');
+ assert.throws(()=>normalizeMaster('boms',{...valid,effectiveFrom:'2027-02-30'}),/valid YYYY-MM-DD/);
+ assert.throws(()=>normalizeMaster('boms',{...valid,effectiveFrom:'2027-13-01'}),/valid YYYY-MM-DD/);
+});
+
+test('approval locks unique SKU site and effectivity slot transactionally',()=>{
+ const src=read('backend/plnMfgRelease.ts');
+ assert.match(src,/mfg_release_slots/);
+ assert.match(src,/slotKey/);
+ assert.match(src,/precondition:\{exists:false\}/);
+ assert.match(src,/ctx\.testMode===true/);
+ assert.match(src,/ctx\.bypassed\?\.push\('mfg\.release\.independent_checker'\)/);
+});
+
+test('master-data selector lists published Inventory, active Assets and site records',()=>{
+ const src=read('backend/plnMfgFoundation.ts');
+ assert.match(src,/foundation\/references/);
+ assert.match(src,/organizations.*materials|orgRoot\+'\/materials'/);
+ assert.match(src,/orgRoot\+'\/assets'/);
+ assert.match(src,/status\)==='active'/);
+ const ui=read('src/org/ProductionFoundation.tsx');
+ assert.match(ui,/Published Inventory Material Master/);
+ assert.match(ui,/Active Asset Register equipment/);
+ assert.match(ui,/Site applicability/);
+});
