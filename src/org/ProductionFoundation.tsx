@@ -8,7 +8,7 @@ type Kind='items'|'boms'|'resources'|'routings';
 type Tab=Kind|'recipes'|'config'|'demo';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
-type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number};
+type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
 type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string};
 type Demo={demo:boolean;persisted:boolean;label:string;items:Row[];boms:Row[];resources:Row[];routings:Row[]};
 const kinds:Kind[]=['items','boms','resources','routings'];
@@ -28,7 +28,7 @@ const newRecord=(tab:Tab):Row=>{
     if(tab==='items')return {id:'',name:'',category:'FINISHED',family:'',uom:'EA',siteId:'',packQty:1,inventoryMaterialId:''};
     if(tab==='boms'||tab==='recipes')return {id:'',name:'',type:tab==='recipes'?'RECIPE':'BOM',parentSkuId:'',outputQty:1,outputUom:'EA',components:[{skuId:'',quantity:1,uom:'EA',scrapPct:0}]};
     if(tab==='resources')return {id:'',name:'',type:'LINE',rate:1000,rateUom:'EA',efficiency:100,siteId:'',assetId:''};
-    return {id:'',name:'',skuId:'',operations:[{code:'STAGE_01',name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0}]};
+    return {id:'',name:'',skuId:'',operations:[{code:'STAGE_01',name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:[]}]};
 };
 const recordKind=(tab:Tab):Kind=>tab==='recipes'?'boms':tab as Kind;
 const str=(value:unknown):string=>typeof value==='string'?value:'';
@@ -92,11 +92,14 @@ function MasterEditor({tab,draft,onChange,items,resources}:{tab:Tab;draft:Row;on
             {!items.length&&<p className='mt-2 text-sm text-amber-300'>Create product or intermediate SKU masters first. Raw-material items must reference Inventory.</p>}
         </section>}
         {tab==='routings'&&<section className='rounded-xl border border-slate-700 p-3'>
-            <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Manufacturing operations</h3><Button variant='secondary' type='button' onClick={()=>update('operations',[...operations,{code:'STAGE_'+String(operations.length+1).padStart(2,'0'),name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0}])}>Add stage</Button></div>
+            <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Manufacturing operations</h3><Button variant='secondary' type='button' onClick={()=>update('operations',[...operations,{code:'STAGE_'+String(operations.length+1).padStart(2,'0'),name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:operations.length?[operations[operations.length-1].code]:[]}])}>Add stage</Button></div>
+            <p className='mb-3 text-xs text-slate-400'>Define outputs for each stage; comma-separated dependencies enable parallel work (for example, prepare beverage and blow bottles before filling).</p>
             <div className='space-y-3'>{operations.map((op,i)=><div key={i} className='grid gap-2 rounded-lg bg-slate-800/70 p-3 md:grid-cols-2 xl:grid-cols-3'>
                 <Field title='Stage code' value={op.code} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,code:v}:a))}/>
                 <Field title='Stage description' value={op.name} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,name:v}:a))}/>
                 <Choice title='Resource' value={op.resourceId} options={resourceOptions} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,resourceId:v}:a))}/>
+                <Choice title='Produced SKU / intermediate' value={op.producesSkuId||''} options={itemOptions} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,producesSkuId:v}:a))}/>
+                <Field title='Depends on stage codes (comma-separated)' value={(op.dependsOn||[]).join(', ')} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,dependsOn:v.split(',').map(x=>x.trim()).filter(Boolean)}:a))}/>
                 <Field title='Setup minutes' type='number' value={op.setupMinutes} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,setupMinutes:Number(v)}:a))}/>
                 <Field title='Minutes / unit' type='number' value={op.runMinutesPerUnit} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,runMinutesPerUnit:Number(v)}:a))}/>
                 <button type='button' className='min-h-11 self-end rounded-lg border border-red-700/50 px-3 text-sm text-red-300' onClick={()=>update('operations',operations.filter((_,j)=>j!==i))}>Remove</button>
