@@ -120,10 +120,11 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const load=async()=>{
         setLoading(true);setError('');
         try{
-            const [items,boms,resources,routings,configuration]=await Promise.all([
-                ...kinds.map(kind=>callBackend<{records:Row[]}>('/api/org/pln-mfg/foundation/list',{kind})),
+            const [datasets,configuration]=await Promise.all([
+                Promise.all(kinds.map(kind=>callBackend<{records:Row[]}>('/api/org/pln-mfg/foundation/list',{kind}))),
                 callBackend<{config:Config;revision:number}>('/api/org/pln-mfg/foundation/config').catch(()=>null),
             ]);
+            const [items,boms,resources,routings]=datasets;
             setRows({items:items.records,boms:boms.records,resources:resources.records,routings:routings.records});
             if(configuration){setConfig(configuration.config);setConfigRevision(configuration.revision);}
         }catch(e){setError(e instanceof Error?e.message:'Could not load manufacturing masters.');}
