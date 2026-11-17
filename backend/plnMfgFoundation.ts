@@ -48,7 +48,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const category=ENUM(raw.category,STAGES,'item category');
         const inventoryMaterialId=str(raw.inventoryMaterialId).trim();
         if(inventoryMaterialId&&!ID.test(inventoryMaterialId))throw new HttpError(400,'Invalid Inventory material reference.');
-        if((category==='RAW'||category==='PACKAGING')&& !inventoryMaterialId)throw new HttpError(400,'Raw materials must refer to the existing Inventory material master. Demo raw materials are available as read-only samples.');
+        if((category==='RAW'||category==='PACKAGING')&& !inventoryMaterialId)throw new HttpError(400,'Raw and packaging materials must refer to the existing Inventory material master. Fictional demo materials remain read-only.');
         return {...base,category,family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,packQty:POSITIVE(raw.packQty??1,'Pack quantity')};
     }
     if(kind==='resources'){
@@ -105,15 +105,46 @@ async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,existingI
     const siteId=str(item.siteId);
     if(siteId){
         const site=await getNode(ctx,siteId);
-        if(str(site.data.level)!=='site')throw new HttpError(400,'Choose an actual organization site.');
+        if(str(site.data.level)!=='site'||str(site.data.status)==='inactive')throw new HttpError(400,'Choose an active organization site.');
+    }
+    if(kind==='items'){
+        const materialId=str(item.inventoryMaterialId);
+        if(materialId){
+            const material=await getDoc('organizations/'+ctx.orgId+'/materials/'+materialId);
+            if(!material||!['approved','active'].includes(str(material.data.status))||!str(material.data.materialNumber))
+                throw new HttpError(400,'Choose an approved, numbered Inventory material from the existing Material Master.');
+            const inventoryUom=str(material.data.uom);
+            if(inventoryUom && inventoryUom.toUpperCase()!==str(item.uom).toUpperCase())
+                throw new HttpError(400,'SKU unit '+str(item.uom)+' must match Inventory material unit '+inventoryUom+' (unit conversions are not yet configured).');
+        }
+    }
+    if(kind==='resources'){
+        const assetId=str(item.assetId);
+        if(assetId){
+            if(!ID.test(assetId))throw new HttpError(400,'Invalid Asset ID.');
+            const asset=await getDoc('organizations/'+ctx.orgId+'/assets/'+assetId);
+            if(!asset||str(asset.data.status)!=='active')
+                throw new HttpError(400,'Manufacturing equipment must reference an active Asset Register record.');
+            if(str(asset.data.siteId)&&str(item.siteId)!==str(asset.data.siteId))
+                throw new HttpError(400,'The resource must belong to the same site as the linked asset.');
+        }
     }
     if(kind==='boms'){
         const parent=await getDoc(DOC(ctx.orgId,'items',str(item.parentSkuId)));
         if(!parent)throw new HttpError(400,'Parent SKU does not exist in Manufacturing master data.');
-        if(str(parent.data.category)==='RAW')throw new HttpError(400,'Raw materials cannot be manufactured as a BOM output.');
+        if(['RAW','PACKAGING'].includes(str(parent.data.category)))throw new HttpError(400,'Inventory-owned raw and packaging materials cannot be produced as manufacturing outputs.');
+        if(str(parent.data.uom).toUpperCase()!==str(item.outputUom).toUpperCase())
+            throw new HttpError(400,'BOM output unit must match the parent SKU unit.');
+        if(str(item.siteId)&&str(parent.data.siteId)&&str(parent.data.siteId)!==str(item.siteId))
+            throw new HttpError(400,'BOM output belongs to another production site.');
         const components=ARR(item.components);
-        for(const c of components){
-            if(!await getDoc(DOC(ctx.orgId,'items',str(c.skuId))))throw new HttpError(400,'Component '+str(c.skuId)+' is missing from SKU master.');
+        for(const component of components){
+            const child=await getDoc(DOC(ctx.orgId,'items',str(component.skuId)));
+            if(!child)throw new HttpError(400,'Component '+str(component.skuId)+' is missing from SKU master.');
+            if(str(child.data.uom).toUpperCase()!==str(component.uom).toUpperCase())
+                throw new HttpError(400,'Component '+str(component.skuId)+' unit does not match its SKU master.');
+            if(str(item.siteId)&&str(child.data.siteId)&&str(child.data.siteId)!==str(item.siteId))
+                throw new HttpError(400,'Component '+str(component.skuId)+' belongs to another production site.');
         }
         const others=(await listDocs(ROOT(ctx.orgId,'boms')))
             .filter(d=>d.id!==existingId)
@@ -122,12 +153,22 @@ async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,existingI
             throw new HttpError(400,'The BOM introduces a circular manufacturing dependency.');
     }
     if(kind==='routings'){
-        if(!await getDoc(DOC(ctx.orgId,'items',str(item.skuId))))throw new HttpError(400,'Routing SKU not found.');
+        const routed=await getDoc(DOC(ctx.orgId,'items',str(item.skuId)));
+        if(!routed)throw new HttpError(400,'Routing SKU not found.');
+        if(str(item.siteId)&&str(routed.data.siteId)&&str(routed.data.siteId)!==str(item.siteId))
+            throw new HttpError(400,'Routing SKU is assigned to another site.');
         for(const o of ARR(item.operations)){
-            if(!await getDoc(DOC(ctx.orgId,'resources',str(o.resourceId))))
-                throw new HttpError(400,'Routing resource '+str(o.resourceId)+' not found.');
-            if(str(o.producesSkuId)&&!await getDoc(DOC(ctx.orgId,'items',str(o.producesSkuId))))
-                throw new HttpError(400,'Stage output '+str(o.producesSkuId)+' is not an existing SKU or intermediate product.');
+            const resource=await getDoc(DOC(ctx.orgId,'resources',str(o.resourceId)));
+            if(!resource)throw new HttpError(400,'Routing resource '+str(o.resourceId)+' not found.');
+            if(str(item.siteId)&&str(resource.data.siteId)&&str(resource.data.siteId)!==str(item.siteId))
+                throw new HttpError(400,'Routing resource '+str(o.resourceId)+' is assigned to another site.');
+            if(str(o.producesSkuId)){
+                const product=await getDoc(DOC(ctx.orgId,'items',str(o.producesSkuId)));
+                if(!product||['RAW','PACKAGING'].includes(str(product.data.category)))
+                    throw new HttpError(400,'Stage output must be a manufactured SKU or intermediate product.');
+                if(str(item.siteId)&&str(product.data.siteId)&&str(product.data.siteId)!==str(item.siteId))
+                    throw new HttpError(400,'Stage output '+str(o.producesSkuId)+' belongs to another site.');
+            }
         }
     }
 }
