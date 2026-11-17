@@ -118,7 +118,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [demo,setDemo]=useState<Demo|null>(null);
     const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
     const canViewMasters=hasPerm(permissions,'MFG.view');
-    const visibleTabs=canViewMasters?tabs:tabs.filter(t=>t.key==='config');
+    const canViewPlanning=hasPerm(permissions,'PLN.view');
+    const visibleTabs=tabs.filter(t=>t.key==='config'?canViewPlanning:canViewMasters);
     const canEdit=canViewMasters&&hasPerm(permissions,'MFG.master.edit');
     const canConfig=hasPerm(permissions,'PLN.configure');
     const canSave=canEdit && (active!=='boms'||hasPerm(permissions,'MFG.bom.edit')) && (active!=='recipes'||hasPerm(permissions,'MFG.bom.edit')) && (active!=='routings'||hasPerm(permissions,'MFG.routing.edit'));
