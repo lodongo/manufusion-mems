@@ -65,6 +65,9 @@ test('Phase 1 routes are tenant-guarded and there are no physical posting endpoi
  for(const key of ['foundation/list','foundation/save','foundation/config','foundation/demo'])assert.ok(src.includes(key));
  assert.match(src,/orgRoute\('org\.mfg\.foundation\.save','MFG\.master\.edit'/);
  assert.match(src,/updateTime:existing\.updateTime/);
+ assert.match(src,/commitChecked\(/);
+ assert.match(src,/\+'\/revisions\/'/);
+ assert.match(src,/foundation\/history/);
  assert.doesNotMatch(src,/\/api\/org\/(inventory\/issue|procurement\/po\/create)/);
  const gate=read('backend/transactionModuleGate.ts');
  assert.match(gate,/PLN:'PLN'/);
