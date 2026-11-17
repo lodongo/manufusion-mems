@@ -1,4 +1,5 @@
 import {useId,useMemo,useState} from 'react';
+import {ArrowLeft,Box,Boxes,ChevronRight,Layers3,Maximize2,Package,PackageOpen,Ruler,Shapes} from 'lucide-react';
 import {Field,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
 
@@ -6,16 +7,18 @@ export type SkuParameterKind='productNames'|'productionForms'|'containers'|'cont
 export type SkuParameter={
     id:string;kind:SkuParameterKind;name:string;enabled?:boolean;description?:string;
     quantity?:number;uom?:string;baseUom?:string;quantityPerUnit?:number;revision?:number;
+    categoryCode?:string;unitCode?:string;unitCount?:number;
 };
-export type MeasureUnit={code:string;label:string;symbol:string;category:string;baseUnit:string;multiplier:number};
+export type MeasureUnit={code:string;label:string;symbol:string;category:string;categoryCode:string;baseUnit:string;multiplier:number};
+export type MeasureCategory={code:string;name:string};
 export type SkuSetup={
-    parameters:SkuParameter[];groups:Record<SkuParameterKind,string>;units:MeasureUnit[];
+    parameters:SkuParameter[];groups:Record<SkuParameterKind,string>;units:MeasureUnit[];categories:MeasureCategory[];
     conventions:Record<string,string|number>;
 };
 export const emptySkuSetup:SkuSetup={
     parameters:[],groups:{productNames:'NME',productionForms:'FRM',containers:'CNT',
         containerSizes:'SIZ',packages:'PKG',packageCounts:'PCT',normalizationUnits:'NRM'},
-    units:[],conventions:{items:'SKU',boms:'BOM',recipes:'RCP',resources:'RSC',
+    units:[],categories:[],conventions:{items:'SKU',boms:'BOM',recipes:'RCP',resources:'RSC',
         routings:'RTG',batches:'BTH',digits:9},
 };
 export type SkuSelections={
@@ -45,7 +48,7 @@ const found=(setup:SkuSetup,kind:SkuParameterKind,id:string|undefined)=>
     setup.parameters.find(p=>p.kind===kind&&p.id===id);
 const pickUnit=(setup:SkuSetup,code:string|undefined)=>{
     if(!code)return undefined;
-    return setup.units.find(u=>u.code===code)||setup.units.find(u=>u.symbol.toLowerCase()===code.toLowerCase());
+    return setup.units.find(u=>u.code===code)||setup.units.find(u=>u.symbol===code);
 };
 function convert(setup:SkuSetup,from:string|undefined,to:string|undefined):number|null{
     const a=pickUnit(setup,from),b=pickUnit(setup,to);
@@ -71,9 +74,19 @@ function Named({title,value,onChange,hint,required=false}:{title:string;value:st
     return <Field label={title} id={id} value={value} hint={hint} required={required} onChange={e=>onChange(e.target.value)}/>;
 }
 function Measure({label,value,setup,onChange}:{label:string;value:string;setup:SkuSetup;onChange:(v:string)=>void}){
-    return <ConfigSelect title={label} value={value} onChange={onChange} options={
-        setup.units.map(x=>[x.code,x.label+' ('+x.symbol+') · '+x.category] as [string,string])
-    } placeholder='Select a unit from the MEMS master'/>;
+    const [chosenCategory,setChosenCategory]=useState('');
+    const selectedUnit=pickUnit(setup,value);
+    const category=selectedUnit?.categoryCode||chosenCategory;
+    const categories=setup.categories.length?setup.categories:
+        [...new Map(setup.units.map(u=>[u.categoryCode,{code:u.categoryCode,name:u.category}])).values()];
+    return <div className='grid gap-3 sm:grid-cols-2'>
+        <ConfigSelect title='Unit category' value={category} placeholder='Select category'
+            options={categories.map(c=>[c.code,c.name] as [string,string])}
+            onChange={code=>{setChosenCategory(code);onChange('');}}/>
+        <ConfigSelect title={label} value={value} placeholder='Select unit' onChange={onChange}
+            options={setup.units.filter(u=>u.categoryCode===category)
+                .map(u=>[u.code,u.label+' ('+u.symbol+')'] as [string,string])}/>
+    </div>;
 }
 const boxClass='rounded-2xl border border-line bg-panel p-3 sm:p-4';
 const solid='min-h-11 rounded-xl bg-brand px-4 text-sm font-semibold text-onbrand disabled:opacity-50';
@@ -98,7 +111,8 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     const previewName=[product,[size?.name,found(setup,'containers',value.containerId)?.name].filter(Boolean).join(' '),
         [pack?.name,count?'x'+count.name:''].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
     const optionsFor=(kind:SkuParameterKind):Array<[string,string]>=>setup.parameters
-        .filter(p=>p.kind===kind&&p.enabled!==false)
+        .filter(p=>p.kind===kind&&p.enabled!==false&&
+            (kind!=='containers'||!value.productionFormId||!p.categoryCode||p.categoryCode===pickUnit(setup,found(setup,'productionForms',value.productionFormId)?.uom)?.categoryCode))
         .map(p=>[p.id, [p.name,
             p.kind==='containerSizes'&&p.uom?String(p.quantity)+' '+(pickUnit(setup,p.uom)?.symbol||p.uom):'',
             p.kind==='normalizationUnits'?String(p.quantityPerUnit)+' '+(pickUnit(setup,p.baseUom)?.symbol||p.baseUom):'',
@@ -110,7 +124,10 @@ export function SkuConfigurationFields({value,onChange,setup}:{
         </div>
         <div className='grid gap-3 sm:grid-cols-2'>
             {selections.map(group=><ConfigSelect key={group.key} title={group.label}
-                value={value[group.key]||''} onChange={v=>onChange({...value,[group.key]:v})}
+                value={value[group.key]||''} onChange={v=>{
+                    if(group.key==='productionFormId')onChange({...value,productionFormId:v,containerId:'',containerSizeId:'',normalizationUnitId:''});
+                    else onChange({...value,[group.key]:v});
+                }}
                 options={optionsFor(group.kind)}/>)}
         </div>
         <div className='rounded-xl border border-line bg-page p-3 space-y-1' aria-live='polite'>
@@ -126,81 +143,167 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     </section>;
 }
 
+
+type MenuKey=SkuParameterKind|'units';
+const menuOrder:Array<{key:MenuKey;title:string;description?:string;Icon:typeof Box}>=[
+    {key:'productNames',title:'Product / SKU Names',Icon:Box},
+    {key:'productionForms',title:'Production Forms',Icon:Layers3},
+    {key:'units',title:'Units',description:'Select category, then unit',Icon:Ruler},
+    {key:'containers',title:'Physical Containers',description:'From unit category and subcategory',Icon:PackageOpen},
+    {key:'containerSizes',title:'Container Sizes',Icon:Maximize2},
+    {key:'packages',title:'Packages',Icon:Package},
+    {key:'packageCounts',title:'Package Containment',description:'From units',Icon:Boxes},
+    {key:'normalizationUnits',title:'Normalization Units',Icon:Shapes},
+];
 export function SkuSetupPanel({setup,canEdit,onSaved}:{
     setup:SkuSetup;canEdit:boolean;onSaved:()=>Promise<void>;
 }){
-    const [kind,setKind]=useState<SkuParameterKind>('productNames');
+    const [active,setActive]=useState<MenuKey|null>(null);
     const [draft,setDraft]=useState<Partial<SkuParameter>|null>(null);
-    const [busy,setBusy]=useState(false);
-    const [error,setError]=useState('');
-    const [info,setInfo]=useState('');
-    const selected=SKU_GROUPS.find(x=>x.kind===kind)!;
-    const items=setup.parameters.filter(x=>x.kind===kind);
-    const update=(key:string,value:unknown)=>setDraft(d=>({...d,[key]:value}));
+    const [busy,setBusy]=useState(false),[error,setError]=useState(''),[info,setInfo]=useState('');
+    const [unitCategory,setUnitCategory]=useState(''),[unitCode,setUnitCode]=useState('');
+    const categories=setup.categories.length?setup.categories:
+        [...new Map(setup.units.map(u=>[u.categoryCode,{code:u.categoryCode,name:u.category}])).values()];
+    const group=active===null?null:menuOrder.find(x=>x.key===active);
+    const records=active===null||active==='units'?[]:setup.parameters.filter(x=>x.kind===active);
+    const countUnits=setup.units.filter(u=>u.category==='Count'&&Number.isSafeInteger(u.multiplier)&&u.multiplier>0);
+    const chosenCountUnit=countUnits.find(u=>u.code===draft?.unitCode);
+    const chosenCount=chosenCountUnit&&draft?.unitCount?Number(draft.unitCount)*chosenCountUnit.multiplier:0;
+    const selectedUnit=setup.units.find(u=>u.code===unitCode);
+    const update=(key:keyof SkuParameter,value:unknown)=>setDraft(d=>({...d,[key]:value}));
+    const open=(key:MenuKey)=>{
+        setActive(key);setDraft(null);setError('');setInfo('');setUnitCategory('');setUnitCode('');
+    };
+    const edit=(entry:SkuParameter)=>{
+        setDraft(entry.kind==='packageCounts'&&!entry.unitCode?
+            {...entry,unitCode:countUnits.find(u=>u.symbol==='ea')?.code||'',unitCount:entry.quantity||1}:entry);
+        setError('');setInfo('');
+    };
     const save=async()=>{
-        if(!draft||!canEdit)return;setBusy(true);setError('');setInfo('');
+        if(!draft||!canEdit||!active||active==='units')return;
+        setBusy(true);setError('');setInfo('');
         try{
+            const parameter=active==='packageCounts'?{...draft,name:String(chosenCount)}:draft;
             const result=await callBackend<{record:SkuParameter}>('/api/org/pln-mfg/sku/setup/save',{
-                kind,parameter:draft,expectedRevision:draft.revision||0,
+                kind:active,parameter,expectedRevision:draft.revision||0,
             });
             await onSaved();setDraft(null);
-            setInfo('Saved '+result.record.name+' · '+result.record.id+' (code generated by MEMS).');
-        }catch(e){setError(e instanceof Error?e.message:'SKU parameter could not be saved.');}
+            setInfo(result.record.name+' saved');
+        }catch(e){setError(e instanceof Error?e.message:'Could not save configuration.');}
         finally{setBusy(false);}
     };
-    return <section className='space-y-4'>
-        <div className={boxClass+' space-y-2'}>
-            <h2 className='text-lg font-semibold text-ink'>Organization SKU Configuration</h2>
-            <p className='text-sm text-soft'>Maintain the approved drop-down values used to compose SKUs. The configuration supports liquid, mass, piece-count and other production units; no bottling rules are hard-coded.</p>
-            <p className='text-xs text-muted'>All parameter IDs are automatically assigned unique three-letter prefixes and nine-digit sequences in the organization database.</p>
-        </div>
-        <div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]'>
-            <div className={boxClass+' space-y-1'}>
-                {SKU_GROUPS.map(row=><button type='button' key={row.kind}
-                    onClick={()=>{setKind(row.kind);setDraft(null);setError('');setInfo('');}}
-                    className={'min-h-11 w-full rounded-xl px-3 py-2 text-left text-sm '+(kind===row.kind?'bg-brand/15 font-semibold text-brand':'text-ink hover:bg-page')}>
-                    {row.title} <span className='text-xs text-muted'>({setup.parameters.filter(x=>x.kind===row.kind).length})</span>
+    const startNew=()=>{
+        const initial:Partial<SkuParameter>={name:'',enabled:true};
+        if(active==='packageCounts'){initial.unitCount=1;initial.unitCode='';}
+        if(active==='containers'&&unitCategory)initial.categoryCode=unitCategory;
+        setDraft(initial);setError('');setInfo('');
+    };
+    return <section className='rounded-2xl border border-line bg-panel p-3 text-ink sm:p-5'>
+        {active===null?<>
+            <h2 className='mb-4 text-lg font-semibold text-ink'>SKU Configuration</h2>
+            <nav aria-label='SKU configuration' className='space-y-2'>
+                {menuOrder.map(({key,title,description,Icon})=><button key={key}
+                    type='button' onClick={()=>open(key)}
+                    className='flex min-h-14 w-full items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2 text-left text-ink transition-colors hover:bg-page focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand'>
+                    <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand'>
+                        <Icon className='h-5 w-5' aria-hidden='true'/>
+                    </span>
+                    <span className='min-w-0 flex-1'>
+                        <span className='block text-sm font-semibold'>{title}</span>
+                        {description&&<span className='block text-xs text-muted'>{description}</span>}
+                    </span>
+                    <ChevronRight className='h-5 w-5 shrink-0 text-muted' aria-hidden='true'/>
                 </button>)}
+            </nav>
+        </>:<>
+            <div className='mb-4 flex items-center gap-2'>
+                <button type='button' className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line text-ink'
+                    aria-label='Back to SKU configuration menu' onClick={()=>{setActive(null);setDraft(null);setError('');setInfo('');}}>
+                    <ArrowLeft className='h-5 w-5' aria-hidden='true'/>
+                </button>
+                <h2 className='min-w-0 flex-1 text-lg font-semibold text-ink'>{group?.title}</h2>
+                {active!=='units'&&canEdit&&!draft&&<button type='button' className={solid} onClick={startNew}>Add</button>}
             </div>
-            <div className='space-y-3'>
-                <div className={boxClass+' space-y-2'}>
-                    <div className='flex flex-wrap items-start justify-between gap-2'>
-                        <div><h3 className='font-semibold text-ink'>{selected.title}</h3><p className='text-xs text-muted'>{selected.hint}</p></div>
-                        {canEdit&&<button className={solid} type='button' onClick={()=>{setDraft({name:'',enabled:true});setError('');setInfo('');}}>Add parameter</button>}
-                    </div>
-                    {items.map(item=><div key={item.id} className='flex flex-wrap items-center justify-between gap-2 border-t border-line py-2'>
-                        <div className='min-w-0'><p className='font-medium text-ink'>{item.name} {item.enabled===false&&<span className='text-xs text-amber-500'>disabled</span>}</p>
-                            <p className='text-xs text-muted'>{item.id}{item.quantity?' · '+item.quantity+' '+(item.uom||''):''}{item.quantityPerUnit?' · '+item.quantityPerUnit+' '+(item.baseUom||'')+' / unit':''}</p></div>
-                        {canEdit&&<button type='button' className={subtle} onClick={()=>{setDraft(item);setError('');setInfo('');}}>Edit</button>}
-                    </div>)}
-                    {!items.length&&<p className='py-3 text-sm text-muted'>No configured options yet.</p>}
-                </div>
-                {draft&&canEdit&&<div className={boxClass+' space-y-3'}>
-                    <div className='flex justify-between gap-2'><h4 className='font-semibold text-ink'>{draft.id?'Edit parameter '+draft.id:'New parameter — ID assigned on save'}</h4>
-                        <button className={subtle} type='button' onClick={()=>setDraft(null)}>Cancel</button></div>
-                    <Named title='Display name' value={draft.name||''} onChange={v=>update('name',v)} required hint='User-facing text in SKU dropdowns'/>
-                    {kind==='productionForms'&&<Measure label='Manufactured quantity unit' value={draft.uom||''} setup={setup} onChange={v=>update('uom',v)}/>}
-                    {kind==='containerSizes'&&<>
-                        <Numeric title='Quantity in one container' value={draft.quantity||0} onChange={v=>update('quantity',v)}/>
-                        <Measure label='Container size unit' value={draft.uom||''} setup={setup} onChange={v=>update('uom',v)}/>
-                    </>}
-                    {kind==='packages'&&<Named title='Physical package UOM code' value={draft.uom||''}
-                        onChange={v=>update('uom',v.toUpperCase())} hint='Example: CASE, PACK, TRAY, CRATE or PALLET'/>}
-                    {kind==='packageCounts'&&<Numeric title='Containers per package' value={draft.quantity||0}
-                        onChange={v=>update('quantity',v)} hint='Whole number, e.g. 6, 12, 24'/>}
-                    {kind==='normalizationUnits'&&<>
-                        <Numeric title='Manufactured quantity in one normalized unit' value={draft.quantityPerUnit||0}
-                            onChange={v=>update('quantityPerUnit',v)} hint='Specify your organization standard (e.g., volume per UC).'/>
-                        <Measure label='Normalization basis unit' value={draft.baseUom||''} setup={setup} onChange={v=>update('baseUom',v)}/>
-                    </>}
-                    <Named title='Description (optional)' value={draft.description||''} onChange={v=>update('description',v)}/>
-                    <label className='flex min-h-11 items-center gap-2 text-sm text-ink'><input type='checkbox'
-                        checked={draft.enabled!==false} onChange={e=>update('enabled',e.target.checked)}/>Enabled for SKU creation</label>
-                    <button className={solid} disabled={busy||!draft.name?.trim()} onClick={()=>void save()} type='button'>Save parameter</button>
+            {active==='units'?<div className='space-y-4'>
+                <ConfigSelect title='Category' value={unitCategory} placeholder='Select unit category'
+                    options={categories.map(c=>[c.code,c.name] as [string,string])}
+                    onChange={v=>{setUnitCategory(v);setUnitCode('');}}/>
+                <ConfigSelect title='Unit' value={unitCode} placeholder='Select unit'
+                    options={setup.units.filter(u=>u.categoryCode===unitCategory)
+                        .map(u=>[u.code,u.label+' ('+u.symbol+')'] as [string,string])} onChange={setUnitCode}/>
+                {selectedUnit&&<div className='rounded-xl border border-line bg-page p-3'>
+                    <p className='font-medium'>{selectedUnit.label} ({selectedUnit.symbol})</p>
+                    <p className='text-xs text-muted'>{selectedUnit.code} · {selectedUnit.category}</p>
                 </div>}
-                {error&&<p role='alert' className='rounded-xl border border-red-400 p-3 text-sm text-red-500'>{error}</p>}
-                {info&&<p role='status' className='rounded-xl border border-line p-3 text-sm text-brand'>{info}</p>}
-            </div>
-        </div>
+            </div>:<>
+                {active==='containers'&&<ConfigSelect title='Unit category' value={unitCategory} placeholder='All unit categories'
+                    options={[['','All categories'],...categories.map(c=>[c.code,c.name] as [string,string])]}
+                    onChange={v=>setUnitCategory(v)}/>}
+                {!draft&&<div className='space-y-2'>
+                    {records.filter(x=>active!=='containers'||!unitCategory||x.categoryCode===unitCategory)
+                        .map(item=><div key={item.id} className='flex min-h-14 items-center justify-between gap-3 rounded-xl border border-line p-3'>
+                        <div className='min-w-0'>
+                            <p className='text-sm font-medium'>{item.name}
+                                {item.enabled===false&&<span className='ml-2 text-xs text-muted'>(Inactive)</span>}
+                            </p>
+                            <p className='text-xs text-muted'>{item.id}
+                                {item.categoryCode?' · '+(categories.find(c=>c.code===item.categoryCode)?.name||item.categoryCode):''}
+                                {item.kind==='packageCounts'?' · '+item.quantity+' containers':''}
+                            </p>
+                        </div>
+                        {canEdit&&<button type='button' className={subtle} onClick={()=>edit(item)}>Edit</button>}
+                    </div>)}
+                    {!records.length&&<p className='py-4 text-center text-sm text-muted'>No values configured</p>}
+                </div>}
+                {draft&&canEdit&&<div className='space-y-4 rounded-xl border border-line bg-page p-3'>
+                    <div className='flex items-center justify-between gap-2'>
+                        <h3 className='text-sm font-semibold'>{draft.id?'Edit '+draft.id:'New '+group?.title}</h3>
+                        <button className={subtle} type='button' onClick={()=>setDraft(null)}>Cancel</button>
+                    </div>
+                    {active==='containers'?<>
+                        <ConfigSelect title='Unit category' value={draft.categoryCode||''} placeholder='Select unit category'
+                            options={categories.map(c=>[c.code,c.name] as [string,string])}
+                            onChange={v=>update('categoryCode',v)}/>
+                        <Named title='Container subcategory' value={draft.name||''} onChange={v=>update('name',v)}
+                            required hint='This subcategory becomes the physical container selection'/>
+                    </>:active==='packageCounts'?<>
+                        <ConfigSelect title='Unit category' value={countUnits[0]?.categoryCode||''} placeholder='Count'
+                            options={countUnits.length?[[countUnits[0].categoryCode,'Count']]:[]} onChange={()=>{}}/>
+                        <ConfigSelect title='Count unit' value={draft.unitCode||''} placeholder='Select a Count unit'
+                            options={countUnits.map(u=>[u.code,u.label+' ('+u.symbol+')'] as [string,string])}
+                            onChange={v=>update('unitCode',v)}/>
+                        <Numeric title='Number of selected units' value={draft.unitCount||0}
+                            onChange={v=>update('unitCount',v)} hint='For example, 2 × Dozen = 24 containers'/>
+                        {chosenCount>0&&Number.isSafeInteger(chosenCount)&&<p className='rounded-xl border border-line p-3 font-medium text-brand'>
+                            {chosenCount} containers per package
+                        </p>}
+                    </>:<>
+                        <Named title='Name' value={draft.name||''} onChange={v=>update('name',v)} required/>
+                    </>}
+                    {active==='productionForms'&&<Measure key='forms' label='Unit' value={draft.uom||''} setup={setup} onChange={v=>update('uom',v)}/>}
+                    {active==='containerSizes'&&<>
+                        <Numeric title='Quantity per container' value={draft.quantity||0} onChange={v=>update('quantity',v)}/>
+                        <Measure key='sizes' label='Unit' value={draft.uom||''} setup={setup} onChange={v=>update('uom',v)}/>
+                    </>}
+                    {active==='packages'&&<Named title='Physical package UOM code' value={draft.uom||''}
+                        onChange={v=>update('uom',v.toUpperCase())}/>}
+                    {active==='normalizationUnits'&&<>
+                        <Numeric title='Content per normalization unit' value={draft.quantityPerUnit||0}
+                            onChange={v=>update('quantityPerUnit',v)}/>
+                        <Measure key='normalization' label='Unit' value={draft.baseUom||''} setup={setup}
+                            onChange={v=>update('baseUom',v)}/>
+                    </>}
+                    <label className='flex min-h-11 items-center gap-2 text-sm text-ink'>
+                        <input type='checkbox' checked={draft.enabled!==false} onChange={e=>update('enabled',e.target.checked)}/>
+                        Active
+                    </label>
+                    <button type='button' className={solid} disabled={busy||
+                        (active==='packageCounts'?!(chosenCount>0&&Number.isSafeInteger(chosenCount)):!draft.name?.trim())}
+                        onClick={()=>void save()}>{busy?'Saving…':'Save'}</button>
+                </div>}
+            </>}
+        </>}
+        {error&&<p role='alert' className='mt-3 rounded-xl border border-red-400 p-3 text-sm text-red-500'>{error}</p>}
+        {info&&<p role='status' className='mt-3 rounded-xl border border-line p-3 text-sm text-brand'>{info}</p>}
     </section>;
 }
