@@ -97,6 +97,12 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     const product=found(setup,'productNames',value.productNameId)?.name||'Select product';
     const previewName=[product,[size?.name,found(setup,'containers',value.containerId)?.name].filter(Boolean).join(' '),
         [pack?.name,count?'x'+count.name:''].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
+    const optionsFor=(kind:SkuParameterKind):Array<[string,string]>=>setup.parameters
+        .filter(p=>p.kind===kind&&p.enabled!==false)
+        .map(p=>[p.id, [p.name,
+            p.kind==='containerSizes'&&p.uom?String(p.quantity)+' '+(pickUnit(setup,p.uom)?.symbol||p.uom):'',
+            p.kind==='normalizationUnits'?String(p.quantityPerUnit)+' '+(pickUnit(setup,p.baseUom)?.symbol||p.baseUom):'',
+        ].filter(Boolean).join(' · ')] as [string,string]);
     return <section className={boxClass+' space-y-3'}>
         <div>
             <h3 className='text-base font-semibold text-ink'>SKU composition</h3>
@@ -105,11 +111,7 @@ export function SkuConfigurationFields({value,onChange,setup}:{
         <div className='grid gap-3 sm:grid-cols-2'>
             {selections.map(group=><ConfigSelect key={group.key} title={group.label}
                 value={value[group.key]||''} onChange={v=>onChange({...value,[group.key]:v})}
-                options={setup.parameters.filter(p=>p.kind===group.kind&&p.enabled!==false)
-                    .map(p=>[p.id,p.name+
-                        (p.kind==='containerSizes'&&p.uom?' · '+p.quantity+' '+(pickUnit(setup,p.uom)?.symbol||p.uom):'')+
-                        (p.kind==='normalizationUnits'?' · '+p.quantityPerUnit+' '+(pickUnit(setup,p.baseUom)?.symbol||p.baseUom):'')]
-                        as [string,string])}/>)}
+                options={optionsFor(group.kind)}/>)}
         </div>
         <div className='rounded-xl border border-line bg-page p-3 space-y-1' aria-live='polite'>
             <p className='font-semibold text-ink'>{previewName}</p>
