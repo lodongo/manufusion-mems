@@ -3,7 +3,7 @@
  * The module does not create stock, purchase requisitions or accounting entries.
  * Firestore is tenant-scoped through orgRoute; mutations use optimistic concurrency.
  */
-import { HttpError, getDoc, isObj, listDocs, nowIso, num, str, writeDoc, type Obj, type Plain } from './core';
+import { HttpError, commitChecked, getDoc, isObj, listDocs, nowIso, num, str, writeDoc, type Obj, type Plain } from './core';
 import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canAt, nodePath, scopeOf } from './access';
 import { audit } from './audit';
@@ -225,10 +225,23 @@ export const plnMfgFoundationRoutes={
             const now=nowIso();
             const revision=existing?(num(existing.data.revision)??1)+1:1;
             const data={...item,status:'draft',revision,createdAt:existing?str(existing.data.createdAt)||now:now,createdBy:existing?str(existing.data.createdBy)||ctx.uid:ctx.uid,updatedAt:now,updatedBy:ctx.uid};
-            const ok=await writeDoc(path,data,existing?{updateTime:existing.updateTime}:{exists:false});
+            const ok=await commitChecked([
+                {path,data,precondition:existing?{updateTime:existing.updateTime}:{exists:false}},
+                {path:path+'/revisions/'+String(revision).padStart(6,'0'),data:{...data,masterId:id,versionSnapshot:true},precondition:{exists:false}},
+            ]);
             if(!ok)throw new HttpError(409,'This record changed before saving. Please reload.');
             await track(ctx,'mfg.master.save',kind+':'+id);
             return {record:{...data},ok:true};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/history':[
+        orgRoute('org.mfg.foundation.history','MFG.view',async ctx=>{
+            const kind=readKind(ctx.body.kind),id=VALID_ID(ctx.body.id,'Master code');
+            const master=await getDoc(DOC(ctx.orgId,kind,id));
+            if(!master)throw new HttpError(404,'Master record not found.');
+            if(!await recordAccess(ctx,'MFG.view',str(master.data.siteId)))throw new HttpError(403,'This record is outside your site scope.');
+            const revisions=await listDocs(DOC(ctx.orgId,kind,id)+'/revisions');
+            return {revisions:revisions.map(out).sort((a,b)=>Number(a.revision)-Number(b.revision))};
         }),
     ],
     'POST /api/org/pln-mfg/foundation/config':[
