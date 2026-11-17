@@ -77,7 +77,12 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const code=VALID_ID(o.code,'Operation code');
         if(codes.has(code))throw new HttpError(400,'Duplicate operation '+code+'.');
         codes.add(code);
-        return {code,sequence:i+1,name:REQUIRED(o.name,'Operation name',120),resourceId:VALID_ID(o.resourceId,'Resource code'),setupMinutes:NONNEGATIVE(o.setupMinutes??0,'Setup minutes',100000),runMinutesPerUnit:NONNEGATIVE(o.runMinutesPerUnit??0,'Minutes per output unit',100000)};
+        const producesSkuId=str(o.producesSkuId).trim();
+        if(producesSkuId)VALID_ID(producesSkuId,'Stage output SKU');
+        const dependsOn=Array.isArray(o.dependsOn)?o.dependsOn.map(str):(i>0?[str(operations[i-1].code)]:[]);
+        if(dependsOn.some(x=>!codes.has(x)||x===code)||new Set(dependsOn).size!==dependsOn.length)
+            throw new HttpError(400,'Stage dependencies must reference unique earlier stages.');
+        return {code,sequence:i+1,name:REQUIRED(o.name,'Operation name',120),resourceId:VALID_ID(o.resourceId,'Resource code'),producesSkuId,dependsOn,setupMinutes:NONNEGATIVE(o.setupMinutes??0,'Setup minutes',100000),runMinutesPerUnit:NONNEGATIVE(o.runMinutesPerUnit??0,'Minutes per output unit',100000)};
     });
     return {...base,skuId,operations:steps as unknown as Plain};
 }
@@ -118,9 +123,12 @@ async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,existingI
     }
     if(kind==='routings'){
         if(!await getDoc(DOC(ctx.orgId,'items',str(item.skuId))))throw new HttpError(400,'Routing SKU not found.');
-        for(const o of ARR(item.operations))
+        for(const o of ARR(item.operations)){
             if(!await getDoc(DOC(ctx.orgId,'resources',str(o.resourceId))))
                 throw new HttpError(400,'Routing resource '+str(o.resourceId)+' not found.');
+            if(str(o.producesSkuId)&&!await getDoc(DOC(ctx.orgId,'items',str(o.producesSkuId))))
+                throw new HttpError(400,'Stage output '+str(o.producesSkuId)+' is not an existing SKU or intermediate product.');
+        }
     }
 }
 
@@ -171,13 +179,13 @@ export function fictionalLine11Demo(){
         {id:'DEMO-FILL',name:'Fictional KHS PET Line 11 filling',type:'LINE',rate:28000,rateUom:'EA',efficiency:80},
         {id:'DEMO-PACK',name:'Fictional Line 11 case packing',type:'WORK_CENTER',rate:2000,rateUom:'CASE',efficiency:80},
     ];
-    const route=(id:string,name:string,skuId:string)=>({id,name,skuId,operations:[
-        {code:'PREP',name:'Water preparation',resourceId:'DEMO-PREP'},
-        {code:'BLOW',name:'PET bottle blowing',resourceId:'DEMO-BLOW'},
-        {code:'FILL',name:'Fill and cap',resourceId:'DEMO-FILL'},
-        {code:'PACK',name:'Label, pack and palletize',resourceId:'DEMO-PACK'},
+    const route=(id:string,name:string,skuId:string,size:'500'|'1000')=>({id,name,skuId,operations:[
+        {code:'PREP',name:'Water preparation',resourceId:'DEMO-PREP',producesSkuId:'DEMO-PREPARED-WATER',dependsOn:[]},
+        {code:'BLOW',name:'PET bottle blowing',resourceId:'DEMO-BLOW',producesSkuId:'DEMO-BOTTLE-'+size,dependsOn:[]},
+        {code:'FILL',name:'Fill and cap',resourceId:'DEMO-FILL',producesSkuId:'DEMO-FILLED-'+size,dependsOn:['PREP','BLOW']},
+        {code:'PACK',name:'Label, pack and palletize',resourceId:'DEMO-PACK',producesSkuId:skuId,dependsOn:['FILL']},
     ]});
-    const routings=[route('DEMO-ROUTE-500','Fictional 500 mL multi-stage process','DEMO-FG-500'),route('DEMO-ROUTE-1000','Fictional 1 L multi-stage process','DEMO-FG-1000')];
+    const routings=[route('DEMO-ROUTE-500','Fictional 500 mL multi-stage process','DEMO-FG-500','500'),route('DEMO-ROUTE-1000','Fictional 1 L multi-stage process','DEMO-FG-1000','1000')];
     return {demo:true,persisted:false,isolated:true,label:'READ-ONLY FICTIONAL DATA — no purchasing, inventory or finance postings',items,boms,resources,routings};
 }
 
