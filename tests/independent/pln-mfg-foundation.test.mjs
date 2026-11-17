@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {normalizeMaster,detectBomCycle,fictionalLine11Demo} from '../../backend/plnMfgFoundation.ts';
-import {selectEffectiveRelease} from '../../backend/plnMfgRelease.ts';
+import {selectEffectiveRelease,selectEffectiveForSite} from '../../backend/plnMfgRelease.ts';
 import {fictionalPilotSnapshot,validateFictionalPilot,assertPilotSeedAllowed} from '../../backend/plnMfgPilotSeed.ts';
 
 const read=p=>readFileSync(new URL('../../'+p,import.meta.url),'utf8');
@@ -187,4 +187,21 @@ test('pilot verification reads sandbox documents without modifying operational m
  const ui=read('src/org/ProductionFoundation.tsx');
  assert.ok(ui.includes('Verify stored pilot records'));
  assert.ok(ui.includes('Pilot acceptance blocked'));
+});
+
+
+test('site-specific approved BOM selection overrides global only from effective date',()=>{
+    const versions=[
+        {id:'ORG-01',siteId:'',status:'active',effectiveFrom:'2026-01-01'},
+        {id:'SITE-01',siteId:'SITE-11',status:'active',effectiveFrom:'2027-01-01'},
+        {id:'SITE-DRAFT',siteId:'SITE-11',status:'draft',effectiveFrom:'2026-09-01'},
+        {id:'OTHER-SITE',siteId:'SITE-99',status:'active',effectiveFrom:'2026-01-01'},
+    ];
+    assert.equal(selectEffectiveForSite(versions,'2026-11-17','SITE-11')?.id,'ORG-01');
+    assert.equal(selectEffectiveForSite(versions,'2027-01-01','SITE-11')?.id,'SITE-01');
+    assert.equal(selectEffectiveForSite(versions,'2027-01-01','SITE-88')?.id,'ORG-01');
+    assert.equal(selectEffectiveForSite(versions,'2027-01-01','')?.id,'ORG-01');
+    const source=read('backend/plnMfgRelease.ts');
+    assert.ok(source.includes('foundation/effective'));
+    assert.ok(source.includes("authorized(ctx,'MFG.view',siteId)"));
 });
