@@ -4,6 +4,8 @@ on:
     branches: [develop]
     paths:
       - 'backend/plnMfg*.ts'
+      - 'backend/mfgSku*.ts'
+      - 'src/org/MfgSkuSetup.tsx'
       - 'backend/index.ts'
       - 'backend/permissionPolicy.ts'
       - 'src/org/ProductionFoundation.tsx'
