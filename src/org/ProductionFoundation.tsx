@@ -12,6 +12,12 @@ type Operation={code:string;name:string;resourceId:string;setupMinutes:number;ru
 type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string};
 type Demo={demo:boolean;persisted:boolean;label:string;items:Row[];boms:Row[];resources:Row[];routings:Row[]};
 type DemoStatus={sandboxId:string;seeded:boolean;isolated:boolean;canSeed:boolean;createdAt:string;warning:string;counts:Record<string,number>|null};
+type References={
+    materials:Array<{id:string;name:string;materialNumber:string;uom:string}>;
+    assets:Array<{id:string;name:string;siteId:string}>;
+    sites:Array<{id:string;name:string;code:string}>;
+};
+const emptyReferences:References={materials:[],assets:[],sites:[]};
 const kinds:Kind[]=['items','boms','resources','routings'];
 const tabs:{key:Tab;label:string;hint:string}[]=[
     {key:'items',label:'Products & SKUs',hint:'Finished, intermediate and Inventory-linked raw materials'},
@@ -46,10 +52,13 @@ function Choice({title,value,options,onChange}:{title:string;value:string;option
 function TextField({title,value,onChange}:{title:string;value:string;onChange:(v:string)=>void}){
     return <label className='block'><span className={label}>{title}</span><textarea rows={2} className={fld} value={value} onChange={e=>onChange(e.target.value)}/></label>;
 }
-function MasterEditor({tab,draft,onChange,items,resources}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];resources:Row[]}){
+function MasterEditor({tab,draft,onChange,items,resources,refs}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];resources:Row[];refs:References}){
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
     const itemOptions:Array<[string,string]>=[['','Select a SKU'],...items.map(i=>[i.id,i.name] as [string,string])];
     const resourceOptions:Array<[string,string]>=[['','Select a resource'],...resources.map(r=>[r.id,r.name] as [string,string])];
+    const siteOptions:Array<[string,string]>=[['','Organization-wide'],...refs.sites.map(r=>[r.id,r.name+(r.code?' · '+r.code:'')] as [string,string])];
+    const assetOptions:Array<[string,string]>=[['','No linked asset'],...refs.assets.map(r=>[r.id,r.name+' · '+r.id] as [string,string])];
+    const materialOptions:Array<[string,string]>=[['','Select approved Inventory material'],...refs.materials.map(r=>[r.id,r.materialNumber+' · '+r.name] as [string,string])];
     const components=asComponents(draft.components);
     const operations=asOperations(draft.operations);
     return <div className='space-y-4'>
@@ -61,10 +70,10 @@ function MasterEditor({tab,draft,onChange,items,resources}:{tab:Tab;draft:Row;on
                 <Field title='Product family' value={str(draft.family)} onChange={v=>update('family',v)}/>
                 <Field title='Base unit of measure' value={str(draft.uom)} onChange={v=>update('uom',v)}/>
                 <Field title='Quantity per sales pack' value={number(draft.packQty,1)} type='number' onChange={v=>update('packQty',Number(v))}/>
-                {['RAW','PACKAGING'].includes(str(draft.category))&&<Field title='Existing Inventory material ID (raw and packaging)' value={str(draft.inventoryMaterialId)} onChange={v=>update('inventoryMaterialId',v)}/>}
+                {['RAW','PACKAGING'].includes(str(draft.category))&&<Choice title='Published Inventory Material Master' value={str(draft.inventoryMaterialId)} options={materialOptions} onChange={v=>{const found=refs.materials.find(m=>m.id===v);onChange({...draft,inventoryMaterialId:v,uom:found?.uom||draft.uom});}}/>}
             </>}
             {(tab==='boms'||tab==='recipes')&&<>
-                <Choice title='Manufactured SKU' value={str(draft.parentSkuId)} options={itemOptions} onChange={v=>update('parentSkuId',v)}/>
+                <Choice title='Manufactured SKU' value={str(draft.parentSkuId)} options={itemOptions} onChange={v=>{const product=items.find(x=>x.id===v);onChange({...draft,parentSkuId:v,outputUom:product?.uom??draft.outputUom});}}/>
                 <Field title='Output quantity (basis)' type='number' value={number(draft.outputQty,1)} onChange={v=>update('outputQty',Number(v))}/>
                 <Field title='Output unit' value={str(draft.outputUom)} onChange={v=>update('outputUom',v)}/>
                 <Field title='Effective from (optional)' type='date' value={str(draft.effectiveFrom)} onChange={v=>update('effectiveFrom',v)}/>
@@ -75,19 +84,19 @@ function MasterEditor({tab,draft,onChange,items,resources}:{tab:Tab;draft:Row;on
                 <Field title='Rated units per hour' type='number' value={number(draft.rate,1000)} onChange={v=>update('rate',Number(v))}/>
                 <Field title='Rate unit' value={str(draft.rateUom)} onChange={v=>update('rateUom',v)}/>
                 <Field title='Planning efficiency (%)' type='number' value={number(draft.efficiency,100)} onChange={v=>update('efficiency',Number(v))}/>
-                <Field title='Existing asset ID (optional)' value={str(draft.assetId)} onChange={v=>update('assetId',v)}/>
+                <Choice title='Active Asset Register equipment (optional)' value={str(draft.assetId)} options={assetOptions} onChange={v=>update('assetId',v)}/>
             </>}
             {tab==='routings'&&<>
                 <Choice title='Finished / intermediate SKU' value={str(draft.skuId)} options={itemOptions} onChange={v=>update('skuId',v)}/>
                 <Field title='Effective date (optional)' type='date' value={str(draft.effectiveFrom)} onChange={v=>update('effectiveFrom',v)}/>
             </>}
-            {['items','resources','routings'].includes(tab)&&<Field title='Organization site ID (optional)' value={str(draft.siteId)} onChange={v=>update('siteId',v)}/>}
+            <Choice title='Site applicability' value={str(draft.siteId)} options={siteOptions} onChange={v=>update('siteId',v)}/>
         </div>
         <TextField title='Description / notes' value={str(draft.description)} onChange={v=>update('description',v)}/>
         {(tab==='boms'||tab==='recipes')&&<section className='rounded-xl border border-slate-700 p-3'>
             <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Component quantities</h3><Button variant='secondary' type='button' onClick={()=>update('components',[...components,{skuId:'',quantity:1,uom:'EA',scrapPct:0}])}>Add component</Button></div>
             <div className='space-y-3'>{components.map((c,i)=><div key={i} className='grid gap-2 rounded-lg bg-slate-800/70 p-3 sm:grid-cols-2 xl:grid-cols-5'>
-                <Choice title={'Component '+(i+1)} value={str(c.skuId)} options={itemOptions} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,skuId:v}:a))}/>
+                <Choice title={'Component '+(i+1)} value={str(c.skuId)} options={itemOptions} onChange={v=>{const item=items.find(x=>x.id===v);update('components',components.map((a,j)=>j===i?{...a,skuId:v,uom:str(item?.uom)||a.uom}:a));}}/>
                 <Field title='Quantity' type='number' value={c.quantity} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,quantity:Number(v)}:a))}/>
                 <Field title='UOM' value={c.uom} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,uom:v}:a))}/>
                 <Field title='Scrap allowance %' type='number' value={c.scrapPct} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,scrapPct:Number(v)}:a))}/>
@@ -109,13 +118,14 @@ function MasterEditor({tab,draft,onChange,items,resources}:{tab:Tab;draft:Row;on
                 <button type='button' className='min-h-11 self-end rounded-lg border border-red-700/50 px-3 text-sm text-red-300' onClick={()=>update('operations',operations.filter((_,j)=>j!==i))}>Remove</button>
             </div>)}</div>
         </section>}
-        <p className='text-xs text-amber-200'>Records are saved as drafts. Technical approvals and release of active BOM/routing versions will be introduced with the governed execution workflow; drafts cannot trigger procurement, inventory or accounting postings.</p>
+        <p className='text-xs text-amber-200'>Products and resources are maintained as drafts. BOMs, recipes and routings require independent technical release before becoming active; no Phase 1 operation can post purchases, stock or financial transactions.</p>
     </div>;
 }
 
 export default function ProductionFoundation({module,permissions}:{module:'PLN'|'MFG';permissions:string[]}){
     const [active,setActive]=useState<Tab>(module==='PLN'?'config':'items');
     const [rows,setRows]=useState<Record<Kind,Row[]>>(emptyRows);
+    const [refs,setRefs]=useState<References>(emptyReferences);
     const [draft,setDraft]=useState<Row|null>(null);
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
     const [configRevision,setConfigRevision]=useState(0);
@@ -138,12 +148,14 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const load=async()=>{
         setLoading(true);setError('');
         try{
-            const [datasets,configuration]=await Promise.all([
+            const [datasets,configuration,refData]=await Promise.all([
                 canViewMasters?Promise.all(kinds.map(kind=>callBackend<{records:Row[]}>('/api/org/pln-mfg/foundation/list',{kind}))):Promise.resolve(kinds.map(()=>({records:[] as Row[]}))),
                 callBackend<{config:Config;revision:number}>('/api/org/pln-mfg/foundation/config').catch(()=>null),
+                canViewMasters?callBackend<References>('/api/org/pln-mfg/foundation/references'):Promise.resolve(emptyReferences),
             ]);
             const [items,boms,resources,routings]=datasets;
             setRows({items:items.records,boms:boms.records,resources:resources.records,routings:routings.records});
+            setRefs(refData);
             if(configuration){setConfig(configuration.config);setConfigRevision(configuration.revision);}
         }catch(e){setError(e instanceof Error?e.message:'Could not load manufacturing masters.');}
         finally{setLoading(false);}
@@ -249,7 +261,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-slate-300'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-slate-700 px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
-                <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items} resources={rows.resources}/>
+                <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items} resources={rows.resources} refs={refs}/>
                 <div className='flex justify-end'><Button disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving...':'Save draft'}</Button></div>
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-emerald-300'>{row.id}</span><span className='rounded-full bg-slate-800 px-2 py-1 text-[11px] uppercase text-slate-300'>{str(row.status)||'draft'}</span></div>
