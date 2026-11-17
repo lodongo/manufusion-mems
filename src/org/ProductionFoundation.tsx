@@ -5,9 +5,10 @@ import { SkuConfigurationFields, SkuSetupPanel, emptySkuSetup, type SkuSelection
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'rounded-2xl border border-line bg-panel p-4 text-ink '+className}>{children}</section>;
 }
-function PageTitle({title,subtitle,action}:{title:string;subtitle:string;action:ReactNode}){
-    return <div className='sticky top-[var(--mems-top,0px)] z-10 -mx-2 mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-line bg-page/95 px-2 py-3 backdrop-blur'>
-        <div className='min-w-0'><h1 className='text-lg font-semibold text-ink'>{title}</h1><p className='text-sm text-muted'>{subtitle}</p></div>{action}
+function PageTitle({title,action}:{title:string;action:ReactNode}){
+    return <div className='mb-4 flex flex-col items-start gap-3 py-2 sm:flex-row sm:items-center sm:justify-between'>
+        <h1 className='text-xl font-semibold text-ink'>{title}</h1>
+        {action}
     </div>;
 }
 function Button({variant='primary',children,className='',...props}:ButtonHTMLAttributes<HTMLButtonElement>&{variant?:'primary'|'secondary'|'danger'}){
@@ -158,7 +159,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
 }
 
 export default function ProductionFoundation({module,permissions}:{module:'PLN'|'MFG';permissions:string[]}){
-    const [active,setActive]=useState<Tab>(module==='PLN'?'config':'items');
+    const [active,setActive]=useState<Tab>(module==='PLN'&&!hasPerm(permissions,'MFG.view')?'config':'skuSetup');
     const [rows,setRows]=useState<Record<Kind,Row[]>>(emptyRows);
     const [skuSetup,setSkuSetup]=useState<SkuSetup>(emptySkuSetup);
     const [refs,setRefs]=useState<References>(emptyReferences);
@@ -280,9 +281,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         try{setDemo(await callBackend<Demo>('/api/org/pln-mfg/foundation/demo'));}catch(e){setError(e instanceof Error?e.message:'Could not open pilot data.');}finally{setBusy(false);}
     };
     return <div className='space-y-4'>
-        <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing — Master Data'} subtitle='Phase 1 foundation · universal multi-stage production model · no live production or stock postings' action={<Button variant='secondary' disabled={busy} onClick={()=>void load()}>Refresh</Button>}/>
+        <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing'} action={<Button variant='secondary' disabled={busy} onClick={()=>void load()}>Refresh</Button>}/>
         <div className='flex gap-2 overflow-x-auto pb-1'>{visibleTabs.map(tab=><button type='button' key={tab.key} aria-current={active===tab.key?'page':undefined} onClick={()=>changeTab(tab.key)} className={'min-h-11 shrink-0 rounded-xl border px-3 text-sm '+(active===tab.key?'border-brand bg-brand/10 text-brand':'border-line text-soft')}>{tab.label}</button>)}</div>
-        <p className='text-sm text-muted'>{tabs.find(t=>t.key===active)?.hint}</p>
+        {active!=='skuSetup'&&<p className='text-sm text-muted'>{tabs.find(t=>t.key===active)?.hint}</p>}
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
         {loading?<Spinner/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='config'?<Card className='space-y-4'>
