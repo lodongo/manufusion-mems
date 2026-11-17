@@ -97,24 +97,23 @@ test('approved versions honor effective dates and exclude unapproved drafts',()=
 
 test('manufacturing release prevents editing of submitted and active versions',()=>{
  const source=read('backend/plnMfgFoundation.ts'),release=read('backend/plnMfgRelease.ts');
- assert.match(source,/\\['pending_approval','active'\\].includes/);
- assert.match(release,/Independent maker-checker approval is mandatory/);
- assert.match(release,/ctx.uid===str\\(doc.data.createdBy\\)/);
- assert.match(release,/referenceChecks\\(ctx,kind,doc.data,id\\)/);
- assert.match(release,/status:'pending_approval'/);
- assert.match(release,/commitChecked\\(/);
- assert.match(release,/effectiveFrom/);
- const index=read('backend/index.ts');
- assert.match(index,/\\.\\.\\.plnMfgReleaseRoutes/);
+ assert.ok(source.includes("['pending_approval','active'].includes"));
+ assert.ok(release.includes('Independent maker-checker approval is mandatory'));
+ assert.ok(release.includes('ctx.uid===str(doc.data.createdBy)'));
+ assert.ok(release.includes('referenceChecks(ctx,kind,doc.data,id)'));
+ assert.ok(release.includes("status:'pending_approval'"));
+ assert.ok(release.includes('commitChecked('));
+ assert.ok(release.includes('effectiveFrom'));
+ assert.ok(read('backend/index.ts').includes('...plnMfgReleaseRoutes'));
 });
 
 test('master-data reference checks preserve Inventory and Asset authority',()=>{
  const src=read('backend/plnMfgFoundation.ts');
- assert.match(src,/\\+'\\/materials\\/\\'/);
- assert.match(src,/\\+'\\/assets\\/\\'/);
- assert.match(src,/Approved, numbered Inventory material|approved, numbered Inventory material/);
- assert.match(src,/same site as the linked asset/);
- assert.match(src,/unit does not match its SKU master/);
+ assert.ok(src.includes("'/materials/'"));
+ assert.ok(src.includes("'/assets/'"));
+ assert.ok(src.includes('approved, numbered Inventory material'));
+ assert.ok(src.includes('same site as the linked asset'));
+ assert.ok(src.includes('unit does not match its SKU master'));
 });
 
 test('isolated fictional Line 11 seeding is denied outside authorized development test mode',()=>{
@@ -127,11 +126,11 @@ test('isolated fictional Line 11 seeding is denied outside authorized developmen
  assert.throws(()=>assertPilotSeedAllowed(true,true,true,'anything else'),/exact confirmation/);
  assert.doesNotThrow(()=>assertPilotSeedAllowed(true,true,true,'SEED FICTIONAL LINE 11'));
  const src=read('backend/plnMfgPilotSeed.ts'),index=read('backend/index.ts');
- assert.match(src,/mfg_demo_sandboxes/);
- assert.match(src,/externalPostingEnabled:false/);
- assert.match(src,/commitChecked\\(writes\\)/);
- assert.doesNotMatch(src,/\\/material_journal\\/|\\/purchase_orders\\/|\\/financial_journal\\//);
- assert.match(index,/\\.\\.\\.plnMfgPilotRoutes/);
+ assert.ok(src.includes('mfg_demo_sandboxes'));
+ assert.ok(src.includes('externalPostingEnabled:false'));
+ assert.ok(src.includes('commitChecked(writes)'));
+ assert.ok(!src.includes('/material_journal/')&&!src.includes('/purchase_orders/')&&!src.includes('/financial_journal/'));
+ assert.ok(index.includes('...plnMfgPilotRoutes'));
 });
 
 test('effective dates are validated, not merely sliced',()=>{
