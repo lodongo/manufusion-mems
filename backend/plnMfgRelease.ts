@@ -35,9 +35,17 @@ export function selectEffectiveRelease<T extends {status?:string;effectiveFrom?:
         (b.id||'').localeCompare(a.id||''))[0]??null;
 }
 
+export function selectEffectiveForSite<T extends {siteId?:string;status?:string;effectiveFrom?:string;approvedAt?:string;id?:string}>(
+    records:T[],date:string,siteId:string,
+):T|null {
+    // A site-specific approved release wins over the organization default only
+    // after its own effective date; until then use the organization release.
+    const applicable=(scope:string)=>selectEffectiveRelease(records.filter(r=>(r.siteId||'')===scope),date);
+    return (siteId?applicable(siteId):null)??applicable('');
+}
 async function authorized(ctx:OrgContext,permission:string,siteId:string) {
     if(ctx.role==='org_super_admin')return true;
-    if(!siteId)return hasPerm(ctx.directPermissions,permission);
+    if(!siteId)return permission==='MFG.view'?hasPerm(ctx.permissions,permission):hasPerm(ctx.directPermissions,permission);
     return canAt(ctx,permission,await nodePath(ctx.orgId,siteId),await scopeOf(ctx));
 }
 const auditAction=(ctx:OrgContext,action:string,target:string,note:string)=>audit([{
@@ -46,6 +54,21 @@ const auditAction=(ctx:OrgContext,action:string,target:string,note:string)=>audi
 }]);
 
 export const plnMfgReleaseRoutes={
+    'POST /api/org/pln-mfg/foundation/effective':[
+        orgRoute('org.mfg.foundation.effective','MFG.view',async ctx=>{
+            const kind=kindOf(ctx.body.kind),skuId=idOf(ctx.body.skuId);
+            const siteId=str(ctx.body.siteId).trim(),date=str(ctx.body.date).trim();
+            if(siteId&&!idPattern.test(siteId))throw new HttpError(400,'Invalid production site.');
+            if(!await authorized(ctx,'MFG.view',siteId))
+                throw new HttpError(403,'This production site is outside your authorized scope.');
+            const all=await listDocs(root(ctx.orgId,kind));
+            const records=all.filter(row=>str(kind==='boms'?row.data.parentSkuId:row.data.skuId)===skuId)
+                .map(row=>({id:row.id,...row.data}));
+            const selected=selectEffectiveForSite(records,date,siteId);
+            return {kind,skuId,siteId,date,record:selected,available:!!selected,
+                explanation:selected?'Approved effective manufacturing version':'No approved version is effective for the selected site and date'};
+        }),
+    ],
     'POST /api/org/pln-mfg/foundation/submit':[
         orgRoute('org.mfg.foundation.submit','MFG.master.edit',async ctx=>{
             const kind=kindOf(ctx.body.kind),id=idOf(ctx.body.id),permission=requiredPerm(kind,'submit');
