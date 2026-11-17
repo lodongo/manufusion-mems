@@ -118,9 +118,9 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
         {tab==='items'&&str(draft.category)==='FINISHED'&&<SkuConfigurationFields value={(draft.skuComponents||{}) as SkuSelections}
             onChange={v=>update('skuComponents',v)} setup={skuSetup}/>}
         <TextField title='Description / notes' value={str(draft.description)} onChange={v=>update('description',v)}/>
-        {(tab==='boms'||tab==='recipes')&&<section className='rounded-xl border border-slate-700 p-3'>
+        {(tab==='boms'||tab==='recipes')&&<section className='rounded-xl border border-line p-3'>
             <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Component quantities</h3><Button variant='secondary' type='button' onClick={()=>update('components',[...components,{skuId:'',quantity:1,uom:'EA',scrapPct:0}])}>Add component</Button></div>
-            <div className='space-y-3'>{components.map((c,i)=><div key={i} className='grid gap-2 rounded-lg bg-slate-800/70 p-3 sm:grid-cols-2 xl:grid-cols-5'>
+            <div className='space-y-3'>{components.map((c,i)=><div key={i} className='grid gap-2 rounded-lg bg-page p-3 sm:grid-cols-2 xl:grid-cols-5'>
                 <Choice title={'Component '+(i+1)} value={str(c.skuId)} options={itemOptions} onChange={v=>{const item=items.find(x=>x.id===v);update('components',components.map((a,j)=>j===i?{...a,skuId:v,uom:str(item?.uom)||a.uom}:a));}}/>
                 <Field title='Quantity' type='number' value={c.quantity} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,quantity:Number(v)}:a))}/>
                 <Field title='Configured component UOM' value={c.uom} disabled onChange={()=>{}}/>
@@ -129,10 +129,10 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
             </div>)}</div>
             {!items.length&&<p className='mt-2 text-sm text-amber-300'>Create product or intermediate SKU masters first. Raw-material items must reference Inventory.</p>}
         </section>}
-        {tab==='routings'&&<section className='rounded-xl border border-slate-700 p-3'>
+        {tab==='routings'&&<section className='rounded-xl border border-line p-3'>
             <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Manufacturing operations</h3><Button variant='secondary' type='button' onClick={()=>update('operations',[...operations,{code:'STG_'+String(operations.length+1).padStart(9,'0'),name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:operations.length?[operations[operations.length-1].code]:[]}])}>Add stage</Button></div>
             <p className='mb-3 text-xs text-muted'>Stage codes are created by MEMS. Tick previous stages that must finish before the current stage; leaving them unticked permits parallel execution.</p>
-            <div className='space-y-3'>{operations.map((op,i)=><div key={i} className='grid gap-2 rounded-lg bg-slate-800/70 p-3 md:grid-cols-2 xl:grid-cols-3'>
+            <div className='space-y-3'>{operations.map((op,i)=><div key={i} className='grid gap-2 rounded-lg bg-page p-3 md:grid-cols-2 xl:grid-cols-3'>
                 <Field title='Automatically assigned stage code' value={op.code} disabled onChange={()=>{}}/>
                 <Field title='Stage description' value={op.name} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,name:v}:a))}/>
                 <Choice title='Resource' value={op.resourceId} options={resourceOptions} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,resourceId:v}:a))}/>
@@ -281,12 +281,12 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     };
     return <div className='space-y-4'>
         <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing — Master Data'} subtitle='Phase 1 foundation · universal multi-stage production model · no live production or stock postings' action={<Button variant='secondary' disabled={busy} onClick={()=>void load()}>Refresh</Button>}/>
-        <div className='flex gap-2 overflow-x-auto pb-1'>{visibleTabs.map(tab=><button type='button' key={tab.key} aria-current={active===tab.key?'page':undefined} onClick={()=>changeTab(tab.key)} className={'min-h-11 shrink-0 rounded-xl border px-3 text-sm '+(active===tab.key?'border-emerald-500 bg-emerald-500/10 text-emerald-200':'border-slate-700 text-slate-300')}>{tab.label}</button>)}</div>
-        <p className='text-sm text-slate-400'>{tabs.find(t=>t.key===active)?.hint}</p>
+        <div className='flex gap-2 overflow-x-auto pb-1'>{visibleTabs.map(tab=><button type='button' key={tab.key} aria-current={active===tab.key?'page':undefined} onClick={()=>changeTab(tab.key)} className={'min-h-11 shrink-0 rounded-xl border px-3 text-sm '+(active===tab.key?'border-brand bg-brand/10 text-brand':'border-line text-soft')}>{tab.label}</button>)}</div>
+        <p className='text-sm text-muted'>{tabs.find(t=>t.key===active)?.hint}</p>
         {error&&<Alert tone='error'>{error}</Alert>}
-        {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-emerald-200'>{notice}</p>}
+        {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
         {loading?<Spinner/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='config'?<Card className='space-y-4'>
-            <p className='text-sm text-slate-400'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>
+            <p className='text-sm text-muted'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
                 <Field title='Planning horizon (days)' type='number' value={config.horizonDays} onChange={v=>setConfig(s=>({...s,horizonDays:Number(v)}))}/>
                 <Field title='Frozen period (days)' type='number' value={config.freezeDays} onChange={v=>setConfig(s=>({...s,freezeDays:Number(v)}))}/>
@@ -296,38 +296,38 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration</Button></div>
         </Card>:active==='demo'?<Card className='space-y-4'>
             <div className='flex flex-wrap items-center justify-between gap-2'><p className='text-sm text-amber-200'>Read-only demonstration. Fictional data cannot post to live stock, purchasing or finance.</p><Button variant='secondary' disabled={busy} onClick={()=>void preview()}>Preview fictional Line 11</Button></div>
-            {demoStatus&&<section className='rounded-xl border border-slate-700 p-3 space-y-2'>
+            {demoStatus&&<section className='rounded-xl border border-line p-3 space-y-2'>
                 <p className='text-sm font-semibold'>{demoStatus.seeded?'Isolated pilot sandbox seeded':'Isolated pilot sandbox not seeded'}</p>
-                <p className='text-xs text-slate-400'>{demoStatus.warning}</p>
-                {demoStatus.seeded&&demoStatus.counts&&<p className='text-xs text-slate-300'>Sample records: {Object.entries(demoStatus.counts).map(([key,count])=>key+': '+count).join(' · ')}</p>}
+                <p className='text-xs text-muted'>{demoStatus.warning}</p>
+                {demoStatus.seeded&&demoStatus.counts&&<p className='text-xs text-soft'>Sample records: {Object.entries(demoStatus.counts).map(([key,count])=>key+': '+count).join(' · ')}</p>}
                 {demoStatus.seeded&&<Button variant='secondary' disabled={busy} onClick={()=>void verifyDemo()}>Verify stored pilot records</Button>}
-                {demoVerification&&<div className='rounded-lg border border-slate-600 p-3 text-sm' role='status'>
-                    <p className={demoVerification.valid?'font-semibold text-emerald-300':'font-semibold text-amber-300'}>{demoVerification.valid?'Integrity verified — all fictional pilot records match':'Pilot acceptance blocked — data inconsistencies found'}</p>
-                    {demoVerification.counts&&<p className='mt-2 text-xs text-slate-400'>{Object.entries(demoVerification.counts).map(([key,value])=>key+': '+value.stored+'/'+value.expected).join(' · ')}</p>}
+                {demoVerification&&<div className='rounded-lg border border-line p-3 text-sm' role='status'>
+                    <p className={demoVerification.valid?'font-semibold text-brand':'font-semibold text-amber-300'}>{demoVerification.valid?'Integrity verified — all fictional pilot records match':'Pilot acceptance blocked — data inconsistencies found'}</p>
+                    {demoVerification.counts&&<p className='mt-2 text-xs text-muted'>{Object.entries(demoVerification.counts).map(([key,value])=>key+': '+value.stored+'/'+value.expected).join(' · ')}</p>}
                     {demoVerification.errors.map((reason,i)=><p className='mt-1 text-xs text-amber-300' key={i}>{reason}</p>)}
-                    {demoVerification.verifiedAt&&<p className='mt-1 text-xs text-slate-400'>Checked {demoVerification.verifiedAt}</p>}
+                    {demoVerification.verifiedAt&&<p className='mt-1 text-xs text-muted'>Checked {demoVerification.verifiedAt}</p>}
                 </div>}
                 {!demoStatus.seeded&&demoStatus.canSeed&&<div className='flex flex-wrap gap-2'>
                     <label className='min-w-44 flex-1'><span className={label}>Confirmation phrase</span>
                         <input className={fld} value={seedPhrase} onChange={e=>setSeedPhrase(e.target.value)} placeholder='SEED FICTIONAL LINE 11'/></label>
                     <Button disabled={busy||seedPhrase!=='SEED FICTIONAL LINE 11'} onClick={()=>void seedDemo()}>Seed isolated test workspace</Button>
                 </div>}
-                {!demoStatus.seeded&&!demoStatus.canSeed&&<p className='text-xs text-slate-400'>Seeding is restricted to organization super admins in explicitly enabled development test mode. The preview remains available to authorized viewers.</p>}
+                {!demoStatus.seeded&&!demoStatus.canSeed&&<p className='text-xs text-muted'>Seeding is restricted to organization super admins in explicitly enabled development test mode. The preview remains available to authorized viewers.</p>}
             </section>}
-            {demo&&<><p className='text-xs text-slate-400'>{demo.label}</p><div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>{([['SKUs',demo.items],['BOMs & recipes',demo.boms],['Resources',demo.resources],['Routings',demo.routings]] as Array<[string,Row[]]>).map(([title,data])=><section className='rounded-lg bg-slate-950 p-3' key={title}><h3 className='mb-2 font-semibold'>{title} ({data.length})</h3>{data.map(r=><div key={r.id} className='border-t border-slate-800 py-2 text-xs'><span className='text-emerald-200'>{r.id}</span><p className='text-slate-300'>{r.name}</p></div>)}</section>)}</div></>}
+            {demo&&<><p className='text-xs text-muted'>{demo.label}</p><div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>{([['SKUs',demo.items],['BOMs & recipes',demo.boms],['Resources',demo.resources],['Routings',demo.routings]] as Array<[string,Row[]]>).map(([title,data])=><section className='rounded-lg bg-page p-3' key={title}><h3 className='mb-2 font-semibold'>{title} ({data.length})</h3>{data.map(r=><div key={r.id} className='border-t border-line py-2 text-xs'><span className='text-brand'>{r.id}</span><p className='text-soft'>{r.name}</p></div>)}</section>)}</div></>}
         </Card>:<>
-            <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-slate-400'>{filtered.length} saved master records · draft versions</p>{canSave&&<Button onClick={()=>setDraft(newRecord(active))}>Add {active==='items'?'SKU':active==='recipes'?'recipe':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
+            <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-muted'>{filtered.length} saved master records · draft versions</p>{canSave&&<Button onClick={()=>setDraft(newRecord(active))}>Add {active==='items'?'SKU':active==='recipes'?'recipe':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
-                {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-slate-300'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-slate-700 px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
+                {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
                 <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items} resources={rows.resources} refs={refs} skuSetup={skuSetup}/>
                 <div className='flex justify-end'><Button disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving...':'Save draft'}</Button></div>
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
-                <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-emerald-300'>{row.id}</span><span className='rounded-full bg-slate-800 px-2 py-1 text-[11px] uppercase text-slate-300'>{str(row.status)||'draft'}</span></div>
+                <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
                 <h3 className='font-semibold'>{row.name}</h3>
-                <p className='text-xs text-slate-400'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:'Components: '+asComponents(row.components).length}</p>
+                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:'Components: '+asComponents(row.components).length}</p>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
-                    <span className='text-xs text-slate-500'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
+                    <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
                     {canSave&&['draft','rejected',''].includes(str(row.status))&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}
                     {canSave&&['active','pending_approval'].includes(str(row.status))&&<Button variant='secondary' onClick={()=>copyVersion(row)}>New version</Button>}
                 </div>
@@ -338,10 +338,10 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                         <Button disabled={busy} onClick={()=>void release(row.id,'approve')}>Approve version</Button>
                         <Button variant='danger' disabled={busy} onClick={()=>void release(row.id,'reject')}>Reject</Button>
                     </div>
-                    <p className='text-xs text-slate-400'>The submitter and creator cannot approve their own master data.</p>
+                    <p className='text-xs text-muted'>The submitter and creator cannot approve their own master data.</p>
                 </div>}
             </Card>)}</div>}
-            {!filtered.length&&!draft&&<Card><p className='text-sm text-slate-400'>No records have been created here yet. Start with products and resources; then define the BOMs and production routings. The fictional pilot is available under Line 11 Pilot Preview.</p></Card>}
+            {!filtered.length&&!draft&&<Card><p className='text-sm text-muted'>No records have been created here yet. Start with products and resources; then define the BOMs and production routings. The fictional pilot is available under Line 11 Pilot Preview.</p></Card>}
         </>}
     </div>;
 }
