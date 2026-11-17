@@ -6,10 +6,10 @@
  * sub-tree, and only when the named tenant is in development test mode.
  * The fixture is repeatable and immutable once seeded.
  */
-import { HttpError, commitChecked, getDoc, nowIso, str } from './core';
+import { HttpError, commitChecked, getDoc, isObj, listDocs, nowIso, str } from './core';
 import { orgRoute } from './guards';
 import { testModeEnvironmentAllowed } from './testModeCore';
-import { fictionalLine11Demo } from './plnMfgFoundation';
+import { detectBomCycle, fictionalLine11Demo } from './plnMfgFoundation';
 import { audit } from './audit';
 
 const SANDBOX_ID='LINE11_KHS_FICTIONAL_V1';
@@ -33,6 +33,93 @@ export function fictionalPilotSnapshot(){
     const demo=fictionalLine11Demo();
     return {...demo,stock:FIXTURE_STOCK,demand:FIXTURE_DEMAND};
 }
+
+const SECTION_KEYS=['items','boms','resources','routings','stock','demand'] as const;
+type PilotSection=typeof SECTION_KEYS[number];
+type PilotSnapshot=ReturnType<typeof fictionalPilotSnapshot>;
+const expectedRows=(snapshot:PilotSnapshot,key:PilotSection):Array<{id:string}>=>
+    snapshot[key] as Array<{id:string}>;
+
+/** Pure validation: checks the complete multi-stage demo graph without touching operational records. */
+export function validateFictionalPilot(snapshot:PilotSnapshot):string[] {
+    const errors:string[]=[];
+    const items=new Map(snapshot.items.map(x=>[x.id,x]));
+    const resources=new Map(snapshot.resources.map(x=>[x.id,x]));
+    for(const section of SECTION_KEYS){
+        const seen=new Set<string>();
+        for(const row of expectedRows(snapshot,section)){
+            if(!row.id||seen.has(row.id))errors.push(section+': missing or duplicate ID '+row.id);
+            seen.add(row.id);
+        }
+    }
+    for(const bom of snapshot.boms){
+        const parent=items.get(bom.parentSkuId);
+        if(!parent||!['INTERMEDIATE','FINISHED'].includes(parent.category))
+            errors.push('BOM '+bom.id+': output must be a manufactured SKU');
+        if(parent&&parent.uom!==bom.outputUom)
+            errors.push('BOM '+bom.id+': output unit does not match the parent SKU');
+        for(const component of bom.components){
+            const child=items.get(component.skuId);
+            if(!child)errors.push('BOM '+bom.id+': missing component '+component.skuId);
+            else if(child.uom!==component.uom)errors.push('BOM '+bom.id+': component unit mismatch '+component.skuId);
+            if(component.quantity<=0||component.scrapPct<0||component.scrapPct>100)
+                errors.push('BOM '+bom.id+': invalid component quantity or loss');
+        }
+    }
+    if(snapshot.boms.some(bom=>detectBomCycle(snapshot.boms.filter(other=>other.id!==bom.id),
+        bom.parentSkuId,bom.components)))errors.push('Circular multi-stage BOM detected');
+    for(const route of snapshot.routings){
+        if(!items.has(route.skuId))errors.push('Routing '+route.id+': missing output SKU');
+        const prior=new Set<string>();
+        for(const step of route.operations){
+            if(!resources.has(step.resourceId))errors.push('Routing '+route.id+': missing resource '+step.resourceId);
+            if(!items.has(step.producesSkuId))errors.push('Routing '+route.id+': missing stage output '+step.producesSkuId);
+            if(step.dependsOn.some(dep=>!prior.has(dep)))errors.push('Routing '+route.id+': invalid stage dependency '+step.code);
+            prior.add(step.code);
+        }
+        if(route.operations.at(-1)?.producesSkuId!==route.skuId)
+            errors.push('Routing '+route.id+': last output must match the routed SKU');
+    }
+    for(const row of [...snapshot.stock,...snapshot.demand]){
+        const sku=items.get(row.skuId);
+        if(!sku)errors.push('Stock/demand: unknown SKU '+row.skuId);
+        if(sku&&sku.uom!==row.uom)errors.push('Stock/demand: unit mismatch '+row.skuId);
+        if(!Number.isFinite(row.quantity)||row.quantity<0)errors.push('Stock/demand: invalid quantity');
+    }
+    return errors;
+}
+
+function isSubset(expected:unknown,actual:unknown):boolean {
+    if(Array.isArray(expected))return Array.isArray(actual)&&expected.length===actual.length&&
+        expected.every((row,i)=>isSubset(row,actual[i]));
+    if(isObj(expected))return isObj(actual)&&Object.entries(expected).every(([key,value])=>isSubset(value,actual[key]));
+    return expected===actual;
+}
+
+export async function verifySeededFictionalPilot(orgId:string){
+    const root=ROOT(orgId),marker=await getDoc(root);
+    if(!marker)return {seeded:false,valid:false,errors:['Pilot sandbox has not been seeded'],counts:null};
+    if(marker.data.demo!==true||marker.data.simulationOnly!==true||marker.data.externalPostingEnabled!==false)
+        return {seeded:true,valid:false,errors:['Sandbox isolation marker is invalid'],counts:null};
+    const snapshot=fictionalPilotSnapshot(),errors=validateFictionalPilot(snapshot);
+    const counts:Record<string,{expected:number;stored:number}>={};
+    for(const section of SECTION_KEYS){
+        const stored=await listDocs(root+'/'+section);
+        const expected=expectedRows(snapshot,section);
+        const byId=new Map(stored.map(doc=>[doc.id,doc]));
+        counts[section]={expected:expected.length,stored:stored.length};
+        if(stored.length!==expected.length)
+            errors.push(section+': expected '+expected.length+' records but found '+stored.length);
+        for(const item of expected){
+            const record=byId.get(item.id);
+            if(!record)errors.push(section+': missing '+item.id);
+            else if(record.data.demo!==true||record.data.simulationOnly!==true||
+                !isSubset(item,record.data))errors.push(section+': contents or isolation flag do not match '+item.id);
+        }
+    }
+    return {seeded:true,valid:errors.length===0,errors,counts,verifiedAt:nowIso()};
+}
+
 export function assertPilotSeedAllowed(env:boolean,superAdmin:boolean,testMode:boolean,phrase:string) {
     if(!env||!superAdmin||!testMode)
         throw new HttpError(403,'Isolated Line 11 seeding is restricted to an explicitly authorized development test tenant and its organization super admin.');
@@ -56,6 +143,8 @@ export const plnMfgPilotRoutes={
             const root=ROOT(ctx.orgId),existing=await getDoc(root);
             if(existing)return {ok:true,seeded:true,alreadySeeded:true,counts:existing.data.counts};
             const fixture=fictionalPilotSnapshot();
+            const violations=validateFictionalPilot(fixture);
+            if(violations.length)throw new HttpError(500,'Fictional pilot data failed integrity checks: '+violations.join('; '));
             const at=nowIso(),actor=ctx.uid;
             const counts={items:fixture.items.length,boms:fixture.boms.length,resources:fixture.resources.length,
                 routings:fixture.routings.length,stock:fixture.stock.length,demand:fixture.demand.length};
@@ -79,6 +168,12 @@ export const plnMfgPilotRoutes={
             await audit([{category:'data',action:'mfg.pilot.fictional.seed',actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,
                 target:{label:SANDBOX_ID},details:'Atomic read-only simulation fixture: no production, financial, inventory or procurement postings.'}]);
             return {ok:true,seeded:true,alreadySeeded:false,counts};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/demo/verify':[
+        orgRoute('org.mfg.demo.verify','MFG.view',async ctx=>{
+            // Read-only verification against the tenant's isolated simulation collections.
+            return verifySeededFictionalPilot(ctx.orgId);
         }),
     ],
     'POST /api/org/pln-mfg/foundation/demo/sandbox':[
