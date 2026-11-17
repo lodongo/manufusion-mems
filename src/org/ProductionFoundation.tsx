@@ -76,7 +76,10 @@ function MasterEditor({tab,draft,onChange,items,resources}:{tab:Tab;draft:Row;on
                 <Field title='Planning efficiency (%)' type='number' value={number(draft.efficiency,100)} onChange={v=>update('efficiency',Number(v))}/>
                 <Field title='Existing asset ID (optional)' value={str(draft.assetId)} onChange={v=>update('assetId',v)}/>
             </>}
-            {tab==='routings'&&<Choice title='Finished / intermediate SKU' value={str(draft.skuId)} options={itemOptions} onChange={v=>update('skuId',v)}/>}
+            {tab==='routings'&&<>
+                <Choice title='Finished / intermediate SKU' value={str(draft.skuId)} options={itemOptions} onChange={v=>update('skuId',v)}/>
+                <Field title='Effective date (optional)' type='date' value={str(draft.effectiveFrom)} onChange={v=>update('effectiveFrom',v)}/>
+            </>}
             {['items','resources','routings'].includes(tab)&&<Field title='Organization site ID (optional)' value={str(draft.siteId)} onChange={v=>update('siteId',v)}/>}
         </div>
         <TextField title='Description / notes' value={str(draft.description)} onChange={v=>update('description',v)}/>
@@ -117,12 +120,17 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [configRevision,setConfigRevision]=useState(0);
     const [demo,setDemo]=useState<Demo|null>(null);
     const [history,setHistory]=useState<Row[]>([]);
+    const [decisionReason,setDecisionReason]=useState('');
     const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
     const canViewMasters=hasPerm(permissions,'MFG.view');
     const canViewPlanning=hasPerm(permissions,'PLN.view');
     const visibleTabs=tabs.filter(t=>t.key==='config'?canViewPlanning:canViewMasters);
     const canEdit=canViewMasters&&hasPerm(permissions,'MFG.master.edit');
     const canConfig=hasPerm(permissions,'PLN.configure');
+    const isReleaseMaster=['boms','recipes','routings'].includes(active);
+    const releaseScope=active==='routings'?'MFG.routing':'MFG.bom';
+    const canSubmit=isReleaseMaster&&canEdit&&hasPerm(permissions,releaseScope+'.submit');
+    const canApprove=isReleaseMaster&&hasPerm(permissions,releaseScope+'.approve');
     const canSave=canEdit && (active!=='boms'||hasPerm(permissions,'MFG.bom.edit')) && (active!=='recipes'||hasPerm(permissions,'MFG.bom.edit')) && (active!=='routings'||hasPerm(permissions,'MFG.routing.edit'));
     const load=async()=>{
         setLoading(true);setError('');
@@ -145,7 +153,20 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         if(active==='recipes')return rows.boms.filter(r=>r.type==='RECIPE');
         return rows[kind];
     },[active,rows]);
-    const changeTab=(tab:Tab)=>{setActive(tab);setDraft(null);setHistory([]);setError('');setNotice('');};
+    const changeTab=(tab:Tab)=>{setActive(tab);setDraft(null);setHistory([]);setError('');setNotice('');setDecisionReason('');};
+    const copyVersion=(row:Row)=>{const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
+    const release=async (id:string,decision:'submit'|'approve'|'reject')=>{
+        if(decision==='reject'&&!decisionReason.trim()){setError('Enter a rejection reason first.');return;}
+        setBusy(true);setError('');setNotice('');
+        try{
+            await callBackend(decision==='submit'?'/api/org/pln-mfg/foundation/submit':'/api/org/pln-mfg/foundation/decide',{
+                kind:recordKind(active),id,...(decision==='submit'?{}:{decision,note:decisionReason.trim()}),
+            });
+            setDecisionReason('');await load();
+            setNotice(decision==='submit'?'Revision submitted to an independent technical approver.':decision==='approve'?'Version approved for effective-date selection.':'Revision rejected and returned for correction.');
+        }catch(e){setError(e instanceof Error?e.message:'Manufacturing approval could not be completed.');}
+        finally{setBusy(false);}
+    };
     const openDraft=async(row:Row)=>{
         setDraft(row);setHistory([]);setError('');
         try{
@@ -205,7 +226,20 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-emerald-300'>{row.id}</span><span className='rounded-full bg-slate-800 px-2 py-1 text-[11px] uppercase text-slate-300'>{str(row.status)||'draft'}</span></div>
                 <h3 className='font-semibold'>{row.name}</h3>
                 <p className='text-xs text-slate-400'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:'Components: '+asComponents(row.components).length}</p>
-                <div className='flex items-center justify-between gap-2'><span className='text-xs text-slate-500'>Revision {row.revision??1}</span>{canSave&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}</div>
+                <div className='flex flex-wrap items-center justify-between gap-2'>
+                    <span className='text-xs text-slate-500'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
+                    {canSave&&['draft','rejected',''].includes(str(row.status))&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}
+                    {canSave&&['active','pending_approval'].includes(str(row.status))&&<Button variant='secondary' onClick={()=>copyVersion(row)}>New version</Button>}
+                </div>
+                {str(row.status)==='draft'&&canSubmit&&<Button variant='secondary' disabled={busy} onClick={()=>void release(row.id,'submit')}>Submit for technical approval</Button>}
+                {str(row.status)==='pending_approval'&&canApprove&&<div className='space-y-2'>
+                    <Field title='Decision note / rejection reason' value={decisionReason} onChange={setDecisionReason}/>
+                    <div className='flex flex-wrap gap-2'>
+                        <Button disabled={busy} onClick={()=>void release(row.id,'approve')}>Approve version</Button>
+                        <Button variant='danger' disabled={busy} onClick={()=>void release(row.id,'reject')}>Reject</Button>
+                    </div>
+                    <p className='text-xs text-slate-400'>The submitter and creator cannot approve their own master data.</p>
+                </div>}
             </Card>)}</div>}
             {!filtered.length&&!draft&&<Card><p className='text-sm text-slate-400'>No records have been created here yet. Start with products and resources; then define the BOMs and production routings. The fictional pilot is available under Line 11 Pilot Preview.</p></Card>}
         </>}
