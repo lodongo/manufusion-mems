@@ -12,6 +12,7 @@ type Operation={code:string;name:string;resourceId:string;setupMinutes:number;ru
 type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string};
 type Demo={demo:boolean;persisted:boolean;label:string;items:Row[];boms:Row[];resources:Row[];routings:Row[]};
 type DemoStatus={sandboxId:string;seeded:boolean;isolated:boolean;canSeed:boolean;createdAt:string;warning:string;counts:Record<string,number>|null};
+type DemoVerification={seeded:boolean;valid:boolean;errors:string[];counts:Record<string,{expected:number;stored:number}>|null;verifiedAt?:string};
 type References={
     materials:Array<{id:string;name:string;materialNumber:string;uom:string}>;
     assets:Array<{id:string;name:string;siteId:string}>;
@@ -131,6 +132,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [configRevision,setConfigRevision]=useState(0);
     const [demo,setDemo]=useState<Demo|null>(null);
     const [demoStatus,setDemoStatus]=useState<DemoStatus|null>(null);
+    const [demoVerification,setDemoVerification]=useState<DemoVerification|null>(null);
     const [seedPhrase,setSeedPhrase]=useState('');
     const [history,setHistory]=useState<Row[]>([]);
     const [decisionReason,setDecisionReason]=useState('');
@@ -169,7 +171,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         return rows[kind];
     },[active,rows]);
     const changeTab=(tab:Tab)=>{
-        setActive(tab);setDraft(null);setHistory([]);setError('');setNotice('');setDecisionReason('');
+        setActive(tab);setDraft(null);setHistory([]);setError('');setNotice('');setDecisionReason('');setDemoVerification(null);
         if(tab==='demo'&&canViewMasters)
             void callBackend<DemoStatus>('/api/org/pln-mfg/foundation/demo/status')
                 .then(setDemoStatus).catch(e=>setError(e instanceof Error?e.message:'Pilot sandbox status unavailable.'));
@@ -219,8 +221,16 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         try{
             await callBackend('/api/org/pln-mfg/foundation/demo/seed',{confirm:seedPhrase});
             setDemoStatus(await callBackend<DemoStatus>('/api/org/pln-mfg/foundation/demo/status'));
-            setSeedPhrase('');setNotice('The fictional Line 11 pilot was seeded inside its isolated simulation namespace.');
+            setSeedPhrase('');setDemoVerification(null);setNotice('The fictional Line 11 pilot was seeded inside its isolated simulation namespace.');
         }catch(e){setError(e instanceof Error?e.message:'Isolated demo seeding was not permitted.');}
+        finally{setBusy(false);}
+    };
+    const verifyDemo=async()=>{
+        setBusy(true);setError('');setNotice('');
+        try{
+            const verified=await callBackend<DemoVerification>('/api/org/pln-mfg/foundation/demo/verify');
+            setDemoVerification(verified);
+        }catch(e){setError(e instanceof Error?e.message:'Could not verify isolated pilot records.');}
         finally{setBusy(false);}
     };
     const preview=async()=>{
@@ -248,6 +258,13 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 <p className='text-sm font-semibold'>{demoStatus.seeded?'Isolated pilot sandbox seeded':'Isolated pilot sandbox not seeded'}</p>
                 <p className='text-xs text-slate-400'>{demoStatus.warning}</p>
                 {demoStatus.seeded&&demoStatus.counts&&<p className='text-xs text-slate-300'>Sample records: {Object.entries(demoStatus.counts).map(([key,count])=>key+': '+count).join(' · ')}</p>}
+                {demoStatus.seeded&&<Button variant='secondary' disabled={busy} onClick={()=>void verifyDemo()}>Verify stored pilot records</Button>}
+                {demoVerification&&<div className='rounded-lg border border-slate-600 p-3 text-sm' role='status'>
+                    <p className={demoVerification.valid?'font-semibold text-emerald-300':'font-semibold text-amber-300'}>{demoVerification.valid?'Integrity verified — all fictional pilot records match':'Pilot acceptance blocked — data inconsistencies found'}</p>
+                    {demoVerification.counts&&<p className='mt-2 text-xs text-slate-400'>{Object.entries(demoVerification.counts).map(([key,value])=>key+': '+value.stored+'/'+value.expected).join(' · ')}</p>}
+                    {demoVerification.errors.map((reason,i)=><p className='mt-1 text-xs text-amber-300' key={i}>{reason}</p>)}
+                    {demoVerification.verifiedAt&&<p className='mt-1 text-xs text-slate-400'>Checked {demoVerification.verifiedAt}</p>}
+                </div>}
                 {!demoStatus.seeded&&demoStatus.canSeed&&<div className='flex flex-wrap gap-2'>
                     <label className='min-w-44 flex-1'><span className={label}>Confirmation phrase</span>
                         <input className={fld} value={seedPhrase} onChange={e=>setSeedPhrase(e.target.value)} placeholder='SEED FICTIONAL LINE 11'/></label>
