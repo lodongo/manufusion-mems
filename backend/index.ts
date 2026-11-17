@@ -67,6 +67,7 @@ import {
 } from './guards';
 import { orgRoutes } from './org';
 import { plnMfgFoundationRoutes } from './plnMfgFoundation';
+import { plnMfgReleaseRoutes } from './plnMfgRelease';
 import { hrReadRoutes } from './hrReadRoutes';
 import { hrEmployeeRoutes } from './hrEmployeeRoutes';
 import { hrRulesRoutes } from './hrRulesRoutes';
@@ -1607,6 +1608,7 @@ export const handler = router(recordWiredRoutes({
 
     ...orgRoutes,
     ...plnMfgFoundationRoutes,
+    ...plnMfgReleaseRoutes,
     ...hrReadRoutes,
     ...hrEmployeeRoutes,
     ...hrRulesRoutes,
