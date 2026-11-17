@@ -60,7 +60,7 @@ function MasterEditor({tab,draft,onChange,items,resources}:{tab:Tab;draft:Row;on
                 <Field title='Product family' value={str(draft.family)} onChange={v=>update('family',v)}/>
                 <Field title='Base unit of measure' value={str(draft.uom)} onChange={v=>update('uom',v)}/>
                 <Field title='Quantity per sales pack' value={number(draft.packQty,1)} type='number' onChange={v=>update('packQty',Number(v))}/>
-                {['RAW','PACKAGING'].includes(str(draft.category))&&<Field title='Inventory material ID (required for raw stock)' value={str(draft.inventoryMaterialId)} onChange={v=>update('inventoryMaterialId',v)}/>}
+                {['RAW','PACKAGING'].includes(str(draft.category))&&<Field title='Existing Inventory material ID (raw and packaging)' value={str(draft.inventoryMaterialId)} onChange={v=>update('inventoryMaterialId',v)}/>}
             </>}
             {(tab==='boms'||tab==='recipes')&&<>
                 <Choice title='Manufactured SKU' value={str(draft.parentSkuId)} options={itemOptions} onChange={v=>update('parentSkuId',v)}/>
@@ -114,14 +114,16 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [configRevision,setConfigRevision]=useState(0);
     const [demo,setDemo]=useState<Demo|null>(null);
     const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
-    const canEdit=hasPerm(permissions,'MFG.master.edit');
+    const canViewMasters=hasPerm(permissions,'MFG.view');
+    const visibleTabs=canViewMasters?tabs:tabs.filter(t=>t.key==='config');
+    const canEdit=canViewMasters&&hasPerm(permissions,'MFG.master.edit');
     const canConfig=hasPerm(permissions,'PLN.configure');
     const canSave=canEdit && (active!=='boms'||hasPerm(permissions,'MFG.bom.edit')) && (active!=='recipes'||hasPerm(permissions,'MFG.bom.edit')) && (active!=='routings'||hasPerm(permissions,'MFG.routing.edit'));
     const load=async()=>{
         setLoading(true);setError('');
         try{
             const [datasets,configuration]=await Promise.all([
-                Promise.all(kinds.map(kind=>callBackend<{records:Row[]}>('/api/org/pln-mfg/foundation/list',{kind}))),
+                canViewMasters?Promise.all(kinds.map(kind=>callBackend<{records:Row[]}>('/api/org/pln-mfg/foundation/list',{kind}))):Promise.resolve(kinds.map(()=>({records:[] as Row[]}))),
                 callBackend<{config:Config;revision:number}>('/api/org/pln-mfg/foundation/config').catch(()=>null),
             ]);
             const [items,boms,resources,routings]=datasets;
@@ -164,7 +166,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     };
     return <div className='space-y-4'>
         <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing — Master Data'} subtitle='Phase 1 foundation · universal multi-stage production model · no live production or stock postings' action={<Button variant='secondary' disabled={busy} onClick={()=>void load()}>Refresh</Button>}/>
-        <div className='flex gap-2 overflow-x-auto pb-1'>{tabs.map(tab=><button type='button' key={tab.key} aria-current={active===tab.key?'page':undefined} onClick={()=>changeTab(tab.key)} className={'min-h-11 shrink-0 rounded-xl border px-3 text-sm '+(active===tab.key?'border-emerald-500 bg-emerald-500/10 text-emerald-200':'border-slate-700 text-slate-300')}>{tab.label}</button>)}</div>
+        <div className='flex gap-2 overflow-x-auto pb-1'>{visibleTabs.map(tab=><button type='button' key={tab.key} aria-current={active===tab.key?'page':undefined} onClick={()=>changeTab(tab.key)} className={'min-h-11 shrink-0 rounded-xl border px-3 text-sm '+(active===tab.key?'border-emerald-500 bg-emerald-500/10 text-emerald-200':'border-slate-700 text-slate-300')}>{tab.label}</button>)}</div>
         <p className='text-sm text-slate-400'>{tabs.find(t=>t.key===active)?.hint}</p>
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-emerald-200'>{notice}</p>}
