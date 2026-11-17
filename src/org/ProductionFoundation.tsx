@@ -11,6 +11,7 @@ type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
 type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string};
 type Demo={demo:boolean;persisted:boolean;label:string;items:Row[];boms:Row[];resources:Row[];routings:Row[]};
+type DemoStatus={sandboxId:string;seeded:boolean;isolated:boolean;canSeed:boolean;createdAt:string;warning:string;counts:Record<string,number>|null};
 const kinds:Kind[]=['items','boms','resources','routings'];
 const tabs:{key:Tab;label:string;hint:string}[]=[
     {key:'items',label:'Products & SKUs',hint:'Finished, intermediate and Inventory-linked raw materials'},
@@ -119,6 +120,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
     const [configRevision,setConfigRevision]=useState(0);
     const [demo,setDemo]=useState<Demo|null>(null);
+    const [demoStatus,setDemoStatus]=useState<DemoStatus|null>(null);
+    const [seedPhrase,setSeedPhrase]=useState('');
     const [history,setHistory]=useState<Row[]>([]);
     const [decisionReason,setDecisionReason]=useState('');
     const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -153,7 +156,12 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         if(active==='recipes')return rows.boms.filter(r=>r.type==='RECIPE');
         return rows[kind];
     },[active,rows]);
-    const changeTab=(tab:Tab)=>{setActive(tab);setDraft(null);setHistory([]);setError('');setNotice('');setDecisionReason('');};
+    const changeTab=(tab:Tab)=>{
+        setActive(tab);setDraft(null);setHistory([]);setError('');setNotice('');setDecisionReason('');
+        if(tab==='demo'&&canViewMasters)
+            void callBackend<DemoStatus>('/api/org/pln-mfg/foundation/demo/status')
+                .then(setDemoStatus).catch(e=>setError(e instanceof Error?e.message:'Pilot sandbox status unavailable.'));
+    };
     const copyVersion=(row:Row)=>{const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
     const release=async (id:string,decision:'submit'|'approve'|'reject')=>{
         if(decision==='reject'&&!decisionReason.trim()){setError('Enter a rejection reason first.');return;}
@@ -193,6 +201,16 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         }catch(e){setError(e instanceof Error?e.message:'Could not save planning configuration.');}
         finally{setBusy(false);}
     };
+    const seedDemo=async()=>{
+        if(!demoStatus?.canSeed||seedPhrase!=='SEED FICTIONAL LINE 11')return;
+        setBusy(true);setError('');setNotice('');
+        try{
+            await callBackend('/api/org/pln-mfg/foundation/demo/seed',{confirm:seedPhrase});
+            setDemoStatus(await callBackend<DemoStatus>('/api/org/pln-mfg/foundation/demo/status'));
+            setSeedPhrase('');setNotice('The fictional Line 11 pilot was seeded inside its isolated simulation namespace.');
+        }catch(e){setError(e instanceof Error?e.message:'Isolated demo seeding was not permitted.');}
+        finally{setBusy(false);}
+    };
     const preview=async()=>{
         setBusy(true);setError('');
         try{setDemo(await callBackend<Demo>('/api/org/pln-mfg/foundation/demo'));}catch(e){setError(e instanceof Error?e.message:'Could not open pilot data.');}finally{setBusy(false);}
@@ -213,7 +231,18 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </div>
             <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration</Button></div>
         </Card>:active==='demo'?<Card className='space-y-4'>
-            <div className='flex flex-wrap items-center justify-between gap-2'><p className='text-sm text-amber-200'>Read-only demonstration. No test data is written to a real tenant.</p><Button variant='secondary' disabled={busy} onClick={()=>void preview()}>Load fictional Line 11</Button></div>
+            <div className='flex flex-wrap items-center justify-between gap-2'><p className='text-sm text-amber-200'>Read-only demonstration. Fictional data cannot post to live stock, purchasing or finance.</p><Button variant='secondary' disabled={busy} onClick={()=>void preview()}>Preview fictional Line 11</Button></div>
+            {demoStatus&&<section className='rounded-xl border border-slate-700 p-3 space-y-2'>
+                <p className='text-sm font-semibold'>{demoStatus.seeded?'Isolated pilot sandbox seeded':'Isolated pilot sandbox not seeded'}</p>
+                <p className='text-xs text-slate-400'>{demoStatus.warning}</p>
+                {demoStatus.seeded&&demoStatus.counts&&<p className='text-xs text-slate-300'>Sample records: {Object.entries(demoStatus.counts).map(([key,count])=>key+': '+count).join(' · ')}</p>}
+                {!demoStatus.seeded&&demoStatus.canSeed&&<div className='flex flex-wrap gap-2'>
+                    <label className='min-w-44 flex-1'><span className={label}>Confirmation phrase</span>
+                        <input className={fld} value={seedPhrase} onChange={e=>setSeedPhrase(e.target.value)} placeholder='SEED FICTIONAL LINE 11'/></label>
+                    <Button disabled={busy||seedPhrase!=='SEED FICTIONAL LINE 11'} onClick={()=>void seedDemo()}>Seed isolated test workspace</Button>
+                </div>}
+                {!demoStatus.seeded&&!demoStatus.canSeed&&<p className='text-xs text-slate-400'>Seeding is restricted to organization super admins in explicitly enabled development test mode. The preview remains available to authorized viewers.</p>}
+            </section>}
             {demo&&<><p className='text-xs text-slate-400'>{demo.label}</p><div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>{([['SKUs',demo.items],['BOMs & recipes',demo.boms],['Resources',demo.resources],['Routings',demo.routings]] as Array<[string,Row[]]>).map(([title,data])=><section className='rounded-lg bg-slate-950 p-3' key={title}><h3 className='mb-2 font-semibold'>{title} ({data.length})</h3>{data.map(r=><div key={r.id} className='border-t border-slate-800 py-2 text-xs'><span className='text-emerald-200'>{r.id}</span><p className='text-slate-300'>{r.name}</p></div>)}</section>)}</div></>}
         </Card>:<>
             <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-slate-400'>{filtered.length} saved master records · draft versions</p>{canSave&&<Button onClick={()=>setDraft(newRecord(active))}>Add {active==='items'?'SKU':active==='recipes'?'recipe':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
