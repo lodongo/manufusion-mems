@@ -77,8 +77,10 @@ export const plnMfgReleaseRoutes={
             if(str(doc.data.status)!=='pending_approval')throw new HttpError(409,'Only submitted revisions can be approved or rejected.');
             if(!await authorized(ctx,permission,str(doc.data.siteId)))
                 throw new HttpError(403,'Approval is outside your authorized site.');
-            if(ctx.uid===str(doc.data.createdBy)||ctx.uid===str(doc.data.submittedBy))
-                throw new HttpError(403,'Independent maker-checker approval is mandatory.');
+            if(ctx.uid===str(doc.data.createdBy)||ctx.uid===str(doc.data.submittedBy)){
+                if(ctx.role==='org_super_admin'&&ctx.testMode===true)ctx.bypassed?.push('mfg.release.independent_checker');
+                else throw new HttpError(403,'Independent maker-checker approval is mandatory.');
+            }
             const decision=str(ctx.body.decision),note=str(ctx.body.note).trim().slice(0,400);
             if(!['approve','reject'].includes(decision))throw new HttpError(400,'Select approve or reject.');
             if(decision==='reject'&&!note)throw new HttpError(400,'A reason is required for rejection.');
