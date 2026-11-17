@@ -7,7 +7,7 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { audit } from './audit';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import {
-    SKU_PARAMETERS, SKU_PARAMETER_KINDS, managedCode, normalizeSkuParameter,
+    SKU_PARAMETERS, SKU_PARAMETER_KINDS, managedCode, normalizeSkuParameter, skuUnitCategories,
     type SkuParameter, type SkuParameterKind,
 } from './mfgSkuModel';
 
@@ -58,9 +58,10 @@ export const mfgSkuConfigurationRoutes={
         orgRoute('org.mfg.sku.setup','MFG.view',async ctx=>{
             const params=await skuParametersForOrg(ctx.orgId);
             return {parameters:params,groups:SKU_PARAMETERS,
+                categories:skuUnitCategories(),
                 units:PROCUREMENT_UNITS.filter(x=>x.active&&x.selectable)
                     .map(x=>({code:x.code,label:x.label,symbol:x.symbol,category:x.category,
-                        baseUnit:x.baseUnit,multiplier:x.multiplier})),
+                        categoryCode:x.categoryCode,baseUnit:x.baseUnit,multiplier:x.multiplier})),
                 conventions:{
                     items:'SKU',boms:'BOM',recipes:'RCP',resources:'RSC',
                     routings:'RTG',batches:'BTH',digits:9,
