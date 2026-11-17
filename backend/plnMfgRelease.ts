@@ -96,9 +96,15 @@ export const plnMfgReleaseRoutes={
             const at=nowIso(),status=decision==='approve'?'active':'rejected';
             const data={...doc.data,status,decisionNote:note,decidedAt:at,decidedBy:ctx.uid,
                 ...(status==='active'?{approvedAt:at,approvedBy:ctx.uid}:{})};
+            // Lock the unique approved SKU/site/effective-date slot in the same Firestore
+            // commit. Two simultaneous approvals cannot publish conflicting versions.
+            const skuId=str(kind==='boms'?doc.data.parentSkuId:doc.data.skuId);
+            const slotKey=[kind,str(doc.data.siteId)||'ORG',skuId,str(doc.data.effectiveFrom)||'BASE'].join('__');
+            const slotPath='organizations/'+ctx.orgId+'/mfg_release_slots/'+slotKey;
             const saved=await commitChecked([
                 {path,data,precondition:{updateTime:doc.updateTime}},
                 {path:path+'/release_events/'+randomId(10),data:{action:decision,kind,revision:doc.data.revision,by:ctx.uid,at,note},precondition:{exists:false}},
+                ...(status==='active'?[{path:slotPath,data:{kind,skuId,siteId:str(doc.data.siteId),effectiveFrom:str(doc.data.effectiveFrom),masterId:id,activatedAt:at,activatedBy:ctx.uid},precondition:{exists:false}}]:[]),
             ]);
             if(!saved)throw new HttpError(409,'This release changed. Refresh and decide again.');
             await auditAction(ctx,'mfg.release.'+decision,kind+':'+id,note||'Technical manufacturing release decision');
