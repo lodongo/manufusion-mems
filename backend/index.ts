@@ -66,6 +66,7 @@ import {
     type SecureContext,
 } from './guards';
 import { orgRoutes } from './org';
+import { plnMfgFoundationRoutes } from './plnMfgFoundation';
 import { hrReadRoutes } from './hrReadRoutes';
 import { hrEmployeeRoutes } from './hrEmployeeRoutes';
 import { hrRulesRoutes } from './hrRulesRoutes';
@@ -1605,6 +1606,7 @@ export const handler = router(recordWiredRoutes({
     ],
 
     ...orgRoutes,
+    ...plnMfgFoundationRoutes,
     ...hrReadRoutes,
     ...hrEmployeeRoutes,
     ...hrRulesRoutes,
