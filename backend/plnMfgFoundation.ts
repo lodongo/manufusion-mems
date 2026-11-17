@@ -317,6 +317,18 @@ export const plnMfgFoundationRoutes={
                     throw new HttpError(400,'Finished goods must be composed using the approved SKU configuration parameters.');
                 }
             }
+            if(kind==='routings'){
+                const operations=ARR(raw.operations);
+                const oldCodes=operations.map(o=>str(o.code));
+                if(new Set(oldCodes).size!==oldCodes.length)
+                    throw new HttpError(400,'Routing stages must have distinct identifiers.');
+                const lookup=new Map(oldCodes.map((code,i)=>[code,'STG_'+String(i+1).padStart(9,'0')]));
+                raw.operations=operations.map((o,i)=>({
+                    ...o,code:'STG_'+String(i+1).padStart(9,'0'),
+                    dependsOn:(Array.isArray(o.dependsOn)?o.dependsOn.map(str):(i>0?[oldCodes[i-1]]:[]))
+                        .map(dep=>lookup.get(dep)||dep),
+                }));
+            }
             const requiredPermission=kind==='boms'?'MFG.bom.edit':kind==='routings'?'MFG.routing.edit':'MFG.master.edit';
             const scopeSite=str(raw.siteId);
             if(!await recordAccess(ctx,'MFG.master.edit',scopeSite) ||
