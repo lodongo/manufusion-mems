@@ -6,7 +6,7 @@
  * sub-tree, and only when the named tenant is in development test mode.
  * The fixture is repeatable and immutable once seeded.
  */
-import { HttpError, commitChecked, getDoc, nowIso, str, type Obj } from './core';
+import { HttpError, commitChecked, getDoc, nowIso, str } from './core';
 import { orgRoute } from './guards';
 import { testModeEnvironmentAllowed } from './testModeCore';
 import { fictionalLine11Demo } from './plnMfgFoundation';
@@ -63,7 +63,7 @@ export const plnMfgPilotRoutes={
                 {path:root,data:{demo:true,simulationOnly:true,name:'Fictional Line 11 KHS PET pilot',createdAt:at,createdBy:actor,counts,
                     restrictedTo:'authorized_development_test_tenant',externalPostingEnabled:false},precondition:{exists:false}},
             ];
-            const add=(kind:string,records:Array<{id:string}&Record<string,unknown>>)=>{
+            const add=(kind:string,records:Array<{id:string}>)=>{
                 for(const row of records)writes.push({path:root+'/'+kind+'/'+row.id,data:{...row,
                     demo:true,simulationOnly:true,source:'FICTIONAL_LINE11_V1',createdAt:at},precondition:{exists:false}});
             };
