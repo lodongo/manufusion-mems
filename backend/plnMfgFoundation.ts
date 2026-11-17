@@ -30,6 +30,14 @@ const NONNEGATIVE = (v:unknown,label:string,max=1e12):number => {
 };
 const VALID_ID = (v:unknown,label='Code') => {const x=REQUIRED(v,label,60);if(!ID.test(x))throw new HttpError(400,label+' must contain letters, numbers, underscores or hyphens.');return x;};
 const UOM=(v:unknown)=>{const x=REQUIRED(v,'Unit of measure',20);if(!CODE.test(x))throw new HttpError(400,'Invalid unit code.');return x;};
+const effectiveDate=(value:unknown):string=>{
+    const date=str(value).trim();
+    if(!date)return '';
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||
+        new Date(date).toISOString().slice(0,10)!==date)
+        throw new HttpError(400,'Effective date must be a valid YYYY-MM-DD calendar date.');
+    return date;
+};
 const ENUM=<T extends string>(v:unknown, options:readonly T[],label:string):T=>{
     if(!options.includes(v as T))throw new HttpError(400,'Invalid '+label+'.');return v as T;
 };
@@ -67,7 +75,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             seen.add(skuId);
             return {line:i+1,skuId,quantity:POSITIVE(c.quantity,'Component quantity'),uom:UOM(c.uom),scrapPct:NONNEGATIVE(c.scrapPct??0,'Scrap percentage',100)};
         });
-        return {...base,type,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:str(raw.effectiveFrom).slice(0,10),versionNote:str(raw.versionNote).slice(0,300)};
+        return {...base,type,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
     const skuId=VALID_ID(raw.skuId,'Routed SKU');
     const operations=ARR(raw.operations);
