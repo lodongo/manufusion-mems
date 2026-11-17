@@ -49,6 +49,7 @@ const OrgRoles = lazy(() => import('./OrgRoles'));
 const SecurityKnowledgeBase = lazy(() => import('./SecurityKnowledgeBase'));
 const OrgAudit = lazy(() => import('./OrgAudit'));
 const PlannedPage = lazy(() => import('./PlannedPage'));
+const ProductionFoundation = lazy(() => import('./ProductionFoundation'));
 
 type MenuItem = NavItem & { perm?: string; module?: string };
 
@@ -96,6 +97,14 @@ const MENU: Array<{ title: string; items: MenuItem[] }> = [
             { key: 'mnt_setup', label: 'Setup', Icon: Settings, perm: 'ADM.workflows', module: 'MNT' },
             { key: 'mnt_budgets', label: 'Budgets & cost approvals', Icon: ClipboardList, perm: 'MNT.', module: 'MNT' },
         ],
+    },
+    {
+        title: 'Manufacturing (MFG)',
+        items: [{key:'mfg_foundation',label:'Master Data & Manufacturing Setup',Icon:Boxes,perm:'MFG.view',module:'MFG'}],
+    },
+    {
+        title: 'Production Planning (PLN)',
+        items: [{key:'pln_foundation',label:'Production Planning & MRP',Icon:ClipboardList,perm:'PLN.view',module:'PLN'}],
     },
     {
         title: 'Procurement (PRC)',
@@ -182,6 +191,8 @@ const TITLES: Record<string, string> = {
     service_catalog: 'Service catalog',
     gl_accounts: 'GL account master',
     mnt_dashboard: 'Maintenance Dashboard',
+    mfg_foundation: 'Manufacturing Masters',
+    pln_foundation: 'Production Planning & MRP',
     mnt_workforce: 'Artisan capacity & time',
     mnt_setup: 'Maintenance Setup',
     work_requests: 'Work requests',
@@ -259,6 +270,12 @@ export default function OrgShell({ session, route, onSignOut, onSessionChange }:
             break;
         case 'asset_dictionary':
             content = <AssetRegister view='dictionary' />;
+            break;
+        case 'mfg_foundation':
+            content = <ProductionFoundation module='MFG' permissions={data.permissions} />;
+            break;
+        case 'pln_foundation':
+            content = <ProductionFoundation module='PLN' permissions={data.permissions} />;
             break;
         case 'material_catalog':
             content = <ProcurementCatalog key='materials' kind='materials' />;
