@@ -239,6 +239,29 @@ export function fictionalLine11Demo(){
 }
 
 export const plnMfgFoundationRoutes={
+    'POST /api/org/pln-mfg/foundation/references':[
+        orgRoute('org.mfg.foundation.references','MFG.view',async ctx=>{
+            const orgRoot='organizations/'+ctx.orgId;
+            const [materials,assets,structure]=await Promise.all([
+                listDocs(orgRoot+'/materials'),listDocs(orgRoot+'/assets'),listDocs(orgRoot+'/structure'),
+            ]);
+            const sites=[];
+            for(const site of structure.filter(x=>str(x.data.level)==='site'&&str(x.data.status)!=='inactive')){
+                if(await recordAccess(ctx,'MFG.view',site.id))
+                    sites.push({id:site.id,name:str(site.data.name)||site.id,code:str(site.data.code)});
+            }
+            const visibleSites=new Set(sites.map(x=>x.id));
+            return {
+                sites,
+                materials:materials.filter(x=>['approved','active'].includes(str(x.data.status))&&str(x.data.materialNumber))
+                    .map(x=>({id:x.id,name:str(x.data.shortText)||str(x.data.name)||x.id,
+                        materialNumber:str(x.data.materialNumber),uom:str(x.data.uom)})),
+                assets:assets.filter(x=>str(x.data.status)==='active'&&
+                    (!str(x.data.siteId)||visibleSites.has(str(x.data.siteId))))
+                    .map(x=>({id:x.id,name:str(x.data.name)||x.id,siteId:str(x.data.siteId)})),
+            };
+        }),
+    ],
     'POST /api/org/pln-mfg/foundation/list':[
         orgRoute('org.mfg.foundation.list','MFG.view',async ctx=>{
             const kind=readKind(ctx.body.kind);
