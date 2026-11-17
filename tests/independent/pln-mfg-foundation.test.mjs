@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {normalizeMaster,detectBomCycle,fictionalLine11Demo} from '../../backend/plnMfgFoundation.ts';
 import {selectEffectiveRelease} from '../../backend/plnMfgRelease.ts';
-import {fictionalPilotSnapshot,assertPilotSeedAllowed} from '../../backend/plnMfgPilotSeed.ts';
+import {fictionalPilotSnapshot,validateFictionalPilot,assertPilotSeedAllowed} from '../../backend/plnMfgPilotSeed.ts';
 
 const read=p=>readFileSync(new URL('../../'+p,import.meta.url),'utf8');
 
@@ -160,4 +160,31 @@ test('master-data selector lists published Inventory, active Assets and site rec
  assert.match(ui,/Published Inventory Material Master/);
  assert.match(ui,/Active Asset Register equipment/);
  assert.match(ui,/Site applicability/);
+});
+
+
+test('fictional full multi-stage pilot graph is internally consistent',()=>{
+ const sample=fictionalPilotSnapshot();
+ assert.deepEqual(validateFictionalPilot(sample),[]);
+ const broken=structuredClone(sample);
+ broken.boms[0].components[0].skuId='MISSING-RAW';
+ assert.ok(validateFictionalPilot(broken).some(x=>x.includes('missing component MISSING-RAW')));
+ const mismatched=structuredClone(sample);
+ mismatched.stock[0].uom='KG';
+ assert.ok(validateFictionalPilot(mismatched).some(x=>x.includes('unit mismatch')));
+ const badRouting=structuredClone(sample);
+ badRouting.routings[0].operations[2].dependsOn=['UNCONFIGURED'];
+ assert.ok(validateFictionalPilot(badRouting).some(x=>x.includes('invalid stage dependency')));
+});
+
+test('pilot verification reads sandbox documents without modifying operational masters',()=>{
+ const backend=read('backend/plnMfgPilotSeed.ts');
+ assert.ok(backend.includes('verifySeededFictionalPilot'));
+ assert.ok(backend.includes("'/mfg_demo_sandboxes/'"));
+ assert.ok(backend.includes('listDocs(root+'));
+ assert.ok(backend.includes('isSubset(item,record.data)'));
+ assert.ok(backend.includes("foundation/demo/verify"));
+ const ui=read('src/org/ProductionFoundation.tsx');
+ assert.ok(ui.includes('Verify stored pilot records'));
+ assert.ok(ui.includes('Pilot acceptance blocked'));
 });
