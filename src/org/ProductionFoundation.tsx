@@ -47,8 +47,8 @@ function TextField({title,value,onChange}:{title:string;value:string;onChange:(v
 }
 function MasterEditor({tab,draft,onChange,items,resources}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];resources:Row[]}){
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
-    const itemOptions:Array<[string,string]>=[['','Select a SKU'],...items.map(i=>[i.id,i.name])];
-    const resourceOptions:Array<[string,string]>=[['','Select a resource'],...resources.map(r=>[r.id,r.name])];
+    const itemOptions:Array<[string,string]>=[['','Select a SKU'],...items.map(i=>[i.id,i.name] as [string,string])];
+    const resourceOptions:Array<[string,string]>=[['','Select a resource'],...resources.map(r=>[r.id,r.name] as [string,string])];
     const components=asComponents(draft.components);
     const operations=asOperations(draft.operations);
     return <div className='space-y-4'>
