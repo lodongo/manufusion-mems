@@ -5,13 +5,13 @@
 const BY_PERMISSION:Record<string,string>={
   INV_ST:'INV',PRC:'PRC',MNT:'MNT',AST:'AST',WHS:'WHS',FIN:'FIN',
   ADM:'ADM',INV:'INV',HRM:'HRM',HR:'HRM',SAF:'SAF',QLT:'QLT',
-  PAY:'PAY',MFG:'MFG',CRM:'CRM',SAL:'SAL',DOC:'DOC',PRJ:'PRJ',
+  PAY:'PAY',MFG:'MFG',PLN:'PLN',CRM:'CRM',SAL:'SAL',DOC:'DOC',PRJ:'PRJ',
 };
 const BY_ROUTE:Record<string,string>={
   mnt:'MNT',maintenance:'MNT',assets:'AST',asset:'AST',ast:'AST',
   inventory:'INV',inv:'INV',stock:'INV',stocktake:'INV',
   procurement:'PRC',prc:'PRC',warehouse:'WHS',whs:'WHS',
-  finance:'FIN',fin:'FIN',quality:'QLT',saf:'SAF',hr:'HRM',hrm:'HRM',
+  finance:'FIN',fin:'FIN',pln:'PLN',mfg:'MFG',quality:'QLT',saf:'SAF',hr:'HRM',hrm:'HRM',
 };
 export function moduleForOrgAction(name:string,permission:string|null):string|null {
   const prefix=permission?.split(/[._]/)[0].toUpperCase();
