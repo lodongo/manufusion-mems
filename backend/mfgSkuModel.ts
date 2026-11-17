@@ -42,10 +42,14 @@ export function masterPrefix(kind:'items'|'boms'|'resources'|'routings',type='')
 export function skuUnitConversion(from:string,to:string):number|null {
     if(!from||!to)return null;
     const pick=(code:string)=>{
-        const exact=PROCUREMENT_UNITS.find(u=>u.code===code&&u.active&&u.selectable);
-        const matching=PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable&&
-            (u.symbol.toLowerCase()===code.toLowerCase()||u.label.toLowerCase()===code.toLowerCase()));
-        return exact??(matching.length===1?matching[0]:null);
+        const units=PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable);
+        const exact=units.find(u=>u.code===code);
+        const exactSymbol=units.filter(u=>u.symbol===code);
+        if(exact)return exact;
+        if(exactSymbol.length===1)return exactSymbol[0]; // g = gram, G can be a distinct dimensional symbol
+        const matching=units.filter(u=>u.symbol.toLowerCase()===code.toLowerCase()||
+            u.label.toLowerCase()===code.toLowerCase());
+        return matching.length===1?matching[0]:null;
     };
     const a=pick(from),b=pick(to);
     if(!a||!b||a.baseUnit!==b.baseUnit||a.categoryCode!==b.categoryCode)return null;
