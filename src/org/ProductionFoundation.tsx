@@ -116,6 +116,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
     const [configRevision,setConfigRevision]=useState(0);
     const [demo,setDemo]=useState<Demo|null>(null);
+    const [history,setHistory]=useState<Row[]>([]);
     const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
     const canViewMasters=hasPerm(permissions,'MFG.view');
     const canViewPlanning=hasPerm(permissions,'PLN.view');
@@ -144,7 +145,14 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         if(active==='recipes')return rows.boms.filter(r=>r.type==='RECIPE');
         return rows[kind];
     },[active,rows]);
-    const changeTab=(tab:Tab)=>{setActive(tab);setDraft(null);setError('');setNotice('');};
+    const changeTab=(tab:Tab)=>{setActive(tab);setDraft(null);setHistory([]);setError('');setNotice('');};
+    const openDraft=async(row:Row)=>{
+        setDraft(row);setHistory([]);setError('');
+        try{
+            const result=await callBackend<{revisions:Row[]}>('/api/org/pln-mfg/foundation/history',{kind:recordKind(active),id:row.id});
+            setHistory(result.revisions);
+        }catch(e){setError(e instanceof Error?e.message:'Could not read revision history.');}
+    };
     const save=async()=>{
         if(!draft||!canSave)return;
         setBusy(true);setError('');setNotice('');
@@ -190,13 +198,14 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-slate-400'>{filtered.length} saved master records · draft versions</p>{canSave&&<Button onClick={()=>setDraft(newRecord(active))}>Add {active==='items'?'SKU':active==='recipes'?'recipe':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
+                {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-slate-300'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-slate-700 px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
                 <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items} resources={rows.resources}/>
                 <div className='flex justify-end'><Button disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving...':'Save draft'}</Button></div>
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-emerald-300'>{row.id}</span><span className='rounded-full bg-slate-800 px-2 py-1 text-[11px] uppercase text-slate-300'>{str(row.status)||'draft'}</span></div>
                 <h3 className='font-semibold'>{row.name}</h3>
                 <p className='text-xs text-slate-400'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:'Components: '+asComponents(row.components).length}</p>
-                <div className='flex items-center justify-between gap-2'><span className='text-xs text-slate-500'>Revision {row.revision??1}</span>{canSave&&<Button variant='secondary' onClick={()=>setDraft(row)}>Open / edit</Button>}</div>
+                <div className='flex items-center justify-between gap-2'><span className='text-xs text-slate-500'>Revision {row.revision??1}</span>{canSave&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}</div>
             </Card>)}</div>}
             {!filtered.length&&!draft&&<Card><p className='text-sm text-slate-400'>No records have been created here yet. Start with products and resources; then define the BOMs and production routings. The fictional pilot is available under Line 11 Pilot Preview.</p></Card>}
         </>}
