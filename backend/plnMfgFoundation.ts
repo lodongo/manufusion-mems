@@ -130,23 +130,47 @@ const readKind=(v:unknown):MasterKind=>ENUM(v,MASTER_KINDS,'master-data kind');
 
 /** Demo data is read-only and never writes to live stock/finance/procurement. */
 export function fictionalLine11Demo(){
+    // Read-only reference scenario, never written to an organization or Inventory ledger.
     const items=[
-        {id:'DEMO-PREFORM',name:'Fictional PET preform',category:'RAW',uom:'EA'},
-        {id:'DEMO-CAP',name:'Fictional 2622 cap',category:'RAW',uom:'EA'},
-        {id:'DEMO-LABEL',name:'Fictional 500 mL label',category:'RAW',uom:'EA'},
-        {id:'DEMO-WATER',name:'Fictional treated beverage water',category:'RAW',uom:'L'},
-        {id:'DEMO-PET-BOTTLE',name:'Fictional blown PET bottle',category:'INTERMEDIATE',uom:'EA'},
-        {id:'DEMO-FILLED',name:'Fictional filled and capped bottle',category:'INTERMEDIATE',uom:'EA'},
+        {id:'DEMO-RAW-WATER',name:'Fictional untreated water',category:'RAW',uom:'L'},
+        {id:'DEMO-MINERAL',name:'Fictional beverage treatment mineral',category:'RAW',uom:'KG'},
+        {id:'DEMO-PREFORM-500',name:'Fictional 500 mL PET preform',category:'PACKAGING',uom:'EA'},
+        {id:'DEMO-PREFORM-1000',name:'Fictional 1 L PET preform',category:'PACKAGING',uom:'EA'},
+        {id:'DEMO-CAP',name:'Fictional 2622 cap',category:'PACKAGING',uom:'EA'},
+        {id:'DEMO-LABEL-500',name:'Fictional 500 mL label',category:'PACKAGING',uom:'EA'},
+        {id:'DEMO-LABEL-1000',name:'Fictional 1 L label',category:'PACKAGING',uom:'EA'},
+        {id:'DEMO-CASE',name:'Fictional 12-bottle case material',category:'PACKAGING',uom:'EA'},
+        {id:'DEMO-PREPARED-WATER',name:'Fictional prepared beverage water',category:'INTERMEDIATE',uom:'L'},
+        {id:'DEMO-BOTTLE-500',name:'Fictional 500 mL blown PET bottle',category:'INTERMEDIATE',uom:'EA'},
+        {id:'DEMO-BOTTLE-1000',name:'Fictional 1 L blown PET bottle',category:'INTERMEDIATE',uom:'EA'},
+        {id:'DEMO-FILLED-500',name:'Fictional filled 500 mL bottle',category:'INTERMEDIATE',uom:'EA'},
+        {id:'DEMO-FILLED-1000',name:'Fictional filled 1 L bottle',category:'INTERMEDIATE',uom:'EA'},
         {id:'DEMO-FG-500',name:'Fictional PET water 500 mL x 12',category:'FINISHED',uom:'CASE'},
         {id:'DEMO-FG-1000',name:'Fictional PET water 1 L x 12',category:'FINISHED',uom:'CASE'},
     ];
+    const c=(skuId:string,quantity:number,uom:string,scrapPct=0)=>({skuId,quantity,uom,scrapPct});
     const boms=[
-        {id:'DEMO-BOM-BLOW',type:'BOM',name:'Blow bottle',parentSkuId:'DEMO-PET-BOTTLE',outputQty:1,outputUom:'EA',components:[{skuId:'DEMO-PREFORM',quantity:1,uom:'EA',scrapPct:1}]},
-        {id:'DEMO-BOM-FILL',type:'RECIPE',name:'Fill and cap',parentSkuId:'DEMO-FILLED',outputQty:1,outputUom:'EA',components:[{skuId:'DEMO-PET-BOTTLE',quantity:1,uom:'EA',scrapPct:1},{skuId:'DEMO-CAP',quantity:1,uom:'EA',scrapPct:1},{skuId:'DEMO-WATER',quantity:0.5,uom:'L',scrapPct:1}]},
-        {id:'DEMO-BOM-PACK',type:'BOM',name:'Label and pack',parentSkuId:'DEMO-FG-500',outputQty:1,outputUom:'CASE',components:[{skuId:'DEMO-FILLED',quantity:12,uom:'EA',scrapPct:1},{skuId:'DEMO-LABEL',quantity:12,uom:'EA',scrapPct:1}]},
+        {id:'DEMO-RECIPE-WATER',type:'RECIPE',name:'Prepare fictional beverage water',parentSkuId:'DEMO-PREPARED-WATER',outputQty:1000,outputUom:'L',components:[c('DEMO-RAW-WATER',1000,'L',1),c('DEMO-MINERAL',0.3,'KG')]},
+        {id:'DEMO-BOM-BLOW-500',type:'BOM',name:'Blow 500 mL PET bottle',parentSkuId:'DEMO-BOTTLE-500',outputQty:1,outputUom:'EA',components:[c('DEMO-PREFORM-500',1,'EA',1)]},
+        {id:'DEMO-BOM-BLOW-1000',type:'BOM',name:'Blow 1 L PET bottle',parentSkuId:'DEMO-BOTTLE-1000',outputQty:1,outputUom:'EA',components:[c('DEMO-PREFORM-1000',1,'EA',1)]},
+        {id:'DEMO-BOM-FILL-500',type:'BOM',name:'Fill and cap 500 mL',parentSkuId:'DEMO-FILLED-500',outputQty:1,outputUom:'EA',components:[c('DEMO-BOTTLE-500',1,'EA',0.5),c('DEMO-CAP',1,'EA',1),c('DEMO-PREPARED-WATER',0.5,'L',1)]},
+        {id:'DEMO-BOM-FILL-1000',type:'BOM',name:'Fill and cap 1 L',parentSkuId:'DEMO-FILLED-1000',outputQty:1,outputUom:'EA',components:[c('DEMO-BOTTLE-1000',1,'EA',0.5),c('DEMO-CAP',1,'EA',1),c('DEMO-PREPARED-WATER',1,'L',1)]},
+        {id:'DEMO-BOM-PACK-500',type:'BOM',name:'Label and case pack 500 mL',parentSkuId:'DEMO-FG-500',outputQty:1,outputUom:'CASE',components:[c('DEMO-FILLED-500',12,'EA',0.5),c('DEMO-LABEL-500',12,'EA',1),c('DEMO-CASE',1,'EA',0.5)]},
+        {id:'DEMO-BOM-PACK-1000',type:'BOM',name:'Label and case pack 1 L',parentSkuId:'DEMO-FG-1000',outputQty:1,outputUom:'CASE',components:[c('DEMO-FILLED-1000',12,'EA',0.5),c('DEMO-LABEL-1000',12,'EA',1),c('DEMO-CASE',1,'EA',0.5)]},
     ];
-    const resources=[{id:'DEMO-L11',name:'Fictional KHS PET Line 11',type:'LINE',rate:28000,rateUom:'EA',efficiency:80}];
-    const routings=[{id:'DEMO-ROUTE-500',name:'Fictional 500 mL process',skuId:'DEMO-FG-500',operations:[{code:'BLOW',name:'Blowing',resourceId:'DEMO-L11'},{code:'FILL',name:'Filling and capping',resourceId:'DEMO-L11'},{code:'PACK',name:'Labelling and packing',resourceId:'DEMO-L11'}]}];
+    const resources=[
+        {id:'DEMO-PREP',name:'Fictional water preparation',type:'BATCH_VESSEL',rate:4000,rateUom:'L',efficiency:90},
+        {id:'DEMO-BLOW',name:'Fictional Line 11 bottle blowing',type:'MACHINE',rate:28000,rateUom:'EA',efficiency:85},
+        {id:'DEMO-FILL',name:'Fictional KHS PET Line 11 filling',type:'LINE',rate:28000,rateUom:'EA',efficiency:80},
+        {id:'DEMO-PACK',name:'Fictional Line 11 case packing',type:'WORK_CENTER',rate:2000,rateUom:'CASE',efficiency:80},
+    ];
+    const route=(id:string,name:string,skuId:string)=>({id,name,skuId,operations:[
+        {code:'PREP',name:'Water preparation',resourceId:'DEMO-PREP'},
+        {code:'BLOW',name:'PET bottle blowing',resourceId:'DEMO-BLOW'},
+        {code:'FILL',name:'Fill and cap',resourceId:'DEMO-FILL'},
+        {code:'PACK',name:'Label, pack and palletize',resourceId:'DEMO-PACK'},
+    ]});
+    const routings=[route('DEMO-ROUTE-500','Fictional 500 mL multi-stage process','DEMO-FG-500'),route('DEMO-ROUTE-1000','Fictional 1 L multi-stage process','DEMO-FG-1000')];
     return {demo:true,persisted:false,isolated:true,label:'READ-ONLY FICTIONAL DATA — no purchasing, inventory or finance postings',items,boms,resources,routings};
 }
 
