@@ -129,7 +129,8 @@ const track=(ctx:OrgContext,action:string,target:string)=>
 const out=(d:{id:string;data:Obj;updateTime?:string})=>({id:d.id,...d.data,updatedAt:str(d.data.updatedAt),revision:num(d.data.revision)??1});
 const readKind=(v:unknown):MasterKind=>ENUM(v,MASTER_KINDS,'master-data kind');
 async function recordAccess(ctx:OrgContext,permission:string,siteId:string):Promise<boolean>{
-    if(!siteId)return ctx.role==='org_super_admin'||hasPerm(ctx.directPermissions,permission);
+    // Shared company masters are readable to authorized MFG viewers, but only direct role holders may edit them.
+    if(!siteId)return permission==='MFG.view'||ctx.role==='org_super_admin'||hasPerm(ctx.directPermissions,permission);
     const scope=await scopeOf(ctx);
     return canAt(ctx,permission,await nodePath(ctx.orgId,siteId),scope);
 }
