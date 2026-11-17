@@ -1,11 +1,24 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Alert } from '../components/ui';
-import { Button, Card, PageTitle, Spinner } from '../admin/kit';
+import { useEffect, useId, useMemo, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { Alert, Field as MemsField, SelectField } from '../components/ui';
+import { Spinner } from '../admin/kit';
+import { SkuConfigurationFields, SkuSetupPanel, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
+function Card({children,className=''}:{children:ReactNode;className?:string}){
+    return <section className={'rounded-2xl border border-line bg-panel p-4 text-ink '+className}>{children}</section>;
+}
+function PageTitle({title,subtitle,action}:{title:string;subtitle:string;action:ReactNode}){
+    return <div className='sticky top-[var(--mems-top,0px)] z-10 -mx-2 mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-line bg-page/95 px-2 py-3 backdrop-blur'>
+        <div className='min-w-0'><h1 className='text-lg font-semibold text-ink'>{title}</h1><p className='text-sm text-muted'>{subtitle}</p></div>{action}
+    </div>;
+}
+function Button({variant='primary',children,className='',...props}:ButtonHTMLAttributes<HTMLButtonElement>&{variant?:'primary'|'secondary'|'danger'}){
+    const styles=variant==='primary'?'bg-brand text-onbrand':variant==='danger'?'border border-red-500/50 text-red-500':'border border-line text-ink';
+    return <button {...props} className={'flex min-h-11 items-center justify-center rounded-xl px-4 text-sm font-semibold disabled:opacity-50 '+styles+' '+className}>{children}</button>;
+}
 import { callBackend } from '../lib/backend';
 import { hasPerm } from '../types';
 
 type Kind='items'|'boms'|'resources'|'routings';
-type Tab=Kind|'recipes'|'config'|'demo';
+type Tab=Kind|'recipes'|'skuSetup'|'config'|'demo';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
@@ -21,6 +34,7 @@ type References={
 const emptyReferences:References={materials:[],assets:[],sites:[]};
 const kinds:Kind[]=['items','boms','resources','routings'];
 const tabs:{key:Tab;label:string;hint:string}[]=[
+    {key:'skuSetup',label:'SKU Configuration',hint:'Configure names, production forms, containers, packages and normalization units'},
     {key:'items',label:'Products & SKUs',hint:'Finished, intermediate and Inventory-linked raw materials'},
     {key:'boms',label:'Bills of Materials',hint:'Versioned component structures'},
     {key:'recipes',label:'Recipes',hint:'Ingredient formulas and intermediate processing'},
@@ -30,10 +44,10 @@ const tabs:{key:Tab;label:string;hint:string}[]=[
     {key:'demo',label:'Line 11 Pilot Preview',hint:'Read-only fictional multi-stage example'},
 ];
 const emptyRows:Record<Kind,Row[]>={items:[],boms:[],resources:[],routings:[]};
-const fld='w-full min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500';
-const label='mb-1 block text-xs font-medium text-slate-300';
+const fld='w-full min-h-11 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink outline-none focus:border-brand';
+const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab):Row=>{
-    if(tab==='items')return {id:'',name:'',category:'FINISHED',family:'',uom:'EA',siteId:'',packQty:1,inventoryMaterialId:''};
+    if(tab==='items')return {id:'',name:'',category:'FINISHED',family:'',uom:'EA',siteId:'',packQty:1,inventoryMaterialId:'',skuComponents:{}};
     if(tab==='boms'||tab==='recipes')return {id:'',name:'',type:tab==='recipes'?'RECIPE':'BOM',parentSkuId:'',outputQty:1,outputUom:'EA',components:[{skuId:'',quantity:1,uom:'EA',scrapPct:0}]};
     if(tab==='resources')return {id:'',name:'',type:'LINE',rate:1000,rateUom:'EA',efficiency:100,siteId:'',assetId:''};
     return {id:'',name:'',skuId:'',operations:[{code:'STAGE_01',name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:[]}]};
@@ -44,16 +58,21 @@ const number=(value:unknown,def=0):number=>typeof value==='number'&&Number.isFin
 const asComponents=(value:unknown):Component[]=>Array.isArray(value)?value as Component[]:[];
 const asOperations=(value:unknown):Operation[]=>Array.isArray(value)?value as Operation[]:[];
 
-function Field({title,value,onChange,type='text',placeholder='',required=false}:{title:string;value:string|number;onChange:(v:string)=>void;type?:string;placeholder?:string;required?:boolean}){
-    return <label className='block min-w-0'><span className={label}>{title}</span><input className={fld} type={type} value={value} placeholder={placeholder} required={required} onChange={e=>onChange(e.target.value)}/></label>;
+function Field({title,value,onChange,type='text',placeholder='',required=false,disabled=false}:{title:string;value:string|number;onChange:(v:string)=>void;type?:string;placeholder?:string;required?:boolean;disabled?:boolean}){
+    const id=useId();
+    return <MemsField id={id} label={title} type={type} value={value} placeholder={placeholder}
+        required={required} disabled={disabled} onChange={e=>onChange(e.target.value)}/>;
 }
 function Choice({title,value,options,onChange}:{title:string;value:string;options:Array<[string,string]>;onChange:(v:string)=>void}){
-    return <label className='block min-w-0'><span className={label}>{title}</span><select className={fld} value={value} onChange={e=>onChange(e.target.value)}>{options.map(([v,t])=><option key={v} value={v}>{t}</option>)}</select></label>;
+    const id=useId();
+    return <SelectField id={id} label={title} value={value} onChange={e=>onChange(e.target.value)}>
+        {options.map(([v,t])=><option key={v} value={v}>{t}</option>)}
+    </SelectField>;
 }
 function TextField({title,value,onChange}:{title:string;value:string;onChange:(v:string)=>void}){
     return <label className='block'><span className={label}>{title}</span><textarea rows={2} className={fld} value={value} onChange={e=>onChange(e.target.value)}/></label>;
 }
-function MasterEditor({tab,draft,onChange,items,resources,refs}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];resources:Row[];refs:References}){
+function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];resources:Row[];refs:References;skuSetup:SkuSetup}){
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
     const itemOptions:Array<[string,string]>=[['','Select a SKU'],...items.map(i=>[i.id,i.name] as [string,string])];
     const resourceOptions:Array<[string,string]>=[['','Select a resource'],...resources.map(r=>[r.id,r.name] as [string,string])];
@@ -64,13 +83,16 @@ function MasterEditor({tab,draft,onChange,items,resources,refs}:{tab:Tab;draft:R
     const operations=asOperations(draft.operations);
     return <div className='space-y-4'>
         <div className='grid gap-3 md:grid-cols-2'>
-            <Field title='Unique code' value={draft.id} required onChange={v=>update('id',v)} placeholder='e.g. FG-WAT-500-12'/>
-            <Field title='Name' value={draft.name} required onChange={v=>update('name',v)}/>
+            <div className='rounded-xl border border-line bg-page p-3'>
+                <span className='block text-xs text-muted'>MEMS generated master code</span>
+                <span className='font-mono text-sm text-brand'>{draft.id||'Automatically allocated on Save'}</span>
+            </div>
+            {!(tab==='items'&&str(draft.category)==='FINISHED')&&<Field title='Name' value={draft.name} required onChange={v=>update('name',v)}/>}
             {tab==='items'&&<>
                 <Choice title='SKU type' value={str(draft.category)} options={ [['FINISHED','Finished goods'],['INTERMEDIATE','Intermediate/WIP'],['RAW','Inventory material'],['PACKAGING','Packaging material']] } onChange={v=>update('category',v)}/>
-                <Field title='Product family' value={str(draft.family)} onChange={v=>update('family',v)}/>
-                <Field title='Base unit of measure' value={str(draft.uom)} onChange={v=>update('uom',v)}/>
-                <Field title='Quantity per sales pack' value={number(draft.packQty,1)} type='number' onChange={v=>update('packQty',Number(v))}/>
+                <Field title='Product family (optional)' value={str(draft.family)} onChange={v=>update('family',v)}/>
+                {str(draft.category)!=='FINISHED'&&<Field title='Base unit of measure' value={str(draft.uom)} onChange={v=>update('uom',v)}/>}
+                {str(draft.category)==='FINISHED'&&<div className='rounded-xl border border-line bg-page p-3 text-sm text-soft'>The SKU name, physical package unit, containers per pack and conversion factor are calculated from selected configuration parameters.</div>}
                 {['RAW','PACKAGING'].includes(str(draft.category))&&<Choice title='Published Inventory Material Master' value={str(draft.inventoryMaterialId)} options={materialOptions} onChange={v=>{const found=refs.materials.find(m=>m.id===v);onChange({...draft,inventoryMaterialId:v,uom:found?.uom||draft.uom});}}/>}
             </>}
             {(tab==='boms'||tab==='recipes')&&<>
@@ -93,6 +115,8 @@ function MasterEditor({tab,draft,onChange,items,resources,refs}:{tab:Tab;draft:R
             </>}
             <Choice title='Site applicability' value={str(draft.siteId)} options={siteOptions} onChange={v=>update('siteId',v)}/>
         </div>
+        {tab==='items'&&str(draft.category)==='FINISHED'&&<SkuConfigurationFields value={(draft.skuComponents||{}) as SkuSelections}
+            onChange={v=>update('skuComponents',v)} setup={skuSetup}/>}
         <TextField title='Description / notes' value={str(draft.description)} onChange={v=>update('description',v)}/>
         {(tab==='boms'||tab==='recipes')&&<section className='rounded-xl border border-slate-700 p-3'>
             <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Component quantities</h3><Button variant='secondary' type='button' onClick={()=>update('components',[...components,{skuId:'',quantity:1,uom:'EA',scrapPct:0}])}>Add component</Button></div>
@@ -126,6 +150,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs}:{tab:Tab;draft:R
 export default function ProductionFoundation({module,permissions}:{module:'PLN'|'MFG';permissions:string[]}){
     const [active,setActive]=useState<Tab>(module==='PLN'?'config':'items');
     const [rows,setRows]=useState<Record<Kind,Row[]>>(emptyRows);
+    const [skuSetup,setSkuSetup]=useState<SkuSetup>(emptySkuSetup);
     const [refs,setRefs]=useState<References>(emptyReferences);
     const [draft,setDraft]=useState<Row|null>(null);
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
@@ -141,6 +166,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const canViewPlanning=hasPerm(permissions,'PLN.view');
     const visibleTabs=tabs.filter(t=>t.key==='config'?canViewPlanning:canViewMasters);
     const canEdit=canViewMasters&&hasPerm(permissions,'MFG.master.edit');
+    const canSkuConfig=canViewMasters&&hasPerm(permissions,'MFG.sku.configure');
     const canConfig=hasPerm(permissions,'PLN.configure');
     const isReleaseMaster=['boms','recipes','routings'].includes(active);
     const releaseScope=active==='routings'?'MFG.routing':'MFG.bom';
@@ -150,14 +176,16 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const load=async()=>{
         setLoading(true);setError('');
         try{
-            const [datasets,configuration,refData]=await Promise.all([
+            const [datasets,configuration,refData,skuData]=await Promise.all([
                 canViewMasters?Promise.all(kinds.map(kind=>callBackend<{records:Row[]}>('/api/org/pln-mfg/foundation/list',{kind}))):Promise.resolve(kinds.map(()=>({records:[] as Row[]}))),
                 callBackend<{config:Config;revision:number}>('/api/org/pln-mfg/foundation/config').catch(()=>null),
                 canViewMasters?callBackend<References>('/api/org/pln-mfg/foundation/references'):Promise.resolve(emptyReferences),
+                canViewMasters?callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup'):Promise.resolve(emptySkuSetup),
             ]);
             const [items,boms,resources,routings]=datasets;
             setRows({items:items.records,boms:boms.records,resources:resources.records,routings:routings.records});
             setRefs(refData);
+            setSkuSetup(skuData);
             if(configuration){setConfig(configuration.config);setConfigRevision(configuration.revision);}
         }catch(e){setError(e instanceof Error?e.message:'Could not load manufacturing masters.');}
         finally{setLoading(false);}
@@ -170,6 +198,10 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         if(active==='recipes')return rows.boms.filter(r=>r.type==='RECIPE');
         return rows[kind];
     },[active,rows]);
+    const refreshSkuSetup=async()=>{
+        const data=await callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup');
+        setSkuSetup(data);
+    };
     const changeTab=(tab:Tab)=>{
         setActive(tab);setDraft(null);setHistory([]);setError('');setNotice('');setDecisionReason('');setDemoVerification(null);
         if(tab==='demo'&&canViewMasters)
@@ -202,8 +234,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         try{
             const body={...draft};
             if(active==='boms'||active==='recipes')body.type=active==='recipes'?'RECIPE':'BOM';
-            await callBackend('/api/org/pln-mfg/foundation/save',{kind:recordKind(active),record:body,expectedRevision:body.revision??0});
-            await load();setDraft(null);setNotice('Draft saved with revision history. It has not been activated.');
+            const result=await callBackend<{record:Row;generatedCode?:string}>('/api/org/pln-mfg/foundation/save',{kind:recordKind(active),record:body,expectedRevision:body.revision??0});
+            await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+'. The code is maintained by MEMS.');
         }catch(e){setError(e instanceof Error?e.message:'Could not save.');}
         finally{setBusy(false);}
     };
@@ -243,7 +275,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         <p className='text-sm text-slate-400'>{tabs.find(t=>t.key===active)?.hint}</p>
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-emerald-200'>{notice}</p>}
-        {loading?<Spinner/>:active==='config'?<Card className='space-y-4'>
+        {loading?<Spinner/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='config'?<Card className='space-y-4'>
             <p className='text-sm text-slate-400'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
                 <Field title='Planning horizon (days)' type='number' value={config.horizonDays} onChange={v=>setConfig(s=>({...s,horizonDays:Number(v)}))}/>
@@ -278,7 +310,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-slate-300'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-slate-700 px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
-                <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items} resources={rows.resources} refs={refs}/>
+                <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items} resources={rows.resources} refs={refs} skuSetup={skuSetup}/>
                 <div className='flex justify-end'><Button disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving...':'Save draft'}</Button></div>
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-emerald-300'>{row.id}</span><span className='rounded-full bg-slate-800 px-2 py-1 text-[11px] uppercase text-slate-300'>{str(row.status)||'draft'}</span></div>
