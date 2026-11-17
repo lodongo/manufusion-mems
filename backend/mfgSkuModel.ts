@@ -41,7 +41,6 @@ export function masterPrefix(kind:'items'|'boms'|'resources'|'routings',type='')
 /** Exact conversion between dimensional units using the published central MEMS registry. */
 export function skuUnitConversion(from:string,to:string):number|null {
     if(!from||!to)return null;
-    if(from.toLowerCase()===to.toLowerCase())return 1;
     const pick=(code:string)=>{
         const exact=PROCUREMENT_UNITS.find(u=>u.code===code&&u.active&&u.selectable);
         const matching=PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable&&
@@ -136,6 +135,12 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
             throw new HttpError(400,'Container size needs a positive quantity and MEMS unit of measure.');
         return {...base,uom,quantity};
     }
+    if(kind==='packages'){
+        const uom=str(raw.uom).trim().toUpperCase();
+        if(!/^[A-Z][A-Z0-9_]{1,14}$/.test(uom))
+            throw new HttpError(400,'Choose a physical package code such as CASE, TRAY or PACK.');
+        return {...base,uom};
+    }
     if(kind==='packageCounts'){
         const quantity=Number(raw.quantity);
         if(!Number.isSafeInteger(quantity)||quantity<1||quantity>10000000)
@@ -149,4 +154,16 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
         return {...base,baseUom,quantityPerUnit};
     }
     return base;
+}
+
+/** Human-friendly SKU name derived from the organization's selected catalogue values. */
+export function composeConfiguredSkuName(values:SkuComponents,params:SkuParameter[]):string {
+    const selected=new Map(params.map(p=>[p.id,p]));
+    const name=str(selected.get(values.productNameId||'')?.name).trim();
+    const size=str(selected.get(values.containerSizeId||'')?.name).trim();
+    const container=str(selected.get(values.containerId||'')?.name).trim();
+    const pack=str(selected.get(values.packageId||'')?.name).trim();
+    const count=str(selected.get(values.packageCountId||'')?.name).trim();
+    return [name,[size,container].filter(Boolean).join(' '),[pack,count?'x'+count:''].filter(Boolean).join(' ')]
+        .filter(Boolean).join(' · ').slice(0,160);
 }
