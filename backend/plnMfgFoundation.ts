@@ -47,7 +47,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const category=ENUM(raw.category,STAGES,'item category');
         const inventoryMaterialId=str(raw.inventoryMaterialId).trim();
         if(inventoryMaterialId&&!ID.test(inventoryMaterialId))throw new HttpError(400,'Invalid Inventory material reference.');
-        if(category==='RAW'&& !inventoryMaterialId)throw new HttpError(400,'Raw materials must refer to the existing Inventory material master. Demo raw materials are available as read-only samples.');
+        if((category==='RAW'||category==='PACKAGING')&& !inventoryMaterialId)throw new HttpError(400,'Raw materials must refer to the existing Inventory material master. Demo raw materials are available as read-only samples.');
         return {...base,category,family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,packQty:POSITIVE(raw.packQty??1,'Pack quantity')};
     }
     if(kind==='resources'){
@@ -110,7 +110,7 @@ async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,existingI
             if(!await getDoc(DOC(ctx.orgId,'items',str(c.skuId))))throw new HttpError(400,'Component '+str(c.skuId)+' is missing from SKU master.');
         }
         const others=(await listDocs(ROOT(ctx.orgId,'boms')))
-            .filter(d=>d.id!==existingId&&str(d.data.status)==='active')
+            .filter(d=>d.id!==existingId)
             .map(d=>({parentSkuId:str(d.data.parentSkuId),components:ARR(d.data.components).map(c=>({skuId:str(c.skuId)}))}));
         if(detectBomCycle(others,str(item.parentSkuId),components.map(c=>({skuId:str(c.skuId)}))))
             throw new HttpError(400,'The BOM introduces a circular manufacturing dependency.');
