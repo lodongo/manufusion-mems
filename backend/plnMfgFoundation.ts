@@ -1,0 +1,210 @@
+/**
+ * PLN/MFG Phase 1 foundation: shared product, versioned BOM/recipe, resources and routings.
+ * The module does not create stock, purchase requisitions or accounting entries.
+ * Firestore is tenant-scoped through orgRoute; mutations use optimistic concurrency.
+ */
+import { HttpError, getDoc, isObj, listDocs, nowIso, num, str, writeDoc, type Obj, type Plain } from './core';
+import { orgRoute, type OrgContext } from './guards';
+import { audit } from './audit';
+import { getNode } from './structure';
+
+export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
+export type MasterKind = typeof MASTER_KINDS[number];
+const COLLECTION: Record<MasterKind,string> = {
+    items: 'mfg_items', boms: 'mfg_boms', resources: 'mfg_resources', routings: 'mfg_routings',
+};
+const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{1,59}$/;
+const CODE = /^[A-Za-z0-9][A-Za-z0-9_.-]{1,59}$/;
+const ROOT = (orgId:string, kind:MasterKind) => 'organizations/'+orgId+'/'+COLLECTION[kind];
+const DOC = (orgId:string, kind:MasterKind, id:string) => ROOT(orgId,kind)+'/'+id;
+const ARR = (v:unknown): Obj[] => Array.isArray(v) ? v.filter(isObj) : [];
+const REQUIRED = (v:unknown,label:string,max=120):string => {
+    const x=str(v).trim(); if(!x||x.length>max) throw new HttpError(400,label+' is required (up to '+max+' characters).'); return x;
+};
+const POSITIVE = (v:unknown,label:string):number => {
+    const x=typeof v==='number'?v:Number(v);if(!Number.isFinite(x)||x<=0||x>1e12)throw new HttpError(400,label+' must be greater than zero.');return x;
+};
+const NONNEGATIVE = (v:unknown,label:string,max=1e12):number => {
+    const x=typeof v==='number'?v:Number(v);if(!Number.isFinite(x)||x<0||x>max)throw new HttpError(400,label+' must be a valid nonnegative number.');return x;
+};
+const VALID_ID = (v:unknown,label='Code') => {const x=REQUIRED(v,label,60);if(!ID.test(x))throw new HttpError(400,label+' must contain letters, numbers, underscores or hyphens.');return x;};
+const UOM=(v:unknown)=>{const x=REQUIRED(v,'Unit of measure',20);if(!CODE.test(x))throw new HttpError(400,'Invalid unit code.');return x;};
+const ENUM=<T extends string>(v:unknown, options:readonly T[],label:string):T=>{
+    if(!options.includes(v as T))throw new HttpError(400,'Invalid '+label+'.');return v as T;
+};
+const STAGES=['RAW','INTERMEDIATE','FINISHED','PACKAGING'] as const;
+const RESOURCE_TYPES=['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER'] as const;
+const BOM_TYPES=['BOM','RECIPE'] as const;
+
+/** Validation is shared with executable tests; rejects malformed graphs before persistence. */
+export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
+    if(!isObj(raw))throw new HttpError(400,'A master-data object is required.');
+    const id=VALID_ID(raw.id,'Master code'), name=REQUIRED(raw.name,'Name',160);
+    const siteId=str(raw.siteId).trim();
+    if(siteId&&!ID.test(siteId))throw new HttpError(400,'Invalid site code.');
+    const base:Obj={id,name,siteId,description:str(raw.description).slice(0,600)};
+    if(kind==='items'){
+        const category=ENUM(raw.category,STAGES,'item category');
+        const inventoryMaterialId=str(raw.inventoryMaterialId).trim();
+        if(inventoryMaterialId&&!ID.test(inventoryMaterialId))throw new HttpError(400,'Invalid Inventory material reference.');
+        if(category==='RAW'&& !inventoryMaterialId)throw new HttpError(400,'Raw materials must refer to the existing Inventory material master. Demo raw materials are available as read-only samples.');
+        return {...base,category,family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,packQty:POSITIVE(raw.packQty??1,'Pack quantity')};
+    }
+    if(kind==='resources'){
+        return {...base,type:ENUM(raw.type,RESOURCE_TYPES,'resource type'),rate:POSITIVE(raw.rate,'Rated units per hour'),rateUom:UOM(raw.rateUom),assetId:str(raw.assetId).slice(0,60),efficiency:NONNEGATIVE(raw.efficiency??100,'Efficiency percentage',100)};
+    }
+    if(kind==='boms'){
+        const type=ENUM(raw.type,BOM_TYPES,'BOM/recipe type');
+        const parentSkuId=VALID_ID(raw.parentSkuId,'Parent SKU');
+        const components=ARR(raw.components);
+        if(!components.length||components.length>150)throw new HttpError(400,'A BOM/recipe must have 1–150 components.');
+        const seen=new Set<string>();
+        const lines=components.map((c,i)=>{
+            const skuId=VALID_ID(c.skuId,'Component SKU');
+            if(skuId===parentSkuId)throw new HttpError(400,'A SKU cannot consume itself.');
+            if(seen.has(skuId))throw new HttpError(400,'Duplicate component SKU '+skuId+'. Combine quantities in one line.');
+            seen.add(skuId);
+            return {line:i+1,skuId,quantity:POSITIVE(c.quantity,'Component quantity'),uom:UOM(c.uom),scrapPct:NONNEGATIVE(c.scrapPct??0,'Scrap percentage',100)};
+        });
+        return {...base,type,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:str(raw.effectiveFrom).slice(0,10),versionNote:str(raw.versionNote).slice(0,300)};
+    }
+    const skuId=VALID_ID(raw.skuId,'Routed SKU');
+    const operations=ARR(raw.operations);
+    if(!operations.length||operations.length>60)throw new HttpError(400,'A routing must have 1–60 operations.');
+    const codes=new Set<string>();
+    const steps=operations.map((o,i)=>{
+        const code=VALID_ID(o.code,'Operation code');
+        if(codes.has(code))throw new HttpError(400,'Duplicate operation '+code+'.');
+        codes.add(code);
+        return {code,sequence:i+1,name:REQUIRED(o.name,'Operation name',120),resourceId:VALID_ID(o.resourceId,'Resource code'),setupMinutes:NONNEGATIVE(o.setupMinutes??0,'Setup minutes',100000),runMinutesPerUnit:NONNEGATIVE(o.runMinutesPerUnit??0,'Minutes per output unit',100000)};
+    });
+    return {...base,skuId,operations:steps as unknown as Plain};
+}
+
+export function detectBomCycle(boms:Array<{parentSkuId:string;components:Array<{skuId:string}>}>,parentSkuId:string,components:Array<{skuId:string}>):boolean {
+    const byParent=new Map(boms.map(b=>[b.parentSkuId,b.components.map(c=>c.skuId)]));
+    byParent.set(parentSkuId,components.map(c=>c.skuId));
+    const active=new Set<string>(), visited=new Set<string>();
+    const visit=(node:string):boolean=>{
+        if(active.has(node))return true;
+        if(visited.has(node))return false;
+        active.add(node);
+        for(const child of byParent.get(node)??[])if(visit(child))return true;
+        active.delete(node);visited.add(node);return false;
+    };
+    return visit(parentSkuId);
+}
+
+async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,existingId:string) {
+    const siteId=str(item.siteId);
+    if(siteId){
+        const site=await getNode(ctx,siteId);
+        if(str(site.data.level)!=='site')throw new HttpError(400,'Choose an actual organization site.');
+    }
+    if(kind==='boms'){
+        const parent=await getDoc(DOC(ctx.orgId,'items',str(item.parentSkuId)));
+        if(!parent)throw new HttpError(400,'Parent SKU does not exist in Manufacturing master data.');
+        if(str(parent.data.category)==='RAW')throw new HttpError(400,'Raw materials cannot be manufactured as a BOM output.');
+        const components=ARR(item.components);
+        for(const c of components){
+            if(!await getDoc(DOC(ctx.orgId,'items',str(c.skuId))))throw new HttpError(400,'Component '+str(c.skuId)+' is missing from SKU master.');
+        }
+        const others=(await listDocs(ROOT(ctx.orgId,'boms')))
+            .filter(d=>d.id!==existingId&&str(d.data.status)==='active')
+            .map(d=>({parentSkuId:str(d.data.parentSkuId),components:ARR(d.data.components).map(c=>({skuId:str(c.skuId)}))}));
+        if(detectBomCycle(others,str(item.parentSkuId),components.map(c=>({skuId:str(c.skuId)}))))
+            throw new HttpError(400,'The BOM introduces a circular manufacturing dependency.');
+    }
+    if(kind==='routings'){
+        if(!await getDoc(DOC(ctx.orgId,'items',str(item.skuId))))throw new HttpError(400,'Routing SKU not found.');
+        for(const o of ARR(item.operations))
+            if(!await getDoc(DOC(ctx.orgId,'resources',str(o.resourceId))))
+                throw new HttpError(400,'Routing resource '+str(o.resourceId)+' not found.');
+    }
+}
+
+const track=(ctx:OrgContext,action:string,target:string)=>
+    audit([{category:'data',action,actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:target},details:'Production master data; approval and release remain separate from draft editing.'}]);
+const out=(d:{id:string;data:Obj;updateTime?:string})=>({id:d.id,...d.data,updatedAt:str(d.data.updatedAt),revision:num(d.data.revision)??1});
+const readKind=(v:unknown):MasterKind=>ENUM(v,MASTER_KINDS,'master-data kind');
+
+/** Demo data is read-only and never writes to live stock/finance/procurement. */
+export function fictionalLine11Demo(){
+    const items=[
+        {id:'DEMO-PREFORM',name:'Fictional PET preform',category:'RAW',uom:'EA'},
+        {id:'DEMO-CAP',name:'Fictional 2622 cap',category:'RAW',uom:'EA'},
+        {id:'DEMO-LABEL',name:'Fictional 500 mL label',category:'RAW',uom:'EA'},
+        {id:'DEMO-WATER',name:'Fictional treated beverage water',category:'RAW',uom:'L'},
+        {id:'DEMO-PET-BOTTLE',name:'Fictional blown PET bottle',category:'INTERMEDIATE',uom:'EA'},
+        {id:'DEMO-FILLED',name:'Fictional filled and capped bottle',category:'INTERMEDIATE',uom:'EA'},
+        {id:'DEMO-FG-500',name:'Fictional PET water 500 mL x 12',category:'FINISHED',uom:'CASE'},
+        {id:'DEMO-FG-1000',name:'Fictional PET water 1 L x 12',category:'FINISHED',uom:'CASE'},
+    ];
+    const boms=[
+        {id:'DEMO-BOM-BLOW',type:'BOM',name:'Blow bottle',parentSkuId:'DEMO-PET-BOTTLE',outputQty:1,outputUom:'EA',components:[{skuId:'DEMO-PREFORM',quantity:1,uom:'EA',scrapPct:1}]},
+        {id:'DEMO-BOM-FILL',type:'RECIPE',name:'Fill and cap',parentSkuId:'DEMO-FILLED',outputQty:1,outputUom:'EA',components:[{skuId:'DEMO-PET-BOTTLE',quantity:1,uom:'EA',scrapPct:1},{skuId:'DEMO-CAP',quantity:1,uom:'EA',scrapPct:1},{skuId:'DEMO-WATER',quantity:0.5,uom:'L',scrapPct:1}]},
+        {id:'DEMO-BOM-PACK',type:'BOM',name:'Label and pack',parentSkuId:'DEMO-FG-500',outputQty:1,outputUom:'CASE',components:[{skuId:'DEMO-FILLED',quantity:12,uom:'EA',scrapPct:1},{skuId:'DEMO-LABEL',quantity:12,uom:'EA',scrapPct:1}]},
+    ];
+    const resources=[{id:'DEMO-L11',name:'Fictional KHS PET Line 11',type:'LINE',rate:28000,rateUom:'EA',efficiency:80}];
+    const routings=[{id:'DEMO-ROUTE-500',name:'Fictional 500 mL process',skuId:'DEMO-FG-500',operations:[{code:'BLOW',name:'Blowing',resourceId:'DEMO-L11'},{code:'FILL',name:'Filling and capping',resourceId:'DEMO-L11'},{code:'PACK',name:'Labelling and packing',resourceId:'DEMO-L11'}]}];
+    return {demo:true,persisted:false,isolated:true,label:'READ-ONLY FICTIONAL DATA — no purchasing, inventory or finance postings',items,boms,resources,routings};
+}
+
+export const plnMfgFoundationRoutes={
+    'POST /api/org/pln-mfg/foundation/list':[
+        orgRoute('org.mfg.foundation.list','MFG.view',async ctx=>{
+            const kind=readKind(ctx.body.kind);
+            return {kind,records:(await listDocs(ROOT(ctx.orgId,kind))).map(out)};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/save':[
+        orgRoute('org.mfg.foundation.save','MFG.master.edit',async ctx=>{
+            const kind=readKind(ctx.body.kind);
+            if(kind==='boms'&&!ctx.permissions.includes('*')&&!ctx.permissions.includes('MFG.bom.edit')&&ctx.role!=='org_super_admin')
+                throw new HttpError(403,'BOM and recipe editing permission required.');
+            if(kind==='routings'&&!ctx.permissions.includes('*')&&!ctx.permissions.includes('MFG.routing.edit')&&ctx.role!=='org_super_admin')
+                throw new HttpError(403,'Routing editing permission required.');
+            const item=normalizeMaster(kind,ctx.body.record);
+            const id=str(item.id),path=DOC(ctx.orgId,kind,id);
+            const existing=await getDoc(path);
+            const expected=ctx.body.expectedRevision;
+            if(existing && Number(expected)!==(num(existing.data.revision)??1))
+                throw new HttpError(409,'This record was edited by another user. Refresh and retry.');
+            if(!existing && expected!==0)throw new HttpError(409,'This record already exists or the new-record revision was not supplied.');
+            await referenceChecks(ctx,kind,item,id);
+            const now=nowIso();
+            const revision=existing?(num(existing.data.revision)??1)+1:1;
+            const data={...item,status:'draft',revision,createdAt:existing?str(existing.data.createdAt)||now:now,createdBy:existing?str(existing.data.createdBy)||ctx.uid:ctx.uid,updatedAt:now,updatedBy:ctx.uid};
+            const ok=await writeDoc(path,data,existing?{updateTime:existing.updateTime}:{exists:false});
+            if(!ok)throw new HttpError(409,'This record changed before saving. Please reload.');
+            await track(ctx,'mfg.master.save',kind+':'+id);
+            return {record:{...data},ok:true};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/config':[
+        orgRoute('org.pln.foundation.config.view','PLN.view',async ctx=>{
+            const doc=await getDoc('organizations/'+ctx.orgId+'/pln_config/master');
+            return {config:doc?.data??{horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'},revision:num(doc?.data.revision)??0};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/config/save':[
+        orgRoute('org.pln.foundation.config.save','PLN.configure',async ctx=>{
+            const raw=isObj(ctx.body.config)?ctx.body.config:{};
+            const horizonDays=POSITIVE(raw.horizonDays,'Horizon days'),freezeDays=NONNEGATIVE(raw.freezeDays,'Freeze days',3650);
+            if(horizonDays>3650||freezeDays>horizonDays)throw new HttpError(400,'Freeze period must fit within the planning horizon.');
+            const lotPolicy=ENUM(raw.lotPolicy,['LOT_FOR_LOT','FIXED','MIN_MAX','PERIOD','OPTIMIZED'] as const,'lot sizing rule');
+            const strategy=ENUM(raw.strategy,['MTS','MTO','ATO','ETO','HYBRID'] as const,'production strategy');
+            const path='organizations/'+ctx.orgId+'/pln_config/master';
+            const prev=await getDoc(path),old=num(prev?.data.revision)??0;
+            if(Number(ctx.body.expectedRevision)!==old)throw new HttpError(409,'Configuration changed. Reload and retry.');
+            const config={horizonDays,freezeDays,lotPolicy,strategy,revision:old+1,updatedAt:nowIso(),updatedBy:ctx.uid};
+            const ok=await writeDoc(path,config,prev?{updateTime:prev.updateTime}:{exists:false});
+            if(!ok)throw new HttpError(409,'Concurrent planning configuration update detected.');
+            await track(ctx,'pln.config.save','PLN planning configuration');
+            return {config,revision:old+1};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/demo':[
+        orgRoute('org.mfg.foundation.demo','MFG.view',async ()=>fictionalLine11Demo()),
+    ],
+};
