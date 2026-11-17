@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {normalizeMaster,detectBomCycle,fictionalLine11Demo} from '../../backend/plnMfgFoundation.ts';
+import {selectEffectiveRelease} from '../../backend/plnMfgRelease.ts';
+import {fictionalPilotSnapshot,assertPilotSeedAllowed} from '../../backend/plnMfgPilotSeed.ts';
 
 const read=p=>readFileSync(new URL('../../'+p,import.meta.url),'utf8');
 
@@ -79,4 +81,55 @@ test('PLN and MFG have functional organization home and admin navigation',()=>{
  assert.match(home,/path:'mfg_foundation'/);assert.match(home,/path:'pln_foundation'/);
  assert.match(perms,/MFG\.master\.edit/);assert.match(perms,/PLN\.configure/);
  assert.match(index,/\.\.\.plnMfgFoundationRoutes/);
+});
+
+test('approved versions honor effective dates and exclude unapproved drafts',()=>{
+ const versions=[
+    {id:'BOM-V1',status:'active',effectiveFrom:'2026-01-01',approvedAt:'2026-01-01'},
+    {id:'BOM-V2',status:'active',effectiveFrom:'2027-01-01',approvedAt:'2026-12-01'},
+    {id:'BOM-V3',status:'draft',effectiveFrom:'2026-02-01',approvedAt:'2026-02-01'},
+ ];
+ assert.equal(selectEffectiveRelease(versions,'2026-11-17')?.id,'BOM-V1');
+ assert.equal(selectEffectiveRelease(versions,'2027-05-01')?.id,'BOM-V2');
+ assert.equal(selectEffectiveRelease(versions,'2025-12-01'),null);
+ assert.throws(()=>selectEffectiveRelease(versions,'not-a-date'),/Valid planning date/);
+});
+
+test('manufacturing release prevents editing of submitted and active versions',()=>{
+ const source=read('backend/plnMfgFoundation.ts'),release=read('backend/plnMfgRelease.ts');
+ assert.match(source,/\\['pending_approval','active'\\].includes/);
+ assert.match(release,/Independent maker-checker approval is mandatory/);
+ assert.match(release,/ctx.uid===str\\(doc.data.createdBy\\)/);
+ assert.match(release,/referenceChecks\\(ctx,kind,doc.data,id\\)/);
+ assert.match(release,/status:'pending_approval'/);
+ assert.match(release,/commitChecked\\(/);
+ assert.match(release,/effectiveFrom/);
+ const index=read('backend/index.ts');
+ assert.match(index,/\\.\\.\\.plnMfgReleaseRoutes/);
+});
+
+test('master-data reference checks preserve Inventory and Asset authority',()=>{
+ const src=read('backend/plnMfgFoundation.ts');
+ assert.match(src,/\\+'\\/materials\\/\\'/);
+ assert.match(src,/\\+'\\/assets\\/\\'/);
+ assert.match(src,/Approved, numbered Inventory material|approved, numbered Inventory material/);
+ assert.match(src,/same site as the linked asset/);
+ assert.match(src,/unit does not match its SKU master/);
+});
+
+test('isolated fictional Line 11 seeding is denied outside authorized development test mode',()=>{
+ const d=fictionalPilotSnapshot();
+ assert.equal(d.persisted,false);
+ assert.equal(d.stock.length,8);assert.equal(d.demand.length,2);
+ assert.throws(()=>assertPilotSeedAllowed(false,true,true,'SEED FICTIONAL LINE 11'),/restricted/);
+ assert.throws(()=>assertPilotSeedAllowed(true,false,true,'SEED FICTIONAL LINE 11'),/restricted/);
+ assert.throws(()=>assertPilotSeedAllowed(true,true,false,'SEED FICTIONAL LINE 11'),/restricted/);
+ assert.throws(()=>assertPilotSeedAllowed(true,true,true,'anything else'),/exact confirmation/);
+ assert.doesNotThrow(()=>assertPilotSeedAllowed(true,true,true,'SEED FICTIONAL LINE 11'));
+ const src=read('backend/plnMfgPilotSeed.ts'),index=read('backend/index.ts');
+ assert.match(src,/mfg_demo_sandboxes/);
+ assert.match(src,/externalPostingEnabled:false/);
+ assert.match(src,/commitChecked\\(writes\\)/);
+ assert.doesNotMatch(src,/\\/material_journal\\/|\\/purchase_orders\\/|\\/financial_journal\\//);
+ assert.match(index,/\\.\\.\\.plnMfgPilotRoutes/);
 });
