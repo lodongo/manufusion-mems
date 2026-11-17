@@ -80,6 +80,7 @@ const BuyerGroups = lazy(() => import('./BuyerGroups'));
 const WarehouseOverview = lazy(() => import('./WarehouseOverview'));
 const DocumentRegistryPage = lazy(() => import('./DocumentRegistryPage'));
 const MyDocSignatures = lazy(() => import('./MyDocSignatures'));
+const ProductionFoundation = lazy(() => import('./ProductionFoundation'));
 
 type Module = OrgContextData['modules'][number];
 type LinkItem = { label: string; path: string; permission?: string; prefix?: string; everyone?: boolean };
@@ -89,6 +90,8 @@ const ROUTE = 'organization_home';
 const toHome = (path = '') => navigate(path ? `${ROUTE}/${path}` : ROUTE);
 
 const MODULE_LINKS: Record<string, LinkItem[]> = {
+    MFG: [{label:'Products, BOMs, recipes & routings',path:'mfg_foundation',permission:'MFG.view'}],
+    PLN: [{label:'Production Planning & MRP',path:'pln_foundation',permission:'PLN.view'}],
     HRM: [
         { label: 'My HR Portal', path: 'hr/HR01', permission: 'HRM.shell.view' },
         { label: 'Employee Records & Administration', path: 'hr/HR02', permission: 'HRM.shell.view' },
@@ -449,6 +452,8 @@ export default function OrgHomePage({
         ...(hasPerm(data.permissions,'HRM.education.manage') ? [{label:'Education',hint:'Education ranks and qualifications',path:'hr/HR18'}] : []),
         ...(hasPerm(data.permissions,'HRM.payroll.view') ? [{label:'Payroll',hint:'Every employee with role, grade, basic salary and payslip preview',path:'hr/HR20'}] : []),
       ]} />;
+    else if (activeMenu?.module.code==='MFG' && (section==='mfg_foundation' || (section==='module'&&activeModule?.module.code==='MFG'))) content = <ProductionFoundation module='MFG' permissions={data.permissions} />;
+    else if (activeMenu?.module.code==='PLN' && (section==='pln_foundation' || (section==='module'&&activeModule?.module.code==='PLN'))) content = <ProductionFoundation module='PLN' permissions={data.permissions} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='DOC') content = <DocumentRegistryPage mode='register' canConfigure={hasPerm(data.permissions,'ADM.document_config')} canReview={hasPerm(data.permissions,'ADM.document_review')} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='0') content = <InventoryDashboard />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='3') content = <StockTake />;
