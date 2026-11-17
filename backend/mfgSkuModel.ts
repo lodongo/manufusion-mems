@@ -14,6 +14,7 @@ export type SkuParameterKind=keyof typeof SKU_PARAMETERS;
 export const SKU_PARAMETER_KINDS=Object.keys(SKU_PARAMETERS) as SkuParameterKind[];
 export type SkuParameter={id:string;kind:SkuParameterKind;name:string;
     uom?:string;quantity?:number;baseUom?:string;quantityPerUnit?:number;
+    categoryCode?:string;unitCode?:string;unitCount?:number;
     enabled?:boolean;description?:string};
 export type SkuComponents={
     productNameId?:string;productionFormId?:string;containerId?:string;
@@ -57,6 +58,30 @@ export function skuUnitConversion(from:string,to:string):number|null {
     return a.multiplier/b.multiplier;
 }
 
+/** Only units from the authoritative MEMS registry can be used as SKU dimensions. */
+export function skuUnitCategories(){
+    return [...new Map(PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable)
+        .map(u=>[u.categoryCode,{code:u.categoryCode,name:u.category}])).values()];
+}
+export function skuUnitsInCategory(categoryCode:string){
+    return PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable&&u.categoryCode===categoryCode);
+}
+export function skuUnitCategoryOf(code:string):string|null {
+    const unit=PROCUREMENT_UNITS.find(u=>u.active&&u.selectable&&
+        (u.code===code||u.symbol===code));
+    return unit?.categoryCode??null;
+}
+export function countUnitTotal(unitCode:string,unitCount:number):number {
+    const unit=PROCUREMENT_UNITS.find(u=>u.code===unitCode&&u.active&&u.selectable&&u.category==='Count');
+    if(!unit)throw new HttpError(400,'Choose a Count unit from the MEMS unit registry.');
+    if(!Number.isSafeInteger(unitCount)||unitCount<1)
+        throw new HttpError(400,'Number of count units must be a positive whole number.');
+    const total=unitCount*unit.multiplier;
+    if(!Number.isSafeInteger(total)||total>10000000)
+        throw new HttpError(400,'Total containers exceeds the supported whole-number range.');
+    return total;
+}
+
 export function calculateSkuConversion(
     values:SkuComponents,
     params:SkuParameter[],
@@ -82,6 +107,9 @@ export function calculateSkuConversion(
     if(normalize&&!pack)throw new HttpError(400,'Select the physical package before normalization.');
     const productionUom=str(form?.uom);
     if(!productionUom)throw new HttpError(400,'Production form must define a production unit.');
+    // Existing container parameters without category stay readable during migration.
+    if(container?.categoryCode && container.categoryCode!==skuUnitCategoryOf(productionUom))
+        throw new HttpError(400,'Physical container category is incompatible with the production form unit.');
     let contentPerContainer:number|null=null,perPack:number|null=null,perUnit:number|null=null;
     if(size){
         const ratio=skuUnitConversion(str(size.uom),productionUom);
@@ -133,6 +161,13 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
         if(!uom||!skuUnitConversion(uom,uom))throw new HttpError(400,'Select a supported MEMS production unit.');
         return {...base,uom};
     }
+    if(kind==='containers'){
+        const categoryCode=str(raw.categoryCode).trim();
+        if(!categoryCode||!skuUnitCategories().some(c=>c.code===categoryCode))
+            throw new HttpError(400,'Choose a unit category before defining its container subcategory.');
+        // The named subcategory is the Physical Container itself (e.g. Volume > Bottle).
+        return {...base,categoryCode};
+    }
     if(kind==='containerSizes'){
         const uom=str(raw.uom).trim(),quantity=Number(raw.quantity);
         if(!uom||!skuUnitConversion(uom,uom)||!Number.isFinite(quantity)||quantity<=0||quantity>1e12)
@@ -146,10 +181,11 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
         return {...base,uom};
     }
     if(kind==='packageCounts'){
-        const quantity=Number(raw.quantity);
-        if(!Number.isSafeInteger(quantity)||quantity<1||quantity>10000000)
-            throw new HttpError(400,'Package containment must be a positive whole number.');
-        return {...base,quantity};
+        // Package containment is measured using the existing MEMS Count-category units:
+        // 1 dozen = 12, 2 dozen = 24, or 6 each = 6.
+        const unitCode=str(raw.unitCode).trim(),unitCount=Number(raw.unitCount);
+        const quantity=countUnitTotal(unitCode,unitCount);
+        return {...base,unitCode,unitCount,quantity};
     }
     if(kind==='normalizationUnits'){
         const baseUom=str(raw.baseUom).trim(),quantityPerUnit=Number(raw.quantityPerUnit);
