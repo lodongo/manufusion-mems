@@ -4,7 +4,8 @@
  * Firestore is tenant-scoped through orgRoute; mutations use optimistic concurrency.
  */
 import { HttpError, getDoc, isObj, listDocs, nowIso, num, str, writeDoc, type Obj, type Plain } from './core';
-import { orgRoute, type OrgContext } from './guards';
+import { orgRoute, hasPerm, type OrgContext } from './guards';
+import { canAt, nodePath, scopeOf } from './access';
 import { audit } from './audit';
 import { getNode } from './structure';
 
@@ -127,6 +128,11 @@ const track=(ctx:OrgContext,action:string,target:string)=>
     audit([{category:'data',action,actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:target},details:'Production master data; approval and release remain separate from draft editing.'}]);
 const out=(d:{id:string;data:Obj;updateTime?:string})=>({id:d.id,...d.data,updatedAt:str(d.data.updatedAt),revision:num(d.data.revision)??1});
 const readKind=(v:unknown):MasterKind=>ENUM(v,MASTER_KINDS,'master-data kind');
+async function recordAccess(ctx:OrgContext,permission:string,siteId:string):Promise<boolean>{
+    if(!siteId)return ctx.role==='org_super_admin'||hasPerm(ctx.directPermissions,permission);
+    const scope=await scopeOf(ctx);
+    return canAt(ctx,permission,await nodePath(ctx.orgId,siteId),scope);
+}
 
 /** Demo data is read-only and never writes to live stock/finance/procurement. */
 export function fictionalLine11Demo(){
@@ -178,19 +184,30 @@ export const plnMfgFoundationRoutes={
     'POST /api/org/pln-mfg/foundation/list':[
         orgRoute('org.mfg.foundation.list','MFG.view',async ctx=>{
             const kind=readKind(ctx.body.kind);
-            return {kind,records:(await listDocs(ROOT(ctx.orgId,kind))).map(out)};
+            const records=await listDocs(ROOT(ctx.orgId,kind));
+            const visible=[];
+            for(const record of records){
+                const siteId=str(record.data.siteId);
+                if(await recordAccess(ctx,'MFG.view',siteId))visible.push(out(record));
+            }
+            return {kind,records:visible};
         }),
     ],
     'POST /api/org/pln-mfg/foundation/save':[
         orgRoute('org.mfg.foundation.save','MFG.master.edit',async ctx=>{
             const kind=readKind(ctx.body.kind);
-            if(kind==='boms'&&!ctx.permissions.includes('*')&&!ctx.permissions.includes('MFG.bom.edit')&&ctx.role!=='org_super_admin')
+            if(kind==='boms'&&!hasPerm(ctx.permissions,'MFG.bom.edit')&&ctx.role!=='org_super_admin')
                 throw new HttpError(403,'BOM and recipe editing permission required.');
-            if(kind==='routings'&&!ctx.permissions.includes('*')&&!ctx.permissions.includes('MFG.routing.edit')&&ctx.role!=='org_super_admin')
+            if(kind==='routings'&&!hasPerm(ctx.permissions,'MFG.routing.edit')&&ctx.role!=='org_super_admin')
                 throw new HttpError(403,'Routing editing permission required.');
             const item=normalizeMaster(kind,ctx.body.record);
             const id=str(item.id),path=DOC(ctx.orgId,kind,id);
             const existing=await getDoc(path);
+            const requiredPermission=kind==='boms'?'MFG.bom.edit':kind==='routings'?'MFG.routing.edit':'MFG.master.edit';
+            if(!await recordAccess(ctx,'MFG.master.edit',str(item.siteId)) ||
+               !await recordAccess(ctx,requiredPermission,str(item.siteId)) ||
+               (existing && (!await recordAccess(ctx,'MFG.master.edit',str(existing.data.siteId)) || !await recordAccess(ctx,requiredPermission,str(existing.data.siteId)))))
+                throw new HttpError(403,'This master record is outside your authorized site or organization scope.');
             const expected=ctx.body.expectedRevision;
             if(existing && Number(expected)!==(num(existing.data.revision)??1))
                 throw new HttpError(409,'This record was edited by another user. Refresh and retry.');
@@ -213,6 +230,8 @@ export const plnMfgFoundationRoutes={
     ],
     'POST /api/org/pln-mfg/foundation/config/save':[
         orgRoute('org.pln.foundation.config.save','PLN.configure',async ctx=>{
+            if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'PLN.configure'))
+                throw new HttpError(403,'Organization-wide planning configuration requires a direct administration permission.');
             const raw=isObj(ctx.body.config)?ctx.body.config:{};
             const horizonDays=POSITIVE(raw.horizonDays,'Horizon days'),freezeDays=NONNEGATIVE(raw.freezeDays,'Freeze days',3650);
             if(horizonDays>3650||freezeDays>horizonDays)throw new HttpError(400,'Freeze period must fit within the planning horizon.');
