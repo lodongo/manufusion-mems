@@ -50,6 +50,10 @@ test('universal manufacturing UI contains neither sector suggestions nor embedde
  assert.ok(ui.includes('Manufacturing material handling'));
  assert.ok(ui.includes("['MANUFACTURING','Manufacturing BOM']"));
  assert.ok(ui.includes('Materials & Products'));
+ const home=read('src/org/OrgHomePage.tsx');
+ assert.ok(home.includes("Materials, BOMs & routings"));
+ assert.ok(!home.includes("Products, BOMs, recipes & routings"));
+ assert.ok(!read('src/org/MfgSkuSetup.tsx').includes("recipes:'RCP'"));
  const backend=read('backend/plnMfgFoundation.ts');
  assert.ok(backend.includes('/foundation/material-policy/save'));
  assert.ok(backend.includes('normalizeMaster'));

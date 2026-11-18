@@ -90,7 +90,7 @@ const ROUTE = 'organization_home';
 const toHome = (path = '') => navigate(path ? `${ROUTE}/${path}` : ROUTE);
 
 const MODULE_LINKS: Record<string, LinkItem[]> = {
-    MFG: [{label:'Products, BOMs, recipes & routings',path:'mfg_foundation',permission:'MFG.view'}],
+    MFG: [{label:'Materials, BOMs & routings',path:'mfg_foundation',permission:'MFG.view'}],
     PLN: [{label:'Production Planning & MRP',path:'pln_foundation',permission:'PLN.view'}],
     HRM: [
         { label: 'My HR Portal', path: 'hr/HR01', permission: 'HRM.shell.view' },

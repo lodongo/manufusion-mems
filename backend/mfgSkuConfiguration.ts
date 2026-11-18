@@ -124,7 +124,7 @@ export const mfgSkuConfigurationRoutes={
                     .map(x=>({code:x.code,label:x.label,symbol:x.symbol,category:x.category,
                         categoryCode:x.categoryCode,baseUnit:x.baseUnit,multiplier:x.multiplier})),
                 conventions:{
-                    items:'SKU',boms:'BOM',recipes:'RCP',resources:'RSC',
+                    items:'SKU',boms:'BOM',resources:'RSC',
                     routings:'RTG',batches:'BTH',digits:9,
                 }};
         }),

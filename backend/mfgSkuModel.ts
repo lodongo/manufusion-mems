@@ -142,14 +142,14 @@ export function calculateSkuConversion(
     const size=get('containerSizes',values.containerSizeId);
     const pack=get('packages',values.packageId);
     const transport=get('transportPackages',values.transportPackageId);
-    // Legacy PCT selections continue to calculate; all new SKUs select PSZ packaging sizes.
+    // Previously saved packaging counts remain interpretable; new SKUs use packaging sizes.
     const count=values.packagingSizeId
         ? get('packagingSizes',values.packagingSizeId) : get('packageCounts',values.packageCountId);
     const normalize=get('normalizationUnits',values.normalizationUnitId);
     if(Boolean(container)!==Boolean(size))throw new HttpError(400,'Container and container size must be selected together.');
     if(!pack&&count)throw new HttpError(400,'Select container packaging before its packaging size.');
-    const legacyConfiguredLayout=Boolean(pack?.packagingTypeCode&&Number.isSafeInteger(pack.quantity)&&Number(pack.quantity)>0);
-    if(pack&&!count&&!legacyConfiguredLayout)throw new HttpError(400,'Select the commercial packaging size.');
+    const existingConfiguredLayout=Boolean(pack?.packagingTypeCode&&Number.isSafeInteger(pack.quantity)&&Number(pack.quantity)>0);
+    if(pack&&!count&&!existingConfiguredLayout)throw new HttpError(400,'Select the commercial packaging size.');
     if(transport&&!pack)throw new HttpError(400,'Transport packaging requires commercial packaging.');
     if((pack||normalize)&&!container)throw new HttpError(400,'Package or normalization requires a configured container and size.');
     if(normalize&&!pack)throw new HttpError(400,'Select the physical package before normalization.');
@@ -168,13 +168,13 @@ export function calculateSkuConversion(
     }
     let packagedContainers:number|null=null;
     if(pack){
-        const n=legacyConfiguredLayout?packagingPrimaryContainerCount(pack,params):(num(count?.quantity)??0);
+        const n=existingConfiguredLayout?packagingPrimaryContainerCount(pack,params):(num(count?.quantity)??0);
         if(!Number.isSafeInteger(n)||n<=0)
             throw new HttpError(400,'Container packaging must have a positive whole-number quantity.');
         // A selected standard size must agree with the configured layout.
         // For nested pallets the packaging size describes the child pack, not the
         // total primary-container count, so do not multiply it a second time.
-        if(legacyConfiguredLayout&&count){
+        if(existingConfiguredLayout&&count){
             const expected=pack.containedUnit==='PACKAGING'
                 ?params.find(p=>p.id===pack.containedPackagingId)?.quantity:n;
             if(Number(count.quantity)!==Number(expected))
@@ -306,7 +306,7 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
             return {...base,packagingTypeCode:type.code,level:type.level,
                 containedUnit:type.containedUnit,uom:type.defaultUnitCode};
         }
-        // Only pre-existing commercial packaging can use this legacy fallback.
+        // Pre-existing commercial packaging has a separate compatibility calculation.
         if(kind==='transportPackages')throw new HttpError(400,'Select a published transport packaging type.');
         const uom=str(raw.uom).trim();
         if(!skuUnitConversion(uom,uom))

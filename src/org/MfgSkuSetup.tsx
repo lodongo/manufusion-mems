@@ -45,7 +45,7 @@ export const emptySkuSetup:SkuSetup={
     units:[],categories:[],primaryContainerMetadata:{version:1,categories:[],types:[]},
     packagingMetadata:{version:1,categories:[],types:[]},
     namingSequence:DEFAULT_SKU_NAMING_SEQUENCE,namingRevision:0,namingConfigured:false,
-    conventions:{items:'SKU',boms:'BOM',recipes:'RCP',resources:'RSC',
+    conventions:{items:'SKU',boms:'BOM',resources:'RSC',
         routings:'RTG',batches:'BTH',digits:9},
 };
 export type SkuSelections={
@@ -192,7 +192,7 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
     const factor=normalBase&&contentPerPackage!==null?contentPerPackage/normalBase:null;
     const productRecord=getParam(setup,'productNames',value.productNameId);
     const product=productRecord?.name||'Select product';
-    const legacyTitle=[product,[size?.name,container?.name].filter(Boolean).join(' '),
+    const defaultTitle=[product,[size?.name,container?.name].filter(Boolean).join(' '),
         [packageRecord?.name,packSize?'x'+packSize.quantity:''].filter(Boolean).join(' ')]
         .filter(Boolean).join(' · ');
     const unitSymbol=(code:string|undefined)=>pickUnit(setup,code)?.symbol||code||'';
@@ -215,7 +215,7 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
         transportTotalUnits:validTransportCount===null?undefined:{quantity:validTransportCount},
     };
     const title=setup.namingConfigured?
-        composeSkuNameFromSequence(setup.namingSequence,namingValues):legacyTitle;
+        composeSkuNameFromSequence(setup.namingSequence,namingValues):defaultTitle;
     const optionsFor=(kind:SkuParameterKind):Array<[string,string]>=>setup.parameters
         .filter(p=>p.kind===kind&&p.enabled!==false&&
             (kind!=='containers'||!value.productionFormId||!p.categoryCode?.startsWith('UOM-')||
