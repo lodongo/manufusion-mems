@@ -6,6 +6,8 @@ on:
       - 'backend/plnMfg*.ts'
       - 'backend/mfgSku*.ts'
       - 'backend/mfgPrimaryContainerMetadata.ts'
+      - 'backend/mfgPackagingMetadata.ts'
+      - 'src/admin/MfgPackagingMetadataBrowser.tsx'
       - 'backend/moduleDefaults.ts'
       - 'src/admin/ModulesPage.tsx'
       - 'src/admin/MfgContainerMetadataBrowser.tsx'
