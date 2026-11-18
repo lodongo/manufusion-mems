@@ -127,9 +127,15 @@ export function assertPilotSeedAllowed(env:boolean,superAdmin:boolean,testMode:b
         throw new HttpError(400,'Type the exact confirmation: SEED FICTIONAL LINE 11.');
 }
 
+/** The isolated fixture is not part of normal Manufacturing navigation or tenant APIs. */
+export function assertPilotViewAllowed(env:boolean,superAdmin:boolean,testMode:boolean){
+    if(!env||!superAdmin||!testMode)
+        throw new HttpError(403,'Test fixture access is restricted to authorized development test mode.');
+}
 export const plnMfgPilotRoutes={
     'POST /api/org/pln-mfg/foundation/demo/status':[
         orgRoute('org.mfg.demo.status','MFG.view',async ctx=>{
+            assertPilotViewAllowed(testModeEnvironmentAllowed(),ctx.role==='org_super_admin',ctx.testMode===true);
             const seeded=await getDoc(ROOT(ctx.orgId));
             return {sandboxId:SANDBOX_ID,seeded:!!seeded,isolated:true,
                 canSeed:ctx.role==='org_super_admin'&&ctx.testMode===true&&testModeEnvironmentAllowed(),
@@ -172,12 +178,14 @@ export const plnMfgPilotRoutes={
     ],
     'POST /api/org/pln-mfg/foundation/demo/verify':[
         orgRoute('org.mfg.demo.verify','MFG.view',async ctx=>{
+            assertPilotViewAllowed(testModeEnvironmentAllowed(),ctx.role==='org_super_admin',ctx.testMode===true);
             // Read-only verification against the tenant's isolated simulation collections.
             return verifySeededFictionalPilot(ctx.orgId);
         }),
     ],
     'POST /api/org/pln-mfg/foundation/demo/sandbox':[
         orgRoute('org.mfg.demo.sandbox','MFG.view',async ctx=>{
+            assertPilotViewAllowed(testModeEnvironmentAllowed(),ctx.role==='org_super_admin',ctx.testMode===true);
             const root=ROOT(ctx.orgId),parent=await getDoc(root);
             if(!parent)throw new HttpError(404,'No isolated pilot data has been seeded for this tenant.');
             // Return the deterministic fixture only after verifying a sandbox marker;

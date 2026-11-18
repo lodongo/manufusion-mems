@@ -540,7 +540,4 @@ export const plnMfgFoundationRoutes={
             return {config,revision:old+1};
         }),
     ],
-    'POST /api/org/pln-mfg/foundation/demo':[
-        orgRoute('org.mfg.foundation.demo','MFG.view',async ()=>fictionalLine11Demo()),
-    ],
 };

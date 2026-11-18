@@ -30,7 +30,7 @@
 | P1-08 | Submit BOM/routing and approve with separate user | Draft → pending approval → active; author cannot approve own submission; released revision cannot be overwritten |
 | P1-09 | Publish variants and dated alternatives for one SKU | Duplicate category/alternative/site/date activation rejected atomically; different categories and alternatives coexist; ambiguous selection requires explicit choice |
 | P1-10 | Save configuration and reload | Initial horizon, frozen period, lot strategy and production strategy persist with revision conflict detection |
-| P1-11 | View fictional pilot preview | Exactly two finished SKUs, full upstream recipe, bottles, filling, case packaging and corresponding reference data |
+| P1-11 | Verify isolated developer fixture | Authorized development test-mode admin may inspect the fictional multi-stage fixture through restricted test endpoints; normal Manufacturing UI must show no test scenario |
 | P1-12 | Seed isolated Line 11 test fixture | Dev environment + authorized test tenant + active test mode + exact confirmation; creates only sandbox records, zero Inventory/Procurement/Finance postings |
 | P1-13 | Verify seeded pilot records | Integrity verification reports matching record counts and no missing, changed or foreign references |
 | P1-14 | Attempt duplicate seed or write with stale record revision | Idempotent seed; optimistic concurrency prevents lost updates; audit events recorded |
@@ -64,7 +64,7 @@
 - Confirm new SKUs use the saved naming rule; old SKU names remain stable until the user explicitly opts into the latest sequence. Store the naming rule revision and generated name with the SKU master.
 
 ## Unverified by the automated GitHub checks
-- Actual authenticated frontend navigation, input interactions and workflow dialogs in development.
+- Actual authenticated frontend navigation, input interactions and workflow dialogs in development, including confirmation that the industry-example selector and pilot tab are absent.
 - Firestore write/read/update/revision history against a designated test tenant.
 - Live master-data selector lists against the tenant's published Inventory and active Assets records.
 - Complete seeded-sandbox verification after a real authorized seed.

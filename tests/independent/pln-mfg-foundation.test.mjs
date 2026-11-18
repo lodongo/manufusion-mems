@@ -7,7 +7,7 @@ import {DEFAULT_SKU_NAMING_SEQUENCE,validateSkuNamingSequence,composeSkuNameFrom
 import {MFG_PACKAGING_TYPES,validatePackagingLayout,packagingHierarchyRank,normalizePackagingTypes} from '../../backend/mfgPackagingMetadata.ts';
 import {selectEffectiveRelease,selectEffectiveForSite} from '../../backend/plnMfgRelease.ts';
 import {defaultMfgMaterialPolicy,normalizeMfgMaterialPolicy} from '../../backend/mfgMaterialPolicy.ts';
-import {fictionalPilotSnapshot,validateFictionalPilot,assertPilotSeedAllowed} from '../../backend/plnMfgPilotSeed.ts';
+import {fictionalPilotSnapshot,validateFictionalPilot,assertPilotSeedAllowed,assertPilotViewAllowed} from '../../backend/plnMfgPilotSeed.ts';
 
 const read=p=>readFileSync(new URL('../../'+p,import.meta.url),'utf8');
 
@@ -164,7 +164,8 @@ test('fictional pilot includes two FG SKUs, two routing options and full upstrea
 
 test('Phase 1 routes are tenant-guarded and there are no physical posting endpoints',()=>{
  const src=read('backend/plnMfgFoundation.ts');
- for(const key of ['foundation/list','foundation/save','foundation/config','foundation/demo'])assert.ok(src.includes(key));
+ for(const key of ['foundation/list','foundation/save','foundation/config'])assert.ok(src.includes(key));
+ assert.ok(!src.includes("foundation/demo':["));
  assert.match(src,/orgRoute\('org\.mfg\.foundation\.save','MFG\.master\.edit'/);
  assert.ok(src.includes('updateTime:old!.updateTime'));
  assert.match(src,/commitChecked\(/);
@@ -226,6 +227,9 @@ test('isolated fictional Line 11 seeding is denied outside authorized developmen
  assert.throws(()=>assertPilotSeedAllowed(true,true,true,'anything else'),/exact confirmation/);
  assert.doesNotThrow(()=>assertPilotSeedAllowed(true,true,true,'SEED FICTIONAL LINE 11'));
  const src=read('backend/plnMfgPilotSeed.ts'),index=read('backend/index.ts');
+ for(const args of [[false,true,true],[true,false,true],[true,true,false]])
+   assert.throws(()=>assertPilotViewAllowed(...args),/restricted/);
+ assert.doesNotThrow(()=>assertPilotViewAllowed(true,true,true));
  assert.ok(src.includes('mfg_demo_sandboxes'));
  assert.ok(src.includes('externalPostingEnabled:false'));
  assert.ok(src.includes('commitChecked(writes)'));
