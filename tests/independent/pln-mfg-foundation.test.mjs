@@ -348,5 +348,7 @@ test('SKU setup has only seven minimalist menu entries and metadata-backed choic
  assert.ok(page.includes("active!=='skuSetup'"));
  const backend=read('backend/mfgSkuConfiguration.ts');
  assert.ok(backend.includes('primaryContainerMetadata'));
- assert.ok(backend.includes('MFG_PRIMARY_CONTAINER_TYPES'));
+ assert.ok(backend.includes('primaryContainerCatalogueFromAdmin'));
+ assert.ok(read('backend/moduleDefaults.ts').includes("key:'primaryContainers'"));
+ assert.ok(read('src/admin/ModulesPage.tsx').includes('MfgContainerMetadataBrowser'));
 });
