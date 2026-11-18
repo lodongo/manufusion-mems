@@ -11,6 +11,7 @@ on:
       - 'backend/moduleDefaults.ts'
       - 'src/admin/ModulesPage.tsx'
       - 'src/admin/MfgContainerMetadataBrowser.tsx'
+      - 'src/shared/mfgSkuNaming.ts'
       - 'src/org/MfgSkuSetup.tsx'
       - 'backend/index.ts'
       - 'backend/permissionPolicy.ts'
