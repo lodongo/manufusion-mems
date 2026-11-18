@@ -6,6 +6,7 @@ import { HttpError, commitChecked, getDoc, isObj, listDocs, nowIso, num, str, ty
 import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { audit } from './audit';
 import { PROCUREMENT_UNITS } from './procurementUnits';
+import {DEFAULT_SKU_NAMING_SEQUENCE,validateSkuNamingSequence,type SkuNamingSequence} from '../src/shared/mfgSkuNaming';
 import { primaryContainerCatalogueFromAdmin } from './mfgPrimaryContainerMetadata';
 import {normalizePackagingTypes,packagingHierarchyRank} from './mfgPackagingMetadata';
 import {
@@ -17,6 +18,21 @@ import {
 const pathRoot=(orgId:string)=>'organizations/'+orgId;
 const SEQ=(orgId:string,prefix:string)=>pathRoot(orgId)+'/mfg_code_sequences/'+prefix;
 const PARAMS=(orgId:string)=>pathRoot(orgId)+'/mfg_sku_parameters';
+const NAMING=(orgId:string)=>pathRoot(orgId)+'/mfg_sku_naming/config';
+
+export async function namingSequenceForOrg(orgId:string):Promise<{
+    sequence:SkuNamingSequence;revision:number;configured:boolean;
+}>{
+    const doc=await getDoc(NAMING(orgId));
+    if(!doc)return {sequence:DEFAULT_SKU_NAMING_SEQUENCE,revision:0,configured:false};
+    try{
+        return {sequence:validateSkuNamingSequence(doc.data.sequence),
+            revision:num(doc.data.revision)??1,configured:true};
+    }catch{
+        // Do not silently apply an invalid stored rule to new SKUs.
+        throw new HttpError(409,'The saved SKU naming sequence is invalid. Contact the module administrator.');
+    }
+}
 const ID_PATTERN=/^[A-Z]{3}_[0-9]{9}$/;
 
 export async function commitGeneratedCode(
@@ -65,16 +81,39 @@ async function currentPackagingTypes(){
     return normalizePackagingTypes(published?.data.items);
 }
 export const mfgSkuConfigurationRoutes={
+    'POST /api/org/pln-mfg/sku/naming/save':[
+        orgRoute('org.mfg.sku.naming.save','MFG.sku.configure',async ctx=>{
+            if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'MFG.sku.configure'))
+                throw new HttpError(403,'Organization SKU naming configuration requires a directly assigned administrator.');
+            let sequence:SkuNamingSequence;
+            try{sequence=validateSkuNamingSequence(ctx.body.sequence);}
+            catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid SKU naming sequence.');}
+            const path=NAMING(ctx.orgId),old=await getDoc(path);
+            const currentRevision=old?(num(old.data.revision)??1):0;
+            if(Number(ctx.body.expectedRevision)!==currentRevision)
+                throw new HttpError(409,'The SKU naming configuration changed. Refresh before saving.');
+            const revision=currentRevision+1,now=nowIso();
+            const data={sequence,revision,updatedAt:now,updatedBy:ctx.uid};
+            const committed=await commitChecked([{
+                path,data,precondition:old?{updateTime:old.updateTime}:{exists:false},
+            }]);
+            if(!committed)throw new HttpError(409,'The SKU naming sequence changed during save.');
+            await log(ctx,'mfg.sku.naming.update','naming:'+revision);
+            return {sequence,revision,configured:true};
+        }),
+    ],
     'POST /api/org/pln-mfg/sku/setup':[
         orgRoute('org.mfg.sku.setup','MFG.view',async ctx=>{
-            const [params,types,packagingTypes]=await Promise.all([
+            const [params,types,packagingTypes,naming]=await Promise.all([
                 skuParametersForOrg(ctx.orgId),currentPrimaryContainerCatalogue(),currentPackagingTypes(),
+                namingSequenceForOrg(ctx.orgId),
             ]);
             const packagingCategories=[...new Map(packagingTypes.map(t=>[t.category,
                 {code:t.code.slice(0,3),name:t.category,level:t.level}])).values()];
             const primaryCategories=[...new Map(types.map(t=>[t.categoryCode,
                 {code:t.categoryCode,name:t.category,sectors:t.sectors}])).values()];
             return {parameters:params,groups:SKU_PARAMETERS,
+                namingSequence:naming.sequence,namingRevision:naming.revision,namingConfigured:naming.configured,
                 // MEMS MFG platform master data, adopted by organization Physical Containers.
                 primaryContainerMetadata:{
                     version:1,categories:primaryCategories,types,
