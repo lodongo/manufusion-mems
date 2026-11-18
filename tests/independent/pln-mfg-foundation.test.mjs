@@ -607,14 +607,16 @@ test('SKU naming rule preserves order, approved separators and correct name/code
  assert.equal(composeSkuNameFromSequence({...config,separator:'-'},skuNamingValues(exampleSelect,params,converted)),
      'FANTA-1000mL-PET_001-12');
  assert.throws(()=>validateSkuNamingSequence({...config,separator:'|||'}),/separator/);
- assert.throws(()=>validateSkuNamingSequence({...config,steps:[config.steps[0],config.steps[0]]}),/repeated/);
+ assert.equal(composeSkuNameFromSequence(
+     {...config,steps:[config.steps[0],config.steps[0]]},
+     skuNamingValues(exampleSelect,params,converted)),'FANTA_FANTA');
  assert.throws(()=>validateSkuNamingSequence({...config,steps:[
      {field:'productName',mode:'QUANTITY',enabled:true},
  ]}),/Name, Code or Quantity/);
  assert.throws(()=>validateSkuNamingSequence({...config,steps:config.steps.map(s=>({...s,enabled:false}))}),/at least one/);
- assert.throws(()=>validateSkuNamingSequence({...config,steps:[
+ assert.deepEqual(validateSkuNamingSequence({...config,steps:[
      {field:'containerSize',mode:'NAME',enabled:true},
- ]}),/product name or code/);
+ ]}).steps,[{field:'containerSize',mode:'NAME',enabled:true}]);
  assert.equal(DEFAULT_SKU_NAMING_SEQUENCE.separator,'_');
 });
 
@@ -659,4 +661,48 @@ test('SKU naming configuration is org-versioned with guarded save and existing-S
  assert.ok(ui.includes('Save naming sequence'));
  assert.ok(ui.includes('Naming sequence preview'));
  assert.ok(read('src/org/ProductionFoundation.tsx').includes('Apply the latest SKU naming sequence'));
+});
+
+
+test('SKU naming starts empty and users add only desired components using +, including custom text',()=>{
+ const ui=read('src/org/MfgSkuSetup.tsx');
+ assert.ok(ui.includes("setup.namingConfigured?setup.namingSequence.steps"));
+ assert.ok(ui.includes("filter(step=>step.enabled)"));
+ assert.ok(ui.includes("steps:[]"));
+ assert.ok(ui.includes('Add component'));
+ assert.ok(ui.includes('Add to sequence'));
+ assert.ok(ui.includes('Remove '));
+ assert.ok(ui.includes('Clear all'));
+ assert.ok(ui.includes("field.key==='literal'?{text:''}"));
+ assert.ok(ui.includes("step.field==='literal'"));
+ assert.ok(ui.includes("title='Custom text'"));
+ assert.ok(ui.includes('setShowNamingPicker'));
+ assert.ok(ui.includes("disabled={busy||!namingDraft?.steps.length"));
+ const selected=validateSkuNamingSequence({separator:'_',steps:[
+     {field:'productName',mode:'CODE',enabled:true},
+     {field:'literal',mode:'TEXT',enabled:true,text:'PROMO'},
+     {field:'commercialPackSize',mode:'QUANTITY',enabled:true},
+ ]});
+ const params=structuredClone(exampleParams);
+ params.find(p=>p.kind==='productNames').productCode='FANTA';
+ const actual=calculateSkuConversion(exampleSelect,params);
+ assert.equal(composeSkuNameWithSequence(exampleSelect,params,selected,actual),'FANTA_PROMO_12');
+ assert.equal(validateSkuNamingSequence({...selected,steps:[
+     {field:'literal',mode:'TEXT',enabled:true,text:'PROMO'},
+ ]}).steps.length,1);
+ const twice=validateSkuNamingSequence({...selected,steps:[
+     {field:'productName',mode:'CODE',enabled:true},
+     {field:'productName',mode:'NAME',enabled:true},
+ ]});
+ assert.equal(composeSkuNameWithSequence(exampleSelect,params,twice,actual),'FANTA_Fanta');
+ assert.throws(()=>validateSkuNamingSequence({...selected,steps:[]}),/Add between/);
+ assert.throws(()=>validateSkuNamingSequence({...selected,steps:[
+     {field:'literal',mode:'TEXT',enabled:true,text:''},
+ ]}),/Custom naming text/);
+ assert.throws(()=>validateSkuNamingSequence({...selected,steps:[
+     {field:'literal',mode:'TEXT',enabled:true,text:'x'.repeat(61)},
+ ]}),/Custom naming text/);
+ assert.throws(()=>validateSkuNamingSequence({...selected,steps:[
+     {field:'literal',mode:'QUANTITY',enabled:true,text:'abc'},
+ ]}),/Name, Code or Quantity/);
 });
