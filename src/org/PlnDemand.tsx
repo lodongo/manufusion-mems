@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState, type ReactNode} from 'react';
+import {useEffect,useId,useMemo,useState, type ReactNode} from 'react';
 import {Alert,Field as MemsField,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
 import {hasPerm} from '../types';
@@ -25,16 +25,14 @@ const statusLabel=(v:string)=>v==='pending_approval'?'Awaiting approval':v==='ap
 function Card({children}:{children:ReactNode}){return <section className='rounded-2xl border border-line bg-panel p-4 text-ink'>{children}</section>;}
 function Input({title,value,onChange,type='text',required=false}:{
  title:string;value:string|number;onChange:(v:string)=>void;type?:string;required?:boolean;
-}){return <label className='block space-y-1 text-xs font-medium text-soft'>{title}
- <MemsField label='' type={type} required={required} value={value} onChange={e=>onChange(e.target.value)} />
- </label>;}
+}){const id=useId();return <MemsField id={id} label={title} type={type}
+ required={required} value={value} onChange={e=>onChange(e.target.value)} />;}
 function Select({title,value,onChange,options}:{title:string;value:string;
  onChange:(v:string)=>void;options:Array<[string,string]>;}){
- return <label className='block space-y-1 text-xs font-medium text-soft'>{title}
-    <SelectField label='' value={value} onChange={e=>onChange(e.target.value)}>
-      {options.map(([id,name])=><option key={id} value={id}>{name}</option>)}
-    </SelectField>
- </label>;
+ const id=useId();
+ return <SelectField id={id} label={title} value={value} onChange={e=>onChange(e.target.value)}>
+    {options.map(([key,name])=><option key={key} value={key}>{name}</option>)}
+ </SelectField>;
 }
 function Btn({children,onClick,disabled=false,secondary=false}:{children:ReactNode;
  onClick:()=>void;disabled?:boolean;secondary?:boolean;}){return <button type='button' disabled={disabled}
@@ -69,10 +67,12 @@ export default function PlnDemand({permissions}:{permissions:string[]}){
  const availableSites=output?.siteId?sites.filter(x=>x.id===output.siteId):sites;
  const visible=useMemo(()=>records.filter(x=>showList==='ALL'||x.status===showList)
   .sort((a,b)=>b.needDate.localeCompare(a.needDate)),[records,showList]);
- const totals=useMemo(()=>summary.reduce((acc,r)=>({
-    forecast:acc.forecast+r.forecast,firm:acc.firm+r.firmOrders,
-    consumed:acc.consumed+r.forecastConsumed,total:acc.total+r.totalDemand,
- }),{forecast:0,firm:0,consumed:0,total:0}),[summary]);
+ const counts=useMemo(()=>({
+    forecasts:records.filter(r=>r.type==='FORECAST'&&r.status==='approved').length,
+    orders:records.filter(r=>r.type==='FIRM_ORDER'&&r.status==='approved').length,
+    awaiting:records.filter(r=>r.status==='pending_approval').length,
+    buckets:summary.length,
+ }),[records,summary]);
  const save=async()=>{
   if(!draft)return;
   if(!draft.skuId||!draft.siteId||!draft.needDate){setError('Choose output, site and required date.');return;}
@@ -111,13 +111,13 @@ export default function PlnDemand({permissions}:{permissions:string[]}){
   {loading?<p className='text-sm text-muted'>Loading demand records…</p>:<>
   <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
    {([
-    ['Approved forecast',totals.forecast],['Firm orders',totals.firm],
-    ['Forecast consumed',totals.consumed],['Net demand',totals.total],
+    ['Approved forecasts',counts.forecasts],['Approved firm orders',counts.orders],
+    ['Awaiting approval',counts.awaiting],['Net demand periods',counts.buckets],
    ] as Array<[string,number]>).map(([title,n])=><Card key={title}>
       <p className='text-xs text-muted'>{title}</p><p className='mt-1 text-lg font-semibold tabular-nums'>{fmt(n)}</p>
    </Card>)}
   </div>
-  <p className='text-xs text-muted'>Summary totals combine quantities across different output units; use the detailed SKU rows for valid quantities. Only approved demand is shown. Monthly forecast consumption is isolated by SKU, site, market and unit.</p>
+  <p className='text-xs text-muted'>Summary cards count records, never add unlike units (such as cases, litres or pieces). Quantity calculations are reported per SKU, site, market, unit and month below.</p>
   <Card>
    <div className='flex flex-wrap items-center justify-between gap-2'>
     <h3 className='font-semibold'>Demand records</h3>
