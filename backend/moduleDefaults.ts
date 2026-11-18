@@ -3,6 +3,7 @@ import { HttpError, getDoc, isObj, nowIso, str, writeDoc, type Doc, type Plain }
 import { audit } from './audit';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { MFG_PRIMARY_CONTAINER_TYPES } from './mfgPrimaryContainerMetadata';
+import { MFG_PACKAGING_TYPES } from './mfgPackagingMetadata';
 import { VENDOR_META_LISTS } from './vendorMetaDefaults';
 import { HR_SKILL_DEFAULTS } from './hrSkillsDefaults';
 import { HR_SKILL_EXPANDED, HR_SKILL_EXPANDED_COUNTS } from './hrSkillsExpanded';
@@ -56,6 +57,16 @@ const COST_CENTER_TYPES: MetaItem[] = [
 
 export const DEFAULT_MODULE_METADATA: Record<string, Array<{ key: string; title: string; description: string; version: number; items: MetaItem[] }>> = {
     MFG: [{
+        key:'packagingTypes',
+        title:'Container packaging and logistics types',
+        description:'Coded secondary, tertiary, transport/logistics, bulk densification and returnable handling-unit types, adopted by each organization for layered packaging.',
+        version:1,
+        items:MFG_PACKAGING_TYPES.map(t=>({
+            code:t.code,label:t.name,category:t.category,subcategory:t.subcategory,
+            level:t.level,containedUnit:t.containedUnit,description:t.description,
+            defaultUnitCode:t.defaultUnitCode,active:true,selectable:true,
+        })),
+    },{
         key:'primaryContainers',
         title:'Primary container types',
         description:'MEMS Manufacturing category → subcategory → controlled primary-container attributes. Organizations adopt these platform master records; up to five dropdown attributes per type.',
