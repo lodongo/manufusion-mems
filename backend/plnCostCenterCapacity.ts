@@ -219,6 +219,25 @@ export const plnCostCenterCapacityRoutes={
     canConfigure:await authorized(ctx,'write',id)};
   }),
  ],
+ 'POST /api/org/pln/cost-center/rating':[
+  orgRoute('org.pln.cost_center.rating',null,async ctx=>{
+   const id=identifier(ctx.body.costCenterId,'manufacturing cost centre');
+   const skuId=identifier(ctx.body.skuId,'manufactured SKU');
+   if(!await authorized(ctx,'read',id))
+    throw new HttpError(403,'This cost centre is outside your authorized scope.');
+   const location=await candidate(ctx,id);
+   const saved=await getDoc(ROOT(ctx.orgId)+'/'+id);
+   if(!saved)throw new HttpError(404,'No commissioned capacity is configured for this cost centre.');
+   const source=(Array.isArray(saved.data.skuCapacities)?saved.data.skuCapacities:[])
+     .find(x=>isObj(x)&&str(x.skuId)===skuId);
+   if(!source)throw new HttpError(404,'This SKU is not commissioned for the selected cost centre.');
+   const params=await skuParametersForOrg(ctx.orgId);
+   const rating=await validSavedProjection(ctx,location.siteId,source,params);
+   if(rating.projection===null)
+    throw new HttpError(409,'This rating requires updated physical-container configuration before planning.');
+   return {costCenterId:id,skuId,revision:num(saved.data.revision)??0,rating};
+  }),
+ ],
  'POST /api/org/pln/cost-center/preview':[
   orgRoute('org.pln.cost_center.preview',null,async ctx=>{
    const id=identifier(ctx.body.costCenterId,'manufacturing cost centre');
