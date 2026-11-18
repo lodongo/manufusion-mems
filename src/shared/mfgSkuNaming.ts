@@ -17,10 +17,11 @@ export const SKU_NAME_FIELDS=[
     {key:'transportPackagesPerLayer',label:'Commercial packages per layer',modes:['QUANTITY']},
     {key:'transportLayerCount',label:'Transport layer count',modes:['QUANTITY']},
     {key:'transportTotalUnits',label:'Commercial packages per transport unit',modes:['QUANTITY']},
+    {key:'literal',label:'Custom text',modes:['TEXT']},
 ] as const;
 export type SkuNameField=typeof SKU_NAME_FIELDS[number]['key'];
-export type SkuNameMode='NAME'|'CODE'|'QUANTITY'|'QUANTITY_UNIT';
-export type SkuNameStep={field:SkuNameField;mode:SkuNameMode;enabled:boolean};
+export type SkuNameMode='NAME'|'CODE'|'QUANTITY'|'QUANTITY_UNIT'|'TEXT';
+export type SkuNameStep={field:SkuNameField;mode:SkuNameMode;enabled:boolean;text?:string};
 export type SkuNamingSequence={separator:string;steps:SkuNameStep[]};
 export type SkuNameToken={name?:string;code?:string;quantity?:number;unit?:string};
 export type SkuNameValues=Partial<Record<SkuNameField,SkuNameToken>>;
@@ -56,23 +57,24 @@ export function validateSkuNamingSequence(raw:unknown):SkuNamingSequence{
     const value=raw as Record<string,unknown>;
     if(typeof value.separator!=='string'||!SKU_NAME_SEPARATORS.some(s=>s.value===value.separator))
         throw Error('Select an approved SKU name separator.');
-    if(!Array.isArray(value.steps)||value.steps.length<1||value.steps.length>SKU_NAME_FIELDS.length)
-        throw Error('SKU naming sequence must contain between 1 and '+SKU_NAME_FIELDS.length+' fields.');
-    const seen=new Set<string>(),steps:SkuNameStep[]=[];
+    if(!Array.isArray(value.steps)||value.steps.length<1||value.steps.length>32)
+        throw Error('Add between 1 and 32 SKU naming components.');
+    const steps:SkuNameStep[]=[];
     for(const row of value.steps){
         if(!row||typeof row!=='object'||Array.isArray(row))throw Error('Invalid SKU naming step.');
         const item=row as Record<string,unknown>;
         const field=SKU_NAME_FIELDS.find(f=>f.key===item.field);
-        if(!field||seen.has(field.key))throw Error('Invalid or repeated SKU naming attribute.');
+        if(!field)throw Error('Invalid SKU naming attribute.');
         if(typeof item.mode!=='string'||!(field.modes as readonly string[]).includes(item.mode))
             throw Error('Select Name, Code or Quantity as applicable to '+field.label+'.');
         if(typeof item.enabled!=='boolean')throw Error('SKU naming step must specify whether it is included.');
-        seen.add(field.key);
-        steps.push({field:field.key,mode:item.mode as SkuNameMode,enabled:item.enabled});
+        const text=field.key==='literal'?String(item.text??'').trim():undefined;
+        if(field.key==='literal'&&item.enabled===true&&(!text||text.length>60||/[\u0000-\u001f\u007f]/.test(text)))
+            throw Error('Custom naming text must contain 1–60 printable characters.');
+        steps.push({field:field.key,mode:item.mode as SkuNameMode,enabled:item.enabled,
+            ...(field.key==='literal'?{text}:{} )});
     }
     if(!steps.some(s=>s.enabled))throw Error('Include at least one SKU naming attribute.');
-    if(!steps.some(s=>s.field==='productName'&&s.enabled))
-        throw Error('The product name or code must be included in the SKU naming sequence.');
     return {separator:value.separator,steps};
 }
 function quantity(v:number|undefined):string{
@@ -89,7 +91,8 @@ export function composeSkuNameFromSequence(
     sequence:SkuNamingSequence,values:SkuNameValues,
 ):string {
     const checked=validateSkuNamingSequence(sequence);
-    const parts=checked.steps.filter(s=>s.enabled).map(s=>formatSkuNameToken(values[s.field],s.mode))
+    const parts=checked.steps.filter(s=>s.enabled).map(s=>
+        s.field==='literal'?s.text||'':formatSkuNameToken(values[s.field],s.mode))
         .filter(Boolean);
     // Do not invent names from absent selections; an enabled field becomes
     // relevant when its corresponding SKU attribute is configured.
