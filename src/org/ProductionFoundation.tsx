@@ -29,10 +29,11 @@ type DemoStatus={sandboxId:string;seeded:boolean;isolated:boolean;canSeed:boolea
 type DemoVerification={seeded:boolean;valid:boolean;errors:string[];counts:Record<string,{expected:number;stored:number}>|null;verifiedAt?:string};
 type References={
     materials:Array<{id:string;name:string;materialNumber:string;uom:string}>;
+    utilities:Array<{workCenterId:string;code:string;name:string}>;
     assets:Array<{id:string;name:string;siteId:string}>;
     sites:Array<{id:string;name:string;code:string}>;
 };
-const emptyReferences:References={materials:[],assets:[],sites:[]};
+const emptyReferences:References={materials:[],utilities:[],assets:[],sites:[]};
 const kinds:Kind[]=['items','boms','resources','routings'];
 const tabs:{key:Tab;label:string;hint:string}[]=[
     {key:'skuSetup',label:'SKU Configuration',hint:'Configure names, production forms, containers, packages and normalization units'},
@@ -47,8 +48,10 @@ const emptyRows:Record<Kind,Row[]>={items:[],boms:[],resources:[],routings:[]};
 const fld='w-full min-h-11 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink outline-none focus:border-brand';
 const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab):Row=>{
-    if(tab==='items')return {id:'',name:'',category:'FINISHED',family:'',uom:'EA',siteId:'',packQty:1,inventoryMaterialId:'',skuComponents:{}};
-    if(tab==='boms')return {id:'',name:'',type:'FLAVOR_VARIANT',flavorVariantId:'',parentSkuId:'',outputQty:1,outputUom:'EA',components:[{skuId:'',quantity:1,uom:'EA',scrapPct:0}]};
+    if(tab==='items')return {id:'',name:'',category:'FINISHED',family:'',uom:'EA',siteId:'',packQty:1,
+        stockPolicy:'NON_STOCKED',sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
+    if(tab==='boms')return {id:'',name:'',type:'FLAVOR_VARIANT',flavorVariantId:'',alternativeCode:'STANDARD',routingId:'',
+        parentSkuId:'',outputQty:1,outputUom:'EA',components:[{skuId:'',quantity:1,uom:'EA',scrapPct:0}]};
     if(tab==='resources')return {id:'',name:'',type:'LINE',rate:1000,rateUom:'EA',efficiency:100,siteId:'',assetId:''};
     return {id:'',name:'',skuId:'',operations:[{code:'STG_000000001',name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:[]}]};
 };
@@ -88,6 +91,14 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
     const siteOptions:Array<[string,string]>=[['','Organization-wide'],...refs.sites.map(r=>[r.id,r.name+(r.code?' · '+r.code:'')] as [string,string])];
     const assetOptions:Array<[string,string]>=[['','No linked asset'],...refs.assets.map(r=>[r.id,r.name+' · '+r.id] as [string,string])];
     const materialOptions:Array<[string,string]>=[['','Select approved Inventory material'],...refs.materials.map(r=>[r.id,r.materialNumber+' · '+r.name] as [string,string])];
+    const utilityOptions:Array<[string,string]>=[['','Select registered equipment utility'],
+        ...refs.utilities.map(u=>[u.workCenterId+'::'+u.code,u.name+' · '+u.workCenterId] as [string,string])];
+    const routingUnitOptions=(skuId:string,current:string):Array<[string,string]>=>{
+        const masterUnit=str(items.find(item=>item.id===skuId)?.uom);
+        const units=skuSetup.units,master=units.find(u=>u.code===masterUnit||u.symbol===masterUnit);
+        const options=master?units.filter(u=>u.categoryCode===master.categoryCode&&u.baseUnit===master.baseUnit):[];
+        return [[current,current],...options.filter(u=>u.code!==current).map(u=>[u.code,u.label+' ('+u.symbol+')'] as [string,string])];
+    };
     const components=asComponents(draft.components);
     const operations=asOperations(draft.operations);
     return <div className='space-y-4'>
@@ -102,15 +113,35 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
                 <Field title='Product family (optional)' value={str(draft.family)} onChange={v=>update('family',v)}/>
                 {str(draft.category)!=='FINISHED'&&<Field title='Base unit of measure' value={str(draft.uom)} onChange={v=>update('uom',v)}/>}
                 {str(draft.category)==='FINISHED'&&<div className='rounded-xl border border-line bg-page p-3 text-sm text-soft'>The SKU name, physical package unit, containers per pack and conversion factor are calculated from selected configuration parameters.</div>}
-                {['RAW','PACKAGING'].includes(str(draft.category))&&<Choice title='Published Inventory Material Master' value={str(draft.inventoryMaterialId)} options={materialOptions} onChange={v=>{const found=refs.materials.find(m=>m.id===v);onChange({...draft,inventoryMaterialId:v,uom:found?.uom||draft.uom});}}/>}
+                {str(draft.category)==='INTERMEDIATE'&&<>
+                    <Choice title='Intermediate tracking' value={str(draft.stockPolicy)||'NON_STOCKED'}
+                        options={ [['NON_STOCKED','Non-stock (process output / no inventory posting)'],['STOCKED','Stock-managed intermediate']] }
+                        onChange={v=>update('stockPolicy',v)}/>
+                    {str(draft.stockPolicy)==='STOCKED'&&<Choice title='Approved Inventory material for stocked intermediate'
+                        value={str(draft.inventoryMaterialId)} options={materialOptions}
+                        onChange={v=>{const found=refs.materials.find(m=>m.id===v);onChange({...draft,inventoryMaterialId:v,uom:found?.uom||draft.uom});}}/>}
+                </>}
+                {str(draft.category)==='RAW'&&<Choice title='Input source' value={str(draft.sourceMode)||'INVENTORY'}
+                    options={ [['INVENTORY','Inventory raw material'],['UTILITY','Metered equipment utility (no stock issue)']] }
+                    onChange={v=>onChange({...draft,sourceMode:v,inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:''})}/>}
+                {(str(draft.category)==='PACKAGING'||str(draft.category)==='RAW'&&str(draft.sourceMode)!=='UTILITY')&&
+                    <Choice title='Published Inventory Material Master' value={str(draft.inventoryMaterialId)} options={materialOptions}
+                        onChange={v=>{const found=refs.materials.find(m=>m.id===v);onChange({...draft,inventoryMaterialId:v,uom:found?.uom||draft.uom});}}/>}
+                {str(draft.category)==='RAW'&&str(draft.sourceMode)==='UTILITY'&&
+                    <Choice title='Adopted equipment utility supply'
+                        value={str(draft.utilityWorkCenterId)&&str(draft.utilityCode)?str(draft.utilityWorkCenterId)+'::'+str(draft.utilityCode):''}
+                        options={utilityOptions} onChange={v=>{const selected=refs.utilities.find(u=>u.workCenterId+'::'+u.code===v);
+                            onChange({...draft,utilityCode:selected?.code||'',utilityWorkCenterId:selected?.workCenterId||''});}}/>}
             </>}
             {(tab==='boms')&&<>
                 <Choice title='BOM type' value={bomCategory(str(draft.type))}
                     options={ [['FLAVOR_VARIANT','Flavor/Variant BOM'],['PACKAGING','Packaging BOM']] }
                     onChange={v=>update('type',v)}/>
-                <Choice title='Flavor/Variant' value={str(draft.flavorVariantId)} options={flavorOptions}
+                <Choice title='Flavor/Variant (optional for common intermediates)' value={str(draft.flavorVariantId)} options={flavorOptions}
                     onChange={v=>update('flavorVariantId',v)}/>
                 <Choice title='Manufactured SKU' value={str(draft.parentSkuId)} options={itemOptions} onChange={v=>{const product=items.find(x=>x.id===v);onChange({...draft,parentSkuId:v,outputUom:product?.uom??draft.outputUom});}}/>
+                <Field title='BOM alternative code' value={str(draft.alternativeCode)||'STANDARD'}
+                    onChange={v=>update('alternativeCode',v.toUpperCase())}/>
                 <Field title='Output quantity (basis)' type='number' value={number(draft.outputQty,1)} onChange={v=>update('outputQty',Number(v))}/>
                 <Field title='Output unit' value={str(draft.outputUom)} onChange={v=>update('outputUom',v)}/>
                 <Field title='Effective from (optional)' type='date' value={str(draft.effectiveFrom)} onChange={v=>update('effectiveFrom',v)}/>
@@ -144,11 +175,12 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
             <div className='space-y-3'>{components.map((c,i)=><div key={i} className='grid gap-2 rounded-lg bg-page p-3 sm:grid-cols-2 xl:grid-cols-5'>
                 <Choice title={'Component '+(i+1)} value={str(c.skuId)} options={componentOptions} onChange={v=>{const item=items.find(x=>x.id===v);update('components',components.map((a,j)=>j===i?{...a,skuId:v,uom:str(item?.uom)||a.uom}:a));}}/>
                 <Field title='Quantity' type='number' value={c.quantity} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,quantity:Number(v)}:a))}/>
-                <Field title='Configured component UOM' value={c.uom} disabled onChange={()=>{}}/>
+                <Choice title='Component unit' value={c.uom} options={routingUnitOptions(c.skuId,c.uom)}
+                    onChange={v=>update('components',components.map((a,j)=>j===i?{...a,uom:v}:a))}/>
                 <Field title='Scrap allowance %' type='number' value={c.scrapPct} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,scrapPct:Number(v)}:a))}/>
                 <button type='button' className='min-h-11 self-end rounded-lg border border-red-700/50 px-3 text-sm text-red-300' onClick={()=>update('components',components.filter((_,j)=>j!==i))}>Remove</button>
             </div>)}</div>
-            {!items.length&&<p className='mt-2 text-sm text-amber-300'>Create product or intermediate SKU masters first. Raw-material items must reference Inventory.</p>}
+            <p className='mt-2 text-xs text-muted'>Component material records must exist before this BOM is saved. Upstream BOMs can be created later; production readiness requires approved upstream supply or confirmed stock.</p>
         </section>}
         {tab==='routings'&&<section className='rounded-xl border border-line p-3'>
             <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Manufacturing operations</h3><Button variant='secondary' type='button' onClick={()=>update('operations',[...operations,{code:'STG_'+String(operations.length+1).padStart(9,'0'),name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:operations.length?[operations[operations.length-1].code]:[]}])}>Add stage</Button></div>
@@ -174,7 +206,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
                 <button type='button' className='min-h-11 self-end rounded-lg border border-red-700/50 px-3 text-sm text-red-300' onClick={()=>update('operations',operations.filter((_,j)=>j!==i))}>Remove</button>
             </div>)}</div>
         </section>}
-        <p className='text-xs text-amber-200'>Flavor/Variant BOMs define formulation inputs; Packaging BOMs define containers and packed-product inputs. BOMs and routings require independent technical release; no Phase 1 operation posts purchases, stock or financial transactions.</p>
+        <p className='text-xs text-amber-200'>Flavor/Variant BOMs define formulation inputs (including flavor-neutral syrup); Packaging BOMs define containers and packed-product inputs. BOMs and routings require independent technical release; no Phase 1 operation posts purchases, stock or financial transactions.</p>
     </div>;
 }
 

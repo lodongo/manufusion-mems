@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {normalizeMaster,detectBomCycle,fictionalLine11Demo} from '../../backend/plnMfgFoundation.ts';
+import {normalizeMaster,detectBomCycle,fictionalLine11Demo,bomFamily,bomAlternative,materialUnitFactor} from '../../backend/plnMfgFoundation.ts';
 import {managedCode,masterPrefix,skuUnitConversion,calculateSkuConversion,composeConfiguredSkuName,composeSkuNameWithSequence,skuNamingValues,normalizeSkuParameter,countUnitTotal,skuUnitCategories,skuUnitsInCategory,packagingPrimaryContainerCount} from '../../backend/mfgSkuModel.ts';
 import {DEFAULT_SKU_NAMING_SEQUENCE,validateSkuNamingSequence,composeSkuNameFromSequence} from '../../src/shared/mfgSkuNaming.ts';
 import {MFG_PACKAGING_TYPES,validatePackagingLayout,packagingHierarchyRank,normalizePackagingTypes} from '../../backend/mfgPackagingMetadata.ts';
@@ -29,10 +29,53 @@ test('BOM supports two new classifications and preserves historical types',()=>{
  const pack={...formula,id:'BOM-PACK',name:'Orange case',type:'PACKAGING',parentSkuId:'FG',components:[{skuId:'BOTTLE',quantity:1,uom:'EA'}]};
  assert.equal(normalizeMaster('boms',formula).type,'FLAVOR_VARIANT');
  assert.equal(normalizeMaster('boms',pack).type,'PACKAGING');
- assert.throws(()=>normalizeMaster('boms',{...formula,flavorVariantId:''}),/Flavor\/Variant/);
+ assert.equal(normalizeMaster('boms',{...formula,flavorVariantId:''}).flavorVariantId,''); // Common simple syrup
  assert.equal(normalizeMaster('boms',{...pack,type:'BOM'}).type,'BOM');
  assert.equal(normalizeMaster('boms',{...formula,type:'RECIPE'}).type,'RECIPE');
 });
+test('Fanta formulation can be flavor-neutral and intermediates can be non-stock or stocked',()=>{
+ const base={id:'SIMPLE-SYRUP',name:'Common syrup',category:'INTERMEDIATE',uom:'L',packQty:1};
+ assert.equal(normalizeMaster('items',base).stockPolicy,'NON_STOCKED');
+ assert.equal(normalizeMaster('items',{...base,stockPolicy:'STOCKED',inventoryMaterialId:'INV-SYRUP'}).stockPolicy,'STOCKED');
+ assert.throws(()=>normalizeMaster('items',{...base,stockPolicy:'STOCKED'}),/Inventory material/);
+ assert.throws(()=>normalizeMaster('items',{...base,stockPolicy:'INVALID'}),/stock policy/);
+ assert.equal(normalizeMaster('boms',{id:'BOM-COMMON',name:'Simple syrup',type:'FLAVOR_VARIANT',
+  parentSkuId:'SIMPLE-SYRUP',outputQty:1000,outputUom:'L',
+  components:[{skuId:'SUGAR',quantity:500,uom:'KG'}]}).flavorVariantId,'');
+});
+test('Metered utility is an auditable input distinct from an Inventory issue',()=>{
+ const water={id:'WATER-01',name:'Treated water',category:'RAW',uom:'L',sourceMode:'UTILITY',
+   utilityCode:'WATER',utilityWorkCenterId:'WC-SYRUP'};
+ assert.equal(normalizeMaster('items',water).stockPolicy,'METERED');
+ assert.throws(()=>normalizeMaster('items',{...water,utilityWorkCenterId:''}),/Utility work center/);
+ assert.throws(()=>normalizeMaster('items',{...water,inventoryMaterialId:'MAT-WATER'}),/cannot simultaneously/);
+ assert.throws(()=>normalizeMaster('items',{...water,sourceMode:'INVENTORY',utilityCode:'',utilityWorkCenterId:''}),/Inventory material/);
+});
+test('BOM alternatives and one-character material units use validated dimensional conversions',()=>{
+ assert.equal(bomAlternative(undefined),'STANDARD');
+ assert.equal(bomAlternative('line_a'),'LINE_A');
+ assert.equal(bomFamily('RECIPE'),'FLAVOR_VARIANT');
+ assert.equal(bomFamily('BOM'),'PACKAGING');
+ assert.equal(materialUnitFactor('L','L'),1);
+ assert.ok(materialUnitFactor('L','mL')>0);
+ assert.throws(()=>materialUnitFactor('L','KG'),/Incompatible material units/);
+ const row={id:'BOM-RTD',name:'Prepared Fanta',type:'FLAVOR_VARIANT',parentSkuId:'RTD',
+    alternativeCode:'line_a',outputQty:1000,outputUom:'L',components:[{skuId:'CONCENTRATE',quantity:100,uom:'L'}]};
+ assert.equal(normalizeMaster('boms',row).alternativeCode,'LINE_A');
+ assert.equal(normalizeMaster('boms',row).components[0].uom,'L');
+});
+test('Release selection requires explicit BOM category and alternative to avoid accidental mixing',()=>{
+ const release=read('backend/plnMfgRelease.ts');
+ assert.ok(release.includes('requiresSelection:options.length>1'));
+ assert.ok(release.includes("bomFamily(str(other.data.type))===bomFamily(str(doc.data.type))"));
+ assert.ok(release.includes("bomAlternative(doc.data.alternativeCode)"));
+ const ui=read('src/org/ProductionFoundation.tsx');
+ assert.ok(ui.includes('BOM alternative code'));
+ assert.ok(ui.includes('Intermediate tracking'));
+ assert.ok(ui.includes('Adopted equipment utility supply'));
+ assert.ok(ui.includes('Component unit'));
+});
+
 test('BOM graph includes both categories when parent is shared',()=>{
  const boms=[{parentSkuId:'PACKED',components:[{skuId:'BULK'}]},{parentSkuId:'PACKED',components:[{skuId:'CAP'}]},{parentSkuId:'BULK',components:[{skuId:'WATER'}]}];
  assert.equal(detectBomCycle(boms,'WATER',[{skuId:'PACKED'}]),true);
@@ -328,7 +371,7 @@ test('product / SKU name has manually assigned business code, name and descripti
  assert.throws(()=>normalizeSkuParameter('productNames',{name:'Fanta',productCode:''}),/Flavor\/Variant code/);
  assert.throws(()=>normalizeSkuParameter('productNames',{name:'Fanta',productCode:'bad code'}),/Flavor\/Variant code/);
  const source=read('backend/mfgSkuConfiguration.ts');
- assert.ok(source.includes('The manually entered SKU name code is already in use'));
+ assert.ok(source.includes('The Flavor/Variant code is already in use'));
 });
 test('container packaging uses MEMS units and numeric packaging sizes need no description',()=>{
  const packageRecord=normalizeSkuParameter('packages',{name:'Case',uom:'UOM-20-001',description:'Secondary packaging unit'});
@@ -355,8 +398,8 @@ test('SKU setup has distinct commercial and transport menus with metadata-backed
  assert.ok(ui.includes('Container subcategory / type'));
  assert.ok(ui.includes('metadataType.attributes.slice(0,5)'));
  assert.ok(ui.includes("active==='packagingSizes'"));
- assert.ok(ui.includes('SKU code'));
- assert.ok(ui.includes('SKU name'));
+ assert.ok(ui.includes('Flavor/Variant code'));
+ assert.ok(ui.includes('Flavor/Variant name'));
  assert.ok(!ui.includes("key:'units'"));
  assert.ok(!ui.includes("title:'Package Containment'"));
  assert.ok(ui.includes('Back to SKU configuration menu'));

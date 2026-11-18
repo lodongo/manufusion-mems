@@ -8,7 +8,7 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canAt, nodePath, scopeOf } from './access';
 import { audit } from './audit';
 import { getNode } from './structure';
-import { calculateSkuConversion, composeConfiguredSkuName, composeSkuNameWithSequence, masterPrefix, type SkuComponents } from './mfgSkuModel';
+import { calculateSkuConversion, composeConfiguredSkuName, composeSkuNameWithSequence, skuUnitConversion, masterPrefix, type SkuComponents } from './mfgSkuModel';
 import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from './mfgSkuConfiguration';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
@@ -17,7 +17,7 @@ const COLLECTION: Record<MasterKind,string> = {
     items: 'mfg_items', boms: 'mfg_boms', resources: 'mfg_resources', routings: 'mfg_routings',
 };
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{1,59}$/;
-const CODE = /^[A-Za-z0-9][A-Za-z0-9_.-]{1,59}$/;
+const CODE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}$/; // Unit codes may be one character (L, g).
 const ROOT = (orgId:string, kind:MasterKind) => 'organizations/'+orgId+'/'+COLLECTION[kind];
 const DOC = (orgId:string, kind:MasterKind, id:string) => ROOT(orgId,kind)+'/'+id;
 const ARR = (v:unknown): Obj[] => Array.isArray(v) ? v.filter(isObj) : [];
@@ -47,6 +47,26 @@ const STAGES=['RAW','INTERMEDIATE','FINISHED','PACKAGING'] as const;
 const RESOURCE_TYPES=['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER'] as const;
 // Backward compatibility: existing BOM and RECIPE revisions remain readable.
 const BOM_TYPES=['FLAVOR_VARIANT','PACKAGING','BOM','RECIPE'] as const;
+const INTERMEDIATE_POLICIES=['STOCKED','NON_STOCKED'] as const;
+const SOURCE_MODES=['INVENTORY','UTILITY'] as const;
+const ALT_CODE=/^[A-Z0-9][A-Z0-9_-]{0,31}$/;
+/** Existing RECIPE/BOM revisions map to the new user-facing categories. */
+export function bomFamily(type:string):'FLAVOR_VARIANT'|'PACKAGING'{
+    return type==='FLAVOR_VARIANT'||type==='RECIPE'?'FLAVOR_VARIANT':'PACKAGING';
+}
+/** Alternative code distinguishes approved routes for the same output/date. */
+export function bomAlternative(value:unknown):string {
+    const code=str(value).trim().toUpperCase()||'STANDARD';
+    if(!ALT_CODE.test(code))throw new HttpError(400,'BOM alternative must be 1–32 uppercase letters, digits, underscores or hyphens.');
+    return code;
+}
+/** Conversions only use dimensional equivalents from the published MEMS unit registry. */
+export function materialUnitFactor(from:string,to:string):number {
+    if(from===to)return 1;
+    const factor=skuUnitConversion(from,to);
+    if(factor===null)throw new HttpError(400,'Incompatible material units: '+from+' and '+to+'. Configure approved unit conversion first.');
+    return factor;
+}
 
 /** Validation is shared with executable tests; rejects malformed graphs before persistence. */
 export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
@@ -59,8 +79,22 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const category=ENUM(raw.category,STAGES,'item category');
         const inventoryMaterialId=str(raw.inventoryMaterialId).trim();
         if(inventoryMaterialId&&!ID.test(inventoryMaterialId))throw new HttpError(400,'Invalid Inventory material reference.');
-        if((category==='RAW'||category==='PACKAGING')&& !inventoryMaterialId)throw new HttpError(400,'Raw and packaging materials must refer to the existing Inventory material master. Fictional demo materials remain read-only.');
-        return {...base,category,family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,packQty:POSITIVE(raw.packQty??1,'Pack quantity'),skuComponents:isObj(raw.skuComponents)?raw.skuComponents:{},skuConversion:isObj(raw.skuConversion)?raw.skuConversion:{},skuNamingSnapshot:isObj(raw.skuNamingSnapshot)?raw.skuNamingSnapshot:{}};
+        const sourceMode=category==='RAW'?ENUM(raw.sourceMode??'INVENTORY',SOURCE_MODES,'material source'):'INVENTORY';
+        const stockPolicy=category==='INTERMEDIATE'
+            ?ENUM(raw.stockPolicy??'NON_STOCKED',INTERMEDIATE_POLICIES,'intermediate stock policy')
+            :sourceMode==='UTILITY'?'METERED':'STOCKED';
+        const utilityCode=sourceMode==='UTILITY'?VALID_ID(raw.utilityCode,'Registered utility code'):'';
+        const utilityWorkCenterId=sourceMode==='UTILITY'?VALID_ID(raw.utilityWorkCenterId,'Utility work center'):'';
+        if((category==='RAW'||category==='PACKAGING')&&sourceMode==='INVENTORY'&&!inventoryMaterialId)
+            throw new HttpError(400,'Inventory-sourced raw and packaging materials require an approved Inventory material reference.');
+        if(sourceMode==='UTILITY'&&inventoryMaterialId)
+            throw new HttpError(400,'A metered utility input cannot simultaneously be an Inventory issue. Select one source.');
+        if(category==='INTERMEDIATE'&&stockPolicy==='STOCKED'&&!inventoryMaterialId)
+            throw new HttpError(400,'A stock-managed intermediate needs an Inventory material reference.');
+        return {...base,category,sourceMode,stockPolicy,utilityCode,utilityWorkCenterId,
+            family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,
+            packQty:POSITIVE(raw.packQty??1,'Pack quantity'),skuComponents:isObj(raw.skuComponents)?raw.skuComponents:{},
+            skuConversion:isObj(raw.skuConversion)?raw.skuConversion:{},skuNamingSnapshot:isObj(raw.skuNamingSnapshot)?raw.skuNamingSnapshot:{}};
     }
     if(kind==='resources'){
         return {...base,type:ENUM(raw.type,RESOURCE_TYPES,'resource type'),rate:POSITIVE(raw.rate,'Rated units per hour'),rateUom:UOM(raw.rateUom),assetId:str(raw.assetId).slice(0,60),efficiency:NONNEGATIVE(raw.efficiency??100,'Efficiency percentage',100)};
@@ -69,8 +103,10 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const type=ENUM(raw.type,BOM_TYPES,'BOM type');
         const flavorVariantId=str(raw.flavorVariantId).trim();
         if(flavorVariantId)VALID_ID(flavorVariantId,'Flavor/Variant');
-        if(type==='FLAVOR_VARIANT'&&!flavorVariantId)
-            throw new HttpError(400,'Select a Flavor/Variant for the Flavor/Variant BOM.');
+        // Flavor-neutral intermediate formulations (e.g. common simple syrup) have no variant.
+        const alternativeCode=bomAlternative(raw.alternativeCode);
+        const routingId=str(raw.routingId).trim();
+        if(routingId)VALID_ID(routingId,'Optional process routing');
         const parentSkuId=VALID_ID(raw.parentSkuId,'Parent SKU');
         const components=ARR(raw.components);
         if(!components.length||components.length>150)throw new HttpError(400,'A BOM/recipe must have 1–150 components.');
@@ -82,7 +118,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             seen.add(skuId);
             return {line:i+1,skuId,quantity:POSITIVE(c.quantity,'Component quantity'),uom:UOM(c.uom),scrapPct:NONNEGATIVE(c.scrapPct??0,'Scrap percentage',100)};
         });
-        return {...base,type,flavorVariantId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
+        return {...base,type,flavorVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
     const skuId=VALID_ID(raw.skuId,'Routed SKU');
     const operations=ARR(raw.operations);
@@ -129,14 +165,18 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         if(str(site.data.level)!=='site'||str(site.data.status)==='inactive')throw new HttpError(400,'Choose an active organization site.');
     }
     if(kind==='items'){
+        if(str(item.sourceMode)==='UTILITY'){
+            const utility=await getDoc('organizations/'+ctx.orgId+'/equipment_utilities/'+str(item.utilityWorkCenterId));
+            if(!utility||!ARR(utility.data.items).some(x=>str(x.code)===str(item.utilityCode)))
+                throw new HttpError(400,'The metered utility input must reference a configured equipment utility supply.');
+        }
         const materialId=str(item.inventoryMaterialId);
         if(materialId){
             const material=await getDoc('organizations/'+ctx.orgId+'/materials/'+materialId);
             if(!material||!['approved','active'].includes(str(material.data.status))||!str(material.data.materialNumber))
                 throw new HttpError(400,'Choose an approved, numbered Inventory material from the existing Material Master.');
             const inventoryUom=str(material.data.uom);
-            if(inventoryUom && inventoryUom.toUpperCase()!==str(item.uom).toUpperCase())
-                throw new HttpError(400,'SKU unit '+str(item.uom)+' must match Inventory material unit '+inventoryUom+' (unit conversions are not yet configured).');
+            if(inventoryUom)materialUnitFactor(str(item.uom),inventoryUom);
         }
     }
     if(kind==='resources'){
@@ -160,18 +200,30 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         const parent=await getDoc(DOC(ctx.orgId,'items',str(item.parentSkuId)));
         if(!parent)throw new HttpError(400,'Parent SKU does not exist in Manufacturing master data.');
         if(['RAW','PACKAGING'].includes(str(parent.data.category)))throw new HttpError(400,'Inventory-owned raw and packaging materials cannot be produced as manufacturing outputs.');
-        if(str(parent.data.uom).toUpperCase()!==str(item.outputUom).toUpperCase())
-            throw new HttpError(400,'BOM output unit must match the parent SKU unit.');
+        materialUnitFactor(str(item.outputUom),str(parent.data.uom));
         if(str(parent.data.siteId)&&str(parent.data.siteId)!==str(item.siteId))
             throw new HttpError(400,'BOM output belongs to another production site.');
+        // Upstream intermediate BOMs are not prerequisites for saving or releasing this BOM.
+        // The referenced material records must exist; a later planning-readiness check
+        // reports missing approved upstream formulations without blocking authoring.
+        if(str(item.flavorVariantId)&&isObj(parent.data.skuComponents)){
+            const assigned=str((parent.data.skuComponents as Obj).productNameId);
+            if(assigned&&assigned!==str(item.flavorVariantId))
+                throw new HttpError(400,'BOM Flavor/Variant conflicts with the finished SKU Flavor/Variant.');
+        }
+        const routingId=str(item.routingId);
+        if(routingId){
+            const route=await getDoc(DOC(ctx.orgId,'routings',routingId));
+            if(!route||str(route.data.skuId)!==str(item.parentSkuId))
+                throw new HttpError(400,'The optional routing must produce this BOM output SKU.');
+        }
         const components=ARR(item.components);
         for(const component of components){
             const child=await getDoc(DOC(ctx.orgId,'items',str(component.skuId)));
             if(!child)throw new HttpError(400,'Component '+str(component.skuId)+' is missing from SKU master.');
             if(str(item.type)==='FLAVOR_VARIANT'&&str(child.data.category)==='PACKAGING')
                 throw new HttpError(400,'Flavor/Variant BOMs contain formulation inputs, not packaging materials. Use a Packaging BOM.');
-            if(str(child.data.uom).toUpperCase()!==str(component.uom).toUpperCase())
-                throw new HttpError(400,'Component '+str(component.skuId)+' unit does not match its SKU master.');
+            materialUnitFactor(str(component.uom),str(child.data.uom));
             if(str(child.data.siteId)&&str(child.data.siteId)!==str(item.siteId))
                 throw new HttpError(400,'Component '+str(component.skuId)+' belongs to another production site.');
         }
@@ -263,8 +315,9 @@ export const plnMfgFoundationRoutes={
     'POST /api/org/pln-mfg/foundation/references':[
         orgRoute('org.mfg.foundation.references','MFG.view',async ctx=>{
             const orgRoot='organizations/'+ctx.orgId;
-            const [materials,assets,structure]=await Promise.all([
+            const [materials,assets,structure,utilityRegisters]=await Promise.all([
                 listDocs(orgRoot+'/materials'),listDocs(orgRoot+'/assets'),listDocs(orgRoot+'/structure'),
+                listDocs(orgRoot+'/equipment_utilities'),
             ]);
             const sites=[];
             for(const site of structure.filter(x=>str(x.data.level)==='site'&&str(x.data.status)!=='inactive')){
@@ -274,6 +327,9 @@ export const plnMfgFoundationRoutes={
             const visibleSites=new Set(sites.map(x=>x.id));
             return {
                 sites,
+                utilities:utilityRegisters.flatMap(d=>ARR(d.data.items).map(u=>({
+                    workCenterId:d.id,code:str(u.code),name:str(u.label)||str(u.code),
+                }))).filter(u=>u.code),
                 materials:materials.filter(x=>['approved','active'].includes(str(x.data.status))&&str(x.data.materialNumber))
                     .map(x=>({id:x.id,name:str(x.data.shortText)||str(x.data.name)||x.id,
                         materialNumber:str(x.data.materialNumber),uom:str(x.data.uom)})),

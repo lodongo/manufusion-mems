@@ -24,17 +24,26 @@
 | P1-02 | Load MFG item list and create finished product and intermediate SKU | Draft saved in own tenant, revision 1 exists, reload retains values |
 | P1-03 | Link a raw/packaging SKU to an existing published Inventory material | Published material appears in selector; invalid, unapproved or missing material rejected |
 | P1-04 | Create manufacturing line/resource with optional Asset Register link | Only active and same-site asset references allowed; rate/efficiency validation works |
-| P1-05 | Create and edit BOM and recipe | Parent and component SKU units match; quantities positive; circular structure rejected; revision snapshots preserved |
+| P1-05 | Create and edit Flavor/Variant or Packaging BOM | Parent and component units are identical or have a compatible MEMS unit conversion; quantities positive; circular structure rejected; revision snapshots preserved |
 | P1-06 | Create parallel-stage routing | Independent prep and bottle blowing stage outputs can feed filling; invalid resource or dependency rejected |
 | P1-07 | Apply site-specific and organization-wide masters | A user cannot mutate another site's resource, BOM or routing; global records require direct administrative permissions |
 | P1-08 | Submit BOM/routing and approve with separate user | Draft → pending approval → active; author cannot approve own submission; released revision cannot be overwritten |
-| P1-09 | Publish different effective dates for one SKU | Duplicate site/date activation rejected atomically; site release takes precedence after start date; older version remains traceable |
+| P1-09 | Publish variants and dated alternatives for one SKU | Duplicate category/alternative/site/date activation rejected atomically; different categories and alternatives coexist; ambiguous selection requires explicit choice |
 | P1-10 | Save configuration and reload | Initial horizon, frozen period, lot strategy and production strategy persist with revision conflict detection |
 | P1-11 | View fictional pilot preview | Exactly two finished SKUs, full upstream recipe, bottles, filling, case packaging and corresponding reference data |
 | P1-12 | Seed isolated Line 11 test fixture | Dev environment + authorized test tenant + active test mode + exact confirmation; creates only sandbox records, zero Inventory/Procurement/Finance postings |
 | P1-13 | Verify seeded pilot records | Integrity verification reports matching record counts and no missing, changed or foreign references |
 | P1-14 | Attempt duplicate seed or write with stale record revision | Idempotent seed; optimistic concurrency prevents lost updates; audit events recorded |
 | P1-15 | Repeat actions with unauthorized, cross-tenant or disabled-module account | Correct 403/404 response, no record disclosure or mutation |
+
+## Fanta scenario — requirements before downstream MRP
+- Flavor-neutral simple syrup may have a Flavor/Variant BOM without selecting a beverage flavor.
+- An intermediate may be explicitly non-stock-managed or stock-managed (linked to an approved Inventory material).
+- A metered raw input, such as treated water, must reference an already configured equipment utility and cannot be issued again as Inventory.
+- A final-product Packaging BOM may be created using its referenced material masters even before their upstream production BOMs exist. This is **not** proof of executable material readiness.
+- BOMs for the same output and date may coexist across categories or alternative codes, with explicit selection; identical category/alternative/site/date releases cannot be duplicated.
+- Unit conversions are restricted to compatible units from the central registry, not arbitrary cross-dimensional assumptions.
+- No MRP run, purchase requisition, stock reservation or actual manufacturing transaction is created by these Phase-1 master-data configuration changes.
 
 ## Normalized commercial unit-case acceptance
 
