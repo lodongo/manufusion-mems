@@ -158,10 +158,11 @@ test('Release selection requires explicit BOM classification and alternative to 
  assert.ok(release.includes("!cls.mrpRelevant"));
  assert.ok(release.includes("bomAlternative(doc.data.alternativeCode)"));
  const ui=read('src/org/ProductionFoundation.tsx');
- assert.ok(ui.includes('BOM alternative code'));
+ assert.ok(ui.includes('Alternative method identifier'));
  assert.ok(ui.includes('Intermediate tracking'));
  assert.ok(ui.includes('Adopted equipment utility supply'));
- assert.ok(ui.includes('Component unit'));
+ assert.ok(ui.includes('Alternate unit'));
+ assert.ok(ui.includes('Other consumption options'));
 });
 
 test('BOM dependencies include different classifications',()=>{
