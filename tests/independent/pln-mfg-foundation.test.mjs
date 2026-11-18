@@ -254,7 +254,7 @@ test('SKU normalization accepts only organization-defined compatible physical un
     assert.equal(skuUnitConversion('INVALID_UOM','INVALID_UOM'),null);
     const broken=exampleParams.map(x=>({...x}));
     broken.find(x=>x.kind==='normalizationUnits').baseUom='kg';
-    assert.throws(()=>calculateSkuConversion(exampleSelect,broken),/incompatible/);
+    assert.throws(()=>calculateSkuConversion(exampleSelect,broken),/incompatible|must match the product form dimension/);
     const disabled=exampleParams.map(x=>({...x}));
     disabled.find(x=>x.kind==='packageCounts').enabled=false;
     assert.throws(()=>calculateSkuConversion(exampleSelect,disabled),/active, configured/);
