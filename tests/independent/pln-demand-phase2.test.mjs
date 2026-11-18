@@ -14,6 +14,8 @@ const source=(path)=>readFileSync(new URL('../../'+path,import.meta.url),'utf8')
 test('demand validation is industry-independent and requires a site, quantity, date and known type',()=>{
  const row=normalizeDemand(base);
  assert.deepEqual(row,base);
+ assert.equal(normalizeDemand({...base,uom:'L'}).uom,'L'); // one-character unit is valid
+ assert.throws(()=>normalizeDemand({...base,uom:''}),/demand unit/);
  for(const date of ['2026-02-30','2026-13-01','2026-11-31','foo','2026-1-2'])
   assert.throws(()=>normalizeDemand({...base,needDate:date}),/date/);
  assert.throws(()=>normalizeDemand({...base,quantity:0}),/quantity/);

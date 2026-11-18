@@ -13,6 +13,7 @@ import {materialUnitFactor} from './plnMfgFoundation';
 const ROOT=(org:string)=>'organizations/'+org+'/pln_demand';
 const SOURCE_KEYS=(org:string)=>'organizations/'+org+'/pln_demand_source_keys';
 const CODE=/^[A-Za-z0-9][A-Za-z0-9_-]{1,79}$/;
+const UNIT=/^[A-Za-z0-9][A-Za-z0-9_.-]{0,19}$/;
 const DAY=/^\d{4}-\d{2}-\d{2}$/;
 const TYPES=['FORECAST','FIRM_ORDER'] as const;
 const SOURCES=['MANUAL','CSV_IMPORT','EXTERNAL'] as const;
@@ -35,6 +36,11 @@ const code=(v:unknown,label:string)=>{
  if(!CODE.test(x))throw new HttpError(400,label+' is required and must be a valid reference.');
  return x;
 };
+const unit=(v:unknown)=>{
+ const x=str(v).trim();
+ if(!UNIT.test(x))throw new HttpError(400,'A valid demand unit is required.');
+ return x;
+};
 const clean=(v:unknown,max=160)=>str(v).trim().slice(0,max);
 export function normalizeDemand(input:unknown):DemandInput{
  if(!isObj(input))throw new HttpError(400,'Demand line is required.');
@@ -51,7 +57,7 @@ export function normalizeDemand(input:unknown):DemandInput{
   throw new HttpError(400,'A confirmed customer order needs a customer/order reference.');
  return {skuId:code(input.skuId,'Demand output SKU'),siteId:code(input.siteId,'Production site'),
    needDate:validDate(input.needDate),type:type as DemandType,quantity,
-   uom:code(input.uom,'Demand unit'),source:source as DemandSource,
+   uom:unit(input.uom),source:source as DemandSource,
    externalId,market:clean(input.market,80),customerReference,notes:clean(input.notes,350)};
 }
 export type DemandSummary={
