@@ -6,6 +6,7 @@ import { HttpError, commitChecked, getDoc, isObj, listDocs, nowIso, num, str, ty
 import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { audit } from './audit';
 import { PROCUREMENT_UNITS } from './procurementUnits';
+import { MFG_PRIMARY_CONTAINER_CATEGORIES, MFG_PRIMARY_CONTAINER_TYPES } from './mfgPrimaryContainerMetadata';
 import {
     SKU_PARAMETERS, SKU_PARAMETER_KINDS, managedCode, normalizeSkuParameter, skuUnitCategories,
     type SkuParameter, type SkuParameterKind,
@@ -58,6 +59,11 @@ export const mfgSkuConfigurationRoutes={
         orgRoute('org.mfg.sku.setup','MFG.view',async ctx=>{
             const params=await skuParametersForOrg(ctx.orgId);
             return {parameters:params,groups:SKU_PARAMETERS,
+                // MEMS MFG platform master data, adopted by organization Physical Containers.
+                primaryContainerMetadata:{
+                    version:1,categories:MFG_PRIMARY_CONTAINER_CATEGORIES,
+                    types:MFG_PRIMARY_CONTAINER_TYPES,
+                },
                 categories:skuUnitCategories(),
                 units:PROCUREMENT_UNITS.filter(x=>x.active&&x.selectable)
                     .map(x=>({code:x.code,label:x.label,symbol:x.symbol,category:x.category,
@@ -79,6 +85,12 @@ export const mfgSkuConfigurationRoutes={
             const all=await skuParametersForOrg(ctx.orgId);
             if(all.some(p=>p.kind===kind&&p.id!==existingId&&p.name.trim().toLocaleLowerCase()===normalized.name.toLocaleLowerCase()))
                 throw new HttpError(409,'That SKU parameter name already exists in this category.');
+            if(kind==='productNames'&&all.some(p=>p.kind==='productNames'&&p.id!==existingId&&
+                str(p.productCode).trim().toUpperCase()===str(normalized.productCode).trim().toUpperCase()))
+                throw new HttpError(409,'The manually entered SKU name code is already in use.');
+            if(kind==='containers'&&all.some(p=>p.kind==='containers'&&p.id!==existingId&&
+                str(p.metadataCode)===str(normalized.metadataCode)&&p.enabled!==false))
+                throw new HttpError(409,'This primary-container master type has already been adopted. Edit its attributes instead.');
             if(!existingId){
                 if(Number(ctx.body.expectedRevision??0)!==0)throw new HttpError(409,'New parameters must begin at revision zero.');
                 const newRecord=await commitGeneratedCode(ctx.orgId,SKU_PARAMETERS[kind],id=>PARAMS(ctx.orgId)+'/'+id,
