@@ -99,10 +99,23 @@ export const mfgSkuConfigurationRoutes={
             const existingId=str(input.id);
             if((kind==='packages'||kind==='transportPackages')&&!existingId&&!str(input.packagingTypeCode))
                 throw new HttpError(400,'Choose a published MEMS packaging type before creating container packaging.');
+            const all=await skuParametersForOrg(ctx.orgId);
+            if(kind==='normalizationUnits'){
+                const referenceFormId=str(input.referenceProductionFormId);
+                if(!referenceFormId&&!existingId)
+                    throw new HttpError(400,'Select a production form to define the normalized case reference.');
+                if(referenceFormId){
+                    const refForm=all.find(p=>p.kind==='productionForms'&&p.id===referenceFormId&&p.enabled!==false);
+                    if(!refForm||!str(refForm.uom))
+                        throw new HttpError(400,'Select an active production form from this organization.');
+                    // The canonical reference UoM comes from the production form, not
+                    // a free-text conversion factor or a second independently edited unit.
+                    input.baseUom=refForm.uom;
+                }
+            }
             const normalized=normalizeSkuParameter(kind,input,
                 kind==='containers'?await currentPrimaryContainerCatalogue():undefined,
                 kind==='packages'||kind==='transportPackages'?await currentPackagingTypes():undefined);
-            const all=await skuParametersForOrg(ctx.orgId);
             if(kind==='packages'&&normalized.containedUnit==='PACKAGING'&&normalized.containersPerLayer){
                 if(normalized.containedPackagingId===existingId)
                     throw new HttpError(400,'A container packaging record cannot contain itself.');
