@@ -5,20 +5,27 @@
  */
 import { HttpError, num, str } from './core';
 import { PROCUREMENT_UNITS } from './procurementUnits';
+import { validatePrimaryContainerSelection } from './mfgPrimaryContainerMetadata';
 
 export const SKU_PARAMETERS={
     productNames:'NME', productionForms:'FRM', containers:'CNT',
-    containerSizes:'SIZ', packages:'PKG', packageCounts:'PCT', normalizationUnits:'NRM',
+    containerSizes:'SIZ', packages:'PKG', packagingSizes:'PSZ',
+    packageCounts:'PCT', // retained for existing organization records, hidden from new configuration
+    normalizationUnits:'NRM',
 } as const;
 export type SkuParameterKind=keyof typeof SKU_PARAMETERS;
 export const SKU_PARAMETER_KINDS=Object.keys(SKU_PARAMETERS) as SkuParameterKind[];
 export type SkuParameter={id:string;kind:SkuParameterKind;name:string;
     uom?:string;quantity?:number;baseUom?:string;quantityPerUnit?:number;
     categoryCode?:string;unitCode?:string;unitCount?:number;
+    productCode?:string;metadataCode?:string;subcategoryCode?:string;
+    containerAttributes?:Record<string,string>;
     enabled?:boolean;description?:string};
 export type SkuComponents={
     productNameId?:string;productionFormId?:string;containerId?:string;
-    containerSizeId?:string;packageId?:string;packageCountId?:string;normalizationUnitId?:string;
+    containerSizeId?:string;packageId?:string;
+    packagingSizeId?:string;packageCountId?:string; // legacy packageCountId read-only compatibility
+    normalizationUnitId?:string;
 };
 export type SkuConversion={
     productionUom:string;containerSizeInProductionUom:number|null;
@@ -99,7 +106,9 @@ export function calculateSkuConversion(
     const container=get('containers',values.containerId);
     const size=get('containerSizes',values.containerSizeId);
     const pack=get('packages',values.packageId);
-    const count=get('packageCounts',values.packageCountId);
+    // Legacy PCT selections continue to calculate; all new SKUs select PSZ packaging sizes.
+    const count=values.packagingSizeId
+        ? get('packagingSizes',values.packagingSizeId) : get('packageCounts',values.packageCountId);
     const normalize=get('normalizationUnits',values.normalizationUnitId);
     if(Boolean(container)!==Boolean(size))throw new HttpError(400,'Container and container size must be selected together.');
     if(Boolean(pack)!==Boolean(count))throw new HttpError(400,'Package and pack containment must be selected together.');
@@ -155,21 +164,26 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
     // Package containment has a canonical name derived from the MEMS Count unit.
     const name=kind==='packageCounts'
         ? String(countUnitTotal(str(raw.unitCode).trim(),Number(raw.unitCount)))
+        : kind==='packagingSizes'?String(Number(raw.quantity))
+        : kind==='containers'?validatePrimaryContainerSelection(str(raw.metadataCode),raw.containerAttributes).name
         : str(raw.name).trim();
     if(!name||name.length>120)throw new HttpError(400,'A parameter name of up to 120 characters is required.');
     const description=str(raw.description).trim().slice(0,300);
     const base={kind,name,description,enabled:raw.enabled!==false};
+    if(kind==='productNames'){
+        const productCode=str(raw.productCode).trim().toUpperCase();
+        if(!/^[A-Z0-9][A-Z0-9_.-]{1,29}$/.test(productCode))
+            throw new HttpError(400,'Enter a unique SKU name code (2–30 letters, digits, dots, hyphens or underscores).');
+        return {...base,productCode};
+    }
     if(kind==='productionForms'){
         const uom=str(raw.uom).trim();
         if(!uom||!skuUnitConversion(uom,uom))throw new HttpError(400,'Select a supported MEMS production unit.');
         return {...base,uom};
     }
     if(kind==='containers'){
-        const categoryCode=str(raw.categoryCode).trim();
-        if(!categoryCode||!skuUnitCategories().some(c=>c.code===categoryCode))
-            throw new HttpError(400,'Choose a unit category before defining its container subcategory.');
-        // The named subcategory is the Physical Container itself (e.g. Volume > Bottle).
-        return {...base,categoryCode};
+        const chosen=validatePrimaryContainerSelection(str(raw.metadataCode),raw.containerAttributes);
+        return {...base,...chosen};
     }
     if(kind==='containerSizes'){
         const uom=str(raw.uom).trim(),quantity=Number(raw.quantity);
@@ -178,10 +192,16 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
         return {...base,uom,quantity};
     }
     if(kind==='packages'){
-        const uom=str(raw.uom).trim().toUpperCase();
-        if(!/^[A-Z][A-Z0-9_]{1,14}$/.test(uom))
-            throw new HttpError(400,'Choose a physical package code such as CASE, TRAY or PACK.');
+        const uom=str(raw.uom).trim();
+        if(!skuUnitConversion(uom,uom))
+            throw new HttpError(400,'Select a unit from the existing MEMS Units master for container packaging.');
         return {...base,uom};
+    }
+    if(kind==='packagingSizes'){
+        const quantity=Number(raw.quantity);
+        if(!Number.isSafeInteger(quantity)||quantity<1||quantity>10000000)
+            throw new HttpError(400,'Container packaging size must be a positive whole number.');
+        return {...base,quantity,description:''};
     }
     if(kind==='packageCounts'){
         // Package containment is measured using the existing MEMS Count-category units:
@@ -206,7 +226,7 @@ export function composeConfiguredSkuName(values:SkuComponents,params:SkuParamete
     const size=str(selected.get(values.containerSizeId||'')?.name).trim();
     const container=str(selected.get(values.containerId||'')?.name).trim();
     const pack=str(selected.get(values.packageId||'')?.name).trim();
-    const count=str(selected.get(values.packageCountId||'')?.name).trim();
+    const count=str(selected.get(values.packagingSizeId||values.packageCountId||'')?.name).trim();
     return [name,[size,container].filter(Boolean).join(' '),[pack,count?'x'+count:''].filter(Boolean).join(' ')]
         .filter(Boolean).join(' · ').slice(0,160);
 }
