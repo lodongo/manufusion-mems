@@ -5,7 +5,7 @@
  */
 import { HttpError, num, str } from './core';
 import { PROCUREMENT_UNITS } from './procurementUnits';
-import { validatePrimaryContainerSelection } from './mfgPrimaryContainerMetadata';
+import { validatePrimaryContainerSelection, type MfgPrimaryContainerType } from './mfgPrimaryContainerMetadata';
 
 export const SKU_PARAMETERS={
     productNames:'NME', productionForms:'FRM', containers:'CNT',
@@ -160,12 +160,12 @@ export function calculateSkuConversion(
     };
 }
 
-export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,unknown>):Omit<SkuParameter,'id'> {
+export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,unknown>,containerTypes?:MfgPrimaryContainerType[]):Omit<SkuParameter,'id'> {
     // Package containment has a canonical name derived from the MEMS Count unit.
     const name=kind==='packageCounts'
         ? String(countUnitTotal(str(raw.unitCode).trim(),Number(raw.unitCount)))
         : kind==='packagingSizes'?String(Number(raw.quantity))
-        : kind==='containers'?validatePrimaryContainerSelection(str(raw.metadataCode),raw.containerAttributes).name
+        : kind==='containers'?validatePrimaryContainerSelection(str(raw.metadataCode),raw.containerAttributes,containerTypes).name
         : str(raw.name).trim();
     if(!name||name.length>120)throw new HttpError(400,'A parameter name of up to 120 characters is required.');
     const description=str(raw.description).trim().slice(0,300);
@@ -182,7 +182,7 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
         return {...base,uom};
     }
     if(kind==='containers'){
-        const chosen=validatePrimaryContainerSelection(str(raw.metadataCode),raw.containerAttributes);
+        const chosen=validatePrimaryContainerSelection(str(raw.metadataCode),raw.containerAttributes,containerTypes);
         return {...base,...chosen};
     }
     if(kind==='containerSizes'){
