@@ -124,7 +124,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
                     onChange={e=>update('applySkuNamingSequence',e.target.checked)}/>
                 Apply the latest SKU naming sequence when saving this existing SKU
             </label>}
-        </>}}
+        </>}
         <TextField title='Description / notes' value={str(draft.description)} onChange={v=>update('description',v)}/>
         {(tab==='boms'||tab==='recipes')&&<section className='rounded-xl border border-line p-3'>
             <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Component quantities</h3><Button variant='secondary' type='button' onClick={()=>update('components',[...components,{skuId:'',quantity:1,uom:'EA',scrapPct:0}])}>Add component</Button></div>
