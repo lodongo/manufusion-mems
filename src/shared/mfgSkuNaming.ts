@@ -4,7 +4,7 @@
  * Pure shared logic: used by the frontend preview and the backend save route.
  */
 export const SKU_NAME_FIELDS=[
-    {key:'productName',label:'Product / SKU name',modes:['NAME','CODE']},
+    {key:'productName',label:'Flavor/Variant',modes:['NAME','CODE']},
     {key:'productionForm',label:'Production form',modes:['NAME','CODE']},
     {key:'primaryContainer',label:'Physical container',modes:['NAME','CODE']},
     {key:'containerSize',label:'Container size',modes:['NAME','CODE','QUANTITY','QUANTITY_UNIT']},

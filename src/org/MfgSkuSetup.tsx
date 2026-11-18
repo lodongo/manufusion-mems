@@ -57,7 +57,7 @@ export type SkuSelections={
 };
 type MenuKey=Exclude<SkuParameterKind,'packageCounts'>|'namingSequence';
 export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
-    {kind:'productNames',title:'Product / SKU Names'},
+    {kind:'productNames',title:'Flavor/Variant'},
     {kind:'productionForms',title:'Production Forms'},
     {kind:'containers',title:'Physical Containers'},
     {kind:'containerSizes',title:'Container Sizes'},
@@ -69,7 +69,7 @@ export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
 ];
 type IconComponent=LucideIcon;
 const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
-    {key:'productNames',title:'Product / SKU Names',Icon:Box},
+    {key:'productNames',title:'Flavor/Variant',Icon:Box},
     {key:'productionForms',title:'Production Forms',Icon:Layers3},
     {key:'containers',title:'Physical Containers',Icon:PackageOpen},
     {key:'containerSizes',title:'Container Sizes',Icon:Maximize2},
@@ -80,7 +80,7 @@ const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
     {key:'namingSequence',title:'SKU Naming Sequence',Icon:ListOrdered},
 ];
 const variants:Array<{key:'productNameId'|'productionFormId'|'containerId'|'containerSizeId'|'packageId'|'packagingSizeId'|'normalizationUnitId';kind:SkuParameterKind;label:string}>=[
-    {key:'productNameId',kind:'productNames',label:'Product / SKU name'},
+    {key:'productNameId',kind:'productNames',label:'Flavor/Variant'},
     {key:'productionFormId',kind:'productionForms',label:'Production form'},
     {key:'containerId',kind:'containers',label:'Physical container'},
     {key:'containerSizeId',kind:'containerSizes',label:'Container size'},
@@ -525,8 +525,8 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                     <button type='button' className={secondary} onClick={()=>setDraft(null)}>Cancel</button>
                 </div>
                 {active==='productNames'&&<>
-                    <TextInput title='SKU name' value={draft.name||''} onChange={v=>update('name',v)} required/>
-                    <TextInput title='SKU code' value={draft.productCode||''} onChange={v=>update('productCode',v.toUpperCase())} required/>
+                    <TextInput title='Flavor/Variant name' value={draft.name||''} onChange={v=>update('name',v)} required/>
+                    <TextInput title='Flavor/Variant code' value={draft.productCode||''} onChange={v=>update('productCode',v.toUpperCase())} required/>
                     <TextInput title='Description' value={draft.description||''} onChange={v=>update('description',v)}/>
                 </>}
                 {active==='productionForms'&&<>

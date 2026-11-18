@@ -271,7 +271,7 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
     if(kind==='productNames'){
         const productCode=str(raw.productCode).trim().toUpperCase();
         if(!/^[A-Z0-9][A-Z0-9_.-]{1,29}$/.test(productCode))
-            throw new HttpError(400,'Enter a unique SKU name code (2–30 letters, digits, dots, hyphens or underscores).');
+            throw new HttpError(400,'Enter a unique Flavor/Variant code (2–30 letters, digits, dots, hyphens or underscores).');
         return {...base,productCode};
     }
     if(kind==='productionForms'){

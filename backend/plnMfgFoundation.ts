@@ -45,7 +45,8 @@ const ENUM=<T extends string>(v:unknown, options:readonly T[],label:string):T=>{
 };
 const STAGES=['RAW','INTERMEDIATE','FINISHED','PACKAGING'] as const;
 const RESOURCE_TYPES=['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER'] as const;
-const BOM_TYPES=['BOM','RECIPE'] as const;
+// Backward compatibility: existing BOM and RECIPE revisions remain readable.
+const BOM_TYPES=['FLAVOR_VARIANT','PACKAGING','BOM','RECIPE'] as const;
 
 /** Validation is shared with executable tests; rejects malformed graphs before persistence. */
 export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
@@ -65,7 +66,11 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         return {...base,type:ENUM(raw.type,RESOURCE_TYPES,'resource type'),rate:POSITIVE(raw.rate,'Rated units per hour'),rateUom:UOM(raw.rateUom),assetId:str(raw.assetId).slice(0,60),efficiency:NONNEGATIVE(raw.efficiency??100,'Efficiency percentage',100)};
     }
     if(kind==='boms'){
-        const type=ENUM(raw.type,BOM_TYPES,'BOM/recipe type');
+        const type=ENUM(raw.type,BOM_TYPES,'BOM type');
+        const flavorVariantId=str(raw.flavorVariantId).trim();
+        if(flavorVariantId)VALID_ID(flavorVariantId,'Flavor/Variant');
+        if(type==='FLAVOR_VARIANT'&&!flavorVariantId)
+            throw new HttpError(400,'Select a Flavor/Variant for the Flavor/Variant BOM.');
         const parentSkuId=VALID_ID(raw.parentSkuId,'Parent SKU');
         const components=ARR(raw.components);
         if(!components.length||components.length>150)throw new HttpError(400,'A BOM/recipe must have 1–150 components.');
@@ -77,7 +82,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             seen.add(skuId);
             return {line:i+1,skuId,quantity:POSITIVE(c.quantity,'Component quantity'),uom:UOM(c.uom),scrapPct:NONNEGATIVE(c.scrapPct??0,'Scrap percentage',100)};
         });
-        return {...base,type,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
+        return {...base,type,flavorVariantId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
     const skuId=VALID_ID(raw.skuId,'Routed SKU');
     const operations=ARR(raw.operations);
@@ -98,8 +103,14 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
 }
 
 export function detectBomCycle(boms:Array<{parentSkuId:string;components:Array<{skuId:string}>}>,parentSkuId:string,components:Array<{skuId:string}>):boolean {
-    const byParent=new Map(boms.map(b=>[b.parentSkuId,b.components.map(c=>c.skuId)]));
-    byParent.set(parentSkuId,components.map(c=>c.skuId));
+    // A parent may have both BOM types or several effective revisions.
+    const byParent=new Map<string,Set<string>>();
+    const add=(parent:string,children:Array<{skuId:string}>)=>{
+        const list=byParent.get(parent)??new Set<string>();
+        children.forEach(c=>list.add(c.skuId));byParent.set(parent,list);
+    };
+    boms.forEach(b=>add(b.parentSkuId,b.components));
+    add(parentSkuId,components);
     const active=new Set<string>(), visited=new Set<string>();
     const visit=(node:string):boolean=>{
         if(active.has(node))return true;
@@ -140,6 +151,12 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         }
     }
     if(kind==='boms'){
+        const flavorVariantId=str(item.flavorVariantId);
+        if(flavorVariantId){
+            const variant=await getDoc('organizations/'+ctx.orgId+'/mfg_sku_parameters/'+flavorVariantId);
+            if(!variant||str(variant.data.kind)!=='productNames'||variant.data.enabled===false)
+                throw new HttpError(400,'Select an active Flavor/Variant from SKU Configuration.');
+        }
         const parent=await getDoc(DOC(ctx.orgId,'items',str(item.parentSkuId)));
         if(!parent)throw new HttpError(400,'Parent SKU does not exist in Manufacturing master data.');
         if(['RAW','PACKAGING'].includes(str(parent.data.category)))throw new HttpError(400,'Inventory-owned raw and packaging materials cannot be produced as manufacturing outputs.');
@@ -151,6 +168,8 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         for(const component of components){
             const child=await getDoc(DOC(ctx.orgId,'items',str(component.skuId)));
             if(!child)throw new HttpError(400,'Component '+str(component.skuId)+' is missing from SKU master.');
+            if(str(item.type)==='FLAVOR_VARIANT'&&str(child.data.category)==='PACKAGING')
+                throw new HttpError(400,'Flavor/Variant BOMs contain formulation inputs, not packaging materials. Use a Packaging BOM.');
             if(str(child.data.uom).toUpperCase()!==str(component.uom).toUpperCase())
                 throw new HttpError(400,'Component '+str(component.skuId)+' unit does not match its SKU master.');
             if(str(child.data.siteId)&&str(child.data.siteId)!==str(item.siteId))
@@ -280,7 +299,7 @@ export const plnMfgFoundationRoutes={
         orgRoute('org.mfg.foundation.save','MFG.master.edit',async ctx=>{
             const kind=readKind(ctx.body.kind);
             if(kind==='boms'&&!hasPerm(ctx.permissions,'MFG.bom.edit')&&ctx.role!=='org_super_admin')
-                throw new HttpError(403,'BOM and recipe editing permission required.');
+                throw new HttpError(403,'BOM editing permission required.');
             if(kind==='routings'&&!hasPerm(ctx.permissions,'MFG.routing.edit')&&ctx.role!=='org_super_admin')
                 throw new HttpError(403,'Routing editing permission required.');
             const raw=isObj(ctx.body.record)?{...ctx.body.record}:{};

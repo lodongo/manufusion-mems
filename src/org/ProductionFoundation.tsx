@@ -19,7 +19,7 @@ import { callBackend } from '../lib/backend';
 import { hasPerm } from '../types';
 
 type Kind='items'|'boms'|'resources'|'routings';
-type Tab=Kind|'recipes'|'skuSetup'|'config'|'demo';
+type Tab=Kind|'skuSetup'|'config'|'demo';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
@@ -37,8 +37,7 @@ const kinds:Kind[]=['items','boms','resources','routings'];
 const tabs:{key:Tab;label:string;hint:string}[]=[
     {key:'skuSetup',label:'SKU Configuration',hint:'Configure names, production forms, containers, packages and normalization units'},
     {key:'items',label:'Products & SKUs',hint:'Finished, intermediate and Inventory-linked raw materials'},
-    {key:'boms',label:'Bills of Materials',hint:'Versioned component structures'},
-    {key:'recipes',label:'Recipes',hint:'Ingredient formulas and intermediate processing'},
+    {key:'boms',label:'Bills of Materials',hint:'Flavor/Variant BOM and Packaging BOM, with separate versioned structures'},
     {key:'resources',label:'Manufacturing Resources',hint:'Work centres, machines and production lines'},
     {key:'routings',label:'Process Routings',hint:'Stage-by-stage manufacturing operations'},
     {key:'config',label:'Planning Configuration',hint:'Organization planning defaults'},
@@ -49,11 +48,14 @@ const fld='w-full min-h-11 rounded-xl border border-line bg-panel px-3 py-2 text
 const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab):Row=>{
     if(tab==='items')return {id:'',name:'',category:'FINISHED',family:'',uom:'EA',siteId:'',packQty:1,inventoryMaterialId:'',skuComponents:{}};
-    if(tab==='boms'||tab==='recipes')return {id:'',name:'',type:tab==='recipes'?'RECIPE':'BOM',parentSkuId:'',outputQty:1,outputUom:'EA',components:[{skuId:'',quantity:1,uom:'EA',scrapPct:0}]};
+    if(tab==='boms')return {id:'',name:'',type:'FLAVOR_VARIANT',flavorVariantId:'',parentSkuId:'',outputQty:1,outputUom:'EA',components:[{skuId:'',quantity:1,uom:'EA',scrapPct:0}]};
     if(tab==='resources')return {id:'',name:'',type:'LINE',rate:1000,rateUom:'EA',efficiency:100,siteId:'',assetId:''};
     return {id:'',name:'',skuId:'',operations:[{code:'STG_000000001',name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:[]}]};
 };
-const recordKind=(tab:Tab):Kind=>tab==='recipes'?'boms':tab as Kind;
+const recordKind=(tab:Tab):Kind=>tab as Kind;
+const bomCategory=(type:string):'FLAVOR_VARIANT'|'PACKAGING'=>
+    type==='FLAVOR_VARIANT'||type==='RECIPE'?'FLAVOR_VARIANT':'PACKAGING';
+const bomLabel=(type:string)=>bomCategory(type)==='FLAVOR_VARIANT'?'Flavor/Variant BOM':'Packaging BOM';
 const str=(value:unknown):string=>typeof value==='string'?value:'';
 const number=(value:unknown,def=0):number=>typeof value==='number'&&Number.isFinite(value)?value:def;
 const asComponents=(value:unknown):Component[]=>Array.isArray(value)?value as Component[]:[];
@@ -76,6 +78,12 @@ function TextField({title,value,onChange}:{title:string;value:string;onChange:(v
 function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];resources:Row[];refs:References;skuSetup:SkuSetup}){
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
     const itemOptions:Array<[string,string]>=[['','Select a SKU'],...items.map(i=>[i.id,i.name] as [string,string])];
+    const flavorOptions:Array<[string,string]>=[['','Select Flavor/Variant'],
+        ...skuSetup.parameters.filter(p=>p.kind==='productNames'&&p.enabled!==false)
+            .map(p=>[p.id,p.name+(p.productCode?' · '+p.productCode:'')] as [string,string])];
+    const componentOptions=tab==='boms'&&bomCategory(str(draft.type))==='FLAVOR_VARIANT'
+        ?itemOptions.filter(([id])=>!id||items.find(x=>x.id===id)?.category!=='PACKAGING')
+        :itemOptions;
     const resourceOptions:Array<[string,string]>=[['','Select a resource'],...resources.map(r=>[r.id,r.name] as [string,string])];
     const siteOptions:Array<[string,string]>=[['','Organization-wide'],...refs.sites.map(r=>[r.id,r.name+(r.code?' · '+r.code:'')] as [string,string])];
     const assetOptions:Array<[string,string]>=[['','No linked asset'],...refs.assets.map(r=>[r.id,r.name+' · '+r.id] as [string,string])];
@@ -96,7 +104,12 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
                 {str(draft.category)==='FINISHED'&&<div className='rounded-xl border border-line bg-page p-3 text-sm text-soft'>The SKU name, physical package unit, containers per pack and conversion factor are calculated from selected configuration parameters.</div>}
                 {['RAW','PACKAGING'].includes(str(draft.category))&&<Choice title='Published Inventory Material Master' value={str(draft.inventoryMaterialId)} options={materialOptions} onChange={v=>{const found=refs.materials.find(m=>m.id===v);onChange({...draft,inventoryMaterialId:v,uom:found?.uom||draft.uom});}}/>}
             </>}
-            {(tab==='boms'||tab==='recipes')&&<>
+            {(tab==='boms')&&<>
+                <Choice title='BOM type' value={bomCategory(str(draft.type))}
+                    options={ [['FLAVOR_VARIANT','Flavor/Variant BOM'],['PACKAGING','Packaging BOM']] }
+                    onChange={v=>update('type',v)}/>
+                <Choice title='Flavor/Variant' value={str(draft.flavorVariantId)} options={flavorOptions}
+                    onChange={v=>update('flavorVariantId',v)}/>
                 <Choice title='Manufactured SKU' value={str(draft.parentSkuId)} options={itemOptions} onChange={v=>{const product=items.find(x=>x.id===v);onChange({...draft,parentSkuId:v,outputUom:product?.uom??draft.outputUom});}}/>
                 <Field title='Output quantity (basis)' type='number' value={number(draft.outputQty,1)} onChange={v=>update('outputQty',Number(v))}/>
                 <Field title='Output unit' value={str(draft.outputUom)} onChange={v=>update('outputUom',v)}/>
@@ -126,10 +139,10 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
             </label>}
         </>}
         <TextField title='Description / notes' value={str(draft.description)} onChange={v=>update('description',v)}/>
-        {(tab==='boms'||tab==='recipes')&&<section className='rounded-xl border border-line p-3'>
+        {(tab==='boms')&&<section className='rounded-xl border border-line p-3'>
             <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Component quantities</h3><Button variant='secondary' type='button' onClick={()=>update('components',[...components,{skuId:'',quantity:1,uom:'EA',scrapPct:0}])}>Add component</Button></div>
             <div className='space-y-3'>{components.map((c,i)=><div key={i} className='grid gap-2 rounded-lg bg-page p-3 sm:grid-cols-2 xl:grid-cols-5'>
-                <Choice title={'Component '+(i+1)} value={str(c.skuId)} options={itemOptions} onChange={v=>{const item=items.find(x=>x.id===v);update('components',components.map((a,j)=>j===i?{...a,skuId:v,uom:str(item?.uom)||a.uom}:a));}}/>
+                <Choice title={'Component '+(i+1)} value={str(c.skuId)} options={componentOptions} onChange={v=>{const item=items.find(x=>x.id===v);update('components',components.map((a,j)=>j===i?{...a,skuId:v,uom:str(item?.uom)||a.uom}:a));}}/>
                 <Field title='Quantity' type='number' value={c.quantity} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,quantity:Number(v)}:a))}/>
                 <Field title='Configured component UOM' value={c.uom} disabled onChange={()=>{}}/>
                 <Field title='Scrap allowance %' type='number' value={c.scrapPct} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,scrapPct:Number(v)}:a))}/>
@@ -161,7 +174,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
                 <button type='button' className='min-h-11 self-end rounded-lg border border-red-700/50 px-3 text-sm text-red-300' onClick={()=>update('operations',operations.filter((_,j)=>j!==i))}>Remove</button>
             </div>)}</div>
         </section>}
-        <p className='text-xs text-amber-200'>Products and resources are maintained as drafts. BOMs, recipes and routings require independent technical release before becoming active; no Phase 1 operation can post purchases, stock or financial transactions.</p>
+        <p className='text-xs text-amber-200'>Flavor/Variant BOMs define formulation inputs; Packaging BOMs define containers and packed-product inputs. BOMs and routings require independent technical release; no Phase 1 operation posts purchases, stock or financial transactions.</p>
     </div>;
 }
 
@@ -171,6 +184,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [skuSetup,setSkuSetup]=useState<SkuSetup>(emptySkuSetup);
     const [refs,setRefs]=useState<References>(emptyReferences);
     const [draft,setDraft]=useState<Row|null>(null);
+    const [bomFilter,setBomFilter]=useState<'ALL'|'FLAVOR_VARIANT'|'PACKAGING'>('ALL');
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
     const [configRevision,setConfigRevision]=useState(0);
     const [demo,setDemo]=useState<Demo|null>(null);
@@ -186,11 +200,11 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const canEdit=canViewMasters&&hasPerm(permissions,'MFG.master.edit');
     const canSkuConfig=canViewMasters&&hasPerm(permissions,'MFG.sku.configure');
     const canConfig=hasPerm(permissions,'PLN.configure');
-    const isReleaseMaster=['boms','recipes','routings'].includes(active);
+    const isReleaseMaster=['boms','routings'].includes(active);
     const releaseScope=active==='routings'?'MFG.routing':'MFG.bom';
     const canSubmit=isReleaseMaster&&canEdit&&hasPerm(permissions,releaseScope+'.submit');
     const canApprove=isReleaseMaster&&hasPerm(permissions,releaseScope+'.approve');
-    const canSave=canEdit && (active!=='boms'||hasPerm(permissions,'MFG.bom.edit')) && (active!=='recipes'||hasPerm(permissions,'MFG.bom.edit')) && (active!=='routings'||hasPerm(permissions,'MFG.routing.edit'));
+    const canSave=canEdit && (active!=='boms'||hasPerm(permissions,'MFG.bom.edit')) && (active!=='routings'||hasPerm(permissions,'MFG.routing.edit'));
     const load=async()=>{
         setLoading(true);setError('');
         try{
@@ -212,10 +226,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const filtered=useMemo(()=>{
         const kind=recordKind(active);
         if(!kinds.includes(kind))return [] as Row[];
-        if(active==='boms')return rows.boms.filter(r=>r.type==='BOM');
-        if(active==='recipes')return rows.boms.filter(r=>r.type==='RECIPE');
+        if(active==='boms')return rows.boms.filter(r=>bomFilter==='ALL'||bomCategory(str(r.type))===bomFilter);
         return rows[kind];
-    },[active,rows]);
+    },[active,rows,bomFilter]);
     const refreshSkuSetup=async()=>{
         const data=await callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup');
         setSkuSetup(data);
@@ -226,7 +239,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             void callBackend<DemoStatus>('/api/org/pln-mfg/foundation/demo/status')
                 .then(setDemoStatus).catch(e=>setError(e instanceof Error?e.message:'Pilot sandbox status unavailable.'));
     };
-    const copyVersion=(row:Row)=>{const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
+    const copyVersion=(row:Row)=>{const cloned={...row,...(active==='boms'?{type:bomCategory(str(row.type))}:{}),id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
     const release=async (id:string,decision:'submit'|'approve'|'reject')=>{
         if(decision==='reject'&&!decisionReason.trim()){setError('Enter a rejection reason first.');return;}
         setBusy(true);setError('');setNotice('');
@@ -251,7 +264,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         setBusy(true);setError('');setNotice('');
         try{
             const body={...draft};
-            if(active==='boms'||active==='recipes')body.type=active==='recipes'?'RECIPE':'BOM';
+            if(active==='boms')body.type=bomCategory(str(body.type));
             const result=await callBackend<{record:Row;generatedCode?:string}>('/api/org/pln-mfg/foundation/save',{kind:recordKind(active),record:body,expectedRevision:body.revision??0});
             await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+'. The code is maintained by MEMS.');
         }catch(e){setError(e instanceof Error?e.message:'Could not save.');}
@@ -322,9 +335,14 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 </div>}
                 {!demoStatus.seeded&&!demoStatus.canSeed&&<p className='text-xs text-muted'>Seeding is restricted to organization super admins in explicitly enabled development test mode. The preview remains available to authorized viewers.</p>}
             </section>}
-            {demo&&<><p className='text-xs text-muted'>{demo.label}</p><div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>{([['SKUs',demo.items],['BOMs & recipes',demo.boms],['Resources',demo.resources],['Routings',demo.routings]] as Array<[string,Row[]]>).map(([title,data])=><section className='rounded-lg bg-page p-3' key={title}><h3 className='mb-2 font-semibold'>{title} ({data.length})</h3>{data.map(r=><div key={r.id} className='border-t border-line py-2 text-xs'><span className='text-brand'>{r.id}</span><p className='text-soft'>{r.name}</p></div>)}</section>)}</div></>}
+            {demo&&<><p className='text-xs text-muted'>{demo.label}</p><div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>{([['SKUs',demo.items],['Flavor/Variant & Packaging BOMs',demo.boms],['Resources',demo.resources],['Routings',demo.routings]] as Array<[string,Row[]]>).map(([title,data])=><section className='rounded-lg bg-page p-3' key={title}><h3 className='mb-2 font-semibold'>{title} ({data.length})</h3>{data.map(r=><div key={r.id} className='border-t border-line py-2 text-xs'><span className='text-brand'>{r.id}</span><p className='text-soft'>{r.name}</p></div>)}</section>)}</div></>}
         </Card>:<>
-            <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-muted'>{filtered.length} saved master records · draft versions</p>{canSave&&<Button onClick={()=>setDraft(newRecord(active))}>Add {active==='items'?'SKU':active==='recipes'?'recipe':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
+            {active==='boms'&&<div className='grid gap-2 sm:grid-cols-2'>
+                <Choice title='Show BOM type' value={bomFilter} onChange={v=>setBomFilter(v as typeof bomFilter)}
+                    options={ [['ALL','All BOMs'],['FLAVOR_VARIANT','Flavor/Variant BOM'],['PACKAGING','Packaging BOM']] }/>
+                <p className='self-end text-xs text-muted'>Earlier RECIPE and BOM revisions remain available in the corresponding categories.</p>
+            </div>}
+            <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-muted'>{filtered.length} saved master records · draft versions</p>{canSave&&<Button onClick={()=>setDraft(newRecord(active))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
@@ -333,7 +351,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
                 <h3 className='font-semibold'>{row.name}</h3>
-                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:'Components: '+asComponents(row.components).length}</p>
+                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:bomLabel(str(row.type))+' · Components: '+asComponents(row.components).length}</p>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
                     {canSave&&['draft','rejected',''].includes(str(row.status))&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}
@@ -349,7 +367,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     <p className='text-xs text-muted'>The submitter and creator cannot approve their own master data.</p>
                 </div>}
             </Card>)}</div>}
-            {!filtered.length&&!draft&&<Card><p className='text-sm text-muted'>No records have been created here yet. Start with products and resources; then define the BOMs and production routings. The fictional pilot is available under Line 11 Pilot Preview.</p></Card>}
+            {!filtered.length&&!draft&&<Card><p className='text-sm text-muted'>No records have been created here yet. Start with flavors/variants, SKUs and resources; then define Flavor/Variant and Packaging BOMs and production routings. The fictional pilot is available under Line 11 Pilot Preview.</p></Card>}
         </>}
     </div>;
 }

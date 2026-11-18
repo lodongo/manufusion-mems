@@ -24,6 +24,20 @@ test('real raw and packaging materials require an Inventory master reference',()
  assert.equal(normalizeMaster('items',{id:'CAP-2622',name:'Cap',category:'PACKAGING',uom:'EA',packQty:1,inventoryMaterialId:'MAT-2622'}).inventoryMaterialId,'MAT-2622');
 });
 
+test('BOM supports two new classifications and preserves historical types',()=>{
+ const formula={id:'BOM-FLAVOR',name:'Orange base',type:'FLAVOR_VARIANT',flavorVariantId:'NME_000000001',parentSkuId:'BULK',outputQty:1000,outputUom:'L',components:[{skuId:'WATER',quantity:1000,uom:'L'}]};
+ const pack={...formula,id:'BOM-PACK',name:'Orange case',type:'PACKAGING',parentSkuId:'FG',components:[{skuId:'BOTTLE',quantity:1,uom:'EA'}]};
+ assert.equal(normalizeMaster('boms',formula).type,'FLAVOR_VARIANT');
+ assert.equal(normalizeMaster('boms',pack).type,'PACKAGING');
+ assert.throws(()=>normalizeMaster('boms',{...formula,flavorVariantId:''}),/Flavor\/Variant/);
+ assert.equal(normalizeMaster('boms',{...pack,type:'BOM'}).type,'BOM');
+ assert.equal(normalizeMaster('boms',{...formula,type:'RECIPE'}).type,'RECIPE');
+});
+test('BOM graph includes both categories when parent is shared',()=>{
+ const boms=[{parentSkuId:'PACKED',components:[{skuId:'BULK'}]},{parentSkuId:'PACKED',components:[{skuId:'CAP'}]},{parentSkuId:'BULK',components:[{skuId:'WATER'}]}];
+ assert.equal(detectBomCycle(boms,'WATER',[{skuId:'PACKED'}]),true);
+});
+
 test('BOM structures reject zero quantities, duplicate components and immediate cycles',()=>{
  const baseline={id:'BOM-01',name:'Water case',type:'BOM',parentSkuId:'FG-WATER',outputQty:1,outputUom:'CASE'};
  const comp={skuId:'CAP-2622',quantity:12,uom:'EA',scrapPct:1};
@@ -311,8 +325,8 @@ test('product / SKU name has manually assigned business code, name and descripti
  assert.equal(product.productCode,'FAN.TA-100');
  assert.equal(product.name,'Fanta');
  assert.equal(product.description,'Orange carbonated beverage');
- assert.throws(()=>normalizeSkuParameter('productNames',{name:'Fanta',productCode:''}),/SKU name code/);
- assert.throws(()=>normalizeSkuParameter('productNames',{name:'Fanta',productCode:'bad code'}),/SKU name code/);
+ assert.throws(()=>normalizeSkuParameter('productNames',{name:'Fanta',productCode:''}),/Flavor\/Variant code/);
+ assert.throws(()=>normalizeSkuParameter('productNames',{name:'Fanta',productCode:'bad code'}),/Flavor\/Variant code/);
  const source=read('backend/mfgSkuConfiguration.ts');
  assert.ok(source.includes('The manually entered SKU name code is already in use'));
 });
