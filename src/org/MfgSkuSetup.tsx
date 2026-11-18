@@ -306,6 +306,7 @@ export function SkuConfigurationFields({value,onChange,setup}:{
 export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:boolean;onSaved:()=>Promise<void>}){
     const [active,setActive]=useState<MenuKey|null>(null);
     const [draft,setDraft]=useState<Partial<SkuParameter>|null>(null);
+    const [namingDraft,setNamingDraft]=useState<SkuNamingSequence|null>(null);
     const [busy,setBusy]=useState(false);
     const [error,setError]=useState(''),[notice,setNotice]=useState('');
     const [category,setCategory]=useState('');
@@ -324,7 +325,14 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
     const kindName=menu.find(x=>x.key===active)?.title||'SKU Configuration';
     const records=active?setup.parameters.filter(p=>p.kind===active):[];
     const update=(field:keyof SkuParameter,value:unknown)=>setDraft(d=>({...d,[field]:value}));
-    const open=(kind:MenuKey)=>{setActive(kind);setDraft(null);setError('');setNotice('');setCategory('');setTypeCode('');};
+    const open=(kind:MenuKey)=>{
+        setActive(kind);setDraft(null);
+        setNamingDraft(kind==='namingSequence'?{
+            separator:setup.namingSequence.separator,
+            steps:setup.namingSequence.steps.map(step=>({...step})),
+        }:null);
+        setError('');setNotice('');setCategory('');setTypeCode('');
+    };
     const begin=()=>{
         setDraft({name:'',enabled:true});
         setTypeCode('');
@@ -337,7 +345,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
         setError('');setNotice('');
     };
     const save=async()=>{
-        if(!active||!draft||!canEdit)return;
+        if(!active||active==='namingSequence'||!draft||!canEdit)return;
         setBusy(true);setError('');setNotice('');
         try{
             const parameter:Partial<SkuParameter>={...draft};
@@ -360,6 +368,34 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
         }catch(e){setError(e instanceof Error?e.message:'Unable to save SKU configuration.');}
         finally{setBusy(false);}
     };
+    const saveNaming=async()=>{
+        if(!canEdit||!namingDraft)return;
+        setBusy(true);setError('');setNotice('');
+        try{
+            await callBackend('/api/org/pln-mfg/sku/naming/save',{
+                sequence:namingDraft,expectedRevision:setup.namingRevision,
+            });
+            await onSaved();setNamingDraft(null);
+            setNotice('SKU naming sequence saved. Existing SKU names are unchanged.');
+        }catch(e){setError(e instanceof Error?e.message:'Unable to save SKU naming sequence.');}
+        finally{setBusy(false);}
+    };
+    const moveNaming=(i:number,change:number)=>{
+        setNamingDraft(previous=>{
+            if(!previous||i+change<0||i+change>=previous.steps.length)return previous;
+            const steps=previous.steps.map(step=>({...step}));
+            [steps[i],steps[i+change]]=[steps[i+change],steps[i]];
+            return {...previous,steps};
+        });
+    };
+    const changeNaming=(i:number,updates:Partial<SkuNamingSequence['steps'][number]>)=>{
+        setNamingDraft(previous=>previous?{...previous,steps:previous.steps.map(
+            (step,j)=>j===i?{...step,...updates}:step)}:previous);
+    };
+    const namingLayout=namingDraft?.steps.filter(step=>step.enabled).map(step=>{
+        const label=SKU_NAME_FIELDS.find(f=>f.key===step.field)?.label||step.field;
+        return '['+label+' · '+step.mode.toLowerCase().replaceAll('_',' ')+']';
+    }).join(namingDraft?.separator??'_');
     return <section className={modal}>
         {!active?<>
             <h2 className='mb-4 text-lg font-semibold'>SKU Configuration</h2>
@@ -380,9 +416,57 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                     <ArrowLeft className='h-5 w-5' aria-hidden='true'/>
                 </button>
                 <h2 className='min-w-0 flex-1 text-lg font-semibold'>{kindName}</h2>
-                {canEdit&&!draft&&<button type='button' className={primary} onClick={begin}>Add</button>}
+                {canEdit&&!draft&&active!=='namingSequence'&&<button type='button' className={primary} onClick={begin}>Add</button>}
             </div>
-            {!draft?<div className='space-y-2'>
+            {active==='namingSequence'?<div className='space-y-4'>
+                <div className='rounded-xl border border-line bg-page p-3 space-y-3'>
+                    <Choice title='Separator' value={namingDraft?.separator||''}
+                        options={SKU_NAME_SEPARATORS.map(x=>[x.value,x.label])}
+                        onChange={v=>setNamingDraft(d=>d?{...d,separator:v}:d)}/>
+                    <p className='text-xs text-muted'>Select which SKU attributes are included, whether to use the name, code or quantity, and their order.</p>
+                </div>
+                <div className='space-y-2'>
+                    {namingDraft?.steps.map((step,i)=>{
+                        const field=SKU_NAME_FIELDS.find(x=>x.key===step.field);
+                        return <div key={step.field} className='rounded-xl border border-line p-3 space-y-2'>
+                            <div className='flex items-center justify-between gap-2'>
+                                <label className='flex min-h-11 flex-1 items-center gap-2 text-sm font-medium'>
+                                    <input type='checkbox' checked={step.enabled} disabled={!canEdit}
+                                        onChange={e=>changeNaming(i,{enabled:e.target.checked})}/>
+                                    <span>{i+1}. {field?.label||step.field}</span>
+                                </label>
+                                <button type='button' className={secondary} disabled={!canEdit||i===0}
+                                    aria-label={'Move '+field?.label+' up'} onClick={()=>moveNaming(i,-1)}>
+                                    <ArrowUp className='h-4 w-4'/>
+                                </button>
+                                <button type='button' className={secondary} disabled={!canEdit||i===(namingDraft?.steps.length??1)-1}
+                                    aria-label={'Move '+field?.label+' down'} onClick={()=>moveNaming(i,1)}>
+                                    <ArrowDown className='h-4 w-4'/>
+                                </button>
+                            </div>
+                            <Choice title='Use' value={step.mode}
+                                options={(field?.modes||['NAME']).map(mode=>
+                                    [mode,mode==='QUANTITY_UNIT'?'Quantity + unit':mode==='QUANTITY'?'Quantity':mode==='CODE'?'Code':'Name'])}
+                                onChange={v=>changeNaming(i,{mode:v as SkuNameMode})}/>
+                        </div>;
+                    })}
+                </div>
+                <div className='rounded-xl border border-line bg-page p-3' aria-live='polite'>
+                    <p className='text-xs font-medium text-muted'>Naming sequence preview</p>
+                    <p className='mt-2 break-all font-mono text-sm text-ink'>{namingLayout||'Select attributes'}</p>
+                    <p className='mt-2 text-xs text-muted'>Placeholders show the sequence. The actual SKU name uses its selected product values.</p>
+                </div>
+                {canEdit&&<div className='flex flex-wrap gap-2'>
+                    <button type='button' className={primary} disabled={busy||!namingDraft}
+                        onClick={()=>void saveNaming()}>{busy?'Saving…':'Save naming sequence'}</button>
+                    <button type='button' className={secondary} disabled={busy}
+                        onClick={()=>setNamingDraft({
+                            separator:DEFAULT_SKU_NAMING_SEQUENCE.separator,
+                            steps:DEFAULT_SKU_NAMING_SEQUENCE.steps.map(step=>({...step})),
+                        })}>Reset to default</button>
+                </div>}
+                <p className='text-xs text-muted'>The internal SKU_######### code remains database-generated. Existing SKU names only change when explicitly regenerated.</p>
+            </div>:!draft?<div className='space-y-2'>
                 {records.map(row=><div key={row.id} className='flex min-h-14 items-center justify-between gap-2 rounded-xl border border-line px-3 py-2'>
                     <div className='min-w-0'>
                         <p className='text-sm font-medium'>{row.name}
