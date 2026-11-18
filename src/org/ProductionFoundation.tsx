@@ -24,10 +24,12 @@ type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:st
 type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
 type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string};
+type BomClassification={code:string;name:string;enabled:boolean;mrpRelevant:boolean;productionEligible:boolean};
 type MaterialPolicy={allowRawUtility:boolean;allowRawDirect:boolean;allowPackagingDirect:boolean;
-    defaultIntermediateTracking:'STOCKED'|'NON_STOCKED'};
+    defaultIntermediateTracking:'STOCKED'|'NON_STOCKED';bomClassifications:BomClassification[]};
 const defaultMaterialPolicy:MaterialPolicy={allowRawUtility:true,allowRawDirect:false,
-    allowPackagingDirect:false,defaultIntermediateTracking:'NON_STOCKED'};
+    allowPackagingDirect:false,defaultIntermediateTracking:'NON_STOCKED',
+    bomClassifications:[{code:'PRODUCTION',name:'Production',enabled:true,mrpRelevant:true,productionEligible:true}]};
 
 type References={
     materials:Array<{id:string;name:string;materialNumber:string;uom:string}>;
@@ -41,7 +43,7 @@ const tabs:{key:Tab;label:string;hint:string}[]=[
     {key:'skuSetup',label:'Product Configuration',hint:'Configure variants, production forms and packaging attributes'},
     {key:'materialPolicy',label:'Manufacturing Setup',hint:'Material consumption and intermediate inventory policies'},
     {key:'items',label:'Materials & Products',hint:'Finished goods, components, intermediates and process inputs'},
-    {key:'boms',label:'Bills of Materials',hint:'Manufacturing BOM and optional Packaging BOM, with versioned structures'},
+    {key:'boms',label:'Bills of Materials',hint:'One BOM master with governed classifications and versioned structures'},
     {key:'resources',label:'Manufacturing Resources',hint:'Work centres, machines and production lines'},
     {key:'routings',label:'Process Routings',hint:'Stage-by-stage manufacturing operations'},
     {key:'config',label:'Planning Configuration',hint:'Organization planning defaults'},
@@ -52,14 +54,12 @@ const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy):Row=>{
     if(tab==='items')return {id:'',name:'',category:'FINISHED',family:'',uom:'EA',siteId:'',packQty:1,
         stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
-    if(tab==='boms')return {id:'',name:'',type:'MANUFACTURING',productVariantId:'',alternativeCode:'STANDARD',routingId:'',
+    if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',productVariantId:'',alternativeCode:'STANDARD',routingId:'',
         parentSkuId:'',outputQty:1,outputUom:'EA',components:[{skuId:'',quantity:1,uom:'EA',scrapPct:0}]};
     if(tab==='resources')return {id:'',name:'',type:'LINE',rate:1000,rateUom:'EA',efficiency:100,siteId:'',assetId:''};
     return {id:'',name:'',skuId:'',operations:[{code:'STG_000000001',name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:[]}]};
 };
 const recordKind=(tab:Tab):Kind=>tab as Kind;
-const bomCategory=(type:string):'MANUFACTURING'|'PACKAGING'=>
-    type==='MANUFACTURING'||type==='FLAVOR_VARIANT'||type==='RECIPE'?'MANUFACTURING':'PACKAGING';
 const str=(value:unknown):string=>typeof value==='string'?value:'';
 const number=(value:unknown,def=0):number=>typeof value==='number'&&Number.isFinite(value)?value:def;
 const asComponents=(value:unknown):Component[]=>Array.isArray(value)?value as Component[]:[];
@@ -85,6 +85,11 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,material
     const variantOptions:Array<[string,string]>=[['','No specific product / variant'],
         ...skuSetup.parameters.filter(p=>p.kind==='productNames'&&p.enabled!==false)
             .map(p=>[p.id,p.name+(p.productCode?' · '+p.productCode:'')] as [string,string])];
+    const classOptions:Array<[string,string]>=materialPolicy.bomClassifications
+        .filter(c=>c.enabled||c.code===str(draft.classificationCode))
+        .map(c=>[c.code,c.name]);
+    if(tab==='boms'&&str(draft.classificationCode)&&!classOptions.some(c=>c[0]===str(draft.classificationCode)))
+        classOptions.push([str(draft.classificationCode),str(draft.classificationCode)+' (existing record)']);
     const componentOptions=itemOptions; // Generic BOMs may include any governed material classification.
     const resourceOptions:Array<[string,string]>=[['','Select a resource'],...resources.map(r=>[r.id,r.name] as [string,string])];
     const siteOptions:Array<[string,string]>=[['','Organization-wide'],...refs.sites.map(r=>[r.id,r.name+(r.code?' · '+r.code:'')] as [string,string])];
@@ -142,9 +147,8 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,material
                             onChange({...draft,utilityCode:selected?.code||'',utilityWorkCenterId:selected?.workCenterId||''});}}/>}
             </>}
             {(tab==='boms')&&<>
-                <Choice title='BOM type' value={bomCategory(str(draft.type))}
-                    options={ [['MANUFACTURING','Manufacturing BOM'],['PACKAGING','Packaging BOM']] }
-                    onChange={v=>update('type',v)}/>
+                <Choice title='BOM classification' value={str(draft.classificationCode)||'PRODUCTION'}
+                    options={classOptions} onChange={v=>update('classificationCode',v)}/>
                 <Choice title='Product/Variant (optional for shared materials)' value={str(draft.productVariantId)} options={variantOptions}
                     onChange={v=>update('productVariantId',v)}/>
                 <Choice title='Manufactured material / product' value={str(draft.parentSkuId)} options={itemOptions} onChange={v=>{const product=items.find(x=>x.id===v);onChange({...draft,parentSkuId:v,outputUom:product?.uom??draft.outputUom});}}/>
@@ -214,7 +218,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,material
                 <button type='button' className='min-h-11 self-end rounded-lg border border-red-700/50 px-3 text-sm text-red-300' onClick={()=>update('operations',operations.filter((_,j)=>j!==i))}>Remove</button>
             </div>)}</div>
         </section>}
-        <p className='text-xs text-amber-200'>Manufacturing BOMs define inputs for formulations, transformations or assemblies; optional Packaging BOMs cover distinct packaging operations. BOMs and routings require independent technical release; no Phase 1 operation posts purchases, stock or financial transactions.</p>
+        <p className='text-xs text-amber-200'>All BOMs share one structure. BOM classifications are governed in Manufacturing Setup; material categories distinguish components and routings define consumption stages. Phase 1 does not post stock, purchasing or finance transactions.</p>
     </div>;
 }
 
@@ -224,7 +228,6 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [skuSetup,setSkuSetup]=useState<SkuSetup>(emptySkuSetup);
     const [refs,setRefs]=useState<References>(emptyReferences);
     const [draft,setDraft]=useState<Row|null>(null);
-    const [bomFilter,setBomFilter]=useState<'ALL'|'MANUFACTURING'|'PACKAGING'>('ALL');
     const [materialPolicy,setMaterialPolicy]=useState<MaterialPolicy>(defaultMaterialPolicy);
     const [materialPolicyRevision,setMaterialPolicyRevision]=useState(0);
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
@@ -265,10 +268,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     useEffect(()=>{void load();},[]);
     const filtered=useMemo(()=>{
         const kind=recordKind(active);
-        if(!kinds.includes(kind))return [] as Row[];
-        if(active==='boms')return rows.boms.filter(r=>bomFilter==='ALL'||bomCategory(str(r.type))===bomFilter);
-        return rows[kind];
-    },[active,rows,bomFilter]);
+        return kinds.includes(kind)?rows[kind]:[] as Row[];
+    },[active,rows]);
     const refreshSkuSetup=async()=>{
         const data=await callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup');
         setSkuSetup(data);
@@ -276,7 +277,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const changeTab=(tab:Tab)=>{
         setActive(tab);setDraft(null);setHistory([]);setError('');setNotice('');setDecisionReason('');
     };
-    const copyVersion=(row:Row)=>{const cloned={...row,...(active==='boms'?{type:bomCategory(str(row.type))}:{}),id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
+    const copyVersion=(row:Row)=>{const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
     const release=async (id:string,decision:'submit'|'approve'|'reject')=>{
         if(decision==='reject'&&!decisionReason.trim()){setError('Enter a rejection reason first.');return;}
         setBusy(true);setError('');setNotice('');
@@ -301,7 +302,6 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         setBusy(true);setError('');setNotice('');
         try{
             const body={...draft};
-            if(active==='boms')body.type=bomCategory(str(body.type));
             const result=await callBackend<{record:Row;generatedCode?:string}>('/api/org/pln-mfg/foundation/save',{kind:recordKind(active),record:body,expectedRevision:body.revision??0});
             await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+'. The code is maintained by MEMS.');
         }catch(e){setError(e instanceof Error?e.message:'Could not save.');}
@@ -352,7 +352,35 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                             setMaterialPolicy(s=>({...s,[key]:e.target.checked}))}/>{title}
                     </label>)}
             </div>
-            <p className='text-xs text-muted'>Manufacturing BOMs define input requirements for all production methods. Packaging BOMs are optional. Material classification does not force inventory postings.</p>
+            <p className='text-xs text-muted'>All BOMs use one engine; classify them by purpose without restricting what material categories they can consume. Production/MRP relevance is controlled below.</p>
+            <section className='space-y-3 rounded-xl border border-line p-3'>
+                <div className='flex flex-wrap items-center justify-between gap-2'>
+                    <h3 className='text-sm font-semibold'>BOM classifications</h3>
+                    <Button variant='secondary' disabled={!canSkuConfig||materialPolicy.bomClassifications.length>=30}
+                        onClick={()=>setMaterialPolicy(p=>({...p,bomClassifications:[...p.bomClassifications,
+                            {code:'',name:'',enabled:true,mrpRelevant:false,productionEligible:false}]}))}>Add classification</Button>
+                </div>
+                <p className='text-xs text-muted'>Production is the default. Add other classifications only when needed. Classification settings are not material classifications.</p>
+                {materialPolicy.bomClassifications.map((c,i)=><div key={i} className='grid gap-2 rounded-lg border border-line p-3 sm:grid-cols-2'>
+                    <Field title='Code' value={c.code} disabled={!canSkuConfig||c.code==='PRODUCTION'}
+                        onChange={v=>setMaterialPolicy(p=>({...p,bomClassifications:p.bomClassifications.map((x,j)=>j===i?{...x,code:v.toUpperCase()}:x)}))}/>
+                    <Field title='Name' value={c.name} disabled={!canSkuConfig}
+                        onChange={v=>setMaterialPolicy(p=>({...p,bomClassifications:p.bomClassifications.map((x,j)=>j===i?{...x,name:v}:x)}))}/>
+                    {([
+                        ['enabled','Enabled'],['mrpRelevant','MRP relevant'],['productionEligible','Production eligible'],
+                    ] as Array<[keyof BomClassification,string]>).map(([key,title])=>
+                        <label key={key} className='flex min-h-9 items-center gap-2 text-xs'>
+                            <input type='checkbox' checked={c[key]===true}
+                                disabled={!canSkuConfig||(c.code==='PRODUCTION'&&c[key]===true)}
+                                onChange={e=>setMaterialPolicy(p=>({...p,bomClassifications:p.bomClassifications.map((x,j)=>
+                                    j===i?{...x,[key]:e.target.checked}:x)}))}/>{title}
+                        </label>)}
+                    {c.code!=='PRODUCTION'&&<Button variant='secondary' disabled={!canSkuConfig}
+                        onClick={()=>setMaterialPolicy(p=>({...p,bomClassifications:p.bomClassifications.filter((_,j)=>j!==i)}))}>
+                        Remove classification
+                    </Button>}
+                </div>)}
+            </section>
             <div className='flex justify-end'><Button disabled={!canSkuConfig||busy} onClick={()=>void saveMaterialPolicy()}>Save manufacturing setup</Button></div>
         </Card>:active==='config'?<Card className='space-y-4'>
             <p className='text-sm text-muted'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>
@@ -364,11 +392,6 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </div>
             <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration</Button></div>
         </Card>:<>
-            {active==='boms'&&<div className='grid gap-2 sm:grid-cols-2'>
-                <Choice title='Show BOM type' value={bomFilter} onChange={v=>setBomFilter(v as typeof bomFilter)}
-                    options={ [['ALL','All BOMs'],['MANUFACTURING','Manufacturing BOM'],['PACKAGING','Packaging BOM']] }/>
-                <p className='self-end text-xs text-muted'>Filter manufacturing structures by BOM category.</p>
-            </div>}
             <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-muted'>{filtered.length} saved master records · draft versions</p>{canSave&&<Button onClick={()=>setDraft(newRecord(active,materialPolicy))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
@@ -378,7 +401,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
                 <h3 className='font-semibold'>{row.name}</h3>
-                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:(bomCategory(str(row.type))==='MANUFACTURING'?'Manufacturing BOM':'Packaging BOM')+' · Components: '+asComponents(row.components).length}</p>
+                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:'BOM · '+(materialPolicy.bomClassifications.find(c=>c.code===str(row.classificationCode))?.name||str(row.classificationCode)||'Production')+' · Components: '+asComponents(row.components).length}</p>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
                     {canSave&&['draft','rejected',''].includes(str(row.status))&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}
@@ -394,7 +417,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     <p className='text-xs text-muted'>The submitter and creator cannot approve their own master data.</p>
                 </div>}
             </Card>)}</div>}
-            {!filtered.length&&!draft&&<Card><p className='text-sm text-muted'>No records exist yet. Begin with material and product records, then define manufacturing BOMs, optional packaging BOMs, resources and routings.</p></Card>}
+            {!filtered.length&&!draft&&<Card><p className='text-sm text-muted'>No records exist yet. Begin with material and product records, then define BOMs, resources and routings.</p></Card>}
         </>}
     </div>;
 }
