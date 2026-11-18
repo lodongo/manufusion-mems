@@ -19,11 +19,23 @@ import { callBackend } from '../lib/backend';
 import { hasPerm } from '../types';
 
 type Kind='items'|'boms'|'resources'|'routings';
-type Tab=Kind|'skuSetup'|'config'|'demo';
+type Tab=Kind|'skuSetup'|'materialPolicy'|'config'|'demo';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
 type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string};
+type Industry='BEVERAGE'|'METALS'|'FOOTWEAR'|'GENERAL';
+type MaterialPolicy={industry:Industry;variantLabel:string;manufacturingBomLabel:string;packagingBomLabel:string;
+    allowRawUtility:boolean;allowRawDirect:boolean;allowPackagingDirect:boolean;defaultIntermediateTracking:'STOCKED'|'NON_STOCKED'};
+const industryLabels:Record<Industry,Pick<MaterialPolicy,'variantLabel'|'manufacturingBomLabel'|'packagingBomLabel'>>={
+ BEVERAGE:{variantLabel:'Flavor/Variant',manufacturingBomLabel:'Flavor/Variant BOM',packagingBomLabel:'Packaging BOM'},
+ METALS:{variantLabel:'Grade/Specification',manufacturingBomLabel:'Manufacturing BOM',packagingBomLabel:'Packaging BOM'},
+ FOOTWEAR:{variantLabel:'Style/Color/Size',manufacturingBomLabel:'Assembly BOM',packagingBomLabel:'Packaging BOM'},
+ GENERAL:{variantLabel:'Product/Variant',manufacturingBomLabel:'Manufacturing BOM',packagingBomLabel:'Packaging BOM'},
+};
+const defaultMaterialPolicy:MaterialPolicy={industry:'BEVERAGE',...industryLabels.BEVERAGE,allowRawUtility:true,
+ allowRawDirect:false,allowPackagingDirect:false,defaultIntermediateTracking:'NON_STOCKED'};
+
 type Demo={demo:boolean;persisted:boolean;label:string;items:Row[];boms:Row[];resources:Row[];routings:Row[]};
 type DemoStatus={sandboxId:string;seeded:boolean;isolated:boolean;canSeed:boolean;createdAt:string;warning:string;counts:Record<string,number>|null};
 type DemoVerification={seeded:boolean;valid:boolean;errors:string[];counts:Record<string,{expected:number;stored:number}>|null;verifiedAt?:string};
@@ -37,6 +49,7 @@ const emptyReferences:References={materials:[],utilities:[],assets:[],sites:[]};
 const kinds:Kind[]=['items','boms','resources','routings'];
 const tabs:{key:Tab;label:string;hint:string}[]=[
     {key:'skuSetup',label:'SKU Configuration',hint:'Configure names, production forms, containers, packages and normalization units'},
+    {key:'materialPolicy',label:'Manufacturing Setup',hint:'Organization material handling and industry terminology'},
     {key:'items',label:'Products & SKUs',hint:'Finished, intermediate and Inventory-linked raw materials'},
     {key:'boms',label:'Bills of Materials',hint:'Flavor/Variant BOM and Packaging BOM, with separate versioned structures'},
     {key:'resources',label:'Manufacturing Resources',hint:'Work centres, machines and production lines'},
@@ -78,7 +91,7 @@ function Choice({title,value,options,onChange}:{title:string;value:string;option
 function TextField({title,value,onChange}:{title:string;value:string;onChange:(v:string)=>void}){
     return <label className='block'><span className={label}>{title}</span><textarea rows={2} className={fld} value={value} onChange={e=>onChange(e.target.value)}/></label>;
 }
-function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];resources:Row[];refs:References;skuSetup:SkuSetup}){
+function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,materialPolicy}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];resources:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy}){
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
     const itemOptions:Array<[string,string]>=[['','Select a SKU'],...items.map(i=>[i.id,i.name] as [string,string])];
     const flavorOptions:Array<[string,string]>=[['','Select Flavor/Variant'],
@@ -121,12 +134,21 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
                         value={str(draft.inventoryMaterialId)} options={materialOptions}
                         onChange={v=>{const found=refs.materials.find(m=>m.id===v);onChange({...draft,inventoryMaterialId:v,uom:found?.uom||draft.uom});}}/>}
                 </>}
-                {str(draft.category)==='RAW'&&<Choice title='Input source' value={str(draft.sourceMode)||'INVENTORY'}
-                    options={ [['INVENTORY','Inventory raw material'],['UTILITY','Metered equipment utility (no stock issue)']] }
-                    onChange={v=>onChange({...draft,sourceMode:v,inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:''})}/>}
-                {(str(draft.category)==='PACKAGING'||str(draft.category)==='RAW'&&str(draft.sourceMode)!=='UTILITY')&&
+                {['RAW','PACKAGING'].includes(str(draft.category))&&
+                    <Choice title='Material consumption source' value={str(draft.sourceMode)||'INVENTORY'}
+                        options={[
+                            ['INVENTORY','Stock-managed Inventory material'],
+                            ...(str(draft.category)==='RAW'&&materialPolicy.allowRawUtility?[['UTILITY','Metered equipment utility (no stock issue)'] as [string,string]]:[]),
+                            ...((str(draft.category)==='RAW'&&materialPolicy.allowRawDirect)||
+                                (str(draft.category)==='PACKAGING'&&materialPolicy.allowPackagingDirect)
+                                ?[['DIRECT','Non-stock direct consumption (no Inventory issue)'] as [string,string]]:[]),
+                        ]}
+                        onChange={v=>onChange({...draft,sourceMode:v,inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:''})}/>}
+                {['RAW','PACKAGING'].includes(str(draft.category))&&str(draft.sourceMode)==='INVENTORY'&&
                     <Choice title='Published Inventory Material Master' value={str(draft.inventoryMaterialId)} options={materialOptions}
                         onChange={v=>{const found=refs.materials.find(m=>m.id===v);onChange({...draft,inventoryMaterialId:v,uom:found?.uom||draft.uom});}}/>}
+                {['RAW','PACKAGING'].includes(str(draft.category))&&str(draft.sourceMode)==='DIRECT'&&
+                    <p className='text-xs text-muted'>Direct consumption tracks the material as a BOM input without creating stock issues. Purchasing, costing and consumption evidence still require downstream configuration.</p>}
                 {str(draft.category)==='RAW'&&str(draft.sourceMode)==='UTILITY'&&
                     <Choice title='Adopted equipment utility supply'
                         value={str(draft.utilityWorkCenterId)&&str(draft.utilityCode)?str(draft.utilityWorkCenterId)+'::'+str(draft.utilityCode):''}
@@ -135,9 +157,9 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
             </>}
             {(tab==='boms')&&<>
                 <Choice title='BOM type' value={bomCategory(str(draft.type))}
-                    options={ [['FLAVOR_VARIANT','Flavor/Variant BOM'],['PACKAGING','Packaging BOM']] }
+                    options={ [['FLAVOR_VARIANT',materialPolicy.manufacturingBomLabel],['PACKAGING',materialPolicy.packagingBomLabel]] }
                     onChange={v=>update('type',v)}/>
-                <Choice title='Flavor/Variant (optional for common intermediates)' value={str(draft.flavorVariantId)} options={flavorOptions}
+                <Choice title={materialPolicy.variantLabel+' (optional for shared intermediates)'} value={str(draft.flavorVariantId)} options={flavorOptions}
                     onChange={v=>update('flavorVariantId',v)}/>
                 <Choice title='Manufactured SKU' value={str(draft.parentSkuId)} options={itemOptions} onChange={v=>{const product=items.find(x=>x.id===v);onChange({...draft,parentSkuId:v,outputUom:product?.uom??draft.outputUom});}}/>
                 <Field title='BOM alternative code' value={str(draft.alternativeCode)||'STANDARD'}
@@ -162,7 +184,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
         </div>
         {tab==='items'&&str(draft.category)==='FINISHED'&&<>
             <SkuConfigurationFields value={(draft.skuComponents||{}) as SkuSelections}
-                onChange={v=>update('skuComponents',v)} setup={skuSetup}/>
+                onChange={v=>update('skuComponents',v)} setup={skuSetup} variantLabel={materialPolicy.variantLabel}/>
             {draft.id&&skuSetup.namingConfigured&&<label className='flex min-h-11 items-center gap-2 rounded-xl border border-line p-3 text-sm text-ink'>
                 <input type='checkbox' checked={draft.applySkuNamingSequence===true}
                     onChange={e=>update('applySkuNamingSequence',e.target.checked)}/>
@@ -217,6 +239,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [refs,setRefs]=useState<References>(emptyReferences);
     const [draft,setDraft]=useState<Row|null>(null);
     const [bomFilter,setBomFilter]=useState<'ALL'|'FLAVOR_VARIANT'|'PACKAGING'>('ALL');
+    const [materialPolicy,setMaterialPolicy]=useState<MaterialPolicy>(defaultMaterialPolicy);
+    const [materialPolicyRevision,setMaterialPolicyRevision]=useState(0);
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
     const [configRevision,setConfigRevision]=useState(0);
     const [demo,setDemo]=useState<Demo|null>(null);
@@ -240,16 +264,18 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const load=async()=>{
         setLoading(true);setError('');
         try{
-            const [datasets,configuration,refData,skuData]=await Promise.all([
+            const [datasets,configuration,refData,skuData,materialSetup]=await Promise.all([
                 canViewMasters?Promise.all(kinds.map(kind=>callBackend<{records:Row[]}>('/api/org/pln-mfg/foundation/list',{kind}))):Promise.resolve(kinds.map(()=>({records:[] as Row[]}))),
                 callBackend<{config:Config;revision:number}>('/api/org/pln-mfg/foundation/config').catch(()=>null),
                 canViewMasters?callBackend<References>('/api/org/pln-mfg/foundation/references'):Promise.resolve(emptyReferences),
                 canViewMasters?callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup'):Promise.resolve(emptySkuSetup),
+                canViewMasters?callBackend<{policy:MaterialPolicy;revision:number}>('/api/org/pln-mfg/foundation/material-policy'):Promise.resolve({policy:defaultMaterialPolicy,revision:0}),
             ]);
             const [items,boms,resources,routings]=datasets;
             setRows({items:items.records,boms:boms.records,resources:resources.records,routings:routings.records});
             setRefs(refData);
             setSkuSetup(skuData);
+            setMaterialPolicy(materialSetup.policy);setMaterialPolicyRevision(materialSetup.revision);
             if(configuration){setConfig(configuration.config);setConfigRevision(configuration.revision);}
         }catch(e){setError(e instanceof Error?e.message:'Could not load manufacturing masters.');}
         finally{setLoading(false);}
@@ -302,6 +328,18 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         }catch(e){setError(e instanceof Error?e.message:'Could not save.');}
         finally{setBusy(false);}
     };
+    const saveMaterialPolicy=async()=>{
+        if(!canSkuConfig)return;
+        setBusy(true);setError('');setNotice('');
+        try{
+            const response=await callBackend<{policy:MaterialPolicy;revision:number}>(
+                '/api/org/pln-mfg/foundation/material-policy/save',
+                {policy:materialPolicy,expectedRevision:materialPolicyRevision});
+            setMaterialPolicy(response.policy);setMaterialPolicyRevision(response.revision);
+            setNotice('Manufacturing setup saved. Existing material and BOM versions remain unchanged.');
+        }catch(e){setError(e instanceof Error?e.message:'Unable to save manufacturing setup.');}
+        finally{setBusy(false);}
+    };
     const saveConfig=async()=>{
         if(!canConfig)return;setBusy(true);setError('');setNotice('');
         try{
@@ -338,7 +376,38 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {active!=='skuSetup'&&<p className='text-sm text-muted'>{tabs.find(t=>t.key===active)?.hint}</p>}
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
-        {loading?<Spinner/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='config'?<Card className='space-y-4'>
+        {loading?<Spinner/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig}
+            variantLabel={materialPolicy.variantLabel} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
+            <h2 className='font-semibold'>Organization manufacturing material policy</h2>
+            <p className='text-sm text-muted'>Choose an industry convention, adjust terminology, and permit material tracking methods. Every BOM input/output keeps a material ID; stock balances are optional. Existing records are never rewritten by changes here.</p>
+            <div className='grid gap-3 sm:grid-cols-2'>
+                <Choice title='Industry profile' value={materialPolicy.industry}
+                    options={ [['BEVERAGE','Beverages / process'],['METALS','Metals / steel'],['FOOTWEAR','Footwear / assembly'],['GENERAL','General manufacturing']] }
+                    onChange={v=>setMaterialPolicy(s=>({...s,industry:v as Industry,...industryLabels[v as Industry]}))}/>
+                <Field title='Product identity label' value={materialPolicy.variantLabel}
+                    onChange={v=>setMaterialPolicy(s=>({...s,variantLabel:v}))}/>
+                <Field title='Manufacturing / process BOM label' value={materialPolicy.manufacturingBomLabel}
+                    onChange={v=>setMaterialPolicy(s=>({...s,manufacturingBomLabel:v}))}/>
+                <Field title='Packaging BOM label' value={materialPolicy.packagingBomLabel}
+                    onChange={v=>setMaterialPolicy(s=>({...s,packagingBomLabel:v}))}/>
+                <Choice title='Default intermediate tracking' value={materialPolicy.defaultIntermediateTracking}
+                    options={ [['NON_STOCKED','Non-stock production stage'],['STOCKED','Stock-managed intermediate']] }
+                    onChange={v=>setMaterialPolicy(s=>({...s,defaultIntermediateTracking:v as MaterialPolicy['defaultIntermediateTracking']}))}/>
+            </div>
+            <div className='space-y-3'>
+                {([
+                    ['allowRawUtility','Allow metered raw/process inputs (e.g. treated water)'],
+                    ['allowRawDirect','Allow directly consumed non-stock raw materials'],
+                    ['allowPackagingDirect','Allow directly consumed non-stock packaging materials'],
+                ] as Array<[keyof MaterialPolicy,string]>).map(([key,title])=>
+                    <label key={key} className='flex min-h-11 items-center gap-3 rounded-xl border border-line p-3 text-sm'>
+                        <input type='checkbox' checked={materialPolicy[key]===true} onChange={e=>
+                            setMaterialPolicy(s=>({...s,[key]:e.target.checked}))}/>{title}
+                    </label>)}
+            </div>
+            <p className='text-xs text-muted'>A steel slab or shoe upper can be a tracked non-stock intermediate; packaging is optional when the finished product has no separate packaging stage. The canonical internal BOM family codes remain stable for compatibility.</p>
+            <div className='flex justify-end'><Button disabled={!canSkuConfig||busy} onClick={()=>void saveMaterialPolicy()}>Save manufacturing setup</Button></div>
+        </Card>:active==='config'?<Card className='space-y-4'>
             <p className='text-sm text-muted'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
                 <Field title='Planning horizon (days)' type='number' value={config.horizonDays} onChange={v=>setConfig(s=>({...s,horizonDays:Number(v)}))}/>
@@ -371,19 +440,19 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         </Card>:<>
             {active==='boms'&&<div className='grid gap-2 sm:grid-cols-2'>
                 <Choice title='Show BOM type' value={bomFilter} onChange={v=>setBomFilter(v as typeof bomFilter)}
-                    options={ [['ALL','All BOMs'],['FLAVOR_VARIANT','Flavor/Variant BOM'],['PACKAGING','Packaging BOM']] }/>
+                    options={ [['ALL','All BOMs'],['FLAVOR_VARIANT',materialPolicy.manufacturingBomLabel],['PACKAGING',materialPolicy.packagingBomLabel]] }/>
                 <p className='self-end text-xs text-muted'>Earlier RECIPE and BOM revisions remain available in the corresponding categories.</p>
             </div>}
             <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-muted'>{filtered.length} saved master records · draft versions</p>{canSave&&<Button onClick={()=>setDraft(newRecord(active))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
-                <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items} resources={rows.resources} refs={refs} skuSetup={skuSetup}/>
+                <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items} resources={rows.resources} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>
                 <div className='flex justify-end'><Button disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving...':'Save draft'}</Button></div>
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
                 <h3 className='font-semibold'>{row.name}</h3>
-                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:bomLabel(str(row.type))+' · Components: '+asComponents(row.components).length}</p>
+                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:(bomCategory(str(row.type))==='FLAVOR_VARIANT'?materialPolicy.manufacturingBomLabel:materialPolicy.packagingBomLabel)+' · Components: '+asComponents(row.components).length}</p>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
                     {canSave&&['draft','rejected',''].includes(str(row.status))&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}

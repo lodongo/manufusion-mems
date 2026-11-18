@@ -154,8 +154,8 @@ function UnitChoice({title,value,setup,onChange}:{title:string;value:string;setu
     </div>;
 }
 
-export function SkuConfigurationFields({value,onChange,setup}:{
-    value:SkuSelections;onChange:(next:SkuSelections)=>void;setup:SkuSetup;
+export function SkuConfigurationFields({value,onChange,setup,variantLabel='Flavor/Variant'}:{
+    value:SkuSelections;onChange:(next:SkuSelections)=>void;setup:SkuSetup;variantLabel?:string;
 }){
     const form=getParam(setup,'productionForms',value.productionFormId);
     const container=getParam(setup,'containers',value.containerId);
@@ -230,7 +230,7 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     return <section className={modal+' space-y-3'}>
         <h3 className='text-base font-semibold'>SKU composition</h3>
         <div className='grid gap-3 sm:grid-cols-2'>
-            {variants.map(v=><Choice key={v.key} title={v.label}
+            {variants.map(v=><Choice key={v.key} title={v.kind==='productNames'?variantLabel:v.label}
                 value={value[v.key]||(!value.packagingSizeId&&v.kind==='packagingSizes'?value.packageCountId||'':'')}
                 options={v.kind==='packagingSizes'&&value.packageCountId
                     ?[...optionsFor(v.kind),...setup.parameters.filter(p=>p.kind==='packageCounts'&&p.id===value.packageCountId).map(p=>[p.id,p.name] as [string,string])]
@@ -303,7 +303,7 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     </section>;
 }
 
-export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:boolean;onSaved:()=>Promise<void>}){
+export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Flavor/Variant'}:{setup:SkuSetup;canEdit:boolean;onSaved:()=>Promise<void>;variantLabel?:string}){
     const [active,setActive]=useState<MenuKey|null>(null);
     const [draft,setDraft]=useState<Partial<SkuParameter>|null>(null);
     const [namingDraft,setNamingDraft]=useState<SkuNamingSequence|null>(null);
@@ -324,7 +324,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
         return Number(prioritize(b.level))-Number(prioritize(a.level));
     });
     const availablePackagingTypes=packagingMetadata.types;
-    const kindName=menu.find(x=>x.key===active)?.title||'SKU Configuration';
+    const kindName=active==='productNames'?variantLabel:menu.find(x=>x.key===active)?.title||'SKU Configuration';
     const records=active?setup.parameters.filter(p=>p.kind===active):[];
     const update=(field:keyof SkuParameter,value:unknown)=>setDraft(d=>({...d,[field]:value}));
     const open=(kind:MenuKey)=>{
@@ -424,7 +424,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                     <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand'>
                         <Icon className='h-5 w-5' aria-hidden='true'/>
                     </span>
-                    <span className='min-w-0 flex-1 text-sm font-semibold'>{title}</span>
+                    <span className='min-w-0 flex-1 text-sm font-semibold'>{key==='productNames'?variantLabel:title}</span>
                     <ChevronRight className='h-5 w-5 shrink-0 text-muted' aria-hidden='true'/>
                 </button>)}
             </nav>
@@ -525,8 +525,8 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                     <button type='button' className={secondary} onClick={()=>setDraft(null)}>Cancel</button>
                 </div>
                 {active==='productNames'&&<>
-                    <TextInput title='Flavor/Variant name' value={draft.name||''} onChange={v=>update('name',v)} required/>
-                    <TextInput title='Flavor/Variant code' value={draft.productCode||''} onChange={v=>update('productCode',v.toUpperCase())} required/>
+                    <TextInput title={variantLabel+' name'} value={draft.name||''} onChange={v=>update('name',v)} required/>
+                    <TextInput title={variantLabel+' code'} value={draft.productCode||''} onChange={v=>update('productCode',v.toUpperCase())} required/>
                     <TextInput title='Description' value={draft.description||''} onChange={v=>update('description',v)}/>
                 </>}
                 {active==='productionForms'&&<>

@@ -6,6 +6,7 @@ import {managedCode,masterPrefix,skuUnitConversion,calculateSkuConversion,compos
 import {DEFAULT_SKU_NAMING_SEQUENCE,validateSkuNamingSequence,composeSkuNameFromSequence} from '../../src/shared/mfgSkuNaming.ts';
 import {MFG_PACKAGING_TYPES,validatePackagingLayout,packagingHierarchyRank,normalizePackagingTypes} from '../../backend/mfgPackagingMetadata.ts';
 import {selectEffectiveRelease,selectEffectiveForSite} from '../../backend/plnMfgRelease.ts';
+import {defaultMfgMaterialPolicy,normalizeMfgMaterialPolicy} from '../../backend/mfgMaterialPolicy.ts';
 import {fictionalPilotSnapshot,validateFictionalPilot,assertPilotSeedAllowed} from '../../backend/plnMfgPilotSeed.ts';
 
 const read=p=>readFileSync(new URL('../../'+p,import.meta.url),'utf8');
@@ -24,6 +25,28 @@ test('real raw and packaging materials require an Inventory master reference',()
  assert.equal(normalizeMaster('items',{id:'CAP-2622',name:'Cap',category:'PACKAGING',uom:'EA',packQty:1,inventoryMaterialId:'MAT-2622'}).inventoryMaterialId,'MAT-2622');
 });
 
+test('manufacturing material policy supports steel and shoe profiles with governed aliases',()=>{
+ assert.equal(defaultMfgMaterialPolicy().variantLabel,'Flavor/Variant');
+ assert.equal(defaultMfgMaterialPolicy('METALS').variantLabel,'Grade/Specification');
+ assert.equal(defaultMfgMaterialPolicy('FOOTWEAR').manufacturingBomLabel,'Assembly BOM');
+ const metal=normalizeMfgMaterialPolicy({...defaultMfgMaterialPolicy('METALS'),allowRawDirect:true,allowPackagingDirect:true});
+ assert.equal(metal.allowRawDirect,true);
+ assert.equal(metal.manufacturingBomLabel,'Manufacturing BOM');
+ assert.throws(()=>normalizeMfgMaterialPolicy({...metal,industry:'INVALID'}),/industry/);
+ assert.throws(()=>normalizeMfgMaterialPolicy({...metal,allowPackagingDirect:'yes'}),/enabled or disabled/);
+ assert.throws(()=>normalizeMfgMaterialPolicy({...metal,variantLabel:'x'.repeat(61)}),/terminology/);
+ const backend=read('backend/plnMfgFoundation.ts'),ui=read('src/org/ProductionFoundation.tsx');
+ assert.ok(backend.includes('/foundation/material-policy/save'));
+ assert.ok(ui.includes('Save manufacturing setup'));
+ assert.ok(ui.includes('allowPackagingDirect'));
+});
+test('raw and packaging direct consumption can be classified without stock ledger items',()=>{
+ const label={id:'LBL-01',name:'Shoe label',category:'PACKAGING',sourceMode:'DIRECT',uom:'EA'};
+ assert.equal(normalizeMaster('items',label).stockPolicy,'DIRECT');
+ assert.equal(normalizeMaster('items',{...label,category:'RAW'}).sourceMode,'DIRECT');
+ assert.throws(()=>normalizeMaster('items',{...label,sourceMode:'UTILITY',utilityCode:'WATER',utilityWorkCenterId:'WC-01'}),/Packaging components/);
+ assert.equal(normalizeMaster('items',{...label,sourceMode:'INVENTORY',inventoryMaterialId:'MAT-01'}).stockPolicy,'STOCKED');
+});
 test('BOM supports two new classifications and preserves historical types',()=>{
  const formula={id:'BOM-FLAVOR',name:'Orange base',type:'FLAVOR_VARIANT',flavorVariantId:'NME_000000001',parentSkuId:'BULK',outputQty:1000,outputUom:'L',components:[{skuId:'WATER',quantity:1000,uom:'L'}]};
  const pack={...formula,id:'BOM-PACK',name:'Orange case',type:'PACKAGING',parentSkuId:'FG',components:[{skuId:'BOTTLE',quantity:1,uom:'EA'}]};

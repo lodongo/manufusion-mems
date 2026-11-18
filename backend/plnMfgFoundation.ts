@@ -10,6 +10,7 @@ import { audit } from './audit';
 import { getNode } from './structure';
 import { calculateSkuConversion, composeConfiguredSkuName, composeSkuNameWithSequence, skuUnitConversion, masterPrefix, type SkuComponents } from './mfgSkuModel';
 import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from './mfgSkuConfiguration';
+import { mfgMaterialPolicyForOrg, mfgMaterialPolicyPath, normalizeMfgMaterialPolicy } from './mfgMaterialPolicy';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
 export type MasterKind = typeof MASTER_KINDS[number];
@@ -48,7 +49,7 @@ const RESOURCE_TYPES=['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CE
 // Backward compatibility: existing BOM and RECIPE revisions remain readable.
 const BOM_TYPES=['FLAVOR_VARIANT','PACKAGING','BOM','RECIPE'] as const;
 const INTERMEDIATE_POLICIES=['STOCKED','NON_STOCKED'] as const;
-const SOURCE_MODES=['INVENTORY','UTILITY'] as const;
+const SOURCE_MODES=['INVENTORY','UTILITY','DIRECT'] as const;
 const ALT_CODE=/^[A-Z0-9][A-Z0-9_-]{0,31}$/;
 /** Existing RECIPE/BOM revisions map to the new user-facing categories. */
 export function bomFamily(type:string):'FLAVOR_VARIANT'|'PACKAGING'{
@@ -79,10 +80,13 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const category=ENUM(raw.category,STAGES,'item category');
         const inventoryMaterialId=str(raw.inventoryMaterialId).trim();
         if(inventoryMaterialId&&!ID.test(inventoryMaterialId))throw new HttpError(400,'Invalid Inventory material reference.');
-        const sourceMode=category==='RAW'?ENUM(raw.sourceMode??'INVENTORY',SOURCE_MODES,'material source'):'INVENTORY';
+        const sourceMode=category==='RAW'||category==='PACKAGING'
+            ?ENUM(raw.sourceMode??'INVENTORY',SOURCE_MODES,'material source'):'INVENTORY';
+        if(category==='PACKAGING'&&sourceMode==='UTILITY')
+            throw new HttpError(400,'Packaging components cannot use a metered utility source.');
         const stockPolicy=category==='INTERMEDIATE'
             ?ENUM(raw.stockPolicy??'NON_STOCKED',INTERMEDIATE_POLICIES,'intermediate stock policy')
-            :sourceMode==='UTILITY'?'METERED':'STOCKED';
+            :sourceMode==='UTILITY'?'METERED':sourceMode==='DIRECT'?'DIRECT':'STOCKED';
         const utilityCode=sourceMode==='UTILITY'?VALID_ID(raw.utilityCode,'Registered utility code'):'';
         const utilityWorkCenterId=sourceMode==='UTILITY'?VALID_ID(raw.utilityWorkCenterId,'Utility work center'):'';
         if((category==='RAW'||category==='PACKAGING')&&sourceMode==='INVENTORY'&&!inventoryMaterialId)
@@ -165,6 +169,12 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         if(str(site.data.level)!=='site'||str(site.data.status)==='inactive')throw new HttpError(400,'Choose an active organization site.');
     }
     if(kind==='items'){
+        const {policy}=await mfgMaterialPolicyForOrg(ctx.orgId);
+        if(str(item.sourceMode)==='DIRECT'&&
+            (str(item.category)==='RAW'?!policy.allowRawDirect:!policy.allowPackagingDirect))
+            throw new HttpError(400,'Direct-consumption tracking is disabled for this material category in organization Manufacturing Setup.');
+        if(str(item.sourceMode)==='UTILITY'&&!policy.allowRawUtility)
+            throw new HttpError(400,'Metered utility inputs are disabled in organization Manufacturing Setup.');
         if(str(item.sourceMode)==='UTILITY'){
             const utility=await getDoc('organizations/'+ctx.orgId+'/equipment_utilities/'+str(item.utilityWorkCenterId));
             if(!utility||!ARR(utility.data.items).some(x=>str(x.code)===str(item.utilityCode)))
@@ -377,6 +387,8 @@ export const plnMfgFoundationRoutes={
             if(old&&Number(ctx.body.expectedRevision)!==(num(old.data.revision)??1))
                 throw new HttpError(409,'This record has changed. Refresh to get the latest revision.');
             if(kind==='items'){
+                if(str(raw.category)==='INTERMEDIATE'&&!str(raw.stockPolicy))
+                    raw.stockPolicy=(await mfgMaterialPolicyForOrg(ctx.orgId)).policy.defaultIntermediateTracking;
                 // Naming snapshots are server-authored: never trust a client-provided
                 // revision, generated name or rule for a manufacturing master.
                 const applySkuNamingSequence=raw.applySkuNamingSequence===true;
@@ -480,6 +492,27 @@ export const plnMfgFoundationRoutes={
             if(!await recordAccess(ctx,'MFG.view',str(master.data.siteId)))throw new HttpError(403,'This record is outside your site scope.');
             const revisions=await listDocs(DOC(ctx.orgId,kind,id)+'/revisions');
             return {revisions:revisions.map(out).sort((a,b)=>Number(a.revision)-Number(b.revision))};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/material-policy':[
+        orgRoute('org.mfg.material.policy.view','MFG.view',async ctx=>
+            mfgMaterialPolicyForOrg(ctx.orgId)),
+    ],
+    'POST /api/org/pln-mfg/foundation/material-policy/save':[
+        orgRoute('org.mfg.material.policy.save','MFG.sku.configure',async ctx=>{
+            if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'MFG.sku.configure'))
+                throw new HttpError(403,'Organization-wide material handling policy requires a direct Manufacturing configuration permission.');
+            const policy=normalizeMfgMaterialPolicy(ctx.body.policy);
+            const path=mfgMaterialPolicyPath(ctx.orgId),old=await getDoc(path);
+            const version=num(old?.data.revision)??0;
+            if(Number(ctx.body.expectedRevision)!==version)
+                throw new HttpError(409,'Material handling setup changed. Refresh before saving.');
+            const now=nowIso(),revision=version+1;
+            const updated={policy,revision,updatedAt:now,updatedBy:ctx.uid};
+            if(!await writeDoc(path,updated,old?{updateTime:old.updateTime}:{exists:false}))
+                throw new HttpError(409,'Concurrent material handling setup update. Reload.');
+            await track(ctx,'mfg.material.policy.save','material-policy:'+revision);
+            return {policy,revision};
         }),
     ],
     'POST /api/org/pln-mfg/foundation/config':[
