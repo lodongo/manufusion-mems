@@ -194,7 +194,7 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     const product=productRecord?.name||'Select product';
     const legacyTitle=[product,[size?.name,container?.name].filter(Boolean).join(' '),
         [packageRecord?.name,packSize?'x'+packSize.quantity:''].filter(Boolean).join(' ')]
-        .filter(Boolean).join(' · ';
+        .filter(Boolean).join(' · ');
     const unitSymbol=(code:string|undefined)=>pickUnit(setup,code)?.symbol||code||'';
     const token=(p:SkuParameter|undefined,code?:string)=>p?{
         name:p.name,code:code||p.id,quantity:p.quantity,unit:unitSymbol(p.uom),
