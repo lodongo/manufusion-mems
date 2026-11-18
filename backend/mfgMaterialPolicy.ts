@@ -5,23 +5,24 @@
  */
 import {HttpError, getDoc, isObj, str} from './core';
 
-export const MFG_INDUSTRIES=['BEVERAGE','METALS','FOOTWEAR','GENERAL'] as const;
-export type MfgIndustry=typeof MFG_INDUSTRIES[number];
+// Convenience examples, not a closed list of manufacturing sectors.
+export const MFG_INDUSTRIES=['GENERAL','BEVERAGE','METALS','FOOTWEAR'] as const;
+export type MfgIndustry=string;
 export type MfgMaterialPolicy={
  industry:MfgIndustry;
  variantLabel:string; manufacturingBomLabel:string; packagingBomLabel:string;
  allowRawUtility:boolean;allowRawDirect:boolean;allowPackagingDirect:boolean;
  defaultIntermediateTracking:'STOCKED'|'NON_STOCKED';
 };
-const labels:Record<MfgIndustry,Pick<MfgMaterialPolicy,'variantLabel'|'manufacturingBomLabel'|'packagingBomLabel'>>={
+const labels:Record<string,Pick<MfgMaterialPolicy,'variantLabel'|'manufacturingBomLabel'|'packagingBomLabel'>>={
  BEVERAGE:{variantLabel:'Flavor/Variant',manufacturingBomLabel:'Flavor/Variant BOM',packagingBomLabel:'Packaging BOM'},
  METALS:{variantLabel:'Grade/Specification',manufacturingBomLabel:'Manufacturing BOM',packagingBomLabel:'Packaging BOM'},
  FOOTWEAR:{variantLabel:'Style/Color/Size',manufacturingBomLabel:'Assembly BOM',packagingBomLabel:'Packaging BOM'},
  GENERAL:{variantLabel:'Product/Variant',manufacturingBomLabel:'Manufacturing BOM',packagingBomLabel:'Packaging BOM'},
 };
 export const MFG_INDUSTRY_LABELS=labels;
-export function defaultMfgMaterialPolicy(industry:MfgIndustry='BEVERAGE'):MfgMaterialPolicy{
- return {industry,...labels[industry],allowRawUtility:true,allowRawDirect:false,
+export function defaultMfgMaterialPolicy(industry:MfgIndustry='GENERAL'):MfgMaterialPolicy{
+ return {industry,...(labels[industry]??labels.GENERAL),allowRawUtility:true,allowRawDirect:false,
     allowPackagingDirect:false,defaultIntermediateTracking:'NON_STOCKED'};
 }
 const label=(input:unknown,base:string):string=>{
@@ -31,9 +32,8 @@ const label=(input:unknown,base:string):string=>{
 };
 export function normalizeMfgMaterialPolicy(input:unknown):MfgMaterialPolicy{
  if(!isObj(input))throw new HttpError(400,'Manufacturing material policy must be an object.');
- const industry=input.industry;
- if(!MFG_INDUSTRIES.includes(industry as MfgIndustry))throw new HttpError(400,'Choose a supported manufacturing industry profile.');
- const base=defaultMfgMaterialPolicy(industry as MfgIndustry);
+ const industry=label(input.industry??'GENERAL','GENERAL');
+ const base=defaultMfgMaterialPolicy(industry);
  const bool=(key:'allowRawUtility'|'allowRawDirect'|'allowPackagingDirect')=>{
    if(input[key]===undefined)return base[key];
    if(typeof input[key]!=='boolean')throw new HttpError(400,key+' must be enabled or disabled.');

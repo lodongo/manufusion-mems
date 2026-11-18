@@ -75,3 +75,10 @@ Phase 1 is **code-complete for baseline features**, not accepted, until P1-01 th
 
 ## Planned boundary
 Phase 2 adds demand entry/forecast consumption, demand allocation, MPS simulation/versioning and rough-cut capacity. Phase 1 contains **no live manufacturing execution, stock reservation/issue/receipt or purchasing** operations.
+
+## General manufacturing acceptance (2026-11-18)
+- New organizations default to GENERAL / Product/Variant / Manufacturing BOM; any industry descriptor can be entered without a closed enumerated list.
+- New manufacturing BOM records use MANUFACTURING; legacy FLAVOR_VARIANT, RECIPE and BOM remain readable in their respective effective version groups.
+- Components and output categories are not limited by beverage-specific rules. An integrated assembly can include packaging inputs, or manufacture a packaging item for downstream use.
+- A Packaging BOM is optional when no separate pack-stage decomposition is needed. Drafting a BOM never requires preceding BOMs to exist, though execution readiness is checked separately.
+- Test model is structurally reusable for process, discrete, assembly and mixed manufacturing; sector-specific execution rules require separate acceptance.

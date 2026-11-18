@@ -68,13 +68,13 @@ export const plnMfgReleaseRoutes={
             if(kind==='boms'){
                 const requestedType=str(ctx.body.bomType);
                 const requestedAlternative=str(ctx.body.alternativeCode);
-                if(requestedType&&!['FLAVOR_VARIANT','PACKAGING'].includes(requestedType))
-                    throw new HttpError(400,'Choose Flavor/Variant or Packaging BOM type.');
+                if(requestedType&&!['MANUFACTURING','FLAVOR_VARIANT','RECIPE','PACKAGING','BOM'].includes(requestedType))
+                    throw new HttpError(400,'Choose Manufacturing or Packaging BOM category.');
                 const groups=new Map<string,typeof records>();
                 for(const record of records){
                     const type=bomFamily(str(record.type));
                     const alternative=bomAlternative(record.alternativeCode);
-                    if(requestedType&&type!==requestedType)continue;
+                    if(requestedType&&type!==bomFamily(requestedType))continue;
                     if(requestedAlternative&&alternative!==bomAlternative(requestedAlternative))continue;
                     const key=type+'__'+alternative,list=groups.get(key)||[];
                     list.push(record);groups.set(key,list);

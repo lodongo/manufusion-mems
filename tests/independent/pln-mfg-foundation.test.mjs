@@ -26,19 +26,33 @@ test('real raw and packaging materials require an Inventory master reference',()
 });
 
 test('manufacturing material policy supports steel and shoe profiles with governed aliases',()=>{
- assert.equal(defaultMfgMaterialPolicy().variantLabel,'Flavor/Variant');
+ assert.equal(defaultMfgMaterialPolicy().variantLabel,'Product/Variant');
  assert.equal(defaultMfgMaterialPolicy('METALS').variantLabel,'Grade/Specification');
  assert.equal(defaultMfgMaterialPolicy('FOOTWEAR').manufacturingBomLabel,'Assembly BOM');
  const metal=normalizeMfgMaterialPolicy({...defaultMfgMaterialPolicy('METALS'),allowRawDirect:true,allowPackagingDirect:true});
  assert.equal(metal.allowRawDirect,true);
  assert.equal(metal.manufacturingBomLabel,'Manufacturing BOM');
- assert.throws(()=>normalizeMfgMaterialPolicy({...metal,industry:'INVALID'}),/industry/);
+ assert.equal(normalizeMfgMaterialPolicy({...metal,industry:'CERAMICS'}).industry,'CERAMICS');
+ assert.equal(normalizeMfgMaterialPolicy({industry:'PHARMACEUTICALS'}).manufacturingBomLabel,'Manufacturing BOM');
+ assert.throws(()=>normalizeMfgMaterialPolicy({...metal,industry:'x'.repeat(80)}),/terminology/);
  assert.throws(()=>normalizeMfgMaterialPolicy({...metal,allowPackagingDirect:'yes'}),/enabled or disabled/);
  assert.throws(()=>normalizeMfgMaterialPolicy({...metal,variantLabel:'x'.repeat(61)}),/terminology/);
  const backend=read('backend/plnMfgFoundation.ts'),ui=read('src/org/ProductionFoundation.tsx');
  assert.ok(backend.includes('/foundation/material-policy/save'));
  assert.ok(ui.includes('Save manufacturing setup'));
  assert.ok(ui.includes('allowPackagingDirect'));
+});
+test('generic manufacturing is not restricted to four example sectors or beverage-only component rules',()=>{
+ for(const industry of ['PAPER','CERAMICS','AUTOMOTIVE','PHARMACEUTICALS','ELECTRONICS','TEXTILES','CHEMICALS','FURNITURE','AEROSPACE']){
+  const result=normalizeMfgMaterialPolicy({industry});
+  assert.equal(result.industry,industry);assert.equal(result.manufacturingBomLabel,'Manufacturing BOM');
+ }
+ const foundation=read('backend/plnMfgFoundation.ts'),ui=read('src/org/ProductionFoundation.tsx');
+ assert.ok(!foundation.includes("['RAW','PACKAGING'].includes(str(parent.data.category))"));
+ assert.ok(!foundation.includes("str(child.data.category)==='PACKAGING'"));
+ assert.ok(ui.includes("type:'MANUFACTURING'"));
+ assert.ok(ui.includes('const componentOptions=itemOptions'));
+ assert.ok(ui.includes('Industry or manufacturing activity (free text)'));
 });
 test('raw and packaging direct consumption can be classified without stock ledger items',()=>{
  const label={id:'LBL-01',name:'Shoe label',category:'PACKAGING',sourceMode:'DIRECT',uom:'EA'};
@@ -51,6 +65,7 @@ test('BOM supports two new classifications and preserves historical types',()=>{
  const formula={id:'BOM-FLAVOR',name:'Orange base',type:'FLAVOR_VARIANT',flavorVariantId:'NME_000000001',parentSkuId:'BULK',outputQty:1000,outputUom:'L',components:[{skuId:'WATER',quantity:1000,uom:'L'}]};
  const pack={...formula,id:'BOM-PACK',name:'Orange case',type:'PACKAGING',parentSkuId:'FG',components:[{skuId:'BOTTLE',quantity:1,uom:'EA'}]};
  assert.equal(normalizeMaster('boms',formula).type,'FLAVOR_VARIANT');
+ assert.equal(normalizeMaster('boms',{...formula,type:'MANUFACTURING'}).type,'MANUFACTURING');
  assert.equal(normalizeMaster('boms',pack).type,'PACKAGING');
  assert.equal(normalizeMaster('boms',{...formula,flavorVariantId:''}).flavorVariantId,''); // Common simple syrup
  assert.equal(normalizeMaster('boms',{...pack,type:'BOM'}).type,'BOM');
@@ -77,7 +92,9 @@ test('Metered utility is an auditable input distinct from an Inventory issue',()
 test('BOM alternatives and one-character material units use validated dimensional conversions',()=>{
  assert.equal(bomAlternative(undefined),'STANDARD');
  assert.equal(bomAlternative('line_a'),'LINE_A');
- assert.equal(bomFamily('RECIPE'),'FLAVOR_VARIANT');
+ assert.equal(bomFamily('RECIPE'),'MANUFACTURING');
+ assert.equal(bomFamily('FLAVOR_VARIANT'),'MANUFACTURING');
+ assert.equal(bomFamily('MANUFACTURING'),'MANUFACTURING');
  assert.equal(bomFamily('BOM'),'PACKAGING');
  assert.equal(materialUnitFactor('L','L'),1);
  assert.ok(materialUnitFactor('L','mL')>0);

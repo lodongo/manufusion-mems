@@ -46,14 +46,16 @@ const ENUM=<T extends string>(v:unknown, options:readonly T[],label:string):T=>{
 };
 const STAGES=['RAW','INTERMEDIATE','FINISHED','PACKAGING'] as const;
 const RESOURCE_TYPES=['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER'] as const;
-// Backward compatibility: existing BOM and RECIPE revisions remain readable.
-const BOM_TYPES=['FLAVOR_VARIANT','PACKAGING','BOM','RECIPE'] as const;
+// New generic manufacturing BOM; historical FLAVOR_VARIANT, RECIPE and BOM remain compatible.
+const BOM_TYPES=['MANUFACTURING','PACKAGING','FLAVOR_VARIANT','BOM','RECIPE'] as const;
 const INTERMEDIATE_POLICIES=['STOCKED','NON_STOCKED'] as const;
 const SOURCE_MODES=['INVENTORY','UTILITY','DIRECT'] as const;
 const ALT_CODE=/^[A-Z0-9][A-Z0-9_-]{0,31}$/;
 /** Existing RECIPE/BOM revisions map to the new user-facing categories. */
-export function bomFamily(type:string):'FLAVOR_VARIANT'|'PACKAGING'{
-    return type==='FLAVOR_VARIANT'||type==='RECIPE'?'FLAVOR_VARIANT':'PACKAGING';
+export function bomFamily(type:string):'MANUFACTURING'|'PACKAGING'{
+    if(type==='MANUFACTURING'||type==='FLAVOR_VARIANT'||type==='RECIPE')return 'MANUFACTURING';
+    if(type==='PACKAGING'||type==='BOM')return 'PACKAGING';
+    throw new HttpError(400,'Unknown manufacturing BOM category.');
 }
 /** Alternative code distinguishes approved routes for the same output/date. */
 export function bomAlternative(value:unknown):string {
@@ -106,7 +108,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
     if(kind==='boms'){
         const type=ENUM(raw.type,BOM_TYPES,'BOM type');
         const flavorVariantId=str(raw.flavorVariantId).trim();
-        if(flavorVariantId)VALID_ID(flavorVariantId,'Flavor/Variant');
+        if(flavorVariantId)VALID_ID(flavorVariantId,'Product/Variant');
         // Flavor-neutral intermediate formulations (e.g. common simple syrup) have no variant.
         const alternativeCode=bomAlternative(raw.alternativeCode);
         const routingId=str(raw.routingId).trim();
@@ -210,11 +212,11 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         if(flavorVariantId){
             const variant=await getDoc('organizations/'+ctx.orgId+'/mfg_sku_parameters/'+flavorVariantId);
             if(!variant||str(variant.data.kind)!=='productNames'||variant.data.enabled===false)
-                throw new HttpError(400,'Select an active Flavor/Variant from SKU Configuration.');
+                throw new HttpError(400,'Select an active Product/Variant from SKU Configuration.');
         }
         const parent=await getDoc(DOC(ctx.orgId,'items',str(item.parentSkuId)));
         if(!parent)throw new HttpError(400,'Parent SKU does not exist in Manufacturing master data.');
-        if(['RAW','PACKAGING'].includes(str(parent.data.category)))throw new HttpError(400,'Inventory-owned raw and packaging materials cannot be produced as manufacturing outputs.');
+        // Output material categories do not prohibit in-house production (including packaging).
         materialUnitFactor(str(item.outputUom),str(parent.data.uom));
         if(str(parent.data.siteId)&&str(parent.data.siteId)!==str(item.siteId))
             throw new HttpError(400,'BOM output belongs to another production site.');
@@ -224,7 +226,7 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         if(str(item.flavorVariantId)&&isObj(parent.data.skuComponents)){
             const assigned=str((parent.data.skuComponents as Obj).productNameId);
             if(assigned&&assigned!==str(item.flavorVariantId))
-                throw new HttpError(400,'BOM Flavor/Variant conflicts with the finished SKU Flavor/Variant.');
+                throw new HttpError(400,'BOM Product/Variant conflicts with the output material identity.');
         }
         const routingId=str(item.routingId);
         if(routingId){
@@ -236,8 +238,6 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         for(const component of components){
             const child=await getDoc(DOC(ctx.orgId,'items',str(component.skuId)));
             if(!child)throw new HttpError(400,'Component '+str(component.skuId)+' is missing from SKU master.');
-            if(str(item.type)==='FLAVOR_VARIANT'&&str(child.data.category)==='PACKAGING')
-                throw new HttpError(400,'Flavor/Variant BOMs contain formulation inputs, not packaging materials. Use a Packaging BOM.');
             materialUnitFactor(str(component.uom),str(child.data.uom));
             if(str(child.data.siteId)&&str(child.data.siteId)!==str(item.siteId))
                 throw new HttpError(400,'Component '+str(component.skuId)+' belongs to another production site.');
