@@ -408,10 +408,10 @@ test('product / SKU name has manually assigned business code, name and descripti
  assert.equal(product.productCode,'FAN.TA-100');
  assert.equal(product.name,'Fanta');
  assert.equal(product.description,'Orange carbonated beverage');
- assert.throws(()=>normalizeSkuParameter('productNames',{name:'Fanta',productCode:''}),/Flavor\/Variant code/);
- assert.throws(()=>normalizeSkuParameter('productNames',{name:'Fanta',productCode:'bad code'}),/Flavor\/Variant code/);
+ assert.throws(()=>normalizeSkuParameter('productNames',{name:'Fanta',productCode:''}),/Product\/Variant code/);
+ assert.throws(()=>normalizeSkuParameter('productNames',{name:'Fanta',productCode:'bad code'}),/Product\/Variant code/);
  const source=read('backend/mfgSkuConfiguration.ts');
- assert.ok(source.includes('The Flavor/Variant code is already in use'));
+ assert.ok(source.includes('The Product/Variant code is already in use'));
 });
 test('container packaging uses MEMS units and numeric packaging sizes need no description',()=>{
  const packageRecord=normalizeSkuParameter('packages',{name:'Case',uom:'UOM-20-001',description:'Secondary packaging unit'});

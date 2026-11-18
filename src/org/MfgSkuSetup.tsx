@@ -57,7 +57,7 @@ export type SkuSelections={
 };
 type MenuKey=Exclude<SkuParameterKind,'packageCounts'>|'namingSequence';
 export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
-    {kind:'productNames',title:'Flavor/Variant'},
+    {kind:'productNames',title:'Product/Variant'},
     {kind:'productionForms',title:'Production Forms'},
     {kind:'containers',title:'Physical Containers'},
     {kind:'containerSizes',title:'Container Sizes'},
@@ -69,7 +69,7 @@ export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
 ];
 type IconComponent=LucideIcon;
 const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
-    {key:'productNames',title:'Flavor/Variant',Icon:Box},
+    {key:'productNames',title:'Product/Variant',Icon:Box},
     {key:'productionForms',title:'Production Forms',Icon:Layers3},
     {key:'containers',title:'Physical Containers',Icon:PackageOpen},
     {key:'containerSizes',title:'Container Sizes',Icon:Maximize2},
@@ -80,7 +80,7 @@ const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
     {key:'namingSequence',title:'SKU Naming Sequence',Icon:ListOrdered},
 ];
 const variants:Array<{key:'productNameId'|'productionFormId'|'containerId'|'containerSizeId'|'packageId'|'packagingSizeId'|'normalizationUnitId';kind:SkuParameterKind;label:string}>=[
-    {key:'productNameId',kind:'productNames',label:'Flavor/Variant'},
+    {key:'productNameId',kind:'productNames',label:'Product/Variant'},
     {key:'productionFormId',kind:'productionForms',label:'Production form'},
     {key:'containerId',kind:'containers',label:'Physical container'},
     {key:'containerSizeId',kind:'containerSizes',label:'Container size'},
@@ -154,7 +154,7 @@ function UnitChoice({title,value,setup,onChange}:{title:string;value:string;setu
     </div>;
 }
 
-export function SkuConfigurationFields({value,onChange,setup,variantLabel='Flavor/Variant'}:{
+export function SkuConfigurationFields({value,onChange,setup,variantLabel='Product/Variant'}:{
     value:SkuSelections;onChange:(next:SkuSelections)=>void;setup:SkuSetup;variantLabel?:string;
 }){
     const form=getParam(setup,'productionForms',value.productionFormId);
@@ -303,7 +303,7 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Flavo
     </section>;
 }
 
-export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Flavor/Variant'}:{setup:SkuSetup;canEdit:boolean;onSaved:()=>Promise<void>;variantLabel?:string}){
+export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Variant'}:{setup:SkuSetup;canEdit:boolean;onSaved:()=>Promise<void>;variantLabel?:string}){
     const [active,setActive]=useState<MenuKey|null>(null);
     const [draft,setDraft]=useState<Partial<SkuParameter>|null>(null);
     const [namingDraft,setNamingDraft]=useState<SkuNamingSequence|null>(null);
