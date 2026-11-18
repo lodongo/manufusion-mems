@@ -86,7 +86,7 @@ export function derivePhysicalCapacity(
  const logistics=parameters.find(p=>p.id===components.transportPackageId&&p.kind==='transportPackages');
  const norm=parameters.find(p=>p.id===components.normalizationUnitId&&p.kind==='normalizationUnits');
  const formQuantity=physicalContainers*conversion.containerSizeInProductionUom;
- const rateUnit=displayUnit(sku.uom);
+ const finishedUnit=commercial?.name||displayUnit(sku.uom);
  // Finished goods are commercial-packaged units when a package is selected;
  // count codes alone are not sufficient to infer whether each means a bottle or a case.
  const finalQuantity=commercial&&packages!==null?packages:null;
@@ -98,15 +98,15 @@ export function derivePhysicalCapacity(
    containerAttributes:container.containerAttributes??{},sizeName:size.name,
    countUnit:countUnit.symbol,timeUnit:time.symbol,
    ratedUnits:input.ratingQuantity,physicalContainers:cap(physicalContainers)},
-  physicalContainers:projected(physicalContainers,'primary containers / '+time.symbol,
+  physicalContainers:projected(physicalContainers,container.name+' / '+time.symbol,
      container.name),
   productionForm:projected(formQuantity,displayUnit(conversion.productionUom)+' / '+time.symbol,
      productionForm?.name||'Production form'),
-  finalProduct:projected(finalQuantity,rateUnit+' / '+time.symbol,sku.name,
+  finalProduct:projected(finalQuantity,finishedUnit+' / '+time.symbol,sku.name,
     'Finished-product package conversion is not configured.'),
-  commercialPackaging:projected(packages,displayUnit(commercial?.uom||'commercial packages')+' / '+time.symbol,
+  commercialPackaging:projected(packages,(commercial?.name||'commercial packages')+' / '+time.symbol,
      commercial?.name||'Commercial packaging','Commercial packaging ratio is not configured.'),
-  transportLogistics:projected(transport,displayUnit(logistics?.uom||'transport units')+' / '+time.symbol,
+  transportLogistics:projected(transport,(logistics?.name||'transport units')+' / '+time.symbol,
      logistics?.name||'Transport & logistics','Transport packaging ratio is not configured.'),
   normalised:projected(normalized,(norm?.name||'normalized units')+' / '+time.symbol,
      norm?.name||'Normalization','Normalization reference is not configured.'),
