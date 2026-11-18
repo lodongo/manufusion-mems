@@ -124,6 +124,26 @@ const log=(ctx:OrgContext,action:string,id:string)=>audit([{
 const allowedEdit=(ctx:OrgContext)=>ctx.role==='org_super_admin'||hasPerm(ctx.permissions,'PLN.configure');
 
 export const plnDemandRoutes={
+ 'POST /api/org/pln/demand/references':[
+  orgRoute('org.pln.demand.references','PLN.view',async ctx=>{
+   const [nodes,skus]=await Promise.all([
+    listDocs('organizations/'+ctx.orgId+'/structure'),
+    listDocs('organizations/'+ctx.orgId+'/mfg_items'),
+   ]);
+   const sites=[];
+   for(const node of nodes){
+    if(str(node.data.level)==='site'&&str(node.data.status)!=='inactive'&&
+        await permitted(ctx,'PLN.view',node.id))
+     sites.push({id:node.id,name:str(node.data.name)||node.id});
+   }
+   const validSites=new Set(sites.map(x=>x.id));
+   const outputs=skus.filter(x=>['FINISHED','INTERMEDIATE'].includes(str(x.data.category))&&
+        (!str(x.data.siteId)||validSites.has(str(x.data.siteId))))
+    .map(x=>({id:x.id,name:str(x.data.name)||x.id,uom:str(x.data.uom),
+       siteId:str(x.data.siteId),category:str(x.data.category)}));
+   return {sites,outputs};
+  }),
+ ],
  'POST /api/org/pln/demand/list':[
   orgRoute('org.pln.demand.list','PLN.view',async ctx=>{
    const all=await listDocs(ROOT(ctx.orgId)),visible=[];
