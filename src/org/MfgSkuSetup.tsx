@@ -161,7 +161,7 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     const norm=getParam(setup,'normalizationUnits',value.normalizationUnitId);
     const contentPerContainer=size&&form&&ratio(setup,size.uom,form.uom)!==null
         ?(size.quantity??0)*ratio(setup,size.uom,form.uom)!:null;
-    const effectivePackSize=packageRecord?.packagingTypeCode
+    const effectivePackSize=packageRecord?.packagingTypeCode&&Number.isSafeInteger(packageRecord.quantity)&&Number(packageRecord.quantity)>0
         ?packagePrimaryCount(packageRecord,setup.parameters)
         :packSize?.quantity??null;
     const contentPerPackage=effectivePackSize!==null&&contentPerContainer!==null
@@ -264,8 +264,10 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
     const metadataType=availableMetadata.types.find(t=>t.code===typeCode);
     const packagingMetadata=setup.packagingMetadata||emptySkuSetup.packagingMetadata;
     const packagingType=packagingMetadata.types.find(t=>t.code===typeCode);
-    const packagedUnitTotal=Number(draft?.containersPerLayer)*Number(draft?.numberOfLayers);
-    const validLayerCount=Number.isSafeInteger(packagedUnitTotal)&&packagedUnitTotal>0&&packagedUnitTotal<=10000000;
+    const availablePackagingCategories=packagingMetadata.categories.filter(c=>
+        (active==='packages'?c.level==='SECONDARY':c.level!=='SECONDARY'));
+    const availablePackagingTypes=packagingMetadata.types.filter(t=>
+        (active==='packages'?t.level==='SECONDARY':t.level!=='SECONDARY')||t.code===typeCode);
     const kindName=menu.find(x=>x.key===active)?.title||'SKU Configuration';
     const records=active?setup.parameters.filter(p=>p.kind===active):[];
     const update=(field:keyof SkuParameter,value:unknown)=>setDraft(d=>({...d,[field]:value}));
@@ -277,8 +279,8 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
     };
     const edit=(entry:SkuParameter)=>{
         setDraft({...entry});
-        setTypeCode(entry.kind==='packages'?entry.packagingTypeCode||'':entry.metadataCode||'');
-        setCategory(entry.kind==='packages'?entry.packagingTypeCode?.slice(0,3)||'':entry.categoryCode||'');
+        setTypeCode(['packages','transportPackages'].includes(entry.kind)?entry.packagingTypeCode||'':entry.metadataCode||'');
+        setCategory(['packages','transportPackages'].includes(entry.kind)?entry.packagingTypeCode?.slice(0,3)||'':entry.categoryCode||'');
         setError('');setNotice('');
     };
     const save=async()=>{
@@ -290,7 +292,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                 parameter.metadataCode=typeCode;
                 parameter.containerAttributes=draft.containerAttributes||{};
             }
-            if(active==='packages'&&typeCode){
+            if((active==='packages'||active==='transportPackages')&&typeCode){
                 parameter.packagingTypeCode=typeCode;
             }
             if(active==='packagingSizes'){
@@ -334,7 +336,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                             {row.enabled===false&&<span className='ml-2 text-xs text-muted'>Inactive</span>}</p>
                         <p className='text-xs text-muted'>{active==='productNames'&&row.productCode?row.productCode+' · ':''}{row.id}
                             {row.subcategoryCode?' · '+row.subcategoryCode:''}
-                            {active==='packages'&&row.packagingTypeCode?' · '+row.packagingTypeCode+' · '+(row.containersPerLayer||0)+' × '+(row.numberOfLayers||0)+' layers':''}</p>
+                            {(active==='packages'||active==='transportPackages')&&row.packagingTypeCode?' · '+row.packagingTypeCode:''}</p>
                     </div>
                     {canEdit&&<button type='button' className={secondary} onClick={()=>edit(row)}>Edit</button>}
                 </div>)}
@@ -377,34 +379,23 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                     <UnitChoice key={draft.id||'new-size'} title='Unit' value={draft.uom||''} setup={setup}
                         onChange={v=>update('uom',v)}/>
                 </>}
-                {active==='packages'&&<>
+                {(active==='packages'||active==='transportPackages')&&<>
                     <Choice title='Packaging category' value={category} placeholder='Select packaging category'
-                        options={packagingMetadata.categories.map(c=>[c.code,c.name])}
+                        options={availablePackagingCategories.map(c=>[c.code,c.name])}
                         onChange={code=>{setCategory(code);setTypeCode('');update('containedPackagingId','');}}/>
                     <Choice title='Packaging type' value={typeCode} placeholder='Select packaging type'
-                        options={packagingMetadata.types.filter(t=>t.code.slice(0,3)===category)
+                        options={availablePackagingTypes.filter(t=>t.code.slice(0,3)===category)
                             .map(t=>[t.code,t.name+' · '+t.code])}
                         onChange={code=>{setTypeCode(code);update('containedPackagingId','');}}/>
                     {packagingType&&<div className='rounded-xl border border-line p-3 text-xs text-muted'>
-                        {packagingType.level} · {packagingType.containedUnit==='PACKAGING'?'Consolidates lower-level packages':'Holds primary containers'}
+                        {packagingType.name} · {packagingType.level}
+                        {active==='packages'?' · Commercial selling unit':' · Transport, storage or consolidated load'}
                     </div>}
-                    {packagingType?.containedUnit==='PACKAGING'&&<Choice
-                        title='Contained packaging (lower level)' value={draft.containedPackagingId||''}
-                        placeholder='Select a configured package'
-                        options={setup.parameters.filter(p=>p.kind==='packages'&&p.id!==draft.id&&p.enabled!==false
-                            &&!!p.packagingTypeCode&&
-                            ({SEC:1,TER:2,PAL:3,LOG:4,RET:4,BUL:5} as Record<string,number>)[p.packagingTypeCode.slice(0,3)] <
-                            (({SEC:1,TER:2,PAL:3,LOG:4,RET:4,BUL:5} as Record<string,number>)[typeCode.slice(0,3)]||0))
-                            .map(p=>[p.id,p.name+' · '+(p.quantity||0)+' contained units'])}
-                        onChange={code=>update('containedPackagingId',code)}/>}
                     <TextInput title='Name' value={draft.name||''} onChange={v=>update('name',v)} required/>
                     <TextInput title='Description' value={draft.description||''} onChange={v=>update('description',v)}/>
-                    <NumberInput title={packagingType?.containedUnit==='PACKAGING'?'Packages per layer':'Containers per layer'}
-                        value={draft.containersPerLayer||0} onChange={v=>update('containersPerLayer',v)}/>
-                    <NumberInput title='Number of layers' value={draft.numberOfLayers||0}
-                        onChange={v=>update('numberOfLayers',v)}/>
-                    {validLayerCount&&<p className='rounded-xl border border-line p-3 text-sm font-medium text-brand'
-                        role='status'>Total: {packagedUnitTotal} {packagingType?.containedUnit==='PACKAGING'?'packages':'containers'} per load</p>}
+                    {draft.id&&draft.containersPerLayer&&draft.numberOfLayers&&<p className='text-xs text-muted'>
+                        Previously configured layering remains stored. New stacking arrangements are set per SKU.
+                    </p>}
                 </>}
                 {active==='packagingSizes'&&<>
                     <NumberInput title='Number of containers' value={draft.quantity||0}
@@ -423,8 +414,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                 </label>
                 <button type='button' className={primary} disabled={busy||
                     (active==='containers'?(!typeCode||!metadataType?.attributes.filter(a=>a.required).every(a=>draft.containerAttributes?.[a.key])):
-                    active==='packages'?(!typeCode||!draft.name?.trim()||!validLayerCount||
-                        (packagingType?.containedUnit==='PACKAGING'&&!draft.containedPackagingId)):
+                    (active==='packages'||active==='transportPackages')?(!typeCode||!draft.name?.trim()):
                     active==='packagingSizes'?!(Number.isSafeInteger(draft.quantity)&&Number(draft.quantity)>0):
                     !draft.name?.trim())} onClick={()=>void save()}>{busy?'Saving…':'Save'}</button>
             </div>}
