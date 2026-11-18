@@ -9,7 +9,7 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canAt, nodePath, scopeOf } from './access';
 import { audit } from './audit';
 import { referenceChecks, bomAlternative } from './plnMfgFoundation';
-import { bomClassificationCode, bomReleaseSlotGroup } from './mfgMaterialPolicy';
+import { bomClassificationCode, bomReleaseSlotGroup, mfgMaterialPolicyForOrg } from './mfgMaterialPolicy';
 
 type Kind = 'boms'|'routings';
 const TABLE:Record<Kind,string> = {boms:'mfg_boms',routings:'mfg_routings'};
@@ -63,10 +63,23 @@ export const plnMfgReleaseRoutes={
             if(!await authorized(ctx,'MFG.view',siteId))
                 throw new HttpError(403,'This production site is outside your authorized scope.');
             const all=await listDocs(root(ctx.orgId,kind));
-            const records=all.filter(row=>str(kind==='boms'?row.data.parentSkuId:row.data.skuId)===skuId)
-                .map(row=>({id:row.id,...row.data,classificationCode:bomClassificationCode(row.data),
-                    alternativeCode:str(row.data.alternativeCode)}));
+            const matching=all.filter(row=>str(kind==='boms'?row.data.parentSkuId:row.data.skuId)===skuId);
+            const existingTypeIds=new Set(matching.filter(row=>
+                !str(row.data.classificationCode)&&!!str(row.data.type)).map(row=>row.id));
+            const records=matching.map(row=>{
+                const data={...row.data};
+                if(kind==='boms'){
+                    data.classificationCode=bomClassificationCode(row.data);
+                    data.productVariantId=str(data.productVariantId)||str(data.flavorVariantId);
+                    delete data.type;delete data.flavorVariantId;
+                }
+                return {id:row.id,...data,alternativeCode:str(data.alternativeCode)};
+            });
             if(kind==='boms'){
+                const usage=str(ctx.body.usage)||'PRODUCTION';
+                if(!['PRODUCTION','MRP','VIEW'].includes(usage))
+                    throw new HttpError(400,'Choose production, MRP or view usage.');
+                const configured=(await mfgMaterialPolicyForOrg(ctx.orgId)).policy.bomClassifications;
                 const requestedClassification=str(ctx.body.classificationCode).toUpperCase();
                 const requestedAlternative=str(ctx.body.alternativeCode);
                 const groups=new Map<string,typeof records>();
@@ -75,6 +88,9 @@ export const plnMfgReleaseRoutes={
                     const alternative=bomAlternative(record.alternativeCode);
                     if(requestedClassification&&classificationCode!==requestedClassification)continue;
                     if(requestedAlternative&&alternative!==bomAlternative(requestedAlternative))continue;
+                    const cls=configured.find(c=>c.code===classificationCode);
+                    if(usage!=='VIEW'&&!existingTypeIds.has(record.id)&&
+                        (!cls||!cls.enabled||(usage==='MRP'?!cls.mrpRelevant:!cls.productionEligible)))continue;
                     const key=classificationCode+'__'+alternative,list=groups.get(key)||[];
                     list.push(record);groups.set(key,list);
                 }

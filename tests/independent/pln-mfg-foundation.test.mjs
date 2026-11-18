@@ -140,6 +140,9 @@ test('Release selection requires explicit BOM classification and alternative to 
  assert.ok(release.includes('requiresSelection:options.length>1'));
  assert.ok(release.includes("bomClassificationCode(other.data)===bomClassificationCode(doc.data)"));
  assert.ok(!release.includes("ctx.body.bomType"));
+ assert.ok(release.includes("delete data.type;delete data.flavorVariantId"));
+ assert.ok(release.includes("!cls.productionEligible"));
+ assert.ok(release.includes("!cls.mrpRelevant"));
  assert.ok(release.includes("bomAlternative(doc.data.alternativeCode)"));
  const ui=read('src/org/ProductionFoundation.tsx');
  assert.ok(ui.includes('BOM alternative code'));
