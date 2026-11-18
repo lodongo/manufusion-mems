@@ -24,7 +24,7 @@
 | P1-02 | Load MFG item list and create finished product and intermediate SKU | Draft saved in own tenant, revision 1 exists, reload retains values |
 | P1-03 | Link a raw/packaging SKU to an existing published Inventory material | Published material appears in selector; invalid, unapproved or missing material rejected |
 | P1-04 | Create manufacturing line/resource with optional Asset Register link | Only active and same-site asset references allowed; rate/efficiency validation works |
-| P1-05 | Create and edit Flavor/Variant or Packaging BOM | Parent and component units are identical or have a compatible MEMS unit conversion; quantities positive; circular structure rejected; revision snapshots preserved |
+| P1-05 | Create and edit Manufacturing or Packaging BOM | Parent and component units are identical or have a compatible MEMS unit conversion; quantities positive; circular structure rejected; revision snapshots preserved |
 | P1-06 | Create parallel-stage routing | Independent prep and bottle blowing stage outputs can feed filling; invalid resource or dependency rejected |
 | P1-07 | Apply site-specific and organization-wide masters | A user cannot mutate another site's resource, BOM or routing; global records require direct administrative permissions |
 | P1-08 | Submit BOM/routing and approve with separate user | Draft → pending approval → active; author cannot approve own submission; released revision cannot be overwritten |
@@ -36,8 +36,8 @@
 | P1-14 | Attempt duplicate seed or write with stale record revision | Idempotent seed; optimistic concurrency prevents lost updates; audit events recorded |
 | P1-15 | Repeat actions with unauthorized, cross-tenant or disabled-module account | Correct 403/404 response, no record disclosure or mutation |
 
-## Fanta scenario — requirements before downstream MRP
-- Flavor-neutral simple syrup may have a Flavor/Variant BOM without selecting a beverage flavor.
+## Universal material and BOM requirements before downstream MRP
+- A shared intermediate or subassembly can have a Manufacturing BOM without selecting a specific product variant.
 - An intermediate may be explicitly non-stock-managed or stock-managed (linked to an approved Inventory material).
 - A metered raw input, such as treated water, must reference an already configured equipment utility and cannot be issued again as Inventory.
 - A final-product Packaging BOM may be created using its referenced material masters even before their upstream production BOMs exist. This is **not** proof of executable material readiness.
@@ -77,8 +77,8 @@ Phase 1 is **code-complete for baseline features**, not accepted, until P1-01 th
 Phase 2 adds demand entry/forecast consumption, demand allocation, MPS simulation/versioning and rough-cut capacity. Phase 1 contains **no live manufacturing execution, stock reservation/issue/receipt or purchasing** operations.
 
 ## General manufacturing acceptance (2026-11-18)
-- New organizations default to GENERAL / Product/Variant / Manufacturing BOM; any industry descriptor can be entered without a closed enumerated list.
-- New manufacturing BOM records use MANUFACTURING; legacy FLAVOR_VARIANT, RECIPE and BOM remain readable in their respective effective version groups.
+- All organizations use the same Product/Variant, Manufacturing BOM and Packaging BOM terminology, without sector presets or custom aliases.
+- Newly saved BOMs use canonical MANUFACTURING or PACKAGING categories. Historical persisted records are normalized internally without old categories appearing in the interface.
 - Components and output categories are not limited by beverage-specific rules. An integrated assembly can include packaging inputs, or manufacture a packaging item for downstream use.
 - A Packaging BOM is optional when no separate pack-stage decomposition is needed. Drafting a BOM never requires preceding BOMs to exist, though execution readiness is checked separately.
 - Test model is structurally reusable for process, discrete, assembly and mixed manufacturing; sector-specific execution rules require separate acceptance.

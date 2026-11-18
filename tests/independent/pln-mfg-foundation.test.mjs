@@ -25,34 +25,34 @@ test('real raw and packaging materials require an Inventory master reference',()
  assert.equal(normalizeMaster('items',{id:'CAP-2622',name:'Cap',category:'PACKAGING',uom:'EA',packQty:1,inventoryMaterialId:'MAT-2622'}).inventoryMaterialId,'MAT-2622');
 });
 
-test('manufacturing material policy supports steel and shoe profiles with governed aliases',()=>{
- assert.equal(defaultMfgMaterialPolicy().variantLabel,'Product/Variant');
- assert.equal(defaultMfgMaterialPolicy('METALS').variantLabel,'Grade/Specification');
- assert.equal(defaultMfgMaterialPolicy('FOOTWEAR').manufacturingBomLabel,'Assembly BOM');
- const metal=normalizeMfgMaterialPolicy({...defaultMfgMaterialPolicy('METALS'),allowRawDirect:true,allowPackagingDirect:true});
- assert.equal(metal.allowRawDirect,true);
- assert.equal(metal.manufacturingBomLabel,'Manufacturing BOM');
- assert.equal(normalizeMfgMaterialPolicy({...metal,industry:'CERAMICS'}).industry,'CERAMICS');
- assert.equal(normalizeMfgMaterialPolicy({industry:'PHARMACEUTICALS'}).manufacturingBomLabel,'Manufacturing BOM');
- assert.throws(()=>normalizeMfgMaterialPolicy({...metal,industry:'x'.repeat(80)}),/terminology/);
- assert.throws(()=>normalizeMfgMaterialPolicy({...metal,allowPackagingDirect:'yes'}),/enabled or disabled/);
- assert.throws(()=>normalizeMfgMaterialPolicy({...metal,variantLabel:'x'.repeat(61)}),/terminology/);
- const backend=read('backend/plnMfgFoundation.ts'),ui=read('src/org/ProductionFoundation.tsx');
- assert.ok(backend.includes('/foundation/material-policy/save'));
- assert.ok(ui.includes('Save manufacturing setup'));
- assert.ok(ui.includes('allowPackagingDirect'));
+test('manufacturing material handling policy has no industry labels or preset selectors',()=>{
+ const p=defaultMfgMaterialPolicy();
+ assert.deepEqual(Object.keys(p).sort(),['allowRawDirect','allowRawUtility','allowPackagingDirect','defaultIntermediateTracking'].sort());
+ assert.equal(p.defaultIntermediateTracking,'NON_STOCKED');
+ const configured=normalizeMfgMaterialPolicy({allowRawUtility:false,allowRawDirect:true,
+  allowPackagingDirect:true,defaultIntermediateTracking:'STOCKED',
+  industry:'SECTOR_EXAMPLE',variantLabel:'Obsolete label',manufacturingBomLabel:'Obsolete BOM label'});
+ assert.equal(configured.allowRawDirect,true);
+ assert.equal(configured.defaultIntermediateTracking,'STOCKED');
+ for(const key of ['industry','variantLabel','manufacturingBomLabel','packagingBomLabel'])
+    assert.equal(Object.hasOwn(configured,key),false);
+ assert.throws(()=>normalizeMfgMaterialPolicy({allowPackagingDirect:'yes'}),/Invalid material handling/);
+ assert.throws(()=>normalizeMfgMaterialPolicy({defaultIntermediateTracking:'OTHER'}),/intermediate tracking/);
 });
-test('generic manufacturing is not restricted to four example sectors or beverage-only component rules',()=>{
- for(const industry of ['PAPER','CERAMICS','AUTOMOTIVE','PHARMACEUTICALS','ELECTRONICS','TEXTILES','CHEMICALS','FURNITURE','AEROSPACE']){
-  const result=normalizeMfgMaterialPolicy({industry});
-  assert.equal(result.industry,industry);assert.equal(result.manufacturingBomLabel,'Manufacturing BOM');
- }
- const foundation=read('backend/plnMfgFoundation.ts'),ui=read('src/org/ProductionFoundation.tsx');
- assert.ok(!foundation.includes("['RAW','PACKAGING'].includes(str(parent.data.category))"));
- assert.ok(!foundation.includes("str(child.data.category)==='PACKAGING'"));
- assert.ok(ui.includes("type:'MANUFACTURING'"));
- assert.ok(ui.includes('const componentOptions=itemOptions'));
- assert.ok(ui.includes('Industry or manufacturing activity (free text)'));
+test('universal manufacturing UI contains neither sector suggestions nor embedded pilot screens',()=>{
+ const ui=read('src/org/ProductionFoundation.tsx');
+ assert.ok(!ui.includes('Optional terminology example'));
+ assert.ok(!ui.includes('Industry profile'));
+ assert.ok(!ui.includes('industryLabels'));
+ assert.ok(!ui.includes('Line 11 Pilot Preview'));
+ assert.ok(!ui.includes("active==='demo'"));
+ assert.ok(!ui.includes('Earlier RECIPE'));
+ assert.ok(ui.includes('Manufacturing material handling'));
+ assert.ok(ui.includes("['MANUFACTURING','Manufacturing BOM']"));
+ assert.ok(ui.includes('Materials & Products'));
+ const backend=read('backend/plnMfgFoundation.ts');
+ assert.ok(backend.includes('/foundation/material-policy/save'));
+ assert.ok(backend.includes('normalizeMaster'));
 });
 test('raw and packaging direct consumption can be classified without stock ledger items',()=>{
  const label={id:'LBL-01',name:'Shoe label',category:'PACKAGING',sourceMode:'DIRECT',uom:'EA'};
@@ -64,12 +64,12 @@ test('raw and packaging direct consumption can be classified without stock ledge
 test('BOM supports two new classifications and preserves historical types',()=>{
  const formula={id:'BOM-FLAVOR',name:'Orange base',type:'FLAVOR_VARIANT',flavorVariantId:'NME_000000001',parentSkuId:'BULK',outputQty:1000,outputUom:'L',components:[{skuId:'WATER',quantity:1000,uom:'L'}]};
  const pack={...formula,id:'BOM-PACK',name:'Orange case',type:'PACKAGING',parentSkuId:'FG',components:[{skuId:'BOTTLE',quantity:1,uom:'EA'}]};
- assert.equal(normalizeMaster('boms',formula).type,'FLAVOR_VARIANT');
+ assert.equal(normalizeMaster('boms',formula).type,'MANUFACTURING');
  assert.equal(normalizeMaster('boms',{...formula,type:'MANUFACTURING'}).type,'MANUFACTURING');
  assert.equal(normalizeMaster('boms',pack).type,'PACKAGING');
  assert.equal(normalizeMaster('boms',{...formula,flavorVariantId:''}).flavorVariantId,''); // Common simple syrup
- assert.equal(normalizeMaster('boms',{...pack,type:'BOM'}).type,'BOM');
- assert.equal(normalizeMaster('boms',{...formula,type:'RECIPE'}).type,'RECIPE');
+ assert.equal(normalizeMaster('boms',{...pack,type:'BOM'}).type,'PACKAGING');
+ assert.equal(normalizeMaster('boms',{...formula,type:'RECIPE'}).type,'MANUFACTURING');
 });
 test('Fanta formulation can be flavor-neutral and intermediates can be non-stock or stocked',()=>{
  const base={id:'SIMPLE-SYRUP',name:'Common syrup',category:'INTERMEDIATE',uom:'L',packQty:1};
@@ -124,7 +124,7 @@ test('BOM graph includes both categories when parent is shared',()=>{
 test('BOM structures reject zero quantities, duplicate components and immediate cycles',()=>{
  const baseline={id:'BOM-01',name:'Water case',type:'BOM',parentSkuId:'FG-WATER',outputQty:1,outputUom:'CASE'};
  const comp={skuId:'CAP-2622',quantity:12,uom:'EA',scrapPct:1};
- assert.equal(normalizeMaster('boms',{...baseline,components:[comp]}).type,'BOM');
+ assert.equal(normalizeMaster('boms',{...baseline,components:[comp]}).type,'PACKAGING');
  assert.throws(()=>normalizeMaster('boms',{...baseline,components:[comp,comp]}),/Duplicate component/);
  assert.throws(()=>normalizeMaster('boms',{...baseline,components:[{...comp,quantity:0}]}),/greater than zero/);
  assert.throws(()=>normalizeMaster('boms',{...baseline,components:[{...comp,skuId:'FG-WATER'}]}),/consume itself/);
@@ -285,8 +285,9 @@ test('pilot verification reads sandbox documents without modifying operational m
  assert.ok(backend.includes('isSubset(item,record.data)'));
  assert.ok(backend.includes("foundation/demo/verify"));
  const ui=read('src/org/ProductionFoundation.tsx');
- assert.ok(ui.includes('Verify stored pilot records'));
- assert.ok(ui.includes('Pilot acceptance blocked'));
+ assert.ok(!ui.includes('Verify stored pilot records'));
+ assert.ok(!ui.includes('Pilot acceptance blocked'));
+ assert.ok(backend.includes('verifySeededFictionalPilot'));
 });
 
 
@@ -314,7 +315,7 @@ test('all new manufacturing master and batch prefixes use nine-digit generated c
     assert.throws(()=>managedCode('BTH',1000000000),/exhausted/);
     assert.throws(()=>managedCode('XXXX',1),/invalid or exhausted/);
     assert.equal(masterPrefix('items'),'SKU');
-    assert.equal(masterPrefix('boms','RECIPE'),'RCP');
+    assert.equal(masterPrefix('boms','RECIPE'),'BOM');
     assert.equal(masterPrefix('boms','BOM'),'BOM');
     assert.equal(masterPrefix('resources'),'RSC');
     assert.equal(masterPrefix('routings'),'RTG');
