@@ -1,5 +1,7 @@
 import {useId,useState} from 'react';
-import {ArrowLeft,Box,ChevronRight,Layers3,Maximize2,Package,PackageOpen,Shapes, type LucideIcon} from 'lucide-react';
+import {ArrowLeft,ArrowDown,ArrowUp,Box,ChevronRight,Layers3,Maximize2,Package,PackageOpen,Shapes, ListOrdered, type LucideIcon} from 'lucide-react';
+import {SKU_NAME_FIELDS,SKU_NAME_SEPARATORS,DEFAULT_SKU_NAMING_SEQUENCE,composeSkuNameFromSequence,
+    type SkuNamingSequence,type SkuNameValues,type SkuNameMode} from '../shared/mfgSkuNaming';
 import {Field,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
 
@@ -7,7 +9,7 @@ export type SkuParameterKind='productNames'|'productionForms'|'containers'|'cont
 export type SkuParameter={
     id:string;kind:SkuParameterKind;name:string;enabled?:boolean;description?:string;
     quantity?:number;uom?:string;baseUom?:string;quantityPerUnit?:number;revision?:number;
-    referenceProductionFormId?:string;
+    referenceProductionFormId?:string;normalizationOperator?:'DIVIDE'|'MULTIPLY';
     categoryCode?:string;unitCode?:string;unitCount?:number;productCode?:string;
     metadataCode?:string;subcategoryCode?:string;containerAttributes?:Record<string,string>;
     packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
@@ -33,6 +35,7 @@ export type SkuSetup={
     parameters:SkuParameter[];groups:Record<SkuParameterKind,string>;units:MeasureUnit[];
     categories:MeasureCategory[];primaryContainerMetadata:PrimaryContainerMetadata;
     packagingMetadata:PackagingMetadata;
+    namingSequence:SkuNamingSequence;namingRevision:number;namingConfigured:boolean;
     conventions:Record<string,string|number>;
 };
 export const emptySkuSetup:SkuSetup={
@@ -41,6 +44,7 @@ export const emptySkuSetup:SkuSetup={
         packages:'PKG',transportPackages:'TLP',packagingSizes:'PSZ',packageCounts:'PCT',normalizationUnits:'NRM'},
     units:[],categories:[],primaryContainerMetadata:{version:1,categories:[],types:[]},
     packagingMetadata:{version:1,categories:[],types:[]},
+    namingSequence:DEFAULT_SKU_NAMING_SEQUENCE,namingRevision:0,namingConfigured:false,
     conventions:{items:'SKU',boms:'BOM',recipes:'RCP',resources:'RSC',
         routings:'RTG',batches:'BTH',digits:9},
 };
@@ -51,7 +55,7 @@ export type SkuSelections={
     transportPackagesPerLayer?:number;transportLayerCount?:number;transportUnitsPerLoad?:number;
     normalizationUnitId?:string;
 };
-type MenuKey=Exclude<SkuParameterKind,'packageCounts'>;
+type MenuKey=Exclude<SkuParameterKind,'packageCounts'>|'namingSequence';
 export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
     {kind:'productNames',title:'Product / SKU Names'},
     {kind:'productionForms',title:'Production Forms'},
@@ -61,6 +65,7 @@ export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
     {kind:'packagingSizes',title:'Commercial Packaging Sizes'},
     {kind:'transportPackages',title:'Transport & Logistics Packaging'},
     {kind:'normalizationUnits',title:'Normalization Units'},
+    {kind:'namingSequence',title:'SKU Naming Sequence'},
 ];
 type IconComponent=LucideIcon;
 const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
@@ -72,6 +77,7 @@ const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
     {key:'packagingSizes',title:'Commercial Packaging Sizes',Icon:Box},
     {key:'transportPackages',title:'Transport & Logistics Packaging',Icon:Layers3},
     {key:'normalizationUnits',title:'Normalization Units',Icon:Shapes},
+    {key:'namingSequence',title:'SKU Naming Sequence',Icon:ListOrdered},
 ];
 const variants:Array<{key:'productNameId'|'productionFormId'|'containerId'|'containerSizeId'|'packageId'|'packagingSizeId'|'normalizationUnitId';kind:SkuParameterKind;label:string}>=[
     {key:'productNameId',kind:'productNames',label:'Product / SKU name'},
@@ -179,13 +185,37 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     const quantityPerTransport=validTransportCount!==null&&contentPerPackage!==null
         ?validTransportCount*contentPerPackage:null;
     const normalizedReferenceUom=normalizationReferenceForm?.uom||norm?.baseUom;
-    const normalBase=norm&&form&&ratio(setup,normalizedReferenceUom,form.uom)!==null
-        ?(norm.quantityPerUnit??0)*ratio(setup,normalizedReferenceUom,form.uom)!:null;
+    const unitRatio=norm&&form?ratio(setup,normalizedReferenceUom,form.uom):null;
+    const normalizedOperator=norm?.normalizationOperator==='MULTIPLY'?'MULTIPLY':'DIVIDE';
+    const normalBase=norm&&unitRatio!==null&&norm.quantityPerUnit&&norm.quantityPerUnit>0
+        ?(normalizedOperator==='MULTIPLY'?unitRatio/norm.quantityPerUnit:norm.quantityPerUnit*unitRatio):null;
     const factor=normalBase&&contentPerPackage!==null?contentPerPackage/normalBase:null;
-    const product=getParam(setup,'productNames',value.productNameId)?.name||'Select product';
-    const title=[product,[size?.name,container?.name].filter(Boolean).join(' '),
+    const productRecord=getParam(setup,'productNames',value.productNameId);
+    const product=productRecord?.name||'Select product';
+    const legacyTitle=[product,[size?.name,container?.name].filter(Boolean).join(' '),
         [packageRecord?.name,packSize?'x'+packSize.quantity:''].filter(Boolean).join(' ')]
-        .filter(Boolean).join(' · ');
+        .filter(Boolean).join(' · ';
+    const unitSymbol=(code:string|undefined)=>pickUnit(setup,code)?.symbol||code||'';
+    const token=(p:SkuParameter|undefined,code?:string)=>p?{
+        name:p.name,code:code||p.id,quantity:p.quantity,unit:unitSymbol(p.uom),
+    }:undefined;
+    const namingValues:SkuNameValues={
+        productName:token(productRecord,productRecord?.productCode),
+        productionForm:token(form),
+        primaryContainer:token(container,container?.metadataCode),
+        containerSize:token(size),
+        commercialPackaging:token(packageRecord,packageRecord?.packagingTypeCode),
+        commercialPackSize:token(packSize),
+        transportPackaging:token(transportRecord,transportRecord?.packagingTypeCode),
+        normalizationUnit:norm?{name:norm.name,code:norm.id,quantity:norm.quantityPerUnit,unit:unitSymbol(normalizedReferenceUom)}:undefined,
+        commercialProductQuantity:contentPerPackage===null?undefined:{quantity:contentPerPackage,unit:unitSymbol(form?.uom)},
+        normalizedCommercialQuantity:factor===null?undefined:{quantity:factor},
+        transportPackagesPerLayer:value.transportPackagesPerLayer?{quantity:value.transportPackagesPerLayer}:undefined,
+        transportLayerCount:value.transportLayerCount?{quantity:value.transportLayerCount}:undefined,
+        transportTotalUnits:validTransportCount===null?undefined:{quantity:validTransportCount},
+    };
+    const title=setup.namingConfigured?
+        composeSkuNameFromSequence(setup.namingSequence,namingValues):legacyTitle;
     const optionsFor=(kind:SkuParameterKind):Array<[string,string]>=>setup.parameters
         .filter(p=>p.kind===kind&&p.enabled!==false&&
             (kind!=='containers'||!value.productionFormId||!p.categoryCode?.startsWith('UOM-')||
@@ -254,8 +284,10 @@ export function SkuConfigurationFields({value,onChange,setup}:{
             {contentPerPackage!==null&&<p className='mt-1 text-muted'>Per commercial package: {pretty(contentPerPackage)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
             {quantityPerTransport!==null&&<p className='mt-1 text-muted'>Per transport unit: {pretty(quantityPerTransport)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
             {norm&&contentPerPackage!==null&&<p className='mt-2 text-muted'>
-                Commercial package: {pretty(contentPerPackage)} {pickUnit(setup,form?.uom)?.symbol||form?.uom} ·
-                Reference: {norm.quantityPerUnit} {pickUnit(setup,normalizedReferenceUom)?.symbol||normalizedReferenceUom} per {norm.name}
+                Commercial package: {pretty(contentPerPackage)} {unitSymbol(form?.uom)} ·
+                {normalizedOperator==='MULTIPLY'
+                    ?' Multiply by '+norm.quantityPerUnit+' '+norm.name+' per '+unitSymbol(normalizedReferenceUom)
+                    :' Divide by '+norm.quantityPerUnit+' '+unitSymbol(normalizedReferenceUom)+' per '+norm.name}
             </p>}
             {factor!==null&&<p className='mt-1 font-semibold text-brand'>
                 Normalized unit cases per commercial package: {pretty(factor)} {norm?.name}
@@ -433,13 +465,14 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                             const selected=setup.parameters.find(p=>p.kind==='productionForms'&&p.id===id);
                             setDraft(prev=>({...prev,referenceProductionFormId:id,baseUom:selected?.uom||''}));
                         }}/>
-                    <QuantityInput title={'Reference quantity per normalized unit ('+
+                    <Choice title='Normalization operator' value={draft.normalizationOperator||'DIVIDE'}
+                        options={[[ 'DIVIDE','Divide ( ÷ )'],['MULTIPLY','Multiply ( × )']]}
+                        onChange={v=>update('normalizationOperator',v)}/>
+                    <QuantityInput title={(draft.normalizationOperator==='MULTIPLY'
+                        ?'Multiplier: normalized units per reference unit ('
+                        :'Reference quantity per normalized unit (')+
                         (pickUnit(setup,draft.baseUom)?.symbol||draft.baseUom||'select a form')+')'}
                         value={draft.quantityPerUnit||0} onChange={v=>update('quantityPerUnit',v)}/>
-                    {draft.referenceProductionFormId&&<p className='text-xs text-muted'>
-                        Example: 1 normalized UC = 5.678 L for a Coca-Cola-style reference.
-                        Actual reference quantities are organization-configured.
-                    </p>}
                     {!draft.id&&!draft.referenceProductionFormId&&<p className='text-xs text-muted'>
                         Select a production form to establish the reference measurement unit.
                     </p>}
