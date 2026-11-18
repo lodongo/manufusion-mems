@@ -154,8 +154,20 @@ export const plnEquipmentCapacityRoutes={
     listDocs('organizations/'+ctx.orgId+'/assets'),listDocs(P(ctx.orgId)),
     listDocs('organizations/'+ctx.orgId+'/mfg_items'),
    ]);
-   const visible:Node[]=[];
-   for(const d of all)if(isActive(d)&&await view(ctx,d.id))visible.push(asNode(d));
+   // Build accessible manufacturing cost centres first. Include their ancestors
+   // even when a site-scoped role does not grant direct permissions at LE level.
+   const allNodes=all.filter(isActive).map(asNode);
+   const index=new Map(allNodes.map(n=>[n.id,n]));
+   const accessibleCostCentres=new Set<string>();
+   for(const node of allNodes){
+    if(node.level==='cost_center'&&isManufacturingCostType(node.costType,types)&&
+       await view(ctx,node.id))accessibleCostCentres.add(node.id);
+   }
+   const included=new Set<string>();
+   for(const ccId of accessibleCostCentres)
+    for(const ancestor of lineage(index,ccId))included.add(ancestor.id);
+   const visible=allNodes.filter(node=>included.has(node.id)||
+      (node.level==='work_center'&&accessibleCostCentres.has(node.parentId)));
    const found=eligibleManufacturingHierarchy(visible,types);
    const ccIds=new Set(found.costCenters.map(n=>n.id));
    const assetById=new Map(assets.map(a=>[a.id,a]));
