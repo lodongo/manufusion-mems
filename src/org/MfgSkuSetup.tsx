@@ -9,6 +9,8 @@ export type SkuParameter={
     quantity?:number;uom?:string;baseUom?:string;quantityPerUnit?:number;revision?:number;
     categoryCode?:string;unitCode?:string;unitCount?:number;productCode?:string;
     metadataCode?:string;subcategoryCode?:string;containerAttributes?:Record<string,string>;
+    packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
+    containersPerLayer?:number;numberOfLayers?:number;
 };
 export type MeasureUnit={code:string;label:string;symbol:string;category:string;categoryCode:string;baseUnit:string;multiplier:number};
 export type MeasureCategory={code:string;name:string};
@@ -21,9 +23,15 @@ export type PrimaryContainerMetadata={
     version:number;categories:Array<{code:string;name:string;sectors:string[]}>;
     types:ContainerMetadataType[];
 };
+export type PackagingType={code:string;name:string;category:string;subcategory:string;
+    level:string;containedUnit:'PRIMARY'|'PACKAGING';description:string;defaultUnitCode:string};
+export type PackagingMetadata={
+    version:number;categories:Array<{code:string;name:string;level:string}>;types:PackagingType[];
+};
 export type SkuSetup={
     parameters:SkuParameter[];groups:Record<SkuParameterKind,string>;units:MeasureUnit[];
     categories:MeasureCategory[];primaryContainerMetadata:PrimaryContainerMetadata;
+    packagingMetadata:PackagingMetadata;
     conventions:Record<string,string|number>;
 };
 export const emptySkuSetup:SkuSetup={
@@ -31,6 +39,7 @@ export const emptySkuSetup:SkuSetup={
     groups:{productNames:'NME',productionForms:'FRM',containers:'CNT',containerSizes:'SIZ',
         packages:'PKG',packagingSizes:'PSZ',packageCounts:'PCT',normalizationUnits:'NRM'},
     units:[],categories:[],primaryContainerMetadata:{version:1,categories:[],types:[]},
+    packagingMetadata:{version:1,categories:[],types:[]},
     conventions:{items:'SKU',boms:'BOM',recipes:'RCP',resources:'RSC',
         routings:'RTG',batches:'BTH',digits:9},
 };
@@ -73,6 +82,17 @@ const getParam=(setup:SkuSetup,kind:SkuParameterKind,id:string|undefined)=>
 const pickUnit=(setup:SkuSetup,code:string|undefined)=>{
     if(!code)return undefined;
     return setup.units.find(u=>u.code===code)||setup.units.find(u=>u.symbol===code);
+};
+const packagePrimaryCount=(pack:SkuParameter,all:SkuParameter[],visited=new Set<string>()):number|null=>{
+    if(visited.has(pack.id))return null;
+    const next=new Set(visited);next.add(pack.id);
+    const total=Number(pack.quantity);
+    if(!Number.isSafeInteger(total)||total<1)return null;
+    if(pack.containedUnit!=='PACKAGING')return total;
+    const child=all.find(p=>p.id===pack.containedPackagingId&&p.kind==='packages');
+    if(!child)return null;
+    const lower=packagePrimaryCount(child,all,next);
+    return lower===null?null:total*lower;
 };
 const ratio=(setup:SkuSetup,from:string|undefined,to:string|undefined):number|null=>{
     const a=pickUnit(setup,from),b=pickUnit(setup,to);
@@ -135,7 +155,11 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     const norm=getParam(setup,'normalizationUnits',value.normalizationUnitId);
     const contentPerContainer=size&&form&&ratio(setup,size.uom,form.uom)!==null
         ?(size.quantity??0)*ratio(setup,size.uom,form.uom)!:null;
-    const contentPerPackage=packSize&&contentPerContainer!==null?contentPerContainer*(packSize.quantity??0):null;
+    const effectivePackSize=packageRecord?.packagingTypeCode
+        ?packagePrimaryCount(packageRecord,setup.parameters)
+        :packSize?.quantity??null;
+    const contentPerPackage=effectivePackSize!==null&&contentPerContainer!==null
+        ?contentPerContainer*effectivePackSize:null;
     const normalBase=norm&&form&&ratio(setup,norm.baseUom,form.uom)!==null
         ?(norm.quantityPerUnit??0)*ratio(setup,norm.baseUom,form.uom)!:null;
     const factor=normalBase&&contentPerPackage!==null?contentPerPackage/normalBase:null;
@@ -166,6 +190,10 @@ export function SkuConfigurationFields({value,onChange,setup}:{
         <div className='rounded-xl border border-line bg-page p-3 text-sm' aria-live='polite'>
             <p className='font-medium text-ink'>{title}</p>
             {contentPerContainer!==null&&<p className='mt-1 text-muted'>Per container: {pretty(contentPerContainer)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
+            {packageRecord?.packagingTypeCode&&<p className='mt-1 text-muted'>
+                {packageRecord.containersPerLayer} {packageRecord.containedUnit==='PACKAGING'?'packages':'containers'} per layer × {packageRecord.numberOfLayers} layers
+                {effectivePackSize!==null?' · '+pretty(effectivePackSize)+' primary containers':''}
+            </p>}
             {contentPerPackage!==null&&<p className='mt-1 text-muted'>Per package: {pretty(contentPerPackage)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
             {factor!==null&&<p className='mt-1 font-semibold text-brand'>Conversion factor: {pretty(factor)} {norm?.name} / {packageRecord?.name}</p>}
             {size&&form&&contentPerContainer===null&&<p className='mt-1 text-red-500'>Container size unit is incompatible with production form.</p>}
@@ -182,6 +210,10 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
     const [typeCode,setTypeCode]=useState('');
     const availableMetadata=setup.primaryContainerMetadata||emptySkuSetup.primaryContainerMetadata;
     const metadataType=availableMetadata.types.find(t=>t.code===typeCode);
+    const packagingMetadata=setup.packagingMetadata||emptySkuSetup.packagingMetadata;
+    const packagingType=packagingMetadata.types.find(t=>t.code===typeCode);
+    const packagedUnitTotal=Number(draft?.containersPerLayer)*Number(draft?.numberOfLayers);
+    const validLayerCount=Number.isSafeInteger(packagedUnitTotal)&&packagedUnitTotal>0&&packagedUnitTotal<=10000000;
     const kindName=menu.find(x=>x.key===active)?.title||'SKU Configuration';
     const records=active?setup.parameters.filter(p=>p.kind===active):[];
     const update=(field:keyof SkuParameter,value:unknown)=>setDraft(d=>({...d,[field]:value}));
@@ -193,7 +225,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
     };
     const edit=(entry:SkuParameter)=>{
         setDraft({...entry});
-        setTypeCode(entry.metadataCode||'');
+        setTypeCode(entry.kind==='packages'?entry.packagingTypeCode||'':entry.metadataCode||'');
         setCategory(entry.categoryCode||'');
         setError('');setNotice('');
     };
@@ -205,6 +237,9 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
             if(active==='containers'){
                 parameter.metadataCode=typeCode;
                 parameter.containerAttributes=draft.containerAttributes||{};
+            }
+            if(active==='packages'&&typeCode){
+                parameter.packagingTypeCode=typeCode;
             }
             if(active==='packagingSizes'){
                 parameter.name=String(parameter.quantity||'');
@@ -246,7 +281,8 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                         <p className='text-sm font-medium'>{row.name}
                             {row.enabled===false&&<span className='ml-2 text-xs text-muted'>Inactive</span>}</p>
                         <p className='text-xs text-muted'>{active==='productNames'&&row.productCode?row.productCode+' · ':''}{row.id}
-                            {row.subcategoryCode?' · '+row.subcategoryCode:''}</p>
+                            {row.subcategoryCode?' · '+row.subcategoryCode:''}
+                            {active==='packages'&&row.packagingTypeCode?' · '+row.packagingTypeCode+' · '+(row.containersPerLayer||0)+' × '+(row.numberOfLayers||0)+' layers':''}</p>
                     </div>
                     {canEdit&&<button type='button' className={secondary} onClick={()=>edit(row)}>Edit</button>}
                 </div>)}
@@ -290,10 +326,31 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                         onChange={v=>update('uom',v)}/>
                 </>}
                 {active==='packages'&&<>
-                    <TextInput title='Container packaging name' value={draft.name||''} onChange={v=>update('name',v)} required/>
-                    <UnitChoice key={draft.id||'new-packaging'} title='Unit' value={draft.uom||''} setup={setup}
-                        onChange={v=>update('uom',v)}/>
+                    <Choice title='Packaging category' value={category} placeholder='Select packaging category'
+                        options={packagingMetadata.categories.map(c=>[c.code,c.name])}
+                        onChange={code=>{setCategory(code);setTypeCode('');update('containedPackagingId','');}}/>
+                    <Choice title='Packaging type' value={typeCode} placeholder='Select packaging type'
+                        options={packagingMetadata.types.filter(t=>t.code.slice(0,3)===category)
+                            .map(t=>[t.code,t.name+' · '+t.code])}
+                        onChange={code=>{setTypeCode(code);update('containedPackagingId','');}}/>
+                    {packagingType&&<div className='rounded-xl border border-line p-3 text-xs text-muted'>
+                        {packagingType.level} · {packagingType.containedUnit==='PACKAGING'?'Consolidates lower-level packages':'Holds primary containers'}
+                    </div>}
+                    {packagingType?.containedUnit==='PACKAGING'&&<Choice
+                        title='Contained packaging (lower level)' value={draft.containedPackagingId||''}
+                        placeholder='Select a configured package'
+                        options={setup.parameters.filter(p=>p.kind==='packages'&&p.id!==draft.id&&p.enabled!==false
+                            &&!!p.packagingTypeCode&&p.level!=='TRANSPORT'&&p.level!=='BULK')
+                            .map(p=>[p.id,p.name+' · '+(p.quantity||0)+' contained units'])}
+                        onChange={code=>update('containedPackagingId',code)}/>}
+                    <TextInput title='Name' value={draft.name||''} onChange={v=>update('name',v)} required/>
                     <TextInput title='Description' value={draft.description||''} onChange={v=>update('description',v)}/>
+                    <NumberInput title={packagingType?.containedUnit==='PACKAGING'?'Packages per layer':'Containers per layer'}
+                        value={draft.containersPerLayer||0} onChange={v=>update('containersPerLayer',v)}/>
+                    <NumberInput title='Number of layers' value={draft.numberOfLayers||0}
+                        onChange={v=>update('numberOfLayers',v)}/>
+                    {validLayerCount&&<p className='rounded-xl border border-line p-3 text-sm font-medium text-brand'
+                        role='status'>Total: {packagedUnitTotal} {packagingType?.containedUnit==='PACKAGING'?'packages':'containers'} per load</p>}
                 </>}
                 {active==='packagingSizes'&&<>
                     <NumberInput title='Number of containers' value={draft.quantity||0}
@@ -312,6 +369,8 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                 </label>
                 <button type='button' className={primary} disabled={busy||
                     (active==='containers'?(!typeCode||!metadataType?.attributes.filter(a=>a.required).every(a=>draft.containerAttributes?.[a.key])):
+                    active==='packages'?(!typeCode||!draft.name?.trim()||!validLayerCount||
+                        (packagingType?.containedUnit==='PACKAGING'&&!draft.containedPackagingId)):
                     active==='packagingSizes'?!(Number.isSafeInteger(draft.quantity)&&Number(draft.quantity)>0):
                     !draft.name?.trim())} onClick={()=>void save()}>{busy?'Saving…':'Save'}</button>
             </div>}
