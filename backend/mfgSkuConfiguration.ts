@@ -97,13 +97,13 @@ export const mfgSkuConfigurationRoutes={
             const kind=parameterKind(ctx.body.kind);
             const input=isObj(ctx.body.parameter)?ctx.body.parameter:{};
             const existingId=str(input.id);
-            if(kind==='packages'&&!existingId&&!str(input.packagingTypeCode))
+            if((kind==='packages'||kind==='transportPackages')&&!existingId&&!str(input.packagingTypeCode))
                 throw new HttpError(400,'Choose a published MEMS packaging type before creating container packaging.');
             const normalized=normalizeSkuParameter(kind,input,
                 kind==='containers'?await currentPrimaryContainerCatalogue():undefined,
-                kind==='packages'?await currentPackagingTypes():undefined);
+                kind==='packages'||kind==='transportPackages'?await currentPackagingTypes():undefined);
             const all=await skuParametersForOrg(ctx.orgId);
-            if(kind==='packages'&&normalized.containedUnit==='PACKAGING'){
+            if(kind==='packages'&&normalized.containedUnit==='PACKAGING'&&normalized.containersPerLayer){
                 if(normalized.containedPackagingId===existingId)
                     throw new HttpError(400,'A container packaging record cannot contain itself.');
                 const child=all.find(p=>p.kind==='packages'&&p.id===normalized.containedPackagingId&&p.enabled!==false);
