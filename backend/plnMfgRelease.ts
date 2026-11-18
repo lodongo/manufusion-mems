@@ -142,7 +142,7 @@ export const plnMfgReleaseRoutes={
                         ?str(other.data.parentSkuId)===str(doc.data.parentSkuId)&&
                             bomFamily(str(other.data.type))===bomFamily(str(doc.data.type))&&
                             bomAlternative(other.data.alternativeCode)===bomAlternative(doc.data.alternativeCode)
-                        :str(other.data.skuId)===str(doc.data.skuId))));
+                        :str(other.data.skuId)===str(doc.data.skuId)));
                 if(same.length)throw new HttpError(409,'Another approved version already applies to this SKU, site and effective date.');
             }
             const at=nowIso(),status=decision==='approve'?'active':'rejected';
