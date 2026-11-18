@@ -7,6 +7,7 @@ export type SkuParameterKind='productNames'|'productionForms'|'containers'|'cont
 export type SkuParameter={
     id:string;kind:SkuParameterKind;name:string;enabled?:boolean;description?:string;
     quantity?:number;uom?:string;baseUom?:string;quantityPerUnit?:number;revision?:number;
+    referenceProductionFormId?:string;
     categoryCode?:string;unitCode?:string;unitCount?:number;productCode?:string;
     metadataCode?:string;subcategoryCode?:string;containerAttributes?:Record<string,string>;
     packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
@@ -159,6 +160,7 @@ export function SkuConfigurationFields({value,onChange,setup}:{
         ?getParam(setup,'packagingSizes',value.packagingSizeId)
         :getParam(setup,'packageCounts',value.packageCountId);
     const norm=getParam(setup,'normalizationUnits',value.normalizationUnitId);
+    const normalizationReferenceForm=getParam(setup,'productionForms',norm?.referenceProductionFormId);
     const contentPerContainer=size&&form&&ratio(setup,size.uom,form.uom)!==null
         ?(size.quantity??0)*ratio(setup,size.uom,form.uom)!:null;
     const effectivePackSize=packageRecord?.packagingTypeCode&&Number.isSafeInteger(packageRecord.quantity)&&Number(packageRecord.quantity)>0
@@ -176,8 +178,9 @@ export function SkuConfigurationFields({value,onChange,setup}:{
         ?validTransportCount*effectivePackSize:null;
     const quantityPerTransport=validTransportCount!==null&&contentPerPackage!==null
         ?validTransportCount*contentPerPackage:null;
-    const normalBase=norm&&form&&ratio(setup,norm.baseUom,form.uom)!==null
-        ?(norm.quantityPerUnit??0)*ratio(setup,norm.baseUom,form.uom)!:null;
+    const normalizedReferenceUom=normalizationReferenceForm?.uom||norm?.baseUom;
+    const normalBase=norm&&form&&ratio(setup,normalizedReferenceUom,form.uom)!==null
+        ?(norm.quantityPerUnit??0)*ratio(setup,normalizedReferenceUom,form.uom)!:null;
     const factor=normalBase&&contentPerPackage!==null?contentPerPackage/normalBase:null;
     const product=getParam(setup,'productNames',value.productNameId)?.name||'Select product';
     const title=[product,[size?.name,container?.name].filter(Boolean).join(' '),
@@ -244,7 +247,16 @@ export function SkuConfigurationFields({value,onChange,setup}:{
             </p>}
             {contentPerPackage!==null&&<p className='mt-1 text-muted'>Per commercial package: {pretty(contentPerPackage)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
             {quantityPerTransport!==null&&<p className='mt-1 text-muted'>Per transport unit: {pretty(quantityPerTransport)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
-            {factor!==null&&<p className='mt-1 font-semibold text-brand'>Conversion factor: {pretty(factor)} {norm?.name} / {packageRecord?.name}</p>}
+            {norm&&contentPerPackage!==null&&<p className='mt-2 text-muted'>
+                Commercial package: {pretty(contentPerPackage)} {pickUnit(setup,form?.uom)?.symbol||form?.uom} ·
+                Reference: {norm.quantityPerUnit} {pickUnit(setup,normalizedReferenceUom)?.symbol||normalizedReferenceUom} per {norm.name}
+            </p>}
+            {factor!==null&&<p className='mt-1 font-semibold text-brand'>
+                Normalized unit cases per commercial package: {pretty(factor)} {norm?.name}
+            </p>}
+            {norm&&form&&normalBase===null&&<p className='mt-1 text-red-500'>
+                The normalization reference is incompatible with the selected production form.
+            </p>}
             {factor!==null&&validTransportCount!==null&&<p className='mt-1 text-muted'>
                 Transport conversion: {pretty(factor*validTransportCount)} {norm?.name} / {transportRecord?.name}
             </p>}
@@ -405,11 +417,29 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                         onChange={v=>update('quantity',v)}/>
                 </>}
                 {active==='normalizationUnits'&&<>
-                    <TextInput title='Normalization unit' value={draft.name||''} onChange={v=>update('name',v)} required/>
-                    <QuantityInput title='Quantity per normalized unit' value={draft.quantityPerUnit||0}
-                        onChange={v=>update('quantityPerUnit',v)}/>
-                    <UnitChoice key={draft.id||'new-normalization'} title='Unit' value={draft.baseUom||''}
-                        setup={setup} onChange={v=>update('baseUom',v)}/>
+                    <TextInput title='Normalized unit name' value={draft.name||''}
+                        onChange={v=>update('name',v)} required/>
+                    <Choice title='Reference production form' value={draft.referenceProductionFormId||''}
+                        placeholder='Select production form'
+                        options={setup.parameters.filter(p=>p.kind==='productionForms'&&p.enabled!==false)
+                            .map(p=>[p.id,p.name+' · '+(pickUnit(setup,p.uom)?.symbol||p.uom||'')])}
+                        onChange={id=>{
+                            const selected=setup.parameters.find(p=>p.kind==='productionForms'&&p.id===id);
+                            setDraft(prev=>({...prev,referenceProductionFormId:id,baseUom:selected?.uom||''}));
+                        }}/>
+                    <QuantityInput title={'Reference quantity per normalized unit ('+
+                        (pickUnit(setup,draft.baseUom)?.symbol||draft.baseUom||'select a form')+')'}
+                        value={draft.quantityPerUnit||0} onChange={v=>update('quantityPerUnit',v)}/>
+                    {draft.referenceProductionFormId&&<p className='text-xs text-muted'>
+                        Example: 1 normalized UC = 5.678 L for a Coca-Cola-style reference.
+                        Actual reference quantities are organization-configured.
+                    </p>}
+                    {!draft.id&&!draft.referenceProductionFormId&&<p className='text-xs text-muted'>
+                        Select a production form to establish the reference measurement unit.
+                    </p>}
+                    {draft.id&&!draft.referenceProductionFormId&&<p className='text-xs text-muted'>
+                        Existing normalization reference: {draft.baseUom}. Select a production form to link it.
+                    </p>}
                 </>}
                 <label className='flex min-h-11 items-center gap-2 text-sm'>
                     <input type='checkbox' checked={draft.enabled!==false} onChange={e=>update('enabled',e.target.checked)}/>
