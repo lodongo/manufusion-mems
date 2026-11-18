@@ -25,6 +25,19 @@ test('real raw and packaging materials require an Inventory master reference',()
  assert.equal(normalizeMaster('items',{id:'CAP-2622',name:'Cap',category:'PACKAGING',uom:'EA',packQty:1,inventoryMaterialId:'MAT-2622'}).inventoryMaterialId,'MAT-2622');
 });
 
+test('BOM editor follows output, materials and optional advanced settings',()=>{
+ const ui=read('src/org/ProductionFoundation.tsx');
+ const backend=read('backend/plnMfgFoundation.ts');
+ assert.ok(ui.includes('1. What are you producing?'));
+ assert.ok(ui.includes('2. What materials are needed?'));
+ assert.ok(ui.includes('3. Additional settings (optional)'));
+ assert.ok(ui.includes("if(tab==='boms')return <BomEditor"));
+ assert.ok(!ui.includes('BOM alternative code'));
+ assert.ok(!ui.includes('Product/Variant (optional for shared materials)'));
+ assert.ok(ui.includes("components:[]"));
+ assert.ok(ui.includes('Output unit (from selected material)'));
+ assert.ok(backend.includes("if(kind==='boms'&&!str(raw.name).trim())"));
+});
 test('BOM classification catalog is controlled, configurable and separate from material categories',()=>{
  const defaultClasses=defaultMfgMaterialPolicy().bomClassifications;
  assert.equal(defaultClasses.length,1);

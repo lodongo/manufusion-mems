@@ -89,3 +89,11 @@ Phase 2 adds demand entry/forecast consumption, demand allocation, MPS simulatio
 - Existing BOM rows, revisions and release records remain viewable and keep approval evidence; the projection hides old data keys without deleting history.
 - Missing, disabled or removed classifications cannot be assigned to new BOMs; in-use classifications cannot be deleted from organization setup.
 - MRP and production eligibility flags do not themselves trigger manufacturing execution or inventory postings. End-to-end authenticated testing is still required before Phase 2 acceptance.
+
+## BOM authoring usability update (2026-11-18)
+- BOM draft creation begins with the output material/product, then its output quantity and automatically inherited UOM, followed by component selection and required quantities.
+- Classification, alternative identifier, compatible output-unit override, applicability, date and optional description/name are under collapsed Additional settings; component scrap and alternate unit are optional per-line adjustments.
+- Output material already controls product/variant identity. Creating a BOM must not repeat product/variant selection.
+- Server generates a BOM title from the output material when the optional name is blank; MEMS still allocates the master code.
+- Saving is rejected if output or any required component is missing or a quantity is invalid. Upstream BOM completion is not required to save a draft.
+- Check usability on narrow Android screens as well as desktop; no manufacturing or procurement postings are triggered.

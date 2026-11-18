@@ -376,6 +376,13 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     };
     const save=async()=>{
         if(!draft||!canSave)return;
+        if(active==='boms'){
+            const parts=asComponents(draft.components);
+            if(!str(draft.parentSkuId)){setError('Choose the output material before saving.');return;}
+            if(!parts.length||parts.some(c=>!str(c.skuId)||!Number.isFinite(c.quantity)||c.quantity<=0)){
+                setError('Add at least one required material with a valid quantity before saving.');return;
+            }
+        }
         setBusy(true);setError('');setNotice('');
         try{
             const body={...draft};

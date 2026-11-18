@@ -472,6 +472,11 @@ export const plnMfgFoundationRoutes={
                     !await recordAccess(ctx,requiredPermission,str(old.data.siteId)))))
                 throw new HttpError(403,'This master is outside your authorized site or organization scope.');
             const makeData=async(id:string)=>{
+                if(kind==='boms'&&!str(raw.name).trim()){
+                    const produced=await getDoc(DOC(ctx.orgId,'items',str(raw.parentSkuId)));
+                    if(!produced)throw new HttpError(400,'Select an existing output material before saving the BOM.');
+                    raw.name=(str(produced.data.name)||str(raw.parentSkuId)).slice(0,150)+' · BOM';
+                }
                 const item=normalizeMaster(kind,{...raw,id});
                 await referenceChecks(ctx,kind,item,id);
                 const now=nowIso(),revision=old?(num(old.data.revision)??1)+1:1;
