@@ -72,7 +72,7 @@ const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
     {key:'transportPackages',title:'Transport & Logistics Packaging',Icon:Layers3},
     {key:'normalizationUnits',title:'Normalization Units',Icon:Shapes},
 ];
-const variants:Array<{key:keyof SkuSelections;kind:SkuParameterKind;label:string}>=[
+const variants:Array<{key:'productNameId'|'productionFormId'|'containerId'|'containerSizeId'|'packageId'|'packagingSizeId'|'normalizationUnitId';kind:SkuParameterKind;label:string}>=[
     {key:'productNameId',kind:'productNames',label:'Product / SKU name'},
     {key:'productionFormId',kind:'productionForms',label:'Production form'},
     {key:'containerId',kind:'containers',label:'Physical container'},
