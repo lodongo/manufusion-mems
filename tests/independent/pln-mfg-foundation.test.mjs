@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {normalizeMaster,detectBomCycle,fictionalLine11Demo} from '../../backend/plnMfgFoundation.ts';
-import {managedCode,masterPrefix,skuUnitConversion,calculateSkuConversion,composeConfiguredSkuName,normalizeSkuParameter,countUnitTotal,skuUnitCategories,skuUnitsInCategory} from '../../backend/mfgSkuModel.ts';
+import {managedCode,masterPrefix,skuUnitConversion,calculateSkuConversion,composeConfiguredSkuName,normalizeSkuParameter,countUnitTotal,skuUnitCategories,skuUnitsInCategory,packagingPrimaryContainerCount} from '../../backend/mfgSkuModel.ts';
+import {MFG_PACKAGING_TYPES,validatePackagingLayout,packagingHierarchyRank,normalizePackagingTypes} from '../../backend/mfgPackagingMetadata.ts';
 import {selectEffectiveRelease,selectEffectiveForSite} from '../../backend/plnMfgRelease.ts';
 import {fictionalPilotSnapshot,validateFictionalPilot,assertPilotSeedAllowed} from '../../backend/plnMfgPilotSeed.ts';
 
@@ -351,4 +352,78 @@ test('SKU setup has only seven minimalist menu entries and metadata-backed choic
  assert.ok(backend.includes('primaryContainerCatalogueFromAdmin'));
  assert.ok(read('backend/moduleDefaults.ts').includes("key:'primaryContainers'"));
  assert.ok(read('src/admin/ModulesPage.tsx').includes('MfgContainerMetadataBrowser'));
+});
+
+
+test('packaging platform metadata spans retail, pallet, bulk and transport logistics',()=>{
+ const cats=new Set(MFG_PACKAGING_TYPES.map(x=>x.category));
+ for(const name of ['Secondary / retail packaging','Tertiary / consolidated packaging','Pallets and unit loads','Transport and logistics','Bulk and densified loads','Returnable and reverse logistics'])
+     assert.ok(cats.has(name),name);
+ assert.ok(MFG_PACKAGING_TYPES.length>=85);
+ assert.ok(MFG_PACKAGING_TYPES.some(p=>p.name==='Plastic pallet'));
+ assert.ok(MFG_PACKAGING_TYPES.some(p=>p.name==='Roll cage'));
+ assert.ok(MFG_PACKAGING_TYPES.some(p=>p.name==='Intermediate bulk container')===false); // IBC is a primary bulk container, not the load
+ for(const x of MFG_PACKAGING_TYPES){
+     assert.match(x.code,/^[A-Z]{3}_\d{3}$/);
+     assert.ok(x.name&&x.category&&x.level);
+     assert.ok(['PRIMARY','PACKAGING'].includes(x.containedUnit));
+ }
+ assert.equal(normalizePackagingTypes(undefined).length,MFG_PACKAGING_TYPES.length);
+ assert.ok(read('backend/moduleDefaults.ts').includes("key:'packagingTypes'"));
+ assert.ok(read('backend/mfgSkuConfiguration.ts').includes("metadata/packagingTypes"));
+});
+test('secondary cases derive total from containers per layer and number of layers',()=>{
+ const caseType=MFG_PACKAGING_TYPES.find(p=>p.name==='Corrugated case');
+ assert.ok(caseType);
+ const normalized=normalizeSkuParameter('packages',{name:'12-bottle case',packagingTypeCode:caseType.code,
+     description:'12 x 1 L glass bottles',containersPerLayer:6,numberOfLayers:2},undefined,MFG_PACKAGING_TYPES);
+ assert.equal(normalized.name,'12-bottle case');
+ assert.equal(normalized.quantity,12);
+ assert.equal(normalized.containedUnit,'PRIMARY');
+ assert.equal(normalized.containersPerLayer,6);
+ assert.equal(normalized.numberOfLayers,2);
+ assert.equal(normalized.uom,caseType.defaultUnitCode);
+ assert.equal(normalized.description,'12 x 1 L glass bottles');
+ assert.throws(()=>validatePackagingLayout({packagingTypeCode:caseType.code,containersPerLayer:0,numberOfLayers:2}),/positive whole number/);
+ assert.throws(()=>validatePackagingLayout({packagingTypeCode:caseType.code,containersPerLayer:12,numberOfLayers:1.5}),/positive whole number/);
+ assert.throws(()=>validatePackagingLayout({packagingTypeCode:'NOPE',containersPerLayer:12,numberOfLayers:1}),/published/);
+});
+test('pallet of cases and bulk consolidation do not double-count the unit level',()=>{
+ const caseType=MFG_PACKAGING_TYPES.find(p=>p.name==='Corrugated case');
+ const palletType=MFG_PACKAGING_TYPES.find(p=>p.name==='Wooden pallet');
+ const freightType=MFG_PACKAGING_TYPES.find(p=>p.name==='Shipping container unit load');
+ const caseRow={id:'PKG_000000101',...normalizeSkuParameter('packages',{
+     packagingTypeCode:caseType.code,name:'12-bottle case',containersPerLayer:12,numberOfLayers:1},undefined,MFG_PACKAGING_TYPES)};
+ const palletRow={id:'PKG_000000102',...normalizeSkuParameter('packages',{
+     packagingTypeCode:palletType.code,name:'50-case pallet',containersPerLayer:10,numberOfLayers:5,
+     containedPackagingId:caseRow.id},undefined,MFG_PACKAGING_TYPES)};
+ const freightRow={id:'PKG_000000103',...normalizeSkuParameter('packages',{
+     packagingTypeCode:freightType.code,name:'6-pallet freight load',containersPerLayer:3,numberOfLayers:2,
+     containedPackagingId:palletRow.id},undefined,MFG_PACKAGING_TYPES)};
+ const records=[...exampleParams,caseRow,palletRow,freightRow];
+ assert.equal(packagingPrimaryContainerCount(caseRow,records),12);
+ assert.equal(packagingPrimaryContainerCount(palletRow,records),600);
+ assert.equal(packagingPrimaryContainerCount(freightRow,records),3600);
+ assert.equal(packagingHierarchyRank(caseType.code),1);
+ assert.ok(packagingHierarchyRank(caseType.code)<packagingHierarchyRank(palletType.code));
+ assert.ok(packagingHierarchyRank(palletType.code)<packagingHierarchyRank(freightType.code));
+ const result=calculateSkuConversion({...exampleSelect,packageId:palletRow.id,
+     packagingSizeId:undefined,packageCountId:undefined},records);
+ assert.equal(result.containersPerPackage,600);
+ assert.equal(result.productionQtyPerPackage,600);
+ assert.throws(()=>packagingPrimaryContainerCount({...caseRow,containedUnit:'PACKAGING',
+     containedPackagingId:palletRow.id},records),/Circular packaging/);
+ assert.throws(()=>validatePackagingLayout({packagingTypeCode:palletType.code,
+     containersPerLayer:10,numberOfLayers:5}),/lower-level/);
+ const code=read('backend/mfgSkuConfiguration.ts');
+ assert.ok(code.includes('packagingHierarchyRank'));
+ assert.ok(code.includes('packagingPrimaryContainerCount'));
+});
+test('packaging setup form uses metadata type dropdown, layer controls and nested contents',()=>{
+ const ui=read('src/org/MfgSkuSetup.tsx');
+ for(const label of ['Packaging category','Packaging type','Packages per layer','Containers per layer','Number of layers','Contained packaging (lower level)','Total:'])
+     assert.ok(ui.includes(label),label);
+ assert.ok(ui.includes('packagingMetadata.types'));
+ assert.ok(ui.includes('packagingTypeCode'));
+ assert.ok(ui.includes('validLayerCount'));
 });
