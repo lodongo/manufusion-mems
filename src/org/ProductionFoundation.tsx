@@ -117,6 +117,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
             options={outputChoices} onChange={v=>{
                 const selected=items.find(i=>i.id===v);
                 onChange({...draft,parentSkuId:v,outputUom:str(selected?.uom)||'EA',
+                    siteId:str(selected?.siteId)||str(draft.siteId),productVariantId:'',routingId:'',
                     components:components.filter(c=>c.skuId!==v)});
             }}/>
         {output?<p className='text-sm text-soft'>Material classification: {str(output.category)} · Base unit: {str(output.uom)}</p>:
