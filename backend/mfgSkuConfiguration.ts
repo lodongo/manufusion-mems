@@ -6,7 +6,7 @@ import { HttpError, commitChecked, getDoc, isObj, listDocs, nowIso, num, str, ty
 import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { audit } from './audit';
 import { PROCUREMENT_UNITS } from './procurementUnits';
-import { MFG_PRIMARY_CONTAINER_CATEGORIES, MFG_PRIMARY_CONTAINER_TYPES } from './mfgPrimaryContainerMetadata';
+import { MFG_PRIMARY_CONTAINER_CATEGORIES, MFG_PRIMARY_CONTAINER_TYPES, primaryContainerCatalogueFromAdmin } from './mfgPrimaryContainerMetadata';
 import {
     SKU_PARAMETERS, SKU_PARAMETER_KINDS, managedCode, normalizeSkuParameter, skuUnitCategories,
     type SkuParameter, type SkuParameterKind,
@@ -54,15 +54,22 @@ export async function skuParametersForOrg(orgId:string):Promise<SkuParameter[]>{
         .filter(x=>SKU_PARAMETER_KINDS.includes(x.kind));
 }
 
+async function currentPrimaryContainerCatalogue(){
+    const published=await getDoc('module_workspaces/MFG/metadata/primaryContainers');
+    return primaryContainerCatalogueFromAdmin(published?.data.items);
+}
 export const mfgSkuConfigurationRoutes={
     'POST /api/org/pln-mfg/sku/setup':[
         orgRoute('org.mfg.sku.setup','MFG.view',async ctx=>{
-            const params=await skuParametersForOrg(ctx.orgId);
+            const [params,types]=await Promise.all([
+                skuParametersForOrg(ctx.orgId),currentPrimaryContainerCatalogue(),
+            ]);
+            const primaryCategories=[...new Map(types.map(t=>[t.categoryCode,
+                {code:t.categoryCode,name:t.category,sectors:t.sectors}])).values()];
             return {parameters:params,groups:SKU_PARAMETERS,
                 // MEMS MFG platform master data, adopted by organization Physical Containers.
                 primaryContainerMetadata:{
-                    version:1,categories:MFG_PRIMARY_CONTAINER_CATEGORIES,
-                    types:MFG_PRIMARY_CONTAINER_TYPES,
+                    version:1,categories:primaryCategories,types,
                 },
                 categories:skuUnitCategories(),
                 units:PROCUREMENT_UNITS.filter(x=>x.active&&x.selectable)
@@ -80,7 +87,8 @@ export const mfgSkuConfigurationRoutes={
                 throw new HttpError(403,'Organization SKU configuration requires a directly assigned administrator.');
             const kind=parameterKind(ctx.body.kind);
             const input=isObj(ctx.body.parameter)?ctx.body.parameter:{};
-            const normalized=normalizeSkuParameter(kind,input);
+            const normalized=normalizeSkuParameter(kind,input,
+                kind==='containers'?await currentPrimaryContainerCatalogue():undefined);
             const existingId=str(input.id);
             const all=await skuParametersForOrg(ctx.orgId);
             if(all.some(p=>p.kind===kind&&p.id!==existingId&&p.name.trim().toLocaleLowerCase()===normalized.name.toLocaleLowerCase()))
