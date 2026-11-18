@@ -3,7 +3,7 @@ import {ArrowLeft,Box,ChevronRight,Layers3,Maximize2,Package,PackageOpen,Shapes,
 import {Field,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
 
-export type SkuParameterKind='productNames'|'productionForms'|'containers'|'containerSizes'|'packages'|'packagingSizes'|'packageCounts'|'normalizationUnits';
+export type SkuParameterKind='productNames'|'productionForms'|'containers'|'containerSizes'|'packages'|'transportPackages'|'packagingSizes'|'packageCounts'|'normalizationUnits';
 export type SkuParameter={
     id:string;kind:SkuParameterKind;name:string;enabled?:boolean;description?:string;
     quantity?:number;uom?:string;baseUom?:string;quantityPerUnit?:number;revision?:number;
@@ -37,7 +37,7 @@ export type SkuSetup={
 export const emptySkuSetup:SkuSetup={
     parameters:[],
     groups:{productNames:'NME',productionForms:'FRM',containers:'CNT',containerSizes:'SIZ',
-        packages:'PKG',packagingSizes:'PSZ',packageCounts:'PCT',normalizationUnits:'NRM'},
+        packages:'PKG',transportPackages:'TLP',packagingSizes:'PSZ',packageCounts:'PCT',normalizationUnits:'NRM'},
     units:[],categories:[],primaryContainerMetadata:{version:1,categories:[],types:[]},
     packagingMetadata:{version:1,categories:[],types:[]},
     conventions:{items:'SKU',boms:'BOM',recipes:'RCP',resources:'RSC',
@@ -45,7 +45,10 @@ export const emptySkuSetup:SkuSetup={
 };
 export type SkuSelections={
     productNameId?:string;productionFormId?:string;containerId?:string;containerSizeId?:string;
-    packageId?:string;packagingSizeId?:string;packageCountId?:string;normalizationUnitId?:string;
+    packageId?:string;packagingSizeId?:string;packageCountId?:string;
+    transportPackageId?:string;transportLayeringEnabled?:boolean;
+    transportPackagesPerLayer?:number;transportLayerCount?:number;transportUnitsPerLoad?:number;
+    normalizationUnitId?:string;
 };
 type MenuKey=Exclude<SkuParameterKind,'packageCounts'>;
 export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
@@ -53,8 +56,9 @@ export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
     {kind:'productionForms',title:'Production Forms'},
     {kind:'containers',title:'Physical Containers'},
     {kind:'containerSizes',title:'Container Sizes'},
-    {kind:'packages',title:'Container Packaging'},
-    {kind:'packagingSizes',title:'Container Packaging Sizes'},
+    {kind:'packages',title:'Commercial Packaging'},
+    {kind:'packagingSizes',title:'Commercial Packaging Sizes'},
+    {kind:'transportPackages',title:'Transport & Logistics Packaging'},
     {kind:'normalizationUnits',title:'Normalization Units'},
 ];
 type IconComponent=LucideIcon;
@@ -63,8 +67,9 @@ const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
     {key:'productionForms',title:'Production Forms',Icon:Layers3},
     {key:'containers',title:'Physical Containers',Icon:PackageOpen},
     {key:'containerSizes',title:'Container Sizes',Icon:Maximize2},
-    {key:'packages',title:'Container Packaging',Icon:Package},
-    {key:'packagingSizes',title:'Container Packaging Sizes',Icon:Box},
+    {key:'packages',title:'Commercial Packaging',Icon:Package},
+    {key:'packagingSizes',title:'Commercial Packaging Sizes',Icon:Box},
+    {key:'transportPackages',title:'Transport & Logistics Packaging',Icon:Layers3},
     {key:'normalizationUnits',title:'Normalization Units',Icon:Shapes},
 ];
 const variants:Array<{key:keyof SkuSelections;kind:SkuParameterKind;label:string}>=[
@@ -72,8 +77,8 @@ const variants:Array<{key:keyof SkuSelections;kind:SkuParameterKind;label:string
     {key:'productionFormId',kind:'productionForms',label:'Production form'},
     {key:'containerId',kind:'containers',label:'Physical container'},
     {key:'containerSizeId',kind:'containerSizes',label:'Container size'},
-    {key:'packageId',kind:'packages',label:'Container packaging'},
-    {key:'packagingSizeId',kind:'packagingSizes',label:'Containers per packaging'},
+    {key:'packageId',kind:'packages',label:'Commercial packaging'},
+    {key:'packagingSizeId',kind:'packagingSizes',label:'Primary containers per commercial package'},
     {key:'normalizationUnitId',kind:'normalizationUnits',label:'Normalization unit'},
 ];
 const pretty=(v:number)=>Number(v.toPrecision(9)).toLocaleString(undefined,{maximumFractionDigits:9});
