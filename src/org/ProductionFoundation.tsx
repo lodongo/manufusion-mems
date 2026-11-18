@@ -116,8 +116,15 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup}:{tab:Ta
             </>}
             <Choice title='Site applicability' value={str(draft.siteId)} options={siteOptions} onChange={v=>update('siteId',v)}/>
         </div>
-        {tab==='items'&&str(draft.category)==='FINISHED'&&<SkuConfigurationFields value={(draft.skuComponents||{}) as SkuSelections}
-            onChange={v=>update('skuComponents',v)} setup={skuSetup}/>}
+        {tab==='items'&&str(draft.category)==='FINISHED'&&<>
+            <SkuConfigurationFields value={(draft.skuComponents||{}) as SkuSelections}
+                onChange={v=>update('skuComponents',v)} setup={skuSetup}/>
+            {draft.id&&skuSetup.namingConfigured&&<label className='flex min-h-11 items-center gap-2 rounded-xl border border-line p-3 text-sm text-ink'>
+                <input type='checkbox' checked={draft.applySkuNamingSequence===true}
+                    onChange={e=>update('applySkuNamingSequence',e.target.checked)}/>
+                Apply the latest SKU naming sequence when saving this existing SKU
+            </label>}
+        </>}}
         <TextField title='Description / notes' value={str(draft.description)} onChange={v=>update('description',v)}/>
         {(tab==='boms'||tab==='recipes')&&<section className='rounded-xl border border-line p-3'>
             <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Component quantities</h3><Button variant='secondary' type='button' onClick={()=>update('components',[...components,{skuId:'',quantity:1,uom:'EA',scrapPct:0}])}>Add component</Button></div>
