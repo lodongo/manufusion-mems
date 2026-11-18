@@ -131,7 +131,8 @@ test('cost centre mapping validates SKU composition, uses optimistic concurrency
  assert.ok(backend.includes("'POST /api/org/pln/cost-center/preview'"));
  assert.ok(backend.includes("'POST /api/org/pln/cost-center/get'"));
  assert.ok(backend.includes("'POST /api/org/pln/cost-center/rating'"));
- assert.ok(backend.includes('rating:'));
+ assert.ok(backend.includes('return {costCenterId:id,skuId,revision:'));
+ assert.ok(backend.includes('rating};'));
  assert.ok(backend.includes("Physical Container")||backend.includes("physical-container"));
  assert.ok(projection.includes('calculateSkuConversion(components,parameters)'));
  assert.ok(projection.includes('input.containerId!==str(components.containerId)'));
