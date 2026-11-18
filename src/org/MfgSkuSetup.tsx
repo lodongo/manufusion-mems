@@ -238,7 +238,7 @@ export function SkuConfigurationFields({value,onChange,setup}:{
         <div className='rounded-xl border border-line bg-page p-3 text-sm' aria-live='polite'>
             <p className='font-medium text-ink'>{title}</p>
             {contentPerContainer!==null&&<p className='mt-1 text-muted'>Per container: {pretty(contentPerContainer)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
-            {packageRecord?.packagingTypeCode&&<p className='mt-1 text-muted'>
+            {packageRecord?.packagingTypeCode&&packageRecord.containersPerLayer&&packageRecord.numberOfLayers&&<p className='mt-1 text-muted'>
                 {packageRecord.containersPerLayer} {packageRecord.containedUnit==='PACKAGING'?'packages':'containers'} per layer × {packageRecord.numberOfLayers} layers
                 {effectivePackSize!==null?' · '+pretty(effectivePackSize)+' primary containers':''}
             </p>}
@@ -265,7 +265,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
     const packagingMetadata=setup.packagingMetadata||emptySkuSetup.packagingMetadata;
     const packagingType=packagingMetadata.types.find(t=>t.code===typeCode);
     const availablePackagingCategories=packagingMetadata.categories.filter(c=>
-        (active==='packages'?c.level==='SECONDARY':c.level!=='SECONDARY'));
+        (active==='packages'?c.level==='SECONDARY'||c.code===draft?.packagingTypeCode?.slice(0,3):c.level!=='SECONDARY'));
     const availablePackagingTypes=packagingMetadata.types.filter(t=>
         (active==='packages'?t.level==='SECONDARY':t.level!=='SECONDARY')||t.code===typeCode);
     const kindName=menu.find(x=>x.key===active)?.title||'SKU Configuration';
