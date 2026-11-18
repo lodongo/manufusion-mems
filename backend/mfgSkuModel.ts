@@ -207,7 +207,7 @@ export function calculateSkuConversion(
     const factor=perPack!==null&&perUnit!==null?perPack/perUnit:null;
     const reverse=factor!==null?1/factor:null;
     const selectedNames:Record<string,string>={};
-    for(const [key,value] of Object.entries({productName:name,productionForm:form,container,containerSize:size,package:pack,packageCount:count,normalizationUnit:normalize}))
+    for(const [key,value] of Object.entries({productName:name,productionForm:form,container,containerSize:size,commercialPackage:pack,packageCount:count,transportPackage:transport,normalizationUnit:normalize}))
         if(value)selectedNames[key]=value.name;
     return {
         productionUom,containerSizeInProductionUom:round(contentPerContainer),
@@ -264,7 +264,8 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
         if(str(raw.packagingTypeCode)){
             const type=(packagingTypes??[]).find(t=>t.code===str(raw.packagingTypeCode));
             if(!type)throw new HttpError(400,'Select a published MEMS packaging type.');
-            if(kind==='packages'&&type.level!=='SECONDARY')
+            if(kind==='packages'&&type.level!=='SECONDARY'&&
+                !(str(raw.id)&&raw.containersPerLayer!==undefined&&raw.numberOfLayers!==undefined))
                 throw new HttpError(400,'Commercial packaging must use a sellable secondary packaging type.');
             if(kind==='transportPackages'&&type.level==='SECONDARY')
                 throw new HttpError(400,'Transport packaging must use a transport, tertiary, bulk or returnable type.');
