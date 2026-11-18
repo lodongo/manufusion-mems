@@ -18,6 +18,7 @@ export type SkuParameterKind=keyof typeof SKU_PARAMETERS;
 export const SKU_PARAMETER_KINDS=Object.keys(SKU_PARAMETERS) as SkuParameterKind[];
 export type SkuParameter={id:string;kind:SkuParameterKind;name:string;
     uom?:string;quantity?:number;baseUom?:string;quantityPerUnit?:number;
+    referenceProductionFormId?:string;
     categoryCode?:string;unitCode?:string;unitCount?:number;
     productCode?:string;metadataCode?:string;subcategoryCode?:string;
     containerAttributes?:Record<string,string>;
@@ -36,7 +37,9 @@ export type SkuConversion={
     productionUom:string;containerSizeInProductionUom:number|null;
     containersPerPackage:number|null;productionQtyPerPackage:number|null;
     normalizationUom:string;productionQtyPerNormalizationUnit:number|null;
-    conversionFactor:number|null; // normalized units per one commercial package
+    normalizationReferenceUom:string|null;referenceQtyPerNormalizedUnit:number|null;
+    normalizedUnitsPerCommercialPackage:number|null;
+    conversionFactor:number|null; // normalized units per one commercial package (compatibility)
     reverseConversionFactor:number|null; // commercial packages per normalized unit
     transportLayeringEnabled:boolean;
     commercialPackagesPerTransportUnit:number|null;primaryContainersPerTransportUnit:number|null;
@@ -177,13 +180,23 @@ export function calculateSkuConversion(
         packagedContainers=n;
         perPack=(contentPerContainer??0)*n;
     }
-    let normalizedName='';
+    let normalizedName='',normalizedReferenceUom:string|null=null;
     if(normalize){
-        const ratio=skuUnitConversion(str(normalize.baseUom),productionUom);
-        if(!ratio)throw new HttpError(400,'Normalization basis is incompatible with the production form.');
+        // The organization's normalized unit is a reference quantity of the
+        // production form (for example: one UC = 5.678 L). The commercial
+        // package provides the numerator; transport packaging does not.
+        const refForm=normalize.referenceProductionFormId
+            ?get('productionForms',normalize.referenceProductionFormId,true):null;
+        const basisUom=refForm?str(refForm.uom):str(normalize.baseUom);
+        if(refForm&&str(normalize.baseUom)&&
+            skuUnitConversion(str(normalize.baseUom),basisUom)!==1)
+            throw new HttpError(400,'Normalized unit reference must use its selected production form unit.');
+        const ratio=skuUnitConversion(basisUom,productionUom);
+        if(!ratio)throw new HttpError(400,'Normalization reference must match the product form dimension.');
         perUnit=(num(normalize.quantityPerUnit)??0)*ratio;
         if(!Number.isFinite(perUnit)||perUnit<=0)
-            throw new HttpError(400,'Configured normalization content must be positive.');
+            throw new HttpError(400,'Configured normalization reference quantity must be positive.');
+        normalizedReferenceUom=basisUom;
         normalizedName=normalize.name;
     }
     const stacking=values.transportLayeringEnabled===true;
@@ -215,6 +228,9 @@ export function calculateSkuConversion(
         productionQtyPerPackage:round(perPack),
         normalizationUom:normalizedName,
         productionQtyPerNormalizationUnit:round(perUnit),
+        normalizationReferenceUom:normalizedReferenceUom,
+        referenceQtyPerNormalizedUnit:normalize?(num(normalize.quantityPerUnit)??null):null,
+        normalizedUnitsPerCommercialPackage:round(factor),
         conversionFactor:round(factor),
         reverseConversionFactor:round(reverse),
         transportLayeringEnabled:transport?stacking:false,
@@ -299,9 +315,10 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
     }
     if(kind==='normalizationUnits'){
         const baseUom=str(raw.baseUom).trim(),quantityPerUnit=Number(raw.quantityPerUnit);
+        const referenceProductionFormId=str(raw.referenceProductionFormId).trim();
         if(!baseUom||!skuUnitConversion(baseUom,baseUom)||!Number.isFinite(quantityPerUnit)||quantityPerUnit<=0||quantityPerUnit>1e12)
-            throw new HttpError(400,'Define the production content of one normalization unit using a MEMS unit of measure.');
-        return {...base,baseUom,quantityPerUnit};
+            throw new HttpError(400,'Define a positive reference quantity in the production form unit per normalized unit case.');
+        return {...base,baseUom,quantityPerUnit,referenceProductionFormId};
     }
     return base;
 }
