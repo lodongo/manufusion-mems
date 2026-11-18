@@ -53,6 +53,10 @@ export function normalizePackagingTypes(source:unknown):MfgPackagingType[]{
     }
     return result.length?result:MFG_PACKAGING_TYPES;
 }
+export function packagingHierarchyRank(typeCode:string):number{
+    const prefix=typeCode.slice(0,3);
+    return ({SEC:1,TER:2,PAL:3,LOG:4,RET:4,BUL:5} as Record<string,number>)[prefix]??0;
+}
 export function validatePackagingLayout(raw:Record<string,unknown>,types:MfgPackagingType[]=MFG_PACKAGING_TYPES){
     const type=types.find(x=>x.code===str(raw.packagingTypeCode));
     if(!type)throw new HttpError(400,'Select a published MEMS packaging type.');
