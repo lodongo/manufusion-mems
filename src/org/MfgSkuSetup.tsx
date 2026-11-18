@@ -264,10 +264,13 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
     const metadataType=availableMetadata.types.find(t=>t.code===typeCode);
     const packagingMetadata=setup.packagingMetadata||emptySkuSetup.packagingMetadata;
     const packagingType=packagingMetadata.types.find(t=>t.code===typeCode);
-    const availablePackagingCategories=packagingMetadata.categories.filter(c=>
-        (active==='packages'?c.level==='SECONDARY'||c.code===draft?.packagingTypeCode?.slice(0,3):c.level!=='SECONDARY'));
-    const availablePackagingTypes=packagingMetadata.types.filter(t=>
-        (active==='packages'?t.level==='SECONDARY':t.level!=='SECONDARY')||t.code===typeCode);
+    // Category priority is a suggestion, not a restriction. A commercial load
+    // can be a pallet, and a logistics unit can be a case in some industries.
+    const availablePackagingCategories=[...packagingMetadata.categories].sort((a,b)=>{
+        const prioritize=(level:string)=>active==='packages'?level==='SECONDARY':level!=='SECONDARY';
+        return Number(prioritize(b.level))-Number(prioritize(a.level));
+    });
+    const availablePackagingTypes=packagingMetadata.types;
     const kindName=menu.find(x=>x.key===active)?.title||'SKU Configuration';
     const records=active?setup.parameters.filter(p=>p.kind===active):[];
     const update=(field:keyof SkuParameter,value:unknown)=>setDraft(d=>({...d,[field]:value}));
