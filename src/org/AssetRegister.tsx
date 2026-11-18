@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, DownloadCloud, Pencil, Plus, Trash2, Undo2, XCircle } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import AssetTechnicalDossier from './AssetTechnicalDossier';
-import PlnAssetCapacityView from './PlnAssetCapacityView';
 import AssetUtilitySupplies from './AssetUtilitySupplies';
 import TroubleshootingContext from './TroubleshootingContext';
 import { workspaceNavigate as navigate } from '../lib/route';
@@ -478,7 +477,6 @@ export function AssetDetail({ tag, back, onBack, startEditing = false }: { tag: 
                 {actionError && <div className='mt-3'><Alert tone='error'>{actionError}</Alert></div>}
             </Card>
 
-            <PlnAssetCapacityView assetTag={a.tag}/>
             <Card>
                 <div className='mb-2 flex items-center justify-between'>
                     <h2 className='font-semibold text-white'>Attributes</h2>

@@ -5,7 +5,6 @@ import { navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
 import { Badge, Button, Card, PageTitle, Spinner, useLoad } from '../admin/kit';
 import { STATUS, type AssetFull } from './AssetRegister';
-import PlnAssetCapacityView from './PlnAssetCapacityView';
 
 // Organization Design owns only the equipment classification and its 1:1 asset link.
 // All technical asset attributes are created/edited exclusively in Asset Management (AST).
@@ -67,7 +66,7 @@ export default function WorkCenterAsset({ workCenterId, onBack }: { workCenterId
                 ← Equipment unit {wc.code}
             </button>
             <PageTitle title={`${wc.name} · asset mapping`} subtitle={`Equipment unit ${wc.code}. Select a compatible asset or create one in Asset Management; technical attributes are never edited here.`} />
-            {a&&<PlnAssetCapacityView assetTag={a.tag}/>}
+
 
             {!data.astEnabled ? (
                 <Card>

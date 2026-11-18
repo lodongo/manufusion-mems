@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Warehouse, ArrowDown, Briefcase, Building, Building2, ChevronRight, Cog, Eye, FileText, Home, Layers, Lock, Pencil, Plus, Trash2, Wrench, X } from 'lucide-react';
 import WorkCenterAsset from './WorkCenterAsset';
+import PlnCostCenterSkuSetup from './PlnCostCenterSkuSetup';
 import EquipmentUtilities from './EquipmentUtilities';
 import StoredEnergy from './StoredEnergy';
 import StoredEnergyReview from './StoredEnergyReview';
@@ -77,7 +78,7 @@ interface NodeData {
     design: Design;
 }
 
-type Mode = null | { type: 'create'; level: string } | { type: 'edit' } | { type: 'bom'; bom?: Bom } | { type: 'levels' } | { type: 'expand' } | { type: 'roles' } | { type: 'details' } | { type: 'asset'; configure?: boolean } | { type: 'utilities' } | { type: 'hazardous-energy' } | { type: 'class-risk' } | {type:'equipment-tasks'} | { type: 'stored-energy' } | { type: 'activity-risk' } | { type: 'activity-risk-review' } | { type: 'loto-program' } | {type:'short-intervention'} | {type:'equipment-safety-devices'} | { type: 'stored-energy-review' } | { type: 'storage' } | { type: 'activities' };
+type Mode = null | { type: 'create'; level: string } | { type: 'edit' } | { type: 'bom'; bom?: Bom } | { type: 'levels' } | { type: 'expand' } | { type: 'roles' } | { type: 'details' } | { type: 'planning' } | { type: 'asset'; configure?: boolean } | { type: 'utilities' } | { type: 'hazardous-energy' } | { type: 'class-risk' } | {type:'equipment-tasks'} | { type: 'stored-energy' } | { type: 'activity-risk' } | { type: 'activity-risk-review' } | { type: 'loto-program' } | {type:'short-intervention'} | {type:'equipment-safety-devices'} | { type: 'stored-energy-review' } | { type: 'storage' } | { type: 'activities' };
 
 const open = (id: string) => navigate(id === 'root' ? 'organization_admin/structure' : `organization_admin/structure/${id}`);
 
@@ -130,6 +131,8 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
         reload();
     };
 
+    if (mode?.type === 'planning' && node?.level === 'cost_center')
+        return <PlnCostCenterSkuSetup costCenterId={node.id} onBack={() => setMode(null)}/>;
     if (mode?.type === 'levels') return <LevelsForm design={design} onDone={done} onCancel={() => setMode(null)} />;
     if (mode?.type === 'expand') return <AddUpperLevel onDone={done} onCancel={() => setMode(null)} />;
     if (mode?.type === 'roles' && node) return <SiteRolesForm site={node} onDone={done} onCancel={() => setMode(null)} />;
@@ -288,11 +291,12 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                             {node.status === 'inactive' ? ' · inactive' : ''}
                         </p>
                     </div>
-                    <IconButton label='Configure' onClick={() => setMode({ type: 'edit' })}>
+                    <IconButton label={node.level === 'cost_center' ? 'Configure planning SKUs' : 'Configure'}
+                        onClick={() => setMode(node.level === 'cost_center' ? {type:'planning'} : {type:'edit'})}>
                         <Cog className='h-4 w-4' />
                     </IconButton>
                     {canEdit && (
-                        <IconButton label='Configure' onClick={() => setMode({ type: 'edit' })}>
+                        <IconButton label='Edit organizational unit' onClick={() => setMode({ type: 'edit' })}>
                             <Pencil className='h-4 w-4' />
                         </IconButton>
                     )}

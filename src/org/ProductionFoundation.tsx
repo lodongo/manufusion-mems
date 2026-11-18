@@ -3,7 +3,7 @@ import { Alert, Field as MemsField, SelectField } from '../components/ui';
 import { Spinner } from '../admin/kit';
 import { SkuConfigurationFields, SkuSetupPanel, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
 import PlnDemand from './PlnDemand';
-import PlnEquipmentSetup from './PlnEquipmentSetup';
+import PlnCostCenterSetup from './PlnCostCenterSetup';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'rounded-2xl border border-line bg-panel p-4 text-ink '+className}>{children}</section>;
 }
@@ -42,7 +42,7 @@ type References={
 const emptyReferences:References={materials:[],utilities:[],assets:[],sites:[]};
 const kinds:Kind[]=['items','boms','resources','routings'];
 const tabs:{key:Tab;label:string;hint:string}[]=[
-    {key:'equipmentCapacity',label:'Equipment & SKU Capacity',hint:'Asset-linked equipment and commissioned SKU throughput for each manufacturing cost centre'},
+    {key:'equipmentCapacity',label:'Manufacturing Cost Centre & SKUs',hint:'Commissioned throughput per manufactured SKU, configured on its cost centre'},
     {key:'demand',label:'Demand & S&OP',hint:'Demand register, approvals and consolidated monthly net demand'},
     {key:'skuSetup',label:'Product Configuration',hint:'Configure variants, production forms and packaging attributes'},
     {key:'materialPolicy',label:'Manufacturing Setup',hint:'Material consumption and intermediate inventory policies'},
@@ -423,7 +423,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {active!=='skuSetup'&&<p className='text-sm text-muted'>{tabs.find(t=>t.key===active)?.hint}</p>}
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
-        {loading?<Spinner/>:active==='equipmentCapacity'?<PlnEquipmentSetup permissions={permissions}/>:active==='demand'?<PlnDemand permissions={permissions}/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
+        {loading?<Spinner/>:active==='equipmentCapacity'?<PlnCostCenterSetup/>:active==='demand'?<PlnDemand permissions={permissions}/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
