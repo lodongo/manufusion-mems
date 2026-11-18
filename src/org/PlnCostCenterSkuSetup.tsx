@@ -81,7 +81,16 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
  };
  useEffect(()=>{void load();},[costCenterId]);
  const outputs=data?.outputs??[],already=new Set(lines.map(x=>x.skuId));
- const canSave=lines.length>0&&lines.every(valid);
+ const canSave=lines.length>0&&lines.every(line=>{
+  if(!valid(line))return false;
+  const sku=outputs.find(o=>o.id===line.skuId);
+  const container=data?.containers.find(c=>c.id===line.containerId);
+  return !!sku&&!!container&&
+   sku.skuComponents.containerId===line.containerId&&
+   sku.skuComponents.containerSizeId===line.containerSizeId&&
+   container.categoryCode===line.containerCategoryCode&&
+   container.subcategoryCode===line.containerSubcategoryCode;
+ });
  const update=(i:number,changes:Partial<Line>)=>setLines(all=>all.map((x,j)=>j===i?
     {...x,...changes,projection:null,conversionIssue:''}:x));
  const newSku=(skuId:string):Line=>{
