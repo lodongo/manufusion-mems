@@ -2,6 +2,7 @@ export const BREAK_IN_TYPE={code:'MAI-016',label:'Break-in Maintenance',category
 import { HttpError, getDoc, isObj, nowIso, str, writeDoc, type Doc, type Plain } from './core';
 import { audit } from './audit';
 import { PROCUREMENT_UNITS } from './procurementUnits';
+import { MFG_PRIMARY_CONTAINER_TYPES } from './mfgPrimaryContainerMetadata';
 import { VENDOR_META_LISTS } from './vendorMetaDefaults';
 import { HR_SKILL_DEFAULTS } from './hrSkillsDefaults';
 import { HR_SKILL_EXPANDED, HR_SKILL_EXPANDED_COUNTS } from './hrSkillsExpanded';
@@ -54,6 +55,17 @@ const COST_CENTER_TYPES: MetaItem[] = [
 ];
 
 export const DEFAULT_MODULE_METADATA: Record<string, Array<{ key: string; title: string; description: string; version: number; items: MetaItem[] }>> = {
+    MFG: [{
+        key:'primaryContainers',
+        title:'Primary container types',
+        description:'MEMS Manufacturing category → subcategory → controlled primary-container attributes. Organizations adopt these platform master records; up to five dropdown attributes per type.',
+        version:1,
+        items:MFG_PRIMARY_CONTAINER_TYPES.map(t=>({
+            code:t.code,label:t.name,category:t.category,subcategory:t.subcategory,
+            categoryCode:t.categoryCode,subcategoryCode:t.subcategoryCode,sectors:t.sectors,
+            attributes:t.attributes,active:true,selectable:true,
+        })),
+    }],
     SAF: SAF_DEFAULT_LISTS,
     DOC: [...DOC_DEFAULT_LISTS, ...RCA_METADATA_LISTS],
     AST: [{ key: 'utilitySupplies', title: 'Utility supplies master', description: 'Category → subcategory → utility supply → typed technical attributes, mandatory flags and controlled dropdown values.', version: 3, items: AST_UTILITY_ITEMS }],
