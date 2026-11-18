@@ -7,8 +7,10 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { audit } from './audit';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { primaryContainerCatalogueFromAdmin } from './mfgPrimaryContainerMetadata';
+import {normalizePackagingTypes} from './mfgPackagingMetadata';
 import {
     SKU_PARAMETERS, SKU_PARAMETER_KINDS, managedCode, normalizeSkuParameter, skuUnitCategories,
+    packagingPrimaryContainerCount,
     type SkuParameter, type SkuParameterKind,
 } from './mfgSkuModel';
 
@@ -58,12 +60,18 @@ async function currentPrimaryContainerCatalogue(){
     const published=await getDoc('module_workspaces/MFG/metadata/primaryContainers');
     return primaryContainerCatalogueFromAdmin(published?.data.items);
 }
+async function currentPackagingTypes(){
+    const published=await getDoc('module_workspaces/MFG/metadata/packagingTypes');
+    return normalizePackagingTypes(published?.data.items);
+}
 export const mfgSkuConfigurationRoutes={
     'POST /api/org/pln-mfg/sku/setup':[
         orgRoute('org.mfg.sku.setup','MFG.view',async ctx=>{
-            const [params,types]=await Promise.all([
-                skuParametersForOrg(ctx.orgId),currentPrimaryContainerCatalogue(),
+            const [params,types,packagingTypes]=await Promise.all([
+                skuParametersForOrg(ctx.orgId),currentPrimaryContainerCatalogue(),currentPackagingTypes(),
             ]);
+            const packagingCategories=[...new Map(packagingTypes.map(t=>[t.category,
+                {code:t.code.slice(0,3),name:t.category,level:t.level}])).values()];
             const primaryCategories=[...new Map(types.map(t=>[t.categoryCode,
                 {code:t.categoryCode,name:t.category,sectors:t.sectors}])).values()];
             return {parameters:params,groups:SKU_PARAMETERS,
@@ -71,6 +79,7 @@ export const mfgSkuConfigurationRoutes={
                 primaryContainerMetadata:{
                     version:1,categories:primaryCategories,types,
                 },
+                packagingMetadata:{version:1,categories:packagingCategories,types:packagingTypes},
                 categories:skuUnitCategories(),
                 units:PROCUREMENT_UNITS.filter(x=>x.active&&x.selectable)
                     .map(x=>({code:x.code,label:x.label,symbol:x.symbol,category:x.category,
@@ -87,10 +96,23 @@ export const mfgSkuConfigurationRoutes={
                 throw new HttpError(403,'Organization SKU configuration requires a directly assigned administrator.');
             const kind=parameterKind(ctx.body.kind);
             const input=isObj(ctx.body.parameter)?ctx.body.parameter:{};
-            const normalized=normalizeSkuParameter(kind,input,
-                kind==='containers'?await currentPrimaryContainerCatalogue():undefined);
             const existingId=str(input.id);
+            if(kind==='packages'&&!existingId&&!str(input.packagingTypeCode))
+                throw new HttpError(400,'Choose a published MEMS packaging type before creating container packaging.');
+            const normalized=normalizeSkuParameter(kind,input,
+                kind==='containers'?await currentPrimaryContainerCatalogue():undefined,
+                kind==='packages'?await currentPackagingTypes():undefined);
             const all=await skuParametersForOrg(ctx.orgId);
+            if(kind==='packages'&&normalized.containedUnit==='PACKAGING'){
+                if(normalized.containedPackagingId===existingId)
+                    throw new HttpError(400,'A container packaging record cannot contain itself.');
+                const child=all.find(p=>p.kind==='packages'&&p.id===normalized.containedPackagingId&&p.enabled!==false);
+                if(!child)throw new HttpError(400,'Select an active lower-level container packaging record.');
+                // Reject cycles (including edits to an existing ancestor) and excessive
+                // resulting counts before anything is committed to the database.
+                packagingPrimaryContainerCount({...normalized,id:existingId||'PKG_PENDING'} as SkuParameter,
+                    [...all.filter(p=>p.id!==existingId)]);
+            }
             if(all.some(p=>p.kind===kind&&p.id!==existingId&&p.name.trim().toLocaleLowerCase()===normalized.name.toLocaleLowerCase()))
                 throw new HttpError(409,'That SKU parameter name already exists in this category.');
             if(kind==='productNames'&&all.some(p=>p.kind==='productNames'&&p.id!==existingId&&
