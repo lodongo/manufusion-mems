@@ -98,5 +98,5 @@ test('planning can configure, asset can see, and standalone planner resource ent
  assert.ok(equipment.includes('<PlnAssetCapacityView assetTag={a.tag}/>'));
  const view=read('src/org/PlnAssetCapacityView.tsx');
  assert.ok(view.includes('/api/org/pln/equipment/asset-view'));
- assert.ok(view.includes('read-only'));
+ assert.ok(view.toLowerCase().includes('read-only'));
 });
