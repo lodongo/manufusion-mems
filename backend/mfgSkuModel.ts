@@ -6,6 +6,7 @@
 import { HttpError, num, str } from './core';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { validatePrimaryContainerSelection, type MfgPrimaryContainerType } from './mfgPrimaryContainerMetadata';
+import {validatePackagingLayout, type MfgPackagingType} from './mfgPackagingMetadata';
 
 export const SKU_PARAMETERS={
     productNames:'NME', productionForms:'FRM', containers:'CNT',
@@ -20,6 +21,8 @@ export type SkuParameter={id:string;kind:SkuParameterKind;name:string;
     categoryCode?:string;unitCode?:string;unitCount?:number;
     productCode?:string;metadataCode?:string;subcategoryCode?:string;
     containerAttributes?:Record<string,string>;
+    packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
+    containersPerLayer?:number;numberOfLayers?:number;
     enabled?:boolean;description?:string};
 export type SkuComponents={
     productNameId?:string;productionFormId?:string;containerId?:string;
@@ -89,6 +92,27 @@ export function countUnitTotal(unitCode:string,unitCount:number):number {
     return total;
 }
 
+/** Count primary containers through a hierarchy such as bottle → case → pallet.
+ * Layout quantities measure items of the declared immediate child level.
+ * Cycles, missing and inactive child packaging prevent misleading totals.
+ */
+export function packagingPrimaryContainerCount(pack:SkuParameter,params:SkuParameter[],seen=new Set<string>()):number{
+    if(pack.kind!=='packages'||pack.enabled===false)
+        throw new HttpError(400,'Packaging record is not active.');
+    if(seen.has(pack.id))throw new HttpError(400,'Circular packaging consolidation is not permitted.');
+    const branch=new Set(seen);branch.add(pack.id);
+    const total=Number(pack.quantity);
+    if(!Number.isSafeInteger(total)||total<=0||total>10000000)
+        throw new HttpError(400,'A packaging layout must have a valid container count.');
+    if(pack.containedUnit!=='PACKAGING')return total;
+    const child=params.find(p=>p.id===pack.containedPackagingId&&p.kind==='packages');
+    if(!child)throw new HttpError(400,'Referenced lower-level packaging is missing.');
+    const primary=total*packagingPrimaryContainerCount(child,params,branch);
+    if(!Number.isSafeInteger(primary)||primary>100000000)
+        throw new HttpError(400,'Consolidated primary container count exceeds the supported range.');
+    return primary;
+}
+
 export function calculateSkuConversion(
     values:SkuComponents,
     params:SkuParameter[],
@@ -111,7 +135,8 @@ export function calculateSkuConversion(
         ? get('packagingSizes',values.packagingSizeId) : get('packageCounts',values.packageCountId);
     const normalize=get('normalizationUnits',values.normalizationUnitId);
     if(Boolean(container)!==Boolean(size))throw new HttpError(400,'Container and container size must be selected together.');
-    if(Boolean(pack)!==Boolean(count))throw new HttpError(400,'Package and pack containment must be selected together.');
+    if(!pack&&count)throw new HttpError(400,'Select container packaging before its packaging size.');
+    if(pack&&!count&&!pack.packagingTypeCode)throw new HttpError(400,'Legacy packaging needs a selected packaging size.');
     if((pack||normalize)&&!container)throw new HttpError(400,'Package or normalization requires a configured container and size.');
     if(normalize&&!pack)throw new HttpError(400,'Select the physical package before normalization.');
     const productionUom=str(form?.uom);
@@ -127,10 +152,21 @@ export function calculateSkuConversion(
         if(!Number.isFinite(contentPerContainer)||contentPerContainer<=0)
             throw new HttpError(400,'Configured container size must be positive.');
     }
-    if(pack&&count){
-        const n=num(count.quantity)??0;
+    let packagedContainers:number|null=null;
+    if(pack){
+        const n=pack.packagingTypeCode?packagingPrimaryContainerCount(pack,params):(num(count?.quantity)??0);
         if(!Number.isSafeInteger(n)||n<=0)
-            throw new HttpError(400,'Package containment must be a positive whole number.');
+            throw new HttpError(400,'Container packaging must have a positive whole-number quantity.');
+        // A selected standard size must agree with the configured layout.
+        // For nested pallets the packaging size describes the child pack, not the
+        // total primary-container count, so do not multiply it a second time.
+        if(pack.packagingTypeCode&&count){
+            const expected=pack.containedUnit==='PACKAGING'
+                ?params.find(p=>p.id===pack.containedPackagingId)?.quantity:n;
+            if(Number(count.quantity)!==Number(expected))
+                throw new HttpError(400,'Packaging size does not match its selected lower-level packaging layout.');
+        }
+        packagedContainers=n;
         perPack=(contentPerContainer??0)*n;
     }
     let normalizedName='';
@@ -150,7 +186,7 @@ export function calculateSkuConversion(
         if(value)selectedNames[key]=value.name;
     return {
         productionUom,containerSizeInProductionUom:round(contentPerContainer),
-        containersPerPackage:count?(num(count.quantity)??null):null,
+        containersPerPackage:packagedContainers,
         productionQtyPerPackage:round(perPack),
         normalizationUom:normalizedName,
         productionQtyPerNormalizationUnit:round(perUnit),
@@ -160,7 +196,7 @@ export function calculateSkuConversion(
     };
 }
 
-export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,unknown>,containerTypes?:MfgPrimaryContainerType[]):Omit<SkuParameter,'id'> {
+export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,unknown>,containerTypes?:MfgPrimaryContainerType[],packagingTypes?:MfgPackagingType[]):Omit<SkuParameter,'id'> {
     // Package containment has a canonical name derived from the MEMS Count unit.
     const name=kind==='packageCounts'
         ? String(countUnitTotal(str(raw.unitCode).trim(),Number(raw.unitCount)))
@@ -192,6 +228,14 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
         return {...base,uom,quantity};
     }
     if(kind==='packages'){
+        if(str(raw.packagingTypeCode)){
+            const layout=validatePackagingLayout(raw,packagingTypes);
+            if(!skuUnitConversion(layout.uom,layout.uom))
+                throw new HttpError(400,'Packaging metadata must use a published MEMS unit.');
+            return {...base,...layout};
+        }
+        // Old organizations retain existing free-form packaging until explicitly
+        // migrated. Newly created entries must use a published packaging type.
         const uom=str(raw.uom).trim();
         if(!skuUnitConversion(uom,uom))
             throw new HttpError(400,'Select a unit from the existing MEMS Units master for container packaging.');
