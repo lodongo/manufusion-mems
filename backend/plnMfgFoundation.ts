@@ -305,6 +305,14 @@ export const plnMfgFoundationRoutes={
                         containerId:str(supplied.containerId),containerSizeId:str(supplied.containerSizeId),
                         packageId:str(supplied.packageId),packagingSizeId:str(supplied.packagingSizeId),
                         packageCountId:str(supplied.packageCountId), // existing SKU compatibility
+                        transportPackageId:str(supplied.transportPackageId),
+                        transportLayeringEnabled:supplied.transportLayeringEnabled===true,
+                        transportPackagesPerLayer:typeof supplied.transportPackagesPerLayer==='number'
+                            ?supplied.transportPackagesPerLayer:undefined,
+                        transportLayerCount:typeof supplied.transportLayerCount==='number'
+                            ?supplied.transportLayerCount:undefined,
+                        transportUnitsPerLoad:typeof supplied.transportUnitsPerLoad==='number'
+                            ?supplied.transportUnitsPerLoad:undefined,
                         normalizationUnitId:str(supplied.normalizationUnitId),
                     };
                     const result=calculateSkuConversion(selected,configured);
