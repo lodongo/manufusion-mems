@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {normalizeMaster,detectBomCycle,fictionalLine11Demo} from '../../backend/plnMfgFoundation.ts';
-import {managedCode,masterPrefix,skuUnitConversion,calculateSkuConversion,composeConfiguredSkuName,normalizeSkuParameter,countUnitTotal,skuUnitCategories,skuUnitsInCategory,packagingPrimaryContainerCount} from '../../backend/mfgSkuModel.ts';
+import {managedCode,masterPrefix,skuUnitConversion,calculateSkuConversion,composeConfiguredSkuName,composeSkuNameWithSequence,skuNamingValues,normalizeSkuParameter,countUnitTotal,skuUnitCategories,skuUnitsInCategory,packagingPrimaryContainerCount} from '../../backend/mfgSkuModel.ts';
+import {DEFAULT_SKU_NAMING_SEQUENCE,validateSkuNamingSequence,composeSkuNameFromSequence} from '../../src/shared/mfgSkuNaming.ts';
 import {MFG_PACKAGING_TYPES,validatePackagingLayout,packagingHierarchyRank,normalizePackagingTypes} from '../../backend/mfgPackagingMetadata.ts';
 import {selectEffectiveRelease,selectEffectiveForSite} from '../../backend/plnMfgRelease.ts';
 import {fictionalPilotSnapshot,validateFictionalPilot,assertPilotSeedAllowed} from '../../backend/plnMfgPilotSeed.ts';
@@ -501,7 +502,7 @@ test('previously saved transport layers under commercial masters remain backward
 });
 
 
-test('Coca-Cola-style normalized unit case is commercial package volume divided by production-form reference',()=>{
+test('production-volume reference normalized unit case is commercial package volume divided by production-form reference',()=>{
  const params=structuredClone(exampleParams);
  const ref=params.find(p=>p.kind==='normalizationUnits');
  ref.referenceProductionFormId='FRM_000000001';
@@ -550,4 +551,112 @@ test('SKU reference form, reference quantity and commercial normalization are pe
  assert.ok(backend.includes('referenceQtyPerNormalizedUnit:'));
  const foundation=read('backend/plnMfgFoundation.ts');
  assert.ok(foundation.includes('raw.skuConversion=result'));
+});
+
+
+test('normalization operator Divide and Multiply use explicit, equivalent reference definitions',()=>{
+ const dividing=structuredClone(exampleParams);
+ const normalized=dividing.find(p=>p.kind==='normalizationUnits');
+ normalized.referenceProductionFormId='FRM_000000001';
+ normalized.normalizationOperator='DIVIDE';normalized.quantityPerUnit=5.678;
+ const divided=calculateSkuConversion(exampleSelect,dividing);
+ assert.equal(divided.normalizationOperator,'DIVIDE');
+ assert.equal(divided.normalizationOperand,5.678);
+ assert.equal(divided.referenceQtyPerNormalizedUnit,5.678);
+ assert.ok(Math.abs(divided.conversionFactor-12/5.678)<1e-10);
+ const multiplying=structuredClone(dividing);
+ multiplying.find(p=>p.kind==='normalizationUnits').normalizationOperator='MULTIPLY';
+ multiplying.find(p=>p.kind==='normalizationUnits').quantityPerUnit=1/5.678;
+ const multiplied=calculateSkuConversion(exampleSelect,multiplying);
+ assert.equal(multiplied.normalizationOperator,'MULTIPLY');
+ assert.ok(Math.abs(multiplied.referenceQtyPerNormalizedUnit-5.678)<1e-10);
+ assert.ok(Math.abs(multiplied.conversionFactor-divided.conversionFactor)<1e-9);
+ assert.ok(Math.abs(multiplied.productionQtyPerNormalizationUnit-5.678)<1e-9);
+ const parameter=normalizeSkuParameter('normalizationUnits',{
+    name:'Unit cases',baseUom:'L',quantityPerUnit:0.18,normalizationOperator:'MULTIPLY',
+    referenceProductionFormId:'FRM_000000001',
+ });
+ assert.equal(parameter.normalizationOperator,'MULTIPLY');
+ assert.throws(()=>normalizeSkuParameter('normalizationUnits',{
+     name:'Case',baseUom:'L',quantityPerUnit:1,normalizationOperator:'SCALE',
+ }),/Divide or Multiply/);
+ const form=read('src/org/MfgSkuSetup.tsx');
+ assert.ok(form.includes("title='Normalization operator'"));
+ assert.ok(form.includes("'DIVIDE','Divide ( ÷ )'"));
+ assert.ok(form.includes("'MULTIPLY','Multiply ( × )'"));
+ assert.ok(!form.includes('Coca-Cola'));
+});
+
+test('SKU naming rule preserves order, approved separators and correct name/code/quantity representation',()=>{
+ const params=structuredClone(exampleParams);
+ params.find(p=>p.kind==='productNames').productCode='FANTA';
+ params.find(p=>p.kind==='containers').metadataCode='PET_001';
+ const converted=calculateSkuConversion(exampleSelect,params);
+ const config=validateSkuNamingSequence({
+     separator:'_',steps:[
+         {field:'productName',mode:'CODE',enabled:true},
+         {field:'containerSize',mode:'QUANTITY_UNIT',enabled:true},
+         {field:'primaryContainer',mode:'CODE',enabled:true},
+         {field:'commercialPackSize',mode:'QUANTITY',enabled:true},
+         {field:'commercialPackaging',mode:'NAME',enabled:false},
+     ],
+ });
+ assert.equal(composeSkuNameWithSequence(exampleSelect,params,config,converted),'FANTA_1000mL_PET_001_12');
+ assert.equal(composeSkuNameFromSequence(config,skuNamingValues(exampleSelect,params,converted)),
+     'FANTA_1000mL_PET_001_12');
+ assert.equal(composeSkuNameFromSequence({...config,separator:'-'},skuNamingValues(exampleSelect,params,converted)),
+     'FANTA-1000mL-PET_001-12');
+ assert.throws(()=>validateSkuNamingSequence({...config,separator:'|||'}),/separator/);
+ assert.throws(()=>validateSkuNamingSequence({...config,steps:[config.steps[0],config.steps[0]]}),/repeated/);
+ assert.throws(()=>validateSkuNamingSequence({...config,steps:[
+     {field:'productName',mode:'QUANTITY',enabled:true},
+ ]}),/Name, Code or Quantity/);
+ assert.throws(()=>validateSkuNamingSequence({...config,steps:config.steps.map(s=>({...s,enabled:false}))}),/at least one/);
+ assert.throws(()=>validateSkuNamingSequence({...config,steps:[
+     {field:'containerSize',mode:'NAME',enabled:true},
+ ]}),/product name or code/);
+ assert.equal(DEFAULT_SKU_NAMING_SEQUENCE.separator,'_');
+});
+
+test('naming rule covers optional transport layers and derived product and normalization quantities',()=>{
+ const seq=validateSkuNamingSequence({separator:'/',steps:[
+    {field:'productName',mode:'NAME',enabled:true},
+    {field:'transportPackagesPerLayer',mode:'QUANTITY',enabled:true},
+    {field:'transportLayerCount',mode:'QUANTITY',enabled:true},
+    {field:'transportTotalUnits',mode:'QUANTITY',enabled:true},
+    {field:'commercialProductQuantity',mode:'QUANTITY_UNIT',enabled:true},
+    {field:'normalizedCommercialQuantity',mode:'QUANTITY',enabled:false},
+ ]});
+ const params=structuredClone(exampleParams);
+ params.push({id:'TLP_000000012',kind:'transportPackages',name:'Transport skid'});
+ const selections={...exampleSelect,transportPackageId:'TLP_000000012',
+    transportLayeringEnabled:true,transportPackagesPerLayer:10,transportLayerCount:5};
+ const result=calculateSkuConversion(selections,params);
+ assert.equal(composeSkuNameWithSequence(selections,params,seq,result),
+     'Fanta/10/5/50/12L');
+ const without={...exampleSelect};
+ const basic=calculateSkuConversion(without,params);
+ assert.equal(composeSkuNameWithSequence(without,params,seq,basic),'Fanta/12L');
+});
+
+test('SKU naming configuration is org-versioned with guarded save and existing-SKU opt-in',()=>{
+ const api=read('backend/mfgSkuConfiguration.ts');
+ assert.ok(api.includes("foundation")===false||api.includes('sku/naming/save'));
+ assert.ok(api.includes('mfg_sku_naming/config'));
+ assert.ok(api.includes('namingSequenceForOrg'));
+ assert.ok(api.includes('commitChecked([{'));
+ assert.ok(api.includes("expectedRevision"));
+ assert.ok(api.includes("org.mfg.sku.naming.save','MFG.sku.configure'"));
+ const foundation=read('backend/plnMfgFoundation.ts');
+ assert.ok(foundation.includes('naming.configured&&(creating||raw.applySkuNamingSequence===true)'));
+ assert.ok(foundation.includes('raw.skuNamingSnapshot'));
+ assert.ok(foundation.includes('raw.name=str(old.data.name)'));
+ const ui=read('src/org/MfgSkuSetup.tsx');
+ assert.ok(ui.includes("title:'SKU Naming Sequence'"));
+ assert.ok(ui.includes("title='Separator'"));
+ assert.ok(ui.includes('SKU_NAME_SEPARATORS'));
+ assert.ok(ui.includes('Move '));
+ assert.ok(ui.includes('Save naming sequence'));
+ assert.ok(ui.includes('SKU naming sequence preview'));
+ assert.ok(read('src/org/ProductionFoundation.tsx').includes('Apply the latest SKU naming sequence'));
 });
