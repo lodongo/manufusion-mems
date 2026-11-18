@@ -264,11 +264,8 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
         if(str(raw.packagingTypeCode)){
             const type=(packagingTypes??[]).find(t=>t.code===str(raw.packagingTypeCode));
             if(!type)throw new HttpError(400,'Select a published MEMS packaging type.');
-            if(kind==='packages'&&type.level!=='SECONDARY'&&
-                !(str(raw.id)&&raw.containersPerLayer!==undefined&&raw.numberOfLayers!==undefined))
-                throw new HttpError(400,'Commercial packaging must use a sellable secondary packaging type.');
-            if(kind==='transportPackages'&&type.level==='SECONDARY')
-                throw new HttpError(400,'Transport packaging must use a transport, tertiary, bulk or returnable type.');
+            // The business role (commercial versus transport) belongs to the
+            // organization, not to a hard-coded package type or industry.
             // Previously configured layer layouts remain readable and editable,
             // but new master types carry no SKU-specific stacking quantities.
             if(kind==='packages'&&raw.containersPerLayer!==undefined&&raw.numberOfLayers!==undefined){
