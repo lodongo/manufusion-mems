@@ -10,7 +10,7 @@ import {validatePackagingLayout, type MfgPackagingType} from './mfgPackagingMeta
 
 export const SKU_PARAMETERS={
     productNames:'NME', productionForms:'FRM', containers:'CNT',
-    containerSizes:'SIZ', packages:'PKG', packagingSizes:'PSZ',
+    containerSizes:'SIZ', packages:'PKG', transportPackages:'TLP', packagingSizes:'PSZ', 
     packageCounts:'PCT', // retained for existing organization records, hidden from new configuration
     normalizationUnits:'NRM',
 } as const;
@@ -28,14 +28,19 @@ export type SkuComponents={
     productNameId?:string;productionFormId?:string;containerId?:string;
     containerSizeId?:string;packageId?:string;
     packagingSizeId?:string;packageCountId?:string; // legacy packageCountId read-only compatibility
+    transportPackageId?:string;transportLayeringEnabled?:boolean;
+    transportPackagesPerLayer?:number;transportLayerCount?:number;transportUnitsPerLoad?:number;
     normalizationUnitId?:string;
 };
 export type SkuConversion={
     productionUom:string;containerSizeInProductionUom:number|null;
     containersPerPackage:number|null;productionQtyPerPackage:number|null;
     normalizationUom:string;productionQtyPerNormalizationUnit:number|null;
-    conversionFactor:number|null; // normalized units per one physical package
-    reverseConversionFactor:number|null; // physical packages per normalized unit
+    conversionFactor:number|null; // normalized units per one commercial package
+    reverseConversionFactor:number|null; // commercial packages per normalized unit
+    transportLayeringEnabled:boolean;
+    commercialPackagesPerTransportUnit:number|null;primaryContainersPerTransportUnit:number|null;
+    productionQtyPerTransportUnit:number|null;normalizationUnitsPerTransportUnit:number|null;
     selectedNames:Record<string,string>;
 };
 
@@ -130,13 +135,16 @@ export function calculateSkuConversion(
     const container=get('containers',values.containerId);
     const size=get('containerSizes',values.containerSizeId);
     const pack=get('packages',values.packageId);
+    const transport=get('transportPackages',values.transportPackageId);
     // Legacy PCT selections continue to calculate; all new SKUs select PSZ packaging sizes.
     const count=values.packagingSizeId
         ? get('packagingSizes',values.packagingSizeId) : get('packageCounts',values.packageCountId);
     const normalize=get('normalizationUnits',values.normalizationUnitId);
     if(Boolean(container)!==Boolean(size))throw new HttpError(400,'Container and container size must be selected together.');
     if(!pack&&count)throw new HttpError(400,'Select container packaging before its packaging size.');
-    if(pack&&!count&&!pack.packagingTypeCode)throw new HttpError(400,'Legacy packaging needs a selected packaging size.');
+    const legacyConfiguredLayout=Boolean(pack?.packagingTypeCode&&Number.isSafeInteger(pack.quantity)&&Number(pack.quantity)>0);
+    if(pack&&!count&&!legacyConfiguredLayout)throw new HttpError(400,'Select the commercial packaging size.');
+    if(transport&&!pack)throw new HttpError(400,'Transport packaging requires commercial packaging.');
     if((pack||normalize)&&!container)throw new HttpError(400,'Package or normalization requires a configured container and size.');
     if(normalize&&!pack)throw new HttpError(400,'Select the physical package before normalization.');
     const productionUom=str(form?.uom);
@@ -154,13 +162,13 @@ export function calculateSkuConversion(
     }
     let packagedContainers:number|null=null;
     if(pack){
-        const n=pack.packagingTypeCode?packagingPrimaryContainerCount(pack,params):(num(count?.quantity)??0);
+        const n=legacyConfiguredLayout?packagingPrimaryContainerCount(pack,params):(num(count?.quantity)??0);
         if(!Number.isSafeInteger(n)||n<=0)
             throw new HttpError(400,'Container packaging must have a positive whole-number quantity.');
         // A selected standard size must agree with the configured layout.
         // For nested pallets the packaging size describes the child pack, not the
         // total primary-container count, so do not multiply it a second time.
-        if(pack.packagingTypeCode&&count){
+        if(legacyConfiguredLayout&&count){
             const expected=pack.containedUnit==='PACKAGING'
                 ?params.find(p=>p.id===pack.containedPackagingId)?.quantity:n;
             if(Number(count.quantity)!==Number(expected))
@@ -178,6 +186,23 @@ export function calculateSkuConversion(
             throw new HttpError(400,'Configured normalization content must be positive.');
         normalizedName=normalize.name;
     }
+    const stacking=values.transportLayeringEnabled===true;
+    let packagesPerTransport:number|null=null;
+    if(transport){
+        const bounded=(v:unknown,label:string)=>{
+            const n=Number(v);
+            if(!Number.isSafeInteger(n)||n<1||n>1000000)
+                throw new HttpError(400,label+' must be a positive whole number.');
+            return n;
+        };
+        packagesPerTransport=stacking
+            ?bounded(values.transportPackagesPerLayer,'Commercial packages per layer')*
+                bounded(values.transportLayerCount,'Number of layers')
+            :bounded(values.transportUnitsPerLoad,'Commercial packages per transport unit');
+        if(packagesPerTransport>10000000)
+            throw new HttpError(400,'Consolidated transport quantity exceeds the supported range.');
+    }else if(stacking||values.transportPackagesPerLayer||values.transportLayerCount||values.transportUnitsPerLoad)
+        throw new HttpError(400,'Select a transport packaging type before configuring its load.');
     const round=(v:number|null)=>v===null?null:Number(v.toPrecision(12));
     const factor=perPack!==null&&perUnit!==null?perPack/perUnit:null;
     const reverse=factor!==null?1/factor:null;
@@ -192,6 +217,14 @@ export function calculateSkuConversion(
         productionQtyPerNormalizationUnit:round(perUnit),
         conversionFactor:round(factor),
         reverseConversionFactor:round(reverse),
+        transportLayeringEnabled:transport?stacking:false,
+        commercialPackagesPerTransportUnit:packagesPerTransport,
+        primaryContainersPerTransportUnit:packagedContainers!==null&&packagesPerTransport!==null
+            ?packagedContainers*packagesPerTransport:null,
+        productionQtyPerTransportUnit:perPack!==null&&packagesPerTransport!==null
+            ?round(perPack*packagesPerTransport):null,
+        normalizationUnitsPerTransportUnit:factor!==null&&packagesPerTransport!==null
+            ?round(factor*packagesPerTransport):null,
         selectedNames,
     };
 }
@@ -227,15 +260,27 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
             throw new HttpError(400,'Container size needs a positive quantity and MEMS unit of measure.');
         return {...base,uom,quantity};
     }
-    if(kind==='packages'){
+    if(kind==='packages'||kind==='transportPackages'){
         if(str(raw.packagingTypeCode)){
-            const layout=validatePackagingLayout(raw,packagingTypes);
-            if(!skuUnitConversion(layout.uom,layout.uom))
+            const type=(packagingTypes??[]).find(t=>t.code===str(raw.packagingTypeCode));
+            if(!type)throw new HttpError(400,'Select a published MEMS packaging type.');
+            if(kind==='packages'&&type.level!=='SECONDARY')
+                throw new HttpError(400,'Commercial packaging must use a sellable secondary packaging type.');
+            if(kind==='transportPackages'&&type.level==='SECONDARY')
+                throw new HttpError(400,'Transport packaging must use a transport, tertiary, bulk or returnable type.');
+            // Previously configured layer layouts remain readable and editable,
+            // but new master types carry no SKU-specific stacking quantities.
+            if(kind==='packages'&&raw.containersPerLayer!==undefined&&raw.numberOfLayers!==undefined){
+                const layout=validatePackagingLayout(raw,packagingTypes);
+                return {...base,...layout};
+            }
+            if(!skuUnitConversion(type.defaultUnitCode,type.defaultUnitCode))
                 throw new HttpError(400,'Packaging metadata must use a published MEMS unit.');
-            return {...base,...layout};
+            return {...base,packagingTypeCode:type.code,level:type.level,
+                containedUnit:type.containedUnit,uom:type.defaultUnitCode};
         }
-        // Old organizations retain existing free-form packaging until explicitly
-        // migrated. Newly created entries must use a published packaging type.
+        // Only pre-existing commercial packaging can use this legacy fallback.
+        if(kind==='transportPackages')throw new HttpError(400,'Select a published transport packaging type.');
         const uom=str(raw.uom).trim();
         if(!skuUnitConversion(uom,uom))
             throw new HttpError(400,'Select a unit from the existing MEMS Units master for container packaging.');
