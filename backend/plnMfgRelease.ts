@@ -1,5 +1,5 @@
 /**
- * Controlled activation for Phase-1 manufacturing BOMs, recipes and routings.
+ * Controlled activation for manufacturing BOMs and routings.
  * Distinct master codes preserve previously approved versions. Released masters are
  * immutable; future-effective versions are selected by their effective date.
  * This module does NOT authorize production, stock movements or procurement.
@@ -14,7 +14,7 @@ type Kind = 'boms'|'routings';
 const TABLE:Record<Kind,string> = {boms:'mfg_boms',routings:'mfg_routings'};
 const idPattern=/^[A-Za-z0-9][A-Za-z0-9_-]{1,59}$/;
 const kindOf=(v:unknown):Kind=>{
-    if(v!=='boms'&&v!=='routings')throw new HttpError(400,'Select a BOM/recipe or routing.');
+    if(v!=='boms'&&v!=='routings')throw new HttpError(400,'Select a BOM or routing.');
     return v;
 };
 const idOf=(v:unknown):string=>{

@@ -106,16 +106,16 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         return {...base,type:ENUM(raw.type,RESOURCE_TYPES,'resource type'),rate:POSITIVE(raw.rate,'Rated units per hour'),rateUom:UOM(raw.rateUom),assetId:str(raw.assetId).slice(0,60),efficiency:NONNEGATIVE(raw.efficiency??100,'Efficiency percentage',100)};
     }
     if(kind==='boms'){
-        const type=ENUM(raw.type,BOM_TYPES,'BOM type');
+        const type=bomFamily(ENUM(raw.type,BOM_TYPES,'BOM type'));
         const flavorVariantId=str(raw.flavorVariantId).trim();
         if(flavorVariantId)VALID_ID(flavorVariantId,'Product/Variant');
-        // Flavor-neutral intermediate formulations (e.g. common simple syrup) have no variant.
+        // Shared manufacturing intermediates do not require product-specific identity.
         const alternativeCode=bomAlternative(raw.alternativeCode);
         const routingId=str(raw.routingId).trim();
         if(routingId)VALID_ID(routingId,'Optional process routing');
         const parentSkuId=VALID_ID(raw.parentSkuId,'Parent SKU');
         const components=ARR(raw.components);
-        if(!components.length||components.length>150)throw new HttpError(400,'A BOM/recipe must have 1–150 components.');
+        if(!components.length||components.length>150)throw new HttpError(400,'A BOM must have 1–150 components.');
         const seen=new Set<string>();
         const lines=components.map((c,i)=>{
             const skuId=VALID_ID(c.skuId,'Component SKU');
@@ -428,7 +428,7 @@ export const plnMfgFoundationRoutes={
                         raw.name=str(old.data.name)||composeConfiguredSkuName(selected,configured);
                         raw.skuNamingSnapshot=isObj(old.data.skuNamingSnapshot)?old.data.skuNamingSnapshot:{};
                     }else{
-                        // Preserve legacy naming until the organization activates a sequence.
+                        // Existing names are stable until an explicit naming update.
                         raw.name=composeConfiguredSkuName(selected,configured);
                     }
                     raw.uom=physicalPackage?.uom||result.productionUom;

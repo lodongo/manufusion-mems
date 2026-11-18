@@ -4,6 +4,7 @@ on:
     branches: [develop]
     paths:
       - 'backend/plnMfg*.ts'
+      - 'backend/mfgMaterialPolicy.ts'
       - 'backend/mfgSku*.ts'
       - 'backend/mfgPrimaryContainerMetadata.ts'
       - 'backend/mfgPackagingMetadata.ts'

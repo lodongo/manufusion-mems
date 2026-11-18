@@ -56,7 +56,7 @@ export function managedCode(prefix:string,sequence:number):string {
     return prefix+'_'+String(sequence).padStart(9,'0');
 }
 export function masterPrefix(kind:'items'|'boms'|'resources'|'routings',type=''):string {
-    return kind==='items'?'SKU':kind==='boms'?(type==='RECIPE'?'RCP':'BOM'):
+    return kind==='items'?'SKU':kind==='boms'?'BOM':
         kind==='resources'?'RSC':'RTG';
 }
 
