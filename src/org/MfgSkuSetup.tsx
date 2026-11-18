@@ -243,11 +243,11 @@ export function SkuConfigurationFields({value,onChange,setup}:{
                 {effectivePackSize!==null?' · '+pretty(effectivePackSize)+' primary containers':''}
             </p>}
             {contentPerPackage!==null&&<p className='mt-1 text-muted'>Per commercial package: {pretty(contentPerPackage)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
-            {quantityPerTransport!==null&&<p className='mt-1 text-muted'>Per transport unit: {pretty(quantityPerTransport)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>
+            {quantityPerTransport!==null&&<p className='mt-1 text-muted'>Per transport unit: {pretty(quantityPerTransport)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
             {factor!==null&&<p className='mt-1 font-semibold text-brand'>Conversion factor: {pretty(factor)} {norm?.name} / {packageRecord?.name}</p>}
             {factor!==null&&validTransportCount!==null&&<p className='mt-1 text-muted'>
                 Transport conversion: {pretty(factor*validTransportCount)} {norm?.name} / {transportRecord?.name}
-            </p>
+            </p>}
             {size&&form&&contentPerContainer===null&&<p className='mt-1 text-red-500'>Container size unit is incompatible with production form.</p>}
         </div>
     </section>;
