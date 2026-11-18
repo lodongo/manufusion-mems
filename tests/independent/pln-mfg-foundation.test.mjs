@@ -433,10 +433,12 @@ test('commercial and transport master packaging are distinct but use one MEMS ca
  assert.equal(logistics.quantity,undefined);
  assert.equal(logistics.level,'TRANSPORT');
  assert.equal(logistics.name,'Transport pallet');
- assert.throws(()=>normalizeSkuParameter('packages',{name:'Wrong level',packagingTypeCode:palletType.code},
-     undefined,MFG_PACKAGING_TYPES),/Commercial packaging/);
- assert.throws(()=>normalizeSkuParameter('transportPackages',{name:'Wrong level',packagingTypeCode:caseType.code},
-     undefined,MFG_PACKAGING_TYPES),/Transport packaging/);
+ // Commercial and logistics classification is configurable even for identical
+ // package types; physical metadata does not dictate the business role.
+ assert.equal(normalizeSkuParameter('packages',{name:'Pallet sold as a unit',packagingTypeCode:palletType.code},
+     undefined,MFG_PACKAGING_TYPES).level,'TRANSPORT');
+ assert.equal(normalizeSkuParameter('transportPackages',{name:'Case used in logistics',packagingTypeCode:caseType.code},
+     undefined,MFG_PACKAGING_TYPES).level,'SECONDARY');
  assert.throws(()=>normalizeSkuParameter('transportPackages',{name:'No type'},
      undefined,MFG_PACKAGING_TYPES),/published transport packaging/);
  assert.ok(read('backend/mfgSkuConfiguration.ts').includes("kind==='transportPackages'"));
@@ -478,7 +480,7 @@ test('SKU configuration menus separate selling packs and logistics, with layerin
      'Enable layered stacking','Commercial packages per layer','Number of layers',
      'Commercial packages per transport unit','Packaging category','Packaging type'])
      assert.ok(ui.includes(label),label);
- assert.ok(ui.includes("t.level==='SECONDARY'"));
+ assert.ok(ui.includes("level==='SECONDARY'"));
  assert.ok(ui.includes('transportPackageId'));
  assert.ok(!ui.includes("title='Contained packaging (lower level)'"));
  const backend=read('backend/plnMfgFoundation.ts');
