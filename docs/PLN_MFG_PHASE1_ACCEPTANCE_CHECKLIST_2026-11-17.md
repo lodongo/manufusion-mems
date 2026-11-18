@@ -24,7 +24,7 @@
 | P1-02 | Load MFG item list and create finished product and intermediate SKU | Draft saved in own tenant, revision 1 exists, reload retains values |
 | P1-03 | Link a raw/packaging SKU to an existing published Inventory material | Published material appears in selector; invalid, unapproved or missing material rejected |
 | P1-04 | Create manufacturing line/resource with optional Asset Register link | Only active and same-site asset references allowed; rate/efficiency validation works |
-| P1-05 | Create and edit Manufacturing or Packaging BOM | Parent and component units are identical or have a compatible MEMS unit conversion; quantities positive; circular structure rejected; revision snapshots preserved |
+| P1-05 | Create and edit a classified BOM in the single BOM master | Parent and component units are identical or have a compatible MEMS unit conversion; quantities positive; circular structure rejected; revision snapshots preserved |
 | P1-06 | Create parallel-stage routing | Independent prep and bottle blowing stage outputs can feed filling; invalid resource or dependency rejected |
 | P1-07 | Apply site-specific and organization-wide masters | A user cannot mutate another site's resource, BOM or routing; global records require direct administrative permissions |
 | P1-08 | Submit BOM/routing and approve with separate user | Draft → pending approval → active; author cannot approve own submission; released revision cannot be overwritten |
@@ -40,7 +40,7 @@
 - A shared intermediate or subassembly can have a Manufacturing BOM without selecting a specific product variant.
 - An intermediate may be explicitly non-stock-managed or stock-managed (linked to an approved Inventory material).
 - A metered raw input, such as treated water, must reference an already configured equipment utility and cannot be issued again as Inventory.
-- A final-product Packaging BOM may be created using its referenced material masters even before their upstream production BOMs exist. This is **not** proof of executable material readiness.
+- A final-product BOM may be created using its referenced material masters even before their upstream production BOMs exist. This is **not** proof of executable material readiness.
 - BOMs for the same output and date may coexist across categories or alternative codes, with explicit selection; identical category/alternative/site/date releases cannot be duplicated.
 - Unit conversions are restricted to compatible units from the central registry, not arbitrary cross-dimensional assumptions.
 - No MRP run, purchase requisition, stock reservation or actual manufacturing transaction is created by these Phase-1 master-data configuration changes.
@@ -77,8 +77,15 @@ Phase 1 is **code-complete for baseline features**, not accepted, until P1-01 th
 Phase 2 adds demand entry/forecast consumption, demand allocation, MPS simulation/versioning and rough-cut capacity. Phase 1 contains **no live manufacturing execution, stock reservation/issue/receipt or purchasing** operations.
 
 ## General manufacturing acceptance (2026-11-18)
-- All organizations use the same Product/Variant, Manufacturing BOM and Packaging BOM terminology, without sector presets or custom aliases.
-- Newly saved BOMs use canonical MANUFACTURING or PACKAGING categories. Historical persisted records are normalized internally without old categories appearing in the interface.
+- All organizations use the same Product/Variant and BOM terminology. BOM classifications are organization-configurable and governed by production/MRP relevance, not industry presets.
+- New BOMs use a governed classificationCode, default PRODUCTION. The BOM list has no hard-coded type filter. Historical records are projected into canonical classifications without showing old type selectors.
 - Components and output categories are not limited by beverage-specific rules. An integrated assembly can include packaging inputs, or manufacture a packaging item for downstream use.
-- A Packaging BOM is optional when no separate pack-stage decomposition is needed. Drafting a BOM never requires preceding BOMs to exist, though execution readiness is checked separately.
+- Packaging is an optional stage and may have its own classified BOM if the organization needs one. Drafting a BOM never requires preceding BOMs to exist, though execution readiness is checked separately.
 - Test model is structurally reusable for process, discrete, assembly and mixed manufacturing; sector-specific execution rules require separate acceptance.
+
+## Single BOM classification acceptance checklist
+- Manufacturing Setup allows authorized administrators to configure classification codes, descriptions, enabled status and MRP/production relevance, with a protected Production default.
+- BOM editor has one BOM classification selector sourced from configuration, not a fixed Manufacturing/Packaging split. The list has no "Show BOM type" dropdown.
+- Existing BOM rows, revisions and release records remain viewable and keep approval evidence; the projection hides old data keys without deleting history.
+- Missing, disabled or removed classifications cannot be assigned to new BOMs; in-use classifications cannot be deleted from organization setup.
+- MRP and production eligibility flags do not themselves trigger manufacturing execution or inventory postings. End-to-end authenticated testing is still required before Phase 2 acceptance.

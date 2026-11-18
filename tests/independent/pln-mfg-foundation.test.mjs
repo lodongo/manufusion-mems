@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {normalizeMaster,detectBomCycle,fictionalLine11Demo,bomFamily,bomAlternative,materialUnitFactor} from '../../backend/plnMfgFoundation.ts';
+import {normalizeMaster,detectBomCycle,fictionalLine11Demo,bomAlternative,materialUnitFactor} from '../../backend/plnMfgFoundation.ts';
 import {managedCode,masterPrefix,skuUnitConversion,calculateSkuConversion,composeConfiguredSkuName,composeSkuNameWithSequence,skuNamingValues,normalizeSkuParameter,countUnitTotal,skuUnitCategories,skuUnitsInCategory,packagingPrimaryContainerCount} from '../../backend/mfgSkuModel.ts';
 import {DEFAULT_SKU_NAMING_SEQUENCE,validateSkuNamingSequence,composeSkuNameFromSequence} from '../../src/shared/mfgSkuNaming.ts';
 import {MFG_PACKAGING_TYPES,validatePackagingLayout,packagingHierarchyRank,normalizePackagingTypes} from '../../backend/mfgPackagingMetadata.ts';
 import {selectEffectiveRelease,selectEffectiveForSite} from '../../backend/plnMfgRelease.ts';
-import {defaultMfgMaterialPolicy,normalizeMfgMaterialPolicy} from '../../backend/mfgMaterialPolicy.ts';
+import {defaultMfgMaterialPolicy,normalizeMfgMaterialPolicy,bomClassificationCode,bomReleaseSlotGroup,normalizeBomClassifications} from '../../backend/mfgMaterialPolicy.ts';
 import {fictionalPilotSnapshot,validateFictionalPilot,assertPilotSeedAllowed,assertPilotViewAllowed} from '../../backend/plnMfgPilotSeed.ts';
 
 const read=p=>readFileSync(new URL('../../'+p,import.meta.url),'utf8');
@@ -25,10 +25,28 @@ test('real raw and packaging materials require an Inventory master reference',()
  assert.equal(normalizeMaster('items',{id:'CAP-2622',name:'Cap',category:'PACKAGING',uom:'EA',packQty:1,inventoryMaterialId:'MAT-2622'}).inventoryMaterialId,'MAT-2622');
 });
 
+test('BOM classification catalog is controlled, configurable and separate from material categories',()=>{
+ const defaultClasses=defaultMfgMaterialPolicy().bomClassifications;
+ assert.equal(defaultClasses.length,1);
+ assert.equal(defaultClasses[0].name,'Production');
+ const extra={code:'ENGINEERING',name:'Engineering',enabled:true,mrpRelevant:false,productionEligible:false};
+ const cfg=normalizeMfgMaterialPolicy({...defaultMfgMaterialPolicy(),bomClassifications:[...defaultClasses,extra]});
+ assert.equal(cfg.bomClassifications.length,2);
+ assert.equal(cfg.bomClassifications[1].productionEligible,false);
+ assert.throws(()=>normalizeBomClassifications([extra]),/Production classification/);
+ assert.throws(()=>normalizeBomClassifications([...defaultClasses,defaultClasses[0]]),/unique/);
+ assert.throws(()=>normalizeBomClassifications([...defaultClasses,{...extra,code:'BAD CODE'}]),/unique/);
+ assert.throws(()=>normalizeBomClassifications([...defaultClasses,{...extra,mrpRelevant:'true'}]),/Invalid BOM classification option/);
+ const backend=read('backend/plnMfgFoundation.ts');
+ assert.ok(backend.includes('A used BOM classification cannot be deleted'));
+ assert.ok(backend.includes('delete raw.type'));
+ assert.ok(backend.includes('data.classificationCode=bomClassificationCode(data)'));
+});
 test('manufacturing material handling policy has no industry labels or preset selectors',()=>{
  const p=defaultMfgMaterialPolicy();
- assert.deepEqual(Object.keys(p).sort(),['allowRawDirect','allowRawUtility','allowPackagingDirect','defaultIntermediateTracking'].sort());
+ assert.deepEqual(Object.keys(p).sort(),['allowRawDirect','allowRawUtility','allowPackagingDirect','defaultIntermediateTracking','bomClassifications'].sort());
  assert.equal(p.defaultIntermediateTracking,'NON_STOCKED');
+ assert.deepEqual(p.bomClassifications.map(c=>c.code),['PRODUCTION']);
  const configured=normalizeMfgMaterialPolicy({allowRawUtility:false,allowRawDirect:true,
   allowPackagingDirect:true,defaultIntermediateTracking:'STOCKED',
   industry:'SECTOR_EXAMPLE',variantLabel:'Obsolete label',manufacturingBomLabel:'Obsolete BOM label'});
@@ -48,7 +66,9 @@ test('universal manufacturing UI contains neither sector suggestions nor embedde
  assert.ok(!ui.includes("active==='demo'"));
  assert.ok(!ui.includes('Earlier RECIPE'));
  assert.ok(ui.includes('Manufacturing material handling'));
- assert.ok(ui.includes("['MANUFACTURING','Manufacturing BOM']"));
+ assert.ok(!ui.includes('Show BOM type'));
+ assert.ok(ui.includes('BOM classification'));
+ assert.ok(ui.includes('BOM classifications'));
  assert.ok(ui.includes('Materials & Products'));
  const home=read('src/org/OrgHomePage.tsx');
  assert.ok(home.includes("Materials, BOMs & routings"));
@@ -65,17 +85,19 @@ test('raw and packaging direct consumption can be classified without stock ledge
  assert.throws(()=>normalizeMaster('items',{...label,sourceMode:'UTILITY',utilityCode:'WATER',utilityWorkCenterId:'WC-01'}),/Packaging components/);
  assert.equal(normalizeMaster('items',{...label,sourceMode:'INVENTORY',inventoryMaterialId:'MAT-01'}).stockPolicy,'STOCKED');
 });
-test('BOM supports two new classifications and preserves historical types',()=>{
+test('BOM uses a configurable classification and normalizes old stored values',()=>{
  const formula={id:'BOM-FLAVOR',name:'Orange base',type:'FLAVOR_VARIANT',flavorVariantId:'NME_000000001',parentSkuId:'BULK',outputQty:1000,outputUom:'L',components:[{skuId:'WATER',quantity:1000,uom:'L'}]};
  const pack={...formula,id:'BOM-PACK',name:'Orange case',type:'PACKAGING',parentSkuId:'FG',components:[{skuId:'BOTTLE',quantity:1,uom:'EA'}]};
- assert.equal(normalizeMaster('boms',formula).type,'MANUFACTURING');
- assert.equal(normalizeMaster('boms',{...formula,type:'MANUFACTURING'}).type,'MANUFACTURING');
- assert.equal(normalizeMaster('boms',pack).type,'PACKAGING');
+ assert.equal(normalizeMaster('boms',formula).classificationCode,'PRODUCTION');
+ assert.equal(normalizeMaster('boms',{...formula,type:'MANUFACTURING'}).classificationCode,'PRODUCTION');
+ assert.equal(normalizeMaster('boms',pack).classificationCode,'PACKAGING');
  assert.equal(normalizeMaster('boms',{...formula,productVariantId:'',flavorVariantId:undefined}).productVariantId,'');
  assert.equal(normalizeMaster('boms',formula).productVariantId,'NME_000000001');
  assert.equal(Object.hasOwn(normalizeMaster('boms',formula),'flavorVariantId'),false);
- assert.equal(normalizeMaster('boms',{...pack,type:'BOM'}).type,'PACKAGING');
- assert.equal(normalizeMaster('boms',{...formula,type:'RECIPE'}).type,'MANUFACTURING');
+ assert.equal(Object.hasOwn(normalizeMaster('boms',formula),'type'),false);
+ assert.equal(normalizeMaster('boms',{...formula,classificationCode:'ENGINEERING'}).classificationCode,'ENGINEERING');
+ assert.equal(normalizeMaster('boms',{...pack,type:'BOM'}).classificationCode,'PACKAGING');
+ assert.equal(normalizeMaster('boms',{...formula,type:'RECIPE'}).classificationCode,'PRODUCTION');
 });
 test('Fanta formulation can be flavor-neutral and intermediates can be non-stock or stocked',()=>{
  const base={id:'SIMPLE-SYRUP',name:'Common syrup',category:'INTERMEDIATE',uom:'L',packQty:1};
@@ -98,10 +120,13 @@ test('Metered utility is an auditable input distinct from an Inventory issue',()
 test('BOM alternatives and one-character material units use validated dimensional conversions',()=>{
  assert.equal(bomAlternative(undefined),'STANDARD');
  assert.equal(bomAlternative('line_a'),'LINE_A');
- assert.equal(bomFamily('RECIPE'),'MANUFACTURING');
- assert.equal(bomFamily('FLAVOR_VARIANT'),'MANUFACTURING');
- assert.equal(bomFamily('MANUFACTURING'),'MANUFACTURING');
- assert.equal(bomFamily('BOM'),'PACKAGING');
+ assert.equal(bomClassificationCode({type:'RECIPE'}),'PRODUCTION');
+ assert.equal(bomClassificationCode({type:'FLAVOR_VARIANT'}),'PRODUCTION');
+ assert.equal(bomClassificationCode({type:'BOM'}),'PACKAGING');
+ assert.equal(bomClassificationCode({classificationCode:'ENGINEERING',type:'PACKAGING'}),'ENGINEERING');
+ assert.equal(bomReleaseSlotGroup({classificationCode:'PRODUCTION'}),'MANUFACTURING');
+ assert.equal(bomReleaseSlotGroup({classificationCode:'PACKAGING'}),'PACKAGING');
+ assert.equal(bomReleaseSlotGroup({classificationCode:'ENGINEERING'}),'CLASS_ENGINEERING');
  assert.equal(materialUnitFactor('L','L'),1);
  assert.ok(materialUnitFactor('L','mL')>0);
  assert.throws(()=>materialUnitFactor('L','KG'),/Incompatible material units/);
@@ -110,10 +135,11 @@ test('BOM alternatives and one-character material units use validated dimensiona
  assert.equal(normalizeMaster('boms',row).alternativeCode,'LINE_A');
  assert.equal(normalizeMaster('boms',row).components[0].uom,'L');
 });
-test('Release selection requires explicit BOM category and alternative to avoid accidental mixing',()=>{
+test('Release selection requires explicit BOM classification and alternative to avoid accidental mixing',()=>{
  const release=read('backend/plnMfgRelease.ts');
  assert.ok(release.includes('requiresSelection:options.length>1'));
- assert.ok(release.includes("bomFamily(str(other.data.type))===bomFamily(str(doc.data.type))"));
+ assert.ok(release.includes("bomClassificationCode(other.data)===bomClassificationCode(doc.data)"));
+ assert.ok(!release.includes("ctx.body.bomType"));
  assert.ok(release.includes("bomAlternative(doc.data.alternativeCode)"));
  const ui=read('src/org/ProductionFoundation.tsx');
  assert.ok(ui.includes('BOM alternative code'));
@@ -122,7 +148,7 @@ test('Release selection requires explicit BOM category and alternative to avoid 
  assert.ok(ui.includes('Component unit'));
 });
 
-test('BOM graph includes both categories when parent is shared',()=>{
+test('BOM dependencies include different classifications',()=>{
  const boms=[{parentSkuId:'PACKED',components:[{skuId:'BULK'}]},{parentSkuId:'PACKED',components:[{skuId:'CAP'}]},{parentSkuId:'BULK',components:[{skuId:'WATER'}]}];
  assert.equal(detectBomCycle(boms,'WATER',[{skuId:'PACKED'}]),true);
 });
@@ -130,7 +156,7 @@ test('BOM graph includes both categories when parent is shared',()=>{
 test('BOM structures reject zero quantities, duplicate components and immediate cycles',()=>{
  const baseline={id:'BOM-01',name:'Water case',type:'BOM',parentSkuId:'FG-WATER',outputQty:1,outputUom:'CASE'};
  const comp={skuId:'CAP-2622',quantity:12,uom:'EA',scrapPct:1};
- assert.equal(normalizeMaster('boms',{...baseline,components:[comp]}).type,'PACKAGING');
+ assert.equal(normalizeMaster('boms',{...baseline,components:[comp]}).classificationCode,'PACKAGING');
  assert.throws(()=>normalizeMaster('boms',{...baseline,components:[comp,comp]}),/Duplicate component/);
  assert.throws(()=>normalizeMaster('boms',{...baseline,components:[{...comp,quantity:0}]}),/greater than zero/);
  assert.throws(()=>normalizeMaster('boms',{...baseline,components:[{...comp,skuId:'FG-WATER'}]}),/consume itself/);
