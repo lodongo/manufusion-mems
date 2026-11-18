@@ -421,8 +421,8 @@ test('SKU setup has distinct commercial and transport menus with metadata-backed
  assert.ok(ui.includes('Container subcategory / type'));
  assert.ok(ui.includes('metadataType.attributes.slice(0,5)'));
  assert.ok(ui.includes("active==='packagingSizes'"));
- assert.ok(ui.includes('Flavor/Variant code'));
- assert.ok(ui.includes('Flavor/Variant name'));
+ assert.ok(ui.includes("variantLabel+' code'"));
+ assert.ok(ui.includes("variantLabel+' name'"));
  assert.ok(!ui.includes("key:'units'"));
  assert.ok(!ui.includes("title:'Package Containment'"));
  assert.ok(ui.includes('Back to SKU configuration menu'));
