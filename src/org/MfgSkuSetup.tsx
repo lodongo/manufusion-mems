@@ -189,8 +189,14 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     const optionsFor=(kind:SkuParameterKind):Array<[string,string]>=>setup.parameters
         .filter(p=>p.kind===kind&&p.enabled!==false&&
             (kind!=='containers'||!value.productionFormId||!p.categoryCode?.startsWith('UOM-')||
-                p.categoryCode===pickUnit(setup,form?.uom)?.categoryCode))
-        .map(p=>[p.id,p.name] as [string,string]);
+                p.categoryCode===pickUnit(setup,form?.uom)?.categoryCode)&&
+            (kind!=='normalizationUnits'||!form?.uom||
+                ratio(setup,getParam(setup,'productionForms',p.referenceProductionFormId)?.uom||p.baseUom,form.uom)!==null))
+        .map(p=>[p.id,p.kind==='normalizationUnits'
+            ?p.name+' · '+p.quantityPerUnit+' '+(pickUnit(setup,
+                getParam(setup,'productionForms',p.referenceProductionFormId)?.uom||p.baseUom)?.symbol||
+                getParam(setup,'productionForms',p.referenceProductionFormId)?.uom||p.baseUom||'')+' / normalized unit'
+            :p.name] as [string,string]);
     return <section className={modal+' space-y-3'}>
         <h3 className='text-base font-semibold'>SKU composition</h3>
         <div className='grid gap-3 sm:grid-cols-2'>
