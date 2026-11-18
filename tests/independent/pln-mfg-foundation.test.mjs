@@ -19,7 +19,7 @@ test('valid SKU and resource masters are normalized without side effects',()=>{
 
 test('real raw and packaging materials require an Inventory master reference',()=>{
  for(const category of ['RAW','PACKAGING']){
-  assert.throws(()=>normalizeMaster('items',{id:'RAW-WATER',name:'Water',category,uom:'L',packQty:1}),/Inventory material master/);
+  assert.throws(()=>normalizeMaster('items',{id:'RAW-WATER',name:'Water',category,uom:'L',packQty:1}),/Inventory material reference/);
  }
  assert.equal(normalizeMaster('items',{id:'CAP-2622',name:'Cap',category:'PACKAGING',uom:'EA',packQty:1,inventoryMaterialId:'MAT-2622'}).inventoryMaterialId,'MAT-2622');
 });
@@ -173,7 +173,7 @@ test('master-data reference checks preserve Inventory and Asset authority',()=>{
  assert.ok(src.includes("'/assets/'"));
  assert.ok(src.includes('approved, numbered Inventory material'));
  assert.ok(src.includes('same site as the linked asset'));
- assert.ok(src.includes('unit does not match its SKU master'));
+ assert.ok(src.includes('materialUnitFactor(str(component.uom),str(child.data.uom))'));
 });
 
 test('isolated fictional Line 11 seeding is denied outside authorized development test mode',()=>{
