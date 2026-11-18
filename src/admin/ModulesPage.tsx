@@ -9,6 +9,7 @@ import DefaultLists from './DefaultLists';
 import {MntTaskCatalogueAdmin} from '../org/MntTaskCatalogue';
 import {MntToolCatalogueAdmin} from '../org/MntToolCatalogue';
 import SafMetadataBrowser from './SafMetadataBrowser';
+import MfgContainerMetadataBrowser, {type MfgContainerMetadataRow} from './MfgContainerMetadataBrowser';
 import UtilityBrowser, { type Utility } from './UtilityBrowser';
 import AssetDictionaryAdmin from './AssetDictionaryAdmin';
 import ProcurementUnits, { type UomEntry } from './ProcurementUnits';
@@ -338,6 +339,9 @@ function Workspace({ module, view, canWrite, isSuper }: { module: Module; view: 
             </div>
         );
     }
+
+    if (editing && editing !== 'new' && module.code === 'MFG' && editing.key === 'primaryContainers')
+        return <MfgContainerMetadataBrowser items={editing.items as MfgContainerMetadataRow[]} onBack={()=>{setEditing(null);reload();}}/>;
 
     if (editing && editing !== 'new' && module.code === 'AST' && editing.key === 'utilitySupplies') return <UtilityBrowser items={editing.items as Utility[]} onBack={()=>setEditing(null)}/>;
 
