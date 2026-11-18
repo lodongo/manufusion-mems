@@ -36,6 +36,16 @@
 | P1-14 | Attempt duplicate seed or write with stale record revision | Idempotent seed; optimistic concurrency prevents lost updates; audit events recorded |
 | P1-15 | Repeat actions with unauthorized, cross-tenant or disabled-module account | Correct 403/404 response, no record disclosure or mutation |
 
+## Normalized commercial unit-case acceptance
+
+- Configure a production form using MEMS's **Volume / L** unit.
+- Create an organization normalization reference named **Unit Case (UC)**, select the production form, and define the reference as **5.678 L per UC** for the Coca-Cola-style example. MEMS must derive the reference UoM from the production form.
+- Create a SKU with **1,000 mL** per primary container and **12 primary containers** per commercial case.
+- Confirm the commercial package has **12 L**, and the stored normalization factor is **12 / 5.678 ≈ 2.1134 UC per physical commercial case**. It must not be stored as one UC simply because the selling package is called a case.
+- Configure a transport pallet with 10 commercial cases per layer and 5 layers; confirm **50 commercial cases** and **600 L**, or approximately **105.67 normalized UC per transport unit**. This is a secondary calculation and must not alter the commercial conversion factor.
+- Reject mismatched reference production dimensions (e.g., mass versus volume), invalid zero/negative references and references to missing or inactive production forms.
+- Preserve pre-existing normalization references based on direct central MEMS units. Save the resolved reference, numerator, denominator and factor as a versioned SKU snapshot for traceability.
+
 ## Unverified by the automated GitHub checks
 - Actual authenticated frontend navigation, input interactions and workflow dialogs in development.
 - Firestore write/read/update/revision history against a designated test tenant.
