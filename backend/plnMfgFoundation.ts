@@ -295,6 +295,11 @@ export const plnMfgFoundationRoutes={
             if(old&&Number(ctx.body.expectedRevision)!==(num(old.data.revision)??1))
                 throw new HttpError(409,'This record has changed. Refresh to get the latest revision.');
             if(kind==='items'){
+                // Naming snapshots are server-authored: never trust a client-provided
+                // revision, generated name or rule for a manufacturing master.
+                const applySkuNamingSequence=raw.applySkuNamingSequence===true;
+                delete raw.skuNamingSnapshot;
+                delete raw.applySkuNamingSequence;
                 const category=str(raw.category);
                 const supplied=isObj(raw.skuComponents)?raw.skuComponents:{};
                 if(category==='FINISHED'||Object.values(supplied).some(Boolean)){
@@ -320,7 +325,7 @@ export const plnMfgFoundationRoutes={
                     const naming=await namingSequenceForOrg(ctx.orgId);
                     raw.skuComponents=selected;
                     raw.skuConversion=result;
-                    if(naming.configured&&(creating||raw.applySkuNamingSequence===true)){
+                    if(naming.configured&&(creating||applySkuNamingSequence)){
                         raw.name=composeSkuNameWithSequence(selected,configured,naming.sequence,result);
                         raw.skuNamingSnapshot={revision:naming.revision,sequence:naming.sequence,
                             generatedName:raw.name,generatedAt:nowIso()};
