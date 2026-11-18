@@ -7,6 +7,7 @@ import { HttpError, num, str } from './core';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { validatePrimaryContainerSelection, type MfgPrimaryContainerType } from './mfgPrimaryContainerMetadata';
 import {validatePackagingLayout, type MfgPackagingType} from './mfgPackagingMetadata';
+import {composeSkuNameFromSequence, type SkuNamingSequence, type SkuNameValues} from '../src/shared/mfgSkuNaming';
 
 export const SKU_PARAMETERS={
     productNames:'NME', productionForms:'FRM', containers:'CNT',
@@ -18,7 +19,7 @@ export type SkuParameterKind=keyof typeof SKU_PARAMETERS;
 export const SKU_PARAMETER_KINDS=Object.keys(SKU_PARAMETERS) as SkuParameterKind[];
 export type SkuParameter={id:string;kind:SkuParameterKind;name:string;
     uom?:string;quantity?:number;baseUom?:string;quantityPerUnit?:number;
-    referenceProductionFormId?:string;
+    referenceProductionFormId?:string;normalizationOperator?:'DIVIDE'|'MULTIPLY';
     categoryCode?:string;unitCode?:string;unitCount?:number;
     productCode?:string;metadataCode?:string;subcategoryCode?:string;
     containerAttributes?:Record<string,string>;
@@ -39,6 +40,8 @@ export type SkuConversion={
     normalizationUom:string;productionQtyPerNormalizationUnit:number|null;
     normalizationReferenceUom:string|null;referenceQtyPerNormalizedUnit:number|null;
     normalizedUnitsPerCommercialPackage:number|null;
+    normalizationOperator:'DIVIDE'|'MULTIPLY';
+    normalizationOperand:number|null;
     conversionFactor:number|null; // normalized units per one commercial package (compatibility)
     reverseConversionFactor:number|null; // commercial packages per normalized unit
     transportLayeringEnabled:boolean;
@@ -181,6 +184,8 @@ export function calculateSkuConversion(
         perPack=(contentPerContainer??0)*n;
     }
     let normalizedName='',normalizedReferenceUom:string|null=null;
+    const normalizationOperator=normalize?.normalizationOperator==='MULTIPLY'?'MULTIPLY':'DIVIDE';
+    let normalizationOperand:number|null=null;
     if(normalize){
         // The organization's normalized unit is a reference quantity of the
         // production form (for example: one UC = 5.678 L). The commercial
@@ -193,9 +198,16 @@ export function calculateSkuConversion(
             throw new HttpError(400,'Normalized unit reference must use its selected production form unit.');
         const ratio=skuUnitConversion(basisUom,productionUom);
         if(!ratio)throw new HttpError(400,'Normalization reference must match the product form dimension.');
-        perUnit=(num(normalize.quantityPerUnit)??0)*ratio;
+        normalizationOperand=num(normalize.quantityPerUnit)??null;
+        if(normalizationOperand===null||!Number.isFinite(normalizationOperand)||normalizationOperand<=0)
+            throw new HttpError(400,'Normalization reference quantity or multiplier must be positive.');
+        // DIVIDE: 1 UC = operand reference units (e.g. L/UC).
+        // MULTIPLY: operand normalized units per reference unit (e.g. UC/L).
+        // The reference production unit may differ by scale, but not dimension.
+        perUnit=normalizationOperator==='DIVIDE'
+            ?normalizationOperand*ratio:ratio/normalizationOperand;
         if(!Number.isFinite(perUnit)||perUnit<=0)
-            throw new HttpError(400,'Configured normalization reference quantity must be positive.');
+            throw new HttpError(400,'Normalization reference quantity must be positive.');
         normalizedReferenceUom=basisUom;
         normalizedName=normalize.name;
     }
@@ -229,8 +241,9 @@ export function calculateSkuConversion(
         normalizationUom:normalizedName,
         productionQtyPerNormalizationUnit:round(perUnit),
         normalizationReferenceUom:normalizedReferenceUom,
-        referenceQtyPerNormalizedUnit:normalize?(num(normalize.quantityPerUnit)??null):null,
+        referenceQtyPerNormalizedUnit:perUnit===null?null:round(perUnit),
         normalizedUnitsPerCommercialPackage:round(factor),
+        normalizationOperator,normalizationOperand,
         conversionFactor:round(factor),
         reverseConversionFactor:round(reverse),
         transportLayeringEnabled:transport?stacking:false,
@@ -316,9 +329,11 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
     if(kind==='normalizationUnits'){
         const baseUom=str(raw.baseUom).trim(),quantityPerUnit=Number(raw.quantityPerUnit);
         const referenceProductionFormId=str(raw.referenceProductionFormId).trim();
+        const operator=raw.normalizationOperator===undefined||raw.normalizationOperator===''?'DIVIDE':str(raw.normalizationOperator);
+        if(operator!=='DIVIDE'&&operator!=='MULTIPLY')throw new HttpError(400,'Select Divide or Multiply as the normalization operator.');
         if(!baseUom||!skuUnitConversion(baseUom,baseUom)||!Number.isFinite(quantityPerUnit)||quantityPerUnit<=0||quantityPerUnit>1e12)
-            throw new HttpError(400,'Define a positive reference quantity in the production form unit per normalized unit case.');
-        return {...base,baseUom,quantityPerUnit,referenceProductionFormId};
+            throw new HttpError(400,'Define a positive reference quantity or multiplier in the selected production form unit.');
+        return {...base,baseUom,quantityPerUnit,referenceProductionFormId,normalizationOperator:operator};
     }
     return base;
 }
@@ -333,4 +348,48 @@ export function composeConfiguredSkuName(values:SkuComponents,params:SkuParamete
     const count=str(selected.get(values.packagingSizeId||values.packageCountId||'')?.name).trim();
     return [name,[size,container].filter(Boolean).join(' '),[pack,count?'x'+count:''].filter(Boolean).join(' ')]
         .filter(Boolean).join(' · ').slice(0,160);
+}
+
+
+/** Project the configured SKU components into stable naming tokens.
+ * Codes prefer meaningful master codes; generated parameter IDs remain an
+ * explicit fallback for records without a business code.
+ */
+export function skuNamingValues(values:SkuComponents,params:SkuParameter[],converted?:SkuConversion):SkuNameValues {
+    const map=new Map(params.map(p=>[p.id,p]));
+    const pick=(id:string|undefined)=>id?map.get(id):undefined;
+    const product=pick(values.productNameId),form=pick(values.productionFormId);
+    const container=pick(values.containerId),size=pick(values.containerSizeId);
+    const commerce=pick(values.packageId);
+    const count=pick(values.packagingSizeId||values.packageCountId);
+    const transport=pick(values.transportPackageId),norm=pick(values.normalizationUnitId);
+    const token=(x:SkuParameter|undefined,code?:string)=>x
+        ?{name:x.name,code:code||x.id,quantity:x.quantity,unit:x.uom?(
+            PROCUREMENT_UNITS.find(u=>u.code===x.uom)?.symbol||x.uom):undefined}:undefined;
+    return {
+        productName:token(product,product?.productCode),
+        productionForm:token(form),
+        primaryContainer:token(container,container?.metadataCode),
+        containerSize:token(size),
+        commercialPackaging:token(commerce,commerce?.packagingTypeCode),
+        commercialPackSize:token(count),
+        transportPackaging:token(transport,transport?.packagingTypeCode),
+        normalizationUnit:norm?{name:norm.name,code:norm.id,quantity:norm.quantityPerUnit,unit:norm.baseUom}:undefined,
+        commercialProductQuantity:converted?.productionQtyPerPackage!==null&&converted?.productionQtyPerPackage!==undefined
+            ?{quantity:converted.productionQtyPerPackage,unit:converted.productionUom}:undefined,
+        normalizedCommercialQuantity:converted?.normalizedUnitsPerCommercialPackage!==null&&
+            converted?.normalizedUnitsPerCommercialPackage!==undefined
+            ?{quantity:converted.normalizedUnitsPerCommercialPackage}:undefined,
+        transportPackagesPerLayer:values.transportPackagesPerLayer
+            ?{quantity:values.transportPackagesPerLayer}:undefined,
+        transportLayerCount:values.transportLayerCount?{quantity:values.transportLayerCount}:undefined,
+        transportTotalUnits:converted?.commercialPackagesPerTransportUnit
+            ?{quantity:converted.commercialPackagesPerTransportUnit}:undefined,
+    };
+}
+export function composeSkuNameWithSequence(values:SkuComponents,params:SkuParameter[],
+    sequence:SkuNamingSequence,converted?:SkuConversion):string{
+    const result=composeSkuNameFromSequence(sequence,skuNamingValues(values,params,converted));
+    if(!result.trim())throw new HttpError(400,'The SKU naming sequence produced an empty name.');
+    return result;
 }
