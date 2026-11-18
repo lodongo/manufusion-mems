@@ -7,7 +7,7 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { audit } from './audit';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { primaryContainerCatalogueFromAdmin } from './mfgPrimaryContainerMetadata';
-import {normalizePackagingTypes} from './mfgPackagingMetadata';
+import {normalizePackagingTypes,packagingHierarchyRank} from './mfgPackagingMetadata';
 import {
     SKU_PARAMETERS, SKU_PARAMETER_KINDS, managedCode, normalizeSkuParameter, skuUnitCategories,
     packagingPrimaryContainerCount,
@@ -108,6 +108,8 @@ export const mfgSkuConfigurationRoutes={
                     throw new HttpError(400,'A container packaging record cannot contain itself.');
                 const child=all.find(p=>p.kind==='packages'&&p.id===normalized.containedPackagingId&&p.enabled!==false);
                 if(!child)throw new HttpError(400,'Select an active lower-level container packaging record.');
+                if(packagingHierarchyRank(str(child.packagingTypeCode))>=packagingHierarchyRank(str(normalized.packagingTypeCode)))
+                    throw new HttpError(400,'A consolidated load must contain a lower-level packaging type, for example a pallet containing cases.');
                 // Reject cycles (including edits to an existing ancestor) and excessive
                 // resulting counts before anything is committed to the database.
                 packagingPrimaryContainerCount({...normalized,id:existingId||'PKG_PENDING'} as SkuParameter,
