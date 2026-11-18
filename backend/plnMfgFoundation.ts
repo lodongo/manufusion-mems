@@ -8,8 +8,8 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canAt, nodePath, scopeOf } from './access';
 import { audit } from './audit';
 import { getNode } from './structure';
-import { calculateSkuConversion, composeConfiguredSkuName, masterPrefix, type SkuComponents } from './mfgSkuModel';
-import { commitGeneratedCode, skuParametersForOrg } from './mfgSkuConfiguration';
+import { calculateSkuConversion, composeConfiguredSkuName, composeSkuNameWithSequence, masterPrefix, type SkuComponents } from './mfgSkuModel';
+import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from './mfgSkuConfiguration';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
 export type MasterKind = typeof MASTER_KINDS[number];
@@ -59,7 +59,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const inventoryMaterialId=str(raw.inventoryMaterialId).trim();
         if(inventoryMaterialId&&!ID.test(inventoryMaterialId))throw new HttpError(400,'Invalid Inventory material reference.');
         if((category==='RAW'||category==='PACKAGING')&& !inventoryMaterialId)throw new HttpError(400,'Raw and packaging materials must refer to the existing Inventory material master. Fictional demo materials remain read-only.');
-        return {...base,category,family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,packQty:POSITIVE(raw.packQty??1,'Pack quantity'),skuComponents:isObj(raw.skuComponents)?raw.skuComponents:{},skuConversion:isObj(raw.skuConversion)?raw.skuConversion:{}};
+        return {...base,category,family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,packQty:POSITIVE(raw.packQty??1,'Pack quantity'),skuComponents:isObj(raw.skuComponents)?raw.skuComponents:{},skuConversion:isObj(raw.skuConversion)?raw.skuConversion:{},skuNamingSnapshot:isObj(raw.skuNamingSnapshot)?raw.skuNamingSnapshot:{}};
     }
     if(kind==='resources'){
         return {...base,type:ENUM(raw.type,RESOURCE_TYPES,'resource type'),rate:POSITIVE(raw.rate,'Rated units per hour'),rateUom:UOM(raw.rateUom),assetId:str(raw.assetId).slice(0,60),efficiency:NONNEGATIVE(raw.efficiency??100,'Efficiency percentage',100)};
@@ -317,9 +317,21 @@ export const plnMfgFoundationRoutes={
                     };
                     const result=calculateSkuConversion(selected,configured);
                     const physicalPackage=configured.find(p=>p.id===selected.packageId);
+                    const naming=await namingSequenceForOrg(ctx.orgId);
                     raw.skuComponents=selected;
                     raw.skuConversion=result;
-                    raw.name=composeConfiguredSkuName(selected,configured);
+                    if(naming.configured&&(creating||raw.applySkuNamingSequence===true)){
+                        raw.name=composeSkuNameWithSequence(selected,configured,naming.sequence,result);
+                        raw.skuNamingSnapshot={revision:naming.revision,sequence:naming.sequence,
+                            generatedName:raw.name,generatedAt:nowIso()};
+                    }else if(!creating&&old){
+                        // Existing SKU names are stable until explicitly regenerated.
+                        raw.name=str(old.data.name)||composeConfiguredSkuName(selected,configured);
+                        raw.skuNamingSnapshot=isObj(old.data.skuNamingSnapshot)?old.data.skuNamingSnapshot:{};
+                    }else{
+                        // Preserve legacy naming until the organization activates a sequence.
+                        raw.name=composeConfiguredSkuName(selected,configured);
+                    }
                     raw.uom=physicalPackage?.uom||result.productionUom;
                     raw.packQty=result.containersPerPackage??1;
                 }else if(creating&&category==='FINISHED'){
