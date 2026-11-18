@@ -8,7 +8,8 @@ import { HttpError, commitChecked, getDoc, listDocs, nowIso, randomId, str } fro
 import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canAt, nodePath, scopeOf } from './access';
 import { audit } from './audit';
-import { referenceChecks, bomFamily, bomAlternative } from './plnMfgFoundation';
+import { referenceChecks, bomAlternative } from './plnMfgFoundation';
+import { bomClassificationCode, bomReleaseSlotGroup } from './mfgMaterialPolicy';
 
 type Kind = 'boms'|'routings';
 const TABLE:Record<Kind,string> = {boms:'mfg_boms',routings:'mfg_routings'};
@@ -63,31 +64,29 @@ export const plnMfgReleaseRoutes={
                 throw new HttpError(403,'This production site is outside your authorized scope.');
             const all=await listDocs(root(ctx.orgId,kind));
             const records=all.filter(row=>str(kind==='boms'?row.data.parentSkuId:row.data.skuId)===skuId)
-                .map(row=>({id:row.id,...row.data,type:str(row.data.type),
+                .map(row=>({id:row.id,...row.data,classificationCode:bomClassificationCode(row.data),
                     alternativeCode:str(row.data.alternativeCode)}));
             if(kind==='boms'){
-                const requestedType=str(ctx.body.bomType);
+                const requestedClassification=str(ctx.body.classificationCode).toUpperCase();
                 const requestedAlternative=str(ctx.body.alternativeCode);
-                if(requestedType&&!['MANUFACTURING','FLAVOR_VARIANT','RECIPE','PACKAGING','BOM'].includes(requestedType))
-                    throw new HttpError(400,'Choose Manufacturing or Packaging BOM category.');
                 const groups=new Map<string,typeof records>();
                 for(const record of records){
-                    const type=bomFamily(str(record.type));
+                    const classificationCode=bomClassificationCode(record);
                     const alternative=bomAlternative(record.alternativeCode);
-                    if(requestedType&&type!==bomFamily(requestedType))continue;
+                    if(requestedClassification&&classificationCode!==requestedClassification)continue;
                     if(requestedAlternative&&alternative!==bomAlternative(requestedAlternative))continue;
-                    const key=type+'__'+alternative,list=groups.get(key)||[];
+                    const key=classificationCode+'__'+alternative,list=groups.get(key)||[];
                     list.push(record);groups.set(key,list);
                 }
                 const options=[...groups.entries()].map(([key,versions])=>{
                     const selected=selectEffectiveForSite(versions,date,siteId);
-                    return selected?{type:bomFamily(str(selected.type)),
+                    return selected?{classificationCode:bomClassificationCode(selected),
                         alternativeCode:bomAlternative(selected.alternativeCode),record:selected}:null;
                 }).filter((x):x is NonNullable<typeof x>=>x!==null);
                 const record=options.length===1?options[0].record:null;
                 return {kind,skuId,siteId,date,record,available:!!record,
                     requiresSelection:options.length>1,options,
-                    explanation:options.length>1?'Choose an explicit BOM category and alternative for this production version':
+                    explanation:options.length>1?'Choose an explicit BOM classification and alternative for this production version':
                         record?'Approved effective BOM alternative':'No approved BOM alternative is effective'};
             }
             const selected=selectEffectiveForSite(records,date,siteId);
@@ -141,7 +140,7 @@ export const plnMfgReleaseRoutes={
                     str(other.data.effectiveFrom)===str(doc.data.effectiveFrom)&&
                     (kind==='boms'
                         ?str(other.data.parentSkuId)===str(doc.data.parentSkuId)&&
-                            bomFamily(str(other.data.type))===bomFamily(str(doc.data.type))&&
+                            bomClassificationCode(other.data)===bomClassificationCode(doc.data)&&
                             bomAlternative(other.data.alternativeCode)===bomAlternative(doc.data.alternativeCode)
                         :str(other.data.skuId)===str(doc.data.skuId)));
                 if(same.length)throw new HttpError(409,'Another approved version already applies to this SKU, site and effective date.');
@@ -153,14 +152,14 @@ export const plnMfgReleaseRoutes={
             // commit. Two simultaneous approvals cannot publish conflicting versions.
             const skuId=str(kind==='boms'?doc.data.parentSkuId:doc.data.skuId);
             const slotKey=[kind,str(doc.data.siteId)||'ORG',skuId,
-                ...(kind==='boms'?[bomFamily(str(doc.data.type)),bomAlternative(doc.data.alternativeCode)]:[]),
+                ...(kind==='boms'?[bomReleaseSlotGroup(doc.data),bomAlternative(doc.data.alternativeCode)]:[]),
                 str(doc.data.effectiveFrom)||'BASE'].join('__');
             const slotPath='organizations/'+ctx.orgId+'/mfg_release_slots/'+slotKey;
             const saved=await commitChecked([
                 {path,data,precondition:{updateTime:doc.updateTime}},
                 {path:path+'/release_events/'+randomId(10),data:{action:decision,kind,revision:doc.data.revision,by:ctx.uid,at,note},precondition:{exists:false}},
                 ...(status==='active'?[{path:slotPath,data:{kind,skuId,siteId:str(doc.data.siteId),effectiveFrom:str(doc.data.effectiveFrom),
-                    ...(kind==='boms'?{bomType:bomFamily(str(doc.data.type)),alternativeCode:bomAlternative(doc.data.alternativeCode)}:{}),
+                    ...(kind==='boms'?{classificationCode:bomClassificationCode(doc.data),alternativeCode:bomAlternative(doc.data.alternativeCode)}:{}),
                     masterId:id,activatedAt:at,activatedBy:ctx.uid},precondition:{exists:false}}]:[]),
             ]);
             if(!saved)throw new HttpError(409,'This release changed. Refresh and decide again.');

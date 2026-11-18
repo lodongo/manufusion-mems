@@ -10,7 +10,7 @@ import { audit } from './audit';
 import { getNode } from './structure';
 import { calculateSkuConversion, composeConfiguredSkuName, composeSkuNameWithSequence, skuUnitConversion, masterPrefix, type SkuComponents } from './mfgSkuModel';
 import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from './mfgSkuConfiguration';
-import { mfgMaterialPolicyForOrg, mfgMaterialPolicyPath, normalizeMfgMaterialPolicy } from './mfgMaterialPolicy';
+import { mfgMaterialPolicyForOrg, mfgMaterialPolicyPath, normalizeMfgMaterialPolicy, bomClassificationCode } from './mfgMaterialPolicy';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
 export type MasterKind = typeof MASTER_KINDS[number];
@@ -46,17 +46,9 @@ const ENUM=<T extends string>(v:unknown, options:readonly T[],label:string):T=>{
 };
 const STAGES=['RAW','INTERMEDIATE','FINISHED','PACKAGING'] as const;
 const RESOURCE_TYPES=['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER'] as const;
-// New generic manufacturing BOM; historical FLAVOR_VARIANT, RECIPE and BOM remain compatible.
-const BOM_TYPES=['MANUFACTURING','PACKAGING','FLAVOR_VARIANT','BOM','RECIPE'] as const;
 const INTERMEDIATE_POLICIES=['STOCKED','NON_STOCKED'] as const;
 const SOURCE_MODES=['INVENTORY','UTILITY','DIRECT'] as const;
 const ALT_CODE=/^[A-Z0-9][A-Z0-9_-]{0,31}$/;
-/** Existing RECIPE/BOM revisions map to the new user-facing categories. */
-export function bomFamily(type:string):'MANUFACTURING'|'PACKAGING'{
-    if(type==='MANUFACTURING'||type==='FLAVOR_VARIANT'||type==='RECIPE')return 'MANUFACTURING';
-    if(type==='PACKAGING'||type==='BOM')return 'PACKAGING';
-    throw new HttpError(400,'Unknown manufacturing BOM category.');
-}
 /** Alternative code distinguishes approved routes for the same output/date. */
 export function bomAlternative(value:unknown):string {
     const code=str(value).trim().toUpperCase()||'STANDARD';
@@ -106,7 +98,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         return {...base,type:ENUM(raw.type,RESOURCE_TYPES,'resource type'),rate:POSITIVE(raw.rate,'Rated units per hour'),rateUom:UOM(raw.rateUom),assetId:str(raw.assetId).slice(0,60),efficiency:NONNEGATIVE(raw.efficiency??100,'Efficiency percentage',100)};
     }
     if(kind==='boms'){
-        const type=bomFamily(ENUM(raw.type,BOM_TYPES,'BOM type'));
+        const classificationCode=bomClassificationCode(raw);
         const productVariantId=str(raw.productVariantId??raw.flavorVariantId).trim();
         if(productVariantId)VALID_ID(productVariantId,'Product/Variant');
         // Shared manufacturing intermediates do not require product-specific identity.
@@ -124,7 +116,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             seen.add(skuId);
             return {line:i+1,skuId,quantity:POSITIVE(c.quantity,'Component quantity'),uom:UOM(c.uom),scrapPct:NONNEGATIVE(c.scrapPct??0,'Scrap percentage',100)};
         });
-        return {...base,type,productVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
+        return {...base,classificationCode,productVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
     const skuId=VALID_ID(raw.skuId,'Routed SKU');
     const operations=ARR(raw.operations);
@@ -208,6 +200,14 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         }
     }
     if(kind==='boms'){
+        const code=bomClassificationCode(item);
+        const configured=(await mfgMaterialPolicyForOrg(ctx.orgId)).policy.bomClassifications.find(c=>c.code===code);
+        // Older records may retain a historical code; new records must adopt a configured classification.
+        const historical=!str(item.classificationCode)&&!!str(item.type);
+        if(!configured&&!historical)
+            throw new HttpError(400,'BOM classification must be configured in Manufacturing Setup.');
+        if(configured&&!configured.enabled&&!historical)
+            throw new HttpError(400,'BOM classification is disabled in Manufacturing Setup.');
         const productVariantId=str(item.productVariantId??item.flavorVariantId);
         if(productVariantId){
             const variant=await getDoc('organizations/'+ctx.orgId+'/mfg_sku_parameters/'+productVariantId);
@@ -276,6 +276,10 @@ const out=(d:{id:string;data:Obj;updateTime?:string})=>{
     if(Object.prototype.hasOwnProperty.call(data,'flavorVariantId')){
         data.productVariantId=str(data.productVariantId)||str(data.flavorVariantId);
         delete data.flavorVariantId;
+    }
+    if(Object.prototype.hasOwnProperty.call(data,'parentSkuId')){
+        data.classificationCode=bomClassificationCode(data);
+        delete data.type;
     }
     return {id:d.id,...data,updatedAt:str(d.data.updatedAt),revision:num(d.data.revision)??1};
 };
@@ -383,6 +387,10 @@ export const plnMfgFoundationRoutes={
             if(kind==='routings'&&!hasPerm(ctx.permissions,'MFG.routing.edit')&&ctx.role!=='org_super_admin')
                 throw new HttpError(403,'Routing editing permission required.');
             const raw=isObj(ctx.body.record)?{...ctx.body.record}:{};
+            if(kind==='boms'){
+                // Canonical BOMs do not persist old category selectors.
+                delete raw.type;delete raw.flavorVariantId;
+            }
             const requestedId=str(raw.id).trim(),creating=!requestedId;
             if(creating&&Number(ctx.body.expectedRevision)!==0)
                 throw new HttpError(409,'New master data starts with revision zero.');
@@ -473,7 +481,7 @@ export const plnMfgFoundationRoutes={
                     updatedAt:now,updatedBy:ctx.uid};
             };
             if(creating){
-                const prefix=masterPrefix(kind,str(raw.type));
+                const prefix=masterPrefix(kind);
                 const created=await commitGeneratedCode(ctx.orgId,prefix,
                     id=>DOC(ctx.orgId,kind,id),makeData,{snapshotSubcollection:'revisions'});
                 await track(ctx,'mfg.master.create',kind+':'+created.id);
@@ -510,6 +518,10 @@ export const plnMfgFoundationRoutes={
             if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'MFG.sku.configure'))
                 throw new HttpError(403,'Organization-wide material handling policy requires a direct Manufacturing configuration permission.');
             const policy=normalizeMfgMaterialPolicy(ctx.body.policy);
+            const used=(await listDocs(ROOT(ctx.orgId,'boms')))
+                .filter(r=>!!str(r.data.classificationCode)).map(r=>bomClassificationCode(r.data));
+            if(used.some(code=>!policy.bomClassifications.some(c=>c.code===code)))
+                throw new HttpError(409,'A used BOM classification cannot be deleted; disable it.');
             const path=mfgMaterialPolicyPath(ctx.orgId),old=await getDoc(path);
             const version=num(old?.data.revision)??0;
             if(Number(ctx.body.expectedRevision)!==version)
