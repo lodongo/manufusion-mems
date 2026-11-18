@@ -100,11 +100,45 @@ export const MFG_PRIMARY_CONTAINER_TYPES:MfgPrimaryContainerType[]=seed.flatMap(
         subcategoryCode:s.code+'-'+suffix,subcategory:name,sectors:s.sectors,attributes:attributes(s.template)};
 }));
 const map=new Map(MFG_PRIMARY_CONTAINER_TYPES.map(t=>[t.code,t]));
-export function getPrimaryContainerMetadata(code:string):MfgPrimaryContainerType|null{
-    return map.get(code)??null;
+export function primaryContainerCatalogueFromAdmin(source:unknown):MfgPrimaryContainerType[] {
+    if(!Array.isArray(source))return MFG_PRIMARY_CONTAINER_TYPES;
+    const published:MfgPrimaryContainerType[]=[];
+    const codes=new Set<string>();
+    for(const row of source){
+        if(!row||typeof row!=='object'||Array.isArray(row))continue;
+        const item=row as Record<string,unknown>;
+        if(item.active===false||item.selectable===false)continue;
+        const code=str(item.code),name=str(item.label),category=str(item.category);
+        const categoryCode=str(item.categoryCode),subcategory=str(item.subcategory);
+        const subcategoryCode=str(item.subcategoryCode);
+        const fields=Array.isArray(item.attributes)?item.attributes:[];
+        if(!/^[A-Z]{3}_[0-9]{3}$/.test(code)||!name||!category||!categoryCode||
+            !subcategory||!subcategoryCode||fields.length>5||codes.has(code))continue;
+        const normalized:AttributeDefinition[]=[];
+        let valid=true;
+        for(const field of fields){
+            if(!field||typeof field!=='object'||Array.isArray(field)){valid=false;break;}
+            const attr=field as Record<string,unknown>;
+            const key=str(attr.key),label=str(attr.label);
+            const choices=Array.isArray(attr.choices)?attr.choices.filter(x=>typeof x==='string'&&x.length>0&&x.length<=80):[];
+            if(!/^[a-zA-Z][a-zA-Z0-9_]{1,29}$/.test(key)||!label||choices.length<2||choices.length>30||
+                new Set(choices).size!==choices.length||normalized.some(x=>x.key===key)){valid=false;break;}
+            normalized.push({key,label,required:attr.required===true,choices});
+        }
+        if(!valid)continue;
+        codes.add(code);
+        published.push({code,name,category,categoryCode,subcategory,subcategoryCode,
+            sectors:Array.isArray(item.sectors)?item.sectors.filter(x=>typeof x==='string') as string[]:[],
+            attributes:normalized});
+    }
+    // If a platform list has no valid records, do not replace the shipped baseline.
+    return published.length?published:MFG_PRIMARY_CONTAINER_TYPES;
 }
-export function validatePrimaryContainerSelection(metadataCode:string,raw:unknown){
-    const type=getPrimaryContainerMetadata(metadataCode);
+export function getPrimaryContainerMetadata(code:string,types:MfgPrimaryContainerType[]=MFG_PRIMARY_CONTAINER_TYPES):MfgPrimaryContainerType|null{
+    return types===MFG_PRIMARY_CONTAINER_TYPES?map.get(code)??null:types.find(t=>t.code===code)??null;
+}
+export function validatePrimaryContainerSelection(metadataCode:string,raw:unknown,types:MfgPrimaryContainerType[]=MFG_PRIMARY_CONTAINER_TYPES){
+    const type=getPrimaryContainerMetadata(metadataCode,types);
     if(!type)throw new HttpError(400,'Select a published MEMS primary-container type.');
     const input=(raw&&typeof raw==='object'&&!Array.isArray(raw))?raw as Record<string,unknown>:{};
     const selected:Record<string,string>={};
