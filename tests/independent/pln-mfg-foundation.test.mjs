@@ -528,10 +528,10 @@ test('reference production form must exist, be active and share compatible dimen
  configured.find(p=>p.kind==='normalizationUnits').referenceProductionFormId='FRM_DOES_NOT_EXIST';
  assert.throws(()=>calculateSkuConversion(exampleSelect,configured),/active, configured/);
  const mismatched=structuredClone(exampleParams);
- const form=mismatched.find(p=>p.kind==='productionForms');
- form.uom='kg';
- mismatched.find(p=>p.kind==='normalizationUnits').referenceProductionFormId=form.id;
- assert.throws(()=>calculateSkuConversion(exampleSelect,mismatched),/Normalized unit reference must use|Normalization reference must match/);
+ mismatched.push({id:'FRM_000000007',kind:'productionForms',name:'Solid mass',uom:'kg'});
+ mismatched.find(p=>p.kind==='normalizationUnits').referenceProductionFormId='FRM_000000007';
+ mismatched.find(p=>p.kind==='normalizationUnits').baseUom='kg';
+ assert.throws(()=>calculateSkuConversion(exampleSelect,mismatched),/Normalization reference must match/);
  const ui=read('src/org/MfgSkuSetup.tsx');
  assert.ok(ui.includes('Reference production form'));
  assert.ok(ui.includes('Reference quantity per normalized unit'));
