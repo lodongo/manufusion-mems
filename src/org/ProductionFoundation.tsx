@@ -145,7 +145,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,material
                 <Choice title='BOM type' value={bomCategory(str(draft.type))}
                     options={ [['MANUFACTURING','Manufacturing BOM'],['PACKAGING','Packaging BOM']] }
                     onChange={v=>update('type',v)}/>
-                <Choice title='Product/Variant (optional for shared materials)'} value={str(draft.flavorVariantId)} options={variantOptions}
+                <Choice title='Product/Variant (optional for shared materials)' value={str(draft.flavorVariantId)} options={variantOptions}
                     onChange={v=>update('flavorVariantId',v)}/>
                 <Choice title='Manufactured material / product' value={str(draft.parentSkuId)} options={itemOptions} onChange={v=>{const product=items.find(x=>x.id===v);onChange({...draft,parentSkuId:v,outputUom:product?.uom??draft.outputUom});}}/>
                 <Field title='BOM alternative code' value={str(draft.alternativeCode)||'STANDARD'}
