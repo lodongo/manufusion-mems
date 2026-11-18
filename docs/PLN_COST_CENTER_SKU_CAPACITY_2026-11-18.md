@@ -30,3 +30,24 @@ The earlier experimental `pln_equipment_capacity` assignment and `/api/org/pln/e
 - Test several SKUs with distinct throughput; edit/remove, revision conflicts, scope restrictions and UOM mismatch.
 - Verify all equipment-specific Asset Register, Organization Design, Safety and Maintenance functionality remains available without newly introduced planning controls.
 - No live stock, purchase, production, costing or finance postings from this setup.
+
+## Physical-container commissioned rating (2026-11-18)
+The primary commissioned rating is **a quantity of physical containers per selected time unit**, no longer the final SKU's stock UOM per hour. Physical Containers now hold an organization-configured default Count rating unit from the authoritative MEMS Units registry. New cost-centre mappings inherit this unit, but a different compatible Count unit can be chosen in Planning. The same page displays the physical-container category, subcategory, selected organizational type, configured attributes and container size.
+
+All rate results use exactly **one time denominator** (selected from the published Time category: second, minute, hour or day). Daily ratings mean 24 elapsed hours, not a shift schedule. Count units such as Dozen are multiplied by their published conversion factor into physical-container count; the unit is never interpreted as the finished pack.
+
+Let C be commissioned physical containers per selected period, V the SKU's production-form quantity per physical container, P the number of physical containers per commercial pack, and T the number of primary containers per transport unit. Then the same reference derives:
+- Physical-container capacity = C
+- Production-form capacity = C × V
+- Finished commercial SKU capacity = C ÷ P (only when its SKU packaging is configured)
+- Commercial-packaging capacity = C ÷ P
+- Transport/logistics capacity = C ÷ T
+- Optional normalized capacity = production form capacity ÷ configured production quantity per normalized unit
+
+All P, T and V come from the selected SKU's **existing configuration and conversion engine**, not independently entered conversion factors. Missing or inconsistent SKU composition disables misleading conversions. The backend validates that the selected container category, subcategory, adopted container ID and size match the SKU. Save is revision-checked and returns the linked projection without posting transactions.
+
+**Lookup contract:** `/api/org/pln/cost-center/rating` receives a scoped costCentre ID and SKU ID, reads the single cost-centre record, and recomputes its capacity projection against current SKU and Physical Container master data. This establishes one authoritative reference for downstream production-form, commercial-packaging and logistics planning views, without silently using stale conversion factors. The endpoint returns the configured rate and corresponding period. Old stock-UOM/hour records cannot be assumed to mean primary containers and require explicit reconfiguration.
+
+Example using fictional demonstration numbers: 24,000 PET bottles/hour × 0.4 L = 9,600 L/hour; with 12 bottles/case the rate is 2,000 cases/hour; with 80 cases/pallet it is 25 pallets/hour. Switching the input period to minutes retains minutes for every derived figure. This is a commissioned rate, not a production-order posting, actual OEE, good-output rate or shift-adjusted schedule.
+
+The Physical Container defaults and this Cost Centre rating form must be checked in an authenticated development tenant. Approved production versions, material stock and asset/equipment settings are unchanged.

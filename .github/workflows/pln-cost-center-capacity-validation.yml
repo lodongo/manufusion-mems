@@ -4,6 +4,9 @@ on:
     branches: [develop]
     paths:
       - 'backend/plnCostCenterCapacity.ts'
+      - 'backend/plnPhysicalCapacity.ts'
+      - 'backend/mfgSkuModel.ts'
+      - 'src/org/MfgSkuSetup.tsx'
       - 'backend/index.ts'
       - 'src/org/PlnCostCenterSetup.tsx'
       - 'src/org/PlnCostCenterSkuSetup.tsx'

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {normalizeSkuCapacity,isManufacturingCostType,eligibleManufacturingHierarchy} from '../../backend/plnCostCenterCapacity.ts';
 import {normalizePhysicalRating,derivePhysicalCapacity,physicalRatingUnits} from '../../backend/plnPhysicalCapacity.ts';
+import {normalizeSkuParameter} from '../../backend/mfgSkuModel.ts';
+import {MFG_PRIMARY_CONTAINER_TYPES} from '../../backend/mfgPrimaryContainerMetadata.ts';
 const read=path=>readFileSync(new URL('../../'+path,import.meta.url),'utf8');
 const node=(id,level,parentId='',costType='',status='active')=>({id,level,parentId,costType,status,name:id,code:id});
 const types=[{code:'MFG',name:'Manufacturing',active:true},{code:'PRD',name:'Production',active:true},
@@ -47,6 +49,23 @@ test('Finance adopted cost centres filter manufacturing without changing organiz
   node('ORPHAN','cost_center','bad','MFG')
  ],types);
  assert.equal(invalid.costCenters.length,0);
+});
+test('Physical Containers can define a default Count unit without a parallel UOM master',()=>{
+ const pet=MFG_PRIMARY_CONTAINER_TYPES.find(t=>t.code==='PET_001');
+ const attrs=Object.fromEntries(pet.attributes.filter(a=>a.required).map(a=>[a.key,a.choices[0]]));
+ const adopted=normalizeSkuParameter('containers',{
+   metadataCode:'PET_001',containerAttributes:attrs,ratingCountUnitCode:'UOM-20-002',
+ },[pet]);
+ assert.equal(adopted.ratingCountUnitCode,'UOM-20-002');
+ assert.equal(adopted.categoryCode,'PET');
+ assert.throws(()=>normalizeSkuParameter('containers',{
+   metadataCode:'PET_001',containerAttributes:attrs,ratingCountUnitCode:'UOM-04-001',
+ },[pet]),/approved Count rating unit/);
+ const ui=read('src/org/MfgSkuSetup.tsx');
+ assert.ok(ui.includes('Count unit for commissioned throughput'));
+ assert.ok(ui.includes("draft.ratingCountUnitCode||'UOM-20-001'"));
+ const planner=read('src/org/PlnCostCenterSkuSetup.tsx');
+ assert.ok(planner.includes('chosen?.ratingCountUnitCode'));
 });
 test('physical rating units use the published Count and Time categories',()=>{
  const units=physicalRatingUnits();
@@ -111,6 +130,8 @@ test('cost centre mapping validates SKU composition, uses optimistic concurrency
  assert.ok(backend.includes("derivePhysicalCapacity(sku,params,line)"));
  assert.ok(backend.includes("'POST /api/org/pln/cost-center/preview'"));
  assert.ok(backend.includes("'POST /api/org/pln/cost-center/get'"));
+ assert.ok(backend.includes("'POST /api/org/pln/cost-center/rating'"));
+ assert.ok(backend.includes('rating:'));
  assert.ok(backend.includes("Physical Container")||backend.includes("physical-container"));
  assert.ok(projection.includes('calculateSkuConversion(components,parameters)'));
  assert.ok(projection.includes('input.containerId!==str(components.containerId)'));
@@ -135,6 +156,7 @@ test('one editor is shared by the Organization Design gear and Production Planni
  assert.ok(ui.includes('Final product form'));
  assert.ok(ui.includes('Commercial packaging'));
  assert.ok(ui.includes('Transport & logistics'));
+ assert.ok(ui.includes('sku.skuComponents.containerSizeId===line.containerSizeId'));
  assert.ok(ui.includes('/api/org/pln/cost-center/save'));
  assert.ok(index.includes('...plnCostCenterCapacityRoutes'));
  assert.ok(!ui.includes('Commissioned throughput / hour'));
