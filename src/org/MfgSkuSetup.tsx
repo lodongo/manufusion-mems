@@ -226,7 +226,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
     const edit=(entry:SkuParameter)=>{
         setDraft({...entry});
         setTypeCode(entry.kind==='packages'?entry.packagingTypeCode||'':entry.metadataCode||'');
-        setCategory(entry.categoryCode||'');
+        setCategory(entry.kind==='packages'?entry.packagingTypeCode?.slice(0,3)||'':entry.categoryCode||'');
         setError('');setNotice('');
     };
     const save=async()=>{
@@ -340,7 +340,9 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                         title='Contained packaging (lower level)' value={draft.containedPackagingId||''}
                         placeholder='Select a configured package'
                         options={setup.parameters.filter(p=>p.kind==='packages'&&p.id!==draft.id&&p.enabled!==false
-                            &&!!p.packagingTypeCode&&p.level!=='TRANSPORT'&&p.level!=='BULK')
+                            &&!!p.packagingTypeCode&&
+                            ({SEC:1,TER:2,PAL:3,LOG:4,RET:4,BUL:5} as Record<string,number>)[p.packagingTypeCode.slice(0,3)] <
+                            (({SEC:1,TER:2,PAL:3,LOG:4,RET:4,BUL:5} as Record<string,number>)[typeCode.slice(0,3)]||0))
                             .map(p=>[p.id,p.name+' · '+(p.quantity||0)+' contained units'])}
                         onChange={code=>update('containedPackagingId',code)}/>}
                     <TextInput title='Name' value={draft.name||''} onChange={v=>update('name',v)} required/>
