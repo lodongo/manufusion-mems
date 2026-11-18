@@ -303,7 +303,8 @@ export const plnMfgFoundationRoutes={
                     const selected:SkuComponents={
                         productNameId:str(supplied.productNameId),productionFormId:str(supplied.productionFormId),
                         containerId:str(supplied.containerId),containerSizeId:str(supplied.containerSizeId),
-                        packageId:str(supplied.packageId),packageCountId:str(supplied.packageCountId),
+                        packageId:str(supplied.packageId),packagingSizeId:str(supplied.packagingSizeId),
+                        packageCountId:str(supplied.packageCountId), // existing SKU compatibility
                         normalizationUnitId:str(supplied.normalizationUnitId),
                     };
                     const result=calculateSkuConversion(selected,configured);
