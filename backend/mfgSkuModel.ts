@@ -117,7 +117,7 @@ export function calculateSkuConversion(
     const productionUom=str(form?.uom);
     if(!productionUom)throw new HttpError(400,'Production form must define a production unit.');
     // Existing container parameters without category stay readable during migration.
-    if(container?.categoryCode && container.categoryCode!==skuUnitCategoryOf(productionUom))
+    if(container?.categoryCode?.startsWith('UOM-') && container.categoryCode!==skuUnitCategoryOf(productionUom))
         throw new HttpError(400,'Physical container category is incompatible with the production form unit.');
     let contentPerContainer:number|null=null,perPack:number|null=null,perUnit:number|null=null;
     if(size){
