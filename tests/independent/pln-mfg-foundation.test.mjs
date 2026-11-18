@@ -331,10 +331,11 @@ test('container packaging uses MEMS units and numeric packaging sizes need no de
  const selections={...exampleSelect,packagingSizeId:'PCT_000000001',packageCountId:''};
  assert.equal(calculateSkuConversion(selections,params).productionQtyPerPackage,12);
 });
-test('SKU setup has only seven minimalist menu entries and metadata-backed choices',()=>{
+test('SKU setup has distinct commercial and transport menus with metadata-backed choices',()=>{
  const ui=read('src/org/MfgSkuSetup.tsx');
- assert.ok(ui.includes("title:'Container Packaging'"));
- assert.ok(ui.includes("title:'Container Packaging Sizes'"));
+ assert.ok(ui.includes("title:'Commercial Packaging'"));
+ assert.ok(ui.includes("title:'Transport & Logistics Packaging'"));
+ assert.ok(ui.includes("title:'Commercial Packaging Sizes'"));
  assert.ok(ui.includes("title:'Physical Containers'"));
  assert.ok(ui.includes('Container subcategory / type'));
  assert.ok(ui.includes('metadataType.attributes.slice(0,5)'));
@@ -484,4 +485,15 @@ test('SKU configuration menus separate selling packs and logistics, with layerin
  assert.ok(backend.includes('transportPackagesPerLayer'));
  assert.ok(backend.includes('transportLayerCount'));
  assert.ok(backend.includes('transportUnitsPerLoad'));
+});
+
+test('previously saved transport layers under commercial masters remain backward compatible',()=>{
+ const old=MFG_PACKAGING_TYPES.find(t=>t.name==='Wooden pallet');
+ const saved=normalizeSkuParameter('packages',{
+     id:'PKG_000000020',name:'Old pallet master',packagingTypeCode:old.code,
+     containersPerLayer:8,numberOfLayers:5,containedPackagingId:'PKG_000000019',
+ },undefined,MFG_PACKAGING_TYPES);
+ assert.equal(saved.quantity,40);
+ assert.equal(saved.containedUnit,'PACKAGING');
+ assert.equal(saved.containersPerLayer,8);
 });
