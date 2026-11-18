@@ -6,7 +6,7 @@ import { HttpError, commitChecked, getDoc, isObj, listDocs, nowIso, num, str, ty
 import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { audit } from './audit';
 import { PROCUREMENT_UNITS } from './procurementUnits';
-import { MFG_PRIMARY_CONTAINER_CATEGORIES, MFG_PRIMARY_CONTAINER_TYPES, primaryContainerCatalogueFromAdmin } from './mfgPrimaryContainerMetadata';
+import { primaryContainerCatalogueFromAdmin } from './mfgPrimaryContainerMetadata';
 import {
     SKU_PARAMETERS, SKU_PARAMETER_KINDS, managedCode, normalizeSkuParameter, skuUnitCategories,
     type SkuParameter, type SkuParameterKind,
