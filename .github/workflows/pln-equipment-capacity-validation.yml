@@ -1,0 +1,48 @@
+name: PLN equipment and SKU capacity validation
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'backend/plnEquipmentCapacity.ts'
+      - 'backend/index.ts'
+      - 'src/org/PlnEquipmentSetup.tsx'
+      - 'src/org/ProductionFoundation.tsx'
+      - 'src/org/PlnAssetCapacityView.tsx'
+      - 'src/org/AssetRegister.tsx'
+      - 'src/org/WorkCenterAsset.tsx'
+      - 'tests/independent/pln-equipment-capacity.test.mjs'
+      - '.github/workflows/pln-equipment-capacity-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  equipment-capacity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Check TypeScript and repository
+        run: npm run check
+      - name: Build frontend
+        run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY: ci-fixture-not-real
+          VITE_FIREBASE_AUTH_DOMAIN: mems-dev-ci.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: mems-dev-ci
+          VITE_FIREBASE_STORAGE_BUCKET: mems-dev-ci.firebasestorage.app
+          VITE_FIREBASE_MESSAGING_SENDER_ID: '123456789012'
+          VITE_FIREBASE_APP_ID: 1:123456789012:web:ci-fixture
+      - name: Validate planning equipment / capacity contract
+        run: node --import tsx --test tests/independent/pln-equipment-capacity.test.mjs
+      - name: Coverage boundaries
+        run: |
+          echo "One equipment per manufacturing cost centre is guarded by optimistic atomic writes."
+          echo "Planning owns SKU mapping and commissioned hourly rates; AST only reads the projection."
+          echo "Authenticated tenant UAT and physical capacity/MPS integration must be verified separately."
