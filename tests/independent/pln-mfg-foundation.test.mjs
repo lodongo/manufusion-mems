@@ -648,7 +648,7 @@ test('SKU naming configuration is org-versioned with guarded save and existing-S
  assert.ok(api.includes("expectedRevision"));
  assert.ok(api.includes("org.mfg.sku.naming.save','MFG.sku.configure'"));
  const foundation=read('backend/plnMfgFoundation.ts');
- assert.ok(foundation.includes('naming.configured&&(creating||raw.applySkuNamingSequence===true)'));
+ assert.ok(foundation.includes('naming.configured&&(creating||applySkuNamingSequence)'));
  assert.ok(foundation.includes('raw.skuNamingSnapshot'));
  assert.ok(foundation.includes('raw.name=str(old.data.name)'));
  const ui=read('src/org/MfgSkuSetup.tsx');
@@ -657,6 +657,6 @@ test('SKU naming configuration is org-versioned with guarded save and existing-S
  assert.ok(ui.includes('SKU_NAME_SEPARATORS'));
  assert.ok(ui.includes('Move '));
  assert.ok(ui.includes('Save naming sequence'));
- assert.ok(ui.includes('SKU naming sequence preview'));
+ assert.ok(ui.includes('Naming sequence preview'));
  assert.ok(read('src/org/ProductionFoundation.tsx').includes('Apply the latest SKU naming sequence'));
 });
