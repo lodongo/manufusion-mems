@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState, type ButtonHTMLAttributes, type Re
 import { Alert, Field as MemsField, SelectField } from '../components/ui';
 import { Spinner } from '../admin/kit';
 import { SkuConfigurationFields, SkuSetupPanel, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
+import PlnDemand from './PlnDemand';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'rounded-2xl border border-line bg-panel p-4 text-ink '+className}>{children}</section>;
 }
@@ -19,7 +20,7 @@ import { callBackend } from '../lib/backend';
 import { hasPerm } from '../types';
 
 type Kind='items'|'boms'|'resources'|'routings';
-type Tab=Kind|'skuSetup'|'materialPolicy'|'config';
+type Tab=Kind|'skuSetup'|'materialPolicy'|'config'|'demand';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
@@ -40,6 +41,7 @@ type References={
 const emptyReferences:References={materials:[],utilities:[],assets:[],sites:[]};
 const kinds:Kind[]=['items','boms','resources','routings'];
 const tabs:{key:Tab;label:string;hint:string}[]=[
+    {key:'demand',label:'Demand & S&OP',hint:'Demand register, approvals and consolidated monthly net demand'},
     {key:'skuSetup',label:'Product Configuration',hint:'Configure variants, production forms and packaging attributes'},
     {key:'materialPolicy',label:'Manufacturing Setup',hint:'Material consumption and intermediate inventory policies'},
     {key:'items',label:'Materials & Products',hint:'Finished goods, components, intermediates and process inputs'},
@@ -301,7 +303,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,material
 }
 
 export default function ProductionFoundation({module,permissions}:{module:'PLN'|'MFG';permissions:string[]}){
-    const [active,setActive]=useState<Tab>(module==='PLN'&&!hasPerm(permissions,'MFG.view')?'config':'skuSetup');
+    const [active,setActive]=useState<Tab>(module==='PLN'?'demand':'skuSetup');
     const [rows,setRows]=useState<Record<Kind,Row[]>>(emptyRows);
     const [skuSetup,setSkuSetup]=useState<SkuSetup>(emptySkuSetup);
     const [refs,setRefs]=useState<References>(emptyReferences);
@@ -315,7 +317,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
     const canViewMasters=hasPerm(permissions,'MFG.view');
     const canViewPlanning=hasPerm(permissions,'PLN.view');
-    const visibleTabs=tabs.filter(t=>t.key==='config'?canViewPlanning:canViewMasters);
+    const visibleTabs=tabs.filter(t=>t.key==='config'||t.key==='demand'?canViewPlanning:canViewMasters);
     const canEdit=canViewMasters&&hasPerm(permissions,'MFG.master.edit');
     const canSkuConfig=canViewMasters&&hasPerm(permissions,'MFG.sku.configure');
     const canConfig=hasPerm(permissions,'PLN.configure');
@@ -418,7 +420,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {active!=='skuSetup'&&<p className='text-sm text-muted'>{tabs.find(t=>t.key===active)?.hint}</p>}
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
-        {loading?<Spinner/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
+        {loading?<Spinner/>:active==='demand'?<PlnDemand permissions={permissions}/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
             <div className='grid gap-3 sm:grid-cols-2'>

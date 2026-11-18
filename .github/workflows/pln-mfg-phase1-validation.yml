@@ -4,6 +4,9 @@ on:
     branches: [develop]
     paths:
       - 'backend/plnMfg*.ts'
+      - 'backend/plnDemand.ts'
+      - 'src/org/PlnDemand.tsx'
+      - 'tests/independent/pln-demand-phase2.test.mjs'
       - 'backend/mfgMaterialPolicy.ts'
       - 'backend/mfgSku*.ts'
       - 'backend/mfgPrimaryContainerMetadata.ts'
