@@ -1,5 +1,5 @@
-import {useId,useMemo,useState, type ComponentType} from 'react';
-import {ArrowLeft,Box,ChevronRight,Layers3,Maximize2,Package,PackageOpen,Shapes} from 'lucide-react';
+import {useId,useState} from 'react';
+import {ArrowLeft,Box,ChevronRight,Layers3,Maximize2,Package,PackageOpen,Shapes, type LucideIcon} from 'lucide-react';
 import {Field,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
 
@@ -48,7 +48,7 @@ export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
     {kind:'packagingSizes',title:'Container Packaging Sizes'},
     {kind:'normalizationUnits',title:'Normalization Units'},
 ];
-type IconComponent=ComponentType<{className?:string;'aria-hidden'?:'true'}>;
+type IconComponent=LucideIcon;
 const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
     {key:'productNames',title:'Product / SKU Names',Icon:Box},
     {key:'productionForms',title:'Production Forms',Icon:Layers3},
@@ -143,9 +143,9 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     const title=[product,[size?.name,container?.name].filter(Boolean).join(' '),
         [packageRecord?.name,packSize?'x'+packSize.quantity:''].filter(Boolean).join(' ')]
         .filter(Boolean).join(' · ');
-    const optionsFor=(kind:SkuParameterKind):Array<[string,string]=>setup.parameters
+    const optionsFor=(kind:SkuParameterKind):Array<[string,string]>=>setup.parameters
         .filter(p=>p.kind===kind&&p.enabled!==false&&
-            (kind!=='containers'||!value.productionFormId||!p.categoryCode.startsWith('UOM-')||
+            (kind!=='containers'||!value.productionFormId||!p.categoryCode?.startsWith('UOM-')||
                 p.categoryCode===pickUnit(setup,form?.uom)?.categoryCode))
         .map(p=>[p.id,p.name] as [string,string]);
     return <section className={modal+' space-y-3'}>
