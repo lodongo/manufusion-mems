@@ -8,13 +8,17 @@ import {HttpError,commitChecked,getDoc,isObj,listDocs,nowIso,num,str,type Doc,ty
 import {orgRoute,hasPerm,type OrgContext} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 import {audit} from './audit';
+import {skuParametersForOrg} from './mfgSkuConfiguration';
+import {primaryContainerCatalogueFromAdmin} from './mfgPrimaryContainerMetadata';
+import {normalizePhysicalRating,derivePhysicalCapacity,physicalRatingUnits,type PhysicalRating} from './plnPhysicalCapacity';
+import type {SkuParameter,SkuComponents} from './mfgSkuModel';
 
 const ID=/^[A-Za-z0-9][A-Za-z0-9_-]{1,119}$/;
 const ROOT=(org:string)=>'organizations/'+org+'/pln_cost_center_capacity';
 const STRUCTURE=(org:string)=>'organizations/'+org+'/structure';
 const SKU=(org:string)=>'organizations/'+org+'/mfg_items';
 type ScopeNode={id:string;parentId:string;level:string;name:string;code:string;costType:string;status:string};
-export type SkuCapacity={skuId:string;commissionedRatePerHour:number;rateUom:string};
+export type SkuCapacity=PhysicalRating;
 const identifier=(x:unknown,label:string)=>{
  const id=str(x).trim();
  if(!ID.test(id))throw new HttpError(400,'Choose a valid '+label+'.');
@@ -65,17 +69,10 @@ export function normalizeSkuCapacity(input:unknown):SkuCapacity[]{
   throw new HttpError(400,'Configure between 1 and 100 SKUs for the manufacturing cost centre.');
  const seen=new Set<string>();
  return input.map(raw=>{
-  if(!isObj(raw))throw new HttpError(400,'Invalid SKU capacity configuration.');
-  const skuId=identifier(raw.skuId,'manufactured SKU');
-  if(seen.has(skuId))throw new HttpError(400,'An SKU may be mapped only once to a cost centre.');
-  seen.add(skuId);
-  const commissionedRatePerHour=Number(raw.commissionedRatePerHour);
-  if(!Number.isFinite(commissionedRatePerHour)||commissionedRatePerHour<=0||commissionedRatePerHour>1e12)
-   throw new HttpError(400,'Commissioned throughput must be a positive quantity per hour.');
-  const rateUom=str(raw.rateUom);
-  if(!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,19}$/.test(rateUom))
-   throw new HttpError(400,'Use the SKU output unit for commissioned throughput.');
-  return {skuId,commissionedRatePerHour,rateUom};
+  const row=normalizePhysicalRating(raw);
+  if(seen.has(row.skuId))throw new HttpError(400,'An SKU may be mapped only once to a cost centre.');
+  seen.add(row.skuId);
+  return row;
  });
 }
 async function authorized(ctx:OrgContext,permission:'read'|'write',id:string){
@@ -99,21 +96,49 @@ async function candidate(ctx:OrgContext,costCenterId:string){
  const site=chain.find(d=>str(d?.data.level)==='site')!,le=chain.find(d=>str(d?.data.level)==='legal_entity')!;
  return {costCenterId,siteId:site.id,legalEntityId:le.id,name:display(cc),code:str(cc.data.code)};
 }
+type OutputSku={id:string;name:string;uom:string;siteId:string;category:string;
+ status:string;skuComponents:SkuComponents;revision:number};
+const asOutput=(item:Doc):OutputSku=>({
+ id:item.id,name:display(item),uom:str(item.data.uom),
+ siteId:str(item.data.siteId),category:str(item.data.category),status:str(item.data.status),
+ skuComponents:(isObj(item.data.skuComponents)?item.data.skuComponents:{}) as SkuComponents,
+ revision:num(item.data.revision)??1,
+});
+const skuForSite=async(ctx:OrgContext,skuId:string,siteId:string)=>{
+ const item=await getDoc(SKU(ctx.orgId)+'/'+skuId);
+ if(!item||!['FINISHED','INTERMEDIATE'].includes(str(item.data.category)))
+  throw new HttpError(400,'Choose an existing finished or intermediate manufactured SKU.');
+ if(str(item.data.siteId)&&str(item.data.siteId)!==siteId)
+  throw new HttpError(400,'The SKU is not available at this cost centre site.');
+ return asOutput(item);
+};
+async function validatedLine(ctx:OrgContext,siteId:string,raw:unknown,params:SkuParameter[]){
+ const line=normalizePhysicalRating(raw);
+ const sku=await skuForSite(ctx,line.skuId,siteId);
+ const projection=derivePhysicalCapacity(sku,params,line);
+ return {...line,skuName:sku.name,skuRevision:sku.revision,projection};
+}
 async function validatedLines(ctx:OrgContext,siteId:string,raw:unknown){
- const lines=normalizeSkuCapacity(raw);
+ const inputs=normalizeSkuCapacity(raw),params=await skuParametersForOrg(ctx.orgId);
  const output=[];
- for(const row of lines){
-  const item=await getDoc(SKU(ctx.orgId)+'/'+row.skuId);
-  if(!item||!['FINISHED','INTERMEDIATE'].includes(str(item.data.category)))
-   throw new HttpError(400,'Choose an existing finished or intermediate manufacturing SKU.');
-  if(str(item.data.siteId)&&str(item.data.siteId)!==siteId)
-   throw new HttpError(400,'The SKU is not available at the cost centre site.');
-  if(str(item.data.uom)!==row.rateUom)
-   throw new HttpError(400,'Commissioned throughput must use the SKU material-master unit.');
-  output.push({...row,skuName:display(item)});
- }
+ for(const line of inputs)output.push(await validatedLine(ctx,siteId,line,params));
  return output;
 }
+const validSavedProjection=async(ctx:OrgContext,siteId:string,raw:unknown,params:SkuParameter[])=>{
+ try{
+  if(!isObj(raw))throw new Error('Malformed rating entry');
+  const line=normalizePhysicalRating(raw);
+  const sku=await skuForSite(ctx,line.skuId,siteId);
+  return {...line,skuName:sku.name,skuRevision:sku.revision,
+    projection:derivePhysicalCapacity(sku,params,line)};
+ }catch(e){
+  // Older SKU-UOM/hour ratings cannot be silently reinterpreted as
+  // physical-container counts. Preserve them visibly for explicit correction.
+  const kept=isObj(raw)?raw:{};
+  return {...kept,projection:null,conversionIssue:
+    e instanceof Error?e.message:'Configure the physical container rating basis.'};
+ }
+};
 const expose=(row:Doc)=>({
  costCenterId:row.id,siteId:str(row.data.siteId),legalEntityId:str(row.data.legalEntityId),
  skuCapacities:Array.isArray(row.data.skuCapacities)?row.data.skuCapacities:[],
@@ -167,13 +192,38 @@ export const plnCostCenterCapacityRoutes={
    const id=identifier(ctx.body.costCenterId,'cost centre');
    if(!await authorized(ctx,'read',id))throw new HttpError(403,'Cost centre is outside your planning or organization scope.');
    const location=await candidate(ctx,id);
-   const rows=await listDocs(SKU(ctx.orgId));
+   const [rows,params,metadata,saved]=await Promise.all([
+    listDocs(SKU(ctx.orgId)),skuParametersForOrg(ctx.orgId),
+    getDoc('module_workspaces/MFG/metadata/primaryContainers'),getDoc(ROOT(ctx.orgId)+'/'+id),
+   ]);
    const outputs=rows.filter(d=>['FINISHED','INTERMEDIATE'].includes(str(d.data.category))&&
-      (!str(d.data.siteId)||str(d.data.siteId)===location.siteId))
-    .map(d=>({id:d.id,name:display(d),siteId:str(d.data.siteId),uom:str(d.data.uom),
-      category:str(d.data.category),status:str(d.data.status)}));
-   const saved=await getDoc(ROOT(ctx.orgId)+'/'+id);
-   return {location,outputs,mapping:saved?expose(saved):null,canConfigure:await authorized(ctx,'write',id)};
+      (!str(d.data.siteId)||str(d.data.siteId)===location.siteId)).map(asOutput);
+   const catalogue=primaryContainerCatalogueFromAdmin(metadata?.data.items);
+   const byMetadata=new Map(catalogue.map(t=>[t.code,t]));
+   const containers=params.filter(x=>x.kind==='containers'&&x.enabled!==false).map(x=>{
+    const type=byMetadata.get(str(x.metadataCode));
+    return {id:x.id,name:x.name,categoryCode:x.categoryCode,subcategoryCode:x.subcategoryCode,
+     categoryName:type?.category||str(x.categoryCode),subcategoryName:type?.subcategory||x.name,
+     containerAttributes:x.containerAttributes||{},metadataCode:x.metadataCode};
+   });
+   const sizes=params.filter(x=>x.kind==='containerSizes'&&x.enabled!==false)
+      .map(x=>({id:x.id,name:x.name,quantity:x.quantity,uom:x.uom}));
+   const ratings=saved?await Promise.all(
+      (Array.isArray(saved.data.skuCapacities)?saved.data.skuCapacities:[])
+       .map(line=>validSavedProjection(ctx,location.siteId,line,params))):[];
+   return {location,outputs,containers,sizes,units:physicalRatingUnits(),
+    mapping:saved?{...expose(saved),skuCapacities:ratings}:null,
+    canConfigure:await authorized(ctx,'write',id)};
+  }),
+ ],
+ 'POST /api/org/pln/cost-center/preview':[
+  orgRoute('org.pln.cost_center.preview',null,async ctx=>{
+   const id=identifier(ctx.body.costCenterId,'manufacturing cost centre');
+   if(!await authorized(ctx,'read',id))
+    throw new HttpError(403,'This cost centre is outside your authorized scope.');
+   const location=await candidate(ctx,id);
+   const params=await skuParametersForOrg(ctx.orgId);
+   return {line:await validatedLine(ctx,location.siteId,ctx.body.rating,params)};
   }),
  ],
  'POST /api/org/pln/cost-center/save':[
