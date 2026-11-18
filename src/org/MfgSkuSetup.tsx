@@ -154,6 +154,7 @@ export function SkuConfigurationFields({value,onChange,setup}:{
     const container=getParam(setup,'containers',value.containerId);
     const size=getParam(setup,'containerSizes',value.containerSizeId);
     const packageRecord=getParam(setup,'packages',value.packageId);
+    const transportRecord=getParam(setup,'transportPackages',value.transportPackageId);
     const packSize=value.packagingSizeId
         ?getParam(setup,'packagingSizes',value.packagingSizeId)
         :getParam(setup,'packageCounts',value.packageCountId);
@@ -165,6 +166,16 @@ export function SkuConfigurationFields({value,onChange,setup}:{
         :packSize?.quantity??null;
     const contentPerPackage=effectivePackSize!==null&&contentPerContainer!==null
         ?contentPerContainer*effectivePackSize:null;
+    const layersEnabled=!!value.transportLayeringEnabled;
+    const transportCount=transportRecord
+        ?(layersEnabled?Number(value.transportPackagesPerLayer)*Number(value.transportLayerCount):
+            Number(value.transportUnitsPerLoad)):null;
+    const validTransportCount=transportCount!==null&&Number.isSafeInteger(transportCount)&&
+        transportCount>=1&&transportCount<=10000000?transportCount:null;
+    const primaryPerTransport=validTransportCount!==null&&effectivePackSize!==null
+        ?validTransportCount*effectivePackSize:null;
+    const quantityPerTransport=validTransportCount!==null&&contentPerPackage!==null
+        ?validTransportCount*contentPerPackage:null;
     const normalBase=norm&&form&&ratio(setup,norm.baseUom,form.uom)!==null
         ?(norm.quantityPerUnit??0)*ratio(setup,norm.baseUom,form.uom)!:null;
     const factor=normalBase&&contentPerPackage!==null?contentPerPackage/normalBase:null;
@@ -192,6 +203,38 @@ export function SkuConfigurationFields({value,onChange,setup}:{
                     else onChange({...value,[v.key]:selected});
                 }}/>)}
         </div>
+        <div className='rounded-xl border border-line p-3 space-y-3'>
+            <h4 className='text-sm font-semibold'>Transport & Logistics Packaging</h4>
+            <Choice title='Transport packaging (optional)' value={value.transportPackageId||''}
+                placeholder='No transport package selected'
+                options={optionsFor('transportPackages')}
+                onChange={id=>onChange({...value,transportPackageId:id,
+                    transportLayeringEnabled:false,transportPackagesPerLayer:undefined,
+                    transportLayerCount:undefined,transportUnitsPerLoad:undefined})}/>
+            {transportRecord&&<>
+                <label className='flex min-h-11 items-center gap-3 text-sm'>
+                    <input type='checkbox' checked={layersEnabled}
+                        onChange={e=>onChange({...value,transportLayeringEnabled:e.target.checked,
+                            transportPackagesPerLayer:undefined,transportLayerCount:undefined,
+                            transportUnitsPerLoad:undefined})}/>
+                    Enable layered stacking
+                </label>
+                {layersEnabled?<div className='grid gap-3 sm:grid-cols-2'>
+                    <NumberInput title='Commercial packages per layer'
+                        value={value.transportPackagesPerLayer||0}
+                        onChange={n=>onChange({...value,transportPackagesPerLayer:n})}/>
+                    <NumberInput title='Number of layers'
+                        value={value.transportLayerCount||0}
+                        onChange={n=>onChange({...value,transportLayerCount:n})}/>
+                </div>:<NumberInput title='Commercial packages per transport unit'
+                    value={value.transportUnitsPerLoad||0}
+                    onChange={n=>onChange({...value,transportUnitsPerLoad:n})}/>}
+                {validTransportCount!==null&&<p className='text-sm font-medium text-brand'>
+                    {pretty(validTransportCount)} commercial packages per {transportRecord.name}
+                    {primaryPerTransport!==null?' · '+pretty(primaryPerTransport)+' primary containers':''}
+                </p>}
+            </>}
+        </div>
         <div className='rounded-xl border border-line bg-page p-3 text-sm' aria-live='polite'>
             <p className='font-medium text-ink'>{title}</p>
             {contentPerContainer!==null&&<p className='mt-1 text-muted'>Per container: {pretty(contentPerContainer)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
@@ -199,8 +242,12 @@ export function SkuConfigurationFields({value,onChange,setup}:{
                 {packageRecord.containersPerLayer} {packageRecord.containedUnit==='PACKAGING'?'packages':'containers'} per layer × {packageRecord.numberOfLayers} layers
                 {effectivePackSize!==null?' · '+pretty(effectivePackSize)+' primary containers':''}
             </p>}
-            {contentPerPackage!==null&&<p className='mt-1 text-muted'>Per package: {pretty(contentPerPackage)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
+            {contentPerPackage!==null&&<p className='mt-1 text-muted'>Per commercial package: {pretty(contentPerPackage)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
+            {quantityPerTransport!==null&&<p className='mt-1 text-muted'>Per transport unit: {pretty(quantityPerTransport)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>
             {factor!==null&&<p className='mt-1 font-semibold text-brand'>Conversion factor: {pretty(factor)} {norm?.name} / {packageRecord?.name}</p>}
+            {factor!==null&&validTransportCount!==null&&<p className='mt-1 text-muted'>
+                Transport conversion: {pretty(factor*validTransportCount)} {norm?.name} / {transportRecord?.name}
+            </p>
             {size&&form&&contentPerContainer===null&&<p className='mt-1 text-red-500'>Container size unit is incompatible with production form.</p>}
         </div>
     </section>;
