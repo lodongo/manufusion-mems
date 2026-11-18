@@ -63,7 +63,8 @@ export const plnMfgReleaseRoutes={
                 throw new HttpError(403,'This production site is outside your authorized scope.');
             const all=await listDocs(root(ctx.orgId,kind));
             const records=all.filter(row=>str(kind==='boms'?row.data.parentSkuId:row.data.skuId)===skuId)
-                .map(row=>({id:row.id,...row.data}));
+                .map(row=>({id:row.id,...row.data,type:str(row.data.type),
+                    alternativeCode:str(row.data.alternativeCode)}));
             if(kind==='boms'){
                 const requestedType=str(ctx.body.bomType);
                 const requestedAlternative=str(ctx.body.alternativeCode);

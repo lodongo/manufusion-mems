@@ -169,6 +169,11 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
             const utility=await getDoc('organizations/'+ctx.orgId+'/equipment_utilities/'+str(item.utilityWorkCenterId));
             if(!utility||!ARR(utility.data.items).some(x=>str(x.code)===str(item.utilityCode)))
                 throw new HttpError(400,'The metered utility input must reference a configured equipment utility supply.');
+            const utilityNodePath=await nodePath(ctx.orgId,str(item.utilityWorkCenterId));
+            if(!utilityNodePath.length||(siteId&&!utilityNodePath.includes(siteId)))
+                throw new HttpError(400,'The metered utility supply must belong to this production site.');
+            if(!canAt(ctx,'MFG.view',utilityNodePath,await scopeOf(ctx)))
+                throw new HttpError(403,'The selected utility is outside your authorized scope.');
         }
         const materialId=str(item.inventoryMaterialId);
         if(materialId){
@@ -327,9 +332,11 @@ export const plnMfgFoundationRoutes={
             const visibleSites=new Set(sites.map(x=>x.id));
             return {
                 sites,
-                utilities:utilityRegisters.flatMap(d=>ARR(d.data.items).map(u=>({
-                    workCenterId:d.id,code:str(u.code),name:str(u.label)||str(u.code),
-                }))).filter(u=>u.code),
+                utilities:(await Promise.all(utilityRegisters.map(async d=>
+                    await recordAccess(ctx,'MFG.view',d.id)?d:null))).filter((d):d is NonNullable<typeof d>=>d!==null)
+                    .flatMap(d=>ARR(d.data.items).map(u=>({
+                        workCenterId:d.id,code:str(u.code),name:str(u.label)||str(u.code),
+                    }))).filter(u=>u.code),
                 materials:materials.filter(x=>['approved','active'].includes(str(x.data.status))&&str(x.data.materialNumber))
                     .map(x=>({id:x.id,name:str(x.data.shortText)||str(x.data.name)||x.id,
                         materialNumber:str(x.data.materialNumber),uom:str(x.data.uom)})),
