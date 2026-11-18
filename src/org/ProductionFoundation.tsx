@@ -52,7 +52,7 @@ const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy):Row=>{
     if(tab==='items')return {id:'',name:'',category:'FINISHED',family:'',uom:'EA',siteId:'',packQty:1,
         stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
-    if(tab==='boms')return {id:'',name:'',type:'MANUFACTURING',flavorVariantId:'',alternativeCode:'STANDARD',routingId:'',
+    if(tab==='boms')return {id:'',name:'',type:'MANUFACTURING',productVariantId:'',alternativeCode:'STANDARD',routingId:'',
         parentSkuId:'',outputQty:1,outputUom:'EA',components:[{skuId:'',quantity:1,uom:'EA',scrapPct:0}]};
     if(tab==='resources')return {id:'',name:'',type:'LINE',rate:1000,rateUom:'EA',efficiency:100,siteId:'',assetId:''};
     return {id:'',name:'',skuId:'',operations:[{code:'STG_000000001',name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:[]}]};
@@ -145,8 +145,8 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,material
                 <Choice title='BOM type' value={bomCategory(str(draft.type))}
                     options={ [['MANUFACTURING','Manufacturing BOM'],['PACKAGING','Packaging BOM']] }
                     onChange={v=>update('type',v)}/>
-                <Choice title='Product/Variant (optional for shared materials)' value={str(draft.flavorVariantId)} options={variantOptions}
-                    onChange={v=>update('flavorVariantId',v)}/>
+                <Choice title='Product/Variant (optional for shared materials)' value={str(draft.productVariantId)} options={variantOptions}
+                    onChange={v=>update('productVariantId',v)}/>
                 <Choice title='Manufactured material / product' value={str(draft.parentSkuId)} options={itemOptions} onChange={v=>{const product=items.find(x=>x.id===v);onChange({...draft,parentSkuId:v,outputUom:product?.uom??draft.outputUom});}}/>
                 <Field title='BOM alternative code' value={str(draft.alternativeCode)||'STANDARD'}
                     onChange={v=>update('alternativeCode',v.toUpperCase())}/>

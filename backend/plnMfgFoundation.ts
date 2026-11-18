@@ -107,8 +107,8 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
     }
     if(kind==='boms'){
         const type=bomFamily(ENUM(raw.type,BOM_TYPES,'BOM type'));
-        const flavorVariantId=str(raw.flavorVariantId).trim();
-        if(flavorVariantId)VALID_ID(flavorVariantId,'Product/Variant');
+        const productVariantId=str(raw.productVariantId??raw.flavorVariantId).trim();
+        if(productVariantId)VALID_ID(productVariantId,'Product/Variant');
         // Shared manufacturing intermediates do not require product-specific identity.
         const alternativeCode=bomAlternative(raw.alternativeCode);
         const routingId=str(raw.routingId).trim();
@@ -124,7 +124,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             seen.add(skuId);
             return {line:i+1,skuId,quantity:POSITIVE(c.quantity,'Component quantity'),uom:UOM(c.uom),scrapPct:NONNEGATIVE(c.scrapPct??0,'Scrap percentage',100)};
         });
-        return {...base,type,flavorVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
+        return {...base,type,productVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
     const skuId=VALID_ID(raw.skuId,'Routed SKU');
     const operations=ARR(raw.operations);
@@ -208,9 +208,9 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         }
     }
     if(kind==='boms'){
-        const flavorVariantId=str(item.flavorVariantId);
-        if(flavorVariantId){
-            const variant=await getDoc('organizations/'+ctx.orgId+'/mfg_sku_parameters/'+flavorVariantId);
+        const productVariantId=str(item.productVariantId??item.flavorVariantId);
+        if(productVariantId){
+            const variant=await getDoc('organizations/'+ctx.orgId+'/mfg_sku_parameters/'+productVariantId);
             if(!variant||str(variant.data.kind)!=='productNames'||variant.data.enabled===false)
                 throw new HttpError(400,'Select an active Product/Variant from SKU Configuration.');
         }
@@ -223,9 +223,9 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         // Upstream intermediate BOMs are not prerequisites for saving or releasing this BOM.
         // The referenced material records must exist; a later planning-readiness check
         // reports missing approved upstream formulations without blocking authoring.
-        if(str(item.flavorVariantId)&&isObj(parent.data.skuComponents)){
+        if(productVariantId&&isObj(parent.data.skuComponents)){
             const assigned=str((parent.data.skuComponents as Obj).productNameId);
-            if(assigned&&assigned!==str(item.flavorVariantId))
+            if(assigned&&assigned!==productVariantId)
                 throw new HttpError(400,'BOM Product/Variant conflicts with the output material identity.');
         }
         const routingId=str(item.routingId);
@@ -271,7 +271,14 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
 
 const track=(ctx:OrgContext,action:string,target:string)=>
     audit([{category:'data',action,actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:target},details:'Production master data; approval and release remain separate from draft editing.'}]);
-const out=(d:{id:string;data:Obj;updateTime?:string})=>({id:d.id,...d.data,updatedAt:str(d.data.updatedAt),revision:num(d.data.revision)??1});
+const out=(d:{id:string;data:Obj;updateTime?:string})=>{
+    const data={...d.data};
+    if(Object.prototype.hasOwnProperty.call(data,'flavorVariantId')){
+        data.productVariantId=str(data.productVariantId)||str(data.flavorVariantId);
+        delete data.flavorVariantId;
+    }
+    return {id:d.id,...data,updatedAt:str(d.data.updatedAt),revision:num(d.data.revision)??1};
+};
 const readKind=(v:unknown):MasterKind=>ENUM(v,MASTER_KINDS,'master-data kind');
 async function recordAccess(ctx:OrgContext,permission:string,siteId:string):Promise<boolean>{
     // Shared company masters are readable to authorized MFG viewers, but only direct role holders may edit them.

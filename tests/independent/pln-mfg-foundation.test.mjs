@@ -67,7 +67,9 @@ test('BOM supports two new classifications and preserves historical types',()=>{
  assert.equal(normalizeMaster('boms',formula).type,'MANUFACTURING');
  assert.equal(normalizeMaster('boms',{...formula,type:'MANUFACTURING'}).type,'MANUFACTURING');
  assert.equal(normalizeMaster('boms',pack).type,'PACKAGING');
- assert.equal(normalizeMaster('boms',{...formula,flavorVariantId:''}).flavorVariantId,''); // Common simple syrup
+ assert.equal(normalizeMaster('boms',{...formula,productVariantId:'',flavorVariantId:undefined}).productVariantId,'');
+ assert.equal(normalizeMaster('boms',formula).productVariantId,'NME_000000001');
+ assert.equal(Object.hasOwn(normalizeMaster('boms',formula),'flavorVariantId'),false);
  assert.equal(normalizeMaster('boms',{...pack,type:'BOM'}).type,'PACKAGING');
  assert.equal(normalizeMaster('boms',{...formula,type:'RECIPE'}).type,'MANUFACTURING');
 });
@@ -79,7 +81,7 @@ test('Fanta formulation can be flavor-neutral and intermediates can be non-stock
  assert.throws(()=>normalizeMaster('items',{...base,stockPolicy:'INVALID'}),/stock policy/);
  assert.equal(normalizeMaster('boms',{id:'BOM-COMMON',name:'Simple syrup',type:'FLAVOR_VARIANT',
   parentSkuId:'SIMPLE-SYRUP',outputQty:1000,outputUom:'L',
-  components:[{skuId:'SUGAR',quantity:500,uom:'KG'}]}).flavorVariantId,'');
+  components:[{skuId:'SUGAR',quantity:500,uom:'KG'}]}).productVariantId,'');
 });
 test('Metered utility is an auditable input distinct from an Inventory issue',()=>{
  const water={id:'WATER-01',name:'Treated water',category:'RAW',uom:'L',sourceMode:'UTILITY',
