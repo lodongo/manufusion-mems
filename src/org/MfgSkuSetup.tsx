@@ -11,7 +11,7 @@ export type SkuParameter={
     quantity?:number;uom?:string;baseUom?:string;quantityPerUnit?:number;revision?:number;
     referenceProductionFormId?:string;normalizationOperator?:'DIVIDE'|'MULTIPLY';
     categoryCode?:string;unitCode?:string;unitCount?:number;productCode?:string;
-    metadataCode?:string;subcategoryCode?:string;containerAttributes?:Record<string,string>;
+    metadataCode?:string;subcategoryCode?:string;containerAttributes?:Record<string,string>;ratingCountUnitCode?:string;
     packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
     containersPerLayer?:number;numberOfLayers?:number;
 };
@@ -550,6 +550,15 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
                             placeholder='Select' options={field.choices.map(option=>[option,option])}
                             onChange={value=>update('containerAttributes',{...draft.containerAttributes,[field.key]:value})}/>)}
                     </>}
+                    <div className='rounded-xl border border-line p-3 space-y-2'>
+                        <p className='text-xs text-muted'>Default physical-container rating unit · Count category</p>
+                        <Choice title='Count unit for commissioned throughput'
+                            value={draft.ratingCountUnitCode||'UOM-20-001'}
+                            options={setup.units.filter(u=>u.category==='Count')
+                                .map(u=>[u.code,u.label+' ('+u.symbol+')'])}
+                            onChange={ratingCountUnitCode=>update('ratingCountUnitCode',ratingCountUnitCode)}/>
+                        <p className='text-xs text-muted'>This unit is the default when an SKU uses this physical container in Production Planning. The cost-centre rating form may select a different compatible Count unit.</p>
+                    </div>
                 </>}
                 {active==='containerSizes'&&<>
                     <TextInput title='Container size name' value={draft.name||''} onChange={v=>update('name',v)} required/>

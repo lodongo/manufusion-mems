@@ -205,7 +205,8 @@ export const plnCostCenterCapacityRoutes={
     const type=byMetadata.get(str(x.metadataCode));
     return {id:x.id,name:x.name,categoryCode:x.categoryCode,subcategoryCode:x.subcategoryCode,
      categoryName:type?.category||str(x.categoryCode),subcategoryName:type?.subcategory||x.name,
-     containerAttributes:x.containerAttributes||{},metadataCode:x.metadataCode};
+     containerAttributes:x.containerAttributes||{},metadataCode:x.metadataCode,
+     ratingCountUnitCode:str(x.ratingCountUnitCode)||'UOM-20-001'};
    });
    const sizes=params.filter(x=>x.kind==='containerSizes'&&x.enabled!==false)
       .map(x=>({id:x.id,name:x.name,quantity:x.quantity,uom:x.uom,

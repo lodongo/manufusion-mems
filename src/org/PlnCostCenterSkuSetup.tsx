@@ -7,7 +7,8 @@ type SkuComposition={containerId?:string;containerSizeId?:string;productionFormI
 type Output={id:string;name:string;siteId:string;uom:string;category:string;status:string;
  skuComponents:SkuComposition;revision:number};
 type Container={id:string;name:string;categoryCode:string;categoryName:string;
- subcategoryCode:string;subcategoryName:string;containerAttributes:Record<string,string>;metadataCode:string};
+ subcategoryCode:string;subcategoryName:string;containerAttributes:Record<string,string>;metadataCode:string;
+ ratingCountUnitCode:string};
 type Size={id:string;name:string;quantity:number;uom:string;uomSymbol:string};
 type Measure={code:string;name:string;symbol:string;multiplier:number;categoryCode:string};
 type Rating={skuId:string;containerId:string;containerSizeId:string;
@@ -70,7 +71,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
      containerSizeId:output?.skuComponents?.containerSizeId||'',
      containerCategoryCode:container?.categoryCode||'',
      containerSubcategoryCode:container?.subcategoryCode||'',
-     ratingQuantity:0,ratingUnitCode:response.units.count.find(u=>u.multiplier===1)?.code||'',
+     ratingQuantity:0,ratingUnitCode:container?.ratingCountUnitCode||response.units.count.find(u=>u.multiplier===1)?.code||'',
      periodUnitCode:response.units.time.find(u=>u.name==='Hour')?.code||'',
      projection:null,conversionIssue:'Previous stock-unit/hour rating needs physical-container reconfiguration.'};
    }));
@@ -90,7 +91,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
    containerSizeId:output?.skuComponents?.containerSizeId||'',
    containerCategoryCode:chosen?.categoryCode||'',
    containerSubcategoryCode:chosen?.subcategoryCode||'',ratingQuantity:0,
-   ratingUnitCode:data?.units.count.find(x=>x.multiplier===1)?.code||'',
+   ratingUnitCode:chosen?.ratingCountUnitCode||data?.units.count.find(x=>x.multiplier===1)?.code||'',
    periodUnitCode:data?.units.time.find(x=>x.name==='Hour')?.code||'',
    projection:null};
  };
@@ -181,7 +182,8 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
         onChange={containerId=>{
          const c=data.containers.find(x=>x.id===containerId);
          update(i,{containerId,containerCategoryCode:c?.categoryCode||'',
-          containerSubcategoryCode:c?.subcategoryCode||'',containerSizeId:expectedSize});
+          containerSubcategoryCode:c?.subcategoryCode||'',containerSizeId:expectedSize,
+          ratingUnitCode:c?.ratingCountUnitCode||line.ratingUnitCode});
         }}/>
        <Picker label='Configured physical container size' value={line.containerSizeId}
         disabled={!data.canConfigure||busy||!currentContainer}

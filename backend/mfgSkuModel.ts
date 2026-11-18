@@ -22,7 +22,7 @@ export type SkuParameter={id:string;kind:SkuParameterKind;name:string;
     referenceProductionFormId?:string;normalizationOperator?:'DIVIDE'|'MULTIPLY';
     categoryCode?:string;unitCode?:string;unitCount?:number;
     productCode?:string;metadataCode?:string;subcategoryCode?:string;
-    containerAttributes?:Record<string,string>;
+    containerAttributes?:Record<string,string>;ratingCountUnitCode?:string;
     packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
     containersPerLayer?:number;numberOfLayers?:number;
     enabled?:boolean;description?:string};
@@ -281,7 +281,10 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
     }
     if(kind==='containers'){
         const chosen=validatePrimaryContainerSelection(str(raw.metadataCode),raw.containerAttributes,containerTypes);
-        return {...base,...chosen};
+        const ratingCountUnitCode=str(raw.ratingCountUnitCode)||'UOM-20-001';
+        const count=PROCUREMENT_UNITS.find(u=>u.active&&u.selectable&&u.category==='Count'&&u.code===ratingCountUnitCode);
+        if(!count)throw new HttpError(400,'Choose an approved Count rating unit for this physical container.');
+        return {...base,...chosen,ratingCountUnitCode};
     }
     if(kind==='containerSizes'){
         const uom=str(raw.uom).trim(),quantity=Number(raw.quantity);
