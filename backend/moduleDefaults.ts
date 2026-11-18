@@ -58,8 +58,8 @@ const COST_CENTER_TYPES: MetaItem[] = [
 export const DEFAULT_MODULE_METADATA: Record<string, Array<{ key: string; title: string; description: string; version: number; items: MetaItem[] }>> = {
     MFG: [{
         key:'packagingTypes',
-        title:'Container packaging and logistics types',
-        description:'Coded secondary, tertiary, transport/logistics, bulk densification and returnable handling-unit types, adopted by each organization for layered packaging.',
+        title:'Commercial and transport packaging types',
+        description:'Coded commercial (selling-unit) packaging and separate tertiary, transport/logistics, bulk and returnable handling-unit types. Layering is configured per SKU.',
         version:1,
         items:MFG_PACKAGING_TYPES.map(t=>({
             code:t.code,label:t.name,category:t.category,subcategory:t.subcategory,
