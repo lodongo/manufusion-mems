@@ -3,7 +3,7 @@
  * Use the organization's adopted Physical Container parameters and the SKU's own
  * approved composition to derive form, commercial and logistics capacities.
  */
-import {HttpError,num,str} from './core';
+import {HttpError,str} from './core';
 import {PROCUREMENT_UNITS} from './procurementUnits';
 import {calculateSkuConversion,type SkuComponents,type SkuParameter} from './mfgSkuModel';
 
@@ -25,6 +25,7 @@ export type CapacityProjection={
  normalised:RatedQuantity;
 };
 const cap=(v:number):number=>Number(v.toPrecision(12));
+const displayUnit=(code:string)=>PROCUREMENT_UNITS.find(u=>u.code===code)?.symbol||code;
 const unit=(code:string,category:string)=>{
  const found=PROCUREMENT_UNITS.find(x=>x.code===code&&x.active&&x.selectable&&x.category===category);
  if(!found||!Number.isFinite(found.multiplier)||found.multiplier<=0)
@@ -85,7 +86,7 @@ export function derivePhysicalCapacity(
  const logistics=parameters.find(p=>p.id===components.transportPackageId&&p.kind==='transportPackages');
  const norm=parameters.find(p=>p.id===components.normalizationUnitId&&p.kind==='normalizationUnits');
  const formQuantity=physicalContainers*conversion.containerSizeInProductionUom;
- const rateUnit=sku.uom;
+ const rateUnit=displayUnit(sku.uom);
  // Finished goods are commercial-packaged units when a package is selected;
  // count codes alone are not sufficient to infer whether each means a bottle or a case.
  const finalQuantity=commercial&&packages!==null?packages:null;
@@ -99,13 +100,13 @@ export function derivePhysicalCapacity(
    ratedUnits:input.ratingQuantity,physicalContainers:cap(physicalContainers)},
   physicalContainers:projected(physicalContainers,'primary containers / '+time.symbol,
      container.name),
-  productionForm:projected(formQuantity,conversion.productionUom+' / '+time.symbol,
+  productionForm:projected(formQuantity,displayUnit(conversion.productionUom)+' / '+time.symbol,
      productionForm?.name||'Production form'),
   finalProduct:projected(finalQuantity,rateUnit+' / '+time.symbol,sku.name,
     'Finished-product package conversion is not configured.'),
-  commercialPackaging:projected(packages,(commercial?.uom||'commercial packages')+' / '+time.symbol,
+  commercialPackaging:projected(packages,displayUnit(commercial?.uom||'commercial packages')+' / '+time.symbol,
      commercial?.name||'Commercial packaging','Commercial packaging ratio is not configured.'),
-  transportLogistics:projected(transport,(logistics?.uom||'transport units')+' / '+time.symbol,
+  transportLogistics:projected(transport,displayUnit(logistics?.uom||'transport units')+' / '+time.symbol,
      logistics?.name||'Transport & logistics','Transport packaging ratio is not configured.'),
   normalised:projected(normalized,(norm?.name||'normalized units')+' / '+time.symbol,
      norm?.name||'Normalization','Normalization reference is not configured.'),

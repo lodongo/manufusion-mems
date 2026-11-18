@@ -8,6 +8,7 @@ import {HttpError,commitChecked,getDoc,isObj,listDocs,nowIso,num,str,type Doc,ty
 import {orgRoute,hasPerm,type OrgContext} from './guards';
 import {canAt,nodePath,scopeOf} from './access';
 import {audit} from './audit';
+import {PROCUREMENT_UNITS} from './procurementUnits';
 import {skuParametersForOrg} from './mfgSkuConfiguration';
 import {primaryContainerCatalogueFromAdmin} from './mfgPrimaryContainerMetadata';
 import {normalizePhysicalRating,derivePhysicalCapacity,physicalRatingUnits,type PhysicalRating} from './plnPhysicalCapacity';
@@ -207,7 +208,8 @@ export const plnCostCenterCapacityRoutes={
      containerAttributes:x.containerAttributes||{},metadataCode:x.metadataCode};
    });
    const sizes=params.filter(x=>x.kind==='containerSizes'&&x.enabled!==false)
-      .map(x=>({id:x.id,name:x.name,quantity:x.quantity,uom:x.uom}));
+      .map(x=>({id:x.id,name:x.name,quantity:x.quantity,uom:x.uom,
+       uomSymbol:PROCUREMENT_UNITS.find(u=>u.code===x.uom)?.symbol||str(x.uom)}));
    const ratings=saved?await Promise.all(
       (Array.isArray(saved.data.skuCapacities)?saved.data.skuCapacities:[])
        .map(line=>validSavedProjection(ctx,location.siteId,line,params))):[];
