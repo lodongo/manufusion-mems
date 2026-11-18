@@ -1,5 +1,5 @@
 import {useId,useState} from 'react';
-import {ArrowLeft,ArrowDown,ArrowUp,Box,ChevronRight,Layers3,Maximize2,Package,PackageOpen,Shapes, ListOrdered, type LucideIcon} from 'lucide-react';
+import {ArrowLeft,ArrowDown,ArrowUp,Box,ChevronRight,Layers3,Maximize2,Package,PackageOpen,Shapes,ListOrdered,Plus,Trash2, type LucideIcon} from 'lucide-react';
 import {SKU_NAME_FIELDS,SKU_NAME_SEPARATORS,DEFAULT_SKU_NAMING_SEQUENCE,composeSkuNameFromSequence,
     type SkuNamingSequence,type SkuNameValues,type SkuNameMode} from '../shared/mfgSkuNaming';
 import {Field,SelectField} from '../components/ui';
@@ -307,6 +307,8 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
     const [active,setActive]=useState<MenuKey|null>(null);
     const [draft,setDraft]=useState<Partial<SkuParameter>|null>(null);
     const [namingDraft,setNamingDraft]=useState<SkuNamingSequence|null>(null);
+    const [showNamingPicker,setShowNamingPicker]=useState(false);
+    const [namingFieldToAdd,setNamingFieldToAdd]=useState('');
     const [busy,setBusy]=useState(false);
     const [error,setError]=useState(''),[notice,setNotice]=useState('');
     const [category,setCategory]=useState('');
@@ -329,8 +331,12 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
         setActive(kind);setDraft(null);
         setNamingDraft(kind==='namingSequence'?{
             separator:setup.namingSequence.separator,
-            steps:setup.namingSequence.steps.map(step=>({...step})),
+            // New organizations build their naming rule using + Add.
+            // For previously configured rules, show only selected steps.
+            steps:setup.namingConfigured?setup.namingSequence.steps
+                .filter(step=>step.enabled).map(step=>({...step})):[],
         }:null);
+        setShowNamingPicker(false);setNamingFieldToAdd('');
         setError('');setNotice('');setCategory('');setTypeCode('');
     };
     const begin=()=>{
@@ -375,7 +381,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
             await callBackend('/api/org/pln-mfg/sku/naming/save',{
                 sequence:namingDraft,expectedRevision:setup.namingRevision,
             });
-            await onSaved();setNamingDraft(null);
+            await onSaved();
             setNotice('SKU naming sequence saved. Existing SKU names are unchanged.');
         }catch(e){setError(e instanceof Error?e.message:'Unable to save SKU naming sequence.');}
         finally{setBusy(false);}
@@ -388,11 +394,24 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
             return {...previous,steps};
         });
     };
+    const addNamingComponent=()=>{
+        const field=SKU_NAME_FIELDS.find(x=>x.key===namingFieldToAdd);
+        if(!field||!canEdit)return;
+        setNamingDraft(d=>d&&d.steps.length<32?{...d,steps:[...d.steps,{
+            field:field.key,mode:field.modes[0] as SkuNameMode,enabled:true,
+            ...(field.key==='literal'?{text:''}:{}),
+        }]}:d);
+        setNamingFieldToAdd('');setShowNamingPicker(false);setError('');
+    };
+    const removeNamingComponent=(i:number)=>{
+        setNamingDraft(d=>d?{...d,steps:d.steps.filter((_,j)=>j!==i)}:d);
+    };
     const changeNaming=(i:number,updates:Partial<SkuNamingSequence['steps'][number]>)=>{
         setNamingDraft(previous=>previous?{...previous,steps:previous.steps.map(
             (step,j)=>j===i?{...step,...updates}:step)}:previous);
     };
     const namingLayout=namingDraft?.steps.filter(step=>step.enabled).map(step=>{
+        if(step.field==='literal')return step.text?.trim()||'[Custom text]';
         const label=SKU_NAME_FIELDS.find(f=>f.key===step.field)?.label||step.field;
         return '['+label+' · '+step.mode.toLowerCase().replaceAll('_',' ')+']';
     }).join(namingDraft?.separator??'_');
@@ -419,51 +438,73 @@ export function SkuSetupPanel({setup,canEdit,onSaved}:{setup:SkuSetup;canEdit:bo
                 {canEdit&&!draft&&active!=='namingSequence'&&<button type='button' className={primary} onClick={begin}>Add</button>}
             </div>
             {active==='namingSequence'?<div className='space-y-4'>
-                <div className='rounded-xl border border-line bg-page p-3 space-y-3'>
-                    <Choice title='Separator' value={namingDraft?.separator||''}
-                        options={SKU_NAME_SEPARATORS.map(x=>[x.value,x.label])}
-                        onChange={v=>setNamingDraft(d=>d?{...d,separator:v}:d)}/>
-                    <p className='text-xs text-muted'>Select which SKU attributes are included, whether to use the name, code or quantity, and their order.</p>
-                </div>
+                <Choice title='Separator' value={namingDraft?.separator??'_'}
+                    options={SKU_NAME_SEPARATORS.map(x=>[x.value,x.label])}
+                    onChange={v=>setNamingDraft(d=>d?{...d,separator:v}:d)}/>
                 <div className='space-y-2'>
                     {namingDraft?.steps.map((step,i)=>{
                         const field=SKU_NAME_FIELDS.find(x=>x.key===step.field);
-                        return <div key={step.field} className='rounded-xl border border-line p-3 space-y-2'>
-                            <div className='flex items-center justify-between gap-2'>
-                                <label className='flex min-h-11 flex-1 items-center gap-2 text-sm font-medium'>
-                                    <input type='checkbox' checked={step.enabled} disabled={!canEdit}
-                                        onChange={e=>changeNaming(i,{enabled:e.target.checked})}/>
-                                    <span>{i+1}. {field?.label||step.field}</span>
-                                </label>
+                        return <div key={i} className='rounded-xl border border-line bg-panel p-3 space-y-3'>
+                            <div className='flex items-center gap-2'>
+                                <span className='flex-1 min-w-0 text-sm font-semibold'>
+                                    {i+1}. {field?.label||step.field}
+                                </span>
                                 <button type='button' className={secondary} disabled={!canEdit||i===0}
-                                    aria-label={'Move '+field?.label+' up'} onClick={()=>moveNaming(i,-1)}>
-                                    <ArrowUp className='h-4 w-4'/>
-                                </button>
-                                <button type='button' className={secondary} disabled={!canEdit||i===(namingDraft?.steps.length??1)-1}
-                                    aria-label={'Move '+field?.label+' down'} onClick={()=>moveNaming(i,1)}>
-                                    <ArrowDown className='h-4 w-4'/>
-                                </button>
+                                    aria-label={'Move '+(field?.label||step.field)+' up'}
+                                    onClick={()=>moveNaming(i,-1)}><ArrowUp className='h-4 w-4'/></button>
+                                <button type='button' className={secondary}
+                                    disabled={!canEdit||i===(namingDraft.steps.length-1)}
+                                    aria-label={'Move '+(field?.label||step.field)+' down'}
+                                    onClick={()=>moveNaming(i,1)}><ArrowDown className='h-4 w-4'/></button>
+                                {canEdit&&<button type='button' className={secondary}
+                                    aria-label={'Remove '+(field?.label||step.field)}
+                                    onClick={()=>removeNamingComponent(i)}><Trash2 className='h-4 w-4'/></button>}
                             </div>
-                            <Choice title='Use' value={step.mode}
-                                options={(field?.modes||['NAME']).map(mode=>
-                                    [mode,mode==='QUANTITY_UNIT'?'Quantity + unit':mode==='QUANTITY'?'Quantity':mode==='CODE'?'Code':'Name'])}
-                                onChange={v=>changeNaming(i,{mode:v as SkuNameMode})}/>
+                            {step.field==='literal'
+                                ?<TextInput title='Custom text' value={step.text||''}
+                                    onChange={text=>changeNaming(i,{text})} required/>
+                                :<Choice title='Use' value={step.mode}
+                                    options={(field?.modes||['NAME']).map(mode=>
+                                        [mode,mode==='QUANTITY_UNIT'?'Quantity + unit':
+                                            mode==='QUANTITY'?'Quantity':mode==='CODE'?'Code':'Name'])}
+                                    onChange={v=>changeNaming(i,{mode:v as SkuNameMode})}/>}
                         </div>;
                     })}
+                    {!namingDraft?.steps.length&&<div className='rounded-xl border border-dashed border-line p-5 text-center text-sm text-muted'>
+                        No naming components added. Use + Add component to build your sequence.
+                    </div>}
                 </div>
+                {canEdit&&<div className='space-y-2'>
+                    <button type='button' className={secondary+' inline-flex items-center gap-2'}
+                        disabled={busy||(namingDraft?.steps.length??0)>=32}
+                        onClick={()=>setShowNamingPicker(v=>!v)}>
+                        <Plus className='h-4 w-4'/> Add component
+                    </button>
+                    {showNamingPicker&&<div className='space-y-3 rounded-xl border border-line bg-page p-3'>
+                        <Choice title='What would you like to add?' value={namingFieldToAdd}
+                            placeholder='Select attribute or custom text'
+                            options={SKU_NAME_FIELDS.map(f=>[f.key,f.label])}
+                            onChange={setNamingFieldToAdd}/>
+                        <div className='flex flex-wrap gap-2'>
+                            <button type='button' className={primary}
+                                disabled={!namingFieldToAdd}
+                                onClick={addNamingComponent}>Add to sequence</button>
+                            <button type='button' className={secondary}
+                                onClick={()=>{setShowNamingPicker(false);setNamingFieldToAdd('');}}>Cancel</button>
+                        </div>
+                    </div>}
+                </div>}
                 <div className='rounded-xl border border-line bg-page p-3' aria-live='polite'>
                     <p className='text-xs font-medium text-muted'>Naming sequence preview</p>
-                    <p className='mt-2 break-all font-mono text-sm text-ink'>{namingLayout||'Select attributes'}</p>
-                    <p className='mt-2 text-xs text-muted'>Placeholders show the sequence. The actual SKU name uses its selected product values.</p>
+                    <p className='mt-2 break-all font-mono text-sm text-ink'>{namingLayout||'Add your first component'}</p>
                 </div>
                 {canEdit&&<div className='flex flex-wrap gap-2'>
-                    <button type='button' className={primary} disabled={busy||!namingDraft}
+                    <button type='button' className={primary}
+                        disabled={busy||!namingDraft?.steps.length||namingDraft.steps.some(
+                            step=>step.field==='literal'&&!step.text?.trim())}
                         onClick={()=>void saveNaming()}>{busy?'Saving…':'Save naming sequence'}</button>
-                    <button type='button' className={secondary} disabled={busy}
-                        onClick={()=>setNamingDraft({
-                            separator:DEFAULT_SKU_NAMING_SEQUENCE.separator,
-                            steps:DEFAULT_SKU_NAMING_SEQUENCE.steps.map(step=>({...step})),
-                        })}>Reset to default</button>
+                    <button type='button' className={secondary} disabled={busy||!namingDraft?.steps.length}
+                        onClick={()=>setNamingDraft(d=>d?{...d,steps:[]}:d)}>Clear all</button>
                 </div>}
                 <p className='text-xs text-muted'>The internal SKU_######### code remains database-generated. Existing SKU names only change when explicitly regenerated.</p>
             </div>:!draft?<div className='space-y-2'>
