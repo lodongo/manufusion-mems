@@ -54,8 +54,8 @@ const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy):Row=>{
     if(tab==='items')return {id:'',name:'',category:'FINISHED',family:'',uom:'EA',siteId:'',packQty:1,
         stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
-    if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',productVariantId:'',alternativeCode:'STANDARD',routingId:'',
-        parentSkuId:'',outputQty:1,outputUom:'EA',components:[{skuId:'',quantity:1,uom:'EA',scrapPct:0}]};
+    if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',alternativeCode:'STANDARD',routingId:'',
+        parentSkuId:'',outputQty:1,outputUom:'EA',components:[]};
     if(tab==='resources')return {id:'',name:'',type:'LINE',rate:1000,rateUom:'EA',efficiency:100,siteId:'',assetId:''};
     return {id:'',name:'',skuId:'',operations:[{code:'STG_000000001',name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:[]}]};
 };
@@ -79,31 +79,133 @@ function Choice({title,value,options,onChange}:{title:string;value:string;option
 function TextField({title,value,onChange}:{title:string;value:string;onChange:(v:string)=>void}){
     return <label className='block'><span className={label}>{title}</span><textarea rows={2} className={fld} value={value} onChange={e=>onChange(e.target.value)}/></label>;
 }
+
+/** A clear output → inputs flow; technical versioning controls are optional. */
+function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
+ draft:Row;onChange:(v:Row)=>void;items:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy;
+}){
+ const output=items.find(i=>i.id===str(draft.parentSkuId));
+ const components=asComponents(draft.components);
+ const quantity=number(draft.outputQty,1);
+ const outputUom=str(draft.outputUom)||str(output?.uom)||'EA';
+ const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
+ const updateComponent=(i:number,patch:Partial<Component>)=>
+   update('components',components.map((c,j)=>i===j?{...c,...patch}:c));
+ const outputChoices:Array<[string,string]>=[['','Choose what you want to produce'],...items.map(i=>[i.id,i.name+' · '+str(i.category)] as [string,string])];
+ const componentChoices:Array<[string,string]>=[['','Choose a required material'],...items.filter(i=>i.id!==str(output?.id))
+   .map(i=>[i.id,i.name+' · '+str(i.category)] as [string,string])];
+ const siteChoices:Array<[string,string]>=[['','All sites (organization default)'],...refs.sites.map(i=>[i.id,i.name] as [string,string])];
+ const classes:Array<[string,string]>=materialPolicy.bomClassifications
+    .filter(c=>c.enabled||c.code===str(draft.classificationCode)).map(c=>[c.code,c.name] as [string,string]);
+ if(str(draft.classificationCode)&&!classes.some(c=>c[0]===str(draft.classificationCode)))
+    classes.push([str(draft.classificationCode),str(draft.classificationCode)+' (existing)']);
+ const units=(skuId:string,current:string):Array<[string,string]>=>{
+    const masterUom=str(items.find(i=>i.id===skuId)?.uom);
+    const unit=skuSetup.units.find(u=>u.code===masterUom||u.symbol===masterUom);
+    const supported=unit?skuSetup.units.filter(u=>u.categoryCode===unit.categoryCode&&u.baseUnit===unit.baseUnit):[];
+    return [[current,current],...supported.filter(u=>u.code!==current)
+       .map(u=>[u.code,u.label+' ('+u.symbol+')'] as [string,string])];
+ };
+ return <div className='space-y-4'>
+    <div className='rounded-xl bg-page p-3 text-sm text-soft'>
+        <p className='font-semibold text-ink'>Bill of materials</p>
+        <p className='mt-1'>First choose what is produced. Then specify the components and their quantities. MEMS creates the BOM code and name automatically.</p>
+    </div>
+    <section className='space-y-3 rounded-xl border border-line p-3'>
+        <h3 className='font-semibold'>1. What are you producing?</h3>
+        <Choice title='Output material or finished product' value={str(draft.parentSkuId)}
+            options={outputChoices} onChange={v=>{
+                const selected=items.find(i=>i.id===v);
+                onChange({...draft,parentSkuId:v,outputUom:str(selected?.uom)||'EA',
+                    components:components.filter(c=>c.skuId!==v)});
+            }}/>
+        {output?<p className='text-sm text-soft'>Material classification: {str(output.category)} · Base unit: {str(output.uom)}</p>:
+            <p className='text-xs text-muted'>Not listed? Create the material first in Materials & Products.</p>}
+        <div className='grid gap-2 sm:grid-cols-2'>
+            <Field title='How much does this BOM produce?' type='number' value={quantity}
+                onChange={v=>update('outputQty',Number(v))}/>
+            <div className='rounded-xl border border-line bg-page p-3'>
+                <p className='text-xs text-muted'>Output unit (from selected material)</p>
+                <p className='mt-1 text-sm font-semibold'>{outputUom}</p>
+            </div>
+        </div>
+    </section>
+    <section className='space-y-3 rounded-xl border border-line p-3'>
+        <div className='flex items-start justify-between gap-2'>
+            <div>
+                <h3 className='font-semibold'>2. What materials are needed?</h3>
+                <p className='mt-1 text-xs text-muted'>Quantities for {quantity} {outputUom} of the output.</p>
+            </div>
+            <Button type='button' variant='secondary' disabled={!output||components.length>=150}
+                onClick={()=>update('components',[...components,{skuId:'',quantity:1,uom:'EA',scrapPct:0}])}>Add</Button>
+        </div>
+        {!output?<p className='text-sm text-muted'>Choose the output above first.</p>:
+            <div className='space-y-3'>
+                {components.map((c,i)=><div key={i} className='space-y-2 rounded-lg bg-page p-3'>
+                    <div className='flex items-center justify-between gap-2'>
+                        <span className='text-sm font-semibold'>Required material {i+1}</span>
+                        <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-xs text-ink'
+                            onClick={()=>update('components',components.filter((_,j)=>j!==i))}>Remove</button>
+                    </div>
+                    <Choice title='Material' value={c.skuId} options={componentChoices}
+                        onChange={v=>updateComponent(i,{skuId:v,uom:str(items.find(item=>item.id===v)?.uom)||'EA'})}/>
+                    <div className='grid grid-cols-2 gap-2'>
+                        <Field title='Required quantity' type='number' value={c.quantity}
+                            onChange={v=>updateComponent(i,{quantity:Number(v)})}/>
+                        <div className='rounded-xl border border-line bg-panel p-3'>
+                            <p className='text-xs text-muted'>Unit</p><p className='mt-1 text-sm font-semibold'>{c.uom}</p>
+                        </div>
+                    </div>
+                    {c.skuId&&<details className='text-xs text-muted'>
+                        <summary className='cursor-pointer py-2'>Other consumption options</summary>
+                        <div className='grid gap-2 pt-2 sm:grid-cols-2'>
+                            <Choice title='Alternate unit' value={c.uom} options={units(c.skuId,c.uom)}
+                                onChange={v=>updateComponent(i,{uom:v})}/>
+                            <Field title='Scrap allowance (%)' type='number' value={c.scrapPct}
+                                onChange={v=>updateComponent(i,{scrapPct:Number(v)})}/>
+                        </div>
+                    </details>}
+                </div>)}
+                {!components.length&&<p className='text-sm text-muted'>No inputs yet. Choose Add to include a component, ingredient or packaging material.</p>}
+            </div>}
+    </section>
+    <details className='rounded-xl border border-line p-3'>
+        <summary className='cursor-pointer font-semibold'>3. Additional settings (optional)</summary>
+        <p className='my-3 text-xs text-muted'>The defaults work for most BOMs. Only change these when you need a different purpose, alternative method, site or effective date.</p>
+        <div className='grid gap-3 sm:grid-cols-2'>
+            <Choice title='BOM classification' value={str(draft.classificationCode)||'PRODUCTION'}
+                options={classes} onChange={v=>update('classificationCode',v)}/>
+            <Field title='Alternative method identifier' value={str(draft.alternativeCode)||'STANDARD'}
+                onChange={v=>update('alternativeCode',v.toUpperCase())}/>
+            <Choice title='Output unit override' value={outputUom} options={units(str(draft.parentSkuId),outputUom)}
+                onChange={v=>update('outputUom',v)}/>
+            <Choice title='Applicable site' value={str(draft.siteId)} options={siteChoices}
+                onChange={v=>update('siteId',v)}/>
+            <Field title='Effective from' type='date' value={str(draft.effectiveFrom)}
+                onChange={v=>update('effectiveFrom',v)}/>
+            <Field title='Optional BOM name' value={draft.name}
+                placeholder={output?output.name+' · BOM':'Generated on save'}
+                onChange={v=>update('name',v)}/>
+            <Field title='Version note' value={str(draft.versionNote)}
+                onChange={v=>update('versionNote',v)}/>
+        </div>
+        <TextField title='Description / notes' value={str(draft.description)}
+            onChange={v=>update('description',v)}/>
+        <p className='mt-2 text-xs text-muted'>Product identity comes from the output material; no separate variant selection is needed. Routing is maintained separately.</p>
+    </details>
+    <p className='text-xs text-muted'>Save creates a draft only. You can define upstream BOMs later. Production release follows the approval workflow.</p>
+ </div>;
+}
 function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,materialPolicy}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];resources:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy}){
+    if(tab==='boms')return <BomEditor draft={draft} onChange={onChange} items={items} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>;
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
-    const itemOptions:Array<[string,string]>=[['','Select a SKU'],...items.map(i=>[i.id,i.name] as [string,string])];
-    const variantOptions:Array<[string,string]>=[['','No specific product / variant'],
-        ...skuSetup.parameters.filter(p=>p.kind==='productNames'&&p.enabled!==false)
-            .map(p=>[p.id,p.name+(p.productCode?' · '+p.productCode:'')] as [string,string])];
-    const classOptions:Array<[string,string]>=materialPolicy.bomClassifications
-        .filter(c=>c.enabled||c.code===str(draft.classificationCode))
-        .map(c=>[c.code,c.name]);
-    if(tab==='boms'&&str(draft.classificationCode)&&!classOptions.some(c=>c[0]===str(draft.classificationCode)))
-        classOptions.push([str(draft.classificationCode),str(draft.classificationCode)+' (existing record)']);
-    const componentOptions=itemOptions; // Generic BOMs may include any governed material classification.
+    const itemOptions:Array<[string,string]>=[['','Select a material or product'],...items.map(i=>[i.id,i.name] as [string,string])];
     const resourceOptions:Array<[string,string]>=[['','Select a resource'],...resources.map(r=>[r.id,r.name] as [string,string])];
     const siteOptions:Array<[string,string]>=[['','Organization-wide'],...refs.sites.map(r=>[r.id,r.name+(r.code?' · '+r.code:'')] as [string,string])];
     const assetOptions:Array<[string,string]>=[['','No linked asset'],...refs.assets.map(r=>[r.id,r.name+' · '+r.id] as [string,string])];
     const materialOptions:Array<[string,string]>=[['','Select approved Inventory material'],...refs.materials.map(r=>[r.id,r.materialNumber+' · '+r.name] as [string,string])];
     const utilityOptions:Array<[string,string]>=[['','Select registered equipment utility'],
         ...refs.utilities.map(u=>[u.workCenterId+'::'+u.code,u.name+' · '+u.workCenterId] as [string,string])];
-    const routingUnitOptions=(skuId:string,current:string):Array<[string,string]>=>{
-        const masterUnit=str(items.find(item=>item.id===skuId)?.uom);
-        const units=skuSetup.units,master=units.find(u=>u.code===masterUnit||u.symbol===masterUnit);
-        const options=master?units.filter(u=>u.categoryCode===master.categoryCode&&u.baseUnit===master.baseUnit):[];
-        return [[current,current],...options.filter(u=>u.code!==current).map(u=>[u.code,u.label+' ('+u.symbol+')'] as [string,string])];
-    };
-    const components=asComponents(draft.components);
     const operations=asOperations(draft.operations);
     return <div className='space-y-4'>
         <div className='grid gap-3 md:grid-cols-2'>
@@ -146,19 +248,6 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,material
                         options={utilityOptions} onChange={v=>{const selected=refs.utilities.find(u=>u.workCenterId+'::'+u.code===v);
                             onChange({...draft,utilityCode:selected?.code||'',utilityWorkCenterId:selected?.workCenterId||''});}}/>}
             </>}
-            {(tab==='boms')&&<>
-                <Choice title='BOM classification' value={str(draft.classificationCode)||'PRODUCTION'}
-                    options={classOptions} onChange={v=>update('classificationCode',v)}/>
-                <Choice title='Product/Variant (optional for shared materials)' value={str(draft.productVariantId)} options={variantOptions}
-                    onChange={v=>update('productVariantId',v)}/>
-                <Choice title='Manufactured material / product' value={str(draft.parentSkuId)} options={itemOptions} onChange={v=>{const product=items.find(x=>x.id===v);onChange({...draft,parentSkuId:v,outputUom:product?.uom??draft.outputUom});}}/>
-                <Field title='BOM alternative code' value={str(draft.alternativeCode)||'STANDARD'}
-                    onChange={v=>update('alternativeCode',v.toUpperCase())}/>
-                <Field title='Output quantity (basis)' type='number' value={number(draft.outputQty,1)} onChange={v=>update('outputQty',Number(v))}/>
-                <Field title='Output unit' value={str(draft.outputUom)} onChange={v=>update('outputUom',v)}/>
-                <Field title='Effective from (optional)' type='date' value={str(draft.effectiveFrom)} onChange={v=>update('effectiveFrom',v)}/>
-                <Field title='Version note' value={str(draft.versionNote)} onChange={v=>update('versionNote',v)}/>
-            </>}
             {tab==='resources'&&<>
                 <Choice title='Resource class' value={str(draft.type)} options={['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER'].map(v=>[v,v.replaceAll('_',' ')])} onChange={v=>update('type',v)}/>
                 <Field title='Rated units per hour' type='number' value={number(draft.rate,1000)} onChange={v=>update('rate',Number(v))}/>
@@ -182,18 +271,6 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,material
             </label>}
         </>}
         <TextField title='Description / notes' value={str(draft.description)} onChange={v=>update('description',v)}/>
-        {(tab==='boms')&&<section className='rounded-xl border border-line p-3'>
-            <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Component quantities</h3><Button variant='secondary' type='button' onClick={()=>update('components',[...components,{skuId:'',quantity:1,uom:'EA',scrapPct:0}])}>Add component</Button></div>
-            <div className='space-y-3'>{components.map((c,i)=><div key={i} className='grid gap-2 rounded-lg bg-page p-3 sm:grid-cols-2 xl:grid-cols-5'>
-                <Choice title={'Component '+(i+1)} value={str(c.skuId)} options={componentOptions} onChange={v=>{const item=items.find(x=>x.id===v);update('components',components.map((a,j)=>j===i?{...a,skuId:v,uom:str(item?.uom)||a.uom}:a));}}/>
-                <Field title='Quantity' type='number' value={c.quantity} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,quantity:Number(v)}:a))}/>
-                <Choice title='Component unit' value={c.uom} options={routingUnitOptions(c.skuId,c.uom)}
-                    onChange={v=>update('components',components.map((a,j)=>j===i?{...a,uom:v}:a))}/>
-                <Field title='Scrap allowance %' type='number' value={c.scrapPct} onChange={v=>update('components',components.map((a,j)=>j===i?{...a,scrapPct:Number(v)}:a))}/>
-                <button type='button' className='min-h-11 self-end rounded-lg border border-red-700/50 px-3 text-sm text-red-300' onClick={()=>update('components',components.filter((_,j)=>j!==i))}>Remove</button>
-            </div>)}</div>
-            <p className='mt-2 text-xs text-muted'>Component material records must exist before this BOM is saved. Upstream BOMs can be created later; production readiness requires approved upstream supply or confirmed stock.</p>
-        </section>}
         {tab==='routings'&&<section className='rounded-xl border border-line p-3'>
             <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Manufacturing operations</h3><Button variant='secondary' type='button' onClick={()=>update('operations',[...operations,{code:'STG_'+String(operations.length+1).padStart(9,'0'),name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:operations.length?[operations[operations.length-1].code]:[]}])}>Add stage</Button></div>
             <p className='mb-3 text-xs text-muted'>Stage codes are created by MEMS. Tick previous stages that must finish before the current stage; leaving them unticked permits parallel execution.</p>
@@ -218,7 +295,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,material
                 <button type='button' className='min-h-11 self-end rounded-lg border border-red-700/50 px-3 text-sm text-red-300' onClick={()=>update('operations',operations.filter((_,j)=>j!==i))}>Remove</button>
             </div>)}</div>
         </section>}
-        <p className='text-xs text-amber-200'>All BOMs share one structure. BOM classifications are governed in Manufacturing Setup; material categories distinguish components and routings define consumption stages. Phase 1 does not post stock, purchasing or finance transactions.</p>
+
     </div>;
 }
 
