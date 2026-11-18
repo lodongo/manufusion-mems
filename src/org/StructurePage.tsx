@@ -120,6 +120,15 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
     useEffect(()=>{let live=true;callBackend<{items:unknown[]}>('/api/org/ast/utilities/read',{workCenterId:id}).then(r=>{if(live)setHasUtilities(r.items.length>0)}).catch(()=>{if(live)setHasUtilities(false)});return ()=>{live=false}},[id,mode]);
     const [busy, setBusy] = useState(false);
     const [actionError, setActionError] = useState('');
+    const configureUnit=async(node:Node)=>{
+        if(node.level!=='cost_center'){setMode({type:'edit'});return;}
+        setBusy(true);setActionError('');
+        try{
+            const result=await callBackend<{manufacturing:boolean}>('/api/org/pln/cost-center/eligibility',{costCenterId:node.id});
+            setMode(result.manufacturing?{type:'planning'}:{type:'edit'});
+        }catch(e){setActionError(e instanceof Error?e.message:'Could not check cost-centre type.');}
+        finally{setBusy(false);}
+    };
 
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load the organization design.'}</Alert>;
@@ -291,8 +300,8 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                             {node.status === 'inactive' ? ' · inactive' : ''}
                         </p>
                     </div>
-                    <IconButton label={node.level === 'cost_center' ? 'Configure planning SKUs' : 'Configure'}
-                        onClick={() => setMode(node.level === 'cost_center' ? {type:'planning'} : {type:'edit'})}>
+                    <IconButton label={node.level === 'cost_center' ? 'Configure cost centre' : 'Configure'}
+                        onClick={() => void configureUnit(node)}>
                         <Cog className='h-4 w-4' />
                     </IconButton>
                     {canEdit && (

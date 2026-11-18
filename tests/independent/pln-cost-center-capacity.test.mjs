@@ -72,7 +72,9 @@ test('the same SKU editor opens from the cost-centre gear and PLN hierarchy',()=
  const menu=read('src/org/PlnCostCenterSetup.tsx');
  const editor=read('src/org/PlnCostCenterSkuSetup.tsx');
  const backendIndex=read('backend/index.ts');
- assert.ok(structure.includes("node.level === 'cost_center' ? {type:'planning'} : {type:'edit'}"));
+ assert.ok(structure.includes("'/api/org/pln/cost-center/eligibility'"));
+ assert.ok(structure.includes("setMode(result.manufacturing?{type:'planning'}:{type:'edit'})"));
+ assert.ok(read('backend/plnCostCenterCapacity.ts').includes("'POST /api/org/pln/cost-center/eligibility'"));
  assert.ok(structure.includes('<PlnCostCenterSkuSetup costCenterId={node.id}'));
  assert.ok(structure.includes("label='Edit organizational unit'"));
  assert.ok(pln.includes('<PlnCostCenterSetup/>'));

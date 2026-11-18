@@ -125,6 +125,18 @@ const auditChange=(ctx:OrgContext,action:string,id:string)=>audit([{
 }]);
 
 export const plnCostCenterCapacityRoutes={
+ 'POST /api/org/pln/cost-center/eligibility':[
+  orgRoute('org.pln.cost_center.eligibility',null,async ctx=>{
+   const id=identifier(ctx.body.costCenterId,'cost centre');
+   if(!await authorized(ctx,'read',id))
+    throw new HttpError(403,'Cost centre is outside your planning or organization scope.');
+   const cc=await getDoc(STRUCTURE(ctx.orgId)+'/'+id);
+   if(!cc||str(cc.data.level)!=='cost_center'||!live(cc))
+    return {manufacturing:false};
+   const costType=str(isObj(cc.data.attributes)?cc.data.attributes.costType:'');
+   return {manufacturing:isManufacturingCostType(costType,await types())};
+  }),
+ ],
  'POST /api/org/pln/cost-center/hierarchy':[
   orgRoute('org.pln.cost_center.hierarchy',null,async ctx=>{
    if(!hasPerm(ctx.permissions,'PLN.view')&&!hasPerm(ctx.permissions,'ADM.structure')&&ctx.role!=='org_super_admin')
