@@ -32,6 +32,7 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
   issue('HEADER','skuId','Output SKU belongs to a different production site.');
  const policy=await mfgMaterialPolicyForOrg(ctx.orgId);
  const effectiveDate=str(raw.effectiveFrom)||new Date().toISOString().slice(0,10);
+ const usedProducingBoms=new Map<string,string>();
  const codes=new Set<string>(),resourceCache=new Map<string,Awaited<ReturnType<typeof getDoc>>>(),
   bomCache=new Map<string,Awaited<ReturnType<typeof getDoc>>>(),
   skuCache=new Map<string,Awaited<ReturnType<typeof getDoc>>>();
@@ -75,6 +76,14 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
   }
   if(stageType==='PRODUCE'&&!bomId)
    issue(code,'bomId','Select an approved, effective BOM for this material-transforming stage.');
+  if(stageType!=='PRODUCE'&&bomId)
+   issue(code,'bomId','A non-transforming stage must not issue or consume a BOM.');
+  if(stageType==='PRODUCE'&&bomId){
+   const alreadyUsed=usedProducingBoms.get(bomId);
+   if(alreadyUsed)issue(code,'bomId',
+    'BOM already assigned to producing stage '+alreadyUsed+'; this could duplicate material demand.');
+   else usedProducingBoms.set(bomId,code);
+  }
   if(bomId){
    const bom=await fetchCached(bomCache,'mfg_boms',bomId);
    if(!bom)issue(code,'bomId','Stage BOM does not exist.');
