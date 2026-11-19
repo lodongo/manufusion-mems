@@ -221,7 +221,8 @@ test('production tabs follow configuration precedence and retain scoped availabi
     .map(match=>match[1]);
  assert.deepEqual(actual,expected);
  assert.ok(page.includes('const visibleTabs=tabs.filter('));
- assert.ok(page.includes('module===\'PLN\'&&t.key===\'resources\'?false:canViewMasters'));
+ assert.ok(page.includes('canViewMasters);'));
+ assert.ok(!page.includes("module==='PLN'&&t.key==='resources'?false"));
  assert.ok(page.includes('changeTab(visibleTabs[activeIndex+1].key)'));
 });
 test('mobile has a single accessible stage selector and desktop has grouped tabs',()=>{
