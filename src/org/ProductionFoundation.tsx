@@ -481,7 +481,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 </section>:null;
             })}
         </nav>
-        {active!=='skuSetup'&&<p className='hidden text-sm text-muted sm:block'>{activeTab?.hint}</p>
+        {active!=='skuSetup'&&<p className='hidden text-sm text-muted sm:block'>{activeTab?.hint}</p>}
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
         {loading?<Spinner/>:active==='costCenterSku'?<PlnCostCenterSetup/>:active==='demand'?<PlnDemand permissions={permissions}/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
