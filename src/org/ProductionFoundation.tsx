@@ -4,6 +4,7 @@ import { Spinner } from '../admin/kit';
 import { SkuConfigurationFields, SkuSetupPanel, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
 import PlnDemand from './PlnDemand';
 import PlnCostCenterSetup from './PlnCostCenterSetup';
+import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'rounded-2xl border border-line bg-panel p-4 text-ink '+className}>{children}</section>;
 }
@@ -310,6 +311,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [skuSetup,setSkuSetup]=useState<SkuSetup>(emptySkuSetup);
     const [refs,setRefs]=useState<References>(emptyReferences);
     const [draft,setDraft]=useState<Row|null>(null);
+    const [viewSkuId,setViewSkuId]=useState('');
     const [materialPolicy,setMaterialPolicy]=useState<MaterialPolicy>(defaultMaterialPolicy);
     const [materialPolicyRevision,setMaterialPolicyRevision]=useState(0);
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
@@ -353,14 +355,15 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         const kind=recordKind(active);
         return kinds.includes(kind)?rows[kind]:[] as Row[];
     },[active,rows]);
+    const viewedSku=rows.items.find(row=>row.id===viewSkuId);
     const refreshSkuSetup=async()=>{
         const data=await callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup');
         setSkuSetup(data);
     };
     const changeTab=(tab:Tab)=>{
-        setActive(tab);setDraft(null);setHistory([]);setError('');setNotice('');setDecisionReason('');
+        setActive(tab);setDraft(null);setViewSkuId('');setHistory([]);setError('');setNotice('');setDecisionReason('');
     };
-    const copyVersion=(row:Row)=>{const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
+    const copyVersion=(row:Row)=>{setViewSkuId('');const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
     const release=async (id:string,decision:'submit'|'approve'|'reject')=>{
         if(decision==='reject'&&!decisionReason.trim()){setError('Enter a rejection reason first.');return;}
         setBusy(true);setError('');setNotice('');
@@ -374,7 +377,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         finally{setBusy(false);}
     };
     const openDraft=async(row:Row)=>{
-        setDraft(row);setHistory([]);setError('');
+        setViewSkuId('');setDraft(row);setHistory([]);setError('');
         try{
             const result=await callBackend<{revisions:Row[]}>('/api/org/pln-mfg/foundation/history',{kind:recordKind(active),id:row.id});
             setHistory(result.revisions);
@@ -482,18 +485,40 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </div>
             <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration</Button></div>
         </Card>:<>
-            <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-muted'>{filtered.length} saved master records · draft versions</p>{canSave&&<Button onClick={()=>setDraft(newRecord(active,materialPolicy))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
+            <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-muted'>{filtered.length} saved master records · draft versions</p>{canSave&&!viewSkuId&&<Button onClick={()=>setDraft(newRecord(active,materialPolicy))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
                 <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items} resources={rows.resources} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>
+                {active==='items'&&draft.id&&['FINISHED','INTERMEDIATE'].includes(str(draft.category))&&
+                    <PlnSkuCostCenterRatings skuId={draft.id}/>}
+
                 <div className='flex justify-end'><Button disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving...':'Save draft'}</Button></div>
+            </Card>:active==='items'&&viewSkuId?<Card className='space-y-4'>
+                <div className='flex flex-wrap items-center justify-between gap-2'>
+                    <h2 className='font-semibold'>Manufactured SKU detail</h2>
+                    <Button variant='secondary' onClick={()=>setViewSkuId('')}>Back to SKU list</Button>
+                </div>
+                {viewedSku?<>
+                    <div className='rounded-xl bg-page p-3'>
+                        <p className='font-mono text-xs text-brand'>{viewedSku.id}</p>
+                        <p className='mt-1 break-words font-semibold'>{viewedSku.name}</p>
+                        <p className='mt-1 text-xs text-muted'>{str(viewedSku.category)} · {str(viewedSku.uom)} · Revision {viewedSku.revision??1}</p>
+                    </div>
+                    <PlnSkuCostCenterRatings skuId={viewedSku.id}/>
+                    {canSave&&['draft','rejected',''].includes(str(viewedSku.status))&&
+                        <Button variant='secondary' onClick={()=>void openDraft(viewedSku)}>Edit SKU draft</Button>}
+                </>:<p className='text-sm text-muted'>SKU not found. Refresh the Materials &amp; Products list.</p>}
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
                 <h3 className='font-semibold'>{row.name}</h3>
                 <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:'BOM · '+(materialPolicy.bomClassifications.find(c=>c.code===str(row.classificationCode))?.name||str(row.classificationCode)||'Production')+' · Components: '+asComponents(row.components).length}</p>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
+                    {active==='items'&&['FINISHED','INTERMEDIATE'].includes(str(row.category))&&
+                        <Button variant='secondary' onClick={()=>{
+                            setViewSkuId(row.id);setDraft(null);setError('');setNotice('');
+                        }}>View SKU</Button>}
                     {canSave&&['draft','rejected',''].includes(str(row.status))&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}
                     {canSave&&['active','pending_approval'].includes(str(row.status))&&<Button variant='secondary' onClick={()=>copyVersion(row)}>New version</Button>}
                 </div>
