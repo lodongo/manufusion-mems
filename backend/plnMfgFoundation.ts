@@ -11,6 +11,8 @@ import { getNode } from './structure';
 import { calculateSkuConversion, composeConfiguredSkuName, composeSkuNameWithSequence, skuUnitConversion, masterPrefix, type SkuComponents } from './mfgSkuModel';
 import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from './mfgSkuConfiguration';
 import { mfgMaterialPolicyForOrg, mfgMaterialPolicyPath, normalizeMfgMaterialPolicy, bomClassificationCode } from './mfgMaterialPolicy';
+import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCommissionedCapacity} from './plnCostCenterCapacity';
+import {physicalRatingUnits} from './plnPhysicalCapacity';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
 export type MasterKind = typeof MASTER_KINDS[number];
@@ -119,6 +121,8 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         return {...base,classificationCode,productVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
     const skuId=VALID_ID(raw.skuId,'Routed SKU');
+    const routingModelVersion=raw.routingModelVersion===2?2:1;
+    const advanced=routingModelVersion===2;
     const operations=ARR(raw.operations);
     if(!operations.length||operations.length>60)throw new HttpError(400,'A routing must have 1–60 operations.');
     const codes=new Set<string>();
@@ -131,9 +135,29 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const dependsOn=Array.isArray(o.dependsOn)?o.dependsOn.map(str):(i>0?[str(operations[i-1].code)]:[]);
         if(dependsOn.some(x=>!codes.has(x)||x===code)||new Set(dependsOn).size!==dependsOn.length)
             throw new HttpError(400,'Stage dependencies must reference unique earlier stages.');
-        return {code,sequence:i+1,name:REQUIRED(o.name,'Operation name',120),resourceId:VALID_ID(o.resourceId,'Resource code'),producesSkuId,dependsOn,setupMinutes:NONNEGATIVE(o.setupMinutes??0,'Setup minutes',100000),runMinutesPerUnit:NONNEGATIVE(o.runMinutesPerUnit??0,'Minutes per output unit',100000)};
+        const stageName=advanced?str(o.name).trim().slice(0,120):REQUIRED(o.name,'Operation name',120);
+        const resourceId=advanced?str(o.resourceId).trim():VALID_ID(o.resourceId,'Resource code');
+        if(resourceId)VALID_ID(resourceId,'Resource code');
+        const core={code,sequence:i+1,name:stageName,resourceId,producesSkuId,dependsOn,
+            setupMinutes:NONNEGATIVE(o.setupMinutes??0,'Setup minutes',100000),
+            runMinutesPerUnit:NONNEGATIVE(o.runMinutesPerUnit??0,'Minutes per output unit',100000)};
+        if(!advanced)return core;
+        const costCenterId=str(o.costCenterId).trim(),bomId=str(o.bomId).trim();
+        if(costCenterId)VALID_ID(costCenterId,'Manufacturing cost centre');
+        if(bomId)VALID_ID(bomId,'Stage BOM');
+        const processClass=str(o.processClass||'GENERAL').trim().toUpperCase();
+        if(!/^[A-Z0-9][A-Z0-9_-]{0,59}$/.test(processClass))
+            throw new HttpError(400,'Stage process class must be a valid classification code.');
+        return {...core,costCenterId,bomId,processClass,
+            stageType:ENUM(o.stageType||'PRODUCE',['PRODUCE','INSPECT','TRANSFER','OTHER'] as const,'stage type'),
+            capacityBasis:ENUM(o.capacityBasis||'RESOURCE_RATE',
+                ['PHYSICAL_CONTAINER','RESOURCE_RATE','BATCH_CYCLE','TIME_PER_UNIT'] as const,'capacity basis'),
+            batchSize:NONNEGATIVE(o.batchSize??0,'Batch size'),
+            cycleMinutes:NONNEGATIVE(o.cycleMinutes??0,'Batch cycle minutes',100000)};
     });
-    return {...base,skuId,operations:steps as unknown as Plain,effectiveFrom:str(raw.effectiveFrom).slice(0,10)};
+    return {...base,skuId,operations:steps as unknown as Plain,
+        routingModelVersion,alternativeCode:advanced?bomAlternative(raw.alternativeCode):'STANDARD',
+        effectiveFrom:effectiveDate(raw.effectiveFrom)};
 }
 
 export function detectBomCycle(boms:Array<{parentSkuId:string;components:Array<{skuId:string}>}>,parentSkuId:string,components:Array<{skuId:string}>):boolean {
@@ -254,16 +278,29 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         if(str(routed.data.siteId)&&str(routed.data.siteId)!==str(item.siteId))
             throw new HttpError(400,'Routing SKU is assigned to another site.');
         for(const o of ARR(item.operations)){
-            const resource=await getDoc(DOC(ctx.orgId,'resources',str(o.resourceId)));
-            if(!resource)throw new HttpError(400,'Routing resource '+str(o.resourceId)+' not found.');
-            if(str(resource.data.siteId)&&str(resource.data.siteId)!==str(item.siteId))
-                throw new HttpError(400,'Routing resource '+str(o.resourceId)+' is assigned to another site.');
+            const stage='Stage '+(num(o.sequence)??0)+' ('+(str(o.name)||str(o.code))+'): ';
+            if(str(o.resourceId)){
+                const resource=await getDoc(DOC(ctx.orgId,'resources',str(o.resourceId)));
+                if(!resource)throw new HttpError(400,stage+'routing resource not found: '+str(o.resourceId));
+                if(str(resource.data.siteId)&&str(resource.data.siteId)!==str(item.siteId))
+                    throw new HttpError(400,stage+'routing resource belongs to another site.');
+            }
+            if(str(o.costCenterId))
+                await routingManufacturingCostCenter(ctx,str(o.costCenterId),str(item.siteId));
             if(str(o.producesSkuId)){
                 const product=await getDoc(DOC(ctx.orgId,'items',str(o.producesSkuId)));
                 if(!product||['RAW','PACKAGING'].includes(str(product.data.category)))
-                    throw new HttpError(400,'Stage output must be a manufactured SKU or intermediate product.');
+                    throw new HttpError(400,stage+'output must be a manufactured SKU or intermediate product.');
                 if(str(product.data.siteId)&&str(product.data.siteId)!==str(item.siteId))
-                    throw new HttpError(400,'Stage output '+str(o.producesSkuId)+' belongs to another site.');
+                    throw new HttpError(400,stage+'output '+str(o.producesSkuId)+' belongs to another site.');
+            }
+            if(str(o.bomId)){
+                const bom=await getDoc(DOC(ctx.orgId,'boms',str(o.bomId)));
+                if(!bom)throw new HttpError(400,stage+'selected stage BOM was not found.');
+                if(str(bom.data.parentSkuId)!==str(o.producesSkuId))
+                    throw new HttpError(400,stage+'BOM output does not match the stage output SKU.');
+                if(str(bom.data.siteId)&&str(bom.data.siteId)!==str(item.siteId))
+                    throw new HttpError(400,stage+'BOM belongs to another production site.');
             }
         }
     }
