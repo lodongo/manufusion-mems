@@ -9,6 +9,7 @@ import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canAt, nodePath, scopeOf } from './access';
 import { audit } from './audit';
 import { referenceChecks, bomAlternative } from './plnMfgFoundation';
+import {reviewManufacturingRouting} from './mfgRoutingReadiness';
 import { bomClassificationCode, bomReleaseSlotGroup, mfgMaterialPolicyForOrg } from './mfgMaterialPolicy';
 
 type Kind = 'boms'|'routings';
@@ -105,9 +106,23 @@ export const plnMfgReleaseRoutes={
                     explanation:options.length>1?'Choose an explicit BOM classification and alternative for this production version':
                         record?'Approved effective BOM alternative':'No approved BOM alternative is effective'};
             }
-            const selected=selectEffectiveForSite(records,date,siteId);
+            const requestedAlternative=str(ctx.body.alternativeCode);
+            const alternatives=new Map<string,typeof records>();
+            for(const record of records){
+                const alternative=bomAlternative(record.alternativeCode);
+                if(requestedAlternative&&alternative!==bomAlternative(requestedAlternative))continue;
+                const list=alternatives.get(alternative)||[];
+                list.push(record);alternatives.set(alternative,list);
+            }
+            const options=[...alternatives.entries()].map(([alternativeCode,versions])=>{
+                const selected=selectEffectiveForSite(versions,date,siteId);
+                return selected?{alternativeCode,record:selected}:null;
+            }).filter((x):x is NonNullable<typeof x>=>x!==null);
+            const selected=options.length===1?options[0].record:null;
             return {kind,skuId,siteId,date,record:selected,available:!!selected,
-                explanation:selected?'Approved effective manufacturing version':'No approved version is effective for the selected site and date'};
+                requiresSelection:options.length>1,options,
+                explanation:options.length>1?'Choose an explicit approved routing alternative':
+                    selected?'Approved effective manufacturing version':'No approved version is effective for the selected site and date'};
         }),
     ],
     'POST /api/org/pln-mfg/foundation/submit':[
@@ -121,6 +136,12 @@ export const plnMfgReleaseRoutes={
             if(!await authorized(ctx,permission,str(doc.data.siteId)))
                 throw new HttpError(403,'Submission is outside your authorized site.');
             await referenceChecks(ctx,kind,doc.data,id);
+            if(kind==='routings'&&doc.data.routingModelVersion===2){
+                const review=await reviewManufacturingRouting(ctx,doc.data);
+                if(!review.ready)
+                    throw new HttpError(409,'Routing is not ready for approval: '+
+                        review.issues.slice(0,4).map(i=>i.stageCode+': '+i.message).join('; '));
+            }
             const at=nowIso(),data={...doc.data,status:'pending_approval',submittedAt:at,submittedBy:ctx.uid};
             const saved=await commitChecked([
                 {path,data,precondition:{updateTime:doc.updateTime}},
@@ -150,6 +171,12 @@ export const plnMfgReleaseRoutes={
             if(decision==='reject'&&!note)throw new HttpError(400,'A reason is required for rejection.');
             if(decision==='approve'){
                 await referenceChecks(ctx,kind,doc.data,id);
+                if(kind==='routings'&&doc.data.routingModelVersion===2){
+                    const review=await reviewManufacturingRouting(ctx,doc.data);
+                    if(!review.ready)
+                        throw new HttpError(409,'Routing release readiness changed: '+
+                            review.issues.slice(0,4).map(i=>i.stageCode+': '+i.message).join('; '));
+                }
                 const comparable=await listDocs(root(ctx.orgId,kind));
                 const same=comparable.filter(other=>other.id!==id&&str(other.data.status)==='active'&&
                     str(other.data.siteId)===str(doc.data.siteId)&&
@@ -158,7 +185,8 @@ export const plnMfgReleaseRoutes={
                         ?str(other.data.parentSkuId)===str(doc.data.parentSkuId)&&
                             bomClassificationCode(other.data)===bomClassificationCode(doc.data)&&
                             bomAlternative(other.data.alternativeCode)===bomAlternative(doc.data.alternativeCode)
-                        :str(other.data.skuId)===str(doc.data.skuId)));
+                        :str(other.data.skuId)===str(doc.data.skuId)&&
+                            bomAlternative(other.data.alternativeCode)===bomAlternative(doc.data.alternativeCode)));
                 if(same.length)throw new HttpError(409,'Another approved version already applies to this SKU, site and effective date.');
             }
             const at=nowIso(),status=decision==='approve'?'active':'rejected';
@@ -168,14 +196,16 @@ export const plnMfgReleaseRoutes={
             // commit. Two simultaneous approvals cannot publish conflicting versions.
             const skuId=str(kind==='boms'?doc.data.parentSkuId:doc.data.skuId);
             const slotKey=[kind,str(doc.data.siteId)||'ORG',skuId,
-                ...(kind==='boms'?[bomReleaseSlotGroup(doc.data),bomAlternative(doc.data.alternativeCode)]:[]),
+                ...(kind==='boms'?[bomReleaseSlotGroup(doc.data),bomAlternative(doc.data.alternativeCode)]:
+                    kind==='routings'&&doc.data.routingModelVersion===2?[bomAlternative(doc.data.alternativeCode)]:[]),
                 str(doc.data.effectiveFrom)||'BASE'].join('__');
             const slotPath='organizations/'+ctx.orgId+'/mfg_release_slots/'+slotKey;
             const saved=await commitChecked([
                 {path,data,precondition:{updateTime:doc.updateTime}},
                 {path:path+'/release_events/'+randomId(10),data:{action:decision,kind,revision:doc.data.revision,by:ctx.uid,at,note},precondition:{exists:false}},
                 ...(status==='active'?[{path:slotPath,data:{kind,skuId,siteId:str(doc.data.siteId),effectiveFrom:str(doc.data.effectiveFrom),
-                    ...(kind==='boms'?{classificationCode:bomClassificationCode(doc.data),alternativeCode:bomAlternative(doc.data.alternativeCode)}:{}),
+                    ...(kind==='boms'?{classificationCode:bomClassificationCode(doc.data),alternativeCode:bomAlternative(doc.data.alternativeCode)}:
+                        kind==='routings'?{alternativeCode:bomAlternative(doc.data.alternativeCode)}:{}),
                     masterId:id,activatedAt:at,activatedBy:ctx.uid},precondition:{exists:false}}]:[]),
             ]);
             if(!saved)throw new HttpError(409,'This release changed. Refresh and decide again.');
