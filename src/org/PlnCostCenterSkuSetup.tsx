@@ -315,7 +315,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
       {issues.length} issue(s) prevent saving. Review the relevant SKU cards above.
      </div>}
      {error&&<p role='alert' className='text-xs text-red-600'>{error}</p>}
-     {notice&&<p role='status' className='text-xs font-semibold'>{notice}</p>
+     {notice&&<p role='status' className='text-xs font-semibold'>{notice}</p>}
      <div className='flex flex-wrap items-center justify-between gap-2'>
       <span className='text-xs text-muted'>{lines.length} SKU(s) in this configuration · revision {revision}</span>
       <div className='flex flex-wrap gap-2'>
