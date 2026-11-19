@@ -11,6 +11,7 @@ import {bomClassificationCode,mfgMaterialPolicyForOrg} from './mfgMaterialPolicy
 type Issue={stageCode:string;field:string;message:string};
 type StagePreview={code:string;name:string;stageType:string;producesSkuId:string;
  costCenterId:string;resourceId:string;bomId:string;capacityBasis:string;
+ dependsOn:string[];setupMinutes:number;runMinutesPerUnit:number;bomComponentCount:number;
  capacity:{quantity:number;unit:string;source:string;revision?:number}|null};
 const path=(org:string,name:string,id:string)=>'organizations/'+org+'/'+name+'/'+id;
 const rows=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
@@ -141,7 +142,10 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
      unit:(str(item?.data.uom)||'output units')+'/hour',source:'Configured run time per unit'};
    }
   }else issue(code,'capacityBasis','Select a supported capacity basis.');
-  stagePreviews.push({code,name,stageType,producesSkuId,costCenterId,resourceId,bomId,capacityBasis,capacity});
+  stagePreviews.push({code,name,stageType,producesSkuId,costCenterId,resourceId,bomId,
+   capacityBasis,dependsOn:predecessors,setupMinutes:finite(step.setupMinutes),
+   runMinutesPerUnit:finite(step.runMinutesPerUnit),
+   bomComponentCount:rows(bomId?bomCache.get(bomId)?.data.components:null).length,capacity});
  }
  if(operations.length){
   // Every required parallel branch must lead to the final stage; isolated
