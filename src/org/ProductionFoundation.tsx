@@ -5,6 +5,7 @@ import { SkuConfigurationFields, SkuSetupPanel, emptySkuSetup, type SkuSelection
 import PlnDemand from './PlnDemand';
 import PlnCostCenterSetup from './PlnCostCenterSetup';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
+import PlnProcessRoutingEditor from './PlnProcessRoutingEditor';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 '+className}>{children}</section>;
 }
@@ -70,7 +71,10 @@ const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy):Row=>{
     if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',alternativeCode:'STANDARD',routingId:'',
         parentSkuId:'',outputQty:1,outputUom:'EA',components:[]};
     if(tab==='resources')return {id:'',name:'',type:'LINE',rate:1000,rateUom:'EA',efficiency:100,siteId:'',assetId:''};
-    return {id:'',name:'',skuId:'',operations:[{code:'STG_000000001',name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:[]}]};
+    return {id:'',name:'',skuId:'',siteId:'',routingModelVersion:2,alternativeCode:'STANDARD',
+        operations:[{code:'STG_000000001',name:'',resourceId:'',setupMinutes:0,
+        runMinutesPerUnit:0,producesSkuId:'',costCenterId:'',bomId:'',stageType:'PRODUCE',
+        processClass:'GENERAL',capacityBasis:'RESOURCE_RATE',batchSize:0,cycleMinutes:0,dependsOn:[]}]};
 };
 const recordKind=(tab:Tab):Kind=>tab as Kind;
 const str=(value:unknown):string=>typeof value==='string'?value:'';
@@ -210,8 +214,10 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
     <p className='text-xs text-muted'>Save creates a draft only. You can define upstream BOMs later. Production release follows the approval workflow.</p>
  </div>;
 }
-function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,materialPolicy}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];resources:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy}){
+function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,materialPolicy}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];boms:Row[];resources:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy}){
     if(tab==='boms')return <BomEditor draft={draft} onChange={onChange} items={items} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>;
+    if(tab==='routings')return <PlnProcessRoutingEditor value={draft} onChange={onChange}
+        items={items} boms={boms} resources={resources} sites={refs.sites}/>;
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
     const itemOptions:Array<[string,string]>=[['','Select a material or product'],...items.map(i=>[i.id,i.name] as [string,string])];
     const resourceOptions:Array<[string,string]>=[['','Select a resource'],...resources.map(r=>[r.id,r.name] as [string,string])];
@@ -330,7 +336,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const canViewMasters=hasPerm(permissions,'MFG.view');
     const canViewPlanning=hasPerm(permissions,'PLN.view');
     const visibleTabs=tabs.filter(t=>t.key==='config'||t.key==='demand'||t.key==='costCenterSku'?canViewPlanning:
-        module==='PLN'&&t.key==='resources'?false:canViewMasters);
+        canViewMasters);
     const activeIndex=visibleTabs.findIndex(tab=>tab.key===active);
     const activeTab=tabs.find(tab=>tab.key===active);
     // Read-only users may have a different first accessible step.
@@ -413,6 +419,10 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         setBusy(true);setError('');setNotice('');
         try{
             const body={...draft};
+            if(active==='routings'&&!str(body.name).trim()){
+                const output=rows.items.find(x=>x.id===str(body.skuId));
+                body.name=(output?.name||'Manufacturing')+' · Process routing';
+            }
             const result=await callBackend<{record:Row;generatedCode?:string}>('/api/org/pln-mfg/foundation/save',{kind:recordKind(active),record:body,expectedRevision:body.revision??0});
             await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+'. The code is maintained by MEMS.');
         }catch(e){setError(e instanceof Error?e.message:'Could not save.');}
@@ -553,7 +563,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
-                <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items} resources={rows.resources} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>
+                <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items}
+                    boms={rows.boms} resources={rows.resources} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>
                 {active==='items'&&draft.id&&['FINISHED','INTERMEDIATE'].includes(str(draft.category))&&
                     <PlnSkuCostCenterRatings skuId={draft.id}/>}
 
