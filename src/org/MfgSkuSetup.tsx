@@ -79,6 +79,17 @@ const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
     {key:'normalizationUnits',title:'Normalization Units',Icon:Shapes},
     {key:'namingSequence',title:'SKU Naming Sequence',Icon:ListOrdered},
 ];
+/** Organize the large parameter catalogue without changing any editor or SKU setting. */
+const menuGroups:{title:string;hint:string;keys:MenuKey[]}[]=[
+    {title:'Product identity',hint:'Names, production form and SKU naming',
+        keys:['productNames','productionForms','namingSequence']},
+    {title:'Primary container',hint:'Container types and physical sizes',
+        keys:['containers','containerSizes']},
+    {title:'Commercial & transport packaging',hint:'Selling packs and logistics units',
+        keys:['packages','packagingSizes','transportPackages']},
+    {title:'Reporting units',hint:'Normalized production measurement',
+        keys:['normalizationUnits']},
+];
 const variants:Array<{key:'productNameId'|'productionFormId'|'containerId'|'containerSizeId'|'packageId'|'packagingSizeId'|'normalizationUnitId';kind:SkuParameterKind;label:string}>=[
     {key:'productNameId',kind:'productNames',label:'Product/Variant'},
     {key:'productionFormId',kind:'productionForms',label:'Production form'},
@@ -417,16 +428,31 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
     }).join(namingDraft?.separator??'_');
     return <section className={modal}>
         {!active?<>
-            <h2 className='mb-4 text-lg font-semibold'>SKU Configuration</h2>
-            <nav aria-label='SKU configuration' className='space-y-2'>
-                {menu.map(({key,title,Icon})=><button key={key} type='button' onClick={()=>open(key)}
-                    className='flex min-h-14 w-full items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2 text-left transition-colors hover:bg-page focus-visible:outline-2 focus-visible:outline-brand'>
-                    <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand'>
-                        <Icon className='h-5 w-5' aria-hidden='true'/>
-                    </span>
-                    <span className='min-w-0 flex-1 text-sm font-semibold'>{key==='productNames'?variantLabel:title}</span>
-                    <ChevronRight className='h-5 w-5 shrink-0 text-muted' aria-hidden='true'/>
-                </button>)}
+            <h2 className='mb-2 text-base font-semibold sm:text-lg'>SKU Configuration</h2>
+            <p className='mb-3 text-xs text-muted'>Configure the product identity and physical container before commercial packaging and reporting units.</p>
+            <nav aria-label='SKU configuration' className='grid gap-3 lg:grid-cols-2'>
+                {menuGroups.map((group,i)=><details key={group.title} className='min-w-0 rounded-xl border border-line bg-panel p-3' open={undefined}
+                    defaultOpen={i===0}>
+                    <summary className='cursor-pointer text-sm font-semibold'>
+                        {i+1}. {group.title}
+                        <span className='mt-1 block text-xs font-normal text-muted'>{group.hint}</span>
+                    </summary>
+                    <div className='mt-3 space-y-2'>
+                        {group.keys.map(key=>{
+                            const entry=menu.find(m=>m.key===key);
+                            if(!entry)return null;
+                            const Icon=entry.Icon;
+                            return <button key={key} type='button' onClick={()=>open(key)}
+                                className='flex min-h-11 w-full min-w-0 items-center gap-2 rounded-lg border border-line bg-page px-2 py-2 text-left hover:bg-brand/10 focus-visible:outline-2 focus-visible:outline-brand'>
+                                <Icon className='h-4 w-4 shrink-0 text-brand' aria-hidden='true'/>
+                                <span className='min-w-0 flex-1 break-words text-xs font-medium sm:text-sm'>
+                                    {key==='productNames'?variantLabel:entry.title}
+                                </span>
+                                <ChevronRight className='h-4 w-4 shrink-0 text-muted' aria-hidden='true'/>
+                            </button>;
+                        })}
+                    </div>
+                </details>)}
             </nav>
         </>:<>
             <div className='mb-4 flex items-center gap-2'>
