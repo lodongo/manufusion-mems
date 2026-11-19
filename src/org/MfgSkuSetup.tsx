@@ -81,8 +81,8 @@ const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
 ];
 /** Organize the large parameter catalogue without changing any editor or SKU setting. */
 const menuGroups:{title:string;hint:string;keys:MenuKey[]}[]=[
-    {title:'Product identity',hint:'Names, production form and SKU naming',
-        keys:['productNames','productionForms','namingSequence']},
+    {title:'Product identity',hint:'Product names and production forms',
+        keys:['productNames','productionForms']},
     {title:'Primary container',hint:'Container types and physical sizes',
         keys:['containers','containerSizes']},
     {title:'Commercial & transport packaging',hint:'Selling packs and logistics units',
@@ -452,6 +452,16 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
                         })}
                     </div>
                 </details>)}
+                <section aria-label='SKU Naming Sequence' className='min-w-0 rounded-xl border border-line bg-panel p-3'>
+                    <p className='mb-1 text-sm font-semibold'>SKU Naming Sequence</p>
+                    <p className='mb-3 text-xs text-muted'>Standalone naming standard for manufactured SKUs; separate from product identity and physical configuration.</p>
+                    <button type='button' onClick={()=>open('namingSequence')}
+                        className='flex min-h-12 w-full min-w-0 items-center gap-2 rounded-lg border border-line bg-page px-3 py-2 text-left hover:bg-brand/10 focus-visible:outline-2 focus-visible:outline-brand'>
+                        <ListOrdered className='h-5 w-5 shrink-0 text-brand' aria-hidden='true'/>
+                        <span className='min-w-0 flex-1 text-sm font-semibold'>Configure SKU naming sequence</span>
+                        <ChevronRight className='h-5 w-5 shrink-0 text-muted' aria-hidden='true'/>
+                    </button>
+                </section>
             </nav>
         </>:<>
             <div className='mb-4 flex items-center gap-2'>
