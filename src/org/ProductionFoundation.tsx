@@ -6,11 +6,11 @@ import PlnDemand from './PlnDemand';
 import PlnCostCenterSetup from './PlnCostCenterSetup';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
-    return <section className={'rounded-2xl border border-line bg-panel p-4 text-ink '+className}>{children}</section>;
+    return <section className={'min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 '+className}>{children}</section>;
 }
 function PageTitle({title,action}:{title:string;action:ReactNode}){
-    return <div className='mb-4 flex flex-col items-start gap-3 py-2 sm:flex-row sm:items-center sm:justify-between'>
-        <h1 className='text-xl font-semibold text-ink'>{title}</h1>
+    return <div className='mb-3 flex min-w-0 items-center justify-between gap-2 py-1 sm:mb-4 sm:py-2'>
+        <h1 className='min-w-0 break-words text-lg font-semibold text-ink sm:text-xl'>{title}</h1>
         {action}
     </div>;
 }
@@ -42,16 +42,24 @@ type References={
 };
 const emptyReferences:References={materials:[],utilities:[],assets:[],sites:[]};
 const kinds:Kind[]=['items','boms','resources','routings'];
-const tabs:{key:Tab;label:string;hint:string}[]=[
-    {key:'costCenterSku',label:'Manufacturing Cost Centre & SKUs',hint:'Commissioned throughput per manufactured SKU, configured on its cost centre'},
-    {key:'demand',label:'Demand & S&OP',hint:'Demand register, approvals and consolidated monthly net demand'},
-    {key:'skuSetup',label:'Product Configuration',hint:'Configure variants, production forms and packaging attributes'},
-    {key:'materialPolicy',label:'Manufacturing Setup',hint:'Material consumption and intermediate inventory policies'},
-    {key:'items',label:'Materials & Products',hint:'Finished goods, components, intermediates and process inputs'},
-    {key:'boms',label:'Bills of Materials',hint:'One BOM master with governed classifications and versioned structures'},
-    {key:'resources',label:'Manufacturing Resources',hint:'Work centres, machines and production lines'},
-    {key:'routings',label:'Process Routings',hint:'Stage-by-stage manufacturing operations'},
-    {key:'config',label:'Planning Configuration',hint:'Organization planning defaults'},
+type Phase='foundation'|'masters'|'capacity'|'planning';
+const phases:{key:Phase;title:string;description:string}[]=[
+    {key:'foundation',title:'1 · Foundation',description:'Establish policies and product definitions'},
+    {key:'masters',title:'2 · Master data',description:'Create the manufactured products and resource masters'},
+    {key:'capacity',title:'3 · Capacity & process',description:'Map commissioned capacity and manufacturing routes'},
+    {key:'planning',title:'4 · Planning',description:'Configure planning rules and demand'},
+];
+/** Configuration precedes use. Preserve the existing tab keys, data and permissions. */
+const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
+    {key:'materialPolicy',label:'Manufacturing Setup',shortLabel:'Manufacturing setup',phase:'foundation',hint:'Configure material consumption and intermediate inventory policies'},
+    {key:'skuSetup',label:'Product Configuration',shortLabel:'Product configuration',phase:'foundation',hint:'Define product variants, production forms, physical containers and packaging'},
+    {key:'items',label:'Materials & Products',shortLabel:'Materials & products',phase:'masters',hint:'Create manufactured SKUs, ingredients, packaging and intermediate products'},
+    {key:'boms',label:'Bills of Materials',shortLabel:'Bills of materials',phase:'masters',hint:'Define the materials and quantities consumed by each product'},
+    {key:'resources',label:'Manufacturing Resources',shortLabel:'Manufacturing resources',phase:'masters',hint:'Register manufacturing resources used by routings'},
+    {key:'costCenterSku',label:'Manufacturing Cost Centre & SKUs',shortLabel:'Cost centre & SKU speeds',phase:'capacity',hint:'Map manufactured SKUs to each cost centre and rate physical-container capacity'},
+    {key:'routings',label:'Process Routings',shortLabel:'Process routings',phase:'capacity',hint:'Define operation sequences using configured resources and outputs'},
+    {key:'config',label:'Planning Configuration',shortLabel:'Planning rules',phase:'planning',hint:'Configure planning horizon, frozen period and lot-sizing defaults'},
+    {key:'demand',label:'Demand & S&OP',shortLabel:'Demand & S&OP',phase:'planning',hint:'Maintain forecast and firm demand after the relevant masters are configured'},
 ];
 const emptyRows:Record<Kind,Row[]>={items:[],boms:[],resources:[],routings:[]};
 const fld='w-full min-h-11 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink outline-none focus:border-brand';
@@ -306,7 +314,7 @@ function MasterEditor({tab,draft,onChange,items,resources,refs,skuSetup,material
 }
 
 export default function ProductionFoundation({module,permissions}:{module:'PLN'|'MFG';permissions:string[]}){
-    const [active,setActive]=useState<Tab>(module==='PLN'?'costCenterSku':'skuSetup');
+    const [active,setActive]=useState<Tab>('materialPolicy');
     const [rows,setRows]=useState<Record<Kind,Row[]>>(emptyRows);
     const [skuSetup,setSkuSetup]=useState<SkuSetup>(emptySkuSetup);
     const [refs,setRefs]=useState<References>(emptyReferences);
@@ -323,6 +331,16 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const canViewPlanning=hasPerm(permissions,'PLN.view');
     const visibleTabs=tabs.filter(t=>t.key==='config'||t.key==='demand'||t.key==='costCenterSku'?canViewPlanning:
         module==='PLN'&&t.key==='resources'?false:canViewMasters);
+    const activeIndex=visibleTabs.findIndex(tab=>tab.key===active);
+    const activeTab=tabs.find(tab=>tab.key===active);
+    // Read-only users may have a different first accessible step.
+    useEffect(()=>{
+        if(visibleTabs.length&&!visibleTabs.some(tab=>tab.key===active)){
+            setActive(visibleTabs[0].key);
+            setDraft(null);
+            setViewSkuId('');
+        }
+    },[active,visibleTabs.length,canViewPlanning,canViewMasters,module]);
     const canEdit=canViewMasters&&hasPerm(permissions,'MFG.master.edit');
     const canSkuConfig=canViewMasters&&hasPerm(permissions,'MFG.sku.configure');
     const canConfig=hasPerm(permissions,'PLN.configure');
@@ -421,9 +439,49 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         finally{setBusy(false);}
     };
     return <div className='space-y-4'>
-        <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing'} action={<Button variant='secondary' disabled={busy} onClick={()=>void load()}>Refresh</Button>}/>
-        <div className='flex gap-2 overflow-x-auto pb-1'>{visibleTabs.map(tab=><button type='button' key={tab.key} aria-current={active===tab.key?'page':undefined} onClick={()=>changeTab(tab.key)} className={'min-h-11 shrink-0 rounded-xl border px-3 text-sm '+(active===tab.key?'border-brand bg-brand/10 text-brand':'border-line text-soft')}>{tab.label}</button>)}</div>
-        {active!=='skuSetup'&&<p className='text-sm text-muted'>{tabs.find(t=>t.key===active)?.hint}</p>}
+        <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing'}
+            action={<Button variant='secondary' className='shrink-0 px-3 text-xs sm:text-sm'
+                disabled={busy||loading} onClick={()=>void load()}>Refresh</Button>}/>
+        <nav aria-label='Production configuration sequence' className='sm:hidden rounded-xl border border-line bg-panel p-3'>
+            <div className='flex items-center justify-between gap-2'>
+                <label htmlFor='manufacturing-step-select' className='text-xs font-semibold text-muted'>Configuration sequence</label>
+                <span className='shrink-0 text-xs text-muted'>{activeIndex>=0?activeIndex+1:0} / {visibleTabs.length}</span>
+            </div>
+            <select id='manufacturing-step-select' value={active}
+                className='mt-2 min-h-11 w-full min-w-0 rounded-xl border border-line bg-page px-3 text-sm font-semibold text-ink'
+                onChange={event=>changeTab(event.target.value as Tab)}>
+                {phases.map(phase=><optgroup key={phase.key} label={phase.title}>
+                    {visibleTabs.filter(tab=>tab.phase===phase.key).map(tab=>
+                        <option key={tab.key} value={tab.key}>
+                            {visibleTabs.indexOf(tab)+1}. {tab.shortLabel}
+                        </option>)}
+                </optgroup>)}
+            </select>
+            <p className='mt-2 text-xs text-muted'>{activeTab?.hint}</p>
+            <div className='mt-3 grid grid-cols-2 gap-2'>
+                <Button variant='secondary' className='w-full px-2 text-xs'
+                    disabled={activeIndex<=0} onClick={()=>changeTab(visibleTabs[activeIndex-1].key)}>Previous</Button>
+                <Button variant='secondary' className='w-full px-2 text-xs'
+                    disabled={activeIndex<0||activeIndex>=visibleTabs.length-1}
+                    onClick={()=>changeTab(visibleTabs[activeIndex+1].key)}>Next step</Button>
+            </div>
+        </nav>
+        <nav aria-label='Production configuration stages' className='hidden gap-3 sm:grid sm:grid-cols-2 xl:grid-cols-4'>
+            {phases.map(phase=>{
+                const entries=visibleTabs.filter(tab=>tab.phase===phase.key);
+                return entries.length?<section key={phase.key} className='min-w-0 rounded-xl border border-line bg-panel p-3'>
+                    <p className='mb-2 text-xs font-semibold text-muted'>{phase.title}</p>
+                    <div className='flex flex-wrap gap-2'>{entries.map(tab=>
+                        <button type='button' key={tab.key} aria-current={active===tab.key?'page':undefined}
+                            onClick={()=>changeTab(tab.key)}
+                            className={'min-h-10 max-w-full rounded-lg border px-2 py-1.5 text-left text-xs font-medium '+
+                                (active===tab.key?'border-brand bg-brand/10 text-brand':'border-line text-soft')}>
+                            {tab.shortLabel}
+                        </button>)}</div>
+                </section>:null;
+            })}
+        </nav>
+        {active!=='skuSetup'&&<p className='hidden text-sm text-muted sm:block'>{activeTab?.hint}</p>
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
         {loading?<Spinner/>:active==='costCenterSku'?<PlnCostCenterSetup/>:active==='demand'?<PlnDemand permissions={permissions}/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
@@ -446,9 +504,14 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     </label>)}
             </div>
             <p className='text-xs text-muted'>All BOMs use one engine; classify them by purpose without restricting what material categories they can consume. Production/MRP relevance is controlled below.</p>
-            <section className='space-y-3 rounded-xl border border-line p-3'>
+            <details className='rounded-xl border border-line p-3'>
+                <summary className='cursor-pointer text-sm font-semibold'>
+                    BOM classifications · {materialPolicy.bomClassifications.length} configured
+                    <span className='ml-2 text-xs font-normal text-muted'>Expand to manage</span>
+                </summary>
+                <div className='mt-3 space-y-3'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
-                    <h3 className='text-sm font-semibold'>BOM classifications</h3>
+                    <h3 className='text-sm font-semibold'>Classification records</h3>
                     <Button variant='secondary' disabled={!canSkuConfig||materialPolicy.bomClassifications.length>=30}
                         onClick={()=>setMaterialPolicy(p=>({...p,bomClassifications:[...p.bomClassifications,
                             {code:'',name:'',enabled:true,mrpRelevant:false,productionEligible:false}]}))}>Add classification</Button>
@@ -473,7 +536,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                         Remove classification
                     </Button>}
                 </div>)}
-            </section>
+                </div>
+            </details>
             <div className='flex justify-end'><Button disabled={!canSkuConfig||busy} onClick={()=>void saveMaterialPolicy()}>Save manufacturing setup</Button></div>
         </Card>:active==='config'?<Card className='space-y-4'>
             <p className='text-sm text-muted'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>
@@ -485,7 +549,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </div>
             <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration</Button></div>
         </Card>:<>
-            <div className='flex flex-wrap items-center justify-between gap-3'><p className='text-sm text-muted'>{filtered.length} saved master records · draft versions</p>{canSave&&!viewSkuId&&<Button onClick={()=>setDraft(newRecord(active,materialPolicy))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
+            <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'><p className='text-xs text-muted sm:text-sm'>{filtered.length} saved master records · draft versions</p>{canSave&&!viewSkuId&&<Button onClick={()=>setDraft(newRecord(active,materialPolicy))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
@@ -511,7 +575,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 </>:<p className='text-sm text-muted'>SKU not found. Refresh the Materials &amp; Products list.</p>}
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
-                <h3 className='font-semibold'>{row.name}</h3>
+                <h3 className='break-words font-semibold'>{row.name}</h3>
                 <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:'BOM · '+(materialPolicy.bomClassifications.find(c=>c.code===str(row.classificationCode))?.name||str(row.classificationCode)||'Production')+' · Components: '+asComponents(row.components).length}</p>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
