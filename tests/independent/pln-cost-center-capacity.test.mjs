@@ -248,6 +248,16 @@ test('SKU configuration menus and cost-centre scope are compact without losing e
  assert.ok(scope.includes('setShowLocation(false)'));
  assert.ok(scope.includes('<PlnCostCenterSkuSetup key={cc} costCenterId={cc}/>'));
 });
+test('SKU naming sequence is a standalone configuration section, not product identity',()=>{
+ const ui=read('src/org/MfgSkuSetup.tsx');
+ assert.ok(ui.includes("keys:['productNames','productionForms']"));
+ assert.ok(!ui.includes("keys:['productNames','productionForms','namingSequence']"));
+ assert.ok(ui.includes("<section aria-label='SKU Naming Sequence'"));
+ assert.ok(ui.includes("onClick={()=>open('namingSequence')}"));
+ assert.ok(ui.includes("Configure SKU naming sequence"));
+ assert.ok(ui.includes("active==='namingSequence'?<div"));
+ assert.ok(ui.includes("onClick={()=>void saveNaming()}"));
+});
 test('equipment and Asset Register pages remain free of planning configuration additions',()=>{
  const ast=read('src/org/AssetRegister.tsx'),equipment=read('src/org/WorkCenterAsset.tsx');
  assert.ok(!ast.includes('PlnAssetCapacityView'));
