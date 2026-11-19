@@ -219,14 +219,11 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
     if(tab==='routings')return <PlnProcessRoutingEditor value={draft} onChange={onChange}
         items={items} boms={boms} resources={resources} sites={refs.sites}/>;
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
-    const itemOptions:Array<[string,string]>=[['','Select a material or product'],...items.map(i=>[i.id,i.name] as [string,string])];
-    const resourceOptions:Array<[string,string]>=[['','Select a resource'],...resources.map(r=>[r.id,r.name] as [string,string])];
     const siteOptions:Array<[string,string]>=[['','Organization-wide'],...refs.sites.map(r=>[r.id,r.name+(r.code?' · '+r.code:'')] as [string,string])];
     const assetOptions:Array<[string,string]>=[['','No linked asset'],...refs.assets.map(r=>[r.id,r.name+' · '+r.id] as [string,string])];
     const materialOptions:Array<[string,string]>=[['','Select approved Inventory material'],...refs.materials.map(r=>[r.id,r.materialNumber+' · '+r.name] as [string,string])];
     const utilityOptions:Array<[string,string]>=[['','Select registered equipment utility'],
         ...refs.utilities.map(u=>[u.workCenterId+'::'+u.code,u.name+' · '+u.workCenterId] as [string,string])];
-    const operations=asOperations(draft.operations);
     return <div className='space-y-4'>
         <div className='grid gap-3 md:grid-cols-2'>
             <div className='rounded-xl border border-line bg-page p-3'>
@@ -275,10 +272,6 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
                 <Field title='Planning efficiency (%)' type='number' value={number(draft.efficiency,100)} onChange={v=>update('efficiency',Number(v))}/>
                 <Choice title='Active Asset Register equipment (optional)' value={str(draft.assetId)} options={assetOptions} onChange={v=>update('assetId',v)}/>
             </>}
-            {tab==='routings'&&<>
-                <Choice title='Manufactured output' value={str(draft.skuId)} options={itemOptions} onChange={v=>update('skuId',v)}/>
-                <Field title='Effective date (optional)' type='date' value={str(draft.effectiveFrom)} onChange={v=>update('effectiveFrom',v)}/>
-            </>}
             <Choice title='Site applicability' value={str(draft.siteId)} options={siteOptions} onChange={v=>update('siteId',v)}/>
         </div>
         {tab==='items'&&str(draft.category)==='FINISHED'&&<>
@@ -291,30 +284,7 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
             </label>}
         </>}
         <TextField title='Description / notes' value={str(draft.description)} onChange={v=>update('description',v)}/>
-        {tab==='routings'&&<section className='rounded-xl border border-line p-3'>
-            <div className='mb-3 flex items-center justify-between gap-3'><h3 className='font-semibold'>Manufacturing operations</h3><Button variant='secondary' type='button' onClick={()=>update('operations',[...operations,{code:'STG_'+String(operations.length+1).padStart(9,'0'),name:'',resourceId:'',setupMinutes:0,runMinutesPerUnit:0,producesSkuId:'',dependsOn:operations.length?[operations[operations.length-1].code]:[]}])}>Add stage</Button></div>
-            <p className='mb-3 text-xs text-muted'>Stage codes are created by MEMS. Tick previous stages that must finish before the current stage; leaving them unticked permits parallel execution.</p>
-            <div className='space-y-3'>{operations.map((op,i)=><div key={i} className='grid gap-2 rounded-lg bg-page p-3 md:grid-cols-2 xl:grid-cols-3'>
-                <Field title='Automatically assigned stage code' value={op.code} disabled onChange={()=>{}}/>
-                <Field title='Stage description' value={op.name} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,name:v}:a))}/>
-                <Choice title='Resource' value={op.resourceId} options={resourceOptions} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,resourceId:v}:a))}/>
-                <Choice title='Produced SKU / intermediate' value={op.producesSkuId||''} options={itemOptions} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,producesSkuId:v}:a))}/>
-                <fieldset className='rounded-xl border border-line p-3 text-sm text-ink'>
-                    <legend className='px-1 text-xs text-soft'>Must follow these stages</legend>
-                    {operations.slice(0,i).map(previous=><label key={previous.code} className='flex min-h-9 items-center gap-2'>
-                        <input type='checkbox' checked={(op.dependsOn||[]).includes(previous.code)}
-                            onChange={event=>update('operations',operations.map((step,j)=>j===i?{
-                                ...step,dependsOn:event.target.checked?[...(step.dependsOn||[]),previous.code]:(step.dependsOn||[]).filter(code=>code!==previous.code),
-                            }:step))}/>
-                        {previous.name||previous.code}
-                    </label>)}
-                    {i===0&&<p className='text-xs text-muted'>First stage; no dependencies</p>}
-                </fieldset>
-                <Field title='Setup minutes' type='number' value={op.setupMinutes} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,setupMinutes:Number(v)}:a))}/>
-                <Field title='Minutes / unit' type='number' value={op.runMinutesPerUnit} onChange={v=>update('operations',operations.map((a,j)=>j===i?{...a,runMinutesPerUnit:Number(v)}:a))}/>
-                <button type='button' className='min-h-11 self-end rounded-lg border border-red-700/50 px-3 text-sm text-red-300' onClick={()=>update('operations',operations.filter((_,j)=>j!==i))}>Remove</button>
-            </div>)}</div>
-        </section>}
+
 
     </div>;
 }
