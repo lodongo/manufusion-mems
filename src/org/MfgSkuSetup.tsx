@@ -431,8 +431,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
             <h2 className='mb-2 text-base font-semibold sm:text-lg'>SKU Configuration</h2>
             <p className='mb-3 text-xs text-muted'>Configure the product identity and physical container before commercial packaging and reporting units.</p>
             <nav aria-label='SKU configuration' className='grid gap-3 lg:grid-cols-2'>
-                {menuGroups.map((group,i)=><details key={group.title} className='min-w-0 rounded-xl border border-line bg-panel p-3' open={undefined}
-                    defaultOpen={i===0}>
+                {menuGroups.map((group,i)=><details key={group.title} className='min-w-0 rounded-xl border border-line bg-panel p-3' open={i===0}>
                     <summary className='cursor-pointer text-sm font-semibold'>
                         {i+1}. {group.title}
                         <span className='mt-1 block text-xs font-normal text-muted'>{group.hint}</span>
