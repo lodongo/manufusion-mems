@@ -20,6 +20,7 @@ function Choice({label,value,options,onChange,disabled=false}:{
 export default function PlnCostCenterSetup(){
  const [data,setData]=useState<Hierarchy|null>(null),[loading,setLoading]=useState(true);
  const [error,setError]=useState('');
+ const [showLocation,setShowLocation]=useState(true);
  const [le,setLe]=useState(''),[site,setSite]=useState(''),[dept,setDept]=useState(''),[cc,setCc]=useState('');
  const reload=async()=>{
   setLoading(true);setError('');
@@ -31,16 +32,27 @@ export default function PlnCostCenterSetup(){
  const sites=data?.sites.filter(n=>n.parentId===le)??[];
  const depts=data?.departments.filter(n=>n.parentId===site)??[];
  const centers=data?.costCenters.filter(n=>n.parentId===dept)??[];
+ const selectedCenter=data?.costCenters.find(n=>n.id===cc);
+ const selectedSite=data?.sites.find(n=>n.id===site);
+ const selectedEntity=data?.legalEntities.find(n=>n.id===le);
  return <div className='space-y-4'>
-  <div className='flex items-start justify-between gap-3'>
-   <div><h2 className='text-lg font-semibold'>Manufacturing cost-centre SKU setup</h2>
-    <p className='text-sm text-muted'>Select the manufacturing location. SKU configuration belongs to its cost centre, not to a separate equipment unit.</p>
+  <div className='flex flex-wrap items-center justify-between gap-2'>
+   <div className='min-w-0'><h2 className='text-base font-semibold sm:text-lg'>Manufacturing cost-centre SKU setup</h2>
+    <p className='hidden text-xs text-muted sm:block'>Select the manufacturing cost centre; no equipment selection is required.</p>
    </div>
    <button type='button' onClick={()=>void reload()} disabled={loading}
     className='min-h-11 shrink-0 rounded-xl border border-line px-3 text-sm disabled:opacity-50'>Refresh</button>
   </div>
   {error&&<Alert tone='error'>{error}</Alert>}
-  {loading?<p className='text-sm text-muted'>Loading cost centres…</p>:<section className='space-y-3 rounded-2xl border border-line bg-panel p-4'>
+  {cc&&!showLocation&&<div className='flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-panel p-3'>
+   <div className='min-w-0'>
+    <p className='text-xs text-muted'>{selectedEntity?.name||'Legal entity'} / {selectedSite?.name||'Site'}</p>
+    <p className='break-words text-sm font-semibold'>{selectedCenter?.name||cc} · {selectedCenter?.code||''}</p>
+   </div>
+   <button type='button' onClick={()=>setShowLocation(true)}
+    className='min-h-10 rounded-lg border border-line px-3 text-xs font-semibold'>Change cost centre</button>
+  </div>}
+  {loading?<p className='text-sm text-muted'>Loading cost centres…</p>:(showLocation||!cc)&&<section className='space-y-3 rounded-2xl border border-line bg-panel p-3 sm:p-4'>
    <h3 className='font-semibold'>Select planning location</h3>
    <div className='grid gap-3 sm:grid-cols-2'>
     <Choice label='Legal entity' value={le}
@@ -49,17 +61,13 @@ export default function PlnCostCenterSetup(){
     <Choice label='Site' value={site} disabled={!le}
      options={[['','Choose site'],...sites.map(n=>[n.id,n.name+' · '+n.code] as [string,string])]}
      onChange={v=>{setSite(v);setDept('');setCc('');}}/>
-    <div className='rounded-xl border border-line bg-page p-3'>
-     <p className='text-xs text-muted'>Activity / cost-centre type</p>
-     <p className='mt-1 font-semibold'>Manufacturing</p>
-     <p className='mt-1 text-xs text-muted'>From the adopted Finance cost-centre classification</p>
-    </div>
+    <p className='text-xs text-muted sm:col-span-2'>Activity type: <strong>Manufacturing</strong> · From adopted Finance cost-centre classification</p>
     <Choice label='Department' value={dept} disabled={!site}
      options={[['','Choose department'],...depts.map(n=>[n.id,n.name+' · '+n.code] as [string,string])]}
      onChange={v=>{setDept(v);setCc('');}}/>
     <Choice label='Manufacturing cost centre' value={cc} disabled={!dept}
      options={[['','Choose cost centre'],...centers.map(n=>[n.id,n.name+' · '+n.code] as [string,string])]}
-     onChange={setCc}/>
+     onChange={v=>{setCc(v);if(v)setShowLocation(false);}}/>
    </div>
    {!data?.costCenters.length&&<p className='text-sm text-muted'>No manufacturing cost centres are accessible. Check Organization Design, Finance's cost-centre type and your access scope.</p>}
   </section>}
