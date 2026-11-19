@@ -210,6 +210,44 @@ test('main manufactured SKU detail returns only scoped, configured manufacturing
  assert.ok(view.includes('Equivalent physical containers'));
  assert.ok(view.includes('View container properties and linked output speeds'));
 });
+test('production tabs follow configuration precedence and retain scoped availability',()=>{
+ const page=read('src/org/ProductionFoundation.tsx');
+ const expected=['materialPolicy','skuSetup','items','boms','resources','costCenterSku','routings','config','demand'];
+ const start=page.indexOf('const tabs:');
+ const end=page.indexOf('const emptyRows:',start);
+ const table=page.slice(start,end);
+ assert.ok(start>0&&end>start);
+ const actual=[...table.matchAll(/key:'(materialPolicy|skuSetup|items|boms|resources|costCenterSku|routings|config|demand)'/g)]
+    .map(match=>match[1]);
+ assert.deepEqual(actual,expected);
+ assert.ok(page.includes('const visibleTabs=tabs.filter('));
+ assert.ok(page.includes('module===\'PLN\'&&t.key===\'resources\'?false:canViewMasters'));
+ assert.ok(page.includes('changeTab(visibleTabs[activeIndex+1].key)'));
+});
+test('mobile has a single accessible stage selector and desktop has grouped tabs',()=>{
+ const page=read('src/org/ProductionFoundation.tsx');
+ assert.ok(page.includes("aria-label='Production configuration sequence' className='sm:hidden"));
+ assert.ok(page.includes("htmlFor='manufacturing-step-select'"));
+ assert.ok(page.includes("id='manufacturing-step-select' value={active}"));
+ assert.ok(page.includes('<optgroup'));
+ assert.ok(page.includes('Previous</Button>'));
+ assert.ok(page.includes('Next step</Button>'));
+ assert.ok(page.includes("aria-label='Production configuration stages'"));
+ assert.ok(!page.includes("className='flex gap-2 overflow-x-auto pb-1'"));
+ assert.ok(page.includes("<details className='rounded-xl border border-line p-3'>"));
+});
+test('SKU configuration menus and cost-centre scope are compact without losing editing controls',()=>{
+ const sku=read('src/org/MfgSkuSetup.tsx');
+ const scope=read('src/org/PlnCostCenterSetup.tsx');
+ assert.ok(sku.includes('menuGroups.map('));
+ assert.ok(sku.includes('defaultOpen={i===0}'));
+ assert.ok(sku.includes('group.keys.map(key=>'));
+ assert.ok(sku.includes('onClick={()=>open(key)}'));
+ assert.ok(scope.includes('showLocation||!cc'));
+ assert.ok(scope.includes('Change cost centre'));
+ assert.ok(scope.includes('setShowLocation(false)'));
+ assert.ok(scope.includes('<PlnCostCenterSkuSetup key={cc} costCenterId={cc}/>'));
+});
 test('equipment and Asset Register pages remain free of planning configuration additions',()=>{
  const ast=read('src/org/AssetRegister.tsx'),equipment=read('src/org/WorkCenterAsset.tsx');
  assert.ok(!ast.includes('PlnAssetCapacityView'));
