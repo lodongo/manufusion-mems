@@ -15,7 +15,8 @@ type RoutingRecord=Row&{skuId?:string;siteId?:string;alternativeCode?:string;
 type CostCenter={id:string;name:string;code:string;siteId:string;legalEntityId:string;commissionedSkuIds:string[]};
 type Diagnostic={stageCode:string;field:string;message:string};
 type StagePreview={code:string;name:string;stageType:string;producesSkuId:string;costCenterId:string;
- resourceId:string;bomId:string;capacityBasis:string;
+ resourceId:string;bomId:string;capacityBasis:string;dependsOn:string[];
+ setupMinutes:number;runMinutesPerUnit:number;bomComponentCount:number;
  capacity:{quantity:number;unit:string;source:string;revision?:number}|null};
 type Review={ready:boolean;issues:Diagnostic[];stages:StagePreview[];
  bottlenecks:Array<{outputSkuId:string;limitingStageCode:string;physicalContainersPerHour:number;
@@ -121,12 +122,27 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
  const centersForSite=centers.filter(x=>x.siteId===value.siteId);
  const chosenBoms=selected?.producesSkuId?boms.filter(x=>str(x.parentSkuId)===selected.producesSkuId&&
   (!str(x.siteId)||str(x.siteId)===value.siteId)):[];
+ const nextStageCode=()=>{
+  let index=ops.length+1,code='';
+  do{code='STG_'+String(index++).padStart(9,'0');}while(ops.some(s=>s.code===code));
+  return code;
+ };
  const addStage=()=>{
   if(ops.length>=60){setStepNotice('Routing supports a maximum of 60 stages.');return;}
-  let i=ops.length+1,code='';
-  do{code='STG_'+String(i++).padStart(9,'0');}while(ops.some(s=>s.code===code));
+  const code=nextStageCode();
   updateSteps([...ops,{...freshStage(code),dependsOn:ops.length?[ops[ops.length-1].code]:[]}]);
   setOpenStep(code);setSection('stages');setStepNotice('');
+ };
+ const duplicateStage=(source:RoutingStep)=>{
+  if(ops.length>=60){setStepNotice('Routing supports a maximum of 60 stages.');return;}
+  const code=nextStageCode(),at=ops.findIndex(s=>s.code===source.code);
+  // Do not clone the producing SKU/BOM: that could duplicate material demand.
+  // The user must explicitly configure the new stage output and inputs.
+  const copy:RoutingStep={...source,code,name:source.name?'Copy of '+source.name:'',
+   producesSkuId:'',bomId:'',dependsOn:[source.code]};
+  updateSteps([...ops.slice(0,at+1),copy,...ops.slice(at+1)]);
+  setOpenStep(code);
+  setStepNotice('Stage copied without an output SKU or BOM to prevent duplicated consumption.');
  };
  const dropStage=(code:string)=>{
   updateSteps(ops.filter(s=>s.code!==code).map(s=>({...s,
@@ -198,7 +214,13 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
      onChange={alternativeCode=>update('alternativeCode',alternativeCode.toUpperCase())}/>
     <TextField label='Effective from (optional)' type='date' value={value.effectiveFrom||''}
      onChange={effectiveFrom=>update('effectiveFrom',effectiveFrom)}/>
+    <TextField label='Routing description (optional)' value={str(value.description)}
+     onChange={description=>update('description',description)}/>
    </div>
+   {value.skuId&&<p className='text-xs text-muted'>
+    Main manufactured output: {items.find(x=>x.id===value.skuId)?.name||value.skuId}
+    {' · '+str(items.find(x=>x.id===value.skuId)?.category)}
+   </p>}
    <div className='rounded-xl bg-page p-3 text-xs text-muted'>
     Routing is a versioned description of how the selected SKU is manufactured. Stages may use different manufacturing
     cost centres within the same site. Commissioned rates, materials and assets remain owned by their respective masters.
@@ -308,7 +330,10 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
        </label>)}
        {i===0&&<p className='text-xs text-muted'>First stage has no predecessors.</p>}
       </fieldset>
-      <div className='flex justify-end'><Action onClick={()=>dropStage(stage.code)}>Remove stage</Action></div>
+      <div className='flex flex-wrap justify-end gap-2'>
+       <Action disabled={ops.length>=60} onClick={()=>duplicateStage(stage)}>Duplicate stage</Action>
+       <Action onClick={()=>dropStage(stage.code)}>Remove stage</Action>
+      </div>
      </div>}
     </section>;
    })}
@@ -345,6 +370,13 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
       <p className='mt-1 text-sm font-semibold'>{s.capacity?
        fmt(s.capacity.quantity)+' '+s.capacity.unit:'Capacity not ready'}</p>
       <p className='mt-1 text-xs text-muted'>{s.capacity?.source||s.capacityBasis}</p>
+      <p className='mt-2 text-xs text-muted'>
+       Predecessors: {s.dependsOn.length?s.dependsOn.join(', '):'None · parallel start possible'}
+      </p>
+      <p className='text-xs text-muted'>Setup: {fmt(s.setupMinutes)} min
+       {s.runMinutesPerUnit>0?' · '+fmt(s.runMinutesPerUnit)+' min/unit':''}
+       {s.bomComponentCount>0?' · '+s.bomComponentCount+' BOM component(s)':''}
+      </p>
      </div>)}
     </div>
     {review.bottlenecks.map(b=><p key={b.outputSkuId} className='rounded-lg border border-line p-3 text-xs'>
