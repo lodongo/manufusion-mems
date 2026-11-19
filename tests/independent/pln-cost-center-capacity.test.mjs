@@ -183,6 +183,33 @@ test('SKU cardinality permits sequential commissioning up to 100 unique records'
  assert.throws(()=>normalizeSkuCapacity([...rows,{...rate,skuId:'SKU_101'}]),/between 1 and 100/);
  assert.throws(()=>normalizeSkuCapacity([...rows.slice(0,99),rows[0]]),/only once/);
 });
+test('saved SKU cards collapse, with one open editor and visible commissioned speed in each cost centre',()=>{
+ const ui=read('src/org/PlnCostCenterSkuSetup.tsx');
+ assert.ok(ui.includes("const [openSku,setOpenSku]=useState('')"));
+ assert.ok(ui.includes("setOpenSku(next.id)"));
+ assert.ok(ui.includes("setOpenSku('')"));
+ assert.ok(ui.includes("aria-expanded={expanded}"));
+ assert.ok(ui.includes("rowKey=line.skuId"));
+ assert.ok(ui.includes('Commissioned speed not yet configured'));
+ assert.ok(ui.includes("setOpenSku(lines[first].skuId||'draft-'+first)"));
+});
+test('main manufactured SKU detail returns only scoped, configured manufacturing cost-centre speeds',()=>{
+ const api=read('backend/plnCostCenterCapacity.ts');
+ const master=read('src/org/ProductionFoundation.tsx');
+ const view=read('src/org/PlnSkuCostCenterRatings.tsx');
+ assert.ok(api.includes("'POST /api/org/pln/cost-center/sku-mappings'"));
+ assert.ok(api.includes("!await authorized(ctx,'read',record.id)"));
+ assert.ok(api.includes("sku.siteId!==location.siteId"));
+ assert.ok(api.includes('validSavedProjection(ctx,location.siteId,row,params)'));
+ assert.ok(api.includes("const perms=permission==='read'?['PLN.view','ADM.structure','MFG.view']"));
+ assert.ok(master.includes('View SKU'));
+ assert.ok(master.includes("<PlnSkuCostCenterRatings skuId={viewedSku.id}/>"));
+ assert.ok(master.includes("<PlnSkuCostCenterRatings skuId={draft.id}/>"));
+ assert.ok(view.includes('/api/org/pln/cost-center/sku-mappings'));
+ assert.ok(view.includes('Commissioned primary-container speed'));
+ assert.ok(view.includes('Equivalent physical containers'));
+ assert.ok(view.includes('View container properties and linked output speeds'));
+});
 test('equipment and Asset Register pages remain free of planning configuration additions',()=>{
  const ast=read('src/org/AssetRegister.tsx'),equipment=read('src/org/WorkCenterAsset.tsx');
  assert.ok(!ast.includes('PlnAssetCapacityView'));
