@@ -240,7 +240,7 @@ test('SKU configuration menus and cost-centre scope are compact without losing e
  const sku=read('src/org/MfgSkuSetup.tsx');
  const scope=read('src/org/PlnCostCenterSetup.tsx');
  assert.ok(sku.includes('menuGroups.map('));
- assert.ok(sku.includes('defaultOpen={i===0}'));
+ assert.ok(sku.includes('open={i===0}'));
  assert.ok(sku.includes('group.keys.map(key=>'));
  assert.ok(sku.includes('onClick={()=>open(key)}'));
  assert.ok(scope.includes('showLocation||!cc'));
