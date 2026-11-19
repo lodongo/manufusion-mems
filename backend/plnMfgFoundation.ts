@@ -13,6 +13,7 @@ import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from '
 import { mfgMaterialPolicyForOrg, mfgMaterialPolicyPath, normalizeMfgMaterialPolicy, bomClassificationCode } from './mfgMaterialPolicy';
 import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCommissionedCapacity} from './plnCostCenterCapacity';
 import {physicalRatingUnits} from './plnPhysicalCapacity';
+import {reviewManufacturingRouting} from './mfgRoutingReadiness';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
 export type MasterKind = typeof MASTER_KINDS[number];
@@ -402,6 +403,59 @@ export const plnMfgFoundationRoutes={
                     (!str(x.data.siteId)||visibleSites.has(str(x.data.siteId))))
                     .map(x=>({id:x.id,name:str(x.data.name)||x.id,siteId:str(x.data.siteId)})),
             };
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/routing-references':[
+        orgRoute('org.mfg.routing.references','MFG.view',async ctx=>{
+            const root='organizations/'+ctx.orgId;
+            const [structure,metadata,capacity]=await Promise.all([
+                listDocs(root+'/structure'),
+                getDoc('module_workspaces/FIN/metadata/costCenterTypes'),
+                listDocs(root+'/pln_cost_center_capacity'),
+            ]);
+            const nodes=structure.map(d=>({
+                id:d.id,parentId:str(d.data.parentId),level:str(d.data.level),
+                name:str(d.data.name)||str(d.data.code)||d.id,
+                code:str(d.data.code),costType:isObj(d.data.attributes)?str(d.data.attributes.costType):'',
+                status:str(d.data.status)||'active',
+            }));
+            const eligible=eligibleManufacturingHierarchy(nodes,
+                Array.isArray(metadata?.data.items)?metadata.data.items:[]);
+            const indexed=new Map(nodes.map(n=>[n.id,n]));
+            const saved=new Map(capacity.map(d=>[d.id,d]));
+            const scope=await scopeOf(ctx),costCenters=[];
+            for(const center of eligible.costCenters){
+                if(ctx.role!=='org_super_admin'&&
+                    !canAt(ctx,'MFG.view',await nodePath(ctx.orgId,center.id),scope))continue;
+                let parent=indexed.get(center.parentId),siteId='',legalEntityId='';
+                for(let i=0;i<12&&parent;i++){
+                    if(parent.level==='site')siteId=parent.id;
+                    if(parent.level==='legal_entity')legalEntityId=parent.id;
+                    parent=indexed.get(parent.parentId);
+                }
+                if(!siteId)continue;
+                const mapping=saved.get(center.id);
+                const skuIds=(Array.isArray(mapping?.data.skuCapacities)?mapping.data.skuCapacities:[])
+                    .filter(isObj).map(x=>str(x.skuId)).filter(Boolean);
+                costCenters.push({id:center.id,name:center.name,code:center.code,siteId,
+                    legalEntityId,commissionedSkuIds:skuIds});
+            }
+            costCenters.sort((a,b)=>a.name.localeCompare(b.name));
+            return {costCenters};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/routing-review':[
+        orgRoute('org.mfg.routing.review','MFG.view',async ctx=>{
+            const raw=isObj(ctx.body.record)?ctx.body.record:{};
+            const siteId=str(raw.siteId);
+            if(!await recordAccess(ctx,'MFG.view',siteId))
+                throw new HttpError(403,'Routing review is outside your authorized production site.');
+            const prepared=normalizeMaster('routings',{
+                ...raw,id:str(raw.id)||'RTG-PREVIEW',
+                name:str(raw.name)||'Routing preview',
+                routingModelVersion:2,
+            });
+            return reviewManufacturingRouting(ctx,prepared);
         }),
     ],
     'POST /api/org/pln-mfg/foundation/list':[
