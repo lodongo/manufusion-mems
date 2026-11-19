@@ -122,7 +122,17 @@ async function validatedLine(ctx:OrgContext,siteId:string,raw:unknown,params:Sku
 async function validatedLines(ctx:OrgContext,siteId:string,raw:unknown){
  const inputs=normalizeSkuCapacity(raw),params=await skuParametersForOrg(ctx.orgId);
  const output=[];
- for(const line of inputs)output.push(await validatedLine(ctx,siteId,line,params));
+ for(const [i,line] of inputs.entries()){
+  try{
+   output.push(await validatedLine(ctx,siteId,line,params));
+  }catch(e){
+   // Identify the precise SKU when a container, production-form or packaging
+   // relationship blocks saving a multi-SKU cost-centre configuration.
+   const detail=e instanceof Error?e.message:'Unable to validate this SKU rating.';
+   if(e instanceof HttpError)throw new HttpError(e.status, 'SKU '+(i+1)+' ('+line.skuId+'): '+detail);
+   throw e;
+  }
+ }
  return output;
 }
 const validSavedProjection=async(ctx:OrgContext,siteId:string,raw:unknown,params:SkuParameter[])=>{
