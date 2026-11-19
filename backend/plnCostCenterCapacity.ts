@@ -81,7 +81,7 @@ async function authorized(ctx:OrgContext,permission:'read'|'write',id:string){
  const path=await nodePath(ctx.orgId,id);
  if(!path.length)return false;
  const scope=await scopeOf(ctx);
- const perms=permission==='read'?['PLN.view','ADM.structure']:['PLN.configure','ADM.structure'];
+ const perms=permission==='read'?['PLN.view','ADM.structure','MFG.view']:['PLN.configure','ADM.structure'];
  return perms.some(p=>hasPerm(ctx.permissions,p)&&canAt(ctx,p,path,scope));
 }
 async function candidate(ctx:OrgContext,costCenterId:string){
@@ -227,6 +227,54 @@ export const plnCostCenterCapacityRoutes={
    return {location,outputs,containers,sizes,units:physicalRatingUnits(),
     mapping:saved?{...expose(saved),skuCapacities:ratings}:null,
     canConfigure:await authorized(ctx,'write',id)};
+  }),
+ ],
+ 'POST /api/org/pln/cost-center/sku-mappings':[
+  orgRoute('org.pln.cost_center.sku_mappings',null,async ctx=>{
+   // The SKU detail is readable by manufacturing viewers. Filter *each* cost
+   // centre by its own hierarchy scope before returning any mapping or speed.
+   if(ctx.role!=='org_super_admin'&&
+      !['MFG.view','PLN.view','ADM.structure'].some(p=>hasPerm(ctx.permissions,p)))
+    throw new HttpError(403,'Manufacturing or planning viewing permission required.');
+   const skuId=identifier(ctx.body.skuId,'manufactured SKU');
+   const skuDoc=await getDoc(SKU(ctx.orgId)+'/'+skuId);
+   if(!skuDoc||!live(skuDoc)||!['FINISHED','INTERMEDIATE'].includes(str(skuDoc.data.category)))
+    throw new HttpError(404,'Finished or intermediate manufactured SKU not available.');
+   const sku=asOutput(skuDoc);
+   const [saved,params]=await Promise.all([listDocs(ROOT(ctx.orgId)),skuParametersForOrg(ctx.orgId)]);
+   const units=physicalRatingUnits();
+   const costCenters:Array<Record<string,unknown>>=[];
+   for(const record of saved){
+    const row=(Array.isArray(record.data.skuCapacities)?record.data.skuCapacities:[])
+      .find(x=>isObj(x)&&str(x.skuId)===skuId);
+    if(!row||!await authorized(ctx,'read',record.id))continue;
+    let location:Awaited<ReturnType<typeof candidate>>;
+    try{location=await candidate(ctx,record.id);}
+    catch(e){
+     if(e instanceof HttpError&&[400,404].includes(e.status))continue;
+     throw e;
+    }
+    if(sku.siteId&&sku.siteId!==location.siteId)continue;
+    const [site,legalEntity,rating]=await Promise.all([
+     getDoc(STRUCTURE(ctx.orgId)+'/'+location.siteId),
+     getDoc(STRUCTURE(ctx.orgId)+'/'+location.legalEntityId),
+     validSavedProjection(ctx,location.siteId,row,params),
+    ]);
+    const count=units.count.find(u=>u.code===str(rating.ratingUnitCode));
+    const period=units.time.find(u=>u.code===str(rating.periodUnitCode));
+    costCenters.push({
+     costCenterId:location.costCenterId,costCenterName:location.name,
+     costCenterCode:location.code,siteId:location.siteId,siteName:site?display(site):location.siteId,
+     legalEntityId:location.legalEntityId,legalEntityName:legalEntity?display(legalEntity):location.legalEntityId,
+     revision:num(record.data.revision)??0,updatedAt:str(record.data.updatedAt),
+     countUnit:count?{name:count.name,symbol:count.symbol,multiplier:count.multiplier}:null,
+     periodUnit:period?{name:period.name,symbol:period.symbol}:null,rating,
+    });
+   }
+   costCenters.sort((a,b)=>String(a.legalEntityName).localeCompare(String(b.legalEntityName))||
+    String(a.siteName).localeCompare(String(b.siteName))||
+    String(a.costCenterName).localeCompare(String(b.costCenterName)));
+   return {skuId,skuName:sku.name,costCenters};
   }),
  ],
  'POST /api/org/pln/cost-center/rating':[
