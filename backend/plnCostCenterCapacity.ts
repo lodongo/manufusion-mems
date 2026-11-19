@@ -260,8 +260,9 @@ export const plnCostCenterCapacityRoutes={
      getDoc(STRUCTURE(ctx.orgId)+'/'+location.legalEntityId),
      validSavedProjection(ctx,location.siteId,row,params),
     ]);
-    const count=units.count.find(u=>u.code===str(rating.ratingUnitCode));
-    const period=units.time.find(u=>u.code===str(rating.periodUnitCode));
+    const fields=rating as Record<string,unknown>;
+    const count=units.count.find(u=>u.code===str(fields.ratingUnitCode));
+    const period=units.time.find(u=>u.code===str(fields.periodUnitCode));
     costCenters.push({
      costCenterId:location.costCenterId,costCenterName:location.name,
      costCenterCode:location.code,siteId:location.siteId,siteName:site?display(site):location.siteId,
