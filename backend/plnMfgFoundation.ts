@@ -280,6 +280,8 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
             throw new HttpError(400,'Routing SKU is assigned to another site.');
         for(const o of ARR(item.operations)){
             const stage='Stage '+(num(o.sequence)??0)+' ('+(str(o.name)||str(o.code))+'): ';
+            if(!str(o.resourceId)&&item.routingModelVersion!==2)
+                throw new HttpError(400,stage+'a manufacturing resource is required.');
             if(str(o.resourceId)){
                 const resource=await getDoc(DOC(ctx.orgId,'resources',str(o.resourceId)));
                 if(!resource)throw new HttpError(400,stage+'routing resource not found: '+str(o.resourceId));
