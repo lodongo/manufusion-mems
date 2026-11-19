@@ -160,6 +160,30 @@ const auditChange=(ctx:OrgContext,action:string,id:string)=>audit([{
  details:'Manufacturing cost-centre SKU/commissioned capacity; no equipment, asset or inventory write',
 }]);
 
+/** Read-only, site- and scope-checked references for MFG routing stages.
+ * The manufacturing cost-centre master remains authoritative for SKU speed. */
+export async function routingManufacturingCostCenter(ctx:OrgContext,costCenterId:string,siteId:string){
+ const id=identifier(costCenterId,'routing manufacturing cost centre');
+ if(!await authorized(ctx,'read',id))
+  throw new HttpError(403,'Routing cost centre is outside your authorized manufacturing scope.');
+ const location=await candidate(ctx,id);
+ if(!siteId||location.siteId!==siteId)
+  throw new HttpError(400,'Routing cost centre must belong to the routing production site.');
+ return location;
+}
+export async function routingCommissionedCapacity(
+ ctx:OrgContext,costCenterId:string,siteId:string,skuId:string,
+){
+ const location=await routingManufacturingCostCenter(ctx,costCenterId,siteId);
+ const record=await getDoc(ROOT(ctx.orgId)+'/'+costCenterId);
+ const source=(Array.isArray(record?.data.skuCapacities)?record.data.skuCapacities:[])
+  .find(row=>isObj(row)&&str(row.skuId)===skuId);
+ if(!source)return {location,rating:null,revision:num(record?.data.revision)??0};
+ const params=await skuParametersForOrg(ctx.orgId);
+ const rating=await validSavedProjection(ctx,siteId,source,params);
+ return {location,rating,revision:num(record?.data.revision)??0};
+}
+
 export const plnCostCenterCapacityRoutes={
  'POST /api/org/pln/cost-center/eligibility':[
   orgRoute('org.pln.cost_center.eligibility',null,async ctx=>{
