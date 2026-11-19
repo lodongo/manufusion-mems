@@ -56,6 +56,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
  const [data,setData]=useState<Details|null>(null),[lines,setLines]=useState<Line[]>([]);
  const [revision,setRevision]=useState(0),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [showValidation,setShowValidation]=useState(false);
  const load=async()=>{
   setLoading(true);setError('');
   try{
@@ -80,19 +81,55 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
   finally{setLoading(false);}
  };
  useEffect(()=>{void load();},[costCenterId]);
- const outputs=data?.outputs??[],already=new Set(lines.map(x=>x.skuId));
- const canSave=lines.length>0&&lines.every(line=>{
-  if(!valid(line))return false;
+ const outputs=data?.outputs??[],already=new Set(lines.map(x=>x.skuId).filter(Boolean));
+ const available=outputs.filter(o=>!already.has(o.id));
+ const lineIssues=(line:Line,i:number):string[]=>{
+  const result:string[]=[];
   const sku=outputs.find(o=>o.id===line.skuId);
   const container=data?.containers.find(c=>c.id===line.containerId);
-  return !!sku&&!!container&&
-   sku.skuComponents.containerId===line.containerId&&
-   sku.skuComponents.containerSizeId===line.containerSizeId&&
-   container.categoryCode===line.containerCategoryCode&&
-   container.subcategoryCode===line.containerSubcategoryCode;
- });
- const update=(i:number,changes:Partial<Line>)=>setLines(all=>all.map((x,j)=>j===i?
-    {...x,...changes,projection:null,conversionIssue:''}:x));
+  if(!line.skuId)result.push('Choose a manufactured SKU.');
+  else if(!sku)result.push('This SKU is not available at the selected site. Refresh the available SKUs.');
+  else if(lines.some((x,j)=>j!==i&&x.skuId===line.skuId))
+   result.push('This SKU is already mapped to this manufacturing cost centre.');
+  if(sku){
+   if(!sku.skuComponents.containerId||!sku.skuComponents.containerSizeId)
+    result.push('Configure the SKU physical container and its size in Materials & Products first.');
+   if(!container)result.push('Choose an adopted physical container for this SKU.');
+   else{
+    if(container.id!==sku.skuComponents.containerId)
+     result.push('Physical container does not match the SKU in Product Configuration.');
+    if(container.categoryCode!==line.containerCategoryCode||
+       container.subcategoryCode!==line.containerSubcategoryCode)
+     result.push('Physical container category or subcategory does not match its adopted type.');
+   }
+   if(!line.containerSizeId||line.containerSizeId!==sku.skuComponents.containerSizeId)
+    result.push('Select the physical container size configured on this SKU.');
+  }
+  if(!Number.isFinite(line.ratingQuantity)||line.ratingQuantity<=0||line.ratingQuantity>1e12)
+   result.push('Enter a commissioned rating greater than zero and no more than 1,000,000,000,000.');
+  if(!data?.units.count.some(u=>u.code===line.ratingUnitCode))
+   result.push('Choose a published Count unit for the physical containers.');
+  if(!data?.units.time.some(u=>u.code===line.periodUnitCode))
+   result.push('Choose a published Time unit for the rating period.');
+  return result;
+ };
+ const issues=lines.flatMap((line,i)=>lineIssues(line,i).map(message=>({index:i,message})));
+ const canSave=lines.length>0&&issues.length===0;
+ const update=(i:number,changes:Partial<Line>)=>{
+  setError('');setNotice('');
+  setLines(all=>all.map((x,j)=>j===i?{...x,...changes,projection:null,conversionIssue:''}:x));
+ };
+ const addSku=()=>{
+  setNotice('');
+  if(lines.length>=100){setError('A cost centre supports a maximum of 100 mapped SKUs.');return;}
+  const next=available[0];
+  if(!next){
+   setError('All eligible manufactured SKUs at this site are already mapped. Create another finished or intermediate SKU in Materials & Products, then refresh this editor.');
+   return;
+  }
+  setLines(all=>[...all,newSku(next.id)]);
+  setError('');setShowValidation(false);
+ };
  const newSku=(skuId:string):Line=>{
   const output=outputs.find(x=>x.id===skuId);
   const chosen=data?.containers.find(c=>c.id===output?.skuComponents?.containerId);
@@ -116,16 +153,25 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
   finally{setBusy(false);}
  };
  const save=async()=>{
-  if(!canSave){setError('Configure an SKU, its matching physical container and a positive rated quantity per selected time unit.');return;}
+  setShowValidation(true);
+  if(!lines.length){setError('Add at least one manufactured SKU before saving.');return;}
+  if(!canSave){setError('Cannot save yet. Correct the SKU-specific issues shown below, then save again.');return;}
   setError('');setNotice('');setBusy(true);
   try{
-   await callBackend('/api/org/pln/cost-center/save',{
+   const result=await callBackend<{mapping:Mapping}>('/api/org/pln/cost-center/save',{
     costCenterId,skuCapacities:lines.map(({skuId,containerId,containerSizeId,
      containerCategoryCode,containerSubcategoryCode,ratingQuantity,ratingUnitCode,periodUnitCode})=>({
      skuId,containerId,containerSizeId,containerCategoryCode,containerSubcategoryCode,
      ratingQuantity,ratingUnitCode,periodUnitCode,
     })),expectedRevision:revision});
-   await load();setNotice('Commissioned physical-container ratings saved; linked product, commercial and transport rates are derived from the SKU configuration.');
+   // Use the committed revision and projections returned by the server. A second
+   // GET must not turn a successful write into an apparent failure or wipe edits.
+   setRevision(result.mapping.revision);
+   setData(current=>current?{...current,mapping:result.mapping}:current);
+   setLines(result.mapping.skuCapacities);
+   setShowValidation(false);
+   setNotice('Saved successfully: '+result.mapping.skuCapacities.length+
+    ' SKU(s), revision '+result.mapping.revision+'. You can add another SKU without losing these ratings.');
   }catch(e){setError(e instanceof Error?e.message:'Could not save commissioned throughput.');}
   finally{setBusy(false);}
  };
@@ -157,10 +203,16 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
      <div><h3 className='font-semibold'>Mapped manufactured SKUs</h3>
       <p className='mt-1 text-xs text-muted'>Rate the selected physical container, then view the equivalent production-form, finished-product, commercial and logistics outputs for the same time interval.</p>
      </div>
-     {data.canConfigure&&<Action secondary disabled={busy||lines.length>=100||outputs.length<=already.size}
-       onClick={()=>setLines(x=>[...x,newSku('')])}>Add SKU</Action>}
+     {data.canConfigure&&<div className='flex flex-wrap gap-2'>
+      <Action secondary disabled={busy||lines.length>=100} onClick={addSku}>Add SKU</Action>
+      <Action secondary disabled={busy} onClick={()=>{
+       if(lines.length&&!window.confirm('Refresh available SKUs? Unsaved changes will be discarded.'))return;
+       void load();
+      }}>Refresh SKUs</Action>
+     </div>}
     </div>
-    {!outputs.length&&<p className='text-sm text-muted'>No finished or intermediate output SKU is configured at this site. Create it in Materials & Products first.</p>}
+    {!outputs.length&&<p role='status' className='text-sm text-muted'>No finished or intermediate output SKU is configured at this site. Create one in Materials & Products, then use Refresh SKUs.</p>}
+    {!available.length&&lines.length>0&&<p className='text-xs text-muted'>All currently available site SKUs are mapped. To add more, configure additional manufactured SKUs in Materials & Products, then refresh this list. Your saved ratings remain intact.</p>}
     {lines.map((line,i)=>{
      const selected=outputs.find(x=>x.id===line.skuId);
      const categoryContainers=data.containers.filter(c=>c.categoryCode===line.containerCategoryCode);
@@ -239,6 +291,10 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
          onClick={()=>void preview(i)}>Calculate linked ratings</Action>
        </div>
       </div>}
+      {showValidation&&lineIssues(line,i).length>0&&<div role='alert' className='rounded-lg border border-red-400 p-3 text-xs text-red-600'>
+       <p className='font-semibold'>SKU {i+1} — correct these issues:</p>
+       <ul className='mt-2 list-disc space-y-1 pl-4'>{lineIssues(line,i).map((message,j)=><li key={j}>{message}</li>)}</ul>
+      </div>}
       {line.projection&&<div className='space-y-2 rounded-xl border border-line p-3'>
        <h4 className='font-semibold'>Resolved ratings · same time period</h4>
        <p className='text-xs text-muted'>Basis: {pretty(line.ratingQuantity)} {data.units.count.find(u=>u.code===line.ratingUnitCode)?.name||'units'} per {data.units.time.find(u=>u.code===line.periodUnitCode)?.name||'period'}. Calculated from the selected SKU’s configured conversion relationships.</p>
@@ -254,10 +310,20 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
      </div>;
     })}
     {!lines.length&&<p className='text-sm text-muted'>No SKUs mapped. Add an SKU to configure its physical-container rating.</p>}
-    {data.canConfigure&&<div className='flex flex-wrap justify-end gap-2'>
-     {data.mapping?.skuCapacities?.length?<Action secondary disabled={busy} onClick={()=>void clear()}>Clear SKU mappings</Action>:null}
-     <Action disabled={!canSave||busy} onClick={()=>void save()}>Save commissioned rating</Action>
-    </div>}
+    {data.canConfigure&&<div className='sticky bottom-0 z-10 space-y-2 rounded-xl border border-line bg-panel p-3 shadow-sm'>
+     {showValidation&&issues.length>0&&<div role='alert' className='text-xs text-red-600'>
+      {issues.length} issue(s) prevent saving. Review the relevant SKU cards above.
+     </div>}
+     {error&&<p role='alert' className='text-xs text-red-600'>{error}</p>}
+     <div className='flex flex-wrap items-center justify-between gap-2'>
+      <span className='text-xs text-muted'>{lines.length} SKU(s) in this configuration · revision {revision}</span>
+      <div className='flex flex-wrap gap-2'>
+       {data.mapping?.skuCapacities?.length?<Action secondary disabled={busy} onClick={()=>void clear()}>Clear SKU mappings</Action>:null}
+       <Action disabled={busy} onClick={()=>void save()}>{busy?'Saving…':'Save commissioned ratings'}</Action>
+       <Action secondary disabled={busy||lines.length>=100} onClick={addSku}>Add another SKU</Action>
+      </div>
+     </div>
+    </div>
     {!data.canConfigure&&<p className='text-xs text-muted'>You have read access; edits require Planning or Organization Design permission.</p>}
     <p className='text-xs text-muted'>This is a commissioned capacity reference, not a production schedule or material posting. Where a packaging or transport relationship is absent, the corresponding rating remains unavailable.</p>
    </section>}
