@@ -157,10 +157,31 @@ test('one editor is shared by the Organization Design gear and Production Planni
  assert.ok(ui.includes('Final product form'));
  assert.ok(ui.includes('Commercial packaging'));
  assert.ok(ui.includes('Transport & logistics'));
- assert.ok(ui.includes('sku.skuComponents.containerSizeId===line.containerSizeId'));
+ assert.ok(ui.includes('line.containerSizeId!==sku.skuComponents.containerSizeId'));
  assert.ok(ui.includes('/api/org/pln/cost-center/save'));
  assert.ok(index.includes('...plnCostCenterCapacityRoutes'));
  assert.ok(!ui.includes('Commissioned throughput / hour'));
+});
+test('SKU editor visibly reports failures, persists committed revisions and supports later additions',()=>{
+ const ui=read('src/org/PlnCostCenterSkuSetup.tsx');
+ const backend=read('backend/plnCostCenterCapacity.ts');
+ assert.ok(ui.includes('setShowValidation(true)'));
+ assert.ok(ui.includes('lineIssues(line,i).map'));
+ assert.ok(ui.includes('Cannot save yet. Correct the SKU-specific issues'));
+ assert.ok(ui.includes('setRevision(result.mapping.revision)'));
+ assert.ok(ui.includes('setLines(result.mapping.skuCapacities)'));
+ assert.ok(ui.includes('setData(current=>current?{...current,mapping:result.mapping}:current)'));
+ assert.ok(ui.includes('Add another SKU'));
+ assert.ok(ui.includes('const next=available[0]'));
+ assert.ok(ui.includes('All eligible manufactured SKUs at this site are already mapped'));
+ assert.ok(!ui.includes('disabled={!canSave||busy}'));
+ assert.ok(backend.includes("SKU '+(i+1)+' ('+line.skuId+'): '"));
+});
+test('SKU cardinality permits sequential commissioning up to 100 unique records',()=>{
+ const rows=Array.from({length:100},(_,i)=>({...rate,skuId:'SKU_'+String(i+1)}));
+ assert.equal(normalizeSkuCapacity(rows).length,100);
+ assert.throws(()=>normalizeSkuCapacity([...rows,{...rate,skuId:'SKU_101'}]),/between 1 and 100/);
+ assert.throws(()=>normalizeSkuCapacity([...rows.slice(0,99),rows[0]]),/only once/);
 });
 test('equipment and Asset Register pages remain free of planning configuration additions',()=>{
  const ast=read('src/org/AssetRegister.tsx'),equipment=read('src/org/WorkCenterAsset.tsx');
