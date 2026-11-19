@@ -57,6 +57,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
  const [revision,setRevision]=useState(0),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
  const [showValidation,setShowValidation]=useState(false);
+ const [openSku,setOpenSku]=useState('');
  const load=async()=>{
   setLoading(true);setError('');
   try{
@@ -77,6 +78,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
      projection:null,conversionIssue:'Previous stock-unit/hour rating needs physical-container reconfiguration.'};
    }));
    setRevision(response.mapping?.revision??0);
+   setOpenSku('');
   }catch(e){setError(e instanceof Error?e.message:'Could not load manufacturing cost-centre ratings.');}
   finally{setLoading(false);}
  };
@@ -128,6 +130,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
    return;
   }
   setLines(all=>[...all,newSku(next.id)]);
+  setOpenSku(next.id);
   setError('');setShowValidation(false);
  };
  const newSku=(skuId:string):Line=>{
@@ -155,7 +158,12 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
  const save=async()=>{
   setShowValidation(true);
   if(!lines.length){setError('Add at least one manufactured SKU before saving.');return;}
-  if(!canSave){setError('Cannot save yet. Correct the SKU-specific issues shown below, then save again.');return;}
+  if(!canSave){
+   const first=issues[0]?.index;
+   if(first!==undefined)setOpenSku(lines[first].skuId||'draft-'+first);
+   setError('Cannot save yet. Correct the SKU-specific issues shown below, then save again.');
+   return;
+  }
   setError('');setNotice('');setBusy(true);
   try{
    const result=await callBackend<{mapping:Mapping}>('/api/org/pln/cost-center/save',{
@@ -169,6 +177,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
    setRevision(result.mapping.revision);
    setData(current=>current?{...current,mapping:result.mapping}:current);
    setLines(result.mapping.skuCapacities);
+   setOpenSku('');
    setShowValidation(false);
    setNotice('Saved successfully: '+result.mapping.skuCapacities.length+
     ' SKU(s), revision '+result.mapping.revision+'. You can add another SKU without losing these ratings.');
@@ -221,16 +230,40 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
      const expectedContainer=selected?.skuComponents?.containerId||'';
      const expectedSize=selected?.skuComponents?.containerSizeId||'';
      const matching=!!selected&&line.containerId===expectedContainer&&line.containerSizeId===expectedSize;
-     return <div key={i} className='space-y-4 rounded-xl border border-line p-3'>
-      <div className='flex items-center justify-between gap-2'>
-       <h4 className='text-sm font-semibold'>SKU {i+1}</h4>
-       {data.canConfigure&&<Action secondary disabled={busy}
-         onClick={()=>setLines(rows=>rows.filter((_,j)=>j!==i))}>Remove</Action>}
+     const rowKey=line.skuId||'draft-'+i;
+     const expanded=openSku===rowKey;
+     const rowFaults=showValidation?lineIssues(line,i).length:0;
+     const countUnit=data.units.count.find(u=>u.code===line.ratingUnitCode);
+     const periodUnit=data.units.time.find(u=>u.code===line.periodUnitCode);
+     return <div key={i} className='space-y-3 rounded-xl border border-line p-3'>
+      <div className='flex items-start justify-between gap-2'>
+       <button type='button' aria-expanded={expanded} aria-controls={'sku-rating-card-'+i}
+        className='flex min-h-11 min-w-0 flex-1 items-start gap-2 rounded-lg p-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand'
+        onClick={()=>setOpenSku(current=>current===rowKey?'':rowKey)}>
+        <span aria-hidden='true' className='mt-0.5 shrink-0 text-brand'>{expanded?'▾':'▸'}</span>
+        <span className='min-w-0'>
+         <span className='block break-words text-sm font-semibold'>SKU {i+1} · {selected?.name||line.skuName||line.skuId||'Choose SKU'}</span>
+         <span className='mt-1 block text-xs text-muted'>
+          {currentContainer?.name||'Physical container not set'}{size?' · '+size.name:''}
+         </span>
+         <span className='mt-1 block text-xs font-medium text-ink'>
+          {line.ratingQuantity>0?pretty(line.ratingQuantity)+' '+(countUnit?.symbol||line.ratingUnitCode)+
+            ' / '+(periodUnit?.symbol||line.periodUnitCode):'Commissioned speed not yet configured'}
+         </span>
+         {rowFaults>0&&<span className='mt-1 block text-xs text-red-500'>{rowFaults} item(s) need correction</span>}
+        </span>
+       </button>
+       {data.canConfigure&&<Action secondary disabled={busy} onClick={()=>{
+        setLines(rows=>rows.filter((_,j)=>j!==i));
+        if(expanded)setOpenSku('');
+        setNotice('');
+       }}>Remove</Action>}
       </div>
+      {expanded&&<div id={'sku-rating-card-'+i} className='space-y-4 border-t border-line pt-3'>
       <Picker label='Manufactured SKU / product' value={line.skuId} disabled={!data.canConfigure||busy}
        options={[['','Choose SKU'],...outputs.filter(x=>x.id===line.skuId||!already.has(x.id))
         .map(x=>[x.id,x.name+' · '+x.category] as [string,string])]}
-       onChange={skuId=>update(i,newSku(skuId))}/>
+       onChange={skuId=>{update(i,newSku(skuId));setOpenSku(skuId||'draft-'+i);}}/>
       {selected&&<div className='space-y-3 rounded-xl border border-line bg-page p-3'>
        <p className='text-sm font-semibold'>Physical container properties</p>
        <Picker label='Physical container category' value={line.containerCategoryCode} disabled={!data.canConfigure||busy}
@@ -306,6 +339,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
         {projectedRow('Transport & logistics',line.projection.transportLogistics)}
         {line.projection.normalised.quantity!==null&&projectedRow('Normalized output',line.projection.normalised)}
        </div>
+      </div>}
       </div>}
      </div>;
     })}
