@@ -95,5 +95,5 @@ test('Step 3 stage UI is compact, preserves governance and shows validated capac
  assert.ok(ui.includes('Save stores a manufacturing routing draft only'));
  assert.ok(parent.includes("if(tab==='routings')return <PlnProcessRoutingEditor"));
  assert.ok(parent.includes("routingModelVersion:2"));
- assert.ok(parent.includes('MFG.routing.approve'));
+ assert.ok(parent.includes("releaseScope+'.approve'"));
 });
