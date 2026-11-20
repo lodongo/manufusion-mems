@@ -14,7 +14,6 @@ import { mfgMaterialPolicyForOrg, mfgMaterialPolicyPath, normalizeMfgMaterialPol
 import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCommissionedCapacity} from './plnCostCenterCapacity';
 import {physicalRatingUnits} from './plnPhysicalCapacity';
 import {reviewManufacturingRouting} from './mfgRoutingReadiness';
-import {routingStageGates,applyRoutingStageAction,type StageRuntimeState,type StageRuntimeAction} from './mfgStageDependencies';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
 export type MasterKind = typeof MASTER_KINDS[number];
@@ -459,45 +458,6 @@ export const plnMfgFoundationRoutes={
                 routingModelVersion:2,
             });
             return reviewManufacturingRouting(ctx,prepared);
-        }),
-    ],
-    'POST /api/org/pln-mfg/foundation/routing-dependency-preview':[
-        orgRoute('org.mfg.routing.dependency.preview','MFG.view',async ctx=>{
-            // A route review simulator, not a production execution endpoint.
-            // Completion is supplied by the viewer only for visual what-if tests.
-            const raw=isObj(ctx.body.record)?ctx.body.record:{};
-            const siteId=str(raw.siteId);
-            if(!await recordAccess(ctx,'MFG.view',siteId))
-                throw new HttpError(403,'Routing dependency preview is outside your authorized site.');
-            const routing=normalizeMaster('routings',{
-                ...raw,id:str(raw.id)||'RTG-PREVIEW',
-                name:str(raw.name)||'Routing dependency preview',routingModelVersion:2,
-            });
-            const steps=ARR(routing.operations).map(stage=>({
-                code:str(stage.code),name:str(stage.name),
-                dependsOn:Array.isArray(stage.dependsOn)?stage.dependsOn.map(str):[],
-            }));
-            if(!isObj(ctx.body.stageStates)&&ctx.body.stageStates!==undefined)
-                throw new HttpError(400,'Invalid simulation stage status map.');
-            const states:Record<string,StageRuntimeState>={};
-            for(const [key,value] of Object.entries(isObj(ctx.body.stageStates)?ctx.body.stageStates:{}))
-                states[key]=value as StageRuntimeState;
-            try{
-                const rawAction=ctx.body.action;
-                if(rawAction!==undefined){
-                    if(!isObj(rawAction))
-                        throw new Error('Choose a valid simulated stage action.');
-                    const code=str(rawAction.stageCode),action=str(rawAction.type) as StageRuntimeAction;
-                    const outcome=applyRoutingStageAction(steps,states,code,action);
-                    return {...outcome,previewOnly:true,productionEvidence:false,
-                        note:'Simulation only. No production stage status, order, material or equipment is changed.'};
-                }
-                return {states,gates:routingStageGates(steps,states),
-                    previewOnly:true,productionEvidence:false,
-                    note:'All prerequisite stages must be COMPLETED before a dependent stage can START or COMPLETE.'};
-            }catch(error){
-                throw new HttpError(409,error instanceof Error?error.message:'Invalid stage dependency or completion state.');
-            }
         }),
     ],
     'POST /api/org/pln-mfg/foundation/list':[
