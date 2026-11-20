@@ -2,6 +2,7 @@ import {useEffect,useId,useState} from 'react';
 import {Alert,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
 import PlnCostCenterSkuSetup from './PlnCostCenterSkuSetup';
+import {preferredSiteId} from './plnFormDefaults';
 
 type Node={id:string;parentId:string;level:string;name:string;code:string;costType:string;status:string};
 type Hierarchy={legalEntities:Node[];sites:Node[];departments:Node[];costCenters:Node[]};
@@ -17,7 +18,7 @@ function Choice({label,value,options,onChange,disabled=false}:{
 }
 
 /** PLN navigates to a cost centre and reuses its Organization Design gear editor. */
-export default function PlnCostCenterSetup({onMappingsChanged}:{onMappingsChanged?:()=>void}={}){
+export default function PlnCostCenterSetup({onMappingsChanged,defaultSiteId=''}:{onMappingsChanged?:()=>void;defaultSiteId?:string}={}){
  const [data,setData]=useState<Hierarchy|null>(null),[loading,setLoading]=useState(true);
  const [error,setError]=useState('');
  const [showLocation,setShowLocation]=useState(true);
@@ -29,6 +30,17 @@ export default function PlnCostCenterSetup({onMappingsChanged}:{onMappingsChange
   finally{setLoading(false);}
  };
  useEffect(()=>{void reload();},[]);
+ useEffect(()=>{
+  if(!data||site)return;
+  // Inherit the organization's site default, but never select one outside the user's accessible hierarchy.
+  const suggested=preferredSiteId(defaultSiteId,data.sites);
+  const found=data.sites.find(n=>n.id===suggested);
+  if(found){
+   setLe(found.parentId);setSite(found.id);
+   const departments=data.departments.filter(n=>n.parentId===found.id);
+   if(departments.length===1)setDept(departments[0].id);
+  }else if(!le&&data.legalEntities.length===1)setLe(data.legalEntities[0].id);
+ },[data,defaultSiteId]);
  const sites=data?.sites.filter(n=>n.parentId===le)??[];
  const depts=data?.departments.filter(n=>n.parentId===site)??[];
  const centers=data?.costCenters.filter(n=>n.parentId===dept)??[];
