@@ -4,6 +4,7 @@ import {SKU_NAME_FIELDS,SKU_NAME_SEPARATORS,DEFAULT_SKU_NAMING_SEQUENCE,composeS
     type SkuNamingSequence,type SkuNameValues,type SkuNameMode} from '../shared/mfgSkuNaming';
 import {Field,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
+import {THROUGHPUT_OUTPUTS,throughputOutput,throughputOutputGroups} from '../shared/throughputOutput';
 
 export type SkuParameterKind='productNames'|'productionForms'|'containers'|'containerSizes'|'packages'|'transportPackages'|'packagingSizes'|'packageCounts'|'normalizationUnits';
 export type SkuParameter={
@@ -11,7 +12,7 @@ export type SkuParameter={
     quantity?:number;uom?:string;baseUom?:string;quantityPerUnit?:number;revision?:number;
     referenceProductionFormId?:string;normalizationOperator?:'DIVIDE'|'MULTIPLY';
     categoryCode?:string;unitCode?:string;unitCount?:number;productCode?:string;
-    metadataCode?:string;subcategoryCode?:string;containerAttributes?:Record<string,string>;ratingCountUnitCode?:string;
+    metadataCode?:string;subcategoryCode?:string;containerAttributes?:Record<string,string>;ratingCountUnitCode?:string;ratingOutputCode?:string;
     packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
     containersPerLayer?:number;numberOfLayers?:number;
 };
@@ -585,14 +586,28 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
                             placeholder='Select' options={field.choices.map(option=>[option,option])}
                             onChange={value=>update('containerAttributes',{...draft.containerAttributes,[field.key]:value})}/>)}
                     </>}
-                    <div className='rounded-xl border border-line p-3 space-y-2'>
-                        <p className='text-xs text-muted'>Default physical-container rating unit · Count category</p>
-                        <Choice title='Count unit for commissioned throughput'
+                    <div className='rounded-xl border border-line p-3 space-y-3'>
+                        <p className='text-sm font-semibold'>Manufacturing line speed / rated output basis</p>
+                        <p className='text-xs text-muted'>What does one output unit represent? This is separate from the physical container material/type and the Each/Dozen count multiplier.</p>
+                        <label className='block space-y-1'>
+                            <span className='text-xs font-medium'>Output type used for line speed *</span>
+                            <select className='min-h-11 w-full rounded-lg border border-line bg-panel px-2 text-sm text-ink'
+                                value={draft.ratingOutputCode||'PRIMARY_CONTAINER'}
+                                onChange={event=>update('ratingOutputCode',event.target.value)}>
+                                {throughputOutputGroups().map(group=><optgroup key={group} label={group}>
+                                    {THROUGHPUT_OUTPUTS.filter(x=>x.group===group).map(x=>
+                                        <option key={x.code} value={x.code}>{x.name}</option>)}
+                                </optgroup>)}
+                            </select>
+                        </label>
+                        <p className='text-xs text-muted'>{throughputOutput(draft.ratingOutputCode||'PRIMARY_CONTAINER')?.description}</p>
+                        <p className='text-xs text-muted'>Default rated output count unit · Count category</p>
+                        <Choice title='Count multiplier (Each, Dozen, etc.)'
                             value={draft.ratingCountUnitCode||'UOM-20-001'}
                             options={setup.units.filter(u=>u.category==='Count')
                                 .map(u=>[u.code,u.label+' ('+u.symbol+')'])}
                             onChange={ratingCountUnitCode=>update('ratingCountUnitCode',ratingCountUnitCode)}/>
-                        <p className='text-xs text-muted'>This unit is the default when an SKU uses this physical container in Production Planning. The cost-centre rating form may select a different compatible Count unit.</p>
+                        <p className='text-xs text-muted'>Example: Bottle + Each → bottles/hour; Case + Each → cases/hour; Kilogram + Each → kg/hour. A case is converted to bottles using the selected SKU commercial-packaging ratio; measured units use the SKU production-form dimension. A custom output needs its explicit primary-unit conversion at the cost centre. The configured type is the default for new SKU ratings only; existing saved ratings stay unchanged.</p>
                     </div>
                 </>}
                 {active==='containerSizes'&&<>
