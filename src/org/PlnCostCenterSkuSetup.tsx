@@ -317,18 +317,14 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack,onMappingsCha
       {selected&&<div className='space-y-3 rounded-xl border border-line p-3'>
        <h4 className='font-semibold'>Commissioned rating parameters</h4>
        <p className='text-xs text-muted'>What is counted is independent of how many are counted. Choose bottles, cases, pieces, measured volume, mass, length or another industrial output before entering speed.</p>
-       <label className='block space-y-1'>
-        <span className='text-xs font-medium'>Output unit used to express line speed *</span>
-        <select value={line.ratingOutputCode||'PRIMARY_CONTAINER'}
-         disabled={!data.canConfigure||busy}
-         className='min-h-11 w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm text-ink'
-         onChange={e=>update(i,{ratingOutputCode:e.target.value,primaryContainersPerRatedOutput:undefined})}>
+       <SelectField id={'rated-output-type-'+costCenterId+'-'+i} label='Output unit used to express line speed' required
+        value={line.ratingOutputCode||'PRIMARY_CONTAINER'} disabled={!data.canConfigure||busy}
+        onChange={e=>update(i,{ratingOutputCode:e.target.value,primaryContainersPerRatedOutput:undefined})}>
          {throughputOutputGroups().map(group=><optgroup key={group} label={group}>
           {THROUGHPUT_OUTPUTS.filter(x=>x.group===group).map(x=>
            <option key={x.code} value={x.code}>{x.name}</option>)}
          </optgroup>)}
-        </select>
-       </label>
+       </SelectField>
        <p className='text-xs text-muted'>{throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER')?.description}</p>
        {throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER')?.kind==='CUSTOM'&&
         <Field id={'custom-rated-output-'+costCenterId+'-'+i}
