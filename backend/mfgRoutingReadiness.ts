@@ -116,10 +116,13 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
      }else{
       const rating=result.rating as Obj;
       const units=physicalRatingUnits();
-      const count=units.count.find(u=>u.code===str(rating.ratingUnitCode));
       const period=units.time.find(u=>u.code===str(rating.periodUnitCode));
       const hour=units.time.find(u=>u.name==='Hour');
-      const quantity=finite(rating.ratingQuantity)*(count?.multiplier||0)*
+      // Entered rates can be cases, pallets, litres or discrete pieces.
+      // Normalize the validated SKU primary count rather than assume bottles.
+      const projection=rating.projection as Obj;
+      const source=isObj(projection.source)?projection.source:{};
+      const quantity=finite(source.physicalContainers)*
        ((hour?.multiplier||0)/(period?.multiplier||Number.POSITIVE_INFINITY));
       if(!Number.isFinite(quantity)||quantity<=0)
        issue(code,'capacityBasis','Commissioned primary-container rate cannot be normalized to containers/hour.');
