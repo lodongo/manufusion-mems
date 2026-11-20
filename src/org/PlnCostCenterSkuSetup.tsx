@@ -54,7 +54,7 @@ function projectedRow(title:string,value:Quantity){
 }
 
 /** The Organization Design gear and PLN hierarchy share one physical-container-based rating editor. */
-export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterId:string;onBack?:()=>void}){
+export default function PlnCostCenterSkuSetup({costCenterId,onBack,onMappingsChanged}:{costCenterId:string;onBack?:()=>void;onMappingsChanged?:()=>void}){
  const [data,setData]=useState<Details|null>(null),[lines,setLines]=useState<Line[]>([]);
  const [revision,setRevision]=useState(0),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -188,6 +188,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
    setRevision(result.mapping.revision);
    setData(current=>current?{...current,mapping:result.mapping}:current);
    setLines(result.mapping.skuCapacities);
+   onMappingsChanged?.();
    setOpenSku('');
    setShowValidation(false);
    setNotice('Saved successfully: '+result.mapping.skuCapacities.length+
@@ -200,7 +201,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
   setError('');setNotice('');setBusy(true);
   try{
    await callBackend('/api/org/pln/cost-center/clear',{costCenterId,expectedRevision:revision});
-   await load();setNotice('Cost-centre rating mappings cleared. Physical Container and SKU masters are unchanged.');
+   await load();onMappingsChanged?.();setNotice('Cost-centre rating mappings cleared. Physical Container and SKU masters are unchanged.');
   }catch(e){setError(e instanceof Error?e.message:'Could not clear rating mappings.');}
   finally{setBusy(false);}
  };
