@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { Alert, Field as MemsField, SelectField } from '../components/ui';
 import { Spinner } from '../admin/kit';
-import { SkuConfigurationFields, SkuSetupPanel, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
+import { SkuConfigurationFields, SkuSetupPanel, UnitChoice, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
 import PlnDemand from './PlnDemand';
 import PlnCostCenterSetup from './PlnCostCenterSetup';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
@@ -75,7 +75,7 @@ const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy,
     defaults:FormDefaults=DEFAULT_FORM_DEFAULTS,sites:References['sites']=[]):Row=>{
     const siteId=preferredSiteId(defaults.defaultSiteId,sites);
-    if(tab==='items')return {id:'',name:'',category:defaults.skuCategory,family:'',uom:'EA',siteId:'',packQty:1,
+    if(tab==='items')return {id:'',name:'',category:defaults.skuCategory,family:'',uom:'',siteId:'',packQty:1,
         stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
     if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',alternativeCode:defaults.routingAlternativeCode,routingId:'',siteId,
         parentSkuId:'',outputQty:defaults.bomOutputQty,outputUom:'EA',components:[]};
@@ -242,8 +242,9 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
             {!(tab==='items'&&str(draft.category)==='FINISHED')&&<Field title='Name' value={draft.name} required onChange={v=>update('name',v)}/>}
             {tab==='items'&&<>
                 <Choice title='SKU type' value={str(draft.category)} options={ [['FINISHED','Finished goods'],['INTERMEDIATE','Intermediate/WIP'],['RAW','Raw/input material'],['PACKAGING','Packaging component']] } onChange={v=>update('category',v)}/>
-                <Field title='Product family (optional)' value={str(draft.family)} onChange={v=>update('family',v)}/>
-                {str(draft.category)!=='FINISHED'&&<Field title='Base unit of measure' value={str(draft.uom)} onChange={v=>update('uom',v)}/>}
+                <Field title='Product family' value={str(draft.family)} required onChange={v=>update('family',v)}/>
+                {str(draft.category)!=='FINISHED'&&<UnitChoice key={draft.id||'new-sku'} title='Unit of measure'
+                    value={str(draft.uom)} setup={skuSetup} onChange={v=>update('uom',v)}/>}
                 {str(draft.category)==='FINISHED'&&<div className='rounded-xl border border-line bg-page p-3 text-sm text-soft'>The SKU name, physical package unit, containers per pack and conversion factor are calculated from selected configuration parameters.</div>}
                 {str(draft.category)==='INTERMEDIATE'&&<>
                     <Choice title='Intermediate tracking' value={str(draft.stockPolicy)||'NON_STOCKED'}
@@ -437,6 +438,12 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     };
     const save=async()=>{
         if(!draft||!canSave)return;
+        if(active==='items'){
+            if(!str(draft.family).trim()){setError('Product family is required before saving this SKU.');return;}
+            if(str(draft.category)!=='FINISHED'&&!skuSetup.units.some(u=>u.code===str(draft.uom)||u.symbol.toLowerCase()===str(draft.uom).toLowerCase())){
+                setError('Choose a unit category and unit of measure from the MEMS unit registry.');return;
+            }
+        }
         if(active==='boms'){
             const parts=asComponents(draft.components);
             if(!str(draft.parentSkuId)){setError('Choose the output material before saving.');return;}
