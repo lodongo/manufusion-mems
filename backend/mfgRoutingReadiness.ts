@@ -28,8 +28,6 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
  if(!operations.length)issue('HEADER','operations','Add at least one manufacturing stage.');
  const routed=skuId?await getDoc(path(ctx.orgId,'mfg_items',skuId)):null;
  if(skuId&&!routed)issue('HEADER','skuId','Routed manufactured SKU was not found.');
- if(routed&&str(routed.data.siteId)&&str(routed.data.siteId)!==siteId)
-  issue('HEADER','skuId','Output SKU belongs to a different production site.');
  const policy=await mfgMaterialPolicyForOrg(ctx.orgId);
  const effectiveDate=str(raw.effectiveFrom)||new Date().toISOString().slice(0,10);
  const usedProducingBoms=new Map<string,string>();
@@ -71,8 +69,6 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
    const sku=await fetchCached(skuCache,'mfg_items',producesSkuId);
    if(!sku||!['FINISHED','INTERMEDIATE'].includes(str(sku.data.category)))
     issue(code,'producesSkuId','Output must be an existing finished or intermediate SKU.');
-   else if(str(sku.data.siteId)&&str(sku.data.siteId)!==siteId)
-    issue(code,'producesSkuId','Stage output belongs to another site.');
   }
   if(stageType==='PRODUCE'&&!bomId)
    issue(code,'bomId','Select an approved, effective BOM for this material-transforming stage.');
