@@ -2,6 +2,7 @@ import {useEffect,useId,useMemo,useState, type ReactNode} from 'react';
 import {Alert,Field as MemsField,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
 import {hasPerm} from '../types';
+import {formDefaultsFor,preferredSiteId,localRequiredDate,type FormDefaults} from './plnFormDefaults';
 
 type DemandType='FORECAST'|'FIRM_ORDER';
 type DemandStatus='draft'|'pending_approval'|'approved'|'rejected';
@@ -39,7 +40,8 @@ function Btn({children,onClick,disabled=false,secondary=false}:{children:ReactNo
  onClick={onClick} className={'min-h-11 rounded-xl px-4 text-sm font-semibold disabled:opacity-50 '+
  (secondary?'border border-line text-ink':'bg-brand text-onbrand')}>{children}</button>;}
 
-export default function PlnDemand({permissions}:{permissions:string[]}){
+export default function PlnDemand({permissions,formDefaults}:{permissions:string[];formDefaults?:FormDefaults}){
+  const defaults=formDefaultsFor(formDefaults);
  const [sites,setSites]=useState<Site[]>([]);
  const [outputs,setOutputs]=useState<Output[]>([]);
  const [records,setRecords]=useState<Demand[]>([]);
@@ -121,7 +123,11 @@ export default function PlnDemand({permissions}:{permissions:string[]}){
   <Card>
    <div className='flex flex-wrap items-center justify-between gap-2'>
     <h3 className='font-semibold'>Demand records</h3>
-    {canEdit&&<Btn onClick={()=>{setDraft(initial());setError('');}}>Add demand</Btn>}
+    {canEdit&&<Btn onClick={()=>{
+     setDraft({...initial(),siteId:preferredSiteId(defaults.defaultSiteId,sites),
+      type:defaults.demandType,quantity:defaults.demandQuantity,needDate:localRequiredDate(defaults.demandLeadDays)});
+     setError('');
+    }}>Add demand</Btn>}
    </div>
    {!outputs.length&&<p className='mt-3 text-sm text-muted'>No demand outputs are available yet. Configure a finished or intermediate material under Manufacturing → Materials & Products, then refresh this page.</p>}
    {draft&&<div className='mt-4 space-y-3 rounded-xl border border-line p-3'>
@@ -131,7 +137,7 @@ export default function PlnDemand({permissions}:{permissions:string[]}){
      <Select title='Output material / product' value={draft.skuId}
       options={[['','Select output'],...outputs.map(o=>[o.id,o.name+' · '+o.category] as [string,string])]}
       onChange={id=>{const item=outputs.find(o=>o.id===id);
-       setDraft(x=>x?{...x,skuId:id,siteId:item?.siteId||'',uom:item?.uom||'EA'}:x);}}/>
+       setDraft(x=>x?{...x,skuId:id,siteId:item?.siteId||preferredSiteId(x.siteId||defaults.defaultSiteId,sites),uom:item?.uom||'EA'}:x);}}/>
      <Select title='Production site' value={draft.siteId}
       options={[['','Select site'],...availableSites.map(o=>[o.id,o.name] as [string,string])]}
       onChange={v=>setDraft(x=>x?{...x,siteId:v}:x)}/>
