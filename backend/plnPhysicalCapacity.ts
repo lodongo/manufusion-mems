@@ -5,18 +5,21 @@
  */
 import {HttpError,str} from './core';
 import {PROCUREMENT_UNITS} from './procurementUnits';
-import {calculateSkuConversion,type SkuComponents,type SkuParameter} from './mfgSkuModel';
+import {calculateSkuConversion,skuUnitConversion,type SkuComponents,type SkuParameter} from './mfgSkuModel';
+import {throughputOutput} from '../src/shared/throughputOutput';
 
 export type PhysicalRating={
  skuId:string;containerId:string;containerSizeId:string;
  containerCategoryCode:string;containerSubcategoryCode:string;
  ratingQuantity:number;ratingUnitCode:string;periodUnitCode:string;
+ ratingOutputCode:string;primaryContainersPerRatedOutput?:number;
 };
 export type RatedQuantity={quantity:number|null;unit:string;name:string;reason?:string};
 export type CapacityProjection={
  source:{containerName:string;containerCategory:string;containerSubcategory:string;
   containerAttributes:Record<string,string>;sizeName:string;countUnit:string;timeUnit:string;
-  ratedUnits:number;physicalContainers:number};
+  ratedUnits:number;physicalContainers:number;ratingOutputCode:string;
+  ratingOutputName:string;primaryContainersPerRatedOutput:number};
  physicalContainers:RatedQuantity;
  productionForm:RatedQuantity;
  finalProduct:RatedQuantity;
@@ -43,15 +46,25 @@ export function normalizePhysicalRating(raw:unknown):PhysicalRating{
  const ratingQuantity=Number(x.ratingQuantity);
  if(!Number.isFinite(ratingQuantity)||ratingQuantity<=0||ratingQuantity>1e12)
   throw new HttpError(400,'Commissioned physical-container rating must be positive.');
- const ratingUnitCode=id(x.ratingUnitCode,'physical-container Count unit');
+ const ratingUnitCode=id(x.ratingUnitCode,'rated-output Count multiplier');
  const periodUnitCode=id(x.periodUnitCode,'Time unit');
  unit(ratingUnitCode,'Count');unit(periodUnitCode,'Time');
+ // Existing commissioned rows are always the physical primary-container basis.
+ // A new organization default must never silently reinterpret legacy ratings.
+ const ratingOutputCode=str(x.ratingOutputCode)||'PRIMARY_CONTAINER';
+ const output=throughputOutput(ratingOutputCode);
+ if(!output)throw new HttpError(400,'Choose a published industrial output type for commissioned throughput.');
+ const primaryContainersPerRatedOutput=Number(x.primaryContainersPerRatedOutput);
+ if(output.kind==='CUSTOM'&&(!Number.isFinite(primaryContainersPerRatedOutput)||
+    primaryContainersPerRatedOutput<=0||primaryContainersPerRatedOutput>1e12))
+  throw new HttpError(400,'Custom output requires a positive number of physical primary units per rated output.');
  return {skuId:id(x.skuId,'manufactured SKU'),
   containerId:id(x.containerId,'adopted Physical Container'),
   containerSizeId:id(x.containerSizeId,'physical-container size'),
   containerCategoryCode:id(x.containerCategoryCode,'container category'),
   containerSubcategoryCode:id(x.containerSubcategoryCode,'container subcategory'),
-  ratingQuantity,ratingUnitCode,periodUnitCode};
+  ratingQuantity,ratingUnitCode,periodUnitCode,ratingOutputCode,
+  ...(output.kind==='CUSTOM'?{primaryContainersPerRatedOutput}:{})};
 }
 const projected=(value:number|null,unitCode:string,name:string,reason?:string):RatedQuantity=>({
  quantity:value===null?null:cap(value),unit:unitCode,name,
@@ -75,10 +88,26 @@ export function derivePhysicalCapacity(
  if(!conversion.containerSizeInProductionUom||conversion.containerSizeInProductionUom<=0)
   throw new HttpError(400,'Configure a compatible container size and production form on the SKU.');
  const countUnit=unit(input.ratingUnitCode,'Count'),time=unit(input.periodUnitCode,'Time');
- const physicalContainers=input.ratingQuantity*countUnit.multiplier;
- if(!Number.isFinite(physicalContainers)||physicalContainers<=0||physicalContainers>1e15)
-  throw new HttpError(400,'Commissioned count is outside the supported range.');
+ const output=throughputOutput(input.ratingOutputCode||'PRIMARY_CONTAINER');
+ if(!output)throw new HttpError(400,'Selected throughput output type is not published.');
  const perPack=conversion.containersPerPackage,perTransport=conversion.primaryContainersPerTransportUnit;
+ let perOutput:number|null=null;
+ if(output.kind==='PRIMARY')perOutput=1;
+ else if(output.kind==='COMMERCIAL')perOutput=perPack;
+ else if(output.kind==='LOGISTICS')perOutput=perTransport;
+ else if(output.kind==='MEASURE'){
+  const converted=skuUnitConversion(output.unitCode||'',conversion.productionUom);
+  if(converted!==null)perOutput=converted/conversion.containerSizeInProductionUom;
+ }else if(output.kind==='CUSTOM')perOutput=input.primaryContainersPerRatedOutput??null;
+ if(!perOutput||!Number.isFinite(perOutput)||perOutput<=0)
+  throw new HttpError(400,
+   output.kind==='COMMERCIAL'?'Configure the selected SKU commercial-packaging ratio before rating cases or packs.':
+   output.kind==='LOGISTICS'?'Configure the SKU transport-packaging hierarchy before rating pallets or loads.':
+   output.kind==='MEASURE'?'This measured output unit is incompatible with the SKU production form or container size.':
+   'Configure a positive conversion between the rated output and physical primary units.');
+ const physicalContainers=input.ratingQuantity*countUnit.multiplier*perOutput;
+ if(!Number.isFinite(physicalContainers)||physicalContainers<=0||physicalContainers>1e15)
+  throw new HttpError(400,'Derived primary-unit count is outside the supported range.');
  const packages=perPack&&perPack>0?physicalContainers/perPack:null;
  const transport=perTransport&&perTransport>0?physicalContainers/perTransport:null;
  const productionForm=parameters.find(p=>p.id===components.productionFormId&&p.kind==='productionForms');
@@ -97,7 +126,9 @@ export function derivePhysicalCapacity(
    containerSubcategory:str(container.subcategoryCode),
    containerAttributes:container.containerAttributes??{},sizeName:size.name,
    countUnit:countUnit.symbol,timeUnit:time.symbol,
-   ratedUnits:input.ratingQuantity,physicalContainers:cap(physicalContainers)},
+   ratedUnits:input.ratingQuantity,physicalContainers:cap(physicalContainers),
+   ratingOutputCode:output.code,ratingOutputName:output.name,
+   primaryContainersPerRatedOutput:cap(perOutput)},
   physicalContainers:projected(physicalContainers,container.name+' / '+time.symbol,
      container.name),
   productionForm:projected(formQuantity,displayUnit(conversion.productionUom)+' / '+time.symbol,
