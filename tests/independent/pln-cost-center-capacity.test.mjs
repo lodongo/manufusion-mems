@@ -269,7 +269,7 @@ test('mobile has a single accessible stage selector and desktop has grouped tabs
  const page=read('src/org/ProductionFoundation.tsx');
  assert.ok(page.includes("aria-label='Production configuration sequence' className='sm:hidden"));
  assert.ok(page.includes("htmlFor='manufacturing-step-select'"));
- assert.ok(page.includes("id='manufacturing-step-select' value={active}"));
+ assert.ok(page.includes("id='manufacturing-step-select' label='Configuration sequence' hideLabel value={active}"));
  assert.ok(page.includes('<optgroup'));
  assert.ok(page.includes('Previous</Button>'));
  assert.ok(page.includes('Next step</Button>'));
