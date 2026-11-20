@@ -186,7 +186,7 @@ test('one editor is shared by the Organization Design gear and Production Planni
  assert.ok(structure.includes("'/api/org/pln/cost-center/eligibility'"));
  assert.ok(structure.includes("setMode(result.manufacturing?{type:'planning'}:{type:'edit'})"));
  assert.ok(structure.includes('<PlnCostCenterSkuSetup costCenterId={node.id}'));
- assert.ok(pln.includes('<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup}/>'));
+ assert.ok(pln.includes('<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup} defaultSiteId={formDefaults.defaultSiteId}/>'));
  assert.ok(menu.includes('<PlnCostCenterSkuSetup key={cc} costCenterId={cc} onMappingsChanged={onMappingsChanged}/>'));
  assert.ok(ui.includes('Physical container category'));
  assert.ok(ui.includes('Physical container subcategory / type'));
