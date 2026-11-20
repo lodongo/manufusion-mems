@@ -305,6 +305,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [capacityMappings,setCapacityMappings]=useState<SetupRow[]>([]);
     const [capacityLoaded,setCapacityLoaded]=useState(false);
     const [setupBlocked,setSetupBlocked]=useState('');
+    const [blockedTarget,setBlockedTarget]=useState<Tab|null>(null);
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
     const [configRevision,setConfigRevision]=useState(0);
     const [history,setHistory]=useState<Row[]>([]);
@@ -389,12 +390,13 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             const missing=prerequisiteNames(tab);
             if(missing.length){
                 const detail=setupProgress[tab].missing.map(step=>setupProgress[step].detail).join(' ');
+                setBlockedTarget(tab);
                 setSetupBlocked('Complete these configuration dependencies before continuing to '+
                     (tabs.find(t=>t.key===tab)?.label||tab)+': '+missing.join(', ')+'. '+detail);
                 return;
             }
         }
-        setSetupBlocked('');
+        setSetupBlocked('');setBlockedTarget(null);
         setActive(tab);setDraft(null);setViewSkuId('');setHistory([]);setError('');setNotice('');setDecisionReason('');
     };
     const copyVersion=(row:Row)=>{setViewSkuId('');const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
@@ -518,7 +520,14 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {setupBlocked&&<div role='alert' className='space-y-2 rounded-xl border border-amber-500/50 p-3 text-sm'>
             <p>{setupBlocked}</p>
             <Button variant='secondary' className='w-fit px-3 text-xs'
-                onClick={()=>{const required=setupProgress[active].missing[0];if(required)changeTab(required as Tab);else setSetupBlocked('');}}>
+                onClick={()=>{
+                    let step=blockedTarget as SetupStep|null;
+                    const visited=new Set<string>();
+                    while(step&&setupProgress[step].missing.length&&!visited.has(step)){
+                        visited.add(step);step=setupProgress[step].missing[0];
+                    }
+                    if(step)changeTab(step as Tab);else{setSetupBlocked('');setBlockedTarget(null);}
+                }}>
                 Review prerequisites
             </Button>
         </div>}
