@@ -66,7 +66,7 @@ export default function PlnDemand({permissions,formDefaults}:{permissions:string
  };
  useEffect(()=>{void load();},[]);
  const output=outputs.find(x=>x.id===draft?.skuId);
- const availableSites=output?.siteId?sites.filter(x=>x.id===output.siteId):sites;
+ const availableSites=sites; // SKU identity is global; demand site is selected separately.
  const visible=useMemo(()=>records.filter(x=>showList==='ALL'||x.status===showList)
   .sort((a,b)=>b.needDate.localeCompare(a.needDate)),[records,showList]);
  const counts=useMemo(()=>({
@@ -137,7 +137,7 @@ export default function PlnDemand({permissions,formDefaults}:{permissions:string
      <Select title='Output material / product' value={draft.skuId}
       options={[['','Select output'],...outputs.map(o=>[o.id,o.name+' · '+o.category] as [string,string])]}
       onChange={id=>{const item=outputs.find(o=>o.id===id);
-       setDraft(x=>x?{...x,skuId:id,siteId:item?.siteId||preferredSiteId(x.siteId||defaults.defaultSiteId,sites),uom:item?.uom||'EA'}:x);}}/>
+       setDraft(x=>x?{...x,skuId:id,siteId:preferredSiteId(x.siteId||defaults.defaultSiteId,sites),uom:item?.uom||'EA'}:x);}}/>
      <Select title='Production site' value={draft.siteId}
       options={[['','Select site'],...availableSites.map(o=>[o.id,o.name] as [string,string])]}
       onChange={v=>setDraft(x=>x?{...x,siteId:v}:x)}/>
