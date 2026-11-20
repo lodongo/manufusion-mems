@@ -3,12 +3,12 @@
  * These reflect persisted setup/master records; they are NOT production stage
  * completion states and do not change manufacturing execution.
  */
-export type SetupStep='materialPolicy'|'skuSetup'|'items'|'boms'|'resources'|
+export type SetupStep='materialPolicy'|'formDefaults'|'skuSetup'|'items'|'boms'|'resources'|
  'costCenterSku'|'routings'|'config'|'demand'|'documentation';
 export type SetupRow={id:string;status?:unknown;category?:unknown;skuCapacities?:unknown;[key:string]:unknown};
 export type SetupParameter={kind:string;enabled?:boolean};
 export type SetupInputs={
- materialPolicyRevision:number;parameters:SetupParameter[];
+ materialPolicyRevision:number;formDefaultsRevision?:number;parameters:SetupParameter[];
  items:SetupRow[];boms:SetupRow[];resources:SetupRow[];
  capacityMappings:SetupRow[];capacityLoaded:boolean;
  routings:SetupRow[];planningConfigurationRevision:number;
@@ -16,7 +16,7 @@ export type SetupInputs={
 export type SetupProgress={step:SetupStep;complete:boolean;detail:string;
  required:SetupStep[];missing:SetupStep[];accessible:boolean};
 export const SETUP_ORDER:SetupStep[]=[
- 'materialPolicy','skuSetup','items','boms','resources','costCenterSku',
+ 'materialPolicy','formDefaults','skuSetup','items','boms','resources','costCenterSku',
  'routings','config','demand','documentation',
 ];
 /** Prerequisites are deliberately a graph rather than simply the prior tab:
@@ -24,6 +24,8 @@ export const SETUP_ORDER:SetupStep[]=[
  * capacity needs SKU identity but not a recipe; routing needs all three. */
 export const SETUP_REQUIREMENTS:Record<SetupStep,SetupStep[]>={
  materialPolicy:[],
+ // Form defaults can be saved immediately; they are never a prerequisite for manufacturing.
+ formDefaults:[],
  skuSetup:['materialPolicy'],
  items:['skuSetup'],
  boms:['items'],
@@ -43,6 +45,8 @@ export function configurationProgress(input:SetupInputs):Record<SetupStep,SetupP
  const completed:Record<SetupStep,{complete:boolean;detail:string}>={
   materialPolicy:{complete:input.materialPolicyRevision>0,
    detail:input.materialPolicyRevision>0?'Manufacturing rules saved.':'Save Manufacturing Setup, including material and BOM policies.'},
+  formDefaults:{complete:(input.formDefaultsRevision??0)>0,
+   detail:(input.formDefaultsRevision??0)>0?'Organization form defaults saved.':'Set default values for new forms, if required.'},
   skuSetup:{complete:missingParams.length===0,
    detail:missingParams.length===0?'Product parameters configured.':
     'Configure active '+missingParams.join(', ')+'.'},

@@ -663,7 +663,32 @@ export const plnMfgFoundationRoutes={
             const doc=await getDoc('organizations/'+ctx.orgId+'/pln_config/master');
             const stored=doc?.data??{};
             return {config:{horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS',...stored,
-                formDefaults:normalizePlanningFormDefaults(stored.formDefaults)},revision:num(doc?.data.revision)??0};
+                formDefaults:normalizePlanningFormDefaults(stored.formDefaults)},revision:num(doc?.data.revision)??0,
+                formDefaultsRevision:num(stored.formDefaultsRevision)??0};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/form-defaults/save':[
+        orgRoute('org.pln.form.defaults.save','PLN.configure',async ctx=>{
+            if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'PLN.configure'))
+                throw new HttpError(403,'Organization-wide form defaults require direct Planning configuration permission.');
+            const formDefaults=normalizePlanningFormDefaults(ctx.body.formDefaults);
+            if(formDefaults.defaultSiteId){
+                const site=await getNode(ctx,formDefaults.defaultSiteId);
+                if(str(site.data.level)!=='site'||str(site.data.status)==='inactive')
+                    throw new HttpError(400,'The default site must be an active site in this organization.');
+            }
+            const path='organizations/'+ctx.orgId+'/pln_config/master';
+            const previous=await getDoc(path);
+            const currentRevision=num(previous?.data.formDefaultsRevision)??0;
+            if(Number(ctx.body.expectedRevision)!==currentRevision)
+                throw new HttpError(409,'Form defaults changed. Refresh before saving again.');
+            const revision=currentRevision+1;
+            const updated={...(previous?.data??{}),formDefaults,formDefaultsRevision:revision,
+                updatedAt:nowIso(),updatedBy:ctx.uid};
+            if(!await writeDoc(path,updated,previous?{updateTime:previous.updateTime}:{exists:false}))
+                throw new HttpError(409,'Concurrent form-default update. Reload before saving.');
+            await track(ctx,'pln.form.defaults.save','PLN form defaults revision '+revision);
+            return {formDefaults,revision};
         }),
     ],
     'POST /api/org/pln-mfg/foundation/config/save':[
@@ -678,14 +703,15 @@ export const plnMfgFoundationRoutes={
             const path='organizations/'+ctx.orgId+'/pln_config/master';
             const prev=await getDoc(path),old=num(prev?.data.revision)??0;
             if(Number(ctx.body.expectedRevision)!==old)throw new HttpError(409,'Configuration changed. Reload and retry.');
-            // Retain existing form defaults when a legacy client saves only planning rules.
-            const formDefaults=normalizePlanningFormDefaults(raw.formDefaults??prev?.data.formDefaults);
+            // Planning rule saves must never revert newer form-default settings.
+            const formDefaults=normalizePlanningFormDefaults(prev?.data.formDefaults??raw.formDefaults);
+            const formDefaultsRevision=num(prev?.data.formDefaultsRevision)??0;
             if(formDefaults.defaultSiteId){
                 const site=await getNode(ctx,formDefaults.defaultSiteId);
                 if(str(site.data.level)!=='site'||str(site.data.status)==='inactive')
                     throw new HttpError(400,'Default planning site must be an active site in this organization.');
             }
-            const config={horizonDays,freezeDays,lotPolicy,strategy,formDefaults,revision:old+1,updatedAt:nowIso(),updatedBy:ctx.uid};
+            const config={horizonDays,freezeDays,lotPolicy,strategy,formDefaults,formDefaultsRevision,revision:old+1,updatedAt:nowIso(),updatedBy:ctx.uid};
             const ok=await writeDoc(path,config,prev?{updateTime:prev.updateTime}:{exists:false});
             if(!ok)throw new HttpError(409,'Concurrent planning configuration update detected.');
             await track(ctx,'pln.config.save','PLN planning configuration');

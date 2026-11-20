@@ -24,6 +24,8 @@ test('PLN configuration dependency graph models independent prerequisites and ke
  assert.deepEqual(SETUP_REQUIREMENTS.config,['routings']);
  assert.deepEqual(SETUP_REQUIREMENTS.demand,['config']);
  assert.equal(SETUP_ORDER.at(-1),'documentation');
+ assert.equal(SETUP_ORDER[1],'formDefaults');
+ assert.deepEqual(SETUP_REQUIREMENTS.formDefaults,[]);
  const state=configurationProgress(empty());
  assert.equal(state.materialPolicy.accessible,true);
  assert.equal(state.documentation.accessible,true);

@@ -17,9 +17,11 @@ on:
       - 'src/org/StructurePage.tsx'
       - 'src/org/ProductionFoundation.tsx'
       - 'src/org/plnFormDefaults.ts'
+      - 'src/org/PlnFormDefaultsPanel.tsx'
       - 'src/org/PlnDemand.tsx'
       - 'backend/plnMfgFoundation.ts'
       - 'tests/independent/pln-form-defaults.test.mjs'
+      - 'tests/independent/pln-form-defaults-visibility.test.mjs'
       - 'src/org/plnSetupDependencies.ts'
       - 'tests/independent/pln-configuration-dependencies.test.mjs'
       - 'src/org/AssetRegister.tsx'
@@ -54,7 +56,7 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: '123456789012'
           VITE_FIREBASE_APP_ID: 1:123456789012:web:ci-fixture
       - name: Test cost-centre-owned SKU capacity
-        run: node --import tsx --test tests/independent/pln-cost-center-capacity.test.mjs tests/independent/pln-documentation-throughput.test.mjs tests/independent/pln-configuration-dependencies.test.mjs tests/independent/pln-form-defaults.test.mjs
+        run: node --import tsx --test tests/independent/pln-cost-center-capacity.test.mjs tests/independent/pln-documentation-throughput.test.mjs tests/independent/pln-configuration-dependencies.test.mjs tests/independent/pln-form-defaults.test.mjs tests/independent/pln-form-defaults-visibility.test.mjs
       - name: Acceptance limits
         run: |
           echo "Planner and Org Design now share cost-centre SKU configuration."

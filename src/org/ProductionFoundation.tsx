@@ -9,6 +9,7 @@ import PlnProcessRoutingEditor from './PlnProcessRoutingEditor';
 import PlnDocumentation from './PlnDocumentation';
 import {configurationProgress,type SetupRow,type SetupStep} from './plnSetupDependencies';
 import {DEFAULT_FORM_DEFAULTS,formDefaultsFor,preferredSiteId,type FormDefaults} from './plnFormDefaults';
+import PlnFormDefaultsPanel from './PlnFormDefaultsPanel';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 '+className}>{children}</section>;
 }
@@ -26,7 +27,7 @@ import { callBackend } from '../lib/backend';
 import { hasPerm } from '../types';
 
 type Kind='items'|'boms'|'resources'|'routings';
-type Tab=Kind|'skuSetup'|'materialPolicy'|'config'|'demand'|'costCenterSku'|'documentation';
+type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'demand'|'costCenterSku'|'documentation';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
@@ -57,6 +58,7 @@ const phases:{key:Phase;title:string;description:string}[]=[
 /** Configuration precedes use. Preserve the existing tab keys, data and permissions. */
 const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
     {key:'materialPolicy',label:'Manufacturing Setup',shortLabel:'Manufacturing setup',phase:'foundation',hint:'Configure material consumption and intermediate inventory policies'},
+    {key:'formDefaults',label:'Form Defaults',shortLabel:'Form defaults',phase:'foundation',hint:'Set suggested starting values for new SKU, BOM, resource, routing and demand forms'},
     {key:'skuSetup',label:'Product Configuration',shortLabel:'Product configuration',phase:'foundation',hint:'Define product variants, production forms, physical containers and packaging'},
     {key:'items',label:'Materials & Products',shortLabel:'Materials & products',phase:'masters',hint:'Create manufactured SKUs, ingredients, packaging and intermediate products'},
     {key:'boms',label:'Bills of Materials',shortLabel:'Bills of materials',phase:'masters',hint:'Define the materials and quantities consumed by each product'},
@@ -311,23 +313,22 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [blockedTarget,setBlockedTarget]=useState<Tab|null>(null);
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS',formDefaults:formDefaultsFor()});
     const [configRevision,setConfigRevision]=useState(0);
-    const formDefaults=formDefaultsFor(config.formDefaults);
-    const setFormDefault=<K extends keyof FormDefaults>(key:K,value:FormDefaults[K])=>
-        setConfig(current=>({...current,formDefaults:{...formDefaultsFor(current.formDefaults),[key]:value}}));
+    const [formDefaultsRevision,setFormDefaultsRevision]=useState(0);
+    const formDefaults=useMemo(()=>formDefaultsFor(config.formDefaults),[config.formDefaults]);
     const [history,setHistory]=useState<Row[]>([]);
     const [decisionReason,setDecisionReason]=useState('');
     const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
     const canViewMasters=hasPerm(permissions,'MFG.view');
     const canViewPlanning=hasPerm(permissions,'PLN.view');
     const visibleTabs=tabs.filter(t=>t.key==='documentation'?module==='PLN'&&canViewPlanning:
-        t.key==='config'||t.key==='demand'||t.key==='costCenterSku'?canViewPlanning:canViewMasters);
+        t.key==='formDefaults'||t.key==='config'||t.key==='demand'||t.key==='costCenterSku'?canViewPlanning:canViewMasters);
     const activeIndex=visibleTabs.findIndex(tab=>tab.key===active);
     const activeTab=tabs.find(tab=>tab.key===active);
     // Configuration progression depends on saved masters, not merely opening tabs.
     // Keep MFG master-data navigation and read-only PLN users usable.
     const enforceSetup=module==='PLN'&&canViewMasters&&canViewPlanning;
     const setupProgress=configurationProgress({
-        materialPolicyRevision,parameters:skuSetup.parameters,
+        materialPolicyRevision,formDefaultsRevision,parameters:skuSetup.parameters,
         items:rows.items as SetupRow[],boms:rows.boms as SetupRow[],
         resources:rows.resources as SetupRow[],routings:rows.routings as SetupRow[],
         capacityMappings,capacityLoaded,planningConfigurationRevision:configRevision,
@@ -336,7 +337,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         .map(key=>tabs.find(t=>t.key===key)?.shortLabel||key);
     const nextTab=visibleTabs[activeIndex+1]?.key;
     const nextMissing=nextTab&&enforceSetup?prerequisiteNames(nextTab):[];
-    const configuredCount=tabs.filter(t=>t.key!=='demand'&&t.key!=='documentation'&&
+    // Keep 8 essential readiness gates; optional form defaults do not block production masters.
+    const configuredCount=tabs.filter(t=>t.key!=='formDefaults'&&t.key!=='demand'&&t.key!=='documentation'&&
         setupProgress[t.key].complete&&setupProgress[t.key].accessible).length;
     // Read-only users may have a different first accessible step.
     useEffect(()=>{
@@ -359,7 +361,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         try{
             const [datasets,configuration,refData,skuData,materialSetup,capacitySetup]=await Promise.all([
                 canViewMasters?Promise.all(kinds.map(kind=>callBackend<{records:Row[]}>('/api/org/pln-mfg/foundation/list',{kind}))):Promise.resolve(kinds.map(()=>({records:[] as Row[]}))),
-                callBackend<{config:Config;revision:number}>('/api/org/pln-mfg/foundation/config').catch(()=>null),
+                callBackend<{config:Config;revision:number;formDefaultsRevision:number}>('/api/org/pln-mfg/foundation/config').catch(()=>null),
                 canViewMasters?callBackend<References>('/api/org/pln-mfg/foundation/references'):Promise.resolve(emptyReferences),
                 canViewMasters?callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup'):Promise.resolve(emptySkuSetup),
                 canViewMasters?callBackend<{policy:MaterialPolicy;revision:number}>('/api/org/pln-mfg/foundation/material-policy'):Promise.resolve({policy:defaultMaterialPolicy,revision:0}),
@@ -371,7 +373,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             setSkuSetup(skuData);
             setMaterialPolicy(materialSetup.policy);setMaterialPolicyRevision(materialSetup.revision);
             setCapacityMappings(capacitySetup?.mappings??[]);setCapacityLoaded(!!capacitySetup);
-            if(configuration){setConfig({...configuration.config,formDefaults:formDefaultsFor(configuration.config.formDefaults)});setConfigRevision(configuration.revision);}
+            if(configuration){setConfig({...configuration.config,formDefaults:formDefaultsFor(configuration.config.formDefaults)});setConfigRevision(configuration.revision);setFormDefaultsRevision(configuration.formDefaultsRevision??0);}
         }catch(e){setError(e instanceof Error?e.message:'Could not load manufacturing masters.');}
         finally{setLoading(false);}
     };
@@ -467,7 +469,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         if(!canConfig)return;setBusy(true);setError('');setNotice('');
         try{
             const result=await callBackend<{config:Config;revision:number}>('/api/org/pln-mfg/foundation/config/save',{config,expectedRevision:configRevision});
-            setConfig({...result.config,formDefaults:formDefaultsFor(result.config.formDefaults)});setConfigRevision(result.revision);setNotice('Planning configuration and form defaults saved.');
+            setConfig({...result.config,formDefaults:formDefaultsFor(result.config.formDefaults)});setConfigRevision(result.revision);setNotice('Planning rules saved; form defaults are managed independently in Form Defaults.');
         }catch(e){setError(e instanceof Error?e.message:'Could not save planning configuration.');}
         finally{setBusy(false);}
     };
@@ -545,7 +547,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
         {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
-        loading?<Spinner/>:active==='costCenterSku'?<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup} defaultSiteId={formDefaults.defaultSiteId}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
+        loading?<Spinner/>:active==='formDefaults'?<PlnFormDefaultsPanel initial={formDefaults} revision={formDefaultsRevision} sites={refs.sites} canEdit={canConfig} onSaved={(next,revision)=>{
+            setConfig(previous=>({...previous,formDefaults:next}));setFormDefaultsRevision(revision);
+        }}/>:active==='costCenterSku'?<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup} defaultSiteId={formDefaults.defaultSiteId}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
@@ -609,39 +613,12 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 <Choice title='Default manufacturing policy' value={config.strategy} options={['MTS','MTO','ATO','ETO','HYBRID'].map(x=>[x,x])} onChange={v=>setConfig(s=>({...s,strategy:v}))}/>
             </div>
 
-            <details className='rounded-xl border border-line p-3'>
-                <summary className='cursor-pointer text-sm font-semibold'>New-form defaults · SKU, BOM, resource, routing and demand</summary>
-                <p className='my-3 text-xs text-muted'>Organization defaults apply only to new forms. Saved records, commissioned physical-container speeds, approvals and manual selections remain unchanged. A site is preselected only if the configured site is accessible, or there is exactly one accessible site.</p>
-                <div className='grid gap-3 sm:grid-cols-2'>
-                    <Choice title='Default production site' value={formDefaults.defaultSiteId}
-                        options={[[ '', 'Automatic (only if one accessible site)' ],...refs.sites.map(x=>[x.id,x.name+(x.code?' · '+x.code:'')] as [string,string])]}
-                        onChange={v=>setFormDefault('defaultSiteId',v)}/>
-                    <Choice title='New SKU category' value={formDefaults.skuCategory}
-                        options={ [['FINISHED','Finished goods'],['INTERMEDIATE','Intermediate / WIP'],['RAW','Raw material'],['PACKAGING','Packaging']] }
-                        onChange={v=>setFormDefault('skuCategory',v as FormDefaults['skuCategory'])}/>
-                    <Field title='Default BOM output quantity' type='number' value={formDefaults.bomOutputQty}
-                        onChange={v=>setFormDefault('bomOutputQty',Number(v))}/>
-                    <Choice title='Default resource class' value={formDefaults.resourceType}
-                        options={['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER'].map(x=>[x,x.replaceAll('_',' ')])}
-                        onChange={v=>setFormDefault('resourceType',v as FormDefaults['resourceType'])}/>
-                    <Field title='Default resource nominal units/hour' type='number' value={formDefaults.resourceRate}
-                        onChange={v=>setFormDefault('resourceRate',Number(v))}/>
-                    <Field title='Default resource planning efficiency (%)' type='number' value={formDefaults.resourceEfficiency}
-                        onChange={v=>setFormDefault('resourceEfficiency',Number(v))}/>
-                    <Field title='New BOM/routing alternative code' value={formDefaults.routingAlternativeCode}
-                        onChange={v=>setFormDefault('routingAlternativeCode',v.toUpperCase())}/>
-                    <Choice title='Default demand type' value={formDefaults.demandType}
-                        options={ [['FORECAST','Forecast'],['FIRM_ORDER','Firm customer order']] }
-                        onChange={v=>setFormDefault('demandType',v as FormDefaults['demandType'])}/>
-                    <Field title='Default demand quantity' type='number' value={formDefaults.demandQuantity}
-                        onChange={v=>setFormDefault('demandQuantity',Number(v))}/>
-                    <Field title='Default demand lead time (calendar days)' type='number' value={formDefaults.demandLeadDays}
-                        onChange={v=>setFormDefault('demandLeadDays',Number(v))}/>
-                </div>
-                <p className='mt-3 text-xs text-muted'>Physical-container speed units always come from the adopted container and unit catalogue. Demand units follow the selected SKU, not a general form default.</p>
-                {canConfig&&<div className='mt-3 flex justify-end'><Button variant='secondary' onClick={()=>setConfig(s=>({...s,formDefaults:{...DEFAULT_FORM_DEFAULTS}}))}>Restore suggested form defaults</Button></div>}
-            </details>
-            <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration and form defaults</Button></div>
+            <div className='rounded-xl border border-line bg-page p-3 text-sm text-soft'>
+                Default SKU, BOM, resource, routing and demand form values are maintained separately in
+                <button type='button' className='ml-1 font-semibold text-brand underline' onClick={()=>changeTab('formDefaults')}>Form Defaults</button>
+                so you can configure them before planning routes and orders.
+            </div>
+            <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration</Button></div>
         </Card>:<>
             <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'><p className='text-xs text-muted sm:text-sm'>{filtered.length} saved master records · draft versions</p>{canSave&&!viewSkuId&&<Button onClick={()=>setDraft(newRecord(active,materialPolicy,formDefaults,refs.sites))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
