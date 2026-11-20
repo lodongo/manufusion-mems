@@ -287,7 +287,7 @@ test('SKU configuration menus and cost-centre scope are compact without losing e
  assert.ok(scope.includes('showLocation||!cc'));
  assert.ok(scope.includes('Change cost centre'));
  assert.ok(scope.includes('setShowLocation(false)'));
- assert.ok(scope.includes('<PlnCostCenterSkuSetup key={cc} costCenterId={cc}/>'));
+ assert.ok(scope.includes('<PlnCostCenterSkuSetup key={cc} costCenterId={cc} onMappingsChanged={onMappingsChanged}/>'));
 });
 test('SKU naming sequence is a standalone configuration section, not product identity',()=>{
  const ui=read('src/org/MfgSkuSetup.tsx');
