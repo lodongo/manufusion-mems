@@ -52,8 +52,8 @@ export function configurationProgress(input:SetupInputs):Record<SetupStep,SetupP
    detail:'Release at least one approved manufacturing BOM through the existing approval workflow.'},
   resources:{complete:input.resources.some(saved),
    detail:'Save at least one manufacturing resource; resources do not depend on BOM approval.'},
-  costCenterSku:{complete:input.capacityLoaded&&input.capacityMappings.some(m=>saved(m)&&
-   Array.isArray(m.skuCapacities)&&m.skuCapacities.some(x=>{
+  costCenterSku:{complete:input.capacityLoaded&&input.capacityMappings.some(m=>
+   !!(text(m.costCenterId)||m.id)&&Array.isArray(m.skuCapacities)&&m.skuCapacities.some(x=>{
     if(!x||typeof x!=='object')return false;
     const row=x as Record<string,unknown>;
     return !!text(row.skuId)&&typeof row.ratingQuantity==='number'&&
