@@ -589,17 +589,14 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
                     <div className='rounded-xl border border-line p-3 space-y-3'>
                         <p className='text-sm font-semibold'>Manufacturing line speed / rated output basis</p>
                         <p className='text-xs text-muted'>What does one output unit represent? This is separate from the physical container material/type and the Each/Dozen count multiplier.</p>
-                        <label className='block space-y-1'>
-                            <span className='text-xs font-medium'>Output type used for line speed *</span>
-                            <select className='min-h-11 w-full rounded-lg border border-line bg-panel px-2 text-sm text-ink'
-                                value={draft.ratingOutputCode||'PRIMARY_CONTAINER'}
-                                onChange={event=>update('ratingOutputCode',event.target.value)}>
+                        <SelectField id='primary-container-rating-output-type' label='Output type used for line speed' required
+                            value={draft.ratingOutputCode||'PRIMARY_CONTAINER'}
+                            onChange={event=>update('ratingOutputCode',event.target.value)}>
                                 {throughputOutputGroups().map(group=><optgroup key={group} label={group}>
                                     {THROUGHPUT_OUTPUTS.filter(x=>x.group===group).map(x=>
                                         <option key={x.code} value={x.code}>{x.name}</option>)}
                                 </optgroup>)}
-                            </select>
-                        </label>
+                        </SelectField>
                         <p className='text-xs text-muted'>{throughputOutput(draft.ratingOutputCode||'PRIMARY_CONTAINER')?.description}</p>
                         <p className='text-xs text-muted'>Default rated output count unit · Count category</p>
                         <Choice title='Count multiplier (Each, Dozen, etc.)'
