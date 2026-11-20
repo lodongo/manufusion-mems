@@ -96,7 +96,8 @@ export function materialUnitFactor(from:string,to:string):number {
 export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
     if(!isObj(raw))throw new HttpError(400,'A master-data object is required.');
     const id=VALID_ID(raw.id,'Master code'), name=REQUIRED(raw.name,'Name',160);
-    const siteId=str(raw.siteId).trim();
+    // SKU master data is organization-wide. Site is attached to routings, resources and BOMs instead.
+    const siteId=kind==='items'?'':str(raw.siteId).trim();
     if(siteId&&!ID.test(siteId))throw new HttpError(400,'Invalid site code.');
     const base:Obj={id,name,siteId,description:str(raw.description).slice(0,600)};
     if(kind==='items'){
@@ -267,10 +268,8 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         }
         const parent=await getDoc(DOC(ctx.orgId,'items',str(item.parentSkuId)));
         if(!parent)throw new HttpError(400,'Parent SKU does not exist in Manufacturing master data.');
-        // Output material categories do not prohibit in-house production (including packaging).
+        // Output material is global; BOM site applicability is controlled by the BOM itself.
         materialUnitFactor(str(item.outputUom),str(parent.data.uom));
-        if(str(parent.data.siteId)&&str(parent.data.siteId)!==str(item.siteId))
-            throw new HttpError(400,'BOM output belongs to another production site.');
         // Upstream intermediate BOMs are not prerequisites for saving or releasing this BOM.
         // The referenced material records must exist; a later planning-readiness check
         // reports missing approved upstream formulations without blocking authoring.
@@ -290,8 +289,6 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
             const child=await getDoc(DOC(ctx.orgId,'items',str(component.skuId)));
             if(!child)throw new HttpError(400,'Component '+str(component.skuId)+' is missing from SKU master.');
             materialUnitFactor(str(component.uom),str(child.data.uom));
-            if(str(child.data.siteId)&&str(child.data.siteId)!==str(item.siteId))
-                throw new HttpError(400,'Component '+str(component.skuId)+' belongs to another production site.');
         }
         const others=(await listDocs(ROOT(ctx.orgId,'boms')))
             .filter(d=>d.id!==existingId)
@@ -302,8 +299,6 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
     if(kind==='routings'){
         const routed=await getDoc(DOC(ctx.orgId,'items',str(item.skuId)));
         if(!routed)throw new HttpError(400,'Routing SKU not found.');
-        if(str(routed.data.siteId)&&str(routed.data.siteId)!==str(item.siteId))
-            throw new HttpError(400,'Routing SKU is assigned to another site.');
         for(const o of ARR(item.operations)){
             const stage='Stage '+(num(o.sequence)??0)+' ('+(str(o.name)||str(o.code))+'): ';
             if(!str(o.resourceId)&&item.routingModelVersion!==2)
@@ -320,8 +315,6 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
                 const product=await getDoc(DOC(ctx.orgId,'items',str(o.producesSkuId)));
                 if(!product||['RAW','PACKAGING'].includes(str(product.data.category)))
                     throw new HttpError(400,stage+'output must be a manufactured SKU or intermediate product.');
-                if(str(product.data.siteId)&&str(product.data.siteId)!==str(item.siteId))
-                    throw new HttpError(400,stage+'output '+str(o.producesSkuId)+' belongs to another site.');
             }
             if(str(o.bomId)){
                 const bom=await getDoc(DOC(ctx.orgId,'boms',str(o.bomId)));
@@ -492,7 +485,8 @@ export const plnMfgFoundationRoutes={
             const records=await listDocs(ROOT(ctx.orgId,kind));
             const visible=[];
             for(const record of records){
-                const siteId=str(record.data.siteId);
+                // Site tags on legacy SKUs must not hide them from authorized users at other sites.
+                const siteId=kind==='items'?'':str(record.data.siteId);
                 if(await recordAccess(ctx,'MFG.view',siteId))visible.push(out(record));
             }
             return {kind,records:visible};
@@ -506,6 +500,7 @@ export const plnMfgFoundationRoutes={
             if(kind==='routings'&&!hasPerm(ctx.permissions,'MFG.routing.edit')&&ctx.role!=='org_super_admin')
                 throw new HttpError(403,'Routing editing permission required.');
             const raw=isObj(ctx.body.record)?{...ctx.body.record}:{};
+            if(kind==='items')raw.siteId=''; // Ignore legacy site fields on new/edited SKUs.
             if(kind==='boms'){
                 // Canonical BOMs do not persist old category selectors.
                 delete raw.type;delete raw.flavorVariantId;
@@ -628,7 +623,8 @@ export const plnMfgFoundationRoutes={
             const kind=readKind(ctx.body.kind),id=VALID_ID(ctx.body.id,'Master code');
             const master=await getDoc(DOC(ctx.orgId,kind,id));
             if(!master)throw new HttpError(404,'Master record not found.');
-            if(!await recordAccess(ctx,'MFG.view',str(master.data.siteId)))throw new HttpError(403,'This record is outside your site scope.');
+            if(!await recordAccess(ctx,'MFG.view',kind==='items'?'':str(master.data.siteId)))
+                throw new HttpError(403,'This record is outside your authorized scope.');
             const revisions=await listDocs(DOC(ctx.orgId,kind,id)+'/revisions');
             return {revisions:revisions.map(out).sort((a,b)=>Number(a.revision)-Number(b.revision))};
         }),
