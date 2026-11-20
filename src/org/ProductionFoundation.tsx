@@ -75,7 +75,7 @@ const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy,
     defaults:FormDefaults=DEFAULT_FORM_DEFAULTS,sites:References['sites']=[]):Row=>{
     const siteId=preferredSiteId(defaults.defaultSiteId,sites);
-    if(tab==='items')return {id:'',name:'',category:defaults.skuCategory,family:'',uom:'EA',siteId,packQty:1,
+    if(tab==='items')return {id:'',name:'',category:defaults.skuCategory,family:'',uom:'EA',siteId:'',packQty:1,
         stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
     if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',alternativeCode:defaults.routingAlternativeCode,routingId:'',siteId,
         parentSkuId:'',outputQty:defaults.bomOutputQty,outputUom:'EA',components:[]};
@@ -143,7 +143,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
             options={outputChoices} onChange={v=>{
                 const selected=items.find(i=>i.id===v);
                 onChange({...draft,parentSkuId:v,outputUom:str(selected?.uom)||'EA',
-                    siteId:str(selected?.siteId)||str(draft.siteId),productVariantId:'',routingId:'',
+                    siteId:str(draft.siteId),productVariantId:'',routingId:'',
                     components:components.filter(c=>c.skuId!==v)});
             }}/>
         {output?<p className='text-sm text-soft'>Material classification: {str(output.category)} · Base unit: {str(output.uom)}</p>:
@@ -281,7 +281,10 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
                 <Field title='Planning efficiency (%)' type='number' value={number(draft.efficiency,100)} onChange={v=>update('efficiency',Number(v))}/>
                 <Choice title='Active Asset Register equipment (optional)' value={str(draft.assetId)} options={assetOptions} onChange={v=>update('assetId',v)}/>
             </>}
-            <Choice title='Site applicability' value={str(draft.siteId)} options={siteOptions} onChange={v=>update('siteId',v)}/>
+            {tab!=='items'&&<Choice title='Site applicability' value={str(draft.siteId)} options={siteOptions} onChange={v=>update('siteId',v)}/>}
+            {tab==='items'&&<p className='md:col-span-2 text-xs text-muted'>
+                SKUs belong to the organization, not one site. Set which manufacturing cost centres can produce each SKU under Manufacturing Cost Centre &amp; SKUs, including the commissioned physical-container speeds.
+            </p>}
         </div>
         {tab==='items'&&str(draft.category)==='FINISHED'&&<>
             <SkuConfigurationFields value={(draft.skuComponents||{}) as SkuSelections}
