@@ -77,7 +77,7 @@ export function configurationProgress(input:SetupInputs):Record<SetupStep,SetupP
  const result={} as Record<SetupStep,SetupProgress>;
  for(const step of SETUP_ORDER){
   const required=SETUP_REQUIREMENTS[step];
-  const missing=required.filter(prev=>!completed[prev].complete);
+  const missing=required.filter(prev=>!completed[prev].complete||!result[prev]?.accessible);
   result[step]={step,...completed[step],required,missing,accessible:missing.length===0};
  }
  return result;
