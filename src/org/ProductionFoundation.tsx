@@ -243,8 +243,10 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
             {tab==='items'&&<>
                 <Choice title='SKU type' value={str(draft.category)} options={ [['FINISHED','Finished goods'],['INTERMEDIATE','Intermediate/WIP'],['RAW','Raw/input material'],['PACKAGING','Packaging component']] } onChange={v=>update('category',v)}/>
                 <Field title='Product family' value={str(draft.family)} required onChange={v=>update('family',v)}/>
-                {str(draft.category)!=='FINISHED'&&<UnitChoice key={draft.id||'new-sku'} title='Unit of measure'
-                    value={str(draft.uom)} setup={skuSetup} onChange={v=>update('uom',v)}/>}
+                {str(draft.category)!=='FINISHED'&&<div className='md:col-span-2'>
+                    <UnitChoice key={draft.id||'new-sku'} title='Unit of measure'
+                        value={str(draft.uom)} setup={skuSetup} onChange={v=>update('uom',v)}/>
+                </div>}
                 {str(draft.category)==='FINISHED'&&<div className='rounded-xl border border-line bg-page p-3 text-sm text-soft'>The SKU name, physical package unit, containers per pack and conversion factor are calculated from selected configuration parameters.</div>}
                 {str(draft.category)==='INTERMEDIATE'&&<>
                     <Choice title='Intermediate tracking' value={str(draft.stockPolicy)||'NON_STOCKED'}
