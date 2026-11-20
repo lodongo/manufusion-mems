@@ -5,9 +5,11 @@ on:
     paths:
       - 'backend/plnMfg*.ts'
       - 'backend/mfgRoutingReadiness.ts'
+      - 'backend/mfgStageDependencies.ts'
       - 'backend/plnCostCenterCapacity.ts'
       - 'src/org/PlnProcessRoutingEditor.tsx'
       - 'tests/independent/pln-step3-routing.test.mjs'
+      - 'tests/independent/pln-routing-dependencies.test.mjs'
       - 'backend/plnDemand.ts'
       - 'src/org/PlnDemand.tsx'
       - 'tests/independent/pln-demand-phase2.test.mjs'
@@ -56,7 +58,7 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: '123456789012'
           VITE_FIREBASE_APP_ID: 1:123456789012:web:ci-fixture
       - name: Phase 1 manufacturing master, pilot isolation and maker-checker tests
-        run: node --import tsx --test tests/independent/pln-mfg-foundation.test.mjs tests/independent/pln-step3-routing.test.mjs
+        run: node --import tsx --test tests/independent/pln-mfg-foundation.test.mjs tests/independent/pln-step3-routing.test.mjs tests/independent/pln-routing-dependencies.test.mjs
       - name: Acceptance limitation
         run: |
           echo "Code, build and pure Phase 1 tests passed."
