@@ -29,7 +29,7 @@ import { hasPerm } from '../types';
 type Kind='items'|'boms'|'resources'|'routings';
 type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'demand'|'costCenterSku'|'documentation';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
-type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
+type Component={source?:'INTERMEDIATE'|'WAREHOUSE';skuId:string;warehouseId?:string;materialId?:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
 type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string;formDefaults?:FormDefaults};
 type BomClassification={code:string;name:string;enabled:boolean;mrpRelevant:boolean;productionEligible:boolean};
@@ -41,11 +41,13 @@ const defaultMaterialPolicy:MaterialPolicy={allowRawUtility:true,allowRawDirect:
 
 type References={
     materials:Array<{id:string;name:string;materialNumber:string;uom:string}>;
+    warehouses:Array<{id:string;name:string;code:string}>;
+    warehouseMaterials:Array<{warehouseId:string;id:string;name:string;materialNumber:string;uom:string}>;
     utilities:Array<{workCenterId:string;code:string;name:string}>;
     assets:Array<{id:string;name:string;siteId:string}>;
     sites:Array<{id:string;name:string;code:string}>;
 };
-const emptyReferences:References={materials:[],utilities:[],assets:[],sites:[]};
+const emptyReferences:References={materials:[],warehouses:[],warehouseMaterials:[],utilities:[],assets:[],sites:[]};
 const kinds:Kind[]=['items','boms','resources','routings'];
 type Phase='foundation'|'masters'|'capacity'|'planning'|'guide';
 const phases:{key:Phase;title:string;description:string}[]=[
@@ -118,18 +120,22 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const updateComponent=(i:number,patch:Partial<Component>)=>
    update('components',components.map((c,j)=>i===j?{...c,...patch}:c));
  const outputChoices:Array<[string,string]>=[['','Choose what you want to produce'],...items.map(i=>[i.id,i.name+' · '+str(i.category)] as [string,string])];
- const componentChoices:Array<[string,string]>=[['','Choose a required material'],...items.filter(i=>i.id!==str(output?.id))
-   .map(i=>[i.id,i.name+' · '+str(i.category)] as [string,string])];
+ const componentChoices:Array<[string,string]>=[['','Choose an intermediate/WIP material'],
+    ...items.filter(i=>i.id!==str(output?.id)&&
+        (str(i.category)==='INTERMEDIATE'||components.some(c=>c.skuId===i.id&&!c.source)))
+        .map(i=>[i.id,i.name+' · '+str(i.category)] as [string,string])];
+ const warehouseChoices:Array<[string,string]>=[['','Choose an accessible warehouse'],
+    ...refs.warehouses.map(w=>[w.id,(w.code?w.code+' · ':'')+w.name] as [string,string])];
  const siteChoices:Array<[string,string]>=[['','All sites (organization default)'],...refs.sites.map(i=>[i.id,i.name] as [string,string])];
  const classes:Array<[string,string]>=materialPolicy.bomClassifications
     .filter(c=>c.enabled||c.code===str(draft.classificationCode)).map(c=>[c.code,c.name] as [string,string]);
  if(str(draft.classificationCode)&&!classes.some(c=>c[0]===str(draft.classificationCode)))
     classes.push([str(draft.classificationCode),str(draft.classificationCode)+' (existing)']);
- const units=(skuId:string,current:string):Array<[string,string]>=>{
-    const masterUom=str(items.find(i=>i.id===skuId)?.uom);
-    const unit=skuSetup.units.find(u=>u.code===masterUom||u.symbol===masterUom);
+ const units=(skuId:string,current:string,baseUnit?:string):Array<[string,string]>=>{
+    const masterUom=baseUnit||str(items.find(i=>i.id===skuId)?.uom);
+    const unit=skuSetup.units.find(u=>u.code===masterUom||u.symbol.toLowerCase()===masterUom.toLowerCase());
     const supported=unit?skuSetup.units.filter(u=>u.categoryCode===unit.categoryCode&&u.baseUnit===unit.baseUnit):[];
-    return [[current,current],...supported.filter(u=>u.code!==current)
+    return [[current,current||'Choose a unit'],...supported.filter(u=>u.code!==current)
        .map(u=>[u.code,u.label+' ('+u.symbol+')'] as [string,string])];
  };
  return <div className='space-y-4'>
@@ -164,35 +170,70 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                 <p className='mt-1 text-xs text-muted'>Quantities for {quantity} {outputUom} of the output.</p>
             </div>
             <Button type='button' variant='secondary' disabled={!output||components.length>=150}
-                onClick={()=>update('components',[...components,{skuId:'',quantity:1,uom:'EA',scrapPct:0}])}>Add</Button>
+                onClick={()=>update('components',[...components,{source:'INTERMEDIATE',skuId:'',warehouseId:'',materialId:'',quantity:1,uom:'',scrapPct:0}])}>Add material</Button>
         </div>
         {!output?<p className='text-sm text-muted'>Choose the output above first.</p>:
             <div className='space-y-3'>
-                {components.map((c,i)=><div key={i} className='space-y-2 rounded-lg bg-page p-3'>
-                    <div className='flex items-center justify-between gap-2'>
-                        <span className='text-sm font-semibold'>Required material {i+1}</span>
-                        <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-xs text-ink'
-                            onClick={()=>update('components',components.filter((_,j)=>j!==i))}>Remove</button>
-                    </div>
-                    <Choice title='Material' value={c.skuId} options={componentChoices}
-                        onChange={v=>updateComponent(i,{skuId:v,uom:str(items.find(item=>item.id===v)?.uom)||'EA'})}/>
-                    <div className='grid grid-cols-2 gap-2'>
-                        <Field title='Required quantity' type='number' value={c.quantity}
-                            onChange={v=>updateComponent(i,{quantity:Number(v)})}/>
-                        <div className='rounded-xl border border-line bg-panel p-3'>
-                            <p className='text-xs text-muted'>Unit</p><p className='mt-1 text-sm font-semibold'>{c.uom}</p>
+                {components.map((c,i)=>{
+                    const fromWarehouse=c.source==='WAREHOUSE';
+                    const material=refs.warehouseMaterials.find(m=>m.warehouseId===c.warehouseId&&m.id===c.materialId);
+                    const warehouse=refs.warehouses.find(w=>w.id===c.warehouseId);
+                    const selected=items.find(item=>item.id===c.skuId);
+                    const unitBasis=fromWarehouse?material?.uom:str(selected?.uom);
+                    const availableMaterials=refs.warehouseMaterials.filter(m=>m.warehouseId===c.warehouseId);
+                    return <div key={i} className='space-y-3 rounded-lg border border-line bg-page p-3'>
+                        <div className='flex flex-wrap items-center justify-between gap-2'>
+                            <span className='text-sm font-semibold'>Required material {i+1}</span>
+                            <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-xs text-ink'
+                                onClick={()=>update('components',components.filter((_,j)=>j!==i))}>Remove</button>
                         </div>
-                    </div>
-                    {c.skuId&&<details className='text-xs text-muted'>
-                        <summary className='cursor-pointer py-2'>Other consumption options</summary>
-                        <div className='grid gap-2 pt-2 sm:grid-cols-2'>
-                            <Choice title='Alternate unit' value={c.uom} options={units(c.skuId,c.uom)}
-                                onChange={v=>updateComponent(i,{uom:v})}/>
-                            <Field title='Scrap allowance (%)' type='number' value={c.scrapPct}
-                                onChange={v=>updateComponent(i,{scrapPct:Number(v)})}/>
+                        <Choice title='Material source' value={fromWarehouse?'WAREHOUSE':'INTERMEDIATE'}
+                            options={[['INTERMEDIATE','Manufactured intermediate / WIP'],['WAREHOUSE','Approved Procurement material from warehouse']]}
+                            onChange={v=>update('components',components.map((row,j)=>j===i?{
+                                source:v as Component['source'],skuId:'',warehouseId:'',materialId:'',
+                                quantity:row.quantity,uom:'',scrapPct:row.scrapPct}:row))}/>
+                        <span className='inline-flex rounded-full border border-line bg-panel px-3 py-1 text-xs font-medium text-ink'>
+                            {fromWarehouse?'WAREHOUSE · PROCUREMENT MATERIAL':'MANUFACTURED · INTERMEDIATE/WIP'}
+                        </span>
+                        {fromWarehouse?<div className='space-y-3'>
+                            <Choice title='Warehouse (within your access)' value={c.warehouseId||''} options={warehouseChoices}
+                                onChange={v=>updateComponent(i,{warehouseId:v,materialId:'',skuId:'',uom:''})}/>
+                            {c.warehouseId&&<Choice title='Approved procurement material' value={c.materialId||''}
+                                options={[['','Choose a material mapped to this warehouse'],
+                                    ...availableMaterials.map(m=>[m.id,m.materialNumber+' · '+m.name] as [string,string])]}
+                                onChange={v=>updateComponent(i,{materialId:v,skuId:'',
+                                    uom:availableMaterials.find(m=>m.id===v)?.uom||''})}/>}
+                            {material&&<p className='text-xs text-muted'>
+                                Source: {warehouse?.code||warehouse?.name} · Procurement Material {material.materialNumber} · {material.name}
+                            </p>}
+                            {!refs.warehouses.length&&<p className='text-xs text-muted'>
+                                No accessible warehouse currently has approved, mapped Procurement materials.
+                            </p>}
+                        </div>:<div className='space-y-2'>
+                            <Choice title='Manufactured intermediate' value={c.skuId} options={componentChoices}
+                                onChange={v=>updateComponent(i,{skuId:v,warehouseId:'',materialId:'',
+                                    uom:str(items.find(item=>item.id===v)?.uom)||''})}/>
+                            {selected&&<p className='text-xs text-muted'>SKU {selected.id} · {selected.name} · {str(selected.category)}</p>}
+                        </div>}
+                        <div className='grid grid-cols-2 gap-2'>
+                            <Field title='Required quantity' type='number' value={c.quantity}
+                                onChange={v=>updateComponent(i,{quantity:Number(v)})}/>
+                            <div className='rounded-xl border border-line bg-panel p-3'>
+                                <p className='text-xs text-muted'>Unit of measure</p>
+                                <p className='mt-1 break-words text-sm font-semibold'>{c.uom||'Select a material'}</p>
+                            </div>
                         </div>
-                    </details>}
-                </div>)}
+                        {(fromWarehouse?!!material:!!c.skuId)&&<details className='text-xs text-muted'>
+                            <summary className='cursor-pointer py-2'>Consumption options</summary>
+                            <div className='grid gap-2 pt-2 sm:grid-cols-2'>
+                                <Choice title='Alternate compatible unit' value={c.uom}
+                                    options={units(c.skuId,c.uom,unitBasis)} onChange={v=>updateComponent(i,{uom:v})}/>
+                                <Field title='Scrap allowance (%)' type='number' value={c.scrapPct}
+                                    onChange={v=>updateComponent(i,{scrapPct:Number(v)})}/>
+                            </div>
+                        </details>}
+                    </div>;
+                })}
                 {!components.length&&<p className='text-sm text-muted'>No inputs yet. Choose Add to include a component, ingredient or packaging material.</p>}
             </div>}
     </section>
@@ -449,8 +490,10 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         if(active==='boms'){
             const parts=asComponents(draft.components);
             if(!str(draft.parentSkuId)){setError('Choose the output material before saving.');return;}
-            if(!parts.length||parts.some(c=>!str(c.skuId)||!Number.isFinite(c.quantity)||c.quantity<=0)){
-                setError('Add at least one required material with a valid quantity before saving.');return;
+            if(!parts.length||parts.some(c=>
+                (c.source==='WAREHOUSE'?(!str(c.warehouseId)||!str(c.materialId)):!str(c.skuId))||
+                !str(c.uom)||!Number.isFinite(c.quantity)||c.quantity<=0)){
+                setError('Each BOM line needs a source, an intermediate or warehouse material, a unit and a positive quantity.');return;
             }
         }
         setBusy(true);setError('');setNotice('');
