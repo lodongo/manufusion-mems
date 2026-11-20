@@ -1,6 +1,7 @@
 import {useEffect,useId,useState,type ReactNode} from 'react';
 import {Alert,Field,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
+import {THROUGHPUT_OUTPUTS,throughputOutput,throughputOutputGroups} from '../shared/throughputOutput';
 
 type SkuComposition={containerId?:string;containerSizeId?:string;productionFormId?:string;
  packageId?:string;transportPackageId?:string};
@@ -8,16 +9,17 @@ type Output={id:string;name:string;siteId:string;uom:string;category:string;stat
  skuComponents:SkuComposition;revision:number};
 type Container={id:string;name:string;categoryCode:string;categoryName:string;
  subcategoryCode:string;subcategoryName:string;containerAttributes:Record<string,string>;metadataCode:string;
- ratingCountUnitCode:string};
+ ratingCountUnitCode:string;ratingOutputCode:string};
 type Size={id:string;name:string;quantity:number;uom:string;uomSymbol:string};
 type Measure={code:string;name:string;symbol:string;multiplier:number;categoryCode:string};
 type Rating={skuId:string;containerId:string;containerSizeId:string;
  containerCategoryCode:string;containerSubcategoryCode:string;ratingQuantity:number;
- ratingUnitCode:string;periodUnitCode:string};
+ ratingUnitCode:string;periodUnitCode:string;ratingOutputCode:string;primaryContainersPerRatedOutput?:number};
 type Quantity={quantity:number|null;unit:string;name:string;reason?:string};
 type Projection={source:{containerName:string;containerCategory:string;containerSubcategory:string;
  containerAttributes:Record<string,string>;sizeName:string;countUnit:string;timeUnit:string;
- ratedUnits:number;physicalContainers:number};
+ ratedUnits:number;physicalContainers:number;ratingOutputCode:string;ratingOutputName:string;
+ primaryContainersPerRatedOutput:number};
  physicalContainers:Quantity;productionForm:Quantity;finalProduct:Quantity;
  commercialPackaging:Quantity;transportLogistics:Quantity;normalised:Quantity};
 type Line=Rating&{projection?:Projection|null;conversionIssue?:string;skuName?:string};
@@ -74,6 +76,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
      containerCategoryCode:container?.categoryCode||'',
      containerSubcategoryCode:container?.subcategoryCode||'',
      ratingQuantity:0,ratingUnitCode:container?.ratingCountUnitCode||response.units.count.find(u=>u.multiplier===1)?.code||'',
+     ratingOutputCode:'PRIMARY_CONTAINER',
      periodUnitCode:response.units.time.find(u=>u.name==='Hour')?.code||'',
      projection:null,conversionIssue:'Previous stock-unit/hour rating needs physical-container reconfiguration.'};
    }));
@@ -110,7 +113,13 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
   if(!Number.isFinite(line.ratingQuantity)||line.ratingQuantity<=0||line.ratingQuantity>1e12)
    result.push('Enter a commissioned rating greater than zero and no more than 1,000,000,000,000.');
   if(!data?.units.count.some(u=>u.code===line.ratingUnitCode))
-   result.push('Choose a published Count unit for the physical containers.');
+   result.push('Choose a published Count multiplier for the rated output.');
+  const outputType=throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER');
+  if(!outputType)result.push('Choose what the manufacturing line output count represents.');
+  if(outputType?.kind==='CUSTOM'&&
+      (!Number.isFinite(line.primaryContainersPerRatedOutput)||
+       (line.primaryContainersPerRatedOutput||0)<=0))
+   result.push('Enter how many physical primary units are in one custom rated output.');
   if(!data?.units.time.some(u=>u.code===line.periodUnitCode))
    result.push('Choose a published Time unit for the rating period.');
   return result;
@@ -140,6 +149,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
    containerSizeId:output?.skuComponents?.containerSizeId||'',
    containerCategoryCode:chosen?.categoryCode||'',
    containerSubcategoryCode:chosen?.subcategoryCode||'',ratingQuantity:0,
+   ratingOutputCode:chosen?.ratingOutputCode||'PRIMARY_CONTAINER',
    ratingUnitCode:chosen?.ratingCountUnitCode||data?.units.count.find(x=>x.multiplier===1)?.code||'',
    periodUnitCode:data?.units.time.find(x=>x.name==='Hour')?.code||'',
    projection:null};
@@ -168,9 +178,10 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
   try{
    const result=await callBackend<{mapping:Mapping}>('/api/org/pln/cost-center/save',{
     costCenterId,skuCapacities:lines.map(({skuId,containerId,containerSizeId,
-     containerCategoryCode,containerSubcategoryCode,ratingQuantity,ratingUnitCode,periodUnitCode})=>({
+     containerCategoryCode,containerSubcategoryCode,ratingQuantity,ratingUnitCode,periodUnitCode,
+     ratingOutputCode,primaryContainersPerRatedOutput})=>({
      skuId,containerId,containerSizeId,containerCategoryCode,containerSubcategoryCode,
-     ratingQuantity,ratingUnitCode,periodUnitCode,
+     ratingQuantity,ratingUnitCode,periodUnitCode,ratingOutputCode,primaryContainersPerRatedOutput,
     })),expectedRevision:revision});
    // Use the committed revision and projections returned by the server. A second
    // GET must not turn a successful write into an apparent failure or wipe edits.
@@ -248,6 +259,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
          </span>
          <span className='mt-1 block text-xs font-medium text-ink'>
           {line.ratingQuantity>0?pretty(line.ratingQuantity)+' '+(countUnit?.symbol||line.ratingUnitCode)+
+            ' '+(throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER')?.name||'primary units')+
             ' / '+(periodUnit?.symbol||line.periodUnitCode):'Commissioned speed not yet configured'}
          </span>
          {rowFaults>0&&<span className='mt-1 block text-xs text-red-500'>{rowFaults} item(s) need correction</span>}
@@ -277,7 +289,9 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
          const c=data.containers.find(x=>x.id===containerId);
          update(i,{containerId,containerCategoryCode:c?.categoryCode||'',
           containerSubcategoryCode:c?.subcategoryCode||'',containerSizeId:expectedSize,
-          ratingUnitCode:c?.ratingCountUnitCode||line.ratingUnitCode});
+          ratingUnitCode:c?.ratingCountUnitCode||line.ratingUnitCode,
+          ratingOutputCode:c?.ratingOutputCode||'PRIMARY_CONTAINER',
+          primaryContainersPerRatedOutput:undefined});
         }}/>
        <Picker label='Configured physical container size' value={line.containerSizeId}
         disabled={!data.canConfigure||busy||!currentContainer}
@@ -301,9 +315,29 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
       </div>}
       {selected&&<div className='space-y-3 rounded-xl border border-line p-3'>
        <h4 className='font-semibold'>Commissioned rating parameters</h4>
+       <p className='text-xs text-muted'>What is counted is independent of how many are counted. Choose bottles, cases, pieces, measured volume, mass, length or another industrial output before entering speed.</p>
+       <label className='block space-y-1'>
+        <span className='text-xs font-medium'>Output unit used to express line speed *</span>
+        <select value={line.ratingOutputCode||'PRIMARY_CONTAINER'}
+         disabled={!data.canConfigure||busy}
+         className='min-h-11 w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm text-ink'
+         onChange={e=>update(i,{ratingOutputCode:e.target.value,primaryContainersPerRatedOutput:undefined})}>
+         {throughputOutputGroups().map(group=><optgroup key={group} label={group}>
+          {THROUGHPUT_OUTPUTS.filter(x=>x.group===group).map(x=>
+           <option key={x.code} value={x.code}>{x.name}</option>)}
+         </optgroup>)}
+        </select>
+       </label>
+       <p className='text-xs text-muted'>{throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER')?.description}</p>
+       {throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER')?.kind==='CUSTOM'&&
+        <Field id={'custom-rated-output-'+costCenterId+'-'+i}
+         label='Physical primary units contained in one custom output *' type='number'
+         min='0.000001' step='any' inputMode='decimal' disabled={!data.canConfigure||busy}
+         value={line.primaryContainersPerRatedOutput||''}
+         onChange={e=>update(i,{primaryContainersPerRatedOutput:Number(e.target.value)})}/>}
        <div className='grid gap-3 sm:grid-cols-2'>
         <div><p className='mb-1 text-xs text-muted'>Rating unit category: Count</p>
-         <Picker label='Count unit / physical containers' value={line.ratingUnitCode}
+         <Picker label='Count multiplier (Each, Dozen, etc.)' value={line.ratingUnitCode}
           disabled={!data.canConfigure||busy}
           options={[['','Choose count unit'],...data.units.count.map(u=>[u.code,u.name+' ('+u.symbol+')'] as [string,string])]}
           onChange={ratingUnitCode=>update(i,{ratingUnitCode})}/></div>
@@ -314,10 +348,10 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
           onChange={periodUnitCode=>update(i,{periodUnitCode})}/></div>
        </div>
        <Field id={`physical-rating-${costCenterId}-${i}`}
-        label='Commissioned physical container quantity per selected time period' type='number'
+        label={'Commissioned '+(throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER')?.name||'output')+' quantity per selected time period'} type='number'
         min='0.000001' step='any' inputMode='decimal' disabled={!data.canConfigure||busy}
         value={line.ratingQuantity||''} onChange={e=>update(i,{ratingQuantity:Number(e.target.value)})}/>
-       <p className='text-xs text-muted'>The count unit may be Each, Dozen, etc. One Dozen means 12 physical containers. All derived ratings use exactly the time period selected above, without changing the denominator.</p>
+       <p className='text-xs text-muted'>Examples: 24,000 Each Bottles/hour = 24,000 bottles/hour. 2,000 Each Cases/hour with 12 bottles/case = 24,000 bottles/hour. For bulk output select Litre, Kilogram, Metre etc; MEMS checks dimensional compatibility. Dozen means 12 of the chosen output, not necessarily 12 bottles. No conversion is guessed.</p>
        {line.conversionIssue&&<p className='text-xs text-red-500'>{line.conversionIssue}</p>}
        <div className='flex flex-wrap gap-2'>
         <Action secondary disabled={busy||!valid(line)||!matching}
@@ -330,7 +364,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack}:{costCenterI
       </div>}
       {line.projection&&<div className='space-y-2 rounded-xl border border-line p-3'>
        <h4 className='font-semibold'>Resolved ratings · same time period</h4>
-       <p className='text-xs text-muted'>Basis: {pretty(line.ratingQuantity)} {data.units.count.find(u=>u.code===line.ratingUnitCode)?.name||'units'} per {data.units.time.find(u=>u.code===line.periodUnitCode)?.name||'period'}. Calculated from the selected SKU’s configured conversion relationships.</p>
+       <p className='text-xs text-muted'>Basis: {pretty(line.ratingQuantity)} {data.units.count.find(u=>u.code===line.ratingUnitCode)?.name||'units'} {throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER')?.name||'primary output'} per {data.units.time.find(u=>u.code===line.periodUnitCode)?.name||'period'}. One rated output equals {pretty(line.projection.source.primaryContainersPerRatedOutput)} SKU physical primary units. Calculated from the selected SKU configuration.</p>
        <div className='grid gap-2 sm:grid-cols-2'>
         {projectedRow('Physical containers',line.projection.physicalContainers)}
         {projectedRow('Final product form',line.projection.productionForm)}
