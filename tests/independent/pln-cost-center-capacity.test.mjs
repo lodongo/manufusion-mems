@@ -129,7 +129,8 @@ test('line speed output distinguishes bottles, cases, pallets and dimensional fl
  assert.equal(custom.physicalContainers.quantity,600);
  assert.throws(()=>derivePhysicalCapacity(sku,params,{...rate,ratingOutputCode:'KILOGRAM'}),
    /incompatible with the SKU production form/);
- const noPackaging={...sku,skuComponents:{...sku.skuComponents,packageId:undefined}};
+ const noPackaging={...sku,skuComponents:{...sku.skuComponents,packageId:undefined,
+  transportPackageId:undefined,transportUnitsPerLoad:undefined}};
  assert.throws(()=>derivePhysicalCapacity(noPackaging,params,caseRate),/commercial-packaging ratio/);
  assert.throws(()=>normalizePhysicalRating({...rate,ratingOutputCode:'NOT_IN_CATALOGUE'}),/published industrial output type/);
  assert.throws(()=>normalizePhysicalRating({...rate,ratingOutputCode:'CUSTOM_OUTPUT'}),/Custom output requires/);
@@ -140,7 +141,7 @@ test('mass-based production output converts kilogram throughput to compatible pr
   {kind:'containerSizes',id:'SACK-25',name:'25 kg',quantity:25,uom:'UOM-01-002'}];
  const massSku={...sku,skuComponents:{...sku.skuComponents,
   productionFormId:'FORM-MASS',containerSizeId:'SACK-25',packageId:undefined,
-  transportPackageId:undefined}};
+  transportPackageId:undefined,transportUnitsPerLoad:undefined}};
  const result=derivePhysicalCapacity(massSku,massParams,{...rate,
   containerSizeId:'SACK-25',ratingOutputCode:'KILOGRAM',ratingQuantity:25000});
  assert.equal(result.physicalContainers.quantity,1000);
@@ -245,8 +246,8 @@ test('main manufactured SKU detail returns only scoped, configured manufacturing
  assert.ok(master.includes("<PlnSkuCostCenterRatings skuId={viewedSku.id}/>"));
  assert.ok(master.includes("<PlnSkuCostCenterRatings skuId={draft.id}/>"));
  assert.ok(view.includes('/api/org/pln/cost-center/sku-mappings'));
- assert.ok(view.includes('Commissioned primary-container speed'));
- assert.ok(view.includes('Equivalent physical containers'));
+ assert.ok(view.includes('Commissioned manufacturing output speed'));
+ assert.ok(view.includes('Equivalent SKU physical primary units'));
  assert.ok(view.includes('View container properties and linked output speeds'));
 });
 test('production tabs follow configuration precedence and retain scoped availability',()=>{
