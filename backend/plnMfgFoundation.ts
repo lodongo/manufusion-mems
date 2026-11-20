@@ -500,7 +500,10 @@ export const plnMfgFoundationRoutes={
             if(kind==='routings'&&!hasPerm(ctx.permissions,'MFG.routing.edit')&&ctx.role!=='org_super_admin')
                 throw new HttpError(403,'Routing editing permission required.');
             const raw=isObj(ctx.body.record)?{...ctx.body.record}:{};
-            if(kind==='items')raw.siteId=''; // Ignore legacy site fields on new/edited SKUs.
+            if(kind==='items'){
+                raw.siteId=''; // Ignore legacy site fields on new/edited SKUs.
+                if(!str(raw.family).trim())throw new HttpError(400,'Product family is required.');
+            }
             if(kind==='boms'){
                 // Canonical BOMs do not persist old category selectors.
                 delete raw.type;delete raw.flavorVariantId;
