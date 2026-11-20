@@ -35,10 +35,10 @@ export const THROUGHPUT_OUTPUTS:ThroughputOutput[]=[
  ] .map(([code,name])=>def(code,name,'Transport / logistics output','LOGISTICS',
     'Count logistics units; MEMS derives contained primary units from the SKU transport packaging.')),
  ...[
- ['LITRE','Litre','L'],['MILLILITRE','Millilitre','mL'],['CUBIC_METRE','Cubic metre','m3'],
+ ['LITRE','Litre','L'],['MILLILITRE','Millilitre','mL'],['CUBIC_METRE','Cubic metre','m³'],
  ['KILOGRAM','Kilogram','kg'],['GRAM','Gram','g'],['TONNE','Tonne','t'],
  ['METRE','Metre','m'],['CENTIMETRE','Centimetre','cm'],['MILLIMETRE','Millimetre','mm'],
- ['SQUARE_METRE','Square metre','m2'],
+ ['SQUARE_METRE','Square metre','m²'],
  ] .map(([code,name,unitCode])=>def(code,name,'Continuous / measured output','MEASURE',
     'Measure flow or produced quantity; only compatible SKU production dimensions can be converted.',unitCode)),
  def('CUSTOM_OUTPUT','Other organization-defined output','Custom output','CUSTOM',
