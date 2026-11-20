@@ -91,12 +91,3 @@ Demonstrate a parallel process graph:
 
 ## Review boundary
 This document defines the recommended structure and rules only. **No routing APIs, Firestore schema or React routing editor are changed by this design commit.** Implementation follows the review of the above behaviour.
-
-## Dependency completion gate — implemented 2026-11-20
-- **Configuration:** Each routing stage keeps an ordered, unique `dependsOn` list. An absent or empty list allows an independent starting branch; multiple predecessors are an **all-of** requirement.
-- **Eligibility rules:** Before a stage transitions from `NOT_STARTED` to `IN_PROGRESS`, every required predecessor must be `COMPLETED`. `IN_PROGRESS` is *not* enough. To reach `COMPLETED`, that stage must already be `IN_PROGRESS` and predecessor completion remains valid. Finished stages cannot restart or complete twice.
-- **Fail closed:** Missing/invalid statuses, unknown stages, duplicate/forward/self links, invalid completion sequence, and a started stage whose dependencies are subsequently marked incomplete are all rejected.
-- **Pure shared gate:** `backend/mfgStageDependencies.ts` exports `routingStageGates` and `applyRoutingStageAction`. Runtime production-order transition handlers **must** call this server-side using the immutable, approved order routing snapshot and actual, server-stored stage status in the same atomic update. Client input or preview data must never be treated as evidence of completion.
-- **Current UI and API:** `/api/org/pln-mfg/foundation/routing-dependency-preview` and the Routing Review **Dependency completion gate** panel demonstrate permitted starts and completions, blocked statuses and missing predecessors. This is deliberately **read-only simulation**. No live production-order execution, equipment interlock, inventory transfer, or status posting is created by this release.
-- **Tests:** `tests/independent/pln-routing-dependencies.test.mjs`, included in PLN-MFG CI, exercises parallel branches, all-of joins, no skipped completion, invalid graphs and forged statuses.
-- **Execution integration outstanding:** The future production-order/shift execution service must persist stage transitions with optimistic concurrency / transactional checks, authorized performer, timestamp, audit trail and optional completion evidence. Completion of a downstream stage must never be accepted until its authoritative predecessors meet these requirements; the simulator itself does not satisfy them.
