@@ -86,7 +86,7 @@ test('planning screen and protected routes exist, with no inventory or procureme
   assert.ok(backend.includes('/api/org/pln/demand/'+route),route);
  assert.ok(index.includes('...plnDemandRoutes'));
  assert.ok(main.includes("key:'demand',label:'Demand & S&OP'"));
- assert.ok(main.includes('<PlnDemand permissions={permissions}/>'));
+ assert.ok(main.includes('<PlnDemand permissions={permissions} formDefaults={formDefaults}/>'));
  assert.ok(ui.includes('Add demand'));
  assert.ok(ui.includes('Submit for approval'));
  assert.ok(ui.includes('Approved demand consolidation'));
