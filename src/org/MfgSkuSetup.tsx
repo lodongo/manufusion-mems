@@ -152,15 +152,17 @@ function QuantityInput({title,value,onChange}:{title:string;value:number;onChang
     return <Field id={id} label={title} type='number' min='0' step='any'
         value={value} onChange={e=>onChange(Number(e.target.value))}/>;
 }
-function UnitChoice({title,value,setup,onChange}:{title:string;value:string;setup:SkuSetup;onChange:(v:string)=>void}){
+export function UnitChoice({title,value,setup,onChange}:{title:string;value:string;setup:SkuSetup;onChange:(v:string)=>void}){
     const [category,setCategory]=useState('');
-    const fromRecord=pickUnit(setup,value)?.categoryCode||'';
+    // Read earlier SKU symbols such as EA without changing their stored value until the user selects a unit.
+    const selected=pickUnit(setup,value)||setup.units.find(u=>u.symbol.toLowerCase()===value.toLowerCase());
+    const fromRecord=selected?.categoryCode||'';
     const activeCategory=fromRecord||category;
     return <div className='grid gap-3 sm:grid-cols-2'>
         <Choice title='Unit category' value={activeCategory} placeholder='Select category'
             options={setup.categories.map(c=>[c.code,c.name])}
             onChange={next=>{setCategory(next);onChange('');}}/>
-        <Choice title={title} value={value} placeholder='Select unit'
+        <Choice title={title} value={selected?.code||value} placeholder='Select unit'
             options={setup.units.filter(u=>u.categoryCode===activeCategory)
                 .map(u=>[u.code,u.label+' ('+u.symbol+')'])} onChange={onChange}/>
     </div>;
