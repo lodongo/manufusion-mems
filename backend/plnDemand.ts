@@ -117,8 +117,6 @@ async function validateMaster(ctx:OrgContext,demand:DemandInput){
  const sku=await getDoc('organizations/'+ctx.orgId+'/mfg_items/'+demand.skuId);
  if(!sku||!['INTERMEDIATE','FINISHED'].includes(str(sku.data.category)))
   throw new HttpError(400,'Demand must reference an existing finished or intermediate output.');
- if(str(sku.data.siteId)&&str(sku.data.siteId)!==demand.siteId)
-  throw new HttpError(400,'Output material is not available at this production site.');
  const baseUom=str(sku.data.uom);
  const factor=materialUnitFactor(demand.uom,baseUom);
  return {...demand,quantity:demand.quantity*factor,uom:baseUom};
@@ -142,11 +140,10 @@ export const plnDemandRoutes={
         await permitted(ctx,'PLN.view',node.id))
      sites.push({id:node.id,name:str(node.data.name)||node.id});
    }
-   const validSites=new Set(sites.map(x=>x.id));
-   const outputs=skus.filter(x=>['FINISHED','INTERMEDIATE'].includes(str(x.data.category))&&
-        (!str(x.data.siteId)||validSites.has(str(x.data.siteId))))
+   // SKU master is shared across the organization; demand retains its chosen production site.
+   const outputs=skus.filter(x=>['FINISHED','INTERMEDIATE'].includes(str(x.data.category)))
     .map(x=>({id:x.id,name:str(x.data.name)||x.id,uom:str(x.data.uom),
-       siteId:str(x.data.siteId),category:str(x.data.category)}));
+       siteId:'',category:str(x.data.category)}));
    return {sites,outputs};
   }),
  ],
