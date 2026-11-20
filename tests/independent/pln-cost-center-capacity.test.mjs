@@ -239,7 +239,7 @@ test('main manufactured SKU detail returns only scoped, configured manufacturing
  const view=read('src/org/PlnSkuCostCenterRatings.tsx');
  assert.ok(api.includes("'POST /api/org/pln/cost-center/sku-mappings'"));
  assert.ok(api.includes("!await authorized(ctx,'read',record.id)"));
- assert.ok(api.includes("sku.siteId!==location.siteId"));
+ assert.ok(!api.includes("sku.siteId!==location.siteId")); // Legacy SKU site does not restrict authorized cost-centre mappings.
  assert.ok(api.includes('validSavedProjection(ctx,location.siteId,row,params)'));
  assert.ok(api.includes("const perms=permission==='read'?['PLN.view','ADM.structure','MFG.view']"));
  assert.ok(master.includes('View SKU'));
