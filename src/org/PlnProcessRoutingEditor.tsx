@@ -21,6 +21,12 @@ type StagePreview={code:string;name:string;stageType:string;producesSkuId:string
 type Review={ready:boolean;issues:Diagnostic[];stages:StagePreview[];
  bottlenecks:Array<{outputSkuId:string;limitingStageCode:string;physicalContainersPerHour:number;
  comparableStageCodes:string[]}>;comparisonNote:string};
+type DependencyState='NOT_STARTED'|'IN_PROGRESS'|'COMPLETED';
+type DependencyGate={code:string;name:string;state:DependencyState;
+ displayState:'BLOCKED'|'READY'|'IN_PROGRESS'|'COMPLETED';
+ requiredPredecessors:string[];unmetPredecessors:string[];canStart:boolean;canComplete:boolean};
+type DependencyPreview={states:Record<string,DependencyState>;gates:DependencyGate[];
+ previewOnly:true;productionEvidence:false;note:string};
 const forms='w-full min-h-11 min-w-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink';
 const fmt=(n:number)=>new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(n);
 const str=(x:unknown)=>typeof x==='string'?x:'';
@@ -78,12 +84,20 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
  const [speed,setSpeed]=useState<{text:string;detail:string}|null>(null);
  const [speedBusy,setSpeedBusy]=useState(false);
  const [stepNotice,setStepNotice]=useState('');
+ const [dependencyStates,setDependencyStates]=useState<Record<string,DependencyState>>({});
+ const [dependencyPreview,setDependencyPreview]=useState<DependencyPreview|null>(null);
+ const [dependencyBusy,setDependencyBusy]=useState(false);
+ const [dependencyError,setDependencyError]=useState('');
  const legacy=value.routingModelVersion!==2;
  const ops=stageList(value.operations);
  const selected=ops.find(s=>s.code===openStep);
  const selectedOutput=items.find(x=>x.id===selected?.producesSkuId);
  const update=(field:string,input:unknown)=>{
   setReview(null);setReviewError('');
+  // Stage graph edits invalidate all local demonstration completion states.
+  if(field==='operations'||field==='siteId'||field==='skuId'){
+   setDependencyStates({});setDependencyPreview(null);setDependencyError('');
+  }
   onChange({...value,[field]:input});
  };
  const updateSteps=(next:RoutingStep[])=>update('operations',next);
@@ -164,6 +178,20 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
   }
   updateSteps(reordered);setStepNotice('');
  };
+ const previewDependencies=async(action?:{stageCode:string;type:'START'|'COMPLETE'},reset=false)=>{
+  setDependencyBusy(true);setDependencyError('');
+  try{
+   const outcome=await callBackend<DependencyPreview>(
+    '/api/org/pln-mfg/foundation/routing-dependency-preview',{
+     record:{...value,routingModelVersion:2},
+     stageStates:reset?{}:dependencyStates,
+     ...(action?{action}:{}),
+    });
+   setDependencyStates(outcome.states);setDependencyPreview(outcome);
+  }catch(e){
+   setDependencyError(e instanceof Error?e.message:'Cannot evaluate process dependencies.');
+  }finally{setDependencyBusy(false);}
+ };
  const check=async()=>{
   setReviewBusy(true);setReview(null);setReviewError('');setSection('review');
   try{
@@ -172,6 +200,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
    setReview(found);
   }catch(e){setReviewError(e instanceof Error?e.message:'Routing review failed.');}
   finally{setReviewBusy(false);}
+  await previewDependencies();
  };
  const upgrade=()=>{
   update('routingModelVersion',2);
@@ -322,6 +351,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
       </details>}
       <fieldset className='space-y-2 rounded-lg border border-line p-3'>
        <legend className='px-1 text-xs font-semibold'>Required predecessor stages</legend>
+       <p className='text-xs text-muted'>Every selected predecessor must be COMPLETED before this stage can start or finish. Multiple independent stages may run in parallel.</p>
        {ops.slice(0,i).map(previous=><label key={previous.code} className='flex min-h-10 items-center gap-2 text-xs'>
         <input type='checkbox' checked={(stage.dependsOn||[]).includes(previous.code)}
          onChange={event=>updateStep(stage.code,{dependsOn:event.target.checked?
@@ -385,6 +415,40 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     </p>)}
     <p className='text-xs text-muted'>{review.comparisonNote}</p>
    </>}
+   <section className='space-y-3 rounded-xl border border-line p-3' aria-label='Stage dependency completion simulation'>
+    <div className='flex flex-wrap items-center justify-between gap-2'>
+     <div>
+      <h4 className='text-sm font-semibold'>Dependency completion gate</h4>
+      <p className='mt-1 text-xs text-muted'>Simulation only — does not record actual production or equipment completion.</p>
+     </div>
+     <Action disabled={dependencyBusy} onClick={()=>void previewDependencies(undefined,true)}>
+      Reset simulation
+     </Action>
+    </div>
+    <p className='text-xs text-muted'>A stage remains BLOCKED until ALL required predecessor stages are COMPLETED. Only READY stages can start; only IN PROGRESS stages can complete.</p>
+    {dependencyError&&<p role='alert' className='rounded-lg border border-red-400 p-2 text-xs text-red-600'>{dependencyError}</p>}
+    {dependencyBusy&&<p role='status' className='text-xs text-muted'>Checking dependency completion…</p>}
+    {!dependencyPreview&&!dependencyBusy&&
+     <Action onClick={()=>void previewDependencies()} primary>Show dependency readiness</Action>}
+    {dependencyPreview&&<>
+     <div className='grid gap-2 sm:grid-cols-2'>
+      {dependencyPreview.gates.map(gate=><div key={gate.code} className='min-w-0 space-y-2 rounded-lg border border-line bg-page p-3'>
+       <p className='break-words text-sm font-semibold'>{gate.name||gate.code}</p>
+       <p className='text-xs font-semibold'>{gate.displayState}</p>
+       {gate.unmetPredecessors.length>0&&<p className='text-xs text-muted'>
+        Waiting for: {gate.unmetPredecessors.map(code=>dependencyPreview.gates.find(s=>s.code===code)?.name||code).join(', ')}
+       </p>}
+       <div className='flex flex-wrap gap-2'>
+        <Action disabled={!gate.canStart||dependencyBusy} onClick={()=>
+         void previewDependencies({stageCode:gate.code,type:'START'})}>Simulate start</Action>
+        <Action disabled={!gate.canComplete||dependencyBusy} onClick={()=>
+         void previewDependencies({stageCode:gate.code,type:'COMPLETE'})}>Simulate completion</Action>
+       </div>
+      </div>)}
+     </div>
+     <p className='text-xs text-muted'>{dependencyPreview.note}</p>
+    </>}
+   </section>
    <div className='flex justify-end'><Action onClick={()=>setSection('stages')}>Back to stages</Action></div>
   </div>}
   <p className='text-xs text-muted'>
