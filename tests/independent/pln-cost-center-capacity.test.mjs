@@ -62,7 +62,8 @@ test('Physical Containers can define a default Count unit without a parallel UOM
    metadataCode:'PET_001',containerAttributes:attrs,ratingCountUnitCode:'UOM-04-001',
  },[pet]),/approved Count rating unit/);
  const ui=read('src/org/MfgSkuSetup.tsx');
- assert.ok(ui.includes('Count unit for commissioned throughput'));
+ assert.ok(ui.includes('Output type used for line speed')); 
+ assert.ok(ui.includes('Count multiplier (Each, Dozen, etc.)'));
  assert.ok(ui.includes("draft.ratingCountUnitCode||'UOM-20-001'"));
  const planner=read('src/org/PlnCostCenterSkuSetup.tsx');
  assert.ok(planner.includes('chosen?.ratingCountUnitCode'));
@@ -74,7 +75,7 @@ test('physical rating units use the published Count and Time categories',()=>{
  assert.equal(units.time.find(x=>x.name==='Hour')?.code,'UOM-05-005');
  assert.equal(units.time.find(x=>x.name==='Minute')?.code,'UOM-05-004');
  assert.ok(!units.time.some(x=>x.name==='Kilogram'));
- assert.deepEqual(normalizePhysicalRating(rate),rate);
+ assert.deepEqual(normalizePhysicalRating(rate),{...rate,ratingOutputCode:'PRIMARY_CONTAINER'});
  assert.throws(()=>normalizePhysicalRating({...rate,ratingUnitCode:'UOM-04-001'}),/published Count unit/);
  assert.throws(()=>normalizePhysicalRating({...rate,periodUnitCode:'UOM-20-001'}),/published Time unit/);
  assert.throws(()=>normalizePhysicalRating({...rate,ratingQuantity:0}),/must be positive/);
@@ -107,6 +108,43 @@ test('one physical-container rating resolves four outputs under the SAME selecte
   ratingUnitCode:'UOM-20-002',periodUnitCode:'UOM-05-004'});
  assert.equal(dozens.physicalContainers.quantity,24);
  assert.equal(dozens.commercialPackaging.quantity,2);
+});
+test('line speed output distinguishes bottles, cases, pallets and dimensional flow with exact conversions',()=>{
+ const caseRate={...rate,ratingOutputCode:'CASE',ratingQuantity:2000};
+ const cases=derivePhysicalCapacity(sku,params,caseRate);
+ assert.equal(cases.physicalContainers.quantity,24000);
+ assert.equal(cases.finalProduct.quantity,2000);
+ assert.equal(cases.source.ratingOutputName,'Case');
+ assert.equal(cases.source.primaryContainersPerRatedOutput,12);
+ const dozenCases=derivePhysicalCapacity(sku,params,{...caseRate,ratingQuantity:2,ratingUnitCode:'UOM-20-002'});
+ assert.equal(dozenCases.physicalContainers.quantity,288);
+ const pallet=derivePhysicalCapacity(sku,params,{...rate,ratingQuantity:25,ratingOutputCode:'PALLET'});
+ assert.equal(pallet.physicalContainers.quantity,24000);
+ assert.equal(pallet.transportLogistics.quantity,25);
+ const litre=derivePhysicalCapacity(sku,params,{...rate,ratingOutputCode:'LITRE',ratingQuantity:9600});
+ assert.equal(litre.physicalContainers.quantity,24000);
+ assert.equal(litre.source.primaryContainersPerRatedOutput,2.5);
+ const custom=derivePhysicalCapacity(sku,params,{...rate,ratingOutputCode:'CUSTOM_OUTPUT',
+   primaryContainersPerRatedOutput:6,ratingQuantity:100});
+ assert.equal(custom.physicalContainers.quantity,600);
+ assert.throws(()=>derivePhysicalCapacity(sku,params,{...rate,ratingOutputCode:'KILOGRAM'}),
+   /incompatible with the SKU production form/);
+ const noPackaging={...sku,skuComponents:{...sku.skuComponents,packageId:undefined}};
+ assert.throws(()=>derivePhysicalCapacity(noPackaging,params,caseRate),/commercial-packaging ratio/);
+ assert.throws(()=>normalizePhysicalRating({...rate,ratingOutputCode:'NOT_IN_CATALOGUE'}),/published industrial output type/);
+ assert.throws(()=>normalizePhysicalRating({...rate,ratingOutputCode:'CUSTOM_OUTPUT'}),/Custom output requires/);
+});
+test('mass-based production output converts kilogram throughput to compatible primary bags',()=>{
+ const massParams=[...params,
+  {kind:'productionForms',id:'FORM-MASS',name:'Mass',uom:'UOM-01-002'},
+  {kind:'containerSizes',id:'SACK-25',name:'25 kg',quantity:25,uom:'UOM-01-002'}];
+ const massSku={...sku,skuComponents:{...sku.skuComponents,
+  productionFormId:'FORM-MASS',containerSizeId:'SACK-25',packageId:undefined,
+  transportPackageId:undefined}};
+ const result=derivePhysicalCapacity(massSku,massParams,{...rate,
+  containerSizeId:'SACK-25',ratingOutputCode:'KILOGRAM',ratingQuantity:25000});
+ assert.equal(result.physicalContainers.quantity,1000);
+ assert.equal(result.productionForm.quantity,25000);
 });
 test('mismatched SKU container, size and category never generate false conversion',()=>{
  assert.throws(()=>derivePhysicalCapacity(sku,params,{...rate,containerCategoryCode:'MET'}),/category or subcategory/);
@@ -152,7 +190,8 @@ test('one editor is shared by the Organization Design gear and Production Planni
  assert.ok(ui.includes('Physical container category'));
  assert.ok(ui.includes('Physical container subcategory / type'));
  assert.ok(ui.includes('Configured physical container size'));
- assert.ok(ui.includes('Count unit / physical containers'));
+ assert.ok(ui.includes('Output unit used to express line speed'));
+ assert.ok(ui.includes('Count multiplier (Each, Dozen, etc.)'));
  assert.ok(ui.includes('Time period (used for every result)'));
  assert.ok(ui.includes('Final product form'));
  assert.ok(ui.includes('Commercial packaging'));
