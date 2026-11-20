@@ -193,7 +193,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                 source:v as Component['source'],skuId:'',warehouseId:'',materialId:'',
                                 quantity:row.quantity,uom:'',scrapPct:row.scrapPct}:row))}/>
                         <span className='inline-flex rounded-full border border-line bg-panel px-3 py-1 text-xs font-medium text-ink'>
-                            {fromWarehouse?'WAREHOUSE · PROCUREMENT MATERIAL':'MANUFACTURED · INTERMEDIATE/WIP'}
+                            {fromWarehouse?'WAREHOUSE · PROCUREMENT MATERIAL':!c.source&&selected&&str(selected.category)!=='INTERMEDIATE'?'EXISTING · MANUFACTURING SKU':'MANUFACTURED · INTERMEDIATE/WIP'}
                         </span>
                         {fromWarehouse?<div className='space-y-3'>
                             <Choice title='Warehouse (within your access)' value={c.warehouseId||''} options={warehouseChoices}
