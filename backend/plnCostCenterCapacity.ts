@@ -105,17 +105,15 @@ const asOutput=(item:Doc):OutputSku=>({
  skuComponents:(isObj(item.data.skuComponents)?item.data.skuComponents:{}) as SkuComponents,
  revision:num(item.data.revision)??1,
 });
-const skuForSite=async(ctx:OrgContext,skuId:string,siteId:string)=>{
+const manufacturedSku=async(ctx:OrgContext,skuId:string)=>{
  const item=await getDoc(SKU(ctx.orgId)+'/'+skuId);
  if(!item||!['FINISHED','INTERMEDIATE'].includes(str(item.data.category)))
   throw new HttpError(400,'Choose an existing finished or intermediate manufactured SKU.');
- if(str(item.data.siteId)&&str(item.data.siteId)!==siteId)
-  throw new HttpError(400,'The SKU is not available at this cost centre site.');
  return asOutput(item);
 };
 async function validatedLine(ctx:OrgContext,siteId:string,raw:unknown,params:SkuParameter[]){
  const line=normalizePhysicalRating(raw);
- const sku=await skuForSite(ctx,line.skuId,siteId);
+ const sku=await manufacturedSku(ctx,line.skuId);
  const projection=derivePhysicalCapacity(sku,params,line);
  return {...line,skuName:sku.name,skuRevision:sku.revision,projection};
 }
@@ -139,7 +137,7 @@ const validSavedProjection=async(ctx:OrgContext,siteId:string,raw:unknown,params
  try{
   if(!isObj(raw))throw new Error('Malformed rating entry');
   const line=normalizePhysicalRating(raw);
-  const sku=await skuForSite(ctx,line.skuId,siteId);
+  const sku=await manufacturedSku(ctx,line.skuId);
   return {...line,skuName:sku.name,skuRevision:sku.revision,
     projection:derivePhysicalCapacity(sku,params,line)};
  }catch(e){
@@ -214,10 +212,9 @@ export const plnCostCenterCapacityRoutes={
    }
    const result=eligibleManufacturingHierarchy(allNodes.filter(n=>included.has(n.id)),costTypes);
    const centerIds=new Set(result.costCenters.map(n=>n.id));
-   const siteIds=new Set(result.sites.map(n=>n.id));
-   const outputs=allSku.filter(d=>['FINISHED','INTERMEDIATE'].includes(str(d.data.category))&&
-      (!str(d.data.siteId)||siteIds.has(str(d.data.siteId))))
-    .map(d=>({id:d.id,name:display(d),siteId:str(d.data.siteId),uom:str(d.data.uom),
+   // SKU identity is global; user access remains enforced on each manufacturing cost centre.
+   const outputs=allSku.filter(d=>['FINISHED','INTERMEDIATE'].includes(str(d.data.category)))
+    .map(d=>({id:d.id,name:display(d),siteId:'',uom:str(d.data.uom),
        category:str(d.data.category),status:str(d.data.status)}));
    return {...result,outputs,mappings:records.filter(d=>centerIds.has(d.id)).map(expose)};
   }),
@@ -231,8 +228,8 @@ export const plnCostCenterCapacityRoutes={
     listDocs(SKU(ctx.orgId)),skuParametersForOrg(ctx.orgId),
     getDoc('module_workspaces/MFG/metadata/primaryContainers'),getDoc(ROOT(ctx.orgId)+'/'+id),
    ]);
-   const outputs=rows.filter(d=>['FINISHED','INTERMEDIATE'].includes(str(d.data.category))&&
-      (!str(d.data.siteId)||str(d.data.siteId)===location.siteId)).map(asOutput);
+   // The selected site can commission any finished or intermediate SKU from this organization.
+   const outputs=rows.filter(d=>['FINISHED','INTERMEDIATE'].includes(str(d.data.category))).map(asOutput);
    const catalogue=primaryContainerCatalogueFromAdmin(metadata?.data.items);
    const byMetadata=new Map(catalogue.map(t=>[t.code,t]));
    const containers=params.filter(x=>x.kind==='containers'&&x.enabled!==false).map(x=>{
@@ -279,7 +276,6 @@ export const plnCostCenterCapacityRoutes={
      if(e instanceof HttpError&&[400,404].includes(e.status))continue;
      throw e;
     }
-    if(sku.siteId&&sku.siteId!==location.siteId)continue;
     const [site,legalEntity,rating]=await Promise.all([
      getDoc(STRUCTURE(ctx.orgId)+'/'+location.siteId),
      getDoc(STRUCTURE(ctx.orgId)+'/'+location.legalEntityId),
