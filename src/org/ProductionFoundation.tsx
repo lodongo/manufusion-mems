@@ -331,7 +331,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const nextTab=visibleTabs[activeIndex+1]?.key;
     const nextMissing=nextTab&&enforceSetup?prerequisiteNames(nextTab):[];
     const configuredCount=tabs.filter(t=>t.key!=='demand'&&t.key!=='documentation'&&
-        setupProgress[t.key].complete).length;
+        setupProgress[t.key].complete&&setupProgress[t.key].accessible).length;
     // Read-only users may have a different first accessible step.
     useEffect(()=>{
         if(visibleTabs.length&&!visibleTabs.some(tab=>tab.key===active)){
@@ -386,6 +386,11 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         }catch{setCapacityLoaded(false);}
     };
     const changeTab=(tab:Tab)=>{
+        if(enforceSetup&&loading&&tab!=='documentation'){
+            setBlockedTarget(tab);
+            setSetupBlocked('Configuration readiness is still loading. Open the step after the current setup status has been checked.');
+            return;
+        }
         if(enforceSetup){
             const missing=prerequisiteNames(tab);
             if(missing.length){
@@ -464,7 +469,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing'}
             action={<Button variant='secondary' className='shrink-0 px-3 text-xs sm:text-sm'
                 disabled={busy||loading} onClick={()=>void load()}>Refresh</Button>}/>
-        {module==='PLN'&&<section className='rounded-xl border border-line bg-panel p-3 text-xs'>
+        {enforceSetup&&<section className='rounded-xl border border-line bg-panel p-3 text-xs'>
             <p className='font-semibold'>Configuration readiness · {configuredCount} / 8 setup requirements saved</p>
             <p className='mt-1 text-muted'>Steps unlock when their saved configuration dependencies are complete. Independent master-data branches can be configured separately.</p>
             {enforceSetup&&activeTab&&setupProgress[active].missing.length>0&&
@@ -482,7 +487,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     {visibleTabs.filter(tab=>tab.phase===phase.key).map(tab=>
                         <option key={tab.key} value={tab.key}>
                             {visibleTabs.indexOf(tab)+1}. {tab.shortLabel}{enforceSetup&&!setupProgress[tab.key].accessible?' · needs prerequisites':
-                                setupProgress[tab.key].complete&&tab.key!=='documentation'?' · configured':''}
+                                enforceSetup&&setupProgress[tab.key].complete&&tab.key!=='documentation'?' · configured':''}
                         </option>)}
                 </optgroup>)}
             </select>
