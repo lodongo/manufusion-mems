@@ -232,8 +232,8 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack,onMappingsCha
       }}>Refresh SKUs</Action>
      </div>}
     </div>
-    {!outputs.length&&<p role='status' className='text-sm text-muted'>No finished or intermediate output SKU is configured at this site. Create one in Materials & Products, then use Refresh SKUs.</p>}
-    {!available.length&&lines.length>0&&<p className='text-xs text-muted'>All currently available site SKUs are mapped. To add more, configure additional manufactured SKUs in Materials & Products, then refresh this list. Your saved ratings remain intact.</p>}
+    {!outputs.length&&<p role='status' className='text-sm text-muted'>No manufactured SKU is configured in this organization. Create one in Materials & Products, then use Refresh SKUs.</p>}
+    {!available.length&&lines.length>0&&<p className='text-xs text-muted'>All available organization SKUs are mapped to this manufacturing cost centre. To add more, configure additional manufactured SKUs in Materials & Products, then refresh this list. Your saved ratings remain intact.</p>}
     {lines.map((line,i)=>{
      const selected=outputs.find(x=>x.id===line.skuId);
      const categoryContainers=data.containers.filter(c=>c.categoryCode===line.containerCategoryCode);
