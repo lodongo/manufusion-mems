@@ -13,6 +13,7 @@ import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from '
 import { mfgMaterialPolicyForOrg, mfgMaterialPolicyPath, normalizeMfgMaterialPolicy, bomClassificationCode } from './mfgMaterialPolicy';
 import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCommissionedCapacity} from './plnCostCenterCapacity';
 import {physicalRatingUnits} from './plnPhysicalCapacity';
+import { allowedNodeIds } from './positions';
 import {reviewManufacturingRouting} from './mfgRoutingReadiness';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
@@ -51,6 +52,19 @@ const STAGES=['RAW','INTERMEDIATE','FINISHED','PACKAGING'] as const;
 const RESOURCE_TYPES=['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER'] as const;
 const INTERMEDIATE_POLICIES=['STOCKED','NON_STOCKED'] as const;
 const SOURCE_MODES=['INVENTORY','UTILITY','DIRECT'] as const;
+/** Published Procurement mapping is not the same as stock on hand. */
+export function mappedProcurementMaterialToWarehouse(materialId:string,material:Obj,warehouseId:string,
+    extensions:Array<{data:Obj}>):boolean {
+    const ids=Array.isArray(material.warehouseIds)?material.warehouseIds.map(str):[];
+    return ids.includes(warehouseId)||
+        (!!str(material.pushedAt)&&str(material.warehouseId)===warehouseId)||
+        extensions.some(e=>str(e.data.sourceId)===materialId&&str(e.data.warehouseId)===warehouseId&&str(e.data.status)==='approved');
+}
+const publishedProcurementMaterial=(m:Obj)=>
+    ['approved','active'].includes(str(m.status).toLowerCase())&&!!str(m.materialNumber);
+const storageCostCentre=(data:Obj)=>
+    str(data.level)==='cost_center'&&str(data.status)!=='inactive'&&
+    isObj(data.attributes)&&['INV','WHS'].includes(str(data.attributes.costType));
 const ALT_CODE=/^[A-Z0-9][A-Z0-9_-]{0,31}$/;
 /** Alternative code distinguishes approved routes for the same output/date. */
 export function bomAlternative(value:unknown):string {
@@ -140,11 +154,25 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         if(!components.length||components.length>150)throw new HttpError(400,'A BOM must have 1–150 components.');
         const seen=new Set<string>();
         const lines=components.map((c,i)=>{
+            const source=str(c.source);
+            if(source&&!['INTERMEDIATE','WAREHOUSE'].includes(source))
+                throw new HttpError(400,'Component '+(i+1)+': choose an intermediate or a warehouse procurement material.');
+            const quantity=POSITIVE(c.quantity,'Component quantity'),uom=UOM(c.uom);
+            const scrapPct=NONNEGATIVE(c.scrapPct??0,'Scrap percentage',100);
+            if(source==='WAREHOUSE'){
+                const warehouseId=VALID_ID(c.warehouseId,'Warehouse');
+                const materialId=VALID_ID(c.materialId,'Procurement material');
+                const key='WAREHOUSE:'+warehouseId+':'+materialId;
+                if(seen.has(key))throw new HttpError(400,'Duplicate material in the same warehouse. Combine its quantities.');
+                seen.add(key);
+                return {line:i+1,source:'WAREHOUSE',skuId:'',warehouseId,materialId,quantity,uom,scrapPct};
+            }
             const skuId=VALID_ID(c.skuId,'Component SKU');
             if(skuId===parentSkuId)throw new HttpError(400,'A SKU cannot consume itself.');
-            if(seen.has(skuId))throw new HttpError(400,'Duplicate component SKU '+skuId+'. Combine quantities in one line.');
-            seen.add(skuId);
-            return {line:i+1,skuId,quantity:POSITIVE(c.quantity,'Component quantity'),uom:UOM(c.uom),scrapPct:NONNEGATIVE(c.scrapPct??0,'Scrap percentage',100)};
+            const key='SKU:'+skuId;
+            if(seen.has(key))throw new HttpError(400,'Duplicate component SKU '+skuId+'. Combine quantities in one line.');
+            seen.add(key);
+            return {line:i+1,...(source?{source:'INTERMEDIATE'}:{}),skuId,quantity,uom,scrapPct};
         });
         return {...base,classificationCode,productVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
@@ -193,7 +221,7 @@ export function detectBomCycle(boms:Array<{parentSkuId:string;components:Array<{
     const byParent=new Map<string,Set<string>>();
     const add=(parent:string,children:Array<{skuId:string}>)=>{
         const list=byParent.get(parent)??new Set<string>();
-        children.forEach(c=>list.add(c.skuId));byParent.set(parent,list);
+        children.forEach(c=>{if(c.skuId)list.add(c.skuId);});byParent.set(parent,list);
     };
     boms.forEach(b=>add(b.parentSkuId,b.components));
     add(parentSkuId,components);
@@ -285,9 +313,32 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
                 throw new HttpError(400,'The optional routing must produce this BOM output SKU.');
         }
         const components=ARR(item.components);
-        for(const component of components){
+        const warehouseLines=components.filter(c=>str(c.source)==='WAREHOUSE');
+        if(warehouseLines.length){
+            const allowed=ctx.role==='org_super_admin'?'all':await allowedNodeIds(ctx.orgId,ctx.me,true);
+            const extensions=await listDocs('organizations/'+ctx.orgId+'/material_extensions');
+            for(const c of warehouseLines){
+                const warehouseId=str(c.warehouseId),materialId=str(c.materialId);
+                if(allowed!=='all'&&!allowed.has(warehouseId))
+                    throw new HttpError(403,'Warehouse '+warehouseId+' is outside your visible organization scope.');
+                const [node,warehouse,material]=await Promise.all([
+                    getDoc('organizations/'+ctx.orgId+'/structure/'+warehouseId),
+                    getDoc('organizations/'+ctx.orgId+'/warehouses/'+warehouseId),
+                    getDoc('organizations/'+ctx.orgId+'/materials/'+materialId),
+                ]);
+                if(!node||!storageCostCentre(node.data)||!warehouse)
+                    throw new HttpError(400,'Choose a configured accessible Inventory/Warehousing cost centre.');
+                if(!material||!publishedProcurementMaterial(material.data)||
+                    !mappedProcurementMaterialToWarehouse(materialId,material.data,warehouseId,extensions))
+                    throw new HttpError(400,'The Procurement material is not approved and mapped to the selected warehouse.');
+                materialUnitFactor(str(c.uom),str(material.data.uom));
+            }
+        }
+        for(const component of components.filter(c=>str(c.source)!=='WAREHOUSE')){
             const child=await getDoc(DOC(ctx.orgId,'items',str(component.skuId)));
             if(!child)throw new HttpError(400,'Component '+str(component.skuId)+' is missing from SKU master.');
+            if(str(component.source)==='INTERMEDIATE'&&str(child.data.category)!=='INTERMEDIATE')
+                throw new HttpError(400,'Only intermediate/WIP SKUs can use the intermediate material source.');
             materialUnitFactor(str(component.uom),str(child.data.uom));
         }
         const others=(await listDocs(ROOT(ctx.orgId,'boms')))
@@ -400,10 +451,26 @@ export const plnMfgFoundationRoutes={
     'POST /api/org/pln-mfg/foundation/references':[
         orgRoute('org.mfg.foundation.references','MFG.view',async ctx=>{
             const orgRoot='organizations/'+ctx.orgId;
-            const [materials,assets,structure,utilityRegisters]=await Promise.all([
+            const [materials,assets,structure,utilityRegisters,warehouseDocs,extensions]=await Promise.all([
                 listDocs(orgRoot+'/materials'),listDocs(orgRoot+'/assets'),listDocs(orgRoot+'/structure'),
-                listDocs(orgRoot+'/equipment_utilities'),
+                listDocs(orgRoot+'/equipment_utilities'),listDocs(orgRoot+'/warehouses'),
+                listDocs(orgRoot+'/material_extensions'),
             ]);
+            const allowedWarehouses=ctx.role==='org_super_admin'?'all':await allowedNodeIds(ctx.orgId,ctx.me,true);
+            const warehouseIds=new Set(warehouseDocs.map(w=>w.id));
+            const warehouseMaterials=[] as Array<{warehouseId:string;id:string;name:string;materialNumber:string;uom:string}>;
+            const warehouses=[] as Array<{id:string;name:string;code:string}>;
+            for(const node of structure.filter(n=>storageCostCentre(n.data)&&warehouseIds.has(n.id)&&
+                (allowedWarehouses==='all'||allowedWarehouses.has(n.id)))){
+                const linked=materials.filter(m=>publishedProcurementMaterial(m.data)&&
+                    mappedProcurementMaterialToWarehouse(m.id,m.data,node.id,extensions));
+                if(!linked.length)continue;
+                warehouses.push({id:node.id,name:str(node.data.name)||node.id,code:str(node.data.code)});
+                linked.forEach(m=>warehouseMaterials.push({
+                    warehouseId:node.id,id:m.id,name:str(m.data.shortText)||str(m.data.name)||m.id,
+                    materialNumber:str(m.data.materialNumber),uom:str(m.data.uom),
+                }));
+            }
             const sites=[];
             for(const site of structure.filter(x=>str(x.data.level)==='site'&&str(x.data.status)!=='inactive')){
                 if(await recordAccess(ctx,'MFG.view',site.id))
@@ -411,7 +478,7 @@ export const plnMfgFoundationRoutes={
             }
             const visibleSites=new Set(sites.map(x=>x.id));
             return {
-                sites,
+                sites,warehouses,warehouseMaterials,
                 utilities:(await Promise.all(utilityRegisters.map(async d=>
                     await recordAccess(ctx,'MFG.view',d.id)?d:null))).filter((d):d is NonNullable<typeof d>=>d!==null)
                     .flatMap(d=>ARR(d.data.items).map(u=>({
