@@ -115,9 +115,9 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
    .finally(()=>{if(live)setSpeedBusy(false);});
   return ()=>{live=false;};
  },[selected?.costCenterId,selected?.producesSkuId,selected?.capacityBasis,value.siteId]);
+ // SKU identity is organization-wide; stage cost-centre mapping controls commissioned capacity.
  const availableOutputs=useMemo(()=>items.filter(x=>
-  ['FINISHED','INTERMEDIATE'].includes(str(x.category))&&
-  (!str(x.siteId)||!value.siteId||str(x.siteId)===value.siteId)),[items,value.siteId]);
+  ['FINISHED','INTERMEDIATE'].includes(str(x.category))),[items]);
  const resourcesForSite=resources.filter(x=>!str(x.siteId)||!value.siteId||str(x.siteId)===value.siteId);
  const centersForSite=centers.filter(x=>x.siteId===value.siteId);
  const chosenBoms=selected?.producesSkuId?boms.filter(x=>str(x.parentSkuId)===selected.producesSkuId&&
@@ -200,14 +200,12 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     <Choice label='Production site' value={value.siteId||''}
      options={[['','Select site'],...sites.map(s=>[s.id,s.name+' · '+s.code] as [string,string])]}
      onChange={siteId=>{setReview(null);onChange({...value,siteId,
-      skuId:availableOutputs.some(x=>x.id===value.skuId&&
-       (!str(x.siteId)||str(x.siteId)===siteId))?value.skuId:'',
       operations:ops.map(s=>({...s,costCenterId:'',resourceId:'',bomId:''}))});}}/>
     <Choice label='Manufactured output SKU' value={value.skuId||''}
      options={[['','Select produced finished or intermediate SKU'],
       ...availableOutputs.map(x=>[x.id,x.name] as [string,string])]}
      onChange={skuId=>{const chosen=items.find(x=>x.id===skuId);
-      onChange({...value,skuId,siteId:chosen&&str(chosen.siteId)?str(chosen.siteId):value.siteId,
+      onChange({...value,skuId,
        name:str(value.name)||((chosen?.name||'New SKU')+' · Routing'),routingModelVersion:2});}}/>
     <TextField label='Routing name' value={value.name} onChange={name=>update('name',name)}/>
     <TextField label='Alternative code' value={value.alternativeCode||'STANDARD'}
