@@ -65,7 +65,6 @@ export default function PlnDemand({permissions,formDefaults}:{permissions:string
   finally{setLoading(false);}
  };
  useEffect(()=>{void load();},[]);
- const output=outputs.find(x=>x.id===draft?.skuId);
  const availableSites=sites; // SKU identity is global; demand site is selected separately.
  const visible=useMemo(()=>records.filter(x=>showList==='ALL'||x.status===showList)
   .sort((a,b)=>b.needDate.localeCompare(a.needDate)),[records,showList]);
