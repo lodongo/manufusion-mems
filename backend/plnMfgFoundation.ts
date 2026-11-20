@@ -59,6 +59,32 @@ export function bomAlternative(value:unknown):string {
     return code;
 }
 /** Conversions only use dimensional equivalents from the published MEMS unit registry. */
+
+/** Organization-managed defaults for new Production Planning & MRP forms only. */
+const BASE_PLN_FORM_DEFAULTS={
+ defaultSiteId:'',skuCategory:'FINISHED',bomOutputQty:1,
+ resourceType:'LINE',resourceRate:1000,resourceEfficiency:100,
+ routingAlternativeCode:'STANDARD',demandType:'FORECAST',demandQuantity:1,demandLeadDays:7,
+} as const;
+function normalizePlanningFormDefaults(raw:unknown){
+ const value=isObj(raw)?raw:{};
+ const defaultSiteId=str(value.defaultSiteId??BASE_PLN_FORM_DEFAULTS.defaultSiteId).trim();
+ if(defaultSiteId&&!ID.test(defaultSiteId))throw new HttpError(400,'Invalid default planning site.');
+ const skuCategory=ENUM(value.skuCategory??BASE_PLN_FORM_DEFAULTS.skuCategory,STAGES,'default SKU category');
+ const bomOutputQty=POSITIVE(value.bomOutputQty??BASE_PLN_FORM_DEFAULTS.bomOutputQty,'Default BOM output quantity');
+ const resourceType=ENUM(value.resourceType??BASE_PLN_FORM_DEFAULTS.resourceType,RESOURCE_TYPES,'default resource class');
+ const resourceRate=POSITIVE(value.resourceRate??BASE_PLN_FORM_DEFAULTS.resourceRate,'Default resource rate');
+ const resourceEfficiency=POSITIVE(value.resourceEfficiency??BASE_PLN_FORM_DEFAULTS.resourceEfficiency,'Default resource efficiency');
+ if(resourceEfficiency>100)throw new HttpError(400,'Default resource efficiency cannot exceed 100%.');
+ const routingAlternativeCode=bomAlternative(value.routingAlternativeCode??BASE_PLN_FORM_DEFAULTS.routingAlternativeCode);
+ const demandType=ENUM(value.demandType??BASE_PLN_FORM_DEFAULTS.demandType,['FORECAST','FIRM_ORDER'] as const,'default demand type');
+ const demandQuantity=POSITIVE(value.demandQuantity??BASE_PLN_FORM_DEFAULTS.demandQuantity,'Default demand quantity');
+ const demandLeadDays=NONNEGATIVE(value.demandLeadDays??BASE_PLN_FORM_DEFAULTS.demandLeadDays,'Default demand lead days',3650);
+ if(!Number.isInteger(demandLeadDays))throw new HttpError(400,'Default demand lead days must be a whole number.');
+ return {defaultSiteId,skuCategory,bomOutputQty,resourceType,resourceRate,resourceEfficiency,
+  routingAlternativeCode,demandType,demandQuantity,demandLeadDays};
+}
+
 export function materialUnitFactor(from:string,to:string):number {
     if(from===to)return 1;
     const factor=skuUnitConversion(from,to);
@@ -635,7 +661,9 @@ export const plnMfgFoundationRoutes={
     'POST /api/org/pln-mfg/foundation/config':[
         orgRoute('org.pln.foundation.config.view','PLN.view',async ctx=>{
             const doc=await getDoc('organizations/'+ctx.orgId+'/pln_config/master');
-            return {config:doc?.data??{horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'},revision:num(doc?.data.revision)??0};
+            const stored=doc?.data??{};
+            return {config:{horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS',...stored,
+                formDefaults:normalizePlanningFormDefaults(stored.formDefaults)},revision:num(doc?.data.revision)??0};
         }),
     ],
     'POST /api/org/pln-mfg/foundation/config/save':[
@@ -650,7 +678,14 @@ export const plnMfgFoundationRoutes={
             const path='organizations/'+ctx.orgId+'/pln_config/master';
             const prev=await getDoc(path),old=num(prev?.data.revision)??0;
             if(Number(ctx.body.expectedRevision)!==old)throw new HttpError(409,'Configuration changed. Reload and retry.');
-            const config={horizonDays,freezeDays,lotPolicy,strategy,revision:old+1,updatedAt:nowIso(),updatedBy:ctx.uid};
+            // Retain existing form defaults when a legacy client saves only planning rules.
+            const formDefaults=normalizePlanningFormDefaults(raw.formDefaults??prev?.data.formDefaults);
+            if(formDefaults.defaultSiteId){
+                const site=await getNode(ctx,formDefaults.defaultSiteId);
+                if(str(site.data.level)!=='site'||str(site.data.status)==='inactive')
+                    throw new HttpError(400,'Default planning site must be an active site in this organization.');
+            }
+            const config={horizonDays,freezeDays,lotPolicy,strategy,formDefaults,revision:old+1,updatedAt:nowIso(),updatedBy:ctx.uid};
             const ok=await writeDoc(path,config,prev?{updateTime:prev.updateTime}:{exists:false});
             if(!ok)throw new HttpError(409,'Concurrent planning configuration update detected.');
             await track(ctx,'pln.config.save','PLN planning configuration');
