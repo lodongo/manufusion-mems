@@ -8,6 +8,7 @@ import { PROCUREMENT_UNITS } from './procurementUnits';
 import { validatePrimaryContainerSelection, type MfgPrimaryContainerType } from './mfgPrimaryContainerMetadata';
 import {validatePackagingLayout, type MfgPackagingType} from './mfgPackagingMetadata';
 import {composeSkuNameFromSequence, type SkuNamingSequence, type SkuNameValues} from '../src/shared/mfgSkuNaming';
+import {throughputOutput} from '../src/shared/throughputOutput';
 
 export const SKU_PARAMETERS={
     productNames:'NME', productionForms:'FRM', containers:'CNT',
@@ -22,7 +23,7 @@ export type SkuParameter={id:string;kind:SkuParameterKind;name:string;
     referenceProductionFormId?:string;normalizationOperator?:'DIVIDE'|'MULTIPLY';
     categoryCode?:string;unitCode?:string;unitCount?:number;
     productCode?:string;metadataCode?:string;subcategoryCode?:string;
-    containerAttributes?:Record<string,string>;ratingCountUnitCode?:string;
+    containerAttributes?:Record<string,string>;ratingCountUnitCode?:string;ratingOutputCode?:string;
     packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
     containersPerLayer?:number;numberOfLayers?:number;
     enabled?:boolean;description?:string};
@@ -284,7 +285,12 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
         const ratingCountUnitCode=str(raw.ratingCountUnitCode)||'UOM-20-001';
         const count=PROCUREMENT_UNITS.find(u=>u.active&&u.selectable&&u.category==='Count'&&u.code===ratingCountUnitCode);
         if(!count)throw new HttpError(400,'Choose an approved Count rating unit for this physical container.');
-        return {...base,...chosen,ratingCountUnitCode};
+        const ratingOutputCode=str(raw.ratingOutputCode)||'PRIMARY_CONTAINER';
+        const output=throughputOutput(ratingOutputCode);
+        if(!output)throw new HttpError(400,'Choose a published manufacturing throughput output type.');
+        if(output.kind==='MEASURE'&&!skuUnitConversion(output.unitCode||'',output.unitCode||''))
+            throw new HttpError(400,'The selected measured-output type requires a published MEMS dimensional unit.');
+        return {...base,...chosen,ratingCountUnitCode,ratingOutputCode};
     }
     if(kind==='containerSizes'){
         const uom=str(raw.uom).trim(),quantity=Number(raw.quantity);
