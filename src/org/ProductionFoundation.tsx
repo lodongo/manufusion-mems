@@ -6,6 +6,7 @@ import PlnDemand from './PlnDemand';
 import PlnCostCenterSetup from './PlnCostCenterSetup';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 import PlnProcessRoutingEditor from './PlnProcessRoutingEditor';
+import PlnDocumentation from './PlnDocumentation';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 '+className}>{children}</section>;
 }
@@ -23,7 +24,7 @@ import { callBackend } from '../lib/backend';
 import { hasPerm } from '../types';
 
 type Kind='items'|'boms'|'resources'|'routings';
-type Tab=Kind|'skuSetup'|'materialPolicy'|'config'|'demand'|'costCenterSku';
+type Tab=Kind|'skuSetup'|'materialPolicy'|'config'|'demand'|'costCenterSku'|'documentation';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
@@ -43,12 +44,13 @@ type References={
 };
 const emptyReferences:References={materials:[],utilities:[],assets:[],sites:[]};
 const kinds:Kind[]=['items','boms','resources','routings'];
-type Phase='foundation'|'masters'|'capacity'|'planning';
+type Phase='foundation'|'masters'|'capacity'|'planning'|'guide';
 const phases:{key:Phase;title:string;description:string}[]=[
     {key:'foundation',title:'1 · Foundation',description:'Establish policies and product definitions'},
     {key:'masters',title:'2 · Master data',description:'Create the manufactured products and resource masters'},
     {key:'capacity',title:'3 · Capacity & process',description:'Map commissioned capacity and manufacturing routes'},
     {key:'planning',title:'4 · Planning',description:'Configure planning rules and demand'},
+    {key:'guide',title:'Reference',description:'Step-by-step documentation and examples'},
 ];
 /** Configuration precedes use. Preserve the existing tab keys, data and permissions. */
 const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
@@ -61,6 +63,7 @@ const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
     {key:'routings',label:'Process Routings',shortLabel:'Process routings',phase:'capacity',hint:'Define operation sequences using configured resources and outputs'},
     {key:'config',label:'Planning Configuration',shortLabel:'Planning rules',phase:'planning',hint:'Configure planning horizon, frozen period and lot-sizing defaults'},
     {key:'demand',label:'Demand & S&OP',shortLabel:'Demand & S&OP',phase:'planning',hint:'Maintain forecast and firm demand after the relevant masters are configured'},
+    {key:'documentation',label:'Documentation & Setup Guide',shortLabel:'Documentation',phase:'guide',hint:'Search guided setup, topics, troubleshooting and fictional examples'},
 ];
 const emptyRows:Record<Kind,Row[]>={items:[],boms:[],resources:[],routings:[]};
 const fld='w-full min-h-11 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink outline-none focus:border-brand';
@@ -305,8 +308,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
     const canViewMasters=hasPerm(permissions,'MFG.view');
     const canViewPlanning=hasPerm(permissions,'PLN.view');
-    const visibleTabs=tabs.filter(t=>t.key==='config'||t.key==='demand'||t.key==='costCenterSku'?canViewPlanning:
-        canViewMasters);
+    const visibleTabs=tabs.filter(t=>t.key==='documentation'?module==='PLN'&&canViewPlanning:
+        t.key==='config'||t.key==='demand'||t.key==='costCenterSku'?canViewPlanning:canViewMasters);
     const activeIndex=visibleTabs.findIndex(tab=>tab.key===active);
     const activeTab=tabs.find(tab=>tab.key===active);
     // Read-only users may have a different first accessible step.
@@ -464,7 +467,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {active!=='skuSetup'&&<p className='hidden text-sm text-muted sm:block'>{activeTab?.hint}</p>}
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
-        {loading?<Spinner/>:active==='costCenterSku'?<PlnCostCenterSetup/>:active==='demand'?<PlnDemand permissions={permissions}/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
+        {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
+        loading?<Spinner/>:active==='costCenterSku'?<PlnCostCenterSetup/>:active==='demand'?<PlnDemand permissions={permissions}/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
