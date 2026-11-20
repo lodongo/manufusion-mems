@@ -7,6 +7,7 @@ import PlnCostCenterSetup from './PlnCostCenterSetup';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 import PlnProcessRoutingEditor from './PlnProcessRoutingEditor';
 import PlnDocumentation from './PlnDocumentation';
+import {configurationProgress,type SetupRow,type SetupStep} from './plnSetupDependencies';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 '+className}>{children}</section>;
 }
@@ -301,6 +302,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [viewSkuId,setViewSkuId]=useState('');
     const [materialPolicy,setMaterialPolicy]=useState<MaterialPolicy>(defaultMaterialPolicy);
     const [materialPolicyRevision,setMaterialPolicyRevision]=useState(0);
+    const [capacityMappings,setCapacityMappings]=useState<SetupRow[]>([]);
+    const [capacityLoaded,setCapacityLoaded]=useState(false);
+    const [setupBlocked,setSetupBlocked]=useState('');
     const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
     const [configRevision,setConfigRevision]=useState(0);
     const [history,setHistory]=useState<Row[]>([]);
@@ -312,6 +316,21 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         t.key==='config'||t.key==='demand'||t.key==='costCenterSku'?canViewPlanning:canViewMasters);
     const activeIndex=visibleTabs.findIndex(tab=>tab.key===active);
     const activeTab=tabs.find(tab=>tab.key===active);
+    // Configuration progression depends on saved masters, not merely opening tabs.
+    // Keep MFG master-data navigation and read-only PLN users usable.
+    const enforceSetup=module==='PLN'&&canViewMasters&&canViewPlanning;
+    const setupProgress=configurationProgress({
+        materialPolicyRevision,parameters:skuSetup.parameters,
+        items:rows.items as SetupRow[],boms:rows.boms as SetupRow[],
+        resources:rows.resources as SetupRow[],routings:rows.routings as SetupRow[],
+        capacityMappings,capacityLoaded,planningConfigurationRevision:configRevision,
+    });
+    const prerequisiteNames=(step:Tab)=>setupProgress[step as SetupStep].missing
+        .map(key=>tabs.find(t=>t.key===key)?.shortLabel||key);
+    const nextTab=visibleTabs[activeIndex+1]?.key;
+    const nextMissing=nextTab&&enforceSetup?prerequisiteNames(nextTab):[];
+    const configuredCount=tabs.filter(t=>t.key!=='demand'&&t.key!=='documentation'&&
+        setupProgress[t.key].complete).length;
     // Read-only users may have a different first accessible step.
     useEffect(()=>{
         if(visibleTabs.length&&!visibleTabs.some(tab=>tab.key===active)){
@@ -331,18 +350,20 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const load=async()=>{
         setLoading(true);setError('');
         try{
-            const [datasets,configuration,refData,skuData,materialSetup]=await Promise.all([
+            const [datasets,configuration,refData,skuData,materialSetup,capacitySetup]=await Promise.all([
                 canViewMasters?Promise.all(kinds.map(kind=>callBackend<{records:Row[]}>('/api/org/pln-mfg/foundation/list',{kind}))):Promise.resolve(kinds.map(()=>({records:[] as Row[]}))),
                 callBackend<{config:Config;revision:number}>('/api/org/pln-mfg/foundation/config').catch(()=>null),
                 canViewMasters?callBackend<References>('/api/org/pln-mfg/foundation/references'):Promise.resolve(emptyReferences),
                 canViewMasters?callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup'):Promise.resolve(emptySkuSetup),
                 canViewMasters?callBackend<{policy:MaterialPolicy;revision:number}>('/api/org/pln-mfg/foundation/material-policy'):Promise.resolve({policy:defaultMaterialPolicy,revision:0}),
+                canViewPlanning?callBackend<{mappings:SetupRow[]}>('/api/org/pln/cost-center/hierarchy').catch(()=>null):Promise.resolve(null),
             ]);
             const [items,boms,resources,routings]=datasets;
             setRows({items:items.records,boms:boms.records,resources:resources.records,routings:routings.records});
             setRefs(refData);
             setSkuSetup(skuData);
             setMaterialPolicy(materialSetup.policy);setMaterialPolicyRevision(materialSetup.revision);
+            setCapacityMappings(capacitySetup?.mappings??[]);setCapacityLoaded(!!capacitySetup);
             if(configuration){setConfig(configuration.config);setConfigRevision(configuration.revision);}
         }catch(e){setError(e instanceof Error?e.message:'Could not load manufacturing masters.');}
         finally{setLoading(false);}
@@ -357,7 +378,23 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         const data=await callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup');
         setSkuSetup(data);
     };
+    const refreshCapacitySetup=async()=>{
+        try{
+            const result=await callBackend<{mappings:SetupRow[]}>('/api/org/pln/cost-center/hierarchy');
+            setCapacityMappings(result.mappings);setCapacityLoaded(true);
+        }catch{setCapacityLoaded(false);}
+    };
     const changeTab=(tab:Tab)=>{
+        if(enforceSetup){
+            const missing=prerequisiteNames(tab);
+            if(missing.length){
+                const detail=setupProgress[tab].missing.map(step=>setupProgress[step].detail).join(' ');
+                setSetupBlocked('Complete these configuration dependencies before continuing to '+
+                    (tabs.find(t=>t.key===tab)?.label||tab)+': '+missing.join(', ')+'. '+detail);
+                return;
+            }
+        }
+        setSetupBlocked('');
         setActive(tab);setDraft(null);setViewSkuId('');setHistory([]);setError('');setNotice('');setDecisionReason('');
     };
     const copyVersion=(row:Row)=>{setViewSkuId('');const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
@@ -425,6 +462,12 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing'}
             action={<Button variant='secondary' className='shrink-0 px-3 text-xs sm:text-sm'
                 disabled={busy||loading} onClick={()=>void load()}>Refresh</Button>}/>
+        {module==='PLN'&&<section className='rounded-xl border border-line bg-panel p-3 text-xs'>
+            <p className='font-semibold'>Configuration readiness · {configuredCount} / 8 setup requirements saved</p>
+            <p className='mt-1 text-muted'>Steps unlock when their saved configuration dependencies are complete. Independent master-data branches can be configured separately.</p>
+            {enforceSetup&&activeTab&&setupProgress[active].missing.length>0&&
+                <p className='mt-2 text-amber-700'>Prerequisite: {prerequisiteNames(active).join(', ')}</p>}
+        </section>}
         <nav aria-label='Production configuration sequence' className='sm:hidden rounded-xl border border-line bg-panel p-3'>
             <div className='flex items-center justify-between gap-2'>
                 <label htmlFor='manufacturing-step-select' className='text-xs font-semibold text-muted'>Configuration sequence</label>
@@ -436,16 +479,19 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 {phases.map(phase=><optgroup key={phase.key} label={phase.title}>
                     {visibleTabs.filter(tab=>tab.phase===phase.key).map(tab=>
                         <option key={tab.key} value={tab.key}>
-                            {visibleTabs.indexOf(tab)+1}. {tab.shortLabel}
+                            {visibleTabs.indexOf(tab)+1}. {tab.shortLabel}{enforceSetup&&!setupProgress[tab.key].accessible?' · needs prerequisites':
+                                setupProgress[tab.key].complete&&tab.key!=='documentation'?' · configured':''}
                         </option>)}
                 </optgroup>)}
             </select>
             <p className='mt-2 text-xs text-muted'>{activeTab?.hint}</p>
+            {enforceSetup&&nextMissing&&nextMissing.length>0&&
+                <p className='mt-1 text-xs text-amber-700'>Next step requires: {nextMissing.join(', ')}</p>}
             <div className='mt-3 grid grid-cols-2 gap-2'>
                 <Button variant='secondary' className='w-full px-2 text-xs'
                     disabled={activeIndex<=0} onClick={()=>changeTab(visibleTabs[activeIndex-1].key)}>Previous</Button>
                 <Button variant='secondary' className='w-full px-2 text-xs'
-                    disabled={activeIndex<0||activeIndex>=visibleTabs.length-1}
+                    disabled={activeIndex<0||activeIndex>=visibleTabs.length-1||(!!nextMissing&&nextMissing.length>0)}
                     onClick={()=>changeTab(visibleTabs[activeIndex+1].key)}>Next step</Button>
             </div>
         </nav>
@@ -456,19 +502,30 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     <p className='mb-2 text-xs font-semibold text-muted'>{phase.title}</p>
                     <div className='flex flex-wrap gap-2'>{entries.map(tab=>
                         <button type='button' key={tab.key} aria-current={active===tab.key?'page':undefined}
+                            aria-disabled={enforceSetup&&!setupProgress[tab.key].accessible}
+                            title={enforceSetup&&!setupProgress[tab.key].accessible?
+                                'Prerequisites: '+prerequisiteNames(tab.key).join(', '):tab.hint}
                             onClick={()=>changeTab(tab.key)}
                             className={'min-h-10 max-w-full rounded-lg border px-2 py-1.5 text-left text-xs font-medium '+
                                 (active===tab.key?'border-brand bg-brand/10 text-brand':'border-line text-soft')}>
                             {tab.shortLabel}
+                            {enforceSetup&&!setupProgress[tab.key].accessible&&<span className='block text-[11px] text-muted'>Requires setup</span>}
                         </button>)}</div>
                 </section>:null;
             })}
         </nav>
         {active!=='skuSetup'&&<p className='hidden text-sm text-muted sm:block'>{activeTab?.hint}</p>}
+        {setupBlocked&&<div role='alert' className='space-y-2 rounded-xl border border-amber-500/50 p-3 text-sm'>
+            <p>{setupBlocked}</p>
+            <Button variant='secondary' className='w-fit px-3 text-xs'
+                onClick={()=>{const required=setupProgress[active].missing[0];if(required)changeTab(required as Tab);else setSetupBlocked('');}}>
+                Review prerequisites
+            </Button>
+        </div>}
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
         {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
-        loading?<Spinner/>:active==='costCenterSku'?<PlnCostCenterSetup/>:active==='demand'?<PlnDemand permissions={permissions}/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
+        loading?<Spinner/>:active==='costCenterSku'?<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup}/>:active==='demand'?<PlnDemand permissions={permissions}/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
