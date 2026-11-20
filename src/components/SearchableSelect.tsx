@@ -36,7 +36,7 @@ function extractOptions(children: ReactNode, group = ''): Option[] {
     return values;
 }
 
-/** Theme-aware, searchable, touch-first dropdown. The fixed sheet avoids scrolling/clipping in nested forms. */
+/** MEMS dropdown template: searchable staged choice, explicit confirmation and visible mobile actions. */
 export default function SearchableSelect({ label, id, hint, error, children, value, defaultValue, name, onChange, disabled, required, hideLabel, ...rest }: Props) {
     const options = useMemo(() => extractOptions(children), [children]);
     const [open, setOpen] = useState(false);
@@ -88,17 +88,17 @@ export default function SearchableSelect({ label, id, hint, error, children, val
             </button>
             {(error || hint) && <span id={`${id}-note`} className={`mt-1 block text-xs ${error ? 'text-red-500' : 'text-muted'}`}>{error || hint}</span>}
             {open && typeof document !== 'undefined' && createPortal(
-                <div className='fixed inset-0 z-[2200] flex items-start justify-center bg-black/60 px-2 pb-3 pt-[max(5dvh,16px)] sm:p-5 sm:items-start'
+                <div className='fixed inset-0 z-[2200] flex items-end justify-center bg-black/60 px-0 pt-[max(4dvh,12px)] sm:items-center sm:p-5'
                     role='presentation' onClick={() => setOpen(false)}>
                     <div role='dialog' aria-label={label} aria-modal='true'
                         onClick={(e) => e.stopPropagation()}
-                        className='flex max-h-[88dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-line bg-page shadow-2xl'>
-                        <div className='flex items-center justify-between border-b border-line p-4'>
+                        className='flex h-[min(88dvh,760px)] min-h-0 w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-line bg-page shadow-2xl sm:h-[min(84dvh,720px)] sm:rounded-2xl'>
+                        <div className='flex shrink-0 items-center justify-between border-b border-line p-4'>
                             <h2 className='min-w-0 truncate text-lg font-semibold text-ink'>{label}</h2>
                             <button ref={closeRef} type='button' aria-label='Close' className='flex h-11 w-11 items-center justify-center rounded-xl border border-line text-ink'
                                 onClick={() => setOpen(false)}><X className='h-5 w-5' /></button>
                         </div>
-                        <div className='p-3'>
+                        <div className='shrink-0 p-3'>
                             {searchVisible ? (
                                 <label className='flex min-h-12 items-center gap-2 rounded-xl border border-line bg-panel px-3'>
                                     <Search className='h-5 w-5 shrink-0 text-muted' />
@@ -114,9 +114,9 @@ export default function SearchableSelect({ label, id, hint, error, children, val
                                     <Search className='h-4 w-4 text-muted'/> Search (optional) · tap to type
                                 </button>
                             )}
-                            <p className='mt-2 px-1 text-xs text-muted'>{filtered.length} of {options.length} options · scroll to choose</p>
+                            <p className='mt-2 px-1 text-xs text-muted'>{filtered.length} of {options.length} options · choose an option, then confirm</p>
                         </div>
-                        <div role='listbox' aria-label={label} className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-8'>
+                        <div role='listbox' aria-label={label} className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3'>
                             {filtered.length === 0 && <p className='p-4 text-center text-sm text-muted'>No matching options</p>}
                             {filtered.map((o, i) =>
                                 <button key={o.value + '-' + i} type='button' role='option' aria-selected={o.value === pending}
@@ -131,9 +131,15 @@ export default function SearchableSelect({ label, id, hint, error, children, val
                                 </button>
                             )}
                         </div>
-                        <div className='flex shrink-0 items-center justify-between gap-2 border-t border-line bg-page p-3'>
-                            <span className='min-w-0 flex-1 truncate text-xs text-muted'>{staged ? staged.label : 'Choose an option, then confirm'}</span>
-                            <button type='button' disabled={pending === null || !staged || staged.disabled} onClick={() => { if (pending !== null) choose(pending); }} className='min-h-12 shrink-0 rounded-xl bg-brand px-5 font-semibold text-onbrand disabled:opacity-40'>Confirm</button>
+                        <div className='shrink-0 border-t border-line bg-page px-3 pt-3 pb-[max(12px,env(safe-area-inset-bottom))]'>
+                            <p aria-live='polite' className='mb-2 truncate text-xs text-muted'>Pending: {staged ? staged.label : 'Choose an option above'}</p>
+                            <div className='flex items-center justify-end gap-2'>
+                                <button type='button' aria-label='Cancel selection' onClick={() => setOpen(false)}
+                                    className='min-h-12 rounded-xl border border-line px-4 font-semibold text-ink'>Cancel</button>
+                                <button type='button' aria-label='Confirm selection' disabled={pending === null || !staged || staged.disabled}
+                                    onClick={() => { if (pending !== null) choose(pending); }}
+                                    className='min-h-12 rounded-xl bg-brand px-5 font-semibold text-onbrand disabled:opacity-40'>Confirm selection</button>
+                            </div>
                         </div>
                     </div>
                 </div>, document.body
