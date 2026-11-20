@@ -488,9 +488,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 <label htmlFor='manufacturing-step-select' className='text-xs font-semibold text-muted'>Configuration sequence</label>
                 <span className='shrink-0 text-xs text-muted'>{activeIndex>=0?activeIndex+1:0} / {visibleTabs.length}</span>
             </div>
-            <select id='manufacturing-step-select' value={active}
-                className='mt-2 min-h-11 w-full min-w-0 rounded-xl border border-line bg-page px-3 text-sm font-semibold text-ink'
-                onChange={event=>changeTab(event.target.value as Tab)}>
+            <div className='mt-2'>
+                <SelectField id='manufacturing-step-select' label='Configuration sequence' hideLabel value={active}
+                    onChange={event=>changeTab(event.target.value as Tab)}>
                 {phases.map(phase=><optgroup key={phase.key} label={phase.title}>
                     {visibleTabs.filter(tab=>tab.phase===phase.key).map(tab=>
                         <option key={tab.key} value={tab.key}>
@@ -498,7 +498,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                                 enforceSetup&&setupProgress[tab.key].complete&&tab.key!=='documentation'?' · configured':''}
                         </option>)}
                 </optgroup>)}
-            </select>
+                </SelectField>
+            </div>
             <p className='mt-2 text-xs text-muted'>{activeTab?.hint}</p>
             {enforceSetup&&nextMissing&&nextMissing.length>0&&
                 <p className='mt-1 text-xs text-amber-700'>Next step requires: {nextMissing.join(', ')}</p>}
