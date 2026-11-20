@@ -17,7 +17,7 @@ function Choice({label,value,options,onChange,disabled=false}:{
 }
 
 /** PLN navigates to a cost centre and reuses its Organization Design gear editor. */
-export default function PlnCostCenterSetup(){
+export default function PlnCostCenterSetup({onMappingsChanged}:{onMappingsChanged?:()=>void}={}){
  const [data,setData]=useState<Hierarchy|null>(null),[loading,setLoading]=useState(true);
  const [error,setError]=useState('');
  const [showLocation,setShowLocation]=useState(true);
@@ -71,6 +71,6 @@ export default function PlnCostCenterSetup(){
    </div>
    {!data?.costCenters.length&&<p className='text-sm text-muted'>No manufacturing cost centres are accessible. Check Organization Design, Finance's cost-centre type and your access scope.</p>}
   </section>}
-  {cc&&<PlnCostCenterSkuSetup key={cc} costCenterId={cc}/>}
+  {cc&&<PlnCostCenterSkuSetup key={cc} costCenterId={cc} onMappingsChanged={onMappingsChanged}/>}
  </div>;
 }
