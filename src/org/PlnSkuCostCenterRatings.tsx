@@ -5,7 +5,8 @@ type RatedQuantity={quantity:number|null;unit:string;name:string;reason?:string}
 type Projection={
  source:{containerName:string;containerCategory:string;containerSubcategory:string;
   containerAttributes:Record<string,string>;sizeName:string;countUnit:string;
-  timeUnit:string;ratedUnits:number;physicalContainers:number};
+  timeUnit:string;ratedUnits:number;physicalContainers:number;
+  ratingOutputCode:string;ratingOutputName:string;primaryContainersPerRatedOutput:number};
  physicalContainers:RatedQuantity;productionForm:RatedQuantity;finalProduct:RatedQuantity;
  commercialPackaging:RatedQuantity;transportLogistics:RatedQuantity;normalised:RatedQuantity;
 };
@@ -16,7 +17,7 @@ type Mapping={
  countUnit:{name:string;symbol:string;multiplier:number}|null;
  periodUnit:{name:string;symbol:string}|null;
  rating:{skuId:string;containerId:string;containerSizeId:string;
-  ratingQuantity?:number;ratingUnitCode?:string;periodUnitCode?:string;
+  ratingQuantity?:number;ratingUnitCode?:string;periodUnitCode?:string;ratingOutputCode?:string;
   projection?:Projection|null;conversionIssue?:string};
 };
 type Response={skuId:string;skuName:string;costCenters:Mapping[]};
@@ -49,7 +50,7 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
   <div className='flex flex-wrap items-start justify-between gap-2'>
    <div>
     <h3 className='font-semibold text-ink'>Mapped manufacturing cost centres</h3>
-    <p className='mt-1 text-xs text-muted'>Commissioned primary-container speed configured for this SKU at each accessible manufacturing cost centre.</p>
+    <p className='mt-1 text-xs text-muted'>Commissioned output speed and its equivalent primary-unit throughput for each accessible manufacturing cost centre.</p>
    </div>
    <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-sm font-semibold'
     disabled={loading} onClick={()=>setReload(n=>n+1)}>Refresh speeds</button>
@@ -76,14 +77,15 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
       </div>
       <div className='grid gap-2 sm:grid-cols-2'>
        <div className='rounded-lg bg-page p-3'>
-        <p className='text-xs text-muted'>Commissioned primary-container speed</p>
+        <p className='text-xs text-muted'>Commissioned manufacturing output speed</p>
         <p className='mt-1 text-lg font-semibold tabular-nums'>
-         {configured?format(row.rating.ratingQuantity!)+' '+count+' / '+period:'Not configured'}
+         {configured?format(row.rating.ratingQuantity!)+' '+count+' '+
+          (p?.source.ratingOutputName||row.rating.ratingOutputCode||'primary units')+' / '+period:'Not configured'}
         </p>
-        <p className='text-xs text-muted'>Configured rating basis, not actual line performance</p>
+        <p className='text-xs text-muted'>Configured rated output, not actual line performance</p>
        </div>
        <div className='rounded-lg bg-page p-3'>
-        <p className='text-xs text-muted'>Equivalent physical containers</p>
+        <p className='text-xs text-muted'>Equivalent SKU physical primary units</p>
         <p className='mt-1 text-lg font-semibold tabular-nums'>
          {p&&p.physicalContainers.quantity!==null
           ?format(p.physicalContainers.quantity)+' / '+period:'Requires valid SKU conversion'}
@@ -101,6 +103,7 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
        <summary className='cursor-pointer text-sm font-semibold'>View container properties and linked output speeds</summary>
        <div className='mt-3 space-y-3'>
         <p className='text-xs text-muted'>
+         Rated output: {p.source.ratingOutputName} · {p.source.primaryContainersPerRatedOutput} primary units per rated output.
          Primary container: {p.source.containerName} · {p.source.sizeName} ·
          category {p.source.containerCategory} / {p.source.containerSubcategory}
         </p>
