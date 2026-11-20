@@ -35,7 +35,7 @@ export const SETUP_REQUIREMENTS:Record<SetupStep,SetupStep[]>={
  documentation:[],
 };
 const text=(v:unknown)=>typeof v==='string'?v:'';
-const saved=(r:SetupRow)=>!!r.id&&text(r.status).toLowerCase()!=='deleted';
+const saved=(r:SetupRow)=>!!r.id&&!['deleted','inactive','disabled','cancelled'].includes(text(r.status).toLowerCase());
 export function configurationProgress(input:SetupInputs):Record<SetupStep,SetupProgress>{
  const active=(kind:string)=>input.parameters.some(p=>p.kind===kind&&p.enabled!==false);
  const required=['productNames','productionForms','containers','containerSizes'];
