@@ -8,6 +8,7 @@ import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 import PlnProcessRoutingEditor from './PlnProcessRoutingEditor';
 import PlnDocumentation from './PlnDocumentation';
 import {configurationProgress,type SetupRow,type SetupStep} from './plnSetupDependencies';
+import {DEFAULT_FORM_DEFAULTS,formDefaultsFor,preferredSiteId,type FormDefaults} from './plnFormDefaults';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 '+className}>{children}</section>;
 }
@@ -29,7 +30,7 @@ type Tab=Kind|'skuSetup'|'materialPolicy'|'config'|'demand'|'costCenterSku'|'doc
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={skuId:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
-type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string};
+type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string;formDefaults?:FormDefaults};
 type BomClassification={code:string;name:string;enabled:boolean;mrpRelevant:boolean;productionEligible:boolean};
 type MaterialPolicy={allowRawUtility:boolean;allowRawDirect:boolean;allowPackagingDirect:boolean;
     defaultIntermediateTracking:'STOCKED'|'NON_STOCKED';bomClassifications:BomClassification[]};
@@ -69,13 +70,15 @@ const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
 const emptyRows:Record<Kind,Row[]>={items:[],boms:[],resources:[],routings:[]};
 const fld='w-full min-h-11 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink outline-none focus:border-brand';
 const label='mb-1 block text-xs font-medium text-soft';
-const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy):Row=>{
-    if(tab==='items')return {id:'',name:'',category:'FINISHED',family:'',uom:'EA',siteId:'',packQty:1,
+const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy,
+    defaults:FormDefaults=DEFAULT_FORM_DEFAULTS,sites:References['sites']=[]):Row=>{
+    const siteId=preferredSiteId(defaults.defaultSiteId,sites);
+    if(tab==='items')return {id:'',name:'',category:defaults.skuCategory,family:'',uom:'EA',siteId,packQty:1,
         stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
-    if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',alternativeCode:'STANDARD',routingId:'',
-        parentSkuId:'',outputQty:1,outputUom:'EA',components:[]};
-    if(tab==='resources')return {id:'',name:'',type:'LINE',rate:1000,rateUom:'EA',efficiency:100,siteId:'',assetId:''};
-    return {id:'',name:'',skuId:'',siteId:'',routingModelVersion:2,alternativeCode:'STANDARD',
+    if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',alternativeCode:defaults.routingAlternativeCode,routingId:'',siteId,
+        parentSkuId:'',outputQty:defaults.bomOutputQty,outputUom:'EA',components:[]};
+    if(tab==='resources')return {id:'',name:'',type:defaults.resourceType,rate:defaults.resourceRate,rateUom:'EA',efficiency:defaults.resourceEfficiency,siteId,assetId:''};
+    return {id:'',name:'',skuId:'',siteId,routingModelVersion:2,alternativeCode:defaults.routingAlternativeCode,
         operations:[{code:'STG_000000001',name:'',resourceId:'',setupMinutes:0,
         runMinutesPerUnit:0,producesSkuId:'',costCenterId:'',bomId:'',stageType:'PRODUCE',
         processClass:'GENERAL',capacityBasis:'RESOURCE_RATE',batchSize:0,cycleMinutes:0,dependsOn:[]}]};
@@ -306,8 +309,11 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [capacityLoaded,setCapacityLoaded]=useState(false);
     const [setupBlocked,setSetupBlocked]=useState('');
     const [blockedTarget,setBlockedTarget]=useState<Tab|null>(null);
-    const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS'});
+    const [config,setConfig]=useState<Config>({horizonDays:90,freezeDays:7,lotPolicy:'LOT_FOR_LOT',strategy:'MTS',formDefaults:formDefaultsFor()});
     const [configRevision,setConfigRevision]=useState(0);
+    const formDefaults=formDefaultsFor(config.formDefaults);
+    const setFormDefault=<K extends keyof FormDefaults>(key:K,value:FormDefaults[K])=>
+        setConfig(current=>({...current,formDefaults:{...formDefaultsFor(current.formDefaults),[key]:value}}));
     const [history,setHistory]=useState<Row[]>([]);
     const [decisionReason,setDecisionReason]=useState('');
     const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -365,7 +371,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             setSkuSetup(skuData);
             setMaterialPolicy(materialSetup.policy);setMaterialPolicyRevision(materialSetup.revision);
             setCapacityMappings(capacitySetup?.mappings??[]);setCapacityLoaded(!!capacitySetup);
-            if(configuration){setConfig(configuration.config);setConfigRevision(configuration.revision);}
+            if(configuration){setConfig({...configuration.config,formDefaults:formDefaultsFor(configuration.config.formDefaults)});setConfigRevision(configuration.revision);}
         }catch(e){setError(e instanceof Error?e.message:'Could not load manufacturing masters.');}
         finally{setLoading(false);}
     };
@@ -461,7 +467,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         if(!canConfig)return;setBusy(true);setError('');setNotice('');
         try{
             const result=await callBackend<{config:Config;revision:number}>('/api/org/pln-mfg/foundation/config/save',{config,expectedRevision:configRevision});
-            setConfig(result.config);setConfigRevision(result.revision);setNotice('Planning configuration saved.');
+            setConfig({...result.config,formDefaults:formDefaultsFor(result.config.formDefaults)});setConfigRevision(result.revision);setNotice('Planning configuration and form defaults saved.');
         }catch(e){setError(e instanceof Error?e.message:'Could not save planning configuration.');}
         finally{setBusy(false);}
     };
@@ -539,7 +545,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
         {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
-        loading?<Spinner/>:active==='costCenterSku'?<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup}/>:active==='demand'?<PlnDemand permissions={permissions}/>:active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
+        loading?<Spinner/>:active==='costCenterSku'?<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup} defaultSiteId={formDefaults.defaultSiteId}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
@@ -602,9 +608,42 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 <Choice title='Default lot-sizing method' value={config.lotPolicy} options={[['LOT_FOR_LOT','Lot for lot'],['FIXED','Fixed lot'],['MIN_MAX','Min / max'],['PERIOD','Period grouping'],['OPTIMIZED','Optimized']]} onChange={v=>setConfig(s=>({...s,lotPolicy:v}))}/>
                 <Choice title='Default manufacturing policy' value={config.strategy} options={['MTS','MTO','ATO','ETO','HYBRID'].map(x=>[x,x])} onChange={v=>setConfig(s=>({...s,strategy:v}))}/>
             </div>
-            <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration</Button></div>
+
+            <details className='rounded-xl border border-line p-3'>
+                <summary className='cursor-pointer text-sm font-semibold'>New-form defaults · SKU, BOM, resource, routing and demand</summary>
+                <p className='my-3 text-xs text-muted'>Organization defaults apply only to new forms. Saved records, commissioned physical-container speeds, approvals and manual selections remain unchanged. A site is preselected only if the configured site is accessible, or there is exactly one accessible site.</p>
+                <div className='grid gap-3 sm:grid-cols-2'>
+                    <Choice title='Default production site' value={formDefaults.defaultSiteId}
+                        options={[[ '', 'Automatic (only if one accessible site)' ],...refs.sites.map(x=>[x.id,x.name+(x.code?' · '+x.code:'')] as [string,string])]}
+                        onChange={v=>setFormDefault('defaultSiteId',v)}/>
+                    <Choice title='New SKU category' value={formDefaults.skuCategory}
+                        options={ [['FINISHED','Finished goods'],['INTERMEDIATE','Intermediate / WIP'],['RAW','Raw material'],['PACKAGING','Packaging']] }
+                        onChange={v=>setFormDefault('skuCategory',v as FormDefaults['skuCategory'])}/>
+                    <Field title='Default BOM output quantity' type='number' value={formDefaults.bomOutputQty}
+                        onChange={v=>setFormDefault('bomOutputQty',Number(v))}/>
+                    <Choice title='Default resource class' value={formDefaults.resourceType}
+                        options={['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER'].map(x=>[x,x.replaceAll('_',' ')])}
+                        onChange={v=>setFormDefault('resourceType',v as FormDefaults['resourceType'])}/>
+                    <Field title='Default resource nominal units/hour' type='number' value={formDefaults.resourceRate}
+                        onChange={v=>setFormDefault('resourceRate',Number(v))}/>
+                    <Field title='Default resource planning efficiency (%)' type='number' value={formDefaults.resourceEfficiency}
+                        onChange={v=>setFormDefault('resourceEfficiency',Number(v))}/>
+                    <Field title='New BOM/routing alternative code' value={formDefaults.routingAlternativeCode}
+                        onChange={v=>setFormDefault('routingAlternativeCode',v.toUpperCase())}/>
+                    <Choice title='Default demand type' value={formDefaults.demandType}
+                        options={ [['FORECAST','Forecast'],['FIRM_ORDER','Firm customer order']] }
+                        onChange={v=>setFormDefault('demandType',v as FormDefaults['demandType'])}/>
+                    <Field title='Default demand quantity' type='number' value={formDefaults.demandQuantity}
+                        onChange={v=>setFormDefault('demandQuantity',Number(v))}/>
+                    <Field title='Default demand lead time (calendar days)' type='number' value={formDefaults.demandLeadDays}
+                        onChange={v=>setFormDefault('demandLeadDays',Number(v))}/>
+                </div>
+                <p className='mt-3 text-xs text-muted'>Physical-container speed units always come from the adopted container and unit catalogue. Demand units follow the selected SKU, not a general form default.</p>
+                {canConfig&&<div className='mt-3 flex justify-end'><Button variant='secondary' onClick={()=>setConfig(s=>({...s,formDefaults:{...DEFAULT_FORM_DEFAULTS}}))}>Restore suggested form defaults</Button></div>}
+            </details>
+            <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration and form defaults</Button></div>
         </Card>:<>
-            <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'><p className='text-xs text-muted sm:text-sm'>{filtered.length} saved master records · draft versions</p>{canSave&&!viewSkuId&&<Button onClick={()=>setDraft(newRecord(active,materialPolicy))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
+            <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'><p className='text-xs text-muted sm:text-sm'>{filtered.length} saved master records · draft versions</p>{canSave&&!viewSkuId&&<Button onClick={()=>setDraft(newRecord(active,materialPolicy,formDefaults,refs.sites))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
