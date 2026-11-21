@@ -987,7 +987,7 @@ async function validatePublishedMaterialSelection(draft:Record<string,unknown>):
     }
 }
 
-async function createMaterialDraft(ctx: OrgContext) {
+export async function createMaterialDraft(ctx: OrgContext) {
         requireModule(ctx, 'materials');
         if (!['org_super_admin'].includes(ctx.role) && !['PRC.create', 'PRC.materials.manage', 'PRC.admin'].some(p => hasPerm(ctx.permissions, p))) throw new HttpError(403, 'Material creation permission is required.');
         const d = await load('materials');
