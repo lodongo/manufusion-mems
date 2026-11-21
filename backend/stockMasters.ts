@@ -32,7 +32,7 @@ export async function stockMasterItems(key: string): Promise<StockMasterEntry[]>
 
 export interface RestrictionMasterEntry extends RestrictionEntry { description: string; color: string }
 
-/** The warehouse restriction master used by materials, storage locations, clusters and bins alike. */
+/** One shared restriction master for Stock Control materials and cluster-permitted storage restrictions. */
 export async function warehouseRestrictionMaster(): Promise<RestrictionMasterEntry[]> {
     return (await stockMasterItems('warehouseRestrictions'))
         .filter((x) => x.selectable)
