@@ -27,8 +27,8 @@ test('Bidded requires no nominated or recommended vendor or supplier part number
 test('server normalizes older GENERAL records and strips nominated suppliers for BIDDED',()=>{
     assert.ok(server.includes("if(relationship!=='BIDDED'&&relationship!=='GENERAL')return data;"));
     assert.ok(server.includes("supplyType:'BIDDED',partyEntryMode:'none',vendorId:'',partyName:'',generalPartNumber:''"));
-    assert.ok(server.includes("await writeDoc(path,materialSourcingPolicy({"));
-    assert.ok(server.includes("const d=materialSourcingPolicy(doc.data);await validatePublishedMaterialSelection(d);"));
+    assert.ok(server.includes("await synchronizeMaterialCluster(ctx,materialSourcingPolicy({"));
+    assert.ok(server.includes("const d=await synchronizeMaterialCluster(ctx,materialSourcingPolicy(doc.data));await validatePublishedMaterialSelection(d);"));
     assert.ok(server.includes("['OEM','OCM','BIDDED'].includes(str(d.supplyType))"));
     assert.ok(server.includes("if(partField&&!str(d[partField]))"));
     assert.ok(server.includes("str(d.supplyType)!=='BIDDED'&&str(d.partyEntryMode)==='manual'"));
