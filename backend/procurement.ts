@@ -1657,7 +1657,9 @@ export const procurementRoutes = {
                     workflowStage:workflow?materialStageLabel(d.data,workflow):'Workflow snapshot missing · administrator review required',
                     submittedAt:str(d.data.submittedAt||d.data.createdAt),owner,creatorName,
                     creatorEmail:str(creator?.data.email),isMine:self,assigned,
-                    canApprove:assigned&&!self,conflict:!!self&&false,configurationOnly:!workflow,
+                    canApprove:assigned&&(!self||(ctx.testMode===true&&ctx.role==='org_super_admin')),
+                    testOverride:ctx.testMode===true&&ctx.role==='org_super_admin',
+                    conflict:self&&assigned&&!(ctx.testMode===true&&ctx.role==='org_super_admin'),configurationOnly:!workflow,
                     sourceId:str(d.data.sourceId),warehouseId:str(d.data.warehouseId)});
             }
         }
