@@ -11,9 +11,9 @@ type CostCenter={
  siteId:string;legalEntityId:string;departmentId:string;
  path:ScopePart[];resource:Resource|null;canConfigure:boolean;
 };
-type ListData={costCenters:CostCenter[];highestPermittedScope:ScopePart|null;unitOptions:Unit[]};
+type ListData={costCenters:CostCenter[];highestPermittedScope:ScopePart|null;unitOptions:Unit[];testOverride?:boolean};
 type DetailData={location:{costCenterId:string;code:string;name:string;siteId:string};
- resource:Resource|null;canConfigure:boolean;unitOptions:Unit[]};
+ resource:Resource|null;canConfigure:boolean;unitOptions:Unit[];testOverride?:boolean};
 const fieldClass='min-h-11 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink';
 const actionClass='min-h-11 rounded-xl border border-line px-4 py-2 text-sm font-semibold disabled:opacity-50';
 function Text({children}:{children:ReactNode}){return <p className='text-xs text-muted'>{children}</p>;}
@@ -53,6 +53,7 @@ export function ManufacturingResourceDetail({costCenterId,initialTab='core',init
   finally{setSaving(false);}
  };
  const title=data?.resource?.name||data?.location.name||'Manufacturing resource';
+ const overrideOutline=data?.testOverride?' border-2 border-blue-500':'';
  const uomOptions=data?.unitOptions||[];
  const categories=[...new Set(uomOptions.map(x=>x.category))].sort();
  return <section className='space-y-4'>
@@ -96,7 +97,7 @@ export function ManufacturingResourceDetail({costCenterId,initialTab='core',init
    <Text>Resource ID: {data.resource?.id||'Allocated automatically on save'} · Production cost centre: {data.location.name}</Text>
    {data.canConfigure&&<div className='flex flex-wrap justify-end gap-2'>
     <button type='button' disabled={saving||name.trim().length<2||!rateUom}
-     className={actionClass+' bg-brand text-onbrand'} onClick={()=>void save()}>
+     className={actionClass+' bg-brand text-onbrand'+overrideOutline} onClick={()=>void save()}>
      {saving?'Saving…':'Save core information'}</button>
    </div>}
    {!data.canConfigure&&<Text>You have read access. Editing requires the applicable manufacturing, planning or organization-design permission.</Text>}
@@ -138,6 +139,7 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
  };
  useEffect(()=>{void load();},[]);
  const all=data?.costCenters||[];
+ const overrideOutline=data?.testOverride?' border-2 border-blue-500':'';
  const filtered=all.filter(x=>
     (!le||x.legalEntityId===le)&&(!site||x.siteId===site)&&
     (!department||x.departmentId===department)&&(!cc||x.costCenterId===cc));
@@ -242,7 +244,7 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
     {!available.length&&<Text>All production cost centres in this scope are already added, or none are accessible.</Text>}
     <div className='flex flex-wrap items-center justify-between gap-2'>
      <Text>{selectedVisible.size} cost centre(s) selected</Text>
-     <button type='button' className={actionClass+' bg-brand text-onbrand'}
+     <button type='button' className={actionClass+' bg-brand text-onbrand'+overrideOutline}
       disabled={busy||!selectedVisible.size} onClick={()=>void add()}>
       {busy?'Adding…':'Add selected resources'}</button>
     </div>
@@ -258,7 +260,7 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
       </button>
       <div className='mt-3 flex flex-wrap gap-2'>
        <button type='button' className={actionClass} onClick={()=>setOpened(x.costCenterId)}>Open resource</button>
-       {x.canConfigure&&<button type='button' className={actionClass+' text-red-600'}
+       {x.canConfigure&&<button type='button' className={actionClass+' text-red-600'+overrideOutline}
         disabled={busy} onClick={()=>void remove(x)}>Remove</button>}
       </div>
      </article>)}
