@@ -41,8 +41,26 @@ test('warehouse location page is storage-type-neutral with pallet controls and s
   assert.ok(ui.includes("label='Stacked rows *'"));
   assert.ok(ui.includes("label='Stacked columns *'"));
   assert.ok(ui.includes("label='Number of stacks (pallets high) *'"));
-  assert.ok(ui.includes("Stacking — calculate pallet capacity"));
+  assert.ok(ui.includes("Pallet stacking setup"));
+  assert.ok(ui.includes("data-testid='warehouse-pallet-stacking'"));
+  assert.ok(ui.includes("data-testid='cluster-pallet-stacking'"));
+  assert.ok(ui.includes("2 · Select physical storage type and stacking"));
+  assert.ok(ui.includes("6 · Name and identification"));
+  assert.ok(api.includes("palletStacking: palletStacking as unknown as Plain"));
+  assert.ok(api.includes("stackedRows:stackingEnabled?int(stackingRaw.stackedRows"));
   assert.ok(ui.includes("Pallet capacity"));
   assert.ok(api.includes('palletPositionCapacity(b,str(wh.data.storageTypeCode),total)'));
   assert.ok(api.includes('palletCapacity: clusters.reduce'));
+});
+
+test('warehouse pallet stacking defaults travel from setup into new clusters',()=>{
+  const ui=read('src/org/WarehouseSetup.tsx');
+  const api=read('backend/warehouse.ts');
+  assert.ok(ui.includes("s?.palletStacking?.enabled??false"));
+  assert.ok(ui.includes("setup.palletStacking?.enabled===true"));
+  assert.ok(ui.includes("palletStacking:{enabled:storageType==='PAL'&&palletEnabled"));
+  assert.ok(api.includes("palletStacking:{"));
+  assert.ok(api.includes("palletDefaults.enabled===true"));
+  assert.ok(ui.indexOf("2 · Select physical storage type and stacking")<
+    ui.indexOf("3 · Allocate physical positions"));
 });
