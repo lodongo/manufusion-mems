@@ -292,6 +292,10 @@ function clusterOut(doc: Doc, layout: Layout) {
         lastCode: last,
         locationCode: str(d.locationCode),
         locationName: str(d.locationName),
+        materialCategoryCode: str(d.materialCategoryCode)||
+            ((Array.isArray(d.subcategories)?d.subcategories:[]).filter(isObj).map(x=>str(x.categoryCode))[0]||''),
+        materialSubcategoryCode:str(d.materialSubcategoryCode)||
+            ((Array.isArray(d.subcategories)?d.subcategories:[]).filter(isObj).map(x=>str(x.code))[0]||''),
         classificationLabel: str(d.restrictionLabel) || str(d.classificationLabel),
         restrictionCode: str(d.restrictionCode),
         restrictionCodes: restrictionCodesOf(d.restrictionCodes,str(d.restrictionCode)),
