@@ -4,6 +4,7 @@ import {PROCUREMENT_UNITS} from './procurementUnits';
 import {calculateSkuConversion,type SkuComponents,type SkuParameter} from './mfgSkuModel';
 import {MFG_PRIMARY_CONTAINER_TYPES,primaryContainerCatalogueFromAdmin} from './mfgPrimaryContainerMetadata';
 import {skuContainmentNeeds,BULK_STORAGE_CONTAINER_CATEGORY} from '../src/shared/skuContainmentPolicy';
+import {skuRatingReadiness} from '../src/shared/plnSkuRatingReadiness';
 
 const volume=PROCUREMENT_UNITS.find(u=>u.active&&u.selectable&&u.category==='Volume');
 if(!volume)throw new Error('Volume unit absent from approved MEMS UoM master');
@@ -95,4 +96,42 @@ test('forty bulk storage options are available even with older published contain
     assert.equal(expanded.filter(t=>t.categoryCode==='BST').length,added.length);
     const disabled=[...source,{code:'BST_001',active:false}];
     assert.ok(!primaryContainerCatalogueFromAdmin(disabled).some(t=>t.code==='BST_001'));
+});
+
+
+test('unconfigured intermediate SKU reports one actionable missing-master prerequisite',()=>{
+    const sku={id:'SKU_000000099',name:'Bulk concentrate',category:'INTERMEDIATE',skuComponents:{}};
+    const provisional={containerId:'CNT_BST',containerSizeId:'SIZ_01'};
+    const result=skuRatingReadiness(sku,provisional);
+    assert.equal(result.status,'SKU_SETUP_REQUIRED');
+    assert.match(result.message,/Materials & Products/);
+    assert.match(result.message,/physical container/);
+    assert.match(result.message,/production form/);
+    assert.match(result.message,/Selecting a container here does not configure/);
+});
+
+test('saved intermediate bulk SKU can be rated without a product variant or packaging',()=>{
+    const components:SkuComponents={
+        containmentScope:'BULK_STORAGE',productionFormId:'FRM_01',
+        containerId:'CNT_BST',containerSizeId:'SIZ_01',
+        requiresCommercialPackaging:false,requiresTransportPackaging:false,
+    };
+    assert.throws(()=>calculateSkuConversion(components,params),/productNames/);
+    const conversion=calculateSkuConversion(components,params,{requireProductName:false});
+    assert.equal(conversion.productionQtyPerPhysicalContainer,1000);
+    assert.equal(conversion.containersPerPackage,null);
+    assert.equal(skuRatingReadiness({id:'SKU_000000099',name:'Bulk concentrate',
+        category:'INTERMEDIATE',skuComponents:components},
+        {containerId:'CNT_BST',containerSizeId:'SIZ_01'}).status,'READY');
+});
+
+test('rating setup guidance distinguishes mismatched and non-container SKUs',()=>{
+    const sku={id:'SKU_000000099',name:'Bulk concentrate',category:'INTERMEDIATE',
+        skuComponents:{containmentScope:'BULK_STORAGE',productionFormId:'FRM_01',
+            containerId:'CNT_BST',containerSizeId:'SIZ_01'}};
+    assert.equal(skuRatingReadiness(sku,{containerId:'CNT_PET',containerSizeId:'SIZ_02'}).status,
+        'APPLY_SKU_SETUP');
+    assert.equal(skuRatingReadiness({...sku,skuComponents:{containmentScope:'NONE'}},
+        {}).status,'NOT_CONTAINER_RATED');
+    assert.equal(skuRatingReadiness(undefined,{}).status,'MISSING_SKU');
 });
