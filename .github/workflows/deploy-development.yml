@@ -2,6 +2,12 @@ name: Deploy MEMS to isolated development Cloud Run
 
 on:
   workflow_dispatch:
+  # One-time deployment trigger. Remove this block after this requested run.
+  push:
+    branches:
+      - develop
+    paths:
+      - .github/workflows/deploy-development.yml
 
 permissions:
   contents: read
