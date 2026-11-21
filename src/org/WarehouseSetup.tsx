@@ -58,7 +58,8 @@ interface Setup {
     materialCategoryCodes: string[];
     storageLocations: Loc[];
     storageTypeCode: string;
-    palletStacking?:{enabled:boolean;stackedRows:number;stackedColumns:number;numberOfStacks:number};
+    palletStacking?:{enabled:boolean;stackingPattern?:'STRAIGHT'|'PYRAMID';
+        bottomRowPallets?:number;bottomRows?:number;stackedRows:number;stackedColumns:number;numberOfStacks:number};
     conditionCode: string;
     layout: Layout;
     capacity: Capacity;
@@ -100,6 +101,10 @@ interface Cluster extends Range {
     storageTypeCode: string;
     storageTypeLabel: string;
     stackingEnabled?: boolean;
+    stackingPattern?: 'STRAIGHT'|'PYRAMID';
+    bottomRowPallets?: number | null;
+    bottomRows?: number | null;
+    secondLevelPallets?: number | null;
     stackedRows?: number | null;
     stackedColumns?: number | null;
     numberOfStacks?: number | null;
@@ -461,7 +466,7 @@ function SetupView({ data, setup, onTopology }: { data: Data; setup: Setup; onTo
                 </div>
                 <Row label='Type of storage' value={type} />
                 {setup.storageTypeCode==='PAL'&&<Row label='Pallet stacking defaults' value={setup.palletStacking?.enabled?
-                    `${setup.palletStacking.stackedRows} rows × ${setup.palletStacking.stackedColumns} columns × ${setup.palletStacking.numberOfStacks} high`:
+                    `${setup.palletStacking.stackingPattern==='PYRAMID'?'Pyramid (2 levels, half on top)':'Straight (directly above)'} · ${setup.palletStacking.bottomRowPallets??setup.palletStacking.stackedColumns} pallets per bottom row × ${setup.palletStacking.bottomRows??setup.palletStacking.stackedRows} rows${setup.palletStacking.stackingPattern==='PYRAMID'?'':` × ${setup.palletStacking.numberOfStacks} high`}`:
                     'Not enabled — edit warehouse to configure'} />}
                 <Row label='Condition' value={cond} />
             </Section>
@@ -555,8 +560,10 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
     const [catQ, setCatQ] = useState('');
     const [storageType, setStorageType] = useState(s?.storageTypeCode ?? '');
     const [palletEnabled,setPalletEnabled]=useState(s?.palletStacking?.enabled??false);
-    const [palletRows,setPalletRows]=useState(String(s?.palletStacking?.stackedRows??1));
-    const [palletColumns,setPalletColumns]=useState(String(s?.palletStacking?.stackedColumns??1));
+    const [palletPattern,setPalletPattern]=useState<'STRAIGHT'|'PYRAMID'>(
+        s?.palletStacking?.stackingPattern==='PYRAMID'?'PYRAMID':'STRAIGHT');
+    const [palletRows,setPalletRows]=useState(String(s?.palletStacking?.bottomRows??s?.palletStacking?.stackedRows??1));
+    const [palletColumns,setPalletColumns]=useState(String(s?.palletStacking?.bottomRowPallets??s?.palletStacking?.stackedColumns??1));
     const [palletLevels,setPalletLevels]=useState(String(s?.palletStacking?.numberOfStacks??1));
     const [condition, setCondition] = useState(s?.conditionCode ?? 'AMB');
     const [locs, setLocs] = useState<LocDraft[]>(s?.storageLocations.length ? s.storageLocations.map((l) => ({ key: l.code, code: l.code, name: l.name, typeCode: l.typeCode, restrictionCode: l.restrictionCode, savedRestrictionCode: l.restrictionCode, suggestedRestrictionCode: l.suggestedRestrictionCode, legacyClassification: l.restrictionCode ? '' : l.classificationCode, active: l.active })) : [blankLoc()]);
@@ -623,11 +630,14 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
     if (!cats.length) problems.push('Choose at least one material category.');
     if (cats.length > L.categories) problems.push(`Up to ${L.categories} material categories.`);
     if (!storageType) problems.push('Choose the type of storage.');
-    const palletNums=[palletRows,palletColumns,palletLevels].map(v=>v.trim()?Number(v):NaN);
+    const palletNums=[palletRows,palletColumns,palletPattern==='PYRAMID'?'2':palletLevels].map(v=>v.trim()?Number(v):NaN);
+    const bottomPallets=palletNums[0]*palletNums[1];
     const validPalletNums=palletNums.every((v,i)=>Number.isInteger(v)&&v>=1&&v<=(i===2?20:100))&&
-        palletNums[0]*palletNums[1]<=L.clusterPositions;
+        bottomPallets<=L.clusterPositions&&(palletPattern!=='PYRAMID'||bottomPallets%2===0);
+    const upperPallets=palletPattern==='PYRAMID'?bottomPallets/2:bottomPallets*(palletNums[2]-1);
+    const previewPalletCapacity=bottomPallets+upperPallets;
     if(storageType==='PAL'&&palletEnabled&&!validPalletNums)
-        problems.push('Pallet stacking needs rows and columns (1–100 each) and stacks high (1–20); floor footprint must fit a cluster.');
+        problems.push('Enter 1–100 pallets per bottom row, 1–100 rows and valid stack height (1–20). Pyramid uses exactly 2 levels and requires an even bottom pallet count.');
     const locProblems = locs.map((l) => {
         const out: string[] = [];
         if (l.name.trim().length < 2 || l.name.trim().length > 60) out.push('name of 2 to 60 characters');
@@ -691,8 +701,9 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                     storageLocations: locs.map((l) => ({ code: l.code, name: l.name.trim(), typeCode: l.typeCode, restrictionCode: l.restrictionCode, active: l.active })),
                     storageTypeCode: storageType,
                     palletStacking:{enabled:storageType==='PAL'&&palletEnabled,
-                        stackedRows:storageType==='PAL'&&palletEnabled?palletNums[0]:1,
-                        stackedColumns:storageType==='PAL'&&palletEnabled?palletNums[1]:1,
+                        stackingPattern:palletPattern,
+                        bottomRowPallets:storageType==='PAL'&&palletEnabled?palletNums[1]:1,
+                        bottomRows:storageType==='PAL'&&palletEnabled?palletNums[0]:1,
                         numberOfStacks:storageType==='PAL'&&palletEnabled?palletNums[2]:1},
                     conditionCode: condition,
                     layout: { floors: layoutFloors.map((f, i) => ({ ...f, name: f.name || `Floor ${letter(i + 1)}` })) }, capacity },
@@ -856,18 +867,26 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                             Enable pallet stacking
                         </label>
                         {palletEnabled&&<>
+                            <SelectField id='wh-pallet-pattern' label='Stacking arrangement *' value={palletPattern}
+                                onChange={e=>{setPalletPattern(e.target.value as 'STRAIGHT'|'PYRAMID');setConfirmed(false);}}>
+                                <option value='STRAIGHT'>Straight — one directly on top of another</option>
+                                <option value='PYRAMID'>Pyramid — 2 levels, second level half of first</option>
+                            </SelectField>
                             <div className='grid grid-cols-2 gap-2'>
-                                <NumField id='wh-pallet-rows' label='Stacked rows *' value={palletRows}
-                                    onChange={v=>{setPalletRows(v);setConfirmed(false);}}/>
-                                <NumField id='wh-pallet-columns' label='Stacked columns *' value={palletColumns}
+                                <NumField id='wh-pallet-per-row' label='Pallets per bottom row *' value={palletColumns}
                                     onChange={v=>{setPalletColumns(v);setConfirmed(false);}}/>
+                                <NumField id='wh-pallet-rows' label='Number of rows *' value={palletRows}
+                                    onChange={v=>{setPalletRows(v);setConfirmed(false);}}/>
                                 <div className='col-span-2'>
-                                    <NumField id='wh-pallet-stacks' label='Number of stacks (pallets high) *' value={palletLevels}
-                                        onChange={v=>{setPalletLevels(v);setConfirmed(false);}}/>
+                                    {palletPattern==='STRAIGHT'?
+                                        <NumField id='wh-pallet-stacks' label='Number of levels (pallets high) *' value={palletLevels}
+                                            onChange={v=>{setPalletLevels(v);setConfirmed(false);}}/>:
+                                        <p className='rounded-lg border border-line p-3 text-sm text-ink'>Pyramid: maximum 2 levels. Upper level = half the bottom level; use an even number of bottom pallets.</p>}
                                 </div>
                             </div>
                             <p className='text-sm font-medium text-ink' aria-live='polite'>
-                                {validPalletNums?`${(palletNums[0]*palletNums[1]).toLocaleString()} ground positions × ${palletNums[2]} high = ${(palletNums[0]*palletNums[1]*palletNums[2]).toLocaleString()} pallets`:'Enter valid row, column and stack counts.'}
+                                {validPalletNums?`${bottomPallets.toLocaleString()} bottom pallets + ${upperPallets.toLocaleString()} above = ${previewPalletCapacity.toLocaleString()} pallets`:
+                                    'Enter valid pallet dimensions. Pyramid requires an even bottom-layer quantity.'}
                             </p>
                         </>}
                         <p className='text-xs text-soft'>These are defaults for new pallet clusters. Cluster-level stacking can be adjusted during allocation. Existing clusters and their physical addresses are not changed.</p>
@@ -1091,7 +1110,7 @@ function ClusterDetail({ data, cluster, onDeleted, onPositions }: { data: Data; 
                 {cluster.palletCapacity!==null&&cluster.palletCapacity!==undefined&&<>
                     <Row label='Pallet capacity' value={cluster.palletCapacity.toLocaleString()} />
                     <Row label='Stacking' value={cluster.stackingEnabled?
-                        `${cluster.stackedRows} rows × ${cluster.stackedColumns} columns × ${cluster.numberOfStacks} pallets high`:'Single level'} />
+                        `${cluster.stackingPattern==='PYRAMID'?'Pyramid':'Straight'} · ${cluster.bottomRowPallets??cluster.stackedColumns} pallets per bottom row × ${cluster.bottomRows??cluster.stackedRows} rows${cluster.stackingPattern==='PYRAMID'?' · upper layer half of bottom':` · ${cluster.numberOfStacks} high`}`:'Single level'} />
                 </>}
                 <Row label='Floor' value={letter(cluster.floor)} />
                 <Row label='Allocation' value={allocLabel(cluster)} />
