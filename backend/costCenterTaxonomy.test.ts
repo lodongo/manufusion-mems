@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
     COST_CENTER_CATEGORIES, costCenterCategoryLabel,
     costCenterSubcategories, costCenterSubcategoryLabel,
+    selectedCostCenterSubcategories, costCenterSubcategoriesLabel,
+    validateCostCenterSubcategorySelection,
 } from '../src/shared/costCenterTaxonomy';
 import { isManufacturingCostType } from './plnCostCenterCapacity';
 
@@ -49,4 +51,41 @@ test('manufacturing stages and inventory control areas remain separately classif
 
 test('custom legacy category codes still have a safe general subcategory', () => {
     assert.deepEqual(costCenterSubcategories('CUS'), [{ code: 'GENERAL', label: 'General / other' }]);
+});
+
+test('multiple selections are accepted in the same category and preserved in order', () => {
+    const available = costCenterSubcategories('MFG');
+    const codes = [available[0].code, available[3].code, available[8].code];
+    assert.deepEqual(validateCostCenterSubcategorySelection('MFG', codes, codes[0], true), codes);
+    const attributes = { costType: 'MFG', costSubcategory: codes[0], costSubcategories: codes };
+    assert.deepEqual(selectedCostCenterSubcategories(attributes), codes);
+    assert.equal(costCenterSubcategoriesLabel('MFG', attributes),
+        codes.map((code) => costCenterSubcategoryLabel('MFG', code)).join(' · '));
+    assert.equal(isManufacturingCostType(attributes.costType, []), true);
+});
+
+test('singular legacy records remain readable and can be migrated without changing type', () => {
+    const subcategory = costCenterSubcategories('INV')[0].code;
+    assert.deepEqual(selectedCostCenterSubcategories({ costSubcategory: subcategory }), [subcategory]);
+    assert.deepEqual(validateCostCenterSubcategorySelection('INV', undefined, subcategory, false), [subcategory]);
+    assert.deepEqual(validateCostCenterSubcategorySelection('INV', [], subcategory, false), []);
+    assert.deepEqual(validateCostCenterSubcategorySelection('INV', undefined, '', false), []);
+});
+
+test('the API rejects duplicate, mismatched and malformed subcategory selections', () => {
+    const manufacturing = costCenterSubcategories('MFG')[0].code;
+    const inventory = costCenterSubcategories('INV')[0].code;
+    assert.throws(() => validateCostCenterSubcategorySelection('MFG', [manufacturing, manufacturing], '', true), /once/);
+    assert.throws(() => validateCostCenterSubcategorySelection('MFG', [manufacturing, inventory], '', true), /belong/);
+    assert.throws(() => validateCostCenterSubcategorySelection('MFG', manufacturing, '', true), /list/);
+    assert.throws(() => validateCostCenterSubcategorySelection('MFG', [12], '', true), /valid/);
+    assert.throws(() => validateCostCenterSubcategorySelection('MFG', [], '', true), /at least one/);
+});
+
+test('every inventory and warehousing subcategory retains its category-level operational permission', () => {
+    for (const code of ['INV', 'WHS']) {
+        const subcategoryCodes = costCenterSubcategories(code).slice(0, 3).map((item) => item.code);
+        assert.equal(validateCostCenterSubcategorySelection(code, subcategoryCodes, subcategoryCodes[0], true).length, 3);
+        assert.equal(isManufacturingCostType(code, []), false);
+    }
 });
