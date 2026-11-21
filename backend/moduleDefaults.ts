@@ -135,6 +135,7 @@ export async function seedModuleMetadata(code: string): Promise<string[]> {
         const path = `module_workspaces/${code}/metadata/${list.key}`;
         const existing = await getDoc(path);
         const energyExpansion=code==='SAF'&&['hazards','hazardousEnergy'].includes(list.key);
+        const taxonomyExpansion=code==='FIN'&&list.key==='costCenterTypes';
         if (!isOutdated(code, list.key, existing)&&!(energyExpansion&&existing&&Number(existing.data.energyCatalogueVersion||0)<2)) continue;
         const oldItems=Array.isArray(existing?.data.items)?existing.data.items.filter(isObj):[];
         const oldCodes=new Set(oldItems.map(x=>str(x.code)));
@@ -143,7 +144,9 @@ export async function seedModuleMetadata(code: string): Promise<string[]> {
             ...(energyExpansion?{energyCatalogueVersion:2}:{}),
             title: list.title,
             description: list.description,
-            items: (energyExpansion&&existing?[...oldItems,...list.items.filter(x=>!oldCodes.has(x.code))]:list.items) as unknown as Plain,
+            items: ((energyExpansion||taxonomyExpansion)&&existing
+                ? [...oldItems,...list.items.filter(x=>!oldCodes.has(x.code))]
+                : list.items) as unknown as Plain,
             source: energyExpansion&&existing?str(existing.data.source)||'MEMS defaults':'MEMS defaults',
             version: list.version,
             createdAt: existing ? str(existing.data.createdAt) || now : now,
