@@ -47,8 +47,8 @@ export const DEFAULT_MODULE_METADATA: Record<string, Array<{ key: string; title:
     },{
         key:'primaryContainers',
         title:'Primary container types',
-        description:'MEMS Manufacturing category → subcategory → controlled primary-container attributes. Organizations adopt these platform master records; up to five dropdown attributes per type.',
-        version:1,
+        description:'MEMS Manufacturing category → subcategory → controlled primary-container attributes, including bulk storage tanks, silos, hoppers and vessels. Organizations adopt these platform master records.',
+        version:2,
         items:MFG_PRIMARY_CONTAINER_TYPES.map(t=>({
             code:t.code,label:t.name,category:t.category,subcategory:t.subcategory,
             categoryCode:t.categoryCode,subcategoryCode:t.subcategoryCode,sectors:t.sectors,
@@ -136,6 +136,7 @@ export async function seedModuleMetadata(code: string): Promise<string[]> {
         const existing = await getDoc(path);
         const energyExpansion=code==='SAF'&&['hazards','hazardousEnergy'].includes(list.key);
         const taxonomyExpansion=code==='FIN'&&list.key==='costCenterTypes';
+        const bulkContainerExpansion=code==='MFG'&&list.key==='primaryContainers';
         if (!isOutdated(code, list.key, existing)&&!(energyExpansion&&existing&&Number(existing.data.energyCatalogueVersion||0)<2)) continue;
         const oldItems=Array.isArray(existing?.data.items)?existing.data.items.filter(isObj):[];
         const oldCodes=new Set(oldItems.map(x=>str(x.code)));
@@ -144,7 +145,7 @@ export async function seedModuleMetadata(code: string): Promise<string[]> {
             ...(energyExpansion?{energyCatalogueVersion:2}:{}),
             title: list.title,
             description: list.description,
-            items: ((energyExpansion||taxonomyExpansion)&&existing
+            items: ((energyExpansion||taxonomyExpansion||bulkContainerExpansion)&&existing
                 ? [...oldItems,...list.items.filter(x=>!oldCodes.has(x.code))]
                 : list.items) as unknown as Plain,
             source: energyExpansion&&existing?str(existing.data.source)||'MEMS defaults':'MEMS defaults',
