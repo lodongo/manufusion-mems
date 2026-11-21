@@ -161,7 +161,7 @@ export async function materialMasterDashboard(ctx: OrgContext, id: string, looku
     add({id:'created',at:str(d.createdAt),action:'Material created',by:str(d.createdBy),details:'Original material request',origin:'Record'});
     add({id:'submitted',at:str(d.submittedAt),action:'Submitted for approval',by:str(d.submittedBy),details:str(d.workflowCode)||'PRC-001',origin:'Record'});
     add({id:'approved',at:str(d.approvedAt),action:'Material approved',by:str(d.approvedBy),details:str(d.workflowStage)||'',origin:'Record'});
-    add({id:'allocated',at:str(d.numberAllocatedAt),action:'Material number allocated',by:str(d.numberAllocatedBy),details:str(d.materialNumber),origin:'Record'});
+    add({id:'allocated',at:str(d.numberAllocatedAt),action:'Approved master data ID assigned',by:str(d.numberAllocatedBy),details:str(d.masterDataId||d.materialNumber),origin:'Record'});
     add({id:'published',at:str(d.pushedAt),action:'Published to original warehouse',by:str(d.pushedBy),details:warehouseLabel(sourceId).warehouseName,origin:'Record'});
     add({id:'updated',at:str(d.updatedAt),action:'Material updated',by:str(d.updatedBy),details:'Latest saved change',origin:'Record'});
     add({id:'disabled',at:str(d.disabledAt),action:'Material disabled',by:str(d.disabledBy),details:'Status change',origin:'Record'});
@@ -188,7 +188,7 @@ export async function materialMasterDashboard(ctx: OrgContext, id: string, looku
     const recent=await runQuery({from:[{collectionId:'audit_events'}],
         orderBy:orderDesc('at'),limit:auditCap},base);
     const extIds=matchingExtensions.map(x=>x.id);
-    const tokens=[id,...extIds,str(d.materialNumber)].filter(Boolean);
+    const tokens=[id,...extIds,str(d.masterDataId),str(d.materialNumber)].filter(Boolean);
     for(const item of recent){
         const ev=item.data;
         if(!['data','security','governance'].includes(str(ev.category)))continue;
@@ -203,7 +203,7 @@ export async function materialMasterDashboard(ctx: OrgContext, id: string, looku
 
     return {
         material:{id,name:str(d.name),shortText:str(d.shortText),
-            materialNumber:str(d.materialNumber),materialCode:str(d.materialCode),
+            materialNumber:str(d.materialNumber),masterDataId:str(d.masterDataId),materialCode:str(d.materialCode),
             categoryCode:str(d.categoryCode),subcategoryCode:str(d.subcategoryCode),
             familyCode:str(d.familyCode),status:str(d.status),
             workflowStage:str(d.workflowStage),createdAt:str(d.createdAt),createdBy:str(d.createdBy),
