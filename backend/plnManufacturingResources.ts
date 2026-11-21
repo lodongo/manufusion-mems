@@ -104,7 +104,7 @@ export const plnManufacturingResourceRoutes={
        });
    }
    const ids=accessible.map(x=>x.path.map(p=>p.id));
-   const common=ids.length?ids[0].findLast((id,i)=>ids.every(path=>path[i]===id))||'':'';
+   const common=ids.length?ids[0].filter((id,i)=>ids.every(path=>path[i]===id)).slice(-1)[0]||'':'';
    const highest=accessible[0]?.path.find(p=>p.id===common)||null;
    return {costCenters:accessible,highestPermittedScope:highest,
       unitOptions:PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable)
@@ -117,7 +117,9 @@ export const plnManufacturingResourceRoutes={
    return {location:cc,resource:doc&&str(doc.data.status)!=='removed'?
        {id:doc.id,name:str(doc.data.name),rateUom:str(doc.data.rateUom),
            notes:str(doc.data.notes||doc.data.description),revision:num(doc.data.revision)??1}:null,
-       canConfigure:await permitted(ctx,ccId,true)};
+       canConfigure:await permitted(ctx,ccId,true),
+       unitOptions:PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable)
+           .map(u=>({code:u.code,name:u.label,symbol:u.symbol,category:u.category}))};
  })],
  'POST /api/org/pln/resource/save':[orgRoute('org.pln.resource.save',null,async ctx=>{
    const ccId=validId(ctx.body.costCenterId);
