@@ -9,12 +9,11 @@ import { MCL_TO_RESTRICTION, SEGREGATED_RESTRICTIONS, restrictionCodesOf, locati
 // ---------------------------------------------------------------------------
 // Warehouse and storage setup for cost centers of type Inventory (INV) or Warehousing (WHS).
 //
-// Hierarchy:  warehouse (the cost center)  >  storage location  >  physical location (bins, in clusters)
+// Hierarchy: warehouse cost center > named storage location > storage cluster > physical position
 //   Warehouse         one or more material categories, layout per floor, capacity
-//   Storage location  SL-01 … inside the warehouse: a name, a storage location type (INV metadata) and a
-//                     warehouse restriction (RS01 …) from the same master the materials use (Procurement
-//                     metadata → warehouseRestrictions); the restriction gives the colour. Clusters and bins
-//                     inherit it, and a material is binned only where its restriction is the same.
+//   Storage location  SL-01 … structural name/type; legacy restriction is read-only
+//   Cluster           physical storage type, condition, stacking and an enabled restriction-code set
+//   Material          warehouse Stock Control restriction must be in its cluster's set.
 //                     Locations saved before carry an old material classification (MCL-…) and stay blocked
 //                     for binning until a person confirms their restriction.
 //   Cluster           CL-0001 …: a run of N physical locations taken in sequence on one floor, in one storage
