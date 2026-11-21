@@ -45,7 +45,7 @@ export function Button({
             disabled={busy || disabled}
             data-test-override={testOverride ? 'true' : undefined}
             title={testOverride ? 'Development test override available — normal status and data checks still apply' : rest.title}
-            className={`flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50 ${VARIANTS[variant]} ${testOverride && !disabled ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-transparent' : ''} ${className}`}
+            className={`flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50 ${VARIANTS[variant]} ${testOverride && !disabled ? 'border-2 border-blue-500 ring-1 ring-blue-500/50 ring-offset-2 ring-offset-transparent' : ''} ${className}`}
         >
             {busy && <Loader2 className='h-4 w-4 animate-spin' />}
             {children}
