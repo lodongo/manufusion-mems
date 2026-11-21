@@ -56,3 +56,28 @@ export function costCenterCategoryLabel(code: string): string {
 export function costCenterSubcategoryLabel(categoryCode: string, code: string): string {
     return costCenterSubcategories(categoryCode).find((subcategory) => subcategory.code === code)?.label ?? code;
 }
+
+/**
+ * Read the canonical multi-selection, including cost centers saved before it existed.
+ * The singular costSubcategory field is retained as a legacy primary alias.
+ */
+export function selectedCostCenterSubcategories(
+    attributes: { costSubcategories?: unknown; costSubcategory?: unknown } | null | undefined,
+): string[] {
+    const multi = Array.isArray(attributes?.costSubcategories)
+        ? attributes.costSubcategories
+        : typeof attributes?.costSubcategory === 'string' && attributes.costSubcategory
+            ? [attributes.costSubcategory] : [];
+    return [...new Set(multi.filter((code): code is string =>
+        typeof code === 'string' && code.trim().length > 0))];
+}
+
+export function costCenterSubcategoriesLabel(
+    categoryCode: string,
+    attributes: { costSubcategories?: unknown; costSubcategory?: unknown } | null | undefined,
+): string {
+    const selected = selectedCostCenterSubcategories(attributes);
+    return selected.length
+        ? selected.map((code) => costCenterSubcategoryLabel(categoryCode, code)).join(' · ')
+        : 'Not yet classified (legacy record)';
+}
