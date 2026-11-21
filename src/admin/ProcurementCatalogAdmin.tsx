@@ -120,16 +120,46 @@ export default function ProcurementCatalogAdmin({ kind, canWrite }: { kind: Kind
             const bytes = new TextEncoder().encode(textAll);
             const sha256 = await sha256Hex(bytes);
             const chunks: string[] = [];
-            for (let i = 0; i < textAll.length; i += CHUNK_CHARS) chunks.push(textAll.slice(i, i + CHUNK_CHARS));
-            await callBackend(`${t.api}/begin`, { kind, size: bytes.length, sha256, totalChunks: chunks.length, fileName: file.name.slice(0, 120) });
-            for (let i = 0; i < chunks.length; i++) {
-                setProgress(`Uploading part ${i + 1} of ${chunks.length}…`);
-                await callBackend(`${t.api}/chunk`, { kind, index: i, data: chunks[i] });
+            for(let i=0;i<textAll.length;i+=CHUNK_CHARS)chunks.push(textAll.slice(i,i+CHUNK_CHARS));
+            if(chunks.length>140)throw new Error('The file requires too many parts for this importer.');
+            const uploadId=crypto.randomUUID().replace(/-/g,'');
+            await callBackend(`${t.api}/begin`,{kind,uploadId,size:bytes.length,sha256,
+                totalChunks:chunks.length,fileName:file.name.slice(0,120)});
+            let acknowledged=0;
+            const uploadPart=async(index:number)=>{
+                const payload=chunks[index];
+                const chunkSha=await sha256Hex(new TextEncoder().encode(payload));
+                for(let attempt=0;attempt<4;attempt++){
+                    try{
+                        const ack=await callBackend<{ok:boolean;index:number;sha256:string}>(`${t.api}/chunk`,{
+                            kind,uploadId,index,sha256:chunkSha,data:payload,
+                        });
+                        if(ack.ok!==true||ack.index!==index||ack.sha256!==chunkSha)
+                            throw new Error('Upload part acknowledgement did not match.');
+                        acknowledged+=1;
+                        setProgress(`Verified ${acknowledged} of ${chunks.length} upload parts…`);
+                        return;
+                    }catch(err){
+                        if(attempt===3)throw new Error(`Part ${index+1} could not be saved after four attempts: ${err instanceof Error?err.message:String(err)}`);
+                        await new Promise(resolve=>setTimeout(resolve,(attempt+1)*450));
+                    }
+                }
+            };
+            for(let start=0;start<chunks.length;start+=3)
+                await Promise.all(Array.from({length:Math.min(3,chunks.length-start)},(_,i)=>
+                    uploadPart(start+i)));
+            setProgress('Checking integrity and saving to the database…');
+            let res=await callBackend<UploadResult & {retryable?:boolean;missingChunks?:number[]}>(`${t.api}/finish`,{kind,uploadId});
+            for(let pass=0;pass<3&&!res.ok&&res.retryable&&Array.isArray(res.missingChunks)&&res.missingChunks.length;pass++){
+                const missing=res.missingChunks.filter(i=>Number.isInteger(i)&&i>=0&&i<chunks.length);
+                if(!missing.length)break;
+                setProgress(`Repairing ${missing.length} missing upload parts…`);
+                for(const index of missing)await uploadPart(index);
+                setProgress('Rechecking the repaired upload…');
+                res=await callBackend<UploadResult & {retryable?:boolean;missingChunks?:number[]}>(`${t.api}/finish`,{kind,uploadId});
             }
-            setProgress('Checking and saving to the database…');
-            const res = await callBackend<UploadResult>(`${t.api}/finish`, { kind });
             setResult(res);
-            reload();
+            if(res.ok)reload();
         } catch (err) {
             setUploadError(err instanceof Error ? err.message : 'Upload failed.');
         } finally {
