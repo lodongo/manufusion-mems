@@ -42,6 +42,10 @@ const lineage=(nodes:Map<string,ScopeNode>,id:string):ScopeNode[]=>{
  return result;
 };
 export function isManufacturingCostType(code:string,raw:unknown){
+ // Primary categories have stable operational meaning regardless of an unseeded
+ // or customised Finance reference list. A subcategory never changes the module.
+ if(code==='MFG')return true;
+ if(code==='INV'||code==='WHS')return false;
  const items=Array.isArray(raw)?raw.filter(isObj):[];
  const match=items.find(x=>str(x.code)===code&&x.active!==false);
  if(!match)return false;
