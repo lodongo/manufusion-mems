@@ -80,6 +80,9 @@ const seed:CatalogSeed[]=[
     {code:'BUL',name:'Bulk, transport and hazardous-goods containers',sectors:['Chemicals','Oil & gas','Mining','Agriculture','Food','Logistics'],
         template:['closure','strength','contact','reuse','handling'],
         items:['Intermediate bulk container','Flexible intermediate bulk container','Bulk bag','Bulk tote','ISO tank container','Portable tank','Flexitank','Plastic drum','Hazardous goods jerrycan','Hazardous goods pail','Industrial hopper','Liquid liner','Dry bulk liner','Pressure vessel package','UN certified drum']},
+    {code:'BST',name:'Bulk storage tanks, silos and vessels',sectors:['Food & beverage','Chemicals','Agriculture','Mining','Oil & gas','Pharmaceutical','Utilities','Bulk ingredients'],
+        template:['grain','contact','pressure','duty','handling'],
+        items:["Stainless-steel bulk liquid storage tank","Carbon-steel bulk storage tank","Food-grade syrup storage tank","Sugar solution storage tank","Water bulk storage tank","Concentrate storage tank","Aseptic holding tank","Jacketed process tank","Insulated bulk liquid tank","Refrigerated bulk storage tank","Heated bulk storage tank","Agitated blend and holding tank","Buffer and surge tank","Atmospheric vertical storage tank","Horizontal storage tank","Pressurized bulk vessel","Vacuum process vessel","CIP solution storage tank","Raw ingredient bulk silo","Sugar silo","Flour or powder silo","Grain storage silo","Cement and mineral silo","Dry powder hopper","Conical discharge hopper","Bulk feed bin","Bulk ingredient bunker","Bulk solid storage bay","Open-top bulk storage pit","Underground bulk storage tank","Flexible bulk storage bladder","Tank farm storage vessel","Bulk tote tank","Mobile bulk process tank","Cryogenic bulk tank","Intermediate process hold vessel","Fermentation storage vessel","Bulk milk storage tank","Oil and fat bulk storage tank","Molasses storage tank"]},
     {code:'MED',name:'Medical and pharmaceutical containers',sectors:['Pharmaceutical','Biotechnology','Healthcare','Diagnostics'],
         template:['sterile','closure','contact','tamper','barrier'],
         items:['Sterile vial','Ampoule','Prefilled syringe','IV infusion bag','Blood bag','Blister strip','Inhaler canister','Auto-injector cartridge','Medical dropper','Eye-drop bottle','Pharmaceutical HDPE jar','Vaccine vial','Specimen container','Diagnostic reagent bottle','Unit dose cup','Dialysis fluid bag']},
@@ -131,8 +134,13 @@ export function primaryContainerCatalogueFromAdmin(source:unknown):MfgPrimaryCon
             sectors:Array.isArray(item.sectors)?item.sectors.filter(x=>typeof x==='string') as string[]:[],
             attributes:normalized});
     }
-    // If a platform list has no valid records, do not replace the shipped baseline.
-    return published.length?published:MFG_PRIMARY_CONTAINER_TYPES;
+    // Expand previously published catalogs additively with new stationary bulk-storage
+    // types. Never revive an explicitly disabled or non-selectable published code.
+    if(!published.length)return MFG_PRIMARY_CONTAINER_TYPES;
+    const present=new Set(source.filter((row):row is Record<string,unknown>=>!!row&&typeof row==='object'&&!Array.isArray(row))
+        .map(row=>str(row.code)));
+    return [...published,...MFG_PRIMARY_CONTAINER_TYPES.filter(type=>
+        type.categoryCode==='BST'&&!present.has(type.code))];
 }
 export function getPrimaryContainerMetadata(code:string,types:MfgPrimaryContainerType[]=MFG_PRIMARY_CONTAINER_TYPES):MfgPrimaryContainerType|null{
     return types===MFG_PRIMARY_CONTAINER_TYPES?map.get(code)??null:types.find(t=>t.code===code)??null;
