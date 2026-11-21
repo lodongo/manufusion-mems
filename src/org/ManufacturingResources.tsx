@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState,type ReactNode} from 'react';
+import {useEffect,useState,type ReactNode} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert,Field,SelectField} from '../components/ui';
 import PlnCostCenterSkuSetup from './PlnCostCenterSkuSetup';
@@ -124,7 +124,7 @@ function ScopeChoice({label,value,items,onChange}:{
 
 /** Scope-filtered manufacturing resources. Newly added cost centres disappear
  * from the available list and open the same shared detail editor as an asset. */
-export default function ManufacturingResources(){
+export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}={}){
  const [data,setData]=useState<ListData|null>(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
  const [le,setLe]=useState(''),[site,setSite]=useState(''),[department,setDepartment]=useState(''),[cc,setCc]=useState('');
@@ -175,6 +175,7 @@ export default function ManufacturingResources(){
   }
   setSelected([]);
   try{await load();}catch{ /* list refresh reports its own error */ }
+  if(count)onChanged?.();
   setNotice(count+' resource(s) added. Click a resource to configure its core and allocate SKUs.');
   if(faults.length)setError('Not added: '+faults.join('; '));
   setBusy(false);
@@ -186,12 +187,15 @@ export default function ManufacturingResources(){
   try{
    await callBackend('/api/org/pln/resource/remove',{
     costCenterId:x.costCenterId,expectedRevision:x.resource.revision});
-   await load();setNotice('Resource removed. Shared SKU allocation and capacity records remain intact.');
+   await load();onChanged?.();
+   setNotice('Resource removed. Shared SKU allocation and capacity records remain intact.');
   }catch(e){setError(e instanceof Error?e.message:'Resource could not be removed.');}
   finally{setBusy(false);}
  };
  if(opened)return <ManufacturingResourceDetail key={opened} costCenterId={opened}
-    onBack={()=>{setOpened('');void load();}} onSaved={()=>void load()}/>;
+    onBack={()=>{setOpened('');void load();}} onSaved={()=>{
+     void load();onChanged?.();
+    }}/>;
  return <div className='space-y-4'>
   <div className='flex flex-wrap items-center justify-between gap-2'>
    <div><h2 className='text-lg font-semibold text-ink'>Manufacturing Resources</h2>
