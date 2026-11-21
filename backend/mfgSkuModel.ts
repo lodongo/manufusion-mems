@@ -32,6 +32,8 @@ export type SkuComponents={
     containmentScope?:SkuContainmentScope;
     requiresCommercialPackaging?:boolean;requiresTransportPackaging?:boolean;
     productNameId?:string;productionFormId?:string;containerId?:string;
+    // SKU-owned manual quantity and published UoM; never taken from a Form Default.
+    containerCapacityQuantity?:number;containerCapacityUom?:string;
     containerSizeId?:string;packageId?:string;
     packagingSizeId?:string;packageCountId?:string; // legacy packageCountId read-only compatibility
     transportPackageId?:string;transportLayeringEnabled?:boolean;
@@ -152,7 +154,11 @@ export function calculateSkuConversion(
     const name=get('productNames',values.productNameId,options.requireProductName!==false);
     const form=get('productionForms',values.productionFormId,true);
     const container=get('containers',values.containerId);
-    const size=get('containerSizes',values.containerSizeId);
+    // Existing SKU size records remain readable; manual SKU capacity overrides
+    // them and is mandatory for new configurations without a legacy size.
+    const manualCapacity=values.containerCapacityQuantity!==undefined||
+        values.containerCapacityUom!==undefined;
+    const size=manualCapacity?null:get('containerSizes',values.containerSizeId);
     const pack=get('packages',values.packageId);
     const transport=get('transportPackages',values.transportPackageId);
     // Previously saved packaging counts remain interpretable; new SKUs use packaging sizes.
@@ -162,11 +168,12 @@ export function calculateSkuConversion(
     let needs:ReturnType<typeof skuContainmentNeeds>;
     try{needs=skuContainmentNeeds(values);}
     catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid SKU requirements.');}
-    if(Boolean(container)!==Boolean(size))throw new HttpError(400,'Physical container and its size must be selected together.');
-    if(needs.containmentScope==='NONE'&&(container||size))
-        throw new HttpError(400,'A direct process-flow SKU must not configure a physical container.');
-    if(needs.containmentScope!=='NONE'&&(!container||!size))
-        throw new HttpError(400,'Choose a physical container and size for the selected containment scope.');
+    if(needs.containmentScope==='NONE'&&(container||size||manualCapacity))
+        throw new HttpError(400,'A direct process-flow SKU must not configure physical container capacity.');
+    if(needs.containmentScope!=='NONE'&&!container)
+        throw new HttpError(400,'Choose a physical container for the selected containment scope.');
+    if(needs.containmentScope!=='NONE'&&!size&&!manualCapacity)
+        throw new HttpError(400,'Enter the primary container capacity and select its unit in the SKU. Capacity is not taken from Form Defaults.');
     if(needs.containmentScope==='BULK_STORAGE'&&container?.categoryCode!==BULK_STORAGE_CONTAINER_CATEGORY)
         throw new HttpError(400,'Bulk storage SKUs must use a tank, silo or vessel from the Bulk Storage category.');
     if(needs.containmentScope==='PRIMARY_CONTAINER'&&container?.categoryCode===BULK_STORAGE_CONTAINER_CATEGORY)
@@ -186,19 +193,33 @@ export function calculateSkuConversion(
     if(transport&&!container)
         throw new HttpError(400,'Transport packaging requires a physical container or bulk vessel.');
     if(pack&&!container)
-        throw new HttpError(400,'Commercial packaging requires a physical container and its size.');
+        throw new HttpError(400,'Commercial packaging requires a physical container and its manually configured capacity.');
     const productionUom=str(form?.uom);
     if(!productionUom)throw new HttpError(400,'Production form must define a production unit.');
     // Existing container parameters without category stay readable during migration.
     if(container?.categoryCode?.startsWith('UOM-') && container.categoryCode!==skuUnitCategoryOf(productionUom))
         throw new HttpError(400,'Physical container category is incompatible with the production form unit.');
     let contentPerContainer:number|null=null,perPack:number|null=null,perUnit:number|null=null;
-    if(size){
+    if(manualCapacity){
+        const entered=values.containerCapacityQuantity;
+        const enteredUnit=str(values.containerCapacityUom);
+        if(typeof entered!=='number'||!Number.isFinite(entered)||entered<=0||entered>1e12)
+            throw new HttpError(400,'Enter a positive primary-container capacity (up to 1,000,000,000,000).');
+        // The MEMS central UoM registry is authoritative: no free-text units.
+        const unit=PROCUREMENT_UNITS.find(u=>u.code===enteredUnit&&u.active&&u.selectable);
+        if(!unit)throw new HttpError(400,'Choose the primary container capacity unit from the MEMS units registry.');
+        const ratio=skuUnitConversion(unit.code,productionUom);
+        if(ratio===null)throw new HttpError(400,'Primary container capacity unit must be compatible with the SKU production form unit.');
+        contentPerContainer=entered*ratio;
+        if(!Number.isFinite(contentPerContainer)||contentPerContainer<=0||contentPerContainer>1e15)
+            throw new HttpError(400,'Converted primary-container capacity is outside the supported range.');
+    }else if(size){
+        // Legacy SKU only; new configurations must use the manual quantity/unit pair.
         const ratio=skuUnitConversion(str(size.uom),productionUom);
-        if(!ratio)throw new HttpError(400,'Container size unit is incompatible with the production form unit.');
+        if(!ratio)throw new HttpError(400,'Legacy container size unit is incompatible with the production form unit.');
         contentPerContainer=(num(size.quantity)??0)*ratio;
         if(!Number.isFinite(contentPerContainer)||contentPerContainer<=0)
-            throw new HttpError(400,'Configured container size must be positive.');
+            throw new HttpError(400,'Configured legacy container size must be positive.');
     }
     let packagedContainers:number|null=null;
     if(pack){
@@ -271,6 +292,8 @@ export function calculateSkuConversion(
     const selectedNames:Record<string,string>={};
     for(const [key,value] of Object.entries({productName:name,productionForm:form,container,containerSize:size,commercialPackage:pack,packageCount:count,transportPackage:transport,normalizationUnit:normalize}))
         if(value)selectedNames[key]=value.name;
+    if(manualCapacity)selectedNames.containerSize=String(values.containerCapacityQuantity)+' '+
+        (PROCUREMENT_UNITS.find(u=>u.code===values.containerCapacityUom)?.symbol||values.containerCapacityUom||'');
     return {
         containmentScope:needs.containmentScope,
         requiresCommercialPackaging:needs.requiresCommercialPackaging,
@@ -392,7 +415,11 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
 export function composeConfiguredSkuName(values:SkuComponents,params:SkuParameter[]):string {
     const selected=new Map(params.map(p=>[p.id,p]));
     const name=str(selected.get(values.productNameId||'')?.name).trim();
-    const size=str(selected.get(values.containerSizeId||'')?.name).trim();
+    const legacySize=str(selected.get(values.containerSizeId||'')?.name).trim();
+    const capacityUnit=PROCUREMENT_UNITS.find(u=>u.code===values.containerCapacityUom);
+    const size=values.containerCapacityQuantity!==undefined
+        ?String(values.containerCapacityQuantity)+' '+(capacityUnit?.symbol||values.containerCapacityUom||'')
+        :legacySize;
     const container=str(selected.get(values.containerId||'')?.name).trim();
     const pack=str(selected.get(values.packageId||'')?.name).trim();
     const count=str(selected.get(values.packagingSizeId||values.packageCountId||'')?.name).trim();
@@ -410,6 +437,11 @@ export function skuNamingValues(values:SkuComponents,params:SkuParameter[],conve
     const pick=(id:string|undefined)=>id?map.get(id):undefined;
     const product=pick(values.productNameId),form=pick(values.productionFormId);
     const container=pick(values.containerId),size=pick(values.containerSizeId);
+    const capacityUnit=PROCUREMENT_UNITS.find(u=>u.code===values.containerCapacityUom);
+    const capacityToken=values.containerCapacityQuantity!==undefined
+        ?{name:String(values.containerCapacityQuantity)+' '+(capacityUnit?.symbol||values.containerCapacityUom||''),
+          code:'',quantity:values.containerCapacityQuantity,unit:capacityUnit?.symbol||values.containerCapacityUom}
+        :undefined;
     const commerce=pick(values.packageId);
     const count=pick(values.packagingSizeId||values.packageCountId);
     const transport=pick(values.transportPackageId),norm=pick(values.normalizationUnitId);
@@ -420,7 +452,7 @@ export function skuNamingValues(values:SkuComponents,params:SkuParameter[],conve
         productName:token(product,product?.productCode),
         productionForm:token(form),
         primaryContainer:token(container,container?.metadataCode),
-        containerSize:token(size),
+        containerSize:capacityToken||token(size),
         commercialPackaging:token(commerce,commerce?.packagingTypeCode),
         commercialPackSize:token(count),
         transportPackaging:token(transport,transport?.packagingTypeCode),
