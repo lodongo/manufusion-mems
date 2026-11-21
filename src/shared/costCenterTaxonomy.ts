@@ -81,3 +81,30 @@ export function costCenterSubcategoriesLabel(
         ? selected.map((code) => costCenterSubcategoryLabel(categoryCode, code)).join(' · ')
         : 'Not yet classified (legacy record)';
 }
+
+/** Reject malformed, duplicate or cross-category selections before persisting a cost center. */
+export function validateCostCenterSubcategorySelection(
+    categoryCode: string,
+    submitted: unknown,
+    legacySingle: unknown,
+    required: boolean,
+): string[] {
+    if (submitted !== undefined && !Array.isArray(submitted))
+        throw new Error('Cost center subcategories must be a list.');
+    const values: unknown[] = submitted !== undefined
+        ? submitted as unknown[]
+        : typeof legacySingle === 'string' && legacySingle.trim() ? [legacySingle] : [];
+    const allowed = new Set(costCenterSubcategories(categoryCode).map((item) => item.code));
+    if (values.length > allowed.size)
+        throw new Error('Too many cost center subcategories selected.');
+    if (values.some((code) => typeof code !== 'string' || !code || code !== code.trim()))
+        throw new Error('Choose valid cost center subcategory codes.');
+    const selected = values as string[];
+    if (new Set(selected).size !== selected.length)
+        throw new Error('Each cost center subcategory can be selected only once.');
+    if (selected.some((code) => !allowed.has(code)))
+        throw new Error('Every selected subcategory must belong to the cost center category.');
+    if (!selected.length && required)
+        throw new Error('Choose at least one cost center subcategory.');
+    return selected;
+}
