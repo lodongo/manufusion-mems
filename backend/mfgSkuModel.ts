@@ -137,6 +137,7 @@ export function packagingPrimaryContainerCount(pack:SkuParameter,params:SkuParam
 export function calculateSkuConversion(
     values:SkuComponents,
     params:SkuParameter[],
+    options:{requireProductName?:boolean}={},
 ):SkuConversion {
     const byId=new Map(params.map(p=>[p.id,p]));
     const get=(kind:SkuParameterKind,id:string|undefined,required=false):SkuParameter|null=>{
@@ -146,7 +147,9 @@ export function calculateSkuConversion(
             throw new HttpError(400,'Choose an active, configured '+kind+' value (not a free-text value).');
         return found;
     };
-    const name=get('productNames',values.productNameId,true);
+    // Bulk or work-in-progress SKUs can use their independently entered product name.
+    // Finished products still require an adopted Product/Variant.
+    const name=get('productNames',values.productNameId,options.requireProductName!==false);
     const form=get('productionForms',values.productionFormId,true);
     const container=get('containers',values.containerId);
     const size=get('containerSizes',values.containerSizeId);
