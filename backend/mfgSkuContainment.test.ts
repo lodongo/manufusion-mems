@@ -5,6 +5,7 @@ import {calculateSkuConversion,type SkuComponents,type SkuParameter} from './mfg
 import {MFG_PRIMARY_CONTAINER_TYPES,primaryContainerCatalogueFromAdmin} from './mfgPrimaryContainerMetadata';
 import {skuContainmentNeeds,BULK_STORAGE_CONTAINER_CATEGORY} from '../src/shared/skuContainmentPolicy';
 import {skuRatingReadiness} from '../src/shared/plnSkuRatingReadiness';
+import {derivePhysicalCapacity,normalizePhysicalRating,physicalRatingUnits} from './plnPhysicalCapacity';
 
 const volume=PROCUREMENT_UNITS.find(u=>u.active&&u.selectable&&u.category==='Volume');
 if(!volume)throw new Error('Volume unit absent from approved MEMS UoM master');
@@ -99,15 +100,11 @@ test('forty bulk storage options are available even with older published contain
 });
 
 
-test('unconfigured intermediate SKU reports one actionable missing-master prerequisite',()=>{
+test('intermediate SKU is allocation-only regardless of physical containment completeness',()=>{
     const sku={id:'SKU_000000099',name:'Bulk concentrate',category:'INTERMEDIATE',skuComponents:{}};
-    const provisional={containerId:'CNT_BST',containerSizeId:'SIZ_01'};
-    const result=skuRatingReadiness(sku,provisional);
-    assert.equal(result.status,'SKU_SETUP_REQUIRED');
-    assert.match(result.message,/Materials & Products/);
-    assert.match(result.message,/physical container/);
-    assert.match(result.message,/production form/);
-    assert.match(result.message,/Selecting a container here does not configure/);
+    const result=skuRatingReadiness(sku,{containerId:'CNT_BST',containerSizeId:'SIZ_01'});
+    assert.equal(result.status,'INTERMEDIATE_NO_SPEED');
+    assert.match(result.message,/without commissioned-speed calculations/);
 });
 
 test('saved intermediate bulk SKU can be rated without a product variant or packaging',()=>{
@@ -122,7 +119,7 @@ test('saved intermediate bulk SKU can be rated without a product variant or pack
     assert.equal(conversion.containersPerPackage,null);
     assert.equal(skuRatingReadiness({id:'SKU_000000099',name:'Bulk concentrate',
         category:'INTERMEDIATE',skuComponents:components},
-        {containerId:'CNT_BST',containerSizeId:'SIZ_01'}).status,'READY');
+        {containerId:'CNT_BST',containerSizeId:'SIZ_01'}).status,'INTERMEDIATE_NO_SPEED');
 });
 
 test('rating setup guidance distinguishes mismatched and non-container SKUs',()=>{
@@ -132,6 +129,59 @@ test('rating setup guidance distinguishes mismatched and non-container SKUs',()=
     assert.equal(skuRatingReadiness(sku,{containerId:'CNT_PET',containerSizeId:'SIZ_02'}).status,
         'APPLY_SKU_SETUP');
     assert.equal(skuRatingReadiness({...sku,skuComponents:{containmentScope:'NONE'}},
+        {}).status,'INTERMEDIATE_NO_SPEED');
+    assert.equal(skuRatingReadiness({...sku,category:'FINISHED',skuComponents:{containmentScope:'NONE'}},
         {}).status,'NOT_CONTAINER_RATED');
     assert.equal(skuRatingReadiness(undefined,{}).status,'MISSING_SKU');
+});
+
+
+test('primary-container capacity must be entered manually with a registered unit',()=>{
+    const manual:SkuComponents={...common,containmentScope:'BULK_STORAGE',containerId:'CNT_BST',
+        containerCapacityQuantity:75,containerCapacityUom:volume.code,
+        requiresCommercialPackaging:false,requiresTransportPackaging:false};
+    const x=calculateSkuConversion(manual,params);
+    assert.equal(x.productionQtyPerPhysicalContainer,75);
+    assert.equal(x.containerSizeInProductionUom,75);
+    assert.equal(x.containersPerPackage,null);
+    assert.equal(skuRatingReadiness({id:'SKU_000000075',name:'Concentrate finished bulk',category:'FINISHED',
+        skuComponents:manual},{containerId:'CNT_BST',containerSizeId:''}).status,'READY');
+    assert.throws(()=>calculateSkuConversion({...manual,containerCapacityQuantity:0},params),/positive primary-container capacity/);
+    assert.throws(()=>calculateSkuConversion({...manual,containerCapacityUom:'BAD_UNIT'},params),/MEMS units registry/);
+    assert.throws(()=>calculateSkuConversion({...manual,containerCapacityUom:''},params),/MEMS units registry/);
+    assert.throws(()=>calculateSkuConversion({...common,containerId:'CNT_BST',containmentScope:'BULK_STORAGE'},params),
+        /Enter the primary container capacity/);
+});
+
+test('manual capacity, not a legacy container-size preset, drives finished SKU rated projections',()=>{
+    const units=physicalRatingUnits();
+    const count=units.count.find(u=>u.multiplier===1)??units.count[0];
+    const time=units.time.find(u=>u.name==='Hour')??units.time[0];
+    assert.ok(count&&time);
+    const manual:SkuComponents={...common,containmentScope:'BULK_STORAGE',containerId:'CNT_BST',
+        containerCapacityQuantity:75,containerCapacityUom:volume.code,
+        requiresCommercialPackaging:false,requiresTransportPackaging:false};
+    const resolvedParams=params.map(p=>p.id==='CNT_BST'?{...p,subcategoryCode:'BST_001'}:p);
+    const input=normalizePhysicalRating({skuId:'SKU_000000075',containerId:'CNT_BST',containerSizeId:'',
+        containerCategoryCode:'BST',containerSubcategoryCode:'BST_001',
+        ratingQuantity:10,ratingUnitCode:count.code,periodUnitCode:time.code,
+        ratingOutputCode:'PRIMARY_CONTAINER'});
+    assert.equal(input.containerSizeId,'');
+    const sku={id:'SKU_000000075',name:'Bulk concentrate final',category:'FINISHED',
+        uom:volume.code,skuComponents:manual};
+    const projection=derivePhysicalCapacity(sku,resolvedParams,input);
+    assert.match(projection.source.sizeName,/75/);
+    assert.equal(projection.source.physicalContainers,10*count.multiplier);
+    assert.equal(projection.productionForm.quantity,750*count.multiplier);
+    assert.throws(()=>derivePhysicalCapacity({...sku,category:'INTERMEDIATE'},resolvedParams,input),
+        /do not use commissioned speeds/);
+});
+
+test('manual capacity cannot silently fall back to legacy sizes when partially entered',()=>{
+    const old:SkuComponents={...common,containerId:'CNT_PET',containerSizeId:'SIZ_02'};
+    assert.equal(calculateSkuConversion(old,params).productionQtyPerPhysicalContainer,1);
+    assert.throws(()=>calculateSkuConversion({...old,containerCapacityQuantity:30},params),
+        /Choose the primary container capacity unit/);
+    assert.throws(()=>calculateSkuConversion({...old,containerCapacityUom:volume.code},params),
+        /Enter a positive primary-container capacity/);
 });
