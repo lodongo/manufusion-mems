@@ -431,7 +431,6 @@ export const warehouseRoutes = {
                     conditionLabel:c.conditionLabel||CONDITIONS.find(x=>x[0]===str(d.conditionCode))?.[1]||''};
             });
             const capacity = isObj(d.capacity) ? d.capacity : {};
-            const palletDefaults=isObj(d.palletStacking)?d.palletStacking:{};
             const total = layoutPositions(layout);
             const allocated = clusters.reduce((s, c) => s + c.positions, 0);
             const usedRestrictions = new Set(clusters.flatMap(c=>c.restrictionCodes));
@@ -444,15 +443,6 @@ export const warehouseRoutes = {
                           materialCategoryCodes: categoryCodesOf(d),
                           storageLocations: locations,
                           storageTypeCode: str(d.storageTypeCode),
-                          palletStacking:{
-                              enabled:str(d.storageTypeCode)==='PAL'&&palletDefaults.enabled===true,
-                              stackingPattern:str(palletDefaults.stackingPattern)||'STRAIGHT',
-                              bottomRowPallets:Number(palletDefaults.bottomRowPallets??palletDefaults.stackedColumns)||1,
-                              bottomRows:Number(palletDefaults.bottomRows??palletDefaults.stackedRows)||1,
-                              stackedRows:Number(palletDefaults.bottomRows??palletDefaults.stackedRows)||1,
-                              stackedColumns:Number(palletDefaults.bottomRowPallets??palletDefaults.stackedColumns)||1,
-                              numberOfStacks:str(palletDefaults.stackingPattern)==='PYRAMID'?2:Number(palletDefaults.numberOfStacks)||1,
-                          },
                           conditionCode: str(d.conditionCode),
                           layout,
                           capacity: {
@@ -638,7 +628,11 @@ export const warehouseRoutes = {
                     updatedAt: now,
                     createdAt: existing ? str(existing.data.createdAt) || now : now,
                 };
-                const affectedClusters=clusters.filter(x=>removedInUse.some(l=>l.code===x.locationCode)||x.subcategories.some(s=>droppedCats.includes(s.categoryCode)));if(affectedClusters.length){if(ctx.body.forceRemoveInUse!==true||str(ctx.body.forceConfirmation)!=='REMOVE IN USE')throw new HttpError(400,'Type REMOVE IN USE to confirm deleting affected clusters.');for(const cluster of affectedClusters)await deleteDoc(clusterCol(ctx.orgId,node.id)+'/'+cluster.code);}await writeDoc(whPath(ctx.orgId, node.id), data);
+                const affectedClusters=clusters.filter(x=>removedInUse.some(l=>l.code===x.locationCode)||x.subcategories.some(s=>droppedCats.includes(s.categoryCode)));if(affectedClusters.length){if(ctx.body.forceRemoveInUse!==true||str(ctx.body.forceConfirmation)!=='REMOVE IN USE')throw new HttpError(400,'Type REMOVE IN USE to confirm deleting affected clusters.');const linked=await listDocs('organizations/'+ctx.orgId+'/warehouse_bin_occupancy');
+                    if(affectedClusters.some(c=>linked.some(x=>str(x.data.warehouseId)===node.id&&
+                        str(x.data.binId).startsWith(c.code+'__'))))
+                        throw new HttpError(409,'A cluster scheduled for removal contains linked materials. Delink those materials first.');
+                    for(const cluster of affectedClusters)await deleteDoc(clusterCol(ctx.orgId,node.id)+'/'+cluster.code);}await writeDoc(whPath(ctx.orgId, node.id), data);
                 const total = layoutPositions(layout);
                 const typeLabel = (code: string) => types.find((t) => t.code === code)?.label ?? code;
                 await record(
@@ -898,6 +892,9 @@ export const warehouseRoutes = {
                 const [doc, wh] = await Promise.all([getDoc(`${clusterCol(ctx.orgId, node.id)}/${code}`), getDoc(whPath(ctx.orgId, node.id))]);
                 if (!doc) throw new HttpError(404, 'Cluster not found.');
                 const c = clusterOut(doc, layoutOf(wh?.data ?? {}));
+                const linked=await listDocs('organizations/'+ctx.orgId+'/warehouse_bin_occupancy');
+                if(linked.some(x=>str(x.data.warehouseId)===node.id&&str(x.data.binId).startsWith(code+'__')))
+                    throw new HttpError(409,'This cluster contains linked materials. Delink them before deleting its physical positions.');
                 await deleteDoc(`${clusterCol(ctx.orgId, node.id)}/${code}`);
                 await record(ctx, 'org.warehouse.cluster.delete', `Cluster ${code} of ${str(node.data.code)}`, `${c.firstCode} to ${c.lastCode} · ${c.positions} positions · ${reason.slice(0, 300)}`);
                 return { ok: true };
@@ -941,7 +938,8 @@ export const warehouseRoutes = {
                             locationCode: c.locationCode,
                             locationName: loc?.name ?? c.locationName,
                             locationType: loc?.typeLabel ?? '',
-                            restriction: c.restrictionCodes.join(', '),
+                            restriction: restrictionCodesOf(c.restrictionCodes.length?c.restrictionCodes:
+                                (c.restrictionCode||loc?.restrictionCode)).join(', '),
                             categories: cats,
                             subcategories: subs,
                             storageType: c.storageTypeLabel,
