@@ -115,7 +115,10 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
         void (async()=>{
             const comment=choice==='reject'?await appPrompt('Reason for rejection (at least 10 characters)'):'';
             if(choice==='reject'&&!comment)return;
-            if(choice==='approve'&&!await appConfirm('Complete the assigned workflow stage for '+m.name+'?'))return;
+            if(choice==='approve'&&!await appConfirm(
+                m.testOverride&&!data?.approvals.steps.length?
+                    'This older request has no workflow snapshot. Recover it with an audited one-step test override and approve '+m.name+'? The original request ID and historical decisions will be preserved.':
+                    'Complete the assigned workflow stage for '+m.name+'?'))return;
             await run(()=>callBackend('/api/org/procurement/materials/approve',{id,decision:choice,comment}));
         })();
     };
