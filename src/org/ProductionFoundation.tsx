@@ -10,6 +10,7 @@ import PlnDocumentation from './PlnDocumentation';
 import {configurationProgress,type SetupRow,type SetupStep} from './plnSetupDependencies';
 import {DEFAULT_FORM_DEFAULTS,formDefaultsFor,preferredSiteId,type FormDefaults} from './plnFormDefaults';
 import PlnFormDefaultsPanel from './PlnFormDefaultsPanel';
+import { bomUomName } from './plnBomUomDisplay';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 '+className}>{children}</section>;
 }
@@ -92,19 +93,6 @@ const str=(value:unknown):string=>typeof value==='string'?value:'';
 const number=(value:unknown,def=0):number=>typeof value==='number'&&Number.isFinite(value)?value:def;
 const asComponents=(value:unknown):Component[]=>Array.isArray(value)?value as Component[]:[];
 const asOperations=(value:unknown):Operation[]=>Array.isArray(value)?value as Operation[]:[];
-
-/** Presentation only: BOM identities remain UOM master codes for validation, inventory and MRP. */
-export function bomUomName(value:string, units:SkuSetup['units']):string{
-    if(!value)return 'Select a material';
-    const key=value.trim();
-    const unit=units.find(u=>u.code===key)||
-        units.find(u=>u.symbol===key)||
-        units.find(u=>u.symbol.toLowerCase()===key.toLowerCase())||
-        units.find(u=>u.label.toLowerCase()===key.toLowerCase());
-    if(!unit)return 'Unit not found in UoM master data';
-    return unit.label+(unit.symbol?' ('+unit.symbol+')':'');
-}
-
 
 function Field({title,value,onChange,type='text',placeholder='',required=false,disabled=false}:{title:string;value:string|number;onChange:(v:string)=>void;type?:string;placeholder?:string;required?:boolean;disabled?:boolean}){
     const id=useId();
