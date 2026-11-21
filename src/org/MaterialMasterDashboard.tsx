@@ -5,7 +5,7 @@ import { appConfirm, appPrompt } from '../components/dialogs';
 import { Alert } from '../components/ui';
 import { Badge, Button, Card, PageTitle, Spinner, useLoad } from '../admin/kit';
 
-type Tab = 'dashboard' | 'attributes' | 'warehouses' | 'availability' | 'history';
+type Tab = 'approvals' | 'dashboard' | 'attributes' | 'warehouses' | 'availability' | 'history';
 
 interface MaterialSummary {
     id:string; name:string; shortText:string; status:string;
@@ -16,7 +16,7 @@ interface MaterialSummary {
     createdBy:string; createdAt:string; submittedAt:string; submittedBy:string; updatedAt:string;
     warehouseId:string; pushedAt:string; warehouseRestrictionCodes:string[];
     canEdit:boolean; canDelete:boolean; canSubmit:boolean; canApprove:boolean;
-    canExtend:boolean; canLifecycle:boolean;
+    canExtend:boolean; canLifecycle:boolean;testOverride:boolean;masterDataId:string;
 }
 interface WarehouseRow {
     warehouseId:string; warehouseName:string; warehouseCode:string;
@@ -41,6 +41,15 @@ interface MaterialDashboardData {
     availability:AvailabilityRow[];
     history:HistoryRow[];
     historyNote:string;ledgerNote:string;
+    approvals:{
+        requestId:string;masterDataId:string;code:string;name:string;
+        approvalMode:string;approvalRule:string;
+        steps:Array<{number:number;action:string;mode:string;assignee:string;
+            decisions:Array<{decision:string;by:string;at:string;comment:string}>}>;
+        extensions:Array<{requestId:string;warehouseId:string;warehouseName:string;
+            status:string;canApprove:boolean;workflowCode:string;workflowStage:string;
+            decisions:Array<{decision:string;by:string;at:string;comment:string;action:string;stepIndex:number}>}>;
+    };
 }
 interface Props {
     id:string;
@@ -51,6 +60,7 @@ interface Props {
 }
 
 const TABS:Array<{key:Tab;label:string}>=[
+    {key:'approvals',label:'Approvals'},
     {key:'dashboard',label:'Dashboard'},
     {key:'attributes',label:'Attributes'},
     {key:'warehouses',label:'Warehouses'},
@@ -80,7 +90,7 @@ function Metric({label,value,note}: {label:string;value:string;note?:string}) {
 export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onExtend}:Props) {
     const {data,loading,error,reload}=useLoad(()=>
         callBackend<MaterialDashboardData>('/api/org/procurement/materials/dashboard',{id}));
-    const [tab,setTab]=useState<Tab>('dashboard');
+    const [tab,setTab]=useState<Tab>('approvals');
     const [busy,setBusy]=useState(false);
     const [failure,setFailure]=useState('');
     const m=data?.material;
@@ -131,11 +141,11 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
             await run(()=>callBackend('/api/org/procurement/materials/'+choice,{id}),choice==='delete');
         })();
     };
-    const lifecycle=(action:'allocate'|'push'|'disable'|'delete')=>{
+    const lifecycle=(action:'disable'|'delete')=>{
         if(!m?.canLifecycle)return;
         void (async()=>{
-            if(action!=='allocate'&&!await appConfirm(
-                (action==='delete'?'Delete the approved material':action==='disable'?'Disable material':'Publish material to its original warehouse')
+            if(!await appConfirm(
+                (action==='delete'?'Delete the approved material':'Disable material')
                 +' '+m.name+'?'))return;
             await run(()=>callBackend('/api/org/procurement/materials/lifecycle',{id,action}),action==='delete');
         })();
@@ -143,7 +153,7 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
 
     return <div className='space-y-4 pb-12'>
         <PageTitle title={headerTitle} subtitle={
-            (m?.materialNumber||m?.id||id)+' · '+(m?.shortText||'Organization Materials Master')
+            (m?.masterDataId||m?.materialNumber||'Pending MSTD approval')+' · '+(m?.shortText||'Organization Materials Master')
         } action={<div className='flex gap-2'>
             <Button variant='secondary' onClick={onBack}><ArrowLeft className='h-4 w-4'/> Materials</Button>
             <Button variant='secondary' onClick={reload} disabled={busy}><RefreshCw className='h-4 w-4'/> Refresh</Button>
@@ -156,25 +166,19 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
                 <div className='flex flex-wrap items-center gap-2'>
                     <Badge tone={m.status==='active'||m.status==='approved'?'brand':m.status==='pending_approval'?'warn':'muted'}>{description(m.status)}</Badge>
                     {m.workflowStage&&<span className='text-xs text-soft'>{m.workflowStage}</span>}
-                    <span className='ml-auto text-xs text-muted'>{m.materialNumber||'Number not allocated'}</span>
+                    <span className='ml-auto text-xs text-muted'>Request: {m.id} · Master: {m.masterDataId||'Not approved'}</span>
                 </div>
                 <div>
                     <h2 className='text-sm font-semibold text-ink'>Material actions</h2>
                     <p className='mt-1 text-xs text-muted'>Only operations authorized for your security role and the current material status are shown.</p>
                 </div>
                 <div className='flex flex-wrap gap-2'>
-                    {m.canEdit&&<Button variant='secondary' disabled={busy} onClick={()=>onEdit(id)}><Pencil className='h-4 w-4'/> Edit draft</Button>}
-                    {m.canDelete&&<Button variant='danger' disabled={busy} onClick={()=>draftAction('delete')}><Trash2 className='h-4 w-4'/> Delete draft</Button>}
-                    {m.canSubmit&&<Button disabled={busy} onClick={()=>draftAction('submit')}>Submit for approval</Button>}
-                    {m.canApprove&&<>
-                        <Button disabled={busy} onClick={()=>decision('approve')}>{m.workflowStage.startsWith('Review')?'Complete review':'Approve'}</Button>
-                        <Button variant='secondary' disabled={busy} onClick={()=>decision('reject')}>Reject</Button>
-                    </>}
-                    {m.canExtend&&<Button variant='secondary' disabled={busy} onClick={()=>onExtend(id)}><Plus className='h-4 w-4'/> Extend to warehouse</Button>}
-                    {m.canLifecycle&&m.status==='approved'&&!m.materialNumber&&<Button disabled={busy} onClick={()=>lifecycle('allocate')}>Allocate material number</Button>}
-                    {m.canLifecycle&&m.status==='approved'&&!!m.materialNumber&&!m.pushedAt&&<Button disabled={busy} onClick={()=>lifecycle('push')}>Publish to original warehouse</Button>}
-                    {m.canLifecycle&&['approved','active'].includes(m.status)&&<Button variant='secondary' disabled={busy} onClick={()=>lifecycle('disable')}>Disable</Button>}
-                    {m.canLifecycle&&m.status==='approved'&&!m.pushedAt&&<Button variant='danger' disabled={busy} onClick={()=>lifecycle('delete')}>Delete approved material</Button>}
+                    {m.canEdit&&<Button testOverride={m.testOverride} variant='secondary' disabled={busy} onClick={()=>onEdit(id)}><Pencil className='h-4 w-4'/> Edit draft</Button>}
+                    {m.canDelete&&<Button testOverride={m.testOverride} variant='danger' disabled={busy} onClick={()=>draftAction('delete')}><Trash2 className='h-4 w-4'/> Delete draft</Button>}
+                    {m.canSubmit&&<Button testOverride={m.testOverride} disabled={busy} onClick={()=>draftAction('submit')}>Submit for approval</Button>}
+                    {m.canExtend&&<Button testOverride={m.testOverride} variant='secondary' disabled={busy} onClick={()=>onExtend(id)}><Plus className='h-4 w-4'/> Extend to warehouse</Button>}
+                    {m.canLifecycle&&['approved','active'].includes(m.status)&&<Button testOverride={m.testOverride} variant='secondary' disabled={busy} onClick={()=>lifecycle('disable')}>Disable</Button>}
+                    {m.canLifecycle&&m.status==='approved'&&!m.pushedAt&&<Button testOverride={m.testOverride} variant='danger' disabled={busy} onClick={()=>lifecycle('delete')}>Delete approved material</Button>}
                 </div>
             </Card>
             <div role='tablist' aria-label='Material dashboard sections'
@@ -186,6 +190,65 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
                     )}>{x.label}</button>)}
             </div>
             <div role='tabpanel' className='space-y-4'>
+                {tab==='approvals'&&<div className='space-y-3'>
+                    <Card className='space-y-3'>
+                        <div className='flex flex-wrap items-center justify-between gap-2'>
+                            <h2 className='font-semibold text-ink'>Material creation · {data.approvals.requestId}</h2>
+                            <Badge tone={m.status==='approved'||m.status==='active'?'brand':m.status==='pending_approval'?'warn':'muted'}>{description(m.status)}</Badge>
+                        </div>
+                        <dl className='grid gap-x-5 sm:grid-cols-2'>
+                            <Fact label='Creation request ID' value={data.approvals.requestId}/>
+                            <Fact label='Approved master data ID' value={data.approvals.masterDataId||'Assigned at final approval'}/>
+                            <Fact label='Approval workflow' value={data.approvals.name||data.approvals.code||'Not yet submitted'}/>
+                            <Fact label='Execution and threshold' value={[data.approvals.approvalMode,data.approvals.approvalRule].filter(Boolean).join(' · ')}/>
+                            <Fact label='Current stage' value={m.workflowStage||description(m.status)}/>
+                            <Fact label='Submitted' value={showDate(m.submittedAt)}/>
+                        </dl>
+                        {m.canApprove&&<div className='flex flex-wrap gap-2 border-t border-line pt-3'>
+                            <Button testOverride={m.testOverride} disabled={busy} onClick={()=>decision('approve')}>{m.workflowStage.startsWith('Review')?'Complete review':'Approve request'}</Button>
+                            <Button testOverride={m.testOverride} variant='secondary' disabled={busy} onClick={()=>decision('reject')}>Reject request</Button>
+                        </div>}
+                        {m.testOverride&&<p className='text-xs text-blue-300'>Development test mode · blue-bordered actions can bypass workflow assignment and maker–checker. All bypassed controls are audited.</p>}
+                        {!data.approvals.steps.length&&m.status==='pending_approval'&&
+                            <Alert tone='warn'>This request has no valid workflow snapshot. Legacy approval routes cannot be used; an administrator must resolve the request under PRC-001.</Alert>}
+                        {data.approvals.steps.length>0&&<div className='space-y-2 border-t border-line pt-3'>
+                            <h3 className='text-sm font-semibold text-ink'>Configured approval stages</h3>
+                            {data.approvals.steps.map(step=><div key={step.number} className='rounded-xl border border-line bg-page p-3'>
+                                <div className='flex flex-wrap items-center justify-between gap-2'>
+                                    <p className='text-sm font-medium text-ink'>{step.number}. {step.action==='review'?'Review':'Approval'} · {step.assignee}</p>
+                                    <Badge tone={step.decisions.some(d=>d.decision==='approve')?'brand':'muted'}>
+                                        {step.decisions.length?description(step.decisions[step.decisions.length-1].decision):'Awaiting decision'}
+                                    </Badge>
+                                </div>
+                                {step.decisions.map((d,i)=><p key={i} className='mt-2 text-xs text-soft'>{showDate(d.at)} · {d.by||'Unknown actor'} · {description(d.decision)}{d.comment?' · '+d.comment:''}</p>)}
+                            </div>)}
+                        </div>}
+                    </Card>
+                    {data.approvals.extensions.length>0&&<Card className='space-y-3'>
+                        <h2 className='font-semibold text-ink'>Warehouse extension approvals</h2>
+                        {data.approvals.extensions.map(ext=><div key={ext.requestId} className='space-y-2 border-b border-line pb-3'>
+                            <div className='flex flex-wrap items-start justify-between gap-2'>
+                                <div>
+                                    <p className='font-semibold text-ink'>{ext.warehouseName}</p>
+                                    <p className='text-xs text-muted'>{ext.requestId} · {ext.workflowCode||'PRC-002'}</p>
+                                    <p className='text-xs text-soft'>{ext.workflowStage}</p>
+                                </div>
+                                <Badge tone={ext.status.toLowerCase()==='approved'?'brand':ext.status.toLowerCase().includes('pending')?'warn':'muted'}>{ext.status}</Badge>
+                            </div>
+                            {ext.canApprove&&<div className='flex flex-wrap gap-2'>
+                                <Button testOverride={m.testOverride} disabled={busy} onClick={()=>{
+                                    const target=data.warehouses.find(w=>w.requestId===ext.requestId);
+                                    if(target)extensionDecision(target,'approve');
+                                }}>Approve extension</Button>
+                                <Button testOverride={m.testOverride} variant='secondary' disabled={busy} onClick={()=>{
+                                    const target=data.warehouses.find(w=>w.requestId===ext.requestId);
+                                    if(target)extensionDecision(target,'reject');
+                                }}>Reject extension</Button>
+                            </div>}
+                            {ext.decisions.map((d,i)=><p key={i} className='text-xs text-muted'>{showDate(d.at)} · {d.action||'Workflow'} · {description(d.decision)} · {d.by}{d.comment?' · '+d.comment:''}</p>)}
+                        </div>)}
+                    </Card>}
+                </div>}
                 {tab==='dashboard'&&<>
                     <div className='grid grid-cols-2 gap-2 lg:grid-cols-4'>
                         <Metric label='Published warehouses' value={String(published.length)} note='Original and extensions'/>
@@ -201,7 +264,8 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
                         <dl className='grid gap-x-5 sm:grid-cols-2'>
                             <Fact label='Description' value={m.shortText}/>
                             <Fact label='Material code' value={m.materialCode}/>
-                            <Fact label='Material number' value={m.materialNumber}/>
+                            <Fact label='Material master ID' value={m.masterDataId||m.materialNumber}/>
+                            <Fact label='Creation request ID' value={m.id}/>
                             <Fact label='Classification' value={[m.categoryCode,m.subcategoryCode,m.familyCode].filter(Boolean).join(' / ')}/>
                             <Fact label='Unit of measure' value={m.uom}/>
                             <Fact label='Supply relationship' value={m.supplyType}/>
@@ -246,10 +310,6 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
                                 {w.mapped?'Published':w.status||'Not published'}
                             </Badge>
                         </div>
-                        {w.canApprove&&<div className='flex flex-wrap gap-2'>
-                            <Button disabled={busy} onClick={()=>extensionDecision(w,'approve')}>Approve extension</Button>
-                            <Button variant='secondary' disabled={busy} onClick={()=>extensionDecision(w,'reject')}>Reject extension</Button>
-                        </div>}
                         <dl className='grid gap-x-4 sm:grid-cols-2'>
                             <Fact label='Workflow state' value={w.status}/>
                             <Fact label='Created / extension requested' value={showDate(w.requestedAt)}/>
