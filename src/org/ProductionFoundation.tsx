@@ -710,7 +710,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
                 <h3 className='break-words font-semibold'>{row.name}</h3>
-                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='resources'?str(row.type)+' · '+number(row.rate)+'/h':active==='routings'?'Operations: '+asOperations(row.operations).length:'BOM · '+(materialPolicy.bomClassifications.find(c=>c.code===str(row.classificationCode))?.name||str(row.classificationCode)||'Production')+' · Components: '+asComponents(row.components).length}</p>
+                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='routings'?'Operations: '+asOperations(row.operations).length:'BOM · '+(materialPolicy.bomClassifications.find(c=>c.code===str(row.classificationCode))?.name||str(row.classificationCode)||'Production')+' · Components: '+asComponents(row.components).length}</p>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
                     {active==='items'&&['FINISHED','INTERMEDIATE'].includes(str(row.category))&&
