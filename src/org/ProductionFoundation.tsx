@@ -93,6 +93,19 @@ const number=(value:unknown,def=0):number=>typeof value==='number'&&Number.isFin
 const asComponents=(value:unknown):Component[]=>Array.isArray(value)?value as Component[]:[];
 const asOperations=(value:unknown):Operation[]=>Array.isArray(value)?value as Operation[]:[];
 
+/** Presentation only: BOM identities remain UOM master codes for validation, inventory and MRP. */
+export function bomUomName(value:string, units:SkuSetup['units']):string{
+    if(!value)return 'Select a material';
+    const key=value.trim();
+    const unit=units.find(u=>u.code===key)||
+        units.find(u=>u.symbol===key)||
+        units.find(u=>u.symbol.toLowerCase()===key.toLowerCase())||
+        units.find(u=>u.label.toLowerCase()===key.toLowerCase());
+    if(!unit)return 'Unit not found in UoM master data';
+    return unit.label+(unit.symbol?' ('+unit.symbol+')':'');
+}
+
+
 function Field({title,value,onChange,type='text',placeholder='',required=false,disabled=false}:{title:string;value:string|number;onChange:(v:string)=>void;type?:string;placeholder?:string;required?:boolean;disabled?:boolean}){
     const id=useId();
     return <MemsField id={id} label={title} type={type} value={value} placeholder={placeholder}
@@ -135,8 +148,12 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
     const masterUom=baseUnit||str(items.find(i=>i.id===skuId)?.uom);
     const unit=skuSetup.units.find(u=>u.code===masterUom||u.symbol.toLowerCase()===masterUom.toLowerCase());
     const supported=unit?skuSetup.units.filter(u=>u.categoryCode===unit.categoryCode&&u.baseUnit===unit.baseUnit):[];
-    return [[current,current||'Choose a unit'],...supported.filter(u=>u.code!==current)
-       .map(u=>[u.code,u.label+' ('+u.symbol+')'] as [string,string])];
+    return [
+        ...(!current?([['','Choose a unit']] as Array<[string,string]>):
+            [[current,bomUomName(current,skuSetup.units)] as [string,string]]),
+        ...supported.filter(u=>u.code!==current&&u.symbol!==current)
+            .map(u=>[u.code,bomUomName(u.code,skuSetup.units)] as [string,string]),
+    ];
  };
  return <div className='space-y-4'>
     <div className='rounded-xl bg-page p-3 text-sm text-soft'>
@@ -152,14 +169,14 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                     siteId:str(draft.siteId),productVariantId:'',routingId:'',
                     components:components.filter(c=>c.skuId!==v)});
             }}/>
-        {output?<p className='text-sm text-soft'>Material classification: {str(output.category)} · Base unit: {str(output.uom)}</p>:
+        {output?<p className='text-sm text-soft'>Material classification: {str(output.category)} · Base unit: {bomUomName(str(output.uom),skuSetup.units)}</p>:
             <p className='text-xs text-muted'>Not listed? Create the material first in Materials & Products.</p>}
         <div className='grid gap-2 sm:grid-cols-2'>
             <Field title='How much does this BOM produce?' type='number' value={quantity}
                 onChange={v=>update('outputQty',Number(v))}/>
             <div className='rounded-xl border border-line bg-page p-3'>
                 <p className='text-xs text-muted'>Output unit (from selected material)</p>
-                <p className='mt-1 text-sm font-semibold'>{outputUom}</p>
+                <p className='mt-1 text-sm font-semibold'>{bomUomName(outputUom,skuSetup.units)}</p>
             </div>
         </div>
     </section>
@@ -167,7 +184,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
         <div className='flex items-start justify-between gap-2'>
             <div>
                 <h3 className='font-semibold'>2. What materials are needed?</h3>
-                <p className='mt-1 text-xs text-muted'>Quantities for {quantity} {outputUom} of the output.</p>
+                <p className='mt-1 text-xs text-muted'>Quantities for {quantity} {bomUomName(outputUom,skuSetup.units)} of the output.</p>
             </div>
             <Button type='button' variant='secondary' disabled={!output||components.length>=150}
                 onClick={()=>update('components',[...components,{source:'INTERMEDIATE',skuId:'',warehouseId:'',materialId:'',quantity:1,uom:'',scrapPct:0}])}>Add material</Button>
@@ -220,7 +237,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                 onChange={v=>updateComponent(i,{quantity:Number(v)})}/>
                             <div className='rounded-xl border border-line bg-panel p-3'>
                                 <p className='text-xs text-muted'>Unit of measure</p>
-                                <p className='mt-1 break-words text-sm font-semibold'>{c.uom||'Select a material'}</p>
+                                <p className='mt-1 break-words text-sm font-semibold'>{bomUomName(c.uom,skuSetup.units)}</p>
                             </div>
                         </div>
                         {(fromWarehouse?!!material:!!c.skuId)&&<details className='text-xs text-muted'>
