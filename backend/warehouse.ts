@@ -180,6 +180,21 @@ function int(v: unknown, min: number, max: number, label: string): number {
     if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${label} must be a whole number from ${min} to ${max}.`);
     return n;
 }
+/** Pallet stacks occupy rows × columns floor places; vertical levels add capacity, not physical addresses. */
+export function palletPositionCapacity(b:Record<string,unknown>,defaultStorageType:string,total:number){
+    const storageTypeCode=str(b.storageTypeCode)||defaultStorageType;
+    if(b.stackingEnabled===true&&storageTypeCode!=='PAL')
+        throw new HttpError(400,'Pallet stacking can be configured only for pallet storage.');
+    const stackingEnabled=storageTypeCode==='PAL'&&b.stackingEnabled===true;
+    const stackedRows=stackingEnabled?int(b.stackedRows,1,100,'Stacked rows'):null;
+    const stackedColumns=stackingEnabled?int(b.stackedColumns,1,100,'Stacked columns'):null;
+    const numberOfStacks=stackingEnabled?int(b.numberOfStacks,1,20,'Number of stacks (pallets high)'):null;
+    const size=int(b.count,1,Math.min(MAX_CLUSTER_POSITIONS,total),'The number of physical positions');
+    if(stackingEnabled&&size!==(stackedRows??1)*(stackedColumns??1))
+        throw new HttpError(400,'Pallet floor positions must equal stacked rows × stacked columns.');
+    const palletCapacity=storageTypeCode==='PAL'?size*(numberOfStacks??1):null;
+    return {size,stackingEnabled,stackedRows,stackedColumns,numberOfStacks,palletCapacity};
+}
 function dec(v: unknown, min: number, max: number, label: string, required: boolean): number | null {
     if (v === undefined || v === null || String(v).trim() === '') {
         if (required) throw new HttpError(400, `Enter the ${label}.`);
@@ -645,18 +660,8 @@ export const warehouseRoutes = {
                 const floorNo = int(b.floor, 1, layout.floors.length, 'The floor');
                 const floor = layout.floors[floorNo - 1];
                 const total = floorPositions(floor);
-                const palletType=str(b.storageTypeCode)||str(wh.data.storageTypeCode);
-                const stackingEnabled=palletType==='PAL'&&b.stackingEnabled===true;
-                const stackedRows=stackingEnabled?int(b.stackedRows,1,100,'Stacked rows'):null;
-                const stackedColumns=stackingEnabled?int(b.stackedColumns,1,100,'Stacked columns'):null;
-                const numberOfStacks=stackingEnabled?int(b.numberOfStacks,1,20,'Number of stacks (pallets high)'):null;
-                if(b.stackingEnabled===true&&palletType!=='PAL')
-                    throw new HttpError(400,'Pallet stacking can be configured only for pallet storage.');
-                const footprint=stackingEnabled?(stackedRows??1)*(stackedColumns??1):null;
-                const size=int(b.count,1,Math.min(MAX_CLUSTER_POSITIONS,total),'The number of physical positions');
-                if(footprint!==null&&size!==footprint)
-                    throw new HttpError(400,'Pallet floor positions must equal stacked rows × stacked columns.');
-                const palletCapacity=palletType==='PAL'?size*(numberOfStacks??1):null;
+                const {size,stackingEnabled,stackedRows,stackedColumns,numberOfStacks,palletCapacity}=
+                    palletPositionCapacity(b,str(wh.data.storageTypeCode),total);
 
                 // Storage location of this warehouse.
                 const { locations } = await describeLocations(locationsOf(wh.data));
