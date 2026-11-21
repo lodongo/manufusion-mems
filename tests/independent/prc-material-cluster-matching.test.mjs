@@ -58,5 +58,5 @@ test('automatic material-to-cluster association never creates an inventory trans
     assert.ok(warehouse.includes('const clusterMaterials=materialDocs.filter'));
     assert.ok(warehouseUI.includes('Assigned materials'));
     assert.ok(warehouseUI.includes('Actual stock placement and physical positions are handled in Inventory after approval'));
-    assert.ok(procurement.includes("const requiredCodes=restrictionCodesOf("));
+    assert.ok(procurement.includes("const requiredCodes=materialRequiredRestrictions("));
 });
