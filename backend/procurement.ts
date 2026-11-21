@@ -36,6 +36,7 @@ import { audited, requireAt } from './scopeGuard';
 import { hasPerm, orgRoute, staff, type OrgContext, type SecureContext } from './guards';
 import { bypass } from './testModeCore';
 import { materialApprovalNotStarted, materialDraftCan, materialMakerCheckerConflict, materialMakerIds } from './materialDraftSecurity';
+import { materialMasterDashboard } from './materialMasterDashboard';
 
 // ---------------------------------------------------------------------------
 // Material approval delegation: validated on save, dated, audited. Undated or malformed entries grant nothing.
@@ -1749,6 +1750,26 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
             };
         }));
         return {items};
+    })],
+    'POST /api/org/procurement/materials/dashboard': [orgRoute('org.procurement.materials.dashboard',null,async ctx=>{
+        requireModule(ctx,'materials');
+        const result=await materialMasterDashboard(ctx,str(ctx.body.id),
+            code=>catalogItemSpec('materials',code));
+        const m=result.material;
+        const workflow=str(m.status)==='pending_approval'?
+            materialWorkflowSnapshot((await getDoc('organizations/'+ctx.orgId+'/materials/'+m.id))?.data||{}):null;
+        const elevated=ctx.role==='org_super_admin';
+        const lifecycle=elevated||['PRC.materials.manage','PRC.admin'].some(p=>hasPerm(ctx.permissions,p));
+        const canExtend=elevated||['PRC.create','PRC.materials.manage','PRC.admin'].some(p=>hasPerm(ctx.permissions,p));
+        const record=(await getDoc('organizations/'+ctx.orgId+'/materials/'+m.id))!.data;
+        return {...result,material:{...m,
+            canEdit:materialDraftCan(record,ctx.uid,ctx.permissions,'edit',elevated),
+            canDelete:materialDraftCan(record,ctx.uid,ctx.permissions,'delete',elevated),
+            canSubmit:materialDraftCan(record,ctx.uid,ctx.permissions,'submit',elevated),
+            canApprove:!!workflow&&await materialApproverCanAct(ctx,record,workflow),
+            canExtend:canExtend&&['approved','active'].includes(str(m.status)),
+            canLifecycle:lifecycle,
+        }};
     })],
     'POST /api/org/procurement/materials/list': [orgRoute('org.procurement.materials.list',null,async ctx=>{
         requireModule(ctx,'materials');
