@@ -3,9 +3,9 @@
 //
 // One master decides where stock may be placed: Procurement metadata → warehouseRestrictions (RS01 …).
 //   Material    material master default (registration) → per-warehouse Stock Control override
-//   Warehouse   every storage location carries one restriction; its clusters and bins inherit it
-// A material can be put in a bin only when both sides are set and carry the same, enabled code.
-// The older material classification list (MCL-…) only suggests a restriction while locations are aligned.
+//   Warehouse   each cluster selects a set of permitted restrictions
+// A material can be placed only if its effective restriction matches an enabled cluster code.
+// Older location-level restrictions remain a read-only fallback for legacy clusters.
 // ---------------------------------------------------------------------------
 
 /** Colours for the topology map, used unless MEMS administration gives a code its own colour. */
@@ -20,7 +20,7 @@ export const GENERIC_MASTER_COLOR = '#2563EB';
 /** Restrictions whose clusters must hold a single subcategory (segregated storage). */
 export const SEGREGATED_RESTRICTIONS = new Set(['RS02', 'RS08', 'RS12', 'RS14']);
 
-/** Suggested restriction for a storage location still carrying an old material classification. Suggestion only: a person confirms it. */
+/** Compatibility mapping for older material classifications; not used for new cluster selection. */
 export const MCL_TO_RESTRICTION: Record<string, string> = {
     'MCL-001': 'RS15', 'MCL-002': 'RS02', 'MCL-003': 'RS08', 'MCL-004': 'RS14', 'MCL-005': 'RS15', 'MCL-006': 'RS03',
     'MCL-007': 'RS03', 'MCL-008': 'RS15', 'MCL-009': 'RS01', 'MCL-010': 'RS10', 'MCL-011': 'RS03', 'MCL-012': 'RS15',
