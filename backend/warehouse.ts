@@ -1,4 +1,5 @@
 import { HttpError, deleteDoc, getDoc, isObj, listDocs, nowIso, str, updateFields, writeDoc, type Doc, type Fields, type Plain } from './core';
+import { selectedCostCenterSubcategories } from '../src/shared/costCenterTaxonomy';
 import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { getNode, record } from './structure';
 import { materialCategories } from './procurement';
@@ -462,7 +463,7 @@ export const warehouseRoutes = {
             const usedRestrictions = new Set(clusters.flatMap(c=>c.restrictionCodes));
             const usedTypes = new Set(locations.map((l) => l.typeCode));
             return {
-                costCenter: { id: node.id, code: str(node.data.code), name: str(node.data.name), costType: isObj(node.data.attributes) ? str(node.data.attributes.costType) : '', costSubcategory: isObj(node.data.attributes) ? str(node.data.attributes.costSubcategory) : '' },
+                costCenter: { id: node.id, code: str(node.data.code), name: str(node.data.name), costType: isObj(node.data.attributes) ? str(node.data.attributes.costType) : '', costSubcategory: isObj(node.data.attributes) ? str(node.data.attributes.costSubcategory) : '', costSubcategories: selectedCostCenterSubcategories(isObj(node.data.attributes) ? node.data.attributes : {}) },
                 configured: !!doc,
                 setup: doc
                     ? {
