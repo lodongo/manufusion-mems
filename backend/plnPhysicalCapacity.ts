@@ -71,11 +71,15 @@ const projected=(value:number|null,unitCode:string,name:string,reason?:string):R
  ...(value===null?{reason:reason||'Not configured in this SKU'}:{}),
 });
 export function derivePhysicalCapacity(
- sku:{id:string;name:string;uom:string;skuComponents:SkuComponents},
+ sku:{id:string;name:string;uom:string;category?:string;skuComponents:SkuComponents},
  parameters:SkuParameter[],input:PhysicalRating,
 ):CapacityProjection{
  if(sku.id!==input.skuId)throw new HttpError(400,'The rating must use the selected manufactured SKU.');
  const components=sku.skuComponents;
+ if(components.containmentScope==='NONE')
+  throw new HttpError(400,'This SKU uses direct process flow, not physical containment. Choose a non-container capacity basis or configure a container on the SKU first.');
+ if(!str(components.productionFormId)||!str(components.containerId)||!str(components.containerSizeId))
+  throw new HttpError(400,'Complete the SKU production form, physical container and size in Materials & Products before commissioning a rate. A container selected only at the cost centre does not update the SKU.');
  const container=parameters.find(p=>p.kind==='containers'&&p.id===input.containerId&&p.enabled!==false);
  const size=parameters.find(p=>p.kind==='containerSizes'&&p.id===input.containerSizeId&&p.enabled!==false);
  if(!container||!size)throw new HttpError(400,'Select active physical-container properties and size.');
@@ -84,7 +88,7 @@ export function derivePhysicalCapacity(
  if(str(container.categoryCode)!==input.containerCategoryCode||
     str(container.subcategoryCode)!==input.containerSubcategoryCode)
   throw new HttpError(400,'Physical container category or subcategory does not match its adopted configuration.');
- const conversion=calculateSkuConversion(components,parameters);
+ const conversion=calculateSkuConversion(components,parameters,{requireProductName:sku.category!=='INTERMEDIATE'});
  if(!conversion.containerSizeInProductionUom||conversion.containerSizeInProductionUom<=0)
   throw new HttpError(400,'Configure a compatible container size and production form on the SKU.');
  const countUnit=unit(input.ratingUnitCode,'Count'),time=unit(input.periodUnitCode,'Time');
