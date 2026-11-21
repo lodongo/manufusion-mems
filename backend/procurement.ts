@@ -1114,6 +1114,12 @@ async function configuredMaterialWorkflow(orgId:string,code:'PRC-001'|'PRC-002')
             Number(x.managerLevel)<1||Number(x.managerLevel)>20))||
         (str(x.action)&&!['review','approve'].includes(str(x.action)))))
         throw new HttpError(409,'Workflow '+code+' has incomplete or invalid approval steps. Configure it before submitting.');
+    const final=steps[steps.length-1] as Obj;
+    if(str(data.approvalMode)!=='parallel'&&str(final?.action)&&str(final.action)!=='approve')
+        throw new HttpError(409,'The final material workflow stage must be an approval, not only a review.');
+    if(!steps.some((x,i)=>str((x as Obj).action)==='approve'||(!str((x as Obj).action)&&i===steps.length-1)))
+        throw new HttpError(409,'At least one material workflow stage must approve the request.');
+
     return {code,name:str(data.name)||(code==='PRC-001'?'Material master creation':'Material warehouse extension'),
         version:Number(data.version)||1,
         approvalMode:str(data.approvalMode)==='parallel'?'parallel':'sequential',
@@ -1207,7 +1213,8 @@ async function makeMaterialDecision(ctx:OrgContext,kind:'creation'|'extension'):
     const history=[...oldHistory,{stepIndex,level:stepIndex+1,action:step.action,role:step.mode==='role'?step.role:step.mode==='user'?step.uid:'manager '+step.managerLevel,
         decision,by:ctx.uid,at:nowIso(),comment:str(ctx.body.comment)}];
     const complete=decision==='approve'&&(workflow.approvalMode==='parallel'?
-        (workflow.approvalRule==='any'||priorSteps.size+1>=workflow.steps.length):
+        (workflow.approvalRule==='any'?
+            step.action==='approve':priorSteps.size+1>=workflow.steps.length):
         stepIndex+1>=workflow.steps.length);
     const next=decision==='reject'?'rejected':complete?'approved':'pending_approval';
     const nextLevel=workflow.approvalMode==='parallel'?Number(data.approvalLevel)||1:next==='pending_approval'?stepIndex+2:stepIndex+1;
@@ -1774,6 +1781,34 @@ await audited(ctx,'procurement.material.submit','Material '+id,{warehouseId:str(
             getDoc('organizations/'+ctx.orgId+'/workflow_registry/'+code)));
         return {workflows:docs.map((d,i)=>({code:i===0?'PRC-001':'PRC-002',enabled:d?.data.enabled===true,
             name:str(d?.data.name),steps:Array.isArray(d?.data.steps)?d.data.steps:[]}))};
+    })],
+    'POST /api/org/procurement/materials/workflow/migrate': [orgRoute('org.procurement.materials.workflow.migrate',null,async ctx=>{
+        requireModule(ctx,'materials');
+        if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'ADM.workflows'))
+            throw new HttpError(403,'Workflow administration permission required.');
+        const code=str(ctx.body.workflowCode);
+        if(code!=='PRC-001'&&code!=='PRC-002')throw new HttpError(400,'Choose PRC-001 or PRC-002.');
+        const workflow=await configuredMaterialWorkflow(ctx.orgId,code);
+        const root='organizations/'+ctx.orgId,collection=code==='PRC-001'?'materials':'material_extensions';
+        const all=await listDocs(root+'/'+collection);
+        const legacy=all.filter(x=>str(x.data.status)==='pending_approval'&&!materialWorkflowSnapshot(x.data));
+        if(ctx.body.previewOnly===true)return {ok:true,count:legacy.length,ids:legacy.slice(0,50).map(x=>x.id),workflowCode:code};
+        if(ctx.body.confirm!==true)throw new HttpError(400,'Confirm adoption of the configured workflow.');
+        if(legacy.length>500)throw new HttpError(409,'More than 500 legacy approvals: migrate in controlled batches.');
+        const stamp=nowIso();
+        for(const d of legacy){
+            await writeDoc(root+'/'+collection+'/'+d.id,{...d.data,
+                legacyApprovalHistory:Array.isArray(d.data.approvalHistory)?d.data.approvalHistory:[],
+                legacyApprovalLevel:Number(d.data.approvalLevel)||1,
+                approvalHistory:[],approvalLevel:1,workflowSnapshot:workflow,
+                workflowCode:workflow.code,workflowVersion:workflow.version,
+                workflowStage:materialStageLabel({approvalLevel:1,approvalHistory:[]},workflow),
+                workflowMigratedBy:ctx.uid,workflowMigratedAt:stamp,
+            });
+        }
+        await audited(ctx,'procurement.material_workflow.legacy_migrate','Migrate '+legacy.length+' pending requests to '+code,
+            {workflowCode:code,version:workflow.version,ids:legacy.slice(0,100).map(x=>x.id)});
+        return {ok:true,migrated:legacy.length,workflowCode:code};
     })],
     'POST /api/org/procurement/materials/approve': [orgRoute('org.procurement.materials.approve',null,
         async ctx=>makeMaterialDecision(ctx,'creation'))],
