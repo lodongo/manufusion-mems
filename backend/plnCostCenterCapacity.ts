@@ -331,7 +331,7 @@ export const plnCostCenterCapacityRoutes={
    costCenters.sort((a,b)=>String(a.legalEntityName).localeCompare(String(b.legalEntityName))||
     String(a.siteName).localeCompare(String(b.siteName))||
     String(a.costCenterName).localeCompare(String(b.costCenterName)));
-   return {skuId,skuName:sku.name,costCenters};
+   return {skuId,skuName:sku.name,skuCategory:sku.category,costCenters};
   }),
  ],
  'POST /api/org/pln/cost-center/rating':[
