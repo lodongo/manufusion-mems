@@ -54,7 +54,7 @@ function projectedRow(title:string,value:Quantity){
 }
 
 /** The Organization Design gear and PLN hierarchy share one physical-container-based rating editor. */
-export default function PlnCostCenterSkuSetup({costCenterId,onBack,onMappingsChanged}:{costCenterId:string;onBack?:()=>void;onMappingsChanged?:()=>void}){
+export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBack,onMappingsChanged}:{costCenterId:string;initialSkuId?:string;onBack?:()=>void;onMappingsChanged?:()=>void}){
  const [data,setData]=useState<Details|null>(null),[lines,setLines]=useState<Line[]>([]);
  const [revision,setRevision]=useState(0),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -67,7 +67,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack,onMappingsCha
    setData(response);
    // Older ratings were entered per SKU stock unit; never reinterpret those as
    // primary containers. Require an explicit new physical-container rate.
-   setLines((response.mapping?.skuCapacities??[]).map(x=>{
+   const restored=(response.mapping?.skuCapacities??[]).map(x=>{
     if(Number.isFinite(x.ratingQuantity))return {...x};
     const output=response.outputs.find(o=>o.id===x.skuId);
     const container=response.containers.find(c=>c.id===output?.skuComponents?.containerId);
@@ -79,9 +79,28 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack,onMappingsCha
      ratingOutputCode:'PRIMARY_CONTAINER',
      periodUnitCode:response.units.time.find(u=>u.name==='Hour')?.code||'',
      projection:null,conversionIssue:'Previous stock-unit/hour rating needs physical-container reconfiguration.'};
-   }));
+   });
+   // The product configuration entry point opens exactly this editor focused
+   // on the selected SKU, adding an unsaved rating card when not mapped yet.
+   if(initialSkuId&&!restored.some(x=>x.skuId===initialSkuId)&&restored.length<100){
+    const sku=response.outputs.find(x=>x.id===initialSkuId);
+    if(sku){
+     const selected=response.containers.find(c=>c.id===sku.skuComponents.containerId);
+     restored.push({
+      skuId:initialSkuId,containerId:selected?.id||'',
+      containerSizeId:sku.skuComponents.containerSizeId||'',
+      containerCategoryCode:selected?.categoryCode||'',
+      containerSubcategoryCode:selected?.subcategoryCode||'',
+      ratingQuantity:0,ratingOutputCode:selected?.ratingOutputCode||'PRIMARY_CONTAINER',
+      ratingUnitCode:selected?.ratingCountUnitCode||response.units.count.find(u=>u.multiplier===1)?.code||'',
+      periodUnitCode:response.units.time.find(u=>u.name==='Hour')?.code||'',
+      projection:null,
+     });
+    }
+   }
+   setLines(restored);
    setRevision(response.mapping?.revision??0);
-   setOpenSku('');
+   setOpenSku(initialSkuId);
   }catch(e){setError(e instanceof Error?e.message:'Could not load manufacturing cost-centre ratings.');}
   finally{setLoading(false);}
  };
@@ -221,7 +240,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack,onMappingsCha
      <p className='mt-1 text-xs text-muted'>Revision {revision}. Physical containers, sizes and packaging ratios come from Product Configuration and the selected SKU.</p>
     </div>
     <div className='flex flex-wrap items-start justify-between gap-2'>
-     <div><h3 className='font-semibold'>Mapped manufactured SKUs</h3>
+     <div><h3 className='font-semibold'>SKU allocation</h3>
       <p className='mt-1 text-xs text-muted'>Rate the selected physical container, then view the equivalent production-form, finished-product, commercial and logistics outputs for the same time interval.</p>
      </div>
      {data.canConfigure&&<div className='flex flex-wrap gap-2'>
@@ -232,6 +251,31 @@ export default function PlnCostCenterSkuSetup({costCenterId,onBack,onMappingsCha
       }}>Refresh SKUs</Action>
      </div>}
     </div>
+    <details className='rounded-xl border border-line bg-page p-3' open={!lines.length}>
+     <summary className='cursor-pointer text-sm font-semibold'>Available organization SKUs · {outputs.length} · {already.size} selected</summary>
+     <p className='my-2 text-xs text-muted'>Select or remove any manufactured SKU within this cost centre. Each mapped SKU gets its own physical-container and throughput rating below. Selection is saved with the commissioned ratings.</p>
+     <div className='grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2'>
+      {outputs.map(sku=><label key={sku.id} className='flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-line bg-panel p-2 text-sm'>
+       <input type='checkbox' checked={already.has(sku.id)}
+        disabled={!data.canConfigure||busy||!already.has(sku.id)&&lines.length>=100}
+        onChange={e=>{
+         setError('');setNotice('');
+         if(e.target.checked){
+          if(!already.has(sku.id)&&lines.length<100){
+           setLines(current=>[...current,newSku(sku.id)]);setOpenSku(sku.id);
+          }
+         }else{
+          setLines(current=>current.filter(line=>line.skuId!==sku.id));
+          if(openSku===sku.id)setOpenSku('');
+         }
+        }}/>
+       <span className='min-w-0'>
+        <span className='block break-words font-medium'>{sku.name}</span>
+        <span className='block text-xs text-muted'>{sku.category} · {sku.id}</span>
+       </span>
+      </label>)}
+     </div>
+    </details>
     {!outputs.length&&<p role='status' className='text-sm text-muted'>No manufactured SKU is configured in this organization. Create one in Materials & Products, then use Refresh SKUs.</p>}
     {!available.length&&lines.length>0&&<p className='text-xs text-muted'>All available organization SKUs are mapped to this manufacturing cost centre. To add more, configure additional manufactured SKUs in Materials & Products, then refresh this list. Your saved ratings remain intact.</p>}
     {lines.map((line,i)=>{
