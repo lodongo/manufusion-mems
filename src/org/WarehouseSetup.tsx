@@ -44,6 +44,7 @@ interface Loc {
     typeCode: string;
     typeLabel: string;
     materialCategoryCode?:string;
+    materialSubcategoryCodes?:string[];
     /** Warehouse restriction (RS…) from the master shared with materials. */
     restrictionCode: string;
     restrictionLabel: string;
@@ -433,7 +434,7 @@ function SetupView({ data, setup, onTopology }: { data: Data; setup: Setup; onTo
                 </p>}
             </section>
 
-            <Section title='Storage locations' count={setup.storageLocations.length} defaultOpen summary='Named storage areas; restrictions are configured in clusters'>
+            <Section title='Storage locations' count={setup.storageLocations.length} defaultOpen summary='Material category, permitted subcategories and physical location type'>
                 {setup.storageLocations.map((l) => {
                     const used = data.clusters.filter((x) => x.locationCode === l.code).reduce((sum, x) => sum + x.positions, 0);
                     return (
@@ -445,7 +446,8 @@ function SetupView({ data, setup, onTopology }: { data: Data; setup: Setup; onTo
                                     <span className='shrink-0 font-mono text-[11px] text-soft'>{l.code}</span>
                                 </p>
                                 <p className='mt-0.5 truncate text-xs text-soft'>
-                                    {l.typeLabel}
+                                    {l.typeLabel} · {data.categories.find(c=>c.code===l.materialCategoryCode)?.name||l.materialCategoryCode||'Legacy location'}
+                                    {' · '}{l.materialSubcategoryCodes?.length||0} subcategories
                                     {!l.active && ' · inactive'}
                                 </p>
                             </div>
@@ -533,9 +535,9 @@ interface FloorDraft {
     positions: string;
 }
 const draftOf = (f: FloorLayout): FloorDraft => ({ name: f.name, racking: f.racking, rows: String(f.rows), racks: f.racking ? String(f.racks) : '', columns: f.racking ? String(f.columns) : '', positions: String(f.positions) });
-interface LocDraft {key:string;code?:string;name:string;typeCode:string;materialCategoryCode:string;active:boolean;}
+interface LocDraft {key:string;code?:string;name:string;typeCode:string;materialCategoryCode:string;materialSubcategoryCodes:string[];active:boolean;}
 let locDraftSeq = 0;
-const blankLoc = (): LocDraft => ({ key: `new-${++locDraftSeq}`, name: '', typeCode: '', materialCategoryCode:'',active: true });
+const blankLoc = (): LocDraft => ({ key: `new-${++locDraftSeq}`, name: '', typeCode: '', materialCategoryCode:'',materialSubcategoryCodes:[],active: true });
 const blankFloor = (i: number): FloorDraft => ({ name: i === 0 ? 'Ground floor' : `Floor ${letter(i + 1)}`, racking: null, rows: '', racks: '', columns: '', positions: '' });
 
 function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void; onCancel: () => void }) {
@@ -544,14 +546,25 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
     const str = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
     const [cats, setCats] = useState<string[]>(s?.materialCategoryCodes ?? []);
     const [catQ, setCatQ] = useState('');
-    const [locs, setLocs] = useState<LocDraft[]>(s?.storageLocations.length ? s.storageLocations.map((l) => ({ key: l.code, code: l.code, name: l.name, typeCode: l.typeCode,
-    materialCategoryCode:l.materialCategoryCode||'',active:l.active })) : [blankLoc()]);
+    const [locSubSearch,setLocSubSearch]=useState<Record<string,string>>({});
+    const [locs, setLocs] = useState<LocDraft[]>(s?.storageLocations.length ? s.storageLocations.map((l) => ({
+        key:l.code,code:l.code,name:l.name,typeCode:l.typeCode,materialCategoryCode:l.materialCategoryCode||'',
+        materialSubcategoryCodes:l.materialSubcategoryCodes?.length?[...l.materialSubcategoryCodes]:
+            Array.from(new Set(data.clusters.filter(cl=>cl.locationCode===l.code)
+                .flatMap(cl=>cl.subcategories.filter(sc=>
+                    !l.materialCategoryCode||sc.categoryCode===l.materialCategoryCode).map(sc=>sc.code)))),
+        active:l.active,
+    })) : [blankLoc()]);
     const usedLocations = new Set(data.clusters.map((c) => c.locationCode));
     const usedCategories = new Set(data.clusters.flatMap((c) => c.subcategories.map((x) => x.categoryCode)));
     const toggleCat = (code: string) => setCats((cur) => (cur.includes(code) ?
         ((usedCategories.has(code)||locs.some(l=>l.materialCategoryCode===code))&&!forceRemove?
             cur:cur.filter(x=>x!==code)) : [...cur, code]));
     const updLoc = (key: string, patch: Partial<LocDraft>) => setLocs((cur) => cur.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+    const toggleLocSub=(key:string,code:string)=>setLocs(cur=>cur.map(loc=>loc.key!==key?loc:{
+        ...loc,materialSubcategoryCodes:loc.materialSubcategoryCodes.includes(code)
+            ?loc.materialSubcategoryCodes.filter(x=>x!==code):[...loc.materialSubcategoryCodes,code],
+    }));
     const [floors, setFloors] = useState<FloorDraft[]>(s?.layout.floors.length ? s.layout.floors.map(draftOf) : [blankFloor(0)]);
     const [open, setOpen] = useState(0);
     const c0 = s?.capacity;
@@ -617,6 +630,15 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
         if(!l.materialCategoryCode&&!l.code)out.push('material catalogue category');
         if(l.materialCategoryCode&&!cats.includes(l.materialCategoryCode))
             out.push('material category must be adopted by this warehouse');
+        const category=data.categories.find(c=>c.code===l.materialCategoryCode);
+        if(l.materialCategoryCode&&!l.materialSubcategoryCodes.length)
+            out.push('select at least one material subcategory');
+        if(l.materialSubcategoryCodes.some(code=>!category?.subcategories.some(sc=>sc.code===code)))
+            out.push('subcategories must belong to the selected category');
+        const held=data.clusters.filter(cl=>cl.locationCode===l.code)
+            .flatMap(cl=>cl.subcategories.map(sc=>sc.code));
+        if(l.materialCategoryCode&&held.some(code=>!l.materialSubcategoryCodes.includes(code)))
+            out.push('subcategories in use by existing clusters must remain selected');
         return out;
     });
     if (!locs.length) problems.push('Add at least one storage location.');
@@ -671,7 +693,8 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                 setup: {
                     materialCategoryCodes: cats,
                     storageLocations: locs.map((l) => ({ code:l.code,name:l.name.trim(),
-                        typeCode:l.typeCode,materialCategoryCode:l.materialCategoryCode,active:l.active })),
+                        typeCode:l.typeCode,materialCategoryCode:l.materialCategoryCode,
+                        materialSubcategoryCodes:l.materialSubcategoryCodes,active:l.active })),
                     layout: { floors: layoutFloors.map((f, i) => ({ ...f, name: f.name || `Floor ${letter(i + 1)}` })) }, capacity },
             });
             onDone();
@@ -748,9 +771,13 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
 
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-white'>2 · Storage locations *</p>
-                    <p className='text-xs text-soft'>Select a category from the MEMS Materials Master for each storage location. Subcategories of that category become the selectable clusters. Physical location type and addresses remain separate, and existing locations are retained.</p>
+                    <p className='text-xs text-soft'>For each storage location, choose a Materials Master category, select one or more of its subcategories, and select the physical storage location type. Each cluster uses one of those selected subcategories.</p>
                     {locs.map((l, i) => {
-
+                        const selectedCategory=data.categories.find(cat=>cat.code===l.materialCategoryCode);
+                        const availableSubcategories=selectedCategory?.subcategories||[];
+                        const query=(locSubSearch[l.key]||'').trim().toLowerCase();
+                        const shownSubcategories=availableSubcategories.filter(sc=>
+                            !query||`${sc.code} ${sc.name}`.toLowerCase().includes(query));
                         const inUse = !!l.code && usedLocations.has(l.code);
                         return (
                             <div key={l.key} className='space-y-2 rounded-xl border border-slate-800 bg-slate-950 p-3'>
@@ -772,12 +799,48 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                                         const code=e.target.value;
                                         const selected=data.categories.find(c=>c.code===code);
                                         updLoc(l.key,{materialCategoryCode:code,
+                                            materialSubcategoryCodes:l.materialSubcategoryCodes.filter(sc=>
+                                                selected?.subcategories.some(x=>x.code===sc)),
                                             name:!l.name.trim()&&selected?selected.name:l.name});
                                     }}>
                                     <option value=''>{l.code?'Legacy location — select a category to align':'Choose a material category…'}</option>
                                     {data.categories.filter(cat=>cats.includes(cat.code)||cat.code===l.materialCategoryCode)
                                         .map(cat=><option key={cat.code} value={cat.code}>{cat.code} · {cat.name}</option>)}
                                 </SelectField>
+                                <div className='space-y-2 rounded-xl border border-slate-700 bg-slate-900/50 p-3'>
+                                    <p className='text-sm font-semibold text-white'>Material subcategories * · select multiple</p>
+                                    {!selectedCategory?<p className='text-xs text-amber-300'>Choose the material category first.</p>:
+                                        <>
+                                            <p className='text-xs text-slate-400'>{l.materialSubcategoryCodes.length} of {availableSubcategories.length} selected from {selectedCategory.name}. These become eligible cluster classifications.</p>
+                                            {!!l.materialSubcategoryCodes.length&&<div className='flex flex-wrap gap-1.5'>
+                                                {l.materialSubcategoryCodes.map(code=>{
+                                                    const sc=availableSubcategories.find(x=>x.code===code);
+                                                    const inCluster=data.clusters.some(cl=>cl.locationCode===l.code&&cl.subcategories.some(x=>x.code===code));
+                                                    return <button key={code} type='button' disabled={inCluster} title={inCluster?'Used in an existing cluster': 'Remove subcategory'}
+                                                        className='flex min-h-8 items-center gap-1 rounded-full border border-emerald-500/50 bg-slate-800 px-2 text-xs text-white disabled:opacity-70'
+                                                        onClick={()=>toggleLocSub(l.key,code)}>{code} · {sc?.name||code}
+                                                        {inCluster?<span className='text-amber-300'>in use</span>:<X className='h-3 w-3'/>}</button>;
+                                                })}
+                                            </div>}
+                                            <input aria-label={`Search subcategories for location ${l.code||i+1}`}
+                                                value={locSubSearch[l.key]||''}
+                                                onChange={e=>setLocSubSearch(cur=>({...cur,[l.key]:e.target.value}))}
+                                                placeholder='Search material subcategories…'
+                                                className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-white'/>
+                                            <div className='max-h-56 space-y-1 overflow-y-auto'>
+                                                {shownSubcategories.map(sc=>{
+                                                    const selected=l.materialSubcategoryCodes.includes(sc.code);
+                                                    const used=data.clusters.some(cl=>cl.locationCode===l.code&&cl.subcategories.some(x=>x.code===sc.code));
+                                                    return <label key={sc.code} className='flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm text-white'>
+                                                        <input type='checkbox' checked={selected} disabled={selected&&used}
+                                                            onChange={()=>toggleLocSub(l.key,sc.code)}/>
+                                                        <span className='min-w-0 flex-1'>{sc.name}<span className='block font-mono text-[11px] text-slate-400'>{sc.code}{used?' · used in cluster':''}</span></span>
+                                                    </label>;
+                                                })}
+                                                {!shownSubcategories.length&&<p className='p-2 text-xs text-slate-400'>No matching subcategories.</p>}
+                                            </div>
+                                        </>}
+                                </div>
                                 <Field id={`loc-name-${l.key}`} label='Physical storage-area name *' maxLength={60}
                                     placeholder='e.g. Raw materials — Sugar and concentrates'
                                     value={l.name} onChange={(e)=>updLoc(l.key,{name:e.target.value})}/>
@@ -989,7 +1052,9 @@ function ClusterEditPanel({data,cluster,onSaved,onCancel}:{data:Data;cluster:Clu
     const eligibleSubcategories=data.categories
         .filter(cat=>data.setup?.materialCategoryCodes.includes(cat.code)&&
             (!parentLocation?.materialCategoryCode||cat.code===parentLocation.materialCategoryCode))
-        .flatMap(cat=>cat.subcategories.map(sc=>({...sc,categoryCode:cat.code})));
+        .flatMap(cat=>cat.subcategories
+            .filter(sc=>!parentLocation?.materialCategoryCode||parentLocation.materialSubcategoryCodes?.includes(sc.code))
+            .map(sc=>({...sc,categoryCode:cat.code})));
     const [storageType,setStorageType]=useState(cluster.storageTypeCode||'BIN');
     const [conditionCode,setConditionCode]=useState(cluster.conditionCode||data.setup?.conditionCode||'AMB');
     const [stacking,setStacking]=useState(cluster.stackingEnabled===true);
@@ -1256,7 +1321,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
         `${l.code} ${l.name} ${l.typeLabel}`.toLowerCase().includes(q.trim().toLowerCase()));
     const chosen = options.find((l) => l.code === location);
     const eligibleSubs=chosen?.materialCategoryCode?
-        allSubs.filter(x=>x.categoryCode===chosen.materialCategoryCode):allSubs;
+        allSubs.filter(x=>x.categoryCode===chosen.materialCategoryCode&&
+            chosen.materialSubcategoryCodes?.includes(x.code)):allSubs;
     const shownSubs=(subTerm?eligibleSubs.filter(x=>
         `${x.code} ${x.name} ${x.categoryName}`.toLowerCase().includes(subTerm)):
         eligibleSubs).slice(0,80);
@@ -1492,7 +1558,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-ink'>6 · Select catalog subcategory for this cluster *</p>
-                    <p className='text-xs text-soft'>Each new cluster is based on exactly one material subcategory from its storage-location category. The category and subcategory codes are retained for Procurement and Inventory synchronization.</p>
+                    <p className='text-xs text-soft'>Each cluster uses one catalog subcategory selected on the parent storage location. Category and subcategory codes remain synchronized with Procurement and Inventory.</p>
                     {subCodes.length > 0 && (
                         <div className='flex max-h-32 flex-wrap gap-1 overflow-y-auto'>
                             {subCodes.map((c) => (
@@ -1508,8 +1574,9 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                         <input value={subQ} onChange={(e) => setSubQ(e.target.value)} placeholder='Search subcategories…' className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-sm text-white' />
                     </div>
                     {chosen?.materialCategoryCode?
-                        <p className='text-xs font-semibold text-ink'>Storage category: {data.categories.find(c=>c.code===chosen.materialCategoryCode)?.name||chosen.materialCategoryCode}</p>:
+                        <p className='text-xs font-semibold text-ink'>Storage category: {data.categories.find(c=>c.code===chosen.materialCategoryCode)?.name||chosen.materialCategoryCode} · {eligibleSubs.length} enabled subcategories</p>:
                         <p className='text-xs text-amber-700'>Legacy storage location is not yet mapped to a category. Available subcategories are drawn from the warehouse's adopted categories; align the location in Edit Storage Setup.</p>}
+                    {chosen?.materialCategoryCode&&!eligibleSubs.length&&<Alert tone='warn'>No subcategories are enabled for this location. Edit storage setup to select one or more subcategories before adding a cluster.</Alert>}
                     <ul className='max-h-64 space-y-1 overflow-y-auto overscroll-contain'>
                         {shownSubs.map((x) => {
                             const on = subCodes.includes(x.code);
