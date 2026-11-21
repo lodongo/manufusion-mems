@@ -10,7 +10,9 @@ subcategories rather than renumbering older entries.
 
 In Organization Design, each cost center retains the original category field
 `attributes.costType` (for example, `MFG`, `INV`, or `WHS`) and adds
-`attributes.costSubcategory`. Both codes are persisted on the same structural
+a canonical `attributes.costSubcategories: string[]` list. A singular
+`attributes.costSubcategory` remains as a backwards-compatible alias to
+the first selected code. All selections are saved on the same structural
 cost-center record; no parallel classification store is introduced.
 
 The Finance cost-center reference endpoint serves the taxonomy, alongside
@@ -23,12 +25,16 @@ and customizations. A custom category without MEMS-defined subcategories uses
 
 1. Add or edit a cost center under a Department in Organization Design.
 2. Select a **Cost center category** (for example `MFG · Manufacturing`).
-3. Select a **Cost center subcategory** from that category only (for example
-   `Simple syrup manufacturing` or `Final syrup and beverage blending`).
-4. Choose its manager and save. Changing the category clears the previous
-   subcategory selection and requires a new compatible subcategory.
+3. Choose **one or more cost center subcategories** within the selected category,
+   using the searchable checkbox list. For example select both
+   `Simple syrup manufacturing` and `Final syrup and beverage blending`.
+   Use **Select all shown**, **Clear selection**, or remove selected chips.
+4. Choose its manager and save. Changing the category clears every previously
+   selected subcategory, requiring at least one new compatible subcategory.
 
-New cost centers require both category and subcategory. Legacy cost centers with
+New cost centers require a category and at least one subcategory. Multiple
+subcategories may be selected; no arbitrary single-subcategory limit applies.
+Legacy cost centers with
 an existing category but no subcategory are still readable and can be edited
 without forcing a retrofit. Changing their category requires choosing a subcategory.
 
@@ -50,8 +56,11 @@ without forcing a retrofit. Changing their category requires choosing a subcateg
 
 ## Validation and rollout
 
-The backend rejects a subcategory that does not belong to its selected category.
-The frontend provides a dependent picker, preventing cross-category selection.
+The backend rejects malformed lists, duplicate codes, and any subcategory that
+does not belong to the selected category. The frontend provides a dependent,
+searchable multi-select list, preventing cross-category selection. Old singular
+subcategories automatically appear as a one-item selection and migrate to the
+canonical array on next save.
 The route maintains legacy categories for existing records and accepts all current
 MEMS categories even if Finance default metadata has not yet been initialized.
 
