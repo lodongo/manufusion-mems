@@ -108,3 +108,28 @@ export function validateCostCenterSubcategorySelection(
         throw new Error('Choose at least one cost center subcategory.');
     return selected;
 }
+
+
+/**
+ * Each equipment unit belongs to exactly one of the activities approved for
+ * its parent cost center. The asset dictionary's technical subcategory is
+ * separate: it must never be compared with this operational code.
+ */
+export function validateEquipmentCostCenterSubcategory(
+    parent: { costSubcategories?: unknown; costSubcategory?: unknown } | null | undefined,
+    submitted: unknown,
+    required: boolean,
+): string {
+    const allowed = selectedCostCenterSubcategories(parent);
+    if (!allowed.length) {
+        if (required) throw new Error('Configure at least one subcategory on the parent cost center before adding equipment.');
+        if (submitted !== undefined && submitted !== null && submitted !== '')
+            throw new Error('The parent cost center has no assigned subcategories.');
+        return '';
+    }
+    if (typeof submitted !== 'string' || !submitted.trim())
+        throw new Error('Choose an equipment subcategory from those assigned to the parent cost center.');
+    if (!allowed.includes(submitted))
+        throw new Error('The equipment subcategory must be one of the parent cost center selections.');
+    return submitted;
+}
