@@ -1127,31 +1127,38 @@ export const procurementRoutes = {
         {const {manualChangeBlocked}=await import('./materialAudit');
         const blockedWhy=await manualChangeBlocked(ctx.orgId,section,changed,{stockControl:[...MATERIAL_STOCK_DIMENSIONS.map(([field])=>field as string),'stockingPolicy'],replenishment:[...REPLENISHMENT_NUMBER_FIELDS,'seasonalFactors']});
         if(blockedWhy)throw new HttpError(409,blockedWhy);}
+        let occupancyRestrictionChange:{id:string;data:Record<string,unknown>;code:string}|null=null;
         if(section==='inventory'&&changed.includes('warehouseRestriction')){
-            // Stock already in a bin was matched to that bin's restriction: the restriction cannot drift away from it.
+            // The material's effective per-warehouse restriction must remain allowed in the selected
+            // cluster. Multiple restrictions are valid; no unnecessary delinking is required.
             const nextRestriction=effectiveRestriction(merged,material.data);
-            const held=(await listDocs(root+'/warehouse_bin_occupancy')).find(x=>str(x.data.materialId)===id&&str(x.data.warehouseId)===warehouseId);
+            const held=(await listDocs(root+'/warehouse_bin_occupancy'))
+                .find(x=>str(x.data.materialId)===id&&str(x.data.warehouseId)===warehouseId);
             if(held){
-                const binId=str(held.data.binId);
-                let binRestriction=str(held.data.restrictionCode);
-                let locationCode='';
-                if(!binRestriction){
-                    // Bins linked before restrictions existed: the bin's restriction is its storage location's.
-                    const [clusterId]=binId.split('__');
-                    const [warehouseDoc,cluster]=await Promise.all([getDoc(root+'/warehouses/'+warehouseId),/^[A-Za-z0-9_-]{1,80}$/.test(clusterId)?getDoc(root+'/warehouses/'+warehouseId+'/clusters/'+clusterId):Promise.resolve(null)]);
-                    locationCode=str(cluster?.data.locationCode);
-                    const loc=(Array.isArray(warehouseDoc?.data.storageLocations)?warehouseDoc!.data.storageLocations.filter(isObj):[]).find(x=>str(x.code)===locationCode);
-                    binRestriction=str(loc?.restrictionCode);
-                }
-                const bin=binId.split('__').pop();
-                if(!binRestriction)
-                    throw new HttpError(409,'This material is binned in '+bin+(locationCode?' (storage location '+locationCode+')':'')+', and that storage location has no warehouse restriction yet. Align it first in Organization design → warehouse → Edit (choose '+nextRestriction+'), then save this restriction.');
-                if(binRestriction!==nextRestriction)
-                    throw new HttpError(409,'This material is binned in '+bin+' under restriction '+binRestriction+'. Delink the bin before changing the warehouse restriction (or keep '+binRestriction+').');
-                if(!str(held.data.restrictionCode))await writeDoc(root+'/warehouse_bin_occupancy/'+held.id,{...held.data,restrictionCode:binRestriction});
+                const binId=str(held.data.binId),[clusterId]=binId.split('__');
+                const [wh,cluster]=await Promise.all([
+                    getDoc(root+'/warehouses/'+warehouseId),
+                    /^[A-Za-z0-9_-]{1,80}$/.test(clusterId)?
+                        getDoc(root+'/warehouses/'+warehouseId+'/clusters/'+clusterId):Promise.resolve(null),
+                ]);
+                const loc=(Array.isArray(wh?.data.storageLocations)?wh!.data.storageLocations.filter(isObj):[])
+                    .find(x=>str(x.code)===str(cluster?.data.locationCode));
+                const codes=restrictionCodesOf(cluster?.data.restrictionCodes,
+                    str(cluster?.data.restrictionCode)||str(loc?.restrictionCode));
+                const issue=binningBlock(nextRestriction,codes,await warehouseRestrictionMaster(),'cluster '+clusterId);
+                if(issue)throw new HttpError(409,'This material is already stored at '+binId+
+                    '. '+issue+' Update the cluster selection or delink the material first.');
+                occupancyRestrictionChange={id:held.id,data:held.data,code:nextRestriction};
             }
         }
         await writeDoc(path,{...merged,materialId:id,warehouseId,updatedBy:ctx.uid,updatedAt:nowIso()});
+        if(occupancyRestrictionChange){
+            const {id:recordId,data,code:restrictionCode}=occupancyRestrictionChange;
+            await writeDoc(root+'/warehouse_bin_occupancy/'+recordId,{
+                ...data,restrictionCode,classification:restrictionCode,
+                snapshot:isObj(data.snapshot)?{...data.snapshot,classification:restrictionCode}:data.snapshot,
+            });
+        }
         await audited(ctx,'inventory.material.'+section+'_settings',str(material.data.materialNumber||id)+' · '+warehouseId,Object.fromEntries(changed.map(k=>[k,{from:old?.data?.[k]??null,to:clean[k]}])));
         // Accepted level changes are logged with their impact on stock holding (Audit tab).
         if(section==='inventory'&&changed.some(k=>['minimumLevel','maximumLevel','reorderQuantity','safetyStock','reorderPoint'].includes(k))){
