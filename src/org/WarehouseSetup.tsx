@@ -152,6 +152,8 @@ interface Data {
     canUnlink?: boolean;
     canHistory?: boolean;
     linkedBins?: Array<{binId:string;materialId:string;materialNumber:string}>;
+    clusterMaterials?: Array<{materialId:string;clusterCode:string;materialNumber:string;
+        name:string;status:string;restrictionCodes:string[]}>;
 }
 
 const letter = (n: number) => String.fromCharCode(64 + n);
@@ -1227,6 +1229,17 @@ function ClusterDetail({ data, cluster, onDeleted, onPositions }: { data: Data; 
                 <Row label='Storage type' value={cluster.storageTypeLabel} />
                 <Row label='Storage condition' value={cluster.conditionLabel||'Not configured'} />
                 <Row label='Created' value={`${cluster.createdByName} · ${fmtDate(cluster.createdAt)}`} />
+            </Card>
+            <Card className='space-y-2'>
+                <p className='font-semibold text-ink'>Assigned materials</p>
+                <p className='text-xs text-soft'>Assignments from Procurement, including saved drafts. Actual stock placement and physical positions are handled in Inventory after approval.</p>
+                {(data.clusterMaterials??[]).filter(m=>m.clusterCode===cluster.code).length===0?
+                    <p className='text-sm text-soft'>No materials assigned to this cluster.</p>:
+                    (data.clusterMaterials??[]).filter(m=>m.clusterCode===cluster.code).map(m=>
+                        <div key={m.materialId} className='rounded-lg border border-line px-3 py-2'>
+                            <p className='text-sm font-medium text-ink'>{m.name} {m.materialNumber&&'· '+m.materialNumber}</p>
+                            <p className='text-xs text-soft'>{m.status.replaceAll('_',' ')} · Restrictions {m.restrictionCodes.join(', ')}</p>
+                        </div>)}
             </Card>
             <div className='grid grid-cols-2 gap-2'>
                 <Button variant='secondary' onClick={onPositions}>
