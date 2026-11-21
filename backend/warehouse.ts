@@ -329,6 +329,8 @@ interface StoredLocation {
     code: string;
     name: string;
     typeCode: string;
+    /** Material category governs which catalog subcategories can be made into clusters. */
+    materialCategoryCode: string;
     /** Warehouse restriction (RS…) from the shared master: decides what may be binned here. */
     restrictionCode: string;
     /** Material classification (MCL-…) saved before restrictions; kept only to suggest a restriction. */
@@ -342,6 +344,7 @@ function locationsOf(d: Record<string, unknown>): StoredLocation[] {
         code: str(l.code),
         name: str(l.name),
         typeCode: str(l.typeCode),
+        materialCategoryCode: str(l.materialCategoryCode),
         restrictionCode: str(l.restrictionCode),
         classificationCode: str(l.classificationCode),
         active: l.active !== false,
@@ -572,12 +575,24 @@ export const warehouseRoutes = {
                     names.add(name.toLowerCase());
                     const type = types.find((t) => t.code === str(raw.typeCode));
                     if (!type || (!type.active && before?.typeCode !== type.code)) throw new HttpError(400, `${tag}: choose the storage location type.`);
+                    const materialCategoryCode=str(raw.materialCategoryCode)||str(before?.materialCategoryCode);
+                    if(materialCategoryCode&&!categoryCodes.includes(materialCategoryCode))
+                        throw new HttpError(400,`${tag}: the selected category must belong to the warehouse's adopted material categories.`);
+                    if(!before&&!materialCategoryCode)
+                        throw new HttpError(400,`${tag}: choose a material catalog category for the new storage location.`);
+                    const held=before?clusters.filter(cl=>cl.locationCode===before.code):[];
+                    if(held.length&&materialCategoryCode&&held.some(cl=>
+                        cl.subcategories.some(sub=>sub.categoryCode!==materialCategoryCode)))
+                        throw new HttpError(409,`${tag}: existing clusters use different material categories. Align or redistribute those clusters before assigning a single catalog category.`);
                     // Preserve legacy restriction for existing clusters, but never ask for or change it on location setup.
                     if (!before) {
                         seq += 1;
                         if (seq > 999) throw new HttpError(400, 'Storage location numbering is exhausted for this warehouse.');
                     }
-                    return { code: before ? before.code : `SL-${String(seq).padStart(2, '0')}`, name, typeCode: type.code, restrictionCode: before?.restrictionCode??'', classificationCode: before?.classificationCode ?? '', active: raw.active !== false, createdAt: before?.createdAt || now };
+                    return { code: before ? before.code : `SL-${String(seq).padStart(2, '0')}`, name,
+                        typeCode:type.code,materialCategoryCode,
+                        restrictionCode:before?.restrictionCode??'',classificationCode:before?.classificationCode??'',
+                        active:raw.active!==false,createdAt:before?.createdAt||now };
                 });
                 // Existing location restriction codes remain untouched as legacy read fallbacks.
                 const kept = new Set(storageLocations.map((s) => s.code));
@@ -682,7 +697,8 @@ export const warehouseRoutes = {
                 const location = locations.find((x) => x.code === str(b.locationCode));
                 if (!location) throw new HttpError(400, 'Choose one of the storage locations of this warehouse.');
                 if (!location.active) throw new HttpError(400, `${location.code} ${location.name} is inactive. Choose another storage location.`);
-                // Storage locations are structural. Material restrictions are defined by this cluster.
+                // The catalog category at the storage location determines the eligible
+                // subcategories for new clusters; legacy unmapped locations are preserved.
 
                 // Material subcategories, only from the warehouse's categories.
                 const catalog = await materialCategories();
@@ -696,11 +712,13 @@ export const warehouseRoutes = {
                 if(restrictionIssue)throw new HttpError(400,restrictionIssue);
                 const selectedRestrictions=restrictionCodes.map(code=>restrictionMaster.find(x=>x.code===code)!);
                 const subCodes = Array.from(new Set((Array.isArray(b.subcategoryCodes) ? b.subcategoryCodes : []).map(str).filter(Boolean)));
-                if (!subCodes.length) throw new HttpError(400, 'Choose at least one material subcategory for the cluster.');
-                if (subCodes.length > MAX_CLUSTER_SUBCATEGORIES) throw new HttpError(400, `A cluster can hold up to ${MAX_CLUSTER_SUBCATEGORIES} subcategories.`);
+                if(subCodes.length!==1)throw new HttpError(400,
+                    'New clusters must select exactly one material catalog subcategory; use another cluster for a different subcategory.');
                 const subcategories = subCodes.map((code) => {
                     const s = allowed.get(code);
-                    if (!s) throw new HttpError(400, `Subcategory ${code} is not in this warehouse's material categories.`);
+                    if(!s)throw new HttpError(400,`Subcategory ${code} is not in the warehouse's adopted material categories.`);
+                    if(location.materialCategoryCode&&s.categoryCode!==location.materialCategoryCode)
+                        throw new HttpError(400,`Subcategory ${code} is not under the storage location category ${location.materialCategoryCode}.`);
                     return s;
                 });
 
@@ -766,6 +784,8 @@ export const warehouseRoutes = {
                         name,
                         locationCode: location.code,
                         locationName: location.name,
+                        materialCategoryCode: subcategories[0].categoryCode,
+                        materialSubcategoryCode: subcategories[0].code,
                         locationTypeCode: location.typeCode,
                         restrictionCodes: restrictionCodes as unknown as Plain,
                         restrictionCode: restrictionCodes[0],
