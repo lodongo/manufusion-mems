@@ -21,7 +21,7 @@ type Mapping={
   ratingQuantity?:number;ratingUnitCode?:string;periodUnitCode?:string;ratingOutputCode?:string;
   projection?:Projection|null;conversionIssue?:string};
 };
-type Response={skuId:string;skuName:string;costCenters:Mapping[]};
+type Response={skuId:string;skuName:string;skuCategory?:string;costCenters:Mapping[]};
 type ResourceLocation={costCenterId:string;costCenterName:string;costCenterCode:string;canConfigure:boolean};
 type Resources={costCenters:ResourceLocation[]};
 const format=(n:number)=>new Intl.NumberFormat(undefined,{maximumFractionDigits:3}).format(n);
@@ -45,6 +45,7 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
  const [scopeCenters,setScopeCenters]=useState<ResourceLocation[]>([]);
  const [selectedCc,setSelectedCc]=useState('');
  const [scopeError,setScopeError]=useState('');
+ const intermediate=response?.skuCategory==='INTERMEDIATE';
  const loadCenters=async()=>{
   setScopeError('');setChooser(true);
   try{
@@ -68,18 +69,20 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
   <div className='flex flex-wrap items-start justify-between gap-2'>
    <div>
     <h3 className='font-semibold text-ink'>Mapped manufacturing cost centres</h3>
-    <p className='mt-1 text-xs text-muted'>Commissioned output speed and its equivalent primary-unit throughput for each accessible manufacturing cost centre.</p>
+    <p className='mt-1 text-xs text-muted'>{intermediate
+     ?'Intermediate/WIP: cost-centre allocations only. No commissioned speeds or converted throughput are calculated.'
+     :'Commissioned finished-goods output speed and equivalent throughput for each accessible manufacturing cost centre.'}</p>
    </div>
    <div className='flex flex-wrap gap-2'>
     <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-sm font-semibold'
      onClick={()=>void loadCenters()}>Allocate SKU</button>
     <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-sm font-semibold'
-     disabled={loading} onClick={()=>setReload(n=>n+1)}>Refresh speeds</button>
+     disabled={loading} onClick={()=>setReload(n=>n+1)}>Refresh mappings</button>
    </div>
   </div>
   {chooser&&<section className='space-y-3 rounded-xl border border-line bg-page p-3'>
    <h4 className='text-sm font-semibold'>Allocate this SKU to a production cost centre</h4>
-   <p className='text-xs text-muted'>Select an authorized cost centre. The same SKU allocation and physical-container rating editor opens as in Manufacturing Resources and Asset Management.</p>
+   <p className='text-xs text-muted'>Select an authorized cost centre. Intermediate/WIP SKUs are allocated without commissioned speeds; finished goods can be rated using the same shared editor.</p>
    {scopeError&&<p role='alert' className='text-xs text-red-600'>{scopeError}</p>}
    <select aria-label='Production cost centre' className='min-h-11 w-full rounded-xl border border-line bg-panel p-2 text-sm'
     value={selectedCc} onChange={e=>setSelectedCc(e.target.value)}>
@@ -93,13 +96,14 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
      onClick={()=>setChooser(false)}>Cancel</button>
    </div>
   </section>}
-  {loading&&<p role='status' className='text-sm text-muted'>Loading manufacturing cost-centre speeds…</p>}
+  {loading&&<p role='status' className='text-sm text-muted'>Loading manufacturing cost-centre allocations…</p>}
   {error&&<p role='alert' className='rounded-lg border border-red-400 p-3 text-sm text-red-600'>{error}</p>}
   {!loading&&response&&<>
    <p className='text-sm font-medium'>{response.costCenters.length} configured cost centre(s) visible to you</p>
    {!response.costCenters.length&&<p className='rounded-lg bg-page p-3 text-sm text-muted'>
-    No commissioned speed mappings were found in your authorized manufacturing cost centres.
-    Configure this SKU from Production Planning &amp; MRP → Manufacturing Cost Centre &amp; SKUs.
+    {intermediate?'No manufacturing cost-centre allocations found for this intermediate SKU.':
+      'No commissioned speed mappings found for this finished SKU.'}
+    Configure the SKU from Production Planning &amp; MRP → Manufacturing Cost Centre &amp; SKUs.
    </p>}
    <div className='grid gap-3'>
     {response.costCenters.map(row=>{
@@ -113,7 +117,10 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
        <h4 className='break-words text-sm font-semibold'>{row.costCenterName} · {row.costCenterCode}</h4>
        <p className='text-xs text-muted'>{row.legalEntityName} / {row.siteName}</p>
       </div>
-      <div className='grid gap-2 sm:grid-cols-2'>
+      {intermediate&&<p className='rounded-lg bg-page p-3 text-xs text-muted'>
+       Intermediate/WIP · Allocation only. Speed calculations are not applicable. Use the SKU master for manually entered physical-container capacity where needed.
+      </p>}
+      {!intermediate&&<div className='grid gap-2 sm:grid-cols-2'>
        <div className='rounded-lg bg-page p-3'>
         <p className='text-xs text-muted'>Commissioned manufacturing output speed</p>
         <p className='mt-1 text-lg font-semibold tabular-nums'>
@@ -133,11 +140,11 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
           'Container conversion could not be verified against current SKU master'}
         </p>
        </div>
-      </div>
-      {!p&&<p role='alert' className='rounded-lg border border-amber-500 p-2 text-xs text-amber-700'>
+      </div>}
+      {!intermediate&&!p&&<p role='alert' className='rounded-lg border border-amber-500 p-2 text-xs text-amber-700'>
        Rating requires review: {row.rating.conversionIssue||'Physical container or SKU configuration needs correction.'}
       </p>}
-      {p&&<details className='rounded-lg border border-line p-3'>
+      {!intermediate&&p&&<details className='rounded-lg border border-line p-3'>
        <summary className='cursor-pointer text-sm font-semibold'>View container properties and linked output speeds</summary>
        <div className='mt-3 space-y-3'>
         <p className='text-xs text-muted'>
