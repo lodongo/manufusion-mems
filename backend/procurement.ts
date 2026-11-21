@@ -1792,7 +1792,35 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
             return {...w,canApprove:!!extension&&str(extension.status)==='pending_approval'&&
                 !!snapshot&&await materialApproverCanAct(ctx,extension,snapshot)};
         }));
-        return {...result,warehouses:warehouseRows,material:{...m,
+        const workflowData=materialWorkflowSnapshot(record);
+        const requestApprovals={
+            requestId:m.id,masterDataId:str(record.masterDataId),
+            code:workflowData?.code||'',
+            name:workflowData?.name||'',
+            approvalMode:workflowData?.approvalMode||'',
+            approvalRule:workflowData?.approvalRule||'',
+            steps:(workflowData?.steps||[]).map((step,i)=>({
+                number:i+1,action:step.action,mode:step.mode,
+                assignee:step.mode==='role'?step.role:step.mode==='user'?step.uid:'Manager level '+step.managerLevel,
+                decisions:(Array.isArray(record.approvalHistory)?record.approvalHistory:[])
+                    .filter(x=>isObj(x)&&Number(x.stepIndex)===i)
+                    .map(x=>({decision:str(x.decision),by:str(x.by),at:str(x.at),comment:str(x.comment)})),
+            })),
+            extensions:warehouseRows.filter(x=>x.relation==='Extended').map(w=>{
+                const ex=extensionsById.get(w.requestId);
+                const flow=ex?materialWorkflowSnapshot(ex):null;
+                return {requestId:w.requestId,warehouseId:w.warehouseId,
+                    warehouseName:w.warehouseName,status:w.status,canApprove:w.canApprove,
+                    workflowCode:flow?.code||'',
+                    workflowStage:ex&&flow?materialStageLabel(ex,flow):w.status,
+                    decisions:(Array.isArray(ex?.approvalHistory)?ex.approvalHistory:[])
+                        .filter(isObj).map(x=>({decision:str(x.decision),by:str(x.by),at:str(x.at),
+                            comment:str(x.comment),action:str(x.action),stepIndex:Number(x.stepIndex)||0})),
+                };
+            }),
+        };
+        return {...result,approvals:requestApprovals,warehouses:warehouseRows,material:{...m,
+            testOverride:ctx.testMode===true&&ctx.role==='org_super_admin',
             canEdit:materialDraftCan(record,ctx.uid,ctx.permissions,'edit',elevated),
             canDelete:materialDraftCan(record,ctx.uid,ctx.permissions,'delete',elevated),
             canSubmit:materialDraftCan(record,ctx.uid,ctx.permissions,'submit',elevated),
@@ -1817,6 +1845,7 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
                 canApprove:pending&&!!workflow&&await materialApproverCanAct(ctx,d.data,workflow)};
         }));
         return {items:items.sort((a,b)=>str((b as Obj).createdAt).localeCompare(str((a as Obj).createdAt))),
+            testOverride:ctx.testMode===true&&ctx.role==='org_super_admin',
             isApprover:items.some(x=>x.canApprove),currentUserId:ctx.uid,
             canCreate:ctx.role==='org_super_admin'||['PRC.create','PRC.materials.manage','PRC.admin'].some(p=>hasPerm(ctx.permissions,p)),
             canExtend:ctx.role==='org_super_admin'||['PRC.create','PRC.materials.manage','PRC.admin'].some(p=>hasPerm(ctx.permissions,p))};
