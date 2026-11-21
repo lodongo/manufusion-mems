@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {resourceCoreRecord} from '../../backend/plnManufacturingResources.ts';
 import {PROCUREMENT_UNITS} from '../../backend/procurementUnits.ts';
-import {isManufacturingCostType} from '../../backend/plnCostCenterCapacity.ts';
+import {isManufacturingCostType,normalizeAllocatedSkuIds} from '../../backend/plnCostCenterCapacity.ts';
 
 const source=path=>readFileSync(new URL('../../'+path,import.meta.url),'utf8');
 const unit=PROCUREMENT_UNITS.find(u=>u.active&&u.selectable&&u.label==='Each') ||
@@ -79,4 +79,26 @@ test('Products, Asset Management and Manufacturing Resources invoke the same SKU
     assert.ok(editor.includes("initialSkuId=''"));
     assert.ok(editor.includes("'/api/org/pln/cost-center/save'"));
     assert.ok(pln.includes("const ROOT=(org:string)=>'organizations/'+org+'/pln_cost_center_capacity'"));
+});
+
+test('pending SKU allocations are saved independently of commissioned ratings in one canonical cost-centre record',()=>{
+ assert.deepEqual(normalizeAllocatedSkuIds(['SKU_001','SKU_002']),['SKU_001','SKU_002']);
+ assert.deepEqual(normalizeAllocatedSkuIds([]),[]);
+ assert.throws(()=>normalizeAllocatedSkuIds(['SKU_001','SKU_001']),/only once/i);
+ assert.throws(()=>normalizeAllocatedSkuIds(Array.from({length:101},(_,i)=>'SKU_'+i)),/100/);
+ assert.throws(()=>normalizeAllocatedSkuIds(['BAD SKU']),/valid manufactured SKU/);
+ const backend=source('backend/plnCostCenterCapacity.ts');
+ const editor=source('src/org/PlnCostCenterSkuSetup.tsx');
+ assert.ok(backend.includes("'POST /api/org/pln/cost-center/allocate'"));
+ assert.ok(backend.includes("allocatedSkuIds:skuIds"));
+ assert.ok(backend.includes("skuCapacities:commissioned"));
+ assert.ok(backend.includes("allocatedSkuIds:allocatedOf(row.data)"));
+ assert.ok(backend.includes("validSavedProjection(ctx,location.siteId,row,params)"));
+ assert.ok(backend.includes("Mapped, awaiting commissioned rating."));
+ assert.ok(backend.includes("'POST /api/org/pln/cost-center/rating'"));
+ assert.ok(editor.includes("'/api/org/pln/cost-center/allocate'"));
+ assert.ok(editor.includes("Save SKU allocations"));
+ assert.ok(editor.includes("skuCapacities:ratedLines.map"));
+ assert.ok(editor.includes("setLines(previous=>previous.map"));
+ assert.ok(editor.includes("allocatedSkuIds:lines.map"));
 });
