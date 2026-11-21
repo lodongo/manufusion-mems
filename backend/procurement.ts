@@ -585,9 +585,10 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                     warnings:[],stats:{}};
                 const verifiedChunks=chunks.filter((d):d is NonNullable<typeof d>=>!!d);
                 const cleanup=async()=>{
-                    for(const chunk of verifiedChunks)
-                        await deleteDoc(stagedChunk(kind,uploadId,num(chunk.data.index)??0));
-                    await deleteDoc(stagedUpload(kind,uploadId));
+                    for(let offset=0;offset<verifiedChunks.length;offset+=12)
+                        await Promise.allSettled(verifiedChunks.slice(offset,offset+12).map(chunk=>
+                            deleteDoc(stagedChunk(kind,uploadId,num(chunk.data.index)??0))));
+                    await deleteDoc(stagedUpload(kind,uploadId)).catch(()=>undefined);
                 };
                 const target = `${def.label}: ${str(s.data.fileName) || def.label}`;
                 const reject = async (errors: string[], warnings: string[] = []) => {
@@ -641,24 +642,29 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                 }
                 const headerJson = JSON.stringify(cat.header);
                 if (Buffer.byteLength(headerJson, 'utf8') > 300_000) return reject(['The catalog header is too large.']);
-                const release = integrated ? str(s.data.sha256).slice(0, 32) : '';
-                const destination = release ? `${base(kind)}/releases/${release}` : base(kind);
-                const before = release ? [] : await listDocs(`${base(kind)}/parts`);
+                // Every upload, not only Finance-integrated releases, is staged immutably.
+                // The active pointer only changes after all part writes and validation succeed.
+                const release=str(s.data.sha256).slice(0,32);
+                const destination=`${base(kind)}/releases/${release}`;
+                const before:Awaited<ReturnType<typeof listDocs>>=[];
                 const previous = await getDoc(base(kind));
                 const written = new Set<string>();
                 const sections: Record<string, number> = {};
                 for (const section of SECTIONS) {
                     const parts = splitParts(cat[section]);
                     sections[section] = parts.length;
-                    for (let i = 0; i < parts.length; i++) {
-                        await writeDoc(`${destination}/parts/${section}_${i}`, { section, index: i, json: parts[i] });
-                        written.add(`${section}_${i}`);
+                    for(let offset=0;offset<parts.length;offset+=8){
+                        await Promise.all(parts.slice(offset,offset+8).map(async(part,j)=>{
+                            const i=offset+j,id=`${section}_${i}`;
+                            await writeDoc(`${destination}/parts/${id}`,{section,index:i,json:part});
+                            written.add(id);
+                        }));
                     }
                 }
                 for (const p of before) if (!written.has(p.id)) await deleteDoc(`${base(kind)}/parts/${p.id}`);
                 const now = nowIso();
                 if (release) await writeDoc(destination,{
-                    kind, status: 'validated', version: str(cat.header.version),
+                    kind, status: 'validated', version: str(cat.header.version)||str(cat.header.schemaVersion),
                     fileName: str(s.data.fileName), size: num(s.data.size) ?? 0,
                     sha256: str(s.data.sha256), sections, headerJson, stats, stagedAt: now
                 });
@@ -667,7 +673,7 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                     kind,
                     module: def.module,
                     status: 'active',
-                    version: str(cat.header.version).slice(0, 40),
+                    version: (str(cat.header.version)||str(cat.header.schemaVersion)).slice(0, 40),
                     catalogName: str(cat.header.catalogName).slice(0, 160),
                     catalogCode: str(cat.header.catalogCode).slice(0, 40),
                     fileName: str(s.data.fileName),
