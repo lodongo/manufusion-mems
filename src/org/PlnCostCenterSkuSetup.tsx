@@ -23,7 +23,7 @@ type Projection={source:{containerName:string;containerCategory:string;container
  physicalContainers:Quantity;productionForm:Quantity;finalProduct:Quantity;
  commercialPackaging:Quantity;transportLogistics:Quantity;normalised:Quantity};
 type Line=Rating&{projection?:Projection|null;conversionIssue?:string;skuName?:string};
-type Mapping={costCenterId:string;revision:number;skuCapacities:Line[];updatedAt:string};
+type Mapping={costCenterId:string;revision:number;skuCapacities:Line[];allocatedSkuIds?:string[];updatedAt:string};
 type Details={location:{costCenterId:string;siteId:string;legalEntityId:string;name:string;code:string};
  outputs:Output[];containers:Container[];sizes:Size[];units:{count:Measure[];time:Measure[]};
  mapping:Mapping|null;canConfigure:boolean};
@@ -80,23 +80,25 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
      periodUnitCode:response.units.time.find(u=>u.name==='Hour')?.code||'',
      projection:null,conversionIssue:'Previous stock-unit/hour rating needs physical-container reconfiguration.'};
    });
-   // The product configuration entry point opens exactly this editor focused
-   // on the selected SKU, adding an unsaved rating card when not mapped yet.
-   if(initialSkuId&&!restored.some(x=>x.skuId===initialSkuId)&&restored.length<100){
-    const sku=response.outputs.find(x=>x.id===initialSkuId);
-    if(sku){
-     const selected=response.containers.find(c=>c.id===sku.skuComponents.containerId);
-     restored.push({
-      skuId:initialSkuId,containerId:selected?.id||'',
-      containerSizeId:sku.skuComponents.containerSizeId||'',
-      containerCategoryCode:selected?.categoryCode||'',
-      containerSubcategoryCode:selected?.subcategoryCode||'',
-      ratingQuantity:0,ratingOutputCode:selected?.ratingOutputCode||'PRIMARY_CONTAINER',
-      ratingUnitCode:selected?.ratingCountUnitCode||response.units.count.find(u=>u.multiplier===1)?.code||'',
-      periodUnitCode:response.units.time.find(u=>u.name==='Hour')?.code||'',
-      projection:null,
-     });
-    }
+   // Allocated SKUs can be saved before their physical-container speed is known.
+   // Reconstruct uncommissioned rows from the same canonical cost-centre record.
+   const allocations=[...new Set([...(response.mapping?.allocatedSkuIds||[]),
+    ...(initialSkuId?[initialSkuId]:[])])];
+   for(const skuId of allocations){
+    if(restored.length>=100)break;
+    if(restored.some(x=>x.skuId===skuId))continue;
+    const sku=response.outputs.find(x=>x.id===skuId);
+    if(!sku)continue;
+    const selected=response.containers.find(c=>c.id===sku.skuComponents.containerId);
+    restored.push({
+     skuId,containerId:selected?.id||'',containerSizeId:sku.skuComponents.containerSizeId||'',
+     containerCategoryCode:selected?.categoryCode||'',
+     containerSubcategoryCode:selected?.subcategoryCode||'',ratingQuantity:0,
+     ratingOutputCode:selected?.ratingOutputCode||'PRIMARY_CONTAINER',
+     ratingUnitCode:selected?.ratingCountUnitCode||response.units.count.find(u=>u.multiplier===1)?.code||'',
+     periodUnitCode:response.units.time.find(u=>u.name==='Hour')?.code||'',
+     projection:null,
+    });
    }
    setLines(restored);
    setRevision(response.mapping?.revision??0);
@@ -143,8 +145,10 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
    result.push('Choose a published Time unit for the rating period.');
   return result;
  };
- const issues=lines.flatMap((line,i)=>lineIssues(line,i).map(message=>({index:i,message})));
- const canSave=lines.length>0&&issues.length===0;
+ const ratedLines=lines.filter(line=>Number.isFinite(line.ratingQuantity)&&line.ratingQuantity>0);
+ const issues=lines.flatMap((line,i)=>line.ratingQuantity>0?
+   lineIssues(line,i).map(message=>({index:i,message})):[]);
+ const canSave=ratedLines.length>0&&issues.length===0;
  const update=(i:number,changes:Partial<Line>)=>{
   setError('');setNotice('');
   setLines(all=>all.map((x,j)=>j===i?{...x,...changes,projection:null,conversionIssue:''}:x));
@@ -184,9 +188,26 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
   }catch(e){setError(e instanceof Error?e.message:'Unable to calculate converted ratings.');}
   finally{setBusy(false);}
  };
+ const saveAllocations=async()=>{
+  setError('');setNotice('');setBusy(true);
+  try{
+   const result=await callBackend<{mapping:Mapping}>('/api/org/pln/cost-center/allocate',{
+    costCenterId,skuIds:lines.map(x=>x.skuId),expectedRevision:revision,
+   });
+   // Preserve unsaved rating inputs; the allocation action only changes membership.
+   setRevision(result.mapping.revision);
+   setData(current=>current?{...current,mapping:result.mapping}:current);
+   onMappingsChanged?.();
+   setNotice('Saved '+lines.length+' SKU allocation(s). Each commissioned speed can be configured and saved independently.');
+  }catch(e){setError(e instanceof Error?e.message:'Could not save SKU allocations.');}
+  finally{setBusy(false);}
+ };
  const save=async()=>{
   setShowValidation(true);
-  if(!lines.length){setError('Add at least one manufactured SKU before saving.');return;}
+  if(!ratedLines.length){
+   setError('There are no completed ratings yet. Use Save SKU allocations first, then rate each SKU independently.');
+   return;
+  }
   if(!canSave){
    const first=issues[0]?.index;
    if(first!==undefined)setOpenSku(lines[first].skuId||'draft-'+first);
@@ -196,7 +217,8 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
   setError('');setNotice('');setBusy(true);
   try{
    const result=await callBackend<{mapping:Mapping}>('/api/org/pln/cost-center/save',{
-    costCenterId,skuCapacities:lines.map(({skuId,containerId,containerSizeId,
+    costCenterId,allocatedSkuIds:lines.map(x=>x.skuId),
+    skuCapacities:ratedLines.map(({skuId,containerId,containerSizeId,
      containerCategoryCode,containerSubcategoryCode,ratingQuantity,ratingUnitCode,periodUnitCode,
      ratingOutputCode,primaryContainersPerRatedOutput})=>({
      skuId,containerId,containerSizeId,containerCategoryCode,containerSubcategoryCode,
@@ -206,12 +228,14 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
    // GET must not turn a successful write into an apparent failure or wipe edits.
    setRevision(result.mapping.revision);
    setData(current=>current?{...current,mapping:result.mapping}:current);
-   setLines(result.mapping.skuCapacities);
+   const byId=new Map(result.mapping.skuCapacities.map(x=>[x.skuId,x]));
+   // Keep provisional allocated rows rather than discard them on a partial save.
+   setLines(previous=>previous.map(x=>byId.get(x.skuId)||x));
    onMappingsChanged?.();
-   setOpenSku('');
    setShowValidation(false);
-   setNotice('Saved successfully: '+result.mapping.skuCapacities.length+
-    ' SKU(s), revision '+result.mapping.revision+'. You can add another SKU without losing these ratings.');
+   setNotice('Saved '+result.mapping.skuCapacities.length+
+    ' commissioned SKU rating(s), revision '+result.mapping.revision+
+    '. Other allocated SKUs can be rated later.');
   }catch(e){setError(e instanceof Error?e.message:'Could not save commissioned throughput.');}
   finally{setBusy(false);}
  };
@@ -408,7 +432,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
          onClick={()=>void preview(i)}>Calculate linked ratings</Action>
        </div>
       </div>}
-      {showValidation&&lineIssues(line,i).length>0&&<div role='alert' className='rounded-lg border border-red-400 p-3 text-xs text-red-600'>
+      {showValidation&&line.ratingQuantity>0&&lineIssues(line,i).length>0&&<div role='alert' className='rounded-lg border border-red-400 p-3 text-xs text-red-600'>
        <p className='font-semibold'>SKU {i+1} — correct these issues:</p>
        <ul className='mt-2 list-disc space-y-1 pl-4'>{lineIssues(line,i).map((message,j)=><li key={j}>{message}</li>)}</ul>
       </div>}
@@ -427,7 +451,11 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
       </div>}
      </div>;
     })}
-    {!lines.length&&<p className='text-sm text-muted'>No SKUs mapped. Add an SKU to configure its physical-container rating.</p>}
+    {!lines.length&&<p className='text-sm text-muted'>No SKUs allocated. Select one or more SKUs, save the allocation, then configure speeds individually.</p>}
+    {lines.length>0&&<p className='text-xs text-muted'>
+     Save SKU allocations first without completing ratings. Commissioned ratings must be saved separately;
+     uncommissioned SKUs cannot be scheduled as rated production capacity.
+    </p>
     {data.canConfigure&&<div className='sticky bottom-0 z-10 space-y-2 rounded-xl border border-line bg-panel p-3 shadow-sm'>
      {showValidation&&issues.length>0&&<div role='alert' className='text-xs text-red-600'>
       {issues.length} issue(s) prevent saving. Review the relevant SKU cards above.
@@ -437,8 +465,11 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
      <div className='flex flex-wrap items-center justify-between gap-2'>
       <span className='text-xs text-muted'>{lines.length} SKU(s) in this configuration · revision {revision}</span>
       <div className='flex flex-wrap gap-2'>
-       {data.mapping?.skuCapacities?.length?<Action secondary disabled={busy} onClick={()=>void clear()}>Clear SKU mappings</Action>:null}
-       <Action disabled={busy} onClick={()=>void save()}>{busy?'Saving…':'Save commissioned ratings'}</Action>
+       {((data.mapping?.skuCapacities?.length||0)+(data.mapping?.allocatedSkuIds?.length||0))>0?
+        <Action secondary disabled={busy} onClick={()=>void clear()}>Clear SKU mappings</Action>:null}
+       <Action secondary disabled={busy} onClick={()=>void saveAllocations()}>
+        {busy?'Saving…':'Save SKU allocations'}</Action>
+       <Action disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving…':'Save commissioned ratings'}</Action>
        <Action secondary disabled={busy||lines.length>=100} onClick={addSku}>Add another SKU</Action>
       </div>
      </div>
