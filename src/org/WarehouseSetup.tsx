@@ -1063,10 +1063,13 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const [start, setStart] = useState({ r: 1, k: 1, c: 1, p: 1 });
     const [name, setName] = useState('');
     const [location, setLocation] = useState(options.length === 1 ? options[0].code : '');
-    // The warehouse restriction belongs to the selected storage location and is not a second independent field.
-    const [clusterClass,setClusterClass]=useState(options.length === 1 ? options[0].restrictionCode : '');
+    const [restrictionCodes,setRestrictionCodes]=useState<string[]>([]);
+    const toggleRestriction=(code:string)=>{setRestrictionCodes(current=>
+        current.includes(code)?current.filter(x=>x!==code):[...current,code]);
+        setConfirmed(false);};
     const [q, setQ] = useState('');
-    const [storageType, setStorageType] = useState(setup.storageTypeCode);
+    const [storageType, setStorageType] = useState(setup.storageTypeCode||'BIN');
+    const [conditionCode,setConditionCode]=useState(setup.conditionCode||'AMB');
     const [stackingEnabled,setStackingEnabled]=useState(
         setup.storageTypeCode==='PAL'&&setup.palletStacking?.enabled===true);
     const [stackingPattern,setStackingPattern]=useState<'STRAIGHT'|'PYRAMID'>(
@@ -1103,7 +1106,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const fits = endOrd !== null && endOrd <= total - 1;
     const clash = startOrd !== null && endOrd !== null ? onFloor.find((c) => c.segments.some(([a, b]) => a <= endOrd && startOrd <= b)) : undefined;
     const startOwner = mode === 'start' && startOrd !== null ? ownerAt(index, startOrd) : undefined;
-    const shownOptions = options.filter((l) => (!clusterClass || l.restrictionCode === clusterClass) && (!q.trim() || `${l.code} ${l.name} ${l.typeLabel} ${l.restrictionCode} ${l.restrictionLabel}`.toLowerCase().includes(q.trim().toLowerCase())));
+    const shownOptions = options.filter(l=>!q.trim()||
+        `${l.code} ${l.name} ${l.typeLabel}`.toLowerCase().includes(q.trim().toLowerCase()));
     const chosen = options.find((l) => l.code === location);
     const problems: string[] = [];
     if (!sizeOk) problems.push(stackMode?
@@ -1113,9 +1117,11 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     if (startOrd !== null && endOrd !== null && !fits) problems.push(`Only ${(total - startOrd).toLocaleString()} positions remain on this floor from ${codeAt(floorNo, floor, startOrd)}.`);
     if (clash) problems.push(`Overlaps cluster ${clash.code} (${clash.firstCode} to ${clash.lastCode}). Every position belongs to one cluster only.`);
     if (!chosen) problems.push('Choose a storage location.');
-    if (chosen && !chosen.aligned) problems.push('The selected storage location is not aligned to the warehouse restriction master. Edit the warehouse and confirm its restriction first.');
-    const chosenRestriction = chosen ? data.restrictions.find((x) => x.code === chosen.restrictionCode) : undefined;
-    if (chosen && ['RS02', 'RS08', 'RS12', 'RS14'].includes(chosen.restrictionCode) && subCodes.length > 1) problems.push(`${chosen.restrictionLabel} storage is segregated: choose one subcategory per cluster.`);
+    if(!restrictionCodes.length)problems.push('Choose one or more warehouse restrictions for this cluster.');
+    if(restrictionCodes.some(code=>!data.restrictions.find(r=>r.code===code&&r.active)))
+        problems.push('All cluster warehouse restrictions must be active in the master.');
+    if(restrictionCodes.some(code=>['RS02','RS08','RS12','RS14'].includes(code))&&subCodes.length>1)
+        problems.push('A selected segregated restriction allows only one material subcategory per cluster.');
     if (!subCodes.length) problems.push('Choose at least one material subcategory.');
     if (subCodes.length > data.limits.clusterSubcategories) problems.push(`Up to ${data.limits.clusterSubcategories} subcategories per cluster.`);
     if (name.trim().length > 60) problems.push('The name can be up to 60 characters.');
@@ -1138,9 +1144,10 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 startPos: start.p,
                 name: name.trim(),
                 locationCode: location,
-                restrictionCode: chosen?.restrictionCode || clusterClass,
+                restrictionCodes,
                 subcategoryCodes: subCodes,
                 storageTypeCode: storageType,
+                conditionCode,
                 stackingEnabled: stackMode,
                 ...(stackMode?{stackingPattern,bottomRowPallets:stackValues[1],
                     bottomRows:stackValues[0],numberOfStacks:stackValues[2]}:{}),
@@ -1167,7 +1174,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                         <p className='font-mono text-xs text-soft'>{data.costCenter.code}</p>
                         <p className='truncate font-semibold text-ink'>Add storage cluster</p>
                     </div>
-                    <span className='rounded-lg bg-panel px-2.5 py-1.5 text-xs font-semibold text-ink'>6 steps</span>
+                    <span className='rounded-lg bg-panel px-2.5 py-1.5 text-xs font-semibold text-ink'>7 steps</span>
                 </div>
                 <div className='rounded-xl border border-line bg-panel px-3 py-2'>
                     <p className={`break-words text-xs font-medium ${clash || (sizeOk && !preview) ? 'text-red-700' : 'text-ink'}`}>
@@ -1232,6 +1239,10 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                             <Stat label='Pallet capacity' value={palletCapacity===null?'—':palletCapacity.toLocaleString()}/>
                         </div>
                     </div>}
+                    <SelectField id='cl-condition' label='Storage condition *' value={conditionCode}
+                        onChange={e=>{setConditionCode(e.target.value);setConfirmed(false);}}>
+                        {data.conditions.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
+                    </SelectField>
                 </Card>
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-ink'>3 · Allocate physical positions *</p><p className='text-xs text-soft'>Use the next free positions or select a starting physical address. No location can belong to two clusters.</p>
@@ -1278,50 +1289,52 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>4 · Choose storage location *</p><p className='text-xs text-soft'>The cluster inherits the warehouse restriction of its storage location — the same master materials use in Stock Control. Only materials with that restriction can be binned here.</p>
-                    <SelectField id='cl-classification' label='Filter locations by warehouse restriction (optional)' value={clusterClass} onChange={(e)=>{setClusterClass(e.target.value);setLocation('');setConfirmed(false);}}>
-                        <option value=''>Show all restrictions</option>
-                        {data.restrictions.filter(x=>x.active||x.code===clusterClass).map(x=><option key={x.code} value={x.code}>{x.label} ({x.code})</option>)}
-                    </SelectField>
-                    {options.some((l) => !l.aligned) && <p className='rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200'>{options.filter((l) => !l.aligned).length} storage location(s) are not aligned to the restriction master. Edit the warehouse to confirm their restriction; they cannot take clusters or bins until then.</p>}
-                    {options.length === 0 && <Alert tone='error'>This warehouse has no active storage locations. Edit the setup and add one first.</Alert>}
-                    {options.length > 6 && (
-                        <div className='relative'>
-                            <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
-                            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder='Search storage locations…' className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-sm text-white' />
-                        </div>
-                    )}
-                    <ul className='max-h-72 space-y-1 overflow-y-auto overscroll-contain'>
-                        {shownOptions.map((l) => {
-                            const on = location === l.code;
-                            return (
-                                <li key={l.code}>
-                                    <button type='button' disabled={!l.aligned} onClick={() => {setLocation(l.code);setClusterClass(l.restrictionCode);
-                                        if(/pallet/i.test(l.typeLabel))setStorageType('PAL');
-                                        setConfirmed(false);}} className={`flex w-full items-start gap-3 rounded-xl border-2 p-3 text-left text-sm disabled:opacity-50 ${on ? 'text-white' : 'border-slate-800 text-slate-300'}`} style={on ? { borderColor: l.color, background: `${l.color}1f` } : undefined}>
-                                        <LocDot color={l.color} size='mt-0.5 h-4 w-4' />
-                                        <span className='min-w-0 flex-1'>
-                                            {l.name}
-                                            <span className='block text-xs text-slate-400'>
-                                                {l.typeLabel} · {l.aligned ? `${l.restrictionLabel} (${l.restrictionCode})` : 'Not aligned — edit the warehouse first'}
-                                            </span>
-                                        </span>
-                                        <span className='font-mono text-[11px] text-slate-500'>{l.code}</span>
-                                        {on && <Check className='h-4 w-4 shrink-0' />}
-                                    </button>
-                                </li>
-                            );
-                        })}
-                    </ul>
-                    {chosen && <div className='rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-ink'>
-                        <p className='font-semibold'>Selected: {chosen.code} · {chosen.name}</p>
-                        <p className='mt-1 text-xs text-soft'>Warehouse restriction applied automatically: {chosen.restrictionLabel} ({chosen.restrictionCode}).{chosenRestriction?.description ? ` ${chosenRestriction.description}` : ''}</p>
+                    <p className='text-sm font-semibold text-ink'>4 · Choose storage location *</p>
+                    <p className='text-xs text-soft'>Choose a named warehouse location. Storage restrictions are selected for the cluster in the next step.</p>
+                    {options.length===0&&<Alert tone='error'>No active storage locations. Add a location in warehouse setup first.</Alert>}
+                    {options.length>6&&<div className='relative'>
+                        <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 text-slate-500' />
+                        <input value={q} onChange={e=>setQ(e.target.value)} placeholder='Search storage locations…'
+                            className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-sm text-white'/>
                     </div>}
-                    {!shownOptions.length && <p className='rounded-xl border border-amber-500/40 bg-amber-100 p-3 text-sm text-amber-950'>No storage locations match this filter. Clear the restriction filter or edit the warehouse setup.</p>}
+                    <div className='max-h-60 space-y-2 overflow-y-auto'>
+                        {shownOptions.map(loc=><button type='button' key={loc.code}
+                            onClick={()=>{setLocation(loc.code);setConfirmed(false);}}
+                            className={\`flex min-h-12 w-full items-center gap-2 rounded-xl border p-3 text-left text-sm \${loc.code===location?'border-emerald-400 bg-emerald-500/10':'border-line bg-page'}\`}>
+                            <span className='min-w-0 flex-1 font-medium text-ink'>{loc.name}
+                                <span className='block text-xs text-soft'>{loc.code} · {loc.typeLabel}</span>
+                            </span>{loc.code===location&&<Check className='h-4 w-4 text-emerald-500'/>}
+                        </button>)}
+                    </div>
                 </Card>
-
+                <Card className='space-y-3' data-testid='cluster-restrictions'>
+                    <p className='text-sm font-semibold text-ink'>5 · Warehouse restrictions *</p>
+                    <p className='text-xs text-soft'>Select all applicable restrictions from the Procurement / Stock Control master. Materials can be linked when their effective warehouse restriction matches any selected code.</p>
+                    <div className='flex flex-wrap gap-2'>
+                        {restrictionCodes.map(code=>{
+                            const r=data.restrictions.find(x=>x.code===code);
+                            return <button key={code} type='button' onClick={()=>toggleRestriction(code)}
+                                className='flex min-h-9 items-center gap-1 rounded-full border border-line bg-panel px-3 text-xs text-ink'>
+                                <LocDot color={r?.color||'#64748B'}/>{code} {r?.label||''}<X className='h-3 w-3'/>
+                            </button>;
+                        })}
+                    </div>
+                    <div className='max-h-60 space-y-1 overflow-y-auto rounded-xl border border-line bg-page p-2'>
+                        {data.restrictions.map(r=><label key={r.code}
+                            className='flex min-h-11 items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink'>
+                            <input type='checkbox' disabled={!r.active} checked={restrictionCodes.includes(r.code)}
+                                onChange={()=>toggleRestriction(r.code)}/>
+                            <LocDot color={r.color}/>
+                            <span className='min-w-0 flex-1'>{r.code} · {r.label}
+                                {!r.active&&<span className='block text-xs text-amber-600'>Disabled in master</span>}
+                            </span>
+                        </label>)}
+                    </div>
+                    {restrictionCodes.some(code=>['RS02','RS08','RS12','RS14'].includes(code))&&
+                        <p className='text-xs text-amber-700'>A selected segregated restriction limits this cluster to one material subcategory.</p>}
+                </Card>
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>5 · Select material subcategories *</p>
+                    <p className='text-sm font-semibold text-ink'>6 · Select material subcategories *</p>
                     <p className='text-xs text-soft'>Choose the material types allowed in this cluster. Keep incompatible materials segregated.</p>
                     {subCodes.length > 0 && (
                         <div className='flex max-h-32 flex-wrap gap-1 overflow-y-auto'>
@@ -1368,7 +1381,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>6 · Name and identification</p>
+                    <p className='text-sm font-semibold text-ink'>7 · Name and identification</p>
                     <Field id='cl-name' label='Cluster name (optional)' maxLength={60} placeholder='e.g. Fast movers, bearings aisle' value={name} onChange={(e) => setName(e.target.value)} />
                 </Card>
 
@@ -1381,7 +1394,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 )}
                 <label className='flex items-start gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-3 text-sm text-slate-200'>
                     <input type='checkbox' className='mt-0.5 h-5 w-5 accent-emerald-500' checked={confirmed} disabled={!preview} onChange={(e) => setConfirmed(e.target.checked)} />
-                    I confirm: allocate these {sizeOk ? size.toLocaleString() : 0} positions{preview ? ` (${preview.split(' · ')[1]})` : ''} to {chosen ? `${chosen.code} ${chosen.name} (${chosen.restrictionLabel})` : 'the chosen storage location'} for {subCodes.length} subcategor{subCodes.length === 1 ? 'y' : 'ies'}. The cluster is numbered automatically.
+                    I confirm: allocate these {sizeOk ? size.toLocaleString() : 0} positions{preview ? ` (${preview.split(' · ')[1]})` : ''} to {chosen ? `${chosen.code} ${chosen.name}` : 'the chosen storage location'} with restrictions {restrictionCodes.join(', ')||'not selected'} for {subCodes.length} subcategor{subCodes.length === 1 ? 'y' : 'ies'}. The cluster is numbered automatically.
                 </label>
                 {error && <Alert tone='error'>{error}</Alert>}
             </div>
