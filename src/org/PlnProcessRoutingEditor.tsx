@@ -102,7 +102,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
   let live=true;
   setSpeed(null);
   if(!selected||selected.capacityBasis!=='PHYSICAL_CONTAINER'||!selected.costCenterId||!selected.producesSkuId||
-    !value.siteId)return;
+    !value.siteId||str(selectedOutput?.category)==='INTERMEDIATE')return;
   setSpeedBusy(true);
   void callBackend<{rating:{ratingQuantity:number;projection:{source:{containerName:string;
     sizeName:string;physicalContainers:number;countUnit:string;timeUnit:string}}}}>(
@@ -114,7 +114,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     detail:e instanceof Error?e.message:'Check the cost centre and primary-container master.'});})
    .finally(()=>{if(live)setSpeedBusy(false);});
   return ()=>{live=false;};
- },[selected?.costCenterId,selected?.producesSkuId,selected?.capacityBasis,value.siteId]);
+ },[selected?.costCenterId,selected?.producesSkuId,selected?.capacityBasis,selectedOutput?.category,value.siteId]);
  // SKU identity is organization-wide; stage cost-centre mapping controls commissioned capacity.
  const availableOutputs=useMemo(()=>items.filter(x=>
   ['FINISHED','INTERMEDIATE'].includes(str(x.category))),[items]);
@@ -284,14 +284,20 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
         }}/>
        <Choice label='Stage output SKU / intermediate' value={stage.producesSkuId||''}
         options={[['','No manufactured output'],...availableOutputs.map(x=>[x.id,x.name] as [string,string])]}
-        onChange={producesSkuId=>updateStep(stage.code,{producesSkuId,bomId:''})}/>
+        onChange={producesSkuId=>{
+         const chosen=items.find(x=>x.id===producesSkuId);
+         updateStep(stage.code,{producesSkuId,bomId:'',
+          ...(str(chosen?.category)==='INTERMEDIATE'&&stage.capacityBasis==='PHYSICAL_CONTAINER'
+             ?{capacityBasis:'BATCH_CYCLE' as const}:{})});
+        }}/>
        {stage.stageType==='PRODUCE'&&<Choice label='Referenced stage BOM' value={stage.bomId||''}
         options={[['','Select BOM for this stage output'],...chosenBoms.map(x=>[x.id,
          x.name+' · '+(str(x.status)||'draft')+' · '+(str(x.alternativeCode)||'STANDARD')] as [string,string])]}
         onChange={bomId=>updateStep(stage.code,{bomId})}/>}
        <Choice label='Capacity basis' value={stage.capacityBasis||'PHYSICAL_CONTAINER'}
         options={capacityBases.filter(x=>
-         str(resource?.sourceKind)!=='PRODUCTION_COST_CENTER'||x[0]!=='RESOURCE_RATE') as Array<[string,string]>}
+         (str(resource?.sourceKind)!=='PRODUCTION_COST_CENTER'||x[0]!=='RESOURCE_RATE')&&
+         (str(output?.category)!=='INTERMEDIATE'||x[0]!=='PHYSICAL_CONTAINER')) as Array<[string,string]>}
         onChange={capacityBasis=>updateStep(stage.code,{capacityBasis:capacityBasis as RoutingStep['capacityBasis']})}/>
        <TextField label='Setup / changeover minutes' type='number' min='0' value={num(stage.setupMinutes)}
         onChange={v=>updateStep(stage.code,{setupMinutes:Number(v)})}/>
@@ -306,7 +312,10 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
        </>}
       </div>
       <div className='rounded-lg bg-page p-3 text-xs'>
-       {stage.capacityBasis==='PHYSICAL_CONTAINER'?<>
+       {str(output?.category)==='INTERMEDIATE'?<>
+        <p className='font-semibold'>Intermediate/WIP: no commissioned SKU speed</p>
+        <p className='mt-1 text-muted'>This stage does not inherit a speed from intermediate-container capacity. Configure the relevant stage process or manufacturing-resource basis independently.</p>
+       </>:stage.capacityBasis==='PHYSICAL_CONTAINER'?<>
         <p className='font-semibold'>Commissioned physical-container speed</p>
         <p className='mt-1'>{speedBusy?'Checking authoritative cost-centre rating…':
          speed?.text||'Choose a commissioned stage SKU and its manufacturing cost centre.'}</p>
