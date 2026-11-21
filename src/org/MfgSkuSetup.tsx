@@ -5,6 +5,7 @@ import {SKU_NAME_FIELDS,SKU_NAME_SEPARATORS,DEFAULT_SKU_NAMING_SEQUENCE,composeS
 import {Field,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
 import {THROUGHPUT_OUTPUTS,throughputOutput,throughputOutputGroups} from '../shared/throughputOutput';
+import {BULK_STORAGE_CONTAINER_CATEGORY,SKU_CONTAINMENT_SCOPES,skuContainmentNeeds,type SkuContainmentScope} from '../shared/skuContainmentPolicy';
 
 export type SkuParameterKind='productNames'|'productionForms'|'containers'|'containerSizes'|'packages'|'transportPackages'|'packagingSizes'|'packageCounts'|'normalizationUnits';
 export type SkuParameter={
@@ -50,6 +51,8 @@ export const emptySkuSetup:SkuSetup={
         routings:'RTG',batches:'BTH',digits:9},
 };
 export type SkuSelections={
+    containmentScope?:SkuContainmentScope;
+    requiresCommercialPackaging?:boolean;requiresTransportPackaging?:boolean;
     productNameId?:string;productionFormId?:string;containerId?:string;containerSizeId?:string;
     packageId?:string;packagingSizeId?:string;packageCountId?:string;
     transportPackageId?:string;transportLayeringEnabled?:boolean;
@@ -172,6 +175,8 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
     value:SkuSelections;onChange:(next:SkuSelections)=>void;setup:SkuSetup;variantLabel?:string;
 }){
     const form=getParam(setup,'productionForms',value.productionFormId);
+    const needs=skuContainmentNeeds(value);
+    const selectedScope=value.containmentScope||'PRIMARY_CONTAINER';
     const container=getParam(setup,'containers',value.containerId);
     const size=getParam(setup,'containerSizes',value.containerSizeId);
     const packageRecord=getParam(setup,'packages',value.packageId);
@@ -194,10 +199,12 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
             Number(value.transportUnitsPerLoad)):null;
     const validTransportCount=transportCount!==null&&Number.isSafeInteger(transportCount)&&
         transportCount>=1&&transportCount<=10000000?transportCount:null;
-    const primaryPerTransport=validTransportCount!==null&&effectivePackSize!==null
-        ?validTransportCount*effectivePackSize:null;
-    const quantityPerTransport=validTransportCount!==null&&contentPerPackage!==null
-        ?validTransportCount*contentPerPackage:null;
+    const physicalPerUnit=needs.requiresCommercialPackaging?effectivePackSize:1;
+    const primaryPerTransport=validTransportCount!==null&&physicalPerUnit!==null
+        ?validTransportCount*physicalPerUnit:null;
+    const quantityPerTransport=validTransportCount!==null&&
+        (needs.requiresCommercialPackaging?contentPerPackage:contentPerContainer)!==null
+        ?validTransportCount*(needs.requiresCommercialPackaging?contentPerPackage!:contentPerContainer!):null;
     const normalizedReferenceUom=normalizationReferenceForm?.uom||norm?.baseUom;
     const unitRatio=norm&&form?ratio(setup,normalizedReferenceUom,form.uom):null;
     const normalizedOperator=norm?.normalizationOperator==='MULTIPLY'?'MULTIPLY':'DIVIDE';
@@ -232,6 +239,9 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
         composeSkuNameFromSequence(setup.namingSequence,namingValues):defaultTitle;
     const optionsFor=(kind:SkuParameterKind):Array<[string,string]>=>setup.parameters
         .filter(p=>p.kind===kind&&p.enabled!==false&&
+            (kind!=='containers'||(selectedScope==='BULK_STORAGE'
+                ?p.categoryCode===BULK_STORAGE_CONTAINER_CATEGORY
+                :p.categoryCode!==BULK_STORAGE_CONTAINER_CATEGORY))&&
             (kind!=='containers'||!value.productionFormId||!p.categoryCode?.startsWith('UOM-')||
                 p.categoryCode===pickUnit(setup,form?.uom)?.categoryCode)&&
             (kind!=='normalizationUnits'||!form?.uom||
@@ -241,10 +251,44 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
                 getParam(setup,'productionForms',p.referenceProductionFormId)?.uom||p.baseUom)?.symbol||
                 getParam(setup,'productionForms',p.referenceProductionFormId)?.uom||p.baseUom||'')+' / normalized unit'
             :p.name] as [string,string]);
+    const shownVariants=variants.filter(v=>
+        (!['containerId','containerSizeId'].includes(v.key)||selectedScope!=='NONE')&&
+        (!['packageId','packagingSizeId'].includes(v.key)||needs.requiresCommercialPackaging));
     return <section className={modal+' space-y-3'}>
         <h3 className='text-base font-semibold'>SKU composition</h3>
+        <div className='rounded-xl border border-line bg-page p-3 space-y-3'>
+            <Choice title='Physical containment scope *' value={selectedScope}
+                options={SKU_CONTAINMENT_SCOPES.map(item=>[item.code,item.label] as [string,string])}
+                onChange={scope=>onChange({...value,containmentScope:scope as SkuContainmentScope,
+                    containerId:'',containerSizeId:'',packageId:'',packagingSizeId:'',packageCountId:'',
+                    transportPackageId:'',requiresCommercialPackaging:false,requiresTransportPackaging:false,
+                    transportLayeringEnabled:false,transportPackagesPerLayer:undefined,
+                    transportLayerCount:undefined,transportUnitsPerLoad:undefined})}/>
+            {selectedScope==='BULK_STORAGE'&&
+                <p className='text-xs text-muted'>Select a bulk tank, silo, hopper, bunker, process vessel or bulk storage bin from the adopted Physical Containers list. Configure its nominal capacity in Container Sizes. No commercial or transport packaging is required unless enabled below.</p>}
+            {selectedScope==='NONE'&&
+                <p className='text-xs text-muted'>Direct or continuous process output. No physical container, commercial pack or logistics load is required.</p>}
+            {selectedScope!=='NONE'&&<div className='space-y-2'>
+                <label className='flex min-h-11 items-center gap-3 rounded-lg border border-line p-3 text-sm'>
+                    <input type='checkbox' checked={needs.requiresCommercialPackaging}
+                        onChange={e=>onChange({...value,requiresCommercialPackaging:e.target.checked,
+                            ...(!e.target.checked?{packageId:'',packagingSizeId:'',packageCountId:''}:{}),
+                            transportLayeringEnabled:false,transportPackagesPerLayer:undefined,
+                            transportLayerCount:undefined,transportUnitsPerLoad:undefined})}/>
+                    <span><strong>Requires commercial packaging</strong><span className='block text-xs text-muted'>Selling pack, case, tray or other commercial unit</span></span>
+                </label>
+                <label className='flex min-h-11 items-center gap-3 rounded-lg border border-line p-3 text-sm'>
+                    <input type='checkbox' checked={needs.requiresTransportPackaging}
+                        onChange={e=>onChange({...value,requiresTransportPackaging:e.target.checked,
+                            ...(!e.target.checked?{transportPackageId:''}:{}),
+                            transportLayeringEnabled:false,transportPackagesPerLayer:undefined,
+                            transportLayerCount:undefined,transportUnitsPerLoad:undefined})}/>
+                    <span><strong>Requires transport & logistics packaging</strong><span className='block text-xs text-muted'>Pallet, crate, shipping load or transport handling unit</span></span>
+                </label>
+            </div>}
+        </div>
         <div className='grid gap-3 sm:grid-cols-2'>
-            {variants.map(v=><Choice key={v.key} title={v.kind==='productNames'?variantLabel:v.label}
+            {shownVariants.map(v=><Choice key={v.key} title={v.kind==='productNames'?variantLabel:v.label}
                 value={value[v.key]||(!value.packagingSizeId&&v.kind==='packagingSizes'?value.packageCountId||'':'')}
                 options={v.kind==='packagingSizes'&&value.packageCountId
                     ?[...optionsFor(v.kind),...setup.parameters.filter(p=>p.kind==='packageCounts'&&p.id===value.packageCountId).map(p=>[p.id,p.name] as [string,string])]
@@ -253,10 +297,15 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
                     if(v.key==='productionFormId')onChange({...value,productionFormId:selected,containerId:'',
                         containerSizeId:'',normalizationUnitId:''});
                     else if(v.key==='packagingSizeId')onChange({...value,packagingSizeId:selected,packageCountId:''});
+                    else if(v.key==='containerId')onChange({...value,containerId:selected,containerSizeId:''});
                     else onChange({...value,[v.key]:selected});
                 }}/>)}
         </div>
-        <div className='rounded-xl border border-line p-3 space-y-3'>
+        {selectedScope==='BULK_STORAGE'&&!optionsFor('containers').length&&
+            <p role='status' className='rounded-lg border border-line p-3 text-xs text-muted'>
+                No bulk storage containers adopted yet. Open Product Configuration → Physical Containers to adopt a bulk tank, silo, hopper or storage vessel before saving the SKU.
+            </p>}
+        {needs.requiresTransportPackaging&&selectedScope!=='NONE'&&<div className='rounded-xl border border-line p-3 space-y-3'>
             <h4 className='text-sm font-semibold'>Transport & Logistics Packaging</h4>
             <Choice title='Transport packaging (optional)' value={value.transportPackageId||''}
                 placeholder='No transport package selected'
@@ -273,21 +322,21 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
                     Enable layered stacking
                 </label>
                 {layersEnabled?<div className='grid gap-3 sm:grid-cols-2'>
-                    <NumberInput title='Commercial packages per layer'
+                    <NumberInput title={needs.requiresCommercialPackaging?'Commercial packages per layer':'Physical containers per layer'}
                         value={value.transportPackagesPerLayer||0}
                         onChange={n=>onChange({...value,transportPackagesPerLayer:n})}/>
                     <NumberInput title='Number of layers'
                         value={value.transportLayerCount||0}
                         onChange={n=>onChange({...value,transportLayerCount:n})}/>
-                </div>:<NumberInput title='Commercial packages per transport unit'
+                </div>:<NumberInput title={needs.requiresCommercialPackaging?'Commercial packages per transport unit':'Physical containers per transport unit'}
                     value={value.transportUnitsPerLoad||0}
                     onChange={n=>onChange({...value,transportUnitsPerLoad:n})}/>}
                 {validTransportCount!==null&&<p className='text-sm font-medium text-brand'>
-                    {pretty(validTransportCount)} commercial packages per {transportRecord.name}
+                    {pretty(validTransportCount)} {needs.requiresCommercialPackaging?'commercial packages':'physical containers'} per {transportRecord.name}
                     {primaryPerTransport!==null?' · '+pretty(primaryPerTransport)+' primary containers':''}
                 </p>}
             </>}
-        </div>
+        </div>}
         <div className='rounded-xl border border-line bg-page p-3 text-sm' aria-live='polite'>
             <p className='font-medium text-ink'>{title}</p>
             {contentPerContainer!==null&&<p className='mt-1 text-muted'>Per container: {pretty(contentPerContainer)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
@@ -303,6 +352,8 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
                     ?' Multiply by '+norm.quantityPerUnit+' '+norm.name+' per '+unitSymbol(normalizedReferenceUom)
                     :' Divide by '+norm.quantityPerUnit+' '+unitSymbol(normalizedReferenceUom)+' per '+norm.name}
             </p>}
+            {!needs.requiresCommercialPackaging&&norm&&normalBase&&contentPerContainer!==null&&
+                <p className='mt-1 font-semibold text-brand'>Normalized units per {container?.name||'physical unit'}: {pretty(contentPerContainer/normalBase)} {norm.name}</p>}
             {factor!==null&&<p className='mt-1 font-semibold text-brand'>
                 Normalized unit cases per commercial package: {pretty(factor)} {norm?.name}
             </p>}
