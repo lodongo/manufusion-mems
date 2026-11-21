@@ -498,11 +498,14 @@ export const plnMfgFoundationRoutes={
     'POST /api/org/pln-mfg/foundation/routing-references':[
         orgRoute('org.mfg.routing.references','MFG.view',async ctx=>{
             const root='organizations/'+ctx.orgId;
-            const [structure,metadata,capacity]=await Promise.all([
+            const [structure,metadata,capacity,skuMasters]=await Promise.all([
                 listDocs(root+'/structure'),
                 getDoc('module_workspaces/FIN/metadata/costCenterTypes'),
                 listDocs(root+'/pln_cost_center_capacity'),
+                listDocs(root+'/mfg_items'),
             ]);
+            const finishedSkuIds=new Set(skuMasters.filter(d=>str(d.data.category)==='FINISHED')
+                .map(d=>d.id));
             const nodes=structure.map(d=>({
                 id:d.id,parentId:str(d.data.parentId),level:str(d.data.level),
                 name:str(d.data.name)||str(d.data.code)||d.id,
@@ -526,7 +529,7 @@ export const plnMfgFoundationRoutes={
                 if(!siteId)continue;
                 const mapping=saved.get(center.id);
                 const skuIds=(Array.isArray(mapping?.data.skuCapacities)?mapping.data.skuCapacities:[])
-                    .filter(isObj).map(x=>str(x.skuId)).filter(Boolean);
+                    .filter(isObj).map(x=>str(x.skuId)).filter(id=>finishedSkuIds.has(id));
                 costCenters.push({id:center.id,name:center.name,code:center.code,siteId,
                     legalEntityId,commissionedSkuIds:skuIds});
             }
