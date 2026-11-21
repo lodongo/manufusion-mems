@@ -1172,10 +1172,11 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const [clusterClass,setClusterClass]=useState(options.length === 1 ? options[0].restrictionCode : '');
     const [q, setQ] = useState('');
     const [storageType, setStorageType] = useState(setup.storageTypeCode);
-    const [stackingEnabled,setStackingEnabled]=useState(false);
-    const [stackedRows,setStackedRows]=useState('1');
-    const [stackedColumns,setStackedColumns]=useState('1');
-    const [numberOfStacks,setNumberOfStacks]=useState('1');
+    const [stackingEnabled,setStackingEnabled]=useState(
+        setup.storageTypeCode==='PAL'&&setup.palletStacking?.enabled===true);
+    const [stackedRows,setStackedRows]=useState(String(setup.palletStacking?.stackedRows??1));
+    const [stackedColumns,setStackedColumns]=useState(String(setup.palletStacking?.stackedColumns??1));
+    const [numberOfStacks,setNumberOfStacks]=useState(String(setup.palletStacking?.numberOfStacks??1));
     const [confirmed, setConfirmed] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
@@ -1265,7 +1266,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                         <p className='font-mono text-xs text-soft'>{data.costCenter.code}</p>
                         <p className='truncate font-semibold text-ink'>Add storage cluster</p>
                     </div>
-                    <span className='rounded-lg bg-panel px-2.5 py-1.5 text-xs font-semibold text-ink'>5 steps</span>
+                    <span className='rounded-lg bg-panel px-2.5 py-1.5 text-xs font-semibold text-ink'>6 steps</span>
                 </div>
                 <div className='rounded-xl border border-line bg-panel px-3 py-2'>
                     <p className={`break-words text-xs font-medium ${clash || (sizeOk && !preview) ? 'text-red-700' : 'text-ink'}`}>
@@ -1292,7 +1293,36 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>2 · Allocate physical positions *</p><p className='text-xs text-soft'>Use the next free positions or select a starting physical address. No location can belong to two clusters.</p>
+                    <p className='text-sm font-semibold text-ink'>2 · Select physical storage type and stacking</p>
+                    <p className='text-xs text-soft'>Choose pallets to configure stacking before determining the number of storage positions.</p>
+                    <SelectField id='cl-type' label='Physical storage type *' value={storageType}
+                        onChange={(e)=>{setStorageType(e.target.value);setConfirmed(false);}}>
+                        {data.storageTypes.map((t)=><option key={t.code} value={t.code}>{t.label}</option>)}
+                    </SelectField>
+                    {palletMode&&<div className='space-y-3 rounded-xl border border-line bg-panel p-3' data-testid='cluster-pallet-stacking'>
+                        <label className='flex min-h-11 items-center gap-3 text-sm font-semibold text-ink'>
+                            <input type='checkbox' checked={stackingEnabled}
+                                onChange={e=>{setStackingEnabled(e.target.checked);setConfirmed(false);}}/>
+                            Enable pallet stacking
+                        </label>
+                        {stackingEnabled&&<>
+                            <div className='grid grid-cols-2 gap-3'>
+                                <NumField id='cl-stack-rows' label='Stacked rows *' value={stackedRows} onChange={change(setStackedRows)}/>
+                                <NumField id='cl-stack-cols' label='Stacked columns *' value={stackedColumns} onChange={change(setStackedColumns)}/>
+                                <div className='col-span-2'>
+                                    <NumField id='cl-stacks' label='Number of stacks (pallets high) *' value={numberOfStacks} onChange={change(setNumberOfStacks)}/>
+                                </div>
+                            </div>
+                            <p className='text-xs text-soft'>Ground positions = rows × columns. Pallet capacity = ground positions × pallets high. Check site load, height and stability limits.</p>
+                        </>}
+                        <div className='grid grid-cols-2 gap-2' aria-live='polite'>
+                            <Stat label='Ground positions' value={sizeOk?size.toLocaleString():'—'}/>
+                            <Stat label='Pallet capacity' value={palletCapacity===null?'—':palletCapacity.toLocaleString()}/>
+                        </div>
+                    </div>}
+                </Card>
+                <Card className='space-y-3'>
+                    <p className='text-sm font-semibold text-ink'>3 · Allocate physical positions *</p><p className='text-xs text-soft'>Use the next free positions or select a starting physical address. No location can belong to two clusters.</p>
                     <div className='grid grid-cols-1 gap-2'>
                         {(
                             [
@@ -1310,7 +1340,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                         ))}
                     </div>
                     {!stackMode&&<NumField id='cl-count' label='Number of floor/storage positions *' value={countText} onChange={change(setCountText)} hint={`Up to ${Math.min(data.limits.clusterPositions, total).toLocaleString()} · taken in sequence: rack row › rack › column › position`} />}
-                    {stackMode&&<p className='rounded-lg border border-line bg-panel p-3 text-xs text-soft'>Pallet floor positions are calculated from stacked rows × columns. Each stack occupies one physical position, regardless of the number of pallets high.</p>}
+                    {stackMode&&<p className='rounded-lg border border-line bg-panel p-3 text-xs text-soft'>Calculated from the pallet stacking setup above: {sizeOk?size.toLocaleString():'—'} physical positions and {palletCapacity===null?'—':palletCapacity.toLocaleString()} pallet places.</p>}
                     {mode === 'start' && (
                         <>
                             <p className='text-sm text-slate-300'>Starting physical location</p>
@@ -1336,7 +1366,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>3 · Choose storage location *</p><p className='text-xs text-soft'>The cluster inherits the warehouse restriction of its storage location — the same master materials use in Stock Control. Only materials with that restriction can be binned here.</p>
+                    <p className='text-sm font-semibold text-ink'>4 · Choose storage location *</p><p className='text-xs text-soft'>The cluster inherits the warehouse restriction of its storage location — the same master materials use in Stock Control. Only materials with that restriction can be binned here.</p>
                     <SelectField id='cl-classification' label='Filter locations by warehouse restriction (optional)' value={clusterClass} onChange={(e)=>{setClusterClass(e.target.value);setLocation('');setConfirmed(false);}}>
                         <option value=''>Show all restrictions</option>
                         {data.restrictions.filter(x=>x.active||x.code===clusterClass).map(x=><option key={x.code} value={x.code}>{x.label} ({x.code})</option>)}
@@ -1379,7 +1409,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>4 · Select material subcategories *</p>
+                    <p className='text-sm font-semibold text-ink'>5 · Select material subcategories *</p>
                     <p className='text-xs text-soft'>Choose the material types allowed in this cluster. Keep incompatible materials segregated.</p>
                     {subCodes.length > 0 && (
                         <div className='flex max-h-32 flex-wrap gap-1 overflow-y-auto'>
@@ -1426,39 +1456,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>5 · Storage type, pallet capacity and name</p>
-                    <p className='text-xs text-soft'>Use the actual type of position, such as a bin, shelf or pallet place.</p>
-                    <SelectField id='cl-type' label='Physical storage type' value={storageType} onChange={(e) => {setStorageType(e.target.value);setConfirmed(false);}}>
-                        {data.storageTypes.map((t) => (
-                            <option key={t.code} value={t.code}>
-                                {t.label}
-                            </option>
-                        ))}
-                    </SelectField>
-                    {palletMode&&<div className='space-y-3 rounded-xl border border-line bg-panel p-3'>
-                        <label className='flex min-h-11 items-center gap-3 text-sm font-medium text-ink'>
-                            <input type='checkbox' checked={stackingEnabled}
-                                onChange={e=>{setStackingEnabled(e.target.checked);setConfirmed(false);}} />
-                            Stacking — calculate pallet capacity
-                        </label>
-                        {stackingEnabled&&<>
-                            <div className='grid grid-cols-2 gap-3'>
-                                <NumField id='cl-stack-rows' label='Stacked rows *' value={stackedRows}
-                                    onChange={change(setStackedRows)} />
-                                <NumField id='cl-stack-cols' label='Stacked columns *' value={stackedColumns}
-                                    onChange={change(setStackedColumns)} />
-                                <div className='col-span-2'>
-                                    <NumField id='cl-stacks' label='Number of stacks (pallets high) *'
-                                        value={numberOfStacks} onChange={change(setNumberOfStacks)} />
-                                </div>
-                            </div>
-                            <p className='text-xs text-soft'>Each row × column combination occupies one ground position. Number of stacks means pallets vertically, not additional floor places. Site loading and stacking limits still apply.</p>
-                        </>}
-                        <div className='grid grid-cols-2 gap-2'>
-                            <Stat label='Ground positions' value={sizeOk?size.toLocaleString():'—'}/>
-                            <Stat label='Pallet capacity' value={palletCapacity===null?'—':palletCapacity.toLocaleString()}/>
-                        </div>
-                    </div>}
+                    <p className='text-sm font-semibold text-ink'>6 · Name and identification</p>
                     <Field id='cl-name' label='Cluster name (optional)' maxLength={60} placeholder='e.g. Fast movers, bearings aisle' value={name} onChange={(e) => setName(e.target.value)} />
                 </Card>
 
