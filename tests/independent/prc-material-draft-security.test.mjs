@@ -61,7 +61,8 @@ test('original creator, delegated editors and submitters are all makers even aft
 test('runtime routes gate all write actions, use optimistic locking, audit and test overrides',()=>{
     const backend=read('backend/procurement.ts');
     const policy=read('backend/permissionPolicy.ts');
-    const ui=read('src/org/MaterialsMaster.tsx');
+    const master=read('src/org/MaterialsMaster.tsx');
+    const ui=read('src/org/MaterialMasterDashboard.tsx');
     const overrides=read('backend/testModeCore.ts');
     for(const action of ['edit','delete','submit']){
         assert.ok(backend.includes("materialDraftCan("));
@@ -76,6 +77,9 @@ test('runtime routes gate all write actions, use optimistic locking, audit and t
     assert.ok(backend.includes("'procurement.material.draft_autosave'"));
     assert.ok(backend.includes("status:'deleted'"));
     assert.ok(backend.includes("filter(d=>str(d.data.status)!=='deleted')"));
+    // Row actions were moved into the selected material dashboard.
+    assert.ok(master.includes('onRowClick={setReviewMaterial}'));
+    assert.ok(!master.includes("key:'actions',label:'Actions'"));
     assert.ok(ui.includes('m.canEdit&&<Button'));
     assert.ok(ui.includes('m.canDelete&&<Button'));
     assert.ok(ui.includes('m.canSubmit&&<Button'));
