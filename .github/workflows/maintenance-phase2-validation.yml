@@ -36,6 +36,8 @@ jobs:
       - run: npm run check
       - name: Asset catalog import safety and mobile transfer regression
         run: node --import tsx --test tests/independent/asset-catalog-import.test.mjs
+      - name: PRC multi-restriction cluster matching and draft handoff regression
+        run: node --import tsx --test tests/independent/prc-material-cluster-matching.test.mjs
       - name: PRC Bidded material sourcing regression
         run: node --import tsx --test tests/independent/prc-bidded-sourcing.test.mjs
       - name: PRC Materials Master classification and attribute regression
