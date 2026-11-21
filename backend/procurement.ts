@@ -571,10 +571,23 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                 const s = await getDoc(stagedUpload(kind,uploadId));
                 if (!s || str(s.data.status) !== 'uploading' || str(s.data.uploadedBy) !== ctx.actor.email) throw new HttpError(400, 'Start the upload again.');
                 const total = num(s.data.totalChunks) ?? 0;
-                const chunks = (await listDocs(`${staging(kind)}/upload`)).sort((a, b) => (num(a.data.index) ?? 0) - (num(b.data.index) ?? 0));
-                const cleanup = async () => {
-                    for (const c of chunks) await deleteDoc(`${staging(kind)}/upload/${c.id}`);
-                    await deleteDoc(staging(kind));
+                // Retrieve every part by its expected index; do not rely on a collection listing.
+                // Missing parts remain staged and are returned to the browser for targeted retry.
+                const chunks:Array<Awaited<ReturnType<typeof getDoc>>>=Array(total).fill(null);
+                for(let offset=0;offset<total;offset+=12){
+                    const batch=await Promise.all(Array.from({length:Math.min(12,total-offset)},(_,i)=>
+                        getDoc(stagedChunk(kind,uploadId,offset+i))));
+                    batch.forEach((chunk,i)=>{chunks[offset+i]=chunk;});
+                }
+                const missing=chunks.flatMap((d,i)=>!d||num(d.data.index)!==i?[i]:[]);
+                if(missing.length)return {ok:false,retryable:true,missingChunks:missing,
+                    errors:[`Upload is missing ${missing.length} part(s): ${missing.slice(0,20).map(n=>n+1).join(', ')}. Retry only these parts.`],
+                    warnings:[],stats:{}};
+                const verifiedChunks=chunks.filter((d):d is NonNullable<typeof d>=>!!d);
+                const cleanup=async()=>{
+                    for(const chunk of verifiedChunks)
+                        await deleteDoc(stagedChunk(kind,uploadId,num(chunk.data.index)??0));
+                    await deleteDoc(stagedUpload(kind,uploadId));
                 };
                 const target = `${def.label}: ${str(s.data.fileName) || def.label}`;
                 const reject = async (errors: string[], warnings: string[] = []) => {
@@ -582,8 +595,13 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                     await rec(ctx, `${area}.catalog.rejected`, target, errors.slice(0, 3).join(' | '));
                     return { ok: false, errors, warnings, stats: {} };
                 };
-                if (chunks.length !== total || chunks.some((c, i) => num(c.data.index) !== i)) return reject(['Some parts of the file did not arrive. Upload it again.']);
-                const textAll = chunks.map((c) => str(c.data.data)).join('');
+                const textAll=verifiedChunks.map((part,i)=>{
+                    const content=str(part.data.data);
+                    const hash=createHash('sha256').update(Buffer.from(content,'utf8')).digest('hex');
+                    if(str(part.data.sha256)!==hash)
+                        throw new HttpError(409,`Part ${i+1} failed storage checksum verification. Restart the upload.`);
+                    return content;
+                }).join('');
                 const bytes = Buffer.from(textAll, 'utf8');
                 if (bytes.length !== num(s.data.size)) return reject([`The file arrived incomplete (${bytes.length} of ${num(s.data.size)} bytes). Upload it again.`]);
                 if (createHash('sha256').update(bytes).digest('hex') !== str(s.data.sha256)) return reject(['The file was altered or corrupted during upload. Upload it again.']);
