@@ -260,11 +260,15 @@ export default function MaterialsMaster() {
         { label: 'Duplicate check', open: duplicateConfirmed ? 0 : 1 },
     ];
     const back = stage > 1 ? <Button variant='secondary' className='flex-1 sm:flex-none' onClick={() => go(stage === 5 ? 4 : stage - 1)}><ArrowLeft className='h-4 w-4' /> Back</Button> : null;
-    const actions = stage === 1 ? <Button className='flex-1 sm:ml-auto sm:flex-none' disabled={loadingDetail} onClick={next1}>Continue <ArrowRight className='h-4 w-4' /></Button>
-        : stage === 2 ? <>{back}<Button className='flex-[2] sm:ml-auto sm:flex-none' onClick={next2}>Continue <ArrowRight className='h-4 w-4' /></Button></>
-        : stage === 3 ? <>{back}<Button variant='secondary' className='flex-1 sm:ml-auto sm:flex-none' busy={saving} disabled={saving||!hierarchy.complete} onClick={() => save(false)}><Save className='h-4 w-4' /> Draft</Button><Button className='flex-[2] sm:flex-none' onClick={next3}>Review <ArrowRight className='h-4 w-4' /></Button></>
-        : stage === 4 ? <>{back}<Button className='flex-[2] sm:ml-auto sm:flex-none' busy={similarLoading} disabled={!complete || similarLoading || duplicateBlocked || liveChecking} onClick={next4}>Check duplicates <ArrowRight className='h-4 w-4' /></Button></>
-        : <>{back}<Button className='flex-[2] sm:ml-auto sm:flex-none' busy={saving} disabled={!complete || !similar || !duplicateConfirmed || saving || duplicateBlocked || liveChecking} onClick={() => save(true)}><Send className='h-4 w-4' /> Submit for approval</Button></>;
+    const draftAction=<Button variant='secondary' className='flex-1 sm:flex-none' busy={saving}
+        disabled={saving||!hierarchy.complete} onClick={()=>void save(false)}>
+        <Save className='h-4 w-4'/> Save draft
+    </Button>;
+    const actions = stage === 1 ? <>{draftAction}<Button className='flex-1 sm:ml-auto sm:flex-none' disabled={loadingDetail} onClick={next1}>Continue <ArrowRight className='h-4 w-4' /></Button></>
+        : stage === 2 ? <>{back}{draftAction}<Button className='flex-[2] sm:ml-auto sm:flex-none' onClick={next2}>Continue <ArrowRight className='h-4 w-4' /></Button></>
+        : stage === 3 ? <>{back}{draftAction}<Button className='flex-[2] sm:flex-none' onClick={next3}>Review <ArrowRight className='h-4 w-4' /></Button></>
+        : stage === 4 ? <>{back}{draftAction}<Button className='flex-[2] sm:ml-auto sm:flex-none' busy={similarLoading} disabled={!complete || similarLoading || duplicateBlocked || liveChecking} onClick={next4}>Check duplicates <ArrowRight className='h-4 w-4' /></Button></>
+        : <>{back}{draftAction}<Button className='flex-[2] sm:ml-auto sm:flex-none' busy={saving} disabled={!complete || !similar || !duplicateConfirmed || saving || duplicateBlocked || liveChecking} onClick={() => save(true)}><Send className='h-4 w-4' /> Submit for approval</Button></>;
     const restrictionLabels=restrictionCodes.map(code=>{
         const r=options?.restrictions.find(x=>x.code===code);return r?r.label+' ('+r.code+')':code;
     });
