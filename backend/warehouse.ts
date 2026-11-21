@@ -180,20 +180,33 @@ function int(v: unknown, min: number, max: number, label: string): number {
     if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${label} must be a whole number from ${min} to ${max}.`);
     return n;
 }
-/** Pallet stacks occupy rows × columns floor places; vertical levels add capacity, not physical addresses. */
+/** Straight stacking uses full vertical levels; pyramid is exactly two levels, the second holding half the first.
+ * Physical position count always refers to the footprint on the warehouse floor. */
 export function palletPositionCapacity(b:Record<string,unknown>,defaultStorageType:string,total:number){
     const storageTypeCode=str(b.storageTypeCode)||defaultStorageType;
     if(b.stackingEnabled===true&&storageTypeCode!=='PAL')
         throw new HttpError(400,'Pallet stacking can be configured only for pallet storage.');
     const stackingEnabled=storageTypeCode==='PAL'&&b.stackingEnabled===true;
-    const stackedRows=stackingEnabled?int(b.stackedRows,1,100,'Stacked rows'):null;
-    const stackedColumns=stackingEnabled?int(b.stackedColumns,1,100,'Stacked columns'):null;
-    const numberOfStacks=stackingEnabled?int(b.numberOfStacks,1,20,'Number of stacks (pallets high)'):null;
+    const stackingPattern=str(b.stackingPattern)||'STRAIGHT';
+    if(stackingEnabled&&!['STRAIGHT','PYRAMID'].includes(stackingPattern))
+        throw new HttpError(400,'Choose straight or pyramid pallet stacking.');
+    const bottomRowPallets=stackingEnabled?int(b.bottomRowPallets??b.stackedColumns,1,100,'Pallets per bottom row'):null;
+    const bottomRows=stackingEnabled?int(b.bottomRows??b.stackedRows,1,100,'Number of rows'):null;
+    const numberOfStacks=stackingEnabled
+        ?(stackingPattern==='PYRAMID'?2:int(b.numberOfStacks,1,20,'Stack height (pallets)')):null;
+    if(stackingEnabled&&stackingPattern==='PYRAMID'&&b.numberOfStacks!==undefined&&Number(b.numberOfStacks)!==2)
+        throw new HttpError(400,'Pyramid stacking is restricted to exactly two levels.');
     const size=int(b.count,1,Math.min(MAX_CLUSTER_POSITIONS,total),'The number of physical positions');
-    if(stackingEnabled&&size!==(stackedRows??1)*(stackedColumns??1))
-        throw new HttpError(400,'Pallet floor positions must equal stacked rows × stacked columns.');
-    const palletCapacity=storageTypeCode==='PAL'?size*(numberOfStacks??1):null;
-    return {size,stackingEnabled,stackedRows,stackedColumns,numberOfStacks,palletCapacity};
+    if(stackingEnabled&&size!==(bottomRowPallets??1)*(bottomRows??1))
+        throw new HttpError(400,'Pallet floor positions must equal pallets per bottom row × number of rows.');
+    if(stackingEnabled&&stackingPattern==='PYRAMID'&&size%2!==0)
+        throw new HttpError(400,'Pyramid stacking requires an even number of bottom pallets so the second level is exactly half.');
+    const secondLevelPallets=stackingEnabled&&stackingPattern==='PYRAMID'?size/2:null;
+    const palletCapacity=storageTypeCode==='PAL'?
+        (stackingEnabled&&stackingPattern==='PYRAMID'?size+(secondLevelPallets??0):size*(numberOfStacks??1)):null;
+    return {size,stackingEnabled,stackingPattern:stackingEnabled?stackingPattern:null,
+        bottomRowPallets,bottomRows,stackedRows:bottomRows,stackedColumns:bottomRowPallets,
+        numberOfStacks,secondLevelPallets,palletCapacity};
 }
 function dec(v: unknown, min: number, max: number, label: string, required: boolean): number | null {
     if (v === undefined || v === null || String(v).trim() === '') {
@@ -288,9 +301,13 @@ function clusterOut(doc: Doc, layout: Layout) {
         storageTypeCode: str(d.storageTypeCode),
         storageTypeLabel: str(d.storageTypeLabel),
         stackingEnabled: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true,
-        stackedRows: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true?Number(d.stackedRows)||1:null,
-        stackedColumns: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true?Number(d.stackedColumns)||1:null,
+        stackingPattern: str(d.stackingPattern)||'STRAIGHT',
+        bottomRowPallets: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true?Number(d.bottomRowPallets??d.stackedColumns)||1:null,
+        bottomRows: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true?Number(d.bottomRows??d.stackedRows)||1:null,
+        stackedRows: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true?Number(d.bottomRows??d.stackedRows)||1:null,
+        stackedColumns: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true?Number(d.bottomRowPallets??d.stackedColumns)||1:null,
         numberOfStacks: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true?Number(d.numberOfStacks)||1:null,
+        secondLevelPallets: str(d.stackingPattern)==='PYRAMID'?Number(d.secondLevelPallets)||0:null,
         palletCapacity: str(d.storageTypeCode)==='PAL'
             ?(d.stackingEnabled===true?Number(d.palletCapacity)||positions:positions):null,
         createdByName: str(d.createdByName),
@@ -417,9 +434,12 @@ export const warehouseRoutes = {
                           storageTypeCode: str(d.storageTypeCode),
                           palletStacking:{
                               enabled:str(d.storageTypeCode)==='PAL'&&palletDefaults.enabled===true,
-                              stackedRows:Number(palletDefaults.stackedRows)||1,
-                              stackedColumns:Number(palletDefaults.stackedColumns)||1,
-                              numberOfStacks:Number(palletDefaults.numberOfStacks)||1,
+                              stackingPattern:str(palletDefaults.stackingPattern)||'STRAIGHT',
+                              bottomRowPallets:Number(palletDefaults.bottomRowPallets??palletDefaults.stackedColumns)||1,
+                              bottomRows:Number(palletDefaults.bottomRows??palletDefaults.stackedRows)||1,
+                              stackedRows:Number(palletDefaults.bottomRows??palletDefaults.stackedRows)||1,
+                              stackedColumns:Number(palletDefaults.bottomRowPallets??palletDefaults.stackedColumns)||1,
+                              numberOfStacks:str(palletDefaults.stackingPattern)==='PYRAMID'?2:Number(palletDefaults.numberOfStacks)||1,
                           },
                           conditionCode: str(d.conditionCode),
                           layout,
@@ -484,14 +504,24 @@ export const warehouseRoutes = {
             if (!storageType) throw new HttpError(400, 'Choose the type of storage.');
             const stackingRaw=isObj(b.palletStacking)?b.palletStacking:{};
             const stackingEnabled=storageType[0]==='PAL'&&stackingRaw.enabled===true;
+            const defaultBottomRowPallets=stackingEnabled?int(stackingRaw.bottomRowPallets??stackingRaw.stackedColumns,1,100,'Pallets per bottom row'):1;
+            const defaultBottomRows=stackingEnabled?int(stackingRaw.bottomRows??stackingRaw.stackedRows,1,100,'Number of rows'):1;
+            const computedDefaults=palletPositionCapacity({
+                storageTypeCode:storageType[0],stackingEnabled,
+                stackingPattern:str(stackingRaw.stackingPattern)||'STRAIGHT',
+                bottomRowPallets:defaultBottomRowPallets,bottomRows:defaultBottomRows,
+                numberOfStacks:str(stackingRaw.stackingPattern)==='PYRAMID'?2:stackingEnabled?stackingRaw.numberOfStacks:1,
+                count:defaultBottomRowPallets*defaultBottomRows,
+            },storageType[0],MAX_CLUSTER_POSITIONS);
             const palletStacking={
                 enabled:stackingEnabled,
-                stackedRows:stackingEnabled?int(stackingRaw.stackedRows,1,100,'Pallet stacked rows'):1,
-                stackedColumns:stackingEnabled?int(stackingRaw.stackedColumns,1,100,'Pallet stacked columns'):1,
-                numberOfStacks:stackingEnabled?int(stackingRaw.numberOfStacks,1,20,'Pallet number of stacks (high)'):1,
+                stackingPattern:computedDefaults.stackingPattern??'STRAIGHT',
+                bottomRowPallets:defaultBottomRowPallets,
+                bottomRows:defaultBottomRows,
+                stackedRows:defaultBottomRows,
+                stackedColumns:defaultBottomRowPallets,
+                numberOfStacks:computedDefaults.numberOfStacks??1,
             };
-            if(palletStacking.stackedRows*palletStacking.stackedColumns>MAX_CLUSTER_POSITIONS)
-                throw new HttpError(400,'Pallet default footprint exceeds the maximum cluster positions.');
             const condition = CONDITIONS.find(([c]) => c === str(b.conditionCode));
             if (!condition) throw new HttpError(400, 'Choose the storage condition.');
 
@@ -678,7 +708,8 @@ export const warehouseRoutes = {
                 const floorNo = int(b.floor, 1, layout.floors.length, 'The floor');
                 const floor = layout.floors[floorNo - 1];
                 const total = floorPositions(floor);
-                const {size,stackingEnabled,stackedRows,stackedColumns,numberOfStacks,palletCapacity}=
+                const {size,stackingEnabled,stackingPattern,bottomRowPallets,bottomRows,
+                    stackedRows,stackedColumns,numberOfStacks,secondLevelPallets,palletCapacity}=
                     palletPositionCapacity(b,str(wh.data.storageTypeCode),total);
 
                 // Storage location of this warehouse.
@@ -773,7 +804,8 @@ export const warehouseRoutes = {
                         storageTypeCode: storageType[0],
                         storageTypeLabel: storageType[1],
                         stackingEnabled,
-                        ...(stackingEnabled?{stackedRows,stackedColumns,numberOfStacks}:{}),
+                        ...(stackingEnabled?{stackingPattern,bottomRowPallets,bottomRows,
+                            stackedRows,stackedColumns,numberOfStacks,secondLevelPallets}:{}),
                         palletCapacity,
                         positions: size,
                         createdBy: ctx.uid,
