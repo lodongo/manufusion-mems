@@ -677,11 +677,15 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
                                 <Row label='Held by' value={node.managerHolders?.length ? node.managerHolders.join(', ') : 'Nobody assigned yet'} />
                             </>
                         )}
-                        {node.level === 'cost_center' && <Row label='Cost center category' value={`${node.attributes.costType ?? '—'} · ${costCenterCategoryLabel(String(node.attributes.costType ?? ''))}`} />
-                            <Row label='Cost center subcategory' value={node.attributes.costSubcategory
-                                ? costCenterSubcategoryLabel(String(node.attributes.costType ?? ''), String(node.attributes.costSubcategory))
-                                : 'Not yet classified (legacy record)'} />
-                            <Row label='Currency (from legal entity)' value={String(data.ancestors.find((a) => a.level === 'legal_entity')?.attributes.currencyCode ?? '—')} />}
+                        {node.level === 'cost_center' && (
+                            <>
+                                <Row label='Cost center category' value={`${node.attributes.costType ?? '—'} · ${costCenterCategoryLabel(String(node.attributes.costType ?? ''))}`} />
+                                <Row label='Cost center subcategory' value={node.attributes.costSubcategory
+                                    ? costCenterSubcategoryLabel(String(node.attributes.costType ?? ''), String(node.attributes.costSubcategory))
+                                    : 'Not yet classified (legacy record)'} />
+                                <Row label='Currency (from legal entity)' value={String(data.ancestors.find((a) => a.level === 'legal_entity')?.attributes.currencyCode ?? '—')} />
+                            </>
+                        )}
                         {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset') && !(node.level === 'cost_center' && ['costType', 'costSubcategory'].includes(f.key))).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
                     </div>
                     {canEdit && (
