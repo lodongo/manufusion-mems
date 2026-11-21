@@ -26,12 +26,13 @@ type Line=Rating&{projection?:Projection|null;conversionIssue?:string;skuName?:s
 type Mapping={costCenterId:string;revision:number;skuCapacities:Line[];allocatedSkuIds?:string[];updatedAt:string};
 type Details={location:{costCenterId:string;siteId:string;legalEntityId:string;name:string;code:string};
  outputs:Output[];containers:Container[];sizes:Size[];units:{count:Measure[];time:Measure[]};
- mapping:Mapping|null;canConfigure:boolean};
-function Action({children,onClick,disabled=false,secondary=false}:{children:ReactNode;
- onClick:()=>void;disabled?:boolean;secondary?:boolean}){
+ mapping:Mapping|null;canConfigure:boolean;testOverride?:boolean};
+function Action({children,onClick,disabled=false,secondary=false,testOverride=false}:{children:ReactNode;
+ onClick:()=>void;disabled?:boolean;secondary?:boolean;testOverride?:boolean}){
  return <button type='button' disabled={disabled} onClick={onClick}
   className={'min-h-11 rounded-xl px-4 text-sm font-semibold disabled:opacity-50 '+
-   (secondary?'border border-line text-ink':'bg-brand text-onbrand')}>{children}</button>;
+   (secondary?'border border-line text-ink':'bg-brand text-onbrand')+
+   (testOverride?' border-2 border-blue-500':'')}>{children}</button>;
 }
 function Picker({label,value,onChange,options,disabled=false}:{label:string;value:string;onChange:(value:string)=>void;
  options:Array<[string,string]>;disabled?:boolean}){
@@ -252,7 +253,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
   <div className='flex flex-wrap items-start justify-between gap-2'>
    <div><h2 className='text-lg font-semibold'>Production Planning & MRP</h2>
     <p className='text-sm text-muted'>Manufacturing cost centre · physical-container commissioned rating</p></div>
-   {onBack&&<Action secondary onClick={onBack}>Back</Action>}
+   {onBack&&<Action testOverride={data?.testOverride} secondary onClick={onBack}>Back</Action>}
   </div>
   {error&&<Alert tone='error'>{error}</Alert>}
   {notice&&<p role='status' className='rounded-xl border border-line p-3 text-sm'>{notice}</p>}
@@ -268,8 +269,8 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
       <p className='mt-1 text-xs text-muted'>Rate the selected physical container, then view the equivalent production-form, finished-product, commercial and logistics outputs for the same time interval.</p>
      </div>
      {data.canConfigure&&<div className='flex flex-wrap gap-2'>
-      <Action secondary disabled={busy||lines.length>=100} onClick={addSku}>Add SKU</Action>
-      <Action secondary disabled={busy} onClick={()=>{
+      <Action testOverride={data?.testOverride} secondary disabled={busy||lines.length>=100} onClick={addSku}>Add SKU</Action>
+      <Action testOverride={data?.testOverride} secondary disabled={busy} onClick={()=>{
        if(lines.length&&!window.confirm('Refresh available SKUs? Unsaved changes will be discarded.'))return;
        void load();
       }}>Refresh SKUs</Action>
@@ -278,7 +279,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
     <section className='space-y-2 rounded-xl border border-line bg-page p-3'>
      <div className='flex flex-wrap items-center justify-between gap-2'>
       <h4 className='text-sm font-semibold'>SKU list · {outputs.length} available · {already.size} selected</h4>
-      {data.canConfigure&&<Action secondary disabled={busy||!available.length||lines.length>=100}
+      {data.canConfigure&&<Action testOverride={data?.testOverride} secondary disabled={busy||!available.length||lines.length>=100}
        onClick={()=>{
         const batch=available.slice(0,100-lines.length).map(sku=>newSku(sku.id));
         setLines(rows=>[...rows,...batch]);
@@ -343,7 +344,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
          {rowFaults>0&&<span className='mt-1 block text-xs text-red-500'>{rowFaults} item(s) need correction</span>}
         </span>
        </button>
-       {data.canConfigure&&<Action secondary disabled={busy} onClick={()=>{
+       {data.canConfigure&&<Action testOverride={data?.testOverride} secondary disabled={busy} onClick={()=>{
         setLines(rows=>rows.filter((_,j)=>j!==i));
         if(expanded)setOpenSku('');
         setNotice('');
@@ -428,7 +429,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
        <p className='text-xs text-muted'>Examples: 24,000 Each Bottles/hour = 24,000 bottles/hour. 2,000 Each Cases/hour with 12 bottles/case = 24,000 bottles/hour. For bulk output select Litre, Kilogram, Metre etc; MEMS checks dimensional compatibility. Dozen means 12 of the chosen output, not necessarily 12 bottles. No conversion is guessed.</p>
        {line.conversionIssue&&<p className='text-xs text-red-500'>{line.conversionIssue}</p>}
        <div className='flex flex-wrap gap-2'>
-        <Action secondary disabled={busy||!valid(line)||!matching}
+        <Action testOverride={data?.testOverride} secondary disabled={busy||!valid(line)||!matching}
          onClick={()=>void preview(i)}>Calculate linked ratings</Action>
        </div>
       </div>}
@@ -466,11 +467,11 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
       <span className='text-xs text-muted'>{lines.length} SKU(s) in this configuration · revision {revision}</span>
       <div className='flex flex-wrap gap-2'>
        {((data.mapping?.skuCapacities?.length||0)+(data.mapping?.allocatedSkuIds?.length||0))>0?
-        <Action secondary disabled={busy} onClick={()=>void clear()}>Clear SKU mappings</Action>:null}
-       <Action secondary disabled={busy} onClick={()=>void saveAllocations()}>
+        <Action testOverride={data?.testOverride} secondary disabled={busy} onClick={()=>void clear()}>Clear SKU mappings</Action>:null}
+       <Action testOverride={data?.testOverride} secondary disabled={busy} onClick={()=>void saveAllocations()}>
         {busy?'Saving…':'Save SKU allocations'}</Action>
-       <Action disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving…':'Save commissioned ratings'}</Action>
-       <Action secondary disabled={busy||lines.length>=100} onClick={addSku}>Add another SKU</Action>
+       <Action testOverride={data?.testOverride} disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving…':'Save commissioned ratings'}</Action>
+       <Action testOverride={data?.testOverride} secondary disabled={busy||lines.length>=100} onClick={addSku}>Add another SKU</Action>
       </div>
      </div>
     </div>}
