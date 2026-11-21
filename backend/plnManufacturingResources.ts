@@ -107,6 +107,7 @@ export const plnManufacturingResourceRoutes={
    const common=ids.length?ids[0].filter((id,i)=>ids.every(path=>path[i]===id)).slice(-1)[0]||'':'';
    const highest=accessible[0]?.path.find(p=>p.id===common)||null;
    return {costCenters:accessible,highestPermittedScope:highest,
+      testOverride:ctx.testMode===true&&ctx.role==='org_super_admin',
       unitOptions:PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable)
         .map(u=>({code:u.code,name:u.label,symbol:u.symbol,category:u.category}))};
  })],
@@ -118,6 +119,7 @@ export const plnManufacturingResourceRoutes={
        {id:doc.id,name:str(doc.data.name),rateUom:str(doc.data.rateUom),
            notes:str(doc.data.notes||doc.data.description),revision:num(doc.data.revision)??1}:null,
        canConfigure:await permitted(ctx,ccId,true),
+       testOverride:ctx.testMode===true&&ctx.role==='org_super_admin',
        unitOptions:PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable)
            .map(u=>({code:u.code,name:u.label,symbol:u.symbol,category:u.category}))};
  })],
