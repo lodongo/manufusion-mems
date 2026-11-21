@@ -1222,16 +1222,30 @@ async function makeMaterialDecision(ctx:OrgContext,kind:'creation'|'extension'):
         workflowStage:next==='approved'?'Approved':next==='rejected'?'Rejected':
             materialStageLabel({...data,approvalLevel:nextLevel,approvalHistory:history},workflow),
         approvedAt:next==='approved'?nowIso():null};
+    // The approved extension record is the authoritative authorization. Persist its
+    // approval before reflecting warehouse IDs on the existing source material, so
+    // a failed second write can never expose a warehouse before approval is recorded.
+    let sourceSync:{path:string;data:Obj}|null=null;
     if(extension&&next==='approved'){
         const sourcePath=root+'/materials/'+str(data.sourceId),source=await getDoc(sourcePath);
         if(!source||!['approved','active'].includes(str(source.data.status)))
             throw new HttpError(409,'The source material is no longer approved. Resolve its status before granting warehouse access.');
-        const target=str(data.warehouseId);
         const linked=Array.isArray(source.data.warehouseIds)?source.data.warehouseIds.map(str):[];
-        const original=str(source.data.warehouseId);
-        await writeDoc(sourcePath,{...source.data,warehouseIds:[...new Set([...linked,original,target].filter(Boolean))],updatedAt:nowIso()});
+        const original=str(source.data.warehouseId),target=str(data.warehouseId);
+        sourceSync={path:sourcePath,data:{...source.data,
+            warehouseIds:[...new Set([...linked,original,target].filter(Boolean))],updatedAt:nowIso()}};
     }
     await writeDoc(path,changed);
+    if(sourceSync){
+        try{await writeDoc(sourceSync.path,sourceSync.data);}
+        catch(e){
+            await audited(ctx,'procurement.material_extension.source_sync_pending','Approved extension '+id,
+                {sourceId:str(data.sourceId),warehouseId:str(data.warehouseId),
+                reason:e instanceof Error?e.message:String(e)});
+            // The approved extension document itself is included by warehouse material
+            // availability checks; source IDs can be reconciled without re-approval.
+        }
+    }
     await audited(ctx,extension?'procurement.material_extension.'+decision:'procurement.material.'+decision,
         (extension?'Material extension ':'Material ')+id,{workflowCode:workflow.code,workflowVersion:workflow.version,
             action:step.action,stepIndex,status:next,comment:str(ctx.body.comment).slice(0,300)});
