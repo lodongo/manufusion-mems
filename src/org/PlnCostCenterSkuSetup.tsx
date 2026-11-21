@@ -120,6 +120,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
   else if(!sku)result.push('This SKU is not available at the selected site. Refresh the available SKUs.');
   else if(lines.some((x,j)=>j!==i&&x.skuId===line.skuId))
    result.push('This SKU is already mapped to this manufacturing cost centre.');
+  if(sku?.category==='INTERMEDIATE')return result; // Allocation-only, never a rating error.
   const readiness=skuRatingReadiness(sku,line);
   if(readiness.status!=='READY'){
    result.push(readiness.message);
@@ -129,7 +130,6 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
   else if(container.categoryCode!==line.containerCategoryCode||
       container.subcategoryCode!==line.containerSubcategoryCode)
    result.push('Use the category and subcategory of the SKU-adopted physical container.');
-  if(sku?.category==='INTERMEDIATE')return result;
   if(!Number.isFinite(line.ratingQuantity)||line.ratingQuantity<=0||line.ratingQuantity>1e12)
    result.push('Enter a commissioned rating greater than zero and no more than 1,000,000,000,000.');
   if(!data?.units.count.some(u=>u.code===line.ratingUnitCode))
@@ -512,7 +512,8 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
         <Action testOverride={data?.testOverride} secondary disabled={busy} onClick={()=>void clear()}>Clear SKU mappings</Action>:null}
        <Action testOverride={data?.testOverride} secondary disabled={busy} onClick={()=>void saveAllocations()}>
         {busy?'Saving…':'Save SKU allocations'}</Action>
-       <Action testOverride={data?.testOverride} disabled={busy} onClick={()=>void save()}>{busy?'Saving…':'Save commissioned ratings'}</Action>
+       {lines.some(line=>outputs.find(o=>o.id===line.skuId)?.category==='FINISHED')&&
+        <Action testOverride={data?.testOverride} disabled={busy} onClick={()=>void save()}>{busy?'Saving…':'Save finished-goods ratings'}</Action>}
        <Action testOverride={data?.testOverride} secondary disabled={busy||lines.length>=100} onClick={addSku}>Add another SKU</Action>
       </div>
      </div>
