@@ -24,6 +24,7 @@ interface Item {
     name: string;
     status?: string;
     approvalLevel: number;
+    workflowStage?: string;
     submittedAt: string;
     isMine: boolean;
     canApprove: boolean;
@@ -250,7 +251,7 @@ export default function WorkflowInbox() {
             { key: 'creator', label: 'Creator', value: (x) => x.creatorName },
             { key: 'email', label: 'Creator email', value: (x) => x.creatorEmail, hidden: true },
             { key: 'submitted', label: 'Submitted', type: 'date', value: (x) => x.submittedAt, render: (x) => fmtDate(x.submittedAt) },
-            { key: 'stage', label: 'Stage', type: 'number', value: (x) => x.approvalLevel, render: (x) => `Level ${x.approvalLevel}` },
+            { key: 'stage', label: 'Workflow stage', value: (x) => x.workflowStage || `Step ${x.approvalLevel}` },
             { key: 'state', label: 'Current status', value: (x) => stateOf(x).label, render: (x) => <Badge tone={stateOf(x).tone}>{stateOf(x).label}</Badge> },
         ],
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -399,7 +400,7 @@ function ItemSheet({ item: x, trail, onClose, onApprove, onReject }: { item: Ite
                                         </span>
                                         <div className='min-w-0'>
                                             <p className='text-sm text-ink'>
-                                                Level {s.level} · {s.approver}
+                                                Stage {s.level} · {s.approver}
                                             </p>
                                             <p className='text-xs text-muted'>
                                                 {s.state === 'done' ? `Approved by ${s.by || 'unknown'} · ${fmtDate(s.at)}` : s.state === 'rejected' ? `Rejected by ${s.by || 'unknown'} · ${fmtDate(s.at)}` : s.state === 'current' ? 'Waiting for this approver' : 'Not reached yet'}
@@ -419,7 +420,7 @@ function ItemSheet({ item: x, trail, onClose, onApprove, onReject }: { item: Ite
                                 {x.name || '—'}
                             </Detail>
                             {x.sourceId && <Detail label='Source'>{x.sourceId}</Detail>}
-                            <Detail label='Stage'>Level {x.approvalLevel}</Detail>
+                            <Detail label='Workflow stage'>{x.workflowStage || `Step ${x.approvalLevel}`}</Detail>
                             <Detail label='Created by'>{x.creatorName || '—'}</Detail>
                             <Detail label='Email'>{x.creatorEmail || '—'}</Detail>
                             <Detail label='Submitted'>{fmtDate(x.submittedAt)}</Detail>
