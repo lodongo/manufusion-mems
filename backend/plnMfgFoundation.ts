@@ -611,6 +611,11 @@ export const plnMfgFoundationRoutes={
                             ?{requiresTransportPackaging:supplied.requiresTransportPackaging as boolean}:{}),
                         productNameId:str(supplied.productNameId),productionFormId:str(supplied.productionFormId),
                         containerId:str(supplied.containerId),containerSizeId:str(supplied.containerSizeId),
+                        // SKU-specific physical capacity is explicit, not a form default.
+                        ...(supplied.containerCapacityQuantity!==undefined
+                            ?{containerCapacityQuantity:supplied.containerCapacityQuantity as number}:{}),
+                        ...(supplied.containerCapacityUom!==undefined
+                            ?{containerCapacityUom:str(supplied.containerCapacityUom)}:{}),
                         packageId:str(supplied.packageId),packagingSizeId:str(supplied.packagingSizeId),
                         packageCountId:str(supplied.packageCountId), // existing SKU compatibility
                         transportPackageId:str(supplied.transportPackageId),
