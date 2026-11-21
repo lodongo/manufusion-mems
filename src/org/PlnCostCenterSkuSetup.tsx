@@ -320,7 +320,10 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
      const size=data.sizes.find(x=>x.id===line.containerSizeId);
      const expectedContainer=selected?.skuComponents?.containerId||'';
      const expectedSize=selected?.skuComponents?.containerSizeId||'';
-     const matching=!!selected&&line.containerId===expectedContainer&&line.containerSizeId===expectedSize;
+     const readiness=skuRatingReadiness(selected,line);
+     const matching=readiness.status==='READY';
+     const masterContainer=data.containers.find(c=>c.id===expectedContainer);
+     const masterSize=data.sizes.find(x=>x.id===expectedSize);
      const rowKey=line.skuId||'draft-'+i;
      const expanded=openSku===rowKey;
      const rowFaults=showValidation?lineIssues(line,i).length:0;
@@ -342,7 +345,10 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
             ' '+(throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER')?.name||'primary units')+
             ' / '+(periodUnit?.symbol||line.periodUnitCode):'Commissioned speed not yet configured'}
          </span>
-         {rowFaults>0&&<span className='mt-1 block text-xs text-red-500'>{rowFaults} item(s) need correction</span>}
+         {readiness.status==='SKU_SETUP_REQUIRED'&&<span className='mt-1 block text-xs font-medium text-amber-700'>SKU master incomplete · Allocation can be saved</span>}
+         {readiness.status==='NOT_CONTAINER_RATED'&&<span className='mt-1 block text-xs font-medium text-amber-700'>Direct process flow · No container rating</span>}
+         {readiness.status==='APPLY_SKU_SETUP'&&<span className='mt-1 block text-xs font-medium text-amber-700'>Use the SKU's saved physical container and size</span>}
+         {rowFaults>0&&<span className='mt-1 block text-xs text-red-500'>{rowFaults} item(s) need correction</span>
         </span>
        </button>
        {data.canConfigure&&<Action testOverride={data?.testOverride} secondary disabled={busy} onClick={()=>{
@@ -358,6 +364,29 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
        onChange={skuId=>{update(i,newSku(skuId));setOpenSku(skuId||'draft-'+i);}}/>
       {selected&&<div className='space-y-3 rounded-xl border border-line bg-page p-3'>
        <p className='text-sm font-semibold'>Physical container properties</p>
+       {readiness.status==='SKU_SETUP_REQUIRED'&&<div className='space-y-2 rounded-xl border border-amber-500/60 bg-panel p-3'>
+        <p className='text-sm font-semibold'>SKU master needs setup · {selected.id}</p>
+        <p className='text-xs text-muted'>{readiness.message}</p>
+        <p className='text-xs text-muted'>Open Materials & Products → find the SKU by this code → Edit (or copy to a new draft version if approved). For concentrate or syrup in tanks, enable Intermediate physical containment if applicable, choose Bulk storage, the exact tank and its size, then save. Return here and select Refresh SKUs. The allocation can be saved now without a rate.</p>
+        {onEditSku&&<Action testOverride={data.testOverride} secondary disabled={busy}
+         onClick={()=>onEditSku(selected.id)}>Open this SKU in Materials & Products</Action>}
+       </div>}
+       {readiness.status==='NOT_CONTAINER_RATED'&&<div className='space-y-2 rounded-xl border border-line bg-panel p-3 text-xs text-muted'>
+        <p>{readiness.message}</p>
+        {onEditSku&&<Action secondary disabled={busy} onClick={()=>onEditSku(selected.id)}>Open this SKU</Action>}
+       </div>}
+       {readiness.status==='APPLY_SKU_SETUP'&&<div className='space-y-2 rounded-xl border border-amber-500/60 bg-panel p-3'>
+        <p className='text-xs text-muted'>{readiness.message}</p>
+        <p className='text-xs text-muted'>Saved SKU master: {masterContainer?.name||expectedContainer} · {masterSize?.name||expectedSize}</p>
+        <Action testOverride={data.testOverride} secondary disabled={busy||!masterContainer||!masterSize}
+         onClick={()=>update(i,{containerId:expectedContainer,containerSizeId:expectedSize,
+          containerCategoryCode:masterContainer?.categoryCode||'',containerSubcategoryCode:masterContainer?.subcategoryCode||'',
+          ratingOutputCode:masterContainer?.ratingOutputCode||'PRIMARY_CONTAINER',
+          ratingUnitCode:masterContainer?.ratingCountUnitCode||line.ratingUnitCode,
+          ratingQuantity:0,primaryContainersPerRatedOutput:undefined})}>
+          Apply SKU container and size (reset unsaved speed)
+        </Action>
+       </div>
        <Picker label='Physical container category' value={line.containerCategoryCode} disabled={!data.canConfigure||busy}
         options={[['','Select category'],...[...new Map(data.containers.map(c=>[c.categoryCode,c.categoryName])).entries()]
          .map(([code,name])=>[code,name] as [string,string])]}
@@ -386,12 +415,9 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
          {size&&<p className='text-xs'><span className='text-muted'>Size: </span>{size.quantity} {size.uomSymbol}</p>}
         </div>
        </div>}
-       {!matching&&<p role='alert' className='text-xs text-red-500'>
-        The selected container or size does not match the SKU. Update the SKU in Product Configuration or select its configured physical container; conversions cannot be guessed.
-       </p>}
-       {!expectedContainer&&<p role='alert' className='text-xs text-red-500'>
-        This SKU has no physical container configured. Configure its physical container, size and production form in Materials & Products before rating it.
-       </p>}
+       {currentContainer?.categoryCode==='BST'&&<p className='text-xs text-muted'>
+        Bulk storage: if rating a filling or transfer process, choose measured litres, kilograms or cubic metres per hour. Whole tanks per hour represents container turnovers, not continuous flow.
+       </p>
       </div>}
       {selected&&<div className='space-y-3 rounded-xl border border-line p-3'>
        <h4 className='font-semibold'>Commissioned rating parameters</h4>
