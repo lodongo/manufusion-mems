@@ -137,6 +137,8 @@ const manufacturedSku=async(ctx:OrgContext,skuId:string)=>{
 async function validatedLine(ctx:OrgContext,siteId:string,raw:unknown,params:SkuParameter[]){
  const line=normalizePhysicalRating(raw);
  const sku=await manufacturedSku(ctx,line.skuId);
+ if(sku.category==='INTERMEDIATE')throw new HttpError(400,
+  'Intermediate/WIP SKUs are allocation-only. Do not submit commissioned speeds for intermediates.');
  const projection=derivePhysicalCapacity(sku,params,line);
  return {...line,skuName:sku.name,skuRevision:sku.revision,projection};
 }
@@ -159,8 +161,12 @@ async function validatedLines(ctx:OrgContext,siteId:string,raw:unknown){
 const validSavedProjection=async(ctx:OrgContext,siteId:string,raw:unknown,params:SkuParameter[])=>{
  try{
   if(!isObj(raw))throw new Error('Malformed rating entry');
+  // An old intermediate commissioned record stays in history but must not
+  // produce a live capacity projection or be used by planning.
+  const sku=await manufacturedSku(ctx,str(raw.skuId));
+  if(sku.category==='INTERMEDIATE')return {...raw,skuName:sku.name,skuRevision:sku.revision,
+    projection:null,conversionIssue:'Intermediate/WIP SKU: commissioned speeds are not applicable.'};
   const line=normalizePhysicalRating(raw);
-  const sku=await manufacturedSku(ctx,line.skuId);
   return {...line,skuName:sku.name,skuRevision:sku.revision,
     projection:derivePhysicalCapacity(sku,params,line)};
  }catch(e){
@@ -198,6 +204,8 @@ export async function routingCommissionedCapacity(
 ){
  const location=await routingManufacturingCostCenter(ctx,costCenterId,siteId);
  const record=await getDoc(ROOT(ctx.orgId)+'/'+costCenterId);
+ const sku=await manufacturedSku(ctx,skuId);
+ if(sku.category==='INTERMEDIATE')return {location,rating:null,revision:num(record?.data.revision)??0};
  const source=(Array.isArray(record?.data.skuCapacities)?record.data.skuCapacities:[])
   .find(row=>isObj(row)&&str(row.skuId)===skuId);
  if(!source)return {location,rating:null,revision:num(record?.data.revision)??0};
@@ -330,6 +338,8 @@ export const plnCostCenterCapacityRoutes={
   orgRoute('org.pln.cost_center.rating',null,async ctx=>{
    const id=identifier(ctx.body.costCenterId,'manufacturing cost centre');
    const skuId=identifier(ctx.body.skuId,'manufactured SKU');
+   if((await manufacturedSku(ctx,skuId)).category==='INTERMEDIATE')
+    throw new HttpError(400,'Intermediate/WIP SKUs have no commissioned speed. Use SKU allocation instead.');
    if(!await authorized(ctx,'read',id))
     throw new HttpError(403,'This cost centre is outside your authorized scope.');
    const location=await candidate(ctx,id);
