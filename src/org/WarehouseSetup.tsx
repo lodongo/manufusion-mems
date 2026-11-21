@@ -58,6 +58,7 @@ interface Setup {
     materialCategoryCodes: string[];
     storageLocations: Loc[];
     storageTypeCode: string;
+    palletStacking?:{enabled:boolean;stackedRows:number;stackedColumns:number;numberOfStacks:number};
     conditionCode: string;
     layout: Layout;
     capacity: Capacity;
@@ -459,6 +460,9 @@ function SetupView({ data, setup, onTopology }: { data: Data; setup: Setup; onTo
                     ))}
                 </div>
                 <Row label='Type of storage' value={type} />
+                {setup.storageTypeCode==='PAL'&&<Row label='Pallet stacking defaults' value={setup.palletStacking?.enabled?
+                    `${setup.palletStacking.stackedRows} rows × ${setup.palletStacking.stackedColumns} columns × ${setup.palletStacking.numberOfStacks} high`:
+                    'Not enabled — edit warehouse to configure'} />}
                 <Row label='Condition' value={cond} />
             </Section>
 
@@ -550,6 +554,10 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
     const [cats, setCats] = useState<string[]>(s?.materialCategoryCodes ?? []);
     const [catQ, setCatQ] = useState('');
     const [storageType, setStorageType] = useState(s?.storageTypeCode ?? '');
+    const [palletEnabled,setPalletEnabled]=useState(s?.palletStacking?.enabled??false);
+    const [palletRows,setPalletRows]=useState(String(s?.palletStacking?.stackedRows??1));
+    const [palletColumns,setPalletColumns]=useState(String(s?.palletStacking?.stackedColumns??1));
+    const [palletLevels,setPalletLevels]=useState(String(s?.palletStacking?.numberOfStacks??1));
     const [condition, setCondition] = useState(s?.conditionCode ?? 'AMB');
     const [locs, setLocs] = useState<LocDraft[]>(s?.storageLocations.length ? s.storageLocations.map((l) => ({ key: l.code, code: l.code, name: l.name, typeCode: l.typeCode, restrictionCode: l.restrictionCode, savedRestrictionCode: l.restrictionCode, suggestedRestrictionCode: l.suggestedRestrictionCode, legacyClassification: l.restrictionCode ? '' : l.classificationCode, active: l.active })) : [blankLoc()]);
     const usedLocations = new Set(data.clusters.map((c) => c.locationCode));
@@ -615,6 +623,11 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
     if (!cats.length) problems.push('Choose at least one material category.');
     if (cats.length > L.categories) problems.push(`Up to ${L.categories} material categories.`);
     if (!storageType) problems.push('Choose the type of storage.');
+    const palletNums=[palletRows,palletColumns,palletLevels].map(v=>v.trim()?Number(v):NaN);
+    const validPalletNums=palletNums.every((v,i)=>Number.isInteger(v)&&v>=1&&v<=(i===2?20:100))&&
+        palletNums[0]*palletNums[1]<=L.clusterPositions;
+    if(storageType==='PAL'&&palletEnabled&&!validPalletNums)
+        problems.push('Pallet stacking needs rows and columns (1–100 each) and stacks high (1–20); floor footprint must fit a cluster.');
     const locProblems = locs.map((l) => {
         const out: string[] = [];
         if (l.name.trim().length < 2 || l.name.trim().length > 60) out.push('name of 2 to 60 characters');
@@ -677,6 +690,10 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                     materialCategoryCodes: cats,
                     storageLocations: locs.map((l) => ({ code: l.code, name: l.name.trim(), typeCode: l.typeCode, restrictionCode: l.restrictionCode, active: l.active })),
                     storageTypeCode: storageType,
+                    palletStacking:{enabled:storageType==='PAL'&&palletEnabled,
+                        stackedRows:storageType==='PAL'&&palletEnabled?palletNums[0]:1,
+                        stackedColumns:storageType==='PAL'&&palletEnabled?palletNums[1]:1,
+                        numberOfStacks:storageType==='PAL'&&palletEnabled?palletNums[2]:1},
                     conditionCode: condition,
                     layout: { floors: layoutFloors.map((f, i) => ({ ...f, name: f.name || `Floor ${letter(i + 1)}` })) }, capacity },
             });
@@ -832,6 +849,29 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                             </option>
                         ))}
                     </SelectField>
+                    {storageType==='PAL'&&<div className='space-y-3 rounded-xl border border-line bg-panel p-3' data-testid='warehouse-pallet-stacking'>
+                        <p className='text-sm font-semibold text-ink'>Pallet stacking setup</p>
+                        <label className='flex min-h-11 items-center gap-2 text-sm text-ink'>
+                            <input type='checkbox' checked={palletEnabled} onChange={e=>{setPalletEnabled(e.target.checked);setConfirmed(false);}} />
+                            Enable pallet stacking
+                        </label>
+                        {palletEnabled&&<>
+                            <div className='grid grid-cols-2 gap-2'>
+                                <NumField id='wh-pallet-rows' label='Stacked rows *' value={palletRows}
+                                    onChange={v=>{setPalletRows(v);setConfirmed(false);}}/>
+                                <NumField id='wh-pallet-columns' label='Stacked columns *' value={palletColumns}
+                                    onChange={v=>{setPalletColumns(v);setConfirmed(false);}}/>
+                                <div className='col-span-2'>
+                                    <NumField id='wh-pallet-stacks' label='Number of stacks (pallets high) *' value={palletLevels}
+                                        onChange={v=>{setPalletLevels(v);setConfirmed(false);}}/>
+                                </div>
+                            </div>
+                            <p className='text-sm font-medium text-ink' aria-live='polite'>
+                                {validPalletNums?`${(palletNums[0]*palletNums[1]).toLocaleString()} ground positions × ${palletNums[2]} high = ${(palletNums[0]*palletNums[1]*palletNums[2]).toLocaleString()} pallets`:'Enter valid row, column and stack counts.'}
+                            </p>
+                        </>}
+                        <p className='text-xs text-soft'>These are defaults for new pallet clusters. Cluster-level stacking can be adjusted during allocation. Existing clusters and their physical addresses are not changed.</p>
+                    </div>}
                     <SelectField id='wh-cond' label='Storage condition *' value={condition} onChange={(e) => setCondition(e.target.value)}>
                         {data.conditions.map((t) => (
                             <option key={t.code} value={t.code}>
