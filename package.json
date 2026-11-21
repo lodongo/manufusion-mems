@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "test:drkms": "node --import tsx --test backend/drkms*.test.ts backend/docSubmodules.test.ts backend/docRcaMethods.test.ts backend/docRcaEvidence.test.ts backend/docRcaTriggers.test.ts backend/docReviewSchedule.test.ts backend/drkmsScanner.test.ts",
     "test:cost-centers": "node --import tsx --test backend/costCenterTaxonomy.test.ts",
+    "test:sku-containment": "node --import tsx --test backend/mfgSkuContainment.test.ts",
     "test:governance": "node --import tsx --test backend/governanceCore.test.ts backend/transactionAccessBoundary.test.ts backend/transactionEndpointMapping.test.ts backend/existingPermissionCrosswalk.test.ts backend/transactionRuntime.test.ts backend/transactionModuleGate.test.ts backend/unifiedGovernanceRuntime.test.ts backend/unifiedApprovalProof.test.ts backend/governanceCutoverCoverage.test.ts",
     "audit:routes": "node scripts/governance-route-audit.mjs",
     "audit:routes:strict": "node scripts/governance-route-audit.mjs --strict",
