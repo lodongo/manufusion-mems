@@ -54,6 +54,7 @@ export type SkuSelections={
     containmentScope?:SkuContainmentScope;
     requiresCommercialPackaging?:boolean;requiresTransportPackaging?:boolean;
     productNameId?:string;productionFormId?:string;containerId?:string;containerSizeId?:string;
+    containerCapacityQuantity?:number;containerCapacityUom?:string;
     packageId?:string;packagingSizeId?:string;packageCountId?:string;
     transportPackageId?:string;transportLayeringEnabled?:boolean;
     transportPackagesPerLayer?:number;transportLayerCount?:number;transportUnitsPerLoad?:number;
@@ -178,7 +179,13 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
     const needs=skuContainmentNeeds(value);
     const selectedScope=value.containmentScope||'PRIMARY_CONTAINER';
     const container=getParam(setup,'containers',value.containerId);
-    const size=getParam(setup,'containerSizes',value.containerSizeId);
+    const legacySize=getParam(setup,'containerSizes',value.containerSizeId);
+    const size=value.containerCapacityQuantity!==undefined?undefined:legacySize;
+    const enteredUnit=pickUnit(setup,value.containerCapacityUom);
+    const enteredCapacity=value.containerCapacityQuantity;
+    const capacityValue=enteredCapacity!==undefined&&value.containerCapacityUom
+        ?enteredCapacity:legacySize?.quantity;
+    const capacityUom=value.containerCapacityUom||legacySize?.uom;
     const packageRecord=getParam(setup,'packages',value.packageId);
     const transportRecord=getParam(setup,'transportPackages',value.transportPackageId);
     const packSize=value.packagingSizeId
@@ -186,8 +193,8 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
         :getParam(setup,'packageCounts',value.packageCountId);
     const norm=getParam(setup,'normalizationUnits',value.normalizationUnitId);
     const normalizationReferenceForm=getParam(setup,'productionForms',norm?.referenceProductionFormId);
-    const contentPerContainer=size&&form&&ratio(setup,size.uom,form.uom)!==null
-        ?(size.quantity??0)*ratio(setup,size.uom,form.uom)!:null;
+    const contentPerContainer=capacityValue!==undefined&&form&&ratio(setup,capacityUom,form.uom)!==null
+        ?capacityValue*ratio(setup,capacityUom,form.uom)!:null;
     const effectivePackSize=packageRecord?.packagingTypeCode&&Number.isSafeInteger(packageRecord.quantity)&&Number(packageRecord.quantity)>0
         ?packagePrimaryCount(packageRecord,setup.parameters)
         :packSize?.quantity??null;
@@ -213,7 +220,10 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
     const factor=normalBase&&contentPerPackage!==null?contentPerPackage/normalBase:null;
     const productRecord=getParam(setup,'productNames',value.productNameId);
     const product=productRecord?.name||'Select product';
-    const defaultTitle=[product,[size?.name,container?.name].filter(Boolean).join(' '),
+    const capacityTitle=enteredCapacity!==undefined
+        ?String(enteredCapacity)+' '+(enteredUnit?.symbol||value.containerCapacityUom||'')
+        :legacySize?.name||'';
+    const defaultTitle=[product,[capacityTitle,container?.name].filter(Boolean).join(' '),
         [packageRecord?.name,packSize?'x'+packSize.quantity:''].filter(Boolean).join(' ')]
         .filter(Boolean).join(' · ');
     const unitSymbol=(code:string|undefined)=>pickUnit(setup,code)?.symbol||code||'';
@@ -224,7 +234,9 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
         productName:token(productRecord,productRecord?.productCode),
         productionForm:token(form),
         primaryContainer:token(container,container?.metadataCode),
-        containerSize:token(size),
+        containerSize:enteredCapacity!==undefined
+            ?{name:capacityTitle,quantity:enteredCapacity,unit:enteredUnit?.symbol||value.containerCapacityUom}
+            :token(legacySize),
         commercialPackaging:token(packageRecord,packageRecord?.packagingTypeCode),
         commercialPackSize:token(packSize),
         transportPackaging:token(transportRecord,transportRecord?.packagingTypeCode),
@@ -252,7 +264,8 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
                 getParam(setup,'productionForms',p.referenceProductionFormId)?.uom||p.baseUom||'')+' / normalized unit'
             :p.name] as [string,string]);
     const shownVariants=variants.filter(v=>
-        (!['containerId','containerSizeId'].includes(v.key)||selectedScope!=='NONE')&&
+        (v.key!=='containerSizeId')&&
+        (v.key!=='containerId'||selectedScope!=='NONE')&&
         (!['packageId','packagingSizeId'].includes(v.key)||needs.requiresCommercialPackaging));
     return <section className={modal+' space-y-3'}>
         <h3 className='text-base font-semibold'>SKU composition</h3>
@@ -260,12 +273,13 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
             <Choice title='Physical containment scope *' value={selectedScope}
                 options={SKU_CONTAINMENT_SCOPES.map(item=>[item.code,item.label] as [string,string])}
                 onChange={scope=>onChange({...value,containmentScope:scope as SkuContainmentScope,
-                    containerId:'',containerSizeId:'',packageId:'',packagingSizeId:'',packageCountId:'',
+                    containerId:'',containerSizeId:'',containerCapacityQuantity:undefined,containerCapacityUom:'',
+                    packageId:'',packagingSizeId:'',packageCountId:'',
                     transportPackageId:'',requiresCommercialPackaging:false,requiresTransportPackaging:false,
                     transportLayeringEnabled:false,transportPackagesPerLayer:undefined,
                     transportLayerCount:undefined,transportUnitsPerLoad:undefined})}/>
             {selectedScope==='BULK_STORAGE'&&
-                <p className='text-xs text-muted'>Select a bulk tank, silo, hopper, bunker, process vessel or bulk storage bin from the adopted Physical Containers list. Configure its nominal capacity in Container Sizes. No commercial or transport packaging is required unless enabled below.</p>}
+                <p className='text-xs text-muted'>Select an adopted bulk tank, silo, hopper, bunker, vessel or bin. Enter its physical capacity and unit for this SKU manually below. Commercial and transport packaging are optional.</p>}
             {selectedScope==='NONE'&&
                 <p className='text-xs text-muted'>Direct or continuous process output. No physical container, commercial pack or logistics load is required.</p>}
             {selectedScope!=='NONE'&&<div className='space-y-2'>
@@ -294,13 +308,31 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
                     ?[...optionsFor(v.kind),...setup.parameters.filter(p=>p.kind==='packageCounts'&&p.id===value.packageCountId).map(p=>[p.id,p.name] as [string,string])]
                     :optionsFor(v.kind)}
                 onChange={selected=>{
-                    if(v.key==='productionFormId')onChange({...value,productionFormId:selected,containerId:'',
-                        containerSizeId:'',normalizationUnitId:''});
+                    if(v.key==='productionFormId')onChange({...value,productionFormId:selected,
+                        normalizationUnitId:''});
                     else if(v.key==='packagingSizeId')onChange({...value,packagingSizeId:selected,packageCountId:''});
-                    else if(v.key==='containerId')onChange({...value,containerId:selected,containerSizeId:''});
+                    else if(v.key==='containerId')onChange({...value,containerId:selected,containerSizeId:'',
+                        containerCapacityQuantity:undefined,containerCapacityUom:''});
                     else onChange({...value,[v.key]:selected});
                 }}/>)}
         </div>
+        {selectedScope!=='NONE'&&<div className='space-y-3 rounded-xl border border-line bg-page p-3'>
+            <h4 className='text-sm font-semibold'>Primary container capacity · entered for this SKU</h4>
+            <p className='text-xs text-muted'>Manually enter the actual physical capacity and its unit. Form Defaults do not set this quantity. The production form defines only the output measurement dimension.</p>
+            <div className='grid gap-3 sm:grid-cols-2'>
+                <Field id='sku-primary-capacity-quantity' label='Capacity quantity *'
+                    type='number' min='0.000001' step='any' inputMode='decimal'
+                    value={value.containerCapacityQuantity??''}
+                    onChange={e=>onChange({...value,containerSizeId:'',
+                        containerCapacityQuantity:e.target.value===''?undefined:Number(e.target.value)})}/>
+                <UnitChoice title='Capacity unit *' setup={setup} value={value.containerCapacityUom||''}
+                    onChange={unit=>onChange({...value,containerSizeId:'',containerCapacityUom:unit})}/>
+            </div>
+            {legacySize&&value.containerCapacityQuantity===undefined&&
+                <p className='text-xs text-amber-700'>Legacy saved capacity: {legacySize.quantity} {pickUnit(setup,legacySize.uom)?.symbol||legacySize.uom}. Enter the actual capacity and select its unit above to replace the legacy size reference. Existing values remain readable until changed.</p>}
+            {value.containerCapacityUom&&form?.uom&&ratio(setup,value.containerCapacityUom,form.uom)===null&&
+                <p role='alert' className='text-xs text-red-500'>The selected capacity unit must be compatible with the production form ({pickUnit(setup,form.uom)?.symbol||form.uom}).</p>}
+        </div>}
         {selectedScope==='BULK_STORAGE'&&!optionsFor('containers').length&&
             <p role='status' className='rounded-lg border border-line p-3 text-xs text-muted'>
                 No bulk storage containers adopted yet. Open Product Configuration → Physical Containers to adopt a bulk tank, silo, hopper or storage vessel before saving the SKU.
