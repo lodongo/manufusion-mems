@@ -37,7 +37,7 @@ test('unreconciled or incomplete journals never claim availability',()=>{
     assert.equal(summarizeMaterialWarehouseStock(partial,true,true,true).availableStock,null);
     assert.equal(summarizeMaterialWarehouseStock(partial,true,true,false).ledgerState,'Unreconciled');
 });
-test('master list opens the five-tab dashboard instead of displaying row actions',()=>{
+test('master list opens the six-tab dashboard with Approvals first and no list action column',()=>{
     const master=read('src/org/MaterialsMaster.tsx');
     const dash=read('src/org/MaterialMasterDashboard.tsx');
     const backend=read('backend/procurement.ts');
@@ -45,9 +45,12 @@ test('master list opens the five-tab dashboard instead of displaying row actions
     assert.ok(master.includes('onRowClick={setReviewMaterial}'));
     assert.ok(master.includes('<MaterialMasterDashboard'));
     assert.equal(master.includes("key:'actions',label:'Actions'"),false);
-    for(const name of ['dashboard','attributes','warehouses','availability','history']){
+    for(const name of ['approvals','dashboard','attributes','warehouses','availability','history']){
         assert.ok(dash.includes("key:'"+name+"'"),'missing tab: '+name);
     }
+    assert.ok(dash.indexOf("key:'approvals'")<dash.indexOf("key:'dashboard'"));
+    assert.ok(dash.includes("useState<Tab>('approvals')"));
+    assert.ok(dash.includes('testOverride={m.testOverride}'));
     assert.ok(dash.includes('Material actions'));
     assert.ok(dash.includes('Approve extension'));
     assert.ok(backend.includes("'POST /api/org/procurement/materials/dashboard'"));
