@@ -785,7 +785,7 @@ export const warehouseRoutes = {
                         posTo: z.p,
                         firstCode: first,
                         lastCode: last,
-                        name,
+                        name:name||subcategories[0].name,
                         locationCode: location.code,
                         locationName: location.name,
                         materialCategoryCode: subcategories[0].categoryCode,
