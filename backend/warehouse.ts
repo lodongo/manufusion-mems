@@ -512,30 +512,10 @@ export const warehouseRoutes = {
                 return c;
             });
 
-            const storageType = STORAGE_TYPES.find(([c]) => c === str(b.storageTypeCode));
-            if (!storageType) throw new HttpError(400, 'Choose the type of storage.');
-            const stackingRaw=isObj(b.palletStacking)?b.palletStacking:{};
-            const stackingEnabled=storageType[0]==='PAL'&&stackingRaw.enabled===true;
-            const defaultBottomRowPallets=stackingEnabled?int(stackingRaw.bottomRowPallets??stackingRaw.stackedColumns,1,100,'Pallets per bottom row'):1;
-            const defaultBottomRows=stackingEnabled?int(stackingRaw.bottomRows??stackingRaw.stackedRows,1,100,'Number of rows'):1;
-            const computedDefaults=palletPositionCapacity({
-                storageTypeCode:storageType[0],stackingEnabled,
-                stackingPattern:str(stackingRaw.stackingPattern)||'STRAIGHT',
-                bottomRowPallets:defaultBottomRowPallets,bottomRows:defaultBottomRows,
-                numberOfStacks:str(stackingRaw.stackingPattern)==='PYRAMID'?2:stackingEnabled?stackingRaw.numberOfStacks:1,
-                count:defaultBottomRowPallets*defaultBottomRows,
-            },storageType[0],MAX_CLUSTER_POSITIONS);
-            const palletStacking={
-                enabled:stackingEnabled,
-                stackingPattern:computedDefaults.stackingPattern??'STRAIGHT',
-                bottomRowPallets:defaultBottomRowPallets,
-                bottomRows:defaultBottomRows,
-                stackedRows:defaultBottomRows,
-                stackedColumns:defaultBottomRowPallets,
-                numberOfStacks:computedDefaults.numberOfStacks??1,
-            };
-            const condition = CONDITIONS.find(([c]) => c === str(b.conditionCode));
-            if (!condition) throw new HttpError(400, 'Choose the storage condition.');
+            // Legacy warehouse defaults are retained only for older clusters. New storage type,
+            // stacking pattern and condition belong to individual clusters.
+            const legacyStorageType=STORAGE_TYPES.find(([c])=>c===str(b.storageTypeCode))?.[0]||'BIN';
+            const legacyCondition=CONDITIONS.find(([c])=>c===str(b.conditionCode))?.[0]||'AMB';
 
             // Storage location metadata is structural; cluster restrictions are chosen separately.
             const types = await locationTypes();
@@ -647,11 +627,10 @@ export const warehouseRoutes = {
                     materialCategories: categories.map((x) => ({ code: x.code, name: x.name })) as unknown as Plain,
                     storageLocations: storageLocations as unknown as Plain,
                     locationSeq: seq,
-                    storageTypeCode: storageType[0],
-                    storageTypeLabel: storageType[1],
-                    palletStacking: palletStacking as unknown as Plain,
-                    conditionCode: condition[0],
-                    conditionLabel: condition[1],
+                    storageTypeCode: str(existing?.data.storageTypeCode)||legacyStorageType,
+                    storageTypeLabel: str(existing?.data.storageTypeLabel)||STORAGE_TYPES.find(([c])=>c===legacyStorageType)?.[1]||'Bins',
+                    conditionCode: str(existing?.data.conditionCode)||legacyCondition,
+                    conditionLabel: str(existing?.data.conditionLabel)||CONDITIONS.find(([c])=>c===legacyCondition)?.[1]||'Ambient',
                     layout: layout as unknown as Plain,
                     capacity: capacity as unknown as Plain,
                     updatedBy: ctx.uid,
@@ -671,7 +650,7 @@ export const warehouseRoutes = {
                         `storage locations ${storageLocations.map((loc) => `${loc.code} ${loc.name} (${typeLabel(loc.typeCode)}${loc.active ? '' : ', inactive'})`).join('; ')}`,
                         removed.length ? `removed ${removed.map((p) => p.code).join(', ')}` : '',
                         affectedClusters.length ? `FORCE REMOVED ${affectedClusters.length} clusters: ${affectedClusters.map(x=>x.code).join(', ')} by ${ctx.uid}` : '',
-                        storageType[1],
+                        'Cluster-managed storage types, stacking and conditions',
                         layout.floors.map((f, i) => `${letter(i + 1)} ${f.name}: ${f.racking ? `${f.rows} rows × ${f.racks} racks × ${f.columns} columns × ${f.positions}` : `no racking, ${f.rows} rows × ${f.positions}`}`).join('; '),
                         `${total} positions`,
                     ]
