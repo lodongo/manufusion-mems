@@ -34,6 +34,8 @@ import { audit } from './audit';
 import { allowedNodeIds } from './positions';
 import { audited, requireAt } from './scopeGuard';
 import { hasPerm, orgRoute, staff, type OrgContext, type SecureContext } from './guards';
+import { bypass } from './testModeCore';
+import { materialApprovalNotStarted, materialDraftCan, materialMakerCheckerConflict, materialMakerIds } from './materialDraftSecurity';
 
 // ---------------------------------------------------------------------------
 // Material approval delegation: validated on save, dated, audited. Undated or malformed entries grant nothing.
@@ -1083,7 +1085,7 @@ export async function createMaterialDraft(ctx: OrgContext) {
         const majorMaterialBranch=str(catalogueClassification.majorBranch);
         await writeDoc(path, { name, shortText, materialCode, categoryCode, subcategoryCode, familyCode, attributes: values,
             ...(storesClassCode?{storesClassCode}:{}),...(majorMaterialBranch?{majorMaterialBranch}:{}),
-            status: 'draft', approvalLevel: 0, createdAt: nowIso(), createdBy: ctx.uid }, { exists: false });
+            status: 'draft', approvalLevel: 0, createdAt: nowIso(), createdBy: ctx.uid, makerUids: [ctx.uid] }, { exists: false });
         await audit([{ category: 'data', action: 'org.material.create', actor: ctx.actor, meta: ctx.meta, target: { label: id }, details: name, orgId: ctx.orgId }]);
         return { ok: true, id, shortText };
     }
@@ -1151,7 +1153,11 @@ function materialStageLabel(record:Obj,workflow:MaterialWorkflowDefinition):stri
     return workflowStageName(workflow.steps[index],index,workflow.steps.length);
 }
 async function materialApproverCanAct(ctx:OrgContext,record:Obj,workflow:MaterialWorkflowDefinition):Promise<boolean>{
-    if(str(record.createdBy)===ctx.uid||str(record.submittedBy)===ctx.uid||
+    // The test override is restricted to a named tenant's organization super admin on development.
+    // Each bypass is recorded at high priority by orgRoute, including the material and control name.
+    if(ctx.testMode===true&&ctx.role==='org_super_admin')
+        return bypass(ctx,'material.workflow.assignment.and.maker_checker');
+    if(materialMakerCheckerConflict(record,ctx.uid)||
         approvedEarlierLevel(record.approvalHistory,ctx.uid))return false;
     const user=await getDoc('users/'+ctx.uid);
     if(!user||str(user.data.status)==='disabled')return false;
@@ -1652,19 +1658,38 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
         action:str(x.action)==='review'?'review':str(x.action)==='approve'?'approve':i===steps.length-1?'approve':'review'})),approvalMode,approvalRule,enabled,version:Number(current.data.version||0)+1,updatedAt:nowIso(),updatedBy:ctx.uid});await audit([{category:terminate?'security':'data',action:terminate?'HIGH_RISK_WORKFLOW_REPLACED':'workflow.configure',actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:code},details:'Enabled: '+enabled+'; stages: '+steps.length+'; terminated: '+(terminate?active.length:0)+'; reason: '+(terminate?reason:'none')}]);return {ok:true,terminated:terminate?active.length:0};})],
     'POST /api/org/procurement/materials/autosave': [orgRoute('org.procurement.materials.autosave', null, async ctx => {
         requireModule(ctx,'materials');
-        if(ctx.role!=='org_super_admin'&&!['PRC.create','PRC.materials.manage','PRC.admin'].some(p=>hasPerm(ctx.permissions,p)))throw new HttpError(403,'Material creation permission required.');
         const data=isObj(ctx.body.data)?ctx.body.data:{};
-        const id=str(ctx.body.id)||'MAT-'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,7).toUpperCase();
+        const suppliedId=str(ctx.body.id);
+        if(suppliedId&&!/^MAT-[A-Za-z0-9-]+$/.test(suppliedId))
+            throw new HttpError(400,'Invalid material draft identifier.');
+        const id=suppliedId||'MAT-'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,7).toUpperCase();
         const path='organizations/'+ctx.orgId+'/materials/'+id;
         const existing=await getDoc(path);
-        if(existing&&(!['draft','rejected'].includes(str(existing.data.status))||(ctx.role!=='org_super_admin'&&str(existing.data.createdBy)!==ctx.uid)))throw new HttpError(403,'Draft is not editable.');
+        if(existing){
+            if(!materialApprovalNotStarted(existing.data))
+                throw new HttpError(409,'Approval has already started. Material cannot be edited or deleted as a draft.');
+            if(!materialDraftCan(existing.data,ctx.uid,ctx.permissions,'edit',ctx.role==='org_super_admin'))
+                throw new HttpError(403,'You are not designated to edit this material draft.');
+        }else if(ctx.role!=='org_super_admin'&&!['PRC.create','PRC.materials.manage','PRC.admin'].some(p=>hasPerm(ctx.permissions,p)))
+            throw new HttpError(403,'Material creation permission required.');
         const allowed=['name','shortText','categoryCode','subcategoryCode','familyCode','materialCode','attributes','supplyType','vendorId','partyEntryMode','partyName','oemPartNumber','ocmPartNumber','generalPartNumber','model','versionNumber','materialClassification','warehouseRestriction','warehouseRestrictionCodes','clusterCode','warehouseId','costCenterId','assetId','assemblyId','uom','assemblyIds'];
         const patch:Record<string,unknown>={};
         for(const key of allowed)if(key in data)patch[key]=data[key];
         if('attributes' in patch&&!isObj(patch.attributes))throw new HttpError(400,'Invalid attributes.');
         if('assemblyIds' in patch&&(!Array.isArray(patch.assemblyIds)||patch.assemblyIds.length>100))throw new HttpError(400,'Invalid assemblies.');
         if(str(patch.shortText).length>120||str(patch.name).length>160)throw new HttpError(400,'Text too long.');
-        await writeDoc(path,await synchronizeMaterialCluster(ctx,materialSourcingPolicy({...existing?.data??{},...patch,status:existing?.data.status??'draft',createdBy:existing?.data.createdBy??ctx.uid,createdAt:existing?.data.createdAt??nowIso(),updatedBy:ctx.uid,updatedAt:nowIso()})));
+        const stamp=nowIso();
+        const next=await synchronizeMaterialCluster(ctx,materialSourcingPolicy({
+            ...existing?.data??{},...patch,status:'draft',
+            createdBy:existing?.data.createdBy??ctx.uid,createdAt:existing?.data.createdAt??stamp,
+            makerUids:materialMakerIds({...existing?.data??{},createdBy:existing?.data.createdBy??ctx.uid,updatedBy:ctx.uid}),
+            updatedBy:ctx.uid,updatedAt:stamp,
+        }));
+        const saved=await writeDoc(path,next,existing?{updateTime:existing.updateTime}:{exists:false});
+        if(!saved)throw new HttpError(409,'Material draft changed during editing. Reload before saving.');
+        await audited(ctx,existing?'procurement.material.draft_autosave':'procurement.material.draft_create',
+            'Material '+id,{fields:Object.keys(patch),createdBy:str(next.createdBy),editedBy:ctx.uid,
+                delegated:!!existing&&str(existing.data.createdBy)!==ctx.uid});
         return {ok:true,id};
     })],
     'POST /api/org/procurement/materials/extension': [orgRoute('org.procurement.materials.extension',null,async ctx=>{
@@ -1724,12 +1749,16 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
     'POST /api/org/procurement/materials/list': [orgRoute('org.procurement.materials.list',null,async ctx=>{
         requireModule(ctx,'materials');
         const docs=await listDocs('organizations/'+ctx.orgId+'/materials');
-        const items=await Promise.all(docs.map(async d=>{
+        const items=await Promise.all(docs.filter(d=>str(d.data.status)!=='deleted').map(async d=>{
             const workflow=materialWorkflowSnapshot(d.data);
             const pending=str(d.data.status)==='pending_approval';
+            const elevated=ctx.role==='org_super_admin';
             return {id:d.id,...d.data,workflowStage:pending?
                 (workflow?materialStageLabel(d.data,workflow):'Legacy workflow · migration required'):
                 str(d.data.status)==='approved'||str(d.data.status)==='active'?'Approved':str(d.data.status).replaceAll('_',' '),
+                canEdit:materialDraftCan(d.data,ctx.uid,ctx.permissions,'edit',elevated),
+                canDelete:materialDraftCan(d.data,ctx.uid,ctx.permissions,'delete',elevated),
+                canSubmit:materialDraftCan(d.data,ctx.uid,ctx.permissions,'submit',elevated),
                 canApprove:pending&&!!workflow&&await materialApproverCanAct(ctx,d.data,workflow)};
         }));
         return {items:items.sort((a,b)=>str((b as Obj).createdAt).localeCompare(str((a as Obj).createdAt))),
@@ -1738,7 +1767,34 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
     'POST /api/org/procurement/materials/create': [orgRoute('org.procurement.materials.create', null, async ctx => {
         return createMaterialDraft(ctx);
     })],
-    'POST /api/org/procurement/materials/update': [orgRoute('org.procurement.materials.update', null, async ctx => { requireModule(ctx, 'materials'); const id=str(ctx.body.id); const path='organizations/'+ctx.orgId+'/materials/'+id; const doc=await getDoc(path); if(!doc) throw new HttpError(404,'Material not found.'); if(!['draft','rejected'].includes(str(doc.data.status))) throw new HttpError(409,'Only drafts and rejected materials may be edited.'); if(ctx.role!=='org_super_admin' && str(doc.data.createdBy)!==ctx.uid) throw new HttpError(403,'Only the creator may edit this draft.'); const data=isObj(ctx.body.data)?ctx.body.data:{}; const allowed=['name','attributes','shortText','supplyType','vendorId','partyEntryMode','partyName','oemPartNumber','ocmPartNumber','generalPartNumber','model','versionNumber','materialClassification','warehouseRestriction','warehouseRestrictionCodes','clusterCode','warehouseId','costCenterId','assetId','assemblyId','uom','assemblyIds']; const patch:Record<string,unknown>={}; for(const k of allowed) if(k in data) patch[k]=data[k]; if('shortText' in patch){if(typeof patch.shortText!=='string'||patch.shortText.length>120)throw new HttpError(400,'Short text must be at most 120 characters.');}await writeDoc(path,await synchronizeMaterialCluster(ctx,materialSourcingPolicy({...doc.data,...patch,updatedAt:nowIso(),updatedBy:ctx.uid}))); await audited(ctx,'procurement.material.draft_update','Material draft '+id,{fields:Object.keys(patch)}); return {ok:true}; })],
+    'POST /api/org/procurement/materials/update': [orgRoute('org.procurement.materials.update', null, async ctx => {
+        requireModule(ctx,'materials');
+        const id=str(ctx.body.id);
+        if(!/^MAT-[A-Za-z0-9-]+$/.test(id))throw new HttpError(400,'Invalid material identifier.');
+        const path='organizations/'+ctx.orgId+'/materials/'+id;
+        const doc=await getDoc(path);
+        if(!doc)throw new HttpError(404,'Material not found.');
+        if(!materialApprovalNotStarted(doc.data))
+            throw new HttpError(409,'Approval has already started. Draft editing is locked.');
+        if(!materialDraftCan(doc.data,ctx.uid,ctx.permissions,'edit',ctx.role==='org_super_admin'))
+            throw new HttpError(403,'You are not designated to edit this draft.');
+        const data=isObj(ctx.body.data)?ctx.body.data:{};
+        const allowed=['name','categoryCode','subcategoryCode','familyCode','materialCode','attributes','shortText','supplyType','vendorId','partyEntryMode','partyName','oemPartNumber','ocmPartNumber','generalPartNumber','model','versionNumber','materialClassification','warehouseRestriction','warehouseRestrictionCodes','clusterCode','warehouseId','costCenterId','assetId','assemblyId','uom','assemblyIds'];
+        const patch:Record<string,unknown>={};
+        for(const k of allowed)if(k in data)patch[k]=data[k];
+        if('shortText' in patch&&(typeof patch.shortText!=='string'||patch.shortText.length>120))
+            throw new HttpError(400,'Short text must be at most 120 characters.');
+        const next=await synchronizeMaterialCluster(ctx,materialSourcingPolicy({
+            ...doc.data,...patch,updatedAt:nowIso(),updatedBy:ctx.uid,
+            makerUids:materialMakerIds({...doc.data,updatedBy:ctx.uid}),
+        }));
+        if(!await writeDoc(path,next,{updateTime:doc.updateTime}))
+            throw new HttpError(409,'Draft changed during editing. Reload before saving.');
+        await audited(ctx,'procurement.material.draft_update','Material draft '+id,
+            {fields:Object.keys(patch),createdBy:str(doc.data.createdBy),editedBy:ctx.uid,
+                delegated:str(doc.data.createdBy)!==ctx.uid});
+        return {ok:true};
+    })],
     'POST /api/org/procurement/materials/lifecycle': [orgRoute('org.procurement.materials.lifecycle', null, async ctx => {
         requireModule(ctx,'materials');
         if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'PRC.materials.manage')&&!hasPerm(ctx.permissions,'PRC.admin'))throw new HttpError(403,'Material lifecycle management permission required.');
@@ -1788,13 +1844,37 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
         }
         throw new HttpError(400,'Unknown lifecycle action.');
     })],
-    'POST /api/org/procurement/materials/delete': [orgRoute('org.procurement.materials.delete', null, async ctx => {requireModule(ctx,'materials');const id=str(ctx.body.id);const path='organizations/'+ctx.orgId+'/materials/'+id;const doc=await getDoc(path);if(!doc)throw new HttpError(404,'Material not found.');if(ctx.role!=='org_super_admin'){if(!['draft','rejected'].includes(str(doc.data.status)))throw new HttpError(409,'Only unapproved drafts can be deleted.');if(str(doc.data.createdBy)!==ctx.uid)throw new HttpError(403,'Not your draft.');}await audit([{category:'data',action:'org.material.delete',actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:id},details:JSON.stringify({name:str(doc.data.name),status:str(doc.data.status),deletedBy:ctx.uid})}]);await deleteDoc(path);return {ok:true};})],
-    'POST /api/org/procurement/materials/submit': [orgRoute('org.procurement.materials.submit', null, async ctx => {requireModule(ctx,'materials');const id=str(ctx.body.id);const path='organizations/'+ctx.orgId+'/materials/'+id;const doc=await getDoc(path);if(!doc)throw new HttpError(404,'Material not found.');if(!['draft','rejected'].includes(str(doc.data.status)))throw new HttpError(409,'Material cannot be submitted.');if(ctx.role!=='org_super_admin'&&str(doc.data.createdBy)!==ctx.uid)throw new HttpError(403,'Not your draft.');const d=await synchronizeMaterialCluster(ctx,materialSourcingPolicy(doc.data));await validatePublishedMaterialSelection(d);const warehouse=await getDoc('organizations/'+ctx.orgId+'/warehouses/'+str(d.warehouseId));const user=await getDoc('users/'+ctx.uid);const allowed=ctx.role==='org_super_admin'?'all':user?await allowedNodeIds(ctx.orgId,user,true):new Set<string>();if(!warehouse||(allowed!=='all'&&!allowed.has(str(d.warehouseId))))throw new HttpError(400,'Choose a warehouse you have access to.');const whCats=Array.isArray(warehouse.data.materialCategoryCodes)?warehouse.data.materialCategoryCodes.map(str):[str(warehouse.data.materialCategoryCode)];if(!whCats.includes(str(d.categoryCode)))throw new HttpError(400,'Warehouse is not configured for this material category.');if(!str(d.uom)||!str(d.supplyType))throw new HttpError(400,'Complete stage 2 mandatory fields.');if(!['OEM','OCM','BIDDED'].includes(str(d.supplyType)))throw new HttpError(400,'Select a valid supply relationship.');const partField=str(d.supplyType)==='OEM'?'oemPartNumber':str(d.supplyType)==='OCM'?'ocmPartNumber':'';if(partField&&!str(d[partField]))throw new HttpError(400,'Enter the applicable part number.');if(str(d.supplyType)!=='BIDDED'&&str(d.partyEntryMode)==='manual'){if(str(d.partyName).trim().length<2||str(d.partyName).length>160)throw new HttpError(400,'Enter a valid OEM, OCM or supplier name (2–160 characters).');}else if(['OEM','OCM'].includes(str(d.supplyType))){if(!str(d.vendorId)||!(await getDoc('organizations/'+ctx.orgId+'/vendors/'+str(d.vendorId))))throw new HttpError(400,'Select an existing registered vendor or enter the name manually.');}const uomDoc=await getDoc('module_workspaces/PRC/metadata/unitsOfMeasure');if(!Array.isArray(uomDoc?.data.items)||!uomDoc.data.items.some(x=>isObj(x)&&str(x.code)===str(d.uom)&&x.active!==false))throw new HttpError(400,'Choose an enabled UOM from MEMS metadata.');const restrictionIssue=locationBlock(restrictionCodesOf(d.warehouseRestrictionCodes,d.warehouseRestriction),await warehouseRestrictionMaster(),'this material');if(restrictionIssue)throw new HttpError(400,'Choose enabled warehouse restrictions in Step 3: '+restrictionIssue);if(str(d.supplyType)==='OEM'){if(!str(d.oemPartNumber)||!str(d.costCenterId)||!str(d.assetId))throw new HttpError(400,'OEM part number, cost center and asset are required.');const nodes=await listDocs('organizations/'+ctx.orgId+'/structure');const byId=new Map(nodes.map(x=>[x.id,x.data]));const cc=byId.get(str(d.costCenterId));const asset=byId.get(str(d.assetId));if(!cc||str(cc.level)!=='cost_center'||(allowed!=='all'&&!allowed.has(str(d.costCenterId)))||!asset||str(asset.level)!=='work_center'||str(asset.parentId)!==str(d.costCenterId))throw new HttpError(400,'Select a valid asset in an accessible cost center.');const selected=Array.isArray(d.assemblyIds)?d.assemblyIds.map(x=>str(x)).filter(Boolean):(str(d.assemblyId)?[str(d.assemblyId)]:[]);if(new Set(selected).size!==selected.length)throw new HttpError(400,'Duplicate assembly selection.');for(const assemblyId of selected){const assembly=byId.get(assemblyId);if(!assembly||str(assembly.level)!=='assembly'||str(assembly.parentId)!==str(d.assetId))throw new HttpError(400,'Every selected assembly must belong to the selected asset.');}}const peers=await listDocs('organizations/'+ctx.orgId+'/materials');const normalize=(v:unknown)=>str(v).trim().toLowerCase().replace(/[^a-z0-9]+/g,'');const a=isObj(d.attributes)?d.attributes:{};const keys=Object.keys(a).filter(k=>str(a[k]).trim());for(const peer of peers){if(peer.id===id||['rejected','cancelled','deleted'].includes(str(peer.data.status).toLowerCase()))continue;const p=peer.data;const peerSource=str(p.supplyType)==='GENERAL'?'BIDDED':str(p.supplyType);const pk=peerSource==='OEM'?'oemPartNumber':peerSource==='OCM'?'ocmPartNumber':'';if(!partField||!pk||peerSource!==str(d.supplyType)||!normalize(d[partField])||normalize(d[partField])!==normalize(p[pk]))continue;const pa=isObj(p.attributes)?p.attributes:{};const attributeScore=keys.length?keys.filter(k=>normalize(a[k])===normalize(pa[k])).length/keys.length*25:0;const score=Math.round((normalize(d.categoryCode)===normalize(p.categoryCode)?10:0)+(normalize(d.subcategoryCode)===normalize(p.subcategoryCode)?15:0)+(normalize(d.familyCode)===normalize(p.familyCode)?20:0)+(normalize(d.materialCode)===normalize(p.materialCode)?25:0)+attributeScore+(normalize(d.name)===normalize(p.name)?5:0));if(score>90)throw new HttpError(409,'REPEAT MATERIAL: '+peer.id+' matches the same part number at '+score+'% similarity. Extend the existing material instead.');}const workflow=await configuredMaterialWorkflow(ctx.orgId,'PRC-001');
-await writeDoc(path,{...d,status:'pending_approval',approvalLevel:1,approvalHistory:[],
+    'POST /api/org/procurement/materials/delete': [orgRoute('org.procurement.materials.delete', null, async ctx => {
+        requireModule(ctx,'materials');
+        const id=str(ctx.body.id);
+        if(!/^MAT-[A-Za-z0-9-]+$/.test(id))throw new HttpError(400,'Invalid material identifier.');
+        const path='organizations/'+ctx.orgId+'/materials/'+id;
+        const doc=await getDoc(path);
+        if(!doc)throw new HttpError(404,'Material not found.');
+        if(!materialApprovalNotStarted(doc.data))
+            throw new HttpError(409,'Approval has already started. Only unsubmitted drafts can be deleted.');
+        if(!materialDraftCan(doc.data,ctx.uid,ctx.permissions,'delete',ctx.role==='org_super_admin'))
+            throw new HttpError(403,'You are not designated to delete this material draft.');
+        // Soft-delete preserves the original record, all makers and the immutable activity audit.
+        if(!await writeDoc(path,{...doc.data,status:'deleted',deletedAt:nowIso(),
+            deletedBy:ctx.uid,deleteReason:str(ctx.body.reason)}, {updateTime:doc.updateTime}))
+            throw new HttpError(409,'Draft changed during deletion. Reload before trying again.');
+        await audited(ctx,'procurement.material.draft_delete','Material draft '+id,
+            {name:str(doc.data.name),createdBy:str(doc.data.createdBy),deletedBy:ctx.uid,
+                delegated:str(doc.data.createdBy)!==ctx.uid});
+        return {ok:true};
+    })],
+    'POST /api/org/procurement/materials/submit': [orgRoute('org.procurement.materials.submit', null, async ctx => {requireModule(ctx,'materials');const id=str(ctx.body.id);const path='organizations/'+ctx.orgId+'/materials/'+id;const doc=await getDoc(path);if(!doc)throw new HttpError(404,'Material not found.');if(!materialApprovalNotStarted(doc.data))throw new HttpError(409,'Material cannot be submitted because approval has already started.');if(!materialDraftCan(doc.data,ctx.uid,ctx.permissions,'submit',ctx.role==='org_super_admin'))throw new HttpError(403,'You are not designated to submit this material draft.');const d=await synchronizeMaterialCluster(ctx,materialSourcingPolicy(doc.data));await validatePublishedMaterialSelection(d);const warehouse=await getDoc('organizations/'+ctx.orgId+'/warehouses/'+str(d.warehouseId));const user=await getDoc('users/'+ctx.uid);const allowed=ctx.role==='org_super_admin'?'all':user?await allowedNodeIds(ctx.orgId,user,true):new Set<string>();if(!warehouse||(allowed!=='all'&&!allowed.has(str(d.warehouseId))))throw new HttpError(400,'Choose a warehouse you have access to.');const whCats=Array.isArray(warehouse.data.materialCategoryCodes)?warehouse.data.materialCategoryCodes.map(str):[str(warehouse.data.materialCategoryCode)];if(!whCats.includes(str(d.categoryCode)))throw new HttpError(400,'Warehouse is not configured for this material category.');if(!str(d.uom)||!str(d.supplyType))throw new HttpError(400,'Complete stage 2 mandatory fields.');if(!['OEM','OCM','BIDDED'].includes(str(d.supplyType)))throw new HttpError(400,'Select a valid supply relationship.');const partField=str(d.supplyType)==='OEM'?'oemPartNumber':str(d.supplyType)==='OCM'?'ocmPartNumber':'';if(partField&&!str(d[partField]))throw new HttpError(400,'Enter the applicable part number.');if(str(d.supplyType)!=='BIDDED'&&str(d.partyEntryMode)==='manual'){if(str(d.partyName).trim().length<2||str(d.partyName).length>160)throw new HttpError(400,'Enter a valid OEM, OCM or supplier name (2–160 characters).');}else if(['OEM','OCM'].includes(str(d.supplyType))){if(!str(d.vendorId)||!(await getDoc('organizations/'+ctx.orgId+'/vendors/'+str(d.vendorId))))throw new HttpError(400,'Select an existing registered vendor or enter the name manually.');}const uomDoc=await getDoc('module_workspaces/PRC/metadata/unitsOfMeasure');if(!Array.isArray(uomDoc?.data.items)||!uomDoc.data.items.some(x=>isObj(x)&&str(x.code)===str(d.uom)&&x.active!==false))throw new HttpError(400,'Choose an enabled UOM from MEMS metadata.');const restrictionIssue=locationBlock(restrictionCodesOf(d.warehouseRestrictionCodes,d.warehouseRestriction),await warehouseRestrictionMaster(),'this material');if(restrictionIssue)throw new HttpError(400,'Choose enabled warehouse restrictions in Step 3: '+restrictionIssue);if(str(d.supplyType)==='OEM'){if(!str(d.oemPartNumber)||!str(d.costCenterId)||!str(d.assetId))throw new HttpError(400,'OEM part number, cost center and asset are required.');const nodes=await listDocs('organizations/'+ctx.orgId+'/structure');const byId=new Map(nodes.map(x=>[x.id,x.data]));const cc=byId.get(str(d.costCenterId));const asset=byId.get(str(d.assetId));if(!cc||str(cc.level)!=='cost_center'||(allowed!=='all'&&!allowed.has(str(d.costCenterId)))||!asset||str(asset.level)!=='work_center'||str(asset.parentId)!==str(d.costCenterId))throw new HttpError(400,'Select a valid asset in an accessible cost center.');const selected=Array.isArray(d.assemblyIds)?d.assemblyIds.map(x=>str(x)).filter(Boolean):(str(d.assemblyId)?[str(d.assemblyId)]:[]);if(new Set(selected).size!==selected.length)throw new HttpError(400,'Duplicate assembly selection.');for(const assemblyId of selected){const assembly=byId.get(assemblyId);if(!assembly||str(assembly.level)!=='assembly'||str(assembly.parentId)!==str(d.assetId))throw new HttpError(400,'Every selected assembly must belong to the selected asset.');}}const peers=await listDocs('organizations/'+ctx.orgId+'/materials');const normalize=(v:unknown)=>str(v).trim().toLowerCase().replace(/[^a-z0-9]+/g,'');const a=isObj(d.attributes)?d.attributes:{};const keys=Object.keys(a).filter(k=>str(a[k]).trim());for(const peer of peers){if(peer.id===id||['rejected','cancelled','deleted'].includes(str(peer.data.status).toLowerCase()))continue;const p=peer.data;const peerSource=str(p.supplyType)==='GENERAL'?'BIDDED':str(p.supplyType);const pk=peerSource==='OEM'?'oemPartNumber':peerSource==='OCM'?'ocmPartNumber':'';if(!partField||!pk||peerSource!==str(d.supplyType)||!normalize(d[partField])||normalize(d[partField])!==normalize(p[pk]))continue;const pa=isObj(p.attributes)?p.attributes:{};const attributeScore=keys.length?keys.filter(k=>normalize(a[k])===normalize(pa[k])).length/keys.length*25:0;const score=Math.round((normalize(d.categoryCode)===normalize(p.categoryCode)?10:0)+(normalize(d.subcategoryCode)===normalize(p.subcategoryCode)?15:0)+(normalize(d.familyCode)===normalize(p.familyCode)?20:0)+(normalize(d.materialCode)===normalize(p.materialCode)?25:0)+attributeScore+(normalize(d.name)===normalize(p.name)?5:0));if(score>90)throw new HttpError(409,'REPEAT MATERIAL: '+peer.id+' matches the same part number at '+score+'% similarity. Extend the existing material instead.');}const workflow=await configuredMaterialWorkflow(ctx.orgId,'PRC-001');
+if(!await writeDoc(path,{...d,status:'pending_approval',approvalLevel:1,approvalHistory:[],
     workflowCode:workflow.code,workflowVersion:workflow.version,workflowSnapshot:workflow,
     workflowStage:materialStageLabel({approvalLevel:1,approvalHistory:[]},workflow),
-    submittedBy:ctx.uid,submittedAt:nowIso()});
-await audited(ctx,'procurement.material.submit','Material '+id,{warehouseId:str(d.warehouseId),categoryCode:str(d.categoryCode)});return {ok:true};})],
+    makerUids:materialMakerIds({...d,submittedBy:ctx.uid}),
+    submittedBy:ctx.uid,submittedAt:nowIso()},{updateTime:doc.updateTime}))
+    throw new HttpError(409,'Draft changed during submission. Reload and review before submitting.');
+await audited(ctx,'procurement.material.submit','Material '+id,
+    {warehouseId:str(d.warehouseId),categoryCode:str(d.categoryCode),submittedBy:ctx.uid,
+        createdBy:str(d.createdBy),makerUids:materialMakerIds({...d,submittedBy:ctx.uid}),
+        workflowCode:workflow.code});return {ok:true};})],
     // Legacy three-approver editor is retired: PRC-001 and PRC-002 are configured in the workflow registry.
     'POST /api/org/procurement/materials/workflow': [orgRoute('org.procurement.materials.workflow',null,async ctx=>{
         requireModule(ctx,'materials');
