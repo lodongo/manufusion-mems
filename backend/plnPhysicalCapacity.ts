@@ -115,10 +115,10 @@ export function derivePhysicalCapacity(
  const logistics=parameters.find(p=>p.id===components.transportPackageId&&p.kind==='transportPackages');
  const norm=parameters.find(p=>p.id===components.normalizationUnitId&&p.kind==='normalizationUnits');
  const formQuantity=physicalContainers*conversion.containerSizeInProductionUom;
- const finishedUnit=commercial?.name||displayUnit(sku.uom);
- // Finished goods are commercial-packaged units when a package is selected;
- // count codes alone are not sufficient to infer whether each means a bottle or a case.
- const finalQuantity=commercial&&packages!==null?packages:null;
+ const finishedUnit=commercial?.name||displayUnit(conversion.productionUom);
+ // Unpackaged/bulk finished output is measured in the production-form UoM;
+ // never pretend that a case or pallet exists when it was not required.
+ const finalQuantity=commercial&&packages!==null?packages:formQuantity;
  const normalized=conversion.productionQtyPerNormalizationUnit&&conversion.productionQtyPerNormalizationUnit>0
   ?formQuantity/conversion.productionQtyPerNormalizationUnit:null;
  return {
@@ -134,11 +134,13 @@ export function derivePhysicalCapacity(
   productionForm:projected(formQuantity,displayUnit(conversion.productionUom)+' / '+time.symbol,
      productionForm?.name||'Production form'),
   finalProduct:projected(finalQuantity,finishedUnit+' / '+time.symbol,sku.name,
-    'Finished-product package conversion is not configured.'),
+    commercial?'Finished-product package conversion is not configured.':undefined),
   commercialPackaging:projected(packages,(commercial?.name||'commercial packages')+' / '+time.symbol,
-     commercial?.name||'Commercial packaging','Commercial packaging ratio is not configured.'),
+     commercial?.name||'Commercial packaging',
+     conversion.requiresCommercialPackaging?'Commercial packaging ratio is not configured.':'Commercial packaging is not required for this SKU.'),
   transportLogistics:projected(transport,(logistics?.name||'transport units')+' / '+time.symbol,
-     logistics?.name||'Transport & logistics','Transport packaging ratio is not configured.'),
+     logistics?.name||'Transport & logistics',
+     conversion.requiresTransportPackaging?'Transport packaging ratio is not configured.':'Transport packaging is not required for this SKU.'),
   normalised:projected(normalized,(norm?.name||'normalized units')+' / '+time.symbol,
      norm?.name||'Normalization','Normalization reference is not configured.'),
  };
