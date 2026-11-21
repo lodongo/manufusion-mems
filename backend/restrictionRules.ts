@@ -44,28 +44,33 @@ export function effectiveRestriction(warehouseInfo: Record<string, unknown> | nu
 
 export interface RestrictionEntry { code: string; label: string; active: boolean }
 
-/**
- * Decide whether a material may be placed in a bin. Returns '' when allowed, otherwise the reason.
- * Both sides must be set, known to the master, enabled, and identical.
- */
-/** Location side only: '' when the storage location carries an enabled restriction from the master. */
-export function locationBlock(binCode: string, master: RestrictionEntry[], locationLabel = 'this storage location'): string {
-    if (!binCode) return `The warehouse restriction of ${locationLabel} is not set. Align the storage location to the warehouse restriction master (Organization design → warehouse → Edit) before binning.`;
-    const bin = master.find((m) => m.code === binCode);
-    if (!bin) return `${locationLabel} uses restriction ${binCode}, which is not in the warehouse restriction master. Align the storage location before binning.`;
-    if (!bin.active) return `${bin.label} (${bin.code}) is disabled in the warehouse restriction master. Align ${locationLabel} to an enabled restriction before binning.`;
+/** A legacy single code remains accepted, but current clusters select multiple restriction codes. */
+export function restrictionCodesOf(value:unknown, fallback?:unknown):string[]{
+    const raw=Array.isArray(value)?value:[value??fallback];
+    return Array.from(new Set(raw.map(x=>String(x??'').trim()).filter(Boolean)));
+}
+
+/** Returns a reason when a cluster has missing, retired or unknown restrictions. */
+export function locationBlock(binCodes:string|string[], master:RestrictionEntry[], locationLabel='this cluster'):string{
+    const codes=restrictionCodesOf(binCodes);
+    if(!codes.length)return `Select at least one warehouse restriction for ${locationLabel} (Organization design → Warehouse → Clusters).`;
+    for(const code of codes){
+        const rule=master.find(x=>x.code===code);
+        if(!rule)return `${locationLabel} uses unknown warehouse restriction ${code}. Update the cluster restrictions.`;
+        if(!rule.active)return `${rule.label} (${rule.code}) is disabled in the warehouse restriction master. Update ${locationLabel}.`;
+    }
     return '';
 }
 
-export function binningBlock(materialCode: string, binCode: string, master: RestrictionEntry[], locationLabel = 'this storage location'): string {
-    const byCode = new Map(master.map((m) => [m.code, m]));
-    const side = locationBlock(binCode, master, locationLabel);
-    if (side) return side;
-    const bin = byCode.get(binCode)!;
-    if (!materialCode) return 'This material has no warehouse restriction for this warehouse. Set it in Stock Control (or on the material master) before binning.';
-    const mat = byCode.get(materialCode);
-    if (!mat) return `The material restriction ${materialCode} is not in the warehouse restriction master. Choose an enabled restriction in Stock Control.`;
-    if (!mat.active) return `The material restriction ${mat.label} (${mat.code}) is disabled. Choose an enabled restriction in Stock Control.`;
-    if (mat.code !== bin.code) return `Restriction mismatch: the material requires ${mat.label} (${mat.code}) but ${locationLabel} is ${bin.label} (${bin.code}).`;
+/** A material's effective Stock Control restriction must be one of the enabled restrictions selected on its cluster. */
+export function binningBlock(materialCode:string,binCodes:string|string[],master:RestrictionEntry[],locationLabel='this cluster'):string{
+    const codes=restrictionCodesOf(binCodes);
+    const side=locationBlock(codes,master,locationLabel);
+    if(side)return side;
+    if(!materialCode)return 'This material has no warehouse restriction. Select one in Stock Control (or its material master).';
+    const mat=master.find(x=>x.code===materialCode);
+    if(!mat)return `Material restriction ${materialCode} is not defined in the warehouse restriction master.`;
+    if(!mat.active)return `Material restriction ${mat.label} (${mat.code}) is disabled in the warehouse restriction master.`;
+    if(!codes.includes(materialCode))return `Restriction mismatch: the material requires ${mat.label} (${mat.code}) but ${locationLabel} permits ${codes.join(', ')}.`;
     return '';
 }
