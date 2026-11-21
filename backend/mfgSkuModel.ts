@@ -54,6 +54,8 @@ export type SkuConversion={
     reverseConversionFactor:number|null; // commercial packages per normalized unit
     transportLayeringEnabled:boolean;
     commercialPackagesPerTransportUnit:number|null;primaryContainersPerTransportUnit:number|null;
+    loadUnitsPerTransportUnit:number|null;
+    transportLoadUnitKind:'COMMERCIAL_PACKAGE'|'PHYSICAL_CONTAINER'|null;
     productionQtyPerTransportUnit:number|null;normalizationUnitsPerTransportUnit:number|null;
     selectedNames:Record<string,string>;
 };
@@ -250,9 +252,9 @@ export function calculateSkuConversion(
             return n;
         };
         packagesPerTransport=stacking
-            ?bounded(values.transportPackagesPerLayer,'Commercial packages per layer')*
+            ?bounded(values.transportPackagesPerLayer,needs.requiresCommercialPackaging?'Commercial packages per layer':'Physical containers per layer')*
                 bounded(values.transportLayerCount,'Number of layers')
-            :bounded(values.transportUnitsPerLoad,'Commercial packages per transport unit');
+            :bounded(values.transportUnitsPerLoad,needs.requiresCommercialPackaging?'Commercial packages per transport unit':'Physical containers per transport unit');
         if(packagesPerTransport>10000000)
             throw new HttpError(400,'Consolidated transport quantity exceeds the supported range.');
     }else if(stacking||values.transportPackagesPerLayer||values.transportLayerCount||values.transportUnitsPerLoad)
@@ -284,7 +286,9 @@ export function calculateSkuConversion(
         conversionFactor:round(factor),
         reverseConversionFactor:round(reverse),
         transportLayeringEnabled:transport?stacking:false,
-        commercialPackagesPerTransportUnit:packagesPerTransport,
+        commercialPackagesPerTransportUnit:pack?packagesPerTransport:null,
+        loadUnitsPerTransportUnit:packagesPerTransport,
+        transportLoadUnitKind:packagesPerTransport===null?null:pack?'COMMERCIAL_PACKAGE':'PHYSICAL_CONTAINER',
         primaryContainersPerTransportUnit:physicalPerLoad,
         productionQtyPerTransportUnit:round(productPerLoad),
         normalizationUnitsPerTransportUnit:packagesPerTransport!==null&&(factor!==null||physicalNormalized!==null)
