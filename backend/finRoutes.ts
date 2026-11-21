@@ -1131,7 +1131,7 @@ export const finRoutes = {
                     .map((u) => {
                         const ch = chainOf(e.units, u.id);
                         const f = finBy.get(u.id);
-                        return { id: u.id, code: u.code, name: u.name, department: ch.find((x) => x.level === 'department')?.name ?? '', site: ch.find((x) => x.level === 'site')?.name ?? '', costType: u.costType, structureStatus: u.status, status: str(f?.status) || 'open', statusLabel: CC_STATUS[str(f?.status) || 'open'], restricted: strs(f?.allowedGl).length, warehouse: wh.has(u.id), owned: owned.has(u.id), actual: (actual.get(u.id) ?? 0) / 100 };
+                        return { id: u.id, code: u.code, name: u.name, department: ch.find((x) => x.level === 'department')?.name ?? '', site: ch.find((x) => x.level === 'site')?.name ?? '', costType: u.costType, costSubcategory: str(u.attributes.costSubcategory), structureStatus: u.status, status: str(f?.status) || 'open', statusLabel: CC_STATUS[str(f?.status) || 'open'], restricted: strs(f?.allowedGl).length, warehouse: wh.has(u.id), owned: owned.has(u.id), actual: (actual.get(u.id) ?? 0) / 100 };
                     })
                     .sort((a, b) => a.code.localeCompare(b.code)),
                 can: flags(ctx, e),
@@ -1150,7 +1150,7 @@ export const finRoutes = {
             const sys = systemAccounts(map);
             const ch = chainOf(e.units, ccId);
             return {
-                cc: { id: cc.id, code: cc.code, name: cc.name, costType: cc.costType, structureStatus: cc.status, department: ch.find((x) => x.level === 'department')?.name ?? '', site: ch.find((x) => x.level === 'site')?.name ?? '', managerRoleCode: cc.managerRoleCode, warehouse: !!wh },
+                cc: { id: cc.id, code: cc.code, name: cc.name, costType: cc.costType, costSubcategory: str(cc.attributes.costSubcategory), structureStatus: cc.status, department: ch.find((x) => x.level === 'department')?.name ?? '', site: ch.find((x) => x.level === 'site')?.name ?? '', managerRoleCode: cc.managerRoleCode, warehouse: !!wh },
                 status: f.status,
                 statusLabel: CC_STATUS[f.status],
                 statuses: CC_STATUS,
