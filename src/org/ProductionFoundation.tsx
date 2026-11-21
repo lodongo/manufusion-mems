@@ -623,7 +623,14 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
         loading?<Spinner/>:active==='formDefaults'?<PlnFormDefaultsPanel initial={formDefaults} revision={formDefaultsRevision} sites={refs.sites} canEdit={canConfig} onSaved={(next,revision)=>{
             setConfig(previous=>({...previous,formDefaults:next}));setFormDefaultsRevision(revision);
-        }}/>:active==='costCenterSku'?<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup} defaultSiteId={formDefaults.defaultSiteId}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
+        }}/>:active==='costCenterSku'?<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup}
+            defaultSiteId={formDefaults.defaultSiteId}
+            onEditSku={skuId=>{
+                const found=rows.items.find(item=>item.id===skuId);
+                setActive('items');setDraft(null);setViewSkuId('');
+                if(found){void openDraft(found);}
+                else setError('The selected SKU was not found in your current Materials & Products list. Refresh the list and search for '+skuId+'.');
+            }}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
