@@ -43,6 +43,7 @@ interface Loc {
     name: string;
     typeCode: string;
     typeLabel: string;
+    materialCategoryCode?:string;
     /** Warehouse restriction (RS…) from the master shared with materials. */
     restrictionCode: string;
     restrictionLabel: string;
@@ -90,6 +91,8 @@ interface Cluster extends Range {
     lastCode: string;
     locationCode: string;
     locationName: string;
+    materialCategoryCode?:string;
+    materialSubcategoryCode?:string;
     classificationLabel: string;
     restrictionCode?: string;
     restrictionCodes: string[];
@@ -530,9 +533,9 @@ interface FloorDraft {
     positions: string;
 }
 const draftOf = (f: FloorLayout): FloorDraft => ({ name: f.name, racking: f.racking, rows: String(f.rows), racks: f.racking ? String(f.racks) : '', columns: f.racking ? String(f.columns) : '', positions: String(f.positions) });
-interface LocDraft {key:string;code?:string;name:string;typeCode:string;active:boolean;}
+interface LocDraft {key:string;code?:string;name:string;typeCode:string;materialCategoryCode:string;active:boolean;}
 let locDraftSeq = 0;
-const blankLoc = (): LocDraft => ({ key: `new-${++locDraftSeq}`, name: '', typeCode: '', active: true });
+const blankLoc = (): LocDraft => ({ key: `new-${++locDraftSeq}`, name: '', typeCode: '', materialCategoryCode:'',active: true });
 const blankFloor = (i: number): FloorDraft => ({ name: i === 0 ? 'Ground floor' : `Floor ${letter(i + 1)}`, racking: null, rows: '', racks: '', columns: '', positions: '' });
 
 function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void; onCancel: () => void }) {
@@ -541,10 +544,13 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
     const str = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
     const [cats, setCats] = useState<string[]>(s?.materialCategoryCodes ?? []);
     const [catQ, setCatQ] = useState('');
-    const [locs, setLocs] = useState<LocDraft[]>(s?.storageLocations.length ? s.storageLocations.map((l) => ({ key: l.code, code: l.code, name: l.name, typeCode: l.typeCode, active: l.active })) : [blankLoc()]);
+    const [locs, setLocs] = useState<LocDraft[]>(s?.storageLocations.length ? s.storageLocations.map((l) => ({ key: l.code, code: l.code, name: l.name, typeCode: l.typeCode,
+    materialCategoryCode:l.materialCategoryCode||'',active:l.active })) : [blankLoc()]);
     const usedLocations = new Set(data.clusters.map((c) => c.locationCode));
     const usedCategories = new Set(data.clusters.flatMap((c) => c.subcategories.map((x) => x.categoryCode)));
-    const toggleCat = (code: string) => setCats((cur) => (cur.includes(code) ? (usedCategories.has(code)&&!forceRemove ? cur : cur.filter((x) => x !== code)) : [...cur, code]));
+    const toggleCat = (code: string) => setCats((cur) => (cur.includes(code) ?
+        ((usedCategories.has(code)||locs.some(l=>l.materialCategoryCode===code))&&!forceRemove?
+            cur:cur.filter(x=>x!==code)) : [...cur, code]));
     const updLoc = (key: string, patch: Partial<LocDraft>) => setLocs((cur) => cur.map((l) => (l.key === key ? { ...l, ...patch } : l)));
     const [floors, setFloors] = useState<FloorDraft[]>(s?.layout.floors.length ? s.layout.floors.map(draftOf) : [blankFloor(0)]);
     const [open, setOpen] = useState(0);
@@ -608,7 +614,9 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
         const out: string[] = [];
         if (l.name.trim().length < 2 || l.name.trim().length > 60) out.push('name of 2 to 60 characters');
         if (!data.locationTypes.some((t) => t.code === l.typeCode)) out.push('storage location type');
-
+        if(!l.materialCategoryCode&&!l.code)out.push('material catalogue category');
+        if(l.materialCategoryCode&&!cats.includes(l.materialCategoryCode))
+            out.push('material category must be adopted by this warehouse');
         return out;
     });
     if (!locs.length) problems.push('Add at least one storage location.');
@@ -662,7 +670,8 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                 confirm: confirmed,
                 setup: {
                     materialCategoryCodes: cats,
-                    storageLocations: locs.map((l) => ({ code: l.code, name: l.name.trim(), typeCode: l.typeCode, active: l.active })),
+                    storageLocations: locs.map((l) => ({ code:l.code,name:l.name.trim(),
+                        typeCode:l.typeCode,materialCategoryCode:l.materialCategoryCode,active:l.active })),
                     layout: { floors: layoutFloors.map((f, i) => ({ ...f, name: f.name || `Floor ${letter(i + 1)}` })) }, capacity },
             });
             onDone();
@@ -739,7 +748,7 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
 
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-white'>2 · Storage locations *</p>
-                    <p className='text-xs text-soft'>Name each storage area and choose its location type. Restrictions, storage equipment and stacking are set on each cluster. Codes SL-01, SL-02… are automatic.</p>
+                    <p className='text-xs text-soft'>Select a category from the MEMS Materials Master for each storage location. Subcategories of that category become the selectable clusters. Physical location type and addresses remain separate, and existing locations are retained.</p>
                     {locs.map((l, i) => {
 
                         const inUse = !!l.code && usedLocations.has(l.code);
@@ -758,7 +767,22 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                                         <Trash2 className='h-4 w-4' />
                                     </button>
                                 </div>
-                                <Field id={`loc-name-${l.key}`} label='Name *' maxLength={60} placeholder='e.g. Main spares store' value={l.name} onChange={(e) => updLoc(l.key, { name: e.target.value })} />
+                                <SelectField id={`loc-category-${l.key}`} label='Material catalog category (storage location) *'
+                                    value={l.materialCategoryCode} onChange={e=>{
+                                        const code=e.target.value;
+                                        const selected=data.categories.find(c=>c.code===code);
+                                        updLoc(l.key,{materialCategoryCode:code,
+                                            name:!l.name.trim()&&selected?selected.name:l.name});
+                                    }}>
+                                    <option value=''>{l.code?'Legacy location — select a category to align':'Choose a material category…'}</option>
+                                    {data.categories.filter(cat=>cats.includes(cat.code)||cat.code===l.materialCategoryCode)
+                                        .map(cat=><option key={cat.code} value={cat.code}>{cat.code} · {cat.name}</option>)}
+                                </SelectField>
+                                <Field id={`loc-name-${l.key}`} label='Physical storage-area name *' maxLength={60}
+                                    placeholder='e.g. Raw materials — Sugar and concentrates'
+                                    value={l.name} onChange={(e)=>updLoc(l.key,{name:e.target.value})}/>
+                                {l.code&&usedLocations.has(l.code)&&
+                                    <p className='text-xs text-soft'>Existing clusters retain their mappings. Changing this category must not conflict with their material subcategories.</p>}
                                 <SelectField id={`loc-type-${l.key}`} label='Storage location type *' value={l.typeCode} onChange={(e) => updLoc(l.key, { typeCode: e.target.value })}>
                                     <option value=''>Select…</option>
                                     {data.locationTypes.map((t) => (
