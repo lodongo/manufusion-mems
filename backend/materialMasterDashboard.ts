@@ -91,7 +91,12 @@ export async function materialMasterDashboard(ctx: OrgContext, id: string, looku
     const availabilityEnabled=['approved','active'].includes(str(d.status));
     const byWarehouse=new Map<string,WarehouseEntry>();
     const sourceId=str(d.warehouseId);
-    const sourceMapped=availabilityEnabled&&!!str(d.pushedAt);
+    // Extension approval may synchronize the original warehouse into warehouseIds.
+    // Use the same effective mapping as Inventory rather than assuming pushAt is required.
+    const sourceMapped=availabilityEnabled&&(
+        !!str(d.pushedAt)||
+        (Array.isArray(d.warehouseIds)&&d.warehouseIds.map(str).includes(sourceId))
+    );
     if(sourceId){
         byWarehouse.set(sourceId,{warehouseId:sourceId,...warehouseLabel(sourceId),
             relation:'Created here',status:formatStatus(str(d.status)),
