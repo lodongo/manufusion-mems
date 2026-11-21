@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ArrowLeft, Boxes, Check, ChevronDown, Copy, Layers, Map as MapIcon, Pencil, Plus, Search, Trash2, Warehouse, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
-import { costCenterCategoryLabel, costCenterSubcategoryLabel } from '../shared/costCenterTaxonomy';
+import { costCenterCategoryLabel, costCenterSubcategoriesLabel } from '../shared/costCenterTaxonomy';
 import { Alert, Field, SelectField } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
@@ -135,7 +135,7 @@ interface Meta {
     description?: string;
 }
 interface Data {
-    costCenter: { id: string; code: string; name: string; costType: string; costSubcategory: string };
+    costCenter: { id: string; code: string; name: string; costType: string; costSubcategory: string; costSubcategories: string[] };
     configured: boolean;
     setup: Setup | null;
     summary: { totalPositions: number; allocated: number; free: number; clusters: number; palletCapacity?: number };
@@ -303,8 +303,8 @@ export default function WarehouseSetup({ costCenterId, onBack }: { costCenterId:
                     <div className='min-w-0 flex-1'>
                         <p className='truncate text-[15px] font-semibold leading-tight text-ink'>{d.costCenter.name}</p>
                         <p className='truncate font-mono text-[11px] text-soft'>{d.costCenter.code} · Warehouse</p>
-                        <p className='truncate text-[11px] text-soft'>{costCenterCategoryLabel(d.costCenter.costType)}
-                            {d.costCenter.costSubcategory ? ' · ' + costCenterSubcategoryLabel(d.costCenter.costType, d.costCenter.costSubcategory) : ''}</p>
+                        <p className='text-[11px] text-soft break-words'>{costCenterCategoryLabel(d.costCenter.costType)}
+                            {d.costCenter.costSubcategories?.length || d.costCenter.costSubcategory ? ' · ' + costCenterSubcategoriesLabel(d.costCenter.costType, d.costCenter) : ''}</p>
                     </div>
                     {d.canEdit && d.configured && !cluster && (
                         <button type='button' aria-label='Edit warehouse' onClick={() => (setTab('setup'), setEditing(true))} className='flex h-10 min-w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-panel px-2.5 text-sm font-medium text-ink'>
