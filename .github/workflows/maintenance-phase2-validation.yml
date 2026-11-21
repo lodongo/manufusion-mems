@@ -34,6 +34,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Asset catalog import safety and mobile transfer regression
+        run: node --import tsx --test tests/independent/asset-catalog-import.test.mjs
       - name: Maintenance governance and access regression tests
         run: node --import tsx --test backend/maintenanceReliabilityCore.test.ts backend/maintenanceCostCore.test.ts backend/maintenanceResourceLeveling.test.ts backend/maintenanceTimesheetCore.test.ts backend/maintenanceStandardHistory.test.ts backend/maintenanceTimeCore.test.ts backend/maintenanceCapacity.test.ts backend/maintenanceAnalytics.test.ts backend/maintenanceApprovalFlow.test.ts backend/maintenanceGovernancePolicy.test.ts backend/maintenanceCleanupAuthorization.test.ts tests/independent/maintenance-gate-access.test.mjs
       - name: Shared approval-engine regression tests
