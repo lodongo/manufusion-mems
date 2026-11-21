@@ -31,6 +31,7 @@ interface Item {
     conflict: boolean;
     configurationOnly: boolean;
     needsReconciliation?: boolean;
+    testOverride?:boolean;
     sourceId: string;
     creatorName: string;
     creatorEmail: string;
@@ -70,7 +71,7 @@ type Tone = 'brand' | 'muted' | 'danger' | 'warn';
 const keyOf = (x: Item) => `${x.type}:${x.id}`;
 const endpointOf = (x: Item) => (x.type === 'stock_adjustment' ? '/api/org/inventory/material/isolation/approve' : '/api/org/procurement/materials/' + (x.type === 'extension' ? 'extension/approve' : 'approve'));
 /** Nobody approves their own request, whatever the server lists. */
-const approvable = (x: Item) => x.canApprove && !x.isMine;
+const approvable = (x: Item) => x.canApprove && (x.testOverride === true || !x.isMine);
 /** Stock isolation approvals only support approve. */
 const rejectable = (x: Item) => approvable(x) && x.type !== 'stock_adjustment' && !x.needsReconciliation;
 /** Bulk approval covers plain approvals only; stock reconciliation is done one by one. */
@@ -273,7 +274,7 @@ export default function WorkflowInbox() {
                 title='My workflow'
                 subtitle='Active transactions, approval assignments and outstanding requests'
                 actions={
-                    <Button disabled={!targets.length} onClick={approveSelected}>
+                    <Button testOverride={targets.some(x=>x.testOverride)} disabled={!targets.length} onClick={approveSelected}>
                         <CheckCircle2 className='h-4 w-4' /> Approve{targets.length ? ` (${targets.length})` : ''}
                     </Button>
                 }
@@ -354,11 +355,11 @@ function ItemSheet({ item: x, trail, onClose, onApprove, onReject }: { item: Ite
                     </div>
                     {approvable(x) && (
                         <div className='flex flex-wrap gap-2'>
-                            <Button onClick={onApprove}>
+                            <Button testOverride={x.testOverride===true} onClick={onApprove}>
                                 <CheckCircle2 className='h-4 w-4' /> {x.needsReconciliation ? 'Reconcile approved stock' : 'Approve request'}
                             </Button>
                             {rejectable(x) && (
-                                <Button variant='danger' onClick={onReject}>
+                                <Button testOverride={x.testOverride===true} variant='danger' onClick={onReject}>
                                     <XCircle className='h-4 w-4' /> Reject
                                 </Button>
                             )}
@@ -367,7 +368,8 @@ function ItemSheet({ item: x, trail, onClose, onApprove, onReject }: { item: Ite
                 </header>
                 <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 pb-[max(1rem,env(safe-area-inset-bottom))]'>
                     {x.conflict && <Alert tone='warn'>This approval step is mapped to you for your own request. Another authorized approver must be assigned.</Alert>}
-                    {x.isMine && x.canApprove && !x.conflict && <Alert tone='warn'>You submitted this request, so you cannot approve it.</Alert>}
+                    {x.testOverride&&approvable(x)&&<Alert tone='info'>Development test mode: blue-bordered actions may bypass maker–checker and workflow assignment; each bypass is audited.</Alert>}
+                    {x.isMine && x.canApprove && !x.testOverride && !x.conflict && <Alert tone='warn'>You submitted this request, so you cannot approve it.</Alert>}
                     {x.configurationOnly && <Alert tone='info'>This transaction is mapped to a workflow but its module is not connected yet; it is shown for tracking only.</Alert>}
                     {x.type === 'stock_adjustment' && approvable(x) && !x.needsReconciliation && <Alert tone='info'>Stock isolation requests can only be approved here.</Alert>}
                     {trail && trail.details.length > 0 && (
