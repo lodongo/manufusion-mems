@@ -1174,11 +1174,12 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const whCats = data.categories.filter((c) => setup.materialCategoryCodes.includes(c.code));
     const allSubs = whCats.flatMap((c) => c.subcategories.map((sc) => ({ ...sc, categoryCode: c.code, categoryName: c.name })));
     const [subCodes, setSubCodes] = useState<string[]>([]);
-    const [subCat, setSubCat] = useState(whCats[0]?.code ?? '');
     const [subQ, setSubQ] = useState('');
     const subTerm = subQ.trim().toLowerCase();
-    const shownSubs = subTerm ? allSubs.filter((x) => `${x.code} ${x.name} ${x.categoryName}`.toLowerCase().includes(subTerm)).slice(0, 80) : allSubs.filter((x) => x.categoryCode === subCat);
-    const toggleSub = (c: string) => setSubCodes((cur) => (cur.includes(c) ? cur.filter((x) => x !== c) : [...cur, c]));
+    const toggleSub = (code:string)=>{
+        setSubCodes(cur=>cur[0]===code?[]:[code]);
+        setConfirmed(false);
+    };
     const [floorNo, setFloorNo] = useState(1);
     const [mode, setMode] = useState<AllocMode>('next');
     const [countText, setCountText] = useState('');
@@ -1229,6 +1230,11 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const shownOptions = options.filter(l=>!q.trim()||
         `${l.code} ${l.name} ${l.typeLabel}`.toLowerCase().includes(q.trim().toLowerCase()));
     const chosen = options.find((l) => l.code === location);
+    const eligibleSubs=chosen?.materialCategoryCode?
+        allSubs.filter(x=>x.categoryCode===chosen.materialCategoryCode):allSubs;
+    const shownSubs=(subTerm?eligibleSubs.filter(x=>
+        `${x.code} ${x.name} ${x.categoryName}`.toLowerCase().includes(subTerm)):
+        eligibleSubs).slice(0,80);
     const problems: string[] = [];
     if (!sizeOk) problems.push(stackMode?
         'Enter pallets per bottom row and number of rows (1–100 each). Straight allows 1–20 levels; pyramid is restricted to 2 with exactly half the bottom pallets above (bottom count must be even).':
@@ -1244,8 +1250,9 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
         problems.push('All cluster warehouse restrictions must be active in the master.');
     if(restrictionCodes.some(code=>['RS02','RS08','RS12','RS14'].includes(code))&&subCodes.length>1)
         problems.push('A selected segregated restriction allows only one material subcategory per cluster.');
-    if (!subCodes.length) problems.push('Choose at least one material subcategory.');
-    if (subCodes.length > data.limits.clusterSubcategories) problems.push(`Up to ${data.limits.clusterSubcategories} subcategories per cluster.`);
+    if(subCodes.length!==1)problems.push('Select exactly one material subcategory to define this cluster.');
+    if(subCodes.some(code=>!eligibleSubs.some(x=>x.code===code)))
+        problems.push('Cluster subcategory must belong to the selected storage-location category.');
     if (name.trim().length > 60) problems.push('The name can be up to 60 characters.');
     const preview = startOrd !== null && endOrd !== null && fits ? `${size.toLocaleString()} positions · ${codeAt(floorNo, floor, startOrd)} → ${codeAt(floorNo, floor, endOrd)}` : '';
     const ready = problems.length === 0 && confirmed;
@@ -1413,7 +1420,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
 
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-ink'>4 · Choose storage location *</p>
-                    <p className='text-xs text-soft'>Choose a named warehouse location. Storage restrictions are selected for the cluster in the next step.</p>
+                    <p className='text-xs text-soft'>Choose the warehouse location for a material catalog category. The next cluster selector shows only its subcategories; physical addresses and restriction rules stay separate.</p>
                     {options.length===0&&<Alert tone='error'>No active storage locations. Add a location in warehouse setup first.</Alert>}
                     {options.length>6&&<div className='relative'>
                         <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 text-slate-500' />
@@ -1422,10 +1429,12 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                     </div>}
                     <div className='max-h-60 space-y-2 overflow-y-auto'>
                         {shownOptions.map(loc=><button type='button' key={loc.code}
-                            onClick={()=>{setLocation(loc.code);setConfirmed(false);}}
+                            onClick={()=>{setLocation(loc.code);setSubCodes([]);setConfirmed(false);}}
                             className={`flex min-h-12 w-full items-center gap-2 rounded-xl border p-3 text-left text-sm ${loc.code===location?'border-emerald-400 bg-emerald-500/10':'border-line bg-page'}`}>
                             <span className='min-w-0 flex-1 font-medium text-ink'>{loc.name}
-                                <span className='block text-xs text-soft'>{loc.code} · {loc.typeLabel}</span>
+                                <span className='block text-xs text-soft'>{loc.code} · {loc.typeLabel} ·
+                                    {data.categories.find(cat=>cat.code===loc.materialCategoryCode)?.name||'Legacy category not yet mapped'}
+                                </span>
                             </span>{loc.code===location&&<Check className='h-4 w-4 text-emerald-500'/>}
                         </button>)}
                     </div>
@@ -1457,8 +1466,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                         <p className='text-xs text-amber-700'>A selected segregated restriction limits this cluster to one material subcategory.</p>}
                 </Card>
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>6 · Select material subcategories *</p>
-                    <p className='text-xs text-soft'>Choose the material types allowed in this cluster. Keep incompatible materials segregated.</p>
+                    <p className='text-sm font-semibold text-ink'>6 · Select catalog subcategory for this cluster *</p>
+                    <p className='text-xs text-soft'>Each new cluster is based on exactly one material subcategory from its storage-location category. The category and subcategory codes are retained for Procurement and Inventory synchronization.</p>
                     {subCodes.length > 0 && (
                         <div className='flex max-h-32 flex-wrap gap-1 overflow-y-auto'>
                             {subCodes.map((c) => (
@@ -1473,15 +1482,9 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                         <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
                         <input value={subQ} onChange={(e) => setSubQ(e.target.value)} placeholder='Search subcategories…' className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-sm text-white' />
                     </div>
-                    {!subTerm && whCats.length > 1 && (
-                        <div className='flex gap-1 overflow-x-auto pb-1'>
-                            {whCats.map((c) => (
-                                <button key={c.code} type='button' onClick={() => setSubCat(c.code)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs ${subCat === c.code ? 'bg-emerald-500 text-onbrand' : 'bg-slate-800 text-slate-300'}`}>
-                                    {c.name}
-                                </button>
-                            ))}
-                        </div>
-                    )}
+                    {chosen?.materialCategoryCode?
+                        <p className='text-xs font-semibold text-ink'>Storage category: {data.categories.find(c=>c.code===chosen.materialCategoryCode)?.name||chosen.materialCategoryCode}</p>:
+                        <p className='text-xs text-amber-700'>Legacy storage location is not yet mapped to a category. Available subcategories are drawn from the warehouse's adopted categories; align the location in Edit Storage Setup.</p>}
                     <ul className='max-h-64 space-y-1 overflow-y-auto overscroll-contain'>
                         {shownSubs.map((x) => {
                             const on = subCodes.includes(x.code);
@@ -1505,7 +1508,9 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
 
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-ink'>7 · Name and identification</p>
-                    <Field id='cl-name' label='Cluster name (optional)' maxLength={60} placeholder='e.g. Fast movers, bearings aisle' value={name} onChange={(e) => setName(e.target.value)} />
+                    <Field id='cl-name' label='Cluster name (optional)' maxLength={60}
+                        placeholder={subCodes.length?allSubs.find(x=>x.code===subCodes[0])?.name||'Cluster name':'e.g. Sugar, caps or labels'}
+                        value={name} onChange={(e) => setName(e.target.value)} />
                 </Card>
 
                 {problems.length > 0 && (
