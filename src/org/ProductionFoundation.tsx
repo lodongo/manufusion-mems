@@ -5,6 +5,7 @@ import { SkuConfigurationFields, SkuSetupPanel, UnitChoice, emptySkuSetup, type 
 import PlnDemand from './PlnDemand';
 import PlnCostCenterSetup from './PlnCostCenterSetup';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
+import ManufacturingResources from './ManufacturingResources';
 import PlnProcessRoutingEditor from './PlnProcessRoutingEditor';
 import PlnDocumentation from './PlnDocumentation';
 import {configurationProgress,type SetupRow,type SetupStep} from './plnSetupDependencies';
@@ -665,7 +666,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 </div>
             </details>
             <div className='flex justify-end'><Button disabled={!canSkuConfig||busy} onClick={()=>void saveMaterialPolicy()}>Save manufacturing setup</Button></div>
-        </Card>:active==='config'?<Card className='space-y-4'>
+        </Card>:active==='resources'?<ManufacturingResources/>:active==='config'?<Card className='space-y-4'>
             <p className='text-sm text-muted'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
                 <Field title='Planning horizon (days)' type='number' value={config.horizonDays} onChange={v=>setConfig(s=>({...s,horizonDays:Number(v)}))}/>
