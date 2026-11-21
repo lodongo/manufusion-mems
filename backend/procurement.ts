@@ -1762,7 +1762,15 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
         const lifecycle=elevated||['PRC.materials.manage','PRC.admin'].some(p=>hasPerm(ctx.permissions,p));
         const canExtend=elevated||['PRC.create','PRC.materials.manage','PRC.admin'].some(p=>hasPerm(ctx.permissions,p));
         const record=(await getDoc('organizations/'+ctx.orgId+'/materials/'+m.id))!.data;
-        return {...result,material:{...m,
+        const extensionDocs=await listDocs('organizations/'+ctx.orgId+'/material_extensions');
+        const extensionsById=new Map(extensionDocs.filter(x=>str(x.data.sourceId)===m.id).map(x=>[x.id,x.data]));
+        const warehouseRows=await Promise.all(result.warehouses.map(async w=>{
+            const extension=w.relation==='Extended'?extensionsById.get(w.requestId):null;
+            const snapshot=extension?materialWorkflowSnapshot(extension):null;
+            return {...w,canApprove:!!extension&&str(extension.status)==='pending_approval'&&
+                !!snapshot&&await materialApproverCanAct(ctx,extension,snapshot)};
+        }));
+        return {...result,warehouses:warehouseRows,material:{...m,
             canEdit:materialDraftCan(record,ctx.uid,ctx.permissions,'edit',elevated),
             canDelete:materialDraftCan(record,ctx.uid,ctx.permissions,'delete',elevated),
             canSubmit:materialDraftCan(record,ctx.uid,ctx.permissions,'submit',elevated),
