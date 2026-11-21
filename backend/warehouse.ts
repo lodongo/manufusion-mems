@@ -4,7 +4,7 @@ import { getNode, record } from './structure';
 import { materialCategories } from './procurement';
 import { locationTypes } from './inventoryMeta';
 import { warehouseRestrictionMaster } from './stockMasters';
-import { MCL_TO_RESTRICTION, SEGREGATED_RESTRICTIONS } from './restrictionRules';
+import { MCL_TO_RESTRICTION, SEGREGATED_RESTRICTIONS, restrictionCodesOf, locationBlock } from './restrictionRules';
 
 // ---------------------------------------------------------------------------
 // Warehouse and storage setup for cost centers of type Inventory (INV) or Warehousing (WHS).
@@ -295,7 +295,10 @@ function clusterOut(doc: Doc, layout: Layout) {
         locationName: str(d.locationName),
         classificationLabel: str(d.restrictionLabel) || str(d.classificationLabel),
         restrictionCode: str(d.restrictionCode),
+        restrictionCodes: restrictionCodesOf(d.restrictionCodes,str(d.restrictionCode)),
         restrictionLabel: str(d.restrictionLabel),
+        conditionCode: str(d.conditionCode),
+        conditionLabel: str(d.conditionLabel),
         color: /^#[0-9a-fA-F]{6}$/.test(str(d.color)) ? str(d.color) : '#64748B',
         subcategories: (Array.isArray(d.subcategories) ? (d.subcategories as Plain[]) : []).filter(isObj).map((s) => ({ code: str(s.code), name: str(s.name), categoryCode: str(s.categoryCode) })),
         storageTypeCode: str(d.storageTypeCode),
@@ -413,16 +416,25 @@ export const warehouseRoutes = {
             const layout = layoutOf(d);
             const [rawClusters, { restrictions, types, locations }] = await Promise.all([clustersOf(ctx.orgId, node.id, layout), describeLocations(locationsOf(d))]);
             const reservations=await listDocs(`organizations/${ctx.orgId}/warehouse_bin_occupancy`);const linkedBins=reservations.filter(x=>str(x.data.warehouseId)===node.id).map(x=>({binId:str(x.data.binId),materialId:str(x.data.materialId),materialNumber:str(x.data.materialNumber)}));const byCode = new Map(locations.map((l) => [l.code, l]));
-            // Colours and restrictions always follow the current restriction of the storage location.
+            // Cluster-selected restrictions determine material compatibility. Legacy location restriction
+            // codes are read as a fallback so existing clusters and allocations remain usable.
             const clusters = rawClusters.map((c) => {
-                const l = byCode.get(c.locationCode);
-                return l ? { ...c, locationName: l.name, classificationLabel: l.restrictionLabel, restrictionCode: l.restrictionCode, restrictionLabel: l.restrictionLabel, aligned: l.aligned, color: l.color } : { ...c, aligned: false };
+                const loc=byCode.get(c.locationCode);
+                const codes=restrictionCodesOf(c.restrictionCodes.length?c.restrictionCodes:(c.restrictionCode||loc?.restrictionCode));
+                const rules=codes.map(code=>restrictions.find(r=>r.code===code));
+                const label=rules.map((r,i)=>r?.label??codes[i]).join(', ');
+                return {...c,locationName:loc?.name??c.locationName,restrictionCodes:codes,
+                    restrictionCode:codes[0]??'',restrictionLabel:label,classificationLabel:label,
+                    aligned:!!loc&&loc.active&&!!codes.length&&rules.every(r=>r?.active),
+                    color:rules[0]?.color??'#64748B',
+                    conditionCode:c.conditionCode||str(d.conditionCode),
+                    conditionLabel:c.conditionLabel||CONDITIONS.find(x=>x[0]===str(d.conditionCode))?.[1]||''};
             });
             const capacity = isObj(d.capacity) ? d.capacity : {};
             const palletDefaults=isObj(d.palletStacking)?d.palletStacking:{};
             const total = layoutPositions(layout);
             const allocated = clusters.reduce((s, c) => s + c.positions, 0);
-            const usedRestrictions = new Set(locations.map((l) => l.restrictionCode));
+            const usedRestrictions = new Set(clusters.flatMap(c=>c.restrictionCodes));
             const usedTypes = new Set(locations.map((l) => l.typeCode));
             return {
                 costCenter: { id: node.id, code: str(node.data.code), name: str(node.data.name), costType: isObj(node.data.attributes) ? str(node.data.attributes.costType) : '' },
@@ -464,8 +476,8 @@ export const warehouseRoutes = {
                 categories,
                 restrictions: restrictions.filter((c) => c.active || usedRestrictions.has(c.code)),
                 alignment: {
-                    pending: locations.filter((l) => !l.aligned).map((l) => ({ code: l.code, name: l.name, suggestedRestrictionCode: l.suggestedRestrictionCode })),
-                    binningOpen: locations.length > 0 && locations.every((l) => l.aligned || !l.active),
+                    pending: clusters.filter(c=>!c.aligned).map(c=>({code:c.code,name:c.name||c.locationName,suggestedRestrictionCode:''})),
+                    binningOpen: clusters.every(c=>c.aligned),
                 },
                 locationTypes: types.filter((t) => t.active || usedTypes.has(t.code)),
                 storageTypes: STORAGE_TYPES.map(([code, label]) => ({ code, label })),
