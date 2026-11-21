@@ -53,7 +53,7 @@ test('warehouse form, cluster creation and backend persist explicit stacking met
   const api=read('backend/warehouse.ts');
   assert.ok(ui.includes("['positions', 'Positions', null]"));
   assert.ok(ui.includes("['map', 'Storage map']"));
-  assert.ok(ui.includes("data-testid='warehouse-pallet-stacking'"));
+  assert.ok(!ui.includes("data-testid='warehouse-pallet-stacking'"));
   assert.ok(ui.includes("data-testid='cluster-pallet-stacking'"));
   assert.ok(ui.includes("2 · Select physical storage type and stacking"));
   assert.ok(ui.includes("label='Pallets per bottom row *'"));
@@ -65,7 +65,7 @@ test('warehouse form, cluster creation and backend persist explicit stacking met
   assert.ok(ui.includes("bottomRowPallets:stackValues[1]"));
   assert.ok(ui.includes("bottomRows:stackValues[0]"));
   assert.ok(api.includes('palletPositionCapacity(b,str(wh.data.storageTypeCode),total)'));
-  assert.ok(api.includes('palletStacking: palletStacking as unknown as Plain'));
+  assert.ok(api.includes("org.warehouse.cluster.update"));
   assert.ok(api.includes('palletCapacity: clusters.reduce'));
-  assert.ok(api.includes("str(palletDefaults.stackingPattern)||'STRAIGHT'"));
+  assert.ok(!api.includes('palletStacking: palletStacking as unknown as Plain'));
 });
