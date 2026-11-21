@@ -137,7 +137,11 @@ const KINDS: Record<Kind, KindDef> = {
         parent: { l2: 'categoryCode', l3: 'subcategoryCode', item: 'familyCode' },
         itemL1: 'categoryCode',
         itemL2: 'subcategoryCode',
-        perms: ['PRC.view', 'INV.view', 'ADM.structure'],
+        perms: ['PRC.view', 'INV.view', 'ADM.structure', 'PRC.create',
+            'PRC.materials.manage', 'PRC.admin',
+            'PRC.materials.draft.edit.own', 'PRC.materials.draft.edit.any',
+            'PRC.materials.draft.delete.own', 'PRC.materials.draft.delete.any',
+            'PRC.materials.draft.submit.own', 'PRC.materials.draft.submit.any'],
         extra: [],
     },
     services: {
