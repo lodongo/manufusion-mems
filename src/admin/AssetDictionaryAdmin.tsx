@@ -10,7 +10,7 @@ import { fmtDate } from './format';
 import { Button, Card, PageTitle, Spinner, useLoad } from './kit';
 import { appConfirm } from '../components/dialogs';
 import { navigate } from '../lib/route';
-import { catalogUploadIssue, detectAdminCatalogKind, type AdminCatalogKind } from './catalogFileKinds';
+import { catalogUploadIssue, detectAdminCatalogKind, splitUtf8UploadParts, type AdminCatalogKind } from './catalogFileKinds';
 
 // MEMS admin: the asset catalog (asset master data). One catalog lives in the database. Uploading a file checks
 // its structure and replaces the catalog straight away; organizations read it from the database to classify their
@@ -27,7 +27,6 @@ interface CatalogStatus {
     stats: Record<string, number>;
 }
 
-const CHUNK_CHARS = 350_000;
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
     const digest = await crypto.subtle.digest('SHA-256', bytes as unknown as BufferSource);
@@ -79,8 +78,7 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
             }
             const bytes = new TextEncoder().encode(textAll);
             const sha256 = await sha256Hex(bytes);
-            const chunks: string[] = [];
-            for (let i = 0; i < textAll.length; i += CHUNK_CHARS) chunks.push(textAll.slice(i, i + CHUNK_CHARS));
+            const chunks=splitUtf8UploadParts(textAll);
             if(!chunks.length||chunks.length>140)
                 throw new Error('This asset master requires too many upload parts. Choose a file under 48 MB.');
             const uploadId=crypto.randomUUID().replace(/-/g,'');
