@@ -61,7 +61,7 @@ const classes=['GENERAL','MATERIAL_PREPARATION','BLENDING','BLOW_MOULDING','FILL
 const freshStage=(code:string):RoutingStep=>({
  code,name:'',resourceId:'',producesSkuId:'',dependsOn:[],setupMinutes:0,runMinutesPerUnit:0,
  costCenterId:'',bomId:'',processClass:'GENERAL',stageType:'PRODUCE',
- capacityBasis:'RESOURCE_RATE',batchSize:0,cycleMinutes:0,
+ capacityBasis:'PHYSICAL_CONTAINER',batchSize:0,cycleMinutes:0,
 });
 const stageList=(input:unknown):RoutingStep[]=>Array.isArray(input)?input as RoutingStep[]:[];
 /** Stage editor does not write to resources, BOMs or equipment; it only saves routing references. */
@@ -269,10 +269,19 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
          ...(stageType!=='PRODUCE'?{bomId:''}:{})})}/>
        <Choice label='Manufacturing cost centre' value={stage.costCenterId||''}
         options={[['','Select site manufacturing cost centre'],...centersForSite.map(x=>[x.id,x.name+' · '+x.code] as [string,string])]}
-        onChange={costCenterId=>updateStep(stage.code,{costCenterId})}/>
+        onChange={costCenterId=>updateStep(stage.code,{costCenterId,
+         resourceId:resource&&str(resource.costCenterId)&&str(resource.costCenterId)!==costCenterId?'':stage.resourceId})}/>
        <Choice label='Primary manufacturing resource' value={stage.resourceId}
-        options={[['','Select configured resource'],...resourcesForSite.map(x=>[x.id,x.name] as [string,string])]}
-        onChange={resourceId=>updateStep(stage.code,{resourceId})}/>
+        options={[['','Select configured resource'],...resourcesForSite.filter(x=>
+         !str(x.costCenterId)||str(x.costCenterId)===stage.costCenterId)
+         .map(x=>[x.id,x.name] as [string,string])]}
+        onChange={resourceId=>{
+         const chosen=resources.find(x=>x.id===resourceId);
+         updateStep(stage.code,{resourceId,
+          ...(str(chosen?.sourceKind)==='PRODUCTION_COST_CENTER'?{
+           capacityBasis:'PHYSICAL_CONTAINER',costCenterId:str(chosen?.costCenterId)
+          }:{})});
+        }}/>
        <Choice label='Stage output SKU / intermediate' value={stage.producesSkuId||''}
         options={[['','No manufactured output'],...availableOutputs.map(x=>[x.id,x.name] as [string,string])]}
         onChange={producesSkuId=>updateStep(stage.code,{producesSkuId,bomId:''})}/>
@@ -280,8 +289,9 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
         options={[['','Select BOM for this stage output'],...chosenBoms.map(x=>[x.id,
          x.name+' · '+(str(x.status)||'draft')+' · '+(str(x.alternativeCode)||'STANDARD')] as [string,string])]}
         onChange={bomId=>updateStep(stage.code,{bomId})}/>}
-       <Choice label='Capacity basis' value={stage.capacityBasis||'RESOURCE_RATE'}
-        options={capacityBases as Array<[string,string]>}
+       <Choice label='Capacity basis' value={stage.capacityBasis||'PHYSICAL_CONTAINER'}
+        options={capacityBases.filter(x=>
+         str(resource?.sourceKind)!=='PRODUCTION_COST_CENTER'||x[0]!=='RESOURCE_RATE') as Array<[string,string]>}
         onChange={capacityBasis=>updateStep(stage.code,{capacityBasis:capacityBasis as RoutingStep['capacityBasis']})}/>
        <TextField label='Setup / changeover minutes' type='number' min='0' value={num(stage.setupMinutes)}
         onChange={v=>updateStep(stage.code,{setupMinutes:Number(v)})}/>
