@@ -81,7 +81,8 @@ export const LEVELS: Record<string, LevelDef> = {
         hint: 'Numbered automatically: 001, 002...',
         example: 'ABC-01-PRD-001',
         children: ['work_center'],
-        fields: [{ key: 'costType', label: 'Cost center type', type: 'fin', list: 'costCenterTypes', required: true }],
+        fields: [{ key: 'costType', label: 'Cost center category', type: 'fin', list: 'costCenterTypes', required: true },
+            { key: 'costSubcategory', label: 'Cost center subcategory', type: 'select' }],
     },
     // Equipment unit (ISO 14224 term): any machine, production line, utility system or facility.
     // Internal key stays 'work_center'; classified from the asset catalog and configured through its asset record.
