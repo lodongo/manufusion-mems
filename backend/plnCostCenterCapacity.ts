@@ -76,6 +76,24 @@ export function normalizeSkuCapacity(input:unknown):SkuCapacity[]{
   return row;
  });
 }
+/** Persistent SKU allocation is independent of commissioned speed readiness. */
+export function normalizeAllocatedSkuIds(input:unknown):string[]{
+ if(!Array.isArray(input)||input.length>100)
+  throw new HttpError(400,'Select no more than 100 manufactured SKUs for this cost centre.');
+ const ids=input.map(v=>identifier(v,'manufactured SKU'));
+ if(new Set(ids).size!==ids.length)
+  throw new HttpError(400,'A manufactured SKU may be allocated only once per cost centre.');
+ return ids;
+}
+const allocatedOf=(record:Obj):string[]=>{
+ const allocated=Array.isArray(record.allocatedSkuIds)?record.allocatedSkuIds.map(str):[];
+ const commissioned=(Array.isArray(record.skuCapacities)?record.skuCapacities:[])
+  .filter(isObj).map(x=>str(x.skuId));
+ return [...new Set([...allocated,...commissioned].filter(Boolean))];
+};
+async function authorizeSkuIds(ctx:OrgContext,ids:string[]):Promise<void>{
+ for(const skuId of ids)await manufacturedSku(ctx,skuId);
+}
 async function authorized(ctx:OrgContext,permission:'read'|'write',id:string){
  if(ctx.role==='org_super_admin')return true;
  const path=await nodePath(ctx.orgId,id);
@@ -152,6 +170,7 @@ const validSavedProjection=async(ctx:OrgContext,siteId:string,raw:unknown,params
 const expose=(row:Doc)=>({
  costCenterId:row.id,siteId:str(row.data.siteId),legalEntityId:str(row.data.legalEntityId),
  skuCapacities:Array.isArray(row.data.skuCapacities)?row.data.skuCapacities:[],
+ allocatedSkuIds:allocatedOf(row.data),
  revision:num(row.data.revision)??0,updatedAt:str(row.data.updatedAt),
 });
 const auditChange=(ctx:OrgContext,action:string,id:string)=>audit([{
@@ -270,7 +289,8 @@ export const plnCostCenterCapacityRoutes={
    for(const record of saved){
     const row=(Array.isArray(record.data.skuCapacities)?record.data.skuCapacities:[])
       .find(x=>isObj(x)&&str(x.skuId)===skuId);
-    if(!row||!await authorized(ctx,'read',record.id))continue;
+    if(!allocatedOf(record.data).includes(skuId)||
+      !await authorized(ctx,'read',record.id))continue;
     let location:Awaited<ReturnType<typeof candidate>>;
     try{location=await candidate(ctx,record.id);}
     catch(e){
@@ -280,7 +300,8 @@ export const plnCostCenterCapacityRoutes={
     const [site,legalEntity,rating]=await Promise.all([
      getDoc(STRUCTURE(ctx.orgId)+'/'+location.siteId),
      getDoc(STRUCTURE(ctx.orgId)+'/'+location.legalEntityId),
-     validSavedProjection(ctx,location.siteId,row,params),
+     row?validSavedProjection(ctx,location.siteId,row,params):
+       Promise.resolve({skuId,projection:null,conversionIssue:'Mapped, awaiting commissioned rating.'}),
     ]);
     const fields=rating as Record<string,unknown>;
     const count=units.count.find(u=>u.code===str(fields.ratingUnitCode));
@@ -329,6 +350,33 @@ export const plnCostCenterCapacityRoutes={
    return {line:await validatedLine(ctx,location.siteId,ctx.body.rating,params)};
   }),
  ],
+ 'POST /api/org/pln/cost-center/allocate':[
+  orgRoute('org.pln.cost_center.allocate',null,async ctx=>{
+   const id=identifier(ctx.body.costCenterId,'manufacturing cost centre');
+   if(!await authorized(ctx,'write',id))
+    throw new HttpError(403,'You cannot allocate SKUs at this manufacturing cost centre.');
+   const location=await candidate(ctx,id);
+   const skuIds=normalizeAllocatedSkuIds(ctx.body.skuIds);
+   await authorizeSkuIds(ctx,skuIds);
+   const path=ROOT(ctx.orgId)+'/'+id,old=await getDoc(path);
+   const revision=num(old?.data.revision)??0;
+   if(Number(ctx.body.expectedRevision)!==revision)
+    throw new HttpError(409,'SKU allocation changed. Reload the cost centre before saving.');
+   const keep=new Set(skuIds),at=nowIso();
+   const commissioned=(Array.isArray(old?.data.skuCapacities)?old.data.skuCapacities:[])
+    .filter(isObj).filter(x=>keep.has(str(x.skuId)));
+   const data:Obj={...old?.data,costCenterId:id,siteId:location.siteId,
+    legalEntityId:location.legalEntityId,allocatedSkuIds:skuIds,
+    skuCapacities:commissioned,revision:revision+1,
+    createdAt:old?str(old.data.createdAt):at,createdBy:old?str(old.data.createdBy):ctx.uid,
+    updatedAt:at,updatedBy:ctx.uid};
+   if(!await commitChecked([{path,data,
+    precondition:old?{updateTime:old.updateTime}:{exists:false}}]))
+    throw new HttpError(409,'SKU allocation was changed by another user. Reload before saving.');
+   await auditChange(ctx,'pln.cost_center.sku_allocation.save',id);
+   return {mapping:data};
+  }),
+ ],
  'POST /api/org/pln/cost-center/save':[
   orgRoute('org.pln.cost_center.save',null,async ctx=>{
    const id=identifier(ctx.body.costCenterId,'manufacturing cost centre');
@@ -337,12 +385,18 @@ export const plnCostCenterCapacityRoutes={
    const location=await candidate(ctx,id);
    const skuCapacities=await validatedLines(ctx,location.siteId,ctx.body.skuCapacities);
    const path=ROOT(ctx.orgId)+'/'+id,old=await getDoc(path);
+   const allocatedSkuIds=ctx.body.allocatedSkuIds!==undefined?
+    normalizeAllocatedSkuIds(ctx.body.allocatedSkuIds):
+    [...new Set([...allocatedOf(old?.data||{}),...skuCapacities.map(x=>x.skuId)])];
+   if(skuCapacities.some(x=>!allocatedSkuIds.includes(x.skuId)))
+    throw new HttpError(400,'Commissioned SKU ratings must belong to the saved SKU allocation.');
+   await authorizeSkuIds(ctx,allocatedSkuIds);
    const revision=num(old?.data.revision)??0;
    if(Number(ctx.body.expectedRevision)!==revision)
     throw new HttpError(409,'Cost-centre SKU configuration changed. Reload before saving.');
    const at=nowIso();
    const data:Obj={costCenterId:id,siteId:location.siteId,legalEntityId:location.legalEntityId,
-    skuCapacities,revision:revision+1,
+    skuCapacities,allocatedSkuIds,revision:revision+1,
     createdAt:old?str(old.data.createdAt):at,createdBy:old?str(old.data.createdBy):ctx.uid,
     updatedAt:at,updatedBy:ctx.uid};
    if(!await commitChecked([{path,data,precondition:old?{updateTime:old.updateTime}:{exists:false}}]))
@@ -359,7 +413,7 @@ export const plnCostCenterCapacityRoutes={
    if(!old)throw new HttpError(404,'No SKU mapping exists for this cost centre.');
    const revision=num(old.data.revision)??0;
    if(Number(ctx.body.expectedRevision)!==revision)throw new HttpError(409,'Mapping changed. Reload.');
-   const data={...old.data,skuCapacities:[],revision:revision+1,
+   const data={...old.data,skuCapacities:[],allocatedSkuIds:[],revision:revision+1,
      updatedAt:nowIso(),updatedBy:ctx.uid};
    if(!await commitChecked([{path,data,precondition:{updateTime:old.updateTime}}]))
     throw new HttpError(409,'Mapping changed during the reset.');
