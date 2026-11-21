@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck,
 import { callBackend } from '../lib/backend';
 import AssetTechnicalDossier from './AssetTechnicalDossier';
 import AssetUtilitySupplies from './AssetUtilitySupplies';
+import {ManufacturingResourceDetail} from './ManufacturingResources';
 import TroubleshootingContext from './TroubleshootingContext';
 import { workspaceNavigate as navigate } from '../lib/route';
 import { fetchReference } from '../lib/reference';
@@ -285,6 +286,7 @@ export function AssetDetail({ tag, back, onBack, startEditing = false }: { tag: 
     const [busy, setBusy] = useState('');
     const [actionError, setActionError] = useState('');
     const [showAll, setShowAll] = useState(false);
+    const [assetPane,setAssetPane]=useState<'core'|'sku'>('core');
 
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Asset not found.'}</Alert>;
@@ -293,6 +295,17 @@ export function AssetDetail({ tag, back, onBack, startEditing = false }: { tag: 
     const mine = a.submittedBy === data.myUid || (a.status === 'pending_approval' && a.createdBy === data.myUid);
     const awaiting = ['pending_approval', 'change_pending', 'disposal_pending'].includes(a.status);
     const goBack = () => (onBack ? onBack() : navigate(`organization_admin/${back ?? 'assets'}`));
+    const equipmentId=a.workCenterId||(a.nodeLevel==='work_center'?a.nodeId:'');
+    const panes=<div role='tablist' aria-label='Asset configuration' className='flex gap-2 overflow-x-auto rounded-xl border border-line bg-panel p-2'>
+        <button type='button' role='tab' aria-selected={assetPane==='core'}
+            className={'min-h-11 rounded-lg border px-3 text-sm font-semibold '+
+                (assetPane==='core'?'border-brand text-brand':'border-line text-ink')}
+            onClick={()=>setAssetPane('core')}>Core information</button>
+        {equipmentId&&<button type='button' role='tab' aria-selected={assetPane==='sku'}
+            className={'min-h-11 rounded-lg border px-3 text-sm font-semibold '+
+                (assetPane==='sku'?'border-brand text-brand':'border-line text-ink')}
+            onClick={()=>setAssetPane('sku')}>SKU allocation</button>}
+    </div>;
 
     if (editing && cls.data)
         return (
@@ -336,11 +349,18 @@ export function AssetDetail({ tag, back, onBack, startEditing = false }: { tag: 
     const missing = attrs.filter((x) => x.required && !hasValue(a.attributes[x.code]));
     const filled = attrs.filter((x) => hasValue(a.attributes[x.code]));
 
+    if(assetPane==='sku'&&equipmentId)return <div className='space-y-3'>
+        <button type='button' onClick={goBack} className='text-sm text-slate-400'>← Asset register</button>
+        {panes}
+        <AssetManufacturingSkuAllocation workCenterId={equipmentId}/>
+    </div>;
+
     return (
         <div className='space-y-3'>
             <button type='button' onClick={goBack} className='text-sm text-slate-400'>
                 ← {onBack ? 'Back' : back === 'asset_approvals' ? 'Awaiting approval' : 'Asset register'}
             </button>
+            {panes}
             <AssetTechnicalDossier assetTag={a.tag} equipmentId={a.workCenterId} />
             <TroubleshootingContext assetTag={a.tag} />
             <AssetUtilitySupplies assetTag={a.tag}/>
@@ -531,6 +551,19 @@ export function AssetDetail({ tag, back, onBack, startEditing = false }: { tag: 
             </Card>
         </div>
     );
+}
+
+/** Asset Management uses the same cost-centre SKU setup as Product Configuration
+ * and Manufacturing Resources. No capacity copy is stored on the asset document. */
+function AssetManufacturingSkuAllocation({workCenterId}:{workCenterId:string}){
+ const {data,error,loading}=useLoad(()=>callBackend<{eligible:boolean;costCenterId:string}>(
+    '/api/org/pln/resource/asset-context',{workCenterId}),[workCenterId]);
+ if(loading&&!data)return <Spinner/>;
+ if(error)return <Alert tone='error'>{error}</Alert>;
+ if(!data?.eligible||!data.costCenterId)return <Card>
+    <p className='text-sm text-muted'>This asset is not linked to an eligible Production cost centre in your permitted scope. Check its equipment-unit location and the Finance cost-centre classification.</p>
+ </Card>;
+ return <ManufacturingResourceDetail key={data.costCenterId} costCenterId={data.costCenterId} initialTab='sku'/>;
 }
 
 function Item({ label, value }: { label: string; value: string }) {
