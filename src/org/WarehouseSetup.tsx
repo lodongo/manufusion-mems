@@ -306,9 +306,9 @@ export default function WarehouseSetup({ costCenterId, onBack }: { costCenterId:
                     <div className='flex items-start gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3'>
                         <AlertTriangle className='mt-0.5 h-5 w-5 shrink-0 text-amber-400' />
                         <div className='min-w-0 flex-1'>
-                            <p className='text-sm font-semibold text-ink'>Binning blocked until restrictions are aligned</p>
+                            <p className='text-sm font-semibold text-ink'>Storage allocation blocked until restrictions are aligned</p>
                             <p className='mt-0.5 text-xs text-soft'>
-                                {pending.length} storage location{pending.length === 1 ? '' : 's'} ({pending.map((x) => x.code).join(', ')}) {pending.length === 1 ? 'has' : 'have'} no warehouse restriction from the master materials use. Confirm each restriction to open binning.
+                                {pending.length} storage location{pending.length === 1 ? '' : 's'} ({pending.map((x) => x.code).join(', ')}) {pending.length === 1 ? 'has' : 'have'} no warehouse restriction from the master materials use. Confirm each restriction to enable location allocation.
                             </p>
                         </div>
                         {d.canEdit && (
@@ -419,6 +419,10 @@ function SetupView({ data, setup, onTopology }: { data: Data; setup: Setup; onTo
                         <dd className='text-sm font-semibold tabular-nums text-ink'>{setup.layout.floors.length}</dd>
                     </div>
                 </dl>
+                {(s.palletCapacity??0)>0&&<p className='mt-3 rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink'>
+                    Pallet capacity: <strong className='tabular-nums'>{s.palletCapacity?.toLocaleString()}</strong> pallets
+                    <span className='block text-xs text-soft'>Estimated capacity based on configured cluster stacking; not physical floor positions or a safety load certification.</span>
+                </p>}
             </section>
 
             <Section title='Storage locations' count={setup.storageLocations.length} defaultOpen summary={`${aligned} of ${setup.storageLocations.length} aligned to the restriction master`}>
@@ -711,7 +715,7 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
                 {data.categories.length === 0 && <Alert tone='error'>The material catalog has not been loaded by MEMS yet, so no material category can be chosen.</Alert>}
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-white'>1 · Material categories in this warehouse *</p>
-                    <p className='text-xs text-slate-400'>Choose every category stored here. Subcategories are chosen later, when you create each cluster of bins.</p>
+                    <p className='text-xs text-slate-400'>Choose every category stored here. Subcategories are chosen later, when you create each cluster of storage positions.</p>
                     {cats.length > 0 && (
                         <div className='flex flex-wrap gap-1'>
                             {cats.map((code) => (
@@ -979,7 +983,7 @@ function FloorEditor({
 // Clusters
 // ---------------------------------------------------------------------------
 
-const allocLabel = (c: Cluster) => (c.kind === 'box' ? 'Range (created before sequential allocation)' : c.mode === 'start' ? 'In sequence from a chosen bin' : 'In sequence, next free space');
+const allocLabel = (c: Cluster) => (c.kind === 'box' ? 'Range (created before sequential allocation)' : c.mode === 'start' ? 'In sequence from a chosen position' : 'In sequence, next free space');
 
 function ClusterList({ data, onOpen }: { data: Data; onOpen: (code: string) => void }) {
     const columns = useMemo<Array<Column<Cluster>>>(
@@ -989,6 +993,8 @@ function ClusterList({ data, onOpen }: { data: Data; onOpen: (code: string) => v
             { key: 'first', label: 'From', value: (c) => c.firstCode, className: 'font-mono whitespace-nowrap' },
             { key: 'last', label: 'To', value: (c) => c.lastCode, className: 'font-mono whitespace-nowrap' },
             { key: 'positions', label: 'Positions', type: 'number', value: (c) => c.positions },
+            { key: 'pallets', label: 'Pallet capacity', type: 'number',
+                value: (c) => c.palletCapacity??0, render: (c) => c.palletCapacity===null||c.palletCapacity===undefined?'—':c.palletCapacity.toLocaleString() },
             { key: 'floor', label: 'Floor', value: (c) => letter(c.floor) },
             { key: 'alloc', label: 'Allocation', value: (c) => allocLabel(c), hidden: true },
             {
@@ -1003,7 +1009,7 @@ function ClusterList({ data, onOpen }: { data: Data; onOpen: (code: string) => v
                 ),
             },
             { key: 'class', label: 'Warehouse restriction', value: (c) => (c.restrictionCode ? `${c.restrictionCode} ${c.restrictionLabel ?? ''}`.trim() : 'Not aligned') },
-            { key: 'aligned', label: 'Binning', value: (c) => (c.aligned ? 'Open' : 'Blocked until aligned') },
+            { key: 'aligned', label: 'Storage access', value: (c) => (c.aligned ? 'Open' : 'Blocked until aligned') },
             { key: 'subs', label: 'Subcategories', value: (c) => c.subcategories.map((x) => `${x.code} ${x.name}`).join(', ') },
             { key: 'type', label: 'Storage type', value: (c) => c.storageTypeLabel },
             { key: 'by', label: 'Created by', value: (c) => c.createdByName, hidden: true },
@@ -1517,13 +1523,13 @@ function Topology({ data, setup, onCluster }: { data: Data; setup: Setup; onClus
                         </span>
                     ))}
                 </div>
-                <p className='text-[11px] text-slate-500'>Allocated bins are white; their border is the colour of the storage location's warehouse restriction.</p>
+                <p className='text-[11px] text-slate-500'>Allocated positions are white; their border is the colour of the storage location's warehouse restriction.</p>
             </Card>
 
             <div className='grid grid-cols-2 gap-1 rounded-xl border border-slate-800 p-1'>
                 {(
                     [
-                        ['map', 'Bin map'],
+                        ['map', 'Storage map'],
                         ['list', 'All locations'],
                     ] as const
                 ).map(([k, label]) => (
@@ -1603,7 +1609,7 @@ function FloorMap({ floorNo, floor, index, picked, onPick }: { floorNo: number; 
 
     return (
         <Card className='space-y-2'>
-            <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>{floor.racking ? 'Every bin · rack by rack, column A at the bottom (tap a bin)' : 'Every position · row by row (tap a position)'}</p>
+            <p className='text-xs font-semibold uppercase tracking-wider text-slate-500'>{floor.racking ? 'Every position · rack by rack, column A at the bottom (tap a position)' : 'Every position · row by row (tap a position)'}</p>
             <div ref={frame} className='max-h-[60dvh] space-y-3 overflow-auto overscroll-contain rounded-lg border border-slate-800 bg-slate-950 p-2'>
                 {blocks.slice(0, shown).map(({ r, k }) => {
                     const head = k === 1;
