@@ -68,7 +68,6 @@ interface Caches {
     titles: Map<string, string>;
     roles: Map<string, string>;
     registry: Doc[];
-    legacy: Doc | null;
 }
 
 async function build(ctx: OrgContext, src: Source, doc: Doc, caches: Caches) {
@@ -90,21 +89,27 @@ async function build(ctx: OrgContext, src: Source, doc: Doc, caches: Caches) {
     const registryCode = src.type === 'creation' ? 'PRC-001' : src.type === 'extension' ? 'PRC-002' : src.type === 'stock_adjustment' ? 'INV-003' : str(d.workflowCode);
     const config = caches.registry.find((w) => w.id === registryCode && w.data.enabled === true);
 
-    // The approver of each level, from the enabled workflow, else the older material workflow.
-    let plan: string[] = [];
-    if (config) {
-        const steps = Array.isArray(config.data.steps) ? (config.data.steps as unknown[]).filter(isObj) : [];
-        plan = await Promise.all(
-            steps.map(async (s) => {
-                if (str(s.mode) === 'user') return (await nameOf(str(s.uid))) || 'A named person';
-                if (str(s.mode) === 'manager') return `Manager ${Number(s.managerLevel) || 1} level${Number(s.managerLevel) > 1 ? 's' : ''} above the requester`;
-                return roleLabel(str(s.role));
-            })
-        );
-    } else if (caches.legacy && (src.type === 'creation' || src.type === 'extension')) {
-        const roles = Array.isArray(caches.legacy.data.roles) ? (caches.legacy.data.roles as unknown[]) : [];
-        const modes = Array.isArray(caches.legacy.data.modes) ? (caches.legacy.data.modes as unknown[]) : [];
-        plan = [0, 1, 2].map((i) => (str(modes[i]) === 'above_creator' ? `Manager ${i + 1} level${i ? 's' : ''} above the requester` : roleLabel(str(roles[i])) || `Level ${i + 1}`));
+    // Material approvals always use their submitted, immutable workflow snapshot.
+    // Never infer an Approver 1/2/3 chain from obsolete legacy configuration.
+    const materialTransaction=src.type==='creation'||src.type==='extension';
+    const snap=materialTransaction&&isObj(d.workflowSnapshot)?d.workflowSnapshot:null;
+    const snapshotSteps=snap&&Array.isArray(snap.steps)?(snap.steps as unknown[]).filter(isObj):[];
+    const configSteps=!materialTransaction&&config&&Array.isArray(config.data.steps)?
+        (config.data.steps as unknown[]).filter(isObj):[];
+    const chosen=materialTransaction?snapshotSteps:configSteps;
+    let plan:string[]=[];
+    if(chosen.length){
+        plan=await Promise.all(chosen.map(async (entry,i)=>{
+            const step=entry as Obj;
+            const name=str(step.mode)==='user'?
+                (await nameOf(str(step.uid)))||'Named employee':
+                str(step.mode)==='manager'?
+                    'Reporting manager ('+(Number(step.managerLevel)||1)+')':
+                    roleLabel(str(step.role));
+            return (materialTransaction?(str(step.action)==='review'?'Review':'Approval')+' · ':'')+name;
+        }));
+    }else if(materialTransaction){
+        plan=['Legacy approval · workflow migration required'];
     }
     const total = Math.max(plan.length, history.filter((h) => str(h.decision) === 'approve' || str(h.decision) === 'approved').length, 1);
     const status = str(d.status);
@@ -115,7 +120,9 @@ async function build(ctx: OrgContext, src: Source, doc: Doc, caches: Caches) {
         const lvl = i + 1;
         const entry = history.find((h, idx) => (Number(h.level) || idx + 1) === lvl);
         const decision = entry ? str(entry.decision) : '';
-        const state: Step['state'] = entry ? (decision === 'reject' || decision === 'rejected' ? 'rejected' : 'done') : !finished && lvl === level && status === 'pending_approval' ? 'current' : 'waiting';
+        const parallel=materialTransaction&&str(snap?.approvalMode)==='parallel';
+        const state: Step['state'] = entry ? (decision === 'reject' || decision === 'rejected' ? 'rejected' : 'done') :
+            !finished && status === 'pending_approval' && (parallel||lvl===level) ? 'current' : 'waiting';
         steps.push({ level: lvl, approver: plan[i] || (entry ? roleLabel(str(entry.role)) : `Level ${lvl}`), state, by: entry ? await nameOf(str(entry.by)) : '', at: entry ? str(entry.at) : '', comment: entry ? clip(entry.comment, 300) : '' });
     }
 
@@ -142,13 +149,12 @@ async function build(ctx: OrgContext, src: Source, doc: Doc, caches: Caches) {
 
 async function loadCaches(ctx: OrgContext): Promise<Caches> {
     const root = `organizations/${ctx.orgId}`;
-    const [positions, roles, registry, legacy] = await Promise.all([listDocs(`${root}/positions`), listDocs(`${root}/roles`), listDocs(`${root}/workflow_registry`), getDoc(`${root}/material_workflows/default`)]);
+    const [positions, roles, registry] = await Promise.all([listDocs(`${root}/positions`), listDocs(`${root}/roles`), listDocs(`${root}/workflow_registry`)]);
     return {
         users: new Map<string, string>(),
         titles: new Map(positions.map((p) => [p.id, str(p.data.title) ? `${str(p.data.title)} (${p.id})` : p.id])),
         roles: new Map(roles.map((r) => [r.id, str(r.data.name) || r.id])),
         registry,
-        legacy,
     };
 }
 
@@ -200,13 +206,41 @@ async function waitingOnMe(ctx: OrgContext, c: Caches, src: Source, doc: Doc): P
     const config = c.registry.find((w) => w.id === registryCode && w.data.enabled === true);
     const assigned = (Array.isArray(ctx.me.data.assignments) ? (ctx.me.data.assignments as unknown[]) : []).filter(isObj).map((a) => str(a.positionCode));
     const held = new Set([ctx.role, ...assigned, ...ctx.grants.map((g) => g.positionCode)]);
-    if (config) {
-        const step = (Array.isArray(config.data.steps) ? (config.data.steps as unknown[]) : [])[level - 1];
-        return isObj(step) && ((str(step.mode) === 'user' && str(step.uid) === ctx.uid) || (str(step.mode) === 'role' && held.has(str(step.role))));
+    if(src.type==='creation'||src.type==='extension'){
+        const snap=isObj(doc.data.workflowSnapshot)?doc.data.workflowSnapshot:null;
+        if(!snap||!Array.isArray(snap.steps))return false;
+        const owner=str(doc.data.submittedBy||doc.data.createdBy);
+        if(owner===ctx.uid)return false;
+        const history=Array.isArray(doc.data.approvalHistory)?doc.data.approvalHistory.filter(isObj):[];
+        if(history.some(h=>str(h.by)===ctx.uid&&str(h.decision)==='approve'))return false;
+        const steps=(snap.steps as unknown[]).filter(isObj);
+        const available=str(snap.approvalMode)==='parallel'?
+            steps.map((v,i)=>({step:v,index:i})).filter(({index})=>!history.some(h=>Number(h.stepIndex)===index&&str(h.decision)==='approve')):
+            [{step:steps[level-1],index:level-1}];
+        const ownerUser=await getDoc('users/'+owner);
+        const ownerAssign=Array.isArray(ownerUser?.data.assignments)?ownerUser.data.assignments.filter(isObj):[];
+        const startPosition=str(ownerAssign[0]?.positionCode);
+        let parents:Map<string,string>|null=null;
+        for(const {step} of available){
+            if(!isObj(step))continue;
+            if(str(step.mode)==='user'&&str(step.uid)===ctx.uid)return true;
+            if(str(step.mode)==='role'&&held.has(str(step.role)))return true;
+            if(str(step.mode)==='manager'){
+                if(!parents){
+                    const nodes=await listDocs('organizations/'+ctx.orgId+'/positions');
+                    parents=new Map(nodes.flatMap(x=>[[x.id,str(x.data.parentCode)],[str(x.data.code),str(x.data.parentCode)]]));
+                }
+                let position=startPosition;
+                for(let i=0;i<(Number(step.managerLevel)||1);i++)position=parents.get(position)||'';
+                if(position&&held.has(position))return true;
+            }
+        }
+        return false;
     }
-    if (c.legacy && (src.type === 'creation' || src.type === 'extension')) {
-        const roles = Array.isArray(c.legacy.data.roles) ? (c.legacy.data.roles as unknown[]) : [];
-        return held.has(str(roles[level - 1]));
+    if(config){
+        const step=(Array.isArray(config.data.steps)?config.data.steps as unknown[]:[])[level-1];
+        return isObj(step)&&((str(step.mode)==='user'&&str(step.uid)===ctx.uid)||
+            (str(step.mode)==='role'&&held.has(str(step.role))));
     }
     return false;
 }
