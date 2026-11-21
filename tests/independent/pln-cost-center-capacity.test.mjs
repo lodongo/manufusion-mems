@@ -209,7 +209,10 @@ test('SKU editor visibly reports failures, persists committed revisions and supp
  assert.ok(ui.includes('lineIssues(line,i).map'));
  assert.ok(ui.includes('Cannot save yet. Correct the SKU-specific issues'));
  assert.ok(ui.includes('setRevision(result.mapping.revision)'));
- assert.ok(ui.includes('setLines(result.mapping.skuCapacities)'));
+ assert.ok(ui.includes("setLines(previous=>previous.map"));
+ assert.ok(ui.includes('Save SKU allocations'));
+ assert.ok(ui.includes("'/api/org/pln/cost-center/allocate'"));
+ assert.ok(ui.includes("skuCapacities:ratedLines.map"));
  assert.ok(ui.includes('setData(current=>current?{...current,mapping:result.mapping}:current)'));
  assert.ok(ui.includes('Add another SKU'));
  assert.ok(ui.includes('const next=available[0]'));
@@ -241,7 +244,9 @@ test('main manufactured SKU detail returns only scoped, configured manufacturing
  assert.ok(api.includes("!await authorized(ctx,'read',record.id)"));
  assert.ok(!api.includes("sku.siteId!==location.siteId")); // Legacy SKU site does not restrict authorized cost-centre mappings.
  assert.ok(api.includes('validSavedProjection(ctx,location.siteId,row,params)'));
- assert.ok(api.includes("const perms=permission==='read'?['PLN.view','ADM.structure','MFG.view']"));
+ assert.ok(api.includes("const perms=permission==='read'?['PLN.view','ADM.structure','MFG.view'"));
+ assert.ok(api.includes("allocatedSkuIds:allocatedOf(row.data)"));
+ assert.ok(api.includes('Mapped, awaiting commissioned rating.'));
  assert.ok(master.includes('View SKU'));
  assert.ok(master.includes("<PlnSkuCostCenterRatings skuId={viewedSku.id}/>"));
  assert.ok(master.includes("<PlnSkuCostCenterRatings skuId={draft.id}/>"));
