@@ -93,7 +93,10 @@ export const LEVELS: Record<string, LevelDef> = {
         hint: 'A machine, production line, utility system or facility, classified from the asset catalog. Numbered automatically: 001, 002...',
         example: 'ABC-01-PRD-001-001',
         children: ['assembly'],
-        fields: [{ key: 'equipmentClass', label: 'Equipment class (from the asset catalog) *', type: 'assetClass' }],
+        fields: [
+            { key: 'costCenterSubcategory', label: 'Cost center subcategory', type: 'select', section: 'Equipment classification' },
+            { key: 'equipmentClass', label: 'Asset class (from technical catalog)', type: 'assetClass', section: 'Equipment classification' },
+        ],
     },
     // Old level kept only to show data created before equipment units; nothing new is added here.
     equipment: {
