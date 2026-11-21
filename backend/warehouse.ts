@@ -692,6 +692,11 @@ export const warehouseRoutes = {
                     if(affectedClusters.some(c=>linked.some(x=>str(x.data.warehouseId)===node.id&&
                         str(x.data.binId).startsWith(c.code+'__'))))
                         throw new HttpError(409,'A cluster scheduled for removal contains linked materials. Delink those materials first.');
+                    const assigned=await listDocs('organizations/'+ctx.orgId+'/materials');
+                    if(affectedClusters.some(c=>assigned.some(m=>
+                        str(m.data.warehouseId)===node.id&&str(m.data.clusterCode)===c.code&&
+                        !['deleted','cancelled'].includes(str(m.data.status)))))
+                        throw new HttpError(409,'A cluster scheduled for removal still has material master assignments. Reassign the materials first.');
                     for(const cluster of affectedClusters)await deleteDoc(clusterCol(ctx.orgId,node.id)+'/'+cluster.code);}await writeDoc(whPath(ctx.orgId, node.id), data);
                 const total = layoutPositions(layout);
                 const typeLabel = (code: string) => types.find((t) => t.code === code)?.label ?? code;
