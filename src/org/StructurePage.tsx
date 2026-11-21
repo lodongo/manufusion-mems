@@ -24,7 +24,7 @@ import { Badge, Button, Card, Empty, PageTitle, Spinner, TextArea, useLoad } fro
 import { CHAIN, LEVELS, LEVEL_EXAMPLES, MAX_UPPER_LEVELS, suggestCode, upperName, type FieldDef } from './structureDefs';
 import type { Position } from './PositionsPage';
 import { appConfirm } from '../components/dialogs';
-import { COST_CENTER_CATEGORIES, costCenterCategoryLabel, costCenterSubcategories, costCenterSubcategoriesLabel, selectedCostCenterSubcategories } from '../shared/costCenterTaxonomy';
+import { COST_CENTER_CATEGORIES, costCenterCategoryLabel, costCenterSubcategories, costCenterSubcategoriesLabel, costCenterSubcategoryLabel, selectedCostCenterSubcategories } from '../shared/costCenterTaxonomy';
 
 interface Node {
     id: string;
@@ -153,6 +153,11 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
         return (
             <NodeForm
                 parent={mode.type === 'edit' ? null : node}
+                costCenter={level === 'work_center'
+                    ? mode.type === 'edit'
+                        ? data.ancestors.find((ancestor) => ancestor.id === node?.parentId) ?? null
+                        : node
+                    : null}
                 parentCode={mode.type === 'edit' ? '' : node?.code ?? ''}
                 level={level}
                 label={label}
@@ -237,8 +242,13 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                             <Row label='Currency (from legal entity)' value={String(currency ?? '—')} />
                         </>
                     )}
+                    {node.level === 'work_center' && (
+                        <Row label='Operational subcategory' value={node.attributes.costCenterSubcategory
+                            ? costCenterSubcategoryLabel(String(data.ancestors.find((ancestor) => ancestor.id === node.parentId)?.attributes.costType ?? ''), String(node.attributes.costCenterSubcategory))
+                            : 'Not yet assigned (legacy equipment)'} />
+                    )}
                     {node.level === 'site' && <Row label='Job roles used here' value={node.roleCodes.length ? node.roleCodes.join(', ') : 'None yet'} />}
-                    {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset') && !(node.level === 'cost_center' && ['costType', 'costSubcategory'].includes(f.key))).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
+                    {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset') && !(node.level === 'cost_center' && ['costType', 'costSubcategory'].includes(f.key)) && !(node.level === 'work_center' && f.key === 'costCenterSubcategory')).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
                     {node.level === 'work_center' && <Row label='Asset' value={node.attributes.assetTag ? `${String(node.attributes.assetTag)} · ${String(node.attributes.assetTagName ?? '')}` : 'Not attributed yet'} />}
                 </Card>
             </div>
@@ -517,6 +527,11 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
         return (
             <NodeForm
                 parent={mode.type === 'edit' ? null : node}
+                costCenter={level === 'work_center'
+                    ? mode.type === 'edit'
+                        ? data.ancestors.find((ancestor) => ancestor.id === node?.parentId) ?? null
+                        : node
+                    : null}
                 parentCode={mode.type === 'edit' ? '' : node?.code ?? ''}
                 level={level}
                 label={label}
@@ -682,7 +697,10 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
                                 <Row label='Currency (from legal entity)' value={String(data.ancestors.find((a) => a.level === 'legal_entity')?.attributes.currencyCode ?? '—')} />
                             </>
                         )}
-                        {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset') && !(node.level === 'cost_center' && ['costType', 'costSubcategory'].includes(f.key))).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
+                        {node.level === 'work_center' && <Row label='Operational subcategory' value={node.attributes.costCenterSubcategory
+                            ? costCenterSubcategoryLabel(String(data.ancestors.find((ancestor) => ancestor.id === node.parentId)?.attributes.costType ?? ''), String(node.attributes.costCenterSubcategory))
+                            : 'Not yet assigned (legacy equipment)'} />}
+                        {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset') && !(node.level === 'cost_center' && ['costType', 'costSubcategory'].includes(f.key)) && !(node.level === 'work_center' && f.key === 'costCenterSubcategory')).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
                     </div>
                     {canEdit && (
                         <div className='flex gap-2'>
@@ -1025,6 +1043,7 @@ function SiteRolesForm({ site, onDone, onCancel }: { site: Node; onDone: () => v
 
 function NodeForm({
     parent,
+    costCenter,
     parentCode,
     level,
     label,
@@ -1034,6 +1053,7 @@ function NodeForm({
     onCancel,
 }: {
     parent: Node | null;
+    costCenter: Node | null;
     parentCode: string;
     level: string;
     label: string;
@@ -1148,6 +1168,13 @@ function NodeForm({
         const missing = def.fields.filter((f) => f.required && !String(attributes[f.key] ?? '').trim());
         if (!name.trim()) return setError('Enter a name.');
         if (level === 'cost_center' && !managerRoleCode) return setError('Choose the cost center manager role.');
+        if (level === 'work_center') {
+            const allowed = selectedCostCenterSubcategories(costCenter?.attributes);
+            if (!allowed.length && !existing)
+                return setError('First select one or more subcategories on the parent cost center.');
+            if (allowed.length && !allowed.includes(attributes.costCenterSubcategory ?? ''))
+                return setError('Choose one equipment subcategory from the parent cost center selections.');
+        }
         if (level === 'cost_center' && !selectedSubcategories.length &&
             (!existing || existing.attributes.costType !== attributes.costType
                 || selectedCostCenterSubcategories(existing.attributes).length > 0))
@@ -1197,6 +1224,42 @@ function NodeForm({
                 : { ...previous, [f.key]: v });
         };
         const label = `${f.label}${f.required || f.key === 'costSubcategory' ? ' *' : ''}`;
+        if (f.key === 'costCenterSubcategory') {
+            const category = String(costCenter?.attributes.costType ?? '');
+            const chosen = selectedCostCenterSubcategories(costCenter?.attributes);
+            const current = String(value);
+            return (
+                <div key={f.key} className='space-y-2'>
+                    <SelectField id='sn-costCenterSubcategory'
+                        label='Equipment subcategory (from cost center) *'
+                        value={current} disabled={!chosen.length}
+                        onChange={(event) => set(event.target.value)}>
+                        <option value=''>{chosen.length ? 'Choose one of the assigned activities...' : 'No cost center subcategories configured'}</option>
+                        {current && !chosen.includes(current) && (
+                            <option value={current} disabled>Previously selected — no longer allowed</option>
+                        )}
+                        {chosen.map((code) => (
+                            <option key={code} value={code}>{costCenterSubcategoryLabel(category, code)}</option>
+                        ))}
+                    </SelectField>
+                    <p className='text-xs text-soft'>
+                        {costCenter
+                            ? `Parent cost center: ${costCenter.code} · ${costCenter.name}. ${chosen.length} permitted subcategor${chosen.length === 1 ? 'y' : 'ies'}.`
+                            : 'The parent cost center could not be resolved.'}
+                        {' '}Select one operational activity; the asset catalog below retains its separate technical classification.
+                    </p>
+                    {!chosen.length && (
+                        <div className='rounded-xl border border-amber-500/30 bg-panel p-3 text-sm text-amber-600'>
+                            No activity subcategories are assigned to this cost center.
+                            {costCenter && <button type='button' className='ml-2 font-semibold underline'
+                                onClick={() => navigate(`organization_admin/structure/${costCenter.id}`)}>
+                                Open cost center
+                            </button>}
+                        </div>
+                    )}
+                </div>
+            );
+        }
         if (f.key === 'costSubcategory') {
             const categoryCode = attributes.costType ?? '';
             const subcategories = costTypes.find((type) => type.code === categoryCode)?.subcategories
@@ -1400,17 +1463,6 @@ function NodeForm({
                     </SelectField>
                 )}
             </Card>
-            {level === 'work_center' && !!attributes.equipmentClass && (
-                <Card className='space-y-2'>
-                    <h3 className='font-semibold text-ink'>Equipment classification</h3>
-                    <p className='text-xs text-soft'>Select Group → Category → Subcategory → Class through the asset dictionary below. Classification controls compatible one-to-one asset matches; technical specifications are maintained only in Asset Management.</p>
-                    <div className='grid grid-cols-2 gap-2'>
-                        <div className='rounded-lg border border-line p-2 text-xs text-soft'>Category <span className='block font-mono font-semibold text-ink'>{attributes.equipmentCategory || 'Derived from class'}</span></div>
-                        <div className='rounded-lg border border-line p-2 text-xs text-soft'>Subcategory <span className='block font-mono font-semibold text-ink'>{attributes.equipmentSubcategory || 'Derived from class'}</span></div>
-                    </div>
-                    <p className='text-xs text-soft'>Class: {attributes.equipmentClass} · {attributes.equipmentClassName || ''}</p>
-                </Card>
-            )}
             {level === 'work_center' && !existing && attributes.equipmentClass && (
                 <Card className='space-y-3'>
                     <h3 className='text-base font-semibold text-ink'>Equipment ↔ Asset (one-to-one)</h3>
@@ -1432,6 +1484,18 @@ function NodeForm({
                     {def.fields.filter((f) => (f.section ?? 'Details') === section && !(level === 'work_center' && f.type === 'asset')).map(renderField)}
                 </Card>
             ))}
+            {level === 'work_center' && !!attributes.equipmentClass && (
+                <Card className='space-y-2'>
+                    <h3 className='font-semibold text-ink'>Technical asset catalog classification</h3>
+                    <p className='text-xs text-soft'>Select Group → Category → Subcategory → Class through the asset dictionary below. Classification controls compatible one-to-one asset matches; technical specifications are maintained only in Asset Management.</p>
+                    <div className='grid grid-cols-2 gap-2'>
+                        <div className='rounded-lg border border-line p-2 text-xs text-soft'>Category <span className='block font-mono font-semibold text-ink'>{attributes.equipmentCategory || 'Derived from class'}</span></div>
+                        <div className='rounded-lg border border-line p-2 text-xs text-soft'>Subcategory <span className='block font-mono font-semibold text-ink'>{attributes.equipmentSubcategory || 'Derived from class'}</span></div>
+                    </div>
+                    <p className='text-xs text-soft'>Class: {attributes.equipmentClass} · {attributes.equipmentClassName || ''}</p>
+                </Card>
+            )}
+
             {level === 'legal_entity' && !existing && <p className='text-xs text-slate-500'>You can add the logo right after saving.</p>}
             {error && <Alert tone='error'>{error}</Alert>}
             <div className='flex gap-2'>
