@@ -24,6 +24,7 @@ import { Badge, Button, Card, Empty, PageTitle, Spinner, TextArea, useLoad } fro
 import { CHAIN, LEVELS, LEVEL_EXAMPLES, MAX_UPPER_LEVELS, suggestCode, upperName, type FieldDef } from './structureDefs';
 import type { Position } from './PositionsPage';
 import { appConfirm } from '../components/dialogs';
+import { COST_CENTER_CATEGORIES, costCenterCategoryLabel, costCenterSubcategories, costCenterSubcategoryLabel } from '../shared/costCenterTaxonomy';
 
 interface Node {
     id: string;
@@ -230,12 +231,16 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                     {node.level === 'cost_center' && (
                         <>
                             <Row label='Cost center manager' value={node.managerRoleCode ? `${node.managerRoleTitle} (${node.managerRoleCode})` : '—'} />
+                            <Row label='Cost center category' value={`${node.attributes.costType ?? '—'} · ${costCenterCategoryLabel(String(node.attributes.costType ?? ''))}`} />
+                            <Row label='Cost center subcategory' value={node.attributes.costSubcategory
+                                ? costCenterSubcategoryLabel(String(node.attributes.costType ?? ''), String(node.attributes.costSubcategory))
+                                : 'Not yet classified (legacy record)'} />
                             <Row label='Held by' value={node.managerHolders?.length ? node.managerHolders.join(', ') : 'Nobody assigned yet'} />
                             <Row label='Currency (from legal entity)' value={String(currency ?? '—')} />
                         </>
                     )}
                     {node.level === 'site' && <Row label='Job roles used here' value={node.roleCodes.length ? node.roleCodes.join(', ') : 'None yet'} />}
-                    {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset')).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
+                    {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset') && !(node.level === 'cost_center' && ['costType', 'costSubcategory'].includes(f.key))).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
                     {node.level === 'work_center' && <Row label='Asset' value={node.attributes.assetTag ? `${String(node.attributes.assetTag)} · ${String(node.attributes.assetTagName ?? '')}` : 'Not attributed yet'} />}
                 </Card>
             </div>
@@ -672,8 +677,12 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
                                 <Row label='Held by' value={node.managerHolders?.length ? node.managerHolders.join(', ') : 'Nobody assigned yet'} />
                             </>
                         )}
-                        {node.level === 'cost_center' && <Row label='Currency (from legal entity)' value={String(data.ancestors.find((a) => a.level === 'legal_entity')?.attributes.currencyCode ?? '—')} />}
-                        {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset')).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
+                        {node.level === 'cost_center' && <Row label='Cost center category' value={`${node.attributes.costType ?? '—'} · ${costCenterCategoryLabel(String(node.attributes.costType ?? ''))}`} />
+                            <Row label='Cost center subcategory' value={node.attributes.costSubcategory
+                                ? costCenterSubcategoryLabel(String(node.attributes.costType ?? ''), String(node.attributes.costSubcategory))
+                                : 'Not yet classified (legacy record)'} />
+                            <Row label='Currency (from legal entity)' value={String(data.ancestors.find((a) => a.level === 'legal_entity')?.attributes.currencyCode ?? '—')} />}
+                        {fields.filter((f) => !(node.level === 'work_center' && f.type === 'asset') && !(node.level === 'cost_center' && ['costType', 'costSubcategory'].includes(f.key))).map((f) => (node.attributes[f.key] !== undefined && node.attributes[f.key] !== '' ? <Row key={f.key} label={f.label} value={f.type === 'asset' || f.type === 'assetClass' ? `${String(node.attributes[f.key])} · ${String(node.attributes[`${f.key}Name`] ?? '')}` : String(node.attributes[f.key])} /> : null))}
                     </div>
                     {canEdit && (
                         <div className='flex gap-2'>
@@ -1042,7 +1051,7 @@ function NodeForm({
     const [status, setStatus] = useState(existing?.status ?? 'active');
     const [attributes, setAttributes] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(existing?.attributes ?? {}).map(([k, v]) => [k, String(v)])));
     const [banks, setBanks] = useState<Array<{ id: string; name: string; swiftCode: string }>>([]);
-    const [costTypes, setCostTypes] = useState<Array<{ code: string; label: string }>>([]);
+    const [costTypes, setCostTypes] = useState(COST_CENTER_CATEGORIES);
     const [assetOpts, setAssetOpts] = useState<{ enabled: boolean; assets: Array<{ tag: string; name: string; className: string }> }>({ enabled: true, assets: [] });
     const [matchingAssets, setMatchingAssets] = useState<Array<{ tag: string; name: string; status: string; nodeCode: string }>>([]);
     const [eligibleLoading, setEligibleLoading] = useState(false);
@@ -1070,9 +1079,9 @@ function NodeForm({
 
     useEffect(() => {
         if (!def.fields.some((f) => f.type === 'fin')) return;
-        callBackend<{ types: Array<{ code: string; label: string }> }>('/api/org/reference/cost-center-types')
-            .then((res) => setCostTypes(res.types))
-            .catch(() => setCostTypes([]));
+        callBackend<{ types: typeof COST_CENTER_CATEGORIES }>('/api/org/reference/cost-center-types')
+            .then((res) => setCostTypes(res.types.length ? res.types : COST_CENTER_CATEGORIES))
+            .catch(() => setCostTypes(COST_CENTER_CATEGORIES));
     }, [def.fields]);
 
     useEffect(() => {
@@ -1136,6 +1145,9 @@ function NodeForm({
         const missing = def.fields.filter((f) => f.required && !String(attributes[f.key] ?? '').trim());
         if (!name.trim()) return setError('Enter a name.');
         if (level === 'cost_center' && !managerRoleCode) return setError('Choose the cost center manager role.');
+        if (level === 'cost_center' && !attributes.costSubcategory &&
+            (!existing || existing.attributes.costType !== attributes.costType || !!existing.attributes.costSubcategory))
+            return setError('Choose a subcategory for the selected cost center category.');
         if (missing.length) return setError(`Please complete: ${missing.map((m) => m.label).join(', ')}.`);
         setBusy(true);
         try {
@@ -1168,8 +1180,25 @@ function NodeForm({
 
     const renderField = (f: FieldDef) => {
         const value = attributes[f.key] ?? '';
-        const set = (v: string) => setAttributes({ ...attributes, [f.key]: v });
-        const label = `${f.label}${f.required ? ' *' : ''}`;
+        const set = (v: string) => setAttributes((previous) =>
+            f.key === 'costType'
+                ? { ...previous, costType: v, costSubcategory: previous.costType === v ? previous.costSubcategory : '' }
+                : { ...previous, [f.key]: v });
+        const label = `${f.label}${f.required || (f.key === 'costSubcategory' && !existing) ? ' *' : ''}`;
+        if (f.key === 'costSubcategory') {
+            const categoryCode = attributes.costType ?? '';
+            const subcategories = costTypes.find((type) => type.code === categoryCode)?.subcategories
+                ?? costCenterSubcategories(categoryCode);
+            return (
+                <SelectField key={f.key} id='sn-costSubcategory' label={label} value={value}
+                    disabled={!categoryCode} onChange={(e) => set(e.target.value)}>
+                    <option value=''>{categoryCode ? 'Select the activity / function...' : 'Choose a category first'}</option>
+                    {subcategories.map((subcategory) => <option key={subcategory.code} value={subcategory.code}>
+                        {subcategory.label}
+                    </option>)}
+                </SelectField>
+            );
+        }
         if (f.type === 'assetClass')
             return (
                 <ClassField
