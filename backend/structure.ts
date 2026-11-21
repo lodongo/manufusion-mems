@@ -27,7 +27,7 @@ import { audit, auditOut } from './audit';
 import { hasPerm, orgRoute, secure, type OrgContext } from './guards';
 import { detectImage } from './branding';
 import { createUnitAsset, linkWorkCenterAsset, readUnitClass, releaseUnitAsset } from './assets';
-import { COST_CENTER_CATEGORIES, costCenterSubcategories } from '../src/shared/costCenterTaxonomy';
+import { COST_CENTER_CATEGORIES, selectedCostCenterSubcategories, validateCostCenterSubcategorySelection } from '../src/shared/costCenterTaxonomy';
 
 // Organization design.
 // Single legal entity organizations start directly with the legal entity. Groups declare
@@ -323,12 +323,24 @@ async function readAttributes(level: string, raw: unknown, requireCostSubcategor
         out[key] = s;
     }
     if (level === 'cost_center') {
-        const category = str(out.costType);
-        const subcategory = str(out.costSubcategory);
-        if (!subcategory && requireCostSubcategory)
-            throw new HttpError(400, 'Choose a cost center subcategory.');
-        if (subcategory && !costCenterSubcategories(category).some((item) => item.code === subcategory))
-            throw new HttpError(400, 'Choose a subcategory belonging to the selected cost center category.');
+        // Preserve the singular key as a compatibility alias; operational module
+        // eligibility continues to depend only on attributes.costType.
+        let selected: string[];
+        try {
+            selected = validateCostCenterSubcategorySelection(
+                str(out.costType), input.costSubcategories, out.costSubcategory, requireCostSubcategory,
+            );
+        } catch (error) {
+            throw new HttpError(400, error instanceof Error ? error.message : 'Invalid cost center subcategories.');
+        }
+        if (selected.length) {
+            out.costSubcategories = selected;
+            out.costSubcategory = selected[0];
+        } else {
+            delete out.costSubcategory;
+            // Preserve an explicitly cleared selection as an empty array.
+            out.costSubcategories = [];
+        }
     }
     return out;
 }
@@ -666,7 +678,7 @@ export const structureRoutes = {
             const incomingAttributes = isObj(ctx.body.attributes) ? ctx.body.attributes : {};
             const requireSubcategory = level === 'cost_center'
                 && (str(previousAttributes.costType) !== str(incomingAttributes.costType)
-                    || !!str(previousAttributes.costSubcategory));
+                    || selectedCostCenterSubcategories(previousAttributes).length > 0);
             const attributes = await readAttributes(level, ctx.body.attributes, requireSubcategory);
             if (level === 'cost_center' && str(previousAttributes.costType) === 'MFG' && str(attributes.costType) !== 'MFG') {
                 const [capacity, resource] = await Promise.all([
