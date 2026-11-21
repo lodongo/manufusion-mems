@@ -1332,7 +1332,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                                 `${size.toLocaleString()} bottom pallets + ${(palletCapacity??size)-size} above = ${palletCapacity?.toLocaleString()} pallet places`:
                                 'Enter valid dimensions. Pyramid requires an even bottom pallet count.'}</p>
                             <p className='text-xs text-soft'>Pallet capacity is an estimate, subject to site load, height and stability limits.</p>
-                        </>
+                        </>}
                         <div className='grid grid-cols-2 gap-2' aria-live='polite'>
                             <Stat label='Ground positions' value={sizeOk?size.toLocaleString():'—'}/>
                             <Stat label='Pallet capacity' value={palletCapacity===null?'—':palletCapacity.toLocaleString()}/>
