@@ -1118,9 +1118,10 @@ async function configuredMaterialWorkflow(orgId:string,code:'PRC-001'|'PRC-002')
         version:Number(data.version)||1,
         approvalMode:str(data.approvalMode)==='parallel'?'parallel':'sequential',
         approvalRule:str(data.approvalRule)==='any'?'any':'all',
-        steps:steps.map((x,i)=>({mode:str(x.mode) as MaterialWorkflowStep['mode'],role:str(x.role),uid:str(x.uid),
+        steps:steps.map((raw,i)=>{const x=raw as Obj;return {
+            mode:str(x.mode) as MaterialWorkflowStep['mode'],role:str(x.role),uid:str(x.uid),
             managerLevel:Number(x.managerLevel)||1,
-            action:(str(x.action)|| (i===steps.length-1?'approve':'review')) as MaterialWorkflowStep['action']}))};
+            action:(str(x.action)|| (i===steps.length-1?'approve':'review')) as MaterialWorkflowStep['action']};})};
 }
 /** A snapshot retains the exact approver definition under which a request was submitted. */
 function materialWorkflowSnapshot(record:Obj):MaterialWorkflowDefinition|null{
