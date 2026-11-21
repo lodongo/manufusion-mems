@@ -357,6 +357,8 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
             if(str(o.resourceId)){
                 const resource=await getDoc(DOC(ctx.orgId,'resources',str(o.resourceId)));
                 if(!resource)throw new HttpError(400,stage+'routing resource not found: '+str(o.resourceId));
+                if(str(resource.data.status)==='removed'||str(resource.data.status)==='deleted')
+                    throw new HttpError(409,stage+'routing resource is no longer active. Select a configured manufacturing resource.');
                 if(str(resource.data.siteId)&&str(resource.data.siteId)!==str(item.siteId))
                     throw new HttpError(400,stage+'routing resource belongs to another site.');
             }
@@ -552,6 +554,7 @@ export const plnMfgFoundationRoutes={
             const records=await listDocs(ROOT(ctx.orgId,kind));
             const visible=[];
             for(const record of records){
+                if(kind==='resources'&&str(record.data.status)==='removed')continue;
                 // Site tags on legacy SKUs must not hide them from authorized users at other sites.
                 const siteId=kind==='items'?'':str(record.data.siteId);
                 if(await recordAccess(ctx,'MFG.view',siteId))visible.push(out(record));
@@ -562,6 +565,8 @@ export const plnMfgFoundationRoutes={
     'POST /api/org/pln-mfg/foundation/save':[
         orgRoute('org.mfg.foundation.save','MFG.master.edit',async ctx=>{
             const kind=readKind(ctx.body.kind);
+            if(kind==='resources')throw new HttpError(409,
+                'Manufacturing resources are configured through Production Planning → Manufacturing Resources. Choose a Production cost centre and configure only core information; use SKU allocation for each commissioned speed.');
             if(kind==='boms'&&!hasPerm(ctx.permissions,'MFG.bom.edit')&&ctx.role!=='org_super_admin')
                 throw new HttpError(403,'BOM editing permission required.');
             if(kind==='routings'&&!hasPerm(ctx.permissions,'MFG.routing.edit')&&ctx.role!=='org_super_admin')
