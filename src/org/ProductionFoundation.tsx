@@ -294,7 +294,7 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
                     <UnitChoice key={draft.id||'new-sku'} title='Unit of measure'
                         value={str(draft.uom)} setup={skuSetup} onChange={v=>update('uom',v)}/>
                 </div>}
-                {str(draft.category)==='FINISHED'&&<div className='rounded-xl border border-line bg-page p-3 text-sm text-soft'>The SKU name, physical package unit, containers per pack and conversion factor are calculated from selected configuration parameters.</div>}
+                {str(draft.category)==='FINISHED'&&<div className='rounded-xl border border-line bg-page p-3 text-sm text-soft'>The SKU name, production unit and relevant packaging conversions are calculated from its configuration. Commercial and transport packaging can be marked Not required; bulk tanks and silos use Bulk storage containment.</div>}
                 {str(draft.category)==='INTERMEDIATE'&&<>
                     <Choice title='Intermediate tracking' value={str(draft.stockPolicy)||'NON_STOCKED'}
                         options={ [['NON_STOCKED','Non-stock (process output / no inventory posting)'],['STOCKED','Stock-managed intermediate']] }
@@ -336,10 +336,22 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
                 SKUs belong to the organization, not one site. Set which manufacturing cost centres can produce each SKU under Manufacturing Cost Centre &amp; SKUs, including the commissioned physical-container speeds.
             </p>}
         </div>
-        {tab==='items'&&str(draft.category)==='FINISHED'&&<>
+        {tab==='items'&&str(draft.category)==='INTERMEDIATE'&&<label className='flex min-h-11 items-start gap-3 rounded-xl border border-line bg-page p-3 text-sm text-ink'>
+            <input type='checkbox' className='mt-1 shrink-0'
+                checked={Object.values((draft.skuComponents||{}) as Record<string,unknown>).some(Boolean)}
+                onChange={e=>update('skuComponents',e.target.checked
+                    ?{containmentScope:'PRIMARY_CONTAINER',requiresCommercialPackaging:false,
+                        requiresTransportPackaging:false}: {})}/>
+            <span><strong>Configure physical containment for this intermediate SKU</strong>
+                <span className='mt-1 block text-xs text-muted'>Enable for syrup, concentrate, bulk material, WIP in tanks or other intermediate products with a physical container. Select a production form, physical container and its size. Commercial and transport packaging are optional.</span>
+            </span>
+        </label>}
+        {tab==='items'&&(str(draft.category)==='FINISHED'||str(draft.category)==='INTERMEDIATE'&&
+            Object.values((draft.skuComponents||{}) as Record<string,unknown>).some(Boolean))&&<>
             <SkuConfigurationFields value={(draft.skuComponents||{}) as SkuSelections}
-                onChange={v=>update('skuComponents',v)} setup={skuSetup}/>
-            {draft.id&&skuSetup.namingConfigured&&<label className='flex min-h-11 items-center gap-2 rounded-xl border border-line p-3 text-sm text-ink'>
+                onChange={v=>update('skuComponents',v)} setup={skuSetup}
+                variantLabel={str(draft.category)==='INTERMEDIATE'?'Product/Variant (optional for intermediate)':'Product/Variant'}/>
+            {str(draft.category)==='FINISHED'&&draft.id&&skuSetup.namingConfigured&&<label className='flex min-h-11 items-center gap-2 rounded-xl border border-line p-3 text-sm text-ink'>
                 <input type='checkbox' checked={draft.applySkuNamingSequence===true}
                     onChange={e=>update('applySkuNamingSequence',e.target.checked)}/>
                 Apply the latest SKU naming sequence when saving this existing SKU
