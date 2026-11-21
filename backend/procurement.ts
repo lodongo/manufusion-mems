@@ -5,7 +5,7 @@ import {catalogueFinanceSummary,catalogueFinanceDetail,catalogueFinanceErrors} f
 import {integratedReleaseProblems} from './catalogueReleaseGuard';
 import { industryAdoptionRecommendation } from './industryCatalog';
 
-import { allocateIntegratedMaterialNumber, classifiedMaterialPrefix } from './materialNumbering';
+import { approveWithMasterIdentity, createNumberedMaterialRequest, validMaterialRequestId } from './materialLifecycleIds';
 import { createHash } from 'crypto';
 import {MATERIAL_STOCK_DIMENSIONS,UNIVERSAL_STOCK_METADATA,STOCK_META_BY_KEY,stockedPolicyToMrp} from './stockPolicyConfig';
 import {METHODS as REPLENISHMENT_METHODS,factorsOf,methodOf,routeFor} from './replenishmentPlan';
@@ -1081,23 +1081,22 @@ export async function createMaterialDraft(ctx: OrgContext) {
         for (const key of strs(cls.requiredAttributes)) if (!values[key]) throw new HttpError(400, 'A required material attribute is missing: ' + key);
         const specifics = strs(cls.specificAttributes).map(k => values[k]).filter(Boolean);
         const shortText = [name, ...specifics].join(' · ').slice(0, 120);
-        const id = 'MAT-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
-        const path = 'organizations/' + ctx.orgId + '/materials/' + id;
+        // A database sequence issues the request identity when the record is first created.
         // Carry the approved reference material classification into the tenant record.
         // Technical material identity is independent from the maintenance strategy used on a WO.
         const catalogueClassification=isObj(cls.accounting)&&isObj(cls.accounting.catalogueClassification)?cls.accounting.catalogueClassification:{};
         const storesClassCode=str(catalogueClassification.storesClassCode);
         const majorMaterialBranch=str(catalogueClassification.majorBranch);
-        await writeDoc(path, { name, shortText, materialCode, categoryCode, subcategoryCode, familyCode, attributes: values,
-            ...(storesClassCode?{storesClassCode}:{}),...(majorMaterialBranch?{majorMaterialBranch}:{}),
-            status: 'draft', approvalLevel: 0, createdAt: nowIso(), createdBy: ctx.uid, makerUids: [ctx.uid] }, { exists: false });
+        const id=await createNumberedMaterialRequest({orgId:ctx.orgId,kind:'NWREQ',collection:'materials',actorUid:ctx.uid,
+            data:{ name, shortText, materialCode, categoryCode, subcategoryCode, familyCode, attributes: values,
+                ...(storesClassCode?{storesClassCode}:{}),...(majorMaterialBranch?{majorMaterialBranch}:{}),
+                status:'draft',approvalLevel:0,createdAt:nowIso(),createdBy:ctx.uid,makerUids:[ctx.uid] }});
         await audit([{ category: 'data', action: 'org.material.create', actor: ctx.actor, meta: ctx.meta, target: { label: id }, details: name, orgId: ctx.orgId }]);
         return { ok: true, id, shortText };
     }
 
 
-/** Material-approval transactions are governed exclusively by the organization workflow registry.
- * Legacy approvalLevel is retained as a read-compatible ordinal, never as a hard-coded approver. */
+/** Material approvals use only the configured PRC-001 and PRC-002 workflow registry snapshots. */
 type MaterialWorkflowStep={mode:'role'|'user'|'manager';role:string;uid:string;managerLevel:number;action:'review'|'approve'};
 type MaterialWorkflowDefinition={code:string;name:string;version:number;approvalMode:'sequential'|'parallel';approvalRule:'all'|'any';steps:MaterialWorkflowStep[]};
 function workflowStageName(step:MaterialWorkflowStep,index:number,total:number):string{
@@ -1158,10 +1157,9 @@ function materialStageLabel(record:Obj,workflow:MaterialWorkflowDefinition):stri
     return workflowStageName(workflow.steps[index],index,workflow.steps.length);
 }
 async function materialApproverCanAct(ctx:OrgContext,record:Obj,workflow:MaterialWorkflowDefinition):Promise<boolean>{
-    // The test override is restricted to a named tenant's organization super admin on development.
-    // Each bypass is recorded at high priority by orgRoute, including the material and control name.
-    if(ctx.testMode===true&&ctx.role==='org_super_admin')
-        return bypass(ctx,'material.workflow.assignment.and.maker_checker');
+    // Read-only permission checks must not record a bypass just by rendering a list.
+    // Actual approval actions call bypass() below so only executed overrides are audited.
+    if(ctx.testMode===true&&ctx.role==='org_super_admin')return true;
     if(materialMakerCheckerConflict(record,ctx.uid)||
         approvedEarlierLevel(record.approvalHistory,ctx.uid))return false;
     const user=await getDoc('users/'+ctx.uid);
@@ -1199,9 +1197,11 @@ async function makeMaterialDecision(ctx:OrgContext,kind:'creation'|'extension'):
     const data=doc.data;
     const workflow=materialWorkflowSnapshot(data);
     if(!workflow||workflow.code!==(extension?'PRC-002':'PRC-001'))
-        throw new HttpError(409,'This request is not bound to the configured material workflow. An administrator must migrate or resubmit the legacy approval request.');
+        throw new HttpError(409,'This request has no valid workflow snapshot. It cannot proceed using retired approval rules; ask an administrator to resolve the request under the configured workflow.');
     if(!await materialApproverCanAct(ctx,data,workflow))
         throw new HttpError(403,'This workflow stage is assigned to a different authorized reviewer or approver.');
+    if(ctx.testMode===true&&ctx.role==='org_super_admin')
+        bypass(ctx,'material.workflow.assignment_and_maker_checker');
     const decision=str(ctx.body.decision);
     if(!['approve','reject'].includes(decision))throw new HttpError(400,'Choose approve or reject.');
     if(decision==='reject'&&str(ctx.body.comment).trim().length<10)
@@ -1229,10 +1229,15 @@ async function makeMaterialDecision(ctx:OrgContext,kind:'creation'|'extension'):
         stepIndex+1>=workflow.steps.length);
     const next=decision==='reject'?'rejected':complete?'approved':'pending_approval';
     const nextLevel=workflow.approvalMode==='parallel'?Number(data.approvalLevel)||1:next==='pending_approval'?stepIndex+2:stepIndex+1;
+    const approvedAt=next==='approved'?nowIso():null;
     const changed={...data,status:next,approvalLevel:nextLevel,approvalHistory:history,
         workflowStage:next==='approved'?'Approved':next==='rejected'?'Rejected':
             materialStageLabel({...data,approvalLevel:nextLevel,approvalHistory:history},workflow),
-        approvedAt:next==='approved'?nowIso():null};
+        approvedAt,approvedBy:next==='approved'?ctx.uid:null,
+        // Successful creation approval also publishes the master to its original warehouse.
+        ...(!extension&&next==='approved'?{warehouseIds:[...new Set([
+            ...(Array.isArray(data.warehouseIds)?data.warehouseIds.map(str):[]),str(data.warehouseId),
+        ].filter(Boolean))],pushedAt:approvedAt,pushedBy:ctx.uid}:{})};
     // The approved extension record is the authoritative authorization. Persist its
     // approval before reflecting warehouse IDs on the existing source material, so
     // a failed second write can never expose a warehouse before approval is recorded.
@@ -1246,7 +1251,16 @@ async function makeMaterialDecision(ctx:OrgContext,kind:'creation'|'extension'):
         sourceSync={path:sourcePath,data:{...source.data,
             warehouseIds:[...new Set([...linked,original,target].filter(Boolean))],updatedAt:nowIso()}};
     }
-    await writeDoc(path,changed);
+    let masterDataId='';
+    if(!extension&&next==='approved'){
+        // Status and master ID must be committed together; never expose an approved
+        // master record without a unique MSTD_ identity.
+        masterDataId=await approveWithMasterIdentity({
+            orgId:ctx.orgId,requestId:id,changed,updateTime:doc.updateTime,actorUid:ctx.uid,
+        });
+    }else if(!await writeDoc(path,changed,{updateTime:doc.updateTime})){
+        throw new HttpError(409,'Workflow request changed during review. Reload before retrying.');
+    }
     if(sourceSync){
         try{await writeDoc(sourceSync.path,sourceSync.data);}
         catch(e){
@@ -1259,12 +1273,13 @@ async function makeMaterialDecision(ctx:OrgContext,kind:'creation'|'extension'):
     }
     await audited(ctx,extension?'procurement.material_extension.'+decision:'procurement.material.'+decision,
         (extension?'Material extension ':'Material ')+id,{workflowCode:workflow.code,workflowVersion:workflow.version,
-            action:step.action,stepIndex,status:next,comment:str(ctx.body.comment).slice(0,300)});
+            action:step.action,stepIndex,status:next,masterDataId,
+            comment:str(ctx.body.comment).slice(0,300)});
     if(!extension&&(next==='approved'||next==='rejected')){
         const {maintenanceMaterialDecided}=await import('./maintenanceMaterialHook');
         await maintenanceMaterialDecided(ctx,id,next);
     }
-    return {ok:true,status:next,stageLabel:str(changed.workflowStage)};
+    return {ok:true,status:next,stageLabel:str(changed.workflowStage),...(masterDataId?{masterDataId}:{})};
 }
 
 export const procurementRoutes = {
@@ -1665,11 +1680,11 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
         requireModule(ctx,'materials');
         const data=isObj(ctx.body.data)?ctx.body.data:{};
         const suppliedId=str(ctx.body.id);
-        if(suppliedId&&!/^MAT-[A-Za-z0-9-]+$/.test(suppliedId))
-            throw new HttpError(400,'Invalid material draft identifier.');
-        const id=suppliedId||'MAT-'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,7).toUpperCase();
-        const path='organizations/'+ctx.orgId+'/materials/'+id;
-        const existing=await getDoc(path);
+        if(suppliedId&&!validMaterialRequestId(suppliedId))
+            throw new HttpError(400,'Invalid material draft request identifier.');
+        let id=suppliedId;
+        const path=id?'organizations/'+ctx.orgId+'/materials/'+id:'';
+        const existing=id?await getDoc(path):null;
         if(existing){
             if(!materialApprovalNotStarted(existing.data))
                 throw new HttpError(409,'Approval has already started. Material cannot be edited or deleted as a draft.');
@@ -1690,8 +1705,13 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
             makerUids:materialMakerIds({...existing?.data??{},createdBy:existing?.data.createdBy??ctx.uid,updatedBy:ctx.uid}),
             updatedBy:ctx.uid,updatedAt:stamp,
         }));
-        const saved=await writeDoc(path,next,existing?{updateTime:existing.updateTime}:{exists:false});
-        if(!saved)throw new HttpError(409,'Material draft changed during editing. Reload before saving.');
+        if(!id){
+            id=await createNumberedMaterialRequest({
+                orgId:ctx.orgId,kind:'NWREQ',collection:'materials',actorUid:ctx.uid,data:next,
+            });
+        }else if(!await writeDoc(path,next,existing?{updateTime:existing.updateTime}:{exists:false})){
+            throw new HttpError(409,'Material draft changed during editing. Reload before saving.');
+        }
         await audited(ctx,existing?'procurement.material.draft_autosave':'procurement.material.draft_create',
             'Material '+id,{fields:Object.keys(patch),createdBy:str(next.createdBy),editedBy:ctx.uid,
                 delegated:!!existing&&str(existing.data.createdBy)!==ctx.uid});
@@ -1725,7 +1745,6 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
             throw new HttpError(409,'An extension for this material and warehouse already exists or awaits approval.');
         const workflow=await configuredMaterialWorkflow(ctx.orgId,'PRC-002');
         const stamp=nowIso();
-        const id='EXT-'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,7).toUpperCase();
         const record={sourceId,warehouseId,materialName:str(source.data.name),shortText:str(source.data.shortText),
             materialNumber:str(source.data.materialNumber),categoryCode:str(source.data.categoryCode),
             status:'pending_approval',approvalLevel:1,approvalHistory:[],workflowSnapshot:workflow,
@@ -1733,7 +1752,10 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
             workflowStage:materialStageLabel({approvalLevel:1,approvalHistory:[]},workflow),
             createdBy:ctx.uid,submittedBy:ctx.uid,createdAt:stamp,submittedAt:stamp,
             verifiedBy:ctx.uid,verifiedAt:stamp};
-        await writeDoc(root+'/material_extensions/'+id,record,{exists:false});
+        const id=await createNumberedMaterialRequest({
+            orgId:ctx.orgId,kind:'EXREQ',collection:'material_extensions',
+            actorUid:ctx.uid,data:record,
+        });
         await audited(ctx,'procurement.material_extension.submit','Extend material '+sourceId+' to warehouse '+warehouseId,
             {id,workflowCode:workflow.code,workflowVersion:workflow.version});
         return {ok:true,id,stageLabel:record.workflowStage};
@@ -1805,7 +1827,7 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
     'POST /api/org/procurement/materials/update': [orgRoute('org.procurement.materials.update', null, async ctx => {
         requireModule(ctx,'materials');
         const id=str(ctx.body.id);
-        if(!/^MAT-[A-Za-z0-9-]+$/.test(id))throw new HttpError(400,'Invalid material identifier.');
+        if(!validMaterialRequestId(id))throw new HttpError(400,'Invalid material identifier.');
         const path='organizations/'+ctx.orgId+'/materials/'+id;
         const doc=await getDoc(path);
         if(!doc)throw new HttpError(404,'Material not found.');
@@ -1838,38 +1860,6 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
         const doc=await getDoc(path);if(!doc)throw new HttpError(404,'Material not found.');
         const d=doc.data;const status=str(d.status);
         if(!['approved','active','disabled'].includes(status))throw new HttpError(409,'Only approved materials can be managed here.');
-        if(action==='allocate'){
-            if(str(d.materialNumber))return {ok:true,materialNumber:str(d.materialNumber)};
-            if(status!=='approved')throw new HttpError(409,'Material must be approved and enabled before number allocation.');
-            const template = (await load('materials')).items.get(str(d.materialCode));
-            const classifiedPrefix = classifiedMaterialPrefix(template);
-            if (classifiedPrefix) {
-                const materialNumber = await allocateIntegratedMaterialNumber({orgId:ctx.orgId,materialId:id,prefix:classifiedPrefix,actorUid:ctx.uid});
-                await audit([{category:'data',action:'org.material.number.allocate',actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:id},details:materialNumber+' (integrated classified numbering)'}]);
-                return {ok:true,materialNumber};
-            }
-            const prefix=str(d.categoryCode).trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
-            if(!prefix)throw new HttpError(409,'Material category code is missing.');
-            const existing=await listDocs(root+'/material_number_reservations');
-            let sequence=existing.filter(x=>x.id.startsWith(prefix+'-')).reduce((n,x)=>Math.max(n,Number(x.id.slice(prefix.length+1))||0),0);
-            let number='';for(let attempt=0;attempt<100;attempt++){sequence++;if(sequence>999999)throw new HttpError(409,'Category material number range exhausted.');const candidate=prefix+String(sequence).padStart(6,'0');try{await writeDoc(root+'/material_number_reservations/'+prefix+'-'+String(sequence).padStart(6,'0'),{materialId:id,materialNumber:candidate,categoryCode:prefix,createdAt:nowIso(),createdBy:ctx.uid},{exists:false});number=candidate;break;}catch(e){if(attempt===99)throw e;}}
-            if(!number)throw new HttpError(409,'Unable to reserve material number.');
-            await writeDoc(path,{...d,materialNumber:number,numberAllocatedAt:nowIso(),numberAllocatedBy:ctx.uid});
-            await audit([{category:'data',action:'org.material.number.allocate',actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:id},details:number}]);
-            return {ok:true,materialNumber:number};
-        }
-        if(action==='push'){
-            if(!str(d.materialNumber))throw new HttpError(409,'Allocate the material number before pushing to warehouse.');
-            if(status!=='approved'&&status!=='active')throw new HttpError(409,'Disabled material cannot be pushed.');
-            const warehouseId=str(d.warehouseId);
-            const warehouse=await getDoc(root+'/warehouses/'+warehouseId);if(!warehouse)throw new HttpError(409,'Requesting warehouse no longer exists.');
-            const whCats=Array.isArray(warehouse.data.materialCategoryCodes)?warehouse.data.materialCategoryCodes.map(str):[str(warehouse.data.materialCategoryCode)];
-            if(!whCats.includes(str(d.categoryCode)))throw new HttpError(409,'Warehouse does not support this material category.');
-            const ids=Array.isArray(d.warehouseIds)?d.warehouseIds.map(str):[];
-            await writeDoc(path,{...d,status:'active',warehouseIds:Array.from(new Set([...ids,warehouseId])),pushedAt:nowIso(),pushedBy:ctx.uid});
-            await audit([{category:'data',action:'org.material.warehouse.push',actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:id},details:warehouseId}]);
-            return {ok:true};
-        }
         if(action==='disable'){await writeDoc(path,{...d,status:'disabled',disabledAt:nowIso(),disabledBy:ctx.uid});await audit([{category:'data',action:'org.material.disable',actor:ctx.actor,meta:ctx.meta,orgId:ctx.orgId,target:{label:id},details:'Disabled material'}]);return {ok:true};}
         if(action==='delete'){
             if(status==='active'||str(d.pushedAt))throw new HttpError(409,'Material already pushed to a warehouse cannot be deleted. Disable it instead.');
@@ -1882,7 +1872,7 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
     'POST /api/org/procurement/materials/delete': [orgRoute('org.procurement.materials.delete', null, async ctx => {
         requireModule(ctx,'materials');
         const id=str(ctx.body.id);
-        if(!/^MAT-[A-Za-z0-9-]+$/.test(id))throw new HttpError(400,'Invalid material identifier.');
+        if(!validMaterialRequestId(id))throw new HttpError(400,'Invalid material identifier.');
         const path='organizations/'+ctx.orgId+'/materials/'+id;
         const doc=await getDoc(path);
         if(!doc)throw new HttpError(404,'Material not found.');
@@ -1910,7 +1900,7 @@ await audited(ctx,'procurement.material.submit','Material '+id,
     {warehouseId:str(d.warehouseId),categoryCode:str(d.categoryCode),submittedBy:ctx.uid,
         createdBy:str(d.createdBy),makerUids:materialMakerIds({...d,submittedBy:ctx.uid}),
         workflowCode:workflow.code});return {ok:true};})],
-    // Legacy three-approver editor is retired: PRC-001 and PRC-002 are configured in the workflow registry.
+    // Read-only registry status; only PRC-001/002 workflow configuration is authoritative.
     'POST /api/org/procurement/materials/workflow': [orgRoute('org.procurement.materials.workflow',null,async ctx=>{
         requireModule(ctx,'materials');
         if(ctx.body.roles||ctx.body.modes||ctx.body.delegations)
@@ -1919,34 +1909,6 @@ await audited(ctx,'procurement.material.submit','Material '+id,
             getDoc('organizations/'+ctx.orgId+'/workflow_registry/'+code)));
         return {workflows:docs.map((d,i)=>({code:i===0?'PRC-001':'PRC-002',enabled:d?.data.enabled===true,
             name:str(d?.data.name),steps:Array.isArray(d?.data.steps)?d.data.steps:[]}))};
-    })],
-    'POST /api/org/procurement/materials/workflow/migrate': [orgRoute('org.procurement.materials.workflow.migrate',null,async ctx=>{
-        requireModule(ctx,'materials');
-        if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'ADM.workflows'))
-            throw new HttpError(403,'Workflow administration permission required.');
-        const code=str(ctx.body.workflowCode);
-        if(code!=='PRC-001'&&code!=='PRC-002')throw new HttpError(400,'Choose PRC-001 or PRC-002.');
-        const workflow=await configuredMaterialWorkflow(ctx.orgId,code);
-        const root='organizations/'+ctx.orgId,collection=code==='PRC-001'?'materials':'material_extensions';
-        const all=await listDocs(root+'/'+collection);
-        const legacy=all.filter(x=>str(x.data.status)==='pending_approval'&&!materialWorkflowSnapshot(x.data));
-        if(ctx.body.previewOnly===true)return {ok:true,count:legacy.length,ids:legacy.slice(0,50).map(x=>x.id),workflowCode:code};
-        if(ctx.body.confirm!==true)throw new HttpError(400,'Confirm adoption of the configured workflow.');
-        if(legacy.length>500)throw new HttpError(409,'More than 500 legacy approvals: migrate in controlled batches.');
-        const stamp=nowIso();
-        for(const d of legacy){
-            await writeDoc(root+'/'+collection+'/'+d.id,{...d.data,
-                legacyApprovalHistory:Array.isArray(d.data.approvalHistory)?d.data.approvalHistory:[],
-                legacyApprovalLevel:Number(d.data.approvalLevel)||1,
-                approvalHistory:[],approvalLevel:1,workflowSnapshot:workflow,
-                workflowCode:workflow.code,workflowVersion:workflow.version,
-                workflowStage:materialStageLabel({approvalLevel:1,approvalHistory:[]},workflow),
-                workflowMigratedBy:ctx.uid,workflowMigratedAt:stamp,
-            });
-        }
-        await audited(ctx,'procurement.material_workflow.legacy_migrate','Migrate '+legacy.length+' pending requests to '+code,
-            {workflowCode:code,version:workflow.version,ids:legacy.slice(0,100).map(x=>x.id)});
-        return {ok:true,migrated:legacy.length,workflowCode:code};
     })],
     'POST /api/org/procurement/materials/approve': [orgRoute('org.procurement.materials.approve',null,
         async ctx=>makeMaterialDecision(ctx,'creation'))],
