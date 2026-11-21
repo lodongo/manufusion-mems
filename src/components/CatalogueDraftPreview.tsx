@@ -30,8 +30,12 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
     const referenceAudit=useMemo(()=>kind==='materials'&&fileData&&companionGlMaster
       ?auditFiveGlExtensions(companionGlMaster,fileData):null,[kind,fileData,companionGlMaster]);
     const rows = useMemo(() => array(fileData?.[ITEMS[kind]]), [fileData, kind]);
+    const referenceOnly=!!fileData&&!!Object.keys(obj(fileData.financialDimensions)).length&&
+        !Object.keys(obj(fileData.financialIntegration)).length;
     const selected = useMemo(() => rows.find(x => text(x.code) === selectedCode), [rows, selectedCode]);
-    const statusOf = (x: Row) => text(kind === 'gl_accounts' ? obj(x.accountDetermination).mappingStatus : obj(obj(x.accounting).glResolution).mappingStatus);
+    const statusOf = (x: Row) => text(kind === 'gl_accounts' ? obj(x.accountDetermination).mappingStatus :
+        obj(obj(x.accounting).glResolution).mappingStatus)||
+        (Object.keys(obj(x.accountingIntegration)).length?'finance_review_required':'');
     const financeExceptions = useMemo(() => rows.filter(x => statusOf(x) === 'finance_review_required').length, [rows, kind]);
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -52,10 +56,13 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
         acc[key]=(acc[key]||0)+1;
         return acc;
     },{} as Record<string,number>),[rows]);
-    const missingRoutes = useMemo(() => kind === 'gl_accounts'
-        ? rows.filter(r => typeof r.usedInProcurement !== 'boolean' || typeof r.usedInBudget !== 'boolean' || typeof r.usedInProcurementPosting !== 'boolean').length
-        : rows.filter(r => !array(obj(obj(r.accounting).glResolution).transactionRoutes).length).length,
-        [rows, kind]);
+    const missingRoutes = useMemo(() => referenceOnly
+        ? rows.filter(r => !Array.isArray(obj(obj(r.accountingIntegration).defaultCandidates).inventoryGLCandidates) &&
+            !Array.isArray(obj(obj(r.accountingIntegration).defaultCandidates).consumptionGLCandidates)).length
+        : kind === 'gl_accounts'
+            ? rows.filter(r => typeof r.usedInProcurement !== 'boolean' || typeof r.usedInBudget !== 'boolean' || typeof r.usedInProcurementPosting !== 'boolean').length
+            : rows.filter(r => !array(obj(obj(r.accounting).glResolution).transactionRoutes).length).length,
+        [rows,kind,referenceOnly]);
     const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         e.target.value = '';
@@ -68,7 +75,13 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
             const data: unknown = JSON.parse(await file.text());
             const root = obj(data);
             if (!Array.isArray(root[ITEMS[kind]])) throw new Error('This file does not contain the expected ' + ITEMS[kind] + ' array.');
-            if (!obj(root.financialIntegration).masterBundleId) throw new Error('The selected file does not contain financial integration metadata.');
+            const integrated=obj(root.financialIntegration);
+            const hasReference=!!Object.keys(obj(root.financialDimensions)).length||
+                !!Object.keys(obj(root.integrationRelease)).length;
+            if(Object.keys(integrated).length&&!integrated.masterBundleId)
+                throw new Error('The financial integration release is missing its master bundle identifier.');
+            if(!Object.keys(integrated).length&&!hasReference)
+                throw new Error('The selected file has neither an integrated Finance review bundle nor reference-only financial dimensions.');
             setFileData(root); setFileName(file.name);
         } catch (ex) {
             setError(ex instanceof Error ? ex.message : 'Unable to open the selected JSON file.');
@@ -115,16 +128,18 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                 {fileData && (
                     <div className='space-y-3'>
                         <div className='rounded-xl border border-amber-700/50 bg-amber-900/20 p-3 text-sm text-amber-200'>
-                            <strong>{display(obj(fileData.financialIntegration).catalogueRelease)}</strong> · Not active or approved · {fileName}
+                            <strong>{referenceOnly?'REFERENCE ONLY — FINANCE APPROVAL REQUIRED':
+                                display(obj(fileData.financialIntegration).catalogueRelease)}</strong>
+                            · {referenceOnly?'Catalog candidates can be imported, but no GL posting authority is granted':'Integrated Finance review; not active or approved'} · {fileName}
                         </div>
                         <div className='flex flex-wrap gap-2 text-xs'>
                             <Badge>{rows.length.toLocaleString()} entries</Badge>
-                            <Badge tone={missingRoutes ? 'warn' : 'muted'}>{missingRoutes} entries missing financial contract</Badge>
-                            <Badge tone={financeExceptions ? 'warn' : 'muted'}>{financeExceptions} Finance mapping exceptions</Badge>
+                            <Badge tone={missingRoutes ? 'warn' : 'muted'}>{missingRoutes} {referenceOnly?'entries without candidate GL accounts':'entries without approved financial routes'}</Badge>
+                            <Badge tone={financeExceptions ? 'warn' : 'muted'}>{financeExceptions} mappings requiring Finance approval</Badge>
                             {branchCounts && Object.entries(branchCounts).map(([branch, count]) => <Badge key={branch}>{branch}: {Number(count)}</Badge>)}
                             {Object.entries(industryCounts).map(([scope,count])=><Badge key={scope}>{scope==='COMMON'?'Common':'Industry-specific'}: {Number(count)}</Badge>)}
                         </div>
-                        {kind==='materials'&&financeExceptions>0&&<details className='rounded-xl border border-slate-600 p-3 text-sm'>
+                        {kind==='materials'&&!referenceOnly&&financeExceptions>0&&<details className='rounded-xl border border-slate-600 p-3 text-sm'>
                             <summary className='cursor-pointer font-semibold text-slate-100'>Bulk review: 439 Materials mappings / five proposed inventory GL accounts</summary>
                             <div className='mt-3 space-y-3'>
                                 <p className='text-xs text-slate-300'>Select the companion GL Master from the SAME Finance-review bundle. This checks all five proposed inventory accounts and every dependent Materials mapping. Reference review is not tenant approval, account adoption, or permission to post.</p>
@@ -181,6 +196,16 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                                 <span className='font-mono'>{text(item.code)}</span> · {text(item.name)} · {item.industryScope==='INDUSTRY_SPECIFIC'?'Industry-specific':'Common'}
                             </button>)}
                         </div>
+                        {referenceOnly&&<details className='rounded-xl border border-slate-600 p-3 text-sm'>
+                            <summary className='cursor-pointer font-semibold'>Financial dimensions contract ({array(obj(fileData?.financialDimensions).dimensions).length})</summary>
+                            <p className='mt-2 text-xs text-amber-300'>Rules are resolved by Finance at legal entity and transaction time; proposed GLs are not authorised postings.</p>
+                            <div className='mt-2 max-h-64 overflow-y-auto space-y-1 text-xs'>
+                                {array(obj(fileData?.financialDimensions).dimensions).map(d=><div key={text(d.code)}
+                                    className='rounded bg-slate-900 p-2 text-slate-200'>
+                                    {text(d.name)} · {text(d.requirement)} · {text(d.deriveFrom)}
+                                </div>)}
+                            </div>
+                        </details>}
                         {selected && (
                             <section aria-label='Full draft financial configuration' className='space-y-3 rounded-xl border border-slate-700 p-3 text-sm'>
                                 <h3 className='font-semibold text-white'>{text(selected.name)} · {selectedCode}</h3>
@@ -201,6 +226,10 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                                         'Procurement candidate': selected.procurementCandidate,
                                         'Finance review required': selected.pendingFinanceApproval,
                                         'Account purpose': determination.accountPurpose,
+                                        'Candidate inventory GLs': obj(obj(selected.accountingIntegration).defaultCandidates).inventoryGLCandidates,
+                                        'Candidate consumption GLs': obj(obj(selected.accountingIntegration).defaultCandidates).consumptionGLCandidates,
+                                        'Financial dimensions profile': acc.dimensionProfile,
+                                        'Financial release': referenceOnly?'REFERENCE_ONLY_FINANCE_REVIEW_REQUIRED':obj(fileData?.financialIntegration).catalogueRelease,
                                     }).filter(([,v]) => v !== undefined).map(([label, value]) => (
                                         <div key={label} className='min-w-0 rounded-lg bg-slate-900 p-2'>
                                             <p className='text-slate-400'>{label}</p>
