@@ -53,6 +53,7 @@ export default function MaterialsMaster() {
     const [family, setFamily] = useState('');
     const [material, setMaterial] = useState('');
     const [detail, setDetail] = useState<ClassDetail | null>(null);
+    const lastDetailedMaterial=useRef('');
     const [name, setName] = useState('');
     const [values, setValues] = useState<Record<string, string>>({});
     const [error, setError] = useState('');
@@ -95,11 +96,13 @@ export default function MaterialsMaster() {
             if(d.code!==material||d.groupCode!==category||d.categoryCode!==subcategory||
                 d.subcategoryCode!==family)throw new Error('The material classification changed in the active Materials Master. Refresh the master and select it again.');
             setDetail(d);
-            if(!editingId){setName(d.name);setValues({});}
+            // Refresh attribute definitions without losing user input for the same material.
+            if(!editingId&&lastDetailedMaterial.current!==d.code){setName(d.name);setValues({});}
+            lastDetailedMaterial.current=d.code;
         }).catch(e=>{if(live){setDetail(null);setError(e instanceof Error?e.message:'Unable to load the selected material attributes.');}})
             .finally(()=>{if(live)setLoadingDetail(false);});
         return()=>{live=false;};
-    },[material,category,subcategory,family,editingId,hierarchy.validMaterial]);
+    },[material,category,subcategory,family,editingId,hierarchy.validMaterial,tree]);
     useEffect(()=>{if(!adding||!material){setLiveMatches([]);setHardDuplicates([]);return;}let active=true;setLiveChecking(true);const timeout=setTimeout(()=>{callBackend<{items:Array<{id:string;name:string;shortText:string;status:string;score:number;partMatch:boolean}>;hardDuplicates:Array<{id:string;name:string;shortText:string;status:string;score:number;partMatch:boolean}>}>(endpoint+'/similar',{excludeId:draftId.current||editingId,material:{name,categoryCode:category,subcategoryCode:subcategory,familyCode:family,materialCode:material,attributes:values,...registration}}).then(r=>{if(active){setLiveMatches(r.items.filter(x=>x.score>90));setHardDuplicates(r.hardDuplicates??[]);}}).catch(()=>{if(active){setLiveMatches([]);setHardDuplicates([]);}}).finally(()=>{if(active)setLiveChecking(false);});},450);return()=>{active=false;clearTimeout(timeout);};},[adding,material,name,category,subcategory,family,values,registration,editingId]);
     useEffect(()=>{if(!adding||!material||name.trim().length<2||extendSource)return;setAutoStatus('Saving draft…');const timer=setTimeout(()=>{const payload={name:name.trim(),shortText,categoryCode:category,subcategoryCode:subcategory,familyCode:family,materialCode:material,attributes:values,...registration,assemblyIds:(registration.assemblyIds??'').split(',').filter(Boolean)};saveQueue.current=saveQueue.current.catch(()=>{}).then(async()=>{const result=await callBackend<{id:string}>(endpoint+'/autosave',{id:draftId.current||editingId,data:payload});draftId.current=result.id;setAutoStatus('Draft saved');}).catch(e=>setAutoStatus(e instanceof Error?'Autosave failed: '+e.message:'Autosave failed'));},650);return()=>clearTimeout(timer);},[adding,material,name,category,subcategory,family,values,registration,shortText,editingId,extendSource]);
     const eligibleWarehouses=(options?.warehouses??[]).filter(w=>w.categoryCodes?.includes(category));
@@ -153,6 +156,7 @@ export default function MaterialsMaster() {
     const startNew = () => {
         setAdding(true);setStage(1);draftId.current='';setExtendSource(null);setAutoStatus('');setReviewAgreed(false);setDuplicateConfirmed(false);
         setSimilar(null);setEditingId('');setRegistration({supplyType:'GENERAL'});setUomCategory('');setError('');setTried({});setShowAttrErrors(false);
+        lastDetailedMaterial.current='';
         setCategory('');setSubcategory('');setFamily('');setMaterial('');setDetail(null);setName('');setValues({});
         reloadMaterialMaster(); // Resolve the latest published Materials Master when starting a new item.
     };
@@ -234,16 +238,16 @@ export default function MaterialsMaster() {
                 <p className='mb-3 text-xs text-muted'>Active Materials Master {tree?.version||'—'} · {categories.length} categories · {tree?.categories?.length??0} subcategories · {tree?.subcategories?.length??0} families · {tree?.classes?.length??0} materials. No industry-based exclusions.</p>
                 {hierarchy.selectionIssue&&<Alert tone='error'>{hierarchy.selectionIssue} Refresh the master if it has recently changed; your draft has not been deleted.</Alert>}
                 <div className='grid gap-4 sm:grid-cols-2'>
-                    <SelectField id='mm-category' label='Material category' required value={category} error={fieldError(1, !hierarchy.validCategory, 'Choose a category from the Materials Master.')} onChange={(e) => { setCategory(e.target.value); setSubcategory(''); setFamily(''); setMaterial(''); setDetail(null);setValues({}); }}>
+                    <SelectField id='mm-category' label='Material category' required value={category} error={fieldError(1, !hierarchy.validCategory, 'Choose a category from the Materials Master.')} onChange={(e) => { setCategory(e.target.value); setSubcategory(''); setFamily(''); setMaterial(''); setDetail(null);setValues({});lastDetailedMaterial.current=''; }}>
                         <option value=''>Select category</option>{categories.map((x) => <option key={x.code} value={x.code}>{x.name} ({x.code})</option>)}
                     </SelectField>
-                    <SelectField id='mm-subcategory' label='Material subcategory' required disabled={!hierarchy.validCategory} value={subcategory} error={fieldError(1, !!category && !hierarchy.validSubcategory, 'Choose a subcategory from this category.')} onChange={(e) => { setSubcategory(e.target.value); setFamily(''); setMaterial('');setDetail(null);setValues({}); }}>
+                    <SelectField id='mm-subcategory' label='Material subcategory' required disabled={!hierarchy.validCategory} value={subcategory} error={fieldError(1, !!category && !hierarchy.validSubcategory, 'Choose a subcategory from this category.')} onChange={(e) => { setSubcategory(e.target.value); setFamily(''); setMaterial('');setDetail(null);setValues({});lastDetailedMaterial.current=''; }}>
                         <option value=''>Select subcategory</option>{subcategories.map((x) => <option key={x.code} value={x.code}>{x.name} ({x.code})</option>)}
                     </SelectField>
-                    <SelectField id='mm-family' label='Material family' required disabled={!hierarchy.validSubcategory} value={family} error={fieldError(1, !!subcategory && !hierarchy.validFamily, 'Choose a family from this subcategory.')} onChange={(e) => { setFamily(e.target.value); setMaterial('');setDetail(null);setValues({}); }}>
+                    <SelectField id='mm-family' label='Material family' required disabled={!hierarchy.validSubcategory} value={family} error={fieldError(1, !!subcategory && !hierarchy.validFamily, 'Choose a family from this subcategory.')} onChange={(e) => { setFamily(e.target.value); setMaterial('');setDetail(null);setValues({});lastDetailedMaterial.current=''; }}>
                         <option value=''>Select family</option>{families.map((x) => <option key={x.code} value={x.code}>{x.name} ({x.code})</option>)}
                     </SelectField>
-                    <SelectField id='mm-material' label='Material type' required disabled={!hierarchy.validFamily} value={material} error={fieldError(1, !!family && !hierarchy.validMaterial, 'Choose the material from this family.')} onChange={(e) => {setMaterial(e.target.value);setDetail(null);setValues({});}}>
+                    <SelectField id='mm-material' label='Material type' required disabled={!hierarchy.validFamily} value={material} error={fieldError(1, !!family && !hierarchy.validMaterial, 'Choose the material from this family.')} onChange={(e) => {setMaterial(e.target.value);setDetail(null);setValues({});lastDetailedMaterial.current='';}}>
                         <option value=''>Select material</option>{materials.map((x) => <option key={x.code} value={x.code}>{x.name} ({x.code})</option>)}
                     </SelectField>
                 </div>
