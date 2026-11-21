@@ -86,7 +86,7 @@ export default function MaterialsMaster() {
     const {data:extensionRecords,reload:reloadExtensions}=useLoad(()=>callBackend<{items:Array<{id:string;sourceId:string;warehouseId:string;materialName:string;status:string;approvalLevel:number;workflowStage?:string;canApprove?:boolean;createdBy?:string}>}>(endpoint+'/extensions'));
     const [reviewMaterial,setReviewMaterial]=useState<SavedMaterial|null>(null);const lifecycle=async(action:'allocate'|'push'|'disable'|'delete')=>{if(!reviewMaterial)return;if((action==='delete'||action==='disable'||action==='push')&&!(await appConfirm((action==='delete'?'Delete':action==='disable'?'Disable':'Push to requesting warehouse')+' material '+reviewMaterial.name+'?')))return;setSaving(true);setError('');try{const result=await callBackend<{ok:boolean;materialNumber?:string}>(endpoint+'/lifecycle',{id:reviewMaterial.id,action});setReviewMaterial(p=>p?{...p,...(action==='allocate'?{materialNumber:result.materialNumber}:action==='push'?{status:'active',pushedAt:new Date().toISOString()}:action==='disable'?{status:'disabled'}:{status:'deleted'})}:null);reload();}catch(e){setError(String(e));}finally{setSaving(false);}};
     const [listView,setListView]=useState('my_drafts');
-    const openExtension=(source:{id:string;name:string;status:string})=>{
+    const openExtension=(source:{id:string;name:string;status?:string})=>{
         const record=records?.items.find(m=>m.id===source.id);
         if(!record||!['approved','active'].includes(record.status||'')){
             setError('Only an approved organization material can be extended. Pending or draft materials must first complete the creation workflow.');
