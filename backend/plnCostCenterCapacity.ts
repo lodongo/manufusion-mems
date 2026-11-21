@@ -268,7 +268,8 @@ export const plnCostCenterCapacityRoutes={
        .map(line=>validSavedProjection(ctx,location.siteId,line,params))):[];
    return {location,outputs,containers,sizes,units:physicalRatingUnits(),
     mapping:saved?{...expose(saved),skuCapacities:ratings}:null,
-    canConfigure:await authorized(ctx,'write',id)};
+    canConfigure:await authorized(ctx,'write',id),
+    testOverride:ctx.testMode===true&&ctx.role==='org_super_admin'};
   }),
  ],
  'POST /api/org/pln/cost-center/sku-mappings':[
