@@ -58,8 +58,6 @@ interface Setup {
     materialCategoryCodes: string[];
     storageLocations: Loc[];
     storageTypeCode: string;
-    palletStacking?:{enabled:boolean;stackingPattern?:'STRAIGHT'|'PYRAMID';
-        bottomRowPallets?:number;bottomRows?:number;stackedRows:number;stackedColumns:number;numberOfStacks:number};
     conditionCode: string;
     layout: Layout;
     capacity: Capacity;
@@ -437,7 +435,7 @@ function SetupView({ data, setup, onTopology }: { data: Data; setup: Setup; onTo
                     const used = data.clusters.filter((x) => x.locationCode === l.code).reduce((sum, x) => sum + x.positions, 0);
                     return (
                         <div key={l.code} className='flex items-center gap-3 rounded-xl bg-page px-3 py-2.5'>
-                            <LocDot color={l.color} size='h-8 w-1.5' />
+                            <LocDot color='#64748B' size='h-8 w-1.5' />
                             <div className='min-w-0 flex-1'>
                                 <p className='flex items-center gap-2'>
                                     <span className='truncate text-sm font-medium text-ink'>{l.name}</span>
@@ -1170,13 +1168,11 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const [q, setQ] = useState('');
     const [storageType, setStorageType] = useState(setup.storageTypeCode||'BIN');
     const [conditionCode,setConditionCode]=useState(setup.conditionCode||'AMB');
-    const [stackingEnabled,setStackingEnabled]=useState(
-        setup.storageTypeCode==='PAL'&&setup.palletStacking?.enabled===true);
-    const [stackingPattern,setStackingPattern]=useState<'STRAIGHT'|'PYRAMID'>(
-        setup.palletStacking?.stackingPattern==='PYRAMID'?'PYRAMID':'STRAIGHT');
-    const [stackedRows,setStackedRows]=useState(String(setup.palletStacking?.bottomRows??setup.palletStacking?.stackedRows??1));
-    const [stackedColumns,setStackedColumns]=useState(String(setup.palletStacking?.bottomRowPallets??setup.palletStacking?.stackedColumns??1));
-    const [numberOfStacks,setNumberOfStacks]=useState(String(setup.palletStacking?.numberOfStacks??1));
+    const [stackingEnabled,setStackingEnabled]=useState(false);
+    const [stackingPattern,setStackingPattern]=useState<'STRAIGHT'|'PYRAMID'>('STRAIGHT');
+    const [stackedRows,setStackedRows]=useState('1');
+    const [stackedColumns,setStackedColumns]=useState('1');
+    const [numberOfStacks,setNumberOfStacks]=useState('1');
     const [confirmed, setConfirmed] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
